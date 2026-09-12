@@ -769,11 +769,13 @@ fn structural_result_summary_figure(fields: &[AnalysisField]) -> Option<Analysis
 fn convergence_figures(run: &AnalysisRunResult) -> Vec<AnalysisGeneratedFigure> {
     let mut figures = Vec::new();
     if let Some(modal) = run.modal_results.as_ref() {
-        if !modal.frequencies_hz.is_empty() {
-            let labels = (1..=modal.frequencies_hz.len())
+        let frequencies_hz = modal.frequencies_hz();
+        let residual_norms = modal.residual_norms();
+        if !frequencies_hz.is_empty() {
+            let labels = (1..=frequencies_hz.len())
                 .map(|idx| format!("Mode {idx}"))
                 .collect::<Vec<_>>();
-            if let Ok(mut chart) = BarChart::new(labels, modal.frequencies_hz.clone()) {
+            if let Ok(mut chart) = BarChart::new(labels, frequencies_hz) {
                 chart.label = Some("Frequency".to_string());
                 chart.color = Vec4::new(0.33, 0.66, 0.96, 1.0);
                 let mut figure = Figure::new()
@@ -795,7 +797,7 @@ fn convergence_figures(run: &AnalysisRunResult) -> Vec<AnalysisGeneratedFigure> 
                 });
             }
         }
-        if !modal.residual_norms.is_empty() {
+        if !residual_norms.is_empty() {
             figures.push(line_figure(
                 AnalysisGeneratedFigureKind::Convergence,
                 "FEA modal residuals",
@@ -803,8 +805,8 @@ fn convergence_figures(run: &AnalysisRunResult) -> Vec<AnalysisGeneratedFigure> 
                 "Residual norm",
                 vec![(
                     "Residual".to_string(),
-                    index_axis(modal.residual_norms.len(), 1.0),
-                    modal.residual_norms.clone(),
+                    index_axis(residual_norms.len(), 1.0),
+                    residual_norms,
                     Vec4::new(0.93, 0.48, 0.26, 1.0),
                 )],
                 Vec::new(),

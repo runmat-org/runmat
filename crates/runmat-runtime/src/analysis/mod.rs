@@ -1926,7 +1926,9 @@ pub fn analysis_run_modal_with_options_op(
     )
     .map_err(|err| map_fea_run_error(AnalysisOperation::Modal, model, &context, err))?;
 
+    let basis = modal_run.basis;
     let run = modal_run.run;
+    let mode_shapes = modal_run.mode_shapes;
     let mut fallback_events = Vec::new();
     if backend == ComputeBackend::Gpu && run.execution_backend != ExecutionBackend::Accelerator {
         fallback_events.push(FallbackEvent::solver_backend());
@@ -1939,13 +1941,12 @@ pub fn analysis_run_modal_with_options_op(
     } else {
         QualityGate::Warn
     };
-    let result_quality = if modal_run.frequencies_hz.is_empty() || modal_run.mode_shapes.is_empty()
-    {
+    let result_quality = if basis.modes().is_empty() {
         QualityGate::Fail
-    } else if modal_run
-        .residual_norms
+    } else if basis
+        .modes()
         .iter()
-        .copied()
+        .map(|mode| mode.residual_norm())
         .fold(0.0_f64, f64::max)
         > options.residual_warn_threshold
     {
@@ -2038,10 +2039,9 @@ pub fn analysis_run_modal_with_options_op(
         run,
         render_topology: render_topology_from_solver_mesh(solver_mesh.as_ref()),
         modal_results: Some(ModalResultsData {
-            modal_payload_version: "modal_results/v1".to_string(),
-            frequencies_hz: modal_run.frequencies_hz,
-            mode_shapes: modal_run.mode_shapes,
-            residual_norms: modal_run.residual_norms,
+            mode_indices: (0..basis.modes().len()).collect(),
+            mode_shapes,
+            basis,
             mode_units: ModalFrequencyUnits::Hz,
             frequency_basis,
         }),

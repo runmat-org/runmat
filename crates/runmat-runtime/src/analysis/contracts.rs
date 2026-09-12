@@ -2675,12 +2675,32 @@ pub struct AnalysisTrendsData {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModalResultsData {
-    pub modal_payload_version: String,
-    pub frequencies_hz: Vec<f64>,
+    pub basis: runmat_analysis_fea::ModalBasisArtifact,
+    pub mode_indices: Vec<usize>,
+    /// Result-facing materializations selected from the immutable computational basis.
     pub mode_shapes: Vec<AnalysisField>,
-    pub residual_norms: Vec<f64>,
     pub mode_units: ModalFrequencyUnits,
     pub frequency_basis: ModalFrequencyBasis,
+}
+
+impl ModalResultsData {
+    pub fn mode_indices(&self) -> impl Iterator<Item = usize> + '_ {
+        self.mode_indices.iter().copied()
+    }
+
+    pub fn frequencies_hz(&self) -> Vec<f64> {
+        self.mode_indices()
+            .filter_map(|index| self.basis.modes().get(index))
+            .map(|mode| mode.frequency_hz())
+            .collect()
+    }
+
+    pub fn residual_norms(&self) -> Vec<f64> {
+        self.mode_indices()
+            .filter_map(|index| self.basis.modes().get(index))
+            .map(|mode| mode.residual_norm())
+            .collect()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

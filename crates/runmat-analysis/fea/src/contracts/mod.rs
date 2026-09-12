@@ -62,6 +62,10 @@ pub const FEA_FIELD_MODAL_EIGENVALUE: &str = "modal.eigenvalue";
 pub const FEA_FIELD_MODAL_MODAL_MASS: &str = "modal.modal_mass";
 pub const FEA_FIELD_MODAL_MODAL_STIFFNESS: &str = "modal.modal_stiffness";
 pub const FEA_FIELD_MODAL_PARTICIPATION_FACTOR: &str = "modal.participation_factor";
+pub const FEA_FIELD_MODAL_EFFECTIVE_MASS: &str = "modal.effective_mass";
+pub const FEA_FIELD_MODAL_CUMULATIVE_EFFECTIVE_MASS: &str = "modal.cumulative_effective_mass";
+pub const FEA_FIELD_MODAL_CUMULATIVE_MASS_RATIO: &str = "modal.cumulative_mass_ratio";
+pub const FEA_FIELD_MODAL_TOTAL_FREE_MASS: &str = "modal.total_free_mass";
 pub const FEA_FIELD_MODAL_RESIDUAL_NORM: &str = "modal.residual_norm";
 pub const FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION: &str =
     "modal.relative_frequency_separation";
@@ -520,9 +524,35 @@ impl Default for ModalSolveOptions {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FeaModalRunResult {
     pub run: FeaRunResult,
-    pub frequencies_hz: Vec<f64>,
+    pub basis: crate::pipeline::modal_basis::ModalBasisArtifact,
     pub mode_shapes: Vec<AnalysisField>,
-    pub residual_norms: Vec<f64>,
+    pub rotation_mode_shapes: Vec<AnalysisField>,
+    pub recovered_modes: Vec<ModalRecoveredMode>,
+}
+
+impl FeaModalRunResult {
+    pub fn frequencies_hz(&self) -> Vec<f64> {
+        self.basis
+            .modes()
+            .iter()
+            .map(|mode| mode.frequency_hz())
+            .collect()
+    }
+
+    pub fn residual_norms(&self) -> Vec<f64> {
+        self.basis
+            .modes()
+            .iter()
+            .map(|mode| mode.residual_norm())
+            .collect()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModalRecoveredMode {
+    pub mode_index: usize,
+    pub fields: Vec<AnalysisField>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

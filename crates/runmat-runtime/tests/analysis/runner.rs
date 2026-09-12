@@ -4511,7 +4511,7 @@ pub(super) fn run_fixture(
                 .data
                 .modal_results
                 .as_ref()
-                .and_then(|modal| modal.residual_norms.iter().copied().reduce(f64::max));
+                .and_then(|modal| modal.residual_norms().into_iter().reduce(f64::max));
             push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,

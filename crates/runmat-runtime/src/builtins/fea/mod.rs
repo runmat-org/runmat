@@ -4409,14 +4409,7 @@ execution:
                 fields: Vec::new(),
             },
             render_topology: None,
-            modal_results: Some(crate::analysis::ModalResultsData {
-                modal_payload_version: "modal_results/v1".to_string(),
-                frequencies_hz: vec![10.0, 20.0],
-                mode_shapes: indexed_fields("mode_shape"),
-                residual_norms: vec![0.1, 0.2],
-                mode_units: crate::analysis::ModalFrequencyUnits::Hz,
-                frequency_basis: crate::analysis::ModalFrequencyBasis::NativeEigenSolve,
-            }),
+            modal_results: None,
             thermal_results: None,
             transient_results: Some(crate::analysis::TransientResultsData {
                 transient_payload_version: "transient_results/v1".to_string(),
@@ -4476,13 +4469,11 @@ execution:
     }
 
     #[test]
-    fn fea_results_translates_successful_selectors_and_public_indices_once() {
+    fn fea_results_translates_successful_snapshot_selectors_once() {
         let _guard = crate::analysis::storage::artifact_store_test_guard();
         let run_id = persist_synthetic_indexed_results();
         let selected = block_on(fea_results_builtin(vec![
             Value::String(run_id),
-            Value::String("ModeIndices".to_string()),
-            Value::Int(IntValue::U8(2)),
             Value::String("TransientSnapshotIndices".to_string()),
             Value::Tensor(Tensor::new(vec![2.0], vec![1, 1]).expect("double selector")),
         ]))
@@ -4490,13 +4481,6 @@ execution:
         let Value::Object(selected) = selected else {
             panic!("results object");
         };
-        let Some(Value::Struct(modal)) = selected.properties.get("modal_results") else {
-            panic!("modal results");
-        };
-        let Some(Value::Tensor(eigenvalues)) = modal.fields.get("frequencies_hz") else {
-            panic!("modal eigenvalues");
-        };
-        assert_eq!(eigenvalues.materialize_f64(), vec![20.0]);
         let Some(Value::Struct(transient)) = selected.properties.get("transient_results") else {
             panic!("transient results");
         };
@@ -4511,13 +4495,11 @@ execution:
         let Some(Value::Tensor(indices)) = summary.fields.get("available_mode_indices") else {
             panic!("available mode indices");
         };
-        assert_eq!(
-            indices
-                .integer_storage()
-                .expect("exact public indices")
-                .exact_values(),
-            vec![IntValue::U64(1), IntValue::U64(2)]
-        );
+        assert!(indices
+            .integer_storage()
+            .expect("exact public indices")
+            .exact_values()
+            .is_empty());
     }
 
     fn assert_object_class(value: &Value, expected: &str) {

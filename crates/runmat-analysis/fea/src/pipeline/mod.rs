@@ -5,6 +5,7 @@ mod electromagnetic_frequency_contract;
 mod electromagnetic_frequency_history;
 pub mod linear_static;
 pub mod modal;
+pub mod modal_basis;
 pub mod nonlinear;
 pub mod thermal;
 pub mod thermo_mechanical;

@@ -21,20 +21,22 @@ use crate::{
     solve::{nonlinear::NonlinearSolveOptions, transient::TransientSolveOptions},
     ComputeBackend, ElectromagneticSolveOptions, FeaContactInterfaceContext, FeaRunResult,
     LinearStaticSolveOptions, ModalSolveOptions, ThermalProcedureControl, ThermalSolveOptions,
-    FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ, FEA_FIELD_MODAL_MODAL_MASS,
-    FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
+    FEA_FIELD_MODAL_CUMULATIVE_EFFECTIVE_MASS, FEA_FIELD_MODAL_CUMULATIVE_MASS_RATIO,
+    FEA_FIELD_MODAL_EFFECTIVE_MASS, FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ,
+    FEA_FIELD_MODAL_MODAL_MASS, FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
     FEA_FIELD_MODAL_PARTICIPATION_FACTOR, FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION,
-    FEA_FIELD_MODAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_BEAM_AXIAL_FORCE,
-    FEA_FIELD_STRUCTURAL_BEAM_BENDING_MOMENT, FEA_FIELD_STRUCTURAL_BEAM_BENDING_STRESS,
-    FEA_FIELD_STRUCTURAL_BEAM_SHEAR_FORCE, FEA_FIELD_STRUCTURAL_BEAM_TORSION_MOMENT,
-    FEA_FIELD_STRUCTURAL_BEAM_TORSION_STRESS, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
-    FEA_FIELD_STRUCTURAL_EQUATION_SCALE, FEA_FIELD_STRUCTURAL_REACTION_FORCE,
-    FEA_FIELD_STRUCTURAL_REACTION_MOMENT, FEA_FIELD_STRUCTURAL_RESIDUAL_NORM,
-    FEA_FIELD_STRUCTURAL_ROTATION, FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT,
-    FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE, FEA_FIELD_STRUCTURAL_SHELL_TRANSVERSE_SHEAR,
-    FEA_FIELD_STRUCTURAL_SHELL_VON_MISES, FEA_FIELD_STRUCTURAL_STRAIN,
-    FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY, FEA_FIELD_STRUCTURAL_STRESS,
-    FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY, FEA_FIELD_STRUCTURAL_VON_MISES,
+    FEA_FIELD_MODAL_RESIDUAL_NORM, FEA_FIELD_MODAL_TOTAL_FREE_MASS,
+    FEA_FIELD_STRUCTURAL_BEAM_AXIAL_FORCE, FEA_FIELD_STRUCTURAL_BEAM_BENDING_MOMENT,
+    FEA_FIELD_STRUCTURAL_BEAM_BENDING_STRESS, FEA_FIELD_STRUCTURAL_BEAM_SHEAR_FORCE,
+    FEA_FIELD_STRUCTURAL_BEAM_TORSION_MOMENT, FEA_FIELD_STRUCTURAL_BEAM_TORSION_STRESS,
+    FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_EQUATION_SCALE,
+    FEA_FIELD_STRUCTURAL_REACTION_FORCE, FEA_FIELD_STRUCTURAL_REACTION_MOMENT,
+    FEA_FIELD_STRUCTURAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_ROTATION,
+    FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT, FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE,
+    FEA_FIELD_STRUCTURAL_SHELL_TRANSVERSE_SHEAR, FEA_FIELD_STRUCTURAL_SHELL_VON_MISES,
+    FEA_FIELD_STRUCTURAL_STRAIN, FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY,
+    FEA_FIELD_STRUCTURAL_STRESS, FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY,
+    FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 
 fn fixed_constraint(id: &str, region: &str) -> runmat_analysis_core::AnalysisConstraint {
@@ -1962,8 +1964,8 @@ fn modal_solver_emits_modes_for_modal_step_fixture() {
         crate::run_modal_with_options(&model, ComputeBackend::Cpu, experimental_modal_options())
             .expect("modal solve should succeed");
 
-    assert!(!result.frequencies_hz.is_empty());
-    assert_eq!(result.frequencies_hz.len(), result.mode_shapes.len());
+    assert!(!result.frequencies_hz().is_empty());
+    assert_eq!(result.frequencies_hz().len(), result.mode_shapes.len());
     assert_eq!(result.mode_shapes[0].shape.len(), 2);
     assert_eq!(result.mode_shapes[0].shape[1], 3);
     assert_eq!(
@@ -1976,43 +1978,78 @@ fn modal_solver_emits_modes_for_modal_step_fixture() {
     );
     assert_eq!(
         field(&result.run, FEA_FIELD_MODAL_FREQUENCY_HZ).element_count(),
-        result.frequencies_hz.len()
+        result.frequencies_hz().len()
     );
     assert_eq!(
         field(&result.run, FEA_FIELD_MODAL_EIGENVALUE).element_count(),
-        result.frequencies_hz.len()
+        result.frequencies_hz().len()
     );
     assert_eq!(
         field(&result.run, FEA_FIELD_MODAL_MODAL_MASS).element_count(),
-        result.frequencies_hz.len()
+        result.frequencies_hz().len()
     );
     assert_eq!(
         field(&result.run, FEA_FIELD_MODAL_MODAL_STIFFNESS).element_count(),
-        result.frequencies_hz.len()
+        result.frequencies_hz().len()
     );
     assert_eq!(
         field(&result.run, FEA_FIELD_MODAL_PARTICIPATION_FACTOR).element_count(),
-        result.frequencies_hz.len()
+        result.frequencies_hz().len() * 3
+    );
+    for field_id in [
+        FEA_FIELD_MODAL_EFFECTIVE_MASS,
+        FEA_FIELD_MODAL_CUMULATIVE_EFFECTIVE_MASS,
+        FEA_FIELD_MODAL_CUMULATIVE_MASS_RATIO,
+    ] {
+        assert_eq!(
+            field(&result.run, field_id).shape,
+            vec![result.frequencies_hz().len(), 3]
+        );
+    }
+    assert_eq!(
+        field(&result.run, FEA_FIELD_MODAL_TOTAL_FREE_MASS).shape,
+        vec![3]
     );
     assert_eq!(
         field(&result.run, FEA_FIELD_MODAL_RESIDUAL_NORM).element_count(),
-        result.frequencies_hz.len()
+        result.frequencies_hz().len()
     );
     assert_eq!(
         field(&result.run, FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION).element_count(),
-        result.frequencies_hz.len()
+        result.frequencies_hz().len()
     );
     let orthogonality = field(&result.run, FEA_FIELD_MODAL_M_ORTHOGONALITY);
     assert_eq!(
         orthogonality.element_count(),
-        result.frequencies_hz.len() * result.frequencies_hz.len()
+        result.frequencies_hz().len() * result.frequencies_hz().len()
     );
     assert_eq!(
         orthogonality.shape,
-        vec![result.frequencies_hz.len(), result.frequencies_hz.len()]
+        vec![result.frequencies_hz().len(), result.frequencies_hz().len()]
     );
     let residual_norms = host_field(&result.run, FEA_FIELD_MODAL_RESIDUAL_NORM);
-    assert_eq!(residual_norms, result.residual_norms.as_slice());
+    assert_eq!(residual_norms, result.residual_norms().as_slice());
+    assert_eq!(result.recovered_modes.len(), result.basis.modes().len());
+    assert!(result.recovered_modes[0]
+        .fields
+        .iter()
+        .any(|field| field.field_id == FEA_FIELD_STRUCTURAL_STRESS));
+    let recovered_von_mises = result.recovered_modes[0]
+        .fields
+        .iter()
+        .find(|field| field.field_id == FEA_FIELD_STRUCTURAL_VON_MISES)
+        .expect("modal deformation recovery should publish von Mises values");
+    assert_eq!(
+        field(&result.run, FEA_FIELD_STRUCTURAL_VON_MISES),
+        recovered_von_mises
+    );
+    let encoded = serde_json::to_value(&result.basis).expect("modal basis should serialize");
+    let decoded: crate::ModalBasisArtifact =
+        serde_json::from_value(encoded.clone()).expect("canonical modal basis should decode");
+    assert_eq!(decoded.identity(), result.basis.identity());
+    let mut tampered = encoded;
+    tampered["modes"][0]["modal_mass"] = serde_json::json!(17.0);
+    assert!(serde_json::from_value::<crate::ModalBasisArtifact>(tampered).is_err());
     assert!(result
         .run
         .diagnostics
@@ -2459,11 +2496,19 @@ fn nonlinear_solver_events_publish_exact_attribution_and_valid_empty_histories()
 fn modal_history_publishes_requested_mode_shapes_with_mode_coordinates() {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     let mut step = ProcedureStep::structural_modal("modal_history");
-    step.observations = vec![nodal_history_observation(
-        "modal_displacement_history",
-        runmat_analysis_core::ObservationQuantity::Displacement,
-        runmat_analysis_core::SamplingPolicy::ModeIndices(vec![1, 2]),
-    )];
+    step.observations = vec![
+        nodal_history_observation(
+            "modal_displacement_history",
+            runmat_analysis_core::ObservationQuantity::Displacement,
+            runmat_analysis_core::SamplingPolicy::ModeIndices(vec![1, 2]),
+        ),
+        history_observation(
+            "modal_stress_history",
+            runmat_analysis_core::ObservationQuantity::Stress,
+            runmat_analysis_core::SamplingPolicy::ModeIndices(vec![1, 2]),
+            runmat_analysis_core::FieldLocation::Element,
+        ),
+    ];
     model.sequence.steps = vec![step];
     let mesh = single_tetrahedron_solver_mesh_for_model(&model);
 
@@ -2478,8 +2523,15 @@ fn modal_history_publishes_requested_mode_shapes_with_mode_coordinates() {
     )
     .expect("requested modal histories should publish solved mode shapes");
 
-    assert_eq!(result.run.observation_histories.len(), 1);
-    let history = &result.run.observation_histories[0];
+    assert_eq!(result.run.observation_histories.len(), 2);
+    let history = result
+        .run
+        .observation_histories
+        .iter()
+        .find(|history| {
+            history.manifest().quantity == runmat_analysis_core::ObservationQuantity::Displacement
+        })
+        .expect("modal displacement history");
     assert_eq!(history.manifest().observed_sample_count, 2);
     assert_eq!(
         history
@@ -2495,6 +2547,19 @@ fn modal_history_publishes_requested_mode_shapes_with_mode_coordinates() {
     for (sample, mode_shape) in history.samples().iter().zip(&result.mode_shapes) {
         assert_eq!(sample.result.field.as_host_f64(), mode_shape.as_host_f64());
     }
+    let stress = result
+        .run
+        .observation_histories
+        .iter()
+        .find(|history| {
+            history.manifest().quantity == runmat_analysis_core::ObservationQuantity::Stress
+        })
+        .expect("modal stress history");
+    assert_eq!(stress.samples().len(), 2);
+    assert!(stress
+        .samples()
+        .iter()
+        .all(|sample| sample.result.field.shape == vec![1, 6]));
 }
 
 #[test]
@@ -3197,8 +3262,8 @@ fn modal_large_fixture_emits_orthogonality_and_separation_diagnostics() {
     )
     .expect("modal large fixture should solve");
 
-    assert!(!result.frequencies_hz.is_empty());
-    assert_eq!(result.frequencies_hz.len(), result.mode_shapes.len());
+    assert!(!result.frequencies_hz().is_empty());
+    assert_eq!(result.frequencies_hz().len(), result.mode_shapes.len());
     assert!(result
         .run
         .diagnostics

@@ -1,31 +1,37 @@
 use runmat_analysis_core::{validate_model, AnalysisField, AnalysisModel, AnalysisProcedure};
 
 use crate::{
-    algebra::{apply_k, apply_m},
     assembly::{assemble_structural_system, StructuralFormulationRequirement},
     contracts::{
         fea_modal_mode_shape_field_id, ComputeBackend, FeaModalRunResult, FeaRunError,
-        FeaRunResult, ModalSolveOptions, FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ,
+        FeaRunResult, ModalRecoveredMode, ModalSolveOptions,
+        FEA_FIELD_MODAL_CUMULATIVE_EFFECTIVE_MASS, FEA_FIELD_MODAL_CUMULATIVE_MASS_RATIO,
+        FEA_FIELD_MODAL_EFFECTIVE_MASS, FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ,
         FEA_FIELD_MODAL_MODAL_MASS, FEA_FIELD_MODAL_MODAL_STIFFNESS,
         FEA_FIELD_MODAL_M_ORTHOGONALITY, FEA_FIELD_MODAL_PARTICIPATION_FACTOR,
         FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION, FEA_FIELD_MODAL_RESIDUAL_NORM,
-        FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_VON_MISES,
+        FEA_FIELD_MODAL_TOTAL_FREE_MASS, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+        FEA_FIELD_STRUCTURAL_STRAIN, FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY,
+        FEA_FIELD_STRUCTURAL_STRESS,
     },
     diagnostics::builders::{extend_common_run_diagnostics, CommonRunDiagnosticInputs},
     excitation::{realize_step_excitations, ExcitationSamplePoint},
+    pipeline::modal_basis::ModalBasisArtifact,
     pipeline::observation_history::{
         evaluate_field_histories, required_mode_history_indices, HistoryFieldSeries,
         HistoryTopology,
     },
-    pipeline::structural_nodal::{
-        nodal_vector_shape, project_structural_nodal_snapshot, project_structural_nodal_snapshots,
-    },
+    pipeline::structural_nodal::{nodal_vector_shape, project_structural_nodal_snapshots},
+    post::fields::recover_deformation_result_fields,
     progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
     solve::modal::solve_modal_system,
 };
 
 const MODAL_DISPLACEMENT_HISTORY_SOURCE: &str = "structural.modal.displacement";
 const MODAL_ROTATION_HISTORY_SOURCE: &str = "structural.modal.rotation";
+const MODAL_STRAIN_HISTORY_SOURCE: &str = "structural.modal.strain";
+const MODAL_STRESS_HISTORY_SOURCE: &str = "structural.modal.stress";
+const MODAL_STRAIN_ENERGY_HISTORY_SOURCE: &str = "structural.modal.strain_energy_density";
 
 pub fn run_modal(
     model: &AnalysisModel,
@@ -145,37 +151,47 @@ pub fn run_modal_with_options(
         },
     );
 
-    let displacement = modal
-        .mode_shapes
-        .first()
-        .cloned()
-        .unwrap_or_else(|| vec![0.0; summary.dof_count.max(3)]);
-    let projected_displacement =
-        project_structural_nodal_snapshot(&summary.structural_dof_layout, &displacement)
-            .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
     let projected_mode_shapes =
         project_structural_nodal_snapshots(&summary.structural_dof_layout, &modal.mode_shapes)
             .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
-    let von_mises = displacement
-        .iter()
-        .map(|value| value.abs())
-        .fold(0.0_f64, f64::max)
-        * 1.0e11;
-    let modal_fields = recover_modal_result_fields(
+    let basis = ModalBasisArtifact::new(
+        identity.clone(),
         &summary,
         &modal.frequencies_hz,
         &modal.mode_shapes,
         &modal.residual_norms,
-    );
-    let mut run_fields = vec![
-        AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_DISPLACEMENT,
-            nodal_vector_shape(&summary.structural_dof_layout),
-            projected_displacement.translations,
-        ),
-        AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_VON_MISES, vec![1], vec![von_mises]),
-    ];
-    run_fields.extend(modal_fields);
+    )?;
+    let recovered_modes = modal
+        .mode_shapes
+        .iter()
+        .enumerate()
+        .map(|(index, shape)| {
+            recover_deformation_result_fields(&summary, shape)
+                .map(|fields| ModalRecoveredMode {
+                    mode_index: index + 1,
+                    fields,
+                })
+                .map_err(|error| FeaRunError::Assembly(error.to_string()))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let mode_shape = nodal_vector_shape(&summary.structural_dof_layout);
+    let first_translation = basis
+        .modes()
+        .first()
+        .and_then(|_| projected_mode_shapes.first())
+        .map(|shape| shape.translations.clone())
+        .unwrap_or_else(|| vec![0.0; mode_shape.iter().product()]);
+    let mut run_fields = recovered_modes
+        .first()
+        .map(|mode| mode.fields.clone())
+        .unwrap_or_else(|| {
+            vec![AnalysisField::host_f64(
+                FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+                mode_shape.clone(),
+                first_translation,
+            )]
+        });
+    run_fields.extend(modal_result_fields(&basis));
 
     let mut run = FeaRunResult {
         identity,
@@ -205,7 +221,6 @@ pub fn run_modal_with_options(
         fields: run_fields,
     };
 
-    let mode_shape = nodal_vector_shape(&summary.structural_dof_layout);
     let mode_shapes = projected_mode_shapes
         .iter()
         .enumerate()
@@ -228,6 +243,12 @@ pub fn run_modal_with_options(
             )
         })
         .collect::<Vec<_>>();
+    let strain_mode_fields =
+        collect_recovered_mode_fields(&recovered_modes, FEA_FIELD_STRUCTURAL_STRAIN);
+    let stress_mode_fields =
+        collect_recovered_mode_fields(&recovered_modes, FEA_FIELD_STRUCTURAL_STRESS);
+    let strain_energy_mode_fields =
+        collect_recovered_mode_fields(&recovered_modes, FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY);
     let evaluated_histories = if execution_step.observations.iter().any(|request| {
         matches!(
             request,
@@ -237,6 +258,64 @@ pub fn run_modal_with_options(
         let coordinates = (1..=mode_shapes.len())
             .map(crate::results::field::RecoveredFieldSample::ModeIndex)
             .collect::<Vec<_>>();
+        let mut series = vec![
+            HistoryFieldSeries {
+                quantity: runmat_analysis_core::ObservationQuantity::Displacement,
+                source_field_id: MODAL_DISPLACEMENT_HISTORY_SOURCE,
+                location: runmat_analysis_core::FieldLocation::Node,
+                entity_domain: crate::results::field::RecoveredFieldEntityDomain::StructuralNodes,
+                value_shape: runmat_analysis_core::ObservationValueShape::Vector3,
+                numeric_representation:
+                    crate::results::field::RecoveredFieldNumericRepresentation::Real,
+                snapshots: &mode_shapes,
+            },
+            HistoryFieldSeries {
+                quantity: runmat_analysis_core::ObservationQuantity::Rotation,
+                source_field_id: MODAL_ROTATION_HISTORY_SOURCE,
+                location: runmat_analysis_core::FieldLocation::Node,
+                entity_domain: crate::results::field::RecoveredFieldEntityDomain::StructuralNodes,
+                value_shape: runmat_analysis_core::ObservationValueShape::Vector3,
+                numeric_representation:
+                    crate::results::field::RecoveredFieldNumericRepresentation::Real,
+                snapshots: &rotation_mode_shapes,
+            },
+        ];
+        if strain_mode_fields.len() == coordinates.len() {
+            series.push(HistoryFieldSeries {
+                quantity: runmat_analysis_core::ObservationQuantity::Strain,
+                source_field_id: MODAL_STRAIN_HISTORY_SOURCE,
+                location: runmat_analysis_core::FieldLocation::Element,
+                entity_domain: crate::results::field::RecoveredFieldEntityDomain::SolidElements,
+                value_shape: runmat_analysis_core::ObservationValueShape::SymmetricTensor3,
+                numeric_representation:
+                    crate::results::field::RecoveredFieldNumericRepresentation::Real,
+                snapshots: &strain_mode_fields,
+            });
+        }
+        if stress_mode_fields.len() == coordinates.len() {
+            series.push(HistoryFieldSeries {
+                quantity: runmat_analysis_core::ObservationQuantity::Stress,
+                source_field_id: MODAL_STRESS_HISTORY_SOURCE,
+                location: runmat_analysis_core::FieldLocation::Element,
+                entity_domain: crate::results::field::RecoveredFieldEntityDomain::SolidElements,
+                value_shape: runmat_analysis_core::ObservationValueShape::SymmetricTensor3,
+                numeric_representation:
+                    crate::results::field::RecoveredFieldNumericRepresentation::Real,
+                snapshots: &stress_mode_fields,
+            });
+        }
+        if strain_energy_mode_fields.len() == coordinates.len() {
+            series.push(HistoryFieldSeries {
+                quantity: runmat_analysis_core::ObservationQuantity::StrainEnergy,
+                source_field_id: MODAL_STRAIN_ENERGY_HISTORY_SOURCE,
+                location: runmat_analysis_core::FieldLocation::Element,
+                entity_domain: crate::results::field::RecoveredFieldEntityDomain::SolidElements,
+                value_shape: runmat_analysis_core::ObservationValueShape::Scalar,
+                numeric_representation:
+                    crate::results::field::RecoveredFieldNumericRepresentation::Real,
+                snapshots: &strain_energy_mode_fields,
+            });
+        }
         evaluate_field_histories(
             execution_step,
             HistoryTopology::Structural {
@@ -245,30 +324,7 @@ pub fn run_modal_with_options(
             },
             &coordinates,
             None,
-            &[
-                HistoryFieldSeries {
-                    quantity: runmat_analysis_core::ObservationQuantity::Displacement,
-                    source_field_id: MODAL_DISPLACEMENT_HISTORY_SOURCE,
-                    location: runmat_analysis_core::FieldLocation::Node,
-                    entity_domain:
-                        crate::results::field::RecoveredFieldEntityDomain::StructuralNodes,
-                    value_shape: runmat_analysis_core::ObservationValueShape::Vector3,
-                    numeric_representation:
-                        crate::results::field::RecoveredFieldNumericRepresentation::Real,
-                    snapshots: &mode_shapes,
-                },
-                HistoryFieldSeries {
-                    quantity: runmat_analysis_core::ObservationQuantity::Rotation,
-                    source_field_id: MODAL_ROTATION_HISTORY_SOURCE,
-                    location: runmat_analysis_core::FieldLocation::Node,
-                    entity_domain:
-                        crate::results::field::RecoveredFieldEntityDomain::StructuralNodes,
-                    value_shape: runmat_analysis_core::ObservationValueShape::Vector3,
-                    numeric_representation:
-                        crate::results::field::RecoveredFieldNumericRepresentation::Real,
-                    snapshots: &rotation_mode_shapes,
-                },
-            ],
+            &series,
         )
         .map_err(|error| FeaRunError::Observation(error.to_string()))?
     } else {
@@ -297,108 +353,117 @@ pub fn run_modal_with_options(
 
     Ok(FeaModalRunResult {
         run,
-        frequencies_hz: modal.frequencies_hz,
+        basis,
         mode_shapes,
-        residual_norms: modal.residual_norms,
+        rotation_mode_shapes,
+        recovered_modes,
     })
 }
 
-fn recover_modal_result_fields(
-    summary: &crate::assembly::AssemblySummary,
-    frequencies_hz: &[f64],
-    mode_shapes: &[Vec<f64>],
-    residual_norms: &[f64],
+fn collect_recovered_mode_fields(
+    modes: &[ModalRecoveredMode],
+    field_id: &str,
 ) -> Vec<AnalysisField> {
-    let mode_count = frequencies_hz.len().min(mode_shapes.len());
-    let frequencies = frequencies_hz
+    modes
         .iter()
-        .copied()
-        .take(mode_count)
-        .collect::<Vec<_>>();
-    let eigenvalues = frequencies
-        .iter()
-        .map(|frequency| (2.0 * std::f64::consts::PI * frequency).powi(2))
-        .collect::<Vec<_>>();
-    let mut modal_mass = Vec::with_capacity(mode_count);
-    let mut modal_stiffness = Vec::with_capacity(mode_count);
-    let mut participation_factor = Vec::with_capacity(mode_count);
-    let residual_norm = (0..mode_count)
-        .map(|index| residual_norms.get(index).copied().unwrap_or(f64::INFINITY))
-        .collect::<Vec<_>>();
-    let relative_frequency_separation = relative_frequency_separation(&frequencies);
-    let mut m_orthogonality = Vec::with_capacity(mode_count.saturating_mul(mode_count));
+        .filter_map(|mode| {
+            mode.fields
+                .iter()
+                .find(|field| field.field_id == field_id)
+                .cloned()
+        })
+        .collect()
+}
 
-    for mode_shape in mode_shapes.iter().take(mode_count) {
-        let mass_applied = apply_m(&summary.operator, mode_shape);
-        let stiffness_applied = apply_k(&summary.operator, mode_shape);
-        let mass = dot(mode_shape, &mass_applied).abs();
-        let stiffness = dot(mode_shape, &stiffness_applied).abs();
-        modal_mass.push(mass);
-        modal_stiffness.push(stiffness);
-        participation_factor.push(mass_applied.iter().sum::<f64>() / mass.sqrt().max(1.0e-12));
-    }
-
-    for left in mode_shapes.iter().take(mode_count) {
-        for right in mode_shapes.iter().take(mode_count) {
-            let mass_applied = apply_m(&summary.operator, right);
-            m_orthogonality.push(dot(left, &mass_applied));
-        }
-    }
-
+fn modal_result_fields(basis: &ModalBasisArtifact) -> Vec<AnalysisField> {
+    let mode_count = basis.modes().len();
+    let directional = |select: fn(crate::pipeline::modal_basis::ModalDirectionalMetric) -> f64| {
+        basis
+            .modes()
+            .iter()
+            .flat_map(|mode| mode.directional().iter().copied().map(select))
+            .collect::<Vec<_>>()
+    };
     vec![
-        AnalysisField::host_f64(FEA_FIELD_MODAL_FREQUENCY_HZ, vec![mode_count], frequencies),
-        AnalysisField::host_f64(FEA_FIELD_MODAL_EIGENVALUE, vec![mode_count], eigenvalues),
-        AnalysisField::host_f64(FEA_FIELD_MODAL_MODAL_MASS, vec![mode_count], modal_mass),
+        AnalysisField::host_f64(
+            FEA_FIELD_MODAL_FREQUENCY_HZ,
+            vec![mode_count],
+            basis
+                .modes()
+                .iter()
+                .map(|mode| mode.frequency_hz())
+                .collect(),
+        ),
+        AnalysisField::host_f64(
+            FEA_FIELD_MODAL_EIGENVALUE,
+            vec![mode_count],
+            basis
+                .modes()
+                .iter()
+                .map(|mode| mode.eigenvalue_rad2_per_s2())
+                .collect(),
+        ),
+        AnalysisField::host_f64(
+            FEA_FIELD_MODAL_MODAL_MASS,
+            vec![mode_count],
+            basis.modes().iter().map(|mode| mode.modal_mass()).collect(),
+        ),
         AnalysisField::host_f64(
             FEA_FIELD_MODAL_MODAL_STIFFNESS,
             vec![mode_count],
-            modal_stiffness,
+            basis
+                .modes()
+                .iter()
+                .map(|mode| mode.modal_stiffness())
+                .collect(),
         ),
         AnalysisField::host_f64(
             FEA_FIELD_MODAL_PARTICIPATION_FACTOR,
-            vec![mode_count],
-            participation_factor,
+            vec![mode_count, 3],
+            directional(|metric| metric.participation_factor()),
+        ),
+        AnalysisField::host_f64(
+            FEA_FIELD_MODAL_EFFECTIVE_MASS,
+            vec![mode_count, 3],
+            directional(|metric| metric.effective_mass()),
+        ),
+        AnalysisField::host_f64(
+            FEA_FIELD_MODAL_CUMULATIVE_EFFECTIVE_MASS,
+            vec![mode_count, 3],
+            directional(|metric| metric.cumulative_effective_mass()),
+        ),
+        AnalysisField::host_f64(
+            FEA_FIELD_MODAL_CUMULATIVE_MASS_RATIO,
+            vec![mode_count, 3],
+            directional(|metric| metric.cumulative_mass_ratio()),
+        ),
+        AnalysisField::host_f64(
+            FEA_FIELD_MODAL_TOTAL_FREE_MASS,
+            vec![3],
+            basis.total_free_mass().to_vec(),
         ),
         AnalysisField::host_f64(
             FEA_FIELD_MODAL_RESIDUAL_NORM,
             vec![mode_count],
-            residual_norm,
+            basis
+                .modes()
+                .iter()
+                .map(|mode| mode.residual_norm())
+                .collect(),
         ),
         AnalysisField::host_f64(
             FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION,
             vec![mode_count],
-            relative_frequency_separation,
+            basis
+                .modes()
+                .iter()
+                .map(|mode| mode.relative_frequency_separation())
+                .collect(),
         ),
         AnalysisField::host_f64(
             FEA_FIELD_MODAL_M_ORTHOGONALITY,
             vec![mode_count, mode_count],
-            m_orthogonality,
+            basis.mass_orthogonality().to_vec(),
         ),
     ]
-}
-
-fn relative_frequency_separation(frequencies: &[f64]) -> Vec<f64> {
-    if frequencies.len() < 2 {
-        return vec![1.0; frequencies.len()];
-    }
-
-    let mut separation = vec![f64::INFINITY; frequencies.len()];
-    for (index, window) in frequencies.windows(2).enumerate() {
-        let a = window[0].abs().max(1.0e-12);
-        let b = window[1].abs().max(1.0e-12);
-        let value = (b - a).abs() / a.max(b);
-        separation[index] = separation[index].min(value);
-        separation[index + 1] = separation[index + 1].min(value);
-    }
-    separation
-        .into_iter()
-        .map(|value| if value.is_finite() { value } else { 1.0 })
-        .collect()
-}
-
-fn dot(left: &[f64], right: &[f64]) -> f64 {
-    left.iter()
-        .zip(right.iter())
-        .map(|(lhs, rhs)| lhs * rhs)
-        .sum()
 }

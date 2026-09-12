@@ -9236,17 +9236,17 @@ fn analysis_run_modal_returns_native_modal_result() {
         .modal_results
         .as_ref()
         .expect("modal payload should exist");
-    assert!(!modal.frequencies_hz.is_empty());
-    assert_eq!(modal.frequencies_hz.len(), modal.mode_shapes.len());
+    assert!(!modal.frequencies_hz().is_empty());
+    assert_eq!(modal.frequencies_hz().len(), modal.mode_shapes.len());
     assert_eq!(
         modal.mode_shapes[0].field_id,
         fea_modal_mode_shape_field_id(1)
     );
     assert_eq!(modal.mode_shapes[0].shape.len(), 2);
     assert_eq!(modal.mode_shapes[0].shape[1], 3);
-    assert_eq!(modal.frequencies_hz.len(), modal.residual_norms.len());
-    assert!(modal.residual_norms.iter().all(|value| value.is_finite()));
-    assert_eq!(modal.modal_payload_version, "modal_results/v1");
+    assert_eq!(modal.frequencies_hz().len(), modal.residual_norms().len());
+    assert!(modal.residual_norms().iter().all(|value| value.is_finite()));
+    assert_eq!(modal.mode_indices.len(), modal.basis.modes().len());
     assert_eq!(modal.mode_units, ModalFrequencyUnits::Hz);
     assert_eq!(modal.frequency_basis, ModalFrequencyBasis::NativeEigenSolve);
     let results = analysis_results_op(
@@ -9277,7 +9277,7 @@ fn analysis_run_modal_returns_native_modal_result() {
     assert_eq!(orthogonality_descriptor.kind, AnalysisFieldKind::Tensor);
     assert_eq!(
         orthogonality_descriptor.shape,
-        vec![modal.frequencies_hz.len(), modal.frequencies_hz.len()]
+        vec![modal.frequencies_hz().len(), modal.frequencies_hz().len()]
     );
     assert_eq!(orthogonality_descriptor.component_count, None);
     assert!(envelope
@@ -9540,8 +9540,8 @@ fn analysis_run_modal_with_options_controls_requested_mode_count() {
         .modal_results
         .as_ref()
         .expect("modal payload should exist");
-    assert!(!modal.frequencies_hz.is_empty());
-    assert!(modal.frequencies_hz.len() <= 2);
+    assert!(!modal.frequencies_hz().is_empty());
+    assert!(modal.frequencies_hz().len() <= 2);
     assert!(envelope.data.provenance.deterministic_mode);
 }
 
@@ -9580,12 +9580,12 @@ fn analysis_results_include_modal_payload_for_modal_runs() {
         .modal_results
         .as_ref()
         .expect("modal payload should propagate to results");
-    assert!(!modal.frequencies_hz.is_empty());
-    assert_eq!(modal.frequencies_hz.len(), modal.mode_shapes.len());
+    assert!(!modal.frequencies_hz().is_empty());
+    assert_eq!(modal.frequencies_hz().len(), modal.mode_shapes.len());
     assert_eq!(modal.mode_shapes[0].shape.len(), 2);
     assert_eq!(modal.mode_shapes[0].shape[1], 3);
-    assert_eq!(modal.frequencies_hz.len(), modal.residual_norms.len());
-    assert_eq!(modal.modal_payload_version, "modal_results/v1");
+    assert_eq!(modal.frequencies_hz().len(), modal.residual_norms().len());
+    assert_eq!(modal.mode_indices.len(), modal.basis.modes().len());
     assert_eq!(modal.mode_units, ModalFrequencyUnits::Hz);
     assert_eq!(modal.frequency_basis, ModalFrequencyBasis::NativeEigenSolve);
     assert!(results.data.summary.mode_count > 0);

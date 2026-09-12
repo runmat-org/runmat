@@ -7,6 +7,8 @@ use crate::assembly::elements::{
 
 #[derive(Debug, Error, Clone, PartialEq)]
 pub enum StructuralFieldRecoveryError {
+    #[error("structural recovery state has {actual} DOFs; expected {expected}")]
+    DisplacementShapeMismatch { expected: usize, actual: usize },
     #[error("solid recovery displacement is absent or non-finite at node {node_index}")]
     InvalidDisplacement { node_index: usize },
     #[error("Tet4 solid recovery failed for element {element_id}: {source}")]

@@ -49,24 +49,63 @@ pub fn recover_result_fields(
         return Ok(empty_structural_fields());
     }
 
-    let dof_count = summary.dof_count.max(3);
-    let mut displacement_values = solve_result.solution.clone();
-    if displacement_values.len() < dof_count {
-        displacement_values.resize(dof_count, 0.0);
-    }
-    if displacement_values.is_empty() {
-        displacement_values = vec![0.0; dof_count];
-    }
-
-    let node_count = structural_displacement_node_count(summary, dof_count);
-    displacement_values = recover_displacement(summary, &displacement_values, node_count);
-
+    let node_count = structural_displacement_node_count(summary, summary.dof_count.max(3));
     let internal_force = apply_k(&summary.operator, &solve_result.solution);
     let reaction_values = recover_reaction_force(summary, &internal_force, node_count);
-    let rotation_values = recover_rotation(summary, &solve_result.solution);
     let reaction_moment_values = recover_reaction_moment(summary, &internal_force);
     let strain_energy = recover_total_strain_energy(&solve_result.solution, &internal_force);
     let residual_metrics = recover_residual_metrics(summary, &solve_result.solution);
+    let mut fields = recover_deformation_result_fields(summary, &solve_result.solution)?;
+    fields.extend([
+        AnalysisField::host_f64(
+            FEA_FIELD_STRUCTURAL_REACTION_FORCE,
+            vec![node_count, VECTOR_COMPONENT_COUNT],
+            reaction_values,
+        ),
+        AnalysisField::host_f64(
+            FEA_FIELD_STRUCTURAL_REACTION_MOMENT,
+            rotation_shape(summary),
+            reaction_moment_values,
+        ),
+        AnalysisField::host_f64(
+            FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY,
+            vec![1],
+            vec![strain_energy],
+        ),
+        AnalysisField::host_f64(
+            FEA_FIELD_STRUCTURAL_RESIDUAL_NORM,
+            vec![1],
+            vec![residual_metrics.normalized_residual_norm],
+        ),
+        AnalysisField::host_f64(
+            FEA_FIELD_STRUCTURAL_EQUATION_SCALE,
+            vec![1],
+            vec![residual_metrics.equation_scale],
+        ),
+    ]);
+    Ok(fields)
+}
+
+/// Recovers only deformation-dependent physical fields from a structural state vector.
+///
+/// Modal shapes have no static load equilibrium, so reaction and residual fields would be
+/// misleading. This shared path keeps their strain, stress, energy-density, beam, and shell
+/// recovery identical to linear-static recovery without manufacturing equilibrium quantities.
+pub fn recover_deformation_result_fields(
+    summary: &AssemblySummary,
+    solution: &[f64],
+) -> Result<Vec<AnalysisField>, StructuralFieldRecoveryError> {
+    if solution.is_empty() || solution.iter().any(|value| !value.is_finite()) {
+        return Ok(Vec::new());
+    }
+    if solution.len() != summary.dof_count {
+        return Err(StructuralFieldRecoveryError::DisplacementShapeMismatch {
+            expected: summary.dof_count,
+            actual: solution.len(),
+        });
+    }
+    let node_count = structural_displacement_node_count(summary, summary.dof_count.max(3));
+    let displacement_values = recover_displacement(summary, solution, node_count);
     let continuum_fields = if publishes_continuum_fields(summary) {
         let strain_recovery = recover_structural_strain(summary, &displacement_values)?;
         let element_count = strain_recovery.element_count;
@@ -101,32 +140,7 @@ pub fn recover_result_fields(
         AnalysisField::host_f64(
             FEA_FIELD_STRUCTURAL_ROTATION,
             rotation_shape(summary),
-            rotation_values,
-        ),
-        AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_REACTION_FORCE,
-            vec![node_count, VECTOR_COMPONENT_COUNT],
-            reaction_values,
-        ),
-        AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_REACTION_MOMENT,
-            rotation_shape(summary),
-            reaction_moment_values,
-        ),
-        AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY,
-            vec![1],
-            vec![strain_energy],
-        ),
-        AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_RESIDUAL_NORM,
-            vec![1],
-            vec![residual_metrics.normalized_residual_norm],
-        ),
-        AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_EQUATION_SCALE,
-            vec![1],
-            vec![residual_metrics.equation_scale],
+            recover_rotation(summary, solution),
         ),
     ];
     if let Some((
@@ -166,10 +180,10 @@ pub fn recover_result_fields(
             ),
         ]);
     }
-    if let Some(beam_fields) = recover_beam_result_fields(summary, &solve_result.solution) {
+    if let Some(beam_fields) = recover_beam_result_fields(summary, solution) {
         fields.extend(beam_fields);
     }
-    if let Some(shell_fields) = recover_shell_result_fields(summary, &solve_result.solution)? {
+    if let Some(shell_fields) = recover_shell_result_fields(summary, solution)? {
         fields.extend(shell_fields);
     }
     Ok(fields)

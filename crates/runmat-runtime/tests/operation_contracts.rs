@@ -1281,9 +1281,9 @@ fn analysis_run_modal_contract_is_v1_and_typed() {
         .modal_results
         .as_ref()
         .expect("modal results payload should exist");
-    assert!(!modal_results.frequencies_hz.is_empty());
+    assert!(!modal_results.frequencies_hz().is_empty());
     assert_eq!(
-        modal_results.frequencies_hz.len(),
+        modal_results.frequencies_hz().len(),
         modal_results.mode_shapes.len()
     );
     assert_eq!(
@@ -1292,10 +1292,13 @@ fn analysis_run_modal_contract_is_v1_and_typed() {
     );
     assert_eq!(modal_results.mode_shapes[0].shape.len(), 2);
     assert_eq!(modal_results.mode_shapes[0].shape[1], 3);
-    assert_eq!(modal_results.modal_payload_version, "modal_results/v1");
     assert_eq!(
-        modal_results.frequencies_hz.len(),
-        modal_results.residual_norms.len()
+        modal_results.mode_indices.len(),
+        modal_results.basis.modes().len()
+    );
+    assert_eq!(
+        modal_results.frequencies_hz().len(),
+        modal_results.residual_norms().len()
     );
     assert_eq!(modal_results.mode_units, ModalFrequencyUnits::Hz);
     assert_eq!(
@@ -1405,8 +1408,8 @@ fn analysis_run_modal_with_options_contract_controls_mode_budget() {
         .modal_results
         .as_ref()
         .expect("modal payload should exist");
-    assert!(!modal.frequencies_hz.is_empty());
-    assert!(modal.frequencies_hz.len() <= 2);
+    assert!(!modal.frequencies_hz().is_empty());
+    assert!(modal.frequencies_hz().len() <= 2);
     assert!(envelope.data.provenance.deterministic_mode);
 
     let invalid = analysis_run_modal_with_options_op(

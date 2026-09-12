@@ -222,15 +222,17 @@ pub fn analysis_results_op(
         max_modal_residual_norm,
         first_mode_converged,
     ) = if let Some(modal) = run_result.modal_results.as_ref() {
-        let count = modal.frequencies_hz.len().min(modal.mode_shapes.len());
-        let max_modal_residual_norm = modal.residual_norms.iter().copied().reduce(f64::max);
-        let first_mode_converged = modal.residual_norms.first().copied().map(|v| v <= 1.0e-6);
+        let frequencies_hz = modal.frequencies_hz();
+        let residual_norms = modal.residual_norms();
+        let count = frequencies_hz.len();
+        let max_modal_residual_norm = residual_norms.iter().copied().reduce(f64::max);
+        let first_mode_converged = residual_norms.first().copied().map(|v| v <= 1.0e-6);
         let (min_frequency_hz, max_frequency_hz) = if count == 0 {
             (None, None)
         } else {
             let mut min_value = f64::INFINITY;
             let mut max_value = f64::NEG_INFINITY;
-            for value in modal.frequencies_hz.iter().copied().take(count) {
+            for value in frequencies_hz.iter().copied() {
                 min_value = min_value.min(value);
                 max_value = max_value.max(value);
             }
@@ -797,12 +799,9 @@ pub fn analysis_results_op(
             if query.mode_indices.is_empty() {
                 Some(modal.clone())
             } else {
-                let mut frequencies_hz = Vec::with_capacity(query.mode_indices.len());
-                let mut mode_shapes = Vec::with_capacity(query.mode_indices.len());
-                let mut residual_norms = Vec::with_capacity(query.mode_indices.len());
                 for &index in &query.mode_indices {
-                    let eigenvalue = modal.frequencies_hz.get(index).copied().ok_or_else(|| {
-                        operation_error(
+                    if modal.basis.modes().get(index).is_none() {
+                        return Err(operation_error(
                             ANALYSIS_RESULTS_OPERATION,
                             ANALYSIS_RESULTS_OP_VERSION,
                             &context,
@@ -817,67 +816,20 @@ pub fn analysis_results_op(
                                 ("requested_mode_index".to_string(), index.to_string()),
                                 (
                                     "available_mode_count".to_string(),
-                                    modal.frequencies_hz.len().to_string(),
+                                    modal.basis.modes().len().to_string(),
                                 ),
                             ]),
-                        )
-                    })?;
-                    let mode_shape = modal.mode_shapes.get(index).cloned().ok_or_else(|| {
-                        operation_error(
-                            ANALYSIS_RESULTS_OPERATION,
-                            ANALYSIS_RESULTS_OP_VERSION,
-                            &context,
-                            OperationErrorSpec {
-                                error_code: "RM.FEA.RESULTS.MODE_NOT_FOUND",
-                                error_type: OperationErrorType::Input,
-                                retryable: false,
-                                severity: OperationErrorSeverity::Error,
-                            },
-                            format!(
-                                "requested modal mode index '{index}' is missing mode shape data"
-                            ),
-                            BTreeMap::from([
-                                ("requested_mode_index".to_string(), index.to_string()),
-                                (
-                                    "available_shape_count".to_string(),
-                                    modal.mode_shapes.len().to_string(),
-                                ),
-                            ]),
-                        )
-                    })?;
-                    let residual_norm =
-                        modal.residual_norms.get(index).copied().ok_or_else(|| {
-                            operation_error(
-                                ANALYSIS_RESULTS_OPERATION,
-                                ANALYSIS_RESULTS_OP_VERSION,
-                                &context,
-                                OperationErrorSpec {
-                                    error_code: "RM.FEA.RESULTS.MODE_NOT_FOUND",
-                                    error_type: OperationErrorType::Input,
-                                    retryable: false,
-                                    severity: OperationErrorSeverity::Error,
-                                },
-                                format!(
-                                    "requested modal mode index '{index}' is missing residual data"
-                                ),
-                                BTreeMap::from([
-                                    ("requested_mode_index".to_string(), index.to_string()),
-                                    (
-                                        "available_residual_count".to_string(),
-                                        modal.residual_norms.len().to_string(),
-                                    ),
-                                ]),
-                            )
-                        })?;
-                    frequencies_hz.push(eigenvalue);
-                    mode_shapes.push(mode_shape);
-                    residual_norms.push(residual_norm);
+                        ));
+                    }
                 }
                 Some(ModalResultsData {
-                    modal_payload_version: modal.modal_payload_version.clone(),
-                    frequencies_hz,
-                    mode_shapes,
-                    residual_norms,
+                    basis: modal.basis.clone(),
+                    mode_indices: query.mode_indices.clone(),
+                    mode_shapes: query
+                        .mode_indices
+                        .iter()
+                        .filter_map(|index| modal.mode_shapes.get(*index).cloned())
+                        .collect(),
                     mode_units: modal.mode_units,
                     frequency_basis: modal.frequency_basis,
                 })
