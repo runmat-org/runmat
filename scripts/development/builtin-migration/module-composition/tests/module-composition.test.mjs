@@ -266,11 +266,11 @@ test("aggregation conditions remain independent from declaration conditions", ()
   assert.doesNotThrow(() => verifyModuleCompositionProduct(product, source));
 });
 
-test("closed path and macro-use attributes reproduce safe noncanonical module placement", () => {
+test("closed path and macro-use attributes remain independent of semantic child roles", () => {
   const product = fixtureProjection().products[1];
   product.children = [child({
     module: "common", source_path: "crates/runmat-runtime/src/builtins/math/helpers/common.rs",
-    sourceKind: "file", role: "support", visibility: "public", macroUse: true, declarationOrder: 0,
+    sourceKind: "file", role: "group", visibility: "public", macroUse: true, declarationOrder: 0,
   }), child({
     module: "tests", source_path: "crates/runmat-runtime/src/builtins/math/tests.rs",
     sourceKind: "file", role: "support", feature: "test", declarationOrder: 1,
@@ -279,9 +279,8 @@ test("closed path and macro-use attributes reproduce safe noncanonical module pl
   assert.match(source, /#\[path = "helpers\/common.rs"\]\n#\[macro_use\]\npub mod common;/);
   assert.match(source, /#\[cfg\(test\)\]\nmod tests;/);
   assert.doesNotThrow(() => verifyModuleCompositionProduct(product, source));
-  const invalid = structuredClone(product);
-  invalid.children[0].role = "identity";
-  assert.throws(() => renderModuleCompositionProduct(invalid), /restricted to support/);
+  product.children[0].role = "identity";
+  assert.doesNotThrow(() => verifyModuleCompositionProduct(product, renderModuleCompositionProduct(product)));
 });
 
 test("the verifier rejects extra Rust, altered topology, and malformed aggregation", () => {

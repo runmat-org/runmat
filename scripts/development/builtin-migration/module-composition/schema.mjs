@@ -71,7 +71,6 @@ export function parseCompositionChild(value, parent) {
   validateChildPath(sourcePath, sourceKind, module, parent.productPath);
   if (parent.crateRole === "runtime" && aggregationSources.length) throw new Error(`${module}: runtime children cannot declare catalog aggregation`);
   if (role === "support" && aggregationSources.length) throw new Error(`${module}: support children cannot contribute catalog aggregation`);
-  if (macroUse && role !== "support") throw new Error(`${module}: macro use is restricted to support children`);
   for (const reexport of reexports) if (!conditionImplies(reexport.condition, declarationCondition)) {
     throw new Error(`${module}: reexport condition must imply its declaration condition`);
   }
