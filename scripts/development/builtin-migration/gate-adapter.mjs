@@ -11,6 +11,7 @@ import { gatePlanEvidence } from "./gate-plan.mjs";
 import { parseInventoryEvidence } from "./inventory.mjs";
 import { assertActiveLease, assertLeaseBaseInventory } from "./lease.mjs";
 import { reviewedIntegrationProducts } from "./integration-products.mjs";
+import { deriveEffectiveModuleComposition } from "./module-composition/effective-state.mjs";
 import { parseExampleProducer } from "./producer-adapters/example.mjs";
 import { parseGeneratedProductsProducer } from "./producer-adapters/generated-products.mjs";
 import { parseCompiledInventoryProducer, parseInventoryDeltaProducer } from "./producer-adapters/inventory.mjs";
@@ -22,7 +23,7 @@ const REPOSITORY = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".
 // The reviewed control owns the complete command. Callers select only a bundle
 // and gate; they cannot supply executable, argv, cwd, checks, or process facts.
 export function runGateProducer(input, clock = Date.now) {
-  exact(input, ["control", "lease", "control_baseline_inventory", "lease_base_inventory", "subject_inventory", "bundle_id", "gate", "artifact_id", "inputs"], "gate producer request");
+  exact(input, ["control", "lease", "queue_state", "queue_checkpoint", "control_baseline_inventory", "lease_base_inventory", "subject_inventory", "bundle_id", "gate", "artifact_id", "inputs"], "gate producer request");
   const controlBaseline = parseInventoryEvidence(input.control_baseline_inventory);
   const leaseBase = parseInventoryEvidence(input.lease_base_inventory);
   const subject = parseInventoryEvidence(input.subject_inventory);
@@ -37,6 +38,9 @@ export function runGateProducer(input, clock = Date.now) {
   if (lease.bundle.id !== bundle.id) throw new Error(`${input.bundle_id}: gate lease belongs to another bundle`);
   const plan = bundle.gate_plans.get(input.gate);
   if (!plan) throw new Error(`${input.bundle_id}/${input.gate}: no reviewed gate plan is registered`);
+  if (input.inputs && Object.hasOwn(input.inputs, "module_composition_projection")) {
+    throw new Error("module composition projection is derived authority and cannot be supplied by a caller");
+  }
   const repository = fs.realpathSync(REPOSITORY);
   const command = commandFor(plan, repository, controlBaseline, subject.compiled_inventory.build);
   const tools = resolveReviewedTools(command.tools, plan.program.kind);
@@ -54,6 +58,17 @@ export function runGateProducer(input, clock = Date.now) {
   const integrationProducts = reviewedIntegrationProducts(
     bundle.integration_product_refs, control.integrationProducts, bundle.id,
   );
+  const hasCompositionProducts = integrationProducts.some((product) =>
+    product.verification.kind === "rust_module_composition");
+  const moduleCompositionProjection = hasCompositionProducts
+    ? deriveEffectiveModuleComposition({
+      control,
+      queueState: input.queue_state,
+      queueCheckpoint: input.queue_checkpoint,
+      lease,
+      clock,
+    })
+    : null;
   const evidenceStorage = storage.admission.volumes.find((entry) => entry.role === "target-temp");
   if (!evidenceStorage) throw new Error(`${input.gate}: target-temp storage admission is absent`);
   const processInput = prepareGateProcessInput(plan, input.inputs, storage.admission.path_bindings.temporary.path, {
@@ -62,11 +77,12 @@ export function runGateProducer(input, clock = Date.now) {
     integration_products: integrationProducts,
     native_registration_manifest: subject.compiled_inventory.snapshot.observed.registration_manifest,
     evidence_storage: evidenceStorage,
-  });
+  }, moduleCompositionProjection);
   const parser = parserFor(plan.parser, input.gate, {
     input, controlBaseline, leaseBase, subject, control, bundle, tools,
     manifestEvidence: processInput?.manifest_evidence ?? null,
     evidenceRoot: processInput?.evidence_root ?? null,
+    moduleCompositionProjection: processInput?.module_composition_projection ?? null,
     integrationProducts,
   });
   const processResult = spawnSync(executable, command.arguments, {

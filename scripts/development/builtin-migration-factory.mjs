@@ -139,10 +139,13 @@ function run(options) {
     const leaseBase = parseInventoryEvidence(readJson(options.leaseBaseInventory));
     const lease = parseLease(readJson(options.lease), control, repository);
     assertLeaseBaseInventory(lease, control, leaseBase);
+    const queue = loadQueueAuthority(
+      options.state, options.queueCheckpoint, options.trustedQueueCheckpointDigest, control,
+    );
     const subject = buildInventory(repository, dispositionInputFromControl(control), {
       compiledInventory: readJson(options.compiledInventory),
     });
-    emit(runGateProducer({ control, lease, control_baseline_inventory: controlBaseline, lease_base_inventory: leaseBase, subject_inventory: subject, bundle_id: options.bundle, gate: options.gate, artifact_id: options.artifact, inputs: options.inputs ? readJson(options.inputs) : null }), options.output);
+    emit(runGateProducer({ control, lease, queue_state: queue.state, queue_checkpoint: queue.checkpoint, control_baseline_inventory: controlBaseline, lease_base_inventory: leaseBase, subject_inventory: subject, bundle_id: options.bundle, gate: options.gate, artifact_id: options.artifact, inputs: options.inputs ? readJson(options.inputs) : null }), options.output);
     return;
   }
   if (options.command === "verify") { runVerify(options); return; }
@@ -311,7 +314,10 @@ function parse(arguments_) {
     && (!options.queueCheckpoint || !options.trustedQueueCheckpointDigest)) {
     throw new Error("queue with --state requires --queue-checkpoint and --trusted-queue-checkpoint-digest");
   }
-  if (command === "produce-gate" && (!options.bundle || !options.gate || !options.artifact)) throw new Error("produce-gate requires --bundle, --gate, and --artifact");
+  if (command === "produce-gate" && (!options.bundle || !options.gate || !options.artifact
+    || !options.state || !options.queueCheckpoint || !options.trustedQueueCheckpointDigest)) {
+    throw new Error("produce-gate requires --bundle, --gate, --artifact, --state, --queue-checkpoint, and --trusted-queue-checkpoint-digest");
+  }
   if (["prepare", "audit"].includes(command) && !options.lease) throw new Error(`${command} requires --lease`);
   if (["prepare", "audit", "produce-gate"].includes(command) && !options.leaseBaseInventory) throw new Error(`${command} requires --lease-base-inventory`);
   if (command === "produce-gate" && !options.lease) throw new Error("produce-gate requires --lease");
@@ -347,7 +353,7 @@ function help() {
     `  builtin-migration-factory.mjs freeze-control --baseline-inventory PATH ${topology} ${controlReview} [--output PATH]\n` +
     `  builtin-migration-factory.mjs validate-control --control PATH --baseline-inventory PATH ${topology} ${controlReview} [--output PATH]\n` +
     `  builtin-migration-factory.mjs issue-lease --request PATH --control PATH --baseline-inventory PATH --lease-base-inventory PATH --state PATH --queue-checkpoint PATH --trusted-queue-checkpoint-digest SHA256 ${topology} ${controlReview} [--output PATH]\n` +
-    `  builtin-migration-factory.mjs produce-gate --compiled-inventory PATH --control PATH --baseline-inventory PATH --lease-base-inventory PATH --lease PATH ${topology} ${controlReview} --bundle ID --gate NAME --artifact ID [--inputs PATH] [--output PATH]\n` +
+    `  builtin-migration-factory.mjs produce-gate --compiled-inventory PATH --control PATH --baseline-inventory PATH --lease-base-inventory PATH --lease PATH --state PATH --queue-checkpoint PATH --trusted-queue-checkpoint-digest SHA256 ${topology} ${controlReview} --bundle ID --gate NAME --artifact ID [--inputs PATH] [--output PATH]\n` +
     `  builtin-migration-factory.mjs queue --compiled-inventory PATH --control PATH --baseline-inventory PATH ${topology} ${controlReview} [--state PATH --queue-checkpoint PATH --trusted-queue-checkpoint-digest SHA256] [--dispositions PATH] [--output PATH]\n` +
     `  builtin-migration-factory.mjs prepare NAME --compiled-inventory PATH --control PATH --baseline-inventory PATH --lease-base-inventory PATH ${topology} ${controlReview} --lease PATH --workspace PATH [--dispositions PATH] [--output PATH]\n` +
     `  builtin-migration-factory.mjs audit --compiled-inventory PATH --control PATH --baseline-inventory PATH --lease-base-inventory PATH ${topology} ${controlReview} --lease PATH --batch PATH --evidence PATH [--dispositions PATH] [--output PATH]\n` +

@@ -1,6 +1,7 @@
 import { compareCodePoint } from "./constants.mjs";
 import { evidenceDigest } from "./evidence.mjs";
 import { parseIntegrationProductVerification } from "./integration-products.mjs";
+import { bindModuleCompositionProjection } from "./module-composition/binding.mjs";
 import { array, digest, enumValue, exact, integer, kind, repositoryPath, stableId } from "./schema.mjs";
 
 export function parseGeneratedProductDefinitions(value) {
@@ -13,7 +14,7 @@ export function parseGeneratedProductDefinitions(value) {
     const generatorPath = repositoryPath(entry.generator.path, `${productId} reviewed generator path`);
     const generatorDigest = digest(entry.generator.baseline_digest, `${productId} reviewed generator digest`);
     if (entry.baseline_digest !== null) digest(entry.baseline_digest, `${productId} reviewed product baseline digest`);
-    return { ...entry, product_id: productId, path: productPath, generator: { path: generatorPath, baseline_digest: generatorDigest }, verification: parseIntegrationProductVerification(entry.verification, productId) };
+    return { ...entry, product_id: productId, path: productPath, generator: { path: generatorPath, baseline_digest: generatorDigest }, verification: parseIntegrationProductVerification(entry.verification, productId, productPath) };
   });
   const ids = products.map((entry) => entry.product_id);
   if (new Set(ids).size !== ids.length || JSON.stringify(ids) !== JSON.stringify([...ids].sort(compareCodePoint))) {
@@ -23,16 +24,29 @@ export function parseGeneratedProductDefinitions(value) {
 }
 
 export function parseGeneratedProductsProof(value, expected) {
-  kind(value, 1, "runmat-builtin-generated-products-proof", "generated products proof");
+  kind(value, 2, "runmat-builtin-generated-products-proof", "generated products proof");
   exact(value, ["schema_version", "kind", "authority", "products", "result"], "generated products proof");
   if (value.authority !== "machine-derived-integration-evidence") throw new Error("generated products proof has invalid authority");
   enumValue(value.result, ["pass", "fail"], "generated products result");
   const definitions = parseGeneratedProductDefinitions(expected.integration_products);
+  const compositionProjection = bindModuleCompositionProjection(
+    definitions,
+    expected.module_composition_projection,
+  );
+  const compositionProducts = new Map(
+    (compositionProjection?.products ?? [])
+      .map((entry) => [entry.product_id, entry]),
+  );
   const products = array(value.products, "generated products", { empty: true }).map((entry) => {
     const productId = stableId(entry?.product_id, "generated product id");
     const reviewed = definitions.find((definition) => definition.product_id === productId);
     if (!reviewed) throw new Error(`${productId}: generated product is not globally reviewed`);
-    return parseProduct(entry, reviewed, expected.native_registration_manifest);
+    return parseProduct(
+      entry,
+      reviewed,
+      expected.native_registration_manifest,
+      compositionProducts.get(productId) ?? null,
+    );
   });
   const keys = products.map((entry) => entry.product_id);
   if (new Set(keys).size !== keys.length || JSON.stringify(keys) !== JSON.stringify([...keys].sort(compareCodePoint))) {
@@ -70,7 +84,7 @@ export function generatedProductChecks(proof, identities) {
   }));
 }
 
-function parseProduct(value, reviewed, nativeManifest) {
+function parseProduct(value, reviewed, nativeManifest, compositionProduct) {
   exact(value, ["product_id", "path", "generator", "checked_in", "first", "second", "deterministic", "synchronized", "verification"], "generated product");
   stableId(value.product_id, "generated product id");
   repositoryPath(value.path, `${value.product_id} generated path`);
@@ -85,14 +99,29 @@ function parseProduct(value, reviewed, nativeManifest) {
   if (value.first.byte_length !== value.second.byte_length || (synchronized && value.checked_in.byte_length !== value.first.byte_length)) {
     throw new Error(`${value.product_id}: generated product byte lengths conflict with content identity`);
   }
-  parseProductVerification(value.verification, reviewed.verification, nativeManifest, value.product_id);
+  parseProductVerification(
+    value.verification,
+    reviewed.verification,
+    nativeManifest,
+    compositionProduct,
+    value.product_id,
+  );
   return value;
 }
 
-function parseProductVerification(value, contract, nativeManifest, id) {
+function parseProductVerification(value, contract, nativeManifest, compositionProduct, id) {
   if (contract.kind === "content_identity") {
     exact(value, ["kind", "result"], `${id} product verification`);
     if (value.kind !== contract.kind || value.result !== "pass") throw new Error(`${id}: content identity verification failed`);
+    return;
+  }
+  if (contract.kind === "rust_module_composition") {
+    exact(value, ["kind", "projection_digest", "result"], `${id} product verification`);
+    if (value.kind !== contract.kind || value.result !== "pass") throw new Error(`${id}: module composition verification failed`);
+    if (!compositionProduct || evidenceDigest(compositionProduct) !== digest(value.projection_digest, `${id} composition projection digest`)) {
+      throw new Error(`${id}: composition proof differs from the exact staged projection`);
+    }
+    if (compositionProduct.children.length === 0) throw new Error(`${id}: integrated module composition cannot be empty`);
     return;
   }
   exact(value, ["kind", "generated_manifest", "native_manifest", "result"], `${id} product verification`);

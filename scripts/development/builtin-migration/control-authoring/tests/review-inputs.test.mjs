@@ -33,23 +33,46 @@ afterEach(() => {
 
 test("bundle and global reviews bind exact scaffold and topology rows", () => {
   const fixture = reviewFixture();
-  const bundle = parseBundleControlReview(
-    fixture.bundleReview, fixture.scaffold, fixture.topology, fixture.inventory,
-  );
   const global = parseGlobalControlReview(
     fixture.globalReview, fixture.scaffold, fixture.topology, fixture.inventory,
+  );
+  const bundle = parseBundleControlReview(
+    fixture.bundleReview, fixture.scaffold, fixture.topology, fixture.inventory, global,
   );
   assert.equal(bundle.bundleId, fixture.bundleId);
   assert.deepEqual([...bundle.identityControls.keys()], [fixture.id]);
   assert.deepEqual([...global.programProfiles.keys()], [...new Set(fixture.bundleReview.bundle_control.gate_plans.map((entry) => entry.program_profile_id))]);
   assert.throws(() => bundle.identityControls.set("bar", {}), /immutable/);
 
+  for (const version of [2, 4]) {
+    const wrongVersion = structuredClone(fixture.globalReview);
+    wrongVersion.schema_version = version;
+    resign(wrongVersion);
+    assert.throws(
+      () => parseGlobalControlReview(
+        wrongVersion, fixture.scaffold, fixture.topology, fixture.inventory,
+      ),
+      /schema_version 3/,
+    );
+  }
+  for (const version of [3, 5]) {
+    const wrongVersion = structuredClone(fixture.bundleReview);
+    wrongVersion.schema_version = version;
+    resign(wrongVersion);
+    assert.throws(
+      () => parseBundleControlReview(
+        wrongVersion, fixture.scaffold, fixture.topology, fixture.inventory, global,
+      ),
+      /schema_version 4/,
+    );
+  }
+
   const drift = structuredClone(fixture.bundleReview);
   drift.bindings.scaffold_bundle_row_digest = `sha256:${"0".repeat(64)}`;
   resign(drift);
   assert.throws(
     () => parseBundleControlReview(
-      drift, fixture.scaffold, fixture.topology, fixture.inventory,
+      drift, fixture.scaffold, fixture.topology, fixture.inventory, global,
     ),
     /scaffold row digest mismatch/,
   );
@@ -59,7 +82,7 @@ test("bundle and global reviews bind exact scaffold and topology rows", () => {
   resign(proposalDrift);
   assert.throws(
     () => parseBundleControlReview(
-      proposalDrift, fixture.scaffold, fixture.topology, fixture.inventory,
+      proposalDrift, fixture.scaffold, fixture.topology, fixture.inventory, global,
     ),
     /authority proposal digest mismatch/,
   );
@@ -141,6 +164,12 @@ test("control composition and attestation are deterministic capabilities, not re
   };
   const candidate = composeControlCandidate(input);
   assert.deepEqual(candidate, composeControlCandidate(input));
+  assert.equal(candidate.schema_version, 4);
+  for (const version of [3, 5]) {
+    const wrongVersion = structuredClone(candidate);
+    wrongVersion.schema_version = version;
+    assert.throws(() => parseControlCandidate(wrongVersion, candidate), /schema_version 4/);
+  }
   assert.throws(
     () => composeControlCandidate({ ...input, reviewSet: { ...reviewSet } }),
     /exact validated control review set/,
@@ -161,6 +190,7 @@ test("control composition and attestation are deterministic capabilities, not re
   };
   const attestation = { ...attestationPayload, digest: evidenceDigest(attestationPayload) };
   const reviewed = validateControlReviewChain(candidate, attestation, candidate);
+  assert.equal(reviewed.controlValue.schema_version, 5);
   assert.doesNotThrow(() => parseControlManifest(reviewed.controlValue, {
     inventory: fixture.inventory,
     reviewedTopology: fixture.topology,
@@ -341,6 +371,7 @@ function reviewFixture() {
       { kind: "file", path: `crates/runmat-runtime/src/builtins/math/basic/${id}.rs` },
     ],
     integration_product_refs: ["wasm-registry"],
+    module_composition_transition: null,
     expected_removals: [],
     baseline_evidence: bundleBaselineEvidence(inventory, [id]),
     gate_plans: gatePolicy.gatePlans,
@@ -377,7 +408,7 @@ function reviewFixture() {
   const scaffoldBundle = scaffold.bundle_rows.find((entry) => entry.bundle_id === bundleId);
   const scaffoldIdentity = scaffold.identity_rows.find((entry) => entry.identity === id);
   const bundlePayload = {
-    schema_version: 3,
+    schema_version: 4,
     kind: "runmat-builtin-migration-bundle-control-review",
     authority: "reviewer-authored-development-input",
     program: "RM-1064/C00-C07",
@@ -401,13 +432,14 @@ function reviewFixture() {
   };
   const bundleReview = { ...bundlePayload, digest: evidenceDigest(bundlePayload) };
   const globalPayload = {
-    schema_version: 2,
+    schema_version: 3,
     kind: "runmat-builtin-migration-global-control-review",
     authority: "reviewer-authored-development-input",
     program: "RM-1064/C00-C07",
     bindings: { scaffold_digest: scaffold.digest, topology_digest: topology.digest, migration_finding_rows_digest: evidenceDigest(scaffold.migration_finding_rows) },
     program_profiles: gatePolicy.programProfiles,
     integration_products: fixtureIntegrationProducts(inventory),
+    module_composition_baseline: null,
     migration_findings: { schema_version: 1, kind: "runmat-builtin-migration-finding-dispositions", rows: [], review: { status: "reviewed", evidence: ["fixture review"] } },
     exception_manifest: { entries: [], review: { status: "reviewed", evidence: ["fixture review"] } },
     target_policy: fixtureTargetPolicy([{

@@ -61,7 +61,7 @@ export function parseOperationalBundleControlPolicy(value, id, inventory, identi
 }
 
 function parseBundlePolicy(value, id, identities, inventory, parsePlans) {
-  exact(value, ["prerequisites", "additional_authored_write_set", "integration_product_refs", "expected_removals", "baseline_evidence", "gate_plans", "owner_role", "complexity", "review"], `${id} bundle control`);
+  exact(value, ["prerequisites", "additional_authored_write_set", "integration_product_refs", "module_composition_transition", "expected_removals", "baseline_evidence", "gate_plans", "owner_role", "complexity", "review"], `${id} bundle control`);
   array(value.prerequisites, `${id} prerequisites`, { empty: true }).forEach((entry) => {
     exact(entry, ["bundle_id", "kind"], `${id} prerequisite`);
     stableId(entry.bundle_id, `${id} prerequisite bundle`);
@@ -69,6 +69,11 @@ function parseBundlePolicy(value, id, identities, inventory, parsePlans) {
   });
   array(value.additional_authored_write_set, `${id} additional authored write set`, { empty: true }).forEach((entry) => parseScope(entry, `${id} additional authored scope`));
   parseIntegrationProductReferences(value.integration_product_refs, id);
+  if (value.module_composition_transition !== null
+    && (!value.module_composition_transition || typeof value.module_composition_transition !== "object"
+      || Array.isArray(value.module_composition_transition))) {
+    throw new Error(`${id} module composition transition must be an object or null`);
+  }
   const baselineEvidence = validateCompleteBundleBaselineEvidence(
     value.baseline_evidence,
     inventory,

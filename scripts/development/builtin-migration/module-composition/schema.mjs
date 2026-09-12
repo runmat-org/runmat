@@ -46,6 +46,15 @@ export function parseCompositionProduct(value) {
   return { ...value, product_id: productId, crate_role: crateRole, path: productPath, module_path: modulePath, children };
 }
 
+export function parseModuleCompositionContract(value, productPath, productId) {
+  exact(value, ["kind", "crate_role", "module_path"], `${productId} module composition contract`);
+  if (value.kind !== "rust_module_composition") throw new Error(`${productId}: module composition contract has an invalid kind`);
+  const crateRole = enumValue(value.crate_role, CRATE_ROLES, `${productId} crate role`);
+  const modulePath = rustParentModule(value.module_path, `${productId} parent module`);
+  validateParentPath(crateRole, productPath, modulePath, productId);
+  return { kind: value.kind, crate_role: crateRole, module_path: modulePath };
+}
+
 export function parseCompositionChild(value, parent) {
   exact(value, ["module", "source_kind", "source_path", "role", "visibility", "feature_policy", "macro_use", "reexport", "aggregation_roles"], `${parent.productId} child`);
   const module = rustModuleIdentifier(value.module, `${parent.productId} child module`);

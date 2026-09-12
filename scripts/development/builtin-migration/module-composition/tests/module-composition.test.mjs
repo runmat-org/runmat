@@ -5,7 +5,7 @@ import {
   applyModuleCompositionTransitions, generateModuleCompositionProducts,
   parseGeneratedModuleComposition, parseModuleCompositionProjection,
   parseModuleCompositionTransition, renderModuleCompositionProduct,
-  verifyModuleCompositionProduct,
+  validateModuleCompositionControl, verifyModuleCompositionProduct,
 } from "../index.mjs";
 
 test("renders and independently verifies the closed catalog and runtime grammar", () => {
@@ -122,6 +122,47 @@ test("replacement and removal require the exact effective prior child", () => {
   assert.throws(() => applyModuleCompositionTransitions(baseline, [replace, staleRemove]), /prior state differs/);
   const remove = transition("remove-current", [{ product_id: "catalog-math", operation: "remove", before: after, after: null }]);
   assert.equal(applyModuleCompositionTransitions(baseline, [replace, remove]).products[0].children.length, 1);
+});
+
+test("reviewed bundle transitions exactly cover products, scopes, and disjoint child keys", () => {
+  const baseline = fixtureProjection();
+  baseline.products[0].children = [];
+  const products = new Map(baseline.products.map((product) => [product.product_id, {
+    product_id: product.product_id,
+    path: product.path,
+    verification: {
+      kind: "rust_module_composition",
+      crate_role: product.crate_role,
+      module_path: product.module_path,
+    },
+  }]));
+  const arithmetic = fixtureProjection().products[0].children[0];
+  const bundle = (id, after = arithmetic) => ({
+    integration_product_refs: ["catalog-math"],
+    module_composition_transition: transition(id, [{
+      product_id: "catalog-math", operation: "add", before: null, after,
+    }]),
+    authored_write_set: [{ kind: "tree", path: after.source_path.slice(0, -"/mod.rs".length) }],
+  });
+  assert.doesNotThrow(() => validateModuleCompositionControl(
+    baseline, products, new Map([["bundle-one", bundle("bundle-one")]]),
+  ));
+  assert.throws(() => validateModuleCompositionControl(
+    baseline, products, new Map([["bundle-one", {
+      ...bundle("bundle-one"), integration_product_refs: [],
+    }]]),
+  ), /without composition products/);
+  assert.throws(() => validateModuleCompositionControl(
+    baseline, products, new Map([["bundle-one", {
+      ...bundle("bundle-one"), authored_write_set: [{ kind: "file", path: "elsewhere.rs" }],
+    }]]),
+  ), /outside its authored scope/);
+  assert.throws(() => validateModuleCompositionControl(
+    baseline, products, new Map([
+      ["bundle-one", bundle("bundle-one")],
+      ["bundle-two", bundle("bundle-two")],
+    ]),
+  ), /also changed by bundle-one/);
 });
 
 function fixtureProjection() {

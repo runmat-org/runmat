@@ -302,8 +302,10 @@ test("compiled migration findings and non-identity legacy spec keys remain expli
 test("control is closed, reviewed, reciprocal, and rejects case-fold ambiguity", () => {
   const fixture = controlledFixture();
   assert.equal(fixture.control.identities.get("foo").public_identity.primary_spelling.spelling, "foo");
-  const future = structuredClone(fixture.controlValue); future.schema_version = 5;
-  assert.throws(() => parseFixtureControl(fixture, future), /schema_version 4/);
+  const legacy = structuredClone(fixture.controlValue); legacy.schema_version = 4;
+  assert.throws(() => parseFixtureControl(fixture, legacy), /schema_version 5/);
+  const future = structuredClone(fixture.controlValue); future.schema_version = 6;
+  assert.throws(() => parseFixtureControl(fixture, future), /schema_version 5/);
   const extra = structuredClone(fixture.controlValue); extra.unreviewed = true;
   assert.throws(() => parseFixtureControl(fixture, extra), /fields must be exactly/);
   const collision = structuredClone(fixture.controlValue); collision.identity_controls.Foo = structuredClone(collision.identity_controls.foo);
@@ -406,6 +408,8 @@ test("validated controls remain bound to their exact baseline and subject target
   assert.throws(() => runGateProducer({
     control: fixture.control,
     lease: fixture.lease,
+    queue_state: fixture.queueState,
+    queue_checkpoint: fixture.queueCheckpoint,
     control_baseline_inventory: foreign.inventory,
     lease_base_inventory: foreign.inventory,
     subject_inventory: foreign.inventory,
@@ -421,6 +425,8 @@ test("validated controls remain bound to their exact baseline and subject target
   assert.throws(() => runGateProducer({
     control: fixture.control,
     lease: fixture.lease,
+    queue_state: fixture.queueState,
+    queue_checkpoint: fixture.queueCheckpoint,
     control_baseline_inventory: fixture.inventory,
     lease_base_inventory: fixture.inventory,
     subject_inventory: subject,

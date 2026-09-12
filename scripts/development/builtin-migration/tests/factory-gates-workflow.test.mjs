@@ -24,13 +24,43 @@ test.afterEach(cleanupRepositoryFixtures);
 
 test("gate producer requests cannot inject commands, results, checks, or storage", () => {
   const fixture = controlledFixture();
-  const request = { control: fixture.controlValue, lease: fixture.lease, control_baseline_inventory: fixture.inventory, lease_base_inventory: fixture.inventory, subject_inventory: fixture.inventory, bundle_id: fixture.bundleId, gate: "architecture", artifact_id: "forged", inputs: null };
+  const request = { control: fixture.controlValue, lease: fixture.lease, queue_state: fixture.queueState, queue_checkpoint: fixture.queueCheckpoint, control_baseline_inventory: fixture.inventory, lease_base_inventory: fixture.inventory, subject_inventory: fixture.inventory, bundle_id: fixture.bundleId, gate: "architecture", artifact_id: "forged", inputs: null };
   assert.throws(() => runGateProducer({ ...request, command: { executable: "/private/tmp/fake", arguments: [], cwd: "/private/tmp" } }), /fields must be exactly/);
   assert.throws(() => runGateProducer({ ...request, control: { value: fixture.controlValue, digest: fixture.control.digest, bundles: new Map() } }), /exact validated control manifest/);
+  assert.throws(
+    () => runGateProducer({
+      ...request,
+      control: fixture.control,
+      inputs: { module_composition_projection: { products: [] } },
+    }),
+    /derived authority/,
+  );
   const fake = structuredClone(fixture.controlValue);
   fake.bundle_controls[fixture.bundleId].gate_plans[0].program.path = "scripts/fake.mjs";
   assert.throws(() => parseFixtureControl(fixture, fake), /absent from or differs from the frozen source snapshot/);
   fs.writeFileSync(path.join(fixture.repository, "nearby-documentation-token.json"), "{\"result\":\"pass\"}\n");
+});
+
+test("produce-gate CLI requires the complete queue authority binding", () => {
+  const cli = path.resolve("scripts/development/builtin-migration-factory.mjs");
+  const result = spawnSync(process.execPath, [
+    cli, "produce-gate", "--bundle", "c00-foo", "--gate", "architecture",
+    "--artifact", "artifact-foo", "--compiled-inventory", "unused",
+    "--control", "unused", "--baseline-inventory", "unused",
+    "--lease-base-inventory", "unused", "--lease", "unused",
+    "--component-graph", "unused", "--draft", "unused",
+    "--c01-c03-review", "unused", "--c04-c05-review", "unused",
+    "--c06-c07-review", "unused", "--reconciliation", "unused",
+    "--stability-corrections", "unused", "--candidate", "unused",
+    "--attestation", "unused", "--topology", "unused",
+    "--control-scaffold", "unused", "--control-review-set", "unused",
+    "--control-candidate", "unused", "--control-attestation", "unused",
+  ], { encoding: "utf8" });
+  assert.equal(result.status, 2);
+  assert.match(
+    result.stderr,
+    /requires --bundle, --gate, --artifact, --state, --queue-checkpoint, and --trusted-queue-checkpoint-digest/,
+  );
 });
 
 test("generated product proof requires two equal runs, checked-in equality, and exact reviewed outputs", () => {
@@ -43,7 +73,7 @@ test("generated product proof requires two equal runs, checked-in equality, and 
   const nativeManifest = fixture.compiledInventory.snapshot.observed.registration_manifest;
   const manifestIdentity = { schema_version: 1, digest: nativeManifest.digest, counts: structuredClone(nativeManifest.counts) };
   const value = {
-    schema_version: 1,
+    schema_version: 2,
     kind: "runmat-builtin-generated-products-proof",
     authority: "machine-derived-integration-evidence",
     products: [{

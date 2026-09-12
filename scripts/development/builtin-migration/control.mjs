@@ -27,8 +27,8 @@ export function validateControlManifestStructure(value, { inventory: current, re
     throw new Error("control manifest validation requires the exact inventory and deterministically validated topology");
   }
   assertValidatedTopologyView(reviewedTopology);
-  kind(value, 4, "runmat-builtin-migration-control-manifest", "control manifest");
-  exact(value, ["schema_version", "kind", "authority", "program", "inputs", "topology_digest", "candidate_digest", "attestation_digest", "baseline_context", "cohorts", "bundle_controls", "identity_controls", "integration_products", "migration_findings", "exception_manifest", "target_policy", "storage_policy", "review", "digest"], "control manifest");
+  kind(value, 5, "runmat-builtin-migration-control-manifest", "control manifest");
+  exact(value, ["schema_version", "kind", "authority", "program", "inputs", "topology_digest", "candidate_digest", "attestation_digest", "baseline_context", "cohorts", "bundle_controls", "identity_controls", "integration_products", "module_composition_baseline", "migration_findings", "exception_manifest", "target_policy", "storage_policy", "review", "digest"], "control manifest");
   if (value.authority !== "reviewed-development-control") throw new Error("control manifest has invalid authority");
   if (value.program !== "RM-1064/C00-C07") throw new Error("control manifest has unexpected program");
   digest(value.topology_digest, "reviewed topology digest");
@@ -43,6 +43,7 @@ export function validateControlManifestStructure(value, { inventory: current, re
     bundleControls: value.bundle_controls,
     identityControls: value.identity_controls,
     integrationProducts: value.integration_products,
+    moduleCompositionBaseline: value.module_composition_baseline,
     migrationFindings: value.migration_findings,
     exceptionManifest: value.exception_manifest,
     targetPolicy: value.target_policy,
@@ -75,6 +76,7 @@ export function validateControlManifestStructure(value, { inventory: current, re
     topology_digest: value.topology_digest,
     baseline,
     integrationProducts: projection.integrationProducts,
+    moduleComposition: projection.moduleComposition,
     targetPolicy: projection.targetPolicy,
     executionTargets: projection.executionTargets,
     cohorts,
@@ -182,7 +184,7 @@ function parseCohorts(value) {
 
 function parseBundle(id, value, current) {
   stableId(id, "bundle id");
-  exact(value, ["id", "identities", "atomic_reason", "prerequisites", "integration_product_refs", "expected_removals", "baseline_evidence", "authored_write_set", "integration_outputs", "gate_plans", "owner_role", "complexity", "review"], `${id} bundle`);
+  exact(value, ["id", "identities", "atomic_reason", "prerequisites", "integration_product_refs", "module_composition_transition", "expected_removals", "baseline_evidence", "authored_write_set", "integration_outputs", "gate_plans", "owner_role", "complexity", "review"], `${id} bundle`);
   if (value.id !== id) throw new Error(`${id}: bundle key and id differ`);
   const result = {
     ...value,

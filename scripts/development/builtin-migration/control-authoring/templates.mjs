@@ -33,11 +33,11 @@ export function indexControlReviews(reviewDirectory, outputDirectory, { scaffold
   assertExactTemplateFiles(source, topology);
 
   const global = sealReviewedPayload(readJson(path.join(source, "global.json"), "global control review"), "global control review");
-  parseGlobalControlReview(global, scaffold, topology, parsedInventory);
+  const globalReview = parseGlobalControlReview(global, scaffold, topology, parsedInventory);
   const bundles = [...topology.bundles.keys()].sort(compareCodePoint).map((bundleId) => {
     const relative = `bundles/${bundleId}.json`;
     const bundle = sealReviewedPayload(readJson(path.join(source, relative), `${bundleId} control review`), `${bundleId} control review`);
-    parseBundleControlReview(bundle, scaffold, topology, parsedInventory);
+    parseBundleControlReview(bundle, scaffold, topology, parsedInventory, globalReview);
     return { bundleId, relative, bundle };
   });
 
@@ -66,7 +66,7 @@ export function indexControlReviews(reviewDirectory, outputDirectory, { scaffold
 
 function globalTemplate(scaffold, topology) {
   return {
-    schema_version: 2,
+    schema_version: 3,
     kind: "runmat-builtin-migration-global-control-review",
     authority: "reviewer-authored-development-input",
     program: PROGRAM,
@@ -77,6 +77,7 @@ function globalTemplate(scaffold, topology) {
     },
     program_profiles: {},
     integration_products: {},
+    module_composition_baseline: null,
     migration_findings: {
       schema_version: 1,
       kind: "runmat-builtin-migration-finding-dispositions",
@@ -101,7 +102,7 @@ function bundleTemplate(bundleId, scaffold, topology) {
   const bundle = topology.bundles.get(bundleId);
   const scaffoldBundle = scaffold.bundle_rows.find((row) => row.bundle_id === bundleId);
   return {
-    schema_version: 3,
+    schema_version: 4,
     kind: "runmat-builtin-migration-bundle-control-review",
     authority: "reviewer-authored-development-input",
     program: PROGRAM,
@@ -123,6 +124,7 @@ function bundleTemplate(bundleId, scaffold, topology) {
       prerequisites: null,
       additional_authored_write_set: null,
       integration_product_refs: null,
+      module_composition_transition: null,
       expected_removals: null,
       baseline_evidence: scaffoldBundle.observations.typed_paths
         .filter((entry) => entry.kind !== "generated-registry")

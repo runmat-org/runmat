@@ -1,4 +1,5 @@
 import { compareCodePoint } from "./constants.mjs";
+import { parseModuleCompositionContract } from "./module-composition/schema.mjs";
 import { array, digest, exact, object, repositoryPath, stableId } from "./schema.mjs";
 
 export function parseIntegrationProductRegistry(value, inventory) {
@@ -31,7 +32,7 @@ export function parseIntegrationProductRegistry(value, inventory) {
     const prior = paths.get(productPath);
     if (prior) throw new Error(`${id}: integration product path is already owned by ${prior}`);
     paths.set(productPath, id);
-    products.set(id, { product_id: id, ...entry, verification: parseIntegrationProductVerification(entry.verification, id) });
+    products.set(id, { product_id: id, ...entry, verification: parseIntegrationProductVerification(entry.verification, id, productPath) });
   }
   return products;
 }
@@ -77,7 +78,10 @@ export function reviewedIntegrationProducts(references, products, id) {
   });
 }
 
-export function parseIntegrationProductVerification(value, id) {
+export function parseIntegrationProductVerification(value, id, productPath) {
+  if (value?.kind === "rust_module_composition") {
+    return parseModuleCompositionContract(value, productPath, id);
+  }
   exact(value, ["kind"], `${id} integration product verification`);
   if (!["content_identity", "native_wasm_registration_manifest"].includes(value.kind)) {
     throw new Error(`${id}: unsupported integration product verification contract ${value.kind}`);
