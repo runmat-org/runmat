@@ -3,6 +3,7 @@ import { compareCodePoint } from "./constants.mjs";
 import { catalogEntry, catalogProvenance, constant, legacyDocumentation, legacyFunction, sortedBy, uniqueBy } from "./compiled-schema.mjs";
 import { fusionSpec, gpuSpec, implementationProvenance, migrationFindingIdentityNames, registrationManifestEntry, runtimeBinding, runtimeConstant, validateObservedOrdering, validation } from "./compiled-runtime-schema.mjs";
 import { SAFE_IDENTITY, array, enumValue, exact, identity, integer, kind, nonempty, object, uniqueStrings } from "./schema.mjs";
+import { canonicalRustModulePath, rustModuleScopesOverlap } from "./rust-module-path.mjs";
 
 const KNOWN_RUNTIME_FEATURES = Object.freeze([
   "blas-lapack", "blas-only", "gui", "interaction-test-hooks", "occt-native",
@@ -140,26 +141,25 @@ function reconcileSnapshot(snapshot) {
 
 function reconcileRegistrationManifest(snapshot) {
   const manifest = snapshot.observed.registration_manifest.entries;
-  const canonicalPath = (value) => value.startsWith("crate::") ? value.slice(7) : value;
   const rows = (values) => values.sort(compareCodePoint);
   const actualBuiltins = rows(manifest.filter((entry) => entry.kind === "builtin")
-    .map((entry) => `${entry.declaration}\0${entry.variant}\0${canonicalPath(entry.builtin_path)}`));
+    .map((entry) => `${entry.declaration}\0${entry.variant}\0${canonicalRustModulePath(entry.builtin_path)}`));
   const expectedBuiltins = rows(snapshot.observed.implementation_provenance
-    .map((entry) => `${entry.name}\0${entry.binding_variant}\0${canonicalPath(entry.builtin_path)}`));
+    .map((entry) => `${entry.name}\0${entry.binding_variant}\0${canonicalRustModulePath(entry.builtin_path)}`));
   if (JSON.stringify(actualBuiltins) !== JSON.stringify(expectedBuiltins)) {
     throw new Error("builtin registration manifest differs from live implementation provenance");
   }
   const actualConstants = rows(manifest.filter((entry) => entry.kind === "constant")
-    .map((entry) => `${entry.declaration}\0${canonicalPath(entry.builtin_path)}`));
+    .map((entry) => `${entry.declaration}\0${canonicalRustModulePath(entry.builtin_path)}`));
   const expectedConstants = rows(snapshot.observed.runtime_constants
-    .map((entry) => `${entry.name}\0${canonicalPath(entry.builtin_path)}`));
+    .map((entry) => `${entry.name}\0${canonicalRustModulePath(entry.builtin_path)}`));
   if (JSON.stringify(actualConstants) !== JSON.stringify(expectedConstants)) {
     throw new Error("constant registration manifest differs from live registrations");
   }
   for (const [kind, specs] of [["gpu_spec", snapshot.observed.gpu_specs], ["fusion_spec", snapshot.observed.fusion_specs]]) {
     const actual = rows(manifest.filter((entry) => entry.kind === kind)
-      .map((entry) => `${entry.declaration}\0${canonicalPath(entry.builtin_path)}`));
-    const expected = rows(specs.map((entry) => `${entry.declaration}\0${canonicalPath(entry.builtin_path)}`));
+      .map((entry) => `${entry.declaration}\0${canonicalRustModulePath(entry.builtin_path)}`));
+    const expected = rows(specs.map((entry) => `${entry.declaration}\0${canonicalRustModulePath(entry.builtin_path)}`));
     if (JSON.stringify(actual) !== JSON.stringify(expected)) {
       throw new Error(`${kind} registration manifest differs from live registrations`);
     }
@@ -167,19 +167,15 @@ function reconcileRegistrationManifest(snapshot) {
 }
 
 function reconcileSpecRegistrationOwnership(snapshot) {
-  const identitiesByBuiltinPath = new Map();
-  for (const entry of snapshot.observed.implementation_provenance) {
-    const path = canonicalBuiltinPath(entry.builtin_path);
-    const identities = identitiesByBuiltinPath.get(path) ?? new Set();
-    identities.add(entry.name);
-    identitiesByBuiltinPath.set(path, identities);
-  }
+  const provenance = snapshot.observed.implementation_provenance;
   for (const [source, specs] of [
     ["gpu_spec_registry", snapshot.observed.gpu_specs],
     ["fusion_spec_registry", snapshot.observed.fusion_specs],
   ]) {
     for (const spec of specs) {
-      const registered = [...(identitiesByBuiltinPath.get(canonicalBuiltinPath(spec.builtin_path)) ?? [])]
+      const registered = [...new Set(provenance
+        .filter((entry) => rustModuleScopesOverlap(entry.builtin_path, spec.builtin_path))
+        .map((entry) => entry.name))]
         .sort(compareCodePoint);
       if (spec.owner.kind === "legacy_group") {
         const affected = spec.owner.affected_identities.map((entry) => entry.name);
@@ -191,10 +187,6 @@ function reconcileSpecRegistrationOwnership(snapshot) {
       }
     }
   }
-}
-
-function canonicalBuiltinPath(value) {
-  return value.startsWith("crate::") ? value.slice("crate::".length) : value;
 }
 
 function reconcileLegacyOwnerFindings(snapshot) {
