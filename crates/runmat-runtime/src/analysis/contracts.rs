@@ -401,7 +401,6 @@ pub enum QualityReasonCode {
     TransientResidualExceeded,
     TransientStabilityExceeded,
     TransientStepFailure,
-    ThermoMechanicalTransientStress,
     ThermoMechanicalConstitutiveSpreadHigh,
     ThermoMechanicalAssignmentHeterogeneityHigh,
     ThermoMechanicalGradientInstability,
@@ -515,25 +514,27 @@ impl Default for AnalysisRunOptions {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AnalysisStructuralTimeStepPolicy {
+    Fixed { interval_count: usize },
+}
+
+impl AnalysisStructuralTimeStepPolicy {
+    pub fn interval_count(self) -> usize {
+        match self {
+            Self::Fixed { interval_count } => interval_count,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AnalysisTransientRunOptions {
     pub deterministic_mode: bool,
-    pub precision_mode: PrecisionMode,
     pub quality_policy: QualityPolicy,
-    pub min_time_step_s: f64,
-    pub max_time_step_s: f64,
-    pub interval_count: usize,
-    pub max_linear_iters: usize,
-    pub tolerance: f64,
+    pub time_step_policy: AnalysisStructuralTimeStepPolicy,
     pub residual_target: f64,
-    pub adaptive_time_step: bool,
-    pub max_step_retries: usize,
-    pub adapt_min_scale: f64,
-    pub adapt_max_scale: f64,
-    pub adapt_growth_exponent: f64,
-    pub adapt_retry_growth_cap: f64,
-    pub adapt_nonconverged_shrink: f64,
-    pub dt_bucket_rel_tolerance: f64,
     #[serde(default)]
     pub solver_mesh_artifact_path: Option<String>,
 }
@@ -542,22 +543,9 @@ impl Default for AnalysisTransientRunOptions {
     fn default() -> Self {
         Self {
             deterministic_mode: false,
-            precision_mode: PrecisionMode::Fp64,
             quality_policy: QualityPolicy::Balanced,
-            min_time_step_s: 1.0e-6,
-            max_time_step_s: 2.0e-2,
-            interval_count: 10,
-            max_linear_iters: 128,
-            tolerance: 1.0e-8,
+            time_step_policy: AnalysisStructuralTimeStepPolicy::Fixed { interval_count: 10 },
             residual_target: 1.0e-6,
-            adaptive_time_step: true,
-            max_step_retries: 4,
-            adapt_min_scale: 0.8,
-            adapt_max_scale: 1.25,
-            adapt_growth_exponent: 0.35,
-            adapt_retry_growth_cap: 1.05,
-            adapt_nonconverged_shrink: 0.75,
-            dt_bucket_rel_tolerance: 0.0,
             solver_mesh_artifact_path: None,
         }
     }
@@ -696,22 +684,9 @@ impl AnalysisTransientRunOptions {
     pub fn coarse() -> Self {
         Self {
             deterministic_mode: false,
-            precision_mode: PrecisionMode::Fp32,
             quality_policy: QualityPolicy::Exploratory,
-            min_time_step_s: 5.0e-4,
-            max_time_step_s: 2.0e-2,
-            interval_count: 6,
-            max_linear_iters: 64,
-            tolerance: 1.0e-6,
+            time_step_policy: AnalysisStructuralTimeStepPolicy::Fixed { interval_count: 6 },
             residual_target: 1.0e-4,
-            adaptive_time_step: true,
-            max_step_retries: 2,
-            adapt_min_scale: 0.75,
-            adapt_max_scale: 1.3,
-            adapt_growth_exponent: 0.3,
-            adapt_retry_growth_cap: 1.02,
-            adapt_nonconverged_shrink: 0.7,
-            dt_bucket_rel_tolerance: 0.02,
             solver_mesh_artifact_path: None,
         }
     }
@@ -724,8 +699,6 @@ impl AnalysisTransientRunOptions {
         Self {
             quality_policy: QualityPolicy::Balanced,
             deterministic_mode: true,
-            precision_mode: PrecisionMode::Fp64,
-            dt_bucket_rel_tolerance: 0.01,
             ..Self::balanced()
         }
     }
@@ -733,22 +706,9 @@ impl AnalysisTransientRunOptions {
     pub fn high_accuracy() -> Self {
         Self {
             deterministic_mode: true,
-            precision_mode: PrecisionMode::Fp64,
             quality_policy: QualityPolicy::Strict,
-            min_time_step_s: 5.0e-6,
-            max_time_step_s: 2.0e-3,
-            interval_count: 24,
-            max_linear_iters: 256,
-            tolerance: 1.0e-10,
+            time_step_policy: AnalysisStructuralTimeStepPolicy::Fixed { interval_count: 24 },
             residual_target: 1.0e-7,
-            adaptive_time_step: true,
-            max_step_retries: 8,
-            adapt_min_scale: 0.85,
-            adapt_max_scale: 1.2,
-            adapt_growth_exponent: 0.45,
-            adapt_retry_growth_cap: 1.03,
-            adapt_nonconverged_shrink: 0.8,
-            dt_bucket_rel_tolerance: 0.005,
             solver_mesh_artifact_path: None,
         }
     }
@@ -1931,7 +1891,6 @@ pub struct AnalysisResultsSummary {
     pub thermo_assignment_heterogeneity_index: Option<f64>,
     pub thermo_region_delta_count: Option<f64>,
     pub thermo_spatial_coverage_ratio: Option<f64>,
-    pub thermo_transient_severity: Option<f64>,
     pub thermo_nonlinear_severity: Option<f64>,
     pub electro_thermal_coupling_enabled: Option<bool>,
     pub electro_thermal_coupling_fingerprint: Option<u64>,
@@ -2112,10 +2071,9 @@ impl AnalysisSolverOptions {
             (Thermal, Static | TransientResponse) => Ok(Self::ThermalDiffusion(
                 AnalysisThermalRunOptions::default(),
             )),
-            (Structural, TransientResponse)
-            | (Coupled(CoupledPhysicsFamily::Thermomechanical), TransientResponse) => Ok(
-                Self::StructuralTransient(AnalysisTransientRunOptions::default()),
-            ),
+            (Structural, TransientResponse) => Ok(Self::StructuralTransient(
+                AnalysisTransientRunOptions::default(),
+            )),
             (Fluid, Static | TransientResponse) => Ok(Self::IncompressibleFlow(
                 AnalysisCfdRunOptions::default(),
             )),
@@ -2629,7 +2587,6 @@ pub struct AnalysisTrendKindSummary {
     pub mean_spike_count: Option<f64>,
     pub mean_stall_count: Option<f64>,
     pub thermo_coupling_enabled_rate: Option<f64>,
-    pub thermo_transient_warn_rate: Option<f64>,
     pub thermo_nonlinear_warn_rate: Option<f64>,
     pub thermo_spread_breach_rate: Option<f64>,
     pub thermo_heterogeneity_breach_rate: Option<f64>,
@@ -2722,6 +2679,7 @@ pub struct ThermalResultsData {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TransientResultsData {
     pub transient_payload_version: String,
+    pub initial_state: runmat_analysis_fea::StructuralInitialStateEvidence,
     pub time_points_s: Vec<f64>,
     pub displacement_snapshots: Vec<AnalysisField>,
     #[serde(default)]
@@ -2734,6 +2692,9 @@ pub struct TransientResultsData {
     pub acceleration_snapshots: Vec<AnalysisField>,
     #[serde(default)]
     pub angular_acceleration_snapshots: Vec<AnalysisField>,
+    pub strain_snapshots: Vec<AnalysisField>,
+    pub stress_snapshots: Vec<AnalysisField>,
+    pub strain_energy_density_snapshots: Vec<AnalysisField>,
     #[serde(default)]
     pub von_mises_snapshots: Vec<AnalysisField>,
     #[serde(default)]
@@ -2742,18 +2703,6 @@ pub struct TransientResultsData {
     pub strain_energy_snapshots: Vec<AnalysisField>,
     #[serde(default)]
     pub residual_norm_snapshots: Vec<AnalysisField>,
-    #[serde(default)]
-    pub thermo_mechanical_temperature_snapshots: Vec<AnalysisField>,
-    #[serde(default)]
-    pub thermo_mechanical_thermal_strain_snapshots: Vec<AnalysisField>,
-    #[serde(default)]
-    pub thermo_mechanical_thermal_stress_snapshots: Vec<AnalysisField>,
-    #[serde(default)]
-    pub thermo_mechanical_displacement_snapshots: Vec<AnalysisField>,
-    #[serde(default)]
-    pub thermo_mechanical_von_mises_snapshots: Vec<AnalysisField>,
-    #[serde(default)]
-    pub thermo_mechanical_coupling_residual_snapshots: Vec<AnalysisField>,
     #[serde(default)]
     pub electro_thermal_temperature_snapshots: Vec<AnalysisField>,
     #[serde(default)]
@@ -2866,7 +2815,7 @@ pub struct ElectromagneticResultsData {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TransientIntegrationMethod {
-    ImplicitEuler,
+    NewmarkAverageAcceleration,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

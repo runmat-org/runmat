@@ -27,12 +27,10 @@ use crate::{
     },
     pipeline::thermo_mechanical::recover_thermo_mechanical_snapshots,
     progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
-    solve::{
-        nonlinear::{
-            detect_completed_nonlinear_events, nonlinear_solver_content_digest,
-            solve_nonlinear_system_at_boundaries, NonlinearSolveOptions, NonlinearSolveResult,
-        },
-        transient::canonical_transient_step_boundaries,
+    solve::nonlinear::{
+        detect_completed_nonlinear_events, nonlinear_solver_content_digest,
+        solve_nonlinear_system_at_boundaries, LoadIncrementSchedule, NonlinearSolveOptions,
+        NonlinearSolveResult,
     },
 };
 
@@ -80,7 +78,7 @@ pub fn run_nonlinear_with_options(
             "nonlinear structural execution requires a load-factor domain".into(),
         ));
     };
-    let step_boundaries = canonical_transient_step_boundaries(
+    let increment_schedule = LoadIncrementSchedule::canonical(
         &[],
         &required_history_samples,
         load_factor_start,
@@ -144,7 +142,7 @@ pub fn run_nonlinear_with_options(
         backend,
         load_factor_start,
         load_factor_end,
-        &step_boundaries,
+        &increment_schedule,
     );
     let event_attributions = nonlinear_event_attributions(model, execution_step, &nonlinear)?;
     emit_phase(

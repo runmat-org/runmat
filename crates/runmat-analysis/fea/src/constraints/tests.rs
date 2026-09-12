@@ -26,7 +26,7 @@ use crate::{
         modal::solve_modal_system,
         nonlinear::{solve_nonlinear_system, NonlinearSolveOptions},
         preconditioner::SpdPreconditionerKind,
-        transient::{solve_transient_system, TransientSolveOptions},
+        transient::{solve_transient_system, StructuralTimeStepPolicy, TransientSolveOptions},
     },
     ComputeBackend,
 };
@@ -1061,30 +1061,45 @@ fn transient_steps_enforce_affine_constraint_kinematics() {
         let result = solve_transient_system(
             &enforced,
             TransientSolveOptions {
-                min_time_step_s: 0.5,
-                max_time_step_s: 0.5,
-                interval_count: 2,
-                adaptive_time_step: false,
+                time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 2 },
                 ..TransientSolveOptions::default()
             },
             ComputeBackend::Cpu,
-        );
+        )
+        .expect("constrained structural dynamics should solve");
 
         assert_eq!(result.converged_steps, 2, "{:?}", result.diagnostics);
+        let constraint_value = |row: usize, state: &[f64]| {
+            let start = constraints.row_offsets[row];
+            let end = constraints.row_offsets[row + 1];
+            constraints.column_indices[start..end]
+                .iter()
+                .zip(&constraints.coefficients[start..end])
+                .map(|(column, coefficient)| coefficient * state[*column])
+                .sum::<f64>()
+        };
         for state in result.displacement_snapshots.iter().skip(1) {
             for row in 0..constraints.row_count() {
-                let start = constraints.row_offsets[row];
-                let end = constraints.row_offsets[row + 1];
-                let value = constraints.column_indices[start..end]
-                    .iter()
-                    .zip(&constraints.coefficients[start..end])
-                    .map(|(column, coefficient)| coefficient * state[*column])
-                    .sum::<f64>();
+                let value = constraint_value(row, state);
                 assert!(
                     (value - constraints.right_hand_side[row]).abs() <= 1.0e-8,
                     "multiplier={multiplier} row {row} expected={} actual={value}",
                     constraints.right_hand_side[row]
                 );
+            }
+        }
+        for (quantity, states) in [
+            ("velocity", &result.velocity_snapshots),
+            ("acceleration", &result.acceleration_snapshots),
+        ] {
+            for state in states {
+                for row in 0..constraints.row_count() {
+                    let value = constraint_value(row, state);
+                    assert!(
+                        value.abs() <= 1.0e-10,
+                        "multiplier={multiplier} {quantity} row {row} expected=0 actual={value}"
+                    );
+                }
             }
         }
     }
@@ -1120,14 +1135,12 @@ fn transient_steps_enforce_nonzero_direct_prescriptions() {
     let result = solve_transient_system(
         &summary,
         TransientSolveOptions {
-            min_time_step_s: 0.5,
-            max_time_step_s: 0.5,
-            interval_count: 2,
-            adaptive_time_step: false,
+            time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 2 },
             ..TransientSolveOptions::default()
         },
         ComputeBackend::Cpu,
-    );
+    )
+    .expect("prescribed-displacement structural dynamics should solve");
 
     assert_eq!(result.converged_steps, 2, "{:?}", result.diagnostics);
     for state in result.displacement_snapshots.iter().skip(1) {
@@ -1138,6 +1151,18 @@ fn transient_steps_enforce_nonzero_direct_prescriptions() {
             result.diagnostics
         );
     }
+    assert!(result
+        .velocity_snapshots
+        .iter()
+        .all(|state| state[0].abs() <= 1.0e-10));
+    assert!(result
+        .acceleration_snapshots
+        .iter()
+        .all(|state| state[0].abs() <= 1.0e-10));
+    assert!(result
+        .residual_norms
+        .iter()
+        .all(|residual| *residual <= 1.0e-6));
 }
 
 #[test]

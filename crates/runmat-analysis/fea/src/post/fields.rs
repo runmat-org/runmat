@@ -191,8 +191,6 @@ pub fn recover_deformation_result_fields(
 
 fn publishes_continuum_fields(summary: &AssemblySummary) -> bool {
     !summary.structural_solid_recovery.is_empty()
-        || (summary.structural_beam_recovery.is_empty()
-            && summary.structural_shell_recovery.is_empty())
 }
 
 /// Moves spatial fields with stable physical semantics into the observation domain.
@@ -1169,6 +1167,37 @@ mod tests {
             ExcitationSamplePoint::Static,
         )
         .expect("field-recovery fixture excitations should realize")
+    }
+
+    #[test]
+    fn synthetic_operator_recovery_does_not_publish_continuum_fields() {
+        let model = fixture_model(FixtureId::CantileverLinearStatic);
+        let summary = assemble_structural_system(
+            &model,
+            &static_excitations(&model),
+            None,
+            StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+        )
+        .expect("the synthetic fixture operator should assemble");
+
+        let fields = recover_deformation_result_fields(&summary, &vec![0.0; summary.dof_count])
+            .expect("kinematic recovery should remain available");
+
+        assert!(fields
+            .iter()
+            .any(|field| field.field_id == FEA_FIELD_STRUCTURAL_DISPLACEMENT));
+        for field_id in [
+            FEA_FIELD_STRUCTURAL_STRAIN,
+            FEA_FIELD_STRUCTURAL_STRESS,
+            FEA_FIELD_STRUCTURAL_VON_MISES,
+            FEA_FIELD_STRUCTURAL_NODAL_VON_MISES,
+            FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY,
+        ] {
+            assert!(
+                fields.iter().all(|field| field.field_id != field_id),
+                "synthetic topology cannot support physical field `{field_id}`"
+            );
+        }
     }
 
     #[test]

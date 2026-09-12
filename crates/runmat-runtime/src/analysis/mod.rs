@@ -253,8 +253,9 @@ pub use contracts::{
     AnalysisResultsQuery, AnalysisResultsSummary, AnalysisRunDatasetFieldPagingPolicy,
     AnalysisRunDatasetPayload, AnalysisRunDatasetStudyRef, AnalysisRunOptions, AnalysisRunResult,
     AnalysisRuntimeCapabilities, AnalysisRuntimeModelTemplateCatalogEntry,
-    AnalysisRuntimeModelTemplateDefaultObservation, AnalysisSolverOptions, AnalysisStudyIssue,
-    AnalysisStudyPlanData, AnalysisStudyPlanStepData, AnalysisStudyRunData, AnalysisStudySpec,
+    AnalysisRuntimeModelTemplateDefaultObservation, AnalysisSolverOptions,
+    AnalysisStructuralTimeStepPolicy, AnalysisStudyIssue, AnalysisStudyPlanData,
+    AnalysisStudyPlanStepData, AnalysisStudyRunData, AnalysisStudySpec,
     AnalysisStudyStatePublicationData, AnalysisStudyStepRunData, AnalysisStudySweepData,
     AnalysisStudySweepFailureEntry, AnalysisStudySweepFailureKind, AnalysisStudySweepPlanData,
     AnalysisStudySweepPlanEntry, AnalysisStudySweepRunEntry, AnalysisStudySweepSpec,
@@ -570,7 +571,7 @@ pub fn analysis_create_model_op(
             vec![ProcedureStep::coupled(
                 "step_default_thermo_mech",
                 CoupledPhysicsFamily::Thermomechanical,
-                AnalysisProcedure::TransientResponse,
+                AnalysisProcedure::Static,
             )],
         ),
         AnalysisModelTemplate::ThermalSteady => (
@@ -4135,11 +4136,7 @@ pub fn analysis_run_transient_with_options_op(
     let _solver_context = install_fea_solver_context();
     let has_transient_step = model.sequence.steps.iter().any(|step| {
         step.procedure == AnalysisProcedure::TransientResponse
-            && matches!(
-                step.family,
-                PhysicsFamily::Structural
-                    | PhysicsFamily::Coupled(CoupledPhysicsFamily::Thermomechanical)
-            )
+            && step.family == PhysicsFamily::Structural
     });
     if !has_transient_step {
         return Err(operation_error(
@@ -4152,7 +4149,7 @@ pub fn analysis_run_transient_with_options_op(
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "FEA model must include at least one transient step for fea.run_transient",
+            "FEA model must include a structural transient step for fea.run_transient",
             BTreeMap::from([
                 ("analysis_model_id".to_string(), model.model_id.0.clone()),
                 ("geometry_id".to_string(), model.geometry_id.clone()),
@@ -4173,20 +4170,14 @@ pub fn analysis_run_transient_with_options_op(
         backend,
         runmat_analysis_fea::solve::transient::TransientSolveOptions {
             formulation_requirement,
-            min_time_step_s: options.min_time_step_s,
-            max_time_step_s: options.max_time_step_s,
-            interval_count: options.interval_count,
-            max_linear_iters: options.max_linear_iters,
-            tolerance: options.tolerance,
+            time_step_policy: match options.time_step_policy {
+                contracts::AnalysisStructuralTimeStepPolicy::Fixed { interval_count } => {
+                    runmat_analysis_fea::solve::transient::StructuralTimeStepPolicy::Fixed {
+                        interval_count,
+                    }
+                }
+            },
             residual_target: options.residual_target,
-            adaptive_time_step: options.adaptive_time_step,
-            max_step_retries: options.max_step_retries,
-            adapt_min_scale: options.adapt_min_scale,
-            adapt_max_scale: options.adapt_max_scale,
-            adapt_growth_exponent: options.adapt_growth_exponent,
-            adapt_retry_growth_cap: options.adapt_retry_growth_cap,
-            adapt_nonconverged_shrink: options.adapt_nonconverged_shrink,
-            dt_bucket_rel_tolerance: options.dt_bucket_rel_tolerance,
             progress_operation: AnalysisOperation::Transient.name().to_string(),
             solver_mesh: solver_mesh.clone(),
         },
@@ -4234,10 +4225,6 @@ pub fn analysis_run_transient_with_options_op(
     });
     let transient_step_failure_warn = run.diagnostics.iter().any(|item| {
         item.code == "FEA_TRANSIENT_STEP_FAILURE"
-            && item.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
-    });
-    let thermo_transient_warn = run.diagnostics.iter().any(|item| {
-        item.code == "FEA_TM_TRANSIENT"
             && item.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
     });
     let electro_transient_warn = run.diagnostics.iter().any(|item| {
@@ -4310,13 +4297,6 @@ pub fn analysis_run_transient_with_options_op(
             detail: "transient step retry budget was exhausted".to_string(),
         });
     }
-    if thermo_transient_warn {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::ThermoMechanicalTransientStress,
-            detail: "thermo-mechanical transient coupling severity exceeded balanced threshold"
-                .to_string(),
-        });
-    }
     if electro_transient_warn {
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::ElectroThermalTransientStress,
@@ -4387,7 +4367,6 @@ pub fn analysis_run_transient_with_options_op(
                         r.code,
                         QualityReasonCode::TransientStabilityExceeded
                             | QualityReasonCode::TransientStepFailure
-                            | QualityReasonCode::ThermoMechanicalTransientStress
                             | QualityReasonCode::ThermoMechanicalConstitutiveSpreadHigh
                             | QualityReasonCode::ThermoMechanicalAssignmentHeterogeneityHigh
                             | QualityReasonCode::ThermoMechanicalGradientInstability
@@ -4417,6 +4396,7 @@ pub fn analysis_run_transient_with_options_op(
         thermal_results: None,
         transient_results: Some(TransientResultsData {
             transient_payload_version: "transient_results/v1".to_string(),
+            initial_state: transient_run.initial_state,
             time_points_s: transient_run.time_points_s,
             displacement_snapshots: transient_run.displacement_snapshots,
             rotation_snapshots: transient_run.rotation_snapshots,
@@ -4424,28 +4404,19 @@ pub fn analysis_run_transient_with_options_op(
             angular_velocity_snapshots: transient_run.angular_velocity_snapshots,
             acceleration_snapshots: transient_run.acceleration_snapshots,
             angular_acceleration_snapshots: transient_run.angular_acceleration_snapshots,
+            strain_snapshots: transient_run.strain_snapshots,
+            stress_snapshots: transient_run.stress_snapshots,
+            strain_energy_density_snapshots: transient_run.strain_energy_density_snapshots,
             von_mises_snapshots: transient_run.von_mises_snapshots,
             kinetic_energy_snapshots: transient_run.kinetic_energy_snapshots,
             strain_energy_snapshots: transient_run.strain_energy_snapshots,
             residual_norm_snapshots: transient_run.residual_norm_snapshots,
-            thermo_mechanical_temperature_snapshots: transient_run
-                .thermo_mechanical_temperature_snapshots,
-            thermo_mechanical_thermal_strain_snapshots: transient_run
-                .thermo_mechanical_thermal_strain_snapshots,
-            thermo_mechanical_thermal_stress_snapshots: transient_run
-                .thermo_mechanical_thermal_stress_snapshots,
-            thermo_mechanical_displacement_snapshots: transient_run
-                .thermo_mechanical_displacement_snapshots,
-            thermo_mechanical_von_mises_snapshots: transient_run
-                .thermo_mechanical_von_mises_snapshots,
-            thermo_mechanical_coupling_residual_snapshots: transient_run
-                .thermo_mechanical_coupling_residual_snapshots,
             electro_thermal_temperature_snapshots: transient_run
                 .electro_thermal_temperature_snapshots,
             electro_thermal_thermal_residual_snapshots: transient_run
                 .electro_thermal_thermal_residual_snapshots,
             residual_norms: transient_run.residual_norms,
-            integration_method: TransientIntegrationMethod::ImplicitEuler,
+            integration_method: TransientIntegrationMethod::NewmarkAverageAcceleration,
         }),
         nonlinear_results: None,
         electromagnetic_results: None,
@@ -4463,7 +4434,7 @@ pub fn analysis_run_transient_with_options_op(
             solver_backend,
             solver_device_apply_k_ratio,
             solver_host_sync_count,
-            precision_mode: contracts::format_precision_mode(options.precision_mode),
+            precision_mode: contracts::format_precision_mode(PrecisionMode::Fp64),
             deterministic_mode: options.deterministic_mode,
             solver_method,
             preconditioner: selected_preconditioner,

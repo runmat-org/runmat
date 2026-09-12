@@ -47,10 +47,6 @@ pub fn is_exposed_analysis_identity(
             )
             | (
                 PhysicsFamily::Coupled(CoupledPhysicsFamily::Thermomechanical),
-                AnalysisProcedure::TransientResponse
-            )
-            | (
-                PhysicsFamily::Coupled(CoupledPhysicsFamily::Thermomechanical),
                 AnalysisProcedure::Nonlinear
             )
     )
@@ -100,10 +96,6 @@ mod tests {
             ),
             (
                 PhysicsFamily::Coupled(CoupledPhysicsFamily::Thermomechanical),
-                AnalysisProcedure::TransientResponse,
-            ),
-            (
-                PhysicsFamily::Coupled(CoupledPhysicsFamily::Thermomechanical),
                 AnalysisProcedure::Nonlinear,
             ),
         ];
@@ -124,6 +116,11 @@ mod tests {
             PhysicsFamily::Structural,
             AnalysisProcedure::Static,
             SolutionSpace::ModalReduced
+        ));
+        assert!(!is_exposed_analysis_identity(
+            PhysicsFamily::Coupled(CoupledPhysicsFamily::Thermomechanical),
+            AnalysisProcedure::TransientResponse,
+            SolutionSpace::Direct
         ));
     }
 }

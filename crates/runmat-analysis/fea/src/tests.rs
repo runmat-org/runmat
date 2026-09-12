@@ -11,14 +11,17 @@ use crate::{
     fea_transient_angular_acceleration_field_id, fea_transient_angular_velocity_field_id,
     fea_transient_kinetic_energy_field_id, fea_transient_residual_norm_field_id,
     fea_transient_rotation_field_id, fea_transient_strain_energy_field_id,
-    fea_transient_velocity_field_id, fea_transient_von_mises_field_id,
+    fea_transient_velocity_field_id,
     fixtures::{
         append_fixture_temperature_field, append_fixture_terminal_voltage, fixture_model,
         mixed_solid_beam_model, replace_fixture_excitations, replace_fixture_with_electric_current,
         FixtureExcitation, FixtureExcitationKind, FixtureId,
     },
     parity::{assert_vectors_within_tolerance, ParityTolerance},
-    solve::{nonlinear::NonlinearSolveOptions, transient::TransientSolveOptions},
+    solve::{
+        nonlinear::NonlinearSolveOptions,
+        transient::{StructuralTimeStepPolicy, TransientSolveOptions},
+    },
     ComputeBackend, ElectromagneticSolveOptions, FeaContactInterfaceContext, FeaRunResult,
     LinearStaticSolveOptions, ModalSolveOptions, ThermalProcedureControl, ThermalSolveOptions,
     FEA_FIELD_MODAL_CUMULATIVE_EFFECTIVE_MASS, FEA_FIELD_MODAL_CUMULATIVE_MASS_RATIO,
@@ -414,7 +417,7 @@ fn solid_physics_pipelines_assemble_from_the_canonical_solver_mesh() {
         &transient_model,
         ComputeBackend::Cpu,
         TransientSolveOptions {
-            interval_count: 2,
+            time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 2 },
             solver_mesh: Some(mesh.clone()),
             ..experimental_transient_options()
         },
@@ -1162,7 +1165,7 @@ fn linear_static_rejects_structural_step_with_thermomechanical_assembly() {
 }
 
 #[test]
-fn transient_rejects_thermomechanical_step_without_coupled_assembly() {
+fn transient_rejects_thermomechanical_identity_before_assembly() {
     let mut model = fixture_model(FixtureId::TransientLong);
     model.sequence.steps = vec![ProcedureStep::coupled(
         "thermomechanical_transient_without_context",
@@ -1174,11 +1177,14 @@ fn transient_rejects_thermomechanical_step_without_coupled_assembly() {
         ComputeBackend::Cpu,
         experimental_transient_options(),
     )
-    .expect_err("a thermomechanical step must realize coupled assembly math");
+    .expect_err("thermomechanical transient requires a solver-owned coupled thermal state");
 
-    let message = error.to_string();
-    assert!(message.contains("requests Coupled(Thermomechanical)"));
-    assert!(message.contains("realizes Structural"));
+    assert!(matches!(
+        error,
+        crate::FeaRunError::FormulationAvailability(rejection)
+            if rejection.reason
+                == runmat_analysis_core::FormulationAdmissionRejectionReason::UnsupportedFamilyProcedure
+    ));
 }
 
 #[test]
@@ -2030,19 +2036,14 @@ fn modal_solver_emits_modes_for_modal_step_fixture() {
     let residual_norms = host_field(&result.run, FEA_FIELD_MODAL_RESIDUAL_NORM);
     assert_eq!(residual_norms, result.residual_norms().as_slice());
     assert_eq!(result.recovered_modes.len(), result.basis.modes().len());
-    assert!(result.recovered_modes[0]
-        .fields
+    assert!(result
+        .recovered_modes
         .iter()
-        .any(|field| field.field_id == FEA_FIELD_STRUCTURAL_STRESS));
-    let recovered_von_mises = result.recovered_modes[0]
-        .fields
-        .iter()
-        .find(|field| field.field_id == FEA_FIELD_STRUCTURAL_VON_MISES)
-        .expect("modal deformation recovery should publish von Mises values");
-    assert_eq!(
-        field(&result.run, FEA_FIELD_STRUCTURAL_VON_MISES),
-        recovered_von_mises
-    );
+        .all(|mode| mode.fields.len() == 2
+            && mode.fields[0].field_id == FEA_FIELD_STRUCTURAL_DISPLACEMENT
+            && mode.fields[1].field_id == FEA_FIELD_STRUCTURAL_ROTATION));
+    assert!(result.run.field(FEA_FIELD_STRUCTURAL_STRESS).is_none());
+    assert!(result.run.field(FEA_FIELD_STRUCTURAL_VON_MISES).is_none());
     let encoded = serde_json::to_value(&result.basis).expect("modal basis should serialize");
     let decoded: crate::ModalBasisArtifact =
         serde_json::from_value(encoded.clone()).expect("canonical modal basis should decode");
@@ -2084,7 +2085,10 @@ fn transient_solver_emits_time_snapshots_for_transient_step_fixture() {
         result.time_points_s.len(),
         result.acceleration_snapshots.len()
     );
-    assert_eq!(result.time_points_s.len(), result.von_mises_snapshots.len());
+    assert!(result.strain_snapshots.is_empty());
+    assert!(result.stress_snapshots.is_empty());
+    assert!(result.von_mises_snapshots.is_empty());
+    assert!(result.strain_energy_density_snapshots.is_empty());
     assert_eq!(
         result.time_points_s.len(),
         result.kinetic_energy_snapshots.len()
@@ -2106,10 +2110,6 @@ fn transient_solver_emits_time_snapshots_for_transient_step_fixture() {
         fea_transient_acceleration_field_id(1)
     );
     assert_eq!(
-        result.von_mises_snapshots[1].field_id,
-        fea_transient_von_mises_field_id(1)
-    );
-    assert_eq!(
         result.kinetic_energy_snapshots[1].field_id,
         fea_transient_kinetic_energy_field_id(1)
     );
@@ -2125,7 +2125,7 @@ fn transient_solver_emits_time_snapshots_for_transient_step_fixture() {
         result.residual_norm_snapshots[1]
             .as_host_f64()
             .expect("residual field should be host-backed")[0],
-        result.residual_norms[0]
+        result.residual_norms[1]
     );
     assert!(!result.residual_norms.is_empty());
     assert!(result
@@ -2137,10 +2137,14 @@ fn transient_solver_emits_time_snapshots_for_transient_step_fixture() {
         .run
         .diagnostics
         .iter()
-        .find(|diag| diag.code == "FEA_TRANSIENT_ENERGY_BALANCE")
-        .expect("transient energy balance diagnostic should be emitted");
-    assert!(energy_diag.message.contains("max_total_energy="));
-    assert!(energy_diag.message.contains("energy_growth_ratio="));
+        .find(|diag| diag.code == "FEA_TRANSIENT_MECHANICAL_ENERGY_HISTORY")
+        .expect("transient mechanical-energy history diagnostic should be emitted");
+    assert!(energy_diag
+        .message
+        .contains("maximum_strain_plus_kinetic_energy_joules="));
+    assert!(energy_diag
+        .message
+        .contains("conservation_balance_evaluated=false"));
 }
 
 #[test]
@@ -2172,15 +2176,30 @@ fn transient_history_schedule_splits_the_solve_and_publishes_exact_samples() {
         &model,
         ComputeBackend::Cpu,
         TransientSolveOptions {
-            interval_count: 2,
-            min_time_step_s: 0.5,
-            max_time_step_s: 0.5,
-            adaptive_time_step: false,
+            time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 2 },
             solver_mesh: Some(mesh),
             ..experimental_transient_options()
         },
     )
     .expect("an explicit history schedule should become exact solve boundaries");
+
+    assert!(matches!(
+        result.initial_state.basis,
+        crate::StructuralInitialStateEvidenceBasis::CanonicalTopology { .. }
+    ));
+    let encoded_initial_state =
+        serde_json::to_value(&result.initial_state).expect("serialize physical initial state");
+    let decoded_initial_state: crate::StructuralInitialStateEvidence =
+        serde_json::from_value(encoded_initial_state.clone())
+            .expect("physical initial-state evidence should round-trip");
+    assert_eq!(decoded_initial_state, result.initial_state);
+    let mut tampered_initial_state = encoded_initial_state;
+    tampered_initial_state["zero_default_displacement_dof_count"] =
+        serde_json::json!(result.initial_state.total_dof_count + 1);
+    assert!(
+        serde_json::from_value::<crate::StructuralInitialStateEvidence>(tampered_initial_state)
+            .is_err()
+    );
 
     assert!(requested_times
         .iter()
@@ -2274,10 +2293,7 @@ fn transient_every_accepted_increment_history_tracks_the_solver_grid() {
         &model,
         ComputeBackend::Cpu,
         TransientSolveOptions {
-            interval_count: 2,
-            min_time_step_s: 0.5,
-            max_time_step_s: 0.5,
-            adaptive_time_step: false,
+            time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 2 },
             solver_mesh: Some(mesh),
             ..experimental_transient_options()
         },
@@ -2320,10 +2336,7 @@ fn solver_pipeline_without_an_event_detector_rejects_event_histories() {
         &model,
         ComputeBackend::Cpu,
         TransientSolveOptions {
-            interval_count: 2,
-            min_time_step_s: 0.5,
-            max_time_step_s: 0.5,
-            adaptive_time_step: false,
+            time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 2 },
             solver_mesh: Some(mesh),
             ..experimental_transient_options()
         },
@@ -2356,7 +2369,7 @@ fn nonlinear_history_schedule_splits_load_increments_and_retains_the_initial_sta
     )
     .expect("an explicit load-factor history should become exact increment boundaries");
 
-    assert!(result.load_factors.contains(&0.3));
+    assert_eq!(result.load_factors, vec![0.3, 0.8, 1.0]);
     assert_eq!(result.run.observation_histories.len(), 1);
     let history = &result.run.observation_histories[0];
     assert_eq!(history.manifest().observed_sample_count, 3);
@@ -2743,10 +2756,7 @@ fn structural_transient_inserts_active_jump_without_extending_the_horizon() {
     );
     signal.evidence.sample_count = 3;
     let options = TransientSolveOptions {
-        min_time_step_s: 0.6,
-        max_time_step_s: 0.6,
-        interval_count: 2,
-        adaptive_time_step: false,
+        time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 2 },
         ..experimental_transient_options()
     };
 
@@ -3288,18 +3298,26 @@ fn transient_long_fixture_emits_stability_diagnostics() {
         &model,
         ComputeBackend::Cpu,
         TransientSolveOptions {
-            interval_count: 24,
+            time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 24 },
             ..experimental_transient_options()
         },
     )
     .expect("transient long fixture should solve");
 
     assert!(result.time_points_s.len() > 8);
-    assert!(result
-        .run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_TRANSIENT_STABILITY"));
+    assert!(result.run.diagnostics.iter().any(|diag| {
+        diag.code == "FEA_TRANSIENT_METHOD"
+            && diag
+                .message
+                .contains("solver=newmark_average_acceleration_pcg")
+            && diag.message.contains("beta=0.25")
+            && diag.message.contains("gamma=0.5")
+    }));
+    assert!(result.run.diagnostics.iter().any(|diag| {
+        diag.code == "FEA_TRANSIENT_STABILITY"
+            && diag.message.contains("time_step_policy=fixed")
+            && diag.message.contains("max_projected_dynamic_residual=")
+    }));
     assert!(result
         .run
         .diagnostics
@@ -3308,13 +3326,13 @@ fn transient_long_fixture_emits_stability_diagnostics() {
 }
 
 #[test]
-fn transient_shock_fixture_emits_adaptivity_and_physics_diagnostics() {
+fn transient_shock_fixture_emits_method_and_stability_diagnostics() {
     let model = fixture_model(FixtureId::TransientShock);
     let result = crate::run_transient_with_options(
         &model,
         ComputeBackend::Cpu,
         TransientSolveOptions {
-            interval_count: 48,
+            time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 48 },
             ..experimental_transient_options()
         },
     )
@@ -3325,16 +3343,21 @@ fn transient_shock_fixture_emits_adaptivity_and_physics_diagnostics() {
         .run
         .diagnostics
         .iter()
-        .any(|diag| diag.code == "FEA_TRANSIENT_ADAPTIVITY"));
-    assert!(result
-        .run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_TRANSIENT_PHYSICS"));
+        .any(|diag| diag.code == "FEA_TRANSIENT_METHOD"
+            && diag
+                .message
+                .contains("solver=newmark_average_acceleration_pcg")
+            && diag.message.contains("beta=0.25")
+            && diag.message.contains("gamma=0.5")));
+    assert!(result.run.diagnostics.iter().any(|diag| {
+        diag.code == "FEA_TRANSIENT_STABILITY"
+            && diag.message.contains("time_step_policy=fixed")
+            && diag.message.contains("max_projected_dynamic_residual=")
+    }));
 }
 
 #[test]
-fn thermo_mechanical_transient_emits_coupled_solve_profile_diagnostic() {
+fn thermo_mechanical_transient_fails_closed_without_a_coupled_thermal_state() {
     let mut model = fixture_model(FixtureId::ThermoMechanicalKickoff);
     configure_thermo_mechanical_excitation(&mut model, 65.0, 1.2e-5);
     model.sequence.steps = vec![ProcedureStep::coupled(
@@ -3342,95 +3365,22 @@ fn thermo_mechanical_transient_emits_coupled_solve_profile_diagnostic() {
         runmat_analysis_core::CoupledPhysicsFamily::Thermomechanical,
         runmat_analysis_core::AnalysisProcedure::TransientResponse,
     )];
-    let result = crate::run_transient_with_options(
+    let error = crate::run_transient_with_options(
         &model,
         ComputeBackend::Cpu,
         TransientSolveOptions {
-            interval_count: 24,
+            time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 24 },
             ..experimental_transient_options()
         },
     )
-    .expect("thermo-mechanical transient solve should succeed");
+    .expect_err("thermo-mechanical transient requires a solver-owned coupled thermal state");
 
-    assert_eq!(
-        result.time_points_s.len(),
-        result.thermo_mechanical_temperature_snapshots.len()
-    );
-    assert_eq!(
-        result.time_points_s.len(),
-        result.thermo_mechanical_thermal_strain_snapshots.len()
-    );
-    assert_eq!(
-        result.time_points_s.len(),
-        result.thermo_mechanical_thermal_stress_snapshots.len()
-    );
-    assert_eq!(
-        result.time_points_s.len(),
-        result.thermo_mechanical_displacement_snapshots.len()
-    );
-    assert_eq!(
-        result.time_points_s.len(),
-        result.thermo_mechanical_von_mises_snapshots.len()
-    );
-    assert_eq!(
-        result.time_points_s.len(),
-        result.thermo_mechanical_coupling_residual_snapshots.len()
-    );
-    assert_eq!(
-        result.thermo_mechanical_temperature_snapshots[0].field_id,
-        fea_thermo_mechanical_temperature_field_id(0)
-    );
-    assert_eq!(
-        result.thermo_mechanical_temperature_snapshots[0].shape,
-        vec![result.displacement_snapshots[0].shape[0]]
-    );
-    assert_eq!(
-        result.thermo_mechanical_thermal_strain_snapshots[0].field_id,
-        fea_thermo_mechanical_thermal_strain_field_id(0)
-    );
-    assert_eq!(
-        result.thermo_mechanical_thermal_stress_snapshots[0].field_id,
-        fea_thermo_mechanical_thermal_stress_field_id(0)
-    );
-    assert_eq!(
-        result.thermo_mechanical_displacement_snapshots[0].field_id,
-        fea_thermo_mechanical_displacement_field_id(0)
-    );
-    assert_eq!(
-        result.thermo_mechanical_von_mises_snapshots[0].field_id,
-        fea_thermo_mechanical_von_mises_field_id(0)
-    );
-    assert_eq!(
-        result.thermo_mechanical_coupling_residual_snapshots[0].field_id,
-        fea_thermo_mechanical_coupling_residual_field_id(0)
-    );
-    assert_thermo_mechanical_consistency_diagnostic(&result.run.diagnostics);
-    assert_thermo_mechanical_temperature_field_diagnostic(&result.run.diagnostics);
-
-    assert!(result
-        .run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_TM_COUPLING"));
-    let coupling = result
-        .run
-        .diagnostics
-        .iter()
-        .find(|diag| diag.code == "FEA_TM_COUPLING")
-        .expect("thermo coupling diagnostic should be present");
-    assert!(coupling.message.contains("effective_modulus_scale="));
-    assert!(coupling
-        .message
-        .contains("constitutive_material_spread_ratio="));
-    assert!(coupling.message.contains("assignment_heterogeneity_index="));
-    let profile = result
-        .run
-        .diagnostics
-        .iter()
-        .find(|diag| diag.code == "FEA_TM_TRANSIENT")
-        .expect("thermo transient profile diagnostic should be present");
-    assert!(profile.message.contains("effective_residual_target_peak="));
-    assert!(profile.message.contains("growth_limit_min="));
+    assert!(matches!(
+        error,
+        crate::FeaRunError::FormulationAvailability(rejection)
+            if rejection.reason
+                == runmat_analysis_core::FormulationAdmissionRejectionReason::UnsupportedFamilyProcedure
+    ));
 }
 
 #[test]
@@ -3441,7 +3391,7 @@ fn structural_transient_rejects_unimplemented_electrothermal_formulation() {
         &model,
         ComputeBackend::Cpu,
         TransientSolveOptions {
-            interval_count: 12,
+            time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 12 },
             ..experimental_transient_options()
         },
     )

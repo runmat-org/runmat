@@ -129,6 +129,12 @@ execution:
 
 Supplying options for a solver that does not support the referenced step is a validation error.
 
+Structural transient solves use the average-acceleration Newmark method with a typed fixed-step
+policy. The procedure step owns the physical start and end times; `time_step_policy` selects the
+number of intervals over that authored domain. The structural transient kernel computes in `f64`,
+and run provenance reports `fp64`; structural transient options therefore do not expose a precision
+selector.
+
 ## Results After A Run
 
 Persisted run ids can be queried through:

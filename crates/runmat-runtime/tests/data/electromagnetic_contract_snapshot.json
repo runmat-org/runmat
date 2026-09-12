@@ -105,7 +105,6 @@
     "thermo_assignment_heterogeneity_index": null,
     "thermo_region_delta_count": null,
     "thermo_spatial_coverage_ratio": null,
-    "thermo_transient_severity": null,
     "thermo_nonlinear_severity": null,
     "electro_thermal_coupling_enabled": null,
     "electro_thermal_coupling_fingerprint": null,

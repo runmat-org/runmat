@@ -372,7 +372,7 @@ fn default_sequence(template: AnalysisModelTemplate, id: &str) -> AnalysisSequen
         AnalysisModelTemplate::ThermoMechanicalCoupled => ProcedureStep::coupled(
             "solve",
             CoupledPhysicsFamily::Thermomechanical,
-            AnalysisProcedure::TransientResponse,
+            AnalysisProcedure::Static,
         ),
         AnalysisModelTemplate::ThermalSteady => ProcedureStep::thermal_steady("solve"),
         AnalysisModelTemplate::ThermalTransient => ProcedureStep::thermal_transient("solve"),

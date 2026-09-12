@@ -17,11 +17,10 @@ pub(super) fn validate_inputs<'a>(
     for input in &step.state_inputs {
         match &input.source {
             StateSource::InitialConditions => {
-                if !model
-                    .initial_conditions
-                    .iter()
-                    .any(|condition| initial_condition_supplies(condition, input.required_kind))
-                {
+                if !model.initial_conditions.iter().any(|condition| {
+                    condition.applies_to_step(step)
+                        && initial_condition_supplies(condition, input.required_kind)
+                }) {
                     return Err(step_error(
                         step,
                         format!(

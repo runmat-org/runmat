@@ -59,6 +59,8 @@ export type FeaAnalysisProcedure = "static" | "modal_extraction" | "prestressed_
 
 export type FeaFormulationRequirement = "production" | "experimental";
 
+export type FeaStructuralTimeStepPolicy = { fixed: { interval_count: number } };
+
 export type FeaPhysicsFamily = "structural" | "thermal" | "electromagnetic" | "acoustic" | "fluid" | { coupled: "thermomechanical" | "electrothermal" | "conjugate_heat_transfer" | "fluid_structure_interaction" };
 
 export type FeaIndependentDomain =
@@ -473,31 +475,16 @@ export interface FeaThermalDiffusionOptions {
   deterministic_mode: boolean;
   precision_mode: FeaPrecisionMode;
   quality_policy: FeaQualityPolicy;
-  step_count: number;
-  time_step_s: number;
+  snapshot_count: number;
   residual_warn_threshold: number;
   solver_mesh_artifact_path: string | null;
 }
 
 export interface FeaStructuralTransientOptions {
   deterministic_mode: boolean;
-  precision_mode: FeaPrecisionMode;
   quality_policy: FeaQualityPolicy;
-  time_step_s: number;
-  min_time_step_s: number;
-  max_time_step_s: number;
-  step_count: number;
-  max_linear_iters: number;
-  tolerance: number;
+  time_step_policy: FeaStructuralTimeStepPolicy;
   residual_target: number;
-  adaptive_time_step: boolean;
-  max_step_retries: number;
-  adapt_min_scale: number;
-  adapt_max_scale: number;
-  adapt_growth_exponent: number;
-  adapt_retry_growth_cap: number;
-  adapt_nonconverged_shrink: number;
-  dt_bucket_rel_tolerance: number;
   solver_mesh_artifact_path: string | null;
 }
 
@@ -505,8 +492,7 @@ export interface FeaIncompressibleFlowOptions {
   deterministic_mode: boolean;
   precision_mode: FeaPrecisionMode;
   quality_policy: FeaQualityPolicy;
-  time_step_s: number;
-  step_count: number;
+  sample_count: number;
   max_linear_iters: number;
   tolerance: number;
   residual_warn_threshold: number;
@@ -517,8 +503,7 @@ export interface FeaConjugateHeatTransferOptions {
   deterministic_mode: boolean;
   precision_mode: FeaPrecisionMode;
   quality_policy: FeaQualityPolicy;
-  time_step_s: number;
-  step_count: number;
+  sample_count: number;
   max_linear_iters: number;
   tolerance: number;
   residual_warn_threshold: number;
@@ -529,8 +514,7 @@ export interface FeaFluidStructureInteractionOptions {
   deterministic_mode: boolean;
   precision_mode: FeaPrecisionMode;
   quality_policy: FeaQualityPolicy;
-  time_step_s: number;
-  step_count: number;
+  sample_count: number;
   max_linear_iters: number;
   tolerance: number;
   residual_warn_threshold: number;

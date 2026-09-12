@@ -11,18 +11,16 @@ use crate::{
         coupling::{electro_thermal, nonlinear as coupling_nonlinear, thermo_mechanical},
         structural,
     },
-    solve::{
-        backend::kind::LinearAlgebraBackendKind,
-        transient::{
-            solve_transient_system_with_assembly, TransientSolveOptions, TransientStepBoundary,
-        },
-    },
+    solve::backend::kind::LinearAlgebraBackendKind,
     ComputeBackend, FeaContactInterfaceContext, FeaPlasticityConstitutiveContext,
 };
 
 mod events;
+mod load_predictor;
 
 pub(crate) use events::{detect_completed_nonlinear_events, nonlinear_solver_content_digest};
+pub(crate) use load_predictor::LoadIncrementSchedule;
+use load_predictor::{predict_load_increments, LoadPredictorOptions};
 
 const VECTOR_COMPONENT_COUNT: usize = 3;
 const TENSOR_COMPONENT_COUNT: usize = 6;
@@ -106,7 +104,9 @@ pub fn solve_nonlinear_system(
     options: NonlinearSolveOptions,
     backend: ComputeBackend,
 ) -> NonlinearSolveResult {
-    solve_nonlinear_system_at_boundaries(summary, options, backend, 0.0, 1.0, &[])
+    let schedule = LoadIncrementSchedule::canonical(&[], &[], 0.0, 1.0)
+        .expect("the canonical unit load-factor domain is valid");
+    solve_nonlinear_system_at_boundaries(summary, options, backend, 0.0, 1.0, &schedule)
 }
 
 pub(crate) fn solve_nonlinear_system_at_boundaries(
@@ -115,7 +115,7 @@ pub(crate) fn solve_nonlinear_system_at_boundaries(
     backend: ComputeBackend,
     load_factor_start: f64,
     load_factor_end: f64,
-    step_boundaries: &[TransientStepBoundary],
+    increment_schedule: &LoadIncrementSchedule,
 ) -> NonlinearSolveResult {
     if summary.dof_count == 0 || options.increment_count == 0 {
         return NonlinearSolveResult {
@@ -160,44 +160,20 @@ pub(crate) fn solve_nonlinear_system_at_boundaries(
     }
 
     let solve_start = Instant::now();
-    let nominal_increment = (load_factor_end - load_factor_start) / options.increment_count as f64;
-    let transient = match solve_transient_system_with_assembly(
+    let predictor = predict_load_increments(
         summary,
-        TransientSolveOptions {
-            formulation_requirement: options.formulation_requirement,
-            solver_mesh: None,
-            min_time_step_s: nominal_increment,
-            max_time_step_s: nominal_increment,
-            interval_count: options.increment_count,
+        LoadPredictorOptions {
+            increment_count: options.increment_count,
             max_linear_iters: options.max_newton_iters.saturating_mul(8).max(32),
             tolerance: options.tolerance,
-            residual_target: options.tolerance * 5.0,
-            adaptive_time_step: false,
-            max_step_retries: 0,
-            adapt_min_scale: 1.0,
-            adapt_max_scale: 1.0,
-            adapt_growth_exponent: 0.5,
-            adapt_retry_growth_cap: 1.0,
-            adapt_nonconverged_shrink: 1.0,
-            dt_bucket_rel_tolerance: 0.0,
-            progress_operation: "fea.run_nonlinear".to_string(),
         },
         backend,
         load_factor_start,
         load_factor_end,
-        step_boundaries,
-        |_, _| Ok::<_, std::convert::Infallible>(summary.clone()),
-    ) {
-        Ok(result) => result,
-        Err(error) => match error {},
-    };
+        increment_schedule,
+    );
 
-    let load_factors = transient
-        .time_points_s
-        .iter()
-        .copied()
-        .skip(1)
-        .collect::<Vec<_>>();
+    let load_factors = predictor.load_factors.clone();
     let increment_count = load_factors.len();
     let plasticity_context = options.plasticity_context.as_ref();
     let contact_context = options.contact_context.as_ref();
@@ -317,13 +293,13 @@ pub(crate) fn solve_nonlinear_system_at_boundaries(
         plasticity_severity_sum += plasticity_severity;
         contact_severity_peak = contact_severity_peak.max(contact_severity);
         contact_severity_sum += contact_severity;
-        let candidate = transient
+        let candidate = predictor
             .displacement_snapshots
             .get(index + 1)
             .cloned()
             .unwrap_or_else(|| previous.clone());
         let mut increment_norm = structural::displacement_increment_norm(&candidate, &previous);
-        let mut residual = transient
+        let mut residual = predictor
             .residual_norms
             .get(index)
             .copied()
@@ -465,12 +441,8 @@ pub(crate) fn solve_nonlinear_system_at_boundaries(
         iteration_counts.iter().copied().sum::<usize>() as f64 / iteration_counts.len() as f64
     };
 
-    let transient_prepared_build_ms =
-        transient_cost_metric(&transient.diagnostics, "prepared_build_ms").unwrap_or(0.0);
-    let transient_fallback_apply_count =
-        transient_cost_metric(&transient.diagnostics, "fallback_apply_count")
-            .unwrap_or(0.0)
-            .max(0.0);
+    let predictor_prepared_build_ms = predictor.prepared_build_ms;
+    let predictor_fallback_apply_count = predictor.fallback_apply_count;
     let solve_ms = solve_start.elapsed().as_secs_f64() * 1_000.0;
 
     let mut diagnostics = vec![FeaDiagnostic {
@@ -513,7 +485,7 @@ pub(crate) fn solve_nonlinear_system_at_boundaries(
         severity: FeaDiagnosticSeverity::Info,
         message: format!(
             "prepared_build_ms={} solve_ms={} fallback_apply_count={}",
-            transient_prepared_build_ms, solve_ms, transient_fallback_apply_count
+            predictor_prepared_build_ms, solve_ms, predictor_fallback_apply_count
         ),
     });
     diagnostics.push(FeaDiagnostic {
@@ -681,7 +653,7 @@ pub(crate) fn solve_nonlinear_system_at_boundaries(
             ));
         }
     }
-    diagnostics.extend(transient.diagnostics);
+    diagnostics.extend(predictor.diagnostics);
 
     NonlinearSolveResult {
         converged_increments,
@@ -710,12 +682,12 @@ pub(crate) fn solve_nonlinear_system_at_boundaries(
         backtrack_burst_count,
         diagnostics,
         solver_method: SolverMethod::IncrementalNewtonRaphson,
-        solver_backend: transient.solver_backend,
-        solver_host_sync_count: transient.solver_host_sync_count,
-        device_apply_k_count: transient.device_apply_k_count,
-        device_apply_k_attempt_count: transient.device_apply_k_attempt_count,
-        preconditioner: transient.preconditioner,
-        accelerator_evidence: transient.accelerator_evidence,
+        solver_backend: predictor.solver_backend,
+        solver_host_sync_count: predictor.solver_host_sync_count,
+        device_apply_k_count: predictor.device_apply_k_count,
+        device_apply_k_attempt_count: predictor.device_apply_k_attempt_count,
+        preconditioner: predictor.preconditioner,
+        accelerator_evidence: predictor.accelerator_evidence,
     }
 }
 
@@ -1244,16 +1216,4 @@ fn contact_known_answer_diagnostic(
             known_answer_coverage_ratio,
         ),
     }
-}
-
-fn transient_cost_metric(diagnostics: &[FeaDiagnostic], key: &str) -> Option<f64> {
-    diagnostics
-        .iter()
-        .find(|diag| diag.code == "FEA_TRANSIENT_COST")
-        .and_then(|diag| {
-            diag.message
-                .split_whitespace()
-                .find_map(|token| token.strip_prefix(&format!("{key}=")))
-        })
-        .and_then(|value| value.parse::<f64>().ok())
 }

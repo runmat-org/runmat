@@ -67,7 +67,7 @@ pub(super) fn map_fea_run_error(
             format!("no nonzero electromagnetic source at {frequency_hz} Hz"),
             model_details(),
         ),
-        FeaRunError::Assembly(message) => operation_error(
+        FeaRunError::Assembly(message) | FeaRunError::Solve(message) => operation_error(
             operation.name(),
             operation.version(),
             context,

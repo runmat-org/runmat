@@ -143,12 +143,6 @@ pub fn analysis_trends_op(
                 Some(values.iter().filter(|value| **value).count() as f64 / values.len() as f64)
             }
         };
-        let thermo_transient_warn_rate =
-            if identity.procedure() == AnalysisProcedure::TransientResponse {
-                diagnostic_warning_rate(&entries, "FEA_TM_TRANSIENT")
-            } else {
-                None
-            };
         let thermo_nonlinear_warn_rate = if identity.procedure() == AnalysisProcedure::Nonlinear {
             diagnostic_warning_rate(&entries, "FEA_TM_NONLINEAR")
         } else {
@@ -589,7 +583,6 @@ pub fn analysis_trends_op(
             mean_spike_count,
             mean_stall_count,
             thermo_coupling_enabled_rate,
-            thermo_transient_warn_rate,
             thermo_nonlinear_warn_rate,
             thermo_spread_breach_rate,
             thermo_heterogeneity_breach_rate,

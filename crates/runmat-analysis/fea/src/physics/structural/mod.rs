@@ -1,3 +1,4 @@
+pub(crate) mod dynamics;
 pub mod material;
 pub(crate) mod topology;
 
@@ -8,48 +9,6 @@ pub fn displacement_increment_norm(a: &[f64], b: &[f64]) -> f64 {
         sum += d * d;
     }
     sum.sqrt()
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct TransientAdaptivityInput {
-    pub step_dt: f64,
-    pub residual_norm: f64,
-    pub residual_target: f64,
-    pub min_dt: f64,
-    pub max_dt: f64,
-    pub converged: bool,
-    pub retries: usize,
-    pub adapt_nonconverged_shrink: f64,
-    pub adapt_growth_exponent: f64,
-    pub adapt_min_scale: f64,
-    pub adapt_max_scale: f64,
-    pub adapt_retry_growth_cap: f64,
-    pub thermo_growth_limit: f64,
-    pub thermo_nonconverged_shrink: f64,
-}
-
-pub fn recommend_next_time_step(input: TransientAdaptivityInput) -> f64 {
-    if !input.converged {
-        return (input.step_dt
-            * input.adapt_nonconverged_shrink.clamp(0.2, 1.0)
-            * input.thermo_nonconverged_shrink)
-            .clamp(input.min_dt, input.max_dt);
-    }
-
-    let target = input.residual_target.max(1.0e-12);
-    let ratio = (target / input.residual_norm.max(1.0e-12)).clamp(0.25, 4.0);
-    let mut factor = ratio.powf(input.adapt_growth_exponent.clamp(0.1, 1.0));
-    factor = factor.clamp(
-        input.adapt_min_scale.clamp(0.2, 1.0),
-        input.adapt_max_scale.clamp(1.0, 2.0),
-    );
-    if input.retries > 0 {
-        factor = factor.min(input.adapt_retry_growth_cap.clamp(1.0, 1.5));
-    } else if input.residual_norm <= target * 0.1 {
-        factor = factor.max((1.0 + (input.adapt_max_scale - 1.0) * 0.6).clamp(1.0, 1.5));
-    }
-    factor = factor.min(input.thermo_growth_limit.max(0.5));
-    (input.step_dt * factor).clamp(input.min_dt, input.max_dt)
 }
 
 pub fn nonlinear_iteration_damping(
@@ -82,27 +41,6 @@ mod tests {
         let b = vec![1.0, 0.0, 3.0];
         let norm = displacement_increment_norm(&a, &b);
         assert!((norm - 2.0).abs() < 1.0e-12);
-    }
-
-    #[test]
-    fn transient_adaptivity_recommendation_stays_bounded() {
-        let next = recommend_next_time_step(TransientAdaptivityInput {
-            step_dt: 1.0e-3,
-            residual_norm: 1.0e-7,
-            residual_target: 1.0e-6,
-            min_dt: 1.0e-6,
-            max_dt: 2.0e-2,
-            converged: true,
-            retries: 0,
-            adapt_nonconverged_shrink: 0.75,
-            adapt_growth_exponent: 0.35,
-            adapt_min_scale: 0.8,
-            adapt_max_scale: 1.25,
-            adapt_retry_growth_cap: 1.05,
-            thermo_growth_limit: 1.0,
-            thermo_nonconverged_shrink: 1.0,
-        });
-        assert!((1.0e-6..=2.0e-2).contains(&next));
     }
 
     #[test]

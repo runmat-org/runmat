@@ -4,10 +4,11 @@ use super::validate_sequence;
 use crate::{
     ActivationLifecycle, AnalysisBoundary, AnalysisModel, AnalysisModelId, AnalysisProcedure,
     AnalysisValidationError, BoundaryOperator, CoordinateFrame, IndependentDomain,
-    InitialStateConflictPolicy, PhysicsFamily, ProcedureStep, ProcedureStepId, RegionTarget,
-    RestartPolicy, SequenceBranch, SequenceBranchId, SequenceDependency, SequenceDependencyReason,
-    SolutionSpace, StateCompleteness, StateId, StateInput, StateKind, StateOutput,
-    StatePersistence, StateSource, StateUse, StepObjectActivation, StepObjectRef,
+    InitialCondition, InitialConditionTarget, InitialConditionValue, InitialStateConflictPolicy,
+    InitialValue, PhysicsFamily, ProcedureStep, ProcedureStepId, RegionTarget, RestartPolicy,
+    SequenceBranch, SequenceBranchId, SequenceDependency, SequenceDependencyReason, SolutionSpace,
+    StateCompleteness, StateId, StateInput, StateKind, StateOutput, StatePersistence, StateSource,
+    StateUse, StepObjectActivation, StepObjectRef, Velocity,
 };
 
 fn model_with_steps(steps: Vec<ProcedureStep>) -> AnalysisModel {
@@ -58,6 +59,30 @@ fn upstream_input(producer: &str, state: &str, kind: StateKind) -> StateInput {
         use_as: StateUse::PhysicalInitialState,
         conflict: InitialStateConflictPolicy::Reject,
     }
+}
+
+fn initial_kinematics_input() -> StateInput {
+    StateInput {
+        input_id: "initial_kinematics".into(),
+        required_kind: StateKind::StructuralKinematics,
+        source: StateSource::InitialConditions,
+        use_as: StateUse::PhysicalInitialState,
+        conflict: InitialStateConflictPolicy::Reject,
+    }
+}
+
+fn initial_velocity(applies_before_step_id: &str) -> InitialCondition {
+    InitialCondition::Velocity(InitialConditionValue {
+        initial_condition_id: "initial_velocity".into(),
+        target: InitialConditionTarget::WholeModel,
+        frame: CoordinateFrame::Global,
+        value: InitialValue::UniformVector3([
+            Velocity::new(1.0),
+            Velocity::new(0.0),
+            Velocity::new(0.0),
+        ]),
+        applies_before_step_id: applies_before_step_id.into(),
+    })
 }
 
 #[test]
@@ -168,6 +193,42 @@ fn rejects_unknown_activation_objects() {
     });
     assert!(matches!(
         validate_sequence(&model_with_steps(vec![step])),
+        Err(AnalysisValidationError::InvalidProcedureStep { .. })
+    ));
+}
+
+#[test]
+fn initial_state_input_requires_a_condition_for_the_consuming_step() {
+    let first = ProcedureStep::structural_transient("first");
+    let mut second = ProcedureStep::structural_transient("second");
+    second.state_inputs.push(initial_kinematics_input());
+    let mut model = model_with_steps(vec![first, second]);
+    model.initial_conditions = vec![initial_velocity("first")];
+
+    assert!(matches!(
+        validate_sequence(&model),
+        Err(AnalysisValidationError::InvalidProcedureStep { .. })
+    ));
+}
+
+#[test]
+fn initial_state_input_requires_the_condition_to_be_active() {
+    let mut step = ProcedureStep::structural_transient("transient");
+    step.state_inputs.push(initial_kinematics_input());
+    step.activations.push(StepObjectActivation {
+        object: StepObjectRef::Boundary("wall".into()),
+        lifecycle: ActivationLifecycle::Activate,
+    });
+    let mut model = model_with_steps(vec![step]);
+    model.initial_conditions = vec![initial_velocity("transient")];
+    model.boundaries.push(AnalysisBoundary {
+        boundary_id: "wall".into(),
+        target: RegionTarget::boundary("wall_region"),
+        operator: BoundaryOperator::AcousticRigidWall,
+    });
+
+    assert!(matches!(
+        validate_sequence(&model),
         Err(AnalysisValidationError::InvalidProcedureStep { .. })
     ));
 }

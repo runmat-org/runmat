@@ -311,7 +311,7 @@ pub(crate) fn expect_scalar(value: SampledValue) -> Result<ComplexScalar, Realiz
     }
 }
 
-pub(super) fn expect_vector3(value: SampledValue) -> Result<ComplexVector3, RealizationError> {
+pub(crate) fn expect_vector3(value: SampledValue) -> Result<ComplexVector3, RealizationError> {
     match value {
         SampledValue::Vector3(value) => Ok(value),
         SampledValue::Scalar(_) => Err(RealizationError::new("excitation requires vector3 signal")),

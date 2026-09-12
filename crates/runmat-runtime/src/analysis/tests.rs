@@ -46,23 +46,23 @@ use runmat_analysis_fea::{
     fea_transient_acceleration_field_id, fea_transient_angular_acceleration_field_id,
     fea_transient_angular_velocity_field_id, fea_transient_kinetic_energy_field_id,
     fea_transient_residual_norm_field_id, fea_transient_rotation_field_id,
-    fea_transient_strain_energy_field_id, fea_transient_velocity_field_id,
-    fea_transient_von_mises_field_id, ComputeBackend, FeaProgressPhase, FeaProgressStatus,
-    SolverMethod, SolverPreconditioner, FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY,
-    FEA_FIELD_ACOUSTIC_PRESSURE_IMAG, FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE,
-    FEA_FIELD_ACOUSTIC_PRESSURE_REAL, FEA_FIELD_CFD_PRESSURE, FEA_FIELD_CFD_RESIDUAL_CONTINUITY,
-    FEA_FIELD_CFD_RESIDUAL_MOMENTUM, FEA_FIELD_CFD_REYNOLDS_NUMBER, FEA_FIELD_CFD_VELOCITY,
-    FEA_FIELD_CFD_VORTICITY, FEA_FIELD_CFD_WALL_SHEAR_STRESS, FEA_FIELD_CHT_FLUID_PRESSURE,
-    FEA_FIELD_CHT_FLUID_VELOCITY, FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY,
-    FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD, FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL,
-    FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT, FEA_FIELD_EM_CURRENT_DENSITY_REAL,
-    FEA_FIELD_EM_ELECTRIC_FIELD_REAL, FEA_FIELD_EM_ELECTRIC_FLUX_DENSITY_REAL,
-    FEA_FIELD_EM_ENERGY_DENSITY, FEA_FIELD_EM_MAGNETIC_FIELD_REAL,
-    FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_MAGNITUDE, FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_REAL,
-    FEA_FIELD_EM_POYNTING_VECTOR_REAL, FEA_FIELD_EM_RESIDUAL_REAL,
-    FEA_FIELD_EM_VECTOR_POTENTIAL_IMAG, FEA_FIELD_EM_VECTOR_POTENTIAL_REAL,
-    FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ, FEA_FIELD_MODAL_MODAL_MASS,
-    FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
+    fea_transient_strain_energy_density_field_id, fea_transient_strain_energy_field_id,
+    fea_transient_strain_field_id, fea_transient_stress_field_id, fea_transient_velocity_field_id,
+    ComputeBackend, FeaProgressPhase, FeaProgressStatus, SolverMethod, SolverPreconditioner,
+    FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY, FEA_FIELD_ACOUSTIC_PRESSURE_IMAG,
+    FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE, FEA_FIELD_ACOUSTIC_PRESSURE_REAL,
+    FEA_FIELD_CFD_PRESSURE, FEA_FIELD_CFD_RESIDUAL_CONTINUITY, FEA_FIELD_CFD_RESIDUAL_MOMENTUM,
+    FEA_FIELD_CFD_REYNOLDS_NUMBER, FEA_FIELD_CFD_VELOCITY, FEA_FIELD_CFD_VORTICITY,
+    FEA_FIELD_CFD_WALL_SHEAR_STRESS, FEA_FIELD_CHT_FLUID_PRESSURE, FEA_FIELD_CHT_FLUID_VELOCITY,
+    FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY, FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD,
+    FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL, FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT,
+    FEA_FIELD_EM_CURRENT_DENSITY_REAL, FEA_FIELD_EM_ELECTRIC_FIELD_REAL,
+    FEA_FIELD_EM_ELECTRIC_FLUX_DENSITY_REAL, FEA_FIELD_EM_ENERGY_DENSITY,
+    FEA_FIELD_EM_MAGNETIC_FIELD_REAL, FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_MAGNITUDE,
+    FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_REAL, FEA_FIELD_EM_POYNTING_VECTOR_REAL,
+    FEA_FIELD_EM_RESIDUAL_REAL, FEA_FIELD_EM_VECTOR_POTENTIAL_IMAG,
+    FEA_FIELD_EM_VECTOR_POTENTIAL_REAL, FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ,
+    FEA_FIELD_MODAL_MODAL_MASS, FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
     FEA_FIELD_MODAL_PARTICIPATION_FACTOR, FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION,
     FEA_FIELD_MODAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_BEAM_AXIAL_FORCE,
     FEA_FIELD_STRUCTURAL_BEAM_BENDING_MOMENT, FEA_FIELD_STRUCTURAL_BEAM_BENDING_STRESS,
@@ -1583,22 +1583,30 @@ fn transient_run_option_presets_are_ordered_for_cost_vs_accuracy() {
     let solid = AnalysisTransientRunOptions::solid_recommended();
     let high_accuracy = AnalysisTransientRunOptions::high_accuracy();
 
-    assert!(coarse.interval_count < balanced.interval_count);
-    assert!(balanced.interval_count < high_accuracy.interval_count);
-
-    assert!(coarse.tolerance > balanced.tolerance);
-    assert!(balanced.tolerance > high_accuracy.tolerance);
-
-    assert!(high_accuracy.max_time_step_s < balanced.max_time_step_s);
-    assert!(serde_json::to_value(&balanced)
-        .unwrap()
-        .get("time_step_s")
-        .is_none());
+    assert!(coarse.time_step_policy.interval_count() < balanced.time_step_policy.interval_count());
+    assert!(
+        balanced.time_step_policy.interval_count()
+            < high_accuracy.time_step_policy.interval_count()
+    );
+    assert!(coarse.residual_target > balanced.residual_target);
+    assert!(balanced.residual_target > high_accuracy.residual_target);
+    let serialized = serde_json::to_value(&balanced).unwrap();
+    assert!(serialized.get("time_step_policy").is_some());
+    assert!(serialized.get("adaptive_time_step").is_none());
+    assert!(serialized.get("precision_mode").is_none());
+    let mut with_ignored_precision = serialized;
+    with_ignored_precision
+        .as_object_mut()
+        .expect("transient options should serialize as an object")
+        .insert("precision_mode".to_string(), serde_json::json!("fp32"));
+    assert!(serde_json::from_value::<AnalysisTransientRunOptions>(with_ignored_precision).is_err());
 
     assert_eq!(solid.quality_policy, QualityPolicy::Balanced);
     assert!(solid.deterministic_mode);
-    assert_eq!(solid.precision_mode, PrecisionMode::Fp64);
-    assert_eq!(solid.dt_bucket_rel_tolerance, 0.01);
+    assert_eq!(
+        solid.time_step_policy,
+        AnalysisStructuralTimeStepPolicy::Fixed { interval_count: 10 }
+    );
 }
 
 #[test]
@@ -4716,7 +4724,6 @@ fn analysis_trends_summarizes_recent_nonlinear_runs() {
     assert!(nonlinear.p95_solve_ms.is_some());
     assert!(nonlinear.failed_increment_rate.is_some());
     assert!(nonlinear.thermo_coupling_enabled_rate.is_none());
-    assert!(nonlinear.thermo_transient_warn_rate.is_none());
     assert!(nonlinear.thermo_nonlinear_warn_rate.is_none());
     assert!(nonlinear.thermo_spread_breach_rate.is_none());
     assert!(nonlinear.thermo_heterogeneity_breach_rate.is_none());
@@ -4924,7 +4931,7 @@ fn analysis_trends_classifies_fsi_runs_separately() {
 }
 
 #[test]
-fn analysis_results_summary_surfaces_thermo_transient_metrics() {
+fn analysis_run_transient_rejects_configured_thermomechanical_step() {
     let _guard = analysis_test_guard();
     let mut model = sample_solid_model();
     model.sequence.steps = vec![ProcedureStep::coupled(
@@ -4941,103 +4948,6 @@ fn analysis_results_summary_surfaces_thermo_transient_metrics() {
             region_temperature_deltas: Vec::new(),
         },
     );
-    let run = analysis_run_transient_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
-        AnalysisTransientRunOptions::default(),
-        OperationContext::new(None, None),
-    )
-    .expect("transient run should succeed");
-
-    assert_eq!(
-        run.data.run.identity.family(),
-        PhysicsFamily::Coupled(CoupledPhysicsFamily::Thermomechanical)
-    );
-
-    let results = analysis_results_op(
-        &run.data,
-        AnalysisResultsQuery::default(),
-        OperationContext::new(None, None),
-    )
-    .expect("results should succeed");
-
-    assert_eq!(results.data.summary.thermo_coupling_enabled, Some(true));
-    assert!(results.data.summary.thermo_coupling_fingerprint.is_some());
-    assert!(results
-        .data
-        .summary
-        .thermo_constitutive_temperature_factor
-        .is_some());
-    assert!(results
-        .data
-        .summary
-        .thermo_effective_modulus_scale
-        .is_some());
-    assert!(results
-        .data
-        .summary
-        .thermo_constitutive_material_spread_ratio
-        .is_some());
-    assert!(results
-        .data
-        .summary
-        .thermo_assignment_heterogeneity_index
-        .is_some());
-    assert!(results.data.summary.thermo_transient_severity.is_some());
-    assert!(results.data.summary.thermo_nonlinear_severity.is_none());
-    assert_eq!(results.data.summary.electro_thermal_coupling_enabled, None);
-    assert!(results
-        .data
-        .summary
-        .electro_thermal_coupling_fingerprint
-        .is_none());
-    assert!(results.data.summary.electro_joule_heating_scale.is_none());
-    assert!(results
-        .data
-        .summary
-        .electro_conductivity_spread_ratio
-        .is_none());
-    assert!(results.data.summary.electro_transient_severity.is_none());
-    assert!(results.data.summary.electro_nonlinear_severity.is_none());
-    assert!(results.data.summary.plastic_nonlinear_severity.is_none());
-    assert!(results.data.summary.contact_nonlinear_severity.is_none());
-    for field_id in [
-        FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL.to_string(),
-        FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT.to_string(),
-        fea_electro_thermal_temperature_field_id(0),
-        fea_electro_thermal_thermal_residual_field_id(0),
-        FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD.to_string(),
-        FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY.to_string(),
-    ] {
-        assert!(run.data.run.field(&field_id).is_none());
-        assert!(results
-            .data
-            .field_descriptors
-            .iter()
-            .all(|descriptor| descriptor.field_id != field_id));
-    }
-    let transient = run
-        .data
-        .transient_results
-        .as_ref()
-        .expect("transient results should be present");
-    assert!(transient.electro_thermal_temperature_snapshots.is_empty());
-    assert!(transient
-        .electro_thermal_thermal_residual_snapshots
-        .is_empty());
-}
-
-#[test]
-fn analysis_run_transient_rejects_coupled_step_without_thermo_coupling() {
-    let _guard = analysis_test_guard();
-    let mut model = sample_solid_model();
-    model.sequence.steps = vec![ProcedureStep::coupled(
-        "transient_missing_thermo_mechanical",
-        CoupledPhysicsFamily::Thermomechanical,
-        AnalysisProcedure::TransientResponse,
-    )];
-
     let error = analysis_run_transient_with_options_op(
         &model,
         ComputeBackend::Cpu,
@@ -5045,14 +4955,9 @@ fn analysis_run_transient_rejects_coupled_step_without_thermo_coupling() {
         AnalysisTransientRunOptions::default(),
         OperationContext::new(None, None),
     )
-    .expect_err("a thermomechanical step requires coupled assembly math");
+    .expect_err("thermomechanical transient response is not an admitted solver family");
 
-    assert_eq!(
-        error.error_code,
-        "RM.FEA.RUN_TRANSIENT.SOLVER_MODEL_INVALID"
-    );
-    assert!(error.message.contains("requests Coupled(Thermomechanical)"));
-    assert!(error.message.contains("realizes Structural"));
+    assert_eq!(error.error_code, "RM.FEA.RUN_TRANSIENT.INVALID_MODEL");
 }
 
 #[test]
@@ -5186,7 +5091,6 @@ fn analysis_results_summary_surfaces_thermo_nonlinear_metrics() {
         .thermo_assignment_heterogeneity_index
         .is_some());
     assert!(results.data.summary.thermo_nonlinear_severity.is_some());
-    assert!(results.data.summary.thermo_transient_severity.is_some());
     assert_eq!(results.data.summary.electro_thermal_coupling_enabled, None);
     assert!(results
         .data
@@ -8046,12 +7950,13 @@ fn analysis_run_transient_returns_native_transient_result() {
     assert_eq!(envelope.op_version, "fea.run_transient/v1");
     assert_eq!(
         envelope.data.run.solver_method,
-        SolverMethod::ImplicitEulerPcg
+        SolverMethod::NewmarkAverageAccelerationPcg
     );
     assert_eq!(
         envelope.data.provenance.solver_method,
-        SolverMethod::ImplicitEulerPcg
+        SolverMethod::NewmarkAverageAccelerationPcg
     );
+    assert_eq!(envelope.data.provenance.precision_mode, "fp64");
     assert_eq!(envelope.data.run_status, RunStatus::Completed);
     assert!(envelope.data.numerically_acceptable);
     assert!(envelope
@@ -8067,7 +7972,7 @@ fn analysis_run_transient_returns_native_transient_result() {
         .expect("transient payload should exist");
     assert_eq!(
         transient.integration_method,
-        TransientIntegrationMethod::ImplicitEuler
+        TransientIntegrationMethod::NewmarkAverageAcceleration
     );
     assert!(!transient.time_points_s.is_empty());
     assert_eq!(
@@ -8082,10 +7987,10 @@ fn analysis_run_transient_returns_native_transient_result() {
         transient.time_points_s.len(),
         transient.acceleration_snapshots.len()
     );
-    assert_eq!(
-        transient.time_points_s.len(),
-        transient.von_mises_snapshots.len()
-    );
+    assert!(transient.strain_snapshots.is_empty());
+    assert!(transient.stress_snapshots.is_empty());
+    assert!(transient.strain_energy_density_snapshots.is_empty());
+    assert!(transient.von_mises_snapshots.is_empty());
     assert_eq!(
         transient.time_points_s.len(),
         transient.kinetic_energy_snapshots.len()
@@ -8105,10 +8010,6 @@ fn analysis_run_transient_returns_native_transient_result() {
     assert_eq!(
         transient.acceleration_snapshots[1].field_id,
         fea_transient_acceleration_field_id(1)
-    );
-    assert_eq!(
-        transient.von_mises_snapshots[1].field_id,
-        fea_transient_von_mises_field_id(1)
     );
     assert_eq!(
         transient.kinetic_energy_snapshots[1].field_id,
@@ -8145,7 +8046,6 @@ fn analysis_run_transient_returns_native_transient_result() {
         assert_eq!(descriptor.component_count, Some(3));
     }
     for field_id in [
-        fea_transient_von_mises_field_id(1),
         fea_transient_kinetic_energy_field_id(1),
         fea_transient_strain_energy_field_id(1),
         fea_transient_residual_norm_field_id(1),
@@ -8913,22 +8813,9 @@ fn analysis_run_transient_with_options_controls_timeline() {
         FormulationRequirement::Experimental,
         AnalysisTransientRunOptions {
             deterministic_mode: true,
-            precision_mode: PrecisionMode::Fp64,
             quality_policy: QualityPolicy::Balanced,
-            min_time_step_s: 1.0 / 3.0,
-            max_time_step_s: 1.0 / 3.0,
-            interval_count: 3,
-            max_linear_iters: 64,
-            tolerance: 1.0e-8,
+            time_step_policy: AnalysisStructuralTimeStepPolicy::Fixed { interval_count: 3 },
             residual_target: 1.0e-6,
-            adaptive_time_step: false,
-            max_step_retries: 0,
-            adapt_min_scale: 0.8,
-            adapt_max_scale: 1.25,
-            adapt_growth_exponent: 0.35,
-            adapt_retry_growth_cap: 1.05,
-            adapt_nonconverged_shrink: 0.75,
-            dt_bucket_rel_tolerance: 0.0,
             solver_mesh_artifact_path: None,
         },
         OperationContext::new(None, None),
@@ -8942,7 +8829,7 @@ fn analysis_run_transient_with_options_controls_timeline() {
         .expect("transient payload should exist");
     assert_eq!(transient.time_points_s.len(), 4);
     assert_eq!(transient.time_points_s[0], 0.0);
-    assert!((transient.time_points_s[3] - 6.0e-3).abs() < 1.0e-12);
+    assert!((transient.time_points_s[3] - 1.0).abs() < 1.0e-12);
     assert!(envelope.data.provenance.deterministic_mode);
 }
 
@@ -9017,99 +8904,6 @@ fn nonlinear_solver_rejects_invalid_contact_enforcement_options() {
     })
     .expect_err("nonlinear solver should reject an invalid contact penalty");
     assert!(error.0.contains("penalty_stiffness_scale"));
-}
-
-#[test]
-fn transient_balanced_degrades_when_thermo_mechanical_severity_is_high() {
-    let _guard = analysis_test_guard();
-    let (mesh_root, mesh_path) =
-        write_ready_minimal_analysis_mesh_artifact("transient-high-thermo-severity");
-    let mut model = sample_solid_model();
-    model.sequence.steps = vec![ProcedureStep::coupled(
-        "transient_thermo_mechanical",
-        CoupledPhysicsFamily::Thermomechanical,
-        AnalysisProcedure::TransientResponse,
-    )];
-    for material in &mut model.materials {
-        material.thermal.expansion_coefficient_per_k = 1.0e-3;
-    }
-    set_model_thermo_coupling(
-        &mut model,
-        TestThermoMechanicalCoupling {
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 90.0,
-            thermal_expansion_coefficient: 1.0e-3,
-            region_temperature_deltas: Vec::new(),
-        },
-    );
-
-    let run = analysis_run_transient_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
-        AnalysisTransientRunOptions {
-            quality_policy: QualityPolicy::Balanced,
-            adaptive_time_step: true,
-            interval_count: 8,
-            solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
-            ..AnalysisTransientRunOptions::default()
-        },
-        OperationContext::new(None, None),
-    )
-    .expect("transient run should return envelope");
-
-    assert!(!run.data.numerically_acceptable);
-    assert_eq!(run.data.run_status, RunStatus::Degraded);
-    assert!(run
-        .data
-        .quality_reasons
-        .iter()
-        .any(|reason| reason.code == QualityReasonCode::ThermoMechanicalTransientStress));
-    let _ = fs::remove_dir_all(&mesh_root);
-}
-
-#[test]
-fn transient_balanced_does_not_report_thermo_stress_below_severity_threshold() {
-    let _guard = analysis_test_guard();
-    let (mesh_root, mesh_path) =
-        write_ready_minimal_analysis_mesh_artifact("transient-low-thermo-severity");
-    let mut model = sample_solid_model();
-    model.sequence.steps = vec![ProcedureStep::coupled(
-        "transient_thermo_mechanical",
-        CoupledPhysicsFamily::Thermomechanical,
-        AnalysisProcedure::TransientResponse,
-    )];
-    set_model_thermo_coupling(
-        &mut model,
-        TestThermoMechanicalCoupling {
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 90.0,
-            thermal_expansion_coefficient: 1.2e-5,
-            region_temperature_deltas: Vec::new(),
-        },
-    );
-
-    let run = analysis_run_transient_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
-        AnalysisTransientRunOptions {
-            quality_policy: QualityPolicy::Balanced,
-            adaptive_time_step: true,
-            interval_count: 8,
-            solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
-            ..AnalysisTransientRunOptions::default()
-        },
-        OperationContext::new(None, None),
-    )
-    .expect("transient run should return envelope");
-
-    assert!(!run.data.quality_reasons.iter().any(|reason| {
-        reason.code == QualityReasonCode::ThermoMechanicalTransientStress
-            || reason.code == QualityReasonCode::ThermoMechanicalConstitutiveSpreadHigh
-            || reason.code == QualityReasonCode::ThermoMechanicalAssignmentHeterogeneityHigh
-    }));
-    let _ = fs::remove_dir_all(&mesh_root);
 }
 
 #[test]
@@ -9692,7 +9486,9 @@ fn analysis_results_query_rejects_unknown_modal_mode_index() {
 #[test]
 fn analysis_results_include_transient_payload_for_transient_runs() {
     let _guard = analysis_test_guard();
-    let mut model = sample_model();
+    let (mesh_root, mesh_path) =
+        write_ready_minimal_analysis_mesh_artifact("transient-results-physical-fields");
+    let mut model = sample_solid_model();
     model.sequence.steps = vec![ProcedureStep::structural_transient(
         "transient_1".to_string(),
     )];
@@ -9700,7 +9496,10 @@ fn analysis_results_include_transient_payload_for_transient_runs() {
         &model,
         ComputeBackend::Cpu,
         FormulationRequirement::Experimental,
-        Default::default(),
+        AnalysisTransientRunOptions {
+            solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
+            ..Default::default()
+        },
         OperationContext::new(None, None),
     )
     .expect("transient run should succeed");
@@ -9719,13 +9518,58 @@ fn analysis_results_include_transient_payload_for_transient_runs() {
         .expect("transient payload should propagate");
     assert_eq!(
         transient.integration_method,
-        TransientIntegrationMethod::ImplicitEuler
+        TransientIntegrationMethod::NewmarkAverageAcceleration
     );
     assert!(!transient.time_points_s.is_empty());
     assert_eq!(
         transient.time_points_s.len(),
         transient.displacement_snapshots.len()
     );
+    assert_eq!(
+        transient.time_points_s.len(),
+        transient.strain_snapshots.len()
+    );
+    assert_eq!(
+        transient.time_points_s.len(),
+        transient.stress_snapshots.len()
+    );
+    assert_eq!(
+        transient.time_points_s.len(),
+        transient.strain_energy_density_snapshots.len()
+    );
+
+    let snapshot_query = AnalysisResultsQuery {
+        transient_snapshot_indices: vec![1],
+        ..AnalysisResultsQuery::default()
+    };
+    let selected = analysis_results_by_run_id_op(
+        &run.data.run_id,
+        snapshot_query,
+        OperationContext::new(None, None),
+    )
+    .expect("persisted transient physical fields should support indexed hydration");
+    let selected = selected
+        .data
+        .transient_results
+        .expect("selected transient payload");
+    assert_eq!(selected.time_points_s.len(), 1);
+    assert_eq!(
+        selected.strain_snapshots[0].field_id,
+        fea_transient_strain_field_id(1)
+    );
+    assert_eq!(
+        selected.stress_snapshots[0].field_id,
+        fea_transient_stress_field_id(1)
+    );
+    assert_eq!(
+        selected.strain_energy_density_snapshots[0].field_id,
+        fea_transient_strain_energy_density_field_id(1)
+    );
+    assert_eq!(
+        selected.strain_energy_snapshots[0].field_id,
+        fea_transient_strain_energy_field_id(1)
+    );
+    let _ = fs::remove_dir_all(mesh_root);
 }
 
 #[test]

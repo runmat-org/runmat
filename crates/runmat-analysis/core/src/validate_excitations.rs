@@ -415,30 +415,34 @@ fn validate_initial<Q: FiniteQuantity>(
             signal_id,
             abscissa,
             approach: _,
-        } if abscissa.is_finite() => match signals.get(signal_id) {
-            Some(signal)
-                if signal.quantity() == expected
-                    && signal.domain() != crate::SignalDomainKind::Frequency
-                    && matches!(
-                        (expected_shape, signal.shape()),
-                        (InitialValueShape::Scalar, SignalShape::Scalar)
-                            | (InitialValueShape::Vector3, SignalShape::Vector3)
-                    ) =>
-            {
-                Ok(())
+        } if abscissa.is_finite() && abscissa.to_bits() != (-0.0_f64).to_bits() => {
+            match signals.get(signal_id) {
+                Some(signal)
+                    if signal.quantity() == expected
+                        && signal.domain() != crate::SignalDomainKind::Frequency
+                        && matches!(
+                            (expected_shape, signal.shape()),
+                            (InitialValueShape::Scalar, SignalShape::Scalar)
+                                | (InitialValueShape::Vector3, SignalShape::Vector3)
+                        ) =>
+                {
+                    Ok(())
+                }
+                Some(signal)
+                    if signal.quantity() == expected
+                        && signal.domain() == crate::SignalDomainKind::Frequency =>
+                {
+                    Err("frequency-domain signals cannot define an initial condition".to_string())
+                }
+                Some(signal) if signal.quantity() == expected => {
+                    Err("initial-condition signal has the wrong value shape".to_string())
+                }
+                Some(_) => {
+                    Err("initial-condition signal has the wrong physical quantity".to_string())
+                }
+                None => Err("initial-condition signal does not exist".to_string()),
             }
-            Some(signal)
-                if signal.quantity() == expected
-                    && signal.domain() == crate::SignalDomainKind::Frequency =>
-            {
-                Err("frequency-domain signals cannot define an initial condition".to_string())
-            }
-            Some(signal) if signal.quantity() == expected => {
-                Err("initial-condition signal has the wrong value shape".to_string())
-            }
-            Some(_) => Err("initial-condition signal has the wrong physical quantity".to_string()),
-            None => Err("initial-condition signal does not exist".to_string()),
-        },
+        }
         InitialValue::FieldArtifact(artifact)
             if !artifact.artifact_id.trim().is_empty()
                 && !artifact.content_digest.trim().is_empty()
@@ -511,7 +515,7 @@ mod tests {
     use crate::{
         CoordinateFrame, ExcitationCaseId, ExcitationId, HeatFlux, ProjectionRequirement,
         RegionTarget, Signal, SignalApproximationEvidence, SignalPrecision, SignalProvenance,
-        SignalRepresentation, SignalValue,
+        SignalRepresentation, SignalSampleApproach, SignalValue, Velocity,
     };
 
     #[test]
@@ -554,6 +558,34 @@ mod tests {
         assert_eq!(
             validate_action_policy(&action, action.excitation(), &signal),
             Err("a scalar-integral excitation cannot require moment conservation".to_string())
+        );
+    }
+
+    #[test]
+    fn initial_signal_sample_rejects_noncanonical_negative_zero_abscissa() {
+        let condition = InitialConditionValue {
+            initial_condition_id: "initial-velocity".into(),
+            target: InitialConditionTarget::WholeModel,
+            frame: CoordinateFrame::Global,
+            value: InitialValue::SignalSample {
+                signal_id: SignalId("velocity-history".into()),
+                abscissa: -0.0,
+                approach: SignalSampleApproach::At,
+            },
+            applies_before_step_id: "transient".into(),
+        };
+        let signals = HashMap::new();
+        let steps = HashSet::from(["transient"]);
+
+        assert_eq!(
+            validate_initial::<Velocity>(
+                &condition,
+                PhysicalQuantityKind::Velocity,
+                InitialValueShape::Vector3,
+                &signals,
+                &steps,
+            ),
+            Err("initial-condition value is not finite or complete".into())
         );
     }
 }

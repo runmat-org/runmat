@@ -68,13 +68,13 @@ pub(crate) fn realize(
 
     let mut assigned = vec![None; projection.nodes.len()];
     let mut applied_condition_ids = Vec::new();
-    for condition in &model.initial_conditions {
-        let InitialCondition::Temperature(condition) = condition else {
-            continue;
-        };
-        if condition.applies_before_step_id != step.step_id.as_str() {
+    for initial_condition in &model.initial_conditions {
+        if !initial_condition.applies_to_step(step) {
             continue;
         }
+        let InitialCondition::Temperature(condition) = initial_condition else {
+            continue;
+        };
         let value = realize_value(model, condition)?;
         if value < 0.0 {
             return Err(ThermalInitialStateError::InvalidTemperature {

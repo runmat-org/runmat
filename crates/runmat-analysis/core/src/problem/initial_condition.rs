@@ -39,6 +39,27 @@ impl InitialCondition {
         }
     }
 
+    pub fn applies_before_step_id(&self) -> &str {
+        match self {
+            Self::Displacement(value) => &value.applies_before_step_id,
+            Self::Velocity(value) => &value.applies_before_step_id,
+            Self::AngularVelocity(value) => &value.applies_before_step_id,
+            Self::Temperature(value) => &value.applies_before_step_id,
+            Self::ElectricPotential(value) => &value.applies_before_step_id,
+            Self::MagneticVectorPotential(value) => &value.applies_before_step_id,
+            Self::AcousticPressure(value) => &value.applies_before_step_id,
+            Self::FluidPressure(value) => &value.applies_before_step_id,
+            Self::FluidVelocity(value) => &value.applies_before_step_id,
+        }
+    }
+
+    pub fn applies_to_step(&self, step: &crate::ProcedureStep) -> bool {
+        self.applies_before_step_id() == step.step_id.as_str()
+            && step.object_is_active(&crate::StepObjectRef::InitialCondition(
+                self.initial_condition_id().to_string(),
+            ))
+    }
+
     pub fn region_target_mut(&mut self) -> Option<&mut RegionTarget> {
         let target = match self {
             Self::Displacement(value) => &mut value.target,

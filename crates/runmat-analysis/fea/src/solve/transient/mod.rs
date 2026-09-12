@@ -1,55 +1,60 @@
+use std::convert::Infallible;
+
 use runmat_analysis_core::{FormulationRequirement, SignalSampleApproach};
 use runmat_meshing_core::SolverMeshArtifact;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, VecDeque};
-use std::time::Instant;
 use thiserror::Error;
 
 use crate::{
+    algebra::spmv,
     assembly::AssemblySummary,
     contracts::{SolverMethod, SolverPreconditioner},
-    diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
-    physics::{
-        coupling::{electro_thermal, thermo_mechanical},
-        structural,
-    },
+    diagnostics::FeaDiagnostic,
     progress::{emit_phase, is_cancelled, FeaProgressPhase, FeaProgressStatus},
-    solve::{
-        accelerator::AcceleratorPreparedLinearSystem, backend::kind::LinearAlgebraBackendKind,
-    },
+    solve::backend::kind::LinearAlgebraBackendKind,
     ComputeBackend,
 };
 
+mod constraint_state;
 mod diagnostics;
-mod linear_step;
+mod effective_solve;
+mod newmark;
+mod schedule;
+mod state;
+#[cfg(test)]
+mod tests;
 
-use diagnostics::{push_transient_quality_diagnostics, TransientQualityDiagnosticInputs};
-use linear_step::{
-    build_step_rhs_with_load, solve_implicit_step_system, strain_energy, AcceleratorStepCache,
-    AcceleratorStepCacheKey, LinearStepStats,
+pub(crate) use diagnostics::mechanical_energy_history_diagnostic;
+use diagnostics::transient_diagnostics;
+use effective_solve::{
+    solve_average_acceleration_step, solve_initial_acceleration, EffectiveDynamicsSolveResult,
 };
+use schedule::next_step_boundary;
+pub(crate) use schedule::{canonical_transient_step_boundaries, TransientStepBoundary};
+use state::SecondOrderState;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TransientSolveOptions {
     pub formulation_requirement: FormulationRequirement,
-    pub min_time_step_s: f64,
-    pub max_time_step_s: f64,
-    pub interval_count: usize,
-    pub max_linear_iters: usize,
-    pub tolerance: f64,
+    pub time_step_policy: StructuralTimeStepPolicy,
     pub residual_target: f64,
-    pub adaptive_time_step: bool,
-    pub max_step_retries: usize,
-    pub adapt_min_scale: f64,
-    pub adapt_max_scale: f64,
-    pub adapt_growth_exponent: f64,
-    pub adapt_retry_growth_cap: f64,
-    pub adapt_nonconverged_shrink: f64,
-    pub dt_bucket_rel_tolerance: f64,
     #[serde(default = "default_progress_operation")]
     pub progress_operation: String,
     #[serde(default)]
     pub solver_mesh: Option<SolverMeshArtifact>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum StructuralTimeStepPolicy {
+    Fixed { interval_count: usize },
+}
+
+impl StructuralTimeStepPolicy {
+    pub fn interval_count(self) -> usize {
+        match self {
+            Self::Fixed { interval_count } => interval_count,
+        }
+    }
 }
 
 fn default_progress_operation() -> String {
@@ -60,20 +65,8 @@ impl Default for TransientSolveOptions {
     fn default() -> Self {
         Self {
             formulation_requirement: FormulationRequirement::Production,
-            min_time_step_s: 1.0e-6,
-            max_time_step_s: 2.0e-2,
-            interval_count: 10,
-            max_linear_iters: 128,
-            tolerance: 1.0e-8,
+            time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 10 },
             residual_target: 1.0e-6,
-            adaptive_time_step: true,
-            max_step_retries: 4,
-            adapt_min_scale: 0.8,
-            adapt_max_scale: 1.25,
-            adapt_growth_exponent: 0.35,
-            adapt_retry_growth_cap: 1.05,
-            adapt_nonconverged_shrink: 0.75,
-            dt_bucket_rel_tolerance: 0.0,
             progress_operation: default_progress_operation(),
             solver_mesh: None,
         }
@@ -86,6 +79,8 @@ pub struct TransientSolveResult {
     pub total_steps: usize,
     pub time_points_s: Vec<f64>,
     pub displacement_snapshots: Vec<Vec<f64>>,
+    pub velocity_snapshots: Vec<Vec<f64>>,
+    pub acceleration_snapshots: Vec<Vec<f64>>,
     pub residual_norms: Vec<f64>,
     pub accepted_time_steps_s: Vec<f64>,
     pub diagnostics: Vec<FeaDiagnostic>,
@@ -100,567 +95,415 @@ pub struct TransientSolveResult {
     pub(crate) assembly_snapshots: Vec<AssemblySummary>,
     #[serde(skip)]
     pub(crate) strain_energy_snapshots: Vec<f64>,
+    #[serde(skip)]
+    pub(crate) kinetic_energy_snapshots: Vec<f64>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum TransientStepBoundaryKind {
-    RequiredSample,
-    SignalDiscontinuity,
+#[derive(Debug, Error)]
+pub enum TransientSolveError<E> {
+    #[error("transient solve options are invalid: {0}")]
+    InvalidOptions(&'static str),
+    #[error("transient solve was cancelled before a complete result was available")]
+    Cancelled,
+    #[error("initial structural acceleration could not be established: {detail}")]
+    InitialAcceleration { detail: String },
+    #[error(
+        "structural acceleration could not be re-established after a discontinuity at {time_s} s: {detail}"
+    )]
+    AccelerationRefresh { time_s: f64, detail: String },
+    #[error("structural transient step ending at {time_s} s failed: {detail}")]
+    Step { time_s: f64, detail: String },
+    #[error(
+        "structural transient state at {time_s} s exceeded its projected residual target: {residual_norm} > {target}"
+    )]
+    ResidualTargetExceeded {
+        time_s: f64,
+        residual_norm: f64,
+        target: f64,
+    },
+    #[error("transient reassembly failed: {0}")]
+    Assembly(E),
+    #[error("transient reassembly changed the structural degree-of-freedom count")]
+    DofCountChanged,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct TransientStepBoundary {
-    time_s: f64,
-    kind: TransientStepBoundaryKind,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
-pub(crate) enum TransientStepBoundaryError {
-    #[error("transient time domain is nonfinite or reversed")]
-    InvalidDomain,
-    #[error("transient step boundary lies outside the finite time domain")]
-    OutsideDomain,
-}
-
-impl TransientStepBoundary {
-    fn approach(self) -> SignalSampleApproach {
-        match self.kind {
-            TransientStepBoundaryKind::RequiredSample => SignalSampleApproach::At,
-            TransientStepBoundaryKind::SignalDiscontinuity => SignalSampleApproach::LeftLimit,
-        }
-    }
-}
-
-pub(crate) fn canonical_transient_step_boundaries(
-    signal_discontinuities_s: &[f64],
-    required_samples_s: &[f64],
-    start_time_s: f64,
-    end_time_s: f64,
-) -> Result<Vec<TransientStepBoundary>, TransientStepBoundaryError> {
-    if !start_time_s.is_finite() || !end_time_s.is_finite() || end_time_s < start_time_s {
-        return Err(TransientStepBoundaryError::InvalidDomain);
-    }
-    let mut boundaries = Vec::with_capacity(
-        signal_discontinuities_s
-            .len()
-            .saturating_add(required_samples_s.len()),
-    );
-    for (times, kind) in [
-        (
-            signal_discontinuities_s,
-            TransientStepBoundaryKind::SignalDiscontinuity,
-        ),
-        (
-            required_samples_s,
-            TransientStepBoundaryKind::RequiredSample,
-        ),
-    ] {
-        for &time_s in times {
-            if !time_s.is_finite() || time_s < start_time_s || time_s > end_time_s {
-                return Err(TransientStepBoundaryError::OutsideDomain);
-            }
-            boundaries.push(TransientStepBoundary { time_s, kind });
-        }
-    }
-    boundaries.sort_by(|left, right| left.time_s.total_cmp(&right.time_s));
-    let mut canonical: Vec<TransientStepBoundary> = Vec::with_capacity(boundaries.len());
-    for boundary in boundaries {
-        if let Some(previous) = canonical
-            .last_mut()
-            .filter(|previous| previous.time_s.to_bits() == boundary.time_s.to_bits())
-        {
-            if boundary.kind == TransientStepBoundaryKind::SignalDiscontinuity {
-                previous.kind = boundary.kind;
-            }
-        } else {
-            canonical.push(boundary);
-        }
-    }
-    Ok(canonical)
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct TransientTimeDomain<'a> {
+    pub(crate) start_time_s: f64,
+    pub(crate) end_time_s: f64,
+    pub(crate) step_boundaries: &'a [TransientStepBoundary],
 }
 
 pub fn solve_transient_system(
     summary: &AssemblySummary,
     options: TransientSolveOptions,
     backend: ComputeBackend,
-) -> TransientSolveResult {
-    match solve_transient_system_with_assembly(summary, options, backend, 0.0, 1.0, &[], |_, _| {
-        Ok::<_, std::convert::Infallible>(summary.clone())
-    }) {
-        Ok(result) => result,
-        Err(error) => match error {},
-    }
+) -> Result<TransientSolveResult, TransientSolveError<Infallible>> {
+    let initial_displacement = if let Some(reduction) = &summary.affine_constraint_reduction {
+        reduction.offset.clone()
+    } else if let Some(matrix) = &summary.constraint_matrix {
+        matrix
+            .affine_reduction()
+            .map_err(|error| TransientSolveError::InitialAcceleration {
+                detail: format!(
+                    "structural constraints cannot establish an initial state: {error}"
+                ),
+            })?
+            .offset
+    } else {
+        summary
+            .operator
+            .load()
+            .iter()
+            .zip(summary.operator.constrained_dofs())
+            .map(|(value, constrained)| if *constrained { *value } else { 0.0 })
+            .collect()
+    };
+    solve_transient_system_with_assembly(
+        summary,
+        options,
+        backend,
+        TransientTimeDomain {
+            start_time_s: 0.0,
+            end_time_s: 1.0,
+            step_boundaries: &[],
+        },
+        initial_displacement,
+        vec![0.0; summary.dof_count],
+        |_, _| Ok(summary.clone()),
+    )
 }
 
 pub(crate) fn solve_transient_system_with_assembly<E>(
     summary: &AssemblySummary,
     options: TransientSolveOptions,
     backend: ComputeBackend,
-    start_time_s: f64,
-    end_time_s: f64,
-    step_boundaries: &[TransientStepBoundary],
+    time_domain: TransientTimeDomain<'_>,
+    initial_displacement: Vec<f64>,
+    initial_velocity: Vec<f64>,
     mut assembly_at: impl FnMut(f64, SignalSampleApproach) -> Result<AssemblySummary, E>,
-) -> Result<TransientSolveResult, E> {
-    if summary.dof_count == 0 || options.interval_count == 0 {
-        return Ok(TransientSolveResult {
-            converged_steps: 0,
-            total_steps: options.interval_count,
-            time_points_s: vec![start_time_s],
-            displacement_snapshots: vec![vec![0.0; summary.dof_count]],
-            residual_norms: Vec::new(),
-            accepted_time_steps_s: Vec::new(),
-            diagnostics: vec![FeaDiagnostic {
-                code: "FEA_TRANSIENT_EMPTY_SYSTEM".to_string(),
-                severity: FeaDiagnosticSeverity::Warning,
-                message: "transient solve skipped because assembled system has zero DOFs or interval_count is zero"
-                    .to_string(),
-            }],
-            solver_method: SolverMethod::ImplicitEulerPcg,
-            solver_backend: LinearAlgebraBackendKind::CpuReference,
-            solver_host_sync_count: 0,
-            device_apply_k_count: 0,
-            device_apply_k_attempt_count: 0,
-            preconditioner: SolverPreconditioner::None,
-            accelerator_evidence: Vec::new(),
-            assembly_snapshots: vec![summary.clone()],
-            strain_energy_snapshots: vec![strain_energy(summary, &vec![0.0; summary.dof_count])],
-        });
+) -> Result<TransientSolveResult, TransientSolveError<E>> {
+    let TransientTimeDomain {
+        start_time_s,
+        end_time_s,
+        step_boundaries,
+    } = time_domain;
+    validate_options(&options, start_time_s, end_time_s)?;
+    if summary.dof_count == 0 {
+        return Ok(empty_result(summary, &options, start_time_s));
     }
-
-    let use_accelerator = backend == ComputeBackend::Gpu;
-    let mut thermo_severity_sum = 0.0_f64;
-    let mut electro_severity_sum = 0.0_f64;
-    let mut electro_severity_peak = 0.0_f64;
-    let mut coupling_sample_count = 0_usize;
-    let mut thermo_severity_peak = 0.0_f64;
-    let mut effective_residual_target_peak = options.residual_target;
-    let mut thermo_growth_limit_min = 1.0_f64;
-    let mut thermo_nonconverged_shrink_min = 1.0_f64;
-    let min_dt = options.min_time_step_s.max(1.0e-9);
-    let max_dt = options.max_time_step_s.max(min_dt);
-    let nominal_time_step_s = (end_time_s - start_time_s) / options.interval_count as f64;
-    let mut dt = nominal_time_step_s.clamp(min_dt, max_dt);
-    let mut x = vec![0.0; summary.dof_count];
+    let backend_kind = match backend {
+        ComputeBackend::Cpu => LinearAlgebraBackendKind::CpuReference,
+        ComputeBackend::Gpu => LinearAlgebraBackendKind::Accelerator,
+    };
+    let initial = solve_initial_acceleration(
+        summary,
+        initial_displacement,
+        initial_velocity,
+        backend_kind,
+        options.residual_target,
+    )
+    .map_err(|error| TransientSolveError::InitialAcceleration {
+        detail: error.to_string(),
+    })?;
+    require_residual_target(&initial, start_time_s, options.residual_target)?;
+    let mut state = initial.state().clone();
     let mut time_points_s = vec![start_time_s];
-    let mut displacement_snapshots = vec![x.clone()];
-    let mut residual_norms = Vec::with_capacity(options.interval_count);
-    let mut accepted_time_steps_s = Vec::with_capacity(options.interval_count);
-    let mut converged_steps = 0usize;
-    let mut retry_budget_hits = 0usize;
-    let mut energies = Vec::with_capacity(options.interval_count + 1);
-    energies.push(strain_energy(summary, &x));
+    let mut displacement_snapshots = vec![state.displacement().to_vec()];
+    let mut velocity_snapshots = vec![state.velocity().to_vec()];
+    let mut acceleration_snapshots = vec![state.acceleration().to_vec()];
+    let interval_count = options.time_step_policy.interval_count();
+    let mut residual_norms = Vec::with_capacity(interval_count + 1);
+    residual_norms.push(initial.projected_residual().relative_norm());
+    let mut accepted_time_steps_s = Vec::with_capacity(interval_count);
     let mut assembly_snapshots = vec![summary.clone()];
-    let mut solver_backend = LinearAlgebraBackendKind::CpuReference;
-    let mut solver_host_sync_count = 0u32;
-    let mut device_apply_k_count = 0u32;
-    let mut device_apply_k_attempt_count = 0u32;
-    let mut selected_preconditioner = SolverPreconditioner::None;
-    let mut linear_diagnostics = Vec::new();
-    let mut accelerator_evidence = Vec::new();
-    let mut prepared_accelerator_systems_by_dt: HashMap<
-        AcceleratorStepCacheKey,
-        AcceleratorPreparedLinearSystem,
-    > = HashMap::new();
-    let mut prepared_accelerator_system_lru = VecDeque::new();
-    let mut prepared_accelerator_cache_hits = 0usize;
-    let mut prepared_accelerator_cache_misses = 0usize;
-    let mut prepared_build_ms = 0.0_f64;
-    let mut solve_ms = 0.0_f64;
-    let mut fallback_apply_count = 0u32;
-    let mut adapt_increase_steps = 0usize;
-    let mut adapt_decrease_steps = 0usize;
-    let mut adapt_hold_steps = 0usize;
-    let mut adapt_scale_sum = 0.0_f64;
-    let mut adapt_scale_min = f64::INFINITY;
-    let mut adapt_scale_max = 0.0_f64;
-    let dt_bucket_rel_tolerance = options.dt_bucket_rel_tolerance.max(0.0);
+    let mut strain_energy_snapshots = vec![strain_energy(summary, &state)];
+    let mut kinetic_energy_snapshots = vec![kinetic_energy(summary, &state)];
+    let mut aggregate = SolveAggregate::default();
+    aggregate.push(&initial);
+    let nominal_time_step_s = (end_time_s - start_time_s) / interval_count as f64;
     let progress_operation = options.progress_operation.as_str();
 
-    let final_time_s = end_time_s;
-    let mut step_index = 0_usize;
-    while time_points_s
-        .last()
-        .is_some_and(|time| *time < final_time_s)
-    {
+    while time_points_s.last().is_some_and(|time| *time < end_time_s) {
         if is_cancelled() {
             emit_phase(
                 progress_operation,
                 FeaProgressPhase::Solve,
                 FeaProgressStatus::Cancelled,
                 "transient solve cancelled",
-                Some(step_index as u64),
+                Some(accepted_time_steps_s.len() as u64),
                 None,
             );
-            break;
+            return Err(TransientSolveError::Cancelled);
         }
+        let current_time_s = time_points_s.last().copied().unwrap_or(start_time_s);
+        let proposed_dt_s = nominal_time_step_s.min(end_time_s - current_time_s);
+        let (next_time_s, approach) =
+            next_step_boundary(current_time_s, proposed_dt_s, end_time_s, step_boundaries);
+        let time_step_s = next_time_s - current_time_s;
         emit_phase(
             progress_operation,
             FeaProgressPhase::Solve,
             FeaProgressStatus::Advanced,
-            format!("solving transient step {}", step_index + 1),
-            Some(step_index as u64),
+            format!("solving transient step ending at {next_time_s} s"),
+            Some(accepted_time_steps_s.len() as u64),
             None,
         );
-        let current_time = time_points_s.last().copied().unwrap_or(start_time_s);
-        let mut step_dt = dt.min(final_time_s - current_time);
-        let mut retries = 0usize;
-        let (
-            next_x,
-            residual_norm,
-            converged,
-            step_stats,
-            accepted_effective_residual_target,
-            accepted_thermo_growth_limit,
-            accepted_thermo_nonconverged_shrink,
-            accepted_assembly,
-            accepted_time_s,
-        ) = loop {
-            let current_time = time_points_s.last().copied().unwrap_or(start_time_s);
-            let (next_time, approach) =
-                next_step_boundary(current_time, step_dt, final_time_s, step_boundaries);
-            step_dt = next_time - current_time;
-            let step_summary = assembly_at(next_time, approach)?;
-            let thermo_severity =
-                thermo_mechanical::severity(step_summary.thermo_mechanical.as_ref());
-            let electro_severity = electro_thermal::severity(step_summary.electro_thermal.as_ref());
-            let thermo_policy =
-                thermo_mechanical::transient_policy(options.residual_target, thermo_severity);
-            let effective_residual_target = thermo_policy.effective_residual_target;
-            let thermo_growth_limit = thermo_policy.growth_limit;
-            let thermo_nonconverged_shrink = thermo_policy.nonconverged_shrink;
-            let rhs =
-                build_step_rhs_with_load(&step_summary, &x, step_dt, step_summary.operator.load());
-            let solve_start = Instant::now();
-            let solved = solve_implicit_step_system(
-                &step_summary,
-                &rhs,
-                step_dt,
-                nominal_time_step_s,
-                &options,
-                use_accelerator,
-                AcceleratorStepCache {
-                    prepared_systems_by_dt: &mut prepared_accelerator_systems_by_dt,
-                    prepared_lru: &mut prepared_accelerator_system_lru,
-                    cache_hits: &mut prepared_accelerator_cache_hits,
-                    cache_misses: &mut prepared_accelerator_cache_misses,
-                    prepared_build_ms: &mut prepared_build_ms,
-                    dt_bucket_rel_tolerance,
-                },
-            );
-            solve_ms += solve_start.elapsed().as_secs_f64() * 1_000.0;
-            coupling_sample_count += 1;
-            thermo_severity_sum += thermo_severity;
-            thermo_severity_peak = thermo_severity_peak.max(thermo_severity);
-            electro_severity_sum += electro_severity;
-            electro_severity_peak = electro_severity_peak.max(electro_severity);
-            effective_residual_target_peak =
-                effective_residual_target_peak.max(effective_residual_target);
-            thermo_growth_limit_min = thermo_growth_limit_min.min(thermo_growth_limit);
-            thermo_nonconverged_shrink_min =
-                thermo_nonconverged_shrink_min.min(thermo_nonconverged_shrink);
-            if !options.adaptive_time_step {
-                let (candidate_x, candidate_residual, candidate_converged, candidate_stats) =
-                    solved;
-                break (
-                    candidate_x,
-                    candidate_residual,
-                    candidate_converged,
-                    candidate_stats,
-                    effective_residual_target,
-                    thermo_growth_limit,
-                    thermo_nonconverged_shrink,
-                    step_summary,
-                    next_time,
-                );
-            }
-            let (candidate_x, candidate_residual, candidate_converged, candidate_stats) = solved;
-            if candidate_converged && candidate_residual <= effective_residual_target * 4.0 {
-                break (
-                    candidate_x,
-                    candidate_residual,
-                    candidate_converged,
-                    candidate_stats,
-                    effective_residual_target,
-                    thermo_growth_limit,
-                    thermo_nonconverged_shrink,
-                    step_summary,
-                    next_time,
-                );
-            }
-            if retries >= options.max_step_retries || step_dt <= min_dt * 1.01 {
-                retry_budget_hits += 1;
-                break (
-                    candidate_x,
-                    candidate_residual,
-                    candidate_converged,
-                    candidate_stats,
-                    effective_residual_target,
-                    thermo_growth_limit,
-                    thermo_nonconverged_shrink,
-                    step_summary,
-                    next_time,
-                );
-            }
-            step_dt = (step_dt * 0.5).clamp(min_dt, max_dt);
-            retries += 1;
-        };
+        let step_summary =
+            assembly_at(next_time_s, approach).map_err(TransientSolveError::Assembly)?;
+        require_stable_dof_count(summary, &step_summary)?;
+        let solved = solve_average_acceleration_step(
+            &step_summary,
+            &state,
+            time_step_s,
+            backend_kind,
+            options.residual_target,
+        )
+        .map_err(|source| TransientSolveError::Step {
+            time_s: next_time_s,
+            detail: source.to_string(),
+        })?;
+        require_residual_target(&solved, next_time_s, options.residual_target)?;
 
-        if let Some(LinearStepStats {
-            solver_backend: step_solver_backend,
-            host_sync_count,
-            device_apply_k_count: step_device_apply_k_count,
-            device_apply_k_attempt_count: step_device_apply_k_attempt_count,
-            preconditioner,
-            diagnostics: step_diagnostics,
-            accelerator_evidence: step_accelerator_evidence,
-        }) = step_stats
-        {
-            solver_backend = step_solver_backend;
-            solver_host_sync_count = solver_host_sync_count.saturating_add(host_sync_count);
-            device_apply_k_count = device_apply_k_count.saturating_add(step_device_apply_k_count);
-            device_apply_k_attempt_count =
-                device_apply_k_attempt_count.saturating_add(step_device_apply_k_attempt_count);
-            fallback_apply_count = fallback_apply_count.saturating_add(
-                step_device_apply_k_attempt_count.saturating_sub(step_device_apply_k_count),
-            );
-            selected_preconditioner = preconditioner;
-            linear_diagnostics.extend(step_diagnostics);
-            accelerator_evidence.extend(step_accelerator_evidence);
-        }
+        // A candidate becomes visible only after its linear solve, physical residual, and state
+        // invariants have all succeeded.
+        state = solved.state().clone();
+        aggregate.push(&solved);
+        accepted_time_steps_s.push(time_step_s);
+        time_points_s.push(next_time_s);
+        displacement_snapshots.push(state.displacement().to_vec());
+        velocity_snapshots.push(state.velocity().to_vec());
+        acceleration_snapshots.push(state.acceleration().to_vec());
+        strain_energy_snapshots.push(strain_energy(&step_summary, &state));
+        kinetic_energy_snapshots.push(kinetic_energy(&step_summary, &state));
+        assembly_snapshots.push(step_summary);
+        residual_norms.push(solved.projected_residual().relative_norm());
 
-        x = next_x;
-        time_points_s.push(accepted_time_s);
-        displacement_snapshots.push(x.clone());
-        residual_norms.push(residual_norm);
-        accepted_time_steps_s.push(step_dt);
-        energies.push(strain_energy(&accepted_assembly, &x));
-        assembly_snapshots.push(accepted_assembly);
-        if converged {
-            converged_steps += 1;
-        }
+        if approach == SignalSampleApproach::LeftLimit {
+            let right_limit_summary = assembly_at(next_time_s, SignalSampleApproach::At)
+                .map_err(TransientSolveError::Assembly)?;
+            require_stable_dof_count(summary, &right_limit_summary)?;
+            let refreshed = solve_initial_acceleration(
+                &right_limit_summary,
+                state.displacement().to_vec(),
+                state.velocity().to_vec(),
+                backend_kind,
+                options.residual_target,
+            )
+            .map_err(|error| TransientSolveError::AccelerationRefresh {
+                time_s: next_time_s,
+                detail: error.to_string(),
+            })?;
+            require_residual_target(&refreshed, next_time_s, options.residual_target)?;
+            state = refreshed.state().clone();
+            aggregate.push(&refreshed);
 
-        if options.adaptive_time_step {
-            let next_dt = recommend_next_time_step(structural::TransientAdaptivityInput {
-                step_dt,
-                residual_norm,
-                residual_target: accepted_effective_residual_target,
-                min_dt,
-                max_dt,
-                converged,
-                retries,
-                adapt_nonconverged_shrink: options.adapt_nonconverged_shrink,
-                adapt_growth_exponent: options.adapt_growth_exponent,
-                adapt_min_scale: options.adapt_min_scale,
-                adapt_max_scale: options.adapt_max_scale,
-                adapt_retry_growth_cap: options.adapt_retry_growth_cap,
-                thermo_growth_limit: accepted_thermo_growth_limit,
-                thermo_nonconverged_shrink: accepted_thermo_nonconverged_shrink,
-            });
-            let scale = next_dt / step_dt.max(1.0e-12);
-            adapt_scale_sum += scale;
-            adapt_scale_min = adapt_scale_min.min(scale);
-            adapt_scale_max = adapt_scale_max.max(scale);
-            if scale > 1.01 {
-                adapt_increase_steps += 1;
-            } else if scale < 0.99 {
-                adapt_decrease_steps += 1;
-            } else {
-                adapt_hold_steps += 1;
-            }
-            dt = next_dt;
-        } else {
-            dt = nominal_time_step_s.clamp(min_dt, max_dt);
+            // A public time point denotes the signal value `At` that coordinate. The left-limit
+            // state is an internal integration boundary only; replace all assembly-dependent
+            // quantities with the right-limit equilibrium used to begin the next interval.
+            *acceleration_snapshots
+                .last_mut()
+                .expect("the accepted state was published above") = state.acceleration().to_vec();
+            *strain_energy_snapshots
+                .last_mut()
+                .expect("the accepted state was published above") =
+                strain_energy(&right_limit_summary, &state);
+            *kinetic_energy_snapshots
+                .last_mut()
+                .expect("the accepted state was published above") =
+                kinetic_energy(&right_limit_summary, &state);
+            *assembly_snapshots
+                .last_mut()
+                .expect("the accepted state was published above") = right_limit_summary;
+            *residual_norms
+                .last_mut()
+                .expect("the accepted state was published above") =
+                refreshed.projected_residual().relative_norm();
         }
-        step_index += 1;
     }
 
     let total_steps = accepted_time_steps_s.len();
-
     emit_phase(
         progress_operation,
         FeaProgressPhase::Solve,
         FeaProgressStatus::Advanced,
-        "transient step solve loop complete",
-        Some(accepted_time_steps_s.len() as u64),
+        "second-order transient solve loop complete",
+        Some(total_steps as u64),
         Some(total_steps as u64),
     );
-
-    let mut max_step_l2_jump_ratio = 0.0_f64;
-    let mut nonfinite_displacement_count = 0usize;
-    for window in displacement_snapshots.windows(2) {
-        let prev = &window[0];
-        let next = &window[1];
-        let prev_norm = prev.iter().map(|value| value * value).sum::<f64>().sqrt();
-        let next_norm = next.iter().map(|value| value * value).sum::<f64>().sqrt();
-        let mut jump_norm_sq = 0.0_f64;
-        for (a, b) in prev.iter().zip(next.iter()) {
-            let d = b - a;
-            jump_norm_sq += d * d;
-            if !b.is_finite() {
-                nonfinite_displacement_count += 1;
-            }
-        }
-        let jump_norm = jump_norm_sq.sqrt();
-        let jump_ratio = jump_norm / prev_norm.max(next_norm).max(1.0);
-        max_step_l2_jump_ratio = max_step_l2_jump_ratio.max(jump_ratio);
-    }
-
-    let mut diagnostics = vec![FeaDiagnostic {
-        code: "FEA_TRANSIENT_METHOD".to_string(),
-        severity: FeaDiagnosticSeverity::Info,
-        message: format!(
-            "solver=implicit_euler_pcg matrix_free={} backend={}",
-            solver_backend == LinearAlgebraBackendKind::CpuReference,
-            solver_backend
-        ),
-    }];
-    diagnostics.extend(linear_diagnostics);
-    push_transient_quality_diagnostics(
-        &mut diagnostics,
-        TransientQualityDiagnosticInputs {
-            options: &options,
-            dt_final: dt,
-            converged_steps,
-            retry_budget_hits,
-            accepted_time_steps_s: &accepted_time_steps_s,
-            residual_norms: &residual_norms,
-            energies: &energies,
-            use_accelerator,
-            prepared_cache_entries: prepared_accelerator_systems_by_dt.len(),
-            prepared_cache_hits: prepared_accelerator_cache_hits,
-            prepared_cache_misses: prepared_accelerator_cache_misses,
-            prepared_build_ms,
-            solve_ms,
-            fallback_apply_count,
-            adapt_increase_steps,
-            adapt_decrease_steps,
-            adapt_hold_steps,
-            adapt_scale_mean: if accepted_time_steps_s.is_empty() {
-                1.0
-            } else {
-                adapt_scale_sum / accepted_time_steps_s.len() as f64
-            },
-            adapt_scale_min: if adapt_scale_min.is_finite() {
-                adapt_scale_min
-            } else {
-                1.0
-            },
-            adapt_scale_max: if adapt_scale_max > 0.0 {
-                adapt_scale_max
-            } else {
-                1.0
-            },
-            dt_bucket_rel_tolerance,
-            max_step_l2_jump_ratio,
-            nonfinite_displacement_count,
-            thermo_severity_mean: if coupling_sample_count == 0 {
-                0.0
-            } else {
-                thermo_severity_sum / coupling_sample_count as f64
-            },
-            thermo_severity_peak,
-            effective_residual_target_peak,
-            thermo_growth_limit_min,
-            thermo_nonconverged_shrink_min,
-        },
+    let diagnostics = transient_diagnostics(
+        &options,
+        &accepted_time_steps_s,
+        &residual_norms,
+        &strain_energy_snapshots,
+        &kinetic_energy_snapshots,
+        aggregate.solver_backend,
     );
-    if electro_severity_peak > 0.0 {
-        diagnostics.push(FeaDiagnostic {
-            code: "FEA_ET_TRANSIENT".to_string(),
-            severity: if electro_severity_peak <= 0.6 {
-                FeaDiagnosticSeverity::Info
-            } else {
-                FeaDiagnosticSeverity::Warning
-            },
-            message: format!(
-                "severity_mean={} severity_peak={}",
-                if coupling_sample_count == 0 {
-                    0.0
-                } else {
-                    electro_severity_sum / coupling_sample_count as f64
-                },
-                electro_severity_peak,
-            ),
-        });
-    }
-
     Ok(TransientSolveResult {
-        converged_steps,
+        converged_steps: total_steps,
         total_steps,
         time_points_s,
         displacement_snapshots,
+        velocity_snapshots,
+        acceleration_snapshots,
         residual_norms,
         accepted_time_steps_s,
         diagnostics,
-        solver_method: SolverMethod::ImplicitEulerPcg,
-        solver_backend,
-        solver_host_sync_count,
-        device_apply_k_count,
-        device_apply_k_attempt_count,
-        preconditioner: selected_preconditioner,
-        accelerator_evidence,
+        solver_method: SolverMethod::NewmarkAverageAccelerationPcg,
+        solver_backend: aggregate.solver_backend,
+        solver_host_sync_count: aggregate.host_sync_count,
+        device_apply_k_count: aggregate.device_apply_k_count,
+        device_apply_k_attempt_count: aggregate.device_apply_k_attempt_count,
+        preconditioner: aggregate.preconditioner,
+        accelerator_evidence: aggregate.accelerator_evidence,
         assembly_snapshots,
-        strain_energy_snapshots: energies,
+        strain_energy_snapshots,
+        kinetic_energy_snapshots,
     })
 }
 
-fn recommend_next_time_step(input: structural::TransientAdaptivityInput) -> f64 {
-    structural::recommend_next_time_step(input)
+fn require_stable_dof_count<E>(
+    initial: &AssemblySummary,
+    candidate: &AssemblySummary,
+) -> Result<(), TransientSolveError<E>> {
+    if candidate.dof_count != initial.dof_count {
+        return Err(TransientSolveError::DofCountChanged);
+    }
+    Ok(())
 }
 
-fn next_step_boundary(
-    current_time_s: f64,
-    proposed_dt_s: f64,
-    final_time_s: f64,
-    step_boundaries: &[TransientStepBoundary],
-) -> (f64, SignalSampleApproach) {
-    let proposed_end = (current_time_s + proposed_dt_s).min(final_time_s);
-    match step_boundaries
-        .iter()
-        .copied()
-        .find(|boundary| boundary.time_s > current_time_s && boundary.time_s <= proposed_end)
-    {
-        Some(boundary) => (boundary.time_s, boundary.approach()),
-        None => (proposed_end, SignalSampleApproach::At),
+fn require_residual_target<E>(
+    solved: &EffectiveDynamicsSolveResult,
+    time_s: f64,
+    target: f64,
+) -> Result<(), TransientSolveError<E>> {
+    let residual_norm = solved.projected_residual().relative_norm();
+    if !residual_norm.is_finite() || residual_norm > target {
+        return Err(TransientSolveError::ResidualTargetExceeded {
+            time_s,
+            residual_norm,
+            target,
+        });
+    }
+    Ok(())
+}
+
+fn validate_options<E>(
+    options: &TransientSolveOptions,
+    start_time_s: f64,
+    end_time_s: f64,
+) -> Result<(), TransientSolveError<E>> {
+    if options.time_step_policy.interval_count() == 0 {
+        return Err(TransientSolveError::InvalidOptions(
+            "interval_count must be positive",
+        ));
+    }
+    if !options.residual_target.is_finite() || options.residual_target <= 0.0 {
+        return Err(TransientSolveError::InvalidOptions(
+            "residual_target must be finite and positive",
+        ));
+    }
+    if !start_time_s.is_finite() || !end_time_s.is_finite() || end_time_s < start_time_s {
+        return Err(TransientSolveError::InvalidOptions(
+            "the time domain must be finite and ordered",
+        ));
+    }
+    Ok(())
+}
+
+fn empty_result(
+    summary: &AssemblySummary,
+    options: &TransientSolveOptions,
+    start_time_s: f64,
+) -> TransientSolveResult {
+    TransientSolveResult {
+        converged_steps: 0,
+        total_steps: 0,
+        time_points_s: vec![start_time_s],
+        displacement_snapshots: vec![Vec::new()],
+        velocity_snapshots: vec![Vec::new()],
+        acceleration_snapshots: vec![Vec::new()],
+        residual_norms: vec![0.0],
+        accepted_time_steps_s: Vec::new(),
+        diagnostics: transient_diagnostics(
+            options,
+            &[],
+            &[],
+            &[0.0],
+            &[0.0],
+            LinearAlgebraBackendKind::CpuReference,
+        ),
+        solver_method: SolverMethod::NewmarkAverageAccelerationPcg,
+        solver_backend: LinearAlgebraBackendKind::CpuReference,
+        solver_host_sync_count: 0,
+        device_apply_k_count: 0,
+        device_apply_k_attempt_count: 0,
+        preconditioner: SolverPreconditioner::None,
+        accelerator_evidence: Vec::new(),
+        assembly_snapshots: vec![summary.clone()],
+        strain_energy_snapshots: vec![0.0],
+        kinetic_energy_snapshots: vec![0.0],
     }
 }
 
-#[cfg(test)]
-mod event_step_tests {
-    use super::*;
+struct SolveAggregate {
+    solver_backend: LinearAlgebraBackendKind,
+    host_sync_count: u32,
+    device_apply_k_count: u32,
+    device_apply_k_attempt_count: u32,
+    preconditioner: SolverPreconditioner,
+    accelerator_evidence: Vec<crate::solve::accelerator::AcceleratorSolveEvidence>,
+}
 
-    #[test]
-    fn event_substeps_preserve_the_nominal_horizon_and_never_cross_a_jump() {
-        let start = 0.0;
-        let final_time = 1.2;
-        let nominal_dt = 0.6;
-        let events = canonical_transient_step_boundaries(&[0.5], &[], start, final_time).unwrap();
-        let mut time = start;
-        let mut steps = Vec::new();
-        while time < final_time {
-            let (next, _) = next_step_boundary(time, nominal_dt, final_time, &events);
-            steps.push((time, next));
-            time = next;
+impl Default for SolveAggregate {
+    fn default() -> Self {
+        Self {
+            solver_backend: LinearAlgebraBackendKind::CpuReference,
+            host_sync_count: 0,
+            device_apply_k_count: 0,
+            device_apply_k_attempt_count: 0,
+            preconditioner: SolverPreconditioner::None,
+            accelerator_evidence: Vec::new(),
         }
-        assert_eq!(time, final_time);
-        assert_eq!(steps, vec![(0.0, 0.5), (0.5, 1.1), (1.1, 1.2)]);
-        assert!(steps
-            .iter()
-            .all(|(left, right)| !(left < &0.5 && right > &0.5)));
     }
+}
 
-    #[test]
-    fn required_samples_split_steps_without_changing_signal_continuity() {
-        let boundaries = canonical_transient_step_boundaries(&[], &[0.25], 0.0, 1.0).unwrap();
-        assert_eq!(
-            next_step_boundary(0.0, 0.5, 1.0, &boundaries),
-            (0.25, SignalSampleApproach::At)
-        );
-
-        let coincident = canonical_transient_step_boundaries(&[0.25], &[0.25], 0.0, 1.0).unwrap();
-        assert_eq!(
-            next_step_boundary(0.0, 0.5, 1.0, &coincident),
-            (0.25, SignalSampleApproach::LeftLimit)
-        );
+impl SolveAggregate {
+    fn push(&mut self, solved: &EffectiveDynamicsSolveResult) {
+        for linear in solved.linear_solves() {
+            self.solver_backend = linear.solver_backend;
+            self.host_sync_count = self.host_sync_count.saturating_add(linear.host_sync_count);
+            self.device_apply_k_count = self
+                .device_apply_k_count
+                .saturating_add(linear.device_apply_k_count);
+            self.device_apply_k_attempt_count = self
+                .device_apply_k_attempt_count
+                .saturating_add(linear.device_apply_k_attempt_count);
+            self.preconditioner = linear.preconditioner;
+            self.accelerator_evidence
+                .extend(linear.accelerator_evidence.iter().cloned());
+        }
     }
+}
+
+fn strain_energy(summary: &AssemblySummary, state: &SecondOrderState) -> f64 {
+    let force = spmv(
+        summary.operator.operators().stiffness(),
+        state.displacement(),
+    )
+    .expect("validated structural displacement dimensions");
+    0.5 * dot(state.displacement(), &force)
+}
+
+fn kinetic_energy(summary: &AssemblySummary, state: &SecondOrderState) -> f64 {
+    let momentum = spmv(summary.operator.operators().mass(), state.velocity())
+        .expect("validated structural velocity dimensions");
+    0.5 * dot(state.velocity(), &momentum)
+}
+
+fn dot(left: &[f64], right: &[f64]) -> f64 {
+    left.iter()
+        .zip(right)
+        .map(|(left, right)| left * right)
+        .sum()
 }

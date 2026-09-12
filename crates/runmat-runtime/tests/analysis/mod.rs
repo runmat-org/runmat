@@ -28,9 +28,10 @@ use runmat_runtime::analysis::{
     analysis_validate, AnalysisAcousticRunOptions, AnalysisCfdRunOptions, AnalysisChtRunOptions,
     AnalysisCreateModelIntentSpec, AnalysisElectromagneticRunOptions, AnalysisFsiRunOptions,
     AnalysisModalRunOptions, AnalysisModelTemplate, AnalysisNonlinearRunOptions,
-    AnalysisResultsQuery, AnalysisRunOptions, AnalysisSolverOptions, AnalysisThermalRunOptions,
-    AnalysisTransientRunOptions, FallbackEvent, FallbackReason, FallbackStage,
-    FormulationRequirement, PrecisionMode, PreconditionerMode, QualityPolicy,
+    AnalysisResultsQuery, AnalysisRunOptions, AnalysisSolverOptions,
+    AnalysisStructuralTimeStepPolicy, AnalysisThermalRunOptions, AnalysisTransientRunOptions,
+    FallbackEvent, FallbackReason, FallbackStage, FormulationRequirement, PrecisionMode,
+    PreconditionerMode, QualityPolicy,
 };
 use runmat_runtime::geometry::geometry_load_op;
 use runmat_runtime::operations::OperationContext;
@@ -72,10 +73,7 @@ struct FixtureSpec {
     max_modal_orthogonality_offdiag: Option<f64>,
     min_modal_relative_frequency_separation: Option<f64>,
     max_transient_residual_norm: Option<f64>,
-    max_transient_energy_growth_ratio: Option<f64>,
     min_gpu_speedup_ratio: Option<f64>,
-    min_transient_cache_hit_ratio: Option<f64>,
-    max_transient_cache_misses: Option<f64>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -98,10 +96,7 @@ struct FixtureManifestEntry {
     max_modal_orthogonality_offdiag: Option<f64>,
     min_modal_relative_frequency_separation: Option<f64>,
     max_transient_residual_norm: Option<f64>,
-    max_transient_energy_growth_ratio: Option<f64>,
     min_gpu_speedup_ratio: Option<f64>,
-    min_transient_cache_hit_ratio: Option<f64>,
-    max_transient_cache_misses: Option<f64>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -152,9 +147,6 @@ struct FixtureRunRecord {
     gpu_solver_device_apply_k_ratio: Option<f64>,
     gpu_speedup_ratio: Option<f64>,
     gpu_solver_backend: Option<String>,
-    gpu_transient_cache_hit_ratio: Option<f64>,
-    gpu_transient_cache_misses: Option<f64>,
-    gpu_transient_cache_entries: Option<f64>,
     gpu_solver_prepared_build_ms: Option<f64>,
     gpu_solver_solve_ms: Option<f64>,
     gpu_solver_fallback_apply_count: Option<f64>,
@@ -166,7 +158,6 @@ struct FixtureRunRecord {
     thermo_assignment_heterogeneity_index: Option<f64>,
     thermo_region_delta_count: Option<f64>,
     thermo_spatial_coverage_ratio: Option<f64>,
-    thermo_transient_severity: Option<f64>,
     thermo_nonlinear_severity: Option<f64>,
     electro_thermal_coupling_enabled: Option<bool>,
     electro_thermal_coupling_fingerprint: Option<u64>,
@@ -257,16 +248,9 @@ struct BaselineConfig {
 const ROLLING_TARGET_FIXTURES: &[&str] = &[
     "modal_large_gpu_provider",
     "modal_large_gpu_provider_stress16",
-    "transient_long_gpu_provider",
-    "transient_shock_gpu_provider",
     "cfd_steady_gpu_provider",
     "cht_coupled_gpu_provider",
     "fsi_coupled_gpu_provider",
-    "thermo_mech_kickoff_gpu_provider",
-    "thermo_gradient_benign_gpu_provider",
-    "thermo_gradient_pathological_gpu_provider",
-    "thermo_ramp_smooth_gpu_provider",
-    "thermo_shock_oscillatory_gpu_provider",
     "thermal_standalone_ramp_gpu_provider",
     "nonlinear_assembly_gpu_provider",
     "nonlinear_assembly_stress_gpu_provider",

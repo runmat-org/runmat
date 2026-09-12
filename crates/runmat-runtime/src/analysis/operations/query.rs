@@ -42,16 +42,13 @@ macro_rules! visit_analysis_result_fields {
                 $($borrow)* transient.angular_velocity_snapshots,
                 $($borrow)* transient.acceleration_snapshots,
                 $($borrow)* transient.angular_acceleration_snapshots,
+                $($borrow)* transient.strain_snapshots,
+                $($borrow)* transient.stress_snapshots,
+                $($borrow)* transient.strain_energy_density_snapshots,
                 $($borrow)* transient.von_mises_snapshots,
                 $($borrow)* transient.kinetic_energy_snapshots,
                 $($borrow)* transient.strain_energy_snapshots,
                 $($borrow)* transient.residual_norm_snapshots,
-                $($borrow)* transient.thermo_mechanical_temperature_snapshots,
-                $($borrow)* transient.thermo_mechanical_thermal_strain_snapshots,
-                $($borrow)* transient.thermo_mechanical_thermal_stress_snapshots,
-                $($borrow)* transient.thermo_mechanical_displacement_snapshots,
-                $($borrow)* transient.thermo_mechanical_von_mises_snapshots,
-                $($borrow)* transient.thermo_mechanical_coupling_residual_snapshots,
                 $($borrow)* transient.electro_thermal_temperature_snapshots,
                 $($borrow)* transient.electro_thermal_thermal_residual_snapshots,
             ] {
@@ -373,12 +370,6 @@ pub fn analysis_results_op(
         "FEA_TM_COUPLING",
         "spatial_coverage_ratio",
     );
-    let thermo_transient_severity = diagnostic_metric(
-        &run_result.run.diagnostics,
-        "FEA_TM_TRANSIENT",
-        "severity_peak",
-    )
-    .or_else(|| diagnostic_metric(&run_result.run.diagnostics, "FEA_TM_TRANSIENT", "severity"));
     let thermo_nonlinear_severity = diagnostic_metric(
         &run_result.run.diagnostics,
         "FEA_TM_NONLINEAR",
@@ -730,7 +721,6 @@ pub fn analysis_results_op(
         thermo_assignment_heterogeneity_index,
         thermo_region_delta_count,
         thermo_spatial_coverage_ratio,
-        thermo_transient_severity,
         thermo_nonlinear_severity,
         electro_thermal_coupling_enabled,
         electro_thermal_coupling_fingerprint,
@@ -865,6 +855,18 @@ pub fn analysis_results_op(
                     &transient.angular_acceleration_snapshots,
                     &query.transient_snapshot_indices,
                 );
+                let strain_snapshots = filter_analysis_fields_by_indices(
+                    &transient.strain_snapshots,
+                    &query.transient_snapshot_indices,
+                );
+                let stress_snapshots = filter_analysis_fields_by_indices(
+                    &transient.stress_snapshots,
+                    &query.transient_snapshot_indices,
+                );
+                let strain_energy_density_snapshots = filter_analysis_fields_by_indices(
+                    &transient.strain_energy_density_snapshots,
+                    &query.transient_snapshot_indices,
+                );
                 let mut von_mises_snapshots =
                     Vec::with_capacity(query.transient_snapshot_indices.len());
                 let mut kinetic_energy_snapshots =
@@ -874,31 +876,6 @@ pub fn analysis_results_op(
                 let mut residual_norm_snapshots =
                     Vec::with_capacity(query.transient_snapshot_indices.len());
                 let mut residual_norms = Vec::with_capacity(query.transient_snapshot_indices.len());
-                let thermo_mechanical_temperature_snapshots = filter_analysis_fields_by_indices(
-                    &transient.thermo_mechanical_temperature_snapshots,
-                    &query.transient_snapshot_indices,
-                );
-                let thermo_mechanical_thermal_strain_snapshots = filter_analysis_fields_by_indices(
-                    &transient.thermo_mechanical_thermal_strain_snapshots,
-                    &query.transient_snapshot_indices,
-                );
-                let thermo_mechanical_thermal_stress_snapshots = filter_analysis_fields_by_indices(
-                    &transient.thermo_mechanical_thermal_stress_snapshots,
-                    &query.transient_snapshot_indices,
-                );
-                let thermo_mechanical_displacement_snapshots = filter_analysis_fields_by_indices(
-                    &transient.thermo_mechanical_displacement_snapshots,
-                    &query.transient_snapshot_indices,
-                );
-                let thermo_mechanical_von_mises_snapshots = filter_analysis_fields_by_indices(
-                    &transient.thermo_mechanical_von_mises_snapshots,
-                    &query.transient_snapshot_indices,
-                );
-                let thermo_mechanical_coupling_residual_snapshots =
-                    filter_analysis_fields_by_indices(
-                        &transient.thermo_mechanical_coupling_residual_snapshots,
-                        &query.transient_snapshot_indices,
-                    );
                 let electro_thermal_temperature_snapshots = filter_analysis_fields_by_indices(
                     &transient.electro_thermal_temperature_snapshots,
                     &query.transient_snapshot_indices,
@@ -1126,8 +1103,8 @@ pub fn analysis_results_op(
                             )
                         })?;
 
-                    if index > 0 {
-                        let residual = transient.residual_norms.get(index - 1).copied().ok_or_else(|| {
+                    {
+                        let residual = transient.residual_norms.get(index).copied().ok_or_else(|| {
                             operation_error(
                                 ANALYSIS_RESULTS_OPERATION,
                                 ANALYSIS_RESULTS_OP_VERSION,
@@ -1165,6 +1142,7 @@ pub fn analysis_results_op(
 
                 Some(TransientResultsData {
                     transient_payload_version: transient.transient_payload_version.clone(),
+                    initial_state: transient.initial_state.clone(),
                     time_points_s,
                     displacement_snapshots,
                     rotation_snapshots,
@@ -1172,16 +1150,13 @@ pub fn analysis_results_op(
                     angular_velocity_snapshots,
                     acceleration_snapshots,
                     angular_acceleration_snapshots,
+                    strain_snapshots,
+                    stress_snapshots,
+                    strain_energy_density_snapshots,
                     von_mises_snapshots,
                     kinetic_energy_snapshots,
                     strain_energy_snapshots,
                     residual_norm_snapshots,
-                    thermo_mechanical_temperature_snapshots,
-                    thermo_mechanical_thermal_strain_snapshots,
-                    thermo_mechanical_thermal_stress_snapshots,
-                    thermo_mechanical_displacement_snapshots,
-                    thermo_mechanical_von_mises_snapshots,
-                    thermo_mechanical_coupling_residual_snapshots,
                     electro_thermal_temperature_snapshots,
                     electro_thermal_thermal_residual_snapshots,
                     residual_norms,

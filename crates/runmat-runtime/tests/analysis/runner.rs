@@ -898,7 +898,7 @@ struct FixtureElectroThermalCoupling {
 
 fn thermo_coupling_for_fixture(spec_id: &str) -> Option<FixtureThermoMechanicalCoupling> {
     match spec_id {
-        "thermo_mech_kickoff_gpu_provider" => Some(FixtureThermoMechanicalCoupling {
+        "thermo_mech_kickoff_rejected" => Some(FixtureThermoMechanicalCoupling {
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 65.0,
             thermal_expansion_coefficient: 1.2e-5,
@@ -913,7 +913,7 @@ fn thermo_coupling_for_fixture(spec_id: &str) -> Option<FixtureThermoMechanicalC
                 },
             ],
         }),
-        "thermo_gradient_benign_gpu_provider" => Some(FixtureThermoMechanicalCoupling {
+        "thermo_gradient_benign_rejected" => Some(FixtureThermoMechanicalCoupling {
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 55.0,
             thermal_expansion_coefficient: 1.0e-5,
@@ -928,7 +928,7 @@ fn thermo_coupling_for_fixture(spec_id: &str) -> Option<FixtureThermoMechanicalC
                 },
             ],
         }),
-        "thermo_gradient_pathological_gpu_provider" => Some(FixtureThermoMechanicalCoupling {
+        "thermo_gradient_pathological_rejected" => Some(FixtureThermoMechanicalCoupling {
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 220.0,
             thermal_expansion_coefficient: 2.5e-5,
@@ -943,7 +943,7 @@ fn thermo_coupling_for_fixture(spec_id: &str) -> Option<FixtureThermoMechanicalC
                 },
             ],
         }),
-        "thermo_ramp_smooth_gpu_provider" => Some(FixtureThermoMechanicalCoupling {
+        "thermo_ramp_smooth_rejected" => Some(FixtureThermoMechanicalCoupling {
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 70.0,
             thermal_expansion_coefficient: 1.1e-5,
@@ -958,7 +958,7 @@ fn thermo_coupling_for_fixture(spec_id: &str) -> Option<FixtureThermoMechanicalC
                 },
             ],
         }),
-        "thermo_shock_oscillatory_gpu_provider" => Some(FixtureThermoMechanicalCoupling {
+        "thermo_shock_oscillatory_rejected" => Some(FixtureThermoMechanicalCoupling {
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 140.0,
             thermal_expansion_coefficient: 2.0e-5,
@@ -979,16 +979,16 @@ fn thermo_coupling_for_fixture(spec_id: &str) -> Option<FixtureThermoMechanicalC
 
 fn thermo_history_for_fixture(spec_id: &str) -> &'static [(f64, f64)] {
     match spec_id {
-        "thermo_mech_kickoff_gpu_provider" => &[(0.0, 0.6), (1.0, 1.0)],
-        "thermo_gradient_benign_gpu_provider" => &[(0.0, 0.7), (1.0, 1.0)],
-        "thermo_gradient_pathological_gpu_provider" => &[(0.0, 0.2), (0.4, 1.3), (1.0, 0.9)],
+        "thermo_mech_kickoff_rejected" => &[(0.0, 0.6), (1.0, 1.0)],
+        "thermo_gradient_benign_rejected" => &[(0.0, 0.7), (1.0, 1.0)],
+        "thermo_gradient_pathological_rejected" => &[(0.0, 0.2), (0.4, 1.3), (1.0, 0.9)],
         value
-            if value == "thermo_ramp_smooth_gpu_provider"
+            if value == "thermo_ramp_smooth_rejected"
                 || value.starts_with("thermal_standalone_ramp_") =>
         {
             &[(0.0, 0.3), (0.5, 0.7), (1.0, 1.0)]
         }
-        "thermo_shock_oscillatory_gpu_provider" => {
+        "thermo_shock_oscillatory_rejected" => {
             &[(0.0, 0.4), (0.25, 1.4), (0.5, 0.5), (0.75, 1.3), (1.0, 0.6)]
         }
         _ => &[],
@@ -1069,15 +1069,14 @@ fn transient_options_for_spec(
     spec: &FixtureSpec,
     solver_mesh_artifact_path: Option<String>,
 ) -> AnalysisTransientRunOptions {
-    let requested_bucket_rel_tol = std::env::var("RUNMAT_TRANSIENT_DT_BUCKET_REL_TOL")
-        .ok()
-        .and_then(|value| value.parse::<f64>().ok());
     AnalysisTransientRunOptions {
-        interval_count: spec
-            .transient_step_count
-            .unwrap_or(AnalysisTransientRunOptions::default().interval_count),
-        dt_bucket_rel_tolerance: requested_bucket_rel_tol
-            .unwrap_or(AnalysisTransientRunOptions::solid_recommended().dt_bucket_rel_tolerance),
+        time_step_policy: AnalysisStructuralTimeStepPolicy::Fixed {
+            interval_count: spec.transient_step_count.unwrap_or(
+                AnalysisTransientRunOptions::default()
+                    .time_step_policy
+                    .interval_count(),
+            ),
+        },
         solver_mesh_artifact_path,
         ..AnalysisTransientRunOptions::solid_recommended()
     }
@@ -2663,8 +2662,32 @@ fn run_fixture_cpu(
     solver_mesh_artifact_path: Option<&str>,
 ) -> FixtureRunResult {
     let solver_mesh_artifact_path = solver_mesh_artifact_path.map(str::to_owned);
-    let solver = AnalysisSolverOptions::defaults_for(fixture_procedure_step(model))
-        .expect("fixture procedure step must select a supported solver");
+    let procedure_step = fixture_procedure_step(model);
+    let solver = match AnalysisSolverOptions::defaults_for(procedure_step) {
+        Ok(solver) => solver,
+        Err(_)
+            if procedure_step.procedure
+                == runmat_analysis_core::AnalysisProcedure::TransientResponse
+                && matches!(
+                    procedure_step.family,
+                    runmat_analysis_core::PhysicsFamily::Coupled(
+                        runmat_analysis_core::CoupledPhysicsFamily::Thermomechanical
+                            | runmat_analysis_core::CoupledPhysicsFamily::Electrothermal
+                    )
+                ) =>
+        {
+            return boxed_fixture_run_result(analysis_run_transient_with_options_op(
+                model,
+                ComputeBackend::Cpu,
+                FormulationRequirement::Experimental,
+                transient_options_for_spec(spec, solver_mesh_artifact_path),
+                OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
+            ));
+        }
+        Err(error) => panic!(
+            "fixture procedure step must select a supported solver or an explicitly governed negative path: {error}"
+        ),
+    };
     boxed_fixture_run_result(match solver {
         AnalysisSolverOptions::StructuralLinear(_) => analysis_run_linear_static_with_options(
             model,
@@ -3019,6 +3042,213 @@ macro_rules! push_threshold_assertion {
             },
         )
     };
+}
+
+fn push_fixed_step_transient_assertions(
+    fixture_id: &str,
+    execution: &str,
+    assertions: &mut Vec<ThresholdAssertionRecord>,
+    failures: &mut Vec<String>,
+    run: &AnalysisRunResult,
+    expected_interval_count: Option<usize>,
+    maximum_residual: Option<f64>,
+) {
+    let method = run
+        .run
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "FEA_TRANSIENT_METHOD")
+        .map(|diagnostic| diagnostic.message.as_str());
+    if !method.is_some_and(|message| message.contains("solver=newmark_average_acceleration_pcg")) {
+        failures.push(format!(
+            "fixture {fixture_id} {execution} run did not report the fixed-step average-acceleration Newmark method"
+        ));
+    }
+    push_threshold_assertion!(
+        fixture_id,
+        assertions,
+        failures,
+        &format!("{execution}_transient_newmark_beta"),
+        "FEA_TRANSIENT_METHOD",
+        method.and_then(|message| parse_metric_value(message, "beta")),
+        Some(0.25),
+        Some(0.25),
+    );
+    push_threshold_assertion!(
+        fixture_id,
+        assertions,
+        failures,
+        &format!("{execution}_transient_newmark_gamma"),
+        "FEA_TRANSIENT_METHOD",
+        method.and_then(|message| parse_metric_value(message, "gamma")),
+        Some(0.5),
+        Some(0.5),
+    );
+    if let Some(expected) = expected_interval_count.map(|value| value as f64) {
+        push_threshold_assertion!(
+            fixture_id,
+            assertions,
+            failures,
+            &format!("{execution}_transient_nominal_interval_count"),
+            "FEA_TRANSIENT_CONVERGENCE",
+            diagnostic_metric(run, "FEA_TRANSIENT_CONVERGENCE", "nominal_interval_count"),
+            Some(expected),
+            Some(expected),
+        );
+        push_threshold_assertion!(
+            fixture_id,
+            assertions,
+            failures,
+            &format!("{execution}_transient_accepted_step_count"),
+            "FEA_TRANSIENT_CONVERGENCE",
+            diagnostic_metric(run, "FEA_TRANSIENT_CONVERGENCE", "accepted_step_count"),
+            Some(expected),
+            None,
+        );
+    }
+    push_threshold_assertion!(
+        fixture_id,
+        assertions,
+        failures,
+        &format!("{execution}_transient_rejected_step_count"),
+        "FEA_TRANSIENT_CONVERGENCE",
+        diagnostic_metric(run, "FEA_TRANSIENT_CONVERGENCE", "rejected_step_count"),
+        Some(0.0),
+        Some(0.0),
+    );
+    let dt_min = diagnostic_metric(run, "FEA_TRANSIENT_STABILITY", "dt_min");
+    let dt_max = diagnostic_metric(run, "FEA_TRANSIENT_STABILITY", "dt_max");
+    for (name, observed) in [("dt_min", dt_min), ("dt_max", dt_max)] {
+        push_threshold_assertion!(
+            fixture_id,
+            assertions,
+            failures,
+            &format!("{execution}_transient_{name}"),
+            "FEA_TRANSIENT_STABILITY",
+            observed,
+            Some(f64::MIN_POSITIVE),
+            Some(f64::MAX),
+        );
+    }
+    if matches!((dt_min, dt_max), (Some(minimum), Some(maximum)) if minimum > maximum) {
+        failures.push(format!(
+            "fixture {fixture_id} {execution} run reported transient dt_min greater than dt_max"
+        ));
+    }
+    push_threshold_assertion!(
+        fixture_id,
+        assertions,
+        failures,
+        &format!("{execution}_transient_max_projected_dynamic_residual"),
+        "FEA_TRANSIENT_STABILITY",
+        diagnostic_metric(
+            run,
+            "FEA_TRANSIENT_STABILITY",
+            "max_projected_dynamic_residual",
+        ),
+        Some(0.0),
+        maximum_residual,
+    );
+    push_threshold_assertion!(
+        fixture_id,
+        assertions,
+        failures,
+        &format!("{execution}_transient_maximum_physical_energy"),
+        "FEA_TRANSIENT_ENERGY",
+        diagnostic_metric(
+            run,
+            "FEA_TRANSIENT_ENERGY",
+            "maximum_physical_strain_plus_kinetic_energy_joules",
+        ),
+        Some(0.0),
+        Some(f64::MAX),
+    );
+    if let Err(error) = validate_transient_result(run) {
+        failures.push(format!(
+            "fixture {fixture_id} {execution} run returned invalid transient results: {error}"
+        ));
+    }
+}
+
+fn validate_transient_result(run: &AnalysisRunResult) -> Result<(), String> {
+    let transient = run
+        .transient_results
+        .as_ref()
+        .ok_or_else(|| "transient payload is missing".to_string())?;
+    let snapshot_count = transient.time_points_s.len();
+    if snapshot_count == 0
+        || transient
+            .time_points_s
+            .iter()
+            .any(|value| !value.is_finite())
+    {
+        return Err("time grid is empty or nonfinite".to_string());
+    }
+    if transient
+        .time_points_s
+        .windows(2)
+        .any(|times| times[1] <= times[0])
+    {
+        return Err("time grid is not strictly increasing".to_string());
+    }
+    let required_fields = [
+        &transient.displacement_snapshots,
+        &transient.velocity_snapshots,
+        &transient.acceleration_snapshots,
+        &transient.kinetic_energy_snapshots,
+        &transient.strain_energy_snapshots,
+        &transient.residual_norm_snapshots,
+    ];
+    if required_fields
+        .iter()
+        .any(|history| history.len() != snapshot_count)
+    {
+        return Err("required transient histories do not match the time grid".to_string());
+    }
+    if transient
+        .residual_norms
+        .iter()
+        .any(|value| !value.is_finite())
+    {
+        return Err("physical residual history contains a nonfinite value".to_string());
+    }
+    if transient.residual_norms.len() != snapshot_count {
+        return Err("physical residual history does not match the time grid".to_string());
+    }
+    if required_fields
+        .iter()
+        .flat_map(|history| history.iter())
+        .any(|field| {
+            field.as_host_f64().is_none_or(|values| {
+                values.is_empty() || values.iter().any(|value| !value.is_finite())
+            })
+        })
+    {
+        return Err(
+            "required transient history contains unavailable or nonfinite values".to_string(),
+        );
+    }
+    let optional_fields = [
+        &transient.rotation_snapshots,
+        &transient.angular_velocity_snapshots,
+        &transient.angular_acceleration_snapshots,
+        &transient.strain_snapshots,
+        &transient.stress_snapshots,
+        &transient.strain_energy_density_snapshots,
+        &transient.von_mises_snapshots,
+    ];
+    if optional_fields.iter().any(|history| {
+        !history.is_empty()
+            && (history.len() != snapshot_count
+                || history.iter().any(|field| {
+                    field.as_host_f64().is_none_or(|values| {
+                        values.is_empty() || values.iter().any(|value| !value.is_finite())
+                    })
+                }))
+    }) {
+        return Err("optional formulation-owned history is incomplete or nonfinite".to_string());
+    }
+    Ok(())
 }
 
 fn push_plastic_state_threshold_assertions(
@@ -4294,9 +4524,6 @@ pub(super) fn run_fixture(
     let mut gpu_solver_device_apply_k_ratio = None;
     let mut gpu_speedup_ratio = None;
     let mut gpu_solver_backend = None;
-    let mut gpu_transient_cache_hit_ratio = None;
-    let mut gpu_transient_cache_misses = None;
-    let mut gpu_transient_cache_entries = None;
     let mut gpu_solver_prepared_build_ms = None;
     let mut gpu_solver_solve_ms = None;
     let mut gpu_solver_fallback_apply_count = None;
@@ -4308,7 +4535,6 @@ pub(super) fn run_fixture(
     let mut thermo_assignment_heterogeneity_index = None;
     let mut thermo_region_delta_count = None;
     let mut thermo_spatial_coverage_ratio = None;
-    let mut thermo_transient_severity = None;
     let mut thermo_nonlinear_severity = None;
     let mut electro_thermal_coupling_enabled = None;
     let mut electro_thermal_coupling_fingerprint = None;
@@ -4401,9 +4627,6 @@ pub(super) fn run_fixture(
                     gpu_solver_device_apply_k_ratio,
                     gpu_speedup_ratio,
                     gpu_solver_backend,
-                    gpu_transient_cache_hit_ratio,
-                    gpu_transient_cache_misses,
-                    gpu_transient_cache_entries,
                     gpu_solver_prepared_build_ms,
                     gpu_solver_solve_ms,
                     gpu_solver_fallback_apply_count,
@@ -4415,7 +4638,6 @@ pub(super) fn run_fixture(
                     thermo_assignment_heterogeneity_index,
                     thermo_region_delta_count,
                     thermo_spatial_coverage_ratio,
-                    thermo_transient_severity,
                     thermo_nonlinear_severity,
                     electro_thermal_coupling_enabled,
                     electro_thermal_coupling_fingerprint,
@@ -4932,110 +5154,15 @@ pub(super) fn run_fixture(
                 &cpu_envelope.data,
             );
         }
-        if let Some(max_residual) = spec.max_transient_residual_norm {
-            let observed = diagnostic_metric(
-                &cpu_envelope.data,
-                "FEA_TRANSIENT_STABILITY",
-                "max_residual_norm",
-            );
-            push_threshold_assertion!(
-                spec.id,
-                &mut threshold_assertions,
-                &mut failures,
-                "transient_max_residual_norm",
-                "FEA_TRANSIENT_STABILITY",
-                observed,
-                None,
-                Some(max_residual),
-            );
-        }
-        if let Some(max_growth) = spec.max_transient_energy_growth_ratio {
-            let observed = diagnostic_metric(
-                &cpu_envelope.data,
-                "FEA_TRANSIENT_ENERGY",
-                "max_energy_growth_ratio",
-            );
-            push_threshold_assertion!(
-                spec.id,
-                &mut threshold_assertions,
-                &mut failures,
-                "transient_max_energy_growth_ratio",
-                "FEA_TRANSIENT_ENERGY",
-                observed,
-                None,
-                Some(max_growth),
-            );
-        }
         if spec.id.starts_with("transient_") {
-            push_threshold_assertion!(
+            push_fixed_step_transient_assertions(
                 spec.id,
+                "cpu",
                 &mut threshold_assertions,
                 &mut failures,
-                "transient_initial_total_energy",
-                "FEA_TRANSIENT_ENERGY_BALANCE",
-                diagnostic_metric(
-                    &cpu_envelope.data,
-                    "FEA_TRANSIENT_ENERGY_BALANCE",
-                    "initial_total_energy",
-                ),
-                Some(0.0),
-                Some(1.0e-12),
-            );
-            push_threshold_assertion!(
-                spec.id,
-                &mut threshold_assertions,
-                &mut failures,
-                "transient_final_total_energy",
-                "FEA_TRANSIENT_ENERGY_BALANCE",
-                diagnostic_metric(
-                    &cpu_envelope.data,
-                    "FEA_TRANSIENT_ENERGY_BALANCE",
-                    "final_total_energy",
-                ),
-                Some(0.0),
-                None,
-            );
-            push_threshold_assertion!(
-                spec.id,
-                &mut threshold_assertions,
-                &mut failures,
-                "transient_max_total_energy",
-                "FEA_TRANSIENT_ENERGY_BALANCE",
-                diagnostic_metric(
-                    &cpu_envelope.data,
-                    "FEA_TRANSIENT_ENERGY_BALANCE",
-                    "max_total_energy",
-                ),
-                Some(0.0),
-                None,
-            );
-            push_threshold_assertion!(
-                spec.id,
-                &mut threshold_assertions,
-                &mut failures,
-                "transient_energy_balance_growth_ratio",
-                "FEA_TRANSIENT_ENERGY_BALANCE",
-                diagnostic_metric(
-                    &cpu_envelope.data,
-                    "FEA_TRANSIENT_ENERGY_BALANCE",
-                    "energy_growth_ratio",
-                ),
-                Some(1.0),
-                Some(spec.max_transient_energy_growth_ratio.unwrap_or(10.0)),
-            );
-            push_threshold_assertion!(
-                spec.id,
-                &mut threshold_assertions,
-                &mut failures,
-                "transient_max_step_energy_jump_ratio",
-                "FEA_TRANSIENT_ENERGY_BALANCE",
-                diagnostic_metric(
-                    &cpu_envelope.data,
-                    "FEA_TRANSIENT_ENERGY_BALANCE",
-                    "max_step_energy_jump_ratio",
-                ),
-                None,
-                Some(10.0),
+                &cpu_envelope.data,
+                spec.transient_step_count,
+                spec.max_transient_residual_norm,
             );
         }
         let is_cfd_fixture =
@@ -6553,29 +6680,6 @@ pub(super) fn run_fixture(
                         (Some(cpu_ms), Some(gpu_ms)) if gpu_ms > 0.0 => Some(cpu_ms / gpu_ms),
                         _ => None,
                     };
-                    let cache_hits = diagnostic_metric(
-                        &gpu_envelope.data,
-                        "FEA_TRANSIENT_CACHE",
-                        "prepared_cache_hits",
-                    );
-                    let cache_misses = diagnostic_metric(
-                        &gpu_envelope.data,
-                        "FEA_TRANSIENT_CACHE",
-                        "prepared_cache_misses",
-                    );
-                    let cache_entries = diagnostic_metric(
-                        &gpu_envelope.data,
-                        "FEA_TRANSIENT_CACHE",
-                        "prepared_cache_entries",
-                    );
-                    gpu_transient_cache_misses = cache_misses;
-                    gpu_transient_cache_entries = cache_entries;
-                    gpu_transient_cache_hit_ratio = match (cache_hits, cache_misses) {
-                        (Some(hits), Some(misses)) if (hits + misses) > 0.0 => {
-                            Some(hits / (hits + misses))
-                        }
-                        _ => None,
-                    };
                     gpu_solver_prepared_build_ms = diagnostic_metric(
                         &gpu_envelope.data,
                         "FEA_MODAL_COST",
@@ -6640,41 +6744,6 @@ pub(super) fn run_fixture(
                             "fallback_apply_count",
                         )
                     });
-                    let transient_adapt_scale_min = diagnostic_metric(
-                        &gpu_envelope.data,
-                        "FEA_TRANSIENT_ADAPTIVITY",
-                        "scale_min",
-                    );
-                    let transient_adapt_scale_max = diagnostic_metric(
-                        &gpu_envelope.data,
-                        "FEA_TRANSIENT_ADAPTIVITY",
-                        "scale_max",
-                    );
-                    let transient_adapt_scale_mean = diagnostic_metric(
-                        &gpu_envelope.data,
-                        "FEA_TRANSIENT_ADAPTIVITY",
-                        "scale_mean",
-                    );
-                    let transient_adapt_decrease_steps = diagnostic_metric(
-                        &gpu_envelope.data,
-                        "FEA_TRANSIENT_ADAPTIVITY",
-                        "decrease_steps",
-                    );
-                    let transient_bucket_rel_tolerance = diagnostic_metric(
-                        &gpu_envelope.data,
-                        "FEA_TRANSIENT_BUCKETING",
-                        "rel_tolerance",
-                    );
-                    let transient_physics_jump_ratio = diagnostic_metric(
-                        &gpu_envelope.data,
-                        "FEA_TRANSIENT_PHYSICS",
-                        "max_step_l2_jump_ratio",
-                    );
-                    let transient_physics_nonfinite = diagnostic_metric(
-                        &gpu_envelope.data,
-                        "FEA_TRANSIENT_PHYSICS",
-                        "nonfinite_displacement_count",
-                    );
                     let nonlinear_converged_increments = diagnostic_metric(
                         &gpu_envelope.data,
                         "FEA_NONLINEAR_CONVERGENCE",
@@ -6777,6 +6846,17 @@ pub(super) fn run_fixture(
                                 .to_string(),
                         );
                     }
+                    if spec.id.starts_with("transient_") {
+                        push_fixed_step_transient_assertions(
+                            spec.id,
+                            "gpu",
+                            &mut threshold_assertions,
+                            &mut failures,
+                            &gpu_envelope.data,
+                            spec.transient_step_count,
+                            spec.max_transient_residual_norm,
+                        );
+                    }
 
                     if let Some(expected_solver_backend) = spec.expected_solver_backend {
                         if gpu_envelope.data.provenance.solver_backend.as_str()
@@ -6801,494 +6881,7 @@ pub(super) fn run_fixture(
                             }
                         }
                     }
-                    if gpu_envelope.data.provenance.solver_backend.as_str() == "accelerator" {
-                        if let Some(min_cache_hit_ratio) = spec.min_transient_cache_hit_ratio {
-                            push_threshold_assertion!(
-                                spec.id,
-                                &mut threshold_assertions,
-                                &mut failures,
-                                "transient_prepared_cache_hit_ratio",
-                                "FEA_TRANSIENT_CACHE",
-                                gpu_transient_cache_hit_ratio,
-                                Some(min_cache_hit_ratio),
-                                None,
-                            );
-                        }
-                        if let Some(max_cache_misses) = spec.max_transient_cache_misses {
-                            push_threshold_assertion!(
-                                spec.id,
-                                &mut threshold_assertions,
-                                &mut failures,
-                                "transient_prepared_cache_misses",
-                                "FEA_TRANSIENT_CACHE",
-                                gpu_transient_cache_misses,
-                                None,
-                                Some(max_cache_misses),
-                            );
-                        }
-                    }
-                    if spec.id == "transient_long_gpu_provider" {
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "transient_adapt_scale_min",
-                            "FEA_TRANSIENT_ADAPTIVITY",
-                            transient_adapt_scale_min,
-                            Some(0.65),
-                            None,
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "transient_adapt_scale_max",
-                            "FEA_TRANSIENT_ADAPTIVITY",
-                            transient_adapt_scale_max,
-                            None,
-                            Some(1.35),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "transient_adapt_scale_mean",
-                            "FEA_TRANSIENT_ADAPTIVITY",
-                            transient_adapt_scale_mean,
-                            Some(0.8),
-                            Some(1.2),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "transient_adapt_decrease_steps",
-                            "FEA_TRANSIENT_ADAPTIVITY",
-                            transient_adapt_decrease_steps,
-                            None,
-                            Some(16.0),
-                        );
-                        let requested_bucket_tol =
-                            std::env::var("RUNMAT_TRANSIENT_DT_BUCKET_REL_TOL")
-                                .ok()
-                                .and_then(|value| value.parse::<f64>().ok())
-                                .unwrap_or(0.0)
-                                .max(0.0);
-                        if requested_bucket_tol > 0.0 {
-                            push_threshold_assertion!(
-                                spec.id,
-                                &mut threshold_assertions,
-                                &mut failures,
-                                "transient_bucket_rel_tolerance",
-                                "FEA_TRANSIENT_BUCKETING",
-                                transient_bucket_rel_tolerance,
-                                Some(requested_bucket_tol * 0.99),
-                                Some(requested_bucket_tol * 1.01 + 1.0e-12),
-                            );
-                            push_threshold_assertion!(
-                                spec.id,
-                                &mut threshold_assertions,
-                                &mut failures,
-                                "transient_bucket_quality_residual",
-                                "FEA_TRANSIENT_STABILITY",
-                                diagnostic_metric(
-                                    &gpu_envelope.data,
-                                    "FEA_TRANSIENT_STABILITY",
-                                    "max_residual_norm",
-                                ),
-                                None,
-                                Some(1.0e-2),
-                            );
-                        }
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "transient_physics_jump_ratio",
-                            "FEA_TRANSIENT_PHYSICS",
-                            transient_physics_jump_ratio,
-                            None,
-                            Some(3.5),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "transient_physics_nonfinite_count",
-                            "FEA_TRANSIENT_PHYSICS",
-                            transient_physics_nonfinite,
-                            None,
-                            Some(0.0),
-                        );
-                    }
-                    if spec.id == "transient_shock_gpu_provider" {
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "transient_shock_physics_jump_ratio",
-                            "FEA_TRANSIENT_PHYSICS",
-                            transient_physics_jump_ratio,
-                            None,
-                            Some(4.0),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "transient_shock_physics_nonfinite_count",
-                            "FEA_TRANSIENT_PHYSICS",
-                            transient_physics_nonfinite,
-                            None,
-                            Some(0.0),
-                        );
-                    }
-                    if spec.id == "thermo_mech_kickoff_gpu_provider" {
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_mech_thermal_strain_scale",
-                            "FEA_TM_COUPLING",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_COUPLING",
-                                "thermal_strain_scale",
-                            ),
-                            Some(5.0e-4),
-                            Some(5.0e-2),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_mech_thermal_load_scale",
-                            "FEA_TM_COUPLING",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_COUPLING",
-                                "thermal_load_scale",
-                            ),
-                            Some(0.5),
-                            Some(2.0),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_mech_effective_modulus_scale",
-                            "FEA_TM_COUPLING",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_COUPLING",
-                                "effective_modulus_scale",
-                            ),
-                            Some(0.85),
-                            Some(1.2),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_mech_material_spread_ratio",
-                            "FEA_TM_COUPLING",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_COUPLING",
-                                "constitutive_material_spread_ratio",
-                            ),
-                            Some(1.0),
-                            Some(1.3),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_mech_assignment_heterogeneity_index",
-                            "FEA_TM_COUPLING",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_COUPLING",
-                                "assignment_heterogeneity_index",
-                            ),
-                            Some(0.0),
-                            Some(1.0),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_mech_transient_severity",
-                            "FEA_TM_TRANSIENT",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_TRANSIENT",
-                                "severity_peak",
-                            ),
-                            Some(0.0),
-                            Some(0.2),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_mech_constitutive_residual_ratio",
-                            "FEA_TM_CONSISTENCY",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_CONSISTENCY",
-                                "constitutive_residual_ratio",
-                            ),
-                            Some(0.0),
-                            Some(1.0e-8),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_mech_thermal_strain_energy_density_mean",
-                            "FEA_TM_CONSISTENCY",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_CONSISTENCY",
-                                "thermal_strain_energy_density_mean",
-                            ),
-                            Some(0.0),
-                            None,
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_mech_consistency_coverage_ratio",
-                            "FEA_TM_CONSISTENCY",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_CONSISTENCY",
-                                "consistency_coverage_ratio",
-                            ),
-                            Some(0.9),
-                            Some(1.0),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_mech_temperature_field_node_count",
-                            "FEA_TM_TEMPERATURE_FIELD",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_TEMPERATURE_FIELD",
-                                "node_count",
-                            ),
-                            Some(1.0),
-                            None,
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_mech_strain_temperature_residual_ratio",
-                            "FEA_TM_TEMPERATURE_FIELD",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_TEMPERATURE_FIELD",
-                                "strain_temperature_residual_ratio",
-                            ),
-                            Some(0.0),
-                            Some(1.0e-8),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_mech_strain_temperature_coverage_ratio",
-                            "FEA_TM_TEMPERATURE_FIELD",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_TEMPERATURE_FIELD",
-                                "strain_temperature_coverage_ratio",
-                            ),
-                            Some(0.9),
-                            Some(1.0),
-                        );
-                    } else if spec.id == "thermo_gradient_benign_gpu_provider" {
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_gradient_benign_spread_ratio",
-                            "FEA_TM_COUPLING",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_COUPLING",
-                                "constitutive_material_spread_ratio",
-                            ),
-                            Some(1.0),
-                            Some(1.18),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_gradient_benign_heterogeneity",
-                            "FEA_TM_COUPLING",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_COUPLING",
-                                "assignment_heterogeneity_index",
-                            ),
-                            Some(0.0),
-                            Some(0.22),
-                        );
-                    } else if spec.id == "thermo_gradient_pathological_gpu_provider" {
-                        // The final authored sample leaves the most strongly cooled region at the
-                        // constitutive clamp while warmer regions recover above it. The resulting
-                        // bounded spread proves that the final time sample was executed rather
-                        // than reporting the initially saturated state.
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_gradient_pathological_spread_ratio",
-                            "FEA_TM_COUPLING",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_COUPLING",
-                                "constitutive_material_spread_ratio",
-                            ),
-                            Some(1.05),
-                            Some(1.2),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_gradient_pathological_heterogeneity",
-                            "FEA_TM_COUPLING",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_COUPLING",
-                                "assignment_heterogeneity_index",
-                            ),
-                            Some(0.2),
-                            Some(1.0),
-                        );
-                    } else if spec.id == "thermo_ramp_smooth_gpu_provider" {
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_ramp_smooth_constitutive_temperature_factor",
-                            "FEA_TM_COUPLING",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_COUPLING",
-                                "constitutive_temperature_factor",
-                            ),
-                            Some(-0.1),
-                            Some(0.1),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_ramp_smooth_effective_modulus_scale",
-                            "FEA_TM_COUPLING",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_COUPLING",
-                                "effective_modulus_scale",
-                            ),
-                            Some(0.85),
-                            Some(1.1),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_ramp_smooth_spatial_gradient_index",
-                            "FEA_TM_COUPLING",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_COUPLING",
-                                "spatial_gradient_index",
-                            ),
-                            Some(0.0),
-                            Some(0.25),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_ramp_smooth_spatial_coverage_ratio",
-                            "FEA_TM_COUPLING",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_COUPLING",
-                                "spatial_coverage_ratio",
-                            ),
-                            Some(1.0),
-                            Some(1.0),
-                        );
-                    } else if spec.id == "thermo_shock_oscillatory_gpu_provider" {
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_shock_constitutive_temperature_factor",
-                            "FEA_TM_COUPLING",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_COUPLING",
-                                "constitutive_temperature_factor",
-                            ),
-                            Some(-0.2),
-                            Some(0.1),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_shock_effective_modulus_scale",
-                            "FEA_TM_COUPLING",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_COUPLING",
-                                "effective_modulus_scale",
-                            ),
-                            Some(0.8),
-                            Some(1.1),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_shock_oscillatory_spatial_gradient_index",
-                            "FEA_TM_COUPLING",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_COUPLING",
-                                "spatial_gradient_index",
-                            ),
-                            Some(0.25),
-                            Some(0.8),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_shock_oscillatory_spatial_coverage_ratio",
-                            "FEA_TM_COUPLING",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_COUPLING",
-                                "spatial_coverage_ratio",
-                            ),
-                            Some(1.0),
-                            Some(1.0),
-                        );
-                    } else if spec.id.starts_with("thermal_standalone_ramp_") {
+                    if spec.id.starts_with("thermal_standalone_ramp_") {
                         push_thermal_standalone_threshold_assertions(
                             spec.id,
                             &mut threshold_assertions,
@@ -7304,8 +6897,8 @@ pub(super) fn run_fixture(
                             "nonlinear_converged_increments",
                             "FEA_NONLINEAR_CONVERGENCE",
                             nonlinear_converged_increments,
-                            Some(24.0),
-                            Some(24.0),
+                            Some(25.0),
+                            Some(25.0),
                         );
                         push_threshold_assertion!(
                             spec.id,
@@ -7324,8 +6917,8 @@ pub(super) fn run_fixture(
                             "nonlinear_total_increments",
                             "FEA_NONLINEAR_CONVERGENCE",
                             nonlinear_total_increments,
-                            Some(24.0),
-                            Some(24.0),
+                            Some(25.0),
+                            Some(25.0),
                         );
                         push_threshold_assertion!(
                             spec.id,
@@ -9683,9 +9276,6 @@ pub(super) fn run_fixture(
                                 gpu_solver_device_apply_k_ratio,
                                 gpu_speedup_ratio,
                                 gpu_solver_backend,
-                                gpu_transient_cache_hit_ratio,
-                                gpu_transient_cache_misses,
-                                gpu_transient_cache_entries,
                                 gpu_solver_prepared_build_ms,
                                 gpu_solver_solve_ms,
                                 gpu_solver_fallback_apply_count,
@@ -9697,7 +9287,6 @@ pub(super) fn run_fixture(
                                 thermo_assignment_heterogeneity_index,
                                 thermo_region_delta_count,
                                 thermo_spatial_coverage_ratio,
-                                thermo_transient_severity,
                                 thermo_nonlinear_severity,
                                 electro_thermal_coupling_enabled,
                                 electro_thermal_coupling_fingerprint,
@@ -9792,7 +9381,6 @@ pub(super) fn run_fixture(
                     thermo_region_delta_count = gpu_results.data.summary.thermo_region_delta_count;
                     thermo_spatial_coverage_ratio =
                         gpu_results.data.summary.thermo_spatial_coverage_ratio;
-                    thermo_transient_severity = gpu_results.data.summary.thermo_transient_severity;
                     thermo_nonlinear_severity = gpu_results.data.summary.thermo_nonlinear_severity;
                     electro_thermal_coupling_enabled =
                         gpu_results.data.summary.electro_thermal_coupling_enabled;
@@ -10105,9 +9693,6 @@ pub(super) fn run_fixture(
                                     gpu_solver_device_apply_k_ratio,
                                     gpu_speedup_ratio,
                                     gpu_solver_backend,
-                                    gpu_transient_cache_hit_ratio,
-                                    gpu_transient_cache_misses,
-                                    gpu_transient_cache_entries,
                                     gpu_solver_prepared_build_ms,
                                     gpu_solver_solve_ms,
                                     gpu_solver_fallback_apply_count,
@@ -10119,7 +9704,6 @@ pub(super) fn run_fixture(
                                     thermo_assignment_heterogeneity_index,
                                     thermo_region_delta_count,
                                     thermo_spatial_coverage_ratio,
-                                    thermo_transient_severity,
                                     thermo_nonlinear_severity,
                                     electro_thermal_coupling_enabled,
                                     electro_thermal_coupling_fingerprint,
@@ -10261,9 +9845,6 @@ pub(super) fn run_fixture(
         gpu_solver_device_apply_k_ratio,
         gpu_speedup_ratio,
         gpu_solver_backend,
-        gpu_transient_cache_hit_ratio,
-        gpu_transient_cache_misses,
-        gpu_transient_cache_entries,
         gpu_solver_prepared_build_ms,
         gpu_solver_solve_ms,
         gpu_solver_fallback_apply_count,
@@ -10275,7 +9856,6 @@ pub(super) fn run_fixture(
         thermo_assignment_heterogeneity_index,
         thermo_region_delta_count,
         thermo_spatial_coverage_ratio,
-        thermo_transient_severity,
         thermo_nonlinear_severity,
         electro_thermal_coupling_enabled,
         electro_thermal_coupling_fingerprint,

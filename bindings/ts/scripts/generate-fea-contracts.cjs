@@ -210,6 +210,8 @@ function rustTypeToTs(type) {
       return { type: "FeaModelTemplateCatalogEntry", nullable: false };
     case "AnalysisRuntimeModelTemplateDefaultObservation":
       return { type: "{ field: string; location: string }", nullable: false };
+    case "AnalysisStructuralTimeStepPolicy":
+      return { type: "FeaStructuralTimeStepPolicy", nullable: false };
     default:
       if (/^BTreeMap<String,\s*String>$/.test(trimmed)) {
         return { type: "Record<string, string>", nullable: false };
@@ -725,6 +727,8 @@ export interface FeaSequenceBranch { branch_id: string; producer_step: string; s
     ...enumTypes.flatMap((typeSource) => [typeSource, ""]),
     ...progressEnums.flatMap((typeSource) => [typeSource, ""]),
     ...authoringEnums.flatMap((typeSource) => [typeSource, ""]),
+    "export type FeaStructuralTimeStepPolicy = { fixed: { interval_count: number } };",
+    "",
     physicsFamily,
     "",
     procedureStep,

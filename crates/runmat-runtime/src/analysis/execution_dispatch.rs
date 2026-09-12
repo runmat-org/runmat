@@ -200,10 +200,7 @@ fn run_operation_for_procedure(
         (Structural, ModalExtraction) => Some(AnalysisOperation::Modal),
         (Acoustic, HarmonicResponse) => Some(AnalysisOperation::Acoustic),
         (Thermal, Static | TransientResponse) => Some(AnalysisOperation::Thermal),
-        (Structural, TransientResponse)
-        | (Coupled(CoupledPhysicsFamily::Thermomechanical), TransientResponse) => {
-            Some(AnalysisOperation::Transient)
-        }
+        (Structural, TransientResponse) => Some(AnalysisOperation::Transient),
         (Fluid, Static | TransientResponse) => Some(AnalysisOperation::Cfd),
         (Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer), Static | TransientResponse) => {
             Some(AnalysisOperation::Cht)
@@ -304,11 +301,6 @@ mod tests {
                 AnalysisOperation::Transient,
             ),
             (
-                PhysicsFamily::Coupled(CoupledPhysicsFamily::Thermomechanical),
-                AnalysisProcedure::TransientResponse,
-                AnalysisOperation::Transient,
-            ),
-            (
                 PhysicsFamily::Electromagnetic,
                 AnalysisProcedure::HarmonicResponse,
                 AnalysisOperation::Electromagnetic,
@@ -361,8 +353,8 @@ mod tests {
     fn unsupported_procedure_tuples_have_no_operation_identity() {
         assert_eq!(
             run_operation_for_procedure(
-                PhysicsFamily::Thermal,
-                AnalysisProcedure::Static,
+                PhysicsFamily::Coupled(CoupledPhysicsFamily::Thermomechanical),
+                AnalysisProcedure::TransientResponse,
                 SolutionSpace::Direct,
             ),
             None

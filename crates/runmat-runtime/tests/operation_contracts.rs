@@ -180,15 +180,19 @@ fn append_inlet_velocity_history(model: &mut AnalysisModel, id: &str, samples: [
         evidence: exact_signal_evidence(samples.len()),
         provenance: SignalProvenance::Authored,
     }));
+    let mut inlet = excitation(
+        &excitation_id.0,
+        case_id.clone(),
+        ExcitationTarget::Region(RegionTarget::boundary("fluid_inlet")),
+        signal_id,
+        ExcitationDistribution::TopologyField,
+    );
+    inlet.direction = Some(runmat_analysis_core::Direction {
+        vector: [1.0, 0.0, 0.0],
+    });
     model
         .excitations
-        .push(ExcitationAction::InletVelocity(excitation(
-            &excitation_id.0,
-            case_id.clone(),
-            ExcitationTarget::Region(RegionTarget::boundary("fluid_inlet")),
-            signal_id,
-            ExcitationDistribution::TopologyField,
-        )));
+        .push(ExcitationAction::InletVelocity(inlet));
     model.excitation_cases.push(ExcitationCase {
         case_id,
         action_ids: vec![excitation_id],
@@ -211,9 +215,9 @@ use runmat_analysis_fea::{
     FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ, FEA_FIELD_MODAL_MODAL_MASS,
     FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
     FEA_FIELD_MODAL_PARTICIPATION_FACTOR, FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION,
-    FEA_FIELD_MODAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
-    FEA_FIELD_STRUCTURAL_EQUATION_SCALE, FEA_FIELD_STRUCTURAL_RESIDUAL_NORM,
-    FEA_FIELD_STRUCTURAL_VON_MISES,
+    FEA_FIELD_MODAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_BEAM_BENDING_STRESS,
+    FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_EQUATION_SCALE,
+    FEA_FIELD_STRUCTURAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 use runmat_geometry_core::{EntityKind, GeometryAsset, UnitSystem};
 use runmat_meshing_core::{
@@ -233,9 +237,9 @@ use runmat_runtime::analysis::{
     analysis_validate_study_sweep_op, AnalysisChtRunOptions, AnalysisCreateModelIntentSpec,
     AnalysisExecutionPlan, AnalysisExecutionStep, AnalysisModalRunOptions, AnalysisModelTemplate,
     AnalysisNonlinearRunOptions, AnalysisResultsCompareQuery, AnalysisResultsQuery,
-    AnalysisRunOptions, AnalysisRunResult, AnalysisSolverOptions, AnalysisStudySpec,
-    AnalysisStudySweepSpec, AnalysisTransientRunOptions, AnalysisTrendsQuery, FallbackEvent,
-    FallbackReason, FallbackStage, FormulationRequirement, ModalFrequencyBasis,
+    AnalysisRunOptions, AnalysisRunResult, AnalysisSolverOptions, AnalysisStructuralTimeStepPolicy,
+    AnalysisStudySpec, AnalysisStudySweepSpec, AnalysisTransientRunOptions, AnalysisTrendsQuery,
+    FallbackEvent, FallbackReason, FallbackStage, FormulationRequirement, ModalFrequencyBasis,
     ModalFrequencyUnits, PrecisionMode, PreconditionerMode, ProductionPublicationReasonCode,
     QualityGate, QualityPolicy, QualityReasonCode, RunStatus,
 };
@@ -1203,8 +1207,13 @@ fn analysis_run_contract_is_v1_and_numerically_accepted_for_fixture() {
     assert!(envelope
         .data
         .run
-        .field(FEA_FIELD_STRUCTURAL_VON_MISES)
+        .field(FEA_FIELD_STRUCTURAL_BEAM_BENDING_STRESS)
         .is_some());
+    assert!(envelope
+        .data
+        .run
+        .field(FEA_FIELD_STRUCTURAL_VON_MISES)
+        .is_none());
     assert!(envelope
         .data
         .run
@@ -1732,7 +1741,7 @@ fn analysis_run_thermal_contract_preserves_steady_and_transient_identities() {
 }
 
 #[test]
-fn thermomechanical_transient_result_preserves_coupled_identity() {
+fn thermomechanical_transient_contract_fails_closed() {
     let geometry = geometry_load_op(
         "/part.stl",
         TRIANGLE_STL.as_bytes(),
@@ -1749,21 +1758,17 @@ fn thermomechanical_transient_result_preserves_coupled_identity() {
     )
     .expect("thermomechanical model should be created");
 
-    let envelope = analysis_run_transient_with_options_op(
+    let error = analysis_run_transient_with_options_op(
         &model.data,
         ComputeBackend::Cpu,
         FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(Some("trace-contract-thermomechanical-3".to_string()), None),
     )
-    .expect("thermomechanical transient run should succeed");
-    assert_eq!(envelope.operation, "fea.run_transient");
-    assert_eq!(envelope.op_version, "fea.run_transient/v1");
-    assert_experimental_result_identity(
-        &envelope.data,
-        PhysicsFamily::Coupled(runmat_analysis_core::CoupledPhysicsFamily::Thermomechanical),
-        AnalysisProcedure::TransientResponse,
-    );
+    .expect_err("thermomechanical transient response is not an admitted solver family");
+    assert_eq!(error.operation, "fea.run_transient");
+    assert_eq!(error.op_version, "fea.run_transient/v1");
+    assert_eq!(error.error_code, "RM.FEA.RUN_TRANSIENT.INVALID_MODEL");
 }
 
 #[test]
@@ -1785,10 +1790,11 @@ fn analysis_run_transient_contract_is_v1_and_typed() {
     assert_eq!(envelope.op_version, "fea.run_transient/v1");
     assert_eq!(
         envelope.data.run.solver_method,
-        SolverMethod::ImplicitEulerPcg
+        SolverMethod::NewmarkAverageAccelerationPcg
     );
     assert_eq!(envelope.data.run_status, RunStatus::Completed);
     assert!(envelope.data.numerically_acceptable);
+    assert_eq!(envelope.data.provenance.precision_mode, "fp64");
     let transient = envelope
         .data
         .transient_results
@@ -1796,7 +1802,7 @@ fn analysis_run_transient_contract_is_v1_and_typed() {
         .expect("transient payload should exist");
     assert_eq!(
         transient.integration_method,
-        runmat_runtime::analysis::TransientIntegrationMethod::ImplicitEuler
+        runmat_runtime::analysis::TransientIntegrationMethod::NewmarkAverageAcceleration
     );
     assert_eq!(
         transient.time_points_s.len(),
@@ -1806,6 +1812,9 @@ fn analysis_run_transient_contract_is_v1_and_typed() {
         transient.time_points_s.len(),
         transient.residual_norm_snapshots.len()
     );
+    assert!(transient.strain_snapshots.is_empty());
+    assert!(transient.stress_snapshots.is_empty());
+    assert!(transient.strain_energy_density_snapshots.is_empty());
     assert_eq!(
         transient.residual_norm_snapshots[1].field_id,
         fea_transient_residual_norm_field_id(1)
@@ -2523,7 +2532,6 @@ fn analysis_trends_contract_is_v1_and_typed() {
     assert!(nonlinear.median_solve_ms.is_some());
     assert!(nonlinear.p95_solve_ms.is_some());
     assert!(nonlinear.thermo_coupling_enabled_rate.is_none());
-    assert!(nonlinear.thermo_transient_warn_rate.is_none());
     assert!(nonlinear.thermo_nonlinear_warn_rate.is_none());
     assert!(nonlinear.thermo_spread_breach_rate.is_none());
     assert!(nonlinear.thermo_heterogeneity_breach_rate.is_none());
@@ -2542,22 +2550,9 @@ fn analysis_run_transient_with_options_contract_controls_execution_window() {
         FormulationRequirement::Experimental,
         AnalysisTransientRunOptions {
             deterministic_mode: true,
-            precision_mode: PrecisionMode::Fp64,
             quality_policy: QualityPolicy::Balanced,
-            min_time_step_s: 0.25,
-            max_time_step_s: 0.25,
-            interval_count: 4,
-            max_linear_iters: 64,
-            tolerance: 1.0e-8,
+            time_step_policy: AnalysisStructuralTimeStepPolicy::Fixed { interval_count: 4 },
             residual_target: 1.0e-6,
-            adaptive_time_step: false,
-            max_step_retries: 0,
-            adapt_min_scale: 0.8,
-            adapt_max_scale: 1.25,
-            adapt_growth_exponent: 0.35,
-            adapt_retry_growth_cap: 1.05,
-            adapt_nonconverged_shrink: 0.75,
-            dt_bucket_rel_tolerance: 0.0,
             solver_mesh_artifact_path: None,
         },
         OperationContext::new(Some("trace-contract-transient-opts-1".to_string()), None),
@@ -2659,7 +2654,7 @@ fn analysis_transient_long_fixture_quality_signals_propagate_to_results() {
         ComputeBackend::Cpu,
         FormulationRequirement::Experimental,
         AnalysisTransientRunOptions {
-            interval_count: 24,
+            time_step_policy: AnalysisStructuralTimeStepPolicy::Fixed { interval_count: 24 },
             ..AnalysisTransientRunOptions::balanced()
         },
         OperationContext::new(Some("trace-contract-transient-long-1".to_string()), None),
@@ -2739,7 +2734,7 @@ fn analysis_results_contract_is_v1_and_filterable() {
     let results = analysis_results_op(
         &run.data,
         AnalysisResultsQuery {
-            include_fields: vec![FEA_FIELD_STRUCTURAL_VON_MISES.to_string()],
+            include_fields: vec![FEA_FIELD_STRUCTURAL_BEAM_BENDING_STRESS.to_string()],
             include_field_values: true,
 
             include_diagnostics: false,
@@ -2760,7 +2755,7 @@ fn analysis_results_contract_is_v1_and_filterable() {
     assert_eq!(results.data.fields.len(), 1);
     assert_eq!(
         results.data.fields[0].field_id,
-        FEA_FIELD_STRUCTURAL_VON_MISES
+        FEA_FIELD_STRUCTURAL_BEAM_BENDING_STRESS
     );
     assert!(results.data.diagnostics.is_none());
 }
@@ -3002,7 +2997,6 @@ fn analysis_results_by_run_id_contract_roundtrip() {
         results.data.summary.thermo_assignment_heterogeneity_index,
         None
     );
-    assert_eq!(results.data.summary.thermo_transient_severity, None);
     assert_eq!(results.data.summary.thermo_nonlinear_severity, None);
 }
 
@@ -3283,11 +3277,16 @@ fn analysis_run_gpu_with_provider_preserves_host_field_contract() {
         envelope
             .data
             .run
-            .field(FEA_FIELD_STRUCTURAL_VON_MISES)
-            .expect("structural von Mises field should be present")
+            .field(FEA_FIELD_STRUCTURAL_BEAM_BENDING_STRESS)
+            .expect("structural beam bending-stress field should be present")
             .values,
         AnalysisFieldValues::HostF64(_)
     ));
+    assert!(envelope
+        .data
+        .run
+        .field(FEA_FIELD_STRUCTURAL_VON_MISES)
+        .is_none());
 }
 
 #[test]

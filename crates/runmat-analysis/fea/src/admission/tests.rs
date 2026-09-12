@@ -47,10 +47,6 @@ fn exposed_identities() -> Vec<(PhysicsFamily, AnalysisProcedure)> {
         ),
         (
             PhysicsFamily::Coupled(CoupledPhysicsFamily::Thermomechanical),
-            AnalysisProcedure::TransientResponse,
-        ),
-        (
-            PhysicsFamily::Coupled(CoupledPhysicsFamily::Thermomechanical),
             AnalysisProcedure::Nonlinear,
         ),
     ]
@@ -236,11 +232,7 @@ fn availability_gate_rejects_production_for_every_registered_procedure() {
 
 #[test]
 fn thermomechanical_structural_procedures_are_available_experimentally() {
-    for procedure in [
-        AnalysisProcedure::Static,
-        AnalysisProcedure::TransientResponse,
-        AnalysisProcedure::Nonlinear,
-    ] {
+    for procedure in [AnalysisProcedure::Static, AnalysisProcedure::Nonlinear] {
         require_qualified_formulation(
             PhysicsFamily::Coupled(CoupledPhysicsFamily::Thermomechanical),
             procedure,
@@ -249,6 +241,18 @@ fn thermomechanical_structural_procedures_are_available_experimentally() {
         )
         .expect("thermomechanical structural procedures should pass pre-availability");
     }
+
+    let rejection = require_qualified_formulation(
+        PhysicsFamily::Coupled(CoupledPhysicsFamily::Thermomechanical),
+        AnalysisProcedure::TransientResponse,
+        SolutionSpace::Direct,
+        FormulationRequirement::Experimental,
+    )
+    .expect_err("thermomechanical transient requires a solver-owned coupled thermal state");
+    assert_eq!(
+        rejection.reason,
+        FormulationAdmissionRejectionReason::UnsupportedFamilyProcedure
+    );
 }
 
 #[test]

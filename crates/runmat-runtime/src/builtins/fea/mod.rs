@@ -4413,6 +4413,27 @@ execution:
             thermal_results: None,
             transient_results: Some(crate::analysis::TransientResultsData {
                 transient_payload_version: "transient_results/v1".to_string(),
+                initial_state: runmat_analysis_fea::StructuralInitialStateEvidence {
+                    procedure_step_id: "synthetic_transient".to_string(),
+                    basis: runmat_analysis_fea::StructuralInitialStateEvidenceBasis::OperatorBoundZeroDefault {
+                        dof_count: 1,
+                        operator_identity: runmat_execution::Digest::sha256(
+                            b"runtime-synthetic-transient-fixture",
+                        ),
+                    },
+                    total_dof_count: 1,
+                    authored_displacement_dof_count: 0,
+                    constraint_derived_displacement_dof_count: 0,
+                    zero_default_displacement_dof_count: 1,
+                    authored_velocity_dof_count: 0,
+                    constraint_derived_velocity_dof_count: 0,
+                    zero_default_velocity_dof_count: 1,
+                    direct_constrained_dof_count: 0,
+                    constraint_equation_count: 0,
+                    maximum_displacement_constraint_residual_bits: 0.0_f64.to_bits(),
+                    maximum_velocity_constraint_residual_bits: 0.0_f64.to_bits(),
+                    applied_conditions: Vec::new(),
+                },
                 time_points_s: vec![0.0, 1.0],
                 displacement_snapshots: indexed_fields("displacement"),
                 rotation_snapshots: Vec::new(),
@@ -4420,20 +4441,18 @@ execution:
                 angular_velocity_snapshots: Vec::new(),
                 acceleration_snapshots: indexed_fields("acceleration"),
                 angular_acceleration_snapshots: Vec::new(),
+                strain_snapshots: indexed_fields("strain"),
+                stress_snapshots: indexed_fields("stress"),
+                strain_energy_density_snapshots: indexed_fields("strain_energy_density"),
                 von_mises_snapshots: indexed_fields("von_mises"),
                 kinetic_energy_snapshots: indexed_fields("kinetic_energy"),
                 strain_energy_snapshots: indexed_fields("strain_energy"),
                 residual_norm_snapshots: indexed_fields("residual_norm"),
-                thermo_mechanical_temperature_snapshots: Vec::new(),
-                thermo_mechanical_thermal_strain_snapshots: Vec::new(),
-                thermo_mechanical_thermal_stress_snapshots: Vec::new(),
-                thermo_mechanical_displacement_snapshots: Vec::new(),
-                thermo_mechanical_von_mises_snapshots: Vec::new(),
-                thermo_mechanical_coupling_residual_snapshots: Vec::new(),
                 electro_thermal_temperature_snapshots: Vec::new(),
                 electro_thermal_thermal_residual_snapshots: Vec::new(),
-                residual_norms: vec![0.25],
-                integration_method: crate::analysis::TransientIntegrationMethod::ImplicitEuler,
+                residual_norms: vec![0.5, 0.25],
+                integration_method:
+                    crate::analysis::TransientIntegrationMethod::NewmarkAverageAcceleration,
             }),
             nonlinear_results: None,
             electromagnetic_results: None,
@@ -4488,6 +4507,19 @@ execution:
             panic!("transient time points");
         };
         assert_eq!(time_points.materialize_f64(), vec![1.0]);
+        assert!(transient.fields.contains_key("strain_snapshots"));
+        assert!(transient.fields.contains_key("stress_snapshots"));
+        assert!(transient
+            .fields
+            .contains_key("strain_energy_density_snapshots"));
+        assert!(transient.fields.contains_key("strain_energy_snapshots"));
+        let Some(Value::Struct(initial_state)) = transient.fields.get("initial_state") else {
+            panic!("structural initial-state evidence");
+        };
+        assert_eq!(
+            initial_state.fields.get("procedure_step_id"),
+            Some(&Value::String("synthetic_transient".to_string()))
+        );
 
         let Some(Value::Struct(summary)) = selected.properties.get("summary") else {
             panic!("results summary");

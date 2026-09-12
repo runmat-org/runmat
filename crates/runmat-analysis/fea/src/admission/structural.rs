@@ -328,7 +328,7 @@ pub(super) fn structural_temporal(procedure: AnalysisProcedure) -> Option<Tempor
             Some(TemporalImplementation::StructuralSubspaceIteration)
         }
         AnalysisProcedure::TransientResponse => {
-            Some(TemporalImplementation::StructuralFirstOrderRelaxation)
+            Some(TemporalImplementation::StructuralNewmarkAverageAcceleration)
         }
         AnalysisProcedure::Nonlinear => {
             Some(TemporalImplementation::StructuralScalarResidualIteration)

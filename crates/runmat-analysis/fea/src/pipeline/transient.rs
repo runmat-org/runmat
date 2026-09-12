@@ -2,43 +2,42 @@ use runmat_analysis_core::{validate_model, AnalysisField, AnalysisModel, Analysi
 
 use crate::assembly::AssemblySummary;
 use crate::{
-    algebra::apply_m,
     assembly::{assemble_structural_system, StructuralFormulationRequirement},
     contracts::{
-        fea_transient_acceleration_field_id, fea_transient_angular_acceleration_field_id,
-        fea_transient_angular_velocity_field_id, fea_transient_displacement_field_id,
         fea_transient_kinetic_energy_field_id, fea_transient_residual_norm_field_id,
-        fea_transient_rotation_field_id, fea_transient_strain_energy_field_id,
-        fea_transient_velocity_field_id, fea_transient_von_mises_field_id, ComputeBackend,
-        FeaRunError, FeaRunResult, FeaTransientRunResult, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
-        FEA_FIELD_STRUCTURAL_VON_MISES,
+        fea_transient_strain_energy_field_id, ComputeBackend, FeaRunError, FeaRunResult,
+        FeaTransientRunResult,
     },
-    diagnostics::{
-        builders::{extend_common_run_diagnostics, CommonRunDiagnosticInputs},
-        FeaDiagnostic, FeaDiagnosticSeverity,
-    },
+    diagnostics::builders::{extend_common_run_diagnostics, CommonRunDiagnosticInputs},
     excitation::{realize_step_excitations, time_discontinuities, ExcitationSamplePoint},
+    physics::structural::dynamics::initial_state::{
+        realize as realize_structural_initial_state, StructuralInitialConstraintView,
+        StructuralInitialStateRealizationBasis,
+    },
     pipeline::electro_thermal::recover_realized_electro_thermal_fields,
     pipeline::observation_history::{
         evaluate_field_histories, required_time_history_samples, HistoryFieldSeries,
         HistoryTopology,
     },
-    pipeline::structural_nodal::{
-        nodal_vector_shape, project_structural_nodal_snapshot, project_structural_nodal_snapshots,
-    },
-    pipeline::thermo_mechanical::recover_realized_thermo_mechanical_snapshots,
     progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
     solve::transient::{
-        canonical_transient_step_boundaries, solve_transient_system_with_assembly,
-        TransientSolveOptions,
+        canonical_transient_step_boundaries, mechanical_energy_history_diagnostic,
+        solve_transient_system_with_assembly, TransientSolveError, TransientSolveOptions,
+        TransientTimeDomain,
     },
 };
 
-const VECTOR_COMPONENT_COUNT: usize = 3;
+mod constraint_admission;
+mod recovery;
+
 const TRANSIENT_DISPLACEMENT_HISTORY_SOURCE: &str = "structural.transient.displacement";
 const TRANSIENT_VELOCITY_HISTORY_SOURCE: &str = "structural.transient.velocity";
 const TRANSIENT_ACCELERATION_HISTORY_SOURCE: &str = "structural.transient.acceleration";
 const TRANSIENT_ROTATION_HISTORY_SOURCE: &str = "structural.transient.rotation";
+const TRANSIENT_STRAIN_HISTORY_SOURCE: &str = "structural.transient.strain";
+const TRANSIENT_STRESS_HISTORY_SOURCE: &str = "structural.transient.stress";
+const TRANSIENT_STRAIN_ENERGY_DENSITY_HISTORY_SOURCE: &str =
+    "structural.transient.strain_energy_density";
 
 pub fn run_transient(
     model: &AnalysisModel,
@@ -80,11 +79,13 @@ pub fn run_transient_with_options(
     check_cancelled("fea.run_transient")?;
     let time_grid = crate::excitation::ProcedureTimeGrid::from_interval_count(
         execution_step,
-        options.interval_count,
+        options.time_step_policy.interval_count(),
     )
     .map_err(FeaRunError::InvalidModel)?;
     let start_time_s = time_grid.start_s();
     let active_model = super::activation::model_with_active_constraints(model, execution_step);
+    constraint_admission::validate(&active_model)
+        .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
     let excitations = realize_step_excitations(
         &active_model,
         execution_step,
@@ -112,6 +113,37 @@ pub fn run_transient_with_options(
         options.formulation_requirement,
     )?;
     super::validate_rotational_dof_targets(model, &summary)?;
+    let initial_state_basis = match summary.structural_formulations.as_slice() {
+        [realization]
+            if realization.operator
+                == runmat_analysis_core::StructuralOperatorImplementation::SyntheticDiagonalChain =>
+        {
+            StructuralInitialStateRealizationBasis::OperatorBoundZeroDefault {
+                dof_count: summary.operator.dof_count(),
+                operator_identity: summary
+                    .operator
+                    .operators()
+                    .stiffness()
+                    .numerical_identity()
+                    .map_err(|error| FeaRunError::Assembly(error.to_string()))?,
+            }
+        }
+        _ => StructuralInitialStateRealizationBasis::CanonicalTopology,
+    };
+    let initial_state = realize_structural_initial_state(
+        &active_model,
+        options.solver_mesh.as_ref(),
+        &summary.structural_dof_layout,
+        initial_state_basis,
+        StructuralInitialConstraintView {
+            constraint_matrix: summary.constraint_matrix.as_ref(),
+            affine_reduction: summary.affine_constraint_reduction.as_ref(),
+            direct_constrained_dofs: summary.operator.constrained_dofs(),
+            direct_prescribed_displacement: summary.operator.load(),
+        },
+        execution_step.step_id.as_str(),
+    )
+    .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
     emit_phase(
         "fea.run_transient",
         FeaProgressPhase::ModelAssembly,
@@ -145,9 +177,13 @@ pub fn run_transient_with_options(
         &summary,
         options.clone(),
         backend,
-        start_time_s,
-        end_time_s,
-        &step_boundaries,
+        TransientTimeDomain {
+            start_time_s,
+            end_time_s,
+            step_boundaries: &step_boundaries,
+        },
+        initial_state.displacement,
+        initial_state.velocity,
         |time_s, approach| {
             let excitations = realize_step_excitations(
                 &active_model,
@@ -173,7 +209,11 @@ pub fn run_transient_with_options(
             }
             Ok::<AssemblySummary, FeaRunError>(assembly)
         },
-    )?;
+    )
+    .map_err(|error| match error {
+        TransientSolveError::Assembly(error) => error,
+        other => FeaRunError::Solve(other.to_string()),
+    })?;
     let reporting_summary = transient
         .assembly_snapshots
         .last()
@@ -206,20 +246,15 @@ pub fn run_transient_with_options(
         },
     );
 
-    let displacement = transient
-        .displacement_snapshots
-        .last()
-        .cloned()
-        .unwrap_or_else(|| vec![0.0; reporting_summary.dof_count.max(3)]);
-    let projected_displacement =
-        project_structural_nodal_snapshot(&reporting_summary.structural_dof_layout, &displacement)
-            .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
-    let von_mises = displacement
-        .iter()
-        .map(|value| value.abs())
-        .fold(0.0_f64, f64::max)
-        * 1.0e11;
-
+    let recovered = recovery::recover_transient_fields(&transient)?;
+    let kinetic_energy_values = transient.kinetic_energy_snapshots.clone();
+    let strain_energy_values = transient.strain_energy_snapshots.clone();
+    recovery::require_snapshot_count(
+        transient.displacement_snapshots.len(),
+        "residual norm",
+        transient.residual_norms.len(),
+    )?;
+    let residual_norm_values = transient.residual_norms.clone();
     let mut run = FeaRunResult {
         identity,
         requested_backend: backend,
@@ -245,134 +280,23 @@ pub fn run_transient_with_options(
         observations: Vec::new(),
         observation_histories: Vec::new(),
         series_reductions: Vec::new(),
-        fields: vec![
-            AnalysisField::host_f64(
-                FEA_FIELD_STRUCTURAL_DISPLACEMENT,
-                nodal_vector_shape(&reporting_summary.structural_dof_layout),
-                projected_displacement.translations,
-            ),
-            AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_VON_MISES, vec![1], vec![von_mises]),
-        ],
+        fields: recovered.final_deformation_fields.clone(),
     };
-
-    let velocity_values = recover_velocity_snapshots(
-        &transient.displacement_snapshots,
-        &transient.time_points_s,
-        reporting_summary.dof_count,
-    );
-    let acceleration_values = recover_acceleration_snapshots(
-        &velocity_values,
-        &transient.time_points_s,
-        reporting_summary.dof_count,
-    );
-    let displacement_values = project_structural_nodal_snapshots(
-        &reporting_summary.structural_dof_layout,
-        &transient.displacement_snapshots,
-    )
-    .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
-    let projected_velocity_values = project_structural_nodal_snapshots(
-        &reporting_summary.structural_dof_layout,
-        &velocity_values,
-    )
-    .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
-    let projected_acceleration_values = project_structural_nodal_snapshots(
-        &reporting_summary.structural_dof_layout,
-        &acceleration_values,
-    )
-    .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
-    let von_mises_values = recover_von_mises_snapshots(
-        &transient.displacement_snapshots,
-        reporting_summary.dof_count,
-    );
-    let kinetic_energy_values =
-        recover_kinetic_energy_snapshots(&transient.assembly_snapshots, &velocity_values);
-    let strain_energy_values = transient.strain_energy_snapshots.clone();
-    run.diagnostics.push(transient_energy_balance_diagnostic(
+    run.diagnostics.push(mechanical_energy_history_diagnostic(
         &kinetic_energy_values,
         &strain_energy_values,
     ));
-    let residual_norm_values = recover_residual_norm_snapshots(
-        transient.displacement_snapshots.len(),
-        &transient.residual_norms,
-    );
 
-    let displacement_snapshots = displacement_values
-        .iter()
-        .enumerate()
-        .map(|(index, snapshot)| {
-            AnalysisField::host_f64(
-                fea_transient_displacement_field_id(index),
-                nodal_vector_shape(&reporting_summary.structural_dof_layout),
-                snapshot.translations.clone(),
-            )
-        })
-        .collect::<Vec<_>>();
-    let rotation_snapshots = displacement_values
-        .iter()
-        .enumerate()
-        .map(|(index, snapshot)| {
-            AnalysisField::host_f64(
-                fea_transient_rotation_field_id(index),
-                nodal_vector_shape(&reporting_summary.structural_dof_layout),
-                snapshot.rotations.clone(),
-            )
-        })
-        .collect::<Vec<_>>();
-    let velocity_snapshots = projected_velocity_values
-        .iter()
-        .enumerate()
-        .map(|(index, snapshot)| {
-            AnalysisField::host_f64(
-                fea_transient_velocity_field_id(index),
-                nodal_vector_shape(&reporting_summary.structural_dof_layout),
-                snapshot.translations.clone(),
-            )
-        })
-        .collect::<Vec<_>>();
-    let angular_velocity_snapshots = projected_velocity_values
-        .iter()
-        .enumerate()
-        .map(|(index, snapshot)| {
-            AnalysisField::host_f64(
-                fea_transient_angular_velocity_field_id(index),
-                nodal_vector_shape(&reporting_summary.structural_dof_layout),
-                snapshot.rotations.clone(),
-            )
-        })
-        .collect::<Vec<_>>();
-    let acceleration_snapshots = projected_acceleration_values
-        .iter()
-        .enumerate()
-        .map(|(index, snapshot)| {
-            AnalysisField::host_f64(
-                fea_transient_acceleration_field_id(index),
-                nodal_vector_shape(&reporting_summary.structural_dof_layout),
-                snapshot.translations.clone(),
-            )
-        })
-        .collect::<Vec<_>>();
-    let angular_acceleration_snapshots = projected_acceleration_values
-        .iter()
-        .enumerate()
-        .map(|(index, snapshot)| {
-            AnalysisField::host_f64(
-                fea_transient_angular_acceleration_field_id(index),
-                nodal_vector_shape(&reporting_summary.structural_dof_layout),
-                snapshot.rotations.clone(),
-            )
-        })
-        .collect::<Vec<_>>();
-    let von_mises_snapshots = von_mises_values
-        .into_iter()
-        .enumerate()
-        .map(|(index, value)| {
-            AnalysisField::host_f64(
-                fea_transient_von_mises_field_id(index),
-                vec![1],
-                vec![value],
-            )
-        })
-        .collect::<Vec<_>>();
+    let displacement_snapshots = recovered.displacement_snapshots;
+    let rotation_snapshots = recovered.rotation_snapshots;
+    let velocity_snapshots = recovered.velocity_snapshots;
+    let angular_velocity_snapshots = recovered.angular_velocity_snapshots;
+    let acceleration_snapshots = recovered.acceleration_snapshots;
+    let angular_acceleration_snapshots = recovered.angular_acceleration_snapshots;
+    let strain_snapshots = recovered.strain_snapshots;
+    let stress_snapshots = recovered.stress_snapshots;
+    let von_mises_snapshots = recovered.von_mises_snapshots;
+    let strain_energy_density_snapshots = recovered.strain_energy_density_snapshots;
     let kinetic_energy_snapshots = kinetic_energy_values
         .into_iter()
         .enumerate()
@@ -407,30 +331,17 @@ pub fn run_transient_with_options(
             )
         })
         .collect::<Vec<_>>();
-    let thermo_mechanical_summaries = transient
-        .assembly_snapshots
-        .iter()
-        .map(|summary| summary.thermo_mechanical.clone())
-        .collect::<Vec<_>>();
     let electro_thermal_summaries = transient
         .assembly_snapshots
         .iter()
         .map(|summary| summary.electro_thermal.clone())
         .collect::<Vec<_>>();
-    let thermo_mechanical_fields = recover_realized_thermo_mechanical_snapshots(
-        &thermo_mechanical_summaries,
-        &displacement_snapshots,
-        &von_mises_snapshots,
-        &residual_norm_values,
-        element_count_for_dofs(reporting_summary.dof_count),
-    );
     let electro_thermal_fields = recover_realized_electro_thermal_fields(
         &electro_thermal_summaries,
         &residual_norm_values,
         reporting_summary.dof_count,
         options.solver_mesh.as_ref(),
     );
-    run.diagnostics.extend(thermo_mechanical_fields.diagnostics);
     run.diagnostics.extend(electro_thermal_fields.diagnostics);
     run.fields.extend(electro_thermal_fields.static_fields);
     let evaluated_histories = if execution_step.observations.iter().any(|request| {
@@ -445,6 +356,86 @@ pub fn run_transient_with_options(
             .copied()
             .map(crate::results::field::RecoveredFieldSample::TimeSeconds)
             .collect::<Vec<_>>();
+        let mut series = vec![
+            HistoryFieldSeries {
+                quantity: runmat_analysis_core::ObservationQuantity::Displacement,
+                source_field_id: TRANSIENT_DISPLACEMENT_HISTORY_SOURCE,
+                location: runmat_analysis_core::FieldLocation::Node,
+                entity_domain: crate::results::field::RecoveredFieldEntityDomain::StructuralNodes,
+                value_shape: runmat_analysis_core::ObservationValueShape::Vector3,
+                numeric_representation:
+                    crate::results::field::RecoveredFieldNumericRepresentation::Real,
+                snapshots: &displacement_snapshots,
+            },
+            HistoryFieldSeries {
+                quantity: runmat_analysis_core::ObservationQuantity::Velocity,
+                source_field_id: TRANSIENT_VELOCITY_HISTORY_SOURCE,
+                location: runmat_analysis_core::FieldLocation::Node,
+                entity_domain: crate::results::field::RecoveredFieldEntityDomain::StructuralNodes,
+                value_shape: runmat_analysis_core::ObservationValueShape::Vector3,
+                numeric_representation:
+                    crate::results::field::RecoveredFieldNumericRepresentation::Real,
+                snapshots: &velocity_snapshots,
+            },
+            HistoryFieldSeries {
+                quantity: runmat_analysis_core::ObservationQuantity::Acceleration,
+                source_field_id: TRANSIENT_ACCELERATION_HISTORY_SOURCE,
+                location: runmat_analysis_core::FieldLocation::Node,
+                entity_domain: crate::results::field::RecoveredFieldEntityDomain::StructuralNodes,
+                value_shape: runmat_analysis_core::ObservationValueShape::Vector3,
+                numeric_representation:
+                    crate::results::field::RecoveredFieldNumericRepresentation::Real,
+                snapshots: &acceleration_snapshots,
+            },
+        ];
+        if rotation_snapshots.len() == coordinates.len() {
+            series.push(HistoryFieldSeries {
+                quantity: runmat_analysis_core::ObservationQuantity::Rotation,
+                source_field_id: TRANSIENT_ROTATION_HISTORY_SOURCE,
+                location: runmat_analysis_core::FieldLocation::Node,
+                entity_domain: crate::results::field::RecoveredFieldEntityDomain::StructuralNodes,
+                value_shape: runmat_analysis_core::ObservationValueShape::Vector3,
+                numeric_representation:
+                    crate::results::field::RecoveredFieldNumericRepresentation::Real,
+                snapshots: &rotation_snapshots,
+            });
+        }
+        if strain_snapshots.len() == coordinates.len() {
+            series.push(HistoryFieldSeries {
+                quantity: runmat_analysis_core::ObservationQuantity::Strain,
+                source_field_id: TRANSIENT_STRAIN_HISTORY_SOURCE,
+                location: runmat_analysis_core::FieldLocation::Element,
+                entity_domain: crate::results::field::RecoveredFieldEntityDomain::SolidElements,
+                value_shape: runmat_analysis_core::ObservationValueShape::SymmetricTensor3,
+                numeric_representation:
+                    crate::results::field::RecoveredFieldNumericRepresentation::Real,
+                snapshots: &strain_snapshots,
+            });
+        }
+        if stress_snapshots.len() == coordinates.len() {
+            series.push(HistoryFieldSeries {
+                quantity: runmat_analysis_core::ObservationQuantity::Stress,
+                source_field_id: TRANSIENT_STRESS_HISTORY_SOURCE,
+                location: runmat_analysis_core::FieldLocation::Element,
+                entity_domain: crate::results::field::RecoveredFieldEntityDomain::SolidElements,
+                value_shape: runmat_analysis_core::ObservationValueShape::SymmetricTensor3,
+                numeric_representation:
+                    crate::results::field::RecoveredFieldNumericRepresentation::Real,
+                snapshots: &stress_snapshots,
+            });
+        }
+        if strain_energy_density_snapshots.len() == coordinates.len() {
+            series.push(HistoryFieldSeries {
+                quantity: runmat_analysis_core::ObservationQuantity::StrainEnergy,
+                source_field_id: TRANSIENT_STRAIN_ENERGY_DENSITY_HISTORY_SOURCE,
+                location: runmat_analysis_core::FieldLocation::Element,
+                entity_domain: crate::results::field::RecoveredFieldEntityDomain::SolidElements,
+                value_shape: runmat_analysis_core::ObservationValueShape::Scalar,
+                numeric_representation:
+                    crate::results::field::RecoveredFieldNumericRepresentation::Real,
+                snapshots: &strain_energy_density_snapshots,
+            });
+        }
         evaluate_field_histories(
             execution_step,
             HistoryTopology::Structural {
@@ -453,52 +444,7 @@ pub fn run_transient_with_options(
             },
             &coordinates,
             None,
-            &[
-                HistoryFieldSeries {
-                    quantity: runmat_analysis_core::ObservationQuantity::Displacement,
-                    source_field_id: TRANSIENT_DISPLACEMENT_HISTORY_SOURCE,
-                    location: runmat_analysis_core::FieldLocation::Node,
-                    entity_domain:
-                        crate::results::field::RecoveredFieldEntityDomain::StructuralNodes,
-                    value_shape: runmat_analysis_core::ObservationValueShape::Vector3,
-                    numeric_representation:
-                        crate::results::field::RecoveredFieldNumericRepresentation::Real,
-                    snapshots: &displacement_snapshots,
-                },
-                HistoryFieldSeries {
-                    quantity: runmat_analysis_core::ObservationQuantity::Velocity,
-                    source_field_id: TRANSIENT_VELOCITY_HISTORY_SOURCE,
-                    location: runmat_analysis_core::FieldLocation::Node,
-                    entity_domain:
-                        crate::results::field::RecoveredFieldEntityDomain::StructuralNodes,
-                    value_shape: runmat_analysis_core::ObservationValueShape::Vector3,
-                    numeric_representation:
-                        crate::results::field::RecoveredFieldNumericRepresentation::Real,
-                    snapshots: &velocity_snapshots,
-                },
-                HistoryFieldSeries {
-                    quantity: runmat_analysis_core::ObservationQuantity::Acceleration,
-                    source_field_id: TRANSIENT_ACCELERATION_HISTORY_SOURCE,
-                    location: runmat_analysis_core::FieldLocation::Node,
-                    entity_domain:
-                        crate::results::field::RecoveredFieldEntityDomain::StructuralNodes,
-                    value_shape: runmat_analysis_core::ObservationValueShape::Vector3,
-                    numeric_representation:
-                        crate::results::field::RecoveredFieldNumericRepresentation::Real,
-                    snapshots: &acceleration_snapshots,
-                },
-                HistoryFieldSeries {
-                    quantity: runmat_analysis_core::ObservationQuantity::Rotation,
-                    source_field_id: TRANSIENT_ROTATION_HISTORY_SOURCE,
-                    location: runmat_analysis_core::FieldLocation::Node,
-                    entity_domain:
-                        crate::results::field::RecoveredFieldEntityDomain::StructuralNodes,
-                    value_shape: runmat_analysis_core::ObservationValueShape::Vector3,
-                    numeric_representation:
-                        crate::results::field::RecoveredFieldNumericRepresentation::Real,
-                    snapshots: &rotation_snapshots,
-                },
-            ],
+            &series,
         )
         .map_err(|error| FeaRunError::Observation(error.to_string()))?
     } else {
@@ -527,6 +473,7 @@ pub fn run_transient_with_options(
 
     Ok(FeaTransientRunResult {
         run,
+        initial_state: initial_state.evidence,
         time_points_s: transient.time_points_s,
         displacement_snapshots,
         rotation_snapshots,
@@ -534,193 +481,16 @@ pub fn run_transient_with_options(
         angular_velocity_snapshots,
         acceleration_snapshots,
         angular_acceleration_snapshots,
+        strain_snapshots,
+        stress_snapshots,
         von_mises_snapshots,
+        strain_energy_density_snapshots,
         kinetic_energy_snapshots,
         strain_energy_snapshots,
         residual_norm_snapshots,
-        thermo_mechanical_temperature_snapshots: thermo_mechanical_fields.temperature_snapshots,
-        thermo_mechanical_thermal_strain_snapshots: thermo_mechanical_fields
-            .thermal_strain_snapshots,
-        thermo_mechanical_thermal_stress_snapshots: thermo_mechanical_fields
-            .thermal_stress_snapshots,
-        thermo_mechanical_displacement_snapshots: thermo_mechanical_fields.displacement_snapshots,
-        thermo_mechanical_von_mises_snapshots: thermo_mechanical_fields.von_mises_snapshots,
-        thermo_mechanical_coupling_residual_snapshots: thermo_mechanical_fields
-            .coupling_residual_snapshots,
         electro_thermal_temperature_snapshots: electro_thermal_fields.temperature_snapshots,
         electro_thermal_thermal_residual_snapshots: electro_thermal_fields
             .thermal_residual_snapshots,
         residual_norms: transient.residual_norms,
     })
-}
-
-fn recover_velocity_snapshots(
-    displacement_snapshots: &[Vec<f64>],
-    time_points_s: &[f64],
-    dof_count: usize,
-) -> Vec<Vec<f64>> {
-    let mut velocities = Vec::with_capacity(displacement_snapshots.len());
-    for (index, snapshot) in displacement_snapshots.iter().enumerate() {
-        if index == 0 {
-            velocities.push(vec![0.0; dof_count.max(snapshot.len())]);
-            continue;
-        }
-        let previous = &displacement_snapshots[index - 1];
-        let dt = (time_points_s.get(index).copied().unwrap_or(index as f64)
-            - time_points_s
-                .get(index - 1)
-                .copied()
-                .unwrap_or(index.saturating_sub(1) as f64))
-        .abs()
-        .max(1.0e-12);
-        velocities.push(difference_quotient(snapshot, previous, dt, dof_count));
-    }
-    velocities
-}
-
-fn recover_acceleration_snapshots(
-    velocity_snapshots: &[Vec<f64>],
-    time_points_s: &[f64],
-    dof_count: usize,
-) -> Vec<Vec<f64>> {
-    let mut accelerations = Vec::with_capacity(velocity_snapshots.len());
-    for (index, snapshot) in velocity_snapshots.iter().enumerate() {
-        if index == 0 {
-            accelerations.push(vec![0.0; dof_count.max(snapshot.len())]);
-            continue;
-        }
-        let previous = &velocity_snapshots[index - 1];
-        let dt = (time_points_s.get(index).copied().unwrap_or(index as f64)
-            - time_points_s
-                .get(index - 1)
-                .copied()
-                .unwrap_or(index.saturating_sub(1) as f64))
-        .abs()
-        .max(1.0e-12);
-        accelerations.push(difference_quotient(snapshot, previous, dt, dof_count));
-    }
-    accelerations
-}
-
-fn difference_quotient(current: &[f64], previous: &[f64], dt: f64, dof_count: usize) -> Vec<f64> {
-    let count = dof_count.max(current.len()).max(previous.len());
-    (0..count)
-        .map(|index| {
-            (current.get(index).copied().unwrap_or(0.0)
-                - previous.get(index).copied().unwrap_or(0.0))
-                / dt
-        })
-        .collect()
-}
-
-fn recover_von_mises_snapshots(displacement_snapshots: &[Vec<f64>], dof_count: usize) -> Vec<f64> {
-    displacement_snapshots
-        .iter()
-        .map(|snapshot| {
-            snapshot
-                .iter()
-                .take(dof_count.max(snapshot.len()))
-                .map(|value| value.abs())
-                .fold(0.0_f64, f64::max)
-                * 1.0e11
-        })
-        .collect()
-}
-
-fn recover_kinetic_energy_snapshots(
-    summaries: &[crate::assembly::AssemblySummary],
-    velocity_snapshots: &[Vec<f64>],
-) -> Vec<f64> {
-    velocity_snapshots
-        .iter()
-        .enumerate()
-        .map(|(index, velocity)| {
-            let Some(summary) = summaries.get(index).or_else(|| summaries.last()) else {
-                return 0.0;
-            };
-            let momentum = apply_m(&summary.operator, velocity);
-            0.5 * velocity
-                .iter()
-                .zip(momentum.iter())
-                .map(|(v, p)| v * p)
-                .sum::<f64>()
-        })
-        .collect()
-}
-
-fn recover_residual_norm_snapshots(snapshot_count: usize, residual_norms: &[f64]) -> Vec<f64> {
-    (0..snapshot_count)
-        .map(|index| {
-            if index == 0 {
-                0.0
-            } else {
-                residual_norms
-                    .get(index - 1)
-                    .copied()
-                    .unwrap_or(f64::INFINITY)
-            }
-        })
-        .collect()
-}
-
-fn transient_energy_balance_diagnostic(
-    kinetic_energy_values: &[f64],
-    strain_energy_values: &[f64],
-) -> FeaDiagnostic {
-    let snapshot_count = kinetic_energy_values.len().max(strain_energy_values.len());
-    let total_energy = (0..snapshot_count)
-        .map(|index| {
-            kinetic_energy_values.get(index).copied().unwrap_or(0.0)
-                + strain_energy_values.get(index).copied().unwrap_or(0.0)
-        })
-        .collect::<Vec<_>>();
-    let initial_total_energy = total_energy.first().copied().unwrap_or(0.0);
-    let final_total_energy = total_energy.last().copied().unwrap_or(0.0);
-    let max_total_energy = total_energy.iter().copied().fold(0.0_f64, f64::max);
-    let reference_energy = total_energy
-        .iter()
-        .copied()
-        .find(|value| value.is_finite() && *value > 1.0e-12)
-        .unwrap_or(max_total_energy.max(1.0));
-    let energy_growth_ratio = if reference_energy > 0.0 {
-        max_total_energy / reference_energy
-    } else {
-        0.0
-    };
-    let max_step_energy_jump_ratio = total_energy
-        .windows(2)
-        .map(|window| {
-            let previous = window[0].abs().max(reference_energy).max(1.0e-12);
-            (window[1] - window[0]).abs() / previous
-        })
-        .fold(0.0_f64, f64::max);
-    let metrics_are_finite = [
-        initial_total_energy,
-        final_total_energy,
-        max_total_energy,
-        energy_growth_ratio,
-        max_step_energy_jump_ratio,
-    ]
-    .iter()
-    .all(|value| value.is_finite());
-    FeaDiagnostic {
-        code: "FEA_TRANSIENT_ENERGY_BALANCE".to_string(),
-        severity: if metrics_are_finite && energy_growth_ratio <= 10.0 {
-            FeaDiagnosticSeverity::Info
-        } else {
-            FeaDiagnosticSeverity::Warning
-        },
-        message: format!(
-            "initial_total_energy={} final_total_energy={} max_total_energy={} energy_growth_ratio={} max_step_energy_jump_ratio={}",
-            initial_total_energy,
-            final_total_energy,
-            max_total_energy,
-            energy_growth_ratio,
-            max_step_energy_jump_ratio,
-        ),
-    }
-}
-
-fn element_count_for_dofs(dof_count: usize) -> usize {
-    dof_count.div_ceil(VECTOR_COMPONENT_COUNT).max(1)
 }
