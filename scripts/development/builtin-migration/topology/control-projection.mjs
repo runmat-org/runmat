@@ -1,5 +1,6 @@
 import { compareCodePoint } from "../constants.mjs";
 import { scopesOverlap } from "../control-graph.mjs";
+import { resolveIntegrationProducts } from "../integration-products.mjs";
 import { digest, identity, stableId } from "../schema.mjs";
 
 export function materializeTopologyControl(topology, overlay) {
@@ -13,6 +14,10 @@ export function materializeTopologyControl(topology, overlay) {
   const bundleControls = requireMap(overlay?.bundleControls, "control bundle policies");
   const topologyIdentities = requireMap(topology?.identities, "reviewed topology identities");
   const identityControls = requireMap(overlay?.identityControls, "control identity policies");
+  const integrationProducts = requireMap(
+    overlay?.integrationProducts,
+    "globally reviewed integration products",
+  );
   requireExactKeys(topologyBundles, bundleControls, "bundle policy");
   requireExactIdentityKeys(topologyIdentities, identityControls, "identity policy");
 
@@ -27,6 +32,11 @@ export function materializeTopologyControl(topology, overlay) {
       identities: [...topologyBundle.identities],
       atomic_reason: topologyBundle.atomic_reason,
       ...structuredClone(executionPolicy),
+      integration_outputs: resolveIntegrationProducts(
+        executionPolicy.integration_product_refs,
+        integrationProducts,
+        id,
+      ),
       authored_write_set: effectiveAuthoredWriteSet(
         topologyBundle.composition.authored_write_set,
         additionalScopes,
@@ -39,30 +49,31 @@ export function materializeTopologyControl(topology, overlay) {
     const topologyIdentity = topologyIdentities.get(id);
     identity(id, "topology identity id");
     if (topologyIdentity.identity !== id) throw new Error(`${id}: topology identity key and value differ`);
+    const control = structuredClone(identityControls.get(id));
+    validatePublicIdentityProjection(id, topologyIdentity.disposition, control.public_identity);
     identities.set(id, {
       identity: id,
-      disposition: operationalDisposition(id, topologyIdentity.disposition),
       cohort: topologyIdentity.cohort,
       bundle_id: topologyIdentity.bundle_id,
       domain: topologyIdentity.domain,
       family: topologyIdentity.family,
-      ...structuredClone(identityControls.get(id)),
+      ...control,
     });
   }
   return { bundles, identities };
 }
 
-function operationalDisposition(id, value) {
-  if (value?.kind === "canonical" && value.canonical === null) {
-    return { kind: "canonical", target: id };
-  }
-  if (value?.kind === "alias" && value.canonical) {
-    return { kind: "alias", target: value.canonical };
-  }
-  if (value?.kind === "internal" && value.canonical === null && String(value.reason ?? "").trim()) {
-    return { kind: "internal", reason: value.reason, evidence: [`reviewed-topology:${id}`] };
-  }
-  throw new Error(`${id}: reviewed topology has an invalid disposition`);
+function validatePublicIdentityProjection(id, disposition, publicIdentity) {
+  if (disposition?.kind === "canonical" && disposition.canonical === null
+    && publicIdentity?.kind === "primary") return;
+  if (disposition?.kind === "alias" && disposition.canonical
+    && publicIdentity?.kind === "alias"
+    && publicIdentity.canonical_identity.toLowerCase() === disposition.canonical.toLowerCase()) return;
+  if (disposition?.kind === "internal" && disposition.canonical === null
+    && String(disposition.reason ?? "").trim()
+    && publicIdentity?.kind === "internal"
+    && publicIdentity.reason === disposition.reason) return;
+  throw new Error(`${id}: reviewed public identity differs from topology disposition`);
 }
 
 function effectiveAuthoredWriteSet(topologyScopes, additionalScopes) {

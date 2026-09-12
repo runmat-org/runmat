@@ -19,14 +19,18 @@ use std::sync::OnceLock;
 
 #[cfg(target_arch = "wasm32")]
 pub mod wasm_registry {
-    use super::{BuiltinDoc, BuiltinFunction, BuiltinImplementationProvenance, Constant};
+    use super::{
+        BuiltinDoc, BuiltinFunction, BuiltinImplementationProvenance, Constant,
+        ConstantRegistration, RegistrationManifestEntry,
+    };
     use std::cell::{Cell, RefCell};
 
     thread_local! {
         static FUNCTIONS: RefCell<Vec<&'static BuiltinFunction>> = const { RefCell::new(Vec::new()) };
-        static CONSTANTS: RefCell<Vec<&'static Constant>> = const { RefCell::new(Vec::new()) };
+        static CONSTANTS: RefCell<Vec<&'static ConstantRegistration>> = const { RefCell::new(Vec::new()) };
         static DOCS: RefCell<Vec<&'static BuiltinDoc>> = const { RefCell::new(Vec::new()) };
         static IMPLEMENTATION_PROVENANCE: RefCell<Vec<&'static BuiltinImplementationProvenance>> = const { RefCell::new(Vec::new()) };
+        static REGISTRATION_MANIFEST: RefCell<Vec<&'static RegistrationManifestEntry>> = const { RefCell::new(Vec::new()) };
         static REGISTERED: Cell<bool> = const { Cell::new(false) };
     }
 
@@ -39,8 +43,8 @@ pub mod wasm_registry {
         FUNCTIONS.with_borrow_mut(|functions| functions.push(leaked));
     }
 
-    pub fn submit_constant(constant: Constant) {
-        let leaked = leak(constant);
+    pub fn submit_constant(registration: ConstantRegistration) {
+        let leaked = leak(registration);
         CONSTANTS.with_borrow_mut(|constants| constants.push(leaked));
     }
 
@@ -54,11 +58,22 @@ pub mod wasm_registry {
         IMPLEMENTATION_PROVENANCE.with_borrow_mut(|entries| entries.push(leaked));
     }
 
+    pub fn submit_registration_manifest_entry(entry: RegistrationManifestEntry) {
+        let leaked = leak(entry);
+        REGISTRATION_MANIFEST.with_borrow_mut(|entries| entries.push(leaked));
+    }
+
     pub fn builtin_functions() -> Vec<&'static BuiltinFunction> {
         FUNCTIONS.with_borrow(Clone::clone)
     }
 
     pub fn constants() -> Vec<&'static Constant> {
+        CONSTANTS.with_borrow(|registrations| {
+            registrations.iter().map(|entry| &entry.constant).collect()
+        })
+    }
+
+    pub fn constant_registrations() -> Vec<&'static ConstantRegistration> {
         CONSTANTS.with_borrow(Clone::clone)
     }
 
@@ -68,6 +83,10 @@ pub mod wasm_registry {
 
     pub fn builtin_implementation_provenance() -> Vec<&'static BuiltinImplementationProvenance> {
         IMPLEMENTATION_PROVENANCE.with_borrow(Clone::clone)
+    }
+
+    pub fn registration_manifest_entries() -> Vec<&'static RegistrationManifestEntry> {
+        REGISTRATION_MANIFEST.with_borrow(Clone::clone)
     }
 
     pub fn mark_registered() {
@@ -679,6 +698,34 @@ pub struct Constant {
     pub value: Value,
 }
 
+/// Declaration-derived provenance for one live constant registration.
+#[doc(hidden)]
+pub struct ConstantRegistration {
+    pub constant: Constant,
+    pub source_file: &'static str,
+    pub module_path: &'static str,
+    pub builtin_path: &'static str,
+}
+
+/// One declaration emitted into both native inventory and the generated WASM registry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[doc(hidden)]
+pub struct RegistrationManifestEntry {
+    pub kind: RegistrationKind,
+    pub declaration: &'static str,
+    pub variant: Option<&'static str>,
+    pub builtin_path: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[doc(hidden)]
+pub enum RegistrationKind {
+    Builtin,
+    Constant,
+    FusionSpec,
+    GpuSpec,
+}
+
 pub mod semantics;
 pub mod shape_rules;
 
@@ -701,7 +748,9 @@ impl std::fmt::Debug for Constant {
 #[cfg(not(target_arch = "wasm32"))]
 inventory::collect!(BuiltinFunction);
 #[cfg(not(target_arch = "wasm32"))]
-inventory::collect!(Constant);
+inventory::collect!(ConstantRegistration);
+#[cfg(not(target_arch = "wasm32"))]
+inventory::collect!(RegistrationManifestEntry);
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn builtin_functions() -> Vec<&'static BuiltinFunction> {
@@ -852,12 +901,39 @@ pub fn builtin_declares_zero_outputs(name: &str) -> bool {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn constants() -> Vec<&'static Constant> {
-    inventory::iter::<Constant>().collect()
+    constant_registrations()
+        .into_iter()
+        .map(|registration| &registration.constant)
+        .collect()
 }
 
 #[cfg(target_arch = "wasm32")]
 pub fn constants() -> Vec<&'static Constant> {
     wasm_registry::constants()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[doc(hidden)]
+pub fn constant_registrations() -> Vec<&'static ConstantRegistration> {
+    inventory::iter::<ConstantRegistration>().collect()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[doc(hidden)]
+pub fn registration_manifest_entries() -> Vec<&'static RegistrationManifestEntry> {
+    inventory::iter::<RegistrationManifestEntry>().collect()
+}
+
+#[cfg(target_arch = "wasm32")]
+#[doc(hidden)]
+pub fn registration_manifest_entries() -> Vec<&'static RegistrationManifestEntry> {
+    wasm_registry::registration_manifest_entries()
+}
+
+#[cfg(target_arch = "wasm32")]
+#[doc(hidden)]
+pub fn constant_registrations() -> Vec<&'static ConstantRegistration> {
+    wasm_registry::constant_registrations()
 }
 
 // ----------------------

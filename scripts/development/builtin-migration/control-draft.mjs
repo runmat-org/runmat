@@ -22,8 +22,8 @@ export function buildControlDraft(inventoryValue) {
     compiled_authority_digest: evidenceDigest(entry.semantic_authority),
     discovery_observation_digest: evidenceDigest(entry.lexical_observations),
     unresolved_fields: [
-      "public_spelling", "disposition", "cohort", "bundle_id", "domain", "family",
-      "runtime_owner", "shared_dependencies", "complexity", "maturity",
+      "public_identity", "forms", "implementation", "topology_disposition", "cohort",
+      "bundle_id", "domain", "family", "shared_dependencies", "complexity", "maturity",
       "expected_authorities", "expected_removals", "baseline_evidence", "owner",
     ],
     review: { status: "unreviewed", evidence: [] },
@@ -121,7 +121,7 @@ function parseIdentityRow(value) {
   digest(value.inventory_row_digest, "control draft inventory row digest");
   digest(value.compiled_authority_digest, "control draft compiled authority digest");
   digest(value.discovery_observation_digest, "control draft discovery observation digest");
-  const expected = ["public_spelling", "disposition", "cohort", "bundle_id", "domain", "family", "runtime_owner", "shared_dependencies", "complexity", "maturity", "expected_authorities", "expected_removals", "baseline_evidence", "owner"];
+  const expected = ["public_identity", "forms", "implementation", "topology_disposition", "cohort", "bundle_id", "domain", "family", "shared_dependencies", "complexity", "maturity", "expected_authorities", "expected_removals", "baseline_evidence", "owner"];
   if (JSON.stringify(uniqueStrings(value.unresolved_fields, `${value.identity} unresolved fields`)) !== JSON.stringify(expected)) throw new Error(`${value.identity}: control draft must leave every identity field unresolved`);
   assertUnreviewed(value.review, `${value.identity} draft review`);
   return value;

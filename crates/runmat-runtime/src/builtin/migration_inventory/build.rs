@@ -1,18 +1,20 @@
 use runmat_builtins::{
     builtin_catalog_entries, builtin_constant_catalog_entries, builtin_docs, builtin_functions,
-    builtin_implementation_provenance, canonical_catalog_fingerprint, constants,
-    native_binding_symbol, AccelTag, BuiltinImplementationAuthority, TypeResolverKind,
-    BUILTIN_CATALOG_SCHEMA_VERSION,
+    builtin_implementation_provenance, canonical_catalog_fingerprint, constant_registrations,
+    native_binding_symbol, registration_manifest_entries, AccelTag, BuiltinImplementationAuthority,
+    RegistrationKind, TypeResolverKind, BUILTIN_CATALOG_SCHEMA_VERSION,
 };
 use sha2::{Digest, Sha256};
 
-use crate::builtins::common::spec::{builtin_fusion_specs, builtin_gpu_specs};
+use crate::builtins::common::spec::{
+    builtin_fusion_spec_registrations, builtin_gpu_spec_registrations,
+};
 
 use super::{
     environment::{build_configuration, hex},
     projection::SpecOwnershipClassifier,
     schema::*,
-    validation::validate_inventory,
+    validation::{canonical_compiler_source_path, validate_inventory},
 };
 
 pub fn migration_inventory() -> MigrationInventory<'static> {
@@ -124,7 +126,7 @@ pub fn migration_inventory() -> MigrationInventory<'static> {
         .map(|provenance| ImplementationProvenanceRecord {
             name: provenance.name,
             binding_variant: provenance.binding_variant,
-            source_file: provenance.source_file,
+            source_file: canonical_compiler_source_path(provenance.source_file),
             module_path: provenance.module_path,
             function: provenance.function,
             builtin_path: provenance.builtin_path,
@@ -144,22 +146,78 @@ pub fn migration_inventory() -> MigrationInventory<'static> {
     });
 
     let spec_owners = SpecOwnershipClassifier::compiled();
-    let mut gpu_specs = builtin_gpu_specs()
-        .map(|spec| spec_owners.gpu_spec(spec))
+    let mut gpu_specs = builtin_gpu_spec_registrations()
+        .map(|registration| {
+            spec_owners.gpu_spec(
+                registration.spec,
+                registration.declaration,
+                registration.builtin_path,
+                canonical_compiler_source_path(registration.source_file),
+                registration.module_path,
+            )
+        })
         .collect::<Vec<_>>();
     gpu_specs.sort_unstable_by_key(|spec| spec.key);
-    let mut fusion_specs = builtin_fusion_specs()
-        .map(|spec| spec_owners.fusion_spec(spec))
+    let mut fusion_specs = builtin_fusion_spec_registrations()
+        .map(|registration| {
+            spec_owners.fusion_spec(
+                registration.spec,
+                registration.declaration,
+                registration.builtin_path,
+                canonical_compiler_source_path(registration.source_file),
+                registration.module_path,
+            )
+        })
         .collect::<Vec<_>>();
     fusion_specs.sort_unstable_by_key(|spec| spec.key);
 
-    let mut runtime_constants = constants()
+    let mut runtime_constants = constant_registrations()
         .into_iter()
-        .map(|constant| RuntimeConstantRecord {
-            name: constant.name,
+        .map(|registration| RuntimeConstantRecord {
+            name: registration.constant.name,
+            source_file: canonical_compiler_source_path(registration.source_file),
+            module_path: registration.module_path,
+            builtin_path: registration.builtin_path,
         })
         .collect::<Vec<_>>();
     runtime_constants.sort_unstable_by_key(|constant| constant.name);
+
+    let mut registration_manifest = registration_manifest_entries()
+        .into_iter()
+        .map(|entry| RegistrationManifestRecord {
+            kind: match entry.kind {
+                RegistrationKind::Builtin => RegistrationKindRecord::Builtin,
+                RegistrationKind::Constant => RegistrationKindRecord::Constant,
+                RegistrationKind::GpuSpec => RegistrationKindRecord::GpuSpec,
+                RegistrationKind::FusionSpec => RegistrationKindRecord::FusionSpec,
+            },
+            declaration: entry.declaration,
+            variant: entry.variant,
+            builtin_path: entry.builtin_path,
+        })
+        .collect::<Vec<_>>();
+    registration_manifest.sort_unstable();
+    let registration_manifest_digest = hex(&Sha256::digest(
+        serde_json::to_vec(&registration_manifest).expect("registration manifest must serialize"),
+    ));
+    let registration_manifest_counts = RegistrationManifestCounts {
+        builtin: registration_manifest
+            .iter()
+            .filter(|entry| entry.kind == RegistrationKindRecord::Builtin)
+            .count(),
+        constant: registration_manifest
+            .iter()
+            .filter(|entry| entry.kind == RegistrationKindRecord::Constant)
+            .count(),
+        gpu_spec: registration_manifest
+            .iter()
+            .filter(|entry| entry.kind == RegistrationKindRecord::GpuSpec)
+            .count(),
+        fusion_spec: registration_manifest
+            .iter()
+            .filter(|entry| entry.kind == RegistrationKindRecord::FusionSpec)
+            .count(),
+    };
 
     let validation = validate_inventory(
         &catalog_provenance,
@@ -168,6 +226,7 @@ pub fn migration_inventory() -> MigrationInventory<'static> {
         &gpu_specs,
         &fusion_specs,
         &runtime_constants,
+        &registration_manifest,
     );
     let snapshot = MigrationInventorySnapshot {
         build: build_configuration(),
@@ -182,6 +241,12 @@ pub fn migration_inventory() -> MigrationInventory<'static> {
             legacy_documentation,
         },
         observed: ObservedInventory {
+            registration_manifest: RegistrationManifest {
+                schema_version: 1,
+                digest: registration_manifest_digest,
+                counts: registration_manifest_counts,
+                entries: registration_manifest,
+            },
             runtime_constants,
             runtime_bindings,
             implementation_provenance,

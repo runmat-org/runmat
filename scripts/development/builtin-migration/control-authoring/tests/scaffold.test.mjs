@@ -17,6 +17,7 @@ import {
 } from "../../topology/freeze.mjs";
 import { fullTopologyChainFixture } from "../../topology/tests/full-chain-fixture.mjs";
 import { buildControlOverlayScaffold, parseControlOverlayScaffold } from "../scaffold.mjs";
+import { parseAuthorityProposals } from "../authority-proposals.mjs";
 
 afterEach(cleanupRepositoryFixtures);
 
@@ -45,10 +46,10 @@ test("builds a deterministic topology-bound scaffold with no reviewed decisions"
     entry.kind === "runtime-owner"
       && entry.path === "crates/runmat-runtime/src/builtins/fixture/alpha.rs"));
   assert.deepEqual(alpha.candidate_paths.topology_target_proposals, {
-    catalog_package: "crates/runmat-builtins/src/catalog/entries/math/core/alpha/mod.rs",
-    runtime_owner: "crates/runmat-runtime/src/builtins/math/core/alpha.rs",
-    runtime_bindings: [],
-    canonical_target: null,
+    proposed_catalog_package: "crates/runmat-builtins/src/catalog/entries/math/core/alpha/mod.rs",
+    proposed_callable_owner: "crates/runmat-runtime/src/builtins/math/core/alpha.rs",
+    proposed_callable_bindings: [],
+    proposed_canonical_identity: null,
     basis: "reviewed-topology-target-package-with-observed-function-candidates",
   });
   assert.deepEqual(Object.keys(alpha.observations.source.authority_counts), [
@@ -58,7 +59,7 @@ test("builds a deterministic topology-bound scaffold with no reviewed decisions"
     "canonical_provider_records", "canonical_fusion_records",
     "observed_provider_paths", "observed_fusion_paths",
   ]);
-  assert.deepEqual(Object.values(alpha.decisions), Array(9).fill({ status: "unresolved" }));
+  assert.deepEqual(Object.values(alpha.decisions), Array(8).fill({ status: "unresolved" }));
 
   const math = first.bundle_rows.find((row) => row.bundle_id === "c01-math-core");
   assert.deepEqual(math.observations.identities, ["alpha", "delta"]);
@@ -80,33 +81,130 @@ test("builds a deterministic topology-bound scaffold with no reviewed decisions"
 });
 
 test("keeps alias and internal target proposals separate from canonical authority", () => {
-  const alias = dispositionScaffold({
+  const aliasArtifact = dispositionScaffold({
     disposition: "alias", canonical: "canonical_target", domain: null, family: null, reason: null,
   }, {
     kind: "alias", canonical: "canonical_target", reason: null, source: "reviewed-input",
   });
+  const alias = aliasArtifact.identity_rows[0];
   assert.deepEqual(alias.candidate_paths.topology_target_proposals, {
-    catalog_package: null,
-    runtime_owner: null,
-    runtime_bindings: [],
-    canonical_target: "canonical_target",
+    proposed_catalog_package: null,
+    proposed_callable_owner: null,
+    proposed_callable_bindings: [],
+    proposed_canonical_identity: "canonical_target",
     basis: "reviewed-alias-target-no-copied-authority-proposal",
   });
 
-  const internal = dispositionScaffold({
+  const internalArtifact = dispositionScaffold({
     disposition: "internal", canonical: null, domain: null, family: null,
     reason: "Implementation-only registration",
   }, {
     kind: "internal", canonical: null, reason: "Implementation-only registration",
     source: "reviewed-input",
   });
+  const internal = internalArtifact.identity_rows[0];
   assert.deepEqual(internal.candidate_paths.topology_target_proposals, {
-    catalog_package: null,
-    runtime_owner: null,
-    runtime_bindings: [],
-    canonical_target: null,
+    proposed_catalog_package: null,
+    proposed_callable_owner: null,
+    proposed_callable_bindings: [],
+    proposed_canonical_identity: null,
     basis: "reviewed-internal-identity-observed-paths-only",
   });
+  const aliasAuthority = aliasArtifact.authority_proposals.identity_rows[0].proposal;
+  assert.equal(aliasAuthority.public_identity.kind, "alias");
+  assert.equal(aliasAuthority.public_identity.alias_spelling.spelling, "foo");
+  assert.equal(aliasAuthority.public_identity.canonical_identity, "canonical_target");
+  assert.equal(aliasAuthority.implementation.callable.proposed_owner_path, null);
+  assert.equal(aliasAuthority.implementation.constant.proposed_owner_path, null);
+
+  const internalAuthority = internalArtifact.authority_proposals.identity_rows[0].proposal;
+  assert.deepEqual(internalAuthority.public_identity, {
+    kind: "internal", reason: "Implementation-only registration",
+    evidence: ["reviewed-topology:foo"],
+  });
+  assert.equal(internalAuthority.forms.kind, "callable");
+  assert.equal(internalAuthority.implementation.callable.proposed_owner_path,
+    "crates/runmat-runtime/src/builtins/math/basic/foo.rs");
+  assert.equal(internalAuthority.implementation.callable.basis,
+    "unique-observed-owner-for-callable-form");
+});
+
+test("proposes public spelling, callable and constant forms, and implementation provenance independently", () => {
+  const callable = controlledScaffold();
+  const callableProposal = callable.scaffold.authority_proposals.identity_rows[0].proposal;
+  assert.equal(callableProposal.public_identity.kind, "primary");
+  assert.equal(callableProposal.public_identity.primary_spelling.spelling, "foo");
+  assert.equal(callableProposal.forms.kind, "callable");
+  assert.equal(callableProposal.implementation.callable.observed_bindings.length, 1);
+  assert.equal(callableProposal.implementation.callable.proposed_owner_path,
+    "crates/runmat-runtime/src/builtins/math/basic/foo.rs");
+
+  const callableAndConstant = controlledScaffold((row) => {
+    row.semantic_authority.constants = [{ name: "foo" }];
+    row.semantic_authority.runtime_constants = [runtimeConstant("foo")];
+  }).scaffold.authority_proposals.identity_rows[0].proposal;
+  assert.equal(callableAndConstant.forms.kind, "callable_and_constant");
+  assert.deepEqual(callableAndConstant.forms.callable_spellings, ["foo"]);
+  assert.deepEqual(callableAndConstant.forms.constant_spellings, ["foo"]);
+  assert.equal(callableAndConstant.implementation.callable.observed_bindings.length, 1);
+  assert.equal(callableAndConstant.implementation.constant.observed_bindings.length, 1);
+
+  const constant = controlledScaffold((row) => {
+    row.semantic_authority.catalog_entries = [];
+    row.semantic_authority.catalog_provenance = [];
+    row.semantic_authority.legacy_functions = [];
+    row.semantic_authority.runtime_bindings = [];
+    row.semantic_authority.implementation_provenance = [];
+    row.semantic_authority.constants = [{ name: "foo" }];
+    row.semantic_authority.runtime_constants = [runtimeConstant("foo")];
+    row.ownership.runtime = [];
+  }).scaffold.authority_proposals.identity_rows[0].proposal;
+  assert.equal(constant.forms.kind, "constant");
+  assert.deepEqual(constant.forms.callable_spellings, []);
+  assert.deepEqual(constant.forms.constant_spellings, ["foo"]);
+  assert.deepEqual(constant.implementation.callable.observed_bindings, []);
+  assert.equal(constant.implementation.callable.proposed_owner_path, null);
+  assert.equal(constant.implementation.constant.proposed_owner_path,
+    "crates/runmat-runtime/src/builtins/constants/mod.rs");
+});
+
+test("routes grouped findings only through compiled typed membership and rejects proposal forgery", () => {
+  const finding = {
+    code: "legacy_spec_group_requires_disposition",
+    source: "gpu_spec_registry",
+    affected: {
+      kind: "owner",
+      owner: {
+        kind: "legacy_group",
+        raw: "unrelated-display-label",
+        affected_identities: [{ name: "foo" }],
+      },
+    },
+    message: "Grouped owner needs reviewed disposition",
+  };
+  const { scaffold, inventory, draft, topology } = controlledScaffold(undefined, [finding]);
+  const routing = scaffold.migration_finding_rows[0].routing_proposal;
+  assert.deepEqual(routing.membership, {
+    kind: "owner",
+    identities: ["foo"],
+    candidate_bundle_ids: ["bundle-foo"],
+    status: "machine-derived-candidate",
+  });
+  assert.equal(routing.affected.owner.raw, "unrelated-display-label");
+
+  const inventoryByIdentity = new Map(inventory.identities.map((row) => [row.identity, row]));
+  assert.deepEqual(
+    parseAuthorityProposals(scaffold.authority_proposals, inventoryByIdentity, topology, inventory.migration_findings),
+    scaffold.authority_proposals,
+  );
+  const forged = mutable(scaffold.authority_proposals);
+  forged.migration_finding_rows[0].proposal.membership.identities = ["invented"];
+  const { digest: ignored, ...payload } = forged;
+  forged.digest = evidenceDigest(payload);
+  assert.throws(
+    () => parseAuthorityProposals(forged, inventoryByIdentity, topology, inventory.migration_findings),
+    /differ(?:s)? from deterministic reconstruction/,
+  );
 });
 
 test("counts canonical authority independently from observed registrations", () => {
@@ -203,15 +301,15 @@ test("carries exact baseline evidence digests and topology target proposals with
   for (const evidence of row.observations.source.baseline_evidence_candidates) {
     assert.equal(evidence.content_digest, sourceFiles.get(evidence.path));
   }
-  assert.equal(row.candidate_paths.topology_target_proposals.runtime_owner,
+  assert.equal(row.candidate_paths.topology_target_proposals.proposed_callable_owner,
     "crates/runmat-runtime/src/builtins/math/basic/foo.rs");
-  assert.deepEqual(row.candidate_paths.topology_target_proposals.runtime_bindings, [{
+  assert.deepEqual(row.candidate_paths.topology_target_proposals.proposed_callable_bindings, [{
     path: "crates/runmat-runtime/src/builtins/math/basic/foo.rs",
     function: "foo_builtin",
     variant: "default",
   }]);
-  assert.equal(row.decisions.runtime_owner.status, "unresolved");
-  assert.equal(row.decisions.baseline_evidence.status, "unresolved");
+  assert.equal(row.decisions.implementation.status, "unresolved");
+  assert.equal(scaffold.bundle_rows[0].decisions.baseline_evidence.status, "unresolved");
 });
 
 function inputs() {
@@ -261,11 +359,44 @@ function dispositionScaffold(disposition, topologyDisposition) {
       evidence: ["fixture topology review"],
     },
   });
-  return buildControlOverlayScaffold(inventory, draft, topology).identity_rows[0];
+  return buildControlOverlayScaffold(inventory, draft, topology);
+}
+
+function controlledScaffold(mutateIdentity = undefined, findings = []) {
+  const id = "foo";
+  const bundleId = "bundle-foo";
+  const repository = repositoryFixture({ identity: id });
+  const inventory = buildInventory(repository, undefined, {
+    revision: REVISION,
+    compiledInventory: compiledInventoryFixture(id),
+  });
+  if (mutateIdentity) mutateIdentity(inventory.identities[0]);
+  inventory.migration_findings = structuredClone(findings);
+  inventory.migration_findings_digest = evidenceDigest(inventory.migration_findings);
+  reseal(inventory);
+  const draft = buildControlDraft(inventory);
+  const topology = topologyFixture(inventory, bundleId, id, {
+    controlDraftDigest: draft.digest,
+  });
+  return {
+    inventory,
+    draft,
+    topology,
+    scaffold: buildControlOverlayScaffold(inventory, draft, topology),
+  };
 }
 
 function mutable(value) {
   return structuredClone(value);
+}
+
+function runtimeConstant(name) {
+  return {
+    name,
+    source_file: "crates/runmat-runtime/src/builtins/constants/mod.rs",
+    module_path: "runmat_runtime::builtins::constants",
+    builtin_path: "builtins::constants",
+  };
 }
 
 function reseal(value) {

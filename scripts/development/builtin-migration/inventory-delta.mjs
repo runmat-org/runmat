@@ -1,31 +1,30 @@
-import fs from "node:fs";
-import path from "node:path";
-
 import { compareCodePoint } from "./constants.mjs";
-import { assertControlBaseline, assertControlSubject } from "./control.mjs";
+import { subjectAuthorityPathFailures } from "./authority-paths.mjs";
+import { assertControlSubject } from "./control.mjs";
 import { evidenceDigest } from "./evidence.mjs";
 
 export function buildInventoryDeltaProof(repository, baseline, current, control, bundleId) {
-  assertControlBaseline(control, baseline);
+  assertControlSubject(control, baseline);
   assertControlSubject(control, current);
   const bundle = control.bundles.get(bundleId);
   if (!bundle) throw new Error(`${bundleId}: inventory delta bundle is absent`);
   const failures = [];
+  failures.push(...subjectAuthorityPathFailures(control, current, [bundle.id]));
   if (current.compiled_inventory.build.operating_system !== baseline.compiled_inventory.build.operating_system
       || current.compiled_inventory.build.architecture !== baseline.compiled_inventory.build.architecture) {
-    failures.push("compiled target differs from the frozen baseline");
+    failures.push("compiled target differs from the lease base");
   }
   const baselineRows = new Map(baseline.identities.map((entry) => [entry.identity, entry]));
   const currentRows = new Map(current.identities.map((entry) => [entry.identity, entry]));
   if (JSON.stringify([...baselineRows.keys()].sort(compareCodePoint)) !== JSON.stringify([...currentRows.keys()].sort(compareCodePoint))) {
-    failures.push("identity set differs from the frozen baseline");
+    failures.push("identity set differs from the lease base");
   }
   failures.push(...changedPathFailures(baseline, current, bundle));
   failures.push(...current.diagnostics.filter((entry) => entry.severity === "error").map((entry) => `inventory diagnostic ${entry.code}:${entry.path ?? ""}`));
   failures.push(...findingFailures(baseline, current, control, bundle));
 
   const identities = bundle.identities.map((identity) => {
-    const identityFailures = auditIdentity(repository, identity, baselineRows.get(identity), currentRows.get(identity), control.identities.get(identity));
+    const identityFailures = finalIdentityAuthorityFailures(identity, currentRows.get(identity), control.identities.get(identity));
     return {
       identity,
       baseline_row_digest: evidenceDigest(baselineRows.get(identity)),
@@ -42,12 +41,12 @@ export function buildInventoryDeltaProof(repository, baseline, current, control,
     }
   }
   const payload = {
-    schema_version: 1,
+    schema_version: 2,
     kind: "runmat-builtin-inventory-delta-proof",
     authority: "machine-derived-migration-evidence",
-    baseline_source_revision: baseline.source.revision,
+    lease_base_source_revision: baseline.source.revision,
     subject_source_revision: current.source.revision,
-    baseline_inventory_digest: baseline.digest,
+    lease_base_inventory_digest: baseline.digest,
     subject_inventory_digest: current.digest,
     subject_source_digest: current.source.digest,
     subject_compiled_inventory_digest: current.compiled_inventory.digest,
@@ -108,41 +107,90 @@ function findingFailures(baseline, current, control, bundle) {
   return failures;
 }
 
-function auditIdentity(repository, identity, baseline, current, controlled) {
+export function finalIdentityAuthorityFailures(identity, current, controlled) {
   const failures = [];
-  if (!baseline) failures.push("baseline inventory row is absent");
   if (!current) failures.push("current inventory row is absent");
   if (!controlled) failures.push("reviewed control row is absent");
-  if (!baseline || !current || !controlled) return failures;
+  if (!current || !controlled) return failures;
   if (current.unresolved.length) failures.push(`current inventory remains unresolved: ${current.unresolved.join(",")}`);
   const authority = current.semantic_authority;
-  if (controlled.disposition.kind === "canonical") {
+  if (controlled.public_identity.kind === "primary") {
     if (authority.catalog_entries.length !== controlled.expected_authorities.catalog_entry_count) failures.push("catalog authority count differs from review");
     if (authority.constants.length !== controlled.expected_authorities.catalog_constant_count) failures.push("catalog constant authority count differs from review");
-    const actualConstants = authority.runtime_constants.map((entry) => entry.name).sort(compareCodePoint);
-    const expectedConstants = [...controlled.expected_authorities.runtime_constants].sort(compareCodePoint);
-    if (JSON.stringify(actualConstants) !== JSON.stringify(expectedConstants)) failures.push("runtime constant set differs from review");
+    const actualConstants = authority.runtime_constants
+      .map(runtimeConstantKey).sort(compareCodePoint);
+    const expectedConstants = reviewedConstantBindings(controlled)
+      .map(runtimeConstantKey).sort(compareCodePoint);
+    if (JSON.stringify(actualConstants) !== JSON.stringify(expectedConstants)) failures.push("runtime constant provenance differs from review");
     if (authority.legacy_functions.length) failures.push("legacy function authority remains");
     if (authority.legacy_documentation.length) failures.push("legacy documentation authority remains");
     if (current.ownership.sidecars.length) failures.push("legacy documentation sidecar remains");
     if (current.ownership.runtime_documentation_shadows.length) failures.push("runtime documentation shadow remains");
     if (current.dependencies.legacy_resolver_paths.length) failures.push("legacy resolver ownership remains");
     const actualBindings = authority.implementation_provenance
-      .filter((entry) => entry.authority === "canonical_binding")
-      .map((entry) => `${entry.source_file}:${entry.function}:${entry.binding_variant}`)
+      .map(observedCallableKey)
       .sort(compareCodePoint);
-    const expectedBindings = controlled.expected_authorities.runtime_bindings
-      .map((entry) => `${entry.path}:${entry.function}:${entry.variant}`)
+    const expectedBindings = reviewedCallableBindings(controlled)
+      .map(reviewedCallableKey)
       .sort(compareCodePoint);
     if (JSON.stringify(actualBindings) !== JSON.stringify(expectedBindings)) failures.push("canonical runtime binding provenance differs from review");
-  } else if (controlled.disposition.kind === "alias") {
-    if (current.disposition.kind !== "alias" || current.disposition.canonical !== controlled.disposition.target.toLowerCase()) failures.push("alias target differs from review");
+    const actualRuntimeBindings = authority.runtime_bindings
+      .map((entry) => `${entry.variant}\0${entry.native_symbol}`).sort(compareCodePoint);
+    const expectedRuntimeBindings = reviewedCallableBindings(controlled)
+      .filter((entry) => entry.kind === "canonical_binding")
+      .map((entry) => `${entry.variant}\0${entry.native_symbol}`).sort(compareCodePoint);
+    if (JSON.stringify(actualRuntimeBindings) !== JSON.stringify(expectedRuntimeBindings)) failures.push("runtime binding registry differs from review");
+  } else if (controlled.public_identity.kind === "alias") {
+    if (current.disposition.kind !== "alias" || current.disposition.canonical !== controlled.public_identity.canonical_identity.toLowerCase()) failures.push("alias target differs from review");
     if (authority.catalog_entries.length || current.ownership.catalog_documentation.length || current.ownership.sidecars.length) failures.push("alias retains copied public authority");
   } else if (authority.catalog_entries.length || authority.legacy_functions.length || current.ownership.catalog_documentation.length || current.ownership.sidecars.length) {
     failures.push("internal identity retains public authority");
   }
-  for (const removal of controlled.expected_removals) {
-    if (fs.existsSync(path.join(repository, removal.path))) failures.push(`${removal.path}: reviewed file removal remains present`);
+  const expectedWasm = controlled.expected_authorities.wasm_registry === "required"
+    ? [...new Set(reviewedCallableBindings(controlled)
+      .filter((entry) => entry.kind === "canonical_binding")
+      .map((entry) => entry.function))].sort(compareCodePoint)
+    : [];
+  const actualWasm = [...current.registrations.wasm].sort(compareCodePoint);
+  if (JSON.stringify(actualWasm) !== JSON.stringify(expectedWasm)) {
+    failures.push("WASM registration set differs from review");
   }
   return failures.sort(compareCodePoint);
+}
+
+export function finalAuthorityFailuresForBundles(inventory, control, bundleIds) {
+  const rows = new Map(inventory.identities.map((entry) => [entry.identity, entry]));
+  return bundleIds.flatMap((bundleId) => {
+    const bundle = control.bundles.get(bundleId);
+    if (!bundle) return [`${bundleId}: final authority references an unknown bundle`];
+    return bundle.identities.flatMap((identity) =>
+      finalIdentityAuthorityFailures(identity, rows.get(identity), control.identities.get(identity))
+        .map((failure) => `${identity}: ${failure}`));
+  }).sort(compareCodePoint);
+}
+
+function reviewedCallableBindings(controlled) {
+  const authority = controlled.implementation.callable;
+  if (authority.kind !== "owned") return [];
+  return authority.bindings.map((entry) => ({ ...entry, source_file: authority.owner_path }));
+}
+
+function reviewedConstantBindings(controlled) {
+  const authority = controlled.implementation.constant;
+  if (authority.kind !== "owned") return [];
+  return authority.bindings.map((entry) => ({
+    name: entry.constant, source_file: authority.owner_path, builtin_path: entry.builtin_path,
+  }));
+}
+
+function runtimeConstantKey(entry) {
+  return `${entry.name}\0${entry.source_file}\0${entry.builtin_path}`;
+}
+
+function observedCallableKey(entry) {
+  return `${entry.authority}\0${entry.source_file}\0${entry.function}\0${entry.binding_variant ?? ""}\0${entry.builtin_path}`;
+}
+
+function reviewedCallableKey(entry) {
+  return `${entry.kind}\0${entry.source_file}\0${entry.function}\0${entry.variant ?? ""}\0${entry.builtin_path}`;
 }

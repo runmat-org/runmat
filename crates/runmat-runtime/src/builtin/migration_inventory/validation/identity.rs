@@ -4,8 +4,10 @@ use runmat_builtins::{builtin_docs, builtin_functions};
 
 use super::super::schema::{
     FusionSpecRecord, GpuSpecRecord, ImplementationProvenanceRecord, InventoryValidationError,
-    MigrationFinding, MigrationFindingCode, RuntimeBindingRecord, SpecOwnerRecord,
+    MigrationFinding, MigrationFindingAffected, MigrationFindingCode, RuntimeBindingRecord,
+    SpecOwnerRecord,
 };
+use super::declaration::{module_scopes_overlap, validate_registration_provenance};
 
 pub(super) fn validate(
     errors: &mut Vec<InventoryValidationError>,
@@ -42,15 +44,35 @@ pub(super) fn validate(
         errors,
         findings,
         "gpu_spec_registry",
-        gpu_specs.iter().map(|spec| (spec.key, &spec.owner)),
+        gpu_specs.iter().map(|spec| {
+            (
+                spec.key,
+                spec.declaration,
+                spec.source_file.as_str(),
+                spec.module_path,
+                spec.builtin_path,
+                &spec.owner,
+            )
+        }),
         callable_names,
+        provenance,
     );
     validate_specs(
         errors,
         findings,
         "fusion_spec_registry",
-        fusion_specs.iter().map(|spec| (spec.key, &spec.owner)),
+        fusion_specs.iter().map(|spec| {
+            (
+                spec.key,
+                spec.declaration,
+                spec.source_file.as_str(),
+                spec.module_path,
+                spec.builtin_path,
+                &spec.owner,
+            )
+        }),
         callable_names,
+        provenance,
     );
 }
 
@@ -121,11 +143,40 @@ fn validate_specs<'a>(
     errors: &mut Vec<InventoryValidationError>,
     findings: &mut Vec<MigrationFinding>,
     source: &'static str,
-    specs: impl IntoIterator<Item = (&'a str, &'a SpecOwnerRecord)>,
+    specs: impl IntoIterator<
+        Item = (
+            &'a str,
+            &'a str,
+            &'a str,
+            &'a str,
+            &'a str,
+            &'a SpecOwnerRecord,
+        ),
+    >,
     callable_names: &BTreeSet<&str>,
+    provenance: &[ImplementationProvenanceRecord],
 ) {
+    let implementation_paths_by_identity =
+        provenance
+            .iter()
+            .fold(BTreeMap::<&str, Vec<&str>>::new(), |mut paths, record| {
+                paths
+                    .entry(record.name)
+                    .or_default()
+                    .push(record.builtin_path);
+                paths
+            });
     let mut counts = BTreeMap::new();
-    for (key, owner) in specs {
+    for (key, declaration, source_file, module_path, builtin_path, owner) in specs {
+        validate_registration_provenance(
+            errors,
+            source,
+            key,
+            source_file,
+            module_path,
+            builtin_path,
+            Some(declaration),
+        );
         *counts.entry(key).or_insert(0usize) += 1;
         match owner {
             SpecOwnerRecord::ExactBuiltin { identity }
@@ -138,20 +189,57 @@ fn validate_specs<'a>(
                         .into(),
                 });
             }
-            SpecOwnerRecord::LegacyGroup { raw } if *raw == key => {
+            SpecOwnerRecord::ExactBuiltin { identity }
+                if !implementation_paths_by_identity
+                    .get(identity.name)
+                    .is_some_and(|paths| {
+                        paths
+                            .iter()
+                            .any(|path| module_scopes_overlap(path, builtin_path))
+                    }) =>
+            {
+                errors.push(InventoryValidationError {
+                    source,
+                    identity: Some(identity.name.to_owned()),
+                    message: format!(
+                        "exact spec owner has no compiled implementation provenance at {builtin_path}"
+                    ),
+                });
+            }
+            SpecOwnerRecord::LegacyGroup {
+                raw,
+                affected_identities,
+            } if *raw == key
+                && !affected_identities.is_empty()
+                && affected_identities
+                    .iter()
+                    .all(|identity| callable_names.contains(identity.name))
+                && affected_identities
+                    .windows(2)
+                    .all(|pair| pair[0].name < pair[1].name) =>
+            {
                 findings.push(MigrationFinding {
                     code: MigrationFindingCode::LegacySpecGroupRequiresDisposition,
                     source,
-                    identity: key.to_owned(),
+                    affected: MigrationFindingAffected::Owner {
+                        owner: owner.clone(),
+                    },
                     message: "legacy grouped spec key requires reviewed migration disposition"
                         .into(),
                 });
             }
+            SpecOwnerRecord::LegacyGroup { raw, .. } if *raw != key => {
+                errors.push(InventoryValidationError {
+                    source,
+                    identity: Some(key.to_owned()),
+                    message: "legacy-group spec ownership does not preserve its raw registry key"
+                        .into(),
+                })
+            }
             SpecOwnerRecord::LegacyGroup { .. } => errors.push(InventoryValidationError {
                 source,
                 identity: Some(key.to_owned()),
-                message: "legacy-group spec ownership does not preserve its raw registry key"
-                    .into(),
+                message: "legacy-group spec ownership must have a nonempty canonical set of compiled affected identities".into(),
             }),
             SpecOwnerRecord::ExactBuiltin { .. } => {}
         }
@@ -164,5 +252,53 @@ fn validate_specs<'a>(
                 message: format!("{count} specifications were registered for one identity"),
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn exact_spec_owner_with_wrong_registration_path_is_invalid() {
+        let mut errors = Vec::new();
+        let mut findings = Vec::new();
+        let callable_names = BTreeSet::from(["foo"]);
+        let provenance = [ImplementationProvenanceRecord {
+            name: "foo",
+            binding_variant: Some("default"),
+            source_file: "crates/runmat-runtime/src/builtins/math/foo.rs".into(),
+            module_path: "runmat_runtime::builtins::math::foo",
+            function: "foo_builtin",
+            builtin_path: "builtins::math::foo",
+            authority: "canonical_binding",
+        }];
+        let owner = SpecOwnerRecord::ExactBuiltin {
+            identity: runmat_builtins::BuiltinCatalogIdentity { name: "foo" },
+        };
+
+        validate_specs(
+            &mut errors,
+            &mut findings,
+            "gpu_spec_registry",
+            [(
+                "foo",
+                "FOO_GPU_SPEC",
+                "crates/runmat-runtime/src/builtins/math/bar.rs",
+                "runmat_runtime::builtins::math::bar",
+                "builtins::math::bar",
+                &owner,
+            )],
+            &callable_names,
+            &provenance,
+        );
+
+        assert!(findings.is_empty());
+        assert!(errors.iter().any(|error| {
+            error.identity.as_deref() == Some("foo")
+                && error
+                    .message
+                    .contains("no compiled implementation provenance")
+        }));
     }
 }

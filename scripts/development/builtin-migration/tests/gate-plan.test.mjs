@@ -61,19 +61,19 @@ test("cargo gate arguments allow repeated values but cannot replace typed author
   assert.throws(() => parseGatePlans([plan("check", ["bad\0argument"])], "fixture"), /NUL/);
 });
 
-test("repository scripts retain typed node and auxiliary git identity", () => {
+test("documentation repository producer retains its complete direct tool identity", () => {
   const repositoryPlan = {
     gate: "documentation-cutover",
     program: {
-      kind: "repository_script", path: "scripts/export-docs.mjs", content_digest: DIGEST,
-      approved_toolchains: tools(["git", "node"]),
+      kind: "repository_script", path: "scripts/development/builtin-migration/documentation-export-cli.mjs", content_digest: DIGEST,
+      approved_toolchains: tools(["cargo", "git", "node", "rustc"]),
     },
     arguments: [], working_directory: "repository", parser: "documentation_cutover",
     expected_artifact_roles: ["documentation-reconciliation"],
   };
   assert.doesNotThrow(() => parseGatePlans([repositoryPlan], "fixture"));
-  repositoryPlan.program.approved_toolchains = tools(["node"]);
-  assert.throws(() => parseGatePlans([repositoryPlan], "fixture"), /requires reviewed git tools/);
+  repositoryPlan.program.approved_toolchains = tools(["git", "node"]);
+  assert.throws(() => parseGatePlans([repositoryPlan], "fixture"), /requires exact reviewed/);
 });
 
 test("every gate toolchain exactly covers the reviewed execution targets", () => {

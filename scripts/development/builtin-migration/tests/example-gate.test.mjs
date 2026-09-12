@@ -11,12 +11,15 @@ import { buildPlan } from "../../../runtime/builtin-example-verifier/plan.mjs";
 import { reconcileShardResults } from "../../../runtime/builtin-example-verifier/reconcile.mjs";
 import { buildShardResult } from "../../../runtime/builtin-example-verifier/result-manifest.mjs";
 import { buildExampleGateProof, parseExampleGateProof } from "../example-gate.mjs";
+import { contentDigest } from "../evidence.mjs";
 
 const SOURCE = "0123456789abcdef0123456789abcdef01234567";
 
 test("example gate proof binds an exact multi-identity scope to every declared product lane", () => {
   withEvidence((manifest, records) => {
-    const proof = buildExampleGateProof(manifest);
+    const manifestEvidence = writeManifestEvidence(records.root, manifest);
+    const rootBinding = evidenceRoot(records.root);
+    const proof = buildExampleGateProof(manifest, manifestEvidence, rootBinding);
     assert.equal(proof.result, "pass");
     assert.deepEqual(proof.identities, ["alpha", "beta"]);
     assert.equal(proof.rows.find((entry) => entry.identity === "alpha").status, "passed");
@@ -25,19 +28,27 @@ test("example gate proof binds an exact multi-identity scope to every declared p
 
     const omittedIdentity = structuredClone(manifest);
     omittedIdentity.identities = ["alpha"];
-    assert.throws(() => buildExampleGateProof(omittedIdentity), /exact reviewed bundle identity set/);
+    const omittedIdentityEvidence = writeManifestEvidence(records.root, omittedIdentity, "omitted-identity-manifest.json");
+    assert.throws(() => buildExampleGateProof(omittedIdentity, omittedIdentityEvidence, rootBinding), /exact reviewed bundle identity set/);
 
     const omittedShard = structuredClone(manifest);
     omittedShard.shard_results.pop();
-    assert.throws(() => buildExampleGateProof(omittedShard), /Missing shard results/);
+    const omittedShardEvidence = writeManifestEvidence(records.root, omittedShard, "omitted-shard-manifest.json");
+    assert.throws(() => buildExampleGateProof(omittedShard, omittedShardEvidence, rootBinding), /Missing shard results/);
 
     fs.appendFileSync(records.nativeBinary, "changed");
-    assert.throws(() => buildExampleGateProof(manifest), /does not match|digest|tree/i);
+    assert.throws(() => buildExampleGateProof(manifest, manifestEvidence, rootBinding), /does not match|digest|tree/i);
+    fs.writeFileSync(records.nativeBinary, "native");
+    fs.appendFileSync(records.inventoryPath, " ");
+    assert.throws(
+      () => parseExampleGateProof(proof, { source_revision: `git:${SOURCE}`, identities: ["alpha", "beta"] }),
+      /content-bound proof/,
+    );
   });
 });
 
 function withEvidence(callback) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "runmat-example-gate-"));
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "runmat-example-gate-")));
   try {
     const inventory = buildInventory({
       schema_version: 1,
@@ -81,10 +92,25 @@ function withEvidence(callback) {
     const reconciliationPath = path.join(root, "reconciliation.json");
     write(inventoryPath, inventory); write(planPath, plan); write(reconciliationPath, reconciliation);
     const shardPaths = shards.map((value, index) => { const target = path.join(root, `${index}.shard-result.json`); write(target, value); return target; });
-    callback({ schema_version: 1, kind: "runmat-builtin-example-gate-manifest", source_revision: `git:${SOURCE}`, identities: ["alpha", "beta"], inventory: inventoryPath, plan: planPath, reconciliation: reconciliationPath, shard_results: shardPaths, artifact_manifests: [nativeManifestPath, browserManifestPath], product_probes: [] }, { nativeBinary });
+    callback({ schema_version: 1, kind: "runmat-builtin-example-gate-manifest", source_revision: `git:${SOURCE}`, identities: ["alpha", "beta"], inventory: inventoryPath, plan: planPath, reconciliation: reconciliationPath, shard_results: shardPaths, artifact_manifests: [nativeManifestPath, browserManifestPath], product_probes: [] }, { inventoryPath, nativeBinary, root });
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
 }
 
 function write(target, value) { fs.writeFileSync(target, `${JSON.stringify(value, null, 2)}\n`); }
+
+function writeManifestEvidence(root, value, filename = "gate-manifest.json") {
+  const manifestPath = path.join(root, filename);
+  write(manifestPath, value);
+  const bytes = fs.readFileSync(manifestPath);
+  return { path: manifestPath, byte_length: bytes.length, content_digest: contentDigest(bytes) };
+}
+
+function evidenceRoot(root) {
+  const stat = fs.statSync(root, { bigint: true });
+  const filesystemId = process.platform === "win32"
+    ? `windows-volume:${stat.dev.toString(16).padStart(8, "0")}`
+    : `posix-dev:${stat.dev}`;
+  return { path: fs.realpathSync(root), filesystem_id: filesystemId };
+}

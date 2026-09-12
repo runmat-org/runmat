@@ -5,7 +5,8 @@ use runmat_builtins::{
 };
 
 use super::super::schema::{
-    InventoryValidationError, MigrationFinding, MigrationFindingCode, RuntimeBindingRecord,
+    InventoryValidationError, MigrationFinding, MigrationFindingAffected, MigrationFindingCode,
+    RuntimeBindingRecord,
 };
 
 pub(super) fn validate(
@@ -36,7 +37,9 @@ pub(super) fn validate(
             findings.push(MigrationFinding {
                 code: MigrationFindingCode::CatalogLegacyAuthorityOverlap,
                 source: "runtime_binding_registry",
-                identity: entry.identity.name.to_owned(),
+                affected: MigrationFindingAffected::Identity {
+                    identity: entry.identity,
+                },
                 message: "catalog identity still has a legacy BuiltinFunction authority".into(),
             });
         }
@@ -49,7 +52,10 @@ pub(super) fn validate(
                 findings.push(MigrationFinding {
                     code: MigrationFindingCode::MissingRequiredRuntimeBinding,
                     source: "runtime_binding_registry",
-                    identity: format_identity(&identity),
+                    affected: MigrationFindingAffected::Binding {
+                        identity: identity.builtin,
+                        variant: identity.variant,
+                    },
                     message: "required canonical runtime binding has not been cut over".into(),
                 });
             }

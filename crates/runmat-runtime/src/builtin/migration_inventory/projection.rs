@@ -1,11 +1,14 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionExprBuilder,
     FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType,
     ShapeRequirements,
 };
-use runmat_builtins::{builtin_catalog_entries, builtin_functions, BuiltinCatalogIdentity};
+use runmat_builtins::{
+    builtin_catalog_entries, builtin_functions, builtin_implementation_provenance,
+    BuiltinCatalogIdentity,
+};
 
 use super::schema::{
     FusionShapeRecord, FusionSpecRecord, FusionTemplateRecord, GpuSpecRecord, ProviderHookRecord,
@@ -14,10 +17,18 @@ use super::schema::{
 
 pub(super) struct SpecOwnershipClassifier {
     exact_builtin_names: BTreeSet<&'static str>,
+    identities_by_builtin_path: BTreeMap<&'static str, BTreeSet<&'static str>>,
 }
 
 impl SpecOwnershipClassifier {
     pub(super) fn compiled() -> Self {
+        let mut identities_by_builtin_path = BTreeMap::<_, BTreeSet<_>>::new();
+        for provenance in builtin_implementation_provenance() {
+            identities_by_builtin_path
+                .entry(canonical_builtin_path(provenance.builtin_path))
+                .or_default()
+                .insert(provenance.name);
+        }
         Self {
             exact_builtin_names: builtin_catalog_entries()
                 .iter()
@@ -28,37 +39,86 @@ impl SpecOwnershipClassifier {
                         .map(|function| function.name),
                 )
                 .collect(),
+            identities_by_builtin_path,
         }
     }
 
-    pub(super) fn gpu_spec(&self, spec: &'static BuiltinGpuSpec) -> GpuSpecRecord {
-        gpu_spec(spec, &self.exact_builtin_names)
+    pub(super) fn gpu_spec(
+        &self,
+        spec: &'static BuiltinGpuSpec,
+        declaration: &'static str,
+        builtin_path: &'static str,
+        source_file: String,
+        module_path: &'static str,
+    ) -> GpuSpecRecord {
+        gpu_spec(
+            spec,
+            declaration,
+            builtin_path,
+            source_file,
+            module_path,
+            self,
+        )
     }
 
-    pub(super) fn fusion_spec(&self, spec: &'static BuiltinFusionSpec) -> FusionSpecRecord {
-        fusion_spec(spec, &self.exact_builtin_names)
+    pub(super) fn fusion_spec(
+        &self,
+        spec: &'static BuiltinFusionSpec,
+        declaration: &'static str,
+        builtin_path: &'static str,
+        source_file: String,
+        module_path: &'static str,
+    ) -> FusionSpecRecord {
+        fusion_spec(
+            spec,
+            declaration,
+            builtin_path,
+            source_file,
+            module_path,
+            self,
+        )
     }
 
     #[cfg(test)]
     pub(super) fn from_exact_builtin_names(names: impl IntoIterator<Item = &'static str>) -> Self {
         Self {
             exact_builtin_names: names.into_iter().collect(),
+            identities_by_builtin_path: BTreeMap::new(),
         }
     }
 
     #[cfg(test)]
-    pub(super) fn owner(&self, key: &'static str) -> SpecOwnerRecord {
-        spec_owner(key, &self.exact_builtin_names)
+    pub(super) fn with_builtin_ownership(
+        mut self,
+        builtin_path: &'static str,
+        names: impl IntoIterator<Item = &'static str>,
+    ) -> Self {
+        self.identities_by_builtin_path
+            .insert(builtin_path, names.into_iter().collect());
+        self
+    }
+
+    #[cfg(test)]
+    pub(super) fn owner(&self, key: &'static str, builtin_path: &'static str) -> SpecOwnerRecord {
+        spec_owner(key, builtin_path, self)
     }
 }
 
 fn gpu_spec(
     spec: &'static BuiltinGpuSpec,
-    exact_builtin_names: &BTreeSet<&'static str>,
+    declaration: &'static str,
+    builtin_path: &'static str,
+    source_file: String,
+    module_path: &'static str,
+    classifier: &SpecOwnershipClassifier,
 ) -> GpuSpecRecord {
     GpuSpecRecord {
         key: spec.name,
-        owner: spec_owner(spec.name, exact_builtin_names),
+        declaration,
+        builtin_path: canonical_builtin_path(builtin_path),
+        source_file,
+        module_path,
+        owner: spec_owner(spec.name, builtin_path, classifier),
         operation: match spec.op_kind {
             GpuOpKind::Elementwise => "elementwise".into(),
             GpuOpKind::Reduction => "reduction".into(),
@@ -103,11 +163,19 @@ fn gpu_spec(
 
 fn fusion_spec(
     spec: &'static BuiltinFusionSpec,
-    exact_builtin_names: &BTreeSet<&'static str>,
+    declaration: &'static str,
+    builtin_path: &'static str,
+    source_file: String,
+    module_path: &'static str,
+    classifier: &SpecOwnershipClassifier,
 ) -> FusionSpecRecord {
     FusionSpecRecord {
         key: spec.name,
-        owner: spec_owner(spec.name, exact_builtin_names),
+        declaration,
+        builtin_path: canonical_builtin_path(builtin_path),
+        source_file,
+        module_path,
+        owner: spec_owner(spec.name, builtin_path, classifier),
         shape: match spec.shape {
             ShapeRequirements::BroadcastCompatible => FusionShapeRecord::BroadcastCompatible,
             ShapeRequirements::Exact(dimensions) => FusionShapeRecord::Exact(dimensions.to_vec()),
@@ -121,13 +189,33 @@ fn fusion_spec(
     }
 }
 
-fn spec_owner(key: &'static str, exact_builtin_names: &BTreeSet<&'static str>) -> SpecOwnerRecord {
-    if exact_builtin_names.contains(key) {
+fn spec_owner(
+    key: &'static str,
+    builtin_path: &'static str,
+    classifier: &SpecOwnershipClassifier,
+) -> SpecOwnerRecord {
+    if classifier.exact_builtin_names.contains(key) {
         return SpecOwnerRecord::ExactBuiltin {
             identity: BuiltinCatalogIdentity { name: key },
         };
     }
-    SpecOwnerRecord::LegacyGroup { raw: key }
+    let canonical_path = canonical_builtin_path(builtin_path);
+    let affected_identities = classifier
+        .identities_by_builtin_path
+        .get(canonical_path)
+        .into_iter()
+        .flatten()
+        .copied()
+        .map(|name| BuiltinCatalogIdentity { name })
+        .collect();
+    SpecOwnerRecord::LegacyGroup {
+        raw: key,
+        affected_identities,
+    }
+}
+
+fn canonical_builtin_path(path: &'static str) -> &'static str {
+    path.strip_prefix("crate::").unwrap_or(path)
 }
 
 fn fusion_template(template: &FusionKernelTemplate) -> FusionTemplateRecord {

@@ -9,6 +9,7 @@ import { parseBundleControlReview } from "./bundle-review.mjs";
 import { parseGlobalControlReview } from "./global-review.mjs";
 import { loadControlReviewSet } from "./review-set.mjs";
 import { assertValidatedControlOverlayScaffold } from "./scaffold.mjs";
+import { identityControlAuthorityTemplate } from "./identity-template.mjs";
 
 const PROGRAM = "RM-1064/C00-C07";
 
@@ -32,11 +33,11 @@ export function indexControlReviews(reviewDirectory, outputDirectory, { scaffold
   assertExactTemplateFiles(source, topology);
 
   const global = sealReviewedPayload(readJson(path.join(source, "global.json"), "global control review"), "global control review");
-  parseGlobalControlReview(global, scaffold, topology);
+  parseGlobalControlReview(global, scaffold, topology, parsedInventory);
   const bundles = [...topology.bundles.keys()].sort(compareCodePoint).map((bundleId) => {
     const relative = `bundles/${bundleId}.json`;
     const bundle = sealReviewedPayload(readJson(path.join(source, relative), `${bundleId} control review`), `${bundleId} control review`);
-    parseBundleControlReview(bundle, scaffold, topology);
+    parseBundleControlReview(bundle, scaffold, topology, parsedInventory);
     return { bundleId, relative, bundle };
   });
 
@@ -65,7 +66,7 @@ export function indexControlReviews(reviewDirectory, outputDirectory, { scaffold
 
 function globalTemplate(scaffold, topology) {
   return {
-    schema_version: 1,
+    schema_version: 2,
     kind: "runmat-builtin-migration-global-control-review",
     authority: "reviewer-authored-development-input",
     program: PROGRAM,
@@ -75,6 +76,7 @@ function globalTemplate(scaffold, topology) {
       migration_finding_rows_digest: evidenceDigest(scaffold.migration_finding_rows),
     },
     program_profiles: {},
+    integration_products: {},
     migration_findings: {
       schema_version: 1,
       kind: "runmat-builtin-migration-finding-dispositions",
@@ -89,7 +91,7 @@ function globalTemplate(scaffold, topology) {
       review: unreviewed(),
     },
     exception_manifest: { entries: [], review: unreviewed() },
-    execution_targets: null,
+    target_policy: null,
     storage_policy: { host_profiles: {}, targets_must_be_disjoint: true, occt_default: "disabled-unless-affected" },
     review: unreviewed(),
   };
@@ -99,7 +101,7 @@ function bundleTemplate(bundleId, scaffold, topology) {
   const bundle = topology.bundles.get(bundleId);
   const scaffoldBundle = scaffold.bundle_rows.find((row) => row.bundle_id === bundleId);
   return {
-    schema_version: 1,
+    schema_version: 3,
     kind: "runmat-builtin-migration-bundle-control-review",
     authority: "reviewer-authored-development-input",
     program: PROGRAM,
@@ -113,26 +115,29 @@ function bundleTemplate(bundleId, scaffold, topology) {
         identity,
         scaffold_identity_row_digest: evidenceDigest(scaffold.identity_rows.find((row) => row.identity === identity)),
         topology_identity_digest: evidenceDigest(topology.identities.get(identity)),
+        authority_proposal_digest: scaffold.authority_proposals.identity_rows
+          .find((row) => row.identity === identity).proposal_digest,
       })),
     },
     bundle_control: {
       prerequisites: null,
       additional_authored_write_set: null,
-      integration_outputs: null,
+      integration_product_refs: null,
+      expected_removals: null,
+      baseline_evidence: scaffoldBundle.observations.typed_paths
+        .filter((entry) => entry.kind !== "generated-registry")
+        .map((entry) => structuredClone(entry)),
       gate_plans: null,
       owner_role: null,
       complexity: null,
       review: unreviewed(),
     },
     identity_controls: Object.fromEntries(bundle.identities.map((identity) => [identity, {
-      public_spelling: null,
-      runtime_owner: null,
+      ...identityControlAuthorityTemplate(scaffold, identity),
       shared_dependencies: null,
       complexity: null,
       maturity: null,
       expected_authorities: null,
-      expected_removals: null,
-      baseline_evidence: null,
       owner: null,
       review: unreviewed(),
     }])),

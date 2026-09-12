@@ -6,10 +6,6 @@ use runmat_builtins::{
 };
 use runmat_value::{StructValue, Value};
 
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
-};
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
@@ -90,23 +86,6 @@ pub const CLOSE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &CLOSE_ERRORS,
 };
 
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::net::close")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "close",
-    op_kind: GpuOpKind::Custom("network"),
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes:
-        "Networking resources are host-only; the builtin gathers GPU values before closing handles.",
-};
-
 fn close_error_with_message(
     message: impl Into<String>,
     error: &'static BuiltinErrorDescriptor,
@@ -140,17 +119,6 @@ fn map_close_flow(err: RuntimeError, error: &'static BuiltinErrorDescriptor) -> 
     }
     builder.build()
 }
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::net::close")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "close",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Networking builtins execute eagerly on the CPU; close participates only in host bookkeeping.",
-};
 
 pub(crate) async fn close_network_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     if args.is_empty() {

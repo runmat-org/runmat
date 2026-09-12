@@ -14,6 +14,11 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
+use crate::builtins::common::spec::{
+    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
+    ReductionNaN, ResidencyPolicy, ShapeRequirements,
+};
+
 const CLOSE_OUTPUT_RESULT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "result",
     ty: BuiltinParamType::NumericScalar,
@@ -128,6 +133,33 @@ pub const CLOSE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
         overload: BuiltinIntegerOverloadKind::StructuralParameter,
         notes: "Figure numbers are read from authoritative host integer storage and must be positive and representable as RunMat's u32 figure identifier. Resident numeric targets are rejected before networking/provider gather. Successful and no-op plotting closures return scalar double 1; callback-driven refusal remains unavailable until CloseRequestFcn is implemented.",
     }];
+
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::close")]
+pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
+    name: "close",
+    op_kind: GpuOpKind::Custom("host-resource"),
+    supported_precisions: &[],
+    broadcast: BroadcastSemantics::None,
+    provider_hooks: &[],
+    constant_strategy: ConstantStrategy::InlineLiteral,
+    residency: ResidencyPolicy::GatherImmediately,
+    nan_mode: ReductionNaN::Include,
+    two_pass_threshold: None,
+    workgroup_size: None,
+    accepts_nan_mode: false,
+    notes: "Figure and networking resources are host-owned; close rejects unsupported resident targets or gathers admitted values before host dispatch.",
+};
+
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::close")]
+pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
+    name: "close",
+    shape: ShapeRequirements::Any,
+    constant_strategy: ConstantStrategy::InlineLiteral,
+    elementwise: None,
+    reduction: None,
+    emits_nan: false,
+    notes: "Resource closure executes eagerly on the host and does not participate in expression fusion.",
+};
 
 #[runtime_builtin(
     name = "close",

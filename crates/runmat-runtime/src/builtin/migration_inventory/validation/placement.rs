@@ -5,7 +5,8 @@ use runmat_builtins::{
 };
 
 use super::super::schema::{
-    FusionSpecRecord, GpuSpecRecord, MigrationFinding, MigrationFindingCode,
+    FusionSpecRecord, GpuSpecRecord, MigrationFinding, MigrationFindingAffected,
+    MigrationFindingCode,
 };
 
 pub(super) fn validate(
@@ -61,11 +62,13 @@ pub(super) fn validate(
     }
 }
 
-fn finding(name: &str, message: &str) -> MigrationFinding {
+fn finding(name: &'static str, message: &str) -> MigrationFinding {
     MigrationFinding {
         code: MigrationFindingCode::PlacementContractMismatch,
         source: "placement_contract",
-        identity: name.to_owned(),
+        affected: MigrationFindingAffected::Identity {
+            identity: runmat_builtins::BuiltinCatalogIdentity { name },
+        },
         message: message.to_owned(),
     }
 }

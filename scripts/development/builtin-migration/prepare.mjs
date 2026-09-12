@@ -3,13 +3,15 @@ import path from "node:path";
 import { rustLeaf, sorted } from "./constants.mjs";
 import { assertControlBaseline } from "./control.mjs";
 import { evidenceDigest } from "./evidence.mjs";
-import { assertValidatedLease } from "./lease.mjs";
+import { assertActiveLease } from "./lease.mjs";
 import { buildSourceFieldDisposition, sourceFieldBaselineDigest } from "./source-fields.mjs";
 import { array, digest, exact, identity, integer, kind, nonempty, repositoryPath, sourceRevision, stableId } from "./schema.mjs";
 
-export function prepareIdentity(repository, inventory, control, lease, identity, outputRoot) {
+export function prepareIdentity(
+  repository, inventory, control, lease, identity, outputRoot, clock = Date.now,
+) {
   assertControlBaseline(control, inventory);
-  assertValidatedLease(lease, control);
+  assertActiveLease(lease, control, clock);
   const key = identity.toLowerCase();
   const row = inventory.identities.find((entry) => entry.identity === key);
   if (!row) throw new Error(`${identity}: identity is not present in the inventory`);
@@ -37,7 +39,7 @@ export function prepareIdentity(repository, inventory, control, lease, identity,
   writeText(path.join(workspace, "catalog", "documentation.rs.template"), documentationTemplate(row, documents));
   writeText(path.join(workspace, "runtime", `${rustLeaf(key)}.rs.template`), runtimeTemplate(row));
   const report = {
-    schema_version: 2,
+    schema_version: 3,
     kind: "runmat-builtin-migration-prepare-result",
     authority: "review-workspace-only",
     identity: key,
@@ -46,6 +48,7 @@ export function prepareIdentity(repository, inventory, control, lease, identity,
     source: inventory.source,
     inventory_digest: inventory.digest,
     lease_id: lease.value.lease_id,
+    lease_digest: lease.value.digest,
     workspace,
     copied_legacy_documents: documents,
     checklist_digest: evidenceDigest(checklist),
@@ -58,8 +61,8 @@ export function prepareIdentity(repository, inventory, control, lease, identity,
 }
 
 export function parsePrepareResult(value, expected) {
-  kind(value, 2, "runmat-builtin-migration-prepare-result", "prepare result");
-  exact(value, ["schema_version", "kind", "authority", "identity", "bundle_id", "control_manifest_digest", "source", "inventory_digest", "lease_id", "workspace", "copied_legacy_documents", "checklist_digest", "checklist_baseline_digest", "checklist_entries", "source_changes"], "prepare result");
+  kind(value, 3, "runmat-builtin-migration-prepare-result", "prepare result");
+  exact(value, ["schema_version", "kind", "authority", "identity", "bundle_id", "control_manifest_digest", "source", "inventory_digest", "lease_id", "lease_digest", "workspace", "copied_legacy_documents", "checklist_digest", "checklist_baseline_digest", "checklist_entries", "source_changes"], "prepare result");
   if (value.authority !== "review-workspace-only" || value.source_changes !== false) throw new Error("prepare result must remain review-only and source-neutral");
   identity(value.identity, "prepare identity");
   stableId(value.bundle_id, "prepare bundle id");
@@ -78,6 +81,7 @@ export function parsePrepareResult(value, expected) {
   digest(value.checklist_digest, "prepare checklist digest");
   digest(value.checklist_baseline_digest, "prepare checklist baseline digest");
   nonempty(value.lease_id, "prepare lease id");
+  digest(value.lease_digest, "prepare lease digest");
   nonempty(value.workspace, "prepare workspace");
   array(value.copied_legacy_documents, "copied legacy documents", { empty: true }).forEach((entry) => {
     exact(entry, ["source", "target"], "copied legacy document");
@@ -85,7 +89,7 @@ export function parsePrepareResult(value, expected) {
     repositoryPath(entry.target, "copied legacy target");
   });
   integer(value.checklist_entries, "prepare checklist entries");
-  if (expected && ((expected.identity !== undefined && value.identity !== expected.identity) || value.bundle_id !== expected.bundle_id || value.control_manifest_digest !== expected.control_manifest_digest || value.lease_id !== expected.lease_id)) {
+  if (expected && ((expected.identity !== undefined && value.identity !== expected.identity) || value.bundle_id !== expected.bundle_id || value.control_manifest_digest !== expected.control_manifest_digest || value.lease_id !== expected.lease_id || value.lease_digest !== expected.lease_digest)) {
     throw new Error("prepare result does not match audit scope");
   }
   return value;

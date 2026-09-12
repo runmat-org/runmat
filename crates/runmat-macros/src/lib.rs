@@ -558,6 +558,16 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
         }
     };
     let provenance_expr_helper = provenance_expr.clone();
+    let manifest_expr = quote! {
+        runmat_builtins::RegistrationManifestEntry {
+            kind: runmat_builtins::RegistrationKind::Builtin,
+            declaration: #name_str,
+            variant: #provenance_variant,
+            builtin_path: #builtin_path_text,
+        }
+    };
+    let manifest_expr_helper = manifest_expr.clone();
+    let manifest_variant = binding_variant_lit.as_ref().map(|value| value.value());
     let (wasm_helper, register_native) = if let Some(variant) = binding_variant_lit {
         let native_symbol = runmat_builtins::native_binding_symbol(&name_str, &variant.value());
         let native_symbol = syn::LitStr::new(&native_symbol, proc_macro2::Span::call_site());
@@ -581,6 +591,7 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
                 pub(crate) fn #helper_ident() {
                     crate::builtin::wasm_registry::submit(#binding_expr);
                     runmat_builtins::wasm_registry::submit_builtin_implementation_provenance(#provenance_expr_helper);
+                    runmat_builtins::wasm_registry::submit_registration_manifest_entry(#manifest_expr_helper);
                 }
             },
             quote! {
@@ -588,6 +599,8 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
                 runmat_builtins::inventory::submit! { #binding_expr }
                 #[cfg(not(target_arch = "wasm32"))]
                 runmat_builtins::inventory::submit! { #provenance_expr }
+                #[cfg(not(target_arch = "wasm32"))]
+                runmat_builtins::inventory::submit! { #manifest_expr }
                 // A package's unit-test harness can link both its cfg(test)
                 // copy and a normal dependency copy of the runtime. Only the
                 // latter should publish the process-wide AOT ABI symbols.
@@ -605,6 +618,7 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
                     runmat_builtins::wasm_registry::submit_builtin_function(#builtin_expr_helper);
                     runmat_builtins::wasm_registry::submit_builtin_doc(#doc_expr_helper);
                     runmat_builtins::wasm_registry::submit_builtin_implementation_provenance(#provenance_expr_helper);
+                    runmat_builtins::wasm_registry::submit_registration_manifest_entry(#manifest_expr_helper);
                 }
             },
             quote! {
@@ -614,12 +628,18 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
                 runmat_builtins::inventory::submit! { #doc_expr }
                 #[cfg(not(target_arch = "wasm32"))]
                 runmat_builtins::inventory::submit! { #provenance_expr }
+                #[cfg(not(target_arch = "wasm32"))]
+                runmat_builtins::inventory::submit! { #manifest_expr }
             },
         )
     };
-    append_wasm_block(quote! {
-        #builtin_path::#helper_ident();
-    });
+    append_wasm_block(
+        quote! { #builtin_path::#helper_ident(); },
+        "builtin",
+        &name_str,
+        manifest_variant.as_deref(),
+        &builtin_path_lit.value(),
+    );
 
     TokenStream::from(quote! {
         #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
@@ -693,29 +713,47 @@ pub fn runtime_constant(args: TokenStream, input: TokenStream) -> TokenStream {
     let item = parse_macro_input!(input as syn::Item);
 
     let constant_expr = quote! {
-        runmat_builtins::Constant {
-            name: #name,
-            value: #value,
+        runmat_builtins::ConstantRegistration {
+            constant: runmat_builtins::Constant {
+                name: #name,
+                value: #value,
+            },
+            source_file: file!(),
+            module_path: module_path!(),
+            builtin_path: #builtin_path_lit,
         }
     };
 
     let helper_ident = helper_ident_from_name("__runmat_wasm_register_const_", &name);
     let constant_expr_helper = constant_expr.clone();
+    let manifest_expr = quote! {
+        runmat_builtins::RegistrationManifestEntry {
+            kind: runmat_builtins::RegistrationKind::Constant, declaration: #name, variant: None, builtin_path: #builtin_path_lit,
+        }
+    };
+    let manifest_expr_helper = manifest_expr.clone();
     let wasm_helper = quote! {
         #[cfg(target_arch = "wasm32")]
         #[allow(non_snake_case)]
         pub(crate) fn #helper_ident() {
             runmat_builtins::wasm_registry::submit_constant(#constant_expr_helper);
+            runmat_builtins::wasm_registry::submit_registration_manifest_entry(#manifest_expr_helper);
         }
     };
     let register_native = quote! {
         #[cfg(not(target_arch = "wasm32"))]
         #[allow(non_upper_case_globals)]
         runmat_builtins::inventory::submit! { #constant_expr }
+        #[cfg(not(target_arch = "wasm32"))]
+        runmat_builtins::inventory::submit! { #manifest_expr }
     };
-    append_wasm_block(quote! {
-        #builtin_path::#helper_ident();
-    });
+    append_wasm_block(
+        quote! { #builtin_path::#helper_ident(); },
+        "constant",
+        &name,
+        None,
+        &builtin_path_lit.value(),
+    );
 
     TokenStream::from(quote! {
         #item
@@ -755,30 +793,49 @@ pub fn register_constant(input: TokenStream) -> TokenStream {
         value,
         builtin_path,
     } = parse_macro_input!(input as RegisterConstantArgs);
+    let builtin_path_lit = builtin_path.clone();
     let constant_expr = quote! {
-        runmat_builtins::Constant {
-            name: #name,
-            value: #value,
+        runmat_builtins::ConstantRegistration {
+            constant: runmat_builtins::Constant {
+                name: #name,
+                value: #value,
+            },
+            source_file: file!(),
+            module_path: module_path!(),
+            builtin_path: #builtin_path_lit,
         }
     };
     let helper_ident = helper_ident_from_name("__runmat_wasm_register_const_", &name.value());
     let builtin_path: syn::Path = syn::parse_str(&builtin_path.value())
         .expect("register_constant `builtin_path` must be a valid path");
     let constant_expr_helper = constant_expr.clone();
+    let manifest_expr = quote! {
+        runmat_builtins::RegistrationManifestEntry {
+            kind: runmat_builtins::RegistrationKind::Constant, declaration: #name, variant: None, builtin_path: #builtin_path_lit,
+        }
+    };
+    let manifest_expr_helper = manifest_expr.clone();
     let wasm_helper = quote! {
         #[cfg(target_arch = "wasm32")]
         #[allow(non_snake_case)]
         pub(crate) fn #helper_ident() {
             runmat_builtins::wasm_registry::submit_constant(#constant_expr_helper);
+            runmat_builtins::wasm_registry::submit_registration_manifest_entry(#manifest_expr_helper);
         }
     };
-    append_wasm_block(quote! {
-        #builtin_path::#helper_ident();
-    });
+    append_wasm_block(
+        quote! { #builtin_path::#helper_ident(); },
+        "constant",
+        &name.value(),
+        None,
+        &builtin_path_lit.value(),
+    );
     TokenStream::from(quote! {
         #wasm_helper
         #[cfg(not(target_arch = "wasm32"))]
         runmat_builtins::inventory::submit! { #constant_expr }
+        #[cfg(not(target_arch = "wasm32"))]
+        runmat_builtins::inventory::submit! { #manifest_expr }
     })
 }
 
@@ -834,24 +891,51 @@ pub fn register_gpu_spec(attr: TokenStream, item: TokenStream) -> TokenStream {
         "__runmat_wasm_register_gpu_spec_{}",
         item_const.ident.to_string()
     );
+    let declaration = item_const.ident.to_string();
     let spec_tokens_helper = spec_tokens.clone();
     let wasm_helper = quote! {
         #[cfg(target_arch = "wasm32")]
         #[allow(non_snake_case)]
         pub(crate) fn #helper_ident() {
-            crate::builtins::common::spec::wasm_registry::submit_gpu_spec(&#spec_tokens_helper);
+            crate::builtins::common::spec::wasm_registry::submit_gpu_spec(
+                crate::builtins::common::spec::GpuSpecRegistration {
+                    spec: &#spec_tokens_helper, builtin_path: #builtin_path_lit, declaration: #declaration,
+                    source_file: file!(), module_path: module_path!(),
+                }
+            );
+            runmat_builtins::wasm_registry::submit_registration_manifest_entry(
+                runmat_builtins::RegistrationManifestEntry {
+                    kind: runmat_builtins::RegistrationKind::GpuSpec, declaration: #declaration, variant: None, builtin_path: #builtin_path_lit,
+                }
+            );
         }
     };
-    append_wasm_block(quote! {
-        #builtin_path::#helper_ident();
-    });
+    append_wasm_block(
+        quote! { #builtin_path::#helper_ident(); },
+        "gpu_spec",
+        &declaration,
+        None,
+        &builtin_path_lit.value(),
+    );
     let expanded = quote! {
         #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
         #item_const
         #wasm_helper
         #[cfg(not(target_arch = "wasm32"))]
         inventory::submit! {
-            crate::builtins::common::spec::GpuSpecInventory { spec: &#spec_for_native }
+            crate::builtins::common::spec::GpuSpecInventory {
+                spec: &#spec_for_native,
+                builtin_path: #builtin_path_lit,
+                declaration: #declaration,
+                source_file: file!(),
+                module_path: module_path!(),
+            }
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        runmat_builtins::inventory::submit! {
+            runmat_builtins::RegistrationManifestEntry {
+                kind: runmat_builtins::RegistrationKind::GpuSpec, declaration: #declaration, variant: None, builtin_path: #builtin_path_lit,
+            }
         }
     };
     expanded.into()
@@ -878,30 +962,63 @@ pub fn register_fusion_spec(attr: TokenStream, item: TokenStream) -> TokenStream
         "__runmat_wasm_register_fusion_spec_{}",
         item_const.ident.to_string()
     );
+    let declaration = item_const.ident.to_string();
     let spec_tokens_helper = spec_tokens.clone();
     let wasm_helper = quote! {
         #[cfg(target_arch = "wasm32")]
         #[allow(non_snake_case)]
         pub(crate) fn #helper_ident() {
-            crate::builtins::common::spec::wasm_registry::submit_fusion_spec(&#spec_tokens_helper);
+            crate::builtins::common::spec::wasm_registry::submit_fusion_spec(
+                crate::builtins::common::spec::FusionSpecRegistration {
+                    spec: &#spec_tokens_helper, builtin_path: #builtin_path_lit, declaration: #declaration,
+                    source_file: file!(), module_path: module_path!(),
+                }
+            );
+            runmat_builtins::wasm_registry::submit_registration_manifest_entry(
+                runmat_builtins::RegistrationManifestEntry {
+                    kind: runmat_builtins::RegistrationKind::FusionSpec, declaration: #declaration, variant: None, builtin_path: #builtin_path_lit,
+                }
+            );
         }
     };
-    append_wasm_block(quote! {
-        #builtin_path::#helper_ident();
-    });
+    append_wasm_block(
+        quote! { #builtin_path::#helper_ident(); },
+        "fusion_spec",
+        &declaration,
+        None,
+        &builtin_path_lit.value(),
+    );
     let expanded = quote! {
         #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
         #item_const
         #wasm_helper
         #[cfg(not(target_arch = "wasm32"))]
         inventory::submit! {
-            crate::builtins::common::spec::FusionSpecInventory { spec: &#spec_for_native }
+            crate::builtins::common::spec::FusionSpecInventory {
+                spec: &#spec_for_native,
+                builtin_path: #builtin_path_lit,
+                declaration: #declaration,
+                source_file: file!(),
+                module_path: module_path!(),
+            }
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        runmat_builtins::inventory::submit! {
+            runmat_builtins::RegistrationManifestEntry {
+                kind: runmat_builtins::RegistrationKind::FusionSpec, declaration: #declaration, variant: None, builtin_path: #builtin_path_lit,
+            }
         }
     };
     expanded.into()
 }
 
-fn append_wasm_block(block: proc_macro2::TokenStream) {
+fn append_wasm_block(
+    block: proc_macro2::TokenStream,
+    kind: &str,
+    declaration: &str,
+    variant: Option<&str>,
+    builtin_path: &str,
+) {
     if !should_generate_wasm_registry() {
         return;
     }
@@ -912,7 +1029,16 @@ fn append_wasm_block(block: proc_macro2::TokenStream) {
     let _guard = wasm_registry_lock().lock().unwrap();
     initialize_registry_file(path);
     let mut contents = fs::read_to_string(path).expect("failed to read wasm registry file");
-    let insertion = format!("    {}\n", block);
+    for value in [kind, declaration, variant.unwrap_or("-"), builtin_path] {
+        assert!(
+            !value.contains(['\t', '\n', '\r']),
+            "WASM registry manifest fields cannot contain control separators"
+        );
+    }
+    let (variant_presence, variant_value) = variant.map_or(("none", ""), |value| ("some", value));
+    let insertion = format!(
+        "    // @runmat-wasm-registration-v2\t{kind}\t{declaration}\t{variant_presence}\t{variant_value}\t{builtin_path}\n    {block}\n"
+    );
     if let Some(pos) = contents.rfind('}') {
         contents.insert_str(pos, &insertion);
     } else {
@@ -948,6 +1074,11 @@ pub const REGISTRY_COMPLETE: bool = false;\n\
 pub const REGISTRY_SOURCE_FINGERPRINT: &str = \"missing-build-script\";\n\
 pub const REGISTRY_BUILD_CONFIGURATION: &str = \"missing-build-script\";\n\
 pub const REGISTRY_ENTRY_COUNT: usize = 0;\n\n\
+pub const REGISTRY_MANIFEST_DIGEST: &str = \"0000000000000000000000000000000000000000000000000000000000000000\";\n\
+pub const REGISTRY_BUILTIN_COUNT: usize = 0;\n\
+pub const REGISTRY_CONSTANT_COUNT: usize = 0;\n\
+pub const REGISTRY_GPU_SPEC_COUNT: usize = 0;\n\
+pub const REGISTRY_FUSION_SPEC_COUNT: usize = 0;\n\n\
 pub fn register_all() {\n}\n";
         fs::write(path, HEADER).expect("failed to initialize wasm registry file");
     });

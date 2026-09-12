@@ -19,9 +19,11 @@ const PARSERS_BY_GATE = Object.freeze({
   "format-diff": ["exit_status"],
   "native-examples": ["example_reconciliation"],
   "browser-examples": ["example_reconciliation"],
+  "browser-runtime": ["exit_status"],
   "provider-tests": ["exit_status"],
   "host-tests": ["exit_status"],
   "foreign-tests": ["exit_status"],
+  "parallel-tests": ["exit_status"],
   "deterministic-products": ["generated_products"],
   "inventory-delta": ["inventory_delta"],
 });
@@ -89,7 +91,16 @@ function parseGatePlan(value, bundleId, current) {
   if (JSON.stringify(roles) !== JSON.stringify(ARTIFACT_ROLES_BY_PARSER[parser])) throw new Error(`${bundleId}: ${parser} must emit its exact typed artifact role set`);
   parseGateProgram(value.program, bundleId, current);
   if (value.program.kind !== "repository_script") validateCargoArguments(argumentsList, bundleId);
-  if (parser === "documentation_cutover") requireProgramTools(value.program, ["git"], bundleId, "documentation cutover");
+  if (parser === "documentation_cutover") requireRepositoryProducer(
+    value, bundleId, "documentation cutover",
+    "scripts/development/builtin-migration/documentation-export-cli.mjs",
+    ["cargo", "git", "node", "rustc"],
+  );
+  if (parser === "example_reconciliation") requireRepositoryProducer(
+    value, bundleId, "example reconciliation",
+    "scripts/development/builtin-migration/example-gate-cli.mjs",
+    ["node"],
+  );
   if (parser === "generated_products") requireProgramTools(value.program, ["cargo", "rustc"], bundleId, "generated product verification");
   return value;
 }
@@ -161,6 +172,19 @@ function requireProgramTools(program, requiredRoles, bundleId, label) {
     const roles = toolchain.tools.map((tool) => tool.role);
     if (requiredRoles.some((role) => !roles.includes(role))) {
       throw new Error(`${bundleId}: ${label} requires reviewed ${requiredRoles.join(" and ")} tools on every execution target`);
+    }
+  }
+}
+
+function requireRepositoryProducer(plan, bundleId, label, sourcePath, toolRoles) {
+  if (plan.program.kind !== "repository_script" || plan.program.path !== sourcePath) {
+    throw new Error(`${bundleId}: ${label} must use its reviewed repository producer`);
+  }
+  if (plan.arguments.length !== 0) throw new Error(`${bundleId}: ${label} producer accepts no arguments`);
+  for (const toolchain of plan.program.approved_toolchains) {
+    const observed = toolchain.tools.map((tool) => tool.role);
+    if (JSON.stringify(observed) !== JSON.stringify(toolRoles)) {
+      throw new Error(`${bundleId}: ${label} requires exact reviewed ${toolRoles.join(", ")} tools`);
     }
   }
 }

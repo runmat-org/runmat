@@ -13,6 +13,8 @@ test("materializes topology-owned facts with control-only execution policy", () 
     identities: ["foo"],
     atomic_reason: "One frozen authority component",
     prerequisites: [],
+    integration_product_refs: [],
+    integration_outputs: [],
     authored_write_set: [
       { kind: "file", path: "crates/runmat-runtime/src/builtins/math/basic/foo.rs" },
       { kind: "tree", path: "crates/runmat-builtins/src/catalog/entries/math/basic" },
@@ -20,21 +22,27 @@ test("materializes topology-owned facts with control-only execution policy", () 
   });
   assert.deepEqual(result.identities.get("foo"), {
     identity: "foo",
-    disposition: { kind: "canonical", target: "foo" },
     cohort: "C01",
     bundle_id: "c01-math-basic",
     domain: "math",
     family: "basic",
-    public_spelling: "foo",
+    public_identity: {
+      kind: "primary", primary_spelling: { identity: "foo", spelling: "foo" },
+    },
   });
 });
 
-test("materializes canonical, alias, and internal dispositions only from topology", () => {
+test("materializes typed public identities that agree with topology", () => {
   const { topology, overlay } = fixture({ dispositions: true });
   const result = materializeTopologyControl(topology, overlay);
-  assert.deepEqual(result.identities.get("foo").disposition, { kind: "canonical", target: "foo" });
-  assert.deepEqual(result.identities.get("foalias").disposition, { kind: "alias", target: "foo" });
-  assert.deepEqual(result.identities.get("__helper").disposition, {
+  assert.deepEqual(result.identities.get("foo").public_identity, {
+    kind: "primary", primary_spelling: { identity: "foo", spelling: "foo" },
+  });
+  assert.deepEqual(result.identities.get("foalias").public_identity, {
+    kind: "alias", alias_spelling: { identity: "foalias", spelling: "foalias" },
+    canonical_identity: "foo",
+  });
+  assert.deepEqual(result.identities.get("__helper").public_identity, {
     kind: "internal",
     reason: "Runtime-only helper",
     evidence: ["reviewed-topology:__helper"],
@@ -58,7 +66,7 @@ test("rejects topology drift and incomplete overlay key sets", () => {
 test("rejects invalid topology dispositions instead of accepting an overlay substitute", () => {
   const { topology, overlay } = fixture();
   topology.identities.get("foo").disposition = { kind: "alias", canonical: null };
-  assert.throws(() => materializeTopologyControl(topology, overlay), /invalid disposition/);
+  assert.throws(() => materializeTopologyControl(topology, overlay), /differs from topology disposition/);
 });
 
 function fixture({ dispositions = false } = {}) {
@@ -92,8 +100,19 @@ function fixture({ dispositions = false } = {}) {
     bundleControls: new Map([["c01-math-basic", {
       prerequisites: [],
       additional_authored_write_set: [{ kind: "file", path: "crates/runmat-runtime/src/builtins/math/basic/foo.rs" }],
+      integration_product_refs: [],
     }]]),
-    identityControls: new Map(identityRows.map(([id]) => [id, { public_spelling: id }])),
+    identityControls: new Map(identityRows.map(([id, row]) => [id, {
+      public_identity: row.disposition.kind === "canonical"
+        ? { kind: "primary", primary_spelling: { identity: id, spelling: id } }
+        : row.disposition.kind === "alias"
+          ? { kind: "alias", alias_spelling: { identity: id, spelling: id }, canonical_identity: row.disposition.canonical }
+          : {
+            kind: "internal", reason: row.disposition.reason,
+            evidence: [`reviewed-topology:${id}`],
+          },
+    }])),
+    integrationProducts: new Map(),
   };
   return { topology, overlay };
 }

@@ -1,10 +1,14 @@
 import { CATALOG_ROOT, RUNTIME_ROOT, compareCodePoint, rustLeaf } from "../constants.mjs";
+import {
+  bundleTypedPathEvidence, identityTypedBaselineEvidence,
+} from "../baseline-evidence.mjs";
 import { parseControlDraft } from "../control-draft.mjs";
 import { evidenceDigest } from "../evidence.mjs";
 import { deepImmutable } from "../immutable.mjs";
 import { parseInventoryEvidence } from "../inventory.mjs";
 import { digest } from "../schema.mjs";
 import { assertValidatedTopologyView } from "../topology/freeze.mjs";
+import { buildAuthorityProposals, migrationFindingRoutingProposal } from "./authority-proposals.mjs";
 
 const PROGRAM = "RM-1064/C00-C07";
 const KIND = "runmat-builtin-migration-control-overlay-scaffold";
@@ -14,21 +18,22 @@ const VALIDATED_SCAFFOLDS = new WeakSet();
 const BUNDLE_DECISIONS = Object.freeze([
   "prerequisites",
   "additional_authored_write_set",
-  "integration_outputs",
+  "integration_product_refs",
+  "expected_removals",
+  "baseline_evidence",
   "gate_plans",
   "owner_role",
   "complexity",
 ]);
 
 const IDENTITY_DECISIONS = Object.freeze([
-  "public_spelling",
-  "runtime_owner",
+  "public_identity",
+  "forms",
+  "implementation",
   "shared_dependencies",
   "complexity",
   "maturity",
   "expected_authorities",
-  "expected_removals",
-  "baseline_evidence",
   "owner",
 ]);
 
@@ -41,7 +46,8 @@ const FINDING_DECISIONS = Object.freeze([
 
 const GLOBAL_DECISIONS = Object.freeze([
   "exception_manifest",
-  "execution_targets",
+  "integration_products",
+  "target_policy",
   "storage_policy",
 ]);
 
@@ -83,8 +89,7 @@ export function buildControlOverlayScaffold(inventoryValue, draftValue, reviewed
         target_packages: clone(topologyRow.composition.target_packages),
         topology_authored_write_set: clone(topologyRow.composition.authored_write_set),
         shared_authority_sources: [...topologyRow.composition.shared_authority_sources],
-        typed_paths: mergeTypedPaths(bundleSourceRows.map((row) =>
-          typedPathObservations(row, sourceFilesByPath))),
+        typed_paths: bundleTypedPathEvidence(inventory, topologyRow.identities),
       },
       candidate_paths: mergeCandidatePaths(topologyRow.identities.map((identity) => candidatesByIdentity.get(identity))),
       decisions: unresolvedDecisions(BUNDLE_DECISIONS),
@@ -96,13 +101,14 @@ export function buildControlOverlayScaffold(inventoryValue, draftValue, reviewed
     .map((finding) => ({
       finding_digest: evidenceDigest(finding),
       observations: clone(finding),
+      routing_proposal: migrationFindingRoutingProposal(finding, topology, inventoryByIdentity),
       decisions: unresolvedDecisions(FINDING_DECISIONS),
       review: unreviewed(),
     }))
     .sort((left, right) => compareCodePoint(left.finding_digest, right.finding_digest));
 
   const payload = {
-    schema_version: 2,
+    schema_version: 3,
     kind: KIND,
     authority: AUTHORITY,
     program: PROGRAM,
@@ -116,6 +122,7 @@ export function buildControlOverlayScaffold(inventoryValue, draftValue, reviewed
     bundle_rows: bundleRows,
     identity_rows: identityRows,
     migration_finding_rows: findingRows,
+    authority_proposals: buildAuthorityProposals(inventoryByIdentity, topology, inventory.migration_findings),
     decisions: unresolvedDecisions(GLOBAL_DECISIONS),
     review: unreviewed(),
   };
@@ -209,7 +216,7 @@ function identityObservations(row, topologyRow, sourceFilesByPath) {
       test_strength: row.tests?.strength ?? "none",
       documentation_strength: row.documentation?.strength ?? "none",
       unresolved_fields: [...(row.unresolved ?? [])].sort(compareCodePoint),
-      typed_paths: typedPathObservations(row, sourceFilesByPath),
+      typed_paths: identityTypedBaselineEvidence(row, sourceFilesByPath),
       baseline_evidence_candidates: baselineEvidenceCandidates(row, sourceFilesByPath),
     },
   };
@@ -256,8 +263,8 @@ function mergeCandidatePaths(rows) {
   return {
     observed,
     topology_target_proposals: {
-      catalog_packages: paths(rows.map((row) => row.topology_target_proposals.catalog_package)),
-      runtime_owners: paths(rows.map((row) => row.topology_target_proposals.runtime_owner)),
+      proposed_catalog_packages: paths(rows.map((row) => row.topology_target_proposals.proposed_catalog_package)),
+      proposed_callable_owners: paths(rows.map((row) => row.topology_target_proposals.proposed_callable_owner)),
       basis: "reviewed-topology-target-packages-only",
     },
   };
@@ -267,32 +274,32 @@ function topologyTargetProposals(row, sourceRow) {
   const leaf = rustLeaf(row.identity);
   if (row.disposition.kind === "alias") {
     return {
-      catalog_package: null,
-      runtime_owner: null,
-      runtime_bindings: [],
-      canonical_target: row.disposition.canonical,
+      proposed_catalog_package: null,
+      proposed_callable_owner: null,
+      proposed_callable_bindings: [],
+      proposed_canonical_identity: row.disposition.canonical,
       basis: "reviewed-alias-target-no-copied-authority-proposal",
     };
   }
   if (row.disposition.kind === "internal") {
     return {
-      catalog_package: null,
-      runtime_owner: null,
-      runtime_bindings: [],
-      canonical_target: null,
+      proposed_catalog_package: null,
+      proposed_callable_owner: null,
+      proposed_callable_bindings: [],
+      proposed_canonical_identity: null,
       basis: "reviewed-internal-identity-observed-paths-only",
     };
   }
   const runtimeOwner = `${RUNTIME_ROOT}/${row.domain}/${row.family}/${leaf}.rs`;
   return {
-    catalog_package: `${CATALOG_ROOT}/${row.domain}/${row.family}/${leaf}/mod.rs`,
-    runtime_owner: runtimeOwner,
-    runtime_bindings: (sourceRow.semantic_authority?.implementation_provenance ?? []).map((entry) => ({
+    proposed_catalog_package: `${CATALOG_ROOT}/${row.domain}/${row.family}/${leaf}/mod.rs`,
+    proposed_callable_owner: runtimeOwner,
+    proposed_callable_bindings: (sourceRow.semantic_authority?.implementation_provenance ?? []).map((entry) => ({
       path: runtimeOwner,
       function: entry.function,
       variant: entry.binding_variant ?? "default",
     })),
-    canonical_target: null,
+    proposed_canonical_identity: null,
     basis: "reviewed-topology-target-package-with-observed-function-candidates",
   };
 }
@@ -303,52 +310,6 @@ function baselineEvidenceCandidates(row, sourceFilesByPath) {
     if (!source) throw new Error(`${row.identity}: source metrics path ${file.path} is absent from the exact source snapshot`);
     return { path: source.path, content_digest: source.content_digest };
   }).sort((left, right) => compareCodePoint(left.path, right.path));
-}
-
-function typedPathObservations(row, sourceFilesByPath) {
-  const records = [];
-  const add = (kind, values) => {
-    for (const value of values ?? []) {
-      const sourcePath = typeof value === "string" ? value : value?.path;
-      if (typeof sourcePath !== "string" || sourcePath.length === 0) continue;
-      const source = sourceFilesByPath.get(sourcePath);
-      records.push({
-        kind,
-        path: sourcePath,
-        source_snapshot: source ? "present" : "absent",
-        content_digest: source?.content_digest ?? null,
-      });
-    }
-  };
-  add("catalog-owner", row.ownership?.catalog);
-  add("catalog-provenance", (row.semantic_authority?.catalog_provenance ?? [])
-    .map((entry) => entry.provenance?.source_file));
-  add("runtime-owner", row.ownership?.runtime);
-  add("implementation-provenance", (row.semantic_authority?.implementation_provenance ?? [])
-    .map((entry) => entry.source_file));
-  add("catalog-documentation", row.ownership?.catalog_documentation);
-  add("legacy-sidecar", row.ownership?.sidecars);
-  add("runtime-documentation-shadow", row.ownership?.runtime_documentation_shadows);
-  add("documentation-source", row.documentation?.sources);
-  add("test-source", row.tests?.paths);
-  add("runtime-registration", (row.registrations?.runtime ?? []).map((entry) => entry.path));
-  add("native-link-catalog-contract", row.registrations?.native_link?.catalog_contract_paths);
-  add("native-link-runtime-input", (row.registrations?.native_link?.runtime_binding_inputs ?? [])
-    .map((entry) => entry.path));
-  add("legacy-resolver", row.dependencies?.legacy_resolver_paths);
-  add("catalog-resolver", row.dependencies?.catalog_resolver_paths);
-  add("provider", row.provider?.gpu_or_wgpu_paths);
-  add("fusion", row.provider?.fusion_paths);
-  add("generated-registry", row.dependencies?.generated_registry);
-  const unique = new Map(records.map((entry) => [`${entry.kind}\0${entry.path}`, entry]));
-  return [...unique.values()].sort((left, right) =>
-    compareCodePoint(`${left.kind}\0${left.path}`, `${right.kind}\0${right.path}`));
-}
-
-function mergeTypedPaths(rows) {
-  const unique = new Map(rows.flat().map((entry) => [`${entry.kind}\0${entry.path}`, entry]));
-  return [...unique.values()].sort((left, right) =>
-    compareCodePoint(`${left.kind}\0${left.path}`, `${right.kind}\0${right.path}`));
 }
 
 function paths(values) {

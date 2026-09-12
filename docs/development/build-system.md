@@ -150,7 +150,7 @@ npm run build
 
 `npm run build` cleans previous artifacts, generates builtin metadata, builds the web WASM package, builds the WASM LSP package, emits TypeScript, creates the standard-library snapshot, and syncs WASM artifacts into `dist`.
 
-The WASM registry has an ordering constraint: proc macros write registry entries while `runmat-runtime` compiles for `wasm32-unknown-unknown`. Always use `scripts/regenerate-wasm-registry.sh`; it generates the production `plot-web,occt-wasm-host` registry into a temporary file, marks it complete only after cargo succeeds, then atomically replaces `generated_wasm_registry.rs`. Normal WASM builds validate the source fingerprint, target/features, completion marker, and entry count, and fail if the registry is missing, partial, stale, or generated for another runtime configuration.
+The WASM registry has an ordering constraint: proc macros write registry entries while `runmat-runtime` compiles for `wasm32-unknown-unknown`. Always use `scripts/regenerate-wasm-registry.sh`; it generates the production `plot-web` registry into a temporary file, marks it complete only after cargo succeeds, then atomically replaces `generated_wasm_registry.rs`. Normal WASM builds validate the source fingerprint, target/features, completion marker, and entry count, and fail if the registry is missing, partial, stale, or generated for another runtime configuration.
 
 ## Release Helpers
 

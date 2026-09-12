@@ -11,12 +11,14 @@ export function dispositionInputFromControl(control) {
   assertValidatedControl(control);
   const identities = {};
   for (const [identity, entry] of control.identities) {
+    const publicIdentity = entry.public_identity;
+    const disposition = publicIdentity.kind === "primary" ? "canonical" : publicIdentity.kind;
     identities[identity] = {
-      disposition: entry.disposition.kind,
-      canonical: entry.disposition.kind === "alias" ? entry.disposition.target : null,
+      disposition,
+      canonical: publicIdentity.kind === "alias" ? publicIdentity.canonical_identity : null,
       domain: entry.domain,
       family: entry.family,
-      reason: entry.disposition.kind === "internal" ? entry.disposition.reason : null,
+      reason: publicIdentity.kind === "internal" ? publicIdentity.reason : null,
       review: { status: "reviewed", evidence: [`control:${control.digest}`] },
     };
   }

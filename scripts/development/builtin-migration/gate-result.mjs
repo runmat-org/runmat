@@ -4,6 +4,9 @@ import path from "node:path";
 import { compareCodePoint } from "./constants.mjs";
 import { contentDigest, evidenceDigest } from "./evidence.mjs";
 import { executionTargetKey, parseExecutionTarget, parseExecutionTargets, sameExecutionTarget } from "./execution-target.mjs";
+import { parseExampleEvidenceRoot, parseExampleGateProof } from "./example-gate.mjs";
+import { EXAMPLE_GATE_MANIFEST_FILENAME } from "./example-gate-input.mjs";
+import { documentationCutoverChecks, parseDocumentationCutoverArtifact } from "./documentation-cutover.mjs";
 import { gatePlanEvidence } from "./gate-plan.mjs";
 import { GATE_PRODUCERS } from "./gate-kinds.mjs";
 import { SAFE_IDENTITY, absolutePath, array, digest, enumValue, exact, filesystemIdentity, integer, kind, nonempty, sourceRevision, stableId, timestamp, uniqueStrings } from "./schema.mjs";
@@ -12,8 +15,8 @@ import { storageStatus } from "./storage-admission.mjs";
 export { GATE_PRODUCERS } from "./gate-kinds.mjs";
 
 export function parseGateResult(value, expected) {
-  kind(value, 5, "runmat-builtin-migration-gate-result", "gate result");
-  exact(value, ["schema_version", "kind", "authority", "producer", "producer_evidence", "artifact_id", "produced_at", "execution_target", "source_revision", "source_digest", "baseline_inventory_digest", "subject_inventory_digest", "control_manifest_digest", "bundle_id", "identities", "gate", "result", "checks", "artifacts", "storage_admission"], "gate result");
+  kind(value, 7, "runmat-builtin-migration-gate-result", "gate result");
+  exact(value, ["schema_version", "kind", "authority", "producer", "producer_evidence", "artifact_id", "produced_at", "execution_target", "source_revision", "source_digest", "control_baseline_inventory_digest", "lease_base_inventory_digest", "subject_inventory_digest", "control_manifest_digest", "bundle_id", "lease_id", "lease_digest", "identities", "gate", "result", "checks", "artifacts", "storage_admission"], "gate result");
   if (value.authority !== "machine-verification-only") throw new Error("gate result has invalid authority");
   const gate = enumValue(value.gate, Object.keys(GATE_PRODUCERS), "gate result gate");
   if (value.producer !== GATE_PRODUCERS[gate]) throw new Error(`${gate}: unexpected gate producer`);
@@ -23,21 +26,22 @@ export function parseGateResult(value, expected) {
   stableId(value.artifact_id, "gate artifact id");
   sourceRevision(value.source_revision, "gate source revision");
   digest(value.source_digest, "gate source digest");
-  digest(value.baseline_inventory_digest, "gate baseline inventory digest");
+  digest(value.control_baseline_inventory_digest, "gate control baseline inventory digest");
+  digest(value.lease_base_inventory_digest, "gate lease base inventory digest");
   digest(value.subject_inventory_digest, "gate subject inventory digest");
   digest(value.control_manifest_digest, "gate control manifest digest");
   stableId(value.bundle_id, "gate bundle id");
+  stableId(value.lease_id, "gate lease id");
+  digest(value.lease_digest, "gate lease digest");
   const identities = uniqueStrings(value.identities, "gate identities", { pattern: SAFE_IDENTITY, lower: true });
-  enumValue(value.result, ["pass", "fail", "unavailable"], "gate result");
+  enumValue(value.result, ["pass", "fail"], "gate result");
   const checks = array(value.checks, "gate checks").map((entry) => {
     exact(entry, ["id", "result", "evidence_digest"], "gate check");
     nonempty(entry.id, "gate check id");
-    enumValue(entry.result, ["pass", "fail", "unavailable"], "gate check result");
+    enumValue(entry.result, ["pass", "fail"], "gate check result");
     digest(entry.evidence_digest, "gate check evidence digest");
     return entry;
   });
-  if (new Set(checks.map((entry) => entry.id)).size !== checks.length) throw new Error("gate check ids must be unique");
-  for (const id of identities) if (!checks.some((entry) => entry.id === `${gate}:${id}`)) throw new Error(`${gate}: typed producer evidence is missing the ${id} identity check`);
   const artifacts = array(value.artifacts, "gate artifacts", { empty: true }).map(parseArtifact);
   const artifactRoles = artifacts.map((entry) => entry.role);
   if (new Set(artifactRoles).size !== artifactRoles.length) throw new Error(`${gate}: gate artifact roles must be unique`);
@@ -58,7 +62,7 @@ export function parseGateResult(value, expected) {
   );
   validateExecutionEnvironment(producerEvidence.invocation.environment, storageAdmission);
   if (expected) {
-    if (value.source_revision !== expected.source_revision || value.source_digest !== expected.source_digest || value.baseline_inventory_digest !== expected.baseline_inventory_digest || value.subject_inventory_digest !== expected.subject_inventory_digest || value.control_manifest_digest !== expected.control_manifest_digest || value.bundle_id !== expected.bundle_id) {
+    if (value.source_revision !== expected.source_revision || value.source_digest !== expected.source_digest || value.control_baseline_inventory_digest !== expected.control_baseline_inventory_digest || value.lease_base_inventory_digest !== expected.lease_base_inventory_digest || value.subject_inventory_digest !== expected.subject_inventory_digest || value.control_manifest_digest !== expected.control_manifest_digest || value.bundle_id !== expected.bundle_id || value.lease_id !== expected.lease_id || value.lease_digest !== expected.lease_digest) {
       throw new Error(`${gate}: stale or mismatched gate provenance`);
     }
     if (expected.gate_plans) validateReviewedPlan(
@@ -66,7 +70,45 @@ export function parseGateResult(value, expected) {
     );
   }
   verifyArtifactFiles(artifacts);
+  validateGateCheckIds(checks, gate, identities, artifacts, value, expected);
+  validateTypedArtifacts(gate, value, artifacts, storageAdmission);
   return { ...value, identities: identities.sort(compareCodePoint), checks, artifacts };
+}
+
+export function validateGateCheckIds(checks, gate, identities, artifacts = [], result = null, expected = null) {
+  const checkIds = checks.map((entry) => entry.id);
+  if (gate === "documentation-cutover") {
+    const artifact = artifacts.find((entry) => entry.role === "documentation-reconciliation");
+    if (!artifact || !result) throw new Error(`${gate}: typed documentation evidence is required to validate checks`);
+    let encoded;
+    try { encoded = JSON.parse(fs.readFileSync(artifact.path)); } catch (error) {
+      throw new Error(`${gate}: documentation reconciliation is not valid JSON: ${error.message}`);
+    }
+    const parsed = parseDocumentationCutoverArtifact(encoded, {
+      source_revision: result.source_revision,
+      source_digest: result.source_digest,
+      compiled_inventory_digest: expected?.subject_compiled_inventory_digest
+        ?? encoded?.provenance?.compiled_inventory_digest,
+      control_manifest_digest: result.control_manifest_digest,
+      bundle_id: result.bundle_id,
+      identities,
+      ...(expected?.documentation_source_dispositions
+        ? { source_dispositions: expected.documentation_source_dispositions }
+        : {}),
+    });
+    const expectedChecks = documentationCutoverChecks(parsed);
+    if (parsed.catalog_export.evidence_digest !== result.producer_evidence.process.stdout_digest) {
+      throw new Error(`${gate}: captured catalog export differs from producer stdout`);
+    }
+    if (JSON.stringify(checks) !== JSON.stringify(expectedChecks)) {
+      throw new Error(`${gate}: gate checks must exactly equal the typed documentation reconciliation`);
+    }
+    return;
+  }
+  const expectedCheckIds = identities.map((identity) => `${gate}:${identity}`).sort(compareCodePoint);
+  if (JSON.stringify(checkIds) !== JSON.stringify(expectedCheckIds)) {
+    throw new Error(`${gate}: gate check ids must exactly cover the identity set in canonical order`);
+  }
 }
 
 function parseArtifact(value) {
@@ -84,6 +126,35 @@ function verifyArtifactFiles(artifacts) {
     if (bytes.length !== artifact.byte_length || contentDigest(bytes) !== artifact.content_digest) {
       throw new Error(`${artifact.role}: artifact bytes differ from gate evidence`);
     }
+  }
+}
+
+function validateTypedArtifacts(gate, result, artifacts, storageAdmission) {
+  if (!(["native-examples", "browser-examples"].includes(gate)) || result.result !== "pass") return;
+  const artifact = artifacts.find((entry) => entry.role === "example-reconciliation");
+  if (!artifact) throw new Error(`${gate}: passing evidence is missing its example reconciliation`);
+  let value;
+  try { value = JSON.parse(fs.readFileSync(artifact.path)); } catch (error) {
+    throw new Error(`${gate}: example reconciliation is not valid JSON: ${error.message}`);
+  }
+  const proof = parseExampleGateProof(value, {
+    source_revision: result.source_revision,
+    identities: result.identities,
+  });
+  const targetVolume = storageAdmission.volumes.find((entry) => entry.role === "target-temp");
+  if (!targetVolume) throw new Error(`${gate}: target-temp storage admission is absent`);
+  parseExampleEvidenceRoot(proof.evidence_root, targetVolume);
+  const expectedManifestPath = path.join(
+    storageAdmission.path_bindings.temporary.path,
+    EXAMPLE_GATE_MANIFEST_FILENAME,
+  );
+  if (proof.evidence.manifest.path !== expectedManifestPath) {
+    throw new Error(`${gate}: example manifest is outside its admitted deterministic input path`);
+  }
+  const bytes = readCanonicalRegularFile(proof.evidence.manifest.path, `${gate} example manifest`);
+  if (bytes.length !== proof.evidence.manifest.byte_length
+    || contentDigest(bytes) !== proof.evidence.manifest.content_digest) {
+    throw new Error(`${gate}: example manifest bytes differ from reconciliation evidence`);
   }
 }
 
@@ -182,7 +253,7 @@ function validateReviewedPlan(gate, result, evidence, artifacts, expected, execu
   const plan = expected.gate_plans.get(gate);
   if (!plan) throw new Error(`${gate}: gate evidence has no reviewed bundle plan`);
   const contract = gatePlanEvidence(plan, executionTarget, storageAdmission.path_bindings.repository.path);
-  if (evidence.contract.reviewed_source_revision !== expected.baseline_source_revision
+  if (evidence.contract.reviewed_source_revision !== expected.control_baseline_source_revision
     || evidence.contract.primary_tool !== contract.primary_tool
     || JSON.stringify(evidence.contract.tools) !== JSON.stringify(contract.tools)
     || evidence.contract.producer_source_digest !== contract.source_digest) {

@@ -4,17 +4,16 @@ import { validateBundleGraph } from "./control-graph.mjs";
 import { validateControlProjection } from "./control-projection-validation.mjs";
 import { parseFindingDispositions } from "./migration-findings.mjs";
 import { parseGatePlans, validateGatePlanTargetCoverage } from "./gate-plan.mjs";
-import { requiredGateNames } from "./gate-requirements.mjs";
-import { materializeTopologyControl } from "./topology/control-projection.mjs";
+import { requiredGatePlanNames } from "./gate-requirements.mjs";
+import { primarySpelling, validateIdentityAuthorityGraph } from "./identity-authority.mjs";
 import { assertValidatedTopologyView } from "./topology/freeze.mjs";
 import { assertValidatedControlReview } from "./control-authoring/authority.mjs";
 import {
-  executionTargetKey, parseExceptionManifestPolicy, parseIdentityControlPolicy,
-  parseOperationalBundleControlPolicy, parseReviewedEvidence,
+  executionTargetKey, parseExceptionManifestPolicy, parseReviewedEvidence,
 } from "./control-authoring/policy-schema.mjs";
 import {
   SAFE_IDENTITY, array, digest, enumValue, exact, identity, integer, kind, nonempty,
-  object, repositoryPath, sourceRevision, stableId, uniqueStrings,
+  repositoryPath, sourceRevision, stableId, uniqueStrings,
 } from "./schema.mjs";
 
 export { MATURITY_GATES } from "./control-authoring/policy-schema.mjs";
@@ -28,8 +27,8 @@ export function validateControlManifestStructure(value, { inventory: current, re
     throw new Error("control manifest validation requires the exact inventory and deterministically validated topology");
   }
   assertValidatedTopologyView(reviewedTopology);
-  kind(value, 2, "runmat-builtin-migration-control-manifest", "control manifest");
-  exact(value, ["schema_version", "kind", "authority", "program", "inputs", "topology_digest", "candidate_digest", "attestation_digest", "baseline_context", "cohorts", "bundle_controls", "identity_controls", "migration_findings", "exception_manifest", "execution_targets", "storage_policy", "review", "digest"], "control manifest");
+  kind(value, 4, "runmat-builtin-migration-control-manifest", "control manifest");
+  exact(value, ["schema_version", "kind", "authority", "program", "inputs", "topology_digest", "candidate_digest", "attestation_digest", "baseline_context", "cohorts", "bundle_controls", "identity_controls", "integration_products", "migration_findings", "exception_manifest", "target_policy", "storage_policy", "review", "digest"], "control manifest");
   if (value.authority !== "reviewed-development-control") throw new Error("control manifest has invalid authority");
   if (value.program !== "RM-1064/C00-C07") throw new Error("control manifest has unexpected program");
   digest(value.topology_digest, "reviewed topology digest");
@@ -43,46 +42,31 @@ export function validateControlManifestStructure(value, { inventory: current, re
     baselineContext: value.baseline_context,
     bundleControls: value.bundle_controls,
     identityControls: value.identity_controls,
+    integrationProducts: value.integration_products,
     migrationFindings: value.migration_findings,
     exceptionManifest: value.exception_manifest,
-    executionTargets: value.execution_targets,
+    targetPolicy: value.target_policy,
     storagePolicy: value.storage_policy,
   });
   const baseline = parseBaselineContext(value.baseline_context, reviewedTopology);
   const cohorts = parseCohorts(value.cohorts);
-  const bundleControls = new Map(Object.entries(object(value.bundle_controls, "control bundle policies")).map(([id, entry]) => [id, parseBundleControl(id, entry, current)]));
-  const identityControls = new Map();
-  for (const [id, entry] of Object.entries(object(value.identity_controls, "control identity policies"))) {
-    const normalized = id.toLowerCase();
-    if (identityControls.has(normalized)) throw new Error(`control identity policies collide case-insensitively at ${id}`);
-    identityControls.set(normalized, parseIdentityControl(id, entry));
-  }
-  const materialized = materializeTopologyControl(reviewedTopology, {
-    topology_digest: value.topology_digest,
-    bundleControls,
-    identityControls,
-  });
-  const bundles = new Map([...materialized.bundles].map(([id, entry]) => [id, parseBundle(id, entry, current)]));
-  const identities = new Map([...materialized.identities].map(([id, entry]) => [id, parseIdentity(id, entry, bundles, cohorts)]));
-  const publicSpellings = new Map();
-  for (const entry of identities.values()) {
-    const folded = entry.public_spelling.toLowerCase();
-    if (publicSpellings.has(folded)) {
-      throw new Error(`public spellings collide case-insensitively: ${publicSpellings.get(folded)} and ${entry.public_spelling}`);
-    }
-    publicSpellings.set(folded, entry.public_spelling);
-  }
+  const bundles = new Map(
+    [...projection.bundles].map(([id, entry]) => [id, parseBundle(id, entry, current)]),
+  );
+  const identities = new Map(
+    [...projection.identities].map(([id, entry]) => [id, parseIdentity(id, entry, bundles, cohorts)]),
+  );
+  validateIdentityAuthorityGraph(identities);
   if (!bundles.size || !identities.size) throw new Error("control manifest must contain bundles and identities");
   const migrationFindings = parseFindingDispositions(value.migration_findings, bundles, current?.migration_findings ?? null);
   parseExceptionManifestPolicy(value.exception_manifest, bundles);
   parseReviewedEvidence(value.review, "control manifest review");
   validateBundleGraph(bundles, identities);
-  validateIdentityGraph(identities);
   validateGatePlanCoverage(bundles, identities);
   for (const bundle of bundles.values()) {
     validateGatePlanTargetCoverage(bundle.gate_plans, projection.executionTargets, bundle.id);
   }
-  if (current) validateBaseline(baseline, current, identities);
+  if (current) validateBaseline(baseline, current, bundles, identities);
   const { digest: _ignored, ...payload } = value;
   if (evidenceDigest(payload) !== value.digest) throw new Error("control manifest digest mismatch");
   return deepImmutable({
@@ -90,6 +74,8 @@ export function validateControlManifestStructure(value, { inventory: current, re
     inputs: value.inputs,
     topology_digest: value.topology_digest,
     baseline,
+    integrationProducts: projection.integrationProducts,
+    targetPolicy: projection.targetPolicy,
     executionTargets: projection.executionTargets,
     cohorts,
     bundles,
@@ -179,16 +165,6 @@ function parseBaselineContext(value, topology) {
   };
 }
 
-function parseBundleControl(id, value, current) {
-  stableId(id, "bundle control id");
-  parseOperationalBundleControlPolicy(value, id, current);
-  return value;
-}
-
-function parseIdentityControl(id, value) {
-  return parseIdentityControlPolicy(value, id);
-}
-
 function parseCohorts(value) {
   const rows = array(value, "control cohorts");
   if (rows.length !== COHORTS.length) throw new Error("control manifest must define C00 through C07 exactly once");
@@ -206,7 +182,7 @@ function parseCohorts(value) {
 
 function parseBundle(id, value, current) {
   stableId(id, "bundle id");
-  exact(value, ["id", "identities", "atomic_reason", "prerequisites", "authored_write_set", "integration_outputs", "gate_plans", "owner_role", "complexity", "review"], `${id} bundle`);
+  exact(value, ["id", "identities", "atomic_reason", "prerequisites", "integration_product_refs", "expected_removals", "baseline_evidence", "authored_write_set", "integration_outputs", "gate_plans", "owner_role", "complexity", "review"], `${id} bundle`);
   if (value.id !== id) throw new Error(`${id}: bundle key and id differ`);
   const result = {
     ...value,
@@ -225,36 +201,12 @@ function parseBundle(id, value, current) {
 
 function parseIdentity(id, value, bundles, cohorts) {
   const normalized = identity(id, "control identity").toLowerCase();
-  exact(value, ["identity", "public_spelling", "disposition", "cohort", "bundle_id", "domain", "family", "runtime_owner", "shared_dependencies", "complexity", "maturity", "expected_authorities", "expected_removals", "baseline_evidence", "owner", "review"], `${id} identity`);
+  exact(value, ["identity", "public_identity", "forms", "implementation", "cohort", "bundle_id", "domain", "family", "shared_dependencies", "complexity", "maturity", "expected_authorities", "owner", "review"], `${id} identity`);
   if (value.identity !== normalized) throw new Error(`${id}: identity key and normalized identity differ`);
   const bundle = bundles.get(value.bundle_id);
   if (!bundle) throw new Error(`${id}: unknown bundle ${value.bundle_id}`);
   if (!cohorts.has(value.cohort)) throw new Error(`${id}: unknown cohort ${value.cohort}`);
-  parseDisposition(value.disposition, normalized);
-  if (value.runtime_owner === null) {
-    if (value.disposition.kind === "canonical"
-      && (value.expected_authorities.runtime_bindings.length > 0
-        || value.expected_authorities.runtime_constants.length === 0)) {
-      throw new Error(`${id}: canonical callable identity requires a runtime owner`);
-    }
-  } else repositoryPath(value.runtime_owner, `${id} runtime owner`);
   return value;
-}
-
-function parseDisposition(value, id) {
-  object(value, `${id} disposition`);
-  if (value.kind === "canonical") {
-    exact(value, ["kind", "target"], `${id} canonical disposition`);
-    if (value.target.toLowerCase() !== id) throw new Error(`${id}: canonical target must be self`);
-  } else if (value.kind === "alias") {
-    exact(value, ["kind", "target"], `${id} alias disposition`);
-    identity(value.target, `${id} alias target`);
-    if (value.target.toLowerCase() === id) throw new Error(`${id}: alias target cannot be self`);
-  } else if (value.kind === "internal") {
-    exact(value, ["kind", "reason", "evidence"], `${id} internal disposition`);
-    nonempty(value.reason, `${id} internal reason`);
-    uniqueStrings(value.evidence, `${id} internal evidence`);
-  } else throw new Error(`${id}: unsupported disposition`);
 }
 
 function parsePrerequisite(value, id) {
@@ -272,11 +224,12 @@ export function parseScope(value, label) {
 }
 
 function parseIntegrationOutput(value, id) {
-  exact(value, ["product_id", "path", "producer"], `${id} integration output`);
+  exact(value, ["kind", "product_id", "path", "producer"], `${id} integration output`);
+  if (value.kind !== "file") throw new Error(`${id}: integration output must be a file`);
   stableId(value.product_id, `${id} integration product id`);
   repositoryPath(value.path, `${id} integration output path`);
   if (value.producer !== "integration") throw new Error(`${id}: integration output producer must be integration`);
-  return { kind: "file", ...value };
+  return value;
 }
 
 function parseIntegrationOutputs(value, id) {
@@ -296,7 +249,7 @@ function parseComplexity(value, label) {
   return value;
 }
 
-function validateBaseline(baseline, current, identities) {
+function validateBaseline(baseline, current, bundles, identities) {
   assertInventoryIntegrity(current, "control baseline inventory");
   validateBaselineBinding(baseline, current);
   const observed = current.identities.map((entry) => entry.identity).sort();
@@ -307,9 +260,10 @@ function validateBaseline(baseline, current, identities) {
     validateReviewedClassification(entry, inventoryIdentities.get(id));
   }
   const sourceFiles = new Map(current.source.files.map((entry) => [entry.path, entry.content_digest]));
-  for (const entry of identities.values()) for (const removal of entry.expected_removals) {
-    const proof = entry.baseline_evidence.find((candidate) => candidate.path === removal.path && candidate.digest === removal.baseline_digest);
-    if (proof.locator !== null || sourceFiles.get(removal.path) !== removal.baseline_digest) throw new Error(`${entry.identity}: file removal baseline does not match the content-derived source snapshot`);
+  for (const bundle of bundles.values()) for (const removal of bundle.expected_removals) {
+    if (sourceFiles.get(removal.path) !== removal.baseline_digest) {
+      throw new Error(`${bundle.id}: file removal baseline does not match the content-derived source snapshot`);
+    }
   }
 }
 
@@ -333,8 +287,9 @@ function validateReviewedClassification(control, inventory) {
   if (inventory.classification_input.review.status !== "reviewed") {
     throw new Error(`${control.identity}: baseline identity disposition is not reviewed`);
   }
-  if (!inventory.spellings.includes(control.public_spelling)) {
-    throw new Error(`${control.identity}: public spelling differs from the reviewed inventory`);
+  const spelling = primarySpelling(control.public_identity);
+  if (spelling !== null && !inventory.spellings.includes(spelling)) {
+    throw new Error(`${control.identity}: public identity spelling differs from the reviewed inventory`);
   }
   const reviewedDomain = inventory.classification_input.domain;
   const reviewedFamily = inventory.classification_input.family;
@@ -343,32 +298,24 @@ function validateReviewedClassification(control, inventory) {
     throw new Error(`${control.identity}: domain or family differs from its reviewed disposition override`);
   }
   const observed = inventory.disposition;
-  if (observed.kind !== control.disposition.kind) {
-    throw new Error(`${control.identity}: disposition differs from the reviewed inventory`);
+  if (observed.kind === "canonical" && control.public_identity.kind !== "primary") {
+    throw new Error(`${control.identity}: public identity differs from the reviewed inventory`);
   }
-  if (observed.kind === "canonical" && control.disposition.target !== control.identity) {
-    throw new Error(`${control.identity}: canonical target differs from the reviewed inventory`);
-  }
-  if (observed.kind === "alias" && observed.canonical !== control.disposition.target.toLowerCase()) {
+  if (observed.kind === "alias" && (control.public_identity.kind !== "alias"
+    || observed.canonical !== control.public_identity.canonical_identity.toLowerCase())) {
     throw new Error(`${control.identity}: alias target differs from the reviewed inventory`);
   }
-  if (observed.kind === "internal" && observed.reason !== control.disposition.reason) {
-    throw new Error(`${control.identity}: internal reason differs from the reviewed inventory`);
-  }
-}
-
-function validateIdentityGraph(identities) {
-  for (const [id, entry] of identities) {
-    if (entry.disposition.kind !== "alias") continue;
-    const target = identities.get(entry.disposition.target.toLowerCase());
-    if (!target) throw new Error(`${id}: alias target is absent from the control manifest`);
-    if (target.disposition.kind !== "canonical") throw new Error(`${id}: alias target must be canonical`);
+  if (observed.kind === "internal" && (control.public_identity.kind !== "internal"
+    || observed.reason !== control.public_identity.reason)) {
+    throw new Error(`${control.identity}: internal identity differs from the reviewed inventory`);
   }
 }
 
 function validateGatePlanCoverage(bundles, identities) {
   for (const bundle of bundles.values()) {
-    const required = new Set(bundle.identities.flatMap((id) => requiredGateNames(identities.get(id))));
+    const required = requiredGatePlanNames(
+      bundle.identities.map((id) => identities.get(id)),
+    );
     for (const gate of required) if (!bundle.gate_plans.has(gate)) throw new Error(`${bundle.id}: required gate ${gate} has no reviewed gate plan`);
   }
 }
