@@ -1,38 +1,52 @@
 import { evidenceDigest } from "./evidence.mjs";
 import { deepImmutable } from "./immutable.mjs";
 import { validateBundleGraph } from "./control-graph.mjs";
+import { validateControlProjection } from "./control-projection-validation.mjs";
 import { parseFindingDispositions } from "./migration-findings.mjs";
 import { parseGatePlans } from "./gate-plan.mjs";
 import { requiredGateNames } from "./gate-requirements.mjs";
 import { materializeTopologyControl } from "./topology/control-projection.mjs";
 import { assertValidatedTopologyView } from "./topology/freeze.mjs";
+import { assertValidatedControlReview } from "./control-authoring/authority.mjs";
+import {
+  parseExceptionManifestPolicy, parseIdentityControlPolicy,
+  parseOperationalBundleControlPolicy, parseReviewedEvidence, parseStoragePolicy,
+} from "./control-authoring/policy-schema.mjs";
 import {
   SAFE_IDENTITY, array, digest, enumValue, exact, identity, integer, kind, nonempty,
-  absolutePath, filesystemIdentity, object, repositoryPath, sourceRevision, stableId, uniqueStrings,
+  object, repositoryPath, sourceRevision, stableId, uniqueStrings,
 } from "./schema.mjs";
 
-export const MATURITY_GATES = Object.freeze([
-  "identity", "disposition", "catalog-contract", "requested-output", "effects-capabilities",
-  "inference", "runtime-facts", "runtime-binding", "native-ir-deopt", "placement",
-  "provider", "fusion", "link-reachability", "interop-parallel", "documentation",
-  "examples", "tests", "wasm",
-]);
+export { MATURITY_GATES } from "./control-authoring/policy-schema.mjs";
 
 const COHORTS = ["C00", "C01", "C02", "C03", "C04", "C05", "C06", "C07"];
 const SEMANTIC_COHORTS = ["prerequisite", "A", "B", "C", "D", "E", "F", "G"];
 const VALIDATED_CONTROLS = new WeakSet();
 
-export function parseControlManifest(value, { inventory: current, reviewedTopology } = {}) {
+export function validateControlManifestStructure(value, { inventory: current, reviewedTopology } = {}) {
   if (!current || !reviewedTopology) {
-    throw new Error("control manifest parsing requires the exact inventory and deterministically validated topology");
+    throw new Error("control manifest validation requires the exact inventory and deterministically validated topology");
   }
   assertValidatedTopologyView(reviewedTopology);
   kind(value, 2, "runmat-builtin-migration-control-manifest", "control manifest");
-  exact(value, ["schema_version", "kind", "authority", "program", "topology_digest", "baseline_context", "cohorts", "bundle_controls", "identity_controls", "migration_findings", "exception_manifest", "storage_policy", "review", "digest"], "control manifest");
+  exact(value, ["schema_version", "kind", "authority", "program", "inputs", "topology_digest", "candidate_digest", "attestation_digest", "baseline_context", "cohorts", "bundle_controls", "identity_controls", "migration_findings", "exception_manifest", "storage_policy", "review", "digest"], "control manifest");
   if (value.authority !== "reviewed-development-control") throw new Error("control manifest has invalid authority");
   if (value.program !== "RM-1064/C00-C07") throw new Error("control manifest has unexpected program");
   digest(value.topology_digest, "reviewed topology digest");
+  parseControlInputs(value.inputs, reviewedTopology);
+  digest(value.candidate_digest, "control candidate digest");
+  digest(value.attestation_digest, "control attestation digest");
   digest(value.digest, "control manifest digest");
+  validateControlProjection({
+    inventory: current,
+    topology: reviewedTopology,
+    baselineContext: value.baseline_context,
+    bundleControls: value.bundle_controls,
+    identityControls: value.identity_controls,
+    migrationFindings: value.migration_findings,
+    exceptionManifest: value.exception_manifest,
+    storagePolicy: value.storage_policy,
+  });
   const baseline = parseBaselineContext(value.baseline_context, reviewedTopology);
   const cohorts = parseCohorts(value.cohorts);
   const bundleControls = new Map(Object.entries(object(value.bundle_controls, "control bundle policies")).map(([id, entry]) => [id, parseBundleControl(id, entry, current)]));
@@ -59,18 +73,51 @@ export function parseControlManifest(value, { inventory: current, reviewedTopolo
   }
   if (!bundles.size || !identities.size) throw new Error("control manifest must contain bundles and identities");
   const migrationFindings = parseFindingDispositions(value.migration_findings, bundles, current?.migration_findings ?? null);
-  parseExceptionManifest(value.exception_manifest);
+  parseExceptionManifestPolicy(value.exception_manifest, bundles);
   parseStoragePolicy(value.storage_policy);
-  parseReview(value.review, "control manifest review");
+  parseReviewedEvidence(value.review, "control manifest review");
   validateBundleGraph(bundles, identities);
   validateIdentityGraph(identities);
   validateGatePlanCoverage(bundles, identities);
   if (current) validateBaseline(baseline, current, identities);
   const { digest: _ignored, ...payload } = value;
   if (evidenceDigest(payload) !== value.digest) throw new Error("control manifest digest mismatch");
-  const parsed = deepImmutable({ value, topology_digest: value.topology_digest, baseline, cohorts, bundles, identities, migrationFindings, digest: value.digest });
+  return deepImmutable({ value, inputs: value.inputs, topology_digest: value.topology_digest, baseline, cohorts, bundles, identities, migrationFindings, digest: value.digest });
+}
+
+export function parseControlManifest(value, { inventory, reviewedTopology, reviewedControl } = {}) {
+  if (!inventory || !reviewedTopology || !reviewedControl) {
+    throw new Error("control manifest parsing requires the exact inventory, deterministically validated topology, and validated control review chain");
+  }
+  assertValidatedControlReview(reviewedControl);
+  if (JSON.stringify(value) !== JSON.stringify(reviewedControl.controlValue)) {
+    throw new Error("control manifest differs from the deterministically reviewed control candidate and attestation");
+  }
+  const parsed = validateControlManifestStructure(value, { inventory, reviewedTopology });
   VALIDATED_CONTROLS.add(parsed);
   return parsed;
+}
+
+function parseControlInputs(value, topology) {
+  exact(value, ["baseline_inventory_digest", "control_draft_digest", "reviewed_topology_digest", "control_scaffold_digest", "review_set_digest", "global_review_digest", "bundle_review_digests"], "control review inputs");
+  for (const field of ["baseline_inventory_digest", "control_draft_digest", "reviewed_topology_digest", "control_scaffold_digest", "review_set_digest", "global_review_digest"]) {
+    digest(value[field], `control review input ${field}`);
+  }
+  if (value.baseline_inventory_digest !== topology.baseline.inventory_digest
+    || value.control_draft_digest !== topology.baseline.control_draft_digest
+    || value.reviewed_topology_digest !== topology.digest) {
+    throw new Error("control review inputs differ from the exact reviewed topology chain");
+  }
+  const rows = array(value.bundle_review_digests, "control bundle review digests");
+  const ids = rows.map((entry) => {
+    exact(entry, ["bundle_id", "digest"], "control bundle review digest");
+    digest(entry.digest, `${entry.bundle_id} bundle review digest`);
+    return stableId(entry.bundle_id, "control bundle review id");
+  });
+  const expected = [...topology.bundles.keys()].sort();
+  if (JSON.stringify(ids) !== JSON.stringify(expected)) {
+    throw new Error("control bundle review digests do not exactly cover the reviewed topology");
+  }
 }
 
 export function assertValidatedControl(value) {
@@ -116,29 +163,12 @@ function parseBaselineContext(value, topology) {
 
 function parseBundleControl(id, value, current) {
   stableId(id, "bundle control id");
-  exact(value, ["prerequisites", "additional_authored_write_set", "integration_outputs", "gate_plans", "owner_role", "complexity", "review"], `${id} bundle control`);
-  const additional = array(value.additional_authored_write_set, `${id} additional authored write set`, { empty: true })
-    .map((entry) => parseScope(entry, `${id} additional authored scope`));
-  const gatePlans = value.gate_plans;
-  parseGatePlans(gatePlans, id, current);
-  return {
-    ...value,
-    additional_authored_write_set: additional,
-    prerequisites: array(value.prerequisites, `${id} prerequisites`, { empty: true }).map((entry) => parsePrerequisite(entry, id)),
-    integration_outputs: array(value.integration_outputs, `${id} integration outputs`, { empty: true }).map((entry) => {
-      parseIntegrationOutput(entry, id);
-      return entry;
-    }),
-    gate_plans: gatePlans,
-    owner_role: nonempty(value.owner_role, `${id} owner role`),
-    complexity: parseComplexity(value.complexity, `${id} complexity`),
-  };
+  parseOperationalBundleControlPolicy(value, id, current);
+  return value;
 }
 
 function parseIdentityControl(id, value) {
-  identity(id, "identity control id");
-  exact(value, ["public_spelling", "runtime_owner", "shared_dependencies", "complexity", "maturity", "expected_authorities", "expected_removals", "baseline_evidence", "owner", "review"], `${id} identity control`);
-  return value;
+  return parseIdentityControlPolicy(value, id);
 }
 
 function parseCohorts(value) {
@@ -171,7 +201,7 @@ function parseBundle(id, value, current) {
     owner_role: nonempty(value.owner_role, `${id} owner role`),
     complexity: parseComplexity(value.complexity, `${id} complexity`),
   };
-  parseReview(value.review, `${id} bundle review`);
+  parseReviewedEvidence(value.review, `${id} bundle review`);
   return result;
 }
 
@@ -183,19 +213,6 @@ function parseIdentity(id, value, bundles, cohorts) {
   if (!bundle) throw new Error(`${id}: unknown bundle ${value.bundle_id}`);
   if (!cohorts.has(value.cohort)) throw new Error(`${id}: unknown cohort ${value.cohort}`);
   parseDisposition(value.disposition, normalized);
-  parseMaturity(value.maturity, id);
-  parseAuthorities(value.expected_authorities, id);
-  const removals = array(value.expected_removals, `${id} expected removals`, { empty: true });
-  const baselineEvidence = array(value.baseline_evidence, `${id} baseline evidence`, { empty: true });
-  removals.forEach((entry) => parseRemoval(entry, id));
-  baselineEvidence.forEach((entry) => parseBaselineEvidence(entry, id));
-  for (const removal of removals) {
-    if (!baselineEvidence.some((entry) => entry.path === removal.path && entry.digest === removal.baseline_digest)) throw new Error(`${id}: expected removal ${removal.path} lacks matching baseline path/digest evidence`);
-  }
-  array(value.shared_dependencies, `${id} shared dependencies`, { empty: true }).forEach((entry) => parseSharedDependency(entry, id));
-  parseComplexity(value.complexity, `${id} complexity`);
-  const publicSpelling = identity(value.public_spelling, `${id} public spelling`);
-  if (publicSpelling.toLowerCase() !== normalized) throw new Error(`${id}: public spelling must case-fold to the identity key`);
   if (value.runtime_owner === null) {
     if (value.disposition.kind === "canonical"
       && (value.expected_authorities.runtime_bindings.length > 0
@@ -203,8 +220,6 @@ function parseIdentity(id, value, bundles, cohorts) {
       throw new Error(`${id}: canonical callable identity requires a runtime owner`);
     }
   } else repositoryPath(value.runtime_owner, `${id} runtime owner`);
-  nonempty(value.owner, `${id} owner`);
-  parseReview(value.review, `${id} review`);
   return value;
 }
 
@@ -222,62 +237,6 @@ function parseDisposition(value, id) {
     nonempty(value.reason, `${id} internal reason`);
     uniqueStrings(value.evidence, `${id} internal evidence`);
   } else throw new Error(`${id}: unsupported disposition`);
-}
-
-function parseMaturity(value, id) {
-  exact(value, MATURITY_GATES, `${id} maturity`);
-  for (const gate of MATURITY_GATES) {
-    const entry = value[gate];
-    exact(entry, ["applicability", "reason", "evidence"], `${id} maturity ${gate}`);
-    enumValue(entry.applicability, ["required", "not-applicable"], `${id} maturity ${gate} applicability`);
-    uniqueStrings(entry.evidence, `${id} maturity ${gate} evidence`, { empty: true });
-    if (entry.applicability === "required" && entry.reason !== null) throw new Error(`${id}: required maturity ${gate} cannot have a reason`);
-    if (entry.applicability === "not-applicable" && (!String(entry.reason ?? "").trim() || entry.evidence.length === 0)) throw new Error(`${id}: inapplicable maturity ${gate} requires reason and evidence`);
-  }
-}
-
-function parseAuthorities(value, id) {
-  exact(value, ["catalog_package", "catalog_entry_count", "catalog_constant_count", "documentation", "runtime_bindings", "runtime_constants", "native_link", "wasm_registry"], `${id} expected authorities`);
-  if (value.catalog_package !== null) repositoryPath(value.catalog_package, `${id} catalog package`);
-  integer(value.catalog_entry_count, `${id} catalog entry count`);
-  integer(value.catalog_constant_count, `${id} catalog constant count`);
-  enumValue(value.documentation, ["catalog", "alias", "none"], `${id} documentation authority`);
-  array(value.runtime_bindings, `${id} runtime bindings`, { empty: true }).forEach((entry) => {
-    exact(entry, ["path", "function", "variant"], `${id} runtime binding`);
-    repositoryPath(entry.path, `${id} runtime binding path`);
-    nonempty(entry.function, `${id} runtime binding function`);
-    nonempty(entry.variant, `${id} runtime binding variant`);
-  });
-  const constants = uniqueStrings(value.runtime_constants, `${id} runtime constants`, { empty: true });
-  constants.forEach((entry) => identity(entry, `${id} runtime constant`));
-  if (JSON.stringify(constants) !== JSON.stringify([...constants].sort())) {
-    throw new Error(`${id}: runtime constants must use canonical order`);
-  }
-  enumValue(value.native_link, ["required", "not-applicable"], `${id} native link`);
-  enumValue(value.wasm_registry, ["required", "not-applicable"], `${id} wasm registry`);
-}
-
-function parseRemoval(value, id) {
-  exact(value, ["kind", "path", "baseline_digest"], `${id} file removal`);
-  if (value.kind !== "file") throw new Error(`${id}: expected removals are complete files; in-file authority changes belong to compiled inventory delta evidence`);
-  repositoryPath(value.path, `${id} removal path`);
-  digest(value.baseline_digest, `${id} removal baseline digest`);
-}
-
-function parseBaselineEvidence(value, id) {
-  exact(value, ["kind", "path", "locator", "digest"], `${id} baseline evidence`);
-  enumValue(value.kind, ["catalog", "runtime", "sidecar", "runtime-shadow", "resolver", "provider", "fusion", "test", "example"], `${id} evidence kind`);
-  repositoryPath(value.path, `${id} evidence path`);
-  if (value.locator !== null) throw new Error(`${id}: baseline source-item locators are obsolete; compiled and lexical inventory rows are the typed item authority`);
-  digest(value.digest, `${id} evidence digest`);
-}
-
-function parseSharedDependency(value, id) {
-  exact(value, ["kind", "path", "ownership", "owner_id"], `${id} shared dependency`);
-  enumValue(value.kind, ["runtime-owner", "legacy-resolver", "provider-service", "fusion-service", "catalog-composition", "runtime-composition", "registry"], `${id} dependency kind`);
-  repositoryPath(value.path, `${id} dependency path`);
-  enumValue(value.ownership, ["bundle", "prerequisite", "integration"], `${id} dependency ownership`);
-  nonempty(value.owner_id, `${id} dependency owner`);
 }
 
 function parsePrerequisite(value, id) {
@@ -308,46 +267,6 @@ function parseComplexity(value, label) {
   integer(value.weight, `${label} weight`, 1);
   uniqueStrings(value.basis, `${label} basis`);
   return value;
-}
-
-function parseExceptionManifest(value) {
-  exact(value, ["entries", "review"], "exception manifest");
-  array(value.entries, "exception entries", { empty: true }).forEach((entry) => {
-    exact(entry, ["id", "scope", "reason", "expires_after_bundle", "evidence"], "exception entry");
-    nonempty(entry.id, "exception id");
-    repositoryPath(entry.scope, "exception scope");
-    nonempty(entry.reason, "exception reason");
-    nonempty(entry.expires_after_bundle, "exception expiry bundle");
-    uniqueStrings(entry.evidence, "exception evidence");
-  });
-  parseReview(value.review, "exception manifest review");
-}
-
-function parseStoragePolicy(value) {
-  exact(value, ["volume_roles", "targets_must_be_disjoint", "occt_default"], "storage policy");
-  exact(value.volume_roles, ["source_worktree", "target_temp"], "storage volume roles");
-  const source = parseVolumePolicy(value.volume_roles.source_worktree, "source-worktree");
-  const target = parseVolumePolicy(value.volume_roles.target_temp, "target-temp");
-  if (source.filesystem_id === target.filesystem_id) throw new Error("source/worktree and target/temp roles must use disjoint filesystem identities");
-  if (value.targets_must_be_disjoint !== true || value.occt_default !== "disabled-unless-affected") throw new Error("storage policy must require disjoint targets and scoped OCCT");
-}
-
-function parseVolumePolicy(value, role) {
-  exact(value, ["role", "mount_path", "filesystem_id", "minimum_free_bytes", "pause_below_bytes", "maximum_observation_age_seconds"], `${role} volume policy`);
-  if (value.role !== role) throw new Error(`${role} volume policy has the wrong role`);
-  absolutePath(value.mount_path, `${role} mount path`);
-  filesystemIdentity(value.filesystem_id, `${role} filesystem id`);
-  integer(value.minimum_free_bytes, `${role} minimum free bytes`, 1);
-  integer(value.pause_below_bytes, `${role} pause below bytes`, 1);
-  integer(value.maximum_observation_age_seconds, `${role} maximum observation age`, 1);
-  if (value.pause_below_bytes < value.minimum_free_bytes) throw new Error(`${role} pause threshold cannot be below minimum free bytes`);
-  return value;
-}
-
-function parseReview(value, label) {
-  exact(value, ["status", "evidence"], label);
-  if (value.status !== "reviewed") throw new Error(`${label} must be reviewed`);
-  uniqueStrings(value.evidence, `${label} evidence`);
 }
 
 function validateBaseline(baseline, current, identities) {

@@ -40,7 +40,7 @@ export function parseGateResult(value, expected) {
   if (JSON.stringify(artifactRoles) !== JSON.stringify([...artifactRoles].sort(compareCodePoint))) throw new Error(`${gate}: gate artifacts must use canonical role ordering`);
   const derivedResult = value.producer_evidence.process.exit_code === 0 && checks.every((entry) => entry.result === "pass") ? "pass" : "fail";
   if (value.result !== derivedResult) throw new Error("gate result conflicts with captured process status or checks");
-  parseStorageAdmission(value.storage_admission, value.result, expected?.storage_policy, producedAt);
+  parseStorageAdmission(value.storage_admission, value.result, expected, producedAt);
   if (expected) {
     if (value.source_revision !== expected.source_revision || value.source_digest !== expected.source_digest || value.baseline_inventory_digest !== expected.baseline_inventory_digest || value.subject_inventory_digest !== expected.subject_inventory_digest || value.control_manifest_digest !== expected.control_manifest_digest || value.bundle_id !== expected.bundle_id) {
       throw new Error(`${gate}: stale or mismatched gate provenance`);
@@ -94,8 +94,10 @@ function validateReviewedPlan(gate, result, evidence, artifacts, expected) {
   if (result === "pass" && JSON.stringify(actualRoles) !== JSON.stringify(plan.expected_artifact_roles)) throw new Error(`${gate}: passing evidence does not cover the reviewed artifact roles`);
 }
 
-function parseStorageAdmission(value, gateResult, policy, producedAt) {
-  exact(value, ["observed_at", "volumes"], "gate storage admission");
+function parseStorageAdmission(value, gateResult, expected, producedAt) {
+  exact(value, ["profile_id", "execution_host", "observed_at", "volumes"], "gate storage admission");
+  const profileId = stableId(value.profile_id, "gate storage profile id");
+  const executionHost = nonempty(value.execution_host, "gate storage execution host");
   const observedAt = timestamp(value.observed_at, "gate storage observed_at");
   const volumes = array(value.volumes, "gate storage volumes");
   const expectedRoles = ["source-worktree", "target-temp"];
@@ -112,9 +114,18 @@ function parseStorageAdmission(value, gateResult, policy, producedAt) {
     const expectedStatus = entry.available_bytes >= entry.pause_below_bytes ? "admitted" : "paused";
     if (entry.status !== expectedStatus) throw new Error(`${entry.role}: storage status conflicts with observed bytes`);
     if (gateResult === "pass" && entry.status !== "admitted") throw new Error(`${entry.role}: a product gate cannot pass below its pause threshold`);
-    if (policy) {
+    if (expected?.storage_policy) {
       const key = entry.role === "source-worktree" ? "source_worktree" : "target_temp";
-      const configured = policy.volume_roles[key];
+      const profile = expected.storage_policy.host_profiles[profileId];
+      if (!profile) throw new Error(`gate storage profile ${profileId} is absent from reviewed control policy`);
+      if (executionHost !== profile.execution_host) {
+        throw new Error(`gate storage execution host differs from reviewed profile ${profileId}`);
+      }
+      if (expected.compiled_build && (profile.operating_system !== expected.compiled_build.operating_system
+        || profile.architecture !== expected.compiled_build.architecture)) {
+        throw new Error(`gate storage profile ${profileId} differs from the subject build target`);
+      }
+      const configured = profile.volume_roles[key];
       const age = (Date.parse(producedAt) - Date.parse(observedAt)) / 1000;
       if (age < 0 || age > configured.maximum_observation_age_seconds) throw new Error(`${entry.role}: storage observation is outside the reviewed time bound`);
       if (entry.evidence_path !== configured.mount_path || entry.filesystem_id !== configured.filesystem_id || entry.minimum_free_bytes !== configured.minimum_free_bytes || entry.pause_below_bytes !== configured.pause_below_bytes) throw new Error(`${entry.role}: storage evidence differs from reviewed control policy`);
