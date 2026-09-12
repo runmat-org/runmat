@@ -1,5 +1,7 @@
 use runmat_value::{Tensor, Value};
 
+use crate::builtins::io::repl_fs::text_conversion::tensor_char_codes_to_string;
+
 pub(super) struct Request {
     pub(super) filename: Option<String>,
     pub(super) requested_outputs: Option<usize>,
@@ -80,7 +82,7 @@ async fn decode_text(value: Value) -> crate::BuiltinResult<String> {
 }
 
 fn numeric_text(tensor: &Tensor) -> crate::BuiltinResult<String> {
-    super::super::tensor_char_codes_to_string(tensor).ok_or_else(type_error)
+    tensor_char_codes_to_string(tensor).ok_or_else(type_error)
 }
 
 fn is_row(shape: &[usize]) -> bool {

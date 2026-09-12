@@ -7,7 +7,6 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
-use runmat_value::{IntValue, IntegerStorage, Tensor};
 
 const ISVALID_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "tf",
@@ -81,6 +80,7 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    use runmat_value::{IntValue, IntegerStorage, Tensor};
 
     #[test]
     fn all_integer_classes_reject_as_invalid_handle_inputs() {

@@ -1,6 +1,7 @@
 use runmat_value::Value;
 
 use super::super::text::TextContainer;
+use crate::builtins::io::repl_fs::text_conversion::tensor_char_codes_to_string;
 use crate::BuiltinResult;
 
 const IDENTITY: &str = "fullfile";
@@ -38,7 +39,7 @@ async fn decode_numeric(value: &Value) -> BuiltinResult<TextContainer> {
             IDENTITY,
         ));
     }
-    let text = super::super::super::tensor_char_codes_to_string(&tensor).ok_or_else(|| {
+    let text = tensor_char_codes_to_string(&tensor).ok_or_else(|| {
         super::super::error::catalog(&runmat_builtins::FULLFILE_ERROR_ARGUMENT_TYPE, IDENTITY)
     })?;
     Ok(TextContainer {

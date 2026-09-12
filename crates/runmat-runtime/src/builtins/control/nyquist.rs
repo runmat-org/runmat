@@ -10,6 +10,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use crate::builtins::control::plot_setup_error::is_nonfatal_plot_setup_error;
 use crate::builtins::control::type_resolvers::nyquist_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -465,7 +466,7 @@ async fn render_nyquist_plot(response: &NyquistResponse) -> BuiltinResult<()> {
     }
 
     if let Err(err) = crate::call_builtin_async("plot", &args).await {
-        if super::is_nonfatal_plot_setup_error(&err) {
+        if is_nonfatal_plot_setup_error(&err) {
             return Ok(());
         }
         return Err(err);

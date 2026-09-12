@@ -1,9 +1,6 @@
 //! Test-only class/method builtins used by semantic and VM pipeline tests.
 
-use crate::{
-    runtime_descriptor_error, runtime_descriptor_error_with_detail, OBJECT_INDEX_BRACE,
-    OBJECT_INDEX_MEMBER, OBJECT_INDEX_PAREN,
-};
+use crate::{runtime_descriptor_error, runtime_descriptor_error_with_detail};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,

@@ -6,7 +6,6 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::introspection::class::class_name_for_value;
 use crate::builtins::introspection::type_resolvers::isa_type;
-use crate::class_registry::get_class;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::{handle_integer_type, handle_is_logical};
 use runmat_builtins::{
@@ -279,10 +278,7 @@ fn class_inherits(class_name: &runmat_types::ClassIdentity, requested_lower: &st
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::{gpu_helpers, test_support};
-    use crate::class_registry::RuntimeClass;
-    use runmat_accelerate_api::{
-        AccelProvider, HostIntegerDataView, HostIntegerTensorView, HostTensorView,
-    };
+    use runmat_accelerate_api::{HostIntegerDataView, HostIntegerTensorView, HostTensorView};
     use runmat_value::{
         CellArray, CharArray, ComplexTensor, HandleRef, IntValue, IntegerComplexStorage,
         IntegerStorage, Listener, LogicalArray, ObjectInstance, SparseTensor, StringArray,

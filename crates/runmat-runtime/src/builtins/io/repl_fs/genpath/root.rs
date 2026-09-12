@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::builtins::common::fs::{expand_user_path, path_to_string};
+use crate::builtins::io::repl_fs::path_root::is_rooted_path;
 use runmat_filesystem as vfs;
 
 pub(super) struct Root {
@@ -34,7 +35,7 @@ async fn resolve_named(text: &str) -> crate::BuiltinResult<Root> {
         super::errors::detail(&runmat_builtins::GENPATH_ERROR_FOLDER_NOT_FOUND, error)
     })?;
     let path = PathBuf::from(expanded);
-    let absolute = if super::super::is_rooted_path(&path) {
+    let absolute = if is_rooted_path(&path) {
         path
     } else {
         let cwd = vfs::current_dir().map_err(|error| {

@@ -6,7 +6,6 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::introspection::type_resolvers::ismethod_type;
-use crate::class_registry::{lookup_method, register_class};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
@@ -14,7 +13,6 @@ use runmat_builtins::{
 };
 use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 use runmat_macros::runtime_builtin;
-use runmat_value::{IntValue, IntegerStorage};
 use runmat_value::{Listener, MException, Value};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::introspection::ismethod")]
@@ -171,7 +169,9 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_value::{CharArray, HandleRef, ObjectInstance, StringArray, Tensor};
+    use runmat_value::{
+        CharArray, HandleRef, IntValue, IntegerStorage, ObjectInstance, StringArray, Tensor,
+    };
     use std::collections::HashMap;
 
     fn unique_class_name(label: &str) -> String {

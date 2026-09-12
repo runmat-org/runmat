@@ -12,7 +12,7 @@ use std::path::PathBuf;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
+    ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::introspection::type_resolvers::who_type;
 use crate::builtins::io::mat::load::read_mat_file_for_builtin;
@@ -498,7 +498,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use crate::call_builtin_async;
     use futures::executor::block_on;
-    use runmat_value::{CellArray, CharArray, StringArray, Tensor};
+    use runmat_value::{CellArray, StringArray, Tensor};
     use tempfile::tempdir;
 
     fn who_builtin(args: Vec<Value>) -> BuiltinResult<Value> {

@@ -14,7 +14,7 @@ use runmat_builtins::{
     BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{CellArray, HandleRef, ObjectInstance, Value};
+use runmat_value::{HandleRef, ObjectInstance, Value};
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -456,6 +456,7 @@ fn cancel_error(
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_value::CellArray;
     use std::sync::Arc;
 
     fn callback_invoker(counter: Arc<Mutex<usize>>) -> Arc<crate::user_functions::FunctionInvoker> {

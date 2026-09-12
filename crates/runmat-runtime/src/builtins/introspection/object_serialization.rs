@@ -12,8 +12,7 @@ use runmat_builtins::{
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{CellArray, ObjectInstance, StructArray, StructValue, Value};
-use runmat_value::{IntValue, IntegerStorage, Tensor};
+use runmat_value::{CellArray, ObjectInstance, StructValue, Value};
 
 pub(crate) const SAVEOBJ_METHOD: runmat_types::StaticMethodName =
     runmat_types::StaticMethodName::new("saveobj");
@@ -587,6 +586,7 @@ pub async fn loadobj_builtin(value: Value) -> crate::BuiltinResult<Value> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_value::{IntValue, IntegerStorage, StructArray, Tensor};
 
     use tempfile::tempdir;
 

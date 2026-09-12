@@ -7,6 +7,7 @@ pub mod arg_tokens;
 pub(crate) mod binary;
 pub mod broadcast;
 pub mod concatenation;
+pub(crate) mod control_flow_error;
 pub mod deal;
 pub mod elementwise;
 pub mod env;
@@ -39,25 +40,4 @@ pub mod validation;
 #[cfg(test)]
 pub mod test_support;
 
-pub(crate) fn map_control_flow_with_builtin(
-    mut err: crate::RuntimeError,
-    builtin: &str,
-) -> crate::RuntimeError {
-    if err.context.builtin.is_none() {
-        err.context = err.context.with_builtin(builtin);
-    }
-    if err.identifier.is_none() {
-        let segment = builtin
-            .chars()
-            .map(|ch| {
-                if ch.is_ascii_alphanumeric() || ch == '_' {
-                    ch
-                } else {
-                    '_'
-                }
-            })
-            .collect::<String>();
-        err.identifier = Some(format!("RunMat:{segment}:Error"));
-    }
-    err
-}
+pub(crate) use control_flow_error::map_control_flow_with_builtin;

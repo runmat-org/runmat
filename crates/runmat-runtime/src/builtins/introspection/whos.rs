@@ -1,6 +1,6 @@
 //! MATLAB-compatible `whos` builtin for RunMat.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::PathBuf;
 
 use glob::Pattern;

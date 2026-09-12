@@ -16,7 +16,6 @@ use runmat_builtins::{
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::IntValue;
 use runmat_value::Value;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::introspection::metaclass")]
@@ -140,7 +139,8 @@ mod tests {
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
     use runmat_value::{
-        CellArray, CharArray, HandleRef, Listener, MException, ObjectInstance, StringArray, Tensor,
+        CellArray, CharArray, HandleRef, IntValue, Listener, MException, ObjectInstance,
+        StringArray, Tensor,
     };
 
     fn handle_target() -> runmat_gc::GcHandle {

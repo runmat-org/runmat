@@ -3,6 +3,7 @@ use std::path::Path;
 
 use crate::builtins::common::fs::{expand_user_path, path_to_string};
 use crate::builtins::common::path_state::current_path_segments;
+use crate::builtins::io::repl_fs::path_root::is_rooted_path;
 use runmat_filesystem as vfs;
 
 pub(super) async fn plan(request: super::arguments::Request) -> crate::BuiltinResult<String> {
@@ -36,7 +37,7 @@ async fn normalize_directory(raw: &str) -> crate::BuiltinResult<String> {
         super::errors::detail(&runmat_builtins::ADDPATH_ERROR_FOLDER_NOT_FOUND, error)
     })?;
     let path = Path::new(&expanded);
-    let joined = if super::super::is_rooted_path(path) {
+    let joined = if is_rooted_path(path) {
         path.to_owned()
     } else {
         vfs::current_dir()

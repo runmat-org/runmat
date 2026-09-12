@@ -9,6 +9,7 @@ use runmat_filesystem as vfs;
 use runmat_value::Value;
 
 use crate::builtins::common::fs::expand_user_path;
+use crate::builtins::io::repl_fs::path_root::is_rooted_path;
 use crate::{build_runtime_error, BuiltinResult};
 
 use super::super::result::DirectoryOutcome;
@@ -35,7 +36,7 @@ fn child_target(parent: &Value, child: &Value) -> BuiltinResult<PathBuf> {
     nonempty(&parent)?;
     nonempty(&child)?;
     let child = PathBuf::from(child);
-    if super::super::super::is_rooted_path(&child) {
+    if is_rooted_path(&child) {
         return Err(error(&MKDIR_ERROR_ABSOLUTE_CHILD));
     }
     Ok(expand(&parent)?.join(child))

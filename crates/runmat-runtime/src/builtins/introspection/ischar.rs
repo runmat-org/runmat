@@ -4,7 +4,7 @@
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
+    ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::introspection::type_resolvers::ischar_type;
 use runmat_builtins::{

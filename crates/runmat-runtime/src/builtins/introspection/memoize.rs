@@ -16,14 +16,13 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{
-    CellArray, CharArray, ComplexTensor, HandleRef, IntValue, IntegerComplexStorage,
-    IntegerStorage, LogicalArray, NumericScalar, ObjectInstance, SparseTensor, StringArray,
-    StructValue, Tensor, Value,
+    CellArray, ComplexTensor, HandleRef, IntValue, LogicalArray, NumericScalar, ObjectInstance,
+    SparseTensor, StringArray, StructValue, Tensor, Value,
 };
 
 use crate::{
     build_runtime_error, builtins::common::tensor, BuiltinResult, RuntimeError,
-    OBJECT_INDEX_MEMBER, OBJECT_INDEX_PAREN, OBJECT_SUBSREF_METHOD,
+    OBJECT_SUBSREF_METHOD,
 };
 
 pub(crate) const MEMOIZED_FUNCTION_CLASS: runmat_types::StaticClassIdentity =
@@ -1297,8 +1296,10 @@ mod tests {
         super::memoized_subsref_builtin(receiver, subscript).await
     }
     use futures::executor::block_on;
-    use runmat_value::IntValue;
+    use runmat_value::{IntValue, IntegerComplexStorage, IntegerStorage};
     use std::sync::{Arc, Mutex};
+
+    use crate::OBJECT_INDEX_MEMBER;
 
     #[test]
     fn memoize_constructor_is_integer_inapplicable() {

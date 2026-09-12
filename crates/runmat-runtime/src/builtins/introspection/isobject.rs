@@ -12,7 +12,6 @@ use runmat_builtins::{
 use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
-use runmat_value::{IntValue, IntegerStorage};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::introspection::isobject")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -113,10 +112,9 @@ pub(crate) fn isobject_value(value: &Value) -> bool {
 mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use runmat_accelerate_api::HostTensorView;
     use runmat_value::{
-        CellArray, CharArray, Closure, HandleRef, Listener, MException, ObjectInstance,
-        StructValue, Tensor,
+        CellArray, CharArray, Closure, HandleRef, IntValue, IntegerStorage, Listener, MException,
+        ObjectInstance, StructValue, Tensor,
     };
 
     fn handle_target() -> runmat_gc::GcHandle {

@@ -25,6 +25,7 @@ pub(in crate::catalog) mod acceleration;
 mod aggregate;
 mod array;
 pub(in crate::catalog) mod cells;
+mod constants;
 mod introspection;
 pub(in crate::catalog) mod io;
 mod logical;
@@ -57,6 +58,11 @@ pub(super) fn extend_catalog_entries(entries: &mut Vec<&'static crate::BuiltinCa
     parallel::extend_entries(entries);
     stats::extend_entries(entries);
     structs::extend_entries(entries);
+}
+
+pub(super) fn extend_catalog_constants(values: &mut Vec<crate::BuiltinConstantCatalogEntry>) {
+    array::extend_constants(values);
+    constants::extend_constants(values);
 }
 
 fn extend_groups(

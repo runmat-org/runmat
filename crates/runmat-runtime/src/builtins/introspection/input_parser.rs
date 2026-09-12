@@ -5,7 +5,7 @@ use runmat_builtins::{
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{CharArray, HandleRef, ObjectInstance, StructValue, Value};
+use runmat_value::{HandleRef, ObjectInstance, StructValue, Value};
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -368,6 +368,7 @@ async fn parse_builtin(parser: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_value::CharArray;
 
     fn parser_with_root() -> (Value, runmat_gc::ExplicitRoot) {
         let parser = block_on(input_parser_builtin()).expect("inputParser");

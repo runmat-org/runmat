@@ -1,13 +1,10 @@
 //! MATLAB-compatible `superclasses` builtin backed by RunMat class metadata.
-use runmat_types::MemberAccess;
-
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::introspection::class::class_name_for_value;
 use crate::builtins::introspection::type_resolvers::superclasses_type;
-use crate::class_registry::{register_class, superclass_chain};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
@@ -222,6 +219,7 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
+    use runmat_types::MemberAccess;
     use runmat_value::{CharArray, HandleRef, ObjectInstance, StringArray, Tensor};
     use std::collections::HashMap;
 

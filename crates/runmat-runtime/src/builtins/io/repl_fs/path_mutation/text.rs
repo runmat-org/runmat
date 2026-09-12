@@ -1,6 +1,8 @@
 use runmat_builtins::BuiltinExtensionDescriptor;
 use runmat_value::{CharArray, StringArray, Tensor, Value};
 
+use crate::builtins::io::repl_fs::text_conversion::tensor_char_codes_to_string;
+
 #[derive(Clone, Copy)]
 pub(in crate::builtins::io::repl_fs) enum NumericPolicy {
     Reject,
@@ -90,5 +92,5 @@ fn decode_numeric_row(tensor: &Tensor) -> Result<String, DecodeError> {
     if tensor.shape.len() > 2 || tensor.rows() > 1 {
         return Err(DecodeError::InvalidInput);
     }
-    super::super::tensor_char_codes_to_string(tensor).ok_or(DecodeError::InvalidInput)
+    tensor_char_codes_to_string(tensor).ok_or(DecodeError::InvalidInput)
 }
