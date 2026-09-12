@@ -211,9 +211,14 @@ fn typed_alias_validation_rejects_ambiguous_or_malformed_edges() {
         "pilot",
         BuiltinCatalogProvenance::new(file!(), module_path!()),
     );
+    const INVALID_QUALIFIED: BuiltinCatalogAlias = BuiltinCatalogAlias::with_provenance(
+        "invalid..name",
+        "pilot",
+        BuiltinCatalogProvenance::new(file!(), module_path!()),
+    );
     let errors = validate_builtin_catalog_with_aliases(
         &[&PILOT, &SECOND],
-        &[&WRONG_CASE, &COLLISION, &INVALID],
+        &[&WRONG_CASE, &COLLISION, &INVALID, &INVALID_QUALIFIED],
     );
     assert!(errors.iter().any(|error| {
         error.message == "builtin alias target must use the exact canonical spelling"
@@ -224,6 +229,13 @@ fn typed_alias_validation_rejects_ambiguous_or_malformed_edges() {
     assert!(errors
         .iter()
         .any(|error| error.message == "builtin alias identity has invalid syntax"));
+    assert_eq!(
+        errors
+            .iter()
+            .filter(|error| error.message == "builtin alias identity has invalid syntax")
+            .count(),
+        2,
+    );
 }
 
 #[test]

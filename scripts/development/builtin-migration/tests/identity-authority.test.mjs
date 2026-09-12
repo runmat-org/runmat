@@ -39,6 +39,12 @@ test("public identity and form spelling records are closed and case-folded", () 
     kind: "primary",
     primary_spelling: { identity: "foo", spelling: "Foo" },
   }, "foo"));
+  for (const malformed of ["foo.", "foo..bar", "foo._bar", "__"]) {
+    assert.throws(() => parsePublicIdentity({
+      kind: "primary",
+      primary_spelling: { identity: malformed, spelling: malformed },
+    }, malformed), /safe builtin identity/);
+  }
   assert.throws(() => parseIdentityForms({
     kind: "callable", callable_spellings: ["other"], constant_spellings: [],
   }, "foo"), /owns the form/);
