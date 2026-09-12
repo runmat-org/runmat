@@ -41,11 +41,15 @@ test("builds a deterministic topology-bound scaffold with no reviewed decisions"
   assert.equal(alpha.source_row_digest, evidenceDigest(alphaSource));
   assert.equal(alpha.topology_row_digest, evidenceDigest(alphaTopology));
   assert.deepEqual(alpha.candidate_paths.observed.runtime, ["crates/runmat-runtime/src/builtins/fixture/alpha.rs"]);
+  assert.ok(alpha.observations.source.typed_paths.some((entry) =>
+    entry.kind === "runtime-owner"
+      && entry.path === "crates/runmat-runtime/src/builtins/fixture/alpha.rs"));
   assert.deepEqual(alpha.candidate_paths.topology_target_proposals, {
     catalog_package: "crates/runmat-builtins/src/catalog/entries/math/core/alpha/mod.rs",
     runtime_owner: "crates/runmat-runtime/src/builtins/math/core/alpha.rs",
+    runtime_bindings: [],
     canonical_target: null,
-    basis: "reviewed-topology-target-package-only",
+    basis: "reviewed-topology-target-package-with-observed-function-candidates",
   });
   assert.deepEqual(Object.keys(alpha.observations.source.authority_counts), [
     "catalog_entries", "catalog_constants", "legacy_functions", "legacy_documentation",
@@ -66,6 +70,9 @@ test("builds a deterministic topology-bound scaffold with no reviewed decisions"
     "crates/runmat-runtime/src/builtins/fixture/alpha.rs",
     "crates/runmat-runtime/src/builtins/fixture/delta.rs",
   ]);
+  assert.ok(math.observations.typed_paths.some((entry) =>
+    entry.kind === "runtime-owner"
+      && entry.path === "crates/runmat-runtime/src/builtins/fixture/alpha.rs"));
   assert.equal(math.review.status, "unreviewed");
   assert.ok(Object.values(math.decisions).every((decision) => decision.status === "unresolved"));
   assert.ok(Object.isFrozen(first));
@@ -81,6 +88,7 @@ test("keeps alias and internal target proposals separate from canonical authorit
   assert.deepEqual(alias.candidate_paths.topology_target_proposals, {
     catalog_package: null,
     runtime_owner: null,
+    runtime_bindings: [],
     canonical_target: "canonical_target",
     basis: "reviewed-alias-target-no-copied-authority-proposal",
   });
@@ -95,6 +103,7 @@ test("keeps alias and internal target proposals separate from canonical authorit
   assert.deepEqual(internal.candidate_paths.topology_target_proposals, {
     catalog_package: null,
     runtime_owner: null,
+    runtime_bindings: [],
     canonical_target: null,
     basis: "reviewed-internal-identity-observed-paths-only",
   });
@@ -196,6 +205,11 @@ test("carries exact baseline evidence digests and topology target proposals with
   }
   assert.equal(row.candidate_paths.topology_target_proposals.runtime_owner,
     "crates/runmat-runtime/src/builtins/math/basic/foo.rs");
+  assert.deepEqual(row.candidate_paths.topology_target_proposals.runtime_bindings, [{
+    path: "crates/runmat-runtime/src/builtins/math/basic/foo.rs",
+    function: "foo_builtin",
+    variant: "default",
+  }]);
   assert.equal(row.decisions.runtime_owner.status, "unresolved");
   assert.equal(row.decisions.baseline_evidence.status, "unresolved");
 });
