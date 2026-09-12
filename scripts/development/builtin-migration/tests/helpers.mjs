@@ -9,6 +9,7 @@ import { composeControlCandidate, controlCandidateInputDigests } from "../contro
 import { loadControlReviewSet } from "../control-authoring/review-set.mjs";
 import { buildControlOverlayScaffold } from "../control-authoring/scaffold.mjs";
 import { contentDigest, evidenceDigest } from "../evidence.mjs";
+import { gatePlanEvidence } from "../gate-plan.mjs";
 import { buildInventory } from "../inventory.mjs";
 import { issueLease, parseLease } from "../lease.mjs";
 import {
@@ -91,7 +92,7 @@ export function controlledFixture(options = {}) {
     : { applicability: "not-applicable", reason: "Reviewed as outside this fixture's behavior", evidence: ["fixture review"] }]));
   const draft = buildControlDraft(inventory);
   const topology = topologyFixture(inventory, bundleId, id, { controlDraftDigest: draft.digest });
-  const bundleControl = { prerequisites: [], additional_authored_write_set: [{ kind: "tree", path: "crates/runmat-builtins/src/catalog/entries/math/basic/foo" }, { kind: "file", path: "crates/runmat-runtime/src/builtins/math/basic/foo.rs" }], integration_outputs: [{ product_id: "wasm-registry", path: "crates/runmat-runtime/src/builtins/generated_wasm_registry.rs", producer: "integration" }], gate_plans: fixtureGatePlans(inventory), owner_role: "builtin-migrator", complexity: { class: "low", weight: 1, basis: ["single identity"] }, review: { status: "reviewed", evidence: ["fixture review"] } };
+  const bundleControl = { prerequisites: [], additional_authored_write_set: [{ kind: "tree", path: "crates/runmat-builtins/src/catalog/entries/math/basic/foo" }, { kind: "file", path: "crates/runmat-runtime/src/builtins/math/basic/foo.rs" }], integration_outputs: [{ product_id: "wasm-registry", path: "crates/runmat-runtime/src/builtins/generated_wasm_registry.rs", producer: "integration" }], gate_plans: fixtureGatePlans(inventory, Object.values(options.storageProfiles ?? {})), owner_role: "builtin-migrator", complexity: { class: "low", weight: 1, basis: ["single identity"] }, review: { status: "reviewed", evidence: ["fixture review"] } };
   const identityControl = { public_spelling: id, runtime_owner: `crates/runmat-runtime/src/builtins/math/basic/${id}.rs`, shared_dependencies: [], complexity: { class: "low", weight: 1, basis: ["single identity"] }, maturity, expected_authorities: { catalog_package: `crates/runmat-builtins/src/catalog/entries/math/basic/${id}/mod.rs`, catalog_entry_count: 1, catalog_constant_count: 0, documentation: "catalog", runtime_bindings: [{ path: `crates/runmat-runtime/src/builtins/math/basic/${id}.rs`, function: `${id}_builtin`, variant: "default" }], runtime_constants: [], native_link: "not-applicable", wasm_registry: "not-applicable" }, expected_removals: [], baseline_evidence: [], owner: "fixture", review: { status: "reviewed", evidence: ["fixture review"] } };
   const migrationFindings = { schema_version: 1, kind: "runmat-builtin-migration-finding-dispositions", rows: inventory.migration_findings.map((finding) => ({ finding_digest: evidenceDigest(finding), ...finding, disposition: "bundle-work", bundle_id: bundleId, reason: "Fixture migration work", evidence: ["fixture review"] })), review: { status: "reviewed", evidence: ["fixture review"] } };
   const exceptionManifest = { entries: [], review: { status: "reviewed", evidence: ["fixture review"] } };
@@ -312,12 +313,22 @@ function gpuGroupFixture() {
   return { key: "data.*", owner: { kind: "legacy_group", raw: "data.*" }, operation: "custom:data", supported_precisions: [], broadcast: "none", provider_hooks: [], constant_strategy: "inline_literal", residency: "inherit_inputs", nan_mode: "include", two_pass_threshold: null, workgroup_size: null, accepts_nan_mode: false, notes: "fixture" };
 }
 
-function fixtureGatePlans(inventory) {
+function fixtureGatePlans(inventory, additionalTargets = []) {
   const source = (sourcePath) => inventory.source.files.find((entry) => entry.path === sourcePath).content_digest;
-  const approved = (executable) => [{ operating_system: inventory.compiled_inventory.build.operating_system, architecture: inventory.compiled_inventory.build.architecture, content_digest: contentDigest(fs.readFileSync(fs.realpathSync(executable))) }];
-  const script = { kind: "repository_script", path: "scripts/development/check-architecture-boundaries.mjs", content_digest: source("scripts/development/check-architecture-boundaries.mjs"), approved_executables: approved(process.execPath) };
-  const generated = { kind: "repository_script", path: "scripts/development/verify-builtin-generated-products.mjs", content_digest: source("scripts/development/verify-builtin-generated-products.mjs"), approved_executables: approved(process.execPath) };
-  const cargo = { kind: "cargo_binary", package: "runmat-runtime", binary: "export_builtin_migration_inventory", manifest_path: "Cargo.toml", manifest_digest: source("Cargo.toml"), approved_executables: approved(execFileSync("/usr/bin/which", ["cargo"], { encoding: "utf8" }).trim()) };
+  const targets = [inventory.compiled_inventory.build, ...additionalTargets]
+    .map(({ operating_system, architecture }) => ({ operating_system, architecture }))
+    .sort((left, right) => `${left.operating_system}\0${left.architecture}`.localeCompare(`${right.operating_system}\0${right.architecture}`));
+  const approvedToolchains = (roles) => targets.map((target) => ({
+    ...target,
+    tools: [...roles].sort().map((role) => {
+      const executable = role === "node" ? fs.realpathSync(process.execPath)
+        : role === "git" ? executableOnPath("git") : rustToolPath(role);
+      return { role, content_digest: contentDigest(fs.readFileSync(executable)) };
+    }),
+  }));
+  const script = { kind: "repository_script", path: "scripts/development/check-architecture-boundaries.mjs", content_digest: source("scripts/development/check-architecture-boundaries.mjs"), approved_toolchains: approvedToolchains(["git", "node"]) };
+  const generated = { kind: "repository_script", path: "scripts/development/verify-builtin-generated-products.mjs", content_digest: source("scripts/development/verify-builtin-generated-products.mjs"), approved_toolchains: approvedToolchains(["node"]) };
+  const cargo = { kind: "cargo_binary", package: "runmat-runtime", binary: "export_builtin_migration_inventory", manifest_path: "Cargo.toml", manifest_digest: source("Cargo.toml"), approved_toolchains: approvedToolchains(["cargo", "rustc"]) };
   return [
     { gate: "architecture", program: script, arguments: [], working_directory: "repository", parser: "exit_status", expected_artifact_roles: [] },
     { gate: "catalog-contract", program: cargo, arguments: [], working_directory: "repository", parser: "compiled_inventory", expected_artifact_roles: ["compiled-inventory"] },
@@ -331,28 +342,44 @@ function fixtureGatePlans(inventory) {
 export function gate(fixture, name, artifactId = `gate-${name}`, subject = fixture.inventory) {
   const namedProducer = producer(name);
   const plan = fixture.control.bundles.get(fixture.bundleId).gate_plans.get(name);
-  const sourceDigest = plan.program.kind === "repository_script" ? plan.program.content_digest : plan.program.manifest_digest;
-  const executableDigest = plan.program.approved_executables[0].content_digest;
   const repository = fs.realpathSync(fixture.repository);
+  const reviewed = gatePlanEvidence(plan, subject.compiled_inventory.build, repository);
+  const sourceDigest = reviewed.source_digest;
   const environment = {
     CARGO_TARGET_DIR: "/private/tmp/runmat-integration-tmp/cargo-target",
     TMPDIR: "/private/tmp/runmat-integration-tmp/tmp",
     TMP: "/private/tmp/runmat-integration-tmp/tmp",
     TEMP: "/private/tmp/runmat-integration-tmp/tmp",
   };
-  const invocation = plan.program.kind === "repository_script"
-    ? { executable: process.execPath, arguments: [path.join(repository, plan.program.path), ...plan.arguments], cwd: repository, environment }
-    : { executable: execFileSync("/usr/bin/which", ["cargo"], { encoding: "utf8" }).trim(), arguments: ["run", "--quiet", "-p", plan.program.package, "--bin", plan.program.binary, "--", ...plan.arguments], cwd: repository, environment };
+  const tools = reviewed.tools.map((entry) => ({
+    role: entry.role,
+    path: entry.role === "node" ? fs.realpathSync(process.execPath)
+      : entry.role === "git" ? executableOnPath("git") : rustToolPath(entry.role),
+  }));
+  const executable = tools.find((entry) => entry.role === reviewed.primary_tool).path;
+  const byRole = new Map(tools.map((entry) => [entry.role, entry.path]));
+  const toolEnvironment = {
+    path_prepend: byRole.has("cargo") ? path.dirname(byRole.get("cargo")) : null,
+    rustc: byRole.get("rustc") ?? null,
+    rustdoc: byRole.get("rustdoc") ?? null,
+    rustfmt: byRole.get("rustfmt") ?? null,
+    removed: [
+      "CARGO_BUILD_RUSTC", "CARGO_BUILD_RUSTC_WRAPPER", "CARGO_BUILD_TARGET_DIR",
+      "CARGO_ENCODED_RUSTFLAGS", "CARGO_ENCODED_RUSTDOCFLAGS", "RUSTC", "RUSTC_WORKSPACE_WRAPPER",
+      "RUSTC_WRAPPER", "RUSTDOC", "RUSTDOCFLAGS", "RUSTFLAGS", "RUSTFMT",
+    ],
+  };
+  const invocation = { executable, arguments: reviewed.arguments, cwd: repository, environment, tools, tool_environment: toolEnvironment };
   const processEvidence = { exit_code: 0, signal: null, stdout_digest: `sha256:${"c".repeat(64)}`, stderr_digest: `sha256:${"d".repeat(64)}` };
   const artifacts = plan.expected_artifact_roles.map((role) => {
-    const artifactPath = path.join(fixture.repository, "..", `${artifactId}-${role}.json`);
+    const artifactPath = path.join(repository, "..", `${artifactId}-${role}.json`);
     const bytes = Buffer.from(`{\"role\":\"${role}\"}\n`);
     fs.writeFileSync(artifactPath, bytes);
     return { role, path: artifactPath, byte_length: bytes.length, content_digest: contentDigest(bytes) };
   });
   return {
-    schema_version: 4, kind: "runmat-builtin-migration-gate-result", authority: "machine-verification-only",
-    producer: namedProducer, producer_evidence: { schema_version: 2, kind: `${namedProducer}-evidence`, contract: { reviewed_source_revision: fixture.inventory.source.revision, executable_digest: executableDigest, producer_source_digest: sourceDigest }, invocation, process: processEvidence, captured_process_digest: evidenceDigest(processEvidence) }, artifact_id: artifactId, produced_at: "2026-09-11T00:00:30.000Z",
+    schema_version: 5, kind: "runmat-builtin-migration-gate-result", authority: "machine-verification-only",
+    producer: namedProducer, producer_evidence: { schema_version: 3, kind: `${namedProducer}-evidence`, contract: { reviewed_source_revision: fixture.inventory.source.revision, primary_tool: reviewed.primary_tool, tools: reviewed.tools, producer_source_digest: sourceDigest }, invocation, process: processEvidence, captured_process_digest: evidenceDigest(processEvidence) }, artifact_id: artifactId, produced_at: "2026-09-11T00:00:30.000Z",
     execution_target: { operating_system: subject.compiled_inventory.build.operating_system, architecture: subject.compiled_inventory.build.architecture },
     source_revision: subject.source.revision,
     source_digest: subject.source.digest, baseline_inventory_digest: fixture.inventory.digest, subject_inventory_digest: subject.digest,
@@ -368,6 +395,17 @@ export function gate(fixture, name, artifactId = `gate-${name}`, subject = fixtu
       { role: "target-temp", evidence_path: "/private/tmp/runmat-integration-tmp", filesystem_id: "posix-dev:2", available_bytes: 10, minimum_free_bytes: 1, pause_below_bytes: 2, status: "admitted" },
     ] },
   };
+}
+
+function rustToolPath(role) {
+  const sysroot = execFileSync("rustc", ["--print", "sysroot"], { encoding: "utf8" }).trim();
+  const executable = process.platform === "win32" ? `${role}.exe` : role;
+  return fs.realpathSync(path.join(sysroot, "bin", executable));
+}
+
+function executableOnPath(name) {
+  const executable = execFileSync(process.platform === "win32" ? "where" : "which", [name], { encoding: "utf8" }).trim().split(/\r?\n/, 1)[0];
+  return fs.realpathSync(executable);
 }
 
 export function digestReference(pathname, artifactId, value) { return { path: pathname, artifact_id: artifactId, digest: evidenceDigest(value) }; }

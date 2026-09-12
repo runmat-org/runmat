@@ -2,7 +2,7 @@ import { compareCodePoint } from "../constants.mjs";
 import { evidenceDigest } from "../evidence.mjs";
 import { executionTargetKey, parseExecutionTargets } from "../execution-target.mjs";
 import { GATE_PRODUCERS } from "../gate-kinds.mjs";
-import { GATE_PARSERS, parseGatePlans } from "../gate-plan.mjs";
+import { GATE_PARSERS, parseGatePlans, parseGateProgram } from "../gate-plan.mjs";
 import {
   SAFE_IDENTITY, absolutePath, array, digest, enumValue, exact, filesystemIdentity,
   identity, integer, nonempty, repositoryPath, stableId, uniqueStrings,
@@ -91,25 +91,7 @@ export function parseIdentityControlPolicy(value, id) {
 export function parseProgramProfile(value, id) {
   stableId(id, "global program profile id");
   exact(value, ["program", "review"], `${id} global program profile`);
-  const program = value.program;
-  if (program?.kind === "repository_script") {
-    exact(program, ["kind", "path", "content_digest", "approved_executables"], `${id} repository script`);
-    repositoryPath(program.path, `${id} repository script path`);
-    digest(program.content_digest, `${id} repository script content digest`);
-  } else if (program?.kind === "cargo_binary") {
-    exact(program, ["kind", "package", "binary", "manifest_path", "manifest_digest", "approved_executables"], `${id} cargo binary`);
-    nonempty(program.package, `${id} cargo package`);
-    nonempty(program.binary, `${id} cargo binary name`);
-    repositoryPath(program.manifest_path, `${id} Cargo manifest path`);
-    digest(program.manifest_digest, `${id} Cargo manifest digest`);
-  } else throw new Error(`${id}: unsupported global program profile kind`);
-  const keys = array(program.approved_executables, `${id} approved executables`).map((entry) => {
-    exact(entry, ["operating_system", "architecture", "content_digest"], `${id} approved executable`);
-    const key = `${nonempty(entry.operating_system, `${id} executable operating system`)}\0${nonempty(entry.architecture, `${id} executable architecture`)}`;
-    digest(entry.content_digest, `${id} executable digest`);
-    return key;
-  });
-  requireCanonicalUnique(keys, `${id} approved executables`);
+  parseGateProgram(value.program, id);
   parseReviewedEvidence(value.review, `${id} global program profile review`);
   return value;
 }
@@ -179,7 +161,10 @@ function parseGateReferences(value, id) {
     stableId(entry.program_profile_id, `${id} gate program profile`);
     if (entry.working_directory !== "repository") throw new Error(`${id}: gate working directory must be repository`);
     enumValue(entry.parser, GATE_PARSERS, `${id} gate parser`);
-    uniqueStrings(entry.arguments, `${id} gate arguments`, { empty: true });
+    array(entry.arguments, `${id} gate arguments`, { empty: true }).forEach((argument) => {
+      nonempty(argument, `${id} gate argument`);
+      if (argument.includes("\0")) throw new Error(`${id}: gate arguments cannot contain NUL bytes`);
+    });
     const roles = uniqueStrings(entry.expected_artifact_roles, `${id} gate artifact roles`, { empty: true });
     if (JSON.stringify(roles) !== JSON.stringify([...roles].sort(compareCodePoint))) throw new Error(`${id}: gate artifact roles must use canonical order`);
     return gate;

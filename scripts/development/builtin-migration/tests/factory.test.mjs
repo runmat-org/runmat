@@ -301,15 +301,6 @@ test("subject admission accepts reviewed cross-platform targets and rechecks eve
     compiledInventory: compiled,
   });
   assert.equal(assertControlSubject(fixture.control, subject), subject);
-  assert.throws(() => runGateProducer({
-    control: fixture.control,
-    baseline_inventory: fixture.inventory,
-    subject_inventory: subject,
-    bundle_id: fixture.bundleId,
-    gate: "architecture",
-    artifact_id: "linux-subject-without-executable-approval",
-    inputs: null,
-  }), /no executable approval for linux\/x86_64/);
 
   const changedDispositions = structuredClone(dispositions);
   changedDispositions.identities.foo = {
@@ -824,6 +815,15 @@ test("gate evidence binds the subject execution target through production and la
   const environment = gate(fixture, "architecture");
   environment.producer_evidence.invocation.environment.CARGO_TARGET_DIR = "/private/tmp/unreviewed-target";
   assert.throws(() => parseGateResult(environment, expected), /environment differs/);
+  const primaryTool = gate(fixture, "architecture");
+  primaryTool.producer_evidence.contract.primary_tool = "git";
+  assert.throws(() => parseGateResult(primaryTool, expected), /executable differs from the primary reviewed tool/);
+  const toolPath = gate(fixture, "architecture");
+  toolPath.producer_evidence.invocation.tools.find((entry) => entry.role === "node").path = toolPath.producer_evidence.invocation.tools.find((entry) => entry.role === "git").path;
+  assert.throws(() => parseGateResult(toolPath, expected), /node: producer tool bytes differ/);
+  const toolEnvironment = gate(fixture, "architecture");
+  toolEnvironment.producer_evidence.invocation.tool_environment.removed = [];
+  assert.throws(() => parseGateResult(toolEnvironment, expected), /does not enforce the reviewed tool selection/);
   const paused = gate(fixture, "architecture");
   paused.storage_admission.volumes[0].available_bytes = 1;
   paused.storage_admission.volumes[0].status = "paused";
@@ -849,9 +849,9 @@ test("gate evidence binds the subject execution target through production and la
       ...plan,
       program: {
         ...plan.program,
-        approved_executables: [
-          { operating_system: "linux", architecture: "x86_64", content_digest: plan.program.approved_executables[0].content_digest },
-          ...plan.program.approved_executables,
+        approved_toolchains: [
+          { operating_system: "linux", architecture: "x86_64", tools: plan.program.approved_toolchains[0].tools },
+          ...plan.program.approved_toolchains,
         ],
       },
     },
@@ -1241,14 +1241,14 @@ function writeFullControlWorkflow(directory) {
 function fullChainControl(inventory, topology) {
   const review = reviewed("full-chain control review");
   const sourceDigest = inventory.source.files[0].content_digest;
-  const approvedExecutables = [{
+  const approvedToolchains = [{
     operating_system: inventory.compiled_inventory.build.operating_system,
     architecture: inventory.compiled_inventory.build.architecture,
-    content_digest: `sha256:${"7".repeat(64)}`,
+    tools: [{ role: "node", content_digest: `sha256:${"7".repeat(64)}` }],
   }];
   const gatePlans = [
-    fixtureGatePlan("architecture", "exit_status", [], sourceDigest, approvedExecutables),
-    fixtureGatePlan("catalog-contract", "compiled_inventory", ["compiled-inventory"], sourceDigest, approvedExecutables),
+    fixtureGatePlan("architecture", "exit_status", [], sourceDigest, approvedToolchains),
+    fixtureGatePlan("catalog-contract", "compiled_inventory", ["compiled-inventory"], sourceDigest, approvedToolchains),
   ];
   const bundleControls = Object.fromEntries(Object.keys(topology.bundles).sort().map((bundleId) => [bundleId, {
     prerequisites: [],
@@ -1439,14 +1439,14 @@ function copyReviewSetAsAuthoringFiles(manifestPath, target) {
   }
 }
 
-function fixtureGatePlan(gate, parser, expectedArtifactRoles, sourceDigest, approvedExecutables) {
+function fixtureGatePlan(gate, parser, expectedArtifactRoles, sourceDigest, approvedToolchains) {
   return {
     gate,
     program: {
       kind: "repository_script",
       path: "scripts/development/check-architecture-boundaries.mjs",
       content_digest: sourceDigest,
-      approved_executables: approvedExecutables,
+      approved_toolchains: approvedToolchains,
     },
     arguments: [],
     working_directory: "repository",

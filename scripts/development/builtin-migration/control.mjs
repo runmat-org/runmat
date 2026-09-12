@@ -3,7 +3,7 @@ import { deepImmutable } from "./immutable.mjs";
 import { validateBundleGraph } from "./control-graph.mjs";
 import { validateControlProjection } from "./control-projection-validation.mjs";
 import { parseFindingDispositions } from "./migration-findings.mjs";
-import { parseGatePlans } from "./gate-plan.mjs";
+import { parseGatePlans, validateGatePlanTargetCoverage } from "./gate-plan.mjs";
 import { requiredGateNames } from "./gate-requirements.mjs";
 import { materializeTopologyControl } from "./topology/control-projection.mjs";
 import { assertValidatedTopologyView } from "./topology/freeze.mjs";
@@ -79,6 +79,9 @@ export function validateControlManifestStructure(value, { inventory: current, re
   validateBundleGraph(bundles, identities);
   validateIdentityGraph(identities);
   validateGatePlanCoverage(bundles, identities);
+  for (const bundle of bundles.values()) {
+    validateGatePlanTargetCoverage(bundle.gate_plans, projection.executionTargets, bundle.id);
+  }
   if (current) validateBaseline(baseline, current, identities);
   const { digest: _ignored, ...payload } = value;
   if (evidenceDigest(payload) !== value.digest) throw new Error("control manifest digest mismatch");

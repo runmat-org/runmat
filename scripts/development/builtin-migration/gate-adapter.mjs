@@ -7,6 +7,7 @@ import { parseCompiledInventory } from "./compiled-inventory.mjs";
 import { assertControlBaseline, assertControlSubject } from "./control.mjs";
 import { canonicalJson, contentDigest, evidenceDigest } from "./evidence.mjs";
 import { GATE_PRODUCERS, parseGateResult } from "./gate-result.mjs";
+import { gatePlanEvidence } from "./gate-plan.mjs";
 import { parseInventoryEvidence } from "./inventory.mjs";
 import { buildDocumentationCutoverArtifact, documentationCutoverChecks, parseDocumentationCutoverArtifact } from "./documentation-cutover.mjs";
 import { generatedProductChecks, parseGeneratedProductsProof } from "./generated-products.mjs";
@@ -31,12 +32,12 @@ export function runGateProducer(input) {
   if (!bundle) throw new Error(`${input.bundle_id}: unknown gate bundle`);
   const plan = bundle.gate_plans.get(input.gate);
   if (!plan) throw new Error(`${input.bundle_id}/${input.gate}: no reviewed gate plan is registered`);
-  const parser = parserFor(plan.parser, input.gate, { input, baseline, subject, control, bundle });
   const repository = fs.realpathSync(REPOSITORY);
   const command = commandFor(plan, repository, baseline, subject.compiled_inventory.build);
-  const executable = resolveExecutable(command.executable);
-  const executableDigest = contentDigest(fs.readFileSync(executable));
-  if (executableDigest !== command.executableDigest) throw new Error(`${input.gate}: executable bytes differ from the reviewed platform plan`);
+  const tools = resolveReviewedTools(command.tools, plan.program.kind);
+  const parser = parserFor(plan.parser, input.gate, { input, baseline, subject, control, bundle, tools });
+  const executable = tools.find((entry) => entry.role === command.primary_tool)?.path;
+  if (!executable) throw new Error(`${input.gate}: reviewed primary tool is absent from the resolved toolchain`);
   const storage = prepareGateStorage(
     control.value.storage_policy,
     subject.compiled_inventory.build,
@@ -44,10 +45,12 @@ export function runGateProducer(input) {
     plannedArtifactOutputs(plan, input.inputs),
     { control_digest: control.digest, bundle_id: bundle.id, artifact_id: input.artifact_id },
   );
+  const toolSelection = reviewedToolEnvironment(tools);
+  const executionEnvironment = toolEnvironment(toolSelection, storage.environment);
   const processResult = spawnSync(executable, command.arguments, {
     cwd: repository,
     encoding: "utf8",
-    env: { ...process.env, ...storage.environment },
+    env: executionEnvironment,
     maxBuffer: 128 * 1024 * 1024,
   });
   if (processResult.error) throw new Error(`${input.gate}: could not execute producer: ${processResult.error.message}`);
@@ -74,16 +77,17 @@ export function runGateProducer(input) {
     execution_targets: control.executionTargets, repository,
   };
   return parseGateResult({
-    schema_version: 4, kind: "runmat-builtin-migration-gate-result", authority: "machine-verification-only",
+    schema_version: 5, kind: "runmat-builtin-migration-gate-result", authority: "machine-verification-only",
     producer: GATE_PRODUCERS[input.gate],
     producer_evidence: {
-      schema_version: 2, kind: `${GATE_PRODUCERS[input.gate]}-evidence`,
+      schema_version: 3, kind: `${GATE_PRODUCERS[input.gate]}-evidence`,
       contract: {
         reviewed_source_revision: baseline.source.revision,
-        executable_digest: executableDigest,
+        primary_tool: command.primary_tool,
+        tools: command.tools,
         producer_source_digest: command.sourceDigest,
       },
-      invocation: { executable, arguments: command.arguments, cwd: repository, environment: storage.environment },
+      invocation: { executable, arguments: command.arguments, cwd: repository, environment: storage.environment, tools, tool_environment: toolSelection },
       process: processEvidence, captured_process_digest: evidenceDigest(processEvidence),
     },
     artifact_id: input.artifact_id, produced_at: new Date().toISOString(),
@@ -108,30 +112,75 @@ function plannedArtifactOutputs(plan, inputs) {
 }
 
 function commandFor(plan, repository, baselineInventory, subjectBuild) {
-  const approvedExecutable = plan.program.approved_executables.find(
-    (entry) => entry.operating_system === subjectBuild.operating_system
-      && entry.architecture === subjectBuild.architecture,
-  );
-  if (!approvedExecutable) {
-    throw new Error(
-      `${plan.gate}: reviewed program has no executable approval for ${subjectBuild.operating_system}/${subjectBuild.architecture}`,
-    );
-  }
-  const executableDigest = approvedExecutable.content_digest;
-  if (plan.program.kind === "repository_script") {
-    const sourceDigest = pinnedSourceDigest(
-      repository, plan.program.path, plan.program.content_digest, baselineInventory,
-    );
-    return { executable: process.execPath, arguments: [path.join(repository, plan.program.path), ...plan.arguments], sourceDigest, executableDigest };
-  }
+  const reviewed = gatePlanEvidence(plan, subjectBuild, repository);
+  const sourcePath = plan.program.kind === "repository_script"
+    ? plan.program.path
+    : plan.program.manifest_path;
+  const expectedDigest = plan.program.kind === "repository_script"
+    ? plan.program.content_digest
+    : plan.program.manifest_digest;
   const sourceDigest = pinnedSourceDigest(
-    repository, plan.program.manifest_path, plan.program.manifest_digest, baselineInventory,
+    repository, sourcePath, expectedDigest, baselineInventory,
   );
+  return { ...reviewed, sourceDigest };
+}
+
+function resolveReviewedTools(reviewedTools, programKind) {
+  const rustToolRoot = programKind === "repository_script" ? null : resolveRustToolRoot();
+  return reviewedTools.map((reviewed) => {
+    const candidate = reviewed.role === "node"
+      ? process.execPath
+      : reviewed.role === "git"
+        ? resolveExecutable("git")
+        : path.join(rustToolRoot, platformExecutableName(reviewed.role));
+    const resolved = fs.realpathSync(candidate);
+    const observedDigest = contentDigest(fs.readFileSync(resolved));
+    if (observedDigest !== reviewed.content_digest) {
+      throw new Error(`${reviewed.role}: tool bytes differ from the reviewed platform plan`);
+    }
+    return { role: reviewed.role, path: resolved };
+  });
+}
+
+function resolveRustToolRoot() {
+  const rustcLocator = resolveExecutable("rustc");
+  const sysroot = execFileSync(rustcLocator, ["--print", "sysroot"], { encoding: "utf8" }).trim();
+  if (!path.isAbsolute(sysroot)) throw new Error("rustc returned a non-absolute sysroot");
+  return fs.realpathSync(path.join(sysroot, "bin"));
+}
+
+function platformExecutableName(role) {
+  return process.platform === "win32" ? `${role}.exe` : role;
+}
+
+const REMOVED_TOOL_ENVIRONMENT = Object.freeze([
+  "CARGO_BUILD_RUSTC", "CARGO_BUILD_RUSTC_WRAPPER", "CARGO_BUILD_TARGET_DIR",
+  "CARGO_ENCODED_RUSTFLAGS", "CARGO_ENCODED_RUSTDOCFLAGS", "RUSTC", "RUSTC_WORKSPACE_WRAPPER",
+  "RUSTC_WRAPPER", "RUSTDOC", "RUSTDOCFLAGS", "RUSTFLAGS", "RUSTFMT",
+]);
+
+function reviewedToolEnvironment(tools) {
+  const byRole = new Map(tools.map((entry) => [entry.role, entry.path]));
+  const cargo = byRole.get("cargo") ?? null;
   return {
-    executable: "cargo",
-    arguments: ["run", "--quiet", "-p", plan.program.package, "--bin", plan.program.binary, "--", ...plan.arguments],
-    sourceDigest, executableDigest,
+    path_prepend: cargo ? path.dirname(cargo) : null,
+    rustc: byRole.get("rustc") ?? null,
+    rustdoc: byRole.get("rustdoc") ?? null,
+    rustfmt: byRole.get("rustfmt") ?? null,
+    removed: [...REMOVED_TOOL_ENVIRONMENT],
   };
+}
+
+function toolEnvironment(selection, storageEnvironment) {
+  const environment = { ...process.env, ...storageEnvironment };
+  for (const name of selection.removed) delete environment[name];
+  if (selection.rustc) environment.RUSTC = selection.rustc;
+  if (selection.rustdoc) environment.RUSTDOC = selection.rustdoc;
+  if (selection.rustfmt) environment.RUSTFMT = selection.rustfmt;
+  if (selection.path_prepend) environment.PATH = environment.PATH
+    ? `${selection.path_prepend}${path.delimiter}${environment.PATH}`
+    : selection.path_prepend;
+  return environment;
 }
 
 function pinnedSourceDigest(repository, sourcePath, expected, inventory) {
@@ -175,7 +224,9 @@ function parserFor(kind, gate, context) {
         return [identity, paths.map((sourcePath) => {
           const frozen = context.baseline.source.files.find((entry) => entry.path === sourcePath);
           if (!frozen) throw new Error(`${sourcePath}: documentation source is absent from the frozen inventory`);
-          const bytes = execFileSync("git", ["show", `${context.baseline.source.revision.slice("git:".length)}:${sourcePath}`], { cwd: REPOSITORY });
+          const git = context.tools.find((entry) => entry.role === "git")?.path;
+          if (!git) throw new Error(`${gate}: reviewed git tool is required to read baseline documentation`);
+          const bytes = execFileSync(git, ["show", `${context.baseline.source.revision.slice("git:".length)}:${sourcePath}`], { cwd: REPOSITORY });
           return sourceFieldBaselineSource(sourcePath, bytes, frozen.content_digest);
         })];
       })),
@@ -297,8 +348,18 @@ function primaryChecks(gate, identities, passed) {
 }
 
 function resolveExecutable(name) {
-  if (path.isAbsolute(name)) return name;
-  return execFileSync("/usr/bin/which", [name], { encoding: "utf8" }).trim();
+  if (path.isAbsolute(name)) return fs.realpathSync(name);
+  const extensions = process.platform === "win32"
+    ? (process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";")
+    : [""];
+  for (const directory of (process.env.PATH ?? "").split(path.delimiter)) {
+    if (!directory) continue;
+    for (const extension of extensions) {
+      const candidate = path.join(directory, `${name}${extension}`);
+      if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) return fs.realpathSync(candidate);
+    }
+  }
+  throw new Error(`${name}: executable is absent from PATH`);
 }
 
 function canonicalPotentialPath(target) {
