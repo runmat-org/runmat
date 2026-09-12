@@ -248,10 +248,12 @@ function fixtureControls() {
     }],
     expected_authorities: {
       catalog_package: "catalog/alpha.rs",
+      catalog_alias_package: null,
+      catalog_constant_package: null,
       catalog_entry_count: 1,
       catalog_constant_count: 0,
       documentation: "catalog",
-      native_link: "not-applicable",
+      native_link: "required",
       wasm_registry: "not-applicable",
     },
   }]]);

@@ -115,6 +115,7 @@ export function finalIdentityAuthorityFailures(identity, current, controlled) {
   if (current.unresolved.length) failures.push(`current inventory remains unresolved: ${current.unresolved.join(",")}`);
   const authority = current.semantic_authority;
   if (controlled.public_identity.kind === "primary") {
+    if (authority.catalog_aliases.length) failures.push("primary identity retains alias authority");
     if (authority.catalog_entries.length !== controlled.expected_authorities.catalog_entry_count) failures.push("catalog authority count differs from review");
     if (authority.constants.length !== controlled.expected_authorities.catalog_constant_count) failures.push("catalog constant authority count differs from review");
     const actualConstants = authority.runtime_constants
@@ -127,24 +128,57 @@ export function finalIdentityAuthorityFailures(identity, current, controlled) {
     if (current.ownership.sidecars.length) failures.push("legacy documentation sidecar remains");
     if (current.ownership.runtime_documentation_shadows.length) failures.push("runtime documentation shadow remains");
     if (current.dependencies.legacy_resolver_paths.length) failures.push("legacy resolver ownership remains");
-    const actualBindings = authority.implementation_provenance
-      .map(observedCallableKey)
-      .sort(compareCodePoint);
-    const expectedBindings = reviewedCallableBindings(controlled)
-      .map(reviewedCallableKey)
-      .sort(compareCodePoint);
-    if (JSON.stringify(actualBindings) !== JSON.stringify(expectedBindings)) failures.push("canonical runtime binding provenance differs from review");
-    const actualRuntimeBindings = authority.runtime_bindings
-      .map((entry) => `${entry.variant}\0${entry.native_symbol}`).sort(compareCodePoint);
-    const expectedRuntimeBindings = reviewedCallableBindings(controlled)
-      .filter((entry) => entry.kind === "canonical_binding")
-      .map((entry) => `${entry.variant}\0${entry.native_symbol}`).sort(compareCodePoint);
-    if (JSON.stringify(actualRuntimeBindings) !== JSON.stringify(expectedRuntimeBindings)) failures.push("runtime binding registry differs from review");
+    const actualConstantPackages = [...new Set(authority.constants
+      .map((entry) => entry.provenance?.source_file).filter(Boolean))].sort(compareCodePoint);
+    const expectedConstantPackages = controlled.expected_authorities.catalog_constant_package === null
+      ? [] : [controlled.expected_authorities.catalog_constant_package];
+    if (JSON.stringify(actualConstantPackages) !== JSON.stringify(expectedConstantPackages)) {
+      failures.push("constant catalog provenance differs from review");
+    }
+    failures.push(...documentationAuthorityFailures(authority, current, controlled));
+    failures.push(...catalogPackageFailures(authority, controlled));
+    failures.push(...callableAuthorityFailures(authority, controlled));
   } else if (controlled.public_identity.kind === "alias") {
-    if (current.disposition.kind !== "alias" || current.disposition.canonical !== controlled.public_identity.canonical_identity.toLowerCase()) failures.push("alias target differs from review");
-    if (authority.catalog_entries.length || current.ownership.catalog_documentation.length || current.ownership.sidecars.length) failures.push("alias retains copied public authority");
-  } else if (authority.catalog_entries.length || authority.legacy_functions.length || current.ownership.catalog_documentation.length || current.ownership.sidecars.length) {
-    failures.push("internal identity retains public authority");
+    const actualAliases = authority.catalog_aliases
+      .map((entry) => `${entry.alias.name.toLowerCase()}\0${entry.canonical.name.toLowerCase()}`)
+      .sort(compareCodePoint);
+    const expectedAliases = [`${controlled.public_identity.alias_spelling.spelling.toLowerCase()}\0${controlled.public_identity.canonical_identity.toLowerCase()}`];
+    if (JSON.stringify(actualAliases) !== JSON.stringify(expectedAliases)) failures.push("compiled catalog alias edge differs from review");
+    const actualAliasPackages = authority.catalog_aliases
+      .map((entry) => entry.provenance.source_file).sort(compareCodePoint);
+    if (JSON.stringify(actualAliasPackages)
+      !== JSON.stringify([controlled.expected_authorities.catalog_alias_package])) {
+      failures.push("catalog alias provenance differs from review");
+    }
+    if (authority.catalog_entries.length || authority.catalog_provenance.length
+      || authority.constants.length || authority.legacy_functions.length
+      || authority.legacy_documentation.length || authority.runtime_bindings.length
+      || authority.runtime_constants.length || authority.implementation_provenance.length
+      || authority.gpu_specs.length || authority.fusion_specs.length
+      || current.ownership.catalog.length || current.ownership.catalog_documentation.length
+      || current.ownership.sidecars.length
+      || current.ownership.runtime_documentation_shadows.length || current.dependencies.legacy_resolver_paths.length) {
+      failures.push("alias retains copied authority");
+    }
+  } else {
+    if (authority.catalog_entries.length !== controlled.expected_authorities.catalog_entry_count) {
+      failures.push("catalog authority count differs from review");
+    }
+    if (authority.catalog_entries.some((entry) => entry.descriptor.completion_policy !== "HiddenInternal")) {
+      failures.push("internal catalog entry is not hidden from public completion");
+    }
+    if (authority.catalog_aliases.length || authority.constants.length || authority.legacy_functions.length
+      || authority.legacy_documentation.length
+      || current.ownership.sidecars.length || current.ownership.runtime_documentation_shadows.length
+      || current.dependencies.legacy_resolver_paths.length) {
+      failures.push("internal identity retains public authority");
+    }
+    const actualConstants = authority.runtime_constants.map(runtimeConstantKey).sort(compareCodePoint);
+    const expectedConstants = reviewedConstantBindings(controlled).map(runtimeConstantKey).sort(compareCodePoint);
+    if (JSON.stringify(actualConstants) !== JSON.stringify(expectedConstants)) failures.push("runtime constant provenance differs from review");
+    failures.push(...documentationAuthorityFailures(authority, current, controlled));
+    failures.push(...catalogPackageFailures(authority, controlled));
+    failures.push(...callableAuthorityFailures(authority, controlled));
   }
   const expectedWasm = controlled.expected_authorities.wasm_registry === "required"
     ? [...new Set(reviewedCallableBindings(controlled)
@@ -156,6 +190,53 @@ export function finalIdentityAuthorityFailures(identity, current, controlled) {
     failures.push("WASM registration set differs from review");
   }
   return failures.sort(compareCodePoint);
+}
+
+function callableAuthorityFailures(authority, controlled) {
+  const failures = [];
+  const actualBindings = authority.implementation_provenance
+    .map(observedCallableKey)
+    .sort(compareCodePoint);
+  const expectedBindings = reviewedCallableBindings(controlled)
+    .map(reviewedCallableKey)
+    .sort(compareCodePoint);
+  if (JSON.stringify(actualBindings) !== JSON.stringify(expectedBindings)) {
+    failures.push("canonical runtime binding provenance differs from review");
+  }
+  const actualRuntimeBindings = authority.runtime_bindings
+    .map((entry) => `${entry.variant}\0${entry.native_symbol}`).sort(compareCodePoint);
+  const expectedRuntimeBindings = reviewedCallableBindings(controlled)
+    .filter((entry) => entry.kind === "canonical_binding")
+    .map((entry) => `${entry.variant}\0${entry.native_symbol}`).sort(compareCodePoint);
+  if (JSON.stringify(actualRuntimeBindings) !== JSON.stringify(expectedRuntimeBindings)) {
+    failures.push("runtime binding registry differs from review");
+  }
+  return failures;
+}
+
+function documentationAuthorityFailures(authority, current, controlled) {
+  const failures = [];
+  const catalogDocuments = authority.catalog_entries
+    .filter((entry) => entry.documentation.authority === "Catalog"
+      && entry.descriptor.completion_policy !== "HiddenInternal");
+  if (controlled.expected_authorities.documentation === "catalog") {
+    if (catalogDocuments.length !== authority.catalog_entries.length
+      || catalogDocuments.length !== controlled.expected_authorities.catalog_entry_count) {
+      failures.push("catalog documentation authority differs from review");
+    }
+  } else if (catalogDocuments.length || current.ownership.catalog_documentation.length) {
+    failures.push("unexpected catalog documentation authority remains");
+  }
+  return failures;
+}
+
+function catalogPackageFailures(authority, controlled) {
+  const actual = [...new Set(authority.catalog_provenance
+    .map((entry) => entry.provenance.source_file))].sort(compareCodePoint);
+  const expected = controlled.expected_authorities.catalog_package === null
+    ? [] : [controlled.expected_authorities.catalog_package];
+  return JSON.stringify(actual) === JSON.stringify(expected)
+    ? [] : ["catalog package provenance differs from review"];
 }
 
 export function finalAuthorityFailuresForBundles(inventory, control, bundleIds) {

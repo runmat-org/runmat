@@ -1,3 +1,5 @@
+mod alias;
+mod aliases;
 mod callable;
 mod constant;
 mod contract;
@@ -18,6 +20,7 @@ mod validation;
 #[cfg(test)]
 mod tests;
 
+pub use alias::*;
 pub use callable::*;
 pub use constant::*;
 pub use contract::*;

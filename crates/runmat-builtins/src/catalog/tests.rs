@@ -90,6 +90,11 @@ const SECOND: BuiltinCatalogEntry = BuiltinCatalogEntry {
     bindings: &SECOND_BINDINGS,
     ..PILOT
 };
+const PILOT_ALIAS: BuiltinCatalogAlias = BuiltinCatalogAlias::with_provenance(
+    "pilotAlias",
+    "pilot",
+    BuiltinCatalogProvenance::new(file!(), module_path!()),
+);
 
 const FINGERPRINT_FILES: &[BuiltinFilesystemEntry] = &[BuiltinFilesystemEntry::File {
     relative_path: "input.txt",
@@ -151,16 +156,81 @@ const INCOMPLETE_CANONICAL: BuiltinCatalogEntry = BuiltinCatalogEntry {
 fn valid_catalog_has_stable_order_independent_fingerprint() {
     assert!(validate_builtin_catalog(&[&PILOT, &SECOND]).is_empty());
     assert_eq!(
-        canonical_catalog_fingerprint(&[&PILOT, &SECOND]).unwrap(),
-        canonical_catalog_fingerprint(&[&SECOND, &PILOT]).unwrap()
+        canonical_catalog_fingerprint(&[&PILOT, &SECOND], &[]).unwrap(),
+        canonical_catalog_fingerprint(&[&SECOND, &PILOT], &[]).unwrap()
     );
+}
+
+#[test]
+fn typed_aliases_validate_and_change_the_catalog_fingerprint() {
+    assert!(validate_builtin_catalog_with_aliases(&[&PILOT], &[&PILOT_ALIAS]).is_empty());
+    assert_ne!(
+        canonical_catalog_fingerprint(&[&PILOT], &[]).unwrap(),
+        canonical_catalog_fingerprint(&[&PILOT], &[&PILOT_ALIAS]).unwrap(),
+    );
+
+    const DANGLING: BuiltinCatalogAlias = BuiltinCatalogAlias::with_provenance(
+        "dangling",
+        "missing",
+        BuiltinCatalogProvenance::new(file!(), module_path!()),
+    );
+    let errors = validate_builtin_catalog_with_aliases(&[&PILOT], &[&DANGLING]);
+    assert!(errors.iter().any(|error| {
+        error.message == "builtin alias target is not a canonical catalog identity"
+    }));
+
+    const RELOCATED: BuiltinCatalogAlias = BuiltinCatalogAlias::with_provenance(
+        "pilotAlias",
+        "pilot",
+        BuiltinCatalogProvenance::new(
+            "catalog/aliases/relocated.rs",
+            "catalog::aliases::relocated",
+        ),
+    );
+    assert_eq!(
+        canonical_catalog_fingerprint(&[&PILOT], &[&PILOT_ALIAS]).unwrap(),
+        canonical_catalog_fingerprint(&[&PILOT], &[&RELOCATED]).unwrap(),
+        "source provenance is migration evidence, not execution semantics",
+    );
+}
+
+#[test]
+fn typed_alias_validation_rejects_ambiguous_or_malformed_edges() {
+    const WRONG_CASE: BuiltinCatalogAlias = BuiltinCatalogAlias::with_provenance(
+        "wrongCase",
+        "PILOT",
+        BuiltinCatalogProvenance::new(file!(), module_path!()),
+    );
+    const COLLISION: BuiltinCatalogAlias = BuiltinCatalogAlias::with_provenance(
+        "Pilot",
+        "second",
+        BuiltinCatalogProvenance::new(file!(), module_path!()),
+    );
+    const INVALID: BuiltinCatalogAlias = BuiltinCatalogAlias::with_provenance(
+        "invalid-name",
+        "pilot",
+        BuiltinCatalogProvenance::new(file!(), module_path!()),
+    );
+    let errors = validate_builtin_catalog_with_aliases(
+        &[&PILOT, &SECOND],
+        &[&WRONG_CASE, &COLLISION, &INVALID],
+    );
+    assert!(errors.iter().any(|error| {
+        error.message == "builtin alias target must use the exact canonical spelling"
+    }));
+    assert!(errors
+        .iter()
+        .any(|error| error.message == "duplicate public builtin spelling"));
+    assert!(errors
+        .iter()
+        .any(|error| error.message == "builtin alias identity has invalid syntax"));
 }
 
 #[test]
 fn fixture_contract_participates_in_catalog_fingerprint() {
     assert_ne!(
-        canonical_catalog_fingerprint(&[&FINGERPRINT_ENTRY_NONE]).unwrap(),
-        canonical_catalog_fingerprint(&[&FINGERPRINT_ENTRY_FILESYSTEM]).unwrap()
+        canonical_catalog_fingerprint(&[&FINGERPRINT_ENTRY_NONE], &[]).unwrap(),
+        canonical_catalog_fingerprint(&[&FINGERPRINT_ENTRY_FILESYSTEM], &[]).unwrap()
     );
 }
 
@@ -370,7 +440,7 @@ fn integer_conversion_documentation_is_catalog_owned_and_executable() {
 
 #[test]
 fn migrated_registry_is_valid_and_case_insensitive() {
-    let errors = validate_builtin_catalog(builtin_catalog_entries());
+    let errors = validate_complete_builtin_catalog();
     assert!(errors.is_empty(), "catalog errors: {errors:#?}");
     assert_eq!(
         builtin_catalog_entry_by_name("FULL")

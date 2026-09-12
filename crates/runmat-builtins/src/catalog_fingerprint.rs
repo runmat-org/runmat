@@ -1,14 +1,15 @@
 use sha2::{Digest, Sha256};
 
 use crate::{
-    builtin_catalog_entries, builtin_constant_catalog_entries, builtin_functions,
-    canonical_catalog_fingerprint, AccelTag, BuiltinCompletionPolicy, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamType, Type, TypeResolverKind,
+    builtin_catalog_aliases, builtin_catalog_entries, builtin_constant_catalog_entries,
+    builtin_functions, canonical_catalog_fingerprint, AccelTag, BuiltinCompletionPolicy,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamType, Type, TypeResolverKind,
+    BUILTIN_CATALOG_SCHEMA_VERSION,
 };
 
 /// Bump when execution-relevant builtin behavior changes in a way the
 /// declarative catalog cannot observe, such as type-resolver semantics.
-pub const BUILTIN_CATALOG_SCHEMA: u32 = 5;
+pub const BUILTIN_CATALOG_SCHEMA: u32 = BUILTIN_CATALOG_SCHEMA_VERSION;
 
 /// Return a target-independent fingerprint of the builtin execution contract.
 ///
@@ -20,11 +21,11 @@ pub fn builtin_catalog_fingerprint() -> [u8; 32] {
     functions.sort_unstable_by_key(|function| function.name);
 
     let mut hash = Sha256::new();
-    field(&mut hash, b"runmat-builtin-catalog-v5");
+    field(&mut hash, b"runmat-builtin-catalog");
     number(&mut hash, BUILTIN_CATALOG_SCHEMA as u64);
     field(
         &mut hash,
-        &canonical_catalog_fingerprint(builtin_catalog_entries())
+        &canonical_catalog_fingerprint(builtin_catalog_entries(), builtin_catalog_aliases())
             .expect("static builtin catalog must serialize"),
     );
     let constants = builtin_constant_catalog_entries();

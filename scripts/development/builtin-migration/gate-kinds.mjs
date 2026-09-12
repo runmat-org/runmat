@@ -10,7 +10,6 @@ export const GATE_PRODUCERS = Object.freeze({
   "format-diff": "runmat-format-diff-validator",
   "native-examples": "runmat-builtin-example-verifier",
   "browser-examples": "runmat-builtin-example-verifier",
-  "browser-runtime": "runmat-browser-runtime-validator",
   "provider-tests": "runmat-provider-test-adapter",
   "host-tests": "runmat-host-test-adapter",
   "foreign-tests": "runmat-foreign-test-adapter",

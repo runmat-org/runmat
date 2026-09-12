@@ -3233,7 +3233,8 @@ impl LoweringCtx {
                 CallKind::Dynamic,
             )
         } else if is_builtin(name) {
-            let builtin = BuiltinId(name.to_string());
+            let builtin = runmat_builtins::builtin_id_by_name(name)
+                .unwrap_or_else(|| BuiltinId(name.to_string()));
             (
                 HirCallableRef::Builtin(builtin.clone()),
                 CallKind::Builtin(builtin),
@@ -3476,9 +3477,9 @@ impl LoweringCtx {
             });
         }
         if is_builtin(name) {
-            return Ok(crate::FunctionHandleTarget::Builtin(BuiltinId(
-                name.to_string(),
-            )));
+            let builtin = runmat_builtins::builtin_id_by_name(name)
+                .unwrap_or_else(|| BuiltinId(name.to_string()));
+            return Ok(crate::FunctionHandleTarget::Builtin(builtin));
         }
         if self.known_project_symbols.contains(name) {
             return Ok(crate::FunctionHandleTarget::DefPath(

@@ -36,3 +36,23 @@ test("integration-owned products remain outside every authored lease", () => {
   bundles.get("beta").authored_write_set = [{ kind: "tree", path: "crates/runmat-runtime/src/builtins" }];
   assert.throws(() => validateBundleGraph(bundles, identities), /overlaps/);
 });
+
+test("an alias in another bundle has an explicit semantic dependency on its canonical identity", () => {
+  const { bundles, identities } = fixture();
+  identities.get("beta").public_identity = {
+    kind: "alias",
+    alias_spelling: { identity: "beta", spelling: "beta" },
+    canonical_identity: "alpha",
+  };
+  assert.throws(
+    () => validateBundleGraph(bundles, identities),
+    /canonical bundle as a semantic prerequisite/,
+  );
+  bundles.get("beta").prerequisites = [{ bundle_id: "alpha", kind: "semantic" }];
+  assert.doesNotThrow(() => validateBundleGraph(bundles, identities));
+  bundles.get("beta").prerequisites[0].kind = "cohort";
+  assert.throws(
+    () => validateBundleGraph(bundles, identities),
+    /canonical bundle as a semantic prerequisite/,
+  );
+});

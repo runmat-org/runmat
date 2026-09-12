@@ -251,6 +251,21 @@ pub fn call_builtin(name: &str, args: &[Value]) -> Result<Value, RuntimeError> {
     futures::executor::block_on(call_builtin_async(name, args))
 }
 
+#[derive(Clone, Copy)]
+struct ResolvedBuiltinName<'a> {
+    requested: &'a str,
+    canonical: &'a str,
+}
+
+impl<'a> ResolvedBuiltinName<'a> {
+    fn resolve(requested: &'a str) -> Self {
+        Self {
+            requested,
+            canonical: runmat_builtins::canonical_builtin_name(requested).unwrap_or(requested),
+        }
+    }
+}
+
 #[async_recursion::async_recursion(?Send)]
 async fn call_builtin_async_impl(
     name: &str,
@@ -258,6 +273,9 @@ async fn call_builtin_async_impl(
     output_count: Option<usize>,
 ) -> Result<Value, RuntimeError> {
     ensure_wasm_builtins_registered();
+
+    let resolved_name = ResolvedBuiltinName::resolve(name);
+    let name = resolved_name.canonical;
 
     let _output_guard = crate::output_count::push_output_count(output_count);
     if let Some(result) = try_distributed_builtin(name, args, output_count).await? {
@@ -304,9 +322,12 @@ async fn call_builtin_async_impl(
             let result = call_registered_class_constructor(name, args, output_count).await?;
             return compatibility_checked_builtin_result(name, args, result);
         }
-        return Err(build_runtime_error(format!("Undefined function: {name}"))
-            .with_identifier("RunMat:UndefinedFunction")
-            .build());
+        return Err(build_runtime_error(format!(
+            "Undefined function: {}",
+            resolved_name.requested
+        ))
+        .with_identifier("RunMat:UndefinedFunction")
+        .build());
     }
 
     if let Some(result) = try_call_registered_instance_method(name, args, output_count).await? {

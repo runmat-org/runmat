@@ -44,7 +44,21 @@ export function validateBundleGraph(bundles, identities) {
       }
     }
   }
+  validateAliasPrerequisites(bundles, identities);
   detectCycles(bundles);
+}
+
+function validateAliasPrerequisites(bundles, identities) {
+  for (const [identity, row] of identities) {
+    if (row.public_identity?.kind !== "alias") continue;
+    const canonical = identities.get(row.public_identity.canonical_identity.toLowerCase());
+    if (!canonical || canonical.bundle_id === row.bundle_id) continue;
+    const prerequisite = bundles.get(row.bundle_id).prerequisites
+      .find((entry) => entry.bundle_id === canonical.bundle_id);
+    if (!prerequisite || prerequisite.kind !== "semantic") {
+      throw new Error(`${identity}: alias bundle must declare its canonical bundle as a semantic prerequisite`);
+    }
+  }
 }
 
 export function findAuthoredCollisions(bundles) {

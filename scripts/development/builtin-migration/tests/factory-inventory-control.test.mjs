@@ -14,7 +14,8 @@ import { runGateProducer } from "../gate-adapter.mjs";
 import { buildInventory } from "../inventory.mjs";
 import { buildInventoryDeltaProof, finalIdentityAuthorityFailures } from "../inventory-delta.mjs";
 import { parseIdentityControlPolicy } from "../control-authoring/policy-schema.mjs";
-import { validateIdentityAuthorityGraph } from "../identity-authority.mjs";
+import { identityControlAuthorityTemplate } from "../control-authoring/identity-template.mjs";
+import { parseImplementationAuthority, validateIdentityAuthorityGraph } from "../identity-authority.mjs";
 import { issueLease } from "../lease.mjs";
 import { prepareIdentity } from "../prepare.mjs";
 import { buildQueue } from "../queue.mjs";
@@ -45,6 +46,17 @@ function dispositionReviewFixture(inventory) {
       review: { status: "reviewed", evidence: ["C00 disposition review"] },
     }],
     review: { status: "reviewed", evidence: ["C00 disposition review"] },
+  };
+}
+
+function catalogConstant(name) {
+  return {
+    name,
+    kind: "real_double",
+    provenance: {
+      source_file: "crates/runmat-builtins/src/catalog/constant.rs",
+      module_path: "catalog::constant",
+    },
   };
 }
 
@@ -83,7 +95,7 @@ test("baseline prepare evidence and subject gate evidence retain distinct proven
   const subject = buildInventory(fixture.repository, dispositionInputFromControl(fixture.control), { compiledInventory: fixture.compiledInventory });
   assert.notEqual(subject.source.revision, fixture.inventory.source.revision);
   assert.notEqual(subject.digest, fixture.inventory.digest);
-  const gates = ["catalog-contract", "runtime-binding", "documentation-cutover", "architecture", "focused-tests", "format-diff", "strict-clippy"].map((name) => gate(fixture, name, `gate-subject-${name}`, subject));
+  const gates = ["catalog-contract", "runtime-binding", "documentation-cutover", "native-link", "architecture", "focused-tests", "format-diff", "strict-clippy"].map((name) => gate(fixture, name, `gate-subject-${name}`, subject));
   const batch = { schema_version: 1, kind: "runmat-builtin-migration-batch", identities: ["foo"] };
   const audit = auditMigration(fixture.repository, fixture.inventory, fixture.inventory, subject, fixture.control, fixture.lease, batch, { artifact_id: "audit-subject", authored_revision: subject.source.revision, prepare_results: [prepared], source_dispositions: [], gate_results: gates });
   assert.equal(audit.result, "pass");
@@ -97,8 +109,8 @@ test("baseline prepare evidence and subject gate evidence retain distinct proven
 test("inventory rejects absent, future, or tampered compiled semantic authority", () => {
   const repository = repositoryFixture();
   assert.throws(() => buildInventory(repository, undefined, { revision: REVISION }), /requires a compiled migration inventory/);
-  const future = compiledInventoryFixture(); future.schema_version = 3;
-  assert.throws(() => buildInventory(repository, undefined, { revision: REVISION, compiledInventory: future }), /schema_version 2/);
+  const future = compiledInventoryFixture(); future.schema_version = 4;
+  assert.throws(() => buildInventory(repository, undefined, { revision: REVISION, compiledInventory: future }), /schema_version 3/);
   const tampered = compiledInventoryFixture(); tampered.snapshot.observed.runtime_bindings[0].variant = "changed";
   assert.throws(() => buildInventory(repository, undefined, { revision: REVISION, compiledInventory: tampered }), /digest mismatch/);
   const collision = compiledInventoryFixture(); collision.snapshot.declared.legacy_documentation.push({ name: "Foo", category: null, summary: null, keywords: null, errors: null, related: null, introduced: null, status: null, examples: null });
@@ -111,7 +123,7 @@ test("compiled constants supply public spellings only when no callable form exis
   const constantOnly = compiledInventoryFixture("eps");
   constantOnly.snapshot.declared.catalog_entries = [];
   constantOnly.snapshot.declared.catalog_provenance = [];
-  constantOnly.snapshot.declared.constants = [{ name: "eps", kind: "real_double" }];
+  constantOnly.snapshot.declared.constants = [catalogConstant("eps")];
   constantOnly.snapshot.observed.runtime_bindings = [];
   constantOnly.snapshot.observed.implementation_provenance = [];
   constantOnly.snapshot.observed.runtime_constants = [runtimeConstant("eps")];
@@ -122,8 +134,8 @@ test("compiled constants supply public spellings only when no callable form exis
 
   const dual = compiledInventoryFixture("inf");
   dual.snapshot.declared.constants = [
-    { name: "Inf", kind: "real_double" },
-    { name: "inf", kind: "real_double" },
+    catalogConstant("Inf"),
+    catalogConstant("inf"),
   ];
   dual.snapshot.observed.runtime_constants = [runtimeConstant("Inf"), runtimeConstant("inf")];
   setRegistrationManifest(dual.snapshot, [
@@ -134,6 +146,32 @@ test("compiled constants supply public spellings only when no callable form exis
   dual.digest.value = contentDigest(Buffer.from(JSON.stringify(dual.snapshot))).slice("sha256:".length);
   const dualInventory = buildInventory(repository, undefined, { revision: REVISION, compiledInventory: dual });
   assert.deepEqual(dualInventory.identities.find((entry) => entry.identity === "inf").spellings, ["inf"]);
+});
+
+test("compiled catalog aliases are typed edges to canonical entries", () => {
+  const repository = repositoryFixture();
+  const compiled = compiledInventoryFixture();
+  compiled.snapshot.declared.catalog_aliases = [{
+    alias: { name: "foalias" }, canonical: { name: "foo" },
+    provenance: {
+      source_file: "crates/runmat-builtins/src/catalog/aliases/math.rs",
+      module_path: "catalog::aliases::math",
+    },
+  }];
+  compiled.digest.value = contentDigest(Buffer.from(JSON.stringify(compiled.snapshot))).slice("sha256:".length);
+  const inventory = buildInventory(repository, undefined, {
+    revision: REVISION, compiledInventory: compiled,
+  });
+  const alias = inventory.identities.find((entry) => entry.identity === "foalias");
+  assert.deepEqual(alias.spellings, ["foalias"]);
+  assert.equal(alias.semantic_authority.catalog_aliases[0].canonical.name, "foo");
+
+  compiled.snapshot.declared.catalog_aliases[0].canonical.name = "missing";
+  compiled.digest.value = contentDigest(Buffer.from(JSON.stringify(compiled.snapshot))).slice("sha256:".length);
+  assert.throws(
+    () => buildInventory(repository, undefined, { revision: REVISION, compiledInventory: compiled }),
+    /catalog alias target is not canonical/,
+  );
 });
 
 test("compiled authority rejects unknown or malformed nested records even with a recomputed digest", () => {
@@ -180,7 +218,7 @@ test("compiled grouped owners require exact typed membership in the compiled ide
   );
 
   const mismatched = compiledInventoryFixture("foo", { legacyGroup: true });
-  mismatched.snapshot.declared.constants = [{ name: "other", kind: "real_double" }];
+  mismatched.snapshot.declared.constants = [catalogConstant("other")];
   mismatched.snapshot.observed.runtime_constants = [runtimeConstant("other")];
   setRegistrationManifest(mismatched.snapshot, [
     ...mismatched.snapshot.observed.registration_manifest.entries,
@@ -309,6 +347,21 @@ test("control is closed, reviewed, reciprocal, and rejects case-fold ambiguity",
     callable: { kind: "none", reason: "alias-resolution" },
     constant: { kind: "none", reason: "alias-resolution" },
   };
+  danglingControl.identity_controls.foo.expected_authorities = {
+    catalog_package: null,
+    catalog_alias_package: "crates/runmat-builtins/src/catalog/aliases/math.rs",
+    catalog_constant_package: null,
+    catalog_entry_count: 0,
+    catalog_constant_count: 0,
+    documentation: "alias",
+    native_link: "not-applicable",
+    wasm_registry: "not-applicable",
+  };
+  for (const gate of ["runtime-binding", "link-reachability"]) {
+    danglingControl.identity_controls.foo.maturity[gate] = {
+      applicability: "not-applicable", reason: "Alias resolution owns no implementation", evidence: ["fixture review"],
+    };
+  }
   danglingControl.topology_digest = danglingTopology.digest;
   resealEvidence(danglingControl);
   assert.throws(
@@ -529,8 +582,9 @@ test("internal double-underscore identities retain typed implementation authorit
     evidence: ["fixture review"],
   };
   row.expected_authorities.documentation = "none";
-  row.expected_authorities.catalog_package = null;
-  row.expected_authorities.catalog_entry_count = 0;
+  row.maturity.documentation = {
+    applicability: "not-applicable", reason: "Internal entries are not public documentation", evidence: ["fixture review"],
+  };
   const dispositions = {
     schema_version: 1,
     kind: "runmat-builtin-dispositions",
@@ -558,6 +612,105 @@ test("internal double-underscore identities retain typed implementation authorit
   assert.equal(parsed.implementation.callable.kind, "owned");
 });
 
+test("final authority checks internal executable bindings and strips alias implementations", () => {
+  const fixture = controlledFixture({ identity: "__helper" });
+  const internal = structuredClone(fixture.controlValue.identity_controls.__helper);
+  internal.public_identity = { kind: "internal", reason: "Runtime helper", evidence: ["review"] };
+  internal.expected_authorities = {
+    ...internal.expected_authorities,
+    documentation: "none",
+  };
+  const current = structuredClone(fixture.inventory.identities[0]);
+  current.semantic_authority.catalog_entries[0].descriptor.completion_policy = "HiddenInternal";
+  assert.deepEqual(finalIdentityAuthorityFailures("__helper", current, internal), []);
+  current.semantic_authority.implementation_provenance[0].function = "wrong_helper";
+  assert.match(
+    finalIdentityAuthorityFailures("__helper", current, internal).join("\n"),
+    /canonical runtime binding provenance differs from review/,
+  );
+
+  const alias = structuredClone(internal);
+  alias.public_identity = {
+    kind: "alias",
+    alias_spelling: { identity: "__helper", spelling: "__helper" },
+    canonical_identity: "foo",
+  };
+  alias.forms = { kind: "unobserved", callable_spellings: [], constant_spellings: [] };
+  alias.implementation = {
+    callable: { kind: "none", reason: "alias-resolution" },
+    constant: { kind: "none", reason: "alias-resolution" },
+  };
+  alias.expected_authorities = {
+    catalog_package: null,
+    catalog_alias_package: "crates/runmat-builtins/src/catalog/aliases/internal.rs",
+    catalog_constant_package: null,
+    catalog_entry_count: 0,
+    catalog_constant_count: 0,
+    documentation: "alias",
+    native_link: "not-applicable",
+    wasm_registry: "not-applicable",
+  };
+  assert.match(
+    finalIdentityAuthorityFailures("__helper", current, alias).join("\n"),
+    /alias retains copied authority/,
+  );
+
+  current.semantic_authority.catalog_aliases = [{
+    alias: { name: "__helper" }, canonical: { name: "foo" },
+    provenance: {
+      source_file: "crates/runmat-builtins/src/catalog/aliases/internal.rs",
+      module_path: "catalog::aliases::internal",
+    },
+  }];
+  current.semantic_authority.catalog_entries = [];
+  current.semantic_authority.catalog_provenance = [];
+  current.semantic_authority.runtime_bindings = [];
+  current.semantic_authority.implementation_provenance = [];
+  current.registrations.wasm = [];
+  current.ownership.catalog = [];
+  current.ownership.catalog_documentation = [];
+  assert.deepEqual(finalIdentityAuthorityFailures("__helper", current, alias), []);
+  current.semantic_authority.catalog_aliases[0].canonical.name = "wrong";
+  assert.match(
+    finalIdentityAuthorityFailures("__helper", current, alias).join("\n"),
+    /compiled catalog alias edge differs from review/,
+  );
+});
+
+test("review templates leave legacy binding cutovers for explicit review", () => {
+  const scaffold = { authority_proposals: { identity_rows: [{
+    identity: "foo",
+    proposal: {
+      public_identity: {
+        kind: "primary", primary_spelling: { identity: "foo", spelling: "foo" },
+      },
+      forms: { kind: "callable", callable_spellings: ["foo"], constant_spellings: [] },
+      implementation: {
+        callable: {
+          proposed_owner_path: "crates/runmat-runtime/src/builtins/math/foo.rs",
+          observed_bindings: [{
+            authority: "legacy_function", binding_variant: null,
+            function: "foo_builtin", builtin_path: "builtins::math::foo",
+          }],
+        },
+        constant: { proposed_owner_path: null, observed_bindings: [] },
+      },
+    },
+  }] } };
+  const template = identityControlAuthorityTemplate(scaffold, "foo");
+  assert.equal(template.implementation.callable, null);
+  const legacy = {
+    callable: { kind: "owned", owner_path: "crates/runmat-runtime/src/builtins/math/foo.rs", bindings: [{
+    kind: "legacy_function", function: "foo_builtin", builtin_path: "builtins::math::foo",
+    }] },
+    constant: { kind: "none", reason: "no-constant-form" },
+  };
+  assert.throws(
+    () => parseImplementationAuthority(legacy, "foo"),
+    /unsupported kind/,
+  );
+});
+
 test("constant-only canonical identities require exact catalog and runtime constant authorities", () => {
   const fixture = controlledFixture();
   const row = structuredClone(fixture.controlValue.identity_controls.foo);
@@ -574,14 +727,25 @@ test("constant-only canonical identities require exact catalog and runtime const
   };
   row.expected_authorities.catalog_entry_count = 0;
   row.expected_authorities.catalog_constant_count = 1;
-  row.expected_authorities.catalog_package = "crates/runmat-builtins/src/catalog/entries/math/basic/foo/mod.rs";
+  row.expected_authorities.catalog_package = null;
+  row.expected_authorities.catalog_constant_package = "crates/runmat-builtins/src/catalog/constant.rs";
+  row.expected_authorities.documentation = "none";
+  row.maturity.documentation = {
+    applicability: "not-applicable", reason: "constant fixture has no public documentation entry",
+    evidence: ["fixture review"],
+  };
   row.expected_authorities.native_link = "not-applicable";
+  row.maturity["link-reachability"] = {
+    applicability: "not-applicable", reason: "constant registration has no callable native symbol",
+    evidence: ["fixture review"],
+  };
   assert.doesNotThrow(() => parseIdentityControlPolicy(row, "foo"));
   assert.doesNotThrow(() => validateIdentityAuthorityGraph(new Map([["foo", row]])));
 
   const current = structuredClone(fixture.inventory.identities[0]);
   current.semantic_authority.catalog_entries = [];
-  current.semantic_authority.constants = [{ name: "foo", kind: "real_double" }];
+  current.semantic_authority.catalog_provenance = [];
+  current.semantic_authority.constants = [catalogConstant("foo")];
   current.semantic_authority.implementation_provenance = [];
   current.semantic_authority.runtime_bindings = [];
   current.semantic_authority.runtime_constants = [runtimeConstant("foo")];

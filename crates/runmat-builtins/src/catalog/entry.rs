@@ -8,7 +8,7 @@ use serde::Serialize;
 
 use crate::{BuiltinEffects, BuiltinSemantics};
 
-pub const BUILTIN_CATALOG_SCHEMA_VERSION: u32 = 5;
+pub const BUILTIN_CATALOG_SCHEMA_VERSION: u32 = 6;
 
 /// Physical ownership of a catalog declaration.
 ///

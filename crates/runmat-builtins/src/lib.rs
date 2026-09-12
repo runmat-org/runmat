@@ -787,14 +787,17 @@ pub fn builtin_name_is_known(name: &str) -> bool {
     builtin_catalog_entry_by_name(name).is_some() || builtin_function_by_name(name).is_some()
 }
 
-/// Resolve a declaration spelling to the canonical typed builtin identity.
-pub fn builtin_callable_identity_by_name(name: &str) -> Option<runmat_types::CallableIdentity> {
+/// Resolve a public spelling to the canonical typed builtin identity.
+pub fn builtin_id_by_name(name: &str) -> Option<runmat_types::BuiltinId> {
     let canonical = builtin_catalog_entry_by_name(name)
         .map(|entry| entry.identity.name)
         .or_else(|| builtin_function_by_name(name).map(|function| function.name))?;
-    Some(runmat_types::CallableIdentity::Builtin(
-        runmat_types::BuiltinId(canonical.to_owned()),
-    ))
+    Some(runmat_types::BuiltinId(canonical.to_owned()))
+}
+
+/// Resolve a declaration spelling to the canonical typed builtin identity.
+pub fn builtin_callable_identity_by_name(name: &str) -> Option<runmat_types::CallableIdentity> {
+    builtin_id_by_name(name).map(runmat_types::CallableIdentity::Builtin)
 }
 
 /// Returns the canonical public call descriptor for a builtin.

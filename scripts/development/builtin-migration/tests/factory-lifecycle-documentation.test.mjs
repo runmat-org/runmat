@@ -112,7 +112,7 @@ test("audit v7 cannot pass on file presence or example tokens without exact gate
   const absent = auditMigration(fixture.repository, fixture.inventory, fixture.inventory, fixture.inventory, fixture.control, fixture.lease, batch, { artifact_id: "audit-foo", authored_revision: fixture.inventory.source.revision, prepare_results: [prepared], source_dispositions: [], gate_results: [] });
   assert.equal(absent.result, "fail");
   assert.ok(absent.identities[0].failures.some((entry) => entry.code === "required-gate-missing"));
-  const gates = ["catalog-contract", "runtime-binding", "documentation-cutover", "architecture", "focused-tests", "format-diff", "strict-clippy"].map((name) => gate(fixture, name));
+  const gates = ["catalog-contract", "runtime-binding", "documentation-cutover", "native-link", "architecture", "focused-tests", "format-diff", "strict-clippy"].map((name) => gate(fixture, name));
   const passed = auditMigration(fixture.repository, fixture.inventory, fixture.inventory, fixture.inventory, fixture.control, fixture.lease, batch, { artifact_id: "audit-foo", authored_revision: fixture.inventory.source.revision, prepare_results: [prepared], source_dispositions: [], gate_results: gates });
   assert.equal(passed.result, "pass");
   const stale = structuredClone(gates); stale[0].source_digest = `sha256:${"b".repeat(64)}`;
@@ -129,7 +129,7 @@ test("source-field destinations require value-digest reconciliation from the doc
   const disposition = JSON.parse(fs.readFileSync(path.join(prepared.workspace, "source-field-disposition.json")));
   disposition.review = { status: "reviewed", evidence: ["review"] };
   for (const source of disposition.sources) for (const leaf of source.leaves) { leaf.disposition = "preserved"; leaf.destination = { kind: "catalog-documentation", catalog_identity: "foo", pointer: leaf.pointer, value_digest: leaf.value_digest }; }
-  const gates = ["catalog-contract", "runtime-binding", "documentation-cutover", "architecture", "focused-tests", "format-diff", "strict-clippy"].map((name) => gate(fixture, name));
+  const gates = ["catalog-contract", "runtime-binding", "documentation-cutover", "native-link", "architecture", "focused-tests", "format-diff", "strict-clippy"].map((name) => gate(fixture, name));
   const batch = { schema_version: 1, kind: "runmat-builtin-migration-batch", identities: ["foo"] };
   const missing = auditMigration(fixture.repository, fixture.inventory, fixture.inventory, fixture.inventory, fixture.control, fixture.lease, batch, { artifact_id: "audit-destination", authored_revision: fixture.inventory.source.revision, prepare_results: [prepared], source_dispositions: [disposition], gate_results: gates });
   assert.ok(missing.identities[0].failures.some((entry) => entry.code === "destination-proof-missing"));

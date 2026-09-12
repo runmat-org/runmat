@@ -96,7 +96,7 @@ export function controlledFixture(options = {}) {
     inventory.digest = evidenceDigest(payload);
   }
   const bundleId = "math-basic-foo";
-  const maturity = Object.fromEntries(MATURITY_GATES.map((gate) => [gate, gate === "identity" || gate === "disposition" || gate === "catalog-contract" || gate === "runtime-binding" || gate === "documentation"
+  const maturity = Object.fromEntries(MATURITY_GATES.map((gate) => [gate, gate === "identity" || gate === "disposition" || gate === "catalog-contract" || gate === "runtime-binding" || gate === "documentation" || gate === "link-reachability"
     ? { applicability: "required", reason: null, evidence: [] }
     : { applicability: "not-applicable", reason: "Reviewed as outside this fixture's behavior", evidence: ["fixture review"] }]));
   const draft = buildControlDraft(inventory);
@@ -121,7 +121,7 @@ export function controlledFixture(options = {}) {
     shared_dependencies: [],
     complexity: { class: "low", weight: 1, basis: ["single identity"] },
     maturity,
-    expected_authorities: { catalog_package: `crates/runmat-builtins/src/catalog/entries/math/basic/${id}/mod.rs`, catalog_entry_count: 1, catalog_constant_count: 0, documentation: "catalog", native_link: "not-applicable", wasm_registry: "not-applicable" },
+    expected_authorities: { catalog_package: `crates/runmat-builtins/src/catalog/entries/math/basic/${id}/mod.rs`, catalog_alias_package: null, catalog_constant_package: null, catalog_entry_count: 1, catalog_constant_count: 0, documentation: "catalog", native_link: "required", wasm_registry: "not-applicable" },
     owner: "fixture", review: { status: "reviewed", evidence: ["fixture review"] },
   };
   const migrationFindings = { schema_version: 1, kind: "runmat-builtin-migration-finding-dispositions", rows: inventory.migration_findings.map((finding) => ({ finding_digest: evidenceDigest(finding), ...finding, disposition: "bundle-work", bundle_id: bundleId, reason: "Fixture migration work", evidence: ["fixture review"] })), review: { status: "reviewed", evidence: ["fixture review"] } };
@@ -363,12 +363,12 @@ export function compiledInventoryFixture(id = "foo", options = {}) {
   };
   const snapshot = {
     build: { architecture: "aarch64", operating_system: "macos", family: "unix", pointer_width: 64, endianness: "little", crate_feature_inventory: { crate_name: "runmat-runtime", schema_version: 1, known_features: ["blas-lapack", "blas-only", "gui", "interaction-test-hooks", "occt-native", "occt-wasm-host", "plot-core", "plot-web", "test-classes", "wgpu"], enabled_features: [] } },
-    declared: { namespace_scope: "function_callables_and_constants_are_reported_separately", catalog_schema_version: 5, catalog_fingerprint: "a".repeat(64), catalog_entries: [catalog], catalog_provenance: [{ identity: { builtin: { name: id }, variant: "default" }, provenance: { source_file: `crates/runmat-builtins/src/catalog/entries/math/basic/${id}/mod.rs`, module_path: `catalog::${id}` } }], constants: [], legacy_functions: [], legacy_documentation: [] },
+    declared: { namespace_scope: "function_callables_and_constants_are_reported_separately", catalog_schema_version: 6, catalog_fingerprint: "a".repeat(64), catalog_entries: [catalog], catalog_aliases: [], catalog_provenance: [{ identity: { builtin: { name: id }, variant: "default" }, provenance: { source_file: `crates/runmat-builtins/src/catalog/entries/math/basic/${id}/mod.rs`, module_path: `catalog::${id}` } }], constants: [], legacy_functions: [], legacy_documentation: [] },
     observed: { registration_manifest: registrationManifest, runtime_constants: [], runtime_bindings: [{ name: id, variant: "default", native_symbol: nativeSymbol(id, "default") }], implementation_provenance: [{ name: id, binding_variant: "default", source_file: `crates/runmat-runtime/src/builtins/math/basic/${id}.rs`, module_path: `builtins::${id}`, function: `${id}_builtin`, builtin_path: `builtins::${id}`, authority: "canonical_binding" }], gpu_specs: options.legacyGroup ? [gpuGroupFixture(id)] : [], fusion_specs: [] },
     validation: { status: "valid", errors: [], migration_readiness: options.finding ? { status: "incomplete", findings: [options.finding] } : { status: "ready", findings: [] } },
   };
   const value = contentDigest(Buffer.from(JSON.stringify(snapshot))).slice("sha256:".length);
-  return { schema_version: 2, kind: "runmat-compiled-builtin-migration-inventory", authority: "derived-read-only-evidence", digest: { algorithm: "sha256", value }, snapshot };
+  return { schema_version: 3, kind: "runmat-compiled-builtin-migration-inventory", authority: "derived-read-only-evidence", digest: { algorithm: "sha256", value }, snapshot };
 }
 
 function catalogEntryFixture(id) {
@@ -414,6 +414,7 @@ export function fixtureGatePlans(inventory, additionalTargets = []) {
     { gate: "focused-tests", program: script, arguments: [], working_directory: "repository", parser: "exit_status", expected_artifact_roles: [] },
     { gate: "format-diff", program: script, arguments: [], working_directory: "repository", parser: "exit_status", expected_artifact_roles: [] },
     { gate: "inventory-delta", program: script, arguments: [], working_directory: "repository", parser: "inventory_delta", expected_artifact_roles: ["inventory-delta"] },
+    { gate: "native-link", program: cargo, arguments: [], working_directory: "repository", parser: "compiled_inventory", expected_artifact_roles: ["compiled-inventory"] },
     { gate: "runtime-binding", program: cargo, arguments: [], working_directory: "repository", parser: "compiled_inventory", expected_artifact_roles: ["compiled-inventory"] },
     { gate: "strict-clippy", program: script, arguments: [], working_directory: "repository", parser: "exit_status", expected_artifact_roles: [] },
   ];
@@ -562,5 +563,5 @@ function qualificationTarget(operatingSystem, architecture, executionOrder) {
   return { operating_system: operatingSystem, architecture, applicability: "required", execution_order: executionOrder, reason: null, evidence: [] };
 }
 
-function producer(gate) { return ({ "catalog-contract": "runmat-builtins-catalog-validator", "runtime-binding": "runmat-runtime-binding-validator", "documentation-cutover": "builtin-documentation-cutover-audit", architecture: "runmat-architecture-boundary-validator", "focused-tests": "runmat-test-result-adapter", "strict-clippy": "runmat-clippy-result-adapter", "format-diff": "runmat-format-diff-validator", "deterministic-products": "runmat-generated-product-validator", "inventory-delta": "builtin-inventory-delta-validator" })[gate]; }
+function producer(gate) { return ({ "catalog-contract": "runmat-builtins-catalog-validator", "runtime-binding": "runmat-runtime-binding-validator", "documentation-cutover": "builtin-documentation-cutover-audit", "native-link": "runmat-native-link-validator", architecture: "runmat-architecture-boundary-validator", "focused-tests": "runmat-test-result-adapter", "strict-clippy": "runmat-clippy-result-adapter", "format-diff": "runmat-format-diff-validator", "deterministic-products": "runmat-generated-product-validator", "inventory-delta": "builtin-inventory-delta-validator" })[gate]; }
 function write(root, relative, contents) { const target = path.join(root, relative); fs.mkdirSync(path.dirname(target), { recursive: true }); fs.writeFileSync(target, contents); }

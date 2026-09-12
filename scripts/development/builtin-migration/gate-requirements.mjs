@@ -7,7 +7,7 @@ export const MATURITY_EVIDENCE = Object.freeze({
   placement: "provider-tests", provider: "provider-tests", fusion: "provider-tests", "link-reachability": "native-link",
   foreign: "foreign-tests", parallel: "parallel-tests", host: "host-tests",
   documentation: "documentation-cutover", "native-example": "native-examples",
-  "browser-example": "browser-examples", "browser-runtime": "browser-runtime",
+  "browser-example": "browser-examples", "browser-runtime": "browser-examples",
   tests: "focused-tests", "wasm-registry": "wasm-registry",
 });
 

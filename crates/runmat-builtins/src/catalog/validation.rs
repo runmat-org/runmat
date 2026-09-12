@@ -1,6 +1,6 @@
 use super::{
-    BuiltinBindingAvailability, BuiltinCatalogEntry, BuiltinDocumentationAuthority,
-    BuiltinExampleVerification,
+    builtin_catalog_aliases, BuiltinBindingAvailability, BuiltinCatalogEntry,
+    BuiltinDocumentationAuthority, BuiltinExampleVerification,
 };
 use crate::BuiltinAsyncBehavior;
 use runmat_types::EffectKind;
@@ -17,16 +17,47 @@ pub struct BuiltinCatalogValidationError {
 pub fn validate_builtin_catalog(
     entries: &[&'static BuiltinCatalogEntry],
 ) -> Vec<BuiltinCatalogValidationError> {
+    validate_builtin_catalog_with_aliases(entries, &[])
+}
+
+pub fn validate_complete_builtin_catalog() -> Vec<BuiltinCatalogValidationError> {
+    let entries = super::builtin_catalog_entries();
+    let aliases = builtin_catalog_aliases();
+    let mut errors = validate_builtin_catalog_with_aliases(entries, aliases);
+    let primary_names = entries
+        .iter()
+        .map(|entry| entry.identity.name.to_ascii_lowercase())
+        .collect::<BTreeSet<_>>();
+    let legacy_names = crate::builtin_functions()
+        .into_iter()
+        .map(|function| function.name.to_ascii_lowercase())
+        .collect::<BTreeSet<_>>();
+    for alias in aliases {
+        let spelling = alias.alias.name.to_ascii_lowercase();
+        if legacy_names.contains(&spelling) && !primary_names.contains(&spelling) {
+            errors.push(error(
+                Some(alias.alias.name),
+                "builtin alias collides with a legacy runtime callable",
+            ));
+        }
+    }
+    errors
+}
+
+pub fn validate_builtin_catalog_with_aliases(
+    entries: &[&'static BuiltinCatalogEntry],
+    aliases: &[&'static super::BuiltinCatalogAlias],
+) -> Vec<BuiltinCatalogValidationError> {
     let mut errors = Vec::new();
     let mut identities = BTreeSet::new();
     let mut bindings = BTreeMap::new();
     for entry in entries {
         let name = entry.identity.name;
-        if name.is_empty() {
-            errors.push(error(None, "builtin identity must not be empty"));
+        if !valid_builtin_identity(name) {
+            errors.push(error(Some(name), "builtin identity has invalid syntax"));
             continue;
         }
-        if !identities.insert(name) {
+        if !identities.insert(name.to_ascii_lowercase()) {
             errors.push(error(Some(name), "duplicate builtin catalog identity"));
         }
         if entry.category.is_empty() {
@@ -98,7 +129,59 @@ pub fn validate_builtin_catalog(
             }
         }
     }
+    let primary_names = entries
+        .iter()
+        .map(|entry| {
+            (
+                entry.identity.name.to_ascii_lowercase(),
+                entry.identity.name,
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let mut public_names = primary_names.keys().cloned().collect::<BTreeSet<_>>();
+    for alias in aliases {
+        let spelling = alias.alias.name;
+        let target = alias.canonical.name;
+        if !valid_builtin_identity(spelling) || !valid_builtin_identity(target) {
+            errors.push(error(
+                Some(spelling),
+                "builtin alias identity has invalid syntax",
+            ));
+            continue;
+        }
+        if spelling.eq_ignore_ascii_case(target) {
+            errors.push(error(Some(spelling), "builtin alias cannot target itself"));
+        }
+        let canonical_target = primary_names.get(&target.to_ascii_lowercase());
+        if canonical_target.is_none() {
+            errors.push(error(
+                Some(spelling),
+                "builtin alias target is not a canonical catalog identity",
+            ));
+        } else if canonical_target.copied() != Some(target) {
+            errors.push(error(
+                Some(spelling),
+                "builtin alias target must use the exact canonical spelling",
+            ));
+        }
+        if !public_names.insert(spelling.to_ascii_lowercase()) {
+            errors.push(error(Some(spelling), "duplicate public builtin spelling"));
+        }
+    }
     errors
+}
+
+fn valid_builtin_identity(value: &str) -> bool {
+    let mut characters = value.chars();
+    match (characters.next(), characters.next()) {
+        (Some(first), second) if first.is_ascii_alphabetic() => second
+            .into_iter()
+            .chain(characters)
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | '.')),
+        (Some('_'), Some('_')) => characters
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | '.')),
+        _ => false,
+    }
 }
 
 fn validate_documentation(

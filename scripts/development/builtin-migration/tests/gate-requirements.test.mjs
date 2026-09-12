@@ -11,7 +11,7 @@ import {
 
 const DIGEST = `sha256:${"a".repeat(64)}`;
 
-test("maturity vocabulary maps independent execution obligations to distinct gates", () => {
+test("maturity vocabulary maps independent obligations to authoritative evidence products", () => {
   assert.deepEqual({
     foreign: MATURITY_EVIDENCE.foreign,
     parallel: MATURITY_EVIDENCE.parallel,
@@ -27,7 +27,7 @@ test("maturity vocabulary maps independent execution obligations to distinct gat
     host: "host-tests",
     nativeExample: "native-examples",
     browserExample: "browser-examples",
-    browserRuntime: "browser-runtime",
+    browserRuntime: "browser-examples",
     provider: "provider-tests",
     wasmRegistry: "wasm-registry",
   });
@@ -56,11 +56,21 @@ test("required maturity cannot disappear without an evidence-gate mapping", () =
   assert.throws(() => requiredGateNames(controlled), /required maturity unrecognized has no evidence gate/);
 });
 
-test("parallel and browser-runtime gates have closed exit-status plans", () => {
-  for (const gate of ["browser-runtime", "parallel-tests"]) {
-    const parsed = parseGatePlans([plan(gate)], "fixture-bundle");
-    assert.equal(parsed.get(gate).parser, "exit_status");
-  }
+test("browser execution obligations share one product-backed proof without collapsing policy", () => {
+  const maturity = Object.fromEntries(
+    Object.keys(MATURITY_EVIDENCE).map((name) => [name, notApplicable()]),
+  );
+  maturity["browser-example"] = { applicability: "required" };
+  maturity["browser-runtime"] = { applicability: "required" };
+  const gates = requiredGateNames(identityControl(maturity));
+  assert.equal(gates.filter((gate) => gate === "browser-examples").length, 1);
+  assert.equal(gates.includes("browser-runtime"), false);
+  assert.notEqual("browser-example", "browser-runtime");
+});
+
+test("parallel evidence retains a closed exit-status plan", () => {
+  const parsed = parseGatePlans([plan("parallel-tests")], "fixture-bundle");
+  assert.equal(parsed.get("parallel-tests").parser, "exit_status");
 });
 
 function identityControl(maturity) {

@@ -211,6 +211,8 @@ function fullChainControl(inventory, topology, scaffold) {
       maturity,
       expected_authorities: {
         catalog_package: null,
+        catalog_alias_package: null,
+        catalog_constant_package: null,
         catalog_entry_count: 0,
         catalog_constant_count: 0,
         documentation: "none",

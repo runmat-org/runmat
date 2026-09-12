@@ -1,6 +1,6 @@
 import { contentDigest } from "./evidence.mjs";
 import { compareCodePoint } from "./constants.mjs";
-import { catalogEntry, catalogProvenance, constant, legacyDocumentation, legacyFunction, sortedBy, uniqueBy } from "./compiled-schema.mjs";
+import { catalogAlias, catalogEntry, catalogProvenance, constant, legacyDocumentation, legacyFunction, sortedBy, uniqueBy } from "./compiled-schema.mjs";
 import { fusionSpec, gpuSpec, implementationProvenance, migrationFindingIdentityNames, registrationManifestEntry, runtimeBinding, runtimeConstant, validateObservedOrdering, validation } from "./compiled-runtime-schema.mjs";
 import { SAFE_IDENTITY, array, enumValue, exact, identity, integer, kind, nonempty, object, uniqueStrings } from "./schema.mjs";
 import { canonicalRustModulePath, rustModuleScopesOverlap } from "./rust-module-path.mjs";
@@ -11,7 +11,7 @@ const KNOWN_RUNTIME_FEATURES = Object.freeze([
 ]);
 
 export function parseCompiledInventory(value) {
-  kind(value, 2, "runmat-compiled-builtin-migration-inventory", "compiled migration inventory");
+  kind(value, 3, "runmat-compiled-builtin-migration-inventory", "compiled migration inventory");
   exact(value, ["schema_version", "kind", "authority", "digest", "snapshot"], "compiled migration inventory");
   if (value.authority !== "derived-read-only-evidence") throw new Error("compiled migration inventory has invalid authority");
   exact(value.digest, ["algorithm", "value"], "compiled inventory digest");
@@ -57,20 +57,30 @@ function parseBuild(value) {
 }
 
 function parseDeclared(value) {
-  exact(value, ["namespace_scope", "catalog_schema_version", "catalog_fingerprint", "catalog_entries", "catalog_provenance", "constants", "legacy_functions", "legacy_documentation"], "compiled declared inventory");
+  exact(value, ["namespace_scope", "catalog_schema_version", "catalog_fingerprint", "catalog_entries", "catalog_aliases", "catalog_provenance", "constants", "legacy_functions", "legacy_documentation"], "compiled declared inventory");
   if (value.namespace_scope !== "function_callables_and_constants_are_reported_separately") throw new Error("compiled namespace scope is unsupported");
-  if (value.catalog_schema_version !== 5) throw new Error("compiled catalog schema version must be 5"); if (!/^[a-f0-9]{64}$/.test(value.catalog_fingerprint)) throw new Error("compiled catalog fingerprint must be lowercase sha256");
+  if (value.catalog_schema_version !== 6) throw new Error("compiled catalog schema version must be 6"); if (!/^[a-f0-9]{64}$/.test(value.catalog_fingerprint)) throw new Error("compiled catalog fingerprint must be lowercase sha256");
   array(value.catalog_entries, "compiled catalog entries", { empty: true }).forEach(catalogEntry);
+  array(value.catalog_aliases, "compiled catalog aliases", { empty: true }).forEach(catalogAlias);
   array(value.catalog_provenance, "compiled catalog provenance", { empty: true }).forEach(catalogProvenance);
   array(value.constants, "compiled constants", { empty: true }).forEach(constant);
   array(value.legacy_functions, "compiled legacy functions", { empty: true }).forEach(legacyFunction);
   array(value.legacy_documentation, "compiled legacy documentation", { empty: true }).forEach(legacyDocumentation);
   sortedUnique(value.catalog_entries, (entry) => entry.identity.name, "catalog entries");
+  sortedUnique(value.catalog_aliases, (entry) => entry.alias.name, "catalog aliases");
   sortedUnique(value.catalog_provenance, (entry) => `${entry.identity.builtin.name}\0${entry.identity.variant}`, "catalog provenance");
   sortedUnique(value.constants, (entry) => entry.name, "declared constants"); sortedUnique(value.legacy_functions, (entry) => entry.name, "legacy functions"); sortedUnique(value.legacy_documentation, (entry) => entry.name, "legacy documentation");
   const declaredBindings = value.catalog_entries.flatMap((entry) => entry.bindings.map((binding) => `${entry.identity.name}\0${binding.variant}`)).sort();
   const provenBindings = value.catalog_provenance.map((entry) => `${entry.identity.builtin.name}\0${entry.identity.variant}`).sort();
   if (JSON.stringify(declaredBindings) !== JSON.stringify(provenBindings)) throw new Error("catalog provenance must cover every declared binding exactly once");
+  const primary = new Set(value.catalog_entries.map((entry) => entry.identity.name.toLowerCase()));
+  const publicNames = new Set(primary);
+  for (const entry of value.catalog_aliases) {
+    const alias = entry.alias.name.toLowerCase();
+    if (!primary.has(entry.canonical.name.toLowerCase())) throw new Error(`${entry.alias.name}: catalog alias target is not canonical`);
+    if (publicNames.has(alias)) throw new Error(`${entry.alias.name}: catalog alias collides with another public spelling`);
+    publicNames.add(alias);
+  }
 }
 
 function parseObserved(value) {
@@ -102,6 +112,7 @@ function compiledIdentities(snapshot) {
     result.add(value.toLowerCase());
   };
   for (const entry of snapshot.declared.catalog_entries) add(entry.identity.name);
+  for (const entry of snapshot.declared.catalog_aliases) add(entry.alias.name);
   for (const field of ["constants", "legacy_functions", "legacy_documentation"]) for (const entry of snapshot.declared[field]) add(entry.name);
   for (const field of ["runtime_constants", "runtime_bindings", "implementation_provenance"]) for (const entry of snapshot.observed[field]) add(entry.name);
   for (const field of ["gpu_specs", "fusion_specs"]) for (const entry of snapshot.observed[field]) if (entry.owner.kind === "exact_builtin") add(entry.owner.identity.name);
@@ -210,6 +221,7 @@ function validateCallableSpellings(snapshot) {
   const spellings = new Map();
   const names = [
     ...snapshot.declared.catalog_entries.map((entry) => entry.identity.name),
+    ...snapshot.declared.catalog_aliases.map((entry) => entry.alias.name),
     ...snapshot.declared.legacy_functions.map((entry) => entry.name),
     ...snapshot.declared.legacy_documentation.map((entry) => entry.name),
   ];
@@ -230,6 +242,7 @@ export function authorityFor(compiled, identityName) {
   return {
     authority: "compiled-migration-snapshot",
     catalog_entries: named(compiled.snapshot.declared.catalog_entries, (entry) => entry.identity.name),
+    catalog_aliases: named(compiled.snapshot.declared.catalog_aliases, (entry) => entry.alias.name),
     catalog_provenance: named(compiled.snapshot.declared.catalog_provenance, (entry) => entry.identity.builtin.name),
     constants: named(compiled.snapshot.declared.constants),
     legacy_functions: named(compiled.snapshot.declared.legacy_functions),
@@ -246,6 +259,7 @@ export function publicSpellingsFor(compiled, identityName) {
   const authority = authorityFor(compiled, identityName);
   const callable = [
     ...authority.catalog_entries.map((entry) => entry.identity.name),
+    ...authority.catalog_aliases.map((entry) => entry.alias.name),
     ...authority.legacy_functions.map((entry) => entry.name),
     ...authority.legacy_documentation.map((entry) => entry.name),
     ...authority.runtime_bindings.map((entry) => entry.name),

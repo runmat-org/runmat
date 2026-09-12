@@ -9,7 +9,7 @@ mod runtime;
 
 use std::collections::BTreeSet;
 
-use runmat_builtins::{builtin_catalog_entries, builtin_functions, validate_builtin_catalog};
+use runmat_builtins::{builtin_functions, validate_complete_builtin_catalog};
 
 use super::schema::{
     CatalogProvenanceRecord, FusionSpecRecord, GpuSpecRecord, ImplementationProvenanceRecord,
@@ -30,7 +30,7 @@ pub(super) fn validate_inventory(
     runtime_constants: &[RuntimeConstantRecord],
     registration_manifest: &[RegistrationManifestRecord],
 ) -> InventoryValidation {
-    let mut errors = validate_builtin_catalog(builtin_catalog_entries())
+    let mut errors = validate_complete_builtin_catalog()
         .into_iter()
         .map(|error| InventoryValidationError {
             source: "catalog",

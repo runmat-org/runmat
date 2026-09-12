@@ -4,9 +4,10 @@ import {
 } from "./schema.mjs";
 
 export const BASELINE_EVIDENCE_KINDS = Object.freeze([
-  "catalog-owner", "catalog-provenance", "runtime-owner", "implementation-provenance",
+  "catalog-owner", "catalog-alias-provenance", "catalog-constant-provenance", "catalog-provenance", "runtime-owner", "implementation-provenance",
   "catalog-documentation", "legacy-sidecar", "runtime-documentation-shadow",
   "documentation-source", "test-source", "runtime-registration",
+  "runtime-constant-registration",
   "native-link-catalog-contract", "native-link-runtime-input", "legacy-resolver",
   "catalog-resolver", "provider", "fusion", "generated-registry",
 ]);
@@ -139,6 +140,8 @@ export function identityTypedBaselineEvidence(
     }
   };
   add("catalog-owner", row.ownership?.catalog);
+  add("catalog-alias-provenance", (row.semantic_authority?.catalog_aliases ?? []).map((entry) => entry.provenance?.source_file));
+  add("catalog-constant-provenance", (row.semantic_authority?.constants ?? []).map((entry) => entry.provenance?.source_file));
   add("catalog-provenance", (row.semantic_authority?.catalog_provenance ?? []).map((entry) => entry.provenance?.source_file));
   add("runtime-owner", row.ownership?.runtime);
   add("implementation-provenance", (row.semantic_authority?.implementation_provenance ?? []).map((entry) => entry.source_file));
@@ -148,6 +151,7 @@ export function identityTypedBaselineEvidence(
   add("documentation-source", row.documentation?.sources);
   add("test-source", row.tests?.paths);
   add("runtime-registration", (row.registrations?.runtime ?? []).map((entry) => entry.path));
+  add("runtime-constant-registration", (row.semantic_authority?.runtime_constants ?? []).map((entry) => entry.source_file));
   add("native-link-catalog-contract", row.registrations?.native_link?.catalog_contract_paths);
   add("native-link-runtime-input", (row.registrations?.native_link?.runtime_binding_inputs ?? []).map((entry) => entry.path));
   add("legacy-resolver", row.dependencies?.legacy_resolver_paths);

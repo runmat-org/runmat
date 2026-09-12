@@ -47,20 +47,17 @@ function callableImplementationTemplate(proposal, identity) {
   }
   const observed = proposal.implementation.callable;
   if (observed.proposed_owner_path === null) return null;
+  if (observed.observed_bindings.some((entry) => entry.authority !== "canonical_binding")) {
+    return null;
+  }
   const bindings = observed.observed_bindings.map((entry) => {
-    if (entry.authority === "canonical_binding") {
-      return {
-        kind: "canonical_binding",
-        function: entry.function,
-        variant: entry.binding_variant,
-        builtin_path: entry.builtin_path,
-        native_symbol: nativeSymbol(identity, entry.binding_variant),
-      };
-    }
+    const variant = entry.binding_variant;
     return {
-      kind: "legacy_function",
+      kind: "canonical_binding",
       function: entry.function,
+      variant,
       builtin_path: entry.builtin_path,
+      native_symbol: nativeSymbol(identity, variant),
     };
   }).sort((left, right) => compareCodePoint(
     implementationBindingKey(left), implementationBindingKey(right),

@@ -1,19 +1,21 @@
 use runmat_types::{NumericClass, NumericDomain, NumericFact, ValueFact, ValueKindFact};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
+
+use super::BuiltinCatalogProvenance;
 
 /// Static, target-independent contract for a language constant.
 ///
 /// The runtime registry separately binds each identity to its live `Value`.
 /// Static consumers must use this catalog so type/shape analysis does not
 /// inspect execution storage or require a runtime registration side effect.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct BuiltinConstantCatalogEntry {
     pub name: &'static str,
     pub kind: BuiltinConstantKind,
+    pub provenance: BuiltinCatalogProvenance,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BuiltinConstantKind {
     RealDouble,
@@ -39,51 +41,26 @@ fn numeric(domain: NumericDomain) -> ValueFact {
 }
 
 static CONSTANTS: [BuiltinConstantCatalogEntry; 11] = [
-    BuiltinConstantCatalogEntry {
-        name: "pi",
-        kind: BuiltinConstantKind::RealDouble,
-    },
-    BuiltinConstantCatalogEntry {
-        name: "eps",
-        kind: BuiltinConstantKind::RealDouble,
-    },
-    BuiltinConstantCatalogEntry {
-        name: "sqrt2",
-        kind: BuiltinConstantKind::RealDouble,
-    },
-    BuiltinConstantCatalogEntry {
-        name: "i",
-        kind: BuiltinConstantKind::ComplexDouble,
-    },
-    BuiltinConstantCatalogEntry {
-        name: "j",
-        kind: BuiltinConstantKind::ComplexDouble,
-    },
-    BuiltinConstantCatalogEntry {
-        name: "inf",
-        kind: BuiltinConstantKind::RealDouble,
-    },
-    BuiltinConstantCatalogEntry {
-        name: "Inf",
-        kind: BuiltinConstantKind::RealDouble,
-    },
-    BuiltinConstantCatalogEntry {
-        name: "nan",
-        kind: BuiltinConstantKind::RealDouble,
-    },
-    BuiltinConstantCatalogEntry {
-        name: "NaN",
-        kind: BuiltinConstantKind::RealDouble,
-    },
-    BuiltinConstantCatalogEntry {
-        name: "true",
-        kind: BuiltinConstantKind::Logical,
-    },
-    BuiltinConstantCatalogEntry {
-        name: "false",
-        kind: BuiltinConstantKind::Logical,
-    },
+    constant("pi", BuiltinConstantKind::RealDouble),
+    constant("eps", BuiltinConstantKind::RealDouble),
+    constant("sqrt2", BuiltinConstantKind::RealDouble),
+    constant("i", BuiltinConstantKind::ComplexDouble),
+    constant("j", BuiltinConstantKind::ComplexDouble),
+    constant("inf", BuiltinConstantKind::RealDouble),
+    constant("Inf", BuiltinConstantKind::RealDouble),
+    constant("nan", BuiltinConstantKind::RealDouble),
+    constant("NaN", BuiltinConstantKind::RealDouble),
+    constant("true", BuiltinConstantKind::Logical),
+    constant("false", BuiltinConstantKind::Logical),
 ];
+
+const fn constant(name: &'static str, kind: BuiltinConstantKind) -> BuiltinConstantCatalogEntry {
+    BuiltinConstantCatalogEntry {
+        name,
+        kind,
+        provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
+    }
+}
 
 pub fn builtin_constant_catalog_entries() -> &'static [BuiltinConstantCatalogEntry] {
     &CONSTANTS

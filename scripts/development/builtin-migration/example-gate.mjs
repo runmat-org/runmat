@@ -67,19 +67,20 @@ export function buildExampleGateProof(manifestValue, manifestEvidence, evidenceR
     shard_results: shardRecords.map(withoutValue), artifact_manifests: artifactRecords.map(withoutValue), product_probes: probeRecords.map(withoutValue),
   };
   const payload = {
-    schema_version: 3, kind: "runmat-builtin-example-gate-proof", authority: "machine-derived-product-evidence",
+    schema_version: 4, kind: "runmat-builtin-example-gate-proof", authority: "machine-derived-product-evidence",
     source_revision: manifest.source_revision, identities: manifest.identities,
     evidence_root: evidenceRoot,
     example_inventory_digest: inventory.inventoryDigest, plan_digest: plan.planDigest,
     reconciliation_digest: recomputed.reconciliationDigest, product_scope: recomputed.productScope,
+    products: plannedProducts,
     evidence, rows, result: rows.some((entry) => entry.status === "failed") ? "fail" : "pass",
   };
   return { ...payload, digest: evidenceDigest(payload) };
 }
 
 export function parseExampleGateProof(value, expected) {
-  kind(value, 3, "runmat-builtin-example-gate-proof", "example gate proof");
-  exact(value, ["schema_version", "kind", "authority", "source_revision", "identities", "evidence_root", "example_inventory_digest", "plan_digest", "reconciliation_digest", "product_scope", "evidence", "rows", "result", "digest"], "example gate proof");
+  kind(value, 4, "runmat-builtin-example-gate-proof", "example gate proof");
+  exact(value, ["schema_version", "kind", "authority", "source_revision", "identities", "evidence_root", "example_inventory_digest", "plan_digest", "reconciliation_digest", "product_scope", "products", "evidence", "rows", "result", "digest"], "example gate proof");
   if (value.authority !== "machine-derived-product-evidence" || value.product_scope !== "all") throw new Error("example gate proof has invalid authority or product scope");
   sourceRevision(value.source_revision, "example gate source revision");
   const identities = uniqueStrings(value.identities, "example gate identities", { pattern: SAFE_IDENTITY, lower: true }).sort(compareCodePoint);
@@ -87,6 +88,11 @@ export function parseExampleGateProof(value, expected) {
   if (value.result !== "pass") throw new Error("example gate proof is not passing");
   const evidenceRoot = parseExampleEvidenceRoot(value.evidence_root);
   parseEvidence(value.evidence, evidenceRoot);
+  const plan = validatePlan(readJsonEvidence(value.evidence.plan.path, "example plan", evidenceRoot).value);
+  const products = plan.products.map((entry) => entry.kind).sort(compareCodePoint);
+  if (JSON.stringify(value.products) !== JSON.stringify(products)) {
+    throw new Error("example gate products differ from the verified execution plan");
+  }
   const rows = array(value.rows, "example gate rows").map((entry) => {
     exact(entry, ["identity", "status", "example_identities", "execution_identities", "evidence_digest"], "example gate row");
     if (!identities.includes(entry.identity) || !["passed", "absent", "failed"].includes(entry.status)) throw new Error("example gate row has invalid identity or status");

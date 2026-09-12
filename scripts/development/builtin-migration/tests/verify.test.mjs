@@ -15,7 +15,7 @@ test.afterEach(cleanupRepositoryFixtures);
 function evidence() {
   const fixture = controlledFixture();
   const prepared = prepareIdentity(fixture.repository, fixture.inventory, fixture.control, fixture.lease, "foo", fs.mkdtempSync(path.join(os.tmpdir(), "verify-")));
-  const gates = ["catalog-contract", "runtime-binding", "documentation-cutover", "architecture", "focused-tests", "format-diff", "strict-clippy"].map((name) => gate(fixture, name));
+  const gates = ["catalog-contract", "runtime-binding", "documentation-cutover", "native-link", "architecture", "focused-tests", "format-diff", "strict-clippy"].map((name) => gate(fixture, name));
   const batch = { schema_version: 1, kind: "runmat-builtin-migration-batch", identities: ["foo"] };
   const audit = auditMigration(fixture.repository, fixture.inventory, fixture.inventory, fixture.inventory, fixture.control, fixture.lease, batch, { artifact_id: "audit-foo", authored_revision: fixture.inventory.source.revision, prepare_results: [prepared], source_dispositions: [], gate_results: gates });
   const auditReference = digestReference("audit.json", "audit-foo", audit);
@@ -24,7 +24,7 @@ function evidence() {
     schema_version: 6, kind: "runmat-builtin-migration-verification-manifest", authority: "reviewed-verification-request",
     batch: { artifact_id: "verify-foo", source_revision: fixture.inventory.source.revision, source_digest: fixture.inventory.source.digest, control_baseline_inventory_digest: fixture.inventory.digest, lease_base_inventory_digest: fixture.inventory.digest, subject_inventory_digest: fixture.inventory.digest, control_manifest_digest: fixture.control.digest, bundle_id: fixture.bundleId, lease_id: fixture.lease.value.lease_id, lease_digest: fixture.lease.value.digest, accepted_seals: fixture.lease.value.accepted_seals, accepted_seal_set_digest: fixture.lease.value.accepted_seal_set_digest, barrier_seals: fixture.lease.value.barrier_seals, barrier_seal_set_digest: fixture.lease.value.barrier_seal_set_digest, identities: ["foo"], phases: audit.phases },
     audit: auditReference, gate_results: gateReferences,
-    expectations: [{ identity: "foo", required_gates: ["architecture", "catalog-contract", "documentation-cutover", "focused-tests", "format-diff", "runtime-binding", "strict-clippy"] }],
+    expectations: [{ identity: "foo", required_gates: ["architecture", "catalog-contract", "documentation-cutover", "focused-tests", "format-diff", "native-link", "runtime-binding", "strict-clippy"] }],
   };
   const loadedAudit = { reference: auditReference, value: audit };
   const loadedGates = gateReferences.map((reference, index) => ({ reference, value: gates[index] }));

@@ -21,6 +21,17 @@ import { parseAuthorityProposals } from "../authority-proposals.mjs";
 
 afterEach(cleanupRepositoryFixtures);
 
+function catalogConstant(name) {
+  return {
+    name,
+    kind: "real_double",
+    provenance: {
+      source_file: "crates/runmat-builtins/src/catalog/constant.rs",
+      module_path: "catalog::constant",
+    },
+  };
+}
+
 test("builds a deterministic topology-bound scaffold with no reviewed decisions", () => {
   const fixture = inputs();
   const first = buildControlOverlayScaffold(fixture.inventory, fixture.draft, fixture.topology);
@@ -53,7 +64,7 @@ test("builds a deterministic topology-bound scaffold with no reviewed decisions"
     basis: "reviewed-topology-target-package-with-observed-function-candidates",
   });
   assert.deepEqual(Object.keys(alpha.observations.source.authority_counts), [
-    "catalog_entries", "catalog_constants", "legacy_functions", "legacy_documentation",
+    "catalog_entries", "catalog_aliases", "catalog_constants", "legacy_functions", "legacy_documentation",
     "canonical_runtime_bindings", "canonical_runtime_constants", "implementation_provenance",
     "observed_runtime_registrations", "observed_wasm_registrations",
     "canonical_provider_records", "canonical_fusion_records",
@@ -129,6 +140,26 @@ test("keeps alias and internal target proposals separate from canonical authorit
     "unique-observed-owner-for-callable-form");
 });
 
+test("preserves catalog alias declaration provenance as typed baseline evidence", () => {
+  const row = controlledScaffold((identity) => {
+    identity.semantic_authority.catalog_entries = [];
+    identity.semantic_authority.catalog_provenance = [];
+    identity.semantic_authority.catalog_aliases = [{
+      alias: { name: "foo" },
+      canonical: { name: "bar" },
+      provenance: {
+        source_file: "crates/runmat-builtins/src/catalog/aliases/math.rs",
+        module_path: "catalog::aliases::math",
+      },
+    }];
+  }).scaffold.identity_rows[0];
+  assert.ok(row.observations.source.typed_paths.some((entry) =>
+    entry.kind === "catalog-alias-provenance"
+      && entry.path === "crates/runmat-builtins/src/catalog/aliases/math.rs"));
+  assert.ok(row.candidate_paths.observed.catalog.includes(
+    "crates/runmat-builtins/src/catalog/aliases/math.rs"));
+});
+
 test("proposes public spelling, callable and constant forms, and implementation provenance independently", () => {
   const callable = controlledScaffold();
   const callableProposal = callable.scaffold.authority_proposals.identity_rows[0].proposal;
@@ -140,7 +171,7 @@ test("proposes public spelling, callable and constant forms, and implementation 
     "crates/runmat-runtime/src/builtins/math/basic/foo.rs");
 
   const callableAndConstant = controlledScaffold((row) => {
-    row.semantic_authority.constants = [{ name: "foo" }];
+    row.semantic_authority.constants = [catalogConstant("foo")];
     row.semantic_authority.runtime_constants = [runtimeConstant("foo")];
   }).scaffold.authority_proposals.identity_rows[0].proposal;
   assert.equal(callableAndConstant.forms.kind, "callable_and_constant");
@@ -155,7 +186,7 @@ test("proposes public spelling, callable and constant forms, and implementation 
     row.semantic_authority.legacy_functions = [];
     row.semantic_authority.runtime_bindings = [];
     row.semantic_authority.implementation_provenance = [];
-    row.semantic_authority.constants = [{ name: "foo" }];
+    row.semantic_authority.constants = [catalogConstant("foo")];
     row.semantic_authority.runtime_constants = [runtimeConstant("foo")];
     row.ownership.runtime = [];
   }).scaffold.authority_proposals.identity_rows[0].proposal;
@@ -166,6 +197,15 @@ test("proposes public spelling, callable and constant forms, and implementation 
   assert.equal(constant.implementation.callable.proposed_owner_path, null);
   assert.equal(constant.implementation.constant.proposed_owner_path,
     "crates/runmat-runtime/src/builtins/constants/mod.rs");
+  const constantRow = controlledScaffold((row) => {
+    row.semantic_authority.constants = [catalogConstant("foo")];
+    row.semantic_authority.runtime_constants = [runtimeConstant("foo")];
+  }).scaffold.identity_rows[0];
+  assert.ok(constantRow.observations.source.typed_paths.some((entry) =>
+    entry.kind === "runtime-constant-registration"
+      && entry.path === "crates/runmat-runtime/src/builtins/constants/mod.rs"));
+  assert.ok(constantRow.candidate_paths.observed.runtime.includes(
+    "crates/runmat-runtime/src/builtins/constants/mod.rs"));
 });
 
 test("routes grouped findings only through compiled typed membership and rejects proposal forgery", () => {
@@ -223,6 +263,7 @@ test("counts canonical authority independently from observed registrations", () 
     .identity_rows[0].observations.source.authority_counts;
   assert.deepEqual(counts, {
     catalog_entries: 1,
+    catalog_aliases: 0,
     catalog_constants: 0,
     legacy_functions: 0,
     legacy_documentation: 0,

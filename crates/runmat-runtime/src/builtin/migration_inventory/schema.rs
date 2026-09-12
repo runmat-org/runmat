@@ -1,12 +1,13 @@
 use runmat_builtins::{
-    BuiltinBindingIdentity, BuiltinCatalogEntry, BuiltinCatalogIdentity, BuiltinCatalogProvenance,
-    BuiltinConstantCatalogEntry, BuiltinDescriptor, BuiltinExtensionDescriptor,
-    BuiltinIntegerAuditDescriptor, BuiltinIntegerCapabilityDescriptor, BuiltinSemantics, Type,
+    BuiltinBindingIdentity, BuiltinCatalogAlias, BuiltinCatalogEntry, BuiltinCatalogIdentity,
+    BuiltinCatalogProvenance, BuiltinConstantCatalogEntry, BuiltinDescriptor,
+    BuiltinExtensionDescriptor, BuiltinIntegerAuditDescriptor, BuiltinIntegerCapabilityDescriptor,
+    BuiltinSemantics, Type,
 };
 use runmat_types::{CapabilityRequirement, ExecutionStackRequirement};
 use serde::Serialize;
 
-pub const MIGRATION_INVENTORY_SCHEMA_VERSION: u32 = 2;
+pub const MIGRATION_INVENTORY_SCHEMA_VERSION: u32 = 3;
 
 #[derive(Debug, Serialize)]
 pub struct MigrationInventory<'a> {
@@ -58,6 +59,7 @@ pub struct DeclaredInventory<'a> {
     pub catalog_schema_version: u32,
     pub catalog_fingerprint: String,
     pub catalog_entries: Vec<&'a BuiltinCatalogEntry>,
+    pub catalog_aliases: Vec<&'a BuiltinCatalogAlias>,
     pub catalog_provenance: Vec<CatalogProvenanceRecord>,
     pub constants: Vec<&'a BuiltinConstantCatalogEntry>,
     pub legacy_functions: Vec<LegacyBuiltinRecord<'a>>,

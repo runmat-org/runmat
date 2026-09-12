@@ -200,6 +200,7 @@ function identityObservations(row, topologyRow, sourceFilesByPath) {
       },
       authority_counts: {
         catalog_entries: row.semantic_authority?.catalog_entries?.length ?? 0,
+        catalog_aliases: row.semantic_authority?.catalog_aliases?.length ?? 0,
         catalog_constants: row.semantic_authority?.constants?.length ?? 0,
         legacy_functions: row.semantic_authority?.legacy_functions?.length ?? 0,
         legacy_documentation: row.semantic_authority?.legacy_documentation?.length ?? 0,
@@ -227,11 +228,14 @@ function identityCandidatePaths(row, topologyRow) {
     observed: {
       catalog: paths([
         ...(row.ownership?.catalog ?? []),
+        ...(row.semantic_authority?.catalog_aliases ?? []).map((entry) => entry.provenance?.source_file),
+        ...(row.semantic_authority?.constants ?? []).map((entry) => entry.provenance?.source_file),
         ...(row.semantic_authority?.catalog_provenance ?? []).map((entry) => entry.provenance?.source_file),
       ]),
       runtime: paths([
         ...(row.ownership?.runtime ?? []),
         ...(row.semantic_authority?.implementation_provenance ?? []).map((entry) => entry.source_file),
+        ...(row.semantic_authority?.runtime_constants ?? []).map((entry) => entry.source_file),
       ]),
       documentation: paths([
         ...(row.ownership?.catalog_documentation ?? []),
