@@ -11,8 +11,8 @@ import { contentDigest, evidenceDigest } from "../../evidence.mjs";
 import { buildInventory } from "../../inventory.mjs";
 import {
   REVISION, cleanupRepositoryFixtures, compiledInventoryFixture, fixtureIntegrationProducts,
-  fixtureGatePlans, fixtureModuleCompositionBaseline, fixtureTargetPolicy, repositoryFixture,
-  topologyFixture,
+  fixtureGatePlans, fixtureTargetPolicy, repositoryFixture,
+  fixtureReviewedModuleCompositionBaseline, topologyFixture,
 } from "../../tests/helpers.mjs";
 import { parseBundleControlReview } from "../bundle-review.mjs";
 import { validateControlReviewChain } from "../authority.mjs";
@@ -45,7 +45,7 @@ test("bundle and global reviews bind exact scaffold and topology rows", () => {
   assert.deepEqual([...global.programProfiles.keys()], [...new Set(fixture.bundleReview.bundle_control.gate_plans.map((entry) => entry.program_profile_id))]);
   assert.throws(() => bundle.identityControls.set("bar", {}), /immutable/);
 
-  for (const version of [2, 4]) {
+  for (const version of [3, 5]) {
     const wrongVersion = structuredClone(fixture.globalReview);
     wrongVersion.schema_version = version;
     resign(wrongVersion);
@@ -53,7 +53,7 @@ test("bundle and global reviews bind exact scaffold and topology rows", () => {
       () => parseGlobalControlReview(
         wrongVersion, fixture.scaffold, fixture.topology, fixture.inventory,
       ),
-      /schema_version 3/,
+      /schema_version 4/,
     );
   }
   for (const version of [3, 5]) {
@@ -112,28 +112,49 @@ test("production global review cannot bypass the fixed composition registry", ()
     fixture.globalReview, fixture.scaffold, fixture.topology, fixture.inventory,
   ).integrationProducts.has("wasm-registry"), "unrelated reviewed products remain admitted");
 
+  const rawProjection = structuredClone(fixture.globalReview);
+  rawProjection.module_composition_baseline = rawProjection.module_composition_baseline.projection;
+  rawProjection.bindings.module_composition_reviewed_baseline_digest = evidenceDigest(rawProjection.module_composition_baseline);
+  resign(rawProjection);
+  assert.throws(
+    () => parseGlobalControlReview(
+      rawProjection, fixture.scaffold, fixture.topology, fixture.inventory,
+    ),
+    /reviewed module composition baseline/,
+  );
+
   const omitted = structuredClone(fixture.globalReview);
   delete omitted.integration_products["catalog-aliases"];
-  omitted.module_composition_baseline.products = omitted.module_composition_baseline.products
+  omitted.module_composition_baseline.projection.products = omitted.module_composition_baseline.projection.products
     .filter((entry) => entry.product_id !== "catalog-aliases");
-  resign(omitted);
+  resignCompositionBaseline(omitted);
   assert.throws(
     () => parseGlobalControlReview(
       omitted, fixture.scaffold, fixture.topology, fixture.inventory,
     ),
-    /reviewed module composition products.*missing catalog-aliases/,
+    /module composition projection.*missing catalog-aliases/,
   );
 
   const aggregationDrift = structuredClone(fixture.globalReview);
-  aggregationDrift.module_composition_baseline.products
+  aggregationDrift.module_composition_baseline.projection.products
     .find((entry) => entry.product_id === "catalog-constants")
     .aggregations = ["entries", "constants"];
-  resign(aggregationDrift);
+  resignCompositionBaseline(aggregationDrift);
   assert.throws(
     () => parseGlobalControlReview(
       aggregationDrift, fixture.scaffold, fixture.topology, fixture.inventory,
     ),
     /catalog-constants: projection aggregation roles do not match/,
+  );
+
+  const digestMismatch = structuredClone(fixture.globalReview);
+  digestMismatch.bindings.module_composition_reviewed_baseline_digest = `sha256:${"0".repeat(64)}`;
+  resign(digestMismatch);
+  assert.throws(
+    () => parseGlobalControlReview(
+      digestMismatch, fixture.scaffold, fixture.topology, fixture.inventory,
+    ),
+    /trusted digest/,
   );
 });
 
@@ -463,15 +484,16 @@ function reviewFixture() {
     review: { status: "reviewed", evidence: ["fixture bundle review"] },
   };
   const bundleReview = { ...bundlePayload, digest: evidenceDigest(bundlePayload) };
+  const moduleCompositionBaseline = fixtureReviewedModuleCompositionBaseline();
   const globalPayload = {
-    schema_version: 3,
+    schema_version: 4,
     kind: "runmat-builtin-migration-global-control-review",
     authority: "reviewer-authored-development-input",
     program: "RM-1064/C00-C07",
-    bindings: { scaffold_digest: scaffold.digest, topology_digest: topology.digest, migration_finding_rows_digest: evidenceDigest(scaffold.migration_finding_rows) },
+    bindings: { scaffold_digest: scaffold.digest, topology_digest: topology.digest, migration_finding_rows_digest: evidenceDigest(scaffold.migration_finding_rows), module_composition_reviewed_baseline_digest: moduleCompositionBaseline.digest },
     program_profiles: gatePolicy.programProfiles,
     integration_products: fixtureIntegrationProducts(inventory),
-    module_composition_baseline: fixtureModuleCompositionBaseline(),
+    module_composition_baseline: moduleCompositionBaseline,
     migration_findings: { schema_version: 1, kind: "runmat-builtin-migration-finding-dispositions", rows: [], review: { status: "reviewed", evidence: ["fixture review"] } },
     exception_manifest: { entries: [], review: { status: "reviewed", evidence: ["fixture review"] } },
     target_policy: fixtureTargetPolicy([{
@@ -540,5 +562,10 @@ function rewriteManifestDigests(directory) {
 }
 
 function resign(value) { const { digest: _ignored, ...payload } = value; value.digest = evidenceDigest(payload); }
+function resignCompositionBaseline(globalReview) {
+  resign(globalReview.module_composition_baseline);
+  globalReview.bindings.module_composition_reviewed_baseline_digest = globalReview.module_composition_baseline.digest;
+  resign(globalReview);
+}
 function writeJson(target, value) { fs.writeFileSync(target, `${JSON.stringify(value, null, 2)}\n`); }
 function readJson(target) { return JSON.parse(fs.readFileSync(target, "utf8")); }

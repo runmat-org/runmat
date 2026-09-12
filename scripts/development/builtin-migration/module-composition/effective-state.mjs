@@ -1,4 +1,5 @@
 import { assertValidatedControl } from "../control.mjs";
+import { compareCodePoint } from "../constants.mjs";
 import { deepImmutable } from "../immutable.mjs";
 import { assertActiveLease } from "../lease.mjs";
 import { acceptedSealSet, assertValidatedQueueState } from "../queue.mjs";
@@ -6,6 +7,14 @@ import { assertValidatedQueueCheckpoint } from "../queue-checkpoint.mjs";
 import { applyModuleCompositionTransitions } from "./projection.mjs";
 
 export function deriveEffectiveModuleComposition({
+  control, queueState, queueCheckpoint, lease, clock = Date.now,
+}) {
+  return deriveModuleCompositionMaterializationState({
+    control, queueState, queueCheckpoint, lease, clock,
+  })?.effective ?? null;
+}
+
+export function deriveModuleCompositionMaterializationState({
   control, queueState, queueCheckpoint, lease, clock = Date.now,
 }) {
   assertValidatedControl(control);
@@ -23,16 +32,30 @@ export function deriveEffectiveModuleComposition({
   }
   const baseline = control.moduleComposition.baseline;
   if (baseline === null) return null;
-  const transitions = state.acceptedSeals.flatMap((reference) => {
+  const acceptedTransitions = state.acceptedSeals.flatMap((reference) => {
     if (!control.moduleComposition.transitions.has(reference.bundle_id)) {
       throw new Error(`${reference.bundle_id}: accepted bundle has no reviewed composition disposition`);
     }
     const transition = control.moduleComposition.transitions.get(reference.bundle_id);
     return transition === null ? [] : [transition];
   });
+  const prior = applyModuleCompositionTransitions(baseline, acceptedTransitions);
   const activeTransition = transitionForActiveBundle(control, active.bundle);
-  if (activeTransition !== null) transitions.push(activeTransition);
-  return deepImmutable(applyModuleCompositionTransitions(baseline, transitions));
+  const effective = activeTransition === null
+    ? prior
+    : applyModuleCompositionTransitions(prior, [activeTransition]);
+  const priorPresentProductIds = new Set([...control.integrationProducts.values()]
+    .filter((product) => product.verification.kind === "rust_module_composition"
+      && product.baseline_digest !== null)
+    .map((product) => product.product_id));
+  for (const transition of acceptedTransitions) {
+    for (const change of transition.changes) priorPresentProductIds.add(change.product_id);
+  }
+  return deepImmutable({
+    prior,
+    effective,
+    priorPresentProductIds: [...priorPresentProductIds].sort(compareCodePoint),
+  });
 }
 
 function transitionForActiveBundle(control, bundle) {

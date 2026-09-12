@@ -1,80 +1,121 @@
 import { compareCodePoint } from "../constants.mjs";
 import { deepImmutable } from "../immutable.mjs";
 
-export const MODULE_COMPOSITION_SUFFIXES = Object.freeze([
-  "acceleration",
-  "argument_validation",
-  "array",
-  "array/creation",
-  "cells",
-  "common",
-  "comms",
-  "constants",
-  "containers",
-  "control",
-  "datetime",
-  "deep_learning",
-  "diagnostics",
-  "fea",
-  "finance",
-  "function_handles",
-  "geometry",
-  "graph",
-  "image",
-  "interop",
-  "introspection",
-  "io",
-  "io/repl_fs",
-  "logical",
-  "math",
-  "math/elementwise",
-  "math/linalg",
-  "math/reduction",
-  "math/signal",
-  "math/trigonometry",
-  "objects",
-  "objects/test_support",
-  "parallel",
-  "plotting",
-  "stats",
-  "stats/ml",
-  "stats/summary",
-  "strings",
-  "strings/queries",
-  "strings/search",
-  "strings/text_analytics",
-  "strings/transform",
-  "structs",
-  "table",
-  "testing",
-  "testing/plugins",
-  "testing/runner",
-  "timing",
-]);
+const PAIRED_PRODUCT_CONFIGURATIONS = deepImmutable(validatePairedConfigurations([
+  paired("acceleration"),
+  paired("argument_validation"),
+  paired("array", ["entries", "constants"]),
+  paired("array/creation", ["entries", "constants"]),
+  paired("cells"),
+  paired("common"),
+  paired("comms"),
+  paired("constants", ["constants"]),
+  paired("containers"),
+  paired("control"),
+  paired("datetime"),
+  paired("deep_learning"),
+  paired("diagnostics"),
+  paired("fea"),
+  paired("finance"),
+  paired("function_handles"),
+  paired("geometry"),
+  paired("graph"),
+  paired("image"),
+  paired("interop"),
+  paired("introspection"),
+  paired("io"),
+  paired("io/repl_fs", ["entries"], [aggregationExport("entries", "registry")]),
+  paired("logical"),
+  paired("math"),
+  paired("math/elementwise"),
+  paired("math/linalg"),
+  paired("math/reduction"),
+  paired("math/signal"),
+  paired("math/trigonometry"),
+  paired("objects"),
+  paired("objects/test_support"),
+  paired("parallel"),
+  paired("plotting"),
+  paired("stats"),
+  paired("stats/ml"),
+  paired("stats/summary"),
+  paired("strings"),
+  paired("strings/queries"),
+  paired("strings/search"),
+  paired("strings/text_analytics"),
+  paired("strings/transform"),
+  paired("structs"),
+  paired("table"),
+  paired("testing"),
+  paired("testing/plugins"),
+  paired("testing/runner"),
+  paired("timing"),
+]));
+
+export const MODULE_COMPOSITION_SUFFIXES = Object.freeze(
+  PAIRED_PRODUCT_CONFIGURATIONS.map((entry) => entry.suffix),
+);
 
 const PRODUCTS = deepImmutable([
   fixedProduct("catalog-aliases", "catalog", "catalog/aliases", ["aliases"]),
   fixedProduct("catalog-root", "catalog", "catalog/entries", ["entries", "constants"]),
   fixedProduct("runtime-root", "runtime", "builtins", []),
-  ...MODULE_COMPOSITION_SUFFIXES.flatMap(pairedProducts),
+  ...PAIRED_PRODUCT_CONFIGURATIONS.flatMap(pairedProducts),
 ].sort((left, right) => compareCodePoint(left.product_id, right.product_id)));
 
 export function moduleCompositionProductRegistry() {
   return PRODUCTS;
 }
 
-function pairedProducts(suffix) {
+function pairedProducts(configuration) {
+  const { suffix, catalog_aggregations: catalogAggregations, aggregation_exports: aggregationExports } = configuration;
   const slug = suffix.replaceAll("/", "-").replaceAll("_", "-");
-  const catalogAggregations = ["array", "array/creation"].includes(suffix)
-    ? ["entries", "constants"]
-    : suffix === "constants" ? ["constants"] : ["entries"];
   return [
-    fixedProduct(`catalog-${slug}`, "catalog", `catalog/entries/${suffix}`, catalogAggregations),
+    fixedProduct(`catalog-${slug}`, "catalog", `catalog/entries/${suffix}`, catalogAggregations, aggregationExports),
     fixedProduct(`runtime-${slug}`, "runtime", `builtins/${suffix}`, []),
   ];
 }
 
-function fixedProduct(productId, crateRole, relativePath, aggregations) {
+function paired(suffix, catalogAggregations = ["entries"], aggregationExports = []) {
+  return { suffix, catalog_aggregations: catalogAggregations, aggregation_exports: aggregationExports };
+}
+
+function aggregationExport(role, module) {
+  return {
+    role, module, visibility: "super", condition: { kind: "always" }, doc_hidden: false,
+  };
+}
+
+function validatePairedConfigurations(values) {
+  const suffixes = values.map((entry) => entry.suffix);
+  if (new Set(suffixes).size !== suffixes.length
+    || JSON.stringify(suffixes) !== JSON.stringify([...suffixes].sort(compareCodePoint))) {
+    throw new Error("module composition paired-product suffixes must be unique and canonical");
+  }
+  for (const entry of values) {
+    if (!/^[a-z][a-z0-9_]*(?:\/[a-z][a-z0-9_]*)*$/.test(entry.suffix)) {
+      throw new Error(`invalid module composition suffix ${entry.suffix}`);
+    }
+    validateRoles(entry.catalog_aggregations, `${entry.suffix} catalog aggregations`);
+    validateRoles(entry.aggregation_exports.map((item) => item.role), `${entry.suffix} aggregation exports`);
+    for (const item of entry.aggregation_exports) {
+      if (!entry.catalog_aggregations.includes(item.role)
+        || !/^[a-z_][a-z0-9_]*$/.test(item.module)
+        || JSON.stringify(Object.keys(item)) !== JSON.stringify(["role", "module", "visibility", "condition", "doc_hidden"])
+        || item.visibility !== "super" || item.condition.kind !== "always" || item.doc_hidden !== false) {
+        throw new Error(`${entry.suffix} has an invalid aggregation export`);
+      }
+    }
+  }
+  return values;
+}
+
+function validateRoles(values, label) {
+  const expected = ["entries", "aliases", "constants"].filter((role) => values.includes(role));
+  if (JSON.stringify(values) !== JSON.stringify(expected)) throw new Error(`${label} must be unique and canonical`);
+}
+
+function fixedProduct(productId, crateRole, relativePath, aggregations, aggregationExports = []) {
   const crate = crateRole === "catalog" ? "runmat-builtins" : "runmat-runtime";
   return {
     product_id: productId,
@@ -82,5 +123,6 @@ function fixedProduct(productId, crateRole, relativePath, aggregations) {
     path: `crates/${crate}/src/${relativePath}/mod.rs`,
     module_path: `crate::${relativePath.replaceAll("/", "::")}`,
     aggregations,
+    aggregation_exports: aggregationExports,
   };
 }

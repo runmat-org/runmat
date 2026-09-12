@@ -20,10 +20,10 @@ pub(super) fn extend_entries(entries: &mut Vec<&'static crate::BuiltinCatalogEnt
             accumulation::ENTRIES,
             binning::ENTRIES,
             combinatorics::ENTRIES,
-            creation::ENTRIES,
-            grouping::ENTRIES,
         ],
     );
+    creation::extend_entries(entries);
+    super::extend_groups(entries, &[grouping::ENTRIES]);
     super::extend_groups(entries, introspection::ENTRY_GROUPS);
 }
 

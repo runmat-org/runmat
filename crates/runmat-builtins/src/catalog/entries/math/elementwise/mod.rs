@@ -49,23 +49,23 @@ pub use typecast::{
     TYPECAST_INTEGER_CAPABILITIES,
 };
 
-pub(super) const ENTRY_GROUPS: &[&[&crate::BuiltinCatalogEntry]] = &[
-    binary_arithmetic::ENTRIES,
-    bsxfun::ENTRIES,
-    complex_components::ENTRIES,
-    complex_construction::ENTRIES,
-    error_functions::ENTRIES,
-    exponentials::ENTRIES,
-    floating_conversions::ENTRIES,
-    gamma_functions::ENTRIES,
-    heaviside::ENTRIES,
-    hypot::ENTRIES,
-    logarithms::ENTRIES,
-    magnitude_phase_sign::ENTRIES,
-    numeric_conversions::ENTRIES,
-    numeric_limits::ENTRIES,
-    powers_of_two::ENTRIES,
-    roots::ENTRIES,
-    rescale::ENTRIES,
-    typecast::ENTRIES,
-];
+pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
+    values.extend(binary_arithmetic::ENTRIES.iter().copied());
+    values.extend(bsxfun::ENTRIES.iter().copied());
+    values.extend(complex_components::ENTRIES.iter().copied());
+    values.extend(complex_construction::ENTRIES.iter().copied());
+    values.extend(error_functions::ENTRIES.iter().copied());
+    values.extend(exponentials::ENTRIES.iter().copied());
+    values.extend(floating_conversions::ENTRIES.iter().copied());
+    values.extend(gamma_functions::ENTRIES.iter().copied());
+    values.extend(heaviside::ENTRIES.iter().copied());
+    values.extend(hypot::ENTRIES.iter().copied());
+    values.extend(logarithms::ENTRIES.iter().copied());
+    values.extend(magnitude_phase_sign::ENTRIES.iter().copied());
+    values.extend(numeric_conversions::ENTRIES.iter().copied());
+    values.extend(numeric_limits::ENTRIES.iter().copied());
+    values.extend(powers_of_two::ENTRIES.iter().copied());
+    values.extend(roots::ENTRIES.iter().copied());
+    values.extend(rescale::ENTRIES.iter().copied());
+    values.extend(typecast::ENTRIES.iter().copied());
+}

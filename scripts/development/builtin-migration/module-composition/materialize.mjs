@@ -1,0 +1,95 @@
+import { compareCodePoint } from "../constants.mjs";
+import { deepImmutable } from "../immutable.mjs";
+import { assertActiveLease } from "../lease.mjs";
+import { validateReviewedModuleCompositionAuthority } from "./authority.mjs";
+import {
+  assertEffectiveChildStatesUnchanged, inspectEffectiveChildStates,
+} from "./child-state.mjs";
+import { deriveModuleCompositionMaterializationState } from "./effective-state.mjs";
+import { inspectCanonicalMaterializationTargets } from "./prior-state.mjs";
+import { inspectMaterializationTargets } from "./repository-state.mjs";
+import { renewCompositionRepositoryLock } from "./transaction-lock.mjs";
+import { installCompositionSet, renderCompositionSetTwice, withCompositionTransaction } from "./transaction.mjs";
+
+export function materializeEffectiveModuleComposition({
+  repository, control, queueState, queueCheckpoint, lease, clock = Date.now,
+}, options = {}) {
+  const state = deriveModuleCompositionMaterializationState({
+    control, queueState, queueCheckpoint, lease, clock,
+  });
+  if (state === null) throw new Error("operational module composition requires a reviewed projection");
+  validateReviewedModuleCompositionAuthority(control.integrationProducts, state.prior);
+  validateReviewedModuleCompositionAuthority(control.integrationProducts, state.effective);
+  const active = assertActiveLease(lease, control, clock);
+  const productIds = selectedProductIds(control, active.bundle);
+  const effectiveById = new Map(state.effective.products
+    .map((product) => [product.product_id, product]));
+  const priorById = new Map(state.prior.products
+    .map((product) => [product.product_id, product]));
+  const products = productIds.map((id) => {
+    const product = effectiveById.get(id);
+    if (!product) throw new Error(`${id}: active integration product is absent from effective composition`);
+    return product;
+  });
+  const priorProducts = productIds.map((id) => {
+    const product = priorById.get(id);
+    if (!product) throw new Error(`${id}: integration product is absent from prior composition`);
+    return product;
+  });
+  const authorizedPresent = new Set(state.priorPresentProductIds);
+  return withCompositionTransaction(repository, (lock, recovery) => {
+    const priorPresent = priorProducts.filter((product) => authorizedPresent.has(product.product_id));
+    const priorRendered = renderCompositionSetTwice(priorPresent);
+    renewCompositionRepositoryLock(lock);
+    const priorContents = new Map(priorRendered
+      .map((entry) => [entry.product.product_id, entry.content]));
+    const proveAuthority = (expectedChildStates = null) => {
+      const observed = deriveModuleCompositionMaterializationState({
+        control, queueState, queueCheckpoint, lease, clock,
+      });
+      if (JSON.stringify(observed) !== JSON.stringify(state)) {
+        throw new Error("operational module composition authority changed during materialization");
+      }
+      validateReviewedModuleCompositionAuthority(control.integrationProducts, observed.prior);
+      validateReviewedModuleCompositionAuthority(control.integrationProducts, observed.effective);
+      const inventory = inspectCanonicalMaterializationTargets(
+        lock.repository, priorProducts,
+        priorPresent.map((product) => product.product_id), priorContents,
+      );
+      inspectMaterializationTargets(lock.repository, products);
+      const childStates = inspectEffectiveChildStates(lock.repository, products);
+      if (expectedChildStates !== null) {
+        assertEffectiveChildStatesUnchanged(expectedChildStates, childStates);
+      }
+      return deepImmutable({ inventory, childStates });
+    };
+    const initialAuthority = proveAuthority();
+    renewCompositionRepositoryLock(lock);
+    const { inventory } = initialAuthority;
+    options.afterAudit?.({ inventory, lock });
+    const affected = products.filter((product) => product.children.length
+      || authorizedPresent.has(product.product_id));
+    const rendered = renderCompositionSetTwice(affected, options.render);
+    renewCompositionRepositoryLock(lock);
+    const affectedIds = new Set(affected.map((product) => product.product_id));
+    const before = inventory.filter((entry) => affectedIds.has(entry.product_id));
+    const transaction = installCompositionSet(
+      lock.repository, rendered, before, lock, options.installHooks,
+      () => { proveAuthority(initialAuthority.childStates); },
+    );
+    return { product_ids: productIds, inventory, installed: transaction.installed, transaction: { recovery, cleanup: transaction.cleanup, cleanup_errors: transaction.cleanup_errors } };
+  });
+}
+
+function selectedProductIds(control, bundle) {
+  const ids = new Set([...control.integrationProducts.values()]
+    .filter((product) => product.verification.kind === "rust_module_composition"
+      && product.lifecycle.kind === "reviewed-baseline-only")
+    .map((product) => product.product_id));
+  for (const output of bundle.integration_outputs) {
+    const product = control.integrationProducts.get(output.product_id);
+    if (!product) throw new Error(`${bundle.id}: active bundle references unknown integration product ${output.product_id}`);
+    if (product.verification.kind === "rust_module_composition") ids.add(product.product_id);
+  }
+  return [...ids].sort(compareCodePoint);
+}

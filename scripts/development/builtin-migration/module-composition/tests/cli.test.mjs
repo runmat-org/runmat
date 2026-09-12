@@ -10,6 +10,9 @@ import { verifyModuleCompositionProduct } from "../verify.mjs";
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../..");
 const cli = path.join(repository, "scripts/development/generate-builtin-module-composition.mjs");
+const scaffold = path.join(repository, "scripts/development/scaffold-builtin-module-composition-baseline.mjs");
+const freeze = path.join(repository, "scripts/development/freeze-builtin-module-composition-baseline.mjs");
+const bootstrap = path.join(repository, "scripts/development/bootstrap-builtin-module-composition.mjs");
 
 test("composition CLI writes the exact typed parent atomically", () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "runmat-module-composition-cli-"));
@@ -29,6 +32,18 @@ test("composition CLI writes the exact typed parent atomically", () => {
   }
 });
 
+test("baseline CLIs expose the three-stage reviewed authority chain", () => {
+  for (const command of [scaffold, freeze, bootstrap]) {
+    const completed = spawnSync(process.execPath, [command, "--help"], { cwd: repository, encoding: "utf8" });
+    assert.equal(completed.status, 0, completed.stderr);
+  }
+  const rawProjection = spawnSync(process.execPath, [bootstrap, "--projection", "projection.json"], {
+    cwd: repository, encoding: "utf8",
+  });
+  assert.equal(rawProjection.status, 2);
+  assert.match(rawProjection.stderr, /unknown option --projection/);
+});
+
 function catalogProduct() {
   return {
     product_id: "catalog-math",
@@ -36,6 +51,7 @@ function catalogProduct() {
     path: "crates/runmat-builtins/src/catalog/entries/math/mod.rs",
     module_path: "crate::catalog::entries::math",
     aggregations: ["entries"],
+    aggregation_exports: [],
     children: [{
       module: "arithmetic",
       source_kind: "directory",
@@ -43,9 +59,10 @@ function catalogProduct() {
       role: "group",
       visibility: "private",
       declaration_condition: { kind: "always" },
+      declaration_order: 0,
       macro_use: false,
       reexports: [{ kind: "glob", visibility: "public", condition: { kind: "always" }, doc_hidden: false }],
-      aggregation_sources: [{ role: "entries", kind: "slice", order: 0 }],
+      aggregation_sources: [{ role: "entries", kind: "slice", order: 0, condition: { kind: "always" } }],
     }],
   };
 }

@@ -62,7 +62,7 @@ export function composeControlCandidate({ inventory: inventoryValue, topology, s
     identity_controls: identityControls,
     integration_products: structuredClone(reviewSet.globalReview.value.integration_products),
     module_composition_baseline: structuredClone(
-      reviewSet.globalReview.value.module_composition_baseline,
+      reviewSet.globalReview.moduleCompositionBaseline,
     ),
     migration_findings: structuredClone(reviewSet.globalReview.value.migration_findings),
     exception_manifest: structuredClone(reviewSet.globalReview.value.exception_manifest),

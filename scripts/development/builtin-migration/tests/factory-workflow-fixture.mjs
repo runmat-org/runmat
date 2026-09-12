@@ -15,7 +15,8 @@ import { composeTopologyCandidate } from "../topology/compose.mjs";
 import { candidateInputDigests, freezeReviewedTopology, parseReviewedTopology, reviewedTopologyView } from "../topology/freeze.mjs";
 import { fullTopologyChainFixture } from "../topology/tests/full-chain-fixture.mjs";
 import {
-  fixtureModuleCompositionBaseline, fixtureModuleCompositionProducts, fixtureTargetPolicy,
+  fixtureModuleCompositionBaseline, fixtureModuleCompositionProducts,
+  fixtureReviewedModuleCompositionBaseline, fixtureTargetPolicy,
 } from "./helpers.mjs";
 import { createTemporaryDirectory } from "./temporary-directories.mjs";
 
@@ -288,8 +289,11 @@ function writeFullControlReviewSet(directory, inventory, topology, scaffold, pol
     program,
     review: reviewed("full-chain executable review"),
   }]));
+  const reviewedCompositionBaseline = fixtureReviewedModuleCompositionBaseline(
+    policies.module_composition_baseline,
+  );
   const globalPayload = {
-    schema_version: 3,
+    schema_version: 4,
     kind: "runmat-builtin-migration-global-control-review",
     authority: "reviewer-authored-development-input",
     program: "RM-1064/C00-C07",
@@ -297,10 +301,11 @@ function writeFullControlReviewSet(directory, inventory, topology, scaffold, pol
       scaffold_digest: scaffold.digest,
       topology_digest: topology.digest,
       migration_finding_rows_digest: evidenceDigest(scaffold.migration_finding_rows),
+      module_composition_reviewed_baseline_digest: reviewedCompositionBaseline.digest,
     },
     program_profiles: programProfiles,
     integration_products: policies.integration_products,
-    module_composition_baseline: policies.module_composition_baseline,
+    module_composition_baseline: reviewedCompositionBaseline,
     migration_findings: policies.migration_findings,
     exception_manifest: policies.exception_manifest,
     target_policy: policies.target_policy,

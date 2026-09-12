@@ -15,7 +15,7 @@ export function applyModuleCompositionTransitions(baselineValue, transitionValue
     applyTransition(products, transition);
   }
   return parseModuleCompositionProjection({
-    schema_version: 3,
+    schema_version: 4,
     kind: "runmat-builtin-module-composition-projection",
     products: [...products.values()].sort((left, right) => compareCodePoint(left.product_id, right.product_id)),
   });
@@ -27,7 +27,7 @@ export function parseModuleCompositionTransition(value, projectionValue) {
 }
 
 function parseTransition(value, products) {
-  kind(value, 3, "runmat-builtin-module-composition-transition", "module composition transition");
+  kind(value, 4, "runmat-builtin-module-composition-transition", "module composition transition");
   exact(value, ["schema_version", "kind", "transition_id", "changes"], "module composition transition");
   const transitionId = stableId(value.transition_id, "module composition transition id");
   const changes = array(value.changes, `${transitionId} composition changes`).map((entry) => parseChange(entry, products, transitionId));
@@ -45,7 +45,9 @@ function parseChange(value, products, transitionId) {
   const operation = enumValue(value.operation, ["add", "remove", "replace"], `${transitionId} operation`);
   const context = {
     productId, crateRole: product.crate_role, productPath: product.path,
-    modulePath: product.module_path, aggregations: product.aggregations,
+    modulePath: product.module_path,
+    aggregations: product.aggregations.filter((role) =>
+      !product.aggregation_exports.some((entry) => entry.role === role)),
   };
   const before = value.before === null ? null : parseCompositionChild(value.before, context);
   const after = value.after === null ? null : parseCompositionChild(value.after, context);

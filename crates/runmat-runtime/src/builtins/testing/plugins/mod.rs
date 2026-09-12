@@ -1,0 +1,7 @@
+mod code_coverage_plugin;
+mod test_runner_plugin;
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) use code_coverage_plugin::__runmat_wasm_register_builtin_code_coverage_plugin_for_folder;
+#[cfg(target_arch = "wasm32")]
+pub(crate) use test_runner_plugin::__runmat_wasm_register_builtin_test_runner_plugin;
