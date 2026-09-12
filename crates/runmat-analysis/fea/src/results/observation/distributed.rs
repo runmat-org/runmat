@@ -31,7 +31,8 @@ use super::{
         extrema_values, partition_selected_entities, selected_or_extrema_payload, spatial_extrema,
     },
     topology::StructuralObservationTopology,
-    ObservationEntity, ObservationError, ObservationEventAttribution, ObservationExecutionPolicy,
+    ObservationAccelerationEvidence, ObservationAccelerationEvidenceIdentity, ObservationEntity,
+    ObservationError, ObservationEventAttribution, ObservationExecutionPolicy,
     ObservationPartition, ObservationPartitionIdentity, ObservationPartitionPlan,
     ObservationPartitionPlanIdentity, ObservationPartitionTarget, ObservationResult,
     ObservationResultIdentity, ResolvedObservation, ResolvedObservationPlan,
@@ -94,6 +95,7 @@ pub struct ObservationPartitionEvidence {
     pub event_attribution: Option<ObservationEventAttribution>,
     pub source_partitions: Vec<RecoveredFieldPartitionIdentity>,
     pub contributions: Vec<ObservationPartitionContributionIdentity>,
+    pub accelerations: Vec<ObservationAccelerationEvidenceIdentity>,
     pub combination: ObservationPartitionCombination,
 }
 
@@ -108,6 +110,18 @@ struct ObservationPartitionEvidenceWire {
     event_attribution: Option<ObservationEventAttribution>,
     source_partitions: Vec<RecoveredFieldPartitionIdentity>,
     contributions: Vec<ObservationPartitionContributionIdentity>,
+    accelerations: Vec<ObservationAccelerationEvidenceIdentity>,
+    combination: ObservationPartitionCombination,
+}
+
+struct ObservationPartitionEvidenceInput {
+    partition_plan: ObservationPartitionPlanIdentity,
+    source_field: RecoveredFieldIdentity,
+    sample: RecoveredFieldSample,
+    event_attribution: Option<ObservationEventAttribution>,
+    source_partitions: Vec<RecoveredFieldPartitionIdentity>,
+    contributions: Vec<ObservationPartitionContributionIdentity>,
+    accelerations: Vec<ObservationAccelerationEvidenceIdentity>,
     combination: ObservationPartitionCombination,
 }
 
@@ -124,6 +138,7 @@ impl TryFrom<ObservationPartitionEvidenceWire> for ObservationPartitionEvidence 
             event_attribution: wire.event_attribution,
             source_partitions: wire.source_partitions,
             contributions: wire.contributions,
+            accelerations: wire.accelerations,
             combination: wire.combination,
         };
         evidence.validate()?;
@@ -132,25 +147,18 @@ impl TryFrom<ObservationPartitionEvidenceWire> for ObservationPartitionEvidence 
 }
 
 impl ObservationPartitionEvidence {
-    fn new(
-        partition_plan: ObservationPartitionPlanIdentity,
-        source_field: RecoveredFieldIdentity,
-        sample: RecoveredFieldSample,
-        event_attribution: Option<ObservationEventAttribution>,
-        source_partitions: Vec<RecoveredFieldPartitionIdentity>,
-        contributions: Vec<ObservationPartitionContributionIdentity>,
-        combination: ObservationPartitionCombination,
-    ) -> Result<Self, ObservationError> {
+    fn new(input: ObservationPartitionEvidenceInput) -> Result<Self, ObservationError> {
         let mut evidence = Self {
             schema_version: 1,
             identity: ObservationPartitionEvidenceIdentity(Digest::sha256([])),
-            partition_plan,
-            source_field,
-            sample,
-            event_attribution,
-            source_partitions,
-            contributions,
-            combination,
+            partition_plan: input.partition_plan,
+            source_field: input.source_field,
+            sample: input.sample,
+            event_attribution: input.event_attribution,
+            source_partitions: input.source_partitions,
+            contributions: input.contributions,
+            accelerations: input.accelerations,
+            combination: input.combination,
         };
         evidence.identity = evidence.derive_identity()?;
         evidence.validate()?;
@@ -172,6 +180,13 @@ impl ObservationPartitionEvidence {
             .collect::<BTreeSet<_>>()
             .len()
             == self.contributions.len();
+        let accelerations_are_unique = self
+            .accelerations
+            .iter()
+            .copied()
+            .collect::<BTreeSet<_>>()
+            .len()
+            == self.accelerations.len();
         let combination_is_valid = match self.combination {
             ObservationPartitionCombination::CanonicalConcatenation => true,
             ObservationPartitionCombination::CanonicalCompensatedReduction { collective_count }
@@ -191,6 +206,7 @@ impl ObservationPartitionEvidence {
             || self.source_partitions.is_empty()
             || !source_partitions_are_unique
             || !contributions_are_unique
+            || !accelerations_are_unique
             || !combination_is_valid
             || self.identity != self.derive_identity()?
         {
@@ -213,6 +229,7 @@ impl ObservationPartitionEvidence {
                 self.event_attribution,
                 &self.source_partitions,
                 &self.contributions,
+                &self.accelerations,
                 self.combination,
             ),
             OBSERVATION_LIMITS,
@@ -236,6 +253,7 @@ pub struct ObservationPartitionContribution {
     pub source_entity_count: usize,
     pub sample: RecoveredFieldSample,
     pub event_attribution: Option<ObservationEventAttribution>,
+    pub acceleration: Option<ObservationAccelerationEvidence>,
     pub payload: ObservationPartitionPayload,
 }
 
@@ -254,6 +272,7 @@ struct ObservationPartitionContributionWire {
     source_entity_count: usize,
     sample: RecoveredFieldSample,
     event_attribution: Option<ObservationEventAttribution>,
+    acceleration: Option<ObservationAccelerationEvidence>,
     payload: ObservationPartitionPayload,
 }
 
@@ -274,6 +293,7 @@ impl TryFrom<ObservationPartitionContributionWire> for ObservationPartitionContr
             source_entity_count: wire.source_entity_count,
             sample: wire.sample,
             event_attribution: wire.event_attribution,
+            acceleration: wire.acceleration,
             payload: wire.payload,
         };
         contribution.validate()?;
@@ -282,6 +302,39 @@ impl TryFrom<ObservationPartitionContributionWire> for ObservationPartitionContr
 }
 
 impl ObservationPartitionContribution {
+    pub(super) fn new(
+        partition_plan: &ObservationPartitionPlan,
+        partition: &ObservationPartition,
+        field: &RecoveredFieldPartitionSet,
+        event_attribution: Option<ObservationEventAttribution>,
+        acceleration: Option<ObservationAccelerationEvidence>,
+        payload: ObservationPartitionPayload,
+    ) -> Result<Self, ObservationError> {
+        let mut contribution = Self {
+            schema_version: 1,
+            identity: ObservationPartitionContributionIdentity(Digest::sha256([])),
+            partition_plan: partition_plan.identity,
+            partition: partition.identity,
+            partition_ordinal: partition.ordinal,
+            observation_id: partition_plan.observation_id.clone(),
+            source_field_definition: field.definition.identity(),
+            source_field: field.source_field,
+            source_partitions: field
+                .partitions
+                .iter()
+                .map(|partition| partition.identity)
+                .collect(),
+            source_entity_count: field.source_indices().count(),
+            sample: field.sample,
+            event_attribution,
+            acceleration,
+            payload,
+        };
+        contribution.identity = contribution.derive_identity()?;
+        contribution.validate()?;
+        Ok(contribution)
+    }
+
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, ObservationError> {
         self.validate()?;
         Ok(encode_contract(
@@ -331,6 +384,17 @@ impl ObservationPartitionContribution {
                 return Err(ObservationError::Invalid(
                     "observation partition contribution event differs from its source sample"
                         .into(),
+                ));
+            }
+        }
+        if let Some(acceleration) = &self.acceleration {
+            acceleration.validate()?;
+            if !matches!(
+                self.payload,
+                ObservationPartitionPayload::ExtremaCandidates { .. }
+            ) {
+                return Err(ObservationError::Invalid(
+                    "accelerated observation contribution must contain extrema candidates".into(),
                 ));
             }
         }
@@ -575,14 +639,13 @@ fn prepare_observation_field_partition(
     })
 }
 
-fn evaluate_observation_partition_with_attribution(
-    plan: &ResolvedObservationPlan,
+pub(super) fn validate_observation_partition_input<'a>(
+    plan: &'a ResolvedObservationPlan,
     partition_plan: &ObservationPartitionPlan,
     partition: &ObservationPartition,
     field: &RecoveredFieldPartitionSet,
-    topology: &StructuralObservationTopology,
     event_attribution: Option<ObservationEventAttribution>,
-) -> Result<ObservationPartitionContribution, ObservationError> {
+) -> Result<&'a ResolvedObservation, ObservationError> {
     partition_plan.validate_for(plan)?;
     let expected_partition = partition_plan
         .partitions
@@ -625,7 +688,16 @@ fn evaluate_observation_partition_with_attribution(
             "observation partition source sample differs from its resolved schedule".into(),
         ));
     }
-    let payload = match &partition.target {
+    Ok(observation)
+}
+
+fn observation_partition_payload(
+    observation: &ResolvedObservation,
+    partition: &ObservationPartition,
+    field: &RecoveredFieldPartitionSet,
+    topology: &StructuralObservationTopology,
+) -> Result<ObservationPartitionPayload, ObservationError> {
+    Ok(match &partition.target {
         ObservationPartitionTarget::Nodes {
             indices,
             identities,
@@ -691,29 +763,33 @@ fn evaluate_observation_partition_with_attribution(
                     ))?,
             )?
         }
-    };
-    let mut contribution = ObservationPartitionContribution {
-        schema_version: 1,
-        identity: ObservationPartitionContributionIdentity(Digest::sha256([])),
-        partition_plan: partition_plan.identity,
-        partition: partition.identity,
-        partition_ordinal: partition.ordinal,
-        observation_id: partition_plan.observation_id.clone(),
-        source_field_definition: field.definition.identity(),
-        source_field: field.source_field,
-        source_partitions: field
-            .partitions
-            .iter()
-            .map(|partition| partition.identity)
-            .collect(),
-        source_entity_count: field.source_indices().count(),
-        sample: field.sample,
+    })
+}
+
+fn evaluate_observation_partition_with_attribution(
+    plan: &ResolvedObservationPlan,
+    partition_plan: &ObservationPartitionPlan,
+    partition: &ObservationPartition,
+    field: &RecoveredFieldPartitionSet,
+    topology: &StructuralObservationTopology,
+    event_attribution: Option<ObservationEventAttribution>,
+) -> Result<ObservationPartitionContribution, ObservationError> {
+    let observation = validate_observation_partition_input(
+        plan,
+        partition_plan,
+        partition,
+        field,
         event_attribution,
+    )?;
+    let payload = observation_partition_payload(observation, partition, field, topology)?;
+    ObservationPartitionContribution::new(
+        partition_plan,
+        partition,
+        field,
+        event_attribution,
+        None,
         payload,
-    };
-    contribution.identity = contribution.derive_identity()?;
-    contribution.validate()?;
-    Ok(contribution)
+    )
 }
 
 pub(crate) fn combine_observation_partitions(
@@ -770,6 +846,15 @@ pub(crate) fn combine_observation_partitions(
     let contribution_identities = contributions
         .iter()
         .map(|contribution| contribution.identity)
+        .collect::<Vec<_>>();
+    let acceleration_identities = contributions
+        .iter()
+        .filter_map(|contribution| {
+            contribution
+                .acceleration
+                .as_ref()
+                .map(|evidence| evidence.identity)
+        })
         .collect::<Vec<_>>();
     let combination = match &contributions[0].payload {
         ObservationPartitionPayload::SelectedValues { .. } => {
@@ -901,15 +986,17 @@ pub(crate) fn combine_observation_partitions(
         &value_shape,
         observation.spec.complex_representation,
     )?;
-    let partition_evidence = ObservationPartitionEvidence::new(
-        partition_plan.identity,
-        first_source,
-        first_sample,
-        first_event_attribution,
-        source_partitions,
-        contribution_identities,
-        combination,
-    )?;
+    let partition_evidence =
+        ObservationPartitionEvidence::new(ObservationPartitionEvidenceInput {
+            partition_plan: partition_plan.identity,
+            source_field: first_source,
+            sample: first_sample,
+            event_attribution: first_event_attribution,
+            source_partitions,
+            contributions: contribution_identities,
+            accelerations: acceleration_identities,
+            combination,
+        })?;
     let mut result = ObservationResult {
         schema_version: 1,
         logical_identity: ObservationResultIdentity(Digest::sha256([])),

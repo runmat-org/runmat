@@ -4,6 +4,7 @@
 //! typed field declarations and admitted topology, evaluates the resulting immutable plan, and
 //! publishes canonical observation objects.
 
+mod acceleration;
 mod contract;
 mod distributed;
 mod distributed_numeric;
@@ -57,6 +58,10 @@ pub use resolve::{resolve_observation_plan, resolve_structural_observation_plan}
 pub(crate) use topology::StructuralObservationTopology;
 
 #[cfg(test)]
+mod acceleration_tests;
+#[cfg(test)]
 mod partition_tests;
 #[cfg(test)]
 mod tests;
+pub use acceleration::evaluate_structural_observation_partition_accelerated;
+pub use acceleration::{ObservationAccelerationEvidence, ObservationAccelerationEvidenceIdentity};

@@ -1,10 +1,11 @@
+#[cfg(feature = "wgpu")]
+use runmat_accelerate_api::GOVERNED_DENSE_REDUCTION_OPERATION;
 use runmat_accelerate_api::{
     AccelProvider, ProviderCapabilityOperation, ProviderCapabilitySnapshot,
     ProviderConcurrencyCapabilities, ProviderElementType, ProviderFeasibility,
     ProviderFeasibilityQuery, ProviderLayout, ProviderOperationFamily, ProviderOperationIdentity,
     ProviderPrecision, ProviderRejectionCode, ProviderRepresentation, ProviderResidency,
-    ProviderResourceEstimate, ProviderStorage, GOVERNED_DENSE_REDUCTION_OPERATION,
-    PROVIDER_CAPABILITY_SCHEMA_VERSION,
+    ProviderResourceEstimate, ProviderStorage, PROVIDER_CAPABILITY_SCHEMA_VERSION,
 };
 use runmat_value::{NumericDType, Value};
 

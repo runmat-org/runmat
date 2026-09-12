@@ -40,7 +40,7 @@ fn definition() -> RecoveredFieldDefinition {
     .unwrap()
 }
 
-fn spec(id: &str, target: ObservationTarget) -> ObservationSpec {
+pub(super) fn spec(id: &str, target: ObservationTarget) -> ObservationSpec {
     ObservationSpec {
         observation_id: ObservationId(id.into()),
         quantity: ObservationQuantity::Temperature,
@@ -72,7 +72,7 @@ fn spec(id: &str, target: ObservationTarget) -> ObservationSpec {
     }
 }
 
-fn prepared(
+pub(super) fn prepared(
     request: ObservationRequest,
 ) -> (
     AnalysisProjection,

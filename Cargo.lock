@@ -6352,6 +6352,7 @@ dependencies = [
 name = "runmat-analysis-fea"
 version = "0.6.2"
 dependencies = [
+ "anyhow",
  "futures",
  "runmat-accelerate-api",
  "runmat-analysis-core",
