@@ -5,8 +5,12 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { auditMigration, parseBatch } from "../audit.mjs";
-import { MATURITY_GATES, parseControlManifest } from "../control.mjs";
+import { MATURITY_GATES, parseControlManifest, validateControlManifestStructure } from "../control.mjs";
 import { buildControlDraft, freezeReviewedControl, parseControlDraft } from "../control-draft.mjs";
+import { validateControlReviewChain } from "../control-authoring/authority.mjs";
+import { composeControlCandidate, controlCandidateInputDigests } from "../control-authoring/compose.mjs";
+import { loadControlReviewSet } from "../control-authoring/review-set.mjs";
+import { buildControlOverlayScaffold } from "../control-authoring/scaffold.mjs";
 import { dispositionInputFromControl, validateDispositionInput } from "../dispositions.mjs";
 import { compileDispositionReview, parseDispositionReview } from "../disposition-review.mjs";
 import { contentDigest, evidenceDigest } from "../evidence.mjs";
@@ -22,7 +26,7 @@ import { buildQueue } from "../queue.mjs";
 import { sourceSnapshot } from "../snapshot.mjs";
 import { parseCompletedSourceDisposition, sourceFieldBaselineDigest, sourceFieldBaselineSource } from "../source-fields.mjs";
 import { composeTopologyCandidate } from "../topology/compose.mjs";
-import { candidateInputDigests, freezeReviewedTopology } from "../topology/freeze.mjs";
+import { candidateInputDigests, freezeReviewedTopology, parseReviewedTopology, reviewedTopologyView } from "../topology/freeze.mjs";
 import { fullTopologyChainFixture } from "../topology/tests/full-chain-fixture.mjs";
 import { cleanupRepositoryFixtures, compiledInventoryFixture, controlledFixture, gate, repositoryFixture, REVISION, topologyFixture } from "./helpers.mjs";
 
@@ -178,14 +182,14 @@ test("control is closed, reviewed, reciprocal, and rejects case-fold ambiguity",
   assert.throws(() => parseFixtureControl(fixture, domain), /fields must be exactly/);
   const disposition = structuredClone(fixture.controlValue); disposition.identity_controls.foo.disposition = { kind: "internal" };
   assert.throws(() => parseFixtureControl(fixture, disposition), /fields must be exactly/);
-  const unsafeStorage = structuredClone(fixture.controlValue); unsafeStorage.storage_policy.volume_roles.target_temp.filesystem_id = unsafeStorage.storage_policy.volume_roles.source_worktree.filesystem_id;
+  const unsafeStorage = structuredClone(fixture.controlValue); unsafeStorage.storage_policy.host_profiles["fixture-host"].volume_roles.target_temp.filesystem_id = unsafeStorage.storage_policy.host_profiles["fixture-host"].volume_roles.source_worktree.filesystem_id;
   assert.throws(() => parseFixtureControl(fixture, unsafeStorage), /disjoint filesystem/);
   const noncanonicalScope = structuredClone(fixture.controlValue); noncanonicalScope.bundle_controls[fixture.bundleId].additional_authored_write_set[0].path = "crates/runmat-builtins/./src";
   assert.throws(() => parseFixtureControl(fixture, noncanonicalScope), /normalized safe repository-relative path/);
   const removal = structuredClone(fixture.controlValue); removal.identity_controls.foo.expected_removals = [{ kind: "file", path: "docs/builtins/reference/foo.json", baseline_digest: `sha256:${"a".repeat(64)}` }];
   assert.throws(() => parseFixtureControl(fixture, removal), /lacks matching baseline/);
   const incompleteInventory = structuredClone(fixture.inventory); incompleteInventory.identities.push({ identity: "bar" }); resealEvidence(incompleteInventory);
-  assert.throws(() => parseFixtureControl(fixture, fixture.controlValue, incompleteInventory), /inventory digest|exactly cover/);
+  assert.throws(() => parseFixtureControl(fixture, fixture.controlValue, incompleteInventory), /inventory digest|exactly cover|projection baseline/);
   assert.throws(() => parseFixtureControl(fixture, fixture.controlValue, fixture.inventory, { ...fixture.topology }), /deterministically validated topology view/);
   assert.throws(() => fixture.topology.bundles.set("forged", {}), /immutable/);
   assert.throws(() => fixture.control.bundles.get(fixture.bundleId).gate_plans.set("forged", {}), /immutable/);
@@ -317,17 +321,26 @@ test("control draft rejects inferred facts, omissions, tampering, and review cla
 
 test("reviewed control freeze binds the exact draft and baseline inventory", () => {
   const fixture = controlledFixture();
-  const draft = buildControlDraft(fixture.inventory);
-  const reviewed = structuredClone(fixture.controlValue);
-  const topology = topologyFixture(fixture.inventory, fixture.bundleId, fixture.id, { controlDraftDigest: draft.digest });
-  reviewed.topology_digest = topology.digest;
-  resealEvidence(reviewed);
-  assert.equal(freezeReviewedControl(draft, reviewed, fixture.inventory, topology).topology_digest, topology.digest);
+  assert.equal(
+    freezeReviewedControl(
+      fixture.draft,
+      fixture.inventory,
+      fixture.topology,
+      fixture.reviewedControl,
+    ).topology_digest,
+    fixture.topology.digest,
+  );
   const staleTopology = topologyFixture(fixture.inventory, fixture.bundleId, fixture.id, { controlDraftDigest: `sha256:${"0".repeat(64)}` });
-  assert.throws(() => freezeReviewedControl(draft, reviewed, fixture.inventory, staleTopology), /does not bind the exact/);
-  const mutatedDraft = structuredClone(draft); mutatedDraft.identity_rows[0].compiled_authority_digest = `sha256:${"1".repeat(64)}`;
+  assert.throws(
+    () => freezeReviewedControl(fixture.draft, fixture.inventory, staleTopology, fixture.reviewedControl),
+    /does not bind the exact/,
+  );
+  const mutatedDraft = structuredClone(fixture.draft); mutatedDraft.identity_rows[0].compiled_authority_digest = `sha256:${"1".repeat(64)}`;
   const { digest: _old, ...payload } = mutatedDraft; mutatedDraft.digest = evidenceDigest(payload);
-  assert.throws(() => freezeReviewedControl(mutatedDraft, reviewed, fixture.inventory, topology), /differ from the inventory/);
+  assert.throws(
+    () => freezeReviewedControl(mutatedDraft, fixture.inventory, fixture.topology, fixture.reviewedControl),
+    /differ from the inventory/,
+  );
 });
 
 test("expected file removals are bound to exact baseline bytes without a second source-item authority", () => {
@@ -612,10 +625,74 @@ test("control CLI reconstructs the complete reviewed topology chain before freez
   const cli = path.resolve("scripts/development/builtin-migration-factory.mjs");
   const frozenPath = path.join(directory, "frozen-control.json");
   const leasePath = path.join(directory, "lease.json");
+  const scaffoldPath = path.join(directory, "cli-scaffold.json");
+  const candidatePath = path.join(directory, "cli-control-candidate.json");
+  const initializedReviewDirectory = path.join(directory, "cli-review-templates");
+  const authoredReviewDirectory = path.join(directory, "cli-authored-reviews");
+  const indexedReviewDirectory = path.join(directory, "cli-indexed-reviews");
+  const attestationTemplatePath = path.join(directory, "cli-control-attestation-template.json");
+  const attestationReviewPath = path.join(directory, "cli-control-attestation-review.json");
+  const attestationPath = path.join(directory, "cli-control-attestation.json");
+  const scaffold = spawnSync(process.execPath, [
+    cli, "scaffold-control", "--baseline-inventory", workflow.paths.inventory,
+    ...workflow.topologyArguments, "--output", scaffoldPath,
+  ], { encoding: "utf8" });
+  assert.equal(scaffold.status, 0, scaffold.stderr);
+  assert.deepEqual(JSON.parse(fs.readFileSync(scaffoldPath)), workflow.values.scaffold);
+  const initialize = spawnSync(process.execPath, [
+    cli, "init-control-reviews", "--baseline-inventory", workflow.paths.inventory,
+    ...workflow.topologyArguments, "--control-scaffold", scaffoldPath,
+    "--review-directory", initializedReviewDirectory,
+  ], { encoding: "utf8" });
+  assert.equal(initialize.status, 0, initialize.stderr);
+  assert.equal(JSON.parse(initialize.stdout).bundle_templates, 7);
+  copyReviewSetAsAuthoringFiles(workflow.paths.controlReviewSet, authoredReviewDirectory);
+  const index = spawnSync(process.execPath, [
+    cli, "index-control-reviews", "--baseline-inventory", workflow.paths.inventory,
+    ...workflow.topologyArguments, "--control-scaffold", scaffoldPath,
+    "--review-directory", authoredReviewDirectory,
+    "--review-set-directory", indexedReviewDirectory,
+  ], { encoding: "utf8" });
+  assert.equal(index.status, 0, index.stderr);
+  const indexedManifest = JSON.parse(index.stdout).manifest;
+  const compose = spawnSync(process.execPath, [
+    cli, "compose-control", "--baseline-inventory", workflow.paths.inventory,
+    ...workflow.topologyArguments,
+    "--control-scaffold", scaffoldPath,
+    "--control-review-set", indexedManifest,
+    "--output", candidatePath,
+  ], { encoding: "utf8" });
+  assert.equal(compose.status, 0, compose.stderr);
+  assert.deepEqual(JSON.parse(fs.readFileSync(candidatePath)), workflow.values.controlCandidate);
+  const attestationTemplate = spawnSync(process.execPath, [
+    cli, "scaffold-control-attestation", "--baseline-inventory", workflow.paths.inventory,
+    ...workflow.topologyArguments,
+    "--control-scaffold", scaffoldPath, "--control-review-set", indexedManifest,
+    "--control-candidate", candidatePath, "--output", attestationTemplatePath,
+  ], { encoding: "utf8" });
+  assert.equal(attestationTemplate.status, 0, attestationTemplate.stderr);
+  const attestationReview = JSON.parse(fs.readFileSync(attestationTemplatePath));
+  attestationReview.review = reviewed("full-chain control attestation");
+  fs.writeFileSync(attestationReviewPath, `${JSON.stringify(attestationReview, null, 2)}\n`);
+  const sealAttestation = spawnSync(process.execPath, [
+    cli, "seal-control-attestation", "--baseline-inventory", workflow.paths.inventory,
+    ...workflow.topologyArguments,
+    "--control-scaffold", scaffoldPath, "--control-review-set", indexedManifest,
+    "--control-candidate", candidatePath, "--attestation-review", attestationReviewPath,
+    "--output", attestationPath,
+  ], { encoding: "utf8" });
+  assert.equal(sealAttestation.status, 0, sealAttestation.stderr);
+  assert.deepEqual(JSON.parse(fs.readFileSync(attestationPath)), workflow.values.controlAttestation);
+  const controlArguments = [
+    "--control-scaffold", scaffoldPath,
+    "--control-review-set", indexedManifest,
+    "--control-candidate", candidatePath,
+    "--control-attestation", attestationPath,
+  ];
   const freeze = spawnSync(process.execPath, [
-    cli, "freeze-control", "--control", workflow.paths.control,
+    cli, "freeze-control",
     "--baseline-inventory", workflow.paths.inventory,
-    ...workflow.topologyArguments, "--output", frozenPath,
+    ...workflow.topologyArguments, ...controlArguments, "--output", frozenPath,
   ], { encoding: "utf8" });
   assert.equal(freeze.status, 0, freeze.stderr);
   assert.deepEqual(JSON.parse(fs.readFileSync(frozenPath)), workflow.control);
@@ -623,7 +700,7 @@ test("control CLI reconstructs the complete reviewed topology chain before freez
   const validate = spawnSync(process.execPath, [
     cli, "validate-control", "--control", frozenPath,
     "--baseline-inventory", workflow.paths.inventory,
-    ...workflow.topologyArguments,
+    ...workflow.topologyArguments, ...controlArguments,
   ], { encoding: "utf8" });
   assert.equal(validate.status, 0, validate.stderr);
   assert.deepEqual(JSON.parse(validate.stdout), workflow.control);
@@ -631,7 +708,7 @@ test("control CLI reconstructs the complete reviewed topology chain before freez
   const issue = spawnSync(process.execPath, [
     cli, "issue-lease", "--request", workflow.paths.leaseRequest,
     "--control", frozenPath, "--baseline-inventory", workflow.paths.inventory,
-    ...workflow.topologyArguments, "--output", leasePath,
+    ...workflow.topologyArguments, ...controlArguments, "--output", leasePath,
   ], { encoding: "utf8" });
   assert.equal(issue.status, 0, issue.stderr);
   const lease = JSON.parse(fs.readFileSync(leasePath));
@@ -643,12 +720,16 @@ test("control CLI reconstructs the complete reviewed topology chain before freez
     ["candidate", (value) => { value.identities.alpha.family = "tampered"; resealEvidence(value); }],
     ["attestation", (value) => { value.review.evidence = ["tampered attestation"]; }],
     ["c01C03Review", (value) => { value.review.evidence = ["tampered cohort review"]; }],
+    ["scaffold", (value) => { value.identity_rows[0].review.status = "reviewed"; resealEvidence(value); }],
+    ["controlCandidate", (value) => { value.identity_controls.alpha.owner = "tampered"; resealEvidence(value); }],
+    ["controlAttestation", (value) => { value.candidate_digest = `sha256:${"0".repeat(64)}`; resealEvidence(value); }],
   ]) {
     const tamperedPath = path.join(directory, `tampered-${field}.json`);
     const tampered = structuredClone(workflow.values[field]);
     mutate(tampered);
     fs.writeFileSync(tamperedPath, JSON.stringify(tampered));
-    const arguments_ = workflow.topologyArguments.map((entry) => entry === workflow.paths[field] ? tamperedPath : entry);
+    const arguments_ = [...workflow.topologyArguments, ...workflow.controlArguments]
+      .map((entry) => entry === workflow.paths[field] ? tamperedPath : entry);
     const rejected = spawnSync(process.execPath, [
       cli, "validate-control", "--control", frozenPath,
       "--baseline-inventory", workflow.paths.inventory, ...arguments_,
@@ -657,13 +738,34 @@ test("control CLI reconstructs the complete reviewed topology chain before freez
   }
 });
 
-test("gate evidence rejects stale storage, filesystem identity, and forged process status", () => {
+test("gate evidence selects a reviewed host storage profile and rejects stale or mismatched observations", () => {
   const fixture = controlledFixture();
-  const expected = { source_revision: fixture.inventory.source.revision, source_digest: fixture.inventory.source.digest, baseline_source_revision: fixture.inventory.source.revision, baseline_inventory_digest: fixture.inventory.digest, subject_inventory_digest: fixture.inventory.digest, control_manifest_digest: fixture.control.digest, bundle_id: fixture.bundleId, storage_policy: fixture.control.value.storage_policy };
+  const expected = { source_revision: fixture.inventory.source.revision, source_digest: fixture.inventory.source.digest, baseline_source_revision: fixture.inventory.source.revision, baseline_inventory_digest: fixture.inventory.digest, subject_inventory_digest: fixture.inventory.digest, control_manifest_digest: fixture.control.digest, bundle_id: fixture.bundleId, storage_policy: fixture.control.value.storage_policy, compiled_build: fixture.inventory.compiled_inventory.build };
   const stale = gate(fixture, "architecture"); stale.storage_admission.observed_at = "2026-09-10T23:00:00.000Z";
   assert.throws(() => parseGateResult(stale, expected), /time bound/);
   const filesystem = gate(fixture, "architecture"); filesystem.storage_admission.volumes[0].filesystem_id = "posix-dev:3";
   assert.throws(() => parseGateResult(filesystem, expected), /differs from reviewed/);
+  const foreignPolicy = structuredClone(fixture.control.value.storage_policy);
+  foreignPolicy.host_profiles["linux-host"] = {
+    operating_system: "linux", architecture: "x86_64", execution_host: "linux-builder",
+    volume_roles: structuredClone(foreignPolicy.host_profiles["fixture-host"].volume_roles),
+  };
+  const foreign = gate(fixture, "architecture");
+  foreign.storage_admission.profile_id = "linux-host";
+  foreign.storage_admission.execution_host = "linux-builder";
+  assert.throws(() => parseGateResult(foreign, { ...expected, storage_policy: foreignPolicy }), /differs from the subject build target/);
+  const samePlatformPolicy = structuredClone(fixture.control.value.storage_policy);
+  samePlatformPolicy.host_profiles["other-macos-host"] = {
+    operating_system: fixture.inventory.compiled_inventory.build.operating_system,
+    architecture: fixture.inventory.compiled_inventory.build.architecture,
+    execution_host: "other-macos-builder",
+    volume_roles: structuredClone(samePlatformPolicy.host_profiles["fixture-host"].volume_roles),
+  };
+  const wrongHost = gate(fixture, "architecture"); wrongHost.storage_admission.profile_id = "other-macos-host";
+  assert.throws(
+    () => parseGateResult(wrongHost, { ...expected, storage_policy: samePlatformPolicy }),
+    /execution host differs from reviewed profile/,
+  );
   const forged = gate(fixture, "architecture"); forged.producer_evidence.process.exit_code = 1;
   assert.throws(() => parseGateResult(forged, expected), /conflicts|inconsistent/);
   const artifactExpected = { ...expected, gate_plans: fixture.control.bundles.get(fixture.bundleId).gate_plans, compiled_build: fixture.inventory.compiled_inventory.build, repository: fixture.repository };
@@ -873,7 +975,45 @@ function writeFullControlWorkflow(directory) {
     review: reviewed("full-chain fixture attestation"),
   };
   const topology = freezeReviewedTopology(candidate, attestation, candidate);
-  const control = fullChainControl(input.baselineInventory, topology);
+  const topologyView = reviewedTopologyView(parseReviewedTopology(topology, candidate, attestation, candidate));
+  const scaffold = buildControlOverlayScaffold(input.baselineInventory, input.controlDraft, topologyView);
+  const policies = fullChainControl(input.baselineInventory, topology);
+  const controlReviewSet = writeFullControlReviewSet(
+    directory,
+    input.baselineInventory,
+    topologyView,
+    scaffold,
+    policies,
+  );
+  const reviewSet = loadControlReviewSet(controlReviewSet, {
+    scaffold,
+    topology: topologyView,
+    inventory: input.baselineInventory,
+  });
+  const controlCandidate = composeControlCandidate({
+    inventory: input.baselineInventory,
+    topology: topologyView,
+    scaffold,
+    reviewSet,
+  });
+  const controlAttestationPayload = {
+    schema_version: 1,
+    kind: "runmat-builtin-migration-control-attestation",
+    authority: "reviewer-authored-development-input",
+    program: "RM-1064/C00-C07",
+    candidate_digest: controlCandidate.digest,
+    input_digests: controlCandidateInputDigests(controlCandidate),
+    review: reviewed("full-chain control attestation"),
+  };
+  const controlAttestation = {
+    ...controlAttestationPayload,
+    digest: evidenceDigest(controlAttestationPayload),
+  };
+  const control = validateControlReviewChain(
+    controlCandidate,
+    controlAttestation,
+    controlCandidate,
+  ).controlValue;
   const bundleId = Object.keys(topology.bundles).sort()[0];
   const leaseRequest = {
     schema_version: 1,
@@ -899,6 +1039,9 @@ function writeFullControlWorkflow(directory) {
     candidate,
     attestation,
     topology,
+    scaffold,
+    controlCandidate,
+    controlAttestation,
     control,
     leaseRequest,
   };
@@ -919,7 +1062,13 @@ function writeFullControlWorkflow(directory) {
     "--reconciliation", paths.reconciliation,
     "--stability-corrections", paths.stabilityCorrections,
   ];
-  return { values, paths, topologyArguments, control, bundleId };
+  const controlArguments = [
+    "--control-scaffold", paths.scaffold,
+    "--control-review-set", controlReviewSet,
+    "--control-candidate", paths.controlCandidate,
+    "--control-attestation", paths.controlAttestation,
+  ];
+  return { values, paths: { ...paths, controlReviewSet }, topologyArguments, controlArguments, control, bundleId };
 }
 
 function fullChainControl(inventory, topology) {
@@ -994,16 +1143,128 @@ function fullChainControl(inventory, topology) {
     },
     exception_manifest: { entries: [], review },
     storage_policy: {
-      volume_roles: {
-        source_worktree: { role: "source-worktree", mount_path: "/source", filesystem_id: "posix-dev:1", minimum_free_bytes: 1, pause_below_bytes: 2, maximum_observation_age_seconds: 60 },
-        target_temp: { role: "target-temp", mount_path: "/target", filesystem_id: "posix-dev:2", minimum_free_bytes: 1, pause_below_bytes: 2, maximum_observation_age_seconds: 60 },
-      },
+      host_profiles: { "fixture-host": {
+        operating_system: inventory.compiled_inventory.build.operating_system,
+        architecture: inventory.compiled_inventory.build.architecture,
+        execution_host: os.hostname(),
+        volume_roles: {
+          source_worktree: { role: "source-worktree", mount_path: "/source", filesystem_id: "posix-dev:1", minimum_free_bytes: 1, pause_below_bytes: 2, maximum_observation_age_seconds: 60 },
+          target_temp: { role: "target-temp", mount_path: "/target", filesystem_id: "posix-dev:2", minimum_free_bytes: 1, pause_below_bytes: 2, maximum_observation_age_seconds: 60 },
+        },
+      } },
       targets_must_be_disjoint: true,
       occt_default: "disabled-unless-affected",
     },
     review,
   };
   return { ...payload, digest: evidenceDigest(payload) };
+}
+
+function writeFullControlReviewSet(directory, inventory, topology, scaffold, policies) {
+  const root = path.join(directory, "control-review-set");
+  fs.mkdirSync(path.join(root, "bundles"), { recursive: true });
+  const programs = new Map();
+  for (const control of Object.values(policies.bundle_controls)) {
+    for (const plan of control.gate_plans) programs.set(JSON.stringify(plan.program), plan.program);
+  }
+  const orderedPrograms = [...programs.entries()].sort(([left], [right]) => left.localeCompare(right));
+  const profileIds = new Map(orderedPrograms.map(([key], index) => [key, `program-${index + 1}`]));
+  const programProfiles = Object.fromEntries(orderedPrograms.map(([, program], index) => [`program-${index + 1}`, {
+    program,
+    review: reviewed("full-chain executable review"),
+  }]));
+  const globalPayload = {
+    schema_version: 1,
+    kind: "runmat-builtin-migration-global-control-review",
+    authority: "reviewer-authored-development-input",
+    program: "RM-1064/C00-C07",
+    bindings: {
+      scaffold_digest: scaffold.digest,
+      topology_digest: topology.digest,
+      migration_finding_rows_digest: evidenceDigest(scaffold.migration_finding_rows),
+    },
+    program_profiles: programProfiles,
+    migration_findings: policies.migration_findings,
+    exception_manifest: policies.exception_manifest,
+    storage_policy: policies.storage_policy,
+    review: reviewed("full-chain global control review"),
+  };
+  const global = { ...globalPayload, digest: evidenceDigest(globalPayload) };
+  const globalBytes = Buffer.from(`${JSON.stringify(global, null, 2)}\n`);
+  fs.writeFileSync(path.join(root, "global.json"), globalBytes);
+
+  const references = [];
+  for (const bundleId of Object.keys(policies.bundle_controls).sort()) {
+    const topologyBundle = topology.bundles.get(bundleId);
+    const scaffoldBundle = scaffold.bundle_rows.find((row) => row.bundle_id === bundleId);
+    const control = policies.bundle_controls[bundleId];
+    const bundleControl = {
+      ...structuredClone(control),
+      gate_plans: control.gate_plans.map(({ program, ...plan }) => ({
+        gate: plan.gate,
+        program_profile_id: profileIds.get(JSON.stringify(program)),
+        arguments: [...plan.arguments],
+        working_directory: plan.working_directory,
+        parser: plan.parser,
+        expected_artifact_roles: [...plan.expected_artifact_roles],
+      })),
+    };
+    const identityRows = topologyBundle.identities.map((identity) => ({
+      identity,
+      scaffold_identity_row_digest: evidenceDigest(scaffold.identity_rows.find((row) => row.identity === identity)),
+      topology_identity_digest: evidenceDigest(topology.identities.get(identity)),
+    }));
+    const bundlePayload = {
+      schema_version: 1,
+      kind: "runmat-builtin-migration-bundle-control-review",
+      authority: "reviewer-authored-development-input",
+      program: "RM-1064/C00-C07",
+      bindings: {
+        scaffold_digest: scaffold.digest,
+        topology_digest: topology.digest,
+        bundle_id: bundleId,
+        scaffold_bundle_row_digest: evidenceDigest(scaffoldBundle),
+        topology_bundle_row_digest: evidenceDigest(topologyBundle),
+        identity_rows: identityRows,
+      },
+      bundle_control: bundleControl,
+      identity_controls: Object.fromEntries(topologyBundle.identities.map((identity) => [identity, policies.identity_controls[identity]])),
+      review: reviewed("full-chain bundle control review"),
+    };
+    const bundle = { ...bundlePayload, digest: evidenceDigest(bundlePayload) };
+    const relative = `bundles/${bundleId}.json`;
+    const bytes = Buffer.from(`${JSON.stringify(bundle, null, 2)}\n`);
+    fs.writeFileSync(path.join(root, relative), bytes);
+    references.push({ bundle_id: bundleId, path: relative, content_digest: contentDigest(bytes) });
+  }
+  const manifestPayload = {
+    schema_version: 1,
+    kind: "runmat-builtin-migration-control-review-set",
+    authority: "content-addressed-review-index-only",
+    program: "RM-1064/C00-C07",
+    bindings: {
+      scaffold_digest: scaffold.digest,
+      topology_digest: topology.digest,
+      inventory_digest: inventory.digest,
+    },
+    global_review: { path: "global.json", content_digest: contentDigest(globalBytes) },
+    bundle_reviews: references,
+  };
+  const manifest = { ...manifestPayload, digest: evidenceDigest(manifestPayload) };
+  const manifestPath = path.join(root, "review-set.json");
+  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  return manifestPath;
+}
+
+function copyReviewSetAsAuthoringFiles(manifestPath, target) {
+  const root = path.dirname(manifestPath);
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  fs.mkdirSync(path.join(target, "bundles"), { recursive: true });
+  for (const relative of [manifest.global_review.path, ...manifest.bundle_reviews.map((entry) => entry.path)]) {
+    const value = JSON.parse(fs.readFileSync(path.join(root, relative), "utf8"));
+    delete value.digest;
+    fs.writeFileSync(path.join(target, relative), `${JSON.stringify(value, null, 2)}\n`);
+  }
 }
 
 function fixtureGatePlan(gate, parser, expectedArtifactRoles, sourceDigest, approvedExecutables) {
@@ -1027,7 +1288,15 @@ function reviewed(evidence) {
 }
 
 function parseFixtureControl(fixture, value = fixture.controlValue, inventory = fixture.inventory, topology = fixture.topology) {
-  return parseControlManifest(value, { inventory, reviewedTopology: topology });
+  const candidate = structuredClone(value);
+  if (topology !== fixture.topology) {
+    candidate.topology_digest = topology.digest;
+    candidate.inputs.baseline_inventory_digest = topology.baseline.inventory_digest;
+    candidate.inputs.control_draft_digest = topology.baseline.control_draft_digest;
+    candidate.inputs.reviewed_topology_digest = topology.digest;
+    resealEvidence(candidate);
+  }
+  return validateControlManifestStructure(candidate, { inventory, reviewedTopology: topology });
 }
 
 function resealEvidence(value) {

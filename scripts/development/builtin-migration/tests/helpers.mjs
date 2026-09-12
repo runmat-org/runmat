@@ -3,6 +3,11 @@ import { execFileSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { MATURITY_GATES, parseControlManifest } from "../control.mjs";
+import { buildControlDraft } from "../control-draft.mjs";
+import { validateControlReviewChain } from "../control-authoring/authority.mjs";
+import { composeControlCandidate, controlCandidateInputDigests } from "../control-authoring/compose.mjs";
+import { loadControlReviewSet } from "../control-authoring/review-set.mjs";
+import { buildControlOverlayScaffold } from "../control-authoring/scaffold.mjs";
 import { contentDigest, evidenceDigest } from "../evidence.mjs";
 import { buildInventory } from "../inventory.mjs";
 import { issueLease, parseLease } from "../lease.mjs";
@@ -84,27 +89,124 @@ export function controlledFixture(options = {}) {
   const maturity = Object.fromEntries(MATURITY_GATES.map((gate) => [gate, gate === "identity" || gate === "disposition" || gate === "catalog-contract" || gate === "runtime-binding" || gate === "documentation"
     ? { applicability: "required", reason: null, evidence: [] }
     : { applicability: "not-applicable", reason: "Reviewed as outside this fixture's behavior", evidence: ["fixture review"] }]));
-  const topology = topologyFixture(inventory, bundleId, id);
-  const controlPayload = {
-    schema_version: 2, kind: "runmat-builtin-migration-control-manifest", authority: "reviewed-development-control", program: "RM-1064/C00-C07", topology_digest: topology.digest,
-    baseline_context: { source_digest: inventory.source.digest, dispositions_digest: inventory.dispositions_digest, migration_findings_digest: inventory.migration_findings_digest, compiled_target: { operating_system: inventory.compiled_inventory.build.operating_system, architecture: inventory.compiled_inventory.build.architecture } },
-    cohorts: ["prerequisite", "A", "B", "C", "D", "E", "F", "G"].map((semantic, order) => ({ id: `C0${order}`, semantic, order })),
-    bundle_controls: { [bundleId]: { prerequisites: [], additional_authored_write_set: [{ kind: "tree", path: "crates/runmat-builtins/src/catalog/entries/math/basic/foo" }, { kind: "file", path: "crates/runmat-runtime/src/builtins/math/basic/foo.rs" }], integration_outputs: [{ product_id: "wasm-registry", path: "crates/runmat-runtime/src/builtins/generated_wasm_registry.rs", producer: "integration" }], gate_plans: fixtureGatePlans(inventory), owner_role: "builtin-migrator", complexity: { class: "low", weight: 1, basis: ["single identity"] }, review: { status: "reviewed", evidence: ["fixture review"] } } },
-    identity_controls: { [id]: { public_spelling: id, runtime_owner: `crates/runmat-runtime/src/builtins/math/basic/${id}.rs`, shared_dependencies: [], complexity: { class: "low", weight: 1, basis: ["single identity"] }, maturity, expected_authorities: { catalog_package: `crates/runmat-builtins/src/catalog/entries/math/basic/${id}/mod.rs`, catalog_entry_count: 1, catalog_constant_count: 0, documentation: "catalog", runtime_bindings: [{ path: `crates/runmat-runtime/src/builtins/math/basic/${id}.rs`, function: `${id}_builtin`, variant: "default" }], runtime_constants: [], native_link: "not-applicable", wasm_registry: "not-applicable" }, expected_removals: [], baseline_evidence: [], owner: "fixture", review: { status: "reviewed", evidence: ["fixture review"] } } },
-    migration_findings: { schema_version: 1, kind: "runmat-builtin-migration-finding-dispositions", rows: inventory.migration_findings.map((finding) => ({ finding_digest: evidenceDigest(finding), ...finding, disposition: "bundle-work", bundle_id: bundleId, reason: "Fixture migration work", evidence: ["fixture review"] })), review: { status: "reviewed", evidence: ["fixture review"] } },
-    exception_manifest: { entries: [], review: { status: "reviewed", evidence: ["fixture review"] } },
-    storage_policy: { volume_roles: {
-      source_worktree: { role: "source-worktree", mount_path: "/System/Volumes/Data", filesystem_id: "posix-dev:1", minimum_free_bytes: 1, pause_below_bytes: 2, maximum_observation_age_seconds: 60 },
-      target_temp: { role: "target-temp", mount_path: "/private/tmp/runmat-integration-tmp", filesystem_id: "posix-dev:2", minimum_free_bytes: 1, pause_below_bytes: 2, maximum_observation_age_seconds: 60 },
-    }, targets_must_be_disjoint: true, occt_default: "disabled-unless-affected" },
-    review: { status: "reviewed", evidence: ["fixture review"] },
-  };
-  const controlValue = { ...controlPayload, digest: evidenceDigest(controlPayload) };
-  const control = parseControlManifest(controlValue, { inventory, reviewedTopology: topology });
+  const draft = buildControlDraft(inventory);
+  const topology = topologyFixture(inventory, bundleId, id, { controlDraftDigest: draft.digest });
+  const bundleControl = { prerequisites: [], additional_authored_write_set: [{ kind: "tree", path: "crates/runmat-builtins/src/catalog/entries/math/basic/foo" }, { kind: "file", path: "crates/runmat-runtime/src/builtins/math/basic/foo.rs" }], integration_outputs: [{ product_id: "wasm-registry", path: "crates/runmat-runtime/src/builtins/generated_wasm_registry.rs", producer: "integration" }], gate_plans: fixtureGatePlans(inventory), owner_role: "builtin-migrator", complexity: { class: "low", weight: 1, basis: ["single identity"] }, review: { status: "reviewed", evidence: ["fixture review"] } };
+  const identityControl = { public_spelling: id, runtime_owner: `crates/runmat-runtime/src/builtins/math/basic/${id}.rs`, shared_dependencies: [], complexity: { class: "low", weight: 1, basis: ["single identity"] }, maturity, expected_authorities: { catalog_package: `crates/runmat-builtins/src/catalog/entries/math/basic/${id}/mod.rs`, catalog_entry_count: 1, catalog_constant_count: 0, documentation: "catalog", runtime_bindings: [{ path: `crates/runmat-runtime/src/builtins/math/basic/${id}.rs`, function: `${id}_builtin`, variant: "default" }], runtime_constants: [], native_link: "not-applicable", wasm_registry: "not-applicable" }, expected_removals: [], baseline_evidence: [], owner: "fixture", review: { status: "reviewed", evidence: ["fixture review"] } };
+  const migrationFindings = { schema_version: 1, kind: "runmat-builtin-migration-finding-dispositions", rows: inventory.migration_findings.map((finding) => ({ finding_digest: evidenceDigest(finding), ...finding, disposition: "bundle-work", bundle_id: bundleId, reason: "Fixture migration work", evidence: ["fixture review"] })), review: { status: "reviewed", evidence: ["fixture review"] } };
+  const exceptionManifest = { entries: [], review: { status: "reviewed", evidence: ["fixture review"] } };
+  const storagePolicy = { host_profiles: { "fixture-host": {
+      operating_system: inventory.compiled_inventory.build.operating_system,
+      architecture: inventory.compiled_inventory.build.architecture,
+      execution_host: os.hostname(),
+      volume_roles: {
+        source_worktree: { role: "source-worktree", mount_path: "/System/Volumes/Data", filesystem_id: "posix-dev:1", minimum_free_bytes: 1, pause_below_bytes: 2, maximum_observation_age_seconds: 60 },
+        target_temp: { role: "target-temp", mount_path: "/private/tmp/runmat-integration-tmp", filesystem_id: "posix-dev:2", minimum_free_bytes: 1, pause_below_bytes: 2, maximum_observation_age_seconds: 60 },
+      },
+    } }, targets_must_be_disjoint: true, occt_default: "disabled-unless-affected" };
+  const scaffold = buildControlOverlayScaffold(inventory, draft, topology);
+  const { reviewSet, manifestPath: controlReviewSetPath } = fixtureControlReviewSet(repository, inventory, topology, scaffold, bundleId, bundleControl, id, identityControl, migrationFindings, exceptionManifest, storagePolicy);
+  const candidate = composeControlCandidate({ inventory, topology, scaffold, reviewSet });
+  const attestationPayload = { schema_version: 1, kind: "runmat-builtin-migration-control-attestation", authority: "reviewer-authored-development-input", program: "RM-1064/C00-C07", candidate_digest: candidate.digest, input_digests: controlCandidateInputDigests(candidate), review: { status: "reviewed", evidence: ["fixture independent review"] } };
+  const attestation = { ...attestationPayload, digest: evidenceDigest(attestationPayload) };
+  const reviewedControl = validateControlReviewChain(candidate, attestation, candidate);
+  const controlValue = reviewedControl.controlValue;
+  const control = parseControlManifest(controlValue, { inventory, reviewedTopology: topology, reviewedControl });
   const leaseRequest = { schema_version: 1, kind: "runmat-builtin-migration-lease-request", authority: "reviewed-development-request", control_manifest_digest: control.digest, bundle_id: bundleId, lease_id: "lease-foo", owner: "fixture", issued_at: "2026-01-01T00:00:00.000Z", expires_at: "2027-01-01T00:00:00.000Z", review: { status: "reviewed", evidence: ["fixture review"] } };
   const leaseValue = issueLease(leaseRequest, control);
   const lease = parseLease(leaseValue, control);
-  return { repository, inventory, compiledInventory, controlValue, control, topology, leaseValue, lease, id, bundleId };
+  return { repository, inventory, compiledInventory, controlValue, control, topology, draft, scaffold, reviewSet, controlReviewSetPath, candidate, attestation, reviewedControl, leaseValue, lease, id, bundleId };
+}
+
+function fixtureControlReviewSet(repository, inventory, topology, scaffold, bundleId, bundleControl, id, identityControl, migrationFindings, exceptionManifest, storagePolicy) {
+  const root = path.join(path.dirname(repository), "control-review");
+  fs.mkdirSync(path.join(root, "bundles"), { recursive: true });
+  const programs = new Map();
+  for (const plan of bundleControl.gate_plans) programs.set(JSON.stringify(plan.program), plan.program);
+  const orderedPrograms = [...programs.entries()].sort(([left], [right]) => left.localeCompare(right));
+  const profileByProgram = new Map(orderedPrograms.map(([key], index) => [key, `program-${index + 1}`]));
+  const programProfiles = Object.fromEntries(orderedPrograms.map(([key, program], index) => [`program-${index + 1}`, {
+    program,
+    review: { status: "reviewed", evidence: ["fixture executable review"] },
+  }]));
+  const globalPayload = {
+    schema_version: 1,
+    kind: "runmat-builtin-migration-global-control-review",
+    authority: "reviewer-authored-development-input",
+    program: "RM-1064/C00-C07",
+    bindings: {
+      scaffold_digest: scaffold.digest,
+      topology_digest: topology.digest,
+      migration_finding_rows_digest: evidenceDigest(scaffold.migration_finding_rows),
+    },
+    program_profiles: programProfiles,
+    migration_findings: migrationFindings,
+    exception_manifest: exceptionManifest,
+    storage_policy: storagePolicy,
+    review: { status: "reviewed", evidence: ["fixture global review"] },
+  };
+  const globalValue = { ...globalPayload, digest: evidenceDigest(globalPayload) };
+  const globalBytes = writeEvidenceJson(path.join(root, "global.json"), globalValue);
+
+  const scaffoldBundle = scaffold.bundle_rows.find((entry) => entry.bundle_id === bundleId);
+  const scaffoldIdentity = scaffold.identity_rows.find((entry) => entry.identity === id);
+  const bundleReviewControl = {
+    ...structuredClone(bundleControl),
+    gate_plans: bundleControl.gate_plans.map(({ program, ...plan }) => ({
+      gate: plan.gate,
+      program_profile_id: profileByProgram.get(JSON.stringify(program)),
+      arguments: [...plan.arguments],
+      working_directory: plan.working_directory,
+      parser: plan.parser,
+      expected_artifact_roles: [...plan.expected_artifact_roles],
+    })),
+  };
+  const bundlePayload = {
+    schema_version: 1,
+    kind: "runmat-builtin-migration-bundle-control-review",
+    authority: "reviewer-authored-development-input",
+    program: "RM-1064/C00-C07",
+    bindings: {
+      scaffold_digest: scaffold.digest,
+      topology_digest: topology.digest,
+      bundle_id: bundleId,
+      scaffold_bundle_row_digest: evidenceDigest(scaffoldBundle),
+      topology_bundle_row_digest: evidenceDigest(topology.bundles.get(bundleId)),
+      identity_rows: [{
+        identity: id,
+        scaffold_identity_row_digest: evidenceDigest(scaffoldIdentity),
+        topology_identity_digest: evidenceDigest(topology.identities.get(id)),
+      }],
+    },
+    bundle_control: bundleReviewControl,
+    identity_controls: { [id]: identityControl },
+    review: { status: "reviewed", evidence: ["fixture bundle review"] },
+  };
+  const bundleValue = { ...bundlePayload, digest: evidenceDigest(bundlePayload) };
+  const bundlePath = `bundles/${bundleId}.json`;
+  const bundleBytes = writeEvidenceJson(path.join(root, bundlePath), bundleValue);
+  const manifestPayload = {
+    schema_version: 1,
+    kind: "runmat-builtin-migration-control-review-set",
+    authority: "content-addressed-review-index-only",
+    program: "RM-1064/C00-C07",
+    bindings: { scaffold_digest: scaffold.digest, topology_digest: topology.digest, inventory_digest: inventory.digest },
+    global_review: { path: "global.json", content_digest: contentDigest(globalBytes) },
+    bundle_reviews: [{ bundle_id: bundleId, path: bundlePath, content_digest: contentDigest(bundleBytes) }],
+  };
+  const manifestValue = { ...manifestPayload, digest: evidenceDigest(manifestPayload) };
+  const manifestPath = path.join(root, "review-set.json");
+  writeEvidenceJson(manifestPath, manifestValue);
+  return {
+    reviewSet: loadControlReviewSet(manifestPath, { scaffold, topology, inventory }),
+    manifestPath,
+  };
+}
+
+function writeEvidenceJson(target, value) {
+  const bytes = Buffer.from(`${JSON.stringify(value, null, 2)}\n`);
+  fs.writeFileSync(target, bytes);
+  return bytes;
 }
 
 export function topologyFixture(inventory, bundleId, id, options = {}) {
@@ -238,7 +340,7 @@ export function gate(fixture, name, artifactId = `gate-${name}`, subject = fixtu
     source_digest: subject.source.digest, baseline_inventory_digest: fixture.inventory.digest, subject_inventory_digest: subject.digest,
     control_manifest_digest: fixture.control.digest, bundle_id: fixture.bundleId, identities: [fixture.id],
     gate: name, result: "pass", checks: [{ id: `${name}:${fixture.id}`, result: "pass", evidence_digest: `sha256:${"a".repeat(64)}` }], artifacts,
-    storage_admission: { observed_at: "2026-09-11T00:00:00.000Z", volumes: [
+    storage_admission: { profile_id: "fixture-host", execution_host: os.hostname(), observed_at: "2026-09-11T00:00:00.000Z", volumes: [
       { role: "source-worktree", evidence_path: "/System/Volumes/Data", filesystem_id: "posix-dev:1", available_bytes: 10, minimum_free_bytes: 1, pause_below_bytes: 2, status: "admitted" },
       { role: "target-temp", evidence_path: "/private/tmp/runmat-integration-tmp", filesystem_id: "posix-dev:2", available_bytes: 10, minimum_free_bytes: 1, pause_below_bytes: 2, status: "admitted" },
     ] },

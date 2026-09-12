@@ -1,5 +1,6 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -79,7 +80,7 @@ export function runGateProducer(input) {
     baseline_inventory_digest: baseline.digest, subject_inventory_digest: subject.digest,
     control_manifest_digest: control.digest,
     bundle_id: bundle.id, identities, gate: input.gate, result, checks, artifacts,
-    storage_admission: observeStorage(control.value.storage_policy),
+    storage_admission: observeStorage(control.value.storage_policy, subject.compiled_inventory.build),
   }, expected);
 }
 
@@ -265,16 +266,21 @@ function resolveExecutable(name) {
   return execFileSync("/usr/bin/which", [name], { encoding: "utf8" }).trim();
 }
 
-function observeStorage(policy) {
+function observeStorage(policy, build) {
   const observedAt = new Date().toISOString();
-  const volumes = [policy.volume_roles.source_worktree, policy.volume_roles.target_temp].map((configured) => {
+  const executionHost = os.hostname();
+  const matches = Object.entries(policy.host_profiles).filter(([, profile]) => profile.operating_system === build.operating_system
+    && profile.architecture === build.architecture && profile.execution_host === executionHost);
+  if (matches.length !== 1) throw new Error(`storage policy must select exactly one profile for ${build.operating_system}/${build.architecture}/${executionHost}`);
+  const [profileId, profile] = matches[0];
+  const volumes = [profile.volume_roles.source_worktree, profile.volume_roles.target_temp].map((configured) => {
     const stats = fs.statSync(configured.mount_path, { bigint: true });
     const space = fs.statfsSync(configured.mount_path, { bigint: true });
     const filesystemId = process.platform === "win32" ? `windows-volume:${stats.dev.toString(16).padStart(8, "0")}` : `posix-dev:${stats.dev}`;
     const availableBytes = Number(space.bavail * space.bsize);
     return { role: configured.role, evidence_path: configured.mount_path, filesystem_id: filesystemId, available_bytes: availableBytes, minimum_free_bytes: configured.minimum_free_bytes, pause_below_bytes: configured.pause_below_bytes, status: availableBytes >= configured.pause_below_bytes ? "admitted" : "paused" };
   });
-  return { observed_at: observedAt, volumes };
+  return { profile_id: profileId, execution_host: executionHost, observed_at: observedAt, volumes };
 }
 
 function canonicalPotentialPath(target) {

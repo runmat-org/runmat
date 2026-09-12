@@ -61,7 +61,11 @@ node scripts/development/builtin-migration-factory.mjs draft-control \
 
 `component-graph` derives indivisible authority components from the same inventory. After reviewers complete the three exact cohort inputs, reconciliation, and stability corrections, `compose-topology` produces the deterministic candidate. `freeze-topology` accepts only an attestation bound to that candidate and every transitive input. `validate-topology` repeats the composition and requires byte-for-byte equality with the frozen result. The command's `--help` output lists the complete argument set for each stage.
 
-The topology is reviewed and frozen first. It transitively binds the draft, inventory, component graph, three cohort reviews, reconciliation, and stability corrections. Reviewers then author the control-only execution overlay with the exact topology digest and exact bundle and identity key sets. `freeze-control` deterministically reconstructs the topology from all of those inputs, verifies that topology binds the original draft, validates every reviewed control field and relationship, and only then emits the reviewed manifest. It does not promote draft observations into review decisions or accept a self-consistent but unreconstructable topology.
+The topology is reviewed and frozen first. It transitively binds the draft, inventory, component graph, three cohort reviews, reconciliation, and stability corrections. `scaffold-control` then emits the deterministic post-topology review surface. The scaffold binds every bundle and identity row to both the inventory and topology, records source evidence and target-path candidates, and leaves every execution-policy decision explicitly unresolved.
+
+Control review is split into one global review and one review file per topology bundle. Bundle reviews own the exact bundle policy and identity controls; their gate plans refer to reusable program-profile IDs. The global review owns those exact executable profiles, migration-finding dispositions, exceptions, storage policy, and global review evidence. A content-addressed review-set manifest binds the exact bytes of all review files, requires one review for every bundle, rejects symlink escapes, and requires the defined executable profiles to equal the referenced set.
+
+`compose-control` validates the complete review set and expands program profiles into a deterministic, unreviewed candidate. An independent control attestation binds that candidate and every transitive input digest. `freeze-control` reconstructs the topology, scaffold, review set, and candidate; validates the attestation; and emits the resulting control manifest. No command can promote a reviewed-looking JSON object directly. Every control-consuming command replays the same chain and requires byte-for-byte equality with the final control.
 
 The repeated topology arguments are the complete evidence chain used by every control-consuming command:
 
@@ -81,10 +85,71 @@ topology_args=(
 ```
 
 ```bash
-node scripts/development/builtin-migration-factory.mjs freeze-control \
-  --control /tmp/rm1064-reviewed-control.json \
+node scripts/development/builtin-migration-factory.mjs scaffold-control \
   --baseline-inventory /tmp/runmat-builtin-inventory.json \
   "${topology_args[@]}" \
+  --output /tmp/rm1064-control-scaffold.json
+
+node scripts/development/builtin-migration-factory.mjs init-control-reviews \
+  --baseline-inventory /tmp/runmat-builtin-inventory.json \
+  "${topology_args[@]}" \
+  --control-scaffold /tmp/rm1064-control-scaffold.json \
+  --review-directory /tmp/rm1064-control-review-drafts
+```
+
+Reviewers complete `global.json` and every file under `bundles/` in that directory. The index command validates those reviewer-authored payloads, computes their content digests, and writes a new sealed review set without modifying the authoring directory:
+
+```bash
+node scripts/development/builtin-migration-factory.mjs index-control-reviews \
+  --baseline-inventory /tmp/runmat-builtin-inventory.json \
+  "${topology_args[@]}" \
+  --control-scaffold /tmp/rm1064-control-scaffold.json \
+  --review-directory /tmp/rm1064-control-review-drafts \
+  --review-set-directory /tmp/rm1064-control-reviews
+
+node scripts/development/builtin-migration-factory.mjs compose-control \
+  --baseline-inventory /tmp/runmat-builtin-inventory.json \
+  "${topology_args[@]}" \
+  --control-scaffold /tmp/rm1064-control-scaffold.json \
+  --control-review-set /tmp/rm1064-control-reviews/review-set.json \
+  --output /tmp/rm1064-control-candidate.json
+```
+
+The independent reviewer starts from a deterministic attestation template, changes its review status and evidence, and seals that reviewed input. The sealing command validates the exact candidate and computes the envelope digest; it cannot supply the review decision.
+
+```bash
+node scripts/development/builtin-migration-factory.mjs scaffold-control-attestation \
+  --baseline-inventory /tmp/runmat-builtin-inventory.json \
+  "${topology_args[@]}" \
+  --control-scaffold /tmp/rm1064-control-scaffold.json \
+  --control-review-set /tmp/rm1064-control-reviews/review-set.json \
+  --control-candidate /tmp/rm1064-control-candidate.json \
+  --output /tmp/rm1064-control-attestation-review.json
+
+node scripts/development/builtin-migration-factory.mjs seal-control-attestation \
+  --baseline-inventory /tmp/runmat-builtin-inventory.json \
+  "${topology_args[@]}" \
+  --control-scaffold /tmp/rm1064-control-scaffold.json \
+  --control-review-set /tmp/rm1064-control-reviews/review-set.json \
+  --control-candidate /tmp/rm1064-control-candidate.json \
+  --attestation-review /tmp/rm1064-control-attestation-review.json \
+  --output /tmp/rm1064-control-attestation.json
+```
+
+The same four control-review inputs accompany freezing and every control-consuming command:
+
+```bash
+control_args=(
+  --control-scaffold /tmp/rm1064-control-scaffold.json
+  --control-review-set /tmp/rm1064-control-reviews/review-set.json
+  --control-candidate /tmp/rm1064-control-candidate.json
+  --control-attestation /tmp/rm1064-control-attestation.json
+)
+
+node scripts/development/builtin-migration-factory.mjs freeze-control \
+  --baseline-inventory /tmp/runmat-builtin-inventory.json \
+  "${topology_args[@]}" \
+  "${control_args[@]}" \
   --output /tmp/rm1064-control.json
 ```
 
@@ -92,12 +157,14 @@ node scripts/development/builtin-migration-factory.mjs freeze-control \
 node scripts/development/builtin-migration-factory.mjs validate-control \
   --control /tmp/rm1064-control.json \
   --baseline-inventory /tmp/runmat-builtin-inventory.json \
-  "${topology_args[@]}"
+  "${topology_args[@]}" \
+  "${control_args[@]}"
 node scripts/development/builtin-migration-factory.mjs queue \
   --compiled-inventory /tmp/runmat-compiled-inventory.json \
   --control /tmp/rm1064-control.json \
   --baseline-inventory /tmp/runmat-builtin-inventory.json \
   "${topology_args[@]}" \
+  "${control_args[@]}" \
   --dispositions /tmp/reviewed-dispositions.json \
   --output /tmp/runmat-builtin-queue.json
 ```
@@ -106,12 +173,12 @@ Queue v2 is derived at bundle granularity. It exposes prerequisite and migration
 
 ## Storage admission
 
-The control manifest gives storage two named roles:
+The control manifest defines reviewed host profiles. Each profile is selected by exact operating system, architecture, and execution-host identity and gives storage two named roles:
 
 - `source-worktree`, for source and worktree safety;
 - `target-temp`, for disjoint build targets and temporary products.
 
-Each role has an absolute evidence path, a POSIX device or Windows volume identity, minimum-free and pause-below watermarks, and a maximum observation age. Source and target roles must identify different filesystems, build targets must be disjoint, and OCCT remains disabled unless the affected surface requires it. Every machine gate samples both roles through the operating system and records the timestamp, path, filesystem identity, available bytes, reviewed thresholds, and derived `admitted` or `paused` status. A product gate cannot pass with stale evidence, a different filesystem, or either role below its pause watermark.
+Each role has an absolute evidence path, a POSIX device or Windows volume identity, minimum-free and pause-below watermarks, and a maximum observation age. Selectors must be unique, and every admitted machine must match exactly one profile. This lets macOS, Linux, Windows, and multiple hosts on one platform use their real paths and volume identities without weakening one another's policy. Within every profile, source and target roles must identify different filesystems; build targets remain disjoint; and OCCT remains disabled unless the affected surface requires it. Every machine gate records the selected profile and execution-host identity, timestamp, paths, filesystem identities, available bytes, reviewed thresholds, and derived `admitted` or `paused` status. A product gate cannot pass with a stale observation, the wrong build target or host profile, a different filesystem, or either role below its pause watermark.
 
 ## Leases and preparation
 
@@ -125,6 +192,7 @@ node scripts/development/builtin-migration-factory.mjs issue-lease \
   --control /tmp/rm1064-control.json \
   --baseline-inventory /tmp/runmat-builtin-inventory.json \
   "${topology_args[@]}" \
+  "${control_args[@]}" \
   --output /tmp/array-shape-lease.json
 ```
 
@@ -136,6 +204,7 @@ node scripts/development/builtin-migration-factory.mjs prepare accumarray \
   --control /tmp/rm1064-control.json \
   --baseline-inventory /tmp/runmat-builtin-inventory.json \
   "${topology_args[@]}" \
+  "${control_args[@]}" \
   --lease /tmp/array-lease.json \
   --workspace /tmp/runmat-builtin-review
 ```
@@ -174,6 +243,7 @@ node scripts/development/builtin-migration-factory.mjs produce-gate \
   --control /tmp/rm1064-control.json \
   --baseline-inventory /tmp/runmat-builtin-inventory.json \
   "${topology_args[@]}" \
+  "${control_args[@]}" \
   --bundle array-shape --gate documentation-cutover \
   --artifact array-shape-documentation \
   --inputs /tmp/array-shape-documentation-input.json \
@@ -194,6 +264,7 @@ node scripts/development/builtin-migration-factory.mjs produce-gate \
   --control /tmp/rm1064-control.json \
   --baseline-inventory /tmp/runmat-builtin-inventory.json \
   "${topology_args[@]}" \
+  "${control_args[@]}" \
   --bundle array-shape --gate architecture --artifact array-shape-architecture \
   --output /tmp/array-shape-architecture.json
 ```
@@ -216,6 +287,7 @@ node scripts/development/builtin-migration-factory.mjs audit \
   --control /tmp/rm1064-control.json \
   --baseline-inventory /tmp/runmat-builtin-inventory.json \
   "${topology_args[@]}" \
+  "${control_args[@]}" \
   --lease /tmp/array-lease.json \
   --batch /tmp/array-batch.json --evidence /tmp/array-audit-evidence.json \
   --output /tmp/array-audit.json
@@ -225,6 +297,7 @@ node scripts/development/builtin-migration-factory.mjs seal \
   --manifest /tmp/array-seal.json --control /tmp/rm1064-control.json \
   --baseline-inventory /tmp/runmat-builtin-inventory.json \
   "${topology_args[@]}" \
+  "${control_args[@]}" \
   --output /tmp/array-seal-result.json
 ```
 
