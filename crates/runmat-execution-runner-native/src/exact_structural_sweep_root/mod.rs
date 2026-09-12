@@ -11,8 +11,9 @@ pub use contract::{
 pub(crate) use publication::package_exact_structural_sweep_result;
 pub(crate) use publication::ExactStructuralSweepRemoteOutcome;
 pub use publication::{
-    import_exact_structural_sweep_result, ExactStructuralSweepEntryResult,
-    ExactStructuralSweepResult, ExactStructuralSweepResultExpectation,
+    import_exact_structural_sweep_result, import_exact_structural_sweep_result_catalog,
+    ExactStructuralSweepEntryResult, ExactStructuralSweepEntryStatus, ExactStructuralSweepResult,
+    ExactStructuralSweepResultCatalog, ExactStructuralSweepResultExpectation,
     ExactStructuralSweepTerminal,
 };
 

@@ -3,7 +3,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use runmat_analysis_execution::{
     CompletedStructuralSequence, StructuralSequencePreparation, StructuralSequenceResultClosure,
 };
-use runmat_analysis_fea::execution::{AnalysisNumericalObjectKind, StructuralLinearWorkload};
+use runmat_analysis_fea::execution::{
+    AnalysisNumericalObjectKind, StructuralLinearWorkload, StudyIdentity,
+};
 use runmat_canonical_codec::{decode_contract, encode_contract};
 use runmat_execution::value::{ValuePayload, ValueRef, ValueRefKind};
 use runmat_execution::{Digest, ProgramRevision};
@@ -185,6 +187,10 @@ pub struct ExactStructuralStudyResultExpectation {
 }
 
 impl ExactStructuralStudyResultExpectation {
+    pub fn study_identity(&self) -> NativeExecutionResult<StudyIdentity> {
+        StudyIdentity::from_authored_digest(self.authored_study_digest, None).map_err(protocol)
+    }
+
     pub fn validate(&self) -> NativeExecutionResult<()> {
         self.artifact_access.validate().map_err(protocol)?;
         runmat_analysis_execution::validate_structural_sequence_workloads(&self.workloads)

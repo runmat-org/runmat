@@ -3262,7 +3262,7 @@ mod tests {
                         )
                         .expect("study identity"),
                     ],
-                    runmat_execution::Digest::sha256(b"composition"),
+                    runmat_analysis_fea::execution::SweepCompositionPolicy::CollectAll,
                 )
                 .expect("sweep identity"),
                 study_count: 0,

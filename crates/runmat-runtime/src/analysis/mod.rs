@@ -108,7 +108,8 @@ pub use study_placement::{
     StructuralStudyPlacementResult,
 };
 pub use study_sweep::{
-    analysis_complete_study_sweep_op, analysis_study_sweep_identity, AnalysisStudySweepRunOutcome,
+    analysis_complete_study_sweep_op, analysis_study_sweep_definition,
+    analysis_study_sweep_identity, AnalysisStudySweepRunOutcome,
 };
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

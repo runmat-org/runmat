@@ -7,8 +7,8 @@ use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::archive::{write_bundle, ArchiveLimits};
 use runmat_execution_artifact::ExecutionBundleBuilder;
 use runmat_runtime::analysis::{
-    analysis_study_sweep_identity, AnalysisStudyRunData, AnalysisStudySpec, AnalysisStudySweepData,
-    AnalysisStudySweepSpec,
+    analysis_study_sweep_definition, AnalysisStudyRunData, AnalysisStudySpec,
+    AnalysisStudySweepData, AnalysisStudySweepSpec,
 };
 use runmat_runtime::operations::{OperationContext, OperationEnvelope};
 
@@ -164,8 +164,8 @@ pub(super) async fn execute_sweep(
     config: &RunMatRuntimeConfig,
     json: bool,
 ) -> Result<Option<OperationEnvelope<AnalysisStudySweepData>>> {
-    let identity =
-        analysis_study_sweep_identity(&spec, &context).map_err(super::report_operation_error)?;
+    let definition =
+        analysis_study_sweep_definition(&spec, &context).map_err(super::report_operation_error)?;
     let resolved = crate::commands::package::resolve_for_source(source, cli)
         .await?
         .context("remote FEA requires a runmat.toml project containing the sweep document")?;
@@ -247,8 +247,7 @@ pub(super) async fn execute_sweep(
         &studies,
         revision.clone(),
         "bundle-sizing-authority",
-        identity,
-        spec.fail_fast,
+        definition.clone(),
     )?;
     let mut bundle_builder =
         ExecutionBundleBuilder::native(&resolved.resolved.frozen, revision.clone())?
@@ -269,13 +268,7 @@ pub(super) async fn execute_sweep(
         revision.clone(),
         bundle_size,
         |run_id| {
-            let prepared = prepare_sweep_root(
-                &studies,
-                revision_for_scope,
-                run_id,
-                identity,
-                spec.fail_fast,
-            )?;
+            let prepared = prepare_sweep_root(&studies, revision_for_scope, run_id, definition)?;
             prepare_remote_sweep_execution(prepared, revision.clone(), bundle_archive)
         },
         RemoteSubmissionOptions {

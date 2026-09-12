@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 
-use runmat_analysis_fea::execution::{StudyIdentity, SweepIdentity};
+use runmat_analysis_fea::execution::{
+    StudyIdentity, SweepCompositionPolicy, SweepDefinition, SweepIdentity,
+};
 use runmat_execution::Digest;
 
 use crate::operations::{
@@ -185,6 +187,15 @@ pub fn analysis_study_sweep_identity(
     spec: &AnalysisStudySweepSpec,
     context: &OperationContext,
 ) -> Result<SweepIdentity, OperationErrorEnvelope> {
+    analysis_study_sweep_definition(spec, context)?
+        .identity()
+        .map_err(|error| invalid_sweep_error(context, error.to_string(), None))
+}
+
+pub fn analysis_study_sweep_definition(
+    spec: &AnalysisStudySweepSpec,
+    context: &OperationContext,
+) -> Result<SweepDefinition, OperationErrorEnvelope> {
     let mut issue_codes = Vec::new();
     if spec.sweep_id.trim().is_empty() {
         issue_codes.push("RM.FEA.STUDY_SWEEP.ID_EMPTY");
@@ -193,12 +204,26 @@ pub fn analysis_study_sweep_identity(
         issue_codes.push("RM.FEA.STUDY_SWEEP.STUDIES_EMPTY");
     }
     if issue_codes.is_empty() {
-        match sweep_identity(spec) {
-            Ok(identity) => return Ok(identity),
-            Err(_) => issue_codes.push("RM.FEA.STUDY_SWEEP.IDENTITY_INVALID"),
+        match sweep_definition(spec) {
+            Ok(definition) => return Ok(definition),
+            Err(_) => {
+                issue_codes.push("RM.FEA.STUDY_SWEEP.IDENTITY_INVALID");
+            }
         }
     }
-    Err(operation_error(
+    Err(invalid_sweep_error(
+        context,
+        "study sweep spec or outcome set is invalid",
+        Some(issue_codes),
+    ))
+}
+
+fn invalid_sweep_error(
+    context: &OperationContext,
+    message: impl Into<String>,
+    issue_codes: Option<Vec<&str>>,
+) -> OperationErrorEnvelope {
+    operation_error(
         ANALYSIS_RUN_STUDY_SWEEP_OPERATION,
         ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION,
         context,
@@ -208,9 +233,11 @@ pub fn analysis_study_sweep_identity(
             retryable: false,
             severity: OperationErrorSeverity::Error,
         },
-        "study sweep spec or outcome set is invalid",
-        BTreeMap::from([("issue_codes".to_string(), issue_codes.join(","))]),
-    ))
+        message,
+        issue_codes.map_or_else(BTreeMap::new, |codes| {
+            BTreeMap::from([("issue_codes".to_string(), codes.join(","))])
+        }),
+    )
 }
 
 fn validate_outcome_cardinality(
@@ -240,7 +267,7 @@ fn validate_outcome_cardinality(
     ))
 }
 
-fn sweep_identity(spec: &AnalysisStudySweepSpec) -> Result<SweepIdentity, String> {
+fn sweep_definition(spec: &AnalysisStudySweepSpec) -> Result<SweepDefinition, String> {
     let studies = spec
         .studies
         .iter()
@@ -256,15 +283,12 @@ fn sweep_identity(spec: &AnalysisStudySweepSpec) -> Result<SweepIdentity, String
         ]
         .concat(),
     );
-    let composition_policy_digest = Digest::sha256(
-        [
-            b"runmat-analysis-sweep-composition/v1\0".as_slice(),
-            &[u8::from(spec.fail_fast)],
-        ]
-        .concat(),
-    );
-    SweepIdentity::new(sweep_contract_digest, studies, composition_policy_digest)
-        .map_err(|error| error.to_string())
+    SweepDefinition::new(
+        sweep_contract_digest,
+        studies,
+        SweepCompositionPolicy::from_fail_fast(spec.fail_fast),
+    )
+    .map_err(|error| error.to_string())
 }
 
 fn study_failure(

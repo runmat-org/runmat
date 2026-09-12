@@ -124,15 +124,26 @@ fn generator_capture_and_realized_content_invalidate_the_realization() {
 fn sweep_identity_preserves_authored_order_and_rejects_duplicate_studies() {
     let first = StudyIdentity::from_authored_digest(digest("study-a"), None).unwrap();
     let second = StudyIdentity::from_authored_digest(digest("study-b"), None).unwrap();
-    let forward =
-        SweepIdentity::new(digest("sweep"), vec![first, second], digest("composition")).unwrap();
-    let reverse =
-        SweepIdentity::new(digest("sweep"), vec![second, first], digest("composition")).unwrap();
+    let forward = SweepIdentity::new(
+        digest("sweep"),
+        vec![first, second],
+        SweepCompositionPolicy::CollectAll,
+    )
+    .unwrap();
+    let reverse = SweepIdentity::new(
+        digest("sweep"),
+        vec![second, first],
+        SweepCompositionPolicy::CollectAll,
+    )
+    .unwrap();
 
     assert_ne!(forward, reverse);
-    assert!(
-        SweepIdentity::new(digest("sweep"), vec![first, first], digest("composition")).is_err()
-    );
+    assert!(SweepIdentity::new(
+        digest("sweep"),
+        vec![first, first],
+        SweepCompositionPolicy::CollectAll,
+    )
+    .is_err());
 }
 
 #[test]
@@ -156,7 +167,7 @@ fn sweep_results_compose_in_authored_order_not_completion_order() {
     let sweep = SweepIdentity::new(
         digest("ordered-sweep"),
         expected_studies.to_vec(),
-        digest("composition"),
+        SweepCompositionPolicy::CollectAll,
     )
     .unwrap();
     let first_entry = SweepEntryOutcome {

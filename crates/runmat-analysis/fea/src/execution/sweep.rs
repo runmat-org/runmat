@@ -7,6 +7,78 @@ use super::{
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SweepCompositionPolicy {
+    FailFast,
+    CollectAll,
+}
+
+impl SweepCompositionPolicy {
+    pub const fn from_fail_fast(fail_fast: bool) -> Self {
+        if fail_fast {
+            Self::FailFast
+        } else {
+            Self::CollectAll
+        }
+    }
+
+    pub const fn fail_fast(self) -> bool {
+        matches!(self, Self::FailFast)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SweepDefinition {
+    sweep_contract_digest: Digest,
+    studies: Vec<StudyIdentity>,
+    composition: SweepCompositionPolicy,
+}
+
+impl SweepDefinition {
+    pub fn new(
+        sweep_contract_digest: Digest,
+        studies: Vec<StudyIdentity>,
+        composition: SweepCompositionPolicy,
+    ) -> AnalysisExecutionResult<Self> {
+        if studies.is_empty() {
+            return Err(AnalysisExecutionError::Invalid(
+                "sweep definition requires at least one study".into(),
+            ));
+        }
+        let mut unique = studies.clone();
+        unique.sort_unstable();
+        unique.dedup();
+        if unique.len() != studies.len() {
+            return Err(AnalysisExecutionError::Invalid(
+                "sweep definition contains duplicate studies".into(),
+            ));
+        }
+        Ok(Self {
+            sweep_contract_digest,
+            studies,
+            composition,
+        })
+    }
+
+    pub fn identity(&self) -> AnalysisExecutionResult<SweepIdentity> {
+        SweepIdentity::from_definition(self)
+    }
+
+    pub const fn sweep_contract_digest(&self) -> Digest {
+        self.sweep_contract_digest
+    }
+
+    pub fn studies(&self) -> &[StudyIdentity] {
+        &self.studies
+    }
+
+    pub const fn composition(&self) -> SweepCompositionPolicy {
+        self.composition
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "disposition")]
 pub enum SweepEntryDisposition {
     Succeeded { result: AnalysisResultIdentity },

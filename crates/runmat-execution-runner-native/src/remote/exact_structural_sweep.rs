@@ -54,7 +54,7 @@ pub(crate) async fn execute(
     let signal_outcomes = signal_outcomes?;
     let meshing_outcomes = meshing_outcomes?;
 
-    if decoded.fail_fast {
+    if decoded.composition.fail_fast() {
         if let Some((failed_group, terminal)) =
             meshing_outcomes
                 .iter()
@@ -125,7 +125,7 @@ pub(crate) async fn execute(
                 ExactStructuralSweepRemoteOutcome::Succeeded(response)
             }
             RemoteExactStructuralStudyComposition::Failed(message) => {
-                if decoded.fail_fast && !cancelled_siblings {
+                if decoded.composition.fail_fast() && !cancelled_siblings {
                     pool.cancel(CancellationReason::ParentScope)?;
                     cancelled_siblings = true;
                 }
@@ -135,7 +135,7 @@ pub(crate) async fn execute(
                 ExactStructuralSweepRemoteOutcome::Cancelled
             }
             RemoteExactStructuralStudyComposition::Indeterminate(message) => {
-                if decoded.fail_fast && !cancelled_siblings {
+                if decoded.composition.fail_fast() && !cancelled_siblings {
                     pool.cancel(CancellationReason::ParentScope)?;
                     cancelled_siblings = true;
                 }

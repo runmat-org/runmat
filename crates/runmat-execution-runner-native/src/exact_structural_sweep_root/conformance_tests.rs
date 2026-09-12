@@ -13,7 +13,8 @@ use runmat_analysis_execution::{
     prepare_signal_materialization, PreparedSignalMaterialization, ResolvedSignalArtifact,
 };
 use runmat_analysis_fea::execution::{
-    SignalMaterializationIdentity, StructuralLinearWorkload, StudyIdentity, SweepIdentity,
+    SignalMaterializationIdentity, StructuralLinearWorkload, StudyIdentity, SweepCompositionPolicy,
+    SweepDefinition,
 };
 use runmat_analysis_fea::fixtures::{fixture_model, FixtureId};
 use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
@@ -142,24 +143,21 @@ async fn exact_structural_sweep_reaches_ordered_admitted_results_over_encrypted_
         exact_meshing,
     })
     .unwrap();
-    let frozen_project_digest = Some(Digest::from_bytes(*project_identity.graph_digest.bytes()));
-    let identity = SweepIdentity::new(
+    let definition = SweepDefinition::new(
         Digest::sha256(b"encrypted structural sweep"),
         vec![
-            StudyIdentity::from_authored_digest(first_study_digest, frozen_project_digest).unwrap(),
-            StudyIdentity::from_authored_digest(second_study_digest, frozen_project_digest)
-                .unwrap(),
-            StudyIdentity::from_authored_digest(invalid_study_digest, frozen_project_digest)
-                .unwrap(),
+            StudyIdentity::from_authored_digest(first_study_digest, None).unwrap(),
+            StudyIdentity::from_authored_digest(second_study_digest, None).unwrap(),
+            StudyIdentity::from_authored_digest(invalid_study_digest, None).unwrap(),
         ],
-        Digest::sha256(b"collect all outcomes"),
+        SweepCompositionPolicy::CollectAll,
     )
     .unwrap();
+    let identity = definition.identity().unwrap();
     let prepared = prepare_exact_structural_sweep_root(ExactStructuralSweepRootPreparation {
         program_revision: revision.clone(),
         artifact_access: access.clone(),
-        identity,
-        fail_fast: false,
+        definition,
         studies: vec![first, second, invalid],
     })
     .unwrap();
@@ -542,14 +540,16 @@ async fn generated_box_workload(
     access: &ArtifactAccess,
 ) -> (StructuralLinearWorkload, PreparedSignalMaterialization) {
     let mut workload = box_structural_workload();
-    let signal = workload
+    let mut authored = workload
         .model
         .signals
-        .first_mut()
-        .expect("cantilever fixture must contain its force signal");
-    let PhysicalSignal::Force(force) = signal else {
+        .first()
+        .expect("cantilever fixture must contain its force signal")
+        .clone();
+    let PhysicalSignal::Force(force) = &mut authored else {
         panic!("cantilever fixture signal must be force")
     };
+    force.signal_id = runmat_analysis_core::SignalId("generated_force_history".into());
     let admitted_input = runmat_runtime::analysis::value_admission::admit_owned_real64(
         runmat_value::Value::Tensor(runmat_value::Tensor::new(vec![-1_000.0], vec![1, 1]).unwrap()),
         runmat_runtime::analysis::value_admission::AnalysisValueAdmissionPolicy::exact_host(),
@@ -587,7 +587,10 @@ async fn generated_box_workload(
         effects: GeneratorEffectPolicy::DeclaredImmutableArtifacts,
     });
     force.evidence.sample_count = 0;
-    let authored = signal.clone();
+    // The executable envelope is currently a static structural solve. Keep its referenced force
+    // constant: a static procedure must not silently choose a point from a time-domain history.
+    // The additional generated history still exercises shared materialization and deduplication.
+    workload.model.signals.push(authored.clone());
 
     let symbols = runmat_package::source_symbols_from_frozen(project, &source_path);
     let definition = symbols

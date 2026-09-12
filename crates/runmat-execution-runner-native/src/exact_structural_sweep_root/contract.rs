@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use runmat_analysis_fea::execution::SweepIdentity;
+use runmat_analysis_fea::execution::{StudyIdentity, SweepDefinition, SweepIdentity};
 use runmat_canonical_codec::{decode_contract, encode_contract};
 use runmat_execution::value::{ValuePayload, ValueRefKind};
 use runmat_execution::{OutputContract, ProgramRevision};
@@ -18,11 +18,15 @@ use super::{
     EXACT_STRUCTURAL_SWEEP_ROOT_TARGET_PROFILE, ROOT_DOMAIN, ROOT_MEDIA_TYPE, ROOT_PREFIX,
     ROOT_PROGRAM_BYTES, ROOT_VALUE_SCHEMA,
 };
-use crate::{NativeExecutionResult, PreparedExactStructuralStudyRoot, RequiredStudyProgram};
+use crate::{
+    ExactStructuralStudyResultExpectation, NativeExecutionResult, PreparedExactStructuralStudyRoot,
+    RequiredStudyProgram,
+};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ExactStructuralSweepEntry {
+    study: StudyIdentity,
     descriptor: ProgramExecutionDescriptor,
     argument_count: u32,
 }
@@ -31,8 +35,7 @@ struct ExactStructuralSweepEntry {
 #[serde(deny_unknown_fields)]
 struct ExactStructuralSweepRootRequest {
     schema_version: u16,
-    identity: SweepIdentity,
-    fail_fast: bool,
+    definition: SweepDefinition,
     entries: Vec<ExactStructuralSweepEntry>,
 }
 
@@ -40,6 +43,16 @@ impl ExactStructuralSweepRootRequest {
     fn validate(&self) -> NativeExecutionResult<()> {
         if self.schema_version != 1 || self.entries.is_empty() {
             return Err(protocol("exact structural sweep root is invalid"));
+        }
+        let entry_studies = self
+            .entries
+            .iter()
+            .map(|entry| entry.study)
+            .collect::<Vec<_>>();
+        if self.definition.studies() != entry_studies || self.definition.identity().is_err() {
+            return Err(protocol(
+                "exact structural sweep definition differs from its ordered studies",
+            ));
         }
         for entry in &self.entries {
             entry.descriptor.validate().map_err(protocol)?;
@@ -71,8 +84,7 @@ impl ExactStructuralSweepRootRequest {
 pub struct ExactStructuralSweepRootPreparation {
     pub program_revision: ProgramRevision,
     pub artifact_access: ArtifactAccess,
-    pub identity: SweepIdentity,
-    pub fail_fast: bool,
+    pub definition: SweepDefinition,
     pub studies: Vec<PreparedExactStructuralStudyRoot>,
 }
 
@@ -109,7 +121,7 @@ impl PreparedExactStructuralSweepRoot {
 #[derive(Clone, Debug, PartialEq)]
 pub struct DecodedExactStructuralSweepRoot {
     pub identity: SweepIdentity,
-    pub fail_fast: bool,
+    pub composition: runmat_analysis_fea::execution::SweepCompositionPolicy,
     pub studies: Vec<ProgramExecutionRequest>,
     pub artifact_access: ArtifactAccess,
 }
@@ -120,8 +132,7 @@ pub fn prepare_exact_structural_sweep_root(
     let ExactStructuralSweepRootPreparation {
         program_revision,
         artifact_access,
-        identity,
-        fail_fast,
+        definition,
         studies,
     } = preparation;
     artifact_access.validate().map_err(protocol)?;
@@ -141,7 +152,9 @@ pub fn prepare_exact_structural_sweep_root(
         if request.recipe.program_revision != program_revision {
             return Err(protocol("sweep and study program revisions differ"));
         }
+        let expectation = study.result_expectation();
         entries.push(ExactStructuralSweepEntry {
+            study: expectation.study_identity()?,
             descriptor: descriptor(&request),
             argument_count: u32::try_from(request.arguments.len()).map_err(protocol)?,
         });
@@ -150,13 +163,23 @@ pub fn prepare_exact_structural_sweep_root(
             insert_object(&mut object_inventory, object)?;
         }
         required_programs.extend(study.required_programs()?);
-        expectations.push(study.result_expectation());
+        expectations.push(expectation);
     }
+
+    let prepared_studies = expectations
+        .iter()
+        .map(ExactStructuralStudyResultExpectation::study_identity)
+        .collect::<NativeExecutionResult<Vec<_>>>()?;
+    if definition.studies() != prepared_studies {
+        return Err(protocol(
+            "sweep definition differs from its prepared study identities",
+        ));
+    }
+    definition.identity().map_err(protocol)?;
 
     let root = ExactStructuralSweepRootRequest {
         schema_version: 1,
-        identity,
-        fail_fast,
+        definition: definition.clone(),
         entries,
     };
     let root_object = LogicalObject::new(
@@ -217,7 +240,7 @@ pub fn prepare_exact_structural_sweep_root(
     let expectation = super::ExactStructuralSweepResultExpectation {
         program_revision,
         artifact_access,
-        identity,
+        definition,
         studies: expectations,
     };
     expectation.validate()?;
@@ -287,8 +310,8 @@ pub fn decode_exact_structural_sweep_root(
         offset = end;
     }
     Ok(DecodedExactStructuralSweepRoot {
-        identity: root.identity,
-        fail_fast: root.fail_fast,
+        identity: root.definition.identity().map_err(protocol)?,
+        composition: root.definition.composition(),
         studies,
         artifact_access,
     })

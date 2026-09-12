@@ -455,3 +455,15 @@ Changing placement cannot weaken an accuracy criterion, alter activation, invent
 transition, or turn an experimental formulation into a production one. Checkpoint and result
 artifacts retain sequence, topology, partition, formulation, observation, and accuracy identity so
 retries and remote execution remain attributable.
+
+A sweep has one canonical definition containing its contract digest, ordered study identities, and
+typed composition policy (`fail fast` or `collect all`). The native root derives the sweep identity
+from that definition and rejects a reordered, omitted, duplicated, or substituted prepared study
+before work begins. Worker completion order and retry placement therefore cannot change aggregate
+identity or authored result order.
+
+Remote sweep output is a manifest-first catalog. Importing the catalog validates the aggregate root,
+ordered terminal statuses, and complete reference inventory without reading successful child-study
+closures. A consumer may then materialize one study by authored index; only that study's mesh,
+fields, observations, histories, and evidence are fetched. Full sweep materialization is an explicit
+convenience operation over the same selective interface, not a requirement imposed by the driver.

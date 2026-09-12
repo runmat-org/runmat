@@ -12,11 +12,10 @@ use runmat_execution_runner_native::{
     ExactStructuralSweepTerminal,
 };
 use runmat_runtime::analysis::{
-    analysis_complete_study_sweep_op, analysis_study_sweep_identity,
-    structural_study_execution_failure, AnalysisStudyRunData, AnalysisStudySweepData,
-    AnalysisStudySweepRunOutcome, AnalysisStudySweepSpec, PreparedStructuralStudyIntent,
-    StructuralStudyExecutionFailure, StructuralStudySequenceNumericalResult,
-    StructuralStudyStepNumericalResult,
+    analysis_complete_study_sweep_op, structural_study_execution_failure, AnalysisStudyRunData,
+    AnalysisStudySweepData, AnalysisStudySweepRunOutcome, AnalysisStudySweepSpec,
+    PreparedStructuralStudyIntent, StructuralStudyExecutionFailure,
+    StructuralStudySequenceNumericalResult, StructuralStudyStepNumericalResult,
 };
 use runmat_runtime::operations::OperationEnvelope;
 
@@ -85,12 +84,12 @@ pub(crate) fn materialize_remote_sweep_outputs(
         .first()
         .map(|intent| intent.operation_context().clone())
         .context("structural sweep contains no study intent")?;
-    let identity = analysis_study_sweep_identity(spec, &context)
+    let definition = runmat_runtime::analysis::analysis_study_sweep_definition(spec, &context)
         .map_err(super::super::report_operation_error)?;
     let expectation = ExactStructuralSweepResultExpectation {
         program_revision: revision.clone(),
         artifact_access: artifact_access(run_id),
-        identity,
+        definition,
         studies: intents
             .iter()
             .zip(signal_materializations)

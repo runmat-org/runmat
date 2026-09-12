@@ -58,7 +58,10 @@ pub use state::{
     CanonicalSemanticState, CanonicalSemanticStateInput, CanonicalStateTransition,
     CanonicalStateTransitionInput, SemanticStatePublicationRequest,
 };
-pub use sweep::{ComposedSweepResult, SweepEntryDisposition, SweepEntryOutcome};
+pub use sweep::{
+    ComposedSweepResult, SweepCompositionPolicy, SweepDefinition, SweepEntryDisposition,
+    SweepEntryOutcome,
+};
 
 #[cfg(test)]
 mod tests;

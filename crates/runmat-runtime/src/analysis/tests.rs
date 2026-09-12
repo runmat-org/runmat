@@ -3068,6 +3068,36 @@ fn analysis_complete_study_sweep_rejects_duplicate_logical_studies() {
 }
 
 #[test]
+fn analysis_study_sweep_identity_binds_authored_order_and_composition_policy() {
+    let context = OperationContext::new(None, None);
+    let first = sample_linear_static_study_spec();
+    let second = sample_electromagnetic_study_spec();
+    let collect_all = AnalysisStudySweepSpec {
+        sweep_id: "identity_sweep".into(),
+        studies: vec![first.clone(), second.clone()],
+        fail_fast: false,
+    };
+    let reversed = AnalysisStudySweepSpec {
+        studies: vec![second, first],
+        ..collect_all.clone()
+    };
+    let fail_fast = AnalysisStudySweepSpec {
+        fail_fast: true,
+        ..collect_all.clone()
+    };
+
+    let collect_all_identity = analysis_study_sweep_identity(&collect_all, &context).unwrap();
+    assert_ne!(
+        collect_all_identity,
+        analysis_study_sweep_identity(&reversed, &context).unwrap()
+    );
+    assert_ne!(
+        collect_all_identity,
+        analysis_study_sweep_identity(&fail_fast, &context).unwrap()
+    );
+}
+
+#[test]
 fn analysis_complete_study_sweep_finds_the_authored_fail_fast_error_before_not_run_entries() {
     let _guard = analysis_test_guard();
     let context = OperationContext::new(None, None);

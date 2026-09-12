@@ -60,8 +60,7 @@ pub(super) fn prepare_sweep_root(
     studies: &[RemoteStudySource],
     revision: ProgramRevision,
     authority: &str,
-    identity: runmat_analysis_fea::execution::SweepIdentity,
-    fail_fast: bool,
+    definition: runmat_analysis_fea::execution::SweepDefinition,
 ) -> Result<PreparedExactStructuralSweepRoot> {
     let prepared = studies
         .iter()
@@ -80,8 +79,7 @@ pub(super) fn prepare_sweep_root(
         ExactStructuralSweepRootPreparation {
             program_revision: revision,
             artifact_access: artifact_access(authority),
-            identity,
-            fail_fast,
+            definition,
             studies: prepared,
         },
     )?)

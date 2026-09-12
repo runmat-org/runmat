@@ -62,8 +62,9 @@ pub use exact_structural_study_root::{
 };
 pub use exact_structural_sweep_root::{
     decode_exact_structural_sweep_root, import_exact_structural_sweep_result,
-    prepare_exact_structural_sweep_root, DecodedExactStructuralSweepRoot,
-    ExactStructuralSweepEntryResult, ExactStructuralSweepResult,
+    import_exact_structural_sweep_result_catalog, prepare_exact_structural_sweep_root,
+    DecodedExactStructuralSweepRoot, ExactStructuralSweepEntryResult,
+    ExactStructuralSweepEntryStatus, ExactStructuralSweepResult, ExactStructuralSweepResultCatalog,
     ExactStructuralSweepResultExpectation, ExactStructuralSweepRootPreparation,
     ExactStructuralSweepTerminal, PreparedExactStructuralSweepRoot,
     EXACT_STRUCTURAL_SWEEP_ROOT_EXECUTION_MODE, EXACT_STRUCTURAL_SWEEP_ROOT_TARGET_PROFILE,

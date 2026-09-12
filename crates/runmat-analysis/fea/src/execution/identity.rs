@@ -3,7 +3,7 @@ use runmat_canonical_codec::{encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
 use serde::{Deserialize, Serialize};
 
-use super::{AnalysisExecutionError, AnalysisExecutionResult};
+use super::{AnalysisExecutionError, AnalysisExecutionResult, SweepDefinition};
 
 const IDENTITY_PREFIX: &[u8] = b"runmat-analysis-identity/v1\0";
 const IDENTITY_LIMITS: CanonicalLimits = CanonicalLimits::new(1024 * 1024, 65_536, 65_536, 32);
@@ -104,25 +104,13 @@ impl SweepIdentity {
     pub fn new(
         sweep_contract_digest: Digest,
         studies: Vec<StudyIdentity>,
-        composition_policy_digest: Digest,
+        composition: super::SweepCompositionPolicy,
     ) -> AnalysisExecutionResult<Self> {
-        if studies.is_empty() {
-            return Err(AnalysisExecutionError::Invalid(
-                "sweep identity requires at least one study".into(),
-            ));
-        }
-        let mut unique = studies.clone();
-        unique.sort_unstable();
-        unique.dedup();
-        if unique.len() != studies.len() {
-            return Err(AnalysisExecutionError::Invalid(
-                "sweep identity contains duplicate studies".into(),
-            ));
-        }
-        Self::derive(
-            "sweep",
-            &(sweep_contract_digest, studies, composition_policy_digest),
-        )
+        SweepDefinition::new(sweep_contract_digest, studies, composition)?.identity()
+    }
+
+    pub(super) fn from_definition(definition: &SweepDefinition) -> AnalysisExecutionResult<Self> {
+        Self::derive("sweep", definition)
     }
 }
 

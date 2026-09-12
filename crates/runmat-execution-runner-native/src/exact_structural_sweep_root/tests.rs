@@ -1,8 +1,12 @@
 use std::collections::BTreeMap;
 
-use runmat_analysis_fea::execution::{StudyIdentity, SweepIdentity};
+use runmat_analysis_fea::execution::{
+    StudyIdentity, SweepCompositionPolicy, SweepDefinition, SweepIdentity,
+};
+use runmat_execution::value::{ValuePayload, ValueRefKind};
 use runmat_execution::Digest;
 use runmat_execution_artifact::cache::CacheImport;
+use runmat_execution_artifact::{LogicalObject, ObjectNamespace, ProgramExecutionResponse};
 
 use super::*;
 
@@ -17,16 +21,20 @@ impl CacheImport for TestCache {
     }
 }
 
-fn identity(first: Digest, second: Digest) -> SweepIdentity {
-    SweepIdentity::new(
+fn definition(first: Digest, second: Digest) -> SweepDefinition {
+    SweepDefinition::new(
         Digest::sha256(b"sweep"),
         vec![
-            StudyIdentity::from_authored_digest(first, Some(Digest::sha256(b"project"))).unwrap(),
-            StudyIdentity::from_authored_digest(second, Some(Digest::sha256(b"project"))).unwrap(),
+            StudyIdentity::from_authored_digest(first, None).unwrap(),
+            StudyIdentity::from_authored_digest(second, None).unwrap(),
         ],
-        Digest::sha256(b"fail-fast"),
+        SweepCompositionPolicy::FailFast,
     )
     .unwrap()
+}
+
+fn identity(first: Digest, second: Digest) -> SweepIdentity {
+    definition(first, second).identity().unwrap()
 }
 
 #[test]
@@ -42,8 +50,7 @@ fn sweep_root_round_trips_ordered_studies_and_deduplicates_programs() {
     let prepared = prepare_exact_structural_sweep_root(ExactStructuralSweepRootPreparation {
         program_revision: crate::exact_structural_study_root::tests::revision(),
         artifact_access: crate::exact_structural_study_root::tests::access(authority),
-        identity: identity(first_digest, second_digest),
-        fail_fast: true,
+        definition: definition(first_digest, second_digest),
         studies: vec![first, second],
     })
     .unwrap();
@@ -59,7 +66,7 @@ fn sweep_root_round_trips_ordered_studies_and_deduplicates_programs() {
     );
     let decoded = decode_exact_structural_sweep_root(prepared.request(), &store).unwrap();
     assert_eq!(decoded.identity, identity(first_digest, second_digest));
-    assert!(decoded.fail_fast);
+    assert_eq!(decoded.composition, SweepCompositionPolicy::FailFast);
     assert_eq!(decoded.studies.len(), 2);
     assert_ne!(
         decoded.studies[0].arguments[0],
@@ -68,7 +75,7 @@ fn sweep_root_round_trips_ordered_studies_and_deduplicates_programs() {
 
     let (response, result_objects) = package_exact_structural_sweep_result(
         prepared.request(),
-        expectation.identity,
+        expectation.identity().unwrap(),
         &expectation.artifact_access,
         vec![
             ExactStructuralSweepRemoteOutcome::Failed("solver failed".into()),
@@ -100,7 +107,7 @@ fn sweep_root_round_trips_ordered_studies_and_deduplicates_programs() {
 
     let (response, result_objects) = package_exact_structural_sweep_result(
         prepared.request(),
-        expectation.identity,
+        expectation.identity().unwrap(),
         &expectation.artifact_access,
         vec![
             ExactStructuralSweepRemoteOutcome::Failed("solver failed".into()),
@@ -143,10 +150,106 @@ fn sweep_root_rejects_a_child_from_another_artifact_authority() {
         prepare_exact_structural_sweep_root(ExactStructuralSweepRootPreparation {
             program_revision: crate::exact_structural_study_root::tests::revision(),
             artifact_access: crate::exact_structural_study_root::tests::access(authority),
-            identity: identity(first_digest, second_digest),
-            fail_fast: true,
+            definition: definition(first_digest, second_digest),
             studies: vec![first, second],
         })
         .is_err()
     );
+}
+
+#[test]
+fn sweep_root_rejects_a_definition_for_another_authored_order() {
+    let authority = "sweep-run";
+    let source = Digest::sha256(b"portable exact CAD source");
+    let first_digest = Digest::sha256(b"study-a");
+    let second_digest = Digest::sha256(b"study-b");
+    let first =
+        crate::exact_structural_study_root::tests::prepared(authority, source, first_digest);
+    let second =
+        crate::exact_structural_study_root::tests::prepared(authority, source, second_digest);
+
+    assert!(
+        prepare_exact_structural_sweep_root(ExactStructuralSweepRootPreparation {
+            program_revision: crate::exact_structural_study_root::tests::revision(),
+            artifact_access: crate::exact_structural_study_root::tests::access(authority),
+            definition: definition(second_digest, first_digest),
+            studies: vec![first, second],
+        })
+        .is_err()
+    );
+}
+
+#[test]
+fn sweep_catalog_does_not_read_unselected_study_closures() {
+    let authority = "sweep-run";
+    let source = Digest::sha256(b"portable exact CAD source");
+    let first_digest = Digest::sha256(b"study-a");
+    let second_digest = Digest::sha256(b"study-b");
+    let first =
+        crate::exact_structural_study_root::tests::prepared(authority, source, first_digest);
+    let second =
+        crate::exact_structural_study_root::tests::prepared(authority, source, second_digest);
+    let prepared = prepare_exact_structural_sweep_root(ExactStructuralSweepRootPreparation {
+        program_revision: crate::exact_structural_study_root::tests::revision(),
+        artifact_access: crate::exact_structural_study_root::tests::access(authority),
+        definition: definition(first_digest, second_digest),
+        studies: vec![first, second],
+    })
+    .unwrap();
+    let expectation = prepared.result_expectation();
+    let access = &expectation.artifact_access;
+    let child_response = |label: &str| {
+        let object = LogicalObject::new(
+            ObjectNamespace::ResultValue,
+            "analysis/test-structural-study-results",
+            "application/vnd.runmat.test-structural-study-result",
+            label.as_bytes().to_vec(),
+        )
+        .unwrap();
+        let reference = access
+            .reference(
+                &object,
+                ValueRefKind::ResultObject,
+                "runmat.test.study-result",
+            )
+            .unwrap();
+        ProgramExecutionResponse::ExternalizedSuccess {
+            outputs: vec![ValuePayload::Object(Box::new(reference.clone()))],
+            result_objects: vec![reference],
+        }
+    };
+    let (response, publication_objects) = package_exact_structural_sweep_result(
+        prepared.request(),
+        expectation.identity().unwrap(),
+        access,
+        vec![
+            ExactStructuralSweepRemoteOutcome::Succeeded(child_response("first")),
+            ExactStructuralSweepRemoteOutcome::Succeeded(child_response("second")),
+        ],
+    )
+    .unwrap();
+    let publication_only = TestCache(
+        publication_objects
+            .into_iter()
+            .map(|object| (object.reference.logical_digest, object.bytes))
+            .collect(),
+    );
+
+    let catalog =
+        import_exact_structural_sweep_result_catalog(&publication_only, response, &expectation)
+            .unwrap();
+    assert_eq!(
+        catalog.statuses(),
+        &[
+            ExactStructuralSweepEntryStatus::Succeeded,
+            ExactStructuralSweepEntryStatus::Succeeded,
+        ]
+    );
+    assert!(catalog
+        .import_entry(
+            &publication_only,
+            0,
+            runmat_execution_artifact::object::ObjectInventoryLimits::default(),
+        )
+        .is_err());
 }
