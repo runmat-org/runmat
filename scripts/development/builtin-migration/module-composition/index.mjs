@@ -16,3 +16,6 @@ export {
 export {
   parseGeneratedModuleComposition, verifyModuleCompositionProduct,
 } from "./verify.mjs";
+export {
+  MODULE_COMPOSITION_SUFFIXES, moduleCompositionProductRegistry,
+} from "./registry.mjs";

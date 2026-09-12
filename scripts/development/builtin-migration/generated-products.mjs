@@ -121,7 +121,6 @@ function parseProductVerification(value, contract, nativeManifest, compositionPr
     if (!compositionProduct || evidenceDigest(compositionProduct) !== digest(value.projection_digest, `${id} composition projection digest`)) {
       throw new Error(`${id}: composition proof differs from the exact staged projection`);
     }
-    if (compositionProduct.children.length === 0) throw new Error(`${id}: integrated module composition cannot be empty`);
     return;
   }
   exact(value, ["kind", "generated_manifest", "native_manifest", "result"], `${id} product verification`);

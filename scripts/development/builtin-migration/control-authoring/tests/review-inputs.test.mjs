@@ -270,7 +270,7 @@ test("candidate composition rejects cross-row defects before independent attesta
         kind: "file",
         path: "crates/runmat-runtime/src/builtins/generated_wasm_registry.rs",
       });
-    }, /overlaps authored write scope/],
+    }, /authored scope overlaps integration product/],
     ["missing required gate", (bundle) => { bundle.bundle_control.gate_plans = bundle.bundle_control.gate_plans.filter((plan) => plan.gate !== "catalog-contract"); }, /required gate catalog-contract/],
     ["baseline spelling drift", (bundle) => { bundle.identity_controls[fixture.id].public_identity.primary_spelling.spelling = "Foo"; }, /public identity spelling differs/],
   ]) {

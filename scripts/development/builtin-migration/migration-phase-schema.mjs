@@ -1,4 +1,5 @@
 import { compareCodePoint } from "./constants.mjs";
+import { parseEffectivePathScope } from "./path-scope.mjs";
 import { evidenceDigest } from "./evidence.mjs";
 import {
   array, digest, exact, repositoryPath, sourceRevision, stableId,
@@ -41,11 +42,8 @@ function canonicalPaths(value, label) {
 }
 
 function parseScopes(value) {
-  return array(value, "reviewed authored write set", { empty: true }).map((entry) => {
-    exact(entry, ["kind", "path"], "reviewed authored scope");
-    if (!["file", "tree"].includes(entry.kind)) throw new Error("reviewed authored scope kind is invalid");
-    return { kind: entry.kind, path: repositoryPath(entry.path, "reviewed authored scope path") };
-  });
+  return array(value, "reviewed authored write set", { empty: true })
+    .map((entry) => parseEffectivePathScope(entry, "reviewed authored scope"));
 }
 
 function parseOutputs(value) {

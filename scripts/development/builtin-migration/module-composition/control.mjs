@@ -1,5 +1,5 @@
 import { compareCodePoint } from "../constants.mjs";
-import { pathAllowed } from "../control-graph.mjs";
+import { pathAllowed } from "../path-scope.mjs";
 import { bindModuleCompositionProjection } from "./binding.mjs";
 import { parseModuleCompositionTransition } from "./projection.mjs";
 
@@ -11,8 +11,14 @@ export function validateModuleCompositionControl(
   const transitions = new Map();
   const changedKeys = new Map();
   for (const [bundleId, bundle] of bundles) {
-    const productIds = bundle.integration_product_refs.filter((productId) =>
-      integrationProducts.get(productId)?.verification.kind === "rust_module_composition");
+    const productIds = bundle.integration_product_refs.filter((productId) => {
+      const product = integrationProducts.get(productId);
+      if (product?.verification.kind !== "rust_module_composition") return false;
+      if (product.lifecycle.kind === "reviewed-baseline-only") {
+        throw new Error(`${bundleId}: reviewed-baseline-only composition product ${productId} cannot be bundle referenced`);
+      }
+      return true;
+    });
     const value = bundle.module_composition_transition;
     if (productIds.length === 0) {
       if (value !== null) {

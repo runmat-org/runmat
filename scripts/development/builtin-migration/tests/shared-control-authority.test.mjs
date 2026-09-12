@@ -8,7 +8,7 @@ import {
   bundleBaselineEvidence, parseBundleRemovals, validateCompleteBundleBaselineEvidence,
 } from "../baseline-evidence.mjs";
 import {
-  parseIntegrationProductRegistry, validateGeneratedRegistryCoverage,
+  parseIntegrationProductRegistry, reviewedIntegrationProducts, validateGeneratedRegistryCoverage,
   validateIntegrationProductCoverage,
 } from "../integration-products.mjs";
 
@@ -39,6 +39,75 @@ test("global integration products bind generator and product baselines exactly",
   assert.throws(
     () => parseIntegrationProductRegistry(duplicatePath, inventory),
     /already owned/,
+  );
+});
+
+test("reviewed baseline-only lifecycle is closed and limited to composition products", () => {
+  const inventory = fixtureInventory();
+  inventory.source.files.push({
+    path: "crates/runmat-runtime/src/builtins/math/mod.rs",
+    content_digest: D2,
+  });
+  const registry = {
+    "runtime-math-parent": {
+      path: "crates/runmat-runtime/src/builtins/math/mod.rs",
+      producer: "integration",
+      generator: { path: "scripts/generate.mjs", baseline_digest: D1 },
+      baseline_digest: D2,
+      lifecycle: { kind: "reviewed-baseline-only" },
+      verification: {
+        kind: "rust_module_composition",
+        crate_role: "runtime",
+        module_path: "crate::builtins::math",
+      },
+    },
+  };
+  const products = parseIntegrationProductRegistry(registry, inventory);
+  assert.deepEqual(products.get("runtime-math-parent").lifecycle, {
+    kind: "reviewed-baseline-only",
+  });
+  assert.doesNotThrow(() => validateIntegrationProductCoverage(new Map(), products));
+  assert.deepEqual(
+    reviewedIntegrationProducts([], products, "math-bundle")
+      .map((product) => product.product_id),
+    ["runtime-math-parent"],
+  );
+
+  const referenced = new Map([["math-bundle", {
+    id: "math-bundle",
+    integration_product_refs: ["runtime-math-parent"],
+  }]]);
+  assert.throws(
+    () => validateIntegrationProductCoverage(referenced, products),
+    /reviewed-baseline-only integration product runtime-math-parent cannot be bundle referenced/,
+  );
+
+  registry["runtime-math-parent"].lifecycle.extra = true;
+  assert.throws(
+    () => parseIntegrationProductRegistry(registry, inventory),
+    /integration product lifecycle fields must be exactly kind/,
+  );
+  delete registry["runtime-math-parent"].lifecycle.extra;
+  registry["runtime-math-parent"].lifecycle.kind = "unknown";
+  assert.throws(
+    () => parseIntegrationProductRegistry(registry, inventory),
+    /unsupported integration product lifecycle unknown/,
+  );
+
+  const nonComposition = productRegistry();
+  nonComposition["wasm-registry"].lifecycle = { kind: "reviewed-baseline-only" };
+  assert.throws(
+    () => parseIntegrationProductRegistry(nonComposition, inventory),
+    /restricted to module composition products/,
+  );
+});
+
+test("ordinary integration products still require exact bundle coverage", () => {
+  const inventory = fixtureInventory();
+  const products = parseIntegrationProductRegistry(productRegistry(), inventory);
+  assert.throws(
+    () => validateIntegrationProductCoverage(new Map(), products),
+    /global integration products must exactly equal the products referenced by bundles/,
   );
 });
 

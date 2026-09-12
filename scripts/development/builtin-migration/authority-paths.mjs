@@ -1,5 +1,5 @@
 import { compareCodePoint } from "./constants.mjs";
-import { pathAllowed } from "./control-graph.mjs";
+import { pathAllowed } from "./path-scope.mjs";
 import { implementationOwners } from "./identity-authority.mjs";
 
 export function validateAuthorityDependencyPolicy(bundles, identities, integrationProducts) {

@@ -769,7 +769,10 @@ test("bundle graph rejects cycles, dangling edges, and authored/generated overla
   const dangling = structuredClone(fixture.controlValue); dangling.bundle_controls[fixture.bundleId].prerequisites = [{ bundle_id: "missing", kind: "semantic" }];
   assert.throws(() => parseFixtureControl(fixture, dangling), /dangling prerequisite/);
   const overlap = structuredClone(fixture.controlValue); overlap.bundle_controls[fixture.bundleId].additional_authored_write_set.push({ kind: "file", path: "crates/runmat-runtime/src/builtins/generated_wasm_registry.rs" });
-  assert.throws(() => parseFixtureControl(fixture, overlap), /overlaps authored write scope/);
+  assert.throws(
+    () => parseFixtureControl(fixture, overlap),
+    /authored scope overlaps integration product/,
+  );
 });
 
 test("disposition v1 is closed and supports reviewed internal double-underscore identities", () => {

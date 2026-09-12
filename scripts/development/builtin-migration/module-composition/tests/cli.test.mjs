@@ -35,6 +35,7 @@ function catalogProduct() {
     crate_role: "catalog",
     path: "crates/runmat-builtins/src/catalog/entries/math/mod.rs",
     module_path: "crate::catalog::entries::math",
+    aggregations: ["entries"],
     children: [{
       module: "arithmetic",
       source_kind: "directory",
@@ -44,7 +45,7 @@ function catalogProduct() {
       feature_policy: { kind: "always" },
       macro_use: false,
       reexport: { kind: "glob", visibility: "public" },
-      aggregation_roles: ["entries"],
+      aggregation_sources: [{ role: "entries", kind: "slice" }],
     }],
   };
 }

@@ -14,7 +14,9 @@ export function parseIntegrationProductRegistry(value, inventory) {
   for (const id of ids) {
     stableId(id, "integration product id");
     const entry = registry[id];
-    exact(entry, ["path", "producer", "generator", "baseline_digest", "verification"], `${id} integration product`);
+    const fields = ["path", "producer", "generator", "baseline_digest", "verification"];
+    if (Object.hasOwn(entry, "lifecycle")) fields.push("lifecycle");
+    exact(entry, fields, `${id} integration product`);
     const productPath = repositoryPath(entry.path, `${id} integration product path`);
     if (entry.producer !== "integration") throw new Error(`${id}: integration product producer must be integration`);
     exact(entry.generator, ["path", "baseline_digest"], `${id} integration product generator`);
@@ -32,7 +34,9 @@ export function parseIntegrationProductRegistry(value, inventory) {
     const prior = paths.get(productPath);
     if (prior) throw new Error(`${id}: integration product path is already owned by ${prior}`);
     paths.set(productPath, id);
-    products.set(id, { product_id: id, ...entry, verification: parseIntegrationProductVerification(entry.verification, id, productPath) });
+    const verification = parseIntegrationProductVerification(entry.verification, id, productPath);
+    const lifecycle = parseIntegrationProductLifecycle(entry.lifecycle, verification, id);
+    products.set(id, { product_id: id, ...entry, verification, lifecycle });
   }
   return products;
 }
@@ -61,7 +65,13 @@ export function resolveIntegrationProducts(references, products, id) {
 }
 
 export function reviewedIntegrationProducts(references, products, id) {
-  return references.map((productId) => {
+  const productIds = [...new Set([
+    ...references,
+    ...[...products.values()]
+      .filter((product) => product.lifecycle.kind === "reviewed-baseline-only")
+      .map((product) => product.product_id),
+  ])].sort(compareCodePoint);
+  return productIds.map((productId) => {
     const product = products.get(productId);
     if (!product) throw new Error(`${id}: integration product reference ${productId} is not globally reviewed`);
     return {
@@ -89,15 +99,35 @@ export function parseIntegrationProductVerification(value, id, productPath) {
   return { kind: value.kind };
 }
 
+function parseIntegrationProductLifecycle(value, verification, id) {
+  if (value === undefined) return { kind: "bundle-referenced" };
+  exact(value, ["kind"], `${id} integration product lifecycle`);
+  if (!["bundle-referenced", "reviewed-baseline-only"].includes(value.kind)) {
+    throw new Error(`${id}: unsupported integration product lifecycle ${value.kind}`);
+  }
+  if (value.kind === "reviewed-baseline-only"
+    && verification.kind !== "rust_module_composition") {
+    throw new Error(`${id}: reviewed-baseline-only lifecycle is restricted to module composition products`);
+  }
+  return { kind: value.kind };
+}
+
 export function validateIntegrationProductCoverage(bundles, products) {
   const referenced = new Set();
   for (const bundle of bundles.values()) {
     for (const productId of bundle.integration_product_refs) {
-      if (!products.has(productId)) throw new Error(`${bundle.id}: unknown integration product ${productId}`);
+      const product = products.get(productId);
+      if (!product) throw new Error(`${bundle.id}: unknown integration product ${productId}`);
+      if (product.lifecycle.kind === "reviewed-baseline-only") {
+        throw new Error(`${bundle.id}: reviewed-baseline-only integration product ${productId} cannot be bundle referenced`);
+      }
       referenced.add(productId);
     }
   }
-  const expected = [...products.keys()].sort(compareCodePoint);
+  const expected = [...products.values()]
+    .filter((product) => product.lifecycle.kind === "bundle-referenced")
+    .map((product) => product.product_id)
+    .sort(compareCodePoint);
   const observed = [...referenced].sort(compareCodePoint);
   if (JSON.stringify(observed) !== JSON.stringify(expected)) {
     throw new Error("global integration products must exactly equal the products referenced by bundles");
