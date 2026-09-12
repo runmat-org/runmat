@@ -367,10 +367,10 @@ function reviewFixture() {
         kind: "repository_script",
         path: "scripts/development/check-architecture-boundaries.mjs",
         content_digest: inventory.source.files.find((entry) => entry.path === "scripts/development/check-architecture-boundaries.mjs").content_digest,
-        approved_executables: [{
+        approved_toolchains: [{
           operating_system: inventory.compiled_inventory.build.operating_system,
           architecture: inventory.compiled_inventory.build.architecture,
-          content_digest: contentDigest(fs.readFileSync(process.execPath)),
+          tools: [{ role: "node", content_digest: contentDigest(fs.readFileSync(process.execPath)) }],
         }],
       },
       review: { status: "reviewed", evidence: ["fixture program review"] },

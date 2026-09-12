@@ -44,16 +44,33 @@ export function parseGatePlans(value, bundleId, current = null) {
 }
 
 export function gatePlanEvidence(plan, build, repository) {
-  const executable = plan.program.approved_executables.find((entry) => entry.operating_system === build.operating_system && entry.architecture === build.architecture);
-  if (!executable) throw new Error(`${plan.gate}: no reviewed executable for the evidence platform`);
+  const tools = approvedTools(plan.program, build, plan.gate);
   if (plan.program.kind === "repository_script") return {
-    executable_digest: executable.content_digest, source_digest: plan.program.content_digest,
+    primary_tool: "node", tools, source_digest: plan.program.content_digest,
     arguments: [path.join(repository, plan.program.path), ...plan.arguments], cwd: repository,
   };
-  return {
-    executable_digest: executable.content_digest, source_digest: plan.program.manifest_digest,
-    arguments: ["run", "--quiet", "-p", plan.program.package, "--bin", plan.program.binary, "--", ...plan.arguments], cwd: repository,
+  if (plan.program.kind === "cargo_operation") return {
+    primary_tool: "cargo", tools, source_digest: plan.program.manifest_digest,
+    arguments: [plan.program.operation, "--manifest-path", path.join(repository, plan.program.manifest_path), ...plan.arguments], cwd: repository,
   };
+  return {
+    primary_tool: "cargo", tools, source_digest: plan.program.manifest_digest,
+    arguments: ["run", "--manifest-path", path.join(repository, plan.program.manifest_path), "--quiet", "-p", plan.program.package, "--bin", plan.program.binary, "--", ...plan.arguments], cwd: repository,
+  };
+}
+
+export function validateGatePlanTargetCoverage(plans, executionTargets, bundleId) {
+  const expected = executionTargets
+    .map((entry) => `${entry.operating_system}\0${entry.architecture}`)
+    .sort();
+  for (const plan of plans.values()) {
+    const observed = plan.program.approved_toolchains
+      .map((entry) => `${entry.operating_system}\0${entry.architecture}`)
+      .sort();
+    if (JSON.stringify(observed) !== JSON.stringify(expected)) {
+      throw new Error(`${bundleId}/${plan.gate}: reviewed toolchains must exactly cover every execution target`);
+    }
+  }
 }
 
 function parseGatePlan(value, bundleId, current) {
@@ -62,41 +79,108 @@ function parseGatePlan(value, bundleId, current) {
   const parser = enumValue(value.parser, GATE_PARSERS, `${bundleId} gate parser`);
   if (!PARSERS_BY_GATE[gate].includes(parser)) throw new Error(`${bundleId}: ${parser} is not an approved parser for ${gate}`);
   if (value.working_directory !== "repository") throw new Error(`${bundleId}: gate working directory must be repository`);
-  uniqueStrings(value.arguments, `${bundleId} gate arguments`, { empty: true });
+  const argumentsList = array(value.arguments, `${bundleId} gate arguments`, { empty: true });
+  argumentsList.forEach((entry) => {
+    nonempty(entry, `${bundleId} gate argument`);
+    if (entry.includes("\0")) throw new Error(`${bundleId}: gate arguments cannot contain NUL bytes`);
+  });
   const roles = uniqueStrings(value.expected_artifact_roles, `${bundleId} gate artifact roles`, { empty: true });
   if (JSON.stringify(roles) !== JSON.stringify([...roles].sort())) throw new Error(`${bundleId}: gate artifact roles must use canonical ordering`);
   if (JSON.stringify(roles) !== JSON.stringify(ARTIFACT_ROLES_BY_PARSER[parser])) throw new Error(`${bundleId}: ${parser} must emit its exact typed artifact role set`);
-  parseProgram(value.program, bundleId, current);
+  parseGateProgram(value.program, bundleId, current);
+  if (value.program.kind !== "repository_script") validateCargoArguments(argumentsList, bundleId);
+  const reviewedRoles = approvedToolRoles(value.program);
+  if (parser === "documentation_cutover" && !reviewedRoles.includes("git")) {
+    throw new Error(`${bundleId}: documentation cutover requires a reviewed git tool`);
+  }
   return value;
 }
 
-function parseProgram(value, bundleId, current) {
+export function parseGateProgram(value, bundleId, current = null) {
   if (value?.kind === "repository_script") {
-    exact(value, ["kind", "path", "content_digest", "approved_executables"], `${bundleId} repository script`);
+    exact(value, ["kind", "path", "content_digest", "approved_toolchains"], `${bundleId} repository script`);
     repositoryPath(value.path, `${bundleId} repository script path`);
     validateSourceDigest(value.path, value.content_digest, current, `${bundleId} repository script`);
+    parseApprovedToolchains(value.approved_toolchains, bundleId, current, ["node"], ["git", "node"]);
+    return value;
   } else if (value?.kind === "cargo_binary") {
-    exact(value, ["kind", "package", "binary", "manifest_path", "manifest_digest", "approved_executables"], `${bundleId} cargo binary`);
-    nonempty(value.package, `${bundleId} cargo package`); nonempty(value.binary, `${bundleId} cargo binary`);
+    exact(value, ["kind", "package", "binary", "manifest_path", "manifest_digest", "approved_toolchains"], `${bundleId} cargo binary`);
+    cargoName(value.package, `${bundleId} cargo package`); cargoName(value.binary, `${bundleId} cargo binary`);
     repositoryPath(value.manifest_path, `${bundleId} Cargo manifest path`);
     validateSourceDigest(value.manifest_path, value.manifest_digest, current, `${bundleId} Cargo manifest`);
+    parseApprovedToolchains(value.approved_toolchains, bundleId, current, requiredToolRoles("run"));
+    return value;
+  } else if (value?.kind === "cargo_operation") {
+    exact(value, ["kind", "operation", "manifest_path", "manifest_digest", "approved_toolchains"], `${bundleId} cargo operation`);
+    const operation = enumValue(value.operation, ["check", "clippy", "fmt", "test"], `${bundleId} Cargo operation`);
+    repositoryPath(value.manifest_path, `${bundleId} Cargo manifest path`);
+    validateSourceDigest(value.manifest_path, value.manifest_digest, current, `${bundleId} Cargo manifest`);
+    parseApprovedToolchains(value.approved_toolchains, bundleId, current, requiredToolRoles(operation));
+    return value;
   } else throw new Error(`${bundleId}: unsupported gate program kind`);
-  parseApprovedExecutables(value.approved_executables, bundleId, current);
 }
 
-function parseApprovedExecutables(value, bundleId, current) {
-  const rows = array(value, `${bundleId} approved gate executables`);
+function parseApprovedToolchains(value, bundleId, current, requiredRoles, allowedRoles = requiredRoles) {
+  const rows = array(value, `${bundleId} approved gate toolchains`);
   const keys = rows.map((entry) => {
-    exact(entry, ["operating_system", "architecture", "content_digest"], `${bundleId} approved gate executable`);
-    nonempty(entry.operating_system, `${bundleId} executable operating system`); nonempty(entry.architecture, `${bundleId} executable architecture`); digest(entry.content_digest, `${bundleId} executable digest`);
-    return `${entry.operating_system}\0${entry.architecture}`;
+    exact(entry, ["operating_system", "architecture", "tools"], `${bundleId} approved gate toolchain`);
+    const key = `${nonempty(entry.operating_system, `${bundleId} toolchain operating system`)}\0${nonempty(entry.architecture, `${bundleId} toolchain architecture`)}`;
+    const roles = array(entry.tools, `${bundleId} approved toolchain tools`).map((tool) => {
+      exact(tool, ["role", "content_digest"], `${bundleId} approved tool`);
+      const role = enumValue(tool.role, ["cargo", "cargo-clippy", "cargo-fmt", "clippy-driver", "git", "node", "rustc", "rustdoc", "rustfmt"], `${bundleId} approved tool role`);
+      digest(tool.content_digest, `${bundleId} ${role} digest`);
+      return role;
+    });
+    if (new Set(roles).size !== roles.length || JSON.stringify(roles) !== JSON.stringify([...roles].sort())) {
+      throw new Error(`${bundleId}: approved tool roles must be unique and canonical`);
+    }
+    if (roles.some((role) => !allowedRoles.includes(role)) || requiredRoles.some((role) => !roles.includes(role))) {
+      throw new Error(`${bundleId}: approved toolchain does not contain its exact allowed and required tools`);
+    }
+    return key;
   });
-  if (new Set(keys).size !== keys.length) throw new Error(`${bundleId}: approved gate executables must be unique by platform`);
-  if (JSON.stringify(keys) !== JSON.stringify([...keys].sort())) throw new Error(`${bundleId}: approved gate executables must use canonical platform ordering`);
+  if (new Set(keys).size !== keys.length) throw new Error(`${bundleId}: approved gate toolchains must be unique by platform`);
+  if (JSON.stringify(keys) !== JSON.stringify([...keys].sort())) throw new Error(`${bundleId}: approved gate toolchains must use canonical platform ordering`);
   if (current) {
     const build = current.compiled_inventory.build;
-    if (!rows.some((entry) => entry.operating_system === build.operating_system && entry.architecture === build.architecture)) throw new Error(`${bundleId}: gate plan has no approved executable for the compiled baseline platform`);
+    if (!rows.some((entry) => entry.operating_system === build.operating_system && entry.architecture === build.architecture)) {
+      throw new Error(`${bundleId}: gate program has no approved toolchain for the compiled baseline platform`);
+    }
   }
+}
+
+function approvedTools(program, build, gate) {
+  const toolchain = program.approved_toolchains.find((entry) =>
+    entry.operating_system === build.operating_system && entry.architecture === build.architecture);
+  if (!toolchain) throw new Error(`${gate}: no reviewed toolchain for the evidence platform`);
+  return toolchain.tools;
+}
+
+function approvedToolRoles(program) {
+  return [...new Set(program.approved_toolchains.flatMap((entry) => entry.tools.map((tool) => tool.role)))];
+}
+
+function cargoName(value, label) {
+  const result = nonempty(value, label);
+  if (!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(result)) throw new Error(`${label} is not a valid Cargo target name`);
+  return result;
+}
+
+function validateCargoArguments(argumentsList, bundleId) {
+  const forbidden = ["--config", "--manifest-path", "--target-dir"];
+  for (const argument of argumentsList) {
+    if (forbidden.some((flag) => argument === flag || argument.startsWith(`${flag}=`))
+      || argument === "-Z" || argument.startsWith("-Z")) {
+      throw new Error(`${bundleId}: Cargo gate arguments cannot override manifest, storage, or configuration authority`);
+    }
+  }
+}
+
+function requiredToolRoles(operation) {
+  if (operation === "clippy") return ["cargo", "cargo-clippy", "clippy-driver", "rustc"];
+  if (operation === "fmt") return ["cargo", "cargo-fmt", "rustfmt"];
+  if (operation === "test") return ["cargo", "rustc", "rustdoc"];
+  return ["cargo", "rustc"];
 }
 
 function validateSourceDigest(sourcePath, expectedDigest, current, label) {

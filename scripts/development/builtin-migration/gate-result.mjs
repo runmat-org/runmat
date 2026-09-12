@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import path from "node:path";
 
 import { compareCodePoint } from "./constants.mjs";
 import { contentDigest, evidenceDigest } from "./evidence.mjs";
@@ -11,7 +12,7 @@ import { storageStatus } from "./storage-admission.mjs";
 export { GATE_PRODUCERS } from "./gate-kinds.mjs";
 
 export function parseGateResult(value, expected) {
-  kind(value, 4, "runmat-builtin-migration-gate-result", "gate result");
+  kind(value, 5, "runmat-builtin-migration-gate-result", "gate result");
   exact(value, ["schema_version", "kind", "authority", "producer", "producer_evidence", "artifact_id", "produced_at", "execution_target", "source_revision", "source_digest", "baseline_inventory_digest", "subject_inventory_digest", "control_manifest_digest", "bundle_id", "identities", "gate", "result", "checks", "artifacts", "storage_admission"], "gate result");
   if (value.authority !== "machine-verification-only") throw new Error("gate result has invalid authority");
   const gate = enumValue(value.gate, Object.keys(GATE_PRODUCERS), "gate result gate");
@@ -64,6 +65,7 @@ export function parseGateResult(value, expected) {
       gate, value.result, producerEvidence, artifacts, expected, executionTarget, storageAdmission,
     );
   }
+  verifyArtifactFiles(artifacts);
   return { ...value, identities: identities.sort(compareCodePoint), checks, artifacts };
 }
 
@@ -73,27 +75,38 @@ function parseArtifact(value) {
   const artifactPath = absolutePath(value.path, `${value.role} artifact path`);
   integer(value.byte_length, `${value.role} artifact byte length`, 0);
   digest(value.content_digest, `${value.role} artifact content digest`);
-  const bytes = fs.readFileSync(artifactPath);
-  if (bytes.length !== value.byte_length || contentDigest(bytes) !== value.content_digest) throw new Error(`${value.role}: artifact bytes differ from gate evidence`);
   return { ...value, path: artifactPath };
 }
 
+function verifyArtifactFiles(artifacts) {
+  for (const artifact of artifacts) {
+    const bytes = readCanonicalRegularFile(artifact.path, `${artifact.role} artifact`);
+    if (bytes.length !== artifact.byte_length || contentDigest(bytes) !== artifact.content_digest) {
+      throw new Error(`${artifact.role}: artifact bytes differ from gate evidence`);
+    }
+  }
+}
+
 function parseProducerEvidence(value, producer) {
-  kind(value, 2, `${producer}-evidence`, "typed producer evidence");
+  kind(value, 3, `${producer}-evidence`, "typed producer evidence");
   exact(value, ["schema_version", "kind", "contract", "invocation", "process", "captured_process_digest"], "typed producer evidence");
-  exact(value.contract, ["reviewed_source_revision", "executable_digest", "producer_source_digest"], "producer contract evidence");
+  exact(value.contract, ["reviewed_source_revision", "primary_tool", "tools", "producer_source_digest"], "producer contract evidence");
   sourceRevision(value.contract.reviewed_source_revision, "producer reviewed source revision");
-  digest(value.contract.executable_digest, "producer executable digest");
+  const contractTools = parseContractTools(value.contract.tools);
+  const primaryTool = enumValue(value.contract.primary_tool, contractTools.map((entry) => entry.role), "producer primary tool");
   digest(value.contract.producer_source_digest, "producer source digest");
-  exact(value.invocation, ["executable", "arguments", "cwd", "environment"], "producer invocation");
-  nonempty(value.invocation.executable, "producer executable");
+  exact(value.invocation, ["executable", "arguments", "cwd", "environment", "tools", "tool_environment"], "producer invocation");
+  const executable = absolutePath(value.invocation.executable, "producer executable");
+  const invocationTools = parseInvocationTools(value.invocation.tools, contractTools);
+  parseToolEnvironment(value.invocation.tool_environment, invocationTools);
+  const primaryPath = invocationTools.find((entry) => entry.role === primaryTool).path;
+  if (executable !== primaryPath) throw new Error("producer executable differs from the primary reviewed tool");
   array(value.invocation.arguments, "producer arguments", { empty: true }).forEach((entry) => nonempty(entry, "producer argument"));
   absolutePath(value.invocation.cwd, "producer working directory");
   exact(value.invocation.environment, ["CARGO_TARGET_DIR", "TMPDIR", "TMP", "TEMP"], "producer environment");
   for (const [name, environmentPath] of Object.entries(value.invocation.environment)) {
     absolutePath(environmentPath, `producer ${name}`);
   }
-  if (contentDigest(fs.readFileSync(value.invocation.executable)) !== value.contract.executable_digest) throw new Error("producer executable bytes differ from contract evidence");
   exact(value.process, ["exit_code", "signal", "stdout_digest", "stderr_digest"], "producer process result");
   integer(value.process.exit_code, "producer exit code");
   if (value.process.signal !== null) nonempty(value.process.signal, "producer signal");
@@ -104,11 +117,77 @@ function parseProducerEvidence(value, producer) {
   return value;
 }
 
+function parseContractTools(value) {
+  const tools = array(value, "producer contract tools").map((entry) => {
+    exact(entry, ["role", "content_digest"], "producer contract tool");
+    const role = enumValue(entry.role, ["cargo", "cargo-clippy", "cargo-fmt", "clippy-driver", "git", "node", "rustc", "rustdoc", "rustfmt"], "producer contract tool role");
+    digest(entry.content_digest, `${role} producer tool digest`);
+    return entry;
+  });
+  requireCanonicalToolRoles(tools, "producer contract tools");
+  return tools;
+}
+
+function parseToolEnvironment(value, tools) {
+  exact(value, ["path_prepend", "rustc", "rustdoc", "rustfmt", "removed"], "producer tool environment");
+  const byRole = new Map(tools.map((entry) => [entry.role, entry.path]));
+  const expected = {
+    path_prepend: byRole.has("cargo") ? path.dirname(byRole.get("cargo")) : null,
+    rustc: byRole.get("rustc") ?? null,
+    rustdoc: byRole.get("rustdoc") ?? null,
+    rustfmt: byRole.get("rustfmt") ?? null,
+    removed: [
+      "CARGO_BUILD_RUSTC", "CARGO_BUILD_RUSTC_WRAPPER", "CARGO_BUILD_TARGET_DIR",
+      "CARGO_ENCODED_RUSTFLAGS", "CARGO_ENCODED_RUSTDOCFLAGS", "RUSTC", "RUSTC_WORKSPACE_WRAPPER",
+      "RUSTC_WRAPPER", "RUSTDOC", "RUSTDOCFLAGS", "RUSTFLAGS", "RUSTFMT",
+    ],
+  };
+  if (JSON.stringify(value) !== JSON.stringify(expected)) {
+    throw new Error("producer tool environment does not enforce the reviewed tool selection");
+  }
+}
+
+function parseInvocationTools(value, contractTools) {
+  const tools = array(value, "producer invocation tools").map((entry) => {
+    exact(entry, ["role", "path"], "producer invocation tool");
+    return { role: nonempty(entry.role, "producer invocation tool role"), path: absolutePath(entry.path, "producer invocation tool path") };
+  });
+  requireCanonicalToolRoles(tools, "producer invocation tools");
+  if (JSON.stringify(tools.map((entry) => entry.role)) !== JSON.stringify(contractTools.map((entry) => entry.role))) {
+    throw new Error("producer invocation tools differ from the contract tool roles");
+  }
+  for (let index = 0; index < tools.length; index += 1) {
+    if (contentDigest(readCanonicalRegularFile(tools[index].path, `${tools[index].role} producer tool`)) !== contractTools[index].content_digest) {
+      throw new Error(`${tools[index].role}: producer tool bytes differ from contract evidence`);
+    }
+  }
+  return tools;
+}
+
+function readCanonicalRegularFile(filePath, label) {
+  const stat = fs.lstatSync(filePath);
+  if (!stat.isFile() || fs.realpathSync(filePath) !== filePath) throw new Error(`${label} must be a canonical regular file`);
+  return fs.readFileSync(filePath);
+}
+
+function requireCanonicalToolRoles(tools, label) {
+  const roles = tools.map((entry) => entry.role);
+  if (new Set(roles).size !== roles.length) throw new Error(`${label} must be unique by role`);
+  if (JSON.stringify(roles) !== JSON.stringify([...roles].sort(compareCodePoint))) {
+    throw new Error(`${label} must use canonical role ordering`);
+  }
+}
+
 function validateReviewedPlan(gate, result, evidence, artifacts, expected, executionTarget, storageAdmission) {
   const plan = expected.gate_plans.get(gate);
   if (!plan) throw new Error(`${gate}: gate evidence has no reviewed bundle plan`);
   const contract = gatePlanEvidence(plan, executionTarget, storageAdmission.path_bindings.repository.path);
-  if (evidence.contract.reviewed_source_revision !== expected.baseline_source_revision || evidence.contract.executable_digest !== contract.executable_digest || evidence.contract.producer_source_digest !== contract.source_digest) throw new Error(`${gate}: producer contract differs from the reviewed gate plan`);
+  if (evidence.contract.reviewed_source_revision !== expected.baseline_source_revision
+    || evidence.contract.primary_tool !== contract.primary_tool
+    || JSON.stringify(evidence.contract.tools) !== JSON.stringify(contract.tools)
+    || evidence.contract.producer_source_digest !== contract.source_digest) {
+    throw new Error(`${gate}: producer contract differs from the reviewed gate plan`);
+  }
   if (JSON.stringify(evidence.invocation.arguments) !== JSON.stringify(contract.arguments) || evidence.invocation.cwd !== contract.cwd) throw new Error(`${gate}: producer invocation differs from the reviewed gate plan`);
   const actualRoles = artifacts.map((entry) => entry.role);
   if (actualRoles.some((role) => !plan.expected_artifact_roles.includes(role))) throw new Error(`${gate}: producer emitted an unreviewed artifact role`);
