@@ -6,11 +6,12 @@ import { executionTargetKey, parseExecutionTarget, parseExecutionTargets, sameEx
 import { gatePlanEvidence } from "./gate-plan.mjs";
 import { GATE_PRODUCERS } from "./gate-kinds.mjs";
 import { SAFE_IDENTITY, absolutePath, array, digest, enumValue, exact, filesystemIdentity, integer, kind, nonempty, sourceRevision, stableId, timestamp, uniqueStrings } from "./schema.mjs";
+import { storageStatus } from "./storage-admission.mjs";
 
 export { GATE_PRODUCERS } from "./gate-kinds.mjs";
 
 export function parseGateResult(value, expected) {
-  kind(value, 3, "runmat-builtin-migration-gate-result", "gate result");
+  kind(value, 4, "runmat-builtin-migration-gate-result", "gate result");
   exact(value, ["schema_version", "kind", "authority", "producer", "producer_evidence", "artifact_id", "produced_at", "execution_target", "source_revision", "source_digest", "baseline_inventory_digest", "subject_inventory_digest", "control_manifest_digest", "bundle_id", "identities", "gate", "result", "checks", "artifacts", "storage_admission"], "gate result");
   if (value.authority !== "machine-verification-only") throw new Error("gate result has invalid authority");
   const gate = enumValue(value.gate, Object.keys(GATE_PRODUCERS), "gate result gate");
@@ -51,12 +52,17 @@ export function parseGateResult(value, expected) {
       throw new Error(`${gate}: execution target is absent from the reviewed control target set`);
     }
   }
-  parseStorageAdmission(value.storage_admission, value.result, expected, producedAt, executionTarget);
+  const storageAdmission = parseStorageAdmission(
+    value.storage_admission, value.result, expected, producedAt, executionTarget, artifacts,
+  );
+  validateExecutionEnvironment(producerEvidence.invocation.environment, storageAdmission);
   if (expected) {
     if (value.source_revision !== expected.source_revision || value.source_digest !== expected.source_digest || value.baseline_inventory_digest !== expected.baseline_inventory_digest || value.subject_inventory_digest !== expected.subject_inventory_digest || value.control_manifest_digest !== expected.control_manifest_digest || value.bundle_id !== expected.bundle_id) {
       throw new Error(`${gate}: stale or mismatched gate provenance`);
     }
-    if (expected.gate_plans) validateReviewedPlan(gate, value.result, producerEvidence, artifacts, expected, executionTarget);
+    if (expected.gate_plans) validateReviewedPlan(
+      gate, value.result, producerEvidence, artifacts, expected, executionTarget, storageAdmission,
+    );
   }
   return { ...value, identities: identities.sort(compareCodePoint), checks, artifacts };
 }
@@ -73,16 +79,20 @@ function parseArtifact(value) {
 }
 
 function parseProducerEvidence(value, producer) {
-  kind(value, 1, `${producer}-evidence`, "typed producer evidence");
+  kind(value, 2, `${producer}-evidence`, "typed producer evidence");
   exact(value, ["schema_version", "kind", "contract", "invocation", "process", "captured_process_digest"], "typed producer evidence");
   exact(value.contract, ["reviewed_source_revision", "executable_digest", "producer_source_digest"], "producer contract evidence");
   sourceRevision(value.contract.reviewed_source_revision, "producer reviewed source revision");
   digest(value.contract.executable_digest, "producer executable digest");
   digest(value.contract.producer_source_digest, "producer source digest");
-  exact(value.invocation, ["executable", "arguments", "cwd"], "producer invocation");
+  exact(value.invocation, ["executable", "arguments", "cwd", "environment"], "producer invocation");
   nonempty(value.invocation.executable, "producer executable");
   array(value.invocation.arguments, "producer arguments", { empty: true }).forEach((entry) => nonempty(entry, "producer argument"));
   absolutePath(value.invocation.cwd, "producer working directory");
+  exact(value.invocation.environment, ["CARGO_TARGET_DIR", "TMPDIR", "TMP", "TEMP"], "producer environment");
+  for (const [name, environmentPath] of Object.entries(value.invocation.environment)) {
+    absolutePath(environmentPath, `producer ${name}`);
+  }
   if (contentDigest(fs.readFileSync(value.invocation.executable)) !== value.contract.executable_digest) throw new Error("producer executable bytes differ from contract evidence");
   exact(value.process, ["exit_code", "signal", "stdout_digest", "stderr_digest"], "producer process result");
   integer(value.process.exit_code, "producer exit code");
@@ -94,10 +104,10 @@ function parseProducerEvidence(value, producer) {
   return value;
 }
 
-function validateReviewedPlan(gate, result, evidence, artifacts, expected, executionTarget) {
+function validateReviewedPlan(gate, result, evidence, artifacts, expected, executionTarget, storageAdmission) {
   const plan = expected.gate_plans.get(gate);
   if (!plan) throw new Error(`${gate}: gate evidence has no reviewed bundle plan`);
-  const contract = gatePlanEvidence(plan, executionTarget, expected.repository);
+  const contract = gatePlanEvidence(plan, executionTarget, storageAdmission.path_bindings.repository.path);
   if (evidence.contract.reviewed_source_revision !== expected.baseline_source_revision || evidence.contract.executable_digest !== contract.executable_digest || evidence.contract.producer_source_digest !== contract.source_digest) throw new Error(`${gate}: producer contract differs from the reviewed gate plan`);
   if (JSON.stringify(evidence.invocation.arguments) !== JSON.stringify(contract.arguments) || evidence.invocation.cwd !== contract.cwd) throw new Error(`${gate}: producer invocation differs from the reviewed gate plan`);
   const actualRoles = artifacts.map((entry) => entry.role);
@@ -105,11 +115,12 @@ function validateReviewedPlan(gate, result, evidence, artifacts, expected, execu
   if (result === "pass" && JSON.stringify(actualRoles) !== JSON.stringify(plan.expected_artifact_roles)) throw new Error(`${gate}: passing evidence does not cover the reviewed artifact roles`);
 }
 
-function parseStorageAdmission(value, gateResult, expected, producedAt, executionTarget) {
-  exact(value, ["profile_id", "execution_host", "observed_at", "volumes"], "gate storage admission");
+function parseStorageAdmission(value, gateResult, expected, producedAt, executionTarget, artifacts) {
+  exact(value, ["profile_id", "execution_host", "observed_at", "path_bindings", "volumes"], "gate storage admission");
   const profileId = stableId(value.profile_id, "gate storage profile id");
   const executionHost = nonempty(value.execution_host, "gate storage execution host");
   const observedAt = timestamp(value.observed_at, "gate storage observed_at");
+  const pathBindings = parsePathBindings(value.path_bindings, artifacts);
   const volumes = array(value.volumes, "gate storage volumes");
   const expectedRoles = ["source-worktree", "target-temp"];
   if (JSON.stringify(volumes.map((entry) => entry.role).sort()) !== JSON.stringify([...expectedRoles].sort())) throw new Error("gate storage admission must cover both named volume roles exactly once");
@@ -122,7 +133,7 @@ function parseStorageAdmission(value, gateResult, expected, producedAt, executio
     integer(entry.minimum_free_bytes, `${entry.role} minimum free bytes`, 1);
     integer(entry.pause_below_bytes, `${entry.role} pause below bytes`, 1);
     if (entry.pause_below_bytes < entry.minimum_free_bytes) throw new Error(`${entry.role}: pause threshold is below minimum`);
-    const expectedStatus = entry.available_bytes >= entry.pause_below_bytes ? "admitted" : "paused";
+    const expectedStatus = storageStatus(entry.available_bytes, entry.minimum_free_bytes, entry.pause_below_bytes);
     if (entry.status !== expectedStatus) throw new Error(`${entry.role}: storage status conflicts with observed bytes`);
     if (gateResult === "pass" && entry.status !== "admitted") throw new Error(`${entry.role}: a product gate cannot pass below its pause threshold`);
     if (expected?.storage_policy) {
@@ -140,5 +151,59 @@ function parseStorageAdmission(value, gateResult, expected, producedAt, executio
       if (age < 0 || age > configured.maximum_observation_age_seconds) throw new Error(`${entry.role}: storage observation is outside the reviewed time bound`);
       if (entry.evidence_path !== configured.mount_path || entry.filesystem_id !== configured.filesystem_id || entry.minimum_free_bytes !== configured.minimum_free_bytes || entry.pause_below_bytes !== configured.pause_below_bytes) throw new Error(`${entry.role}: storage evidence differs from reviewed control policy`);
     }
+  }
+  const filesystems = new Map(volumes.map((entry) => [entry.role, entry.filesystem_id]));
+  if (pathBindings.repository.filesystem_id !== filesystems.get("source-worktree")) {
+    throw new Error("repository path is not bound to the reviewed source-worktree volume");
+  }
+  for (const binding of [pathBindings.cargo_target, pathBindings.temporary, ...pathBindings.artifacts]) {
+    if (binding.filesystem_id !== filesystems.get("target-temp")) {
+      throw new Error(`${binding.role}: path is not bound to the reviewed target-temp volume`);
+    }
+  }
+  if (expected?.repository && pathBindings.repository.path !== fs.realpathSync(expected.repository)) {
+    throw new Error("gate repository path differs from the trusted execution repository");
+  }
+  return { ...value, path_bindings: pathBindings };
+}
+
+function parsePathBindings(value, artifacts) {
+  exact(value, ["repository", "cargo_target", "temporary", "artifacts"], "gate storage path bindings");
+  const repository = parsePathBinding(value.repository, "repository");
+  const cargoTarget = parsePathBinding(value.cargo_target, "cargo-target");
+  const temporary = parsePathBinding(value.temporary, "temporary");
+  const artifactBindings = array(value.artifacts, "gate artifact path bindings", { empty: true })
+    .map((entry) => parsePathBinding(entry, entry?.role ?? "artifact"));
+  const roles = artifactBindings.map((entry) => entry.role);
+  if (new Set(roles).size !== roles.length) throw new Error("gate artifact path binding roles must be unique");
+  if (JSON.stringify(roles) !== JSON.stringify([...roles].sort(compareCodePoint))) {
+    throw new Error("gate artifact path bindings must use canonical role ordering");
+  }
+  const expected = artifacts.map((entry) => ({ role: entry.role, path: entry.path }));
+  const observed = artifactBindings.map((entry) => ({ role: entry.role, path: entry.path }));
+  if (JSON.stringify(observed) !== JSON.stringify(expected)) {
+    throw new Error("gate artifact paths differ from their reviewed storage bindings");
+  }
+  return { repository, cargo_target: cargoTarget, temporary, artifacts: artifactBindings };
+}
+
+function parsePathBinding(value, role) {
+  exact(value, ["role", "path", "filesystem_id"], `${role} storage path binding`);
+  if (value.role !== role) throw new Error(`${role}: storage path binding has the wrong role`);
+  return {
+    role,
+    path: absolutePath(value.path, `${role} storage path`),
+    filesystem_id: filesystemIdentity(value.filesystem_id, `${role} storage filesystem id`),
+  };
+}
+
+function validateExecutionEnvironment(environment, admission) {
+  const cargoTarget = admission.path_bindings.cargo_target.path;
+  const temporary = admission.path_bindings.temporary.path;
+  if (environment.CARGO_TARGET_DIR !== cargoTarget
+    || environment.TMPDIR !== temporary
+    || environment.TMP !== temporary
+    || environment.TEMP !== temporary) {
+    throw new Error("producer environment differs from reviewed storage path bindings");
   }
 }
