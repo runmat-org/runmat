@@ -6,7 +6,6 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
-    algebra::spmv,
     assembly::AssemblySummary,
     contracts::{SolverMethod, SolverPreconditioner},
     diagnostics::FeaDiagnostic,
@@ -15,6 +14,7 @@ use crate::{
     ComputeBackend,
 };
 
+mod balance;
 mod constraint_state;
 mod diagnostics;
 mod effective_solve;
@@ -24,6 +24,7 @@ mod state;
 #[cfg(test)]
 mod tests;
 
+use balance::TransientBalanceHistory;
 pub(crate) use diagnostics::mechanical_energy_history_diagnostic;
 use diagnostics::transient_diagnostics;
 use effective_solve::{
@@ -31,7 +32,6 @@ use effective_solve::{
 };
 use schedule::next_step_boundary;
 pub(crate) use schedule::{canonical_transient_step_boundaries, TransientStepBoundary};
-use state::SecondOrderState;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TransientSolveOptions {
@@ -97,6 +97,13 @@ pub struct TransientSolveResult {
     pub(crate) strain_energy_snapshots: Vec<f64>,
     #[serde(skip)]
     pub(crate) kinetic_energy_snapshots: Vec<f64>,
+    #[serde(skip)]
+    pub(crate) reaction_snapshots: Vec<Vec<f64>>,
+    pub external_work_j: Vec<f64>,
+    pub damping_dissipation_j: Vec<f64>,
+    pub energy_balance_residual_j: Vec<f64>,
+    pub relative_energy_balance_error: Vec<f64>,
+    pub dynamic_balance_snapshots: Vec<crate::contracts::StructuralDynamicBalanceSnapshot>,
 }
 
 #[derive(Debug, Error)]
@@ -125,6 +132,10 @@ pub enum TransientSolveError<E> {
     Assembly(E),
     #[error("transient reassembly changed the structural degree-of-freedom count")]
     DofCountChanged,
+    #[error("transient reassembly changed the invariant structural {component}")]
+    StructuralSystemChanged { component: &'static str },
+    #[error("structural dynamic-balance evaluation failed: {detail}")]
+    DynamicBalance { detail: String },
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -217,8 +228,11 @@ pub(crate) fn solve_transient_system_with_assembly<E>(
     residual_norms.push(initial.projected_residual().relative_norm());
     let mut accepted_time_steps_s = Vec::with_capacity(interval_count);
     let mut assembly_snapshots = vec![summary.clone()];
-    let mut strain_energy_snapshots = vec![strain_energy(summary, &state)];
-    let mut kinetic_energy_snapshots = vec![kinetic_energy(summary, &state)];
+    let mut balance_history = TransientBalanceHistory::start(summary, &state).map_err(|error| {
+        TransientSolveError::DynamicBalance {
+            detail: error.to_string(),
+        }
+    })?;
     let mut aggregate = SolveAggregate::default();
     aggregate.push(&initial);
     let nominal_time_step_s = (end_time_s - start_time_s) / interval_count as f64;
@@ -251,7 +265,11 @@ pub(crate) fn solve_transient_system_with_assembly<E>(
         );
         let step_summary =
             assembly_at(next_time_s, approach).map_err(TransientSolveError::Assembly)?;
-        require_stable_dof_count(summary, &step_summary)?;
+        require_stable_system(summary, &step_summary)?;
+        let previous_state = state.clone();
+        let previous_summary = assembly_snapshots
+            .last()
+            .expect("the initial assembly is retained for every accepted state");
         let solved = solve_average_acceleration_step(
             &step_summary,
             &state,
@@ -264,6 +282,17 @@ pub(crate) fn solve_transient_system_with_assembly<E>(
             detail: source.to_string(),
         })?;
         require_residual_target(&solved, next_time_s, options.residual_target)?;
+        balance_history
+            .push_step(
+                previous_summary,
+                &previous_state,
+                &step_summary,
+                solved.state(),
+                time_step_s,
+            )
+            .map_err(|error| TransientSolveError::DynamicBalance {
+                detail: error.to_string(),
+            })?;
 
         // A candidate becomes visible only after its linear solve, physical residual, and state
         // invariants have all succeeded.
@@ -274,15 +303,13 @@ pub(crate) fn solve_transient_system_with_assembly<E>(
         displacement_snapshots.push(state.displacement().to_vec());
         velocity_snapshots.push(state.velocity().to_vec());
         acceleration_snapshots.push(state.acceleration().to_vec());
-        strain_energy_snapshots.push(strain_energy(&step_summary, &state));
-        kinetic_energy_snapshots.push(kinetic_energy(&step_summary, &state));
         assembly_snapshots.push(step_summary);
         residual_norms.push(solved.projected_residual().relative_norm());
 
         if approach == SignalSampleApproach::LeftLimit {
             let right_limit_summary = assembly_at(next_time_s, SignalSampleApproach::At)
                 .map_err(TransientSolveError::Assembly)?;
-            require_stable_dof_count(summary, &right_limit_summary)?;
+            require_stable_system(summary, &right_limit_summary)?;
             let refreshed = solve_initial_acceleration(
                 &right_limit_summary,
                 state.displacement().to_vec(),
@@ -304,14 +331,11 @@ pub(crate) fn solve_transient_system_with_assembly<E>(
             *acceleration_snapshots
                 .last_mut()
                 .expect("the accepted state was published above") = state.acceleration().to_vec();
-            *strain_energy_snapshots
-                .last_mut()
-                .expect("the accepted state was published above") =
-                strain_energy(&right_limit_summary, &state);
-            *kinetic_energy_snapshots
-                .last_mut()
-                .expect("the accepted state was published above") =
-                kinetic_energy(&right_limit_summary, &state);
+            balance_history
+                .refresh_reaction(&right_limit_summary, &state)
+                .map_err(|error| TransientSolveError::DynamicBalance {
+                    detail: error.to_string(),
+                })?;
             *assembly_snapshots
                 .last_mut()
                 .expect("the accepted state was published above") = right_limit_summary;
@@ -335,8 +359,9 @@ pub(crate) fn solve_transient_system_with_assembly<E>(
         &options,
         &accepted_time_steps_s,
         &residual_norms,
-        &strain_energy_snapshots,
-        &kinetic_energy_snapshots,
+        balance_history.strain_energy_j(),
+        balance_history.kinetic_energy_j(),
+        balance_history.relative_energy_balance_error(),
         aggregate.solver_backend,
     );
     Ok(TransientSolveResult {
@@ -357,17 +382,53 @@ pub(crate) fn solve_transient_system_with_assembly<E>(
         preconditioner: aggregate.preconditioner,
         accelerator_evidence: aggregate.accelerator_evidence,
         assembly_snapshots,
-        strain_energy_snapshots,
-        kinetic_energy_snapshots,
+        reaction_snapshots: balance_history.reaction_snapshots().to_vec(),
+        strain_energy_snapshots: balance_history.strain_energy_j().to_vec(),
+        kinetic_energy_snapshots: balance_history.kinetic_energy_j().to_vec(),
+        external_work_j: balance_history.external_work_j().to_vec(),
+        damping_dissipation_j: balance_history.damping_dissipation_j().to_vec(),
+        energy_balance_residual_j: balance_history.energy_balance_residual_j().to_vec(),
+        relative_energy_balance_error: balance_history.relative_energy_balance_error().to_vec(),
+        dynamic_balance_snapshots: balance_history.balances().to_vec(),
     })
 }
 
-fn require_stable_dof_count<E>(
+fn require_stable_system<E>(
     initial: &AssemblySummary,
     candidate: &AssemblySummary,
 ) -> Result<(), TransientSolveError<E>> {
     if candidate.dof_count != initial.dof_count {
         return Err(TransientSolveError::DofCountChanged);
+    }
+    if candidate.structural_dof_layout != initial.structural_dof_layout {
+        return Err(TransientSolveError::StructuralSystemChanged {
+            component: "DOF layout",
+        });
+    }
+    if candidate.operator.constrained_dofs() != initial.operator.constrained_dofs()
+        || candidate.constraint_matrix != initial.constraint_matrix
+        || candidate.affine_constraint_reduction != initial.affine_constraint_reduction
+    {
+        return Err(TransientSolveError::StructuralSystemChanged {
+            component: "constraint system",
+        });
+    }
+    let initial_operators = initial.operator.operators();
+    let candidate_operators = candidate.operator.operators();
+    if candidate_operators.stiffness() != initial_operators.stiffness() {
+        return Err(TransientSolveError::StructuralSystemChanged {
+            component: "stiffness operator",
+        });
+    }
+    if candidate_operators.mass() != initial_operators.mass() {
+        return Err(TransientSolveError::StructuralSystemChanged {
+            component: "mass operator",
+        });
+    }
+    if candidate_operators.damping() != initial_operators.damping() {
+        return Err(TransientSolveError::StructuralSystemChanged {
+            component: "damping operator",
+        });
     }
     Ok(())
 }
@@ -431,6 +492,7 @@ fn empty_result(
             &[],
             &[0.0],
             &[0.0],
+            &[0.0],
             LinearAlgebraBackendKind::CpuReference,
         ),
         solver_method: SolverMethod::NewmarkAverageAccelerationPcg,
@@ -443,6 +505,18 @@ fn empty_result(
         assembly_snapshots: vec![summary.clone()],
         strain_energy_snapshots: vec![0.0],
         kinetic_energy_snapshots: vec![0.0],
+        reaction_snapshots: vec![Vec::new()],
+        external_work_j: vec![0.0],
+        damping_dissipation_j: vec![0.0],
+        energy_balance_residual_j: vec![0.0],
+        relative_energy_balance_error: vec![0.0],
+        dynamic_balance_snapshots: vec![crate::contracts::StructuralDynamicBalanceSnapshot {
+            applied_load: Vec::new(),
+            inertia_force: Vec::new(),
+            damping_force: Vec::new(),
+            elastic_force: Vec::new(),
+            equilibrium_residual: Vec::new(),
+        }],
     }
 }
 
@@ -484,26 +558,4 @@ impl SolveAggregate {
                 .extend(linear.accelerator_evidence.iter().cloned());
         }
     }
-}
-
-fn strain_energy(summary: &AssemblySummary, state: &SecondOrderState) -> f64 {
-    let force = spmv(
-        summary.operator.operators().stiffness(),
-        state.displacement(),
-    )
-    .expect("validated structural displacement dimensions");
-    0.5 * dot(state.displacement(), &force)
-}
-
-fn kinetic_energy(summary: &AssemblySummary, state: &SecondOrderState) -> f64 {
-    let momentum = spmv(summary.operator.operators().mass(), state.velocity())
-        .expect("validated structural velocity dimensions");
-    0.5 * dot(state.velocity(), &momentum)
-}
-
-fn dot(left: &[f64], right: &[f64]) -> f64 {
-    left.iter()
-        .zip(right)
-        .map(|(left, right)| left * right)
-        .sum()
 }

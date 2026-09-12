@@ -133,7 +133,31 @@ Structural transient solves use the average-acceleration Newmark method with a t
 policy. The procedure step owns the physical start and end times; `time_step_policy` selects the
 number of intervals over that authored domain. The structural transient kernel computes in `f64`,
 and run provenance reports `fp64`; structural transient options therefore do not expose a precision
-selector.
+selector. Signal discontinuities and requested history samples become exact solve boundaries. A
+boundary that lies on the nominal time lattice is snapped within a bounded floating-point envelope,
+so it does not create a numerically meaningless extra increment.
+
+Every accepted structural state retains displacement, velocity, and acceleration together with the
+physical balance
+
+```text
+M a + C v + K u - f = r
+```
+
+The projected free-coordinate norm of `r` is the convergence residual. Its constrained-coordinate
+components are the dynamic support reactions; translational and rotational reactions are published
+separately when the formulation owns rotational degrees of freedom. The transient payload also
+contains strain energy, kinetic energy, cumulative external work, cumulative damping dissipation,
+the signed energy-balance residual, and its normalized absolute error at every time point. For an
+initial mechanical energy `E0`, the reported balance is `E - E0 - Wext + D`. Formulation-owned solid
+strain, stress, von Mises, and strain-energy-density histories are recovered from each accepted
+physical state. Those fields remain absent for operator-only or other formulations that do not own
+the corresponding continuum recovery.
+
+The current direct-transient implementation requires invariant structural K, M, C, DOF layout, and
+constraint operators during one run. A reassembly that changes any of them fails before advancing
+the state. Time-varying loads are supported; prescribed support motion remains unavailable until its
+absolute/relative coordinate and derivative-consistency contract is implemented.
 
 ## Results After A Run
 

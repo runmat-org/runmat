@@ -4411,6 +4411,14 @@ pub fn analysis_run_transient_with_options_op(
             kinetic_energy_snapshots: transient_run.kinetic_energy_snapshots,
             strain_energy_snapshots: transient_run.strain_energy_snapshots,
             residual_norm_snapshots: transient_run.residual_norm_snapshots,
+            reaction_force_snapshots: transient_run.reaction_force_snapshots,
+            reaction_moment_snapshots: transient_run.reaction_moment_snapshots,
+            external_work_snapshots: transient_run.external_work_snapshots,
+            damping_dissipation_snapshots: transient_run.damping_dissipation_snapshots,
+            energy_balance_residual_snapshots: transient_run.energy_balance_residual_snapshots,
+            relative_energy_balance_error_snapshots: transient_run
+                .relative_energy_balance_error_snapshots,
+            dynamic_balance_snapshots: transient_run.dynamic_balance_snapshots,
             electro_thermal_temperature_snapshots: transient_run
                 .electro_thermal_temperature_snapshots,
             electro_thermal_thermal_residual_snapshots: transient_run

@@ -5,8 +5,9 @@ use runmat_analysis_core::{
     EvidenceConfidence, ExcitationAction, ExcitationCase, ExcitationCaseActivation,
     ExcitationCaseId, ExcitationDistribution, ExcitationId, ExcitationKinematics, ExcitationTarget,
     Force, MaterialAssignment, MaterialMechanicalModel, MaterialModel, MaterialThermalModel,
-    Moment, PhysicalSignal, PrescribedStructuralDofs, PrescribedValue, Pressure, ProcedureStep,
-    ProjectionRequirement, RegionTarget, Rotation, RotationDofValue, ShellElementModel,
+    MechanicalDampingModel, Moment, PhysicalSignal, PrescribedStructuralDofs, PrescribedValue,
+    Pressure, ProcedureStep, ProjectionRequirement, RayleighMassCoefficient,
+    RayleighStiffnessCoefficient, RegionTarget, Rotation, RotationDofValue, ShellElementModel,
     ShellSectionModel, Signal, SignalApproximationEvidence, SignalId, SignalPrecision,
     SignalProvenance, SignalRepresentation, SignalShape, SignalValue, Stiffness,
     StructuralConstraint, StructuralConstraintKind, StructuralElement, StructuralElementKind,
@@ -530,6 +531,7 @@ pub enum FixtureId {
     ModalLarge,
     TransientLong,
     TransientShock,
+    StructuralTransientTet4Reference,
     NonlinearAssembly,
     NonlinearAssemblyStress,
     NonlinearSofteningBenchmark,
@@ -602,6 +604,7 @@ pub fn fixture_model(fixture: FixtureId) -> AnalysisModel {
         FixtureId::ModalLarge => modal_large_fixture(),
         FixtureId::TransientLong => transient_long_fixture(),
         FixtureId::TransientShock => transient_shock_fixture(),
+        FixtureId::StructuralTransientTet4Reference => structural_transient_tet4_reference(),
         FixtureId::NonlinearAssembly => nonlinear_assembly_fixture(),
         FixtureId::NonlinearAssemblyStress => nonlinear_assembly_stress_fixture(),
         FixtureId::NonlinearSofteningBenchmark => nonlinear_softening_benchmark_fixture(),
@@ -977,6 +980,65 @@ fn transient_shock_fixture() -> AnalysisModel {
     model.sequence.steps = vec![ProcedureStep::structural_transient(
         "transient_shock_1".to_string(),
     )];
+    model
+}
+
+fn structural_transient_tet4_reference() -> AnalysisModel {
+    let mut model = cantilever_linear_static();
+    model.model_id = AnalysisModelId("structural_transient_tet4_reference".into());
+    model.geometry_id = "geo:structural_transient_tet4_reference".into();
+    model.materials[0].mechanical.youngs_modulus_pa = 1.0e5;
+    model.materials[0].mechanical.poisson_ratio = 0.25;
+    model.materials[0].mechanical.density_kg_per_m3 = 1_000.0;
+    model.materials[0].mechanical.damping = MechanicalDampingModel::Rayleigh {
+        mass_coefficient: RayleighMassCoefficient::new(0.2),
+        stiffness_coefficient: RayleighStiffnessCoefficient::new(2.0e-4),
+    };
+    model.material_assignments = vec![MaterialAssignment {
+        region_id: "dynamic_volume".into(),
+        expected_material_id: "mat_steel".into(),
+        assigned_material_id: "mat_steel".into(),
+        confidence: EvidenceConfidence::Verified,
+    }];
+    model.constraints = vec![
+        fixed_constraint("fixed_root", "root"),
+        AnalysisConstraint::Structural(StructuralConstraint {
+            constraint_id: "free_vertex_y_support".into(),
+            frame: CoordinateFrame::Global,
+            kind: StructuralConstraintKind::Prescribed(PrescribedStructuralDofs {
+                target: RegionTarget::boundary("free_vertex_y_support"),
+                translations: vec![TranslationDofValue {
+                    dof: StructuralTranslationDof::Uy,
+                    value: PrescribedValue::Constant(Displacement::new(0.0)),
+                }],
+                rotations: Vec::new(),
+            }),
+        }),
+        AnalysisConstraint::Structural(StructuralConstraint {
+            constraint_id: "free_vertex_z_support".into(),
+            frame: CoordinateFrame::Global,
+            kind: StructuralConstraintKind::Prescribed(PrescribedStructuralDofs {
+                target: RegionTarget::boundary("free_vertex_z_support"),
+                translations: vec![TranslationDofValue {
+                    dof: StructuralTranslationDof::Uz,
+                    value: PrescribedValue::Constant(Displacement::new(0.0)),
+                }],
+                rotations: Vec::new(),
+            }),
+        }),
+    ];
+    replace_fixture_excitations(
+        &mut model,
+        vec![FixtureExcitation {
+            id: "dynamic_force_x".into(),
+            region_id: "dynamic_force".into(),
+            kind: FixtureExcitationKind::Force([1.0, 0.0, 0.0]),
+        }],
+    );
+    model.sequence = AnalysisSequence::from_steps(
+        "structural_transient_tet4_reference_sequence",
+        vec![ProcedureStep::structural_transient("transient")],
+    );
     model
 }
 

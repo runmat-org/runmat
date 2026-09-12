@@ -261,6 +261,14 @@ validation or assembly.
 
 Rotational structural runs may return `structural.rotation` and `structural.reaction_moment` fields. Beam-specific moment resultants use `structural.beam_torsion_moment` and `structural.beam_bending_moment`; shell-specific resultants use `structural.shell_bending_moment`.
 
+Structural transient payloads retain one required entry per accepted time point for displacement,
+velocity, acceleration, reaction force, kinetic energy, strain energy, residual norm, external work,
+damping dissipation, signed energy-balance residual, normalized energy-balance error, and the full
+`M*a`, `C*v`, `K*u`, applied-load, and equilibrium-residual vectors. Rotation, angular velocity,
+angular acceleration, reaction moment, and continuum recovery histories are present only when the
+executed formulation owns those quantities. Snapshot queries validate the complete inventory before
+returning a subset and reject partial or malformed stored payloads.
+
 ## Runtime Config
 
 Use `[runtime.fea]`:

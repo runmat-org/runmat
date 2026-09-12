@@ -49,6 +49,12 @@ macro_rules! visit_analysis_result_fields {
                 $($borrow)* transient.kinetic_energy_snapshots,
                 $($borrow)* transient.strain_energy_snapshots,
                 $($borrow)* transient.residual_norm_snapshots,
+                $($borrow)* transient.reaction_force_snapshots,
+                $($borrow)* transient.reaction_moment_snapshots,
+                $($borrow)* transient.external_work_snapshots,
+                $($borrow)* transient.damping_dissipation_snapshots,
+                $($borrow)* transient.energy_balance_residual_snapshots,
+                $($borrow)* transient.relative_energy_balance_error_snapshots,
                 $($borrow)* transient.electro_thermal_temperature_snapshots,
                 $($borrow)* transient.electro_thermal_thermal_residual_snapshots,
             ] {
@@ -833,6 +839,21 @@ pub fn analysis_results_op(
 
     let transient_results = if query.include_transient_results && query.include_field_values {
         if let Some(transient) = run_result.transient_results.as_ref() {
+            transient.validate().map_err(|detail| {
+                operation_error(
+                    ANALYSIS_RESULTS_OPERATION,
+                    ANALYSIS_RESULTS_OP_VERSION,
+                    &context,
+                    OperationErrorSpec {
+                        error_code: "RM.FEA.RESULTS.INVALID_TRANSIENT_INVENTORY",
+                        error_type: OperationErrorType::Contract,
+                        retryable: false,
+                        severity: OperationErrorSeverity::Error,
+                    },
+                    detail,
+                    BTreeMap::new(),
+                )
+            })?;
             if query.transient_snapshot_indices.is_empty() {
                 Some(transient.clone())
             } else {
@@ -867,14 +888,45 @@ pub fn analysis_results_op(
                     &transient.strain_energy_density_snapshots,
                     &query.transient_snapshot_indices,
                 );
-                let mut von_mises_snapshots =
-                    Vec::with_capacity(query.transient_snapshot_indices.len());
+                let von_mises_snapshots = filter_analysis_fields_by_indices(
+                    &transient.von_mises_snapshots,
+                    &query.transient_snapshot_indices,
+                );
                 let mut kinetic_energy_snapshots =
                     Vec::with_capacity(query.transient_snapshot_indices.len());
                 let mut strain_energy_snapshots =
                     Vec::with_capacity(query.transient_snapshot_indices.len());
                 let mut residual_norm_snapshots =
                     Vec::with_capacity(query.transient_snapshot_indices.len());
+                let reaction_force_snapshots = filter_analysis_fields_by_indices(
+                    &transient.reaction_force_snapshots,
+                    &query.transient_snapshot_indices,
+                );
+                let reaction_moment_snapshots = filter_analysis_fields_by_indices(
+                    &transient.reaction_moment_snapshots,
+                    &query.transient_snapshot_indices,
+                );
+                let external_work_snapshots = filter_analysis_fields_by_indices(
+                    &transient.external_work_snapshots,
+                    &query.transient_snapshot_indices,
+                );
+                let damping_dissipation_snapshots = filter_analysis_fields_by_indices(
+                    &transient.damping_dissipation_snapshots,
+                    &query.transient_snapshot_indices,
+                );
+                let energy_balance_residual_snapshots = filter_analysis_fields_by_indices(
+                    &transient.energy_balance_residual_snapshots,
+                    &query.transient_snapshot_indices,
+                );
+                let relative_energy_balance_error_snapshots = filter_analysis_fields_by_indices(
+                    &transient.relative_energy_balance_error_snapshots,
+                    &query.transient_snapshot_indices,
+                );
+                let dynamic_balance_snapshots = query
+                    .transient_snapshot_indices
+                    .iter()
+                    .filter_map(|index| transient.dynamic_balance_snapshots.get(*index).cloned())
+                    .collect();
                 let mut residual_norms = Vec::with_capacity(query.transient_snapshot_indices.len());
                 let electro_thermal_temperature_snapshots = filter_analysis_fields_by_indices(
                     &transient.electro_thermal_temperature_snapshots,
@@ -984,35 +1036,6 @@ pub fn analysis_results_op(
                                         (
                                             "available_acceleration_snapshot_count".to_string(),
                                             transient.acceleration_snapshots.len().to_string(),
-                                        ),
-                                    ]),
-                                )
-                            })?;
-                    let von_mises =
-                        transient
-                            .von_mises_snapshots
-                            .get(index)
-                            .cloned()
-                            .ok_or_else(|| {
-                                operation_error(
-                                    ANALYSIS_RESULTS_OPERATION,
-                                    ANALYSIS_RESULTS_OP_VERSION,
-                                    &context,
-                                    OperationErrorSpec {
-                                        error_code:
-                                            "RM.FEA.RESULTS.TRANSIENT_SNAPSHOT_NOT_FOUND",
-                                        error_type: OperationErrorType::Input,
-                                        retryable: false,
-                                        severity: OperationErrorSeverity::Error,
-                                    },
-                                    format!(
-                                        "requested transient snapshot index '{index}' is missing von Mises data"
-                                    ),
-                                    BTreeMap::from([
-                                        ("requested_snapshot_index".to_string(), index.to_string()),
-                                        (
-                                            "available_von_mises_snapshot_count".to_string(),
-                                            transient.von_mises_snapshots.len().to_string(),
                                         ),
                                     ]),
                                 )
@@ -1134,7 +1157,6 @@ pub fn analysis_results_op(
                     displacement_snapshots.push(snapshot);
                     velocity_snapshots.push(velocity);
                     acceleration_snapshots.push(acceleration);
-                    von_mises_snapshots.push(von_mises);
                     kinetic_energy_snapshots.push(kinetic_energy);
                     strain_energy_snapshots.push(strain_energy);
                     residual_norm_snapshots.push(residual_norm_snapshot);
@@ -1157,6 +1179,13 @@ pub fn analysis_results_op(
                     kinetic_energy_snapshots,
                     strain_energy_snapshots,
                     residual_norm_snapshots,
+                    reaction_force_snapshots,
+                    reaction_moment_snapshots,
+                    external_work_snapshots,
+                    damping_dissipation_snapshots,
+                    energy_balance_residual_snapshots,
+                    relative_energy_balance_error_snapshots,
+                    dynamic_balance_snapshots,
                     electro_thermal_temperature_snapshots,
                     electro_thermal_thermal_residual_snapshots,
                     residual_norms,

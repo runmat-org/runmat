@@ -19,6 +19,30 @@ fn with_load_at(summary: &AssemblySummary, dof: usize, value: f64) -> AssemblySu
     changed
 }
 
+fn with_scaled_stiffness(summary: &AssemblySummary, scale: f64) -> AssemblySummary {
+    let mut changed = summary.clone();
+    let source = summary.operator.operators();
+    let stiffness = crate::algebra::RealSparseMatrix::scaled_sum(
+        &[(scale, source.stiffness())],
+        crate::algebra::OperatorRole::Stiffness,
+        source.stiffness().properties(),
+    )
+    .unwrap();
+    let operators = crate::algebra::CanonicalRealOperators::try_new(
+        stiffness,
+        source.mass().clone(),
+        source.damping().clone(),
+    )
+    .unwrap();
+    changed.operator = crate::algebra::AssembledRealSystem::try_new(
+        operators,
+        summary.operator.constrained_dofs().to_vec(),
+        summary.operator.load().to_vec(),
+    )
+    .unwrap();
+    changed
+}
+
 #[test]
 fn invalid_fixed_step_and_residual_policies_fail_closed() {
     let empty_grid = TransientSolveOptions {
@@ -36,6 +60,46 @@ fn invalid_fixed_step_and_residual_policies_fail_closed() {
     assert!(matches!(
         validate_options::<Infallible>(&invalid_residual, 0.0, 1.0),
         Err(TransientSolveError::InvalidOptions(_))
+    ));
+}
+
+#[test]
+fn time_varying_structural_operator_is_rejected_before_advancing_state() {
+    let model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
+    let step = &model.sequence.steps[0];
+    let excitations =
+        realize_step_excitations(&model, step, ExcitationSamplePoint::Static).unwrap();
+    let summary = assemble_structural_system(
+        &model,
+        &excitations,
+        None,
+        StructuralFormulationRequirement::PhysicalDiscretization,
+    )
+    .unwrap();
+    let changed = with_scaled_stiffness(&summary, 1.01);
+
+    let result = solve_transient_system_with_assembly(
+        &summary,
+        TransientSolveOptions {
+            time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 2 },
+            ..TransientSolveOptions::default()
+        },
+        ComputeBackend::Cpu,
+        TransientTimeDomain {
+            start_time_s: 0.0,
+            end_time_s: 1.0,
+            step_boundaries: &[],
+        },
+        vec![0.0; summary.dof_count],
+        vec![0.0; summary.dof_count],
+        |_, _| Ok::<_, Infallible>(changed.clone()),
+    );
+
+    assert!(matches!(
+        result,
+        Err(TransientSolveError::StructuralSystemChanged {
+            component: "stiffness operator"
+        })
     ));
 }
 

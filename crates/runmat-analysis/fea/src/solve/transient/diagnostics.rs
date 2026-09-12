@@ -11,6 +11,7 @@ pub(super) fn transient_diagnostics(
     residual_norms: &[f64],
     strain_energy: &[f64],
     kinetic_energy: &[f64],
+    relative_energy_balance_error: &[f64],
     backend: LinearAlgebraBackendKind,
 ) -> Vec<FeaDiagnostic> {
     let maximum_residual = residual_norms.iter().copied().fold(0.0_f64, f64::max);
@@ -28,6 +29,10 @@ pub(super) fn transient_diagnostics(
         .iter()
         .zip(kinetic_energy)
         .map(|(strain, kinetic)| strain + kinetic)
+        .fold(0.0_f64, f64::max);
+    let maximum_relative_energy_balance_error = relative_energy_balance_error
+        .iter()
+        .copied()
         .fold(0.0_f64, f64::max);
     vec![
         FeaDiagnostic {
@@ -59,27 +64,40 @@ pub(super) fn transient_diagnostics(
         },
         FeaDiagnostic {
             code: "FEA_TRANSIENT_ENERGY".into(),
-            severity: if maximum_total_energy.is_finite() {
+            severity: if maximum_total_energy.is_finite()
+                && maximum_relative_energy_balance_error.is_finite()
+                && maximum_relative_energy_balance_error <= 1.0e-6
+            {
                 FeaDiagnosticSeverity::Info
             } else {
                 FeaDiagnosticSeverity::Warning
             },
             message: format!(
-                "maximum_physical_strain_plus_kinetic_energy_joules={maximum_total_energy}"
+                "maximum_physical_strain_plus_kinetic_energy_joules={maximum_total_energy} maximum_relative_energy_balance_error={maximum_relative_energy_balance_error} conservation_balance_evaluated=true"
             ),
         },
     ]
 }
 
-/// Describes the mechanical-energy history without claiming a conservation balance.
-///
-/// External work and damping dissipation are not integrated by this solver result, so the
-/// diagnostic intentionally makes no stability or conservation judgment from energy growth.
 pub(crate) fn mechanical_energy_history_diagnostic(
     kinetic_energy: &[f64],
     strain_energy: &[f64],
+    external_work: &[f64],
+    damping_dissipation: &[f64],
+    energy_balance_residual: &[f64],
+    relative_energy_balance_error: &[f64],
 ) -> FeaDiagnostic {
-    let snapshot_count = kinetic_energy.len().max(strain_energy.len());
+    let snapshot_count = [
+        kinetic_energy.len(),
+        strain_energy.len(),
+        external_work.len(),
+        damping_dissipation.len(),
+        energy_balance_residual.len(),
+        relative_energy_balance_error.len(),
+    ]
+    .into_iter()
+    .max()
+    .unwrap_or(0);
     let total_energy = (0..snapshot_count)
         .map(|index| {
             kinetic_energy.get(index).copied().unwrap_or(f64::NAN)
@@ -97,10 +115,24 @@ pub(crate) fn mechanical_energy_history_diagnostic(
         .windows(2)
         .map(|window| (window[1] - window[0]).abs())
         .fold(0.0_f64, f64::max);
+    let final_external_work = external_work.last().copied().unwrap_or(f64::NAN);
+    let final_damping_dissipation = damping_dissipation.last().copied().unwrap_or(f64::NAN);
+    let maximum_absolute_balance_residual = energy_balance_residual
+        .iter()
+        .map(|value| value.abs())
+        .fold(0.0_f64, f64::max);
+    let maximum_relative_balance_error = relative_energy_balance_error
+        .iter()
+        .copied()
+        .fold(0.0_f64, f64::max);
     let metrics_are_finite = total_energy.iter().all(|value| value.is_finite())
         && minimum_total_energy.is_finite()
         && maximum_total_energy.is_finite()
-        && maximum_step_change.is_finite();
+        && maximum_step_change.is_finite()
+        && final_external_work.is_finite()
+        && final_damping_dissipation.is_finite()
+        && maximum_absolute_balance_residual.is_finite()
+        && maximum_relative_balance_error.is_finite();
 
     FeaDiagnostic {
         code: "FEA_TRANSIENT_MECHANICAL_ENERGY_HISTORY".to_string(),
@@ -110,7 +142,7 @@ pub(crate) fn mechanical_energy_history_diagnostic(
             FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "snapshot_count={snapshot_count} initial_strain_plus_kinetic_energy_joules={initial_total_energy} final_strain_plus_kinetic_energy_joules={final_total_energy} minimum_strain_plus_kinetic_energy_joules={minimum_total_energy} maximum_strain_plus_kinetic_energy_joules={maximum_total_energy} maximum_step_change_joules={maximum_step_change} conservation_balance_evaluated=false"
+            "snapshot_count={snapshot_count} initial_strain_plus_kinetic_energy_joules={initial_total_energy} final_strain_plus_kinetic_energy_joules={final_total_energy} minimum_strain_plus_kinetic_energy_joules={minimum_total_energy} maximum_strain_plus_kinetic_energy_joules={maximum_total_energy} maximum_step_change_joules={maximum_step_change} final_external_work_joules={final_external_work} final_damping_dissipation_joules={final_damping_dissipation} maximum_absolute_energy_balance_residual_joules={maximum_absolute_balance_residual} maximum_relative_energy_balance_error={maximum_relative_balance_error} conservation_balance_evaluated=true"
         ),
     }
 }

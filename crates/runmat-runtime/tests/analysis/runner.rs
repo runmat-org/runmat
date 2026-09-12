@@ -3163,6 +3163,20 @@ fn push_fixed_step_transient_assertions(
         Some(0.0),
         Some(f64::MAX),
     );
+    push_threshold_assertion!(
+        fixture_id,
+        assertions,
+        failures,
+        &format!("{execution}_transient_maximum_relative_energy_balance_error"),
+        "FEA_TRANSIENT_ENERGY",
+        diagnostic_metric(
+            run,
+            "FEA_TRANSIENT_ENERGY",
+            "maximum_relative_energy_balance_error",
+        ),
+        Some(0.0),
+        Some(1.0e-6),
+    );
     if let Err(error) = validate_transient_result(run) {
         failures.push(format!(
             "fixture {fixture_id} {execution} run returned invalid transient results: {error}"
@@ -3198,6 +3212,11 @@ fn validate_transient_result(run: &AnalysisRunResult) -> Result<(), String> {
         &transient.kinetic_energy_snapshots,
         &transient.strain_energy_snapshots,
         &transient.residual_norm_snapshots,
+        &transient.reaction_force_snapshots,
+        &transient.external_work_snapshots,
+        &transient.damping_dissipation_snapshots,
+        &transient.energy_balance_residual_snapshots,
+        &transient.relative_energy_balance_error_snapshots,
     ];
     if required_fields
         .iter()
@@ -3236,6 +3255,9 @@ fn validate_transient_result(run: &AnalysisRunResult) -> Result<(), String> {
         &transient.stress_snapshots,
         &transient.strain_energy_density_snapshots,
         &transient.von_mises_snapshots,
+        &transient.reaction_moment_snapshots,
+        &transient.electro_thermal_temperature_snapshots,
+        &transient.electro_thermal_thermal_residual_snapshots,
     ];
     if optional_fields.iter().any(|history| {
         !history.is_empty()
@@ -3247,6 +3269,14 @@ fn validate_transient_result(run: &AnalysisRunResult) -> Result<(), String> {
                 }))
     }) {
         return Err("optional formulation-owned history is incomplete or nonfinite".to_string());
+    }
+    if transient.dynamic_balance_snapshots.len() != snapshot_count {
+        return Err("dynamic-balance history does not match the time grid".to_string());
+    }
+    for balance in &transient.dynamic_balance_snapshots {
+        balance
+            .validate()
+            .map_err(|error| format!("dynamic-balance history is invalid: {error}"))?;
     }
     Ok(())
 }
@@ -4351,7 +4381,10 @@ fn write_fixture_solver_mesh_artifact(
     fs::create_dir_all(root).map_err(|error| error.to_string())?;
     let mut mesh =
         runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
-    subdivide_fixture_tetrahedron(&mut mesh, model);
+    let is_physical_transient_reference = model.model_id.0 == "structural_transient_tet4_reference";
+    if !is_physical_transient_reference {
+        subdivide_fixture_tetrahedron(&mut mesh, model);
+    }
     let mut source_hasher = Sha256::new();
     source_hasher.update(model.geometry_id.as_bytes());
     mesh.geometry.source_digest = StableDigest::from_bytes(source_hasher.finalize().into());
@@ -4395,7 +4428,18 @@ fn write_fixture_solver_mesh_artifact(
     }
     let boundary_face_count = mesh.topology.boundary_faces.len();
     for (index, region_id) in boundary_regions.into_iter().enumerate() {
-        let face = &mut mesh.topology.boundary_faces[index % boundary_face_count];
+        let face_index = if is_physical_transient_reference {
+            match region_id.as_str() {
+                "root" => 0,
+                "free_vertex_y_support" => 1,
+                "free_vertex_z_support" => 2,
+                "dynamic_force" => 3,
+                _ => index % boundary_face_count,
+            }
+        } else {
+            index % boundary_face_count
+        };
+        let face = &mut mesh.topology.boundary_faces[face_index];
         face.provenance.push(PersistentEntityId {
             kind: PersistentEntityKind::Region,
             source_topology_id: region_id,
@@ -4419,13 +4463,15 @@ fn write_fixture_solver_mesh_artifact(
 fn fixture_requires_solver_mesh(spec: &FixtureSpec, model: &AnalysisModel) -> bool {
     spec.expect_validate_error.is_none()
         && spec.expect_run_error.is_none()
-        && (matches!(
-            AnalysisSolverOptions::defaults_for(fixture_procedure_step(model)),
-            Ok(AnalysisSolverOptions::ThermalDiffusion(_))
-                | Ok(AnalysisSolverOptions::ConjugateHeatTransfer(_))
-                | Ok(AnalysisSolverOptions::FluidStructureInteraction(_))
-                | Ok(AnalysisSolverOptions::ElectromagneticPotential(_))
-        ) || spec.id.starts_with("electro_thermal_joule_"))
+        && (spec.id == "transient_physical_tet4_reference_cpu"
+            || matches!(
+                AnalysisSolverOptions::defaults_for(fixture_procedure_step(model)),
+                Ok(AnalysisSolverOptions::ThermalDiffusion(_))
+                    | Ok(AnalysisSolverOptions::ConjugateHeatTransfer(_))
+                    | Ok(AnalysisSolverOptions::FluidStructureInteraction(_))
+                    | Ok(AnalysisSolverOptions::ElectromagneticPotential(_))
+            )
+            || spec.id.starts_with("electro_thermal_joule_"))
 }
 
 fn configure_mesh_backed_electro_thermal_model(spec: &FixtureSpec, model: &mut AnalysisModel) {

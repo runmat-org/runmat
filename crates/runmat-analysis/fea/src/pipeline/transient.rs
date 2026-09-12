@@ -4,9 +4,12 @@ use crate::assembly::AssemblySummary;
 use crate::{
     assembly::{assemble_structural_system, StructuralFormulationRequirement},
     contracts::{
-        fea_transient_kinetic_energy_field_id, fea_transient_residual_norm_field_id,
+        fea_transient_damping_dissipation_field_id, fea_transient_energy_balance_residual_field_id,
+        fea_transient_external_work_field_id, fea_transient_kinetic_energy_field_id,
+        fea_transient_relative_energy_balance_error_field_id, fea_transient_residual_norm_field_id,
         fea_transient_strain_energy_field_id, ComputeBackend, FeaRunError, FeaRunResult,
-        FeaTransientRunResult,
+        FeaTransientRunResult, FEA_FIELD_STRUCTURAL_REACTION_FORCE,
+        FEA_FIELD_STRUCTURAL_REACTION_MOMENT,
     },
     diagnostics::builders::{extend_common_run_diagnostics, CommonRunDiagnosticInputs},
     excitation::{realize_step_excitations, time_discontinuities, ExcitationSamplePoint},
@@ -285,6 +288,10 @@ pub fn run_transient_with_options(
     run.diagnostics.push(mechanical_energy_history_diagnostic(
         &kinetic_energy_values,
         &strain_energy_values,
+        &transient.external_work_j,
+        &transient.damping_dissipation_j,
+        &transient.energy_balance_residual_j,
+        &transient.relative_energy_balance_error,
     ));
 
     let displacement_snapshots = recovered.displacement_snapshots;
@@ -293,6 +300,8 @@ pub fn run_transient_with_options(
     let angular_velocity_snapshots = recovered.angular_velocity_snapshots;
     let acceleration_snapshots = recovered.acceleration_snapshots;
     let angular_acceleration_snapshots = recovered.angular_acceleration_snapshots;
+    let reaction_force_snapshots = recovered.reaction_force_snapshots;
+    let reaction_moment_snapshots = recovered.reaction_moment_snapshots;
     let strain_snapshots = recovered.strain_snapshots;
     let stress_snapshots = recovered.stress_snapshots;
     let von_mises_snapshots = recovered.von_mises_snapshots;
@@ -331,6 +340,32 @@ pub fn run_transient_with_options(
             )
         })
         .collect::<Vec<_>>();
+    let external_work_snapshots = scalar_snapshots(
+        &transient.external_work_j,
+        fea_transient_external_work_field_id,
+    );
+    let damping_dissipation_snapshots = scalar_snapshots(
+        &transient.damping_dissipation_j,
+        fea_transient_damping_dissipation_field_id,
+    );
+    let energy_balance_residual_snapshots = scalar_snapshots(
+        &transient.energy_balance_residual_j,
+        fea_transient_energy_balance_residual_field_id,
+    );
+    let relative_energy_balance_error_snapshots = scalar_snapshots(
+        &transient.relative_energy_balance_error,
+        fea_transient_relative_energy_balance_error_field_id,
+    );
+    if let Some(field) = reaction_force_snapshots.last() {
+        let mut field = field.clone();
+        field.field_id = FEA_FIELD_STRUCTURAL_REACTION_FORCE.into();
+        run.fields.push(field);
+    }
+    if let Some(field) = reaction_moment_snapshots.last() {
+        let mut field = field.clone();
+        field.field_id = FEA_FIELD_STRUCTURAL_REACTION_MOMENT.into();
+        run.fields.push(field);
+    }
     let electro_thermal_summaries = transient
         .assembly_snapshots
         .iter()
@@ -488,9 +523,25 @@ pub fn run_transient_with_options(
         kinetic_energy_snapshots,
         strain_energy_snapshots,
         residual_norm_snapshots,
+        reaction_force_snapshots,
+        reaction_moment_snapshots,
+        external_work_snapshots,
+        damping_dissipation_snapshots,
+        energy_balance_residual_snapshots,
+        relative_energy_balance_error_snapshots,
+        dynamic_balance_snapshots: transient.dynamic_balance_snapshots,
         electro_thermal_temperature_snapshots: electro_thermal_fields.temperature_snapshots,
         electro_thermal_thermal_residual_snapshots: electro_thermal_fields
             .thermal_residual_snapshots,
         residual_norms: transient.residual_norms,
     })
+}
+
+fn scalar_snapshots(values: &[f64], field_id: impl Fn(usize) -> String) -> Vec<AnalysisField> {
+    values
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(index, value)| AnalysisField::host_f64(field_id(index), vec![1], vec![value]))
+        .collect()
 }

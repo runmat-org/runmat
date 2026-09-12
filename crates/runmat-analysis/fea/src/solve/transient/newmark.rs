@@ -33,11 +33,6 @@ pub(super) struct NewmarkEffectiveStep {
     predictor: NewmarkPredictor,
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub(super) struct DynamicResidual {
-    imbalance: Vec<f64>,
-}
-
 #[derive(Clone, Debug, Error, PartialEq)]
 pub(super) enum NewmarkError {
     #[error("the Newmark time step must be finite and positive")]
@@ -95,12 +90,6 @@ impl NewmarkEffectiveStep {
             .collect();
         SecondOrderState::try_new(displacement, velocity, acceleration)
             .map_err(NewmarkError::InvalidState)
-    }
-}
-
-impl DynamicResidual {
-    pub(super) fn imbalance(&self) -> &[f64] {
-        &self.imbalance
     }
 }
 
@@ -175,33 +164,6 @@ pub(super) fn prepare_average_acceleration_step(
     })
 }
 
-pub(super) fn physical_dynamic_residual(
-    operators: &CanonicalRealOperators,
-    state: &SecondOrderState,
-    load: &[f64],
-) -> Result<DynamicResidual, NewmarkError> {
-    if operators.dof_count() != state.dof_count() || load.len() != state.dof_count() {
-        return Err(NewmarkError::DimensionMismatch);
-    }
-    if load.iter().any(|value| !value.is_finite()) {
-        return Err(NewmarkError::NonFiniteInput);
-    }
-    let inertia = spmv(operators.mass(), state.acceleration())
-        .map_err(|_| NewmarkError::DimensionMismatch)?;
-    let damping =
-        spmv(operators.damping(), state.velocity()).map_err(|_| NewmarkError::DimensionMismatch)?;
-    let elastic = spmv(operators.stiffness(), state.displacement())
-        .map_err(|_| NewmarkError::DimensionMismatch)?;
-    let imbalance = load
-        .iter()
-        .zip(&inertia)
-        .zip(&damping)
-        .zip(&elastic)
-        .map(|(((load, inertia), damping), elastic)| load - inertia - damping - elastic)
-        .collect::<Vec<_>>();
-    Ok(DynamicResidual { imbalance })
-}
-
 fn validate_inputs(
     operators: &CanonicalRealOperators,
     state: &SecondOrderState,
@@ -224,6 +186,7 @@ fn validate_inputs(
 mod tests {
     use super::*;
     use crate::algebra::{MatrixProperties, OperatorRole};
+    use crate::contracts::StructuralDynamicBalanceSnapshot;
 
     fn scalar_operators(mass: f64, damping: f64, stiffness: f64) -> CanonicalRealOperators {
         CanonicalRealOperators::try_new(
@@ -262,9 +225,10 @@ mod tests {
 
         let acceleration = step.right_hand_side()[0] / step.effective_operator().get(0, 0);
         let completed = step.complete(vec![acceleration]).unwrap();
-        let residual = physical_dynamic_residual(&operators, &completed, &[7.0]).unwrap();
-        assert!(residual.imbalance[0].abs() <= 2.0e-14);
-        assert_eq!(residual.imbalance.len(), 1);
+        let balance =
+            StructuralDynamicBalanceSnapshot::evaluate(&operators, &completed, &[7.0]).unwrap();
+        assert!(balance.equilibrium_residual[0].abs() <= 2.0e-14);
+        assert_eq!(balance.equilibrium_residual.len(), 1);
     }
 
     #[test]
@@ -280,8 +244,8 @@ mod tests {
             Err(NewmarkError::DimensionMismatch)
         );
         assert_eq!(
-            physical_dynamic_residual(&operators, &state, &[f64::INFINITY]),
-            Err(NewmarkError::NonFiniteInput)
+            StructuralDynamicBalanceSnapshot::evaluate(&operators, &state, &[f64::INFINITY]),
+            Err(super::super::balance::DynamicBalanceError::NonFinite)
         );
     }
 

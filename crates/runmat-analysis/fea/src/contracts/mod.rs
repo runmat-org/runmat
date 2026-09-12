@@ -218,6 +218,30 @@ pub fn fea_transient_residual_norm_field_id(snapshot_index: usize) -> String {
     format!("transient.residual_norm.{snapshot_index}")
 }
 
+pub fn fea_transient_reaction_force_field_id(snapshot_index: usize) -> String {
+    format!("transient.reaction_force.{snapshot_index}")
+}
+
+pub fn fea_transient_reaction_moment_field_id(snapshot_index: usize) -> String {
+    format!("transient.reaction_moment.{snapshot_index}")
+}
+
+pub fn fea_transient_external_work_field_id(snapshot_index: usize) -> String {
+    format!("transient.external_work.{snapshot_index}")
+}
+
+pub fn fea_transient_damping_dissipation_field_id(snapshot_index: usize) -> String {
+    format!("transient.damping_dissipation.{snapshot_index}")
+}
+
+pub fn fea_transient_energy_balance_residual_field_id(snapshot_index: usize) -> String {
+    format!("transient.energy_balance_residual.{snapshot_index}")
+}
+
+pub fn fea_transient_relative_energy_balance_error_field_id(snapshot_index: usize) -> String {
+    format!("transient.relative_energy_balance_error.{snapshot_index}")
+}
+
 pub fn fea_nonlinear_displacement_field_id(increment_index: usize) -> String {
     format!("nonlinear.displacement.{increment_index}")
 }
@@ -589,9 +613,50 @@ pub struct FeaTransientRunResult {
     pub kinetic_energy_snapshots: Vec<AnalysisField>,
     pub strain_energy_snapshots: Vec<AnalysisField>,
     pub residual_norm_snapshots: Vec<AnalysisField>,
+    pub reaction_force_snapshots: Vec<AnalysisField>,
+    pub reaction_moment_snapshots: Vec<AnalysisField>,
+    pub external_work_snapshots: Vec<AnalysisField>,
+    pub damping_dissipation_snapshots: Vec<AnalysisField>,
+    pub energy_balance_residual_snapshots: Vec<AnalysisField>,
+    pub relative_energy_balance_error_snapshots: Vec<AnalysisField>,
+    pub dynamic_balance_snapshots: Vec<StructuralDynamicBalanceSnapshot>,
     pub electro_thermal_temperature_snapshots: Vec<AnalysisField>,
     pub electro_thermal_thermal_residual_snapshots: Vec<AnalysisField>,
     pub residual_norms: Vec<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StructuralDynamicBalanceSnapshot {
+    pub applied_load: Vec<f64>,
+    pub inertia_force: Vec<f64>,
+    pub damping_force: Vec<f64>,
+    pub elastic_force: Vec<f64>,
+    pub equilibrium_residual: Vec<f64>,
+}
+
+impl StructuralDynamicBalanceSnapshot {
+    pub fn validate(&self) -> Result<(), FeaRunError> {
+        let dof_count = self.applied_load.len();
+        if self.inertia_force.len() != dof_count
+            || self.damping_force.len() != dof_count
+            || self.elastic_force.len() != dof_count
+            || self.equilibrium_residual.len() != dof_count
+            || self
+                .applied_load
+                .iter()
+                .chain(&self.inertia_force)
+                .chain(&self.damping_force)
+                .chain(&self.elastic_force)
+                .chain(&self.equilibrium_residual)
+                .any(|value| !value.is_finite())
+        {
+            return Err(FeaRunError::Solve(
+                "structural dynamic-balance snapshot is malformed".into(),
+            ));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

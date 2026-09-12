@@ -85,7 +85,10 @@ pub(super) fn next_step_boundary(
     step_boundaries: &[TransientStepBoundary],
 ) -> (f64, SignalSampleApproach) {
     let proposed_end = current_time_s + proposed_dt_s;
-    let endpoint_tolerance = 8.0
+    // Repeated additions of a nominal interval accumulate a few ulps over long fixed grids.
+    // Snap only within a small roundoff envelope of the final endpoint; authored boundaries
+    // remain exact and are still selected below.
+    let endpoint_tolerance = 128.0
         * f64::EPSILON
         * final_time_s
             .abs()
@@ -97,11 +100,9 @@ pub(super) fn next_step_boundary(
     } else {
         proposed_end.min(final_time_s)
     };
-    match step_boundaries
-        .iter()
-        .copied()
-        .find(|boundary| boundary.time_s > current_time_s && boundary.time_s <= proposed_end)
-    {
+    match step_boundaries.iter().copied().find(|boundary| {
+        boundary.time_s > current_time_s && boundary.time_s <= proposed_end + endpoint_tolerance
+    }) {
         Some(boundary) => (boundary.time_s, boundary.approach()),
         None => (proposed_end, SignalSampleApproach::At),
     }
@@ -158,5 +159,16 @@ mod tests {
 
         assert_eq!(time, final_time);
         assert_eq!(step_count, 16);
+
+        let final_time = 1.0;
+        let nominal_dt = final_time / 160.0;
+        let mut time = 0.0;
+        let mut step_count = 0;
+        while time < final_time {
+            (time, _) = next_step_boundary(time, nominal_dt, final_time, &[]);
+            step_count += 1;
+        }
+        assert_eq!(time, final_time);
+        assert_eq!(step_count, 160);
     }
 }

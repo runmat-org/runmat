@@ -4448,6 +4448,23 @@ execution:
                 kinetic_energy_snapshots: indexed_fields("kinetic_energy"),
                 strain_energy_snapshots: indexed_fields("strain_energy"),
                 residual_norm_snapshots: indexed_fields("residual_norm"),
+                reaction_force_snapshots: indexed_fields("reaction_force"),
+                reaction_moment_snapshots: Vec::new(),
+                external_work_snapshots: indexed_fields("external_work"),
+                damping_dissipation_snapshots: indexed_fields("damping_dissipation"),
+                energy_balance_residual_snapshots: indexed_fields("energy_balance_residual"),
+                relative_energy_balance_error_snapshots: indexed_fields(
+                    "relative_energy_balance_error",
+                ),
+                dynamic_balance_snapshots: (0..2)
+                    .map(|_| runmat_analysis_fea::StructuralDynamicBalanceSnapshot {
+                        applied_load: vec![0.0],
+                        inertia_force: vec![0.0],
+                        damping_force: vec![0.0],
+                        elastic_force: vec![0.0],
+                        equilibrium_residual: vec![0.0],
+                    })
+                    .collect(),
                 electro_thermal_temperature_snapshots: Vec::new(),
                 electro_thermal_thermal_residual_snapshots: Vec::new(),
                 residual_norms: vec![0.5, 0.25],
@@ -4513,6 +4530,18 @@ execution:
             .fields
             .contains_key("strain_energy_density_snapshots"));
         assert!(transient.fields.contains_key("strain_energy_snapshots"));
+        assert!(transient.fields.contains_key("reaction_force_snapshots"));
+        assert!(transient.fields.contains_key("external_work_snapshots"));
+        assert!(transient
+            .fields
+            .contains_key("damping_dissipation_snapshots"));
+        assert!(transient
+            .fields
+            .contains_key("energy_balance_residual_snapshots"));
+        assert!(transient
+            .fields
+            .contains_key("relative_energy_balance_error_snapshots"));
+        assert!(transient.fields.contains_key("dynamic_balance_snapshots"));
         let Some(Value::Struct(initial_state)) = transient.fields.get("initial_state") else {
             panic!("structural initial-state evidence");
         };

@@ -1497,6 +1497,9 @@ fn infer_field_unit(field_id: &str) -> Option<&'static str> {
     if normalized.contains("kinetic_energy")
         || normalized.contains("strain_energy")
         || normalized.contains("total_strain_energy")
+        || normalized.contains("external_work")
+        || normalized.contains("damping_dissipation")
+        || normalized.contains("energy_balance_residual")
     {
         return Some("J");
     }
@@ -2701,14 +2704,107 @@ pub struct TransientResultsData {
     pub kinetic_energy_snapshots: Vec<AnalysisField>,
     #[serde(default)]
     pub strain_energy_snapshots: Vec<AnalysisField>,
-    #[serde(default)]
     pub residual_norm_snapshots: Vec<AnalysisField>,
+    pub reaction_force_snapshots: Vec<AnalysisField>,
+    pub reaction_moment_snapshots: Vec<AnalysisField>,
+    pub external_work_snapshots: Vec<AnalysisField>,
+    pub damping_dissipation_snapshots: Vec<AnalysisField>,
+    pub energy_balance_residual_snapshots: Vec<AnalysisField>,
+    pub relative_energy_balance_error_snapshots: Vec<AnalysisField>,
+    pub dynamic_balance_snapshots: Vec<runmat_analysis_fea::StructuralDynamicBalanceSnapshot>,
     #[serde(default)]
     pub electro_thermal_temperature_snapshots: Vec<AnalysisField>,
     #[serde(default)]
     pub electro_thermal_thermal_residual_snapshots: Vec<AnalysisField>,
     pub residual_norms: Vec<f64>,
     pub integration_method: TransientIntegrationMethod,
+}
+
+impl TransientResultsData {
+    pub fn validate(&self) -> Result<(), String> {
+        let snapshot_count = self.time_points_s.len();
+        if snapshot_count == 0 {
+            return Err("transient results must contain at least one accepted state".into());
+        }
+        if self.time_points_s.iter().any(|time_s| !time_s.is_finite())
+            || self.time_points_s.windows(2).any(|pair| pair[1] <= pair[0])
+        {
+            return Err("transient time points must be finite and strictly increasing".into());
+        }
+        let required = [
+            ("displacement", self.displacement_snapshots.len()),
+            ("velocity", self.velocity_snapshots.len()),
+            ("acceleration", self.acceleration_snapshots.len()),
+            ("kinetic energy", self.kinetic_energy_snapshots.len()),
+            ("strain energy", self.strain_energy_snapshots.len()),
+            ("residual norm field", self.residual_norm_snapshots.len()),
+            ("reaction force", self.reaction_force_snapshots.len()),
+            ("external work", self.external_work_snapshots.len()),
+            (
+                "damping dissipation",
+                self.damping_dissipation_snapshots.len(),
+            ),
+            (
+                "energy-balance residual",
+                self.energy_balance_residual_snapshots.len(),
+            ),
+            (
+                "relative energy-balance error",
+                self.relative_energy_balance_error_snapshots.len(),
+            ),
+            ("dynamic balance", self.dynamic_balance_snapshots.len()),
+            ("residual norm", self.residual_norms.len()),
+        ];
+        if let Some((name, actual)) = required
+            .into_iter()
+            .find(|(_, actual)| *actual != snapshot_count)
+        {
+            return Err(format!(
+                "transient {name} history has {actual} entries for {snapshot_count} accepted states"
+            ));
+        }
+        let optional = [
+            ("rotation", self.rotation_snapshots.len()),
+            ("angular velocity", self.angular_velocity_snapshots.len()),
+            (
+                "angular acceleration",
+                self.angular_acceleration_snapshots.len(),
+            ),
+            ("strain", self.strain_snapshots.len()),
+            ("stress", self.stress_snapshots.len()),
+            (
+                "strain-energy density",
+                self.strain_energy_density_snapshots.len(),
+            ),
+            ("von Mises", self.von_mises_snapshots.len()),
+            ("reaction moment", self.reaction_moment_snapshots.len()),
+            (
+                "electro-thermal temperature",
+                self.electro_thermal_temperature_snapshots.len(),
+            ),
+            (
+                "electro-thermal residual",
+                self.electro_thermal_thermal_residual_snapshots.len(),
+            ),
+        ];
+        if let Some((name, actual)) = optional
+            .into_iter()
+            .find(|(_, actual)| *actual != 0 && *actual != snapshot_count)
+        {
+            return Err(format!(
+                "optional transient {name} history has {actual} entries for {snapshot_count} accepted states"
+            ));
+        }
+        if self.residual_norms.iter().any(|value| !value.is_finite()) {
+            return Err("transient residual norms must be finite".into());
+        }
+        for balance in &self.dynamic_balance_snapshots {
+            balance
+                .validate()
+                .map_err(|error| format!("invalid transient dynamic balance: {error}"))?;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

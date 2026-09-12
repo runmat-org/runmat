@@ -44,11 +44,14 @@ use runmat_analysis_fea::{
     fea_thermo_mechanical_temperature_field_id, fea_thermo_mechanical_thermal_strain_field_id,
     fea_thermo_mechanical_thermal_stress_field_id, fea_thermo_mechanical_von_mises_field_id,
     fea_transient_acceleration_field_id, fea_transient_angular_acceleration_field_id,
-    fea_transient_angular_velocity_field_id, fea_transient_kinetic_energy_field_id,
-    fea_transient_residual_norm_field_id, fea_transient_rotation_field_id,
-    fea_transient_strain_energy_density_field_id, fea_transient_strain_energy_field_id,
-    fea_transient_strain_field_id, fea_transient_stress_field_id, fea_transient_velocity_field_id,
-    ComputeBackend, FeaProgressPhase, FeaProgressStatus, SolverMethod, SolverPreconditioner,
+    fea_transient_angular_velocity_field_id, fea_transient_damping_dissipation_field_id,
+    fea_transient_energy_balance_residual_field_id, fea_transient_external_work_field_id,
+    fea_transient_kinetic_energy_field_id, fea_transient_reaction_force_field_id,
+    fea_transient_relative_energy_balance_error_field_id, fea_transient_residual_norm_field_id,
+    fea_transient_rotation_field_id, fea_transient_strain_energy_density_field_id,
+    fea_transient_strain_energy_field_id, fea_transient_strain_field_id,
+    fea_transient_stress_field_id, fea_transient_velocity_field_id, ComputeBackend,
+    FeaProgressPhase, FeaProgressStatus, SolverMethod, SolverPreconditioner,
     FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY, FEA_FIELD_ACOUSTIC_PRESSURE_IMAG,
     FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE, FEA_FIELD_ACOUSTIC_PRESSURE_REAL,
     FEA_FIELD_CFD_PRESSURE, FEA_FIELD_CFD_RESIDUAL_CONTINUITY, FEA_FIELD_CFD_RESIDUAL_MOMENTUM,
@@ -8004,6 +8007,30 @@ fn analysis_run_transient_returns_native_transient_result() {
         transient.residual_norm_snapshots.len()
     );
     assert_eq!(
+        transient.time_points_s.len(),
+        transient.reaction_force_snapshots.len()
+    );
+    assert_eq!(
+        transient.time_points_s.len(),
+        transient.external_work_snapshots.len()
+    );
+    assert_eq!(
+        transient.time_points_s.len(),
+        transient.damping_dissipation_snapshots.len()
+    );
+    assert_eq!(
+        transient.time_points_s.len(),
+        transient.energy_balance_residual_snapshots.len()
+    );
+    assert_eq!(
+        transient.time_points_s.len(),
+        transient.relative_energy_balance_error_snapshots.len()
+    );
+    assert_eq!(
+        transient.time_points_s.len(),
+        transient.dynamic_balance_snapshots.len()
+    );
+    assert_eq!(
         transient.velocity_snapshots[1].field_id,
         fea_transient_velocity_field_id(1)
     );
@@ -8023,6 +8050,10 @@ fn analysis_run_transient_returns_native_transient_result() {
         transient.residual_norm_snapshots[1].field_id,
         fea_transient_residual_norm_field_id(1)
     );
+    assert_eq!(
+        transient.reaction_force_snapshots[1].field_id,
+        fea_transient_reaction_force_field_id(1)
+    );
     let results = analysis_results_op(
         &envelope.data,
         AnalysisResultsQuery::default(),
@@ -8040,6 +8071,7 @@ fn analysis_run_transient_returns_native_transient_result() {
     for field_id in [
         fea_transient_velocity_field_id(1),
         fea_transient_acceleration_field_id(1),
+        fea_transient_reaction_force_field_id(1),
     ] {
         let descriptor = descriptor(&field_id);
         assert_eq!(descriptor.kind, AnalysisFieldKind::Vector);
@@ -8049,6 +8081,10 @@ fn analysis_run_transient_returns_native_transient_result() {
         fea_transient_kinetic_energy_field_id(1),
         fea_transient_strain_energy_field_id(1),
         fea_transient_residual_norm_field_id(1),
+        fea_transient_external_work_field_id(1),
+        fea_transient_damping_dissipation_field_id(1),
+        fea_transient_energy_balance_residual_field_id(1),
+        fea_transient_relative_energy_balance_error_field_id(1),
     ] {
         let descriptor = descriptor(&field_id);
         assert_eq!(descriptor.kind, AnalysisFieldKind::Scalar);

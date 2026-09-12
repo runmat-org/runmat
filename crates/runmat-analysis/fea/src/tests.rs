@@ -9,9 +9,11 @@ use crate::{
     fea_thermo_mechanical_thermal_strain_field_id, fea_thermo_mechanical_thermal_stress_field_id,
     fea_thermo_mechanical_von_mises_field_id, fea_transient_acceleration_field_id,
     fea_transient_angular_acceleration_field_id, fea_transient_angular_velocity_field_id,
-    fea_transient_kinetic_energy_field_id, fea_transient_residual_norm_field_id,
-    fea_transient_rotation_field_id, fea_transient_strain_energy_field_id,
-    fea_transient_velocity_field_id,
+    fea_transient_damping_dissipation_field_id, fea_transient_energy_balance_residual_field_id,
+    fea_transient_external_work_field_id, fea_transient_kinetic_energy_field_id,
+    fea_transient_reaction_force_field_id, fea_transient_relative_energy_balance_error_field_id,
+    fea_transient_residual_norm_field_id, fea_transient_rotation_field_id,
+    fea_transient_strain_energy_field_id, fea_transient_velocity_field_id,
     fixtures::{
         append_fixture_temperature_field, append_fixture_terminal_voltage, fixture_model,
         mixed_solid_beam_model, replace_fixture_excitations, replace_fixture_with_electric_current,
@@ -70,6 +72,8 @@ use runmat_analysis_core::{
 use runmat_meshing_core::{
     ElementOrder, PersistentEntityId, PersistentEntityKind, SolverMeshArtifact,
 };
+
+mod transient_physical;
 
 fn experimental_linear_static_options() -> LinearStaticSolveOptions {
     LinearStaticSolveOptions {
@@ -1516,20 +1520,27 @@ fn single_tetrahedron_solver_mesh_for_model(
         model
             .constraints
             .iter()
-            .filter_map(|condition| condition.target().map(|target| target.region_id.clone())),
+            .filter_map(|condition| condition.target().map(|target| target.region_id.clone()))
+            .filter(|region| {
+                region != "free_vertex_y_support" && region != "free_vertex_z_support"
+            }),
     );
     let mut loaded_regions = std::collections::BTreeSet::from(["tip".to_string()]);
-    loaded_regions.extend(model.excitations.iter().filter_map(|action| {
-        match &action.excitation().target {
-            runmat_analysis_core::ExcitationTarget::Region(target) => {
-                Some(target.region_id.clone())
-            }
-            runmat_analysis_core::ExcitationTarget::ReferencePoint(point) => {
-                Some(point.reference_point_id.clone())
-            }
-            _ => None,
-        }
-    }));
+    loaded_regions.extend(
+        model
+            .excitations
+            .iter()
+            .filter_map(|action| match &action.excitation().target {
+                runmat_analysis_core::ExcitationTarget::Region(target) => {
+                    Some(target.region_id.clone())
+                }
+                runmat_analysis_core::ExcitationTarget::ReferencePoint(point) => {
+                    Some(point.reference_point_id.clone())
+                }
+                _ => None,
+            })
+            .filter(|region| region != "dynamic_force"),
+    );
     loaded_regions.extend(
         model
             .material_assignments
@@ -1547,6 +1558,11 @@ fn single_tetrahedron_solver_mesh_for_model(
     }
     for region in loaded_regions {
         add_face_region(&mut mesh, 1, &region);
+    }
+    if model.model_id.0 == "structural_transient_tet4_reference" {
+        add_face_region(&mut mesh, 1, "free_vertex_y_support");
+        add_face_region(&mut mesh, 2, "free_vertex_z_support");
+        add_face_region(&mut mesh, 3, "dynamic_force");
     }
     reseal_solver_mesh(&mut mesh);
     mesh
@@ -2102,6 +2118,30 @@ fn transient_solver_emits_time_snapshots_for_transient_step_fixture() {
         result.residual_norm_snapshots.len()
     );
     assert_eq!(
+        result.time_points_s.len(),
+        result.reaction_force_snapshots.len()
+    );
+    assert_eq!(
+        result.time_points_s.len(),
+        result.external_work_snapshots.len()
+    );
+    assert_eq!(
+        result.time_points_s.len(),
+        result.damping_dissipation_snapshots.len()
+    );
+    assert_eq!(
+        result.time_points_s.len(),
+        result.energy_balance_residual_snapshots.len()
+    );
+    assert_eq!(
+        result.time_points_s.len(),
+        result.relative_energy_balance_error_snapshots.len()
+    );
+    assert_eq!(
+        result.time_points_s.len(),
+        result.dynamic_balance_snapshots.len()
+    );
+    assert_eq!(
         result.velocity_snapshots[1].field_id,
         fea_transient_velocity_field_id(1)
     );
@@ -2120,6 +2160,26 @@ fn transient_solver_emits_time_snapshots_for_transient_step_fixture() {
     assert_eq!(
         result.residual_norm_snapshots[1].field_id,
         fea_transient_residual_norm_field_id(1)
+    );
+    assert_eq!(
+        result.reaction_force_snapshots[1].field_id,
+        fea_transient_reaction_force_field_id(1)
+    );
+    assert_eq!(
+        result.external_work_snapshots[1].field_id,
+        fea_transient_external_work_field_id(1)
+    );
+    assert_eq!(
+        result.damping_dissipation_snapshots[1].field_id,
+        fea_transient_damping_dissipation_field_id(1)
+    );
+    assert_eq!(
+        result.energy_balance_residual_snapshots[1].field_id,
+        fea_transient_energy_balance_residual_field_id(1)
+    );
+    assert_eq!(
+        result.relative_energy_balance_error_snapshots[1].field_id,
+        fea_transient_relative_energy_balance_error_field_id(1)
     );
     assert_eq!(
         result.residual_norm_snapshots[1]
@@ -2144,7 +2204,167 @@ fn transient_solver_emits_time_snapshots_for_transient_step_fixture() {
         .contains("maximum_strain_plus_kinetic_energy_joules="));
     assert!(energy_diag
         .message
-        .contains("conservation_balance_evaluated=false"));
+        .contains("conservation_balance_evaluated=true"));
+}
+
+#[test]
+fn physical_tet4_transient_converges_to_damped_step_response_and_closes_balance() {
+    let model = fixture_model(FixtureId::StructuralTransientTet4Reference);
+    let mesh = single_tetrahedron_solver_mesh_for_model(&model);
+    let step = &model.sequence.steps[0];
+    let excitations = crate::excitation::realize_step_excitations(
+        &model,
+        step,
+        crate::excitation::ExcitationSamplePoint::time(0.0),
+    )
+    .expect("the physical transient excitation should realize");
+    let summary = crate::assembly::assemble_structural_system(
+        &model,
+        &excitations,
+        Some(mesh.clone()),
+        crate::assembly::StructuralFormulationRequirement::PhysicalDiscretization,
+    )
+    .expect("the physical Tet4 reference should assemble");
+    let free_dofs = summary
+        .operator
+        .constrained_dofs()
+        .iter()
+        .enumerate()
+        .filter_map(|(dof, constrained)| (!constrained).then_some(dof))
+        .collect::<Vec<_>>();
+    assert_eq!(free_dofs.len(), 1);
+    let free_dof = free_dofs[0];
+    let stiffness = summary
+        .operator
+        .operators()
+        .stiffness()
+        .get(free_dof, free_dof);
+    let mass = summary.operator.operators().mass().get(free_dof, free_dof);
+    let damping = summary
+        .operator
+        .operators()
+        .damping()
+        .get(free_dof, free_dof);
+    let force = summary.operator.load()[free_dof];
+    assert!(stiffness > 0.0 && mass > 0.0 && damping > 0.0 && force > 0.0);
+
+    let natural_frequency = (stiffness / mass).sqrt();
+    let decay = damping / (2.0 * mass);
+    let damped_frequency = (natural_frequency * natural_frequency - decay * decay).sqrt();
+    let static_displacement = force / stiffness;
+    let exact_at = |time_s: f64| {
+        let exponential = (-decay * time_s).exp();
+        let phase = damped_frequency * time_s;
+        let displacement = static_displacement
+            * (1.0 - exponential * (phase.cos() + decay / damped_frequency * phase.sin()));
+        let velocity = static_displacement * exponential * natural_frequency * natural_frequency
+            / damped_frequency
+            * phase.sin();
+        let acceleration = (force - damping * velocity - stiffness * displacement) / mass;
+        [displacement, velocity, acceleration]
+    };
+    let exact = exact_at(1.0);
+
+    let mut finest = None;
+    let errors = [40, 80, 160].map(|interval_count| {
+        let result = crate::run_transient_with_options(
+            &model,
+            ComputeBackend::Cpu,
+            TransientSolveOptions {
+                time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count },
+                residual_target: 1.0e-10,
+                solver_mesh: Some(mesh.clone()),
+                ..experimental_transient_options()
+            },
+        )
+        .expect("the physical Tet4 transient should solve");
+        assert_eq!(result.time_points_s.len(), interval_count + 1);
+        let last = result.time_points_s.len() - 1;
+        let actual = [
+            result.displacement_snapshots[last]
+                .as_host_f64()
+                .expect("displacement should be host-backed")[free_dof],
+            result.velocity_snapshots[last]
+                .as_host_f64()
+                .expect("velocity should be host-backed")[free_dof],
+            result.acceleration_snapshots[last]
+                .as_host_f64()
+                .expect("acceleration should be host-backed")[free_dof],
+        ];
+        let error = ((actual[0] - exact[0]) / static_displacement)
+            .hypot((actual[1] - exact[1]) / (static_displacement * natural_frequency))
+            .hypot(
+                (actual[2] - exact[2])
+                    / (static_displacement * natural_frequency * natural_frequency),
+            );
+        finest = Some(result);
+        error
+    });
+    assert!((errors[0] / errors[1]).log2() > 1.8, "errors={errors:?}");
+    assert!((errors[1] / errors[2]).log2() > 1.8, "errors={errors:?}");
+
+    let result = finest.expect("the finest physical reference run should be retained");
+    let snapshot_count = result.time_points_s.len();
+    assert_eq!(result.dynamic_balance_snapshots.len(), snapshot_count);
+    assert_eq!(result.reaction_force_snapshots.len(), snapshot_count);
+    assert_eq!(result.external_work_snapshots.len(), snapshot_count);
+    assert_eq!(result.damping_dissipation_snapshots.len(), snapshot_count);
+    assert_eq!(
+        result.energy_balance_residual_snapshots.len(),
+        snapshot_count
+    );
+    assert_eq!(
+        result.relative_energy_balance_error_snapshots.len(),
+        snapshot_count
+    );
+    for balance in &result.dynamic_balance_snapshots {
+        balance.validate().expect("dynamic balance should validate");
+        for dof in 0..balance.equilibrium_residual.len() {
+            assert_eq!(
+                balance.equilibrium_residual[dof],
+                balance.inertia_force[dof]
+                    + balance.damping_force[dof]
+                    + balance.elastic_force[dof]
+                    - balance.applied_load[dof]
+            );
+            if dof == free_dof {
+                assert!(balance.equilibrium_residual[dof].abs() < 1.0e-9);
+            }
+        }
+    }
+    let damping_history = result
+        .damping_dissipation_snapshots
+        .iter()
+        .map(|field| field.as_host_f64().unwrap()[0])
+        .collect::<Vec<_>>();
+    assert!(damping_history.windows(2).all(|pair| pair[1] >= pair[0]));
+    let relative_balance = result
+        .relative_energy_balance_error_snapshots
+        .last()
+        .unwrap()
+        .as_host_f64()
+        .unwrap()[0];
+    assert!(
+        relative_balance < 1.0e-9,
+        "relative balance={relative_balance}"
+    );
+
+    let last = snapshot_count - 1;
+    let strain_energy = result.strain_energy_snapshots[last].as_host_f64().unwrap()[0];
+    let energy_density = result.strain_energy_density_snapshots[last]
+        .as_host_f64()
+        .unwrap()[0];
+    assert!((strain_energy - energy_density / 6.0).abs() < 1.0e-12);
+    let reaction = result.reaction_force_snapshots[last].as_host_f64().unwrap();
+    let balance = &result.dynamic_balance_snapshots[last];
+    for (dof, actual) in reaction.iter().copied().enumerate() {
+        let expected = if summary.operator.constrained_dofs()[dof] {
+            balance.equilibrium_residual[dof]
+        } else {
+            0.0
+        };
+        assert!((actual - expected).abs() < 1.0e-12);
+    }
 }
 
 #[test]

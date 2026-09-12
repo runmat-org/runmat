@@ -4,6 +4,7 @@ use crate::{
     contracts::{
         fea_transient_acceleration_field_id, fea_transient_angular_acceleration_field_id,
         fea_transient_angular_velocity_field_id, fea_transient_displacement_field_id,
+        fea_transient_reaction_force_field_id, fea_transient_reaction_moment_field_id,
         fea_transient_rotation_field_id, fea_transient_strain_energy_density_field_id,
         fea_transient_strain_field_id, fea_transient_stress_field_id,
         fea_transient_velocity_field_id, fea_transient_von_mises_field_id, FeaRunError,
@@ -24,6 +25,8 @@ pub(super) struct TransientFieldRecovery {
     pub angular_velocity_snapshots: Vec<AnalysisField>,
     pub acceleration_snapshots: Vec<AnalysisField>,
     pub angular_acceleration_snapshots: Vec<AnalysisField>,
+    pub reaction_force_snapshots: Vec<AnalysisField>,
+    pub reaction_moment_snapshots: Vec<AnalysisField>,
     pub strain_snapshots: Vec<AnalysisField>,
     pub stress_snapshots: Vec<AnalysisField>,
     pub von_mises_snapshots: Vec<AnalysisField>,
@@ -53,6 +56,11 @@ pub(super) fn recover_transient_fields(
         snapshot_count,
         "assembly",
         transient.assembly_snapshots.len(),
+    )?;
+    require_snapshot_count(
+        snapshot_count,
+        "dynamic reaction",
+        transient.reaction_snapshots.len(),
     )?;
 
     let deformation_fields = transient
@@ -109,6 +117,8 @@ pub(super) fn recover_transient_fields(
     let mut angular_velocity_snapshots = Vec::with_capacity(snapshot_count);
     let mut acceleration_snapshots = Vec::with_capacity(snapshot_count);
     let mut angular_acceleration_snapshots = Vec::with_capacity(snapshot_count);
+    let mut reaction_force_snapshots = Vec::with_capacity(snapshot_count);
+    let mut reaction_moment_snapshots = Vec::with_capacity(snapshot_count);
     for (index, summary) in transient.assembly_snapshots.iter().enumerate() {
         let velocity = project_structural_nodal_snapshot(
             &summary.structural_dof_layout,
@@ -118,6 +128,11 @@ pub(super) fn recover_transient_fields(
         let acceleration = project_structural_nodal_snapshot(
             &summary.structural_dof_layout,
             &transient.acceleration_snapshots[index],
+        )
+        .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+        let reaction = project_structural_nodal_snapshot(
+            &summary.structural_dof_layout,
+            &transient.reaction_snapshots[index],
         )
         .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
         let shape = nodal_vector_shape(&summary.structural_dof_layout);
@@ -138,11 +153,21 @@ pub(super) fn recover_transient_fields(
             shape.clone(),
             acceleration.translations,
         ));
+        reaction_force_snapshots.push(AnalysisField::host_f64(
+            fea_transient_reaction_force_field_id(index),
+            shape.clone(),
+            reaction.translations,
+        ));
         if summary.structural_dof_layout.rotational_dof_count() > 0 {
             angular_acceleration_snapshots.push(AnalysisField::host_f64(
                 fea_transient_angular_acceleration_field_id(index),
-                shape,
+                shape.clone(),
                 acceleration.rotations,
+            ));
+            reaction_moment_snapshots.push(AnalysisField::host_f64(
+                fea_transient_reaction_moment_field_id(index),
+                shape,
+                reaction.rotations,
             ));
         }
     }
@@ -155,6 +180,8 @@ pub(super) fn recover_transient_fields(
         angular_velocity_snapshots,
         acceleration_snapshots,
         angular_acceleration_snapshots,
+        reaction_force_snapshots,
+        reaction_moment_snapshots,
         strain_snapshots,
         stress_snapshots,
         von_mises_snapshots,

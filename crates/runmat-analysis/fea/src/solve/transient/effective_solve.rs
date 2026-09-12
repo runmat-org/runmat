@@ -7,6 +7,7 @@ use crate::{
     },
     assembly::AssemblySummary,
     constraints::{AffineConstraintReduction, ConstraintAlgebraError, ResolvedConstraintMatrix},
+    contracts::StructuralDynamicBalanceSnapshot,
     solve::{
         backend::{cpu_reference::CpuReferenceBackend, kind::LinearAlgebraBackendKind},
         linear::{solve_linear_system, LinearSolveResult},
@@ -15,13 +16,12 @@ use crate::{
 };
 
 use super::{
+    balance::DynamicBalanceError,
     constraint_state::{
         canonicalize_homogeneous_solution, homogeneous_constraints, physical_load, project_vector,
         validate_constant_constraint_kinematics,
     },
-    newmark::{
-        physical_dynamic_residual, prepare_average_acceleration_step, DynamicResidual, NewmarkError,
-    },
+    newmark::{prepare_average_acceleration_step, NewmarkError},
     state::{SecondOrderState, SecondOrderStateError},
 };
 
@@ -70,6 +70,8 @@ pub(super) enum EffectiveDynamicsSolveError {
     InvalidEffectiveSystem(RealSystemError),
     #[error("the average-acceleration Newmark step is invalid: {0}")]
     Newmark(NewmarkError),
+    #[error("the structural dynamic balance is invalid: {0}")]
+    DynamicBalance(DynamicBalanceError),
     #[error("the effective structural dynamics solve did not converge (residual={residual_norm})")]
     LinearSolveFailed { residual_norm: f64 },
     #[error("the effective structural dynamics solve returned an invalid state vector")]
@@ -222,14 +224,13 @@ impl EquilibriumRefinement<'_> {
         for refinement_count in 0..=MAXIMUM_EQUILIBRIUM_REFINEMENTS {
             let state = build_state(&acceleration)?;
             validate_constant_constraint_kinematics(self.summary, &state, true)?;
-            let full_residual = physical_dynamic_residual(
+            let full_balance = StructuralDynamicBalanceSnapshot::evaluate(
                 self.summary.operator.operators(),
                 &state,
                 self.physical_load,
             )
-            .map_err(EffectiveDynamicsSolveError::Newmark)?;
-            let projected_residual =
-                project_residual(self.summary, &state, self.physical_load, &full_residual)?;
+            .map_err(EffectiveDynamicsSolveError::DynamicBalance)?;
+            let projected_residual = project_residual(self.summary, &full_balance)?;
             if projected_residual.relative_norm <= self.target {
                 return Ok(EffectiveDynamicsSolveResult {
                     state,
@@ -250,7 +251,7 @@ impl EquilibriumRefinement<'_> {
             let correction_equation = normalize_correction_equation(
                 self.summary,
                 &self.effective_operator,
-                full_residual.imbalance(),
+                &full_balance.imbalance(),
             )?;
             let correction = solve_effective_system(
                 &correction_equation.summary,
@@ -561,24 +562,13 @@ fn effective_summary(
 
 fn project_residual(
     summary: &AssemblySummary,
-    state: &SecondOrderState,
-    load: &[f64],
-    residual: &DynamicResidual,
+    balance: &StructuralDynamicBalanceSnapshot,
 ) -> Result<ProjectedDynamicResidual, EffectiveDynamicsSolveError> {
-    let inertia = spmv(summary.operator.operators().mass(), state.acceleration())
-        .map_err(|_| EffectiveDynamicsSolveError::InvalidSolution)?;
-    let damping = spmv(summary.operator.operators().damping(), state.velocity())
-        .map_err(|_| EffectiveDynamicsSolveError::InvalidSolution)?;
-    let elastic = spmv(
-        summary.operator.operators().stiffness(),
-        state.displacement(),
-    )
-    .map_err(|_| EffectiveDynamicsSolveError::InvalidSolution)?;
-    let imbalance = project_vector(summary, residual.imbalance())?;
-    let projected_load = project_vector(summary, load)?;
-    let projected_inertia = project_vector(summary, &inertia)?;
-    let projected_damping = project_vector(summary, &damping)?;
-    let projected_elastic = project_vector(summary, &elastic)?;
+    let imbalance = project_vector(summary, &balance.equilibrium_residual)?;
+    let projected_load = project_vector(summary, &balance.applied_load)?;
+    let projected_inertia = project_vector(summary, &balance.inertia_force)?;
+    let projected_damping = project_vector(summary, &balance.damping_force)?;
+    let projected_elastic = project_vector(summary, &balance.elastic_force)?;
     let absolute_norm = norm(&imbalance);
     let force_scale = norm(&projected_load)
         .max(norm(&projected_inertia) + norm(&projected_damping) + norm(&projected_elastic))
