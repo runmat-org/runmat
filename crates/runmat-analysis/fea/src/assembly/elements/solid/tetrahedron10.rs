@@ -276,9 +276,9 @@ fn physical_shape_gradients(
     let inverse = inverse_jacobian(nodes_m, reference)?;
     Ok(reference.map(|gradient| {
         std::array::from_fn(|axis| {
-            inverse[0][axis] * gradient[0]
-                + inverse[1][axis] * gradient[1]
-                + inverse[2][axis] * gradient[2]
+            inverse[axis][0] * gradient[0]
+                + inverse[axis][1] * gradient[1]
+                + inverse[axis][2] * gradient[2]
         })
     }))
 }
@@ -445,6 +445,45 @@ mod tests {
                         .abs()
                         < 1.0e-14
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn skew_tetrahedron10_gradients_reproduce_physical_coordinates() {
+        let corners = [
+            [0.2, -0.4, 0.7],
+            [2.1, 0.3, 0.9],
+            [0.8, 1.7, 0.5],
+            [0.5, 0.2, 2.4],
+        ];
+        let geometry = Tetrahedron10ElementGeometry {
+            nodes_m: [
+                corners[0],
+                corners[1],
+                corners[2],
+                corners[3],
+                midpoint(corners[0], corners[1]),
+                midpoint(corners[1], corners[2]),
+                midpoint(corners[2], corners[0]),
+                midpoint(corners[0], corners[3]),
+                midpoint(corners[1], corners[3]),
+                midpoint(corners[2], corners[3]),
+            ],
+        };
+        for barycentric in QUADRATURE {
+            let gradients = physical_shape_gradients(geometry.nodes_m, barycentric).unwrap();
+            for coordinate in 0..3 {
+                for derivative in 0..3 {
+                    let value = geometry
+                        .nodes_m
+                        .iter()
+                        .zip(gradients)
+                        .map(|(node, gradient)| node[coordinate] * gradient[derivative])
+                        .sum::<f64>();
+                    let expected = f64::from(coordinate == derivative);
+                    assert!((value - expected).abs() < 1.0e-11);
+                }
             }
         }
     }
