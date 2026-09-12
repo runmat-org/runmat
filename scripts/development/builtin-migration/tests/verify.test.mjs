@@ -1,7 +1,4 @@
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 import test from "node:test";
 import { auditMigration } from "../audit.mjs";
 import { evidenceDigest } from "../evidence.mjs";
@@ -9,12 +6,13 @@ import { prepareIdentity } from "../prepare.mjs";
 import { sealBundle } from "../seal.mjs";
 import { verifyBatch } from "../verify.mjs";
 import { cleanupRepositoryFixtures, controlledFixture, digestReference, gate } from "./helpers.mjs";
+import { createTemporaryDirectory } from "./temporary-directories.mjs";
 
 test.afterEach(cleanupRepositoryFixtures);
 
 function evidence() {
   const fixture = controlledFixture();
-  const prepared = prepareIdentity(fixture.repository, fixture.inventory, fixture.control, fixture.lease, "foo", fs.mkdtempSync(path.join(os.tmpdir(), "verify-")));
+  const prepared = prepareIdentity(fixture.repository, fixture.inventory, fixture.control, fixture.lease, "foo", createTemporaryDirectory("verify-"));
   const gates = ["catalog-contract", "runtime-binding", "documentation-cutover", "native-link", "architecture", "focused-tests", "format-diff", "strict-clippy"].map((name) => gate(fixture, name));
   const batch = { schema_version: 1, kind: "runmat-builtin-migration-batch", identities: ["foo"] };
   const audit = auditMigration(fixture.repository, fixture.inventory, fixture.inventory, fixture.inventory, fixture.control, fixture.lease, batch, { artifact_id: "audit-foo", authored_revision: fixture.inventory.source.revision, prepare_results: [prepared], source_dispositions: [], gate_results: gates });

@@ -20,13 +20,12 @@ import { R31_REQUIRED_LANES } from "../target-policy.mjs";
 import {
   candidateInputDigests, freezeReviewedTopology, parseReviewedTopology, reviewedTopologyView,
 } from "../topology/freeze.mjs";
+import { cleanupTemporaryDirectories, createTemporaryDirectory } from "./temporary-directories.mjs";
 
 export const REVISION = `git:${"1".repeat(40)}`;
-const fixtureRoots = new Set();
 
 export function repositoryFixture({ sidecar = false, identity = "foo" } = {}) {
-  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "runmat-migration-factory-"));
-  fixtureRoots.add(fixtureRoot);
+  const fixtureRoot = createTemporaryDirectory("runmat-migration-factory-");
   const root = path.join(fixtureRoot, "repository");
   fs.mkdirSync(root);
   write(root, "Cargo.toml", "[workspace]\nresolver = \"2\"\n");
@@ -64,8 +63,7 @@ pub const ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
 }
 
 export function cleanupRepositoryFixtures() {
-  for (const fixtureRoot of fixtureRoots) fs.rmSync(fixtureRoot, { recursive: true, force: true });
-  fixtureRoots.clear();
+  cleanupTemporaryDirectories();
 }
 
 export function controlledFixture(options = {}) {

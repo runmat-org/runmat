@@ -15,6 +15,7 @@ import { composeTopologyCandidate } from "../topology/compose.mjs";
 import { candidateInputDigests, freezeReviewedTopology, parseReviewedTopology, reviewedTopologyView } from "../topology/freeze.mjs";
 import { fullTopologyChainFixture } from "../topology/tests/full-chain-fixture.mjs";
 import { fixtureTargetPolicy } from "./helpers.mjs";
+import { createTemporaryDirectory } from "./temporary-directories.mjs";
 
 export function writeFullControlWorkflow(directory, revision, sourceContentDigest = undefined, sourceMode = undefined) {
   const input = fullTopologyChainFixture({ revision, sourceContentDigest, sourceMode });
@@ -141,7 +142,7 @@ export function writeFullControlWorkflow(directory, revision, sourceContentDiges
 }
 
 export function cleanFactoryCliRepository() {
-  const repository = fs.mkdtempSync(path.join(os.tmpdir(), "runmat-factory-cli-repository-"));
+  const repository = createTemporaryDirectory("runmat-factory-cli-repository-");
   fs.cpSync(path.resolve("scripts"), path.join(repository, "scripts"), { recursive: true });
   execFileSync("git", ["init", "--quiet"], { cwd: repository });
   execFileSync("git", ["add", "scripts"], { cwd: repository });
