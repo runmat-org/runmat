@@ -10,7 +10,7 @@ test("attestation promotes only the exact content-bound candidate", () => {
   const frozen = freezeReviewedTopology(candidate, attestation, candidate);
   assert.equal(frozen.candidate_digest, candidate.digest);
   assert.equal(frozen.attestation_digest, evidenceDigest(attestation));
-  assert.equal(parseReviewedTopology(frozen, candidate, attestation, candidate), frozen);
+  assert.deepEqual(parseReviewedTopology(frozen, candidate, attestation, candidate), frozen);
 });
 
 test("attestation rejects candidate and transitive-input drift", () => {

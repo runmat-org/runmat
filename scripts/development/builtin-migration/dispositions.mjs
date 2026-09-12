@@ -1,4 +1,5 @@
 import { sorted } from "./constants.mjs";
+import { assertValidatedControl } from "./control.mjs";
 import { emptyClassification } from "./records.mjs";
 import { SAFE_IDENTITY, exact, identity as parseIdentity, kind, object, uniqueStrings } from "./schema.mjs";
 
@@ -7,6 +8,7 @@ export function emptyDispositionInput() {
 }
 
 export function dispositionInputFromControl(control) {
+  assertValidatedControl(control);
   const identities = {};
   for (const [identity, entry] of control.identities) {
     identities[identity] = {

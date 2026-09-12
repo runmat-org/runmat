@@ -1,8 +1,11 @@
 import { evidenceDigest } from "./evidence.mjs";
+import { deepImmutable } from "./immutable.mjs";
 import { validateBundleGraph } from "./control-graph.mjs";
 import { parseFindingDispositions } from "./migration-findings.mjs";
 import { parseGatePlans } from "./gate-plan.mjs";
 import { requiredGateNames } from "./gate-requirements.mjs";
+import { materializeTopologyControl } from "./topology/control-projection.mjs";
+import { assertValidatedTopologyView } from "./topology/freeze.mjs";
 import {
   SAFE_IDENTITY, array, digest, enumValue, exact, identity, integer, kind, nonempty,
   absolutePath, filesystemIdentity, object, repositoryPath, sourceRevision, stableId, uniqueStrings,
@@ -17,22 +20,35 @@ export const MATURITY_GATES = Object.freeze([
 
 const COHORTS = ["C00", "C01", "C02", "C03", "C04", "C05", "C06", "C07"];
 const SEMANTIC_COHORTS = ["prerequisite", "A", "B", "C", "D", "E", "F", "G"];
+const VALIDATED_CONTROLS = new WeakSet();
 
-export function parseControlManifest(value, current = null) {
-  kind(value, 1, "runmat-builtin-migration-control-manifest", "control manifest");
-  exact(value, ["schema_version", "kind", "authority", "program", "control_draft_digest", "baseline", "cohorts", "bundles", "identities", "migration_findings", "exception_manifest", "storage_policy", "review"], "control manifest");
+export function parseControlManifest(value, { inventory: current, reviewedTopology } = {}) {
+  if (!current || !reviewedTopology) {
+    throw new Error("control manifest parsing requires the exact inventory and deterministically validated topology");
+  }
+  assertValidatedTopologyView(reviewedTopology);
+  kind(value, 2, "runmat-builtin-migration-control-manifest", "control manifest");
+  exact(value, ["schema_version", "kind", "authority", "program", "topology_digest", "baseline_context", "cohorts", "bundle_controls", "identity_controls", "migration_findings", "exception_manifest", "storage_policy", "review", "digest"], "control manifest");
   if (value.authority !== "reviewed-development-control") throw new Error("control manifest has invalid authority");
   if (value.program !== "RM-1064/C00-C07") throw new Error("control manifest has unexpected program");
-  digest(value.control_draft_digest, "control draft digest");
-  const baseline = parseBaseline(value.baseline);
+  digest(value.topology_digest, "reviewed topology digest");
+  digest(value.digest, "control manifest digest");
+  const baseline = parseBaselineContext(value.baseline_context, reviewedTopology);
   const cohorts = parseCohorts(value.cohorts);
-  const bundles = new Map(Object.entries(object(value.bundles, "control bundles")).map(([id, entry]) => [id, parseBundle(id, entry, current)]));
-  const identities = new Map();
-  for (const [id, entry] of Object.entries(object(value.identities, "control identities"))) {
+  const bundleControls = new Map(Object.entries(object(value.bundle_controls, "control bundle policies")).map(([id, entry]) => [id, parseBundleControl(id, entry, current)]));
+  const identityControls = new Map();
+  for (const [id, entry] of Object.entries(object(value.identity_controls, "control identity policies"))) {
     const normalized = id.toLowerCase();
-    if (identities.has(normalized)) throw new Error(`control identities collide case-insensitively at ${id}`);
-    identities.set(normalized, parseIdentity(id, entry, bundles, cohorts));
+    if (identityControls.has(normalized)) throw new Error(`control identity policies collide case-insensitively at ${id}`);
+    identityControls.set(normalized, parseIdentityControl(id, entry));
   }
+  const materialized = materializeTopologyControl(reviewedTopology, {
+    topology_digest: value.topology_digest,
+    bundleControls,
+    identityControls,
+  });
+  const bundles = new Map([...materialized.bundles].map(([id, entry]) => [id, parseBundle(id, entry, current)]));
+  const identities = new Map([...materialized.identities].map(([id, entry]) => [id, parseIdentity(id, entry, bundles, cohorts)]));
   const publicSpellings = new Map();
   for (const entry of identities.values()) {
     const folded = entry.public_spelling.toLowerCase();
@@ -50,20 +66,79 @@ export function parseControlManifest(value, current = null) {
   validateIdentityGraph(identities);
   validateGatePlanCoverage(bundles, identities);
   if (current) validateBaseline(baseline, current, identities);
-  return { value, baseline, cohorts, bundles, identities, migrationFindings, digest: evidenceDigest(value) };
+  const { digest: _ignored, ...payload } = value;
+  if (evidenceDigest(payload) !== value.digest) throw new Error("control manifest digest mismatch");
+  const parsed = deepImmutable({ value, topology_digest: value.topology_digest, baseline, cohorts, bundles, identities, migrationFindings, digest: value.digest });
+  VALIDATED_CONTROLS.add(parsed);
+  return parsed;
 }
 
-function parseBaseline(value) {
-  exact(value, ["revision", "source_digest", "inventory_digest", "dispositions_digest", "migration_findings_digest", "compiled_target"], "control baseline");
+export function assertValidatedControl(value) {
+  if (!VALIDATED_CONTROLS.has(value)) throw new Error("operation requires the exact validated control manifest");
+  return value;
+}
+
+export function assertControlBaseline(control, inventory) {
+  assertValidatedControl(control);
+  assertInventoryIntegrity(inventory, "control baseline inventory");
+  validateBaselineBinding(control.baseline, inventory);
+  return inventory;
+}
+
+export function assertControlSubject(control, inventory) {
+  assertValidatedControl(control);
+  assertInventoryIntegrity(inventory, "control subject inventory");
+  const build = inventory.compiled_inventory?.build;
+  if (build?.operating_system !== control.baseline.compiled_target.operating_system
+    || build?.architecture !== control.baseline.compiled_target.architecture) {
+    throw new Error("control subject compiled target differs from the reviewed baseline target");
+  }
+  const expected = [...control.identities.keys()].sort();
+  const observed = inventory.identities.map((entry) => entry.identity).sort();
+  if (JSON.stringify(observed) !== JSON.stringify(expected)) {
+    throw new Error("control subject identities differ from the reviewed control identity set");
+  }
+  return inventory;
+}
+
+function parseBaselineContext(value, topology) {
+  exact(value, ["source_digest", "dispositions_digest", "migration_findings_digest", "compiled_target"], "control baseline context");
   exact(value.compiled_target, ["operating_system", "architecture"], "control baseline compiled target");
   return {
-    revision: sourceRevision(value.revision, "control baseline revision"),
+    revision: sourceRevision(topology?.baseline?.revision, "reviewed topology baseline revision"),
     source_digest: digest(value.source_digest, "control baseline source digest"),
-    inventory_digest: digest(value.inventory_digest, "control baseline inventory digest"),
+    inventory_digest: digest(topology?.baseline?.inventory_digest, "reviewed topology baseline inventory digest"),
     dispositions_digest: digest(value.dispositions_digest, "control baseline dispositions digest"),
     migration_findings_digest: digest(value.migration_findings_digest, "control baseline migration findings digest"),
     compiled_target: { operating_system: nonempty(value.compiled_target.operating_system, "control baseline operating system"), architecture: nonempty(value.compiled_target.architecture, "control baseline architecture") },
   };
+}
+
+function parseBundleControl(id, value, current) {
+  stableId(id, "bundle control id");
+  exact(value, ["prerequisites", "additional_authored_write_set", "integration_outputs", "gate_plans", "owner_role", "complexity", "review"], `${id} bundle control`);
+  const additional = array(value.additional_authored_write_set, `${id} additional authored write set`, { empty: true })
+    .map((entry) => parseScope(entry, `${id} additional authored scope`));
+  const gatePlans = value.gate_plans;
+  parseGatePlans(gatePlans, id, current);
+  return {
+    ...value,
+    additional_authored_write_set: additional,
+    prerequisites: array(value.prerequisites, `${id} prerequisites`, { empty: true }).map((entry) => parsePrerequisite(entry, id)),
+    integration_outputs: array(value.integration_outputs, `${id} integration outputs`, { empty: true }).map((entry) => {
+      parseIntegrationOutput(entry, id);
+      return entry;
+    }),
+    gate_plans: gatePlans,
+    owner_role: nonempty(value.owner_role, `${id} owner role`),
+    complexity: parseComplexity(value.complexity, `${id} complexity`),
+  };
+}
+
+function parseIdentityControl(id, value) {
+  identity(id, "identity control id");
+  exact(value, ["public_spelling", "runtime_owner", "shared_dependencies", "complexity", "maturity", "expected_authorities", "expected_removals", "baseline_evidence", "owner", "review"], `${id} identity control`);
+  return value;
 }
 
 function parseCohorts(value) {
@@ -276,12 +351,8 @@ function parseReview(value, label) {
 }
 
 function validateBaseline(baseline, current, identities) {
-  if (current.source?.revision !== baseline.revision) throw new Error("control baseline revision does not match current source revision");
-  if (current.source?.digest !== baseline.source_digest) throw new Error("control baseline source digest does not match current source snapshot");
-  if (current.digest !== baseline.inventory_digest) throw new Error("control baseline inventory digest does not match current inventory");
-  if (current.dispositions_digest !== baseline.dispositions_digest) throw new Error("control baseline dispositions digest does not match reviewed dispositions");
-  if (current.migration_findings_digest !== baseline.migration_findings_digest) throw new Error("control baseline migration findings digest does not match compiled findings");
-  if (current.compiled_inventory.build.operating_system !== baseline.compiled_target.operating_system || current.compiled_inventory.build.architecture !== baseline.compiled_target.architecture) throw new Error("control baseline compiled target does not match the inventory build");
+  assertInventoryIntegrity(current, "control baseline inventory");
+  validateBaselineBinding(baseline, current);
   const observed = current.identities.map((entry) => entry.identity).sort();
   const reviewed = [...identities.keys()].sort();
   if (JSON.stringify(observed) !== JSON.stringify(reviewed)) throw new Error("control manifest identities do not exactly cover the baseline inventory");
@@ -294,6 +365,22 @@ function validateBaseline(baseline, current, identities) {
     const proof = entry.baseline_evidence.find((candidate) => candidate.path === removal.path && candidate.digest === removal.baseline_digest);
     if (proof.locator !== null || sourceFiles.get(removal.path) !== removal.baseline_digest) throw new Error(`${entry.identity}: file removal baseline does not match the content-derived source snapshot`);
   }
+}
+
+function validateBaselineBinding(baseline, current) {
+  if (current.source?.revision !== baseline.revision) throw new Error("control baseline revision does not match current source revision");
+  if (current.source?.digest !== baseline.source_digest) throw new Error("control baseline source digest does not match current source snapshot");
+  if (current.digest !== baseline.inventory_digest) throw new Error("control baseline inventory digest does not match current inventory");
+  if (current.dispositions_digest !== baseline.dispositions_digest) throw new Error("control baseline dispositions digest does not match reviewed dispositions");
+  if (current.migration_findings_digest !== baseline.migration_findings_digest) throw new Error("control baseline migration findings digest does not match compiled findings");
+  if (current.compiled_inventory.build.operating_system !== baseline.compiled_target.operating_system || current.compiled_inventory.build.architecture !== baseline.compiled_target.architecture) throw new Error("control baseline compiled target does not match the inventory build");
+}
+
+function assertInventoryIntegrity(value, label) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${label} must be an inventory object`);
+  digest(value.digest, `${label} digest`);
+  const { digest: _ignored, ...payload } = value;
+  if (evidenceDigest(payload) !== value.digest) throw new Error(`${label} artifact digest mismatch`);
 }
 
 function validateReviewedClassification(control, inventory) {

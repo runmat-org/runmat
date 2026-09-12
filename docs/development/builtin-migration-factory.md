@@ -23,28 +23,28 @@ The exporter writes to stdout when no argument is supplied, which is the interfa
 
 The factory rejects a missing snapshot, a future schema version, unknown fields at any nesting level, malformed enum or record payloads, noncanonical ordering, inconsistent binding/provenance relationships, structurally invalid producer validation, or a snapshot whose SHA-256 digest does not match its contents. Compiler-declared callable spellings participate in the public spelling inventory. Constant spellings do so only when the identity has no callable form, which lets a constant-only identity enter reviewed control without allowing case variants such as `Inf` and `inf` to override the callable's public spelling. Migration-readiness findings are different from structural errors: the factory preserves every typed finding in inventory evidence and requires the control manifest to give it an exact reviewed disposition. A legacy GPU or fusion registry group remains a reviewed raw key rather than being guessed into a callable identity. Inventory v2 pins the source revision, the complete ordered source-root and file snapshot, a separate digest over every scanner-consumed path, the compiled snapshot digest, the migration-finding digest, and the reviewed identity-disposition digest. Its dirty-state observation is scoped to those frozen roots, so an unrelated untracked file cannot invalidate the baseline while any tracked, untracked, modified, or deleted source inside the migration surface remains visible.
 
-## Reviewed control and scheduling
+## Reviewed topology, control, and scheduling
 
-The v1 `runmat-builtin-migration-control-manifest` is authored and reviewed rather than inferred. It contains:
+Migration topology and execution policy are separate reviewed authorities. The frozen topology owns atomic bundle membership, cohorts, target domain and family, typed `canonical`, `alias`, or `internal` disposition, bundle composition, and the topology review evidence. The v2 `runmat-builtin-migration-control-manifest` names that topology by digest and contains only the execution policy needed to carry it out:
 
-- the digest of the exact unreviewed control draft from which review began;
-- the exact baseline revision and source, compiled inventory, and disposition digests;
+- baseline source, disposition, migration-finding, and compiled-target context not already owned by topology;
 - C00-C07 with fixed order and semantic labels;
-- atomic migration bundles and their prerequisite DAG, kept separate from each identity's target domain and family;
-- reciprocal identity membership, exact public spelling, and typed `canonical`, `alias`, or `internal` disposition;
-- domain, family, runtime owner when one exists, shared dependencies, reviewed complexity, maturity applicability, exact callable and constant authorities, expected removals, and baseline evidence;
-- authored write scopes separated from integration-produced files;
+- bundle prerequisites, additional authored scopes, integration-produced files, gate plans, owner role, and reviewed complexity;
+- exact public spelling, runtime owner when one exists, shared dependencies, reviewed complexity, maturity applicability, exact callable and constant authorities, expected removals, baseline evidence, and owner for every identity;
 - exact reviewed dispositions for every compiled migration-readiness finding;
-- per-bundle gate plans that freeze the program source, arguments, working-directory policy, parser kind, and expected artifact roles;
 - reviewed exceptions and storage policy.
 
-Identifiers beginning with `__` are supported for real internal bindings. Distinct identity keys or public spellings that collide case-insensitively are rejected. Canonical callable identities require a runtime owner. A canonical constant-only identity may use `null` when its reviewed authority names at least one exact runtime constant and no callable runtime binding; aliases and internal identities may also explicitly use `null`. Catalog entry counts, catalog constant counts, runtime binding records, and case-sensitive runtime constant spellings are independent reviewed facts. Bundle prerequisites must exist and form a DAG. Bundle/identity membership must be reciprocal. A bundle is an atomic scheduling and write-set boundary, not a package-taxonomy authority: identities in one bundle may have different reviewed target domains and families when they share a legacy owner that must move atomically. They must still belong to one cohort, and the queue derives their exact target-family set from the identity rows. Authored scopes cannot overlap integration outputs, and cross-bundle authored collisions are reported by the queue.
+The serialized control cannot repeat bundle membership, cohort, atomic reason, disposition, domain, family, composition, or identity-target evidence. Its parser reconstructs the operational view by joining the exact control keys to a deterministically reconstructed frozen topology. The join retains every topology-owned authored scope and adds only separately reviewed, non-overlapping execution scopes. Missing or extra keys, topology drift, overlapping scopes, or attempts to restate topology-owned fields are rejected.
+
+Successful validation returns immutable topology and control views that are recognized only by the modules that performed the complete deterministic checks. Queue, lease, preparation, audit, gate, inventory-delta, disposition, and seal entry points reject copied or lookalike objects even when their fields resemble a reviewed manifest. Invocation-specific state, such as the bundle selected for an inventory-delta proof, is passed separately and never attached to the reviewed control object.
+
+Identifiers beginning with `__` are supported for real internal bindings. Distinct identity keys or public spellings that collide case-insensitively are rejected. Canonical callable identities require a runtime owner. A canonical constant-only identity may use `null` when its reviewed authority names at least one exact runtime constant and no callable runtime binding; aliases and internal identities may also explicitly use `null`. Catalog entry counts, catalog constant counts, runtime binding records, and case-sensitive runtime constant spellings are independent reviewed facts. Bundle prerequisites must exist and form a DAG. Bundle/identity membership comes only from topology and remains reciprocal. A bundle is an atomic scheduling and write-set boundary, not a package-taxonomy authority: identities in one bundle may have different reviewed target domains and families when they share a legacy owner that must move atomically. They must still belong to one cohort, and the queue derives their exact target-family set from the materialized topology view. Authored scopes cannot overlap integration outputs, and cross-bundle authored collisions are reported by the queue. Repository-relative paths must be canonical POSIX paths; alternate spellings such as embedded `.` segments cannot bypass scope comparisons.
 
 Generating the initial review surface does not confer authority. `draft-control` emits a deterministic, content-addressed v1 scaffold for every exact inventory identity and migration finding. It pins the baseline and the compiled-authority, lexical-observation, and complete inventory-row digests, but leaves public spelling, disposition, alias target, cohort, bundle, domain, family, runtime owner, dependencies, complexity, maturity, expected authorities, removals, baseline evidence, owner, gate plans, exceptions, and storage policy unresolved. Its bundle list is empty, every review status is `unreviewed`, and the parser rejects attempts to insert inferred facts or review claims into the draft.
 
-The identity-disposition review has a compact authoring form for large inventories. A v1 `runmat-builtin-disposition-review` groups exact, explicitly enumerated identities that share one reviewed canonical, alias, or internal decision. It accepts no wildcard, pattern, path-derived selector, or default disposition. Groups must cover the baseline inventory exactly once, and alias maps must cover their group exactly and target a reviewed canonical identity. Domain, family, bundle, and cohort are separate target-layout decisions made in the reviewed control manifest; the disposition review does not infer them from current paths. Existing catalog entries are baseline evidence rather than a target-state veto: review may identify one as a duplicated alias or an accidentally exposed internal binding, provided its obsolete authority is removed and verified during the atomic cutover. The `compile-dispositions` command expands that reviewer-authored input into the complete row-per-identity disposition file consumed by inventory generation. Both artifacts remain development review evidence; neither is a runtime or catalog authority.
+The identity-disposition review has a compact authoring form for large inventories. A v1 `runmat-builtin-disposition-review` groups exact, explicitly enumerated identities that share one reviewed canonical, alias, or internal decision. It accepts no wildcard, pattern, path-derived selector, or default disposition. Groups must cover the baseline inventory exactly once, and alias maps must cover their group exactly and target a reviewed canonical identity. Domain, family, bundle, and cohort are separate target-layout decisions made in the reviewed topology; the disposition review does not infer them from current paths. Existing catalog entries are baseline evidence rather than a target-state veto: review may identify one as a duplicated alias or an accidentally exposed internal binding, provided its obsolete authority is removed and verified during the atomic cutover. The `compile-dispositions` command expands that reviewer-authored input into the complete row-per-identity disposition file consumed by inventory generation. Both artifacts remain development review evidence; neither is a runtime or catalog authority.
 
-The queue preserves unresolved and conflicting path-derived domain or family observations in its evidence, but it does not treat those fields as blockers after the reviewed control supplies the target layout. The reviewed disposition is handled the same way. Any unresolved inventory field outside that closed control-owned set still blocks scheduling. This distinction lets the inventory report the repository as it exists without allowing historical paths to override the reviewed migration topology.
+The queue preserves unresolved and conflicting path-derived domain or family observations in its evidence, but it does not treat those fields as blockers after the reviewed topology supplies the target layout. The reviewed disposition is handled the same way. Any unresolved inventory field outside that closed topology-owned set still blocks scheduling. This distinction lets the inventory report the repository as it exists without allowing historical paths to override the reviewed migration topology.
 
 ```sh
 node scripts/development/builtin-migration-factory.mjs compile-dispositions \
@@ -59,24 +59,45 @@ node scripts/development/builtin-migration-factory.mjs draft-control \
   --output /tmp/rm1064-control-draft.json
 ```
 
-Reviewers author the complete control manifest separately and set its `control_draft_digest` to the draft digest. `freeze-control` verifies the draft against the baseline inventory, requires exact identity and finding coverage, validates every reviewed control field and relationship, and only then emits the reviewed manifest. It does not promote draft observations into review decisions.
+`component-graph` derives indivisible authority components from the same inventory. After reviewers complete the three exact cohort inputs, reconciliation, and stability corrections, `compose-topology` produces the deterministic candidate. `freeze-topology` accepts only an attestation bound to that candidate and every transitive input. `validate-topology` repeats the composition and requires byte-for-byte equality with the frozen result. The command's `--help` output lists the complete argument set for each stage.
 
-```sh
+The topology is reviewed and frozen first. It transitively binds the draft, inventory, component graph, three cohort reviews, reconciliation, and stability corrections. Reviewers then author the control-only execution overlay with the exact topology digest and exact bundle and identity key sets. `freeze-control` deterministically reconstructs the topology from all of those inputs, verifies that topology binds the original draft, validates every reviewed control field and relationship, and only then emits the reviewed manifest. It does not promote draft observations into review decisions or accept a self-consistent but unreconstructable topology.
+
+The repeated topology arguments are the complete evidence chain used by every control-consuming command:
+
+```bash
+topology_args=(
+  --topology /tmp/rm1064-reviewed-topology.json
+  --candidate /tmp/rm1064-topology-candidate.json
+  --attestation /tmp/rm1064-topology-attestation.json
+  --component-graph /tmp/rm1064-component-graph.json
+  --draft /tmp/rm1064-control-draft.json
+  --c01-c03-review /tmp/rm1064-c01-c03-review.json
+  --c04-c05-review /tmp/rm1064-c04-c05-review.json
+  --c06-c07-review /tmp/rm1064-c06-c07-review.json
+  --reconciliation /tmp/rm1064-topology-reconciliation.json
+  --stability-corrections /tmp/rm1064-topology-stability-corrections.json
+)
+```
+
+```bash
 node scripts/development/builtin-migration-factory.mjs freeze-control \
-  --draft /tmp/rm1064-control-draft.json \
   --control /tmp/rm1064-reviewed-control.json \
   --baseline-inventory /tmp/runmat-builtin-inventory.json \
+  "${topology_args[@]}" \
   --output /tmp/rm1064-control.json
 ```
 
-```sh
+```bash
 node scripts/development/builtin-migration-factory.mjs validate-control \
   --control /tmp/rm1064-control.json \
-  --baseline-inventory /tmp/runmat-builtin-inventory.json
+  --baseline-inventory /tmp/runmat-builtin-inventory.json \
+  "${topology_args[@]}"
 node scripts/development/builtin-migration-factory.mjs queue \
   --compiled-inventory /tmp/runmat-compiled-inventory.json \
   --control /tmp/rm1064-control.json \
   --baseline-inventory /tmp/runmat-builtin-inventory.json \
+  "${topology_args[@]}" \
   --dispositions /tmp/reviewed-dispositions.json \
   --output /tmp/runmat-builtin-queue.json
 ```
@@ -98,21 +119,23 @@ An authored lease v1 binds one bundle to the control digest, owner, base revisio
 
 Lease assignment is also a two-stage workflow. A closed v1 request names only the reviewed control digest, bundle, lease ID, owner, UTC interval, and review evidence. `issue-lease` rejects unreviewed or stale requests and derives the base revision, authored scope, and integration-output exclusions from the frozen control; a request cannot supply or widen those fields. The resulting lease embeds the reviewed request and carries its own content digest.
 
-```sh
+```bash
 node scripts/development/builtin-migration-factory.mjs issue-lease \
   --request /tmp/array-shape-lease-request.json \
   --control /tmp/rm1064-control.json \
   --baseline-inventory /tmp/runmat-builtin-inventory.json \
+  "${topology_args[@]}" \
   --output /tmp/array-shape-lease.json
 ```
 
 `prepare` requires the compiled inventory, control, and lease. Its workspace must be outside the repository. Canonical path checks reject symlink escapes into source. Prepare v2 copies legacy documentation byte-for-byte, writes comment-only templates, records inventory evidence, and emits a source-field checklist. It never edits source and refuses to overwrite a modified review file.
 
-```sh
+```bash
 node scripts/development/builtin-migration-factory.mjs prepare accumarray \
   --compiled-inventory /tmp/runmat-compiled-inventory.json \
   --control /tmp/rm1064-control.json \
   --baseline-inventory /tmp/runmat-builtin-inventory.json \
+  "${topology_args[@]}" \
   --lease /tmp/array-lease.json \
   --workspace /tmp/runmat-builtin-review
 ```
@@ -145,11 +168,12 @@ Documentation evidence must be written outside the repository to a new path. The
 
 The bundle's reviewed `documentation-cutover` gate plan must select the `documentation_cutover` parser and the `runmat-builtins` catalog documentation exporter with its transition argument. Run it with `--inputs`:
 
-```sh
+```bash
 node scripts/development/builtin-migration-factory.mjs produce-gate \
   --compiled-inventory /tmp/runmat-compiled-inventory.json \
   --control /tmp/rm1064-control.json \
   --baseline-inventory /tmp/runmat-builtin-inventory.json \
+  "${topology_args[@]}" \
   --bundle array-shape --gate documentation-cutover \
   --artifact array-shape-documentation \
   --inputs /tmp/array-shape-documentation-input.json \
@@ -164,11 +188,12 @@ Nearby files, matching tokens, successful exit codes, file-presence counts, or a
 
 Run a reviewed producer with:
 
-```sh
+```bash
 node scripts/development/builtin-migration-factory.mjs produce-gate \
   --compiled-inventory /tmp/runmat-compiled-inventory.json \
   --control /tmp/rm1064-control.json \
   --baseline-inventory /tmp/runmat-builtin-inventory.json \
+  "${topology_args[@]}" \
   --bundle array-shape --gate architecture --artifact array-shape-architecture \
   --output /tmp/array-shape-architecture.json
 ```
@@ -185,11 +210,12 @@ Verification manifest v3 is a reviewed, closed request containing content-addres
 
 Seal manifest v2 combines an exact passing verification with integration-owned evidence. A seal requires at least `deterministic-products` and `inventory-delta`, complete bundle identity coverage, matching baseline and subject provenance, and reviewed prerequisite seal references. A passing seal is still integration evidence; it does not mutate catalog or runtime authority.
 
-```sh
+```bash
 node scripts/development/builtin-migration-factory.mjs audit \
   --compiled-inventory /tmp/runmat-compiled-inventory.json \
   --control /tmp/rm1064-control.json \
   --baseline-inventory /tmp/runmat-builtin-inventory.json \
+  "${topology_args[@]}" \
   --lease /tmp/array-lease.json \
   --batch /tmp/array-batch.json --evidence /tmp/array-audit-evidence.json \
   --output /tmp/array-audit.json
@@ -198,6 +224,7 @@ node scripts/development/builtin-migration-factory.mjs verify \
 node scripts/development/builtin-migration-factory.mjs seal \
   --manifest /tmp/array-seal.json --control /tmp/rm1064-control.json \
   --baseline-inventory /tmp/runmat-builtin-inventory.json \
+  "${topology_args[@]}" \
   --output /tmp/array-seal-result.json
 ```
 

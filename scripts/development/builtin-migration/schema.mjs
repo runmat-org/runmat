@@ -67,7 +67,13 @@ export function stableId(value, label) {
 
 export function repositoryPath(value, label) {
   const result = nonempty(value, label);
-  if (!SAFE_PATH.test(result) || result.includes("//")) throw new Error(`${label} is not a safe repository-relative path`);
+  if (!SAFE_PATH.test(result)
+    || result.includes("//")
+    || result === "."
+    || result.endsWith("/")
+    || path.posix.normalize(result) !== result) {
+    throw new Error(`${label} is not a normalized safe repository-relative path`);
+  }
   return result;
 }
 

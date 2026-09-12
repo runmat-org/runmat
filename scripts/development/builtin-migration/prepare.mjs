@@ -1,11 +1,15 @@
 import fs from "node:fs";
 import path from "node:path";
 import { rustLeaf, sorted } from "./constants.mjs";
+import { assertControlBaseline } from "./control.mjs";
 import { evidenceDigest } from "./evidence.mjs";
+import { assertValidatedLease } from "./lease.mjs";
 import { buildSourceFieldDisposition, sourceFieldBaselineDigest } from "./source-fields.mjs";
 import { array, digest, exact, identity, integer, kind, nonempty, repositoryPath, sourceRevision, stableId } from "./schema.mjs";
 
 export function prepareIdentity(repository, inventory, control, lease, identity, outputRoot) {
+  assertControlBaseline(control, inventory);
+  assertValidatedLease(lease, control);
   const key = identity.toLowerCase();
   const row = inventory.identities.find((entry) => entry.identity === key);
   if (!row) throw new Error(`${identity}: identity is not present in the inventory`);

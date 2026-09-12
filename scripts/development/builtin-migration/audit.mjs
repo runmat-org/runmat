@@ -1,22 +1,26 @@
 import fs from "node:fs";
 import path from "node:path";
 import { compareCodePoint, sorted } from "./constants.mjs";
+import { assertControlBaseline, assertControlSubject } from "./control.mjs";
 import { evidenceDigest } from "./evidence.mjs";
 import { parseGateResult } from "./gate-result.mjs";
 import { requiredGateNames } from "./gate-requirements.mjs";
-import { validateLeaseDiff } from "./lease.mjs";
+import { assertValidatedLease, validateLeaseDiff } from "./lease.mjs";
 import { parsePrepareResult } from "./prepare.mjs";
 import { SAFE_IDENTITY, exact, kind, stableId, uniqueStrings } from "./schema.mjs";
 import { parseCompletedSourceDisposition } from "./source-fields.mjs";
 
 export function auditMigration(repository, baseline, subject, control, lease, batchValue, evidence) {
+  assertControlBaseline(control, baseline);
+  assertControlSubject(control, subject);
+  assertValidatedLease(lease, control);
   stableId(evidence.artifact_id, "audit artifact id");
   const requested = parseBatch(batchValue);
   const bundle = lease.bundle;
   const failures = [];
   if (subject.source.dirty !== false) failures.push(issue("subject-source-not-clean", "audit subject must be a clean committed source snapshot"));
   if (JSON.stringify(requested) !== JSON.stringify(sorted(bundle.identities))) failures.push(issue("partial-bundle", "audit batch must cover the complete reviewed bundle"));
-  try { validateLeaseDiff(bundle, evidence.changed_paths ?? []); } catch (error) { failures.push(issue("lease-violation", error.message)); }
+  try { validateLeaseDiff(lease, control, evidence.changed_paths ?? []); } catch (error) { failures.push(issue("lease-violation", error.message)); }
   const expected = {
     source_revision: subject.source.revision, source_digest: subject.source.digest,
     baseline_source_revision: baseline.source.revision,
