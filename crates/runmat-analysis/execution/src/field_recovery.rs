@@ -130,6 +130,20 @@ pub fn prepare_structural_field_recovery(
             "field recovery topology differs from the completed solve",
         ));
     }
+    let constraint_plan =
+        runmat_analysis_fea::constraints::CanonicalStructuralConstraintPlan::compile_for_model(
+            &workload.model,
+            mesh_artifact.as_ref(),
+        )
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    result
+        .constraint_result
+        .validate_against_model(&constraint_plan, &workload.model, mesh_artifact.as_ref())
+        .map_err(|_| {
+            AnalysisBridgeError::Identity(
+                "field recovery constraint result differs from the canonical executed plan",
+            )
+        })?;
     let request = FieldRecoveryRequest::new(
         preparation.source_host.workload.step,
         source_result,

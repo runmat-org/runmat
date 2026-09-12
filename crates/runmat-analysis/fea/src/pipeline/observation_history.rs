@@ -274,11 +274,17 @@ pub(crate) fn evaluate_field_histories(
         }
         HistoryTopology::Structural { model, mesh } => {
             let topology = StructuralObservationTopology::derive(model, mesh)?;
+            let constraint_plan =
+                crate::constraints::CanonicalStructuralConstraintPlan::compile_for_model(
+                    model, mesh,
+                )
+                .map_err(|error| ObservationError::Invalid(error.to_string()))?;
             (
                 resolve_structural_observation_plan(
                     &history_step,
                     model,
                     mesh,
+                    &constraint_plan,
                     &definitions,
                     ObservationLimits::default(),
                 )?,

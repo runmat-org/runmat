@@ -10,7 +10,10 @@ use runmat_analysis_core::{
 };
 use runmat_canonical_codec::{encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
-use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOrder};
+use runmat_meshing_core::{
+    fixtures::canonical_tetrahedron_solver_mesh, ElementOrder, PersistentEntityId,
+    PersistentEntityKind, StableDigest,
+};
 
 use crate::{
     execution::{
@@ -150,6 +153,145 @@ fn complex_pressure_history_spec(
 
 fn projection(order: ElementOrder) -> AnalysisProjection {
     AnalysisProjection::derive(&canonical_tetrahedron_solver_mesh(order)).unwrap()
+}
+
+#[test]
+fn constraint_reaction_resultant_uses_canonical_group_ownership() {
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    let mut mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+    for face in &mut mesh.topology.boundary_faces {
+        face.provenance.push(PersistentEntityId {
+            kind: PersistentEntityKind::Face,
+            source_topology_id: "root".into(),
+            assembly_path: vec!["root".into()],
+        });
+        face.provenance.sort();
+    }
+    mesh.canonical_digest = StableDigest::ZERO;
+    mesh.seal_canonical_digest().unwrap();
+    let constraint_plan = crate::constraints::CanonicalStructuralConstraintPlan::compile_for_model(
+        &model,
+        Some(&mesh),
+    )
+    .unwrap();
+    assert_eq!(constraint_plan.groups.len(), 1);
+
+    let mut request = spec(
+        "root-reaction",
+        ObservationTarget::Constraint {
+            constraint_id: "bc_root".into(),
+        },
+    );
+    request.quantity = ObservationQuantity::ReactionForce;
+    request.value_shape = ObservationValueShape::Vector3;
+    request.source_location = FieldLocation::Constraint;
+    request.output_location = FieldLocation::Global;
+    request.reduction = Some(ReductionPolicy {
+        spatial: SpatialReduction::Resultant,
+        series: SeriesReduction::None,
+        extrema_ties: ExtremaTiePolicy::FirstCanonical,
+    });
+    let mut moment_request = request.clone();
+    moment_request.observation_id = ObservationId("root-reaction-moment".into());
+    moment_request.quantity = ObservationQuantity::ReactionMoment;
+    model.sequence.steps[0].observations = vec![
+        ObservationRequest::Reduction(request),
+        ObservationRequest::Reduction(moment_request),
+    ];
+    let force_definition = RecoveredFieldDefinition::new(
+        "structural.constraint_reaction_force",
+        ObservationQuantity::ReactionForce,
+        FieldLocation::Constraint,
+        RecoveredFieldEntityDomain::ConstraintGroups,
+        ObservationValueShape::Vector3,
+        RecoveredFieldNumericRepresentation::Real,
+    )
+    .unwrap();
+    let moment_definition = RecoveredFieldDefinition::new(
+        "structural.constraint_reaction_moment_about_global_origin",
+        ObservationQuantity::ReactionMoment,
+        FieldLocation::Constraint,
+        RecoveredFieldEntityDomain::ConstraintGroups,
+        ObservationValueShape::Vector3,
+        RecoveredFieldNumericRepresentation::Real,
+    )
+    .unwrap();
+    let plan = resolve_structural_observation_plan(
+        &model.sequence.steps[0],
+        &model,
+        Some(&mesh),
+        &constraint_plan,
+        &[force_definition.clone(), moment_definition.clone()],
+        ObservationLimits::default(),
+    )
+    .unwrap();
+    assert!(matches!(
+        &plan.observations[0].target,
+        ResolvedObservationTarget::ConstraintGroups { indices, identities }
+            if indices == &[0]
+                && identities == &[StableDigest::from_bytes(
+                    *constraint_plan.groups[0].source_digest.bytes()
+                )]
+    ));
+    let force_field = RecoveredField::new(
+        force_definition,
+        RecoveredFieldSample::Final,
+        runmat_analysis_core::AnalysisField::host_f64(
+            "structural.constraint_reaction_force",
+            vec![1, 3],
+            vec![125.0, -250.0, 375.0],
+        ),
+    )
+    .unwrap();
+    let moment_field = RecoveredField::new(
+        moment_definition,
+        RecoveredFieldSample::Final,
+        runmat_analysis_core::AnalysisField::host_f64(
+            "structural.constraint_reaction_moment_about_global_origin",
+            vec![1, 3],
+            vec![12.5, -25.0, 37.5],
+        ),
+    )
+    .unwrap();
+    let catalog = RecoveredFieldCatalog::new_for_topology(
+        plan.topology_digest,
+        RecoveredFieldEntityCounts {
+            structural_nodes: mesh.topology.nodes.len(),
+            solid_elements: mesh.topology.volume_elements.len(),
+            beam_elements: 0,
+            shell_elements: 0,
+            constraint_groups: 1,
+        },
+        vec![force_field, moment_field],
+    )
+    .unwrap();
+    let results = evaluate_structural_observations(&plan, &model, Some(&mesh), &catalog).unwrap();
+    assert_eq!(results.len(), 2);
+    assert_eq!(
+        results[0].field.as_host_f64().unwrap(),
+        &[125.0, -250.0, 375.0]
+    );
+    assert_eq!(
+        results[1].field.as_host_f64().unwrap(),
+        &[12.5, -25.0, 37.5]
+    );
+    assert!(results[0].entities.is_empty());
+
+    model.sequence.steps[0].observations[0]
+        .spec_mut()
+        .unwrap()
+        .target = ObservationTarget::Constraint {
+        constraint_id: "missing".into(),
+    };
+    assert!(resolve_structural_observation_plan(
+        &model.sequence.steps[0],
+        &model,
+        Some(&mesh),
+        &constraint_plan,
+        &crate::post::fields::structural_observable_field_definitions().unwrap(),
+        ObservationLimits::default(),
+    )
+    .is_err());
 }
 
 fn completed_scalar_series(
@@ -1489,11 +1631,15 @@ fn explicit_structural_nodes_resolve_and_evaluate_without_a_solver_mesh() {
     request.quantity = ObservationQuantity::Displacement;
     request.value_shape = ObservationValueShape::Vector3;
     model.sequence.steps[0].observations = vec![ObservationRequest::Field(request)];
+    let constraint_plan =
+        crate::constraints::CanonicalStructuralConstraintPlan::compile_for_model(&model, None)
+            .unwrap();
     let step = &model.sequence.steps[0];
     let plan = resolve_structural_observation_plan(
         step,
         &model,
         None,
+        &constraint_plan,
         std::slice::from_ref(&definition),
         ObservationLimits::default(),
     )
@@ -1516,6 +1662,7 @@ fn explicit_structural_nodes_resolve_and_evaluate_without_a_solver_mesh() {
             solid_elements: 0,
             beam_elements: beam_count,
             shell_elements: shell_count,
+            constraint_groups: 0,
         },
         vec![field],
     )

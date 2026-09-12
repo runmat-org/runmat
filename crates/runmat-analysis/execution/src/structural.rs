@@ -214,6 +214,7 @@ pub fn prepare_structural_linear_program(
         preparation.workload.procedure_step()?,
         &preparation.workload.model,
         preparation.mesh.as_ref(),
+        &constraint_plan,
         &field_definitions,
         ObservationLimits::default(),
     )

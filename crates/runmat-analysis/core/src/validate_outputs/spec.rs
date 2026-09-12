@@ -3,7 +3,7 @@ use crate::{
     CoordinateFrame, CoupledPhysicsFamily, ExcitationTarget, FieldLocation, ObservationComponent,
     ObservationQuantity, ObservationRequest, ObservationSpec, ObservationTarget,
     ObservationValueShape, PhysicsFamily, ProcedureStep, RecoveryPolicy, SignConvention,
-    SignalPrecision,
+    SignalPrecision, SpatialReduction,
 };
 
 use super::{invalid_observation, observation_error};
@@ -369,6 +369,15 @@ fn validate_recovery(
     request: &ObservationRequest,
     spec: &ObservationSpec,
 ) -> Result<(), AnalysisValidationError> {
+    if spec.output_location == FieldLocation::Global
+        && spec.recovery == RecoveryPolicy::Native
+        && spec
+            .reduction
+            .as_ref()
+            .is_some_and(|reduction| reduction.spatial != SpatialReduction::None)
+    {
+        return Ok(());
+    }
     if spec.source_location == spec.output_location {
         return if matches!(spec.recovery, RecoveryPolicy::Native) {
             Ok(())

@@ -11,6 +11,7 @@ use runmat_execution::Digest;
 use runmat_meshing_core::{SolverMeshArtifact, StableDigest};
 
 use crate::{
+    constraints::CanonicalStructuralConstraintPlan,
     results::field::{
         RecoveredFieldDefinition, RecoveredFieldEntityDomain, RecoveredFieldNumericRepresentation,
     },
@@ -34,23 +35,33 @@ pub fn resolve_observation_plan(
     limits: ObservationLimits,
 ) -> Result<ResolvedObservationPlan, ObservationError> {
     let topology = StructuralObservationTopology::from_projection(projection);
-    resolve_observation_plan_for_topology(step, &topology, fields, limits)
+    resolve_observation_plan_for_topology(step, &topology, None, fields, limits)
 }
 
 pub fn resolve_structural_observation_plan(
     step: &ProcedureStep,
     model: &AnalysisModel,
     mesh: Option<&SolverMeshArtifact>,
+    constraint_plan: &CanonicalStructuralConstraintPlan,
     fields: &[RecoveredFieldDefinition],
     limits: ObservationLimits,
 ) -> Result<ResolvedObservationPlan, ObservationError> {
     let topology = StructuralObservationTopology::derive(model, mesh)?;
-    resolve_observation_plan_for_topology(step, &topology, fields, limits)
+    constraint_plan
+        .validate()
+        .map_err(|error| ObservationError::Invalid(error.to_string()))?;
+    if constraint_plan.topology != topology.identity {
+        return Err(ObservationError::Identity(
+            "constraint plan topology differs from the observation topology",
+        ));
+    }
+    resolve_observation_plan_for_topology(step, &topology, Some(constraint_plan), fields, limits)
 }
 
 fn resolve_observation_plan_for_topology(
     step: &ProcedureStep,
     topology: &StructuralObservationTopology,
+    constraint_plan: Option<&CanonicalStructuralConstraintPlan>,
     fields: &[RecoveredFieldDefinition],
     limits: ObservationLimits,
 ) -> Result<ResolvedObservationPlan, ObservationError> {
@@ -61,7 +72,7 @@ fn resolve_observation_plan_for_topology(
     let observations = step
         .observations
         .iter()
-        .map(|request| resolve_request(step, request, topology, fields, limits))
+        .map(|request| resolve_request(step, request, topology, constraint_plan, fields, limits))
         .collect::<Result<Vec<_>, _>>()?;
     let mut plan = ResolvedObservationPlan {
         schema_version: 1,
@@ -86,10 +97,10 @@ fn validate_field_catalog(fields: &[RecoveredFieldDefinition]) -> Result<(), Obs
         }
         if !matches!(
             field.location(),
-            FieldLocation::Node | FieldLocation::Element
+            FieldLocation::Node | FieldLocation::Element | FieldLocation::Constraint
         ) {
             return Err(ObservationError::Unsupported(
-                "this evaluator accepts only recovered nodal and element fields",
+                "this evaluator accepts only recovered nodal, element, and constraint-group fields",
             ));
         }
         shape_component_count(field.value_shape())?;
@@ -101,6 +112,7 @@ fn resolve_request(
     step: &ProcedureStep,
     request: &ObservationRequest,
     topology: &StructuralObservationTopology,
+    constraint_plan: Option<&CanonicalStructuralConstraintPlan>,
     fields: &[RecoveredFieldDefinition],
     limits: ObservationLimits,
 ) -> Result<ResolvedObservation, ObservationError> {
@@ -125,7 +137,13 @@ fn resolve_request(
     validate_supported_spec(request, spec)?;
     let source_field = bind_field(spec, fields)?;
     validate_numeric_representation(spec, &source_field)?;
-    let target = resolve_target(request, spec, source_field.entity_domain(), topology)?;
+    let target = resolve_target(
+        request,
+        spec,
+        source_field.entity_domain(),
+        topology,
+        constraint_plan,
+    )?;
     validate_resolved_spatial_reduction(spec, &source_field, &target)?;
     let component = resolve_component(spec, &source_field)?;
     let result_value_shape = spec.result_value_shape();
@@ -298,10 +316,10 @@ fn validate_supported_spec(
     }
     if !matches!(
         spec.source_location,
-        FieldLocation::Node | FieldLocation::Element
+        FieldLocation::Node | FieldLocation::Element | FieldLocation::Constraint
     ) {
         return Err(ObservationError::Unsupported(
-            "this evaluator accepts only nodal and element fields",
+            "this evaluator accepts only nodal, element, and constraint-group fields",
         ));
     }
     match request {
@@ -452,6 +470,11 @@ fn validate_resolved_spatial_reduction(
                 spec.quantity,
                 ObservationQuantity::ReactionForce | ObservationQuantity::ReactionMoment
             ) => {}
+        (ObservationValueShape::Vector3, ResolvedObservationTarget::ConstraintGroups { .. })
+            if matches!(
+                spec.quantity,
+                ObservationQuantity::ReactionForce | ObservationQuantity::ReactionMoment
+            ) => {}
         (ObservationValueShape::Vector3, ResolvedObservationTarget::Volume { .. })
         | (ObservationValueShape::Vector3, ResolvedObservationTarget::Boundary { .. }) => {}
         (ObservationValueShape::SymmetricTensor3, ResolvedObservationTarget::Boundary { .. })
@@ -535,6 +558,7 @@ fn resolve_target(
     spec: &ObservationSpec,
     field_domain: RecoveredFieldEntityDomain,
     topology: &StructuralObservationTopology,
+    constraint_plan: Option<&CanonicalStructuralConstraintPlan>,
 ) -> Result<ResolvedObservationTarget, ObservationError> {
     if spec.reduction.as_ref().is_some_and(|reduction| {
         matches!(
@@ -549,7 +573,9 @@ fn resolve_target(
             resolve_interpolated_points(spec, field_domain, topology)
         }
         ObservationRequest::Probe(_) => resolve_probe(spec, field_domain, topology),
-        ObservationRequest::Reduction(_) => resolve_reduction_target(spec, field_domain, topology),
+        ObservationRequest::Reduction(_) => {
+            resolve_reduction_target(spec, field_domain, topology, constraint_plan)
+        }
         ObservationRequest::Field(_) => resolve_field_target(spec, field_domain, topology),
         ObservationRequest::History(_)
             if spec
@@ -557,7 +583,7 @@ fn resolve_target(
                 .as_ref()
                 .is_some_and(|reduction| reduction.spatial != SpatialReduction::None) =>
         {
-            resolve_reduction_target(spec, field_domain, topology)
+            resolve_reduction_target(spec, field_domain, topology, constraint_plan)
         }
         ObservationRequest::History(_)
             if matches!(spec.target, ObservationTarget::Path { .. })
@@ -804,7 +830,45 @@ fn resolve_reduction_target(
     spec: &ObservationSpec,
     field_domain: RecoveredFieldEntityDomain,
     topology: &StructuralObservationTopology,
+    constraint_plan: Option<&CanonicalStructuralConstraintPlan>,
 ) -> Result<ResolvedObservationTarget, ObservationError> {
+    if field_domain == RecoveredFieldEntityDomain::ConstraintGroups {
+        if spec.source_location != FieldLocation::Constraint
+            || !matches!(
+                spec.quantity,
+                ObservationQuantity::ReactionForce | ObservationQuantity::ReactionMoment
+            )
+            || !matches!(
+                spec.reduction.as_ref().map(|reduction| reduction.spatial),
+                Some(SpatialReduction::Resultant)
+            )
+        {
+            return Err(ObservationError::Invalid(
+                "constraint-group fields support reaction resultants only".into(),
+            ));
+        }
+        let ObservationTarget::Constraint { constraint_id } = &spec.target else {
+            return Err(target_error(
+                spec,
+                "constraint-group reaction fields require one authored constraint target",
+            ));
+        };
+        let plan = constraint_plan.ok_or(ObservationError::Unsupported(
+            "constraint-target reactions require the canonical executed constraint plan",
+        ))?;
+        let (index, group) = plan
+            .groups
+            .iter()
+            .enumerate()
+            .find(|(_, group)| group.constraint_id == *constraint_id)
+            .ok_or_else(|| {
+                target_error(spec, "constraint target is absent from the canonical plan")
+            })?;
+        return Ok(ResolvedObservationTarget::ConstraintGroups {
+            indices: vec![index],
+            identities: vec![StableDigest::from_bytes(*group.source_digest.bytes())],
+        });
+    }
     if !matches!(
         field_domain,
         RecoveredFieldEntityDomain::StructuralNodes | RecoveredFieldEntityDomain::SolidElements
@@ -1062,7 +1126,8 @@ fn integration_work(
 ) -> Result<usize, ObservationError> {
     match target {
         ResolvedObservationTarget::Nodes { indices, .. }
-        | ResolvedObservationTarget::Elements { indices, .. } => Ok(indices.len()),
+        | ResolvedObservationTarget::Elements { indices, .. }
+        | ResolvedObservationTarget::ConstraintGroups { indices, .. } => Ok(indices.len()),
         ResolvedObservationTarget::Points { samples } => {
             samples.iter().try_fold(0usize, |work, sample| {
                 work.checked_add(sample.source_node_indices.len().saturating_mul(8))

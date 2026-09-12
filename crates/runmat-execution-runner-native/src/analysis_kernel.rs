@@ -22,6 +22,7 @@ use runmat_analysis_fea::planning::resource::{
 use runmat_analysis_fea::post::fields::{
     structural_observable_field_definitions, take_structural_observable_fields,
 };
+use runmat_analysis_fea::post::recover_constraint_group_observable_fields;
 use runmat_analysis_fea::results::accuracy::{
     evaluate_accuracy, publication_gate, AccuracyArtifact, AccuracyArtifactInput, AccuracyEvidence,
     AccuracyEvidenceScope, AccuracyMeasure,
@@ -671,13 +672,30 @@ fn execute_field_recovery(
             "field recovery topology differs from the completed solve",
         ));
     }
-    let fields = take_structural_observable_fields(&mut solver_result.run.fields)
+    let constraint_plan =
+        CanonicalStructuralConstraintPlan::compile_for_model(&workload.model, mesh.as_ref())
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    solver_result
+        .constraint_result
+        .validate_against_model(&constraint_plan, &workload.model, mesh.as_ref())
+        .map_err(|_| {
+            AnalysisBridgeError::Identity(
+                "field recovery constraint result differs from the canonical executed plan",
+            )
+        })?;
+    let mut fields = take_structural_observable_fields(&mut solver_result.run.fields)
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    fields.extend(
+        recover_constraint_group_observable_fields(&solver_result.constraint_result)
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
+    );
+    let mut entity_counts = topology.entity_counts;
+    entity_counts.constraint_groups = solver_result.constraint_result.groups.len();
     let artifact = RecoveredFieldArtifact::new(
         request.identity(),
         request.source_result,
         topology.identity.discretization_digest(),
-        topology.entity_counts,
+        entity_counts,
         fields,
     )
     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
@@ -825,6 +843,7 @@ fn execute_structural_linear(
             solve.procedure_step()?,
             &solve.model,
             mesh.as_ref(),
+            &constraint_plan,
             &field_definitions,
             ObservationLimits::default(),
         )
@@ -1321,6 +1340,7 @@ mod tests {
                 &solve.model.sequence.steps[0],
                 &solve.model,
                 Some(&SolverMeshArtifact::canonical_decode(&field_inputs[3].payload()).unwrap()),
+                &executed_constraint_plan,
                 &definitions,
                 runmat_analysis_fea::results::observation::ObservationLimits::default(),
             )

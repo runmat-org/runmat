@@ -72,6 +72,7 @@ pub enum RecoveredFieldEntityDomain {
     SolidElements,
     BeamElements,
     ShellElements,
+    ConstraintGroups,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -81,6 +82,7 @@ pub struct RecoveredFieldEntityCounts {
     pub solid_elements: usize,
     pub beam_elements: usize,
     pub shell_elements: usize,
+    pub constraint_groups: usize,
 }
 
 impl RecoveredFieldEntityCounts {
@@ -90,6 +92,7 @@ impl RecoveredFieldEntityCounts {
             RecoveredFieldEntityDomain::SolidElements => self.solid_elements,
             RecoveredFieldEntityDomain::BeamElements => self.beam_elements,
             RecoveredFieldEntityDomain::ShellElements => self.shell_elements,
+            RecoveredFieldEntityDomain::ConstraintGroups => self.constraint_groups,
         }
     }
 
@@ -299,6 +302,9 @@ impl RecoveredFieldDefinition {
             ) | (
                 FieldLocation::Element,
                 RecoveredFieldEntityDomain::ShellElements
+            ) | (
+                FieldLocation::Constraint,
+                RecoveredFieldEntityDomain::ConstraintGroups
             )
         ) {
             return Err(RecoveredFieldError::CatalogUnsupportedLocation);

@@ -766,6 +766,14 @@ fn observation_partition_payload(
                     ))?,
             )?
         }
+        ObservationPartitionTarget::ConstraintGroups { indices, .. } => {
+            let values = select_values(field, indices, observation)?;
+            ObservationPartitionPayload::WeightedReduction {
+                square_sum: vec![0.0; values.len()],
+                linear_sum: values,
+                measure: indices.len() as f64,
+            }
+        }
     })
 }
 
@@ -1057,6 +1065,19 @@ fn validate_contribution_payload(
         ) if matches!(
             reduction_operation(observation),
             Ok(SpatialReduction::Resultant | SpatialReduction::Moment { .. })
+        ) && linear_sum.len() == storage_components
+            && square_sum.len() == storage_components
+            && *measure == indices.len() as f64 => {}
+        (
+            ObservationPartitionTarget::ConstraintGroups { indices, .. },
+            ObservationPartitionPayload::WeightedReduction {
+                linear_sum,
+                square_sum,
+                measure,
+            },
+        ) if matches!(
+            reduction_operation(observation),
+            Ok(SpatialReduction::Resultant)
         ) && linear_sum.len() == storage_components
             && square_sum.len() == storage_components
             && *measure == indices.len() as f64 => {}

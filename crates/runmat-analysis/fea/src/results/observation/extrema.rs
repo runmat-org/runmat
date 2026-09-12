@@ -109,10 +109,10 @@ pub(super) fn partition_selected_entities(
                 })
                 .collect()
         }
-        ObservationPartitionTarget::Volume { .. } | ObservationPartitionTarget::Boundary { .. } => {
-            Err(ObservationError::Identity(
-                "integral partitions do not own selected entities",
-            ))
-        }
+        ObservationPartitionTarget::Volume { .. }
+        | ObservationPartitionTarget::Boundary { .. }
+        | ObservationPartitionTarget::ConstraintGroups { .. } => Err(ObservationError::Identity(
+            "integral partitions do not own selected entities",
+        )),
     }
 }

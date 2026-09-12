@@ -252,6 +252,7 @@ fn structural_preflight_derives_numerical_facts_before_assembly() {
         &model.sequence.steps[0],
         &model,
         Some(&mesh),
+        &constraints,
         &field_definitions,
         ObservationLimits::default(),
     )
@@ -365,6 +366,7 @@ fn mixed_preflight_binds_complete_topology_and_connector_sparsity() {
         &model.sequence.steps[0],
         &model,
         Some(&mesh),
+        &constraints,
         &[],
         ObservationLimits::default(),
     )
@@ -431,6 +433,7 @@ fn explicit_preflight_derives_complete_bounds_without_a_solver_mesh() {
         &model.sequence.steps[0],
         &model,
         None,
+        &constraints,
         &[],
         ObservationLimits::default(),
     )

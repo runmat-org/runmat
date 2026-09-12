@@ -27,16 +27,22 @@ use crate::{
     },
     pipeline::electro_thermal::recover_electro_thermal_fields,
     pipeline::thermo_mechanical::recover_thermo_mechanical_snapshots,
-    post::fields::{
-        recover_result_fields, structural_field_recovery_metrics, take_structural_observable_fields,
+    post::{
+        fields::{
+            recover_result_fields, structural_field_recovery_metrics,
+            take_structural_observable_fields,
+        },
+        recover_constraint_group_observable_fields,
     },
     progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
     results::{
-        field::RecoveredFieldCatalog,
-        observation::{evaluate_observations, resolve_observation_plan, ObservationLimits},
+        field::{RecoveredFieldCatalog, StructuralRecoveredFieldTopology},
+        observation::{
+            evaluate_structural_observations, resolve_structural_observation_plan,
+            ObservationLimits,
+        },
     },
     solve::{backend::build_backend, linear::solve_linear_system},
-    topology::AnalysisProjection,
 };
 
 const VECTOR_COMPONENT_COUNT: usize = 3;
@@ -230,25 +236,53 @@ fn run_linear_static_with_constraint_plan(
                 "spatial observations require the canonical solver mesh used by assembly".into(),
             )
         })?;
-        let projection = AnalysisProjection::derive(mesh)
+        let compiled_constraint_plan;
+        let observation_constraint_plan = if let Some(plan) = constraint_plan {
+            plan
+        } else {
+            compiled_constraint_plan =
+                CanonicalStructuralConstraintPlan::compile_for_model(model, Some(mesh))
+                    .map_err(|error| FeaRunError::Observation(error.to_string()))?;
+            &compiled_constraint_plan
+        };
+        let constraint_result =
+            crate::constraints::CanonicalStructuralConstraintResult::recover_for_model(
+                observation_constraint_plan,
+                model,
+                Some(mesh),
+                &fields,
+            )
             .map_err(|error| FeaRunError::Observation(error.to_string()))?;
-        let recovered = take_structural_observable_fields(&mut fields)
+        let mut recovered = take_structural_observable_fields(&mut fields)
             .map_err(|error| FeaRunError::Observation(error.to_string()))?;
-        let catalog = RecoveredFieldCatalog::new(&projection, recovered)
+        recovered.extend(
+            recover_constraint_group_observable_fields(&constraint_result)
+                .map_err(|error| FeaRunError::Observation(error.to_string()))?,
+        );
+        let mut topology = StructuralRecoveredFieldTopology::derive(model, Some(mesh))
             .map_err(|error| FeaRunError::Observation(error.to_string()))?;
+        topology.entity_counts.constraint_groups = constraint_result.groups.len();
+        let catalog = RecoveredFieldCatalog::new_for_topology(
+            topology.identity.discretization_digest(),
+            topology.entity_counts,
+            recovered,
+        )
+        .map_err(|error| FeaRunError::Observation(error.to_string()))?;
         let definitions = catalog
             .fields()
             .iter()
             .map(|field| field.definition().clone())
             .collect::<Vec<_>>();
-        let plan = resolve_observation_plan(
+        let plan = resolve_structural_observation_plan(
             execution_step,
-            &projection,
+            model,
+            Some(mesh),
+            observation_constraint_plan,
             &definitions,
             ObservationLimits::default(),
         )
         .map_err(|error| FeaRunError::Observation(error.to_string()))?;
-        let observations = evaluate_observations(&plan, &projection, &catalog)
+        let observations = evaluate_structural_observations(&plan, model, Some(mesh), &catalog)
             .map_err(|error| FeaRunError::Observation(error.to_string()))?;
         fields.extend(
             catalog

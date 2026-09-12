@@ -515,14 +515,15 @@ impl CanonicalStructuralConstraintResult {
             return Err(ConstraintResultError::InvalidEvidence);
         }
         for (group, planned) in self.groups.iter().zip(&plan.groups) {
-            let expected_active = plan
+            let active_rows = plan
                 .rows
                 .iter()
                 .filter(|row| {
                     row.constraint_id == planned.constraint_id
                         && row.reaction_recovery != ReactionRecovery::RedundantEquation
                 })
-                .count();
+                .collect::<Vec<_>>();
+            let expected_active = active_rows.len();
             let expected_redundant = planned.row_count - expected_active;
             let expected_row_identities = plan
                 .rows
@@ -544,6 +545,131 @@ impl CanonicalStructuralConstraintResult {
                     .collect::<Vec<_>>()
                     != expected_row_identities
             {
+                return Err(ConstraintResultError::InvalidEvidence);
+            }
+            let mut force = [0.0; 3];
+            let mut work = 0.0;
+            let mut displacement_error: f64 = 0.0;
+            let mut rotation_error: f64 = 0.0;
+            for (row, reaction) in active_rows.into_iter().zip(&group.row_reactions) {
+                for term in &row.terms {
+                    if matches!(term.owner, CanonicalStructuralDofOwner::StructuralNode(_)) {
+                        if let CanonicalStructuralDof::Translation(_) = term.dof {
+                            force[translation_component(term.dof)?] +=
+                                term.coefficient * reaction.generalized_reaction;
+                        }
+                    }
+                }
+                work += reaction.generalized_reaction * row.right_hand_side;
+                match reaction.violation {
+                    ConstraintViolation::DisplacementMeters(value) => {
+                        displacement_error = displacement_error.max(value);
+                    }
+                    ConstraintViolation::RotationRadians(value) => {
+                        rotation_error = rotation_error.max(value);
+                    }
+                }
+            }
+            if force != group.resultant_force_newtons
+                || work != group.constraint_work_joules
+                || displacement_error != group.maximum_displacement_error_meters
+                || rotation_error != group.maximum_rotation_error_radians
+            {
+                return Err(ConstraintResultError::InvalidEvidence);
+            }
+        }
+        Ok(())
+    }
+
+    /// Validates topology-dependent reaction moments against the exact executed model.
+    ///
+    /// The plan alone can rederive generalized force and work totals, but a moment about the
+    /// global origin also depends on the coordinates of every structural-node owner.
+    pub fn validate_against_model(
+        &self,
+        plan: &CanonicalStructuralConstraintPlan,
+        model: &AnalysisModel,
+        mesh: Option<&SolverMeshArtifact>,
+    ) -> Result<(), ConstraintResultError> {
+        self.validate_against(plan)?;
+        let coordinates = match plan.topology {
+            CanonicalStructuralTopologyIdentity::Solid { .. } => mesh
+                .ok_or_else(|| {
+                    ConstraintResultError::InvalidPlan(
+                        "solid constraint-result validation requires its canonical mesh".into(),
+                    )
+                })?
+                .topology
+                .nodes
+                .iter()
+                .map(|node| (node.stable_identity, node.coordinates_m))
+                .collect::<BTreeMap<_, _>>(),
+            CanonicalStructuralTopologyIdentity::Explicit { .. }
+            | CanonicalStructuralTopologyIdentity::ConformalMixed { .. } => {
+                let structural = model.structural.as_ref().ok_or_else(|| {
+                    ConstraintResultError::InvalidPlan(
+                        "explicit constraint-result validation requires structural topology".into(),
+                    )
+                })?;
+                let topology = match plan.topology {
+                    CanonicalStructuralTopologyIdentity::Explicit { .. } => {
+                        CanonicalStructuralNodeSpace::derive_explicit(structural)
+                    }
+                    CanonicalStructuralTopologyIdentity::ConformalMixed { .. } => {
+                        CanonicalStructuralNodeSpace::derive(
+                            mesh.ok_or_else(|| {
+                                ConstraintResultError::InvalidPlan(
+                                    "mixed constraint-result validation requires its canonical mesh"
+                                        .into(),
+                                )
+                            })?,
+                            structural,
+                        )
+                    }
+                    CanonicalStructuralTopologyIdentity::Solid { .. } => unreachable!(),
+                }
+                .map_err(|error| ConstraintResultError::InvalidPlan(error.to_string()))?;
+                topology
+                    .nodes
+                    .into_iter()
+                    .map(|node| (node.identity, node.coordinates_m))
+                    .collect()
+            }
+        };
+        for group in &self.groups {
+            let mut moment = [0.0; 3];
+            for (row, reaction) in plan
+                .rows
+                .iter()
+                .filter(|row| {
+                    row.constraint_id == group.constraint_id
+                        && row.reaction_recovery != ReactionRecovery::RedundantEquation
+                })
+                .zip(&group.row_reactions)
+            {
+                for term in &row.terms {
+                    let CanonicalStructuralDofOwner::StructuralNode(identity) = term.owner else {
+                        continue;
+                    };
+                    let generalized_reaction = term.coefficient * reaction.generalized_reaction;
+                    match term.dof {
+                        CanonicalStructuralDof::Translation(_) => add_cross_product(
+                            &mut moment,
+                            *coordinates
+                                .get(&identity)
+                                .ok_or(ConstraintResultError::NodeAbsent)?,
+                            component_vector(
+                                translation_component(term.dof)?,
+                                generalized_reaction,
+                            ),
+                        ),
+                        CanonicalStructuralDof::Rotation(_) => {
+                            moment[dof_component(term.dof) - 3] += generalized_reaction;
+                        }
+                    }
+                }
+            }
+            if moment != group.resultant_moment_about_global_origin_newton_meters {
                 return Err(ConstraintResultError::InvalidEvidence);
             }
         }

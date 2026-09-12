@@ -150,10 +150,17 @@ pub(crate) fn admit_structural_observation(
         .iter()
         .map(|field| field.definition.clone())
         .collect::<Vec<_>>();
+    let constraint_plan =
+        runmat_analysis_fea::constraints::CanonicalStructuralConstraintPlan::compile_for_model(
+            &workload.model,
+            mesh.as_ref(),
+        )
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let plan = resolve_structural_observation_plan(
         &preparation.step,
         &workload.model,
         mesh.as_ref(),
+        &constraint_plan,
         &definitions,
         preparation.limits,
     )

@@ -343,6 +343,14 @@ fn validate_plan_targets(
                     ));
                 }
             }
+            ResolvedObservationTarget::ConstraintGroups { identities, .. } => {
+                if identities.len() != 1 || identities[0] == runmat_meshing_core::StableDigest::ZERO
+                {
+                    return Err(ObservationError::Identity(
+                        "resolved constraint target identity is invalid",
+                    ));
+                }
+            }
         }
     }
     Ok(())

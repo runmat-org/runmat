@@ -1356,6 +1356,24 @@ fn result_evidence_aggregates_only_canonical_reaction_owners() {
     assert!(redundant.redundant_row_count > 0);
     assert_eq!(redundant.resultant_force_newtons, [0.0; 3]);
 
+    let mut force_substituted = result.clone();
+    force_substituted.groups[0].resultant_force_newtons[0] += 1.0;
+    force_substituted.resultant_force_newtons[0] += 1.0;
+    force_substituted.validate().unwrap();
+    assert_eq!(
+        force_substituted.validate_against(&plan),
+        Err(ConstraintResultError::InvalidEvidence)
+    );
+
+    let mut moment_substituted = result.clone();
+    moment_substituted.groups[0].resultant_moment_about_global_origin_newton_meters[0] += 1.0;
+    moment_substituted.resultant_moment_about_global_origin_newton_meters[0] += 1.0;
+    moment_substituted.validate().unwrap();
+    assert_eq!(
+        moment_substituted.validate_against_model(&plan, &model, Some(&mesh)),
+        Err(ConstraintResultError::InvalidEvidence)
+    );
+
     let mut substituted = result;
     substituted.resultant_force_newtons[0] = 20.0;
     assert_eq!(

@@ -83,6 +83,7 @@ impl StructuralObservationTopology {
             solid_elements: self.solid_elements.len(),
             beam_elements: self.beam_elements.len(),
             shell_elements: self.shell_elements.len(),
+            constraint_groups: 0,
         }
     }
 
@@ -239,6 +240,9 @@ impl StructuralObservationTopology {
             RecoveredFieldEntityDomain::SolidElements => Ok(&self.solid_elements),
             RecoveredFieldEntityDomain::BeamElements => Ok(&self.beam_elements),
             RecoveredFieldEntityDomain::ShellElements => Ok(&self.shell_elements),
+            RecoveredFieldEntityDomain::ConstraintGroups => Err(ObservationError::Unsupported(
+                "constraint groups are resolved by the canonical constraint plan",
+            )),
             RecoveredFieldEntityDomain::StructuralNodes => Err(ObservationError::Invalid(
                 "nodal field domain cannot resolve element topology".into(),
             )),

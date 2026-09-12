@@ -9,7 +9,8 @@ use runmat_analysis_core::{
 use runmat_analysis_fea::execution::{
     AnalysisNumericalObjectKind, AnalysisTaskIdentity, AnalysisWorkKind, ConstraintPlanIdentity,
     DiscretizationIdentity, ExecutionPlanIdentity, NumericalPlanIdentity, OperatorIdentity,
-    ProblemIdentity, SequenceIdentity, StepIdentity, StructuralLinearWorkloadResult, StudyIdentity,
+    ProblemIdentity, SequenceIdentity, SolverResultIdentity, StepIdentity,
+    StructuralLinearWorkloadResult, StudyIdentity,
 };
 use runmat_execution::value::ValueRefKind;
 use runmat_execution::{Digest, ExecutionScopeId, PoolId, ProgramEnvironment, ProgramRevision};
@@ -76,6 +77,44 @@ fn structural_displacement_observation() -> runmat_analysis_core::ObservationReq
         complex_representation: runmat_analysis_core::ComplexRepresentation::Real,
         sampling: runmat_analysis_core::SamplingPolicy::Final,
         reduction: None,
+        storage: runmat_analysis_core::ObservationStoragePolicy {
+            precision: runmat_analysis_core::SignalPrecision::Real64,
+            compression: runmat_analysis_core::CompressionPolicy::Lossless,
+            retention: runmat_analysis_core::RetentionPolicy::Canonical,
+            partial_access: runmat_analysis_core::PartialAccessPolicy::ManifestAndChunks,
+        },
+        purpose: runmat_analysis_core::ObservationPurpose::Publication,
+        cost: runmat_analysis_core::ObservationCostEstimate {
+            operation_count: 1_000,
+            peak_resident_bytes: 1_000_000,
+            stored_bytes: 1_000_000,
+            transfer_bytes: 1_000_000,
+            collective_count: 0,
+        },
+    })
+}
+
+fn structural_constraint_reaction_observation() -> runmat_analysis_core::ObservationRequest {
+    runmat_analysis_core::ObservationRequest::Reduction(runmat_analysis_core::ObservationSpec {
+        observation_id: runmat_analysis_core::ObservationId("root_reaction".into()),
+        quantity: runmat_analysis_core::ObservationQuantity::ReactionForce,
+        value_shape: runmat_analysis_core::ObservationValueShape::Vector3,
+        target: runmat_analysis_core::ObservationTarget::Constraint {
+            constraint_id: "bc_root".into(),
+        },
+        source_location: runmat_analysis_core::FieldLocation::Constraint,
+        output_location: runmat_analysis_core::FieldLocation::Global,
+        recovery: runmat_analysis_core::RecoveryPolicy::Native,
+        component: runmat_analysis_core::ObservationComponent::All,
+        frame: runmat_analysis_core::CoordinateFrame::Global,
+        sign_convention: runmat_analysis_core::SignConvention::Native,
+        complex_representation: runmat_analysis_core::ComplexRepresentation::Real,
+        sampling: runmat_analysis_core::SamplingPolicy::Final,
+        reduction: Some(runmat_analysis_core::ReductionPolicy {
+            spatial: runmat_analysis_core::SpatialReduction::Resultant,
+            series: runmat_analysis_core::SeriesReduction::None,
+            extrema_ties: runmat_analysis_core::ExtremaTiePolicy::FirstCanonical,
+        }),
         storage: runmat_analysis_core::ObservationStoragePolicy {
             precision: runmat_analysis_core::SignalPrecision::Real64,
             compression: runmat_analysis_core::CompressionPolicy::Lossless,
@@ -1155,7 +1194,11 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
     let mut unrelated_observation = requested_observation.clone();
     unrelated_observation.spec_mut().unwrap().observation_id =
         runmat_analysis_core::ObservationId("unrelated_displacement".into());
-    producer_step.observations = vec![requested_observation, unrelated_observation];
+    producer_step.observations = vec![
+        requested_observation,
+        unrelated_observation,
+        structural_constraint_reaction_observation(),
+    ];
     let state_id = producer_step.state_outputs[0].state_id.clone();
     let mut consumer_step = producer_step.clone();
     consumer_step.step_id = ProcedureStepId("branch".into());
@@ -1470,6 +1513,38 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
     .unwrap();
     assert_eq!(decoded.run, raw);
 
+    let mut substituted_constraint_result = constraint_result.clone();
+    substituted_constraint_result.groups[0].resultant_force_newtons[0] += 1.0;
+    substituted_constraint_result.resultant_force_newtons[0] += 1.0;
+    let substituted_result =
+        StructuralLinearWorkloadResult::new(raw.clone(), substituted_constraint_result).unwrap();
+    let substituted_payload = substituted_result.canonical_bytes().unwrap();
+    let substituted_payload_digest = Digest::sha256(&substituted_payload);
+    let substituted_identity =
+        SolverResultIdentity::new(prepared.host.workload.identity, substituted_payload_digest)
+            .unwrap();
+    let substituted_objects = prepare_analysis_objects(
+        AnalysisNumericalObjectKind::SolverResult,
+        substituted_identity.digest(),
+        &substituted_payload,
+        4096,
+        ObjectNamespace::ResultValue,
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    assert!(
+        prepare_structural_field_recovery(StructuralFieldRecoveryPreparation {
+            source_host: prepared.host.clone(),
+            source_invocation: prepared.inputs[0].clone(),
+            source_result: substituted_objects,
+            mesh: Some(prepared.inputs[1].clone()),
+            program_revision: revision(),
+            chunk_bytes: 4096,
+            inventory_limits: ObjectInventoryLimits::default(),
+        })
+        .is_err()
+    );
+
     let field_prepared = prepare_structural_field_recovery(StructuralFieldRecoveryPreparation {
         source_host: prepared.host.clone(),
         source_invocation: prepared.inputs[0].clone(),
@@ -1488,10 +1563,15 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
     );
     let projection = runmat_analysis_fea::topology::AnalysisProjection::derive(&mesh).unwrap();
     let mut recoverable_storage = raw.fields.clone();
-    let recovered_fields = runmat_analysis_fea::post::fields::take_structural_observable_fields(
-        &mut recoverable_storage,
-    )
-    .unwrap();
+    let mut recovered_fields =
+        runmat_analysis_fea::post::fields::take_structural_observable_fields(
+            &mut recoverable_storage,
+        )
+        .unwrap();
+    recovered_fields.extend(
+        runmat_analysis_fea::post::recover_constraint_group_observable_fields(&constraint_result)
+            .unwrap(),
+    );
     let recovered_artifact = runmat_analysis_fea::results::field::RecoveredFieldArtifact::new(
         field_prepared.request.identity(),
         field_prepared.request.source_result,
@@ -1501,6 +1581,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
             solid_elements: projection.elements.len(),
             beam_elements: 0,
             shell_elements: 0,
+            constraint_groups: constraint_result.groups.len(),
         },
         recovered_fields,
     )
@@ -1556,7 +1637,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         None,
     )
     .unwrap();
-    assert_eq!(observation_fanout.partitions.len(), 4);
+    assert_eq!(observation_fanout.partitions.len(), 5);
     let observation_resource_plan = observation_fanout.resource_plan.clone();
     let mut partition_dependencies = BTreeMap::new();
     for partition in &observation_fanout.partitions {
@@ -1698,7 +1779,10 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
             execution_context(resources),
         )
         .unwrap();
-        assert_eq!(submission.dependencies.len(), 2);
+        assert_eq!(
+            submission.dependencies.len(),
+            reduction.partition_plan.partitions.len()
+        );
         reduction.program.write_to(&mut store).unwrap();
         let completed = execute_serial_analysis(
             &reduction.program.request,
@@ -1731,6 +1815,12 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
             )
         })
         .collect::<BTreeMap<_, _>>();
+    let reaction =
+        &distributed_results_by_id[&runmat_analysis_core::ObservationId("root_reaction".into())];
+    assert_eq!(
+        reaction.field.as_host_f64().unwrap(),
+        constraint_result.groups[0].resultant_force_newtons
+    );
     let canonical_distributed_results = distributed_source_request
         .plan
         .observations

@@ -413,6 +413,13 @@ choices!(
         FieldLocation::Connector
     ),
     (
+        location_constraint,
+        LOCATION_CONSTRAINT_DESCRIPTOR,
+        LOCATION_CONSTRAINT_SIGNATURES,
+        "fea.FieldLocation.constraint",
+        FieldLocation::Constraint
+    ),
+    (
         location_reference_point,
         LOCATION_REFERENCE_POINT_DESCRIPTOR,
         LOCATION_REFERENCE_POINT_SIGNATURES,
@@ -1230,7 +1237,7 @@ const QUANTITY_METHODS: [(&str, &str); 37] = [
     ("contactGap", "fea.ObservationQuantity.contactGap"),
     ("contactPressure", "fea.ObservationQuantity.contactPressure"),
 ];
-const FIELD_LOCATION_METHODS: [(&str, &str); 12] = [
+const FIELD_LOCATION_METHODS: [(&str, &str); 13] = [
     ("node", "fea.FieldLocation.node"),
     ("point", "fea.FieldLocation.point"),
     ("cell", "fea.FieldLocation.cell"),
@@ -1240,6 +1247,7 @@ const FIELD_LOCATION_METHODS: [(&str, &str); 12] = [
     ("edge", "fea.FieldLocation.edge"),
     ("interface", "fea.FieldLocation.interface"),
     ("connector", "fea.FieldLocation.connector"),
+    ("constraint", "fea.FieldLocation.constraint"),
     ("referencePoint", "fea.FieldLocation.referencePoint"),
     ("mode", "fea.FieldLocation.mode"),
     ("globalLocation", "fea.FieldLocation.globalLocation"),
@@ -1344,6 +1352,15 @@ mod tests {
         assert_eq!(
             field_location("test", &value).unwrap(),
             FieldLocation::Point
+        );
+    }
+
+    #[test]
+    fn constraint_field_location_constructor_preserves_the_typed_location() {
+        let value = block_on(location_constraint()).unwrap();
+        assert_eq!(
+            field_location("test", &value).unwrap(),
+            FieldLocation::Constraint
         );
     }
 

@@ -26,7 +26,8 @@ pub(super) fn required_source_indices(
 ) -> Result<Vec<usize>, ObservationError> {
     let indices = match &partition.target {
         ObservationPartitionTarget::Nodes { indices, .. }
-        | ObservationPartitionTarget::Elements { indices, .. } => indices.clone(),
+        | ObservationPartitionTarget::Elements { indices, .. }
+        | ObservationPartitionTarget::ConstraintGroups { indices, .. } => indices.clone(),
         ObservationPartitionTarget::Points {
             sample_ordinals, ..
         } => {

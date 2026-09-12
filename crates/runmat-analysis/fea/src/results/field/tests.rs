@@ -139,6 +139,7 @@ fn recovered_field_artifact_binds_source_topology_and_content() {
             solid_elements: projection.elements.len(),
             beam_elements: 0,
             shell_elements: 0,
+            constraint_groups: 0,
         },
         vec![field],
     )
@@ -177,6 +178,7 @@ fn field_manifest_resolves_semantics_without_values_and_reconstructs_exact_conte
             solid_elements: projection.elements.len(),
             beam_elements: 0,
             shell_elements: 0,
+            constraint_groups: 0,
         },
         vec![final_field.clone(), time_field.clone()],
     )
@@ -265,6 +267,7 @@ fn field_storage_partitions_are_canonical_complete_and_reconstruct_exactly() {
             solid_elements: 1,
             beam_elements: 0,
             shell_elements: 0,
+            constraint_groups: 0,
         },
         vec![field],
     )

@@ -65,6 +65,7 @@ impl StructuralRecoveredFieldTopology {
                 .unwrap_or(0),
             beam_elements,
             shell_elements,
+            constraint_groups: 0,
         };
         entity_counts.validate()?;
         Ok(Self {

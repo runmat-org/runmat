@@ -227,6 +227,8 @@ pub enum FieldLocation {
     Edge,
     Interface,
     Connector,
+    /// One authored constraint group in the canonical executed constraint plan.
+    Constraint,
     ReferencePoint,
     Mode,
     Global,

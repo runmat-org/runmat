@@ -123,6 +123,10 @@ pub enum ResolvedObservationTarget {
         face_indices: Vec<usize>,
         face_identities: Vec<StableDigest>,
     },
+    ConstraintGroups {
+        indices: Vec<usize>,
+        identities: Vec<StableDigest>,
+    },
 }
 
 impl ResolvedObservationTarget {
@@ -134,6 +138,7 @@ impl ResolvedObservationTarget {
                 element_indices, ..
             } => element_indices.len(),
             Self::Boundary { face_indices, .. } => face_indices.len(),
+            Self::ConstraintGroups { indices, .. } => indices.len(),
         }
     }
 }
@@ -1014,6 +1019,23 @@ fn validate_resolved_observation(
                 return Err(ObservationError::Invalid(
                     "resolved point samples are empty, unordered, or semantically inconsistent"
                         .into(),
+                ));
+            }
+        }
+        ResolvedObservationTarget::ConstraintGroups {
+            indices,
+            identities,
+        } => {
+            if observation.spec.source_location != FieldLocation::Constraint
+                || observation.spec.output_location != FieldLocation::Global
+                || observation.source_entity_domain != RecoveredFieldEntityDomain::ConstraintGroups
+                || !has_discrete_reaction_reduction
+                || indices.len() != 1
+                || identities.len() != 1
+                || identities[0] == StableDigest::ZERO
+            {
+                return Err(ObservationError::Invalid(
+                    "resolved constraint target is not one canonical reaction-result group".into(),
                 ));
             }
         }

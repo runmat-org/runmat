@@ -90,6 +90,10 @@ pub enum ObservationPartitionTarget {
         face_indices: Vec<usize>,
         face_identities: Vec<StableDigest>,
     },
+    ConstraintGroups {
+        indices: Vec<usize>,
+        identities: Vec<StableDigest>,
+    },
 }
 
 impl ObservationPartitionTarget {
@@ -103,6 +107,7 @@ impl ObservationPartitionTarget {
                 element_indices, ..
             } => element_indices.len(),
             Self::Boundary { face_indices, .. } => face_indices.len(),
+            Self::ConstraintGroups { indices, .. } => indices.len(),
         }
     }
 
@@ -117,6 +122,7 @@ impl ObservationPartitionTarget {
             Self::Boundary {
                 face_identities, ..
             } => face_identities,
+            Self::ConstraintGroups { identities, .. } => identities,
         }
     }
 }
@@ -457,6 +463,13 @@ fn partition_target(
         } => ObservationPartitionTarget::Boundary {
             face_indices: face_indices[start..end].to_vec(),
             face_identities: face_identities[start..end].to_vec(),
+        },
+        ResolvedObservationTarget::ConstraintGroups {
+            indices,
+            identities,
+        } => ObservationPartitionTarget::ConstraintGroups {
+            indices: indices[start..end].to_vec(),
+            identities: identities[start..end].to_vec(),
         },
     }
 }
