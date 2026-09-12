@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
     Mutex,
@@ -20,19 +20,31 @@ use runmat_analysis_core::{
     ExtremaTiePolicy, ObservationId, ObservationRequest, ObservationTarget, ReductionPolicy,
     SeriesReduction, SpatialReduction,
 };
-use runmat_execution::ExecutionCostComponents;
+use runmat_execution::{
+    resource::{AcceleratorRequest, AcceleratorUsage, ResourceRequest, ResourceUsage},
+    ExecutionCostComponents,
+};
 
 use super::{
     acceleration::{
         classify_observation_partition_acceleration, evaluate_observation_partition_with_provider,
-        ObservationAccelerationEligibility,
+        ObservationAccelerationEligibility, ObservationProviderAccelerationInput,
     },
+    acceleration_evidence::validate_acceleration_publication,
     distributed::combine_observation_partitions,
     evaluate_solid_observation_partition,
     partition_tests::{prepared, spec},
-    prepare_solid_observation_field_partition, ObservationExecutionPolicy,
-    ObservationPartitionContribution, ObservationPartitionPlan,
+    prepare_solid_observation_field_partition, ObservationAccelerationSummary,
+    ObservationExecutionPolicy, ObservationPartitionContribution, ObservationPartitionPlan,
 };
+
+fn allocation() -> AcceleratorRequest {
+    AcceleratorRequest {
+        class: "test-gpu".into(),
+        count: 1,
+        memory_bytes_each: 1024 * 1024,
+    }
+}
 
 #[test]
 fn governed_extrema_preserve_scientific_identity_and_publish_execution_evidence() {
@@ -83,14 +95,76 @@ fn governed_extrema_preserve_scientific_identity_and_publish_execution_evidence(
         &plan,
         &partition_plan,
         partition,
-        &source,
-        None,
-        &provider,
+        ObservationProviderAccelerationInput {
+            field: &source,
+            event_attribution: None,
+            allocation: &allocation(),
+            provider: &provider,
+        },
     )
     .unwrap();
     assert_eq!(accelerated.identity, host.identity);
     assert_eq!(accelerated.payload, host.payload);
     assert!(accelerated.acceleration.is_some());
+    assert_eq!(
+        accelerated.acceleration.as_ref().unwrap().allocation,
+        allocation()
+    );
+    let evidence = accelerated.acceleration.as_ref().unwrap();
+    evidence.validate_for_allocation(&allocation()).unwrap();
+    let summary = ObservationAccelerationSummary::from_evidence(std::slice::from_ref(evidence))
+        .unwrap()
+        .unwrap();
+    let encoded_summary = serde_json::to_vec(&summary).unwrap();
+    assert_eq!(
+        serde_json::from_slice::<ObservationAccelerationSummary>(&encoded_summary).unwrap(),
+        summary
+    );
+    let mut tampered_summary = serde_json::to_value(&summary).unwrap();
+    tampered_summary["execution_ns"] = serde_json::json!(2);
+    assert!(serde_json::from_value::<ObservationAccelerationSummary>(tampered_summary).is_err());
+    let resource_plan = ResourceRequest {
+        cpu_millicores: 1_000,
+        memory_bytes: 1 << 20,
+        scratch_bytes: 0,
+        max_wall_millis: 1_000,
+        max_artifact_bytes: 1 << 20,
+        max_egress_bytes: 0,
+        max_relay_bytes: 0,
+        accelerators: vec![allocation()],
+        required_capabilities: BTreeSet::new(),
+    };
+    let resource_usage = ResourceUsage {
+        accelerator_millis: vec![AcceleratorUsage {
+            class: allocation().class,
+            device_millis: 1,
+        }],
+        ..ResourceUsage::default()
+    };
+    validate_acceleration_publication(&[&summary], &resource_plan, &resource_usage).unwrap();
+    let mut missing_usage = resource_usage.clone();
+    missing_usage.accelerator_millis.clear();
+    assert!(
+        validate_acceleration_publication(&[&summary], &resource_plan, &missing_usage).is_err()
+    );
+    let mut substituted_plan = resource_plan.clone();
+    substituted_plan.accelerators[0].memory_bytes_each += 1;
+    assert!(
+        validate_acceleration_publication(&[&summary], &substituted_plan, &resource_usage,)
+            .is_err()
+    );
+    let mut insufficient_usage = resource_usage.clone();
+    insufficient_usage.accelerator_millis[0].device_millis = 0;
+    assert!(
+        validate_acceleration_publication(&[&summary], &resource_plan, &insufficient_usage,)
+            .is_err()
+    );
+    let mut substituted = allocation();
+    substituted.class = "substituted-gpu".into();
+    assert!(evidence.validate_for_allocation(&substituted).is_err());
+    let mut undersized = allocation();
+    undersized.memory_bytes_each = 1;
+    assert!(evidence.validate_for_allocation(&undersized).is_err());
     assert_eq!(
         ObservationPartitionContribution::from_canonical_bytes(
             &accelerated.canonical_bytes().unwrap()
@@ -112,6 +186,10 @@ fn governed_extrema_preserve_scientific_identity_and_publish_execution_evidence(
         host_result.partition_evidence.identity
     );
     assert_eq!(accelerated_result.partition_evidence.accelerations.len(), 1);
+    assert_eq!(
+        &accelerated_result.partition_evidence.accelerations[0],
+        evidence
+    );
     assert_eq!(provider.live_handle_count(), 0);
 
     let mut tampered = accelerated;
@@ -166,9 +244,12 @@ fn governed_extrema_reject_unsupported_work_before_provider_allocation() {
             &plan,
             &partition_plan,
             partition,
-            &source,
-            None,
-            &provider,
+            ObservationProviderAccelerationInput {
+                field: &source,
+                event_attribution: None,
+                allocation: &allocation(),
+                provider: &provider,
+            },
         )
         .is_err());
         assert_eq!(provider.next.load(Ordering::Relaxed), 0);

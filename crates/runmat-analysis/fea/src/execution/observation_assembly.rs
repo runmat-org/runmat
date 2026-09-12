@@ -64,6 +64,7 @@ impl ObservationAssemblyRequest {
         resource_plan: &FeaResourcePlan,
     ) -> AnalysisExecutionResult<Self> {
         validate_results(source, results)?;
+        validate_acceleration_allocations(resource_plan, results)?;
         resource_plan
             .validate_identity()
             .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
@@ -109,6 +110,7 @@ impl ObservationAssemblyRequest {
     ) -> AnalysisExecutionResult<()> {
         self.validate_identity()?;
         validate_results(source, results)?;
+        validate_acceleration_allocations(resource_plan, results)?;
         resource_plan
             .validate_identity()
             .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
@@ -198,6 +200,30 @@ fn validate_results(
                 "observation assembly result order or source differs from its resolved plan",
             ));
         }
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_acceleration_allocations(
+    resource_plan: &FeaResourcePlan,
+    results: &[ObservationResult],
+) -> AnalysisExecutionResult<()> {
+    let evidence = results
+        .iter()
+        .flat_map(|result| &result.partition_evidence.accelerations)
+        .collect::<Vec<_>>();
+    if evidence.is_empty() {
+        return Ok(());
+    }
+    let [allocation] = resource_plan.request.accelerators.as_slice() else {
+        return Err(AnalysisExecutionError::Identity(
+            "published observation acceleration has no unique resource-plan allocation",
+        ));
+    };
+    for operation in evidence {
+        operation
+            .validate_for_allocation(allocation)
+            .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
     }
     Ok(())
 }

@@ -1,22 +1,24 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use runmat_accelerate_api::{
-    AccelProvider, DenseReductionExecutionEvidence, DenseReductionOperation, DenseReductionRequest,
-    GpuTensorHandle, GpuTensorStorage, HostNumericDataOwned, HostNumericDataView,
-    HostNumericTensorView, ProviderCancellationToken, ProviderCostQuery, ProviderElementType,
-    ProviderFeasibilityQuery, ProviderLayout, ProviderOperationFamily, ProviderOperationIdentity,
-    ProviderRepresentation, ProviderResidency, ProviderStorage, ProviderWorkload,
-    DENSE_REDUCTION_EVIDENCE_SCHEMA_VERSION, GOVERNED_DENSE_REDUCTION_OPERATION,
+    AccelProvider, DenseReductionOperation, DenseReductionRequest, GpuTensorHandle,
+    GpuTensorStorage, HostNumericDataOwned, HostNumericDataView, HostNumericTensorView,
+    ProviderCancellationToken, ProviderCostQuery, ProviderElementType, ProviderFeasibilityQuery,
+    ProviderLayout, ProviderOperationFamily, ProviderOperationIdentity, ProviderRepresentation,
+    ProviderResidency, ProviderStorage, ProviderWorkload, GOVERNED_DENSE_REDUCTION_OPERATION,
 };
 use runmat_analysis_core::{ExtremaTiePolicy, SpatialReduction};
 use runmat_canonical_codec::encode_contract;
-use runmat_execution::{identity::AttemptId, CandidatePreparationState, Digest};
+use runmat_execution::{
+    identity::AttemptId, resource::AcceleratorRequest, CandidatePreparationState, Digest,
+};
 use runmat_meshing_core::SolverMeshArtifact;
 use serde::{Deserialize, Serialize};
 
 use crate::{progress, results::field::RecoveredFieldPartitionSet};
 
 use super::{
+    acceleration_evidence::ObservationAccelerationEvidence,
     contract::{shape_component_count, OBSERVATION_LIMITS},
     distributed::validate_observation_partition_input,
     distributed_numeric::select_values,
@@ -34,6 +36,21 @@ pub enum ObservationAccelerationEligibility {
     GovernedExactF64Extrema,
 }
 
+pub struct StructuralObservationAccelerationInput<'a> {
+    pub model: &'a runmat_analysis_core::AnalysisModel,
+    pub mesh: Option<&'a SolverMeshArtifact>,
+    pub field: &'a RecoveredFieldPartitionSet,
+    pub event_attribution: Option<ObservationEventAttribution>,
+    pub allocation: &'a AcceleratorRequest,
+}
+
+pub(super) struct ObservationProviderAccelerationInput<'a> {
+    pub field: &'a RecoveredFieldPartitionSet,
+    pub event_attribution: Option<ObservationEventAttribution>,
+    pub allocation: &'a AcceleratorRequest,
+    pub provider: &'a dyn AccelProvider,
+}
+
 struct GovernedExtremaInput<'a> {
     observation: &'a super::ResolvedObservation,
     operation: DenseReductionOperation,
@@ -41,141 +58,16 @@ struct GovernedExtremaInput<'a> {
     entities: Vec<ObservationEntity>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct ObservationAccelerationEvidenceIdentity(Digest);
-
-impl ObservationAccelerationEvidenceIdentity {
-    pub const fn digest(self) -> Digest {
-        self.0
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields, try_from = "ObservationAccelerationEvidenceWire")]
-pub struct ObservationAccelerationEvidence {
-    pub schema_version: u16,
-    pub identity: ObservationAccelerationEvidenceIdentity,
-    pub selected_values_identity: Digest,
-    pub provider: DenseReductionExecutionEvidence,
-    pub input_upload_bytes: u64,
-    pub result_download_bytes: u64,
-    pub terminal_synchronizations: u32,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ObservationAccelerationEvidenceWire {
-    schema_version: u16,
-    identity: ObservationAccelerationEvidenceIdentity,
-    selected_values_identity: Digest,
-    provider: DenseReductionExecutionEvidence,
-    input_upload_bytes: u64,
-    result_download_bytes: u64,
-    terminal_synchronizations: u32,
-}
-
-impl TryFrom<ObservationAccelerationEvidenceWire> for ObservationAccelerationEvidence {
-    type Error = ObservationError;
-
-    fn try_from(wire: ObservationAccelerationEvidenceWire) -> Result<Self, Self::Error> {
-        let evidence = Self {
-            schema_version: wire.schema_version,
-            identity: wire.identity,
-            selected_values_identity: wire.selected_values_identity,
-            provider: wire.provider,
-            input_upload_bytes: wire.input_upload_bytes,
-            result_download_bytes: wire.result_download_bytes,
-            terminal_synchronizations: wire.terminal_synchronizations,
-        };
-        evidence.validate()?;
-        Ok(evidence)
-    }
-}
-
-impl ObservationAccelerationEvidence {
-    pub(super) fn new(
-        selected_values_identity: Digest,
-        provider: DenseReductionExecutionEvidence,
-        input_upload_bytes: u64,
-        result_download_bytes: u64,
-        terminal_synchronizations: u32,
-    ) -> Result<Self, ObservationError> {
-        let mut evidence = Self {
-            schema_version: 1,
-            identity: ObservationAccelerationEvidenceIdentity(Digest::sha256([])),
-            selected_values_identity,
-            provider,
-            input_upload_bytes,
-            result_download_bytes,
-            terminal_synchronizations,
-        };
-        evidence.identity = evidence.derive_identity()?;
-        evidence.validate()?;
-        Ok(evidence)
-    }
-
-    pub fn validate(&self) -> Result<(), ObservationError> {
-        let operation_is_extrema = matches!(
-            self.provider.operation,
-            DenseReductionOperation::Minimum { .. } | DenseReductionOperation::Maximum { .. }
-        );
-        if self.schema_version != 1
-            || self.provider.schema_version != DENSE_REDUCTION_EVIDENCE_SCHEMA_VERSION
-            || self.provider.input_identity != self.selected_values_identity
-            || !operation_is_extrema
-            || self.provider.used_host_fallback
-            || self.provider.cancellation_observed
-            || self.provider.cancellation_checks == 0
-            || self.provider.dispatches == 0
-            || self.provider.host_upload_bytes != 0
-            || self.provider.host_download_bytes != 0
-            || self.provider.host_synchronizations != 0
-            || self.input_upload_bytes != self.provider.input_bytes
-            || self.result_download_bytes != self.provider.output_bytes
-            || self.terminal_synchronizations != 2
-            || self.identity != self.derive_identity()?
-        {
-            return Err(ObservationError::Invalid(
-                "observation acceleration evidence is inconsistent".into(),
-            ));
-        }
-        Ok(())
-    }
-
-    fn derive_identity(&self) -> Result<ObservationAccelerationEvidenceIdentity, ObservationError> {
-        let bytes = encode_contract(
-            super::contract::OBSERVATION_PREFIX,
-            "observation-acceleration-evidence-identity",
-            &(
-                self.schema_version,
-                self.selected_values_identity,
-                &self.provider,
-                self.input_upload_bytes,
-                self.result_download_bytes,
-                self.terminal_synchronizations,
-            ),
-            OBSERVATION_LIMITS,
-        )?;
-        Ok(ObservationAccelerationEvidenceIdentity(Digest::sha256(
-            bytes,
-        )))
-    }
-}
-
 pub fn evaluate_structural_observation_partition_accelerated(
     plan: &ResolvedObservationPlan,
     partition_plan: &ObservationPartitionPlan,
     partition: &ObservationPartition,
-    model: &runmat_analysis_core::AnalysisModel,
-    mesh: Option<&SolverMeshArtifact>,
-    field: &RecoveredFieldPartitionSet,
-    event_attribution: Option<ObservationEventAttribution>,
+    input: StructuralObservationAccelerationInput<'_>,
 ) -> Result<ObservationPartitionContribution, ObservationError> {
     let provider = runmat_accelerate_api::provider().ok_or(ObservationError::Unsupported(
         "accelerated observation evaluation requires an active provider",
     ))?;
-    let topology = StructuralObservationTopology::derive(model, mesh)?;
+    let topology = StructuralObservationTopology::derive(input.model, input.mesh)?;
     if topology.digest() != plan.topology_digest {
         return Err(ObservationError::Identity(
             "accelerated observation topology differs from its resolved plan",
@@ -185,9 +77,12 @@ pub fn evaluate_structural_observation_partition_accelerated(
         plan,
         partition_plan,
         partition,
-        field,
-        event_attribution,
-        provider,
+        ObservationProviderAccelerationInput {
+            field: input.field,
+            event_attribution: input.event_attribution,
+            allocation: input.allocation,
+            provider,
+        },
     )
 }
 
@@ -213,32 +108,46 @@ pub(crate) fn evaluate_observation_partition_with_provider(
     plan: &ResolvedObservationPlan,
     partition_plan: &ObservationPartitionPlan,
     partition: &ObservationPartition,
-    field: &RecoveredFieldPartitionSet,
-    event_attribution: Option<ObservationEventAttribution>,
-    provider: &dyn AccelProvider,
+    execution: ObservationProviderAccelerationInput<'_>,
 ) -> Result<ObservationPartitionContribution, ObservationError> {
-    let governed =
-        governed_extrema_input(plan, partition_plan, partition, field, event_attribution)?.ok_or(
-            ObservationError::Unsupported(
-                "observation partition is outside the governed exact-f64 extrema envelope",
-            ),
-        )?;
-    let selected = select_values(field, governed.indices, governed.observation)?;
+    execution
+        .allocation
+        .validate()
+        .map_err(|error| ObservationError::Invalid(error.to_string()))?;
+    if execution.allocation.count != 1 || execution.allocation.memory_bytes_each == 0 {
+        return Err(ObservationError::Invalid(
+            "governed observation acceleration requires one bounded accelerator allocation".into(),
+        ));
+    }
+    let governed = governed_extrema_input(
+        plan,
+        partition_plan,
+        partition,
+        execution.field,
+        execution.event_attribution,
+    )?
+    .ok_or(ObservationError::Unsupported(
+        "observation partition is outside the governed exact-f64 extrema envelope",
+    ))?;
+    let selected = select_values(execution.field, governed.indices, governed.observation)?;
     if selected.len() != governed.entities.len() || selected.is_empty() {
         return Err(ObservationError::Identity(
             "accelerated extrema require one selected value per entity",
         ));
     }
     let selected_values_identity =
-        selected_values_identity(plan, partition_plan, partition, field, &selected)?;
+        selected_values_identity(plan, partition_plan, partition, execution.field, &selected)?;
     let shape = [1, selected.len()];
     let input_bytes = checked_bytes(selected.len())?;
     let result_download_bytes = 16_u64;
     let feasibility = dense_reduction_feasibility(&shape)?;
-    let capability = provider.capability_snapshot();
-    if !provider.query_feasibility(&feasibility).is_supported()
+    let capability = execution.provider.capability_snapshot();
+    if !execution
+        .provider
+        .query_feasibility(&feasibility)
+        .is_supported()
         || capability.revision == 0
-        || capability.device.device_id != provider.device_id()
+        || capability.device.device_id != execution.provider.device_id()
         || !capability.concurrency.transactional_results
         || !capability.element_types.contains(&ProviderElementType::F64)
         || !capability.supports_operation(
@@ -250,7 +159,8 @@ pub(crate) fn evaluate_observation_partition_with_provider(
             "active provider cannot execute exact-f64 governed observation extrema",
         ));
     }
-    let cost = provider
+    let cost = execution
+        .provider
         .estimate_cost(&ProviderCostQuery {
             operation: feasibility,
             preparation: CandidatePreparationState::Cold,
@@ -267,14 +177,15 @@ pub(crate) fn evaluate_observation_partition_with_provider(
         ));
     }
 
-    let input = provider
+    let input = execution
+        .provider
         .upload_numeric(&HostNumericTensorView {
             data: HostNumericDataView::F64(&selected),
             shape: &shape,
             storage: GpuTensorStorage::Real,
         })
         .map_err(|error| ObservationError::Invalid(error.to_string()))?;
-    let mut handles = ProviderHandles::new(provider);
+    let mut handles = ProviderHandles::new(execution.provider);
     handles.track(&input);
     let cancellation =
         ProviderCancellationToken::from_shared(progress::cancellation_token().shared_flag());
@@ -287,7 +198,7 @@ pub(crate) fn evaluate_observation_partition_with_provider(
         provider_capability_revision: capability.revision,
         cancellation: &cancellation,
     };
-    let result = futures::executor::block_on(provider.execute_dense_reduction(&request))
+    let result = futures::executor::block_on(execution.provider.execute_dense_reduction(&request))
         .map_err(|error| ObservationError::Invalid(error.to_string()))?;
     handles.track(&result.values);
     if let Some(indices) = &result.indices {
@@ -296,9 +207,9 @@ pub(crate) fn evaluate_observation_partition_with_provider(
     result
         .validate(request, &capability)
         .map_err(|error| ObservationError::Invalid(error.to_string()))?;
-    let value = download_scalar(provider, &result.values)?;
+    let value = download_scalar(execution.provider, &result.values)?;
     let index = download_scalar(
-        provider,
+        execution.provider,
         result.indices.as_ref().ok_or(ObservationError::Identity(
             "accelerated extrema omitted its canonical index",
         ))?,
@@ -311,6 +222,7 @@ pub(crate) fn evaluate_observation_partition_with_provider(
     }
     let evidence = ObservationAccelerationEvidence::new(
         selected_values_identity,
+        execution.allocation.clone(),
         result.evidence,
         input_bytes,
         result_download_bytes,
@@ -319,8 +231,8 @@ pub(crate) fn evaluate_observation_partition_with_provider(
     ObservationPartitionContribution::new(
         partition_plan,
         partition,
-        field,
-        event_attribution,
+        execution.field,
+        execution.event_attribution,
         Some(evidence),
         ObservationPartitionPayload::ExtremaCandidates {
             entities: vec![governed.entities[index].clone()],

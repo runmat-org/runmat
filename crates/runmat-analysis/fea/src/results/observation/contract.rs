@@ -5,6 +5,7 @@ use runmat_analysis_core::{
     SpatialReduction,
 };
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
+use runmat_execution::resource::{ResourceRequest, ResourceUsage};
 use runmat_execution::Digest;
 use runmat_meshing_core::StableDigest;
 use serde::{Deserialize, Serialize};
@@ -12,6 +13,9 @@ use serde::{Deserialize, Serialize};
 use super::distributed::{
     ObservationPartitionCombination, ObservationPartitionEvidence,
     ObservationPartitionEvidenceIdentity,
+};
+use super::{
+    acceleration_evidence::validate_acceleration_publication, ObservationAccelerationSummary,
 };
 use crate::execution::{AnalysisExecutionError, AnalysisExecutionResult};
 use crate::execution::{
@@ -487,6 +491,7 @@ pub struct ObservationArtifact {
 pub struct ObservationArtifactEntry {
     pub result: ObservationResultIdentity,
     pub partition_evidence: ObservationPartitionEvidenceIdentity,
+    pub acceleration: Option<ObservationAccelerationSummary>,
     pub observation_id: ObservationId,
     pub sample: RecoveredFieldSample,
     pub quantity: ObservationQuantity,
@@ -555,12 +560,25 @@ impl ObservationArtifactManifest {
         }
         let mut result_ids = std::collections::BTreeSet::new();
         let mut observation_ids = std::collections::BTreeSet::new();
-        if self.results.iter().any(|entry| {
-            !result_ids.insert(entry.result) || !observation_ids.insert(&entry.observation_id)
-        }) {
-            return Err(ObservationError::Identity(
-                "observation manifest contains duplicate results",
-            ));
+        let mut acceleration_evidence = std::collections::BTreeSet::new();
+        for entry in &self.results {
+            if !result_ids.insert(entry.result) || !observation_ids.insert(&entry.observation_id) {
+                return Err(ObservationError::Identity(
+                    "observation manifest contains duplicate results",
+                ));
+            }
+            if let Some(summary) = &entry.acceleration {
+                summary.validate()?;
+                if summary
+                    .evidence
+                    .iter()
+                    .any(|identity| !acceleration_evidence.insert(*identity))
+                {
+                    return Err(ObservationError::Identity(
+                        "observation manifest reuses acceleration evidence",
+                    ));
+                }
+            }
         }
         if self.identity != derive_artifact_identity(self)? {
             return Err(ObservationError::Identity(
@@ -568,6 +586,20 @@ impl ObservationArtifactManifest {
             ));
         }
         Ok(())
+    }
+
+    pub fn validate_acceleration_publication(
+        &self,
+        resource_plan: &ResourceRequest,
+        resource_usage: &ResourceUsage,
+    ) -> Result<(), ObservationError> {
+        self.validate()?;
+        let summaries = self
+            .results
+            .iter()
+            .filter_map(|entry| entry.acceleration.as_ref())
+            .collect::<Vec<_>>();
+        validate_acceleration_publication(&summaries, resource_plan, resource_usage)
     }
 
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, ObservationError> {
@@ -680,17 +712,8 @@ impl ObservationArtifact {
             results: self
                 .results
                 .iter()
-                .map(|result| ObservationArtifactEntry {
-                    result: result.logical_identity,
-                    partition_evidence: result.partition_evidence.identity,
-                    observation_id: result.observation_id.clone(),
-                    sample: result.sample,
-                    quantity: result.quantity,
-                    location: result.location,
-                    value_shape: result.value_shape.clone(),
-                    partial_access: result.partial_access,
-                })
-                .collect(),
+                .map(observation_artifact_entry)
+                .collect::<Result<Vec<_>, _>>()?,
         };
         manifest.validate()?;
         Ok(manifest)
@@ -701,25 +724,29 @@ impl ObservationArtifact {
         results: Vec<ObservationResult>,
     ) -> Result<Self, ObservationError> {
         manifest.validate()?;
-        if manifest.results.len() != results.len()
-            || manifest
-                .results
-                .iter()
-                .zip(&results)
-                .any(|(entry, result)| {
-                    entry.result != result.logical_identity
-                        || entry.partition_evidence != result.partition_evidence.identity
-                        || entry.observation_id != result.observation_id
-                        || entry.sample != result.sample
-                        || entry.quantity != result.quantity
-                        || entry.location != result.location
-                        || entry.value_shape != result.value_shape
-                        || entry.partial_access != result.partial_access
-                })
-        {
+        if manifest.results.len() != results.len() {
             return Err(ObservationError::Identity(
                 "observation results differ from their manifest",
             ));
+        }
+        for (entry, result) in manifest.results.iter().zip(&results) {
+            let acceleration = ObservationAccelerationSummary::from_evidence(
+                &result.partition_evidence.accelerations,
+            )?;
+            if entry.result != result.logical_identity
+                || entry.partition_evidence != result.partition_evidence.identity
+                || entry.acceleration != acceleration
+                || entry.observation_id != result.observation_id
+                || entry.sample != result.sample
+                || entry.quantity != result.quantity
+                || entry.location != result.location
+                || entry.value_shape != result.value_shape
+                || entry.partial_access != result.partial_access
+            {
+                return Err(ObservationError::Identity(
+                    "observation results differ from their manifest",
+                ));
+            }
         }
         let artifact = Self {
             schema_version: manifest.schema_version,
@@ -799,19 +826,28 @@ impl ObservationArtifact {
             results: self
                 .results
                 .iter()
-                .map(|result| ObservationArtifactEntry {
-                    result: result.logical_identity,
-                    partition_evidence: result.partition_evidence.identity,
-                    observation_id: result.observation_id.clone(),
-                    sample: result.sample,
-                    quantity: result.quantity,
-                    location: result.location,
-                    value_shape: result.value_shape.clone(),
-                    partial_access: result.partial_access,
-                })
-                .collect(),
+                .map(observation_artifact_entry)
+                .collect::<Result<Vec<_>, _>>()?,
         })
     }
+}
+
+fn observation_artifact_entry(
+    result: &ObservationResult,
+) -> Result<ObservationArtifactEntry, ObservationError> {
+    Ok(ObservationArtifactEntry {
+        result: result.logical_identity,
+        partition_evidence: result.partition_evidence.identity,
+        acceleration: ObservationAccelerationSummary::from_evidence(
+            &result.partition_evidence.accelerations,
+        )?,
+        observation_id: result.observation_id.clone(),
+        sample: result.sample,
+        quantity: result.quantity,
+        location: result.location,
+        value_shape: result.value_shape.clone(),
+        partial_access: result.partial_access,
+    })
 }
 
 fn derive_artifact_identity(

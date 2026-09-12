@@ -31,11 +31,11 @@ use super::{
         extrema_values, partition_selected_entities, selected_or_extrema_payload, spatial_extrema,
     },
     topology::StructuralObservationTopology,
-    ObservationAccelerationEvidence, ObservationAccelerationEvidenceIdentity, ObservationEntity,
-    ObservationError, ObservationEventAttribution, ObservationExecutionPolicy,
-    ObservationPartition, ObservationPartitionIdentity, ObservationPartitionPlan,
-    ObservationPartitionPlanIdentity, ObservationPartitionTarget, ObservationResult,
-    ObservationResultIdentity, ResolvedObservation, ResolvedObservationPlan,
+    ObservationAccelerationEvidence, ObservationEntity, ObservationError,
+    ObservationEventAttribution, ObservationExecutionPolicy, ObservationPartition,
+    ObservationPartitionIdentity, ObservationPartitionPlan, ObservationPartitionPlanIdentity,
+    ObservationPartitionTarget, ObservationResult, ObservationResultIdentity, ResolvedObservation,
+    ResolvedObservationPlan,
 };
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -95,7 +95,7 @@ pub struct ObservationPartitionEvidence {
     pub event_attribution: Option<ObservationEventAttribution>,
     pub source_partitions: Vec<RecoveredFieldPartitionIdentity>,
     pub contributions: Vec<ObservationPartitionContributionIdentity>,
-    pub accelerations: Vec<ObservationAccelerationEvidenceIdentity>,
+    pub accelerations: Vec<ObservationAccelerationEvidence>,
     pub combination: ObservationPartitionCombination,
 }
 
@@ -110,7 +110,7 @@ struct ObservationPartitionEvidenceWire {
     event_attribution: Option<ObservationEventAttribution>,
     source_partitions: Vec<RecoveredFieldPartitionIdentity>,
     contributions: Vec<ObservationPartitionContributionIdentity>,
-    accelerations: Vec<ObservationAccelerationEvidenceIdentity>,
+    accelerations: Vec<ObservationAccelerationEvidence>,
     combination: ObservationPartitionCombination,
 }
 
@@ -121,7 +121,7 @@ struct ObservationPartitionEvidenceInput {
     event_attribution: Option<ObservationEventAttribution>,
     source_partitions: Vec<RecoveredFieldPartitionIdentity>,
     contributions: Vec<ObservationPartitionContributionIdentity>,
-    accelerations: Vec<ObservationAccelerationEvidenceIdentity>,
+    accelerations: Vec<ObservationAccelerationEvidence>,
     combination: ObservationPartitionCombination,
 }
 
@@ -183,10 +183,13 @@ impl ObservationPartitionEvidence {
         let accelerations_are_unique = self
             .accelerations
             .iter()
-            .copied()
+            .map(|evidence| evidence.identity)
             .collect::<BTreeSet<_>>()
             .len()
             == self.accelerations.len();
+        for acceleration in &self.accelerations {
+            acceleration.validate()?;
+        }
         let combination_is_valid = match self.combination {
             ObservationPartitionCombination::CanonicalConcatenation => true,
             ObservationPartitionCombination::CanonicalCompensatedReduction { collective_count }
@@ -847,14 +850,9 @@ pub(crate) fn combine_observation_partitions(
         .iter()
         .map(|contribution| contribution.identity)
         .collect::<Vec<_>>();
-    let acceleration_identities = contributions
+    let accelerations = contributions
         .iter()
-        .filter_map(|contribution| {
-            contribution
-                .acceleration
-                .as_ref()
-                .map(|evidence| evidence.identity)
-        })
+        .filter_map(|contribution| contribution.acceleration.clone())
         .collect::<Vec<_>>();
     let combination = match &contributions[0].payload {
         ObservationPartitionPayload::SelectedValues { .. } => {
@@ -994,7 +992,7 @@ pub(crate) fn combine_observation_partitions(
             event_attribution: first_event_attribution,
             source_partitions,
             contributions: contribution_identities,
-            accelerations: acceleration_identities,
+            accelerations,
             combination,
         })?;
     let mut result = ObservationResult {

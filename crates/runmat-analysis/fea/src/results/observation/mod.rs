@@ -5,6 +5,7 @@
 //! publishes canonical observation objects.
 
 mod acceleration;
+mod acceleration_evidence;
 mod contract;
 mod distributed;
 mod distributed_numeric;
@@ -66,5 +67,9 @@ mod tests;
 pub use acceleration::{
     classify_observation_partition_acceleration,
     evaluate_structural_observation_partition_accelerated, ObservationAccelerationEligibility,
+    StructuralObservationAccelerationInput,
+};
+pub use acceleration_evidence::{
     ObservationAccelerationEvidence, ObservationAccelerationEvidenceIdentity,
+    ObservationAccelerationSummary, ObservationAccelerationSummaryIdentity,
 };

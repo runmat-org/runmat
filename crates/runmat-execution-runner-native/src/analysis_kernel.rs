@@ -35,6 +35,7 @@ use runmat_analysis_fea::results::observation::{
     evaluate_structural_observation_partition_accelerated, reduce_observation_partitions,
     ObservationArtifact, ObservationArtifactInput, ObservationArtifactManifest, ObservationLimits,
     ObservationPartitionContribution, ObservationPartitionPlan, ObservationResult,
+    StructuralObservationAccelerationInput,
 };
 use runmat_analysis_fea::results::publication::PublishedAnalysisResult;
 use runmat_analysis_fea::{
@@ -395,7 +396,13 @@ fn execute_observation_partition(
             request.event_attribution,
         ),
         ObservationPartitionExecutionTarget::GovernedAccelerator { class } => {
+            let [allocation] = resource_plan.request.accelerators.as_slice() else {
+                return Err(AnalysisBridgeError::Identity(
+                    "observation accelerator target has no unique admitted allocation",
+                ));
+            };
             if workload.backend != runmat_analysis_fea::ComputeBackend::Gpu
+                || allocation.class != *class
                 || !invocation.host.workload.required_capabilities.contains(
                     &runmat_analysis_execution::AnalysisCapabilityRequirement::Accelerator {
                         class: class.clone(),
@@ -410,10 +417,13 @@ fn execute_observation_partition(
                 &source_request.plan,
                 &partition_plan,
                 partition,
-                &workload.model,
-                mesh.as_ref(),
-                &fields,
-                request.event_attribution,
+                StructuralObservationAccelerationInput {
+                    model: &workload.model,
+                    mesh: mesh.as_ref(),
+                    field: &fields,
+                    event_attribution: request.event_attribution,
+                    allocation,
+                },
             )
         }
     }

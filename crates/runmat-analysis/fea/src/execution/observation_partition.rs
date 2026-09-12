@@ -381,6 +381,7 @@ impl ObservationPartitionReductionRequest {
             .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
         validate_contributions(partition_plan, contributions)?;
         validate_contribution_attribution(source, partition_plan, contributions)?;
+        validate_acceleration_allocations(resource_plan, contributions)?;
         resource_plan
             .validate_identity()
             .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
@@ -428,6 +429,7 @@ impl ObservationPartitionReductionRequest {
             .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
         validate_contributions(partition_plan, contributions)?;
         validate_contribution_attribution(source, partition_plan, contributions)?;
+        validate_acceleration_allocations(resource_plan, contributions)?;
         resource_plan
             .validate_identity()
             .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
@@ -508,6 +510,33 @@ fn validate_contributions(
                 "observation contribution order or ownership differs from its plan",
             ));
         }
+    }
+    Ok(())
+}
+
+fn validate_acceleration_allocations(
+    resource_plan: &FeaResourcePlan,
+    contributions: &[ObservationPartitionContribution],
+) -> AnalysisExecutionResult<()> {
+    let accelerations = contributions
+        .iter()
+        .filter_map(|contribution| contribution.acceleration.as_ref())
+        .collect::<Vec<_>>();
+    if accelerations.is_empty() {
+        return Ok(());
+    }
+    let [allocation] = resource_plan.request.accelerators.as_slice() else {
+        return Err(AnalysisExecutionError::Identity(
+            "accelerated observation evidence has no unique resource-plan allocation",
+        ));
+    };
+    if accelerations
+        .iter()
+        .any(|evidence| evidence.validate_for_allocation(allocation).is_err())
+    {
+        return Err(AnalysisExecutionError::Identity(
+            "accelerated observation evidence differs from its resource-plan allocation",
+        ));
     }
     Ok(())
 }

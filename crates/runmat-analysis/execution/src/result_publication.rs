@@ -115,6 +115,13 @@ pub fn prepare_result_publication(
                 .manifest
                 .validate()
                 .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+            observations
+                .manifest
+                .validate_acceleration_publication(
+                    &resource_plan.request,
+                    &resource_usage.actual.scheduler,
+                )
+                .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
             if observations.manifest.identity.digest() != observations.output.logical_identity {
                 return Err(AnalysisBridgeError::Identity(
                     "publication observation manifest differs from its content",
