@@ -74,11 +74,14 @@ export function parseControlDraft(value, inventoryValue = null) {
   return value;
 }
 
-export function freezeReviewedControl(draftValue, controlValue, inventoryValue) {
+export function freezeReviewedControl(draftValue, controlValue, inventoryValue, reviewedTopology) {
+  if (!reviewedTopology) throw new Error("reviewed control freeze requires the deterministically validated topology");
   const draft = parseControlDraft(draftValue, inventoryValue);
   const inventory = parseInventoryEvidence(inventoryValue);
-  if (controlValue.control_draft_digest !== draft.digest) throw new Error("reviewed control does not cite the exact unreviewed draft");
-  const parsed = parseControlManifest(controlValue, inventory);
+  if (reviewedTopology.baseline?.control_draft_digest !== draft.digest) {
+    throw new Error("reviewed topology does not bind the exact unreviewed control draft");
+  }
+  const parsed = parseControlManifest(controlValue, { inventory, reviewedTopology });
   const draftIdentities = draft.identity_rows.map((entry) => entry.identity);
   if (JSON.stringify([...parsed.identities.keys()].sort(compareCodePoint)) !== JSON.stringify(draftIdentities)) throw new Error("reviewed control identities differ from the frozen draft");
   return parsed;

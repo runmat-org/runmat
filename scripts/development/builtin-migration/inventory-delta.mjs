@@ -2,11 +2,14 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { compareCodePoint } from "./constants.mjs";
+import { assertControlBaseline, assertControlSubject } from "./control.mjs";
 import { evidenceDigest } from "./evidence.mjs";
 
-export function buildInventoryDeltaProof(repository, baseline, current, control) {
-  const bundle = control.bundles.get(control.active_bundle_id);
-  if (!bundle) throw new Error(`${control.active_bundle_id}: inventory delta bundle is absent`);
+export function buildInventoryDeltaProof(repository, baseline, current, control, bundleId) {
+  assertControlBaseline(control, baseline);
+  assertControlSubject(control, current);
+  const bundle = control.bundles.get(bundleId);
+  if (!bundle) throw new Error(`${bundleId}: inventory delta bundle is absent`);
   const failures = [];
   if (current.compiled_inventory.build.operating_system !== baseline.compiled_inventory.build.operating_system
       || current.compiled_inventory.build.architecture !== baseline.compiled_inventory.build.architecture) {

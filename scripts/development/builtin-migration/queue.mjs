@@ -1,4 +1,5 @@
 import { compareCodePoint } from "./constants.mjs";
+import { assertControlBaseline } from "./control.mjs";
 import { findAuthoredCollisions } from "./control-graph.mjs";
 import { exact, kind, nonempty, object, stableId } from "./schema.mjs";
 
@@ -7,6 +8,7 @@ const CONTROL_RESOLVED_INVENTORY_FIELDS = new Set([
 ]);
 
 export function buildQueue(inventory, control, state = emptyQueueState()) {
+  assertControlBaseline(control, inventory);
   validateQueueState(state, control);
   const inventoryByIdentity = new Map(inventory.identities.map((entry) => [entry.identity, entry]));
   const rows = [...control.bundles.values()].map((bundle) => queueRow(bundle, control, inventoryByIdentity, state));

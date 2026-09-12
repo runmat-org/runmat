@@ -1,8 +1,13 @@
 import { pathAllowed } from "./control-graph.mjs";
+import { assertValidatedControl } from "./control.mjs";
 import { evidenceDigest } from "./evidence.mjs";
+import { deepImmutable } from "./immutable.mjs";
 import { array, digest, exact, kind, nonempty, sourceRevision, stableId, uniqueStrings } from "./schema.mjs";
 
+const VALIDATED_LEASES = new WeakSet();
+
 export function issueLease(requestValue, control) {
+  assertValidatedControl(control);
   const request = parseLeaseRequest(requestValue, control);
   const bundle = control.bundles.get(request.bundle_id);
   const payload = {
@@ -24,6 +29,7 @@ export function issueLease(requestValue, control) {
 }
 
 export function parseLeaseRequest(value, control) {
+  assertValidatedControl(control);
   kind(value, 1, "runmat-builtin-migration-lease-request", "lease request");
   exact(value, ["schema_version", "kind", "authority", "control_manifest_digest", "bundle_id", "lease_id", "owner", "issued_at", "expires_at", "review"], "lease request");
   if (value.authority !== "reviewed-development-request") throw new Error("lease request has invalid authority");
@@ -41,6 +47,7 @@ export function parseLeaseRequest(value, control) {
 }
 
 export function parseLease(value, control, changedPaths = null) {
+  assertValidatedControl(control);
   kind(value, 1, "runmat-builtin-migration-authored-lease", "authored lease");
   exact(value, ["schema_version", "kind", "authority", "request", "control_manifest_digest", "bundle_id", "lease_id", "owner", "base_revision", "authored_write_set", "forbidden_integration_outputs", "issued_at", "expires_at", "digest"], "authored lease");
   if (value.authority !== "derived-from-reviewed-control") throw new Error("authored lease has invalid authority");
@@ -66,11 +73,27 @@ export function parseLease(value, control, changedPaths = null) {
   digest(value.digest, "lease digest");
   const { digest: _ignored, ...payload } = value;
   if (evidenceDigest(payload) !== value.digest) throw new Error("authored lease digest mismatch");
-  if (changedPaths) validateLeaseDiff(bundle, changedPaths);
-  return { value, bundle };
+  if (changedPaths) validateBundleDiff(bundle, changedPaths);
+  const parsed = deepImmutable({ value, bundle });
+  VALIDATED_LEASES.add(parsed);
+  return parsed;
 }
 
-export function validateLeaseDiff(bundle, changedPaths) {
+export function assertValidatedLease(value, control) {
+  assertValidatedControl(control);
+  if (!VALIDATED_LEASES.has(value)) throw new Error("operation requires the exact validated authored lease");
+  if (value.value.control_manifest_digest !== control.digest) {
+    throw new Error("authored lease was validated for another control manifest");
+  }
+  return value;
+}
+
+export function validateLeaseDiff(lease, control, changedPaths) {
+  assertValidatedLease(lease, control);
+  validateBundleDiff(lease.bundle, changedPaths);
+}
+
+function validateBundleDiff(bundle, changedPaths) {
   const violations = [];
   for (const changed of changedPaths) {
     const sourcePath = typeof changed === "string" ? changed : changed.path;

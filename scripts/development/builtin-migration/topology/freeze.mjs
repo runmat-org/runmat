@@ -1,4 +1,5 @@
 import { evidenceDigest } from "../evidence.mjs";
+import { deepImmutable } from "../immutable.mjs";
 import { digest, exact, kind, object } from "../schema.mjs";
 import { parseTopologyCandidate } from "./candidate.mjs";
 import { parseReviewedEvidence, TOPOLOGY_PROGRAM } from "./schema.mjs";
@@ -16,6 +17,8 @@ const INPUT_DIGEST_FIELDS = Object.freeze([
   "reconciliation",
   "stability_corrections",
 ]);
+const VALIDATED_TOPOLOGIES = new WeakSet();
+const VALIDATED_TOPOLOGY_VIEWS = new WeakSet();
 
 export function freezeReviewedTopology(candidateValue, attestationValue, expectedCandidate) {
   if (!expectedCandidate) throw new Error("topology freeze requires deterministic recomposition of the expected candidate");
@@ -62,6 +65,39 @@ export function parseReviewedTopology(value, candidateValue, attestationValue, e
   if (!candidateValue || !attestationValue || !expectedCandidate) {
     throw new Error("reviewed topology validation requires the candidate, attestation, and deterministic recomposition");
   }
+  parseReviewedTopologyIntegrity(value);
+  const expected = freezeReviewedTopology(candidateValue, attestationValue, expectedCandidate);
+  if (JSON.stringify(value) !== JSON.stringify(expected)) {
+    throw new Error("reviewed topology differs from the deterministically reconstructed topology");
+  }
+  const validated = deepImmutable(value);
+  VALIDATED_TOPOLOGIES.add(validated);
+  return validated;
+}
+
+export function reviewedTopologyView(value) {
+  if (!VALIDATED_TOPOLOGIES.has(value)) {
+    throw new Error("reviewed topology view requires a deterministically validated topology");
+  }
+  const view = deepImmutable({
+    value,
+    digest: value.digest,
+    baseline: value.baseline,
+    bundles: new Map(Object.entries(value.bundles)),
+    identities: new Map(Object.entries(value.identities)),
+  });
+  VALIDATED_TOPOLOGY_VIEWS.add(view);
+  return view;
+}
+
+export function assertValidatedTopologyView(value) {
+  if (!VALIDATED_TOPOLOGY_VIEWS.has(value)) {
+    throw new Error("control manifest requires a deterministically validated topology view");
+  }
+  return value;
+}
+
+function parseReviewedTopologyIntegrity(value) {
   kind(value, 1, REVIEWED_TOPOLOGY_KIND, "reviewed topology");
   exact(value, ["schema_version", "kind", "authority", "program", "candidate_digest", "attestation_digest", "baseline", "inputs", "bundles", "identities", "summary", "review", "digest"], "reviewed topology");
   if (value.authority !== "reviewed-development-topology" || value.program !== TOPOLOGY_PROGRAM) {
@@ -78,10 +114,6 @@ export function parseReviewedTopology(value, candidateValue, attestationValue, e
   digest(value.digest, "reviewed topology digest");
   const { digest: _ignored, ...payload } = value;
   if (evidenceDigest(payload) !== value.digest) throw new Error("reviewed topology digest mismatch");
-  const expected = freezeReviewedTopology(candidateValue, attestationValue, expectedCandidate);
-  if (JSON.stringify(value) !== JSON.stringify(expected)) {
-    throw new Error("reviewed topology differs from the deterministically reconstructed topology");
-  }
   return value;
 }
 

@@ -1,11 +1,13 @@
 import { evidenceDigest } from "./evidence.mjs";
+import { assertValidatedControl } from "./control.mjs";
 import { parseGateResult } from "./gate-result.mjs";
 import { array, digest, exact, kind, repositoryPath, sourceRevision, stableId, uniqueStrings, SAFE_IDENTITY } from "./schema.mjs";
 
 export function sealBundle(manifest, verification, gateValues, prerequisiteValues = [], control = null, repository = null) {
+  assertValidatedControl(control);
   const parsed = parseSealManifest(manifest);
   const failures = [];
-  if (!control || control.digest !== parsed.control_manifest_digest || !control.bundles.has(parsed.bundle_id)) throw new Error("seal requires its exact parsed control manifest");
+  if (control.digest !== parsed.control_manifest_digest || !control.bundles.has(parsed.bundle_id)) throw new Error("seal requires its exact parsed control manifest");
   if (parsed.baseline_inventory_digest !== control.baseline.inventory_digest) throw new Error("seal baseline inventory differs from the reviewed control baseline");
   const requiredPrerequisites = control.bundles.get(parsed.bundle_id).prerequisites.map((entry) => entry.bundle_id).sort();
   const declaredPrerequisites = parsed.prerequisite_seals.map((entry) => entry.bundle_id).sort();

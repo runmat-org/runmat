@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { parseCompiledInventory } from "./compiled-inventory.mjs";
-import { parseControlManifest } from "./control.mjs";
+import { assertControlBaseline, assertControlSubject } from "./control.mjs";
 import { canonicalJson, contentDigest, evidenceDigest } from "./evidence.mjs";
 import { GATE_PRODUCERS, parseGateResult } from "./gate-result.mjs";
 import { parseInventoryEvidence } from "./inventory.mjs";
@@ -23,7 +23,9 @@ export function runGateProducer(input) {
   const baseline = parseInventoryEvidence(input.baseline_inventory);
   const subject = parseInventoryEvidence(input.subject_inventory);
   if (subject.source.dirty !== false) throw new Error("gate subject must be a clean committed source snapshot");
-  const control = parseControlManifest(input.control.value ?? input.control, baseline);
+  const control = input.control;
+  assertControlBaseline(control, baseline);
+  assertControlSubject(control, subject);
   const bundle = control.bundles.get(input.bundle_id);
   if (!bundle) throw new Error(`${input.bundle_id}: unknown gate bundle`);
   const plan = bundle.gate_plans.get(input.gate);
@@ -201,10 +203,13 @@ function parserFor(kind, gate, context) {
     const artifactOutput = producerArtifactOutput(context, gate);
     const compiled = parseCompiledInventory(JSON.parse(stdout));
     if (compiled.digest !== context.subject.compiled_inventory.digest) throw new Error(`${gate}: producer output differs from the subject compiled inventory`);
-    const proof = buildInventoryDeltaProof(REPOSITORY, context.baseline, context.subject, {
-      ...context.control,
-      active_bundle_id: context.bundle.id,
-    });
+    const proof = buildInventoryDeltaProof(
+      REPOSITORY,
+      context.baseline,
+      context.subject,
+      context.control,
+      context.bundle.id,
+    );
     if (JSON.stringify(proof.identities.map((entry) => entry.identity)) !== JSON.stringify(identities)) {
       throw new Error(`${gate}: inventory delta identity coverage differs from the reviewed bundle`);
     }

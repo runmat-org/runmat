@@ -6,6 +6,9 @@ import { MATURITY_GATES, parseControlManifest } from "../control.mjs";
 import { contentDigest, evidenceDigest } from "../evidence.mjs";
 import { buildInventory } from "../inventory.mjs";
 import { issueLease, parseLease } from "../lease.mjs";
+import {
+  candidateInputDigests, freezeReviewedTopology, parseReviewedTopology, reviewedTopologyView,
+} from "../topology/freeze.mjs";
 
 export const REVISION = `git:${"1".repeat(40)}`;
 const fixtureRoots = new Set();
@@ -72,16 +75,22 @@ export function controlledFixture(options = {}) {
     },
   };
   const inventory = buildInventory(repository, dispositions, { revision: REVISION, compiledInventory });
+  if (options.unresolved) {
+    inventory.identities[0].unresolved = [...options.unresolved];
+    const { digest: _ignored, ...payload } = inventory;
+    inventory.digest = evidenceDigest(payload);
+  }
   const bundleId = "math-basic-foo";
   const maturity = Object.fromEntries(MATURITY_GATES.map((gate) => [gate, gate === "identity" || gate === "disposition" || gate === "catalog-contract" || gate === "runtime-binding" || gate === "documentation"
     ? { applicability: "required", reason: null, evidence: [] }
     : { applicability: "not-applicable", reason: "Reviewed as outside this fixture's behavior", evidence: ["fixture review"] }]));
-  const controlValue = {
-    schema_version: 1, kind: "runmat-builtin-migration-control-manifest", authority: "reviewed-development-control", program: "RM-1064/C00-C07", control_draft_digest: `sha256:${"f".repeat(64)}`,
-    baseline: { revision: REVISION, source_digest: inventory.source.digest, inventory_digest: inventory.digest, dispositions_digest: inventory.dispositions_digest, migration_findings_digest: inventory.migration_findings_digest, compiled_target: { operating_system: inventory.compiled_inventory.build.operating_system, architecture: inventory.compiled_inventory.build.architecture } },
+  const topology = topologyFixture(inventory, bundleId, id);
+  const controlPayload = {
+    schema_version: 2, kind: "runmat-builtin-migration-control-manifest", authority: "reviewed-development-control", program: "RM-1064/C00-C07", topology_digest: topology.digest,
+    baseline_context: { source_digest: inventory.source.digest, dispositions_digest: inventory.dispositions_digest, migration_findings_digest: inventory.migration_findings_digest, compiled_target: { operating_system: inventory.compiled_inventory.build.operating_system, architecture: inventory.compiled_inventory.build.architecture } },
     cohorts: ["prerequisite", "A", "B", "C", "D", "E", "F", "G"].map((semantic, order) => ({ id: `C0${order}`, semantic, order })),
-    bundles: { [bundleId]: { id: bundleId, identities: [id], atomic_reason: "One runtime and catalog contract", prerequisites: [], authored_write_set: [{ kind: "tree", path: "crates/runmat-builtins/src/catalog/entries/math/basic/foo" }, { kind: "file", path: "crates/runmat-runtime/src/builtins/math/basic/foo.rs" }], integration_outputs: [{ product_id: "wasm-registry", path: "crates/runmat-runtime/src/builtins/generated_wasm_registry.rs", producer: "integration" }], gate_plans: fixtureGatePlans(inventory), owner_role: "builtin-migrator", complexity: { class: "low", weight: 1, basis: ["single identity"] }, review: { status: "reviewed", evidence: ["fixture review"] } } },
-    identities: { [id]: { identity: id, public_spelling: id, disposition: { kind: "canonical", target: id }, cohort: "C01", bundle_id: bundleId, domain: "math", family: "basic", runtime_owner: `crates/runmat-runtime/src/builtins/math/basic/${id}.rs`, shared_dependencies: [], complexity: { class: "low", weight: 1, basis: ["single identity"] }, maturity, expected_authorities: { catalog_package: `crates/runmat-builtins/src/catalog/entries/math/basic/${id}/mod.rs`, catalog_entry_count: 1, catalog_constant_count: 0, documentation: "catalog", runtime_bindings: [{ path: `crates/runmat-runtime/src/builtins/math/basic/${id}.rs`, function: `${id}_builtin`, variant: "default" }], runtime_constants: [], native_link: "not-applicable", wasm_registry: "not-applicable" }, expected_removals: [], baseline_evidence: [], owner: "fixture", review: { status: "reviewed", evidence: ["fixture review"] } } },
+    bundle_controls: { [bundleId]: { prerequisites: [], additional_authored_write_set: [{ kind: "tree", path: "crates/runmat-builtins/src/catalog/entries/math/basic/foo" }, { kind: "file", path: "crates/runmat-runtime/src/builtins/math/basic/foo.rs" }], integration_outputs: [{ product_id: "wasm-registry", path: "crates/runmat-runtime/src/builtins/generated_wasm_registry.rs", producer: "integration" }], gate_plans: fixtureGatePlans(inventory), owner_role: "builtin-migrator", complexity: { class: "low", weight: 1, basis: ["single identity"] }, review: { status: "reviewed", evidence: ["fixture review"] } } },
+    identity_controls: { [id]: { public_spelling: id, runtime_owner: `crates/runmat-runtime/src/builtins/math/basic/${id}.rs`, shared_dependencies: [], complexity: { class: "low", weight: 1, basis: ["single identity"] }, maturity, expected_authorities: { catalog_package: `crates/runmat-builtins/src/catalog/entries/math/basic/${id}/mod.rs`, catalog_entry_count: 1, catalog_constant_count: 0, documentation: "catalog", runtime_bindings: [{ path: `crates/runmat-runtime/src/builtins/math/basic/${id}.rs`, function: `${id}_builtin`, variant: "default" }], runtime_constants: [], native_link: "not-applicable", wasm_registry: "not-applicable" }, expected_removals: [], baseline_evidence: [], owner: "fixture", review: { status: "reviewed", evidence: ["fixture review"] } } },
     migration_findings: { schema_version: 1, kind: "runmat-builtin-migration-finding-dispositions", rows: inventory.migration_findings.map((finding) => ({ finding_digest: evidenceDigest(finding), ...finding, disposition: "bundle-work", bundle_id: bundleId, reason: "Fixture migration work", evidence: ["fixture review"] })), review: { status: "reviewed", evidence: ["fixture review"] } },
     exception_manifest: { entries: [], review: { status: "reviewed", evidence: ["fixture review"] } },
     storage_policy: { volume_roles: {
@@ -90,11 +99,76 @@ export function controlledFixture(options = {}) {
     }, targets_must_be_disjoint: true, occt_default: "disabled-unless-affected" },
     review: { status: "reviewed", evidence: ["fixture review"] },
   };
-  const control = parseControlManifest(controlValue, inventory);
+  const controlValue = { ...controlPayload, digest: evidenceDigest(controlPayload) };
+  const control = parseControlManifest(controlValue, { inventory, reviewedTopology: topology });
   const leaseRequest = { schema_version: 1, kind: "runmat-builtin-migration-lease-request", authority: "reviewed-development-request", control_manifest_digest: control.digest, bundle_id: bundleId, lease_id: "lease-foo", owner: "fixture", issued_at: "2026-01-01T00:00:00.000Z", expires_at: "2027-01-01T00:00:00.000Z", review: { status: "reviewed", evidence: ["fixture review"] } };
   const leaseValue = issueLease(leaseRequest, control);
   const lease = parseLease(leaseValue, control);
-  return { repository, inventory, compiledInventory, controlValue, control, leaseValue, lease, id, bundleId };
+  return { repository, inventory, compiledInventory, controlValue, control, topology, leaseValue, lease, id, bundleId };
+}
+
+export function topologyFixture(inventory, bundleId, id, options = {}) {
+  const bundle = options.bundle ?? {
+    id: bundleId,
+    cohort: "C01",
+    authority_components: [`component-${id}`],
+    identities: [id],
+    atomic_reason: "One runtime and catalog contract",
+    composition: {
+      kind: "single-component",
+      target_packages: [{ domain: "math", family: "basic" }],
+      authored_write_set: [],
+      shared_authority_sources: [],
+      evidence: ["fixture topology review"],
+    },
+    identity_targets: [{ identity: id, domain: "math", family: "basic", classification: "preserved", evidence: ["fixture topology review"] }],
+    review: { status: "reviewed", evidence: ["fixture topology review"] },
+  };
+  const identityRow = options.identity ?? {
+    identity: id,
+    bundle_id: bundleId,
+    cohort: "C01",
+    domain: "math",
+    family: "basic",
+    disposition: { kind: "canonical", canonical: null, reason: null, source: "reviewed-input" },
+    classification: "preserved",
+    evidence: ["fixture topology review"],
+  };
+  const candidatePayload = {
+    schema_version: 1,
+    kind: "runmat-builtin-migration-topology-candidate",
+    authority: "composed-unreviewed-candidate",
+    program: "RM-1064/C00-C07",
+    baseline: {
+      revision: inventory.source.revision,
+      inventory_digest: inventory.digest,
+      component_graph_digest: `sha256:${"e".repeat(64)}`,
+      control_draft_digest: options.controlDraftDigest ?? `sha256:${"f".repeat(64)}`,
+    },
+    inputs: {
+      c01_c03_review: `sha256:${"1".repeat(64)}`,
+      c04_c05_review: `sha256:${"2".repeat(64)}`,
+      c06_c07_review: `sha256:${"3".repeat(64)}`,
+      reconciliation: `sha256:${"4".repeat(64)}`,
+      stability_corrections: `sha256:${"5".repeat(64)}`,
+    },
+    bundles: { [bundleId]: bundle },
+    identities: { [id]: identityRow },
+    summary: { components: 1, identities: 1, bundles: 1, cohorts: ["C01"], target_packages: 1 },
+    review: { status: "unreviewed", evidence: [] },
+  };
+  const candidate = { ...candidatePayload, digest: evidenceDigest(candidatePayload) };
+  const attestation = {
+    schema_version: 1,
+    kind: "runmat-builtin-topology-attestation",
+    authority: "reviewer-authored-development-input",
+    program: "RM-1064/C00-C07",
+    candidate_digest: candidate.digest,
+    input_digests: candidateInputDigests(candidate),
+    review: { status: "reviewed", evidence: ["fixture topology review"] },
+  };
+  const frozen = freezeReviewedTopology(candidate, attestation, candidate);
+  return reviewedTopologyView(parseReviewedTopology(frozen, candidate, attestation, candidate));
 }
 
 export function compiledInventoryFixture(id = "foo", options = {}) {
