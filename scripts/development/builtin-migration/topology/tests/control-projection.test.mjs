@@ -70,6 +70,65 @@ test("rejects invalid topology dispositions instead of accepting an overlay subs
   assert.throws(() => materializeTopologyControl(topology, overlay), /differs from topology disposition/);
 });
 
+test("derives exact integration-product exclusions while retaining sibling tree leaves", () => {
+  const { topology, overlay } = fixture();
+  const product = {
+    product_id: "math-basic-parent",
+    path: "crates/runmat-builtins/src/catalog/entries/math/basic/mod.rs",
+    producer: "integration",
+  };
+  overlay.integrationProducts.set(product.product_id, product);
+  overlay.bundleControls.get("c01-math-basic").integration_product_refs = [product.product_id];
+  const result = materializeTopologyControl(topology, overlay);
+  assert.deepEqual(result.bundles.get("c01-math-basic").authored_write_set, [
+    { kind: "file", path: "crates/runmat-runtime/src/builtins/math/basic/foo.rs" },
+    {
+      kind: "tree",
+      path: "crates/runmat-builtins/src/catalog/entries/math/basic",
+      excluded_files: ["crates/runmat-builtins/src/catalog/entries/math/basic/mod.rs"],
+    },
+  ]);
+});
+
+test("derives exclusions from globally reviewed products without requiring a bundle reference", () => {
+  const { topology, overlay } = fixture();
+  overlay.integrationProducts.set("baseline-parent", {
+    product_id: "baseline-parent",
+    path: "crates/runmat-builtins/src/catalog/entries/math/basic/mod.rs",
+    producer: "integration",
+  });
+  const result = materializeTopologyControl(topology, overlay);
+  assert.deepEqual(
+    result.bundles.get("c01-math-basic").authored_write_set[1].excluded_files,
+    ["crates/runmat-builtins/src/catalog/entries/math/basic/mod.rs"],
+  );
+  assert.deepEqual(result.bundles.get("c01-math-basic").integration_outputs, []);
+});
+
+test("rejects an integration product equal to an authored scope and case-fold path ambiguity", () => {
+  const exact = fixture();
+  exact.overlay.integrationProducts.set("owned-file", {
+    product_id: "owned-file",
+    path: "crates/runmat-runtime/src/builtins/math/basic/foo.rs",
+    producer: "integration",
+  });
+  assert.throws(
+    () => materializeTopologyControl(exact.topology, exact.overlay),
+    /authored scope overlaps integration product/,
+  );
+
+  const folded = fixture();
+  folded.overlay.integrationProducts.set("folded-parent", {
+    product_id: "folded-parent",
+    path: "crates/runmat-builtins/src/catalog/entries/Math/basic/mod.rs",
+    producer: "integration",
+  });
+  assert.throws(
+    () => materializeTopologyControl(folded.topology, folded.overlay),
+    /collide case-insensitively/,
+  );
+});
+
 function fixture({ dispositions = false } = {}) {
   const identityRows = [["foo", topologyIdentity("foo", { kind: "canonical", canonical: null, reason: null, source: "reviewed-input" })]];
   if (dispositions) {

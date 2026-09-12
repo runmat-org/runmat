@@ -6,6 +6,7 @@ import { parseFindingDispositions } from "./migration-findings.mjs";
 import { parseGatePlans, validateGatePlanTargetCoverage } from "./gate-plan.mjs";
 import { requiredGatePlanNames } from "./gate-requirements.mjs";
 import { primarySpelling, validateIdentityAuthorityGraph } from "./identity-authority.mjs";
+import { parseEffectivePathScope } from "./path-scope.mjs";
 import { assertValidatedTopologyView } from "./topology/freeze.mjs";
 import { assertValidatedControlReview } from "./control-authoring/authority.mjs";
 import {
@@ -62,7 +63,7 @@ export function validateControlManifestStructure(value, { inventory: current, re
   const migrationFindings = parseFindingDispositions(value.migration_findings, bundles, current?.migration_findings ?? null);
   parseExceptionManifestPolicy(value.exception_manifest, bundles);
   parseReviewedEvidence(value.review, "control manifest review");
-  validateBundleGraph(bundles, identities);
+  validateBundleGraph(bundles, identities, projection.integrationProducts);
   validateGatePlanCoverage(bundles, identities);
   for (const bundle of bundles.values()) {
     validateGatePlanTargetCoverage(bundle.gate_plans, projection.executionTargets, bundle.id);
@@ -219,10 +220,7 @@ function parsePrerequisite(value, id) {
 }
 
 export function parseScope(value, label) {
-  exact(value, ["kind", "path"], label);
-  enumValue(value.kind, ["file", "tree"], `${label} kind`);
-  repositoryPath(value.path, `${label} path`);
-  return value;
+  return parseEffectivePathScope(value, label);
 }
 
 function parseIntegrationOutput(value, id) {

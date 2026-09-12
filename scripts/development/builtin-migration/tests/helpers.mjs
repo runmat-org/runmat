@@ -108,9 +108,9 @@ export function controlledFixture(options = {}) {
     module: "basic", source_kind: "directory",
     source_path: "crates/runmat-runtime/src/builtins/math/basic/mod.rs",
     role: "group", visibility: "public", feature_policy: { kind: "always" },
-    macro_use: false, reexport: { kind: "none" }, aggregation_roles: [],
+    macro_use: false, reexport: { kind: "none" }, aggregation_sources: [],
   };
-  const bundleControl = { prerequisites: [], additional_authored_write_set: [{ kind: "tree", path: `crates/runmat-builtins/src/catalog/entries/math/basic/${id}` }, { kind: "file", path: `crates/runmat-runtime/src/builtins/math/basic/${id}.rs` }, ...(options.composition ? [{ kind: "file", path: compositionChild.source_path }] : []), ...(options.sidecar ? [{ kind: "file", path: `docs/builtins/reference/${id}.json` }] : [])], integration_product_refs: options.composition ? [compositionProduct, "wasm-registry"] : ["wasm-registry"], module_composition_transition: options.composition ? { schema_version: 1, kind: "runmat-builtin-module-composition-transition", transition_id: bundleId, changes: [{ product_id: compositionProduct, operation: "add", before: null, after: compositionChild }] } : null, expected_removals: [], baseline_evidence: bundleBaselineEvidence(inventory, [id]), gate_plans: fixtureGatePlans(inventory, Object.values(options.storageProfiles ?? {})), owner_role: "builtin-migrator", complexity: { class: "low", weight: 1, basis: ["single identity"] }, review: { status: "reviewed", evidence: ["fixture review"] } };
+  const bundleControl = { prerequisites: [], additional_authored_write_set: [{ kind: "tree", path: `crates/runmat-builtins/src/catalog/entries/math/basic/${id}` }, { kind: "file", path: `crates/runmat-runtime/src/builtins/math/basic/${id}.rs` }, ...(options.composition ? [{ kind: "file", path: compositionChild.source_path }] : []), ...(options.sidecar ? [{ kind: "file", path: `docs/builtins/reference/${id}.json` }] : [])], integration_product_refs: options.composition ? [compositionProduct, "wasm-registry"] : ["wasm-registry"], module_composition_transition: options.composition ? { schema_version: 2, kind: "runmat-builtin-module-composition-transition", transition_id: bundleId, changes: [{ product_id: compositionProduct, operation: "add", before: null, after: compositionChild }] } : null, expected_removals: [], baseline_evidence: bundleBaselineEvidence(inventory, [id]), gate_plans: fixtureGatePlans(inventory, Object.values(options.storageProfiles ?? {})), owner_role: "builtin-migrator", complexity: { class: "low", weight: 1, basis: ["single identity"] }, review: { status: "reviewed", evidence: ["fixture review"] } };
   const runtimeOwner = `crates/runmat-runtime/src/builtins/math/basic/${id}.rs`;
   const identityControl = {
     public_identity: {
@@ -223,12 +223,12 @@ function fixtureControlReviewSet(repository, inventory, topology, scaffold, bund
     program_profiles: programProfiles,
     integration_products: fixtureIntegrationProducts(inventory, options.composition),
     module_composition_baseline: options.composition ? {
-      schema_version: 1,
+      schema_version: 2,
       kind: "runmat-builtin-module-composition-projection",
       products: [{
         product_id: "runtime-math-parent", crate_role: "runtime",
         path: "crates/runmat-runtime/src/builtins/math/mod.rs",
-        module_path: "crate::builtins::math", children: [],
+        module_path: "crate::builtins::math", aggregations: [], children: [],
       }],
     } : null,
     migration_findings: migrationFindings,

@@ -1,4 +1,4 @@
-import { pathAllowed } from "./control-graph.mjs";
+import { pathAllowed } from "./path-scope.mjs";
 import { subjectAuthorityPathFailures } from "./authority-paths.mjs";
 import { assertControlSubject, assertValidatedControl } from "./control.mjs";
 import { evidenceDigest } from "./evidence.mjs";

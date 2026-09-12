@@ -5,13 +5,14 @@ import { renderModuleCompositionProduct, generatedHeader } from "./generate.mjs"
 import { childPathAttribute, parseCompositionProduct } from "./schema.mjs";
 
 const CFG = /^#\[cfg\(feature = "([a-zA-Z0-9][a-zA-Z0-9_+.-]*)"\)\]$/;
-const DECLARATION = /^(?:(pub\(crate\)|pub\(in crate::catalog\)|pub) )?mod ((?:r#)?[A-Za-z_][A-Za-z0-9_]*);$/;
-const REEXPORT = /^(?:(pub\(crate\)|pub\(in crate::catalog\)|pub) )?use ((?:r#)?[A-Za-z_][A-Za-z0-9_]*)::(\*|\{[A-Za-z_][A-Za-z0-9_]*(?:, [A-Za-z_][A-Za-z0-9_]*)*\});$/;
-const AGGREGATION = /^pub\(super\) fn (extend_entries|extend_aliases|extend_constants)\(values: &mut Vec<&'static crate::(BuiltinCatalogEntry|BuiltinCatalogAlias|BuiltinConstantCatalogEntry)>\) \{$/;
+const TEST_CFG = /^#\[cfg\(test\)\]$/;
+const DECLARATION = /^(?:(pub\(super\)|pub\(crate\)|pub\(in crate::catalog\)|pub) )?mod ((?:r#)?[A-Za-z_][A-Za-z0-9_]*);$/;
+const REEXPORT = /^(?:(pub\(super\)|pub\(crate\)|pub\(in crate::catalog\)|pub) )?use ((?:r#)?[A-Za-z_][A-Za-z0-9_]*)::(\*|\{[A-Za-z_][A-Za-z0-9_]*(?:, [A-Za-z_][A-Za-z0-9_]*)*\});$/;
+const AGGREGATION = /^pub\(super\) fn (extend_entries|extend_aliases|extend_constants)\(values: &mut Vec<(&'static )?crate::(BuiltinCatalogEntry|BuiltinCatalogAlias|BuiltinConstantCatalogEntry)>\) \{$/;
 const AGGREGATION_CONFIG = Object.freeze({
-  extend_entries: ["entries", "BuiltinCatalogEntry", "ENTRIES"],
-  extend_aliases: ["aliases", "BuiltinCatalogAlias", "ALIASES"],
-  extend_constants: ["constants", "BuiltinConstantCatalogEntry", "CONSTANTS"],
+  extend_entries: ["entries", "BuiltinCatalogEntry", "ENTRIES", true],
+  extend_aliases: ["aliases", "BuiltinCatalogAlias", "ALIASES", true],
+  extend_constants: ["constants", "BuiltinConstantCatalogEntry", "CONSTANTS", false],
 });
 
 export function verifyModuleCompositionProduct(productValue, source) {
@@ -70,17 +71,32 @@ export function parseGeneratedModuleComposition(source) {
 }
 
 function parseAggregation(lines, start) {
-  const [role, type, constant] = AGGREGATION_CONFIG[start[1]];
-  if (start[2] !== type) throw new Error(`${role} aggregation value type is invalid`);
+  const [role, type, constant, references] = AGGREGATION_CONFIG[start[1]];
+  if (start[3] !== type || Boolean(start[2]) !== references) {
+    throw new Error(`${role} aggregation value type is invalid`);
+  }
   const children = [];
   while (lines[0] !== "}") {
     if (!lines.length) throw new Error(`${role} aggregation is unterminated`);
     let feature = { kind: "always" };
-    const match = /^    #\[cfg\(feature = "([a-zA-Z0-9][a-zA-Z0-9_+.-]*)"\)\]$/.exec(lines[0]);
+    const line = lines[0]?.slice(4);
+    const match = CFG.exec(line);
     if (match) { lines.shift(); feature = { kind: "cargo-feature", feature: match[1] }; }
-    const child = new RegExp(`^    values\\.extend\\(((?:r#)?[A-Za-z_][A-Za-z0-9_]*)::${constant}\\.iter\\(\\)\\.copied\\(\\)\\);$`).exec(lines.shift());
-    if (!child) throw new Error(`${role} aggregation child is invalid`);
-    children.push({ module: child[1], feature_policy: feature });
+    else if (TEST_CFG.test(line)) { lines.shift(); feature = { kind: "test" }; }
+    const statement = lines.shift();
+    const patterns = [
+      ["slice", new RegExp(`^    values\\.extend\\(((?:r#)?[A-Za-z_][A-Za-z0-9_]*)::${constant}\\.iter\\(\\)\\.copied\\(\\)\\);$`)],
+      ["groups", /^    values\.extend\(((?:r#)?[A-Za-z_][A-Za-z0-9_]*)::ENTRY_GROUPS\.iter\(\)\.flat_map\(\|group\| group\.iter\(\)\.copied\(\)\)\);$/],
+      ["function", new RegExp(`^    ((?:r#)?[A-Za-z_][A-Za-z0-9_]*)::${start[1]}\\(values\\);$`)],
+    ];
+    const parsed = patterns.flatMap(([sourceKind, pattern]) => {
+      const match = pattern.exec(statement);
+      return match ? [{ source_kind: sourceKind, module: match[1] }] : [];
+    });
+    if (parsed.length !== 1 || (role !== "entries" && parsed[0].source_kind === "groups")) {
+      throw new Error(`${role} aggregation child is invalid`);
+    }
+    children.push({ ...parsed[0], feature_policy: feature });
   }
   lines.shift();
   canonicalUnique(children, (entry) => entry.module, `${role} aggregation children`);
@@ -97,9 +113,15 @@ function parseReexport(match, featurePolicy) {
 
 function takeFeature(lines) {
   const match = CFG.exec(lines[0]);
-  if (!match) return { kind: "always" };
-  lines.shift();
-  return { kind: "cargo-feature", feature: match[1] };
+  if (match) {
+    lines.shift();
+    return { kind: "cargo-feature", feature: match[1] };
+  }
+  if (TEST_CFG.test(lines[0])) {
+    lines.shift();
+    return { kind: "test" };
+  }
+  return { kind: "always" };
 }
 
 function takePath(lines) {
@@ -127,14 +149,24 @@ function expectedSurface(product) {
       module: entry.module, visibility: entry.reexport.visibility, feature_policy: entry.feature_policy,
       reexport: entry.reexport.kind === "glob" ? { kind: "glob" } : { kind: "named", items: entry.reexport.items },
     })),
-    aggregations: product.crate_role === "runtime" ? [] : ["entries", "aliases", "constants"].flatMap((role) => {
-      const children = product.children.filter((entry) => entry.aggregation_roles.includes(role)).map((entry) => ({ module: entry.module, feature_policy: entry.feature_policy }));
-      return children.length ? [{ role, children }] : [];
-    }),
+    aggregations: product.crate_role === "runtime" ? [] : product.aggregations.map((role) => ({
+      role,
+      children: product.children.flatMap((entry) => {
+        const source = entry.aggregation_sources.find((candidate) => candidate.role === role);
+        return source ? [{
+          source_kind: source.kind, module: entry.module, feature_policy: entry.feature_policy,
+        }] : [];
+      }),
+    })),
   };
 }
 
-function visibility(value) { return { undefined: "private", "pub(crate)": "crate", "pub(in crate::catalog)": "catalog", pub: "public" }[String(value)]; }
+function visibility(value) {
+  return {
+    undefined: "private", "pub(super)": "super", "pub(crate)": "crate",
+    "pub(in crate::catalog)": "catalog", pub: "public",
+  }[String(value)];
+}
 
 function canonicalUnique(values, key, label) {
   const keys = values.map(key);

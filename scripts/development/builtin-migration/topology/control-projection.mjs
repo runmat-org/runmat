@@ -1,5 +1,5 @@
 import { compareCodePoint } from "../constants.mjs";
-import { scopesOverlap } from "../control-graph.mjs";
+import { deriveIntegrationProductExclusions, scopesOverlap } from "../path-scope.mjs";
 import { resolveIntegrationProducts } from "../integration-products.mjs";
 import { digest, identity, stableId } from "../schema.mjs";
 
@@ -40,6 +40,7 @@ export function materializeTopologyControl(topology, overlay) {
       authored_write_set: effectiveAuthoredWriteSet(
         topologyBundle.composition.authored_write_set,
         additionalScopes,
+        integrationProducts,
       ),
     });
   }
@@ -76,7 +77,7 @@ function validatePublicIdentityProjection(id, disposition, publicIdentity) {
   throw new Error(`${id}: reviewed public identity differs from topology disposition`);
 }
 
-function effectiveAuthoredWriteSet(topologyScopes, additionalScopes) {
+function effectiveAuthoredWriteSet(topologyScopes, additionalScopes, integrationProducts) {
   if (!Array.isArray(topologyScopes) || !Array.isArray(additionalScopes)) {
     throw new Error("topology and additional authored write sets must be arrays");
   }
@@ -92,8 +93,9 @@ function effectiveAuthoredWriteSet(topologyScopes, additionalScopes) {
       }
     }
   }
-  return [...structuredClone(topologyScopes), ...structuredClone(additionalScopes)]
+  const scopes = [...structuredClone(topologyScopes), ...structuredClone(additionalScopes)]
     .sort((left, right) => compareCodePoint(`${left.kind}:${left.path}`, `${right.kind}:${right.path}`));
+  return deriveIntegrationProductExclusions(scopes, integrationProducts);
 }
 
 function requireExactKeys(expected, actual, label) {

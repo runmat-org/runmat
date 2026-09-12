@@ -1,8 +1,9 @@
-import path from "node:path";
-
 import { compareCodePoint } from "./constants.mjs";
+import {
+  assertDerivedIntegrationProductExclusions, scopesOverlap,
+} from "./path-scope.mjs";
 
-export function validateBundleGraph(bundles, identities) {
+export function validateBundleGraph(bundles, identities, integrationProducts) {
   for (const [bundleId, bundle] of bundles) {
     const members = [...identities.values()].filter((entry) => entry.bundle_id === bundleId).map((entry) => entry.identity).sort(compareCodePoint);
     if (JSON.stringify(members) !== JSON.stringify(bundle.identities)) {
@@ -14,18 +15,13 @@ export function validateBundleGraph(bundles, identities) {
       if (!bundles.has(prerequisite.bundle_id)) throw new Error(`${bundleId}: dangling prerequisite ${prerequisite.bundle_id}`);
       if (prerequisite.bundle_id === bundleId) throw new Error(`${bundleId}: bundle cannot depend on itself`);
     }
-    for (const authored of bundle.authored_write_set) {
-      for (const generated of bundle.integration_outputs) {
-        if (scopesOverlap(authored, generated)) {
-          throw new Error(`${bundleId}: integration output ${generated.path} overlaps authored write scope ${authored.path}`);
-        }
-      }
-    }
   }
   const outputsByPath = new Map();
   const outputsById = new Map();
   for (const [ownerId, owner] of bundles) for (const output of owner.integration_outputs) {
-    const declaration = { product_id: output.product_id, path: output.path, producer: output.producer };
+    const declaration = {
+      kind: "file", product_id: output.product_id, path: output.path, producer: output.producer,
+    };
     const priorPath = outputsByPath.get(output.path);
     const priorId = outputsById.get(output.product_id);
     if (priorPath && JSON.stringify(priorPath.declaration) !== JSON.stringify(declaration)) {
@@ -36,6 +32,13 @@ export function validateBundleGraph(bundles, identities) {
     }
     outputsByPath.set(output.path, { owner: ownerId, declaration });
     outputsById.set(output.product_id, { owner: ownerId, declaration });
+  }
+  for (const [bundleId, bundle] of bundles) {
+    assertDerivedIntegrationProductExclusions(
+      bundle.authored_write_set,
+      integrationProducts,
+      bundleId,
+    );
   }
   for (const { owner, declaration } of outputsByPath.values()) {
     for (const [authorId, author] of bundles) for (const scope of author.authored_write_set) {
@@ -76,20 +79,6 @@ export function findAuthoredCollisions(bundles) {
     }
   }
   return collisions;
-}
-
-export function pathAllowed(scopes, candidate) {
-  return scopes.some((scope) => contains(scope, candidate));
-}
-
-export function scopesOverlap(left, right) {
-  return contains(left, right.path) || contains(right, left.path);
-}
-
-function contains(scope, candidate) {
-  const normalized = path.posix.normalize(candidate);
-  if (scope.kind === "file") return normalized === scope.path;
-  return normalized === scope.path || normalized.startsWith(`${scope.path}/`);
 }
 
 function detectCycles(bundles) {

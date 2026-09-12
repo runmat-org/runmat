@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { compareCodePoint } from "./constants.mjs";
-import { pathAllowed } from "./control-graph.mjs";
+import { pathAllowed } from "./path-scope.mjs";
 import { assertValidatedControl } from "./control.mjs";
 import { evidenceDigest } from "./evidence.mjs";
 import { deepImmutable } from "./immutable.mjs";

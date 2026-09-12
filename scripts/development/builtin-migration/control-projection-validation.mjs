@@ -48,7 +48,7 @@ export function validateControlProjection({
   const moduleComposition = validateModuleCompositionControl(
     moduleCompositionBaseline, integrationProducts, bundles,
   );
-  validateBundleGraph(bundles, materialized.identities);
+  validateBundleGraph(bundles, materialized.identities, integrationProducts);
   validateGeneratedRegistryCoverage(
     inventory,
     bundles,

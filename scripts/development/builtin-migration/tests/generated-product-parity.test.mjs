@@ -121,16 +121,17 @@ test("module composition input and proof bind the exact reviewed parent projecti
     feature_policy: { kind: "always" },
     macro_use: false,
     reexport: { kind: "glob", visibility: "public" },
-    aggregation_roles: ["entries"],
+    aggregation_sources: [{ role: "entries", kind: "slice" }],
   };
   const projection = {
-    schema_version: 1,
+    schema_version: 2,
     kind: "runmat-builtin-module-composition-projection",
     products: [{
       product_id: composition.product_id,
       crate_role: "catalog",
       path: composition.path,
       module_path: "crate::catalog::entries::math",
+      aggregations: ["entries"],
       children: [child],
     }],
   };
@@ -165,8 +166,68 @@ test("module composition input and proof bind the exact reviewed parent projecti
     module_composition_projection: projection,
   };
   assert.equal(parseGeneratedProductsProof(value, expectedValue).result, "pass");
+  const emptyProjection = structuredClone(projection);
+  emptyProjection.products[0].children = [];
+  const emptyValue = structuredClone(value);
+  emptyValue.products[0].verification.projection_digest = evidenceDigest(emptyProjection.products[0]);
+  assert.equal(parseGeneratedProductsProof(emptyValue, {
+    ...expectedValue,
+    module_composition_projection: emptyProjection,
+  }).result, "pass");
   const stale = structuredClone(value);
   stale.products[0].verification.projection_digest = SOURCE_DIGEST;
   assert.throws(() => parseGeneratedProductsProof(stale, expectedValue), /exact staged projection/);
   assert.throws(() => stageGeneratedProductsInput([composition], null, null), /require their exact projection/);
+});
+
+test("empty runtime composition remains a verified baseline product", () => {
+  const composition = definition();
+  composition.product_id = "runtime-math-composition";
+  composition.path = "crates/runmat-runtime/src/builtins/math/mod.rs";
+  composition.verification = {
+    kind: "rust_module_composition",
+    crate_role: "runtime",
+    module_path: "crate::builtins::math",
+  };
+  const product = {
+    product_id: composition.product_id,
+    crate_role: "runtime",
+    path: composition.path,
+    module_path: "crate::builtins::math",
+    aggregations: [],
+    children: [],
+  };
+  const projection = {
+    schema_version: 2,
+    kind: "runmat-builtin-module-composition-projection",
+    products: [product],
+  };
+  const observation = { byte_length: 10, content_digest: CONTENT_DIGEST };
+  const proofValue = {
+    schema_version: 2,
+    kind: "runmat-builtin-generated-products-proof",
+    authority: "machine-derived-integration-evidence",
+    products: [{
+      product_id: composition.product_id,
+      path: composition.path,
+      generator: { path: composition.generator.path, content_digest: SOURCE_DIGEST },
+      checked_in: observation,
+      first: observation,
+      second: observation,
+      deterministic: true,
+      synchronized: true,
+      verification: {
+        kind: "rust_module_composition",
+        projection_digest: evidenceDigest(product),
+        result: "pass",
+      },
+    }],
+    result: "pass",
+  };
+  assert.equal(parseGeneratedProductsProof(proofValue, {
+    integration_products: [composition],
+    source_files: [{ path: composition.generator.path, content_digest: SOURCE_DIGEST }],
+    native_registration_manifest: null,
+    module_composition_projection: projection,
+  }).result, "pass");
 });
