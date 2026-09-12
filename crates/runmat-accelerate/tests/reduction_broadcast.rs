@@ -1,9 +1,13 @@
 #![cfg(feature = "wgpu")]
 
-use runmat_accelerate::backend::wgpu::provider::{WgpuProvider, WgpuProviderOptions};
-use runmat_accelerate_api::AccelProvider;
-use runmat_accelerate_api::GpuTensorHandle;
-use runmat_accelerate_api::HostTensorView;
+use runmat_accelerate::backend::wgpu::provider::{
+    WgpuPrecisionPolicy, WgpuProvider, WgpuProviderOptions,
+};
+use runmat_accelerate_api::{
+    AccelProvider, DenseReductionOperation, DenseReductionRequest, GpuTensorHandle, HostTensorView,
+    ProviderCancellationToken,
+};
+use runmat_execution::{identity::AttemptId, Digest};
 
 // Guard tests to avoid provider state races
 static TEST_MUTEX: once_cell::sync::Lazy<tokio::sync::Mutex<()>> =
@@ -80,6 +84,72 @@ async fn reduce_sum_dim_semantics() {
         let exp = *exp;
         assert!((got - exp).abs() < 1e-6, "dim1 r={r} got={got} exp={exp}");
     }
+}
+
+#[tokio::test]
+async fn governed_resident_reduction_binds_attempt_and_reports_no_host_fallback() {
+    let _guard = TEST_MUTEX.lock().await;
+    let provider = match WgpuProvider::new(WgpuProviderOptions {
+        precision: WgpuPrecisionPolicy::RequireF64,
+        ..WgpuProviderOptions::default()
+    }) {
+        Ok(provider) => provider,
+        Err(error)
+            if error
+                .to_string()
+                .contains("selected adapter does not expose SHADER_F64") =>
+        {
+            if std::env::var_os("RUNMAT_REQUIRE_WGPU_F64").is_some() {
+                panic!("required exact-f64 WGPU adapter is unavailable: {error}");
+            }
+            eprintln!("exact-f64 governed reduction qualification: {error}");
+            return;
+        }
+        Err(error) => {
+            if std::env::var_os("RUNMAT_REQUIRE_WGPU_F64").is_some() {
+                panic!(
+                    "required exact-f64 WGPU qualification could not inspect an adapter: {error}"
+                );
+            }
+            eprintln!("exact-f64 governed reduction qualification: {error}");
+            return;
+        }
+    };
+    let values = [
+        1.0, 7.0, -2.0, // entity 0
+        5.0, 3.0, 8.0, // entity 1
+        5.0, 9.0, 4.0, // entity 2
+        -1.0, 2.0, 8.0, // entity 3
+    ];
+    let input = upload_matrix(&provider, 3, 4, &values);
+    let capability = provider.capability_snapshot();
+    let cancellation = ProviderCancellationToken::new();
+    let request = DenseReductionRequest {
+        input: &input,
+        operation: DenseReductionOperation::Maximum { dimension: 1 },
+        attempt_id: AttemptId::derive(&[b"governed-reduction-test"]),
+        input_identity: Digest::sha256(b"canonical-field-partition"),
+        provider_capability_schema_version: capability.schema_version,
+        provider_capability_revision: capability.revision,
+        cancellation: &cancellation,
+    };
+    let result = provider
+        .execute_dense_reduction(&request)
+        .await
+        .expect("governed reduction");
+    result.validate(request, &capability).unwrap();
+    assert!(!result.evidence.used_host_fallback);
+    assert_eq!(result.evidence.host_upload_bytes, 0);
+    assert_eq!(result.evidence.host_download_bytes, 0);
+    assert_eq!(result.evidence.host_synchronizations, 0);
+
+    let reduced = provider.download(&result.values).await.expect("values");
+    let indices = provider
+        .download(result.indices.as_ref().expect("indices"))
+        .await
+        .expect("indices");
+    assert_eq!(reduced.data, vec![5.0, 9.0, 8.0]);
+    assert_eq!(indices.data, vec![2.0, 3.0, 2.0]);
 }
 
 #[tokio::test]

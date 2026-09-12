@@ -3,7 +3,8 @@ use runmat_accelerate_api::{
     ProviderConcurrencyCapabilities, ProviderElementType, ProviderFeasibility,
     ProviderFeasibilityQuery, ProviderLayout, ProviderOperationFamily, ProviderOperationIdentity,
     ProviderPrecision, ProviderRejectionCode, ProviderRepresentation, ProviderResidency,
-    ProviderResourceEstimate, ProviderStorage, PROVIDER_CAPABILITY_SCHEMA_VERSION,
+    ProviderResourceEstimate, ProviderStorage, GOVERNED_DENSE_REDUCTION_OPERATION,
+    PROVIDER_CAPABILITY_SCHEMA_VERSION,
 };
 use runmat_value::{NumericDType, Value};
 
@@ -30,6 +31,10 @@ const WGPU_OPERATIONS: &[(&str, ProviderOperationFamily)] = &[
     ("transfer.download", ProviderOperationFamily::Download),
     ("legacy.elementwise", ProviderOperationFamily::Elementwise),
     ("legacy.reduction", ProviderOperationFamily::Reduction),
+    (
+        GOVERNED_DENSE_REDUCTION_OPERATION,
+        ProviderOperationFamily::Reduction,
+    ),
     ("legacy.matmul", ProviderOperationFamily::MatrixMultiply),
     ("fusion.elementwise", ProviderOperationFamily::Fusion),
     ("fusion.reduction", ProviderOperationFamily::Fusion),

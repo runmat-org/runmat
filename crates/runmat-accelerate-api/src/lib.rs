@@ -13,10 +13,14 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::RwLock;
 
+mod cancellation;
 mod placement;
+mod reduction;
 mod sparse;
 
+pub use cancellation::*;
 pub use placement::*;
+pub use reduction::*;
 pub use sparse::*;
 
 type ResidencyMarkFn = fn(&GpuTensorHandle);
@@ -3108,6 +3112,16 @@ pub trait AccelProvider: Send + Sync {
         _a: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         unsupported_future("reduce_sum not supported by provider")
+    }
+    /// Execute one governed dense reduction and return attempt-scoped physical evidence.
+    ///
+    /// This contract is for systems that must distinguish native resident work from a provider
+    /// fallback. Ordinary MATLAB reductions continue to use the operation-specific methods.
+    fn execute_dense_reduction<'a>(
+        &'a self,
+        _request: &'a DenseReductionRequest<'a>,
+    ) -> AccelProviderFuture<'a, DenseReductionResult> {
+        unsupported_future("governed dense reduction not supported by provider")
     }
     fn reduce_sum_dim<'a>(
         &'a self,

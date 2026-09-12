@@ -1564,6 +1564,81 @@ impl AccelProvider for WgpuProvider {
             }
         })
     }
+
+    fn execute_dense_reduction<'a>(
+        &'a self,
+        request: &'a runmat_accelerate_api::DenseReductionRequest<'a>,
+    ) -> AccelProviderFuture<'a, runmat_accelerate_api::DenseReductionResult> {
+        Box::pin(async move {
+            use runmat_accelerate_api::{
+                checked_f64_bytes, DenseReductionExecutionEvidence, DenseReductionOperation,
+                DenseReductionResult, DENSE_REDUCTION_EVIDENCE_SCHEMA_VERSION,
+            };
+
+            request.validate(self.device_id())?;
+            let capability = self.capability_snapshot();
+            anyhow::ensure!(
+                capability.schema_version == request.provider_capability_schema_version
+                    && capability.revision == request.provider_capability_revision,
+                "governed dense reduction capability is stale"
+            );
+            let started = std::time::Instant::now();
+            let (values, indices) = match request.operation {
+                DenseReductionOperation::Sum { dimension } => (
+                    self.reduce_dim_sum_mean_exec(
+                        request.input,
+                        dimension as usize,
+                        crate::backend::wgpu::types::DimReduceOp::Sum,
+                    )?,
+                    None,
+                ),
+                DenseReductionOperation::Minimum { dimension } => {
+                    let result = self.reduce_dim_minmax_exec(
+                        request.input,
+                        dimension as usize,
+                        crate::backend::wgpu::types::DimReduceExtrema::Min,
+                    )?;
+                    (result.values, Some(result.indices))
+                }
+                DenseReductionOperation::Maximum { dimension } => {
+                    let result = self.reduce_dim_minmax_exec(
+                        request.input,
+                        dimension as usize,
+                        crate::backend::wgpu::types::DimReduceExtrema::Max,
+                    )?;
+                    (result.values, Some(result.indices))
+                }
+            };
+            let output_count = if indices.is_some() { 2 } else { 1 };
+            let result = DenseReductionResult {
+                values,
+                indices,
+                evidence: DenseReductionExecutionEvidence {
+                    schema_version: DENSE_REDUCTION_EVIDENCE_SCHEMA_VERSION,
+                    attempt_id: request.attempt_id,
+                    input_identity: request.input_identity,
+                    provider_device_id: self.device_id(),
+                    provider_capability_schema_version: capability.schema_version,
+                    provider_capability_revision: capability.revision,
+                    operation: request.operation,
+                    input_bytes: checked_f64_bytes(&request.input.shape)?,
+                    output_bytes: checked_f64_bytes(&request.expected_output_shape())?
+                        .checked_mul(output_count)
+                        .ok_or_else(|| anyhow::anyhow!("dense reduction output bytes overflow"))?,
+                    dispatches: 1,
+                    host_upload_bytes: 0,
+                    host_download_bytes: 0,
+                    host_synchronizations: 0,
+                    execution_ns: started.elapsed().as_nanos().min(u64::MAX as u128) as u64,
+                    used_host_fallback: false,
+                    cancellation_checks: 1,
+                    cancellation_observed: false,
+                },
+            };
+            result.validate(*request, &capability)?;
+            Ok(result)
+        })
+    }
     fn reduce_integer_sum_native<'a>(
         &'a self,
         a: &'a GpuTensorHandle,

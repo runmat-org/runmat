@@ -2,7 +2,7 @@ use anyhow::{ensure, Result};
 
 use super::algebra::{apply_jacobi_controlled, multiply_controlled};
 use super::{CancellationMonitor, Controlled, SparseMatrix, SparsePreconditioner};
-use runmat_accelerate_api::{SparseCancellationToken, SparseKrylovTermination};
+use runmat_accelerate_api::{ProviderCancellationToken, SparseKrylovTermination};
 
 pub(in crate::simple_provider) struct CgOutcome {
     pub solution: Vec<f64>,
@@ -21,7 +21,7 @@ pub(in crate::simple_provider) struct CgProblem<'a> {
     pub relative_tolerance: f64,
     pub absolute_tolerance: f64,
     pub max_iterations: u32,
-    pub cancellation: &'a SparseCancellationToken,
+    pub cancellation: &'a ProviderCancellationToken,
 }
 
 pub(in crate::simple_provider) fn solve_cg(problem: CgProblem<'_>) -> Result<CgOutcome> {

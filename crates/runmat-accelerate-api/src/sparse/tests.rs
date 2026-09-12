@@ -8,7 +8,7 @@ use anyhow::anyhow;
 use super::*;
 use crate::{
     AccelDownloadFuture, AccelProvider, GpuTensorDescriptor, GpuTensorHandle, GpuTensorStorage,
-    HostNumericDataView, HostNumericTensorView, NumericElementType,
+    HostNumericDataView, HostNumericTensorView, NumericElementType, ProviderCancellationToken,
 };
 
 fn numeric_handle(device_id: u32, buffer_id: u64, length: usize) -> GpuTensorHandle {
@@ -21,15 +21,15 @@ fn numeric_handle(device_id: u32, buffer_id: u64, length: usize) -> GpuTensorHan
 }
 
 #[test]
-fn sparse_cancellation_token_shares_one_atomic_state() {
+fn provider_cancellation_token_shares_one_atomic_state() {
     let shared = Arc::new(AtomicBool::new(false));
-    let token = SparseCancellationToken::from_shared(Arc::clone(&shared));
+    let token = ProviderCancellationToken::from_shared(Arc::clone(&shared));
     assert!(!token.is_cancelled());
     shared.store(true, Ordering::Release);
     assert!(token.is_cancelled());
 
     let shared = Arc::new(AtomicBool::new(false));
-    let token = SparseCancellationToken::from_shared(Arc::clone(&shared));
+    let token = ProviderCancellationToken::from_shared(Arc::clone(&shared));
     token.cancel();
     assert!(shared.load(Ordering::Acquire));
 }
@@ -54,7 +54,7 @@ fn matrix_handle(device_id: u32, matrix_id: u64) -> SparseMatrixHandle {
 }
 
 fn execution_context(
-    cancellation: &SparseCancellationToken,
+    cancellation: &ProviderCancellationToken,
     provider_capability_revision: u64,
 ) -> SparseExecutionContext<'_> {
     SparseExecutionContext {
@@ -209,7 +209,7 @@ fn krylov_validation_rejects_cross_device_and_preconditioner_substitution() {
             storage: GpuTensorStorage::Real,
         },
     };
-    let cancellation = SparseCancellationToken::new();
+    let cancellation = ProviderCancellationToken::new();
     let base = SparseKrylovRequest {
         matrix: &matrix,
         rhs: &rhs,
@@ -260,7 +260,7 @@ fn krylov_validation_requires_typed_provider_loss_to_match_the_terminal() {
     });
     let matrix = matrix_handle(0, 13);
     let rhs = numeric_handle(0, 21, 2);
-    let cancellation = SparseCancellationToken::new();
+    let cancellation = ProviderCancellationToken::new();
     let request = SparseKrylovRequest {
         matrix: &matrix,
         rhs: &rhs,
@@ -358,7 +358,7 @@ fn default_sparse_contract_rejects_without_dense_transfer() {
 
     let matrix = matrix_handle(0, 13);
     let rhs = numeric_handle(0, 21, 2);
-    let cancellation = SparseCancellationToken::new();
+    let cancellation = ProviderCancellationToken::new();
     let request = SparseKrylovRequest {
         matrix: &matrix,
         rhs: &rhs,

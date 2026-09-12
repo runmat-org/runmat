@@ -1,39 +1,9 @@
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
-
 use runmat_execution::identity::{AttemptId, Digest};
 use serde::{Deserialize, Serialize};
 
+use crate::ProviderCancellationToken;
+
 pub const SPARSE_EVIDENCE_SCHEMA_VERSION: u16 = 2;
-
-/// A cheap, shareable cancellation flag for one numerical attempt.
-///
-/// This is deliberately data, not a user callback: providers may poll it at
-/// their declared cooperative checkpoints without calling into runtime code.
-#[derive(Clone, Debug, Default)]
-pub struct SparseCancellationToken {
-    cancelled: Arc<AtomicBool>,
-}
-
-impl SparseCancellationToken {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn from_shared(cancelled: Arc<AtomicBool>) -> Self {
-        Self { cancelled }
-    }
-
-    pub fn cancel(&self) {
-        self.cancelled.store(true, Ordering::Release);
-    }
-
-    pub fn is_cancelled(&self) -> bool {
-        self.cancelled.load(Ordering::Acquire)
-    }
-}
 
 #[derive(Clone, Copy, Debug)]
 pub struct SparseExecutionContext<'a> {
@@ -41,7 +11,7 @@ pub struct SparseExecutionContext<'a> {
     pub operator_identity: Digest,
     pub provider_capability_schema_version: u16,
     pub provider_capability_revision: u64,
-    pub cancellation: &'a SparseCancellationToken,
+    pub cancellation: &'a ProviderCancellationToken,
 }
 
 impl SparseExecutionContext<'_> {

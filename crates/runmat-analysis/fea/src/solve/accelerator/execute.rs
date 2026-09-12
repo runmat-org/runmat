@@ -2,7 +2,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use runmat_accelerate_api::{
     GpuTensorStorage, HostNumericDataOwned, HostNumericDataView, HostNumericTensorView,
-    SparseCancellationToken, SparseKrylovMethod, SparseKrylovRequest, SparseKrylovTermination,
+    ProviderCancellationToken, SparseKrylovMethod, SparseKrylovRequest, SparseKrylovTermination,
 };
 use runmat_execution::{identity::AttemptId, Digest};
 
@@ -65,7 +65,7 @@ pub fn solve_prepared_accelerator_system(
         }
     };
     let cancellation = progress::cancellation_token();
-    let provider_cancellation = SparseCancellationToken::from_shared(cancellation.shared_flag());
+    let provider_cancellation = ProviderCancellationToken::from_shared(cancellation.shared_flag());
     let attempt_id = provider_attempt_id(prepared.operator_identity);
     let result = (|| {
         let request = SparseKrylovRequest {

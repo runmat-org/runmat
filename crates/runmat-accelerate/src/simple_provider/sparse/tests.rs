@@ -63,7 +63,7 @@ fn download_vector(
 
 fn execution_context<'a>(
     provider: &InProcessProvider,
-    cancellation: &'a runmat_accelerate_api::SparseCancellationToken,
+    cancellation: &'a runmat_accelerate_api::ProviderCancellationToken,
 ) -> runmat_accelerate_api::SparseExecutionContext<'a> {
     let capability = provider.capability_snapshot();
     runmat_accelerate_api::SparseExecutionContext {
@@ -107,7 +107,7 @@ fn inprocess_sparse_lifecycle_executes_spmv_jacobi_and_resident_cg() {
     assert_eq!(download_vector(&provider, &diagonal_output), vec![1.0, 2.0]);
 
     let rhs = upload_vector(&provider, &[1.0, 2.0]);
-    let cancellation = runmat_accelerate_api::SparseCancellationToken::new();
+    let cancellation = runmat_accelerate_api::ProviderCancellationToken::new();
     let request = SparseKrylovRequest {
         matrix: &matrix,
         rhs: &rhs,
@@ -184,7 +184,7 @@ fn inprocess_resident_cg_observes_typed_cancellation_before_iteration() {
     let provider = InProcessProvider::new();
     let (_pattern, matrix) = prepare_matrix(&provider);
     let rhs = upload_vector(&provider, &[1.0, 2.0]);
-    let cancellation = runmat_accelerate_api::SparseCancellationToken::new();
+    let cancellation = runmat_accelerate_api::ProviderCancellationToken::new();
     cancellation.cancel();
     let request = SparseKrylovRequest {
         matrix: &matrix,

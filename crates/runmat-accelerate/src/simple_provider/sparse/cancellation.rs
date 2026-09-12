@@ -1,4 +1,4 @@
-use runmat_accelerate_api::SparseCancellationToken;
+use runmat_accelerate_api::ProviderCancellationToken;
 
 pub(super) const MAXIMUM_WORK_UNITS_BETWEEN_CHECKS: u64 = 1_024;
 
@@ -8,13 +8,13 @@ pub(super) enum Controlled<T> {
 }
 
 pub(super) struct CancellationMonitor<'a> {
-    token: &'a SparseCancellationToken,
+    token: &'a ProviderCancellationToken,
     work_since_check: u64,
     checks: u64,
 }
 
 impl<'a> CancellationMonitor<'a> {
-    pub(super) fn new(token: &'a SparseCancellationToken) -> Self {
+    pub(super) fn new(token: &'a ProviderCancellationToken) -> Self {
         Self {
             token,
             work_since_check: 0,

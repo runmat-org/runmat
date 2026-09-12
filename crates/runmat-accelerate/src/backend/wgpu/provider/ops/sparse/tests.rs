@@ -1,8 +1,8 @@
 use futures::executor::block_on;
 use runmat_accelerate_api::{
     AccelProvider, GpuTensorHandle, GpuTensorStorage, HostCsrPatternView, HostNumericDataOwned,
-    HostNumericDataView, HostNumericTensorView, NumericElementType, ProviderRejectionCode,
-    SparseCancellationToken, SparseExecutionContext, SparseFeasibility, SparseFeasibilityQuery,
+    HostNumericDataView, HostNumericTensorView, NumericElementType, ProviderCancellationToken,
+    ProviderRejectionCode, SparseExecutionContext, SparseFeasibility, SparseFeasibilityQuery,
     SparseIndexWidth, SparseKrylovMethod, SparseKrylovRequest, SparseKrylovTermination,
     SparseOperation, SparsePreconditionerApplyRequest, SparsePreconditionerKind,
     SparsePreconditionerRequest, SparseProviderLossReason, SparseSpmvRequest, SparseTranspose,
@@ -521,7 +521,7 @@ fn sparse_cg_keeps_iteration_work_resident_and_returns_bound_evidence() {
     let rhs = upload_vector(provider, [1.0, 2.0]);
     let initial = upload_vector(provider, [0.1, 0.1]);
     let capability = provider.capability_snapshot();
-    let cancellation = SparseCancellationToken::new();
+    let cancellation = ProviderCancellationToken::new();
     let attempt_id = AttemptId::derive(&[b"wgpu-sparse-cg-test"]);
     let operator_identity = Digest::sha256(b"wgpu-sparse-cg-operator");
     let request = SparseKrylovRequest {
@@ -646,7 +646,7 @@ fn exact_f64_sparse_cg_is_executed_or_rejected_by_adapter_capability() {
             .element_types,
         vec![NumericElementType::F64]
     );
-    let cancellation = SparseCancellationToken::new();
+    let cancellation = ProviderCancellationToken::new();
     let request = SparseKrylovRequest {
         matrix: &matrix,
         rhs: &rhs,
@@ -719,7 +719,7 @@ fn sparse_cg_matches_a_representative_multi_workgroup_reference() {
         .collect::<Vec<_>>();
     let rhs = upload_numeric_vector(provider, &rhs_values);
     let capability = provider.capability_snapshot();
-    let cancellation = SparseCancellationToken::new();
+    let cancellation = ProviderCancellationToken::new();
     let request = SparseKrylovRequest {
         matrix: &matrix,
         rhs: &rhs,
@@ -781,7 +781,7 @@ fn sparse_cg_reports_iteration_limit_and_numerical_breakdown() {
     };
     let provider = session.provider();
     let capability = provider.capability_snapshot();
-    let cancellation = SparseCancellationToken::new();
+    let cancellation = ProviderCancellationToken::new();
 
     let pattern = upload_pattern(provider);
     let matrix = bind_matrix(provider, &pattern);
@@ -904,7 +904,7 @@ fn sparse_cg_observes_cancellation_after_resident_work_begins() {
     .expect("prepare cancellation Jacobi");
     let rhs = upload_numeric_vector(provider, &vec![1.0; rows]);
     let capability = provider.capability_snapshot();
-    let cancellation = SparseCancellationToken::new();
+    let cancellation = ProviderCancellationToken::new();
     let cancellation_signal = cancellation.clone();
     let request = SparseKrylovRequest {
         matrix: &matrix,
@@ -982,7 +982,7 @@ fn sparse_cg_reports_provider_loss_after_resident_work_begins() {
     .expect("prepare provider-loss Jacobi");
     let rhs = upload_numeric_vector(provider, &vec![1.0; rows]);
     let capability = provider.capability_snapshot();
-    let cancellation = SparseCancellationToken::new();
+    let cancellation = ProviderCancellationToken::new();
     let request = SparseKrylovRequest {
         matrix: &matrix,
         rhs: &rhs,
