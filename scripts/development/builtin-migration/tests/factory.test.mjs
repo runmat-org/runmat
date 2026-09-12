@@ -598,6 +598,8 @@ test("generated product proof requires two equal runs, checked-in equality, and 
   };
   const parsed = parseGeneratedProductsProof(value, expected);
   assert.equal(generatedProductChecks(parsed, [fixture.id])[0].result, "pass");
+  const empty = { ...value, products: [], result: "pass" };
+  assert.equal(parseGeneratedProductsProof(empty, { ...expected, integration_outputs: [] }).result, "pass");
   const stale = structuredClone(value);
   stale.products[0].checked_in = { ...observation, content_digest: `sha256:${"0".repeat(64)}` };
   stale.products[0].synchronized = false;

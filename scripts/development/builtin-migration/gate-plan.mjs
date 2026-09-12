@@ -89,10 +89,8 @@ function parseGatePlan(value, bundleId, current) {
   if (JSON.stringify(roles) !== JSON.stringify(ARTIFACT_ROLES_BY_PARSER[parser])) throw new Error(`${bundleId}: ${parser} must emit its exact typed artifact role set`);
   parseGateProgram(value.program, bundleId, current);
   if (value.program.kind !== "repository_script") validateCargoArguments(argumentsList, bundleId);
-  const reviewedRoles = approvedToolRoles(value.program);
-  if (parser === "documentation_cutover" && !reviewedRoles.includes("git")) {
-    throw new Error(`${bundleId}: documentation cutover requires a reviewed git tool`);
-  }
+  if (parser === "documentation_cutover") requireProgramTools(value.program, ["git"], bundleId, "documentation cutover");
+  if (parser === "generated_products") requireProgramTools(value.program, ["cargo", "rustc"], bundleId, "generated product verification");
   return value;
 }
 
@@ -101,7 +99,9 @@ export function parseGateProgram(value, bundleId, current = null) {
     exact(value, ["kind", "path", "content_digest", "approved_toolchains"], `${bundleId} repository script`);
     repositoryPath(value.path, `${bundleId} repository script path`);
     validateSourceDigest(value.path, value.content_digest, current, `${bundleId} repository script`);
-    parseApprovedToolchains(value.approved_toolchains, bundleId, current, ["node"], ["git", "node"]);
+    parseApprovedToolchains(value.approved_toolchains, bundleId, current, ["node"], [
+      "cargo", "cargo-clippy", "cargo-fmt", "clippy-driver", "git", "node", "rustc", "rustdoc", "rustfmt",
+    ]);
     return value;
   } else if (value?.kind === "cargo_binary") {
     exact(value, ["kind", "package", "binary", "manifest_path", "manifest_digest", "approved_toolchains"], `${bundleId} cargo binary`);
@@ -156,8 +156,13 @@ function approvedTools(program, build, gate) {
   return toolchain.tools;
 }
 
-function approvedToolRoles(program) {
-  return [...new Set(program.approved_toolchains.flatMap((entry) => entry.tools.map((tool) => tool.role)))];
+function requireProgramTools(program, requiredRoles, bundleId, label) {
+  for (const toolchain of program.approved_toolchains) {
+    const roles = toolchain.tools.map((tool) => tool.role);
+    if (requiredRoles.some((role) => !roles.includes(role))) {
+      throw new Error(`${bundleId}: ${label} requires reviewed ${requiredRoles.join(" and ")} tools on every execution target`);
+    }
+  }
 }
 
 function cargoName(value, label) {

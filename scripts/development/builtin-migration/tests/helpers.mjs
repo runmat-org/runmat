@@ -327,12 +327,12 @@ function fixtureGatePlans(inventory, additionalTargets = []) {
     }),
   }));
   const script = { kind: "repository_script", path: "scripts/development/check-architecture-boundaries.mjs", content_digest: source("scripts/development/check-architecture-boundaries.mjs"), approved_toolchains: approvedToolchains(["git", "node"]) };
-  const generated = { kind: "repository_script", path: "scripts/development/verify-builtin-generated-products.mjs", content_digest: source("scripts/development/verify-builtin-generated-products.mjs"), approved_toolchains: approvedToolchains(["node"]) };
+  const generated = { kind: "repository_script", path: "scripts/development/verify-builtin-generated-products.mjs", content_digest: source("scripts/development/verify-builtin-generated-products.mjs"), approved_toolchains: approvedToolchains(["cargo", "node", "rustc"]) };
   const cargo = { kind: "cargo_binary", package: "runmat-runtime", binary: "export_builtin_migration_inventory", manifest_path: "Cargo.toml", manifest_digest: source("Cargo.toml"), approved_toolchains: approvedToolchains(["cargo", "rustc"]) };
   return [
     { gate: "architecture", program: script, arguments: [], working_directory: "repository", parser: "exit_status", expected_artifact_roles: [] },
     { gate: "catalog-contract", program: cargo, arguments: [], working_directory: "repository", parser: "compiled_inventory", expected_artifact_roles: ["compiled-inventory"] },
-    { gate: "deterministic-products", program: generated, arguments: [], working_directory: "repository", parser: "generated_products", expected_artifact_roles: ["generated-products"] },
+    { gate: "deterministic-products", program: generated, arguments: ["--product", "wasm-registry"], working_directory: "repository", parser: "generated_products", expected_artifact_roles: ["generated-products"] },
     { gate: "documentation-cutover", program: script, arguments: [], working_directory: "repository", parser: "documentation_cutover", expected_artifact_roles: ["documentation-reconciliation"] },
     { gate: "inventory-delta", program: script, arguments: [], working_directory: "repository", parser: "inventory_delta", expected_artifact_roles: ["inventory-delta"] },
     { gate: "runtime-binding", program: cargo, arguments: [], working_directory: "repository", parser: "compiled_inventory", expected_artifact_roles: ["compiled-inventory"] },

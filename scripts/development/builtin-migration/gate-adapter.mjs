@@ -126,7 +126,9 @@ function commandFor(plan, repository, baselineInventory, subjectBuild) {
 }
 
 function resolveReviewedTools(reviewedTools, programKind) {
-  const rustToolRoot = programKind === "repository_script" ? null : resolveRustToolRoot();
+  const needsRustToolRoot = programKind !== "repository_script"
+    || reviewedTools.some((entry) => !["git", "node"].includes(entry.role));
+  const rustToolRoot = needsRustToolRoot ? resolveRustToolRoot() : null;
   return reviewedTools.map((reviewed) => {
     const candidate = reviewed.role === "node"
       ? process.execPath

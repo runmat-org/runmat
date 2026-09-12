@@ -73,7 +73,7 @@ test("repository scripts retain typed node and auxiliary git identity", () => {
   };
   assert.doesNotThrow(() => parseGatePlans([repositoryPlan], "fixture"));
   repositoryPlan.program.approved_toolchains = tools(["node"]);
-  assert.throws(() => parseGatePlans([repositoryPlan], "fixture"), /requires a reviewed git tool/);
+  assert.throws(() => parseGatePlans([repositoryPlan], "fixture"), /requires reviewed git tools/);
 });
 
 test("every gate toolchain exactly covers the reviewed execution targets", () => {

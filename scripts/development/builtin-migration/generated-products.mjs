@@ -7,7 +7,7 @@ export function parseGeneratedProductsProof(value, expected) {
   exact(value, ["schema_version", "kind", "authority", "products", "result"], "generated products proof");
   if (value.authority !== "machine-derived-integration-evidence") throw new Error("generated products proof has invalid authority");
   enumValue(value.result, ["pass", "fail"], "generated products result");
-  const products = array(value.products, "generated products").map(parseProduct);
+  const products = array(value.products, "generated products", { empty: true }).map(parseProduct);
   const keys = products.map((entry) => entry.product_id);
   if (new Set(keys).size !== keys.length || JSON.stringify(keys) !== JSON.stringify([...keys].sort(compareCodePoint))) {
     throw new Error("generated products must be unique and canonically ordered");
