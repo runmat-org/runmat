@@ -8,17 +8,43 @@ test.afterEach(cleanupRepositoryFixtures);
 
 test("effective composition is derived from the reviewed baseline and active lease", () => {
   const fixture = controlledFixture({ composition: true });
+  assert.equal(
+    fixture.control.moduleComposition.transitions.get(fixture.bundleId).transition_id,
+    fixture.bundleId,
+  );
   const projection = deriveEffectiveModuleComposition({
     control: fixture.control,
     queueState: fixture.queueState,
     queueCheckpoint: fixture.queueCheckpoint,
     lease: fixture.lease,
   });
-  assert.deepEqual(projection.products[0].children.map((child) => child.module), ["basic"]);
+  const runtimeMath = projection.products.find((product) => product.product_id === "runtime-math");
+  assert.deepEqual(runtimeMath.children.map((child) => child.module), ["basic"]);
   assert.equal(
-    projection.products[0].children[0].source_path,
+    runtimeMath.children[0].source_path,
     "crates/runmat-runtime/src/builtins/math/basic/mod.rs",
   );
+});
+
+test("baseline-only products do not require an unrelated active bundle transition", () => {
+  const fixture = controlledFixture();
+  assert.deepEqual(fixture.lease.bundle.integration_outputs.map((entry) => entry.product_id), [
+    "wasm-registry",
+  ]);
+  assert.equal(
+    fixture.control.integrationProducts.get("runtime-math").lifecycle.kind,
+    "reviewed-baseline-only",
+  );
+  assert.equal(fixture.control.moduleComposition.transitions.get(fixture.bundleId), null);
+
+  const projection = deriveEffectiveModuleComposition({
+    control: fixture.control,
+    queueState: fixture.queueState,
+    queueCheckpoint: fixture.queueCheckpoint,
+    lease: fixture.lease,
+  });
+
+  assert.ok(projection.products.every((product) => product.children.length === 0));
 });
 
 test("effective composition requires branded queue authority and its exact lease checkpoint", () => {

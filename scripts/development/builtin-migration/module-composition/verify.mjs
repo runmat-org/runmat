@@ -1,13 +1,14 @@
 import path from "node:path";
 
-import { compareCodePoint } from "../constants.mjs";
+import { conditionKey, parseConditionAttribute } from "./condition.mjs";
 import { renderModuleCompositionProduct, generatedHeader } from "./generate.mjs";
 import { childPathAttribute, parseCompositionProduct } from "./schema.mjs";
 
-const CFG = /^#\[cfg\(feature = "([a-zA-Z0-9][a-zA-Z0-9_+.-]*)"\)\]$/;
-const TEST_CFG = /^#\[cfg\(test\)\]$/;
-const DECLARATION = /^(?:(pub\(super\)|pub\(crate\)|pub\(in crate::catalog\)|pub) )?mod ((?:r#)?[A-Za-z_][A-Za-z0-9_]*);$/;
-const REEXPORT = /^(?:(pub\(super\)|pub\(crate\)|pub\(in crate::catalog\)|pub) )?use ((?:r#)?[A-Za-z_][A-Za-z0-9_]*)::(\*|\{[A-Za-z_][A-Za-z0-9_]*(?:, [A-Za-z_][A-Za-z0-9_]*)*\});$/;
+const IDENTIFIER = "(?:r#)?[A-Za-z_][A-Za-z0-9_]*";
+const DECLARATION = new RegExp(`^(?:(pub\\(super\\)|pub\\(crate\\)|pub\\(in crate::catalog\\)|pub) )?mod (${IDENTIFIER});$`);
+const GLOB_REEXPORT = new RegExp(`^(?:(pub\\(super\\)|pub\\(crate\\)|pub\\(in crate::catalog\\)|pub) )?use (${IDENTIFIER})::\\*;$`);
+const NAMED_REEXPORT = new RegExp(`^(?:(pub\\(super\\)|pub\\(crate\\)|pub\\(in crate::catalog\\)|pub) )?use (${IDENTIFIER})::\\{$`);
+const NAMED_ITEM = new RegExp(`^    (${IDENTIFIER})(?: as (${IDENTIFIER}))?,$`);
 const AGGREGATION = /^pub\(super\) fn (extend_entries|extend_aliases|extend_constants)\(values: &mut Vec<(&'static )?crate::(BuiltinCatalogEntry|BuiltinCatalogAlias|BuiltinConstantCatalogEntry)>\) \{$/;
 const AGGREGATION_CONFIG = Object.freeze({
   extend_entries: ["entries", "BuiltinCatalogEntry", "ENTRIES", true],
@@ -35,141 +36,132 @@ export function parseGeneratedModuleComposition(source) {
   let phase = "declarations";
   while (lines.length) {
     if (lines[0] === "") { lines.shift(); continue; }
-    const feature = takeFeature(lines);
+    const condition = takeCondition(lines);
+    const docHidden = takeDocHidden(lines);
     const pathAttribute = takePath(lines);
     const macroUse = takeMacroUse(lines);
     const line = lines.shift();
     const declaration = DECLARATION.exec(line);
     if (declaration) {
-      if (phase !== "declarations") throw new Error("module declaration appears after another generated section");
-      declarations.push({ module: declaration[2], visibility: visibility(declaration[1]), feature_policy: feature, path_attribute: pathAttribute, macro_use: macroUse });
+      if (phase !== "declarations" || docHidden) throw new Error("module declaration has invalid placement or attributes");
+      declarations.push({ module: declaration[2], visibility: visibility(declaration[1]), declaration_condition: condition, path_attribute: pathAttribute, macro_use: macroUse });
       continue;
     }
     if (pathAttribute !== null || macroUse) throw new Error("path or macro-use attribute is not attached to a module declaration");
-    const reexport = REEXPORT.exec(line);
-    if (reexport) {
+    const glob = GLOB_REEXPORT.exec(line);
+    const named = NAMED_REEXPORT.exec(line);
+    if (glob || named) {
       if (phase === "aggregations") throw new Error("module reexport appears after aggregation");
       phase = "reexports";
-      reexports.push(parseReexport(reexport, feature));
+      reexports.push(parseReexport(lines, glob, named, condition, docHidden));
       continue;
     }
-    if (feature.kind !== "always") throw new Error("feature policy is not attached to a module declaration or reexport");
+    if (docHidden || condition.kind !== "always") throw new Error("attribute is not attached to a module declaration or reexport");
     const start = AGGREGATION.exec(line);
     if (!start) throw new Error(`unsupported generated Rust syntax: ${line}`);
     phase = "aggregations";
     aggregations.push(parseAggregation(lines, start));
   }
-  canonicalUnique(declarations, (entry) => entry.module, "generated module declarations");
-  canonicalUnique(reexports, (entry) => entry.module, "generated module reexports");
-  const aggregationRoles = aggregations.map((entry) => entry.role);
-  const expectedRoles = ["entries", "aliases", "constants"].filter((role) => aggregationRoles.includes(role));
-  if (new Set(aggregationRoles).size !== aggregationRoles.length
-    || JSON.stringify(aggregationRoles) !== JSON.stringify(expectedRoles)) {
-    throw new Error("generated module aggregations must use canonical role order");
-  }
+  canonicalDeclarations(declarations);
+  canonicalReexports(reexports);
+  const roles = aggregations.map((entry) => entry.role);
+  const expectedRoles = ["entries", "aliases", "constants"].filter((role) => roles.includes(role));
+  if (new Set(roles).size !== roles.length || JSON.stringify(roles) !== JSON.stringify(expectedRoles)) throw new Error("generated module aggregations must use canonical role order");
   return { declarations, reexports, aggregations };
+}
+
+function parseReexport(lines, glob, named, condition, docHidden) {
+  if (glob) return { module: glob[2], visibility: visibility(glob[1]), condition, doc_hidden: docHidden, reexport: { kind: "glob" } };
+  const items = [];
+  while (lines[0] !== "};") {
+    if (!lines.length) throw new Error("named reexport is unterminated");
+    const match = NAMED_ITEM.exec(lines.shift());
+    if (!match) throw new Error("named reexport item is invalid");
+    items.push({ name: match[1], alias: match[2] ?? null });
+  }
+  lines.shift();
+  const itemKeys = items.map((item) => `${item.name}\0${item.alias ?? ""}`);
+  const exportedNames = items.map((item) => (item.alias ?? item.name).toLowerCase());
+  if (new Set(itemKeys.map((key) => key.toLowerCase())).size !== itemKeys.length
+    || JSON.stringify(itemKeys) !== JSON.stringify([...itemKeys].sort())
+    || new Set(exportedNames).size !== exportedNames.length) {
+    throw new Error("named reexport items must be unique and use canonical order");
+  }
+  return { module: named[2], visibility: visibility(named[1]), condition, doc_hidden: docHidden, reexport: { kind: "named", items } };
 }
 
 function parseAggregation(lines, start) {
   const [role, type, constant, references] = AGGREGATION_CONFIG[start[1]];
-  if (start[3] !== type || Boolean(start[2]) !== references) {
-    throw new Error(`${role} aggregation value type is invalid`);
-  }
+  if (start[3] !== type || Boolean(start[2]) !== references) throw new Error(`${role} aggregation value type is invalid`);
   const children = [];
   while (lines[0] !== "}") {
     if (!lines.length) throw new Error(`${role} aggregation is unterminated`);
-    let feature = { kind: "always" };
-    const line = lines[0]?.slice(4);
-    const match = CFG.exec(line);
-    if (match) { lines.shift(); feature = { kind: "cargo-feature", feature: match[1] }; }
-    else if (TEST_CFG.test(line)) { lines.shift(); feature = { kind: "test" }; }
+    const condition = takeIndentedCondition(lines);
     const statement = lines.shift();
     const patterns = [
-      ["slice", new RegExp(`^    values\\.extend\\(((?:r#)?[A-Za-z_][A-Za-z0-9_]*)::${constant}\\.iter\\(\\)\\.copied\\(\\)\\);$`)],
-      ["groups", /^    values\.extend\(((?:r#)?[A-Za-z_][A-Za-z0-9_]*)::ENTRY_GROUPS\.iter\(\)\.flat_map\(\|group\| group\.iter\(\)\.copied\(\)\)\);$/],
-      ["function", new RegExp(`^    ((?:r#)?[A-Za-z_][A-Za-z0-9_]*)::${start[1]}\\(values\\);$`)],
+      ["slice", new RegExp(`^    values\\.extend\\((${IDENTIFIER})::${constant}\\.iter\\(\\)\\.copied\\(\\)\\);$`)],
+      ["groups", new RegExp(`^    values\\.extend\\((${IDENTIFIER})::ENTRY_GROUPS\\.iter\\(\\)\\.flat_map\\(\\|group\\| group\\.iter\\(\\)\\.copied\\(\\)\\)\\);$`)],
+      ["function", new RegExp(`^    (${IDENTIFIER})::${start[1]}\\(values\\);$`)],
     ];
     const parsed = patterns.flatMap(([sourceKind, pattern]) => {
       const match = pattern.exec(statement);
       return match ? [{ source_kind: sourceKind, module: match[1] }] : [];
     });
-    if (parsed.length !== 1 || (role !== "entries" && parsed[0].source_kind === "groups")) {
-      throw new Error(`${role} aggregation child is invalid`);
-    }
-    children.push({ ...parsed[0], feature_policy: feature });
+    if (parsed.length !== 1 || (role !== "entries" && parsed[0].source_kind === "groups")) throw new Error(`${role} aggregation child is invalid`);
+    children.push({ ...parsed[0], declaration_condition: condition, order: children.length });
   }
   lines.shift();
-  canonicalUnique(children, (entry) => entry.module, `${role} aggregation children`);
   return { role, children };
 }
 
-function parseReexport(match, featurePolicy) {
-  const target = match[3];
-  return {
-    module: match[2], visibility: visibility(match[1]), feature_policy: featurePolicy,
-    reexport: target === "*" ? { kind: "glob" } : { kind: "named", items: target.slice(1, -1).split(", ") },
-  };
+function takeCondition(lines) {
+  const parsed = parseConditionAttribute(lines[0]);
+  if (parsed === null) return { kind: "always" };
+  lines.shift();
+  return parsed;
 }
 
-function takeFeature(lines) {
-  const match = CFG.exec(lines[0]);
-  if (match) {
-    lines.shift();
-    return { kind: "cargo-feature", feature: match[1] };
-  }
-  if (TEST_CFG.test(lines[0])) {
-    lines.shift();
-    return { kind: "test" };
-  }
-  return { kind: "always" };
+function takeIndentedCondition(lines) {
+  const line = lines[0]?.startsWith("    ") ? lines[0].slice(4) : "";
+  const parsed = parseConditionAttribute(line);
+  if (parsed === null) return { kind: "always" };
+  lines.shift();
+  return parsed;
 }
 
+function takeDocHidden(lines) { if (lines[0] !== "#[doc(hidden)]") return false; lines.shift(); return true; }
 function takePath(lines) {
   const match = /^#\[path = "([A-Za-z0-9_./-]+\.rs)"\]$/.exec(lines[0]);
   if (!match) return null;
   lines.shift();
-  if (match[1].startsWith("/") || match[1].includes("//") || path.posix.normalize(match[1]) !== match[1]
-    || match[1].split("/").includes("..")) throw new Error("generated module path attribute is not a canonical descendant");
+  if (match[1].startsWith("/") || match[1].includes("//") || path.posix.normalize(match[1]) !== match[1] || match[1].split("/").includes("..")) throw new Error("generated module path attribute is not a canonical descendant");
   return match[1];
 }
-
-function takeMacroUse(lines) {
-  if (lines[0] !== "#[macro_use]") return false;
-  lines.shift();
-  return true;
-}
+function takeMacroUse(lines) { if (lines[0] !== "#[macro_use]") return false; lines.shift(); return true; }
 
 function expectedSurface(product) {
   return {
-    declarations: product.children.map((entry) => ({
-      module: entry.module, visibility: entry.visibility, feature_policy: entry.feature_policy,
-      path_attribute: childPathAttribute(product.path, entry), macro_use: entry.macro_use,
-    })),
-    reexports: product.children.filter((entry) => entry.reexport.kind !== "none").map((entry) => ({
-      module: entry.module, visibility: entry.reexport.visibility, feature_policy: entry.feature_policy,
-      reexport: entry.reexport.kind === "glob" ? { kind: "glob" } : { kind: "named", items: entry.reexport.items },
-    })),
+    declarations: product.children.map((entry) => ({ module: entry.module, visibility: entry.visibility, declaration_condition: entry.declaration_condition, path_attribute: childPathAttribute(product.path, entry), macro_use: entry.macro_use })),
+    reexports: product.children.flatMap((entry) => entry.reexports.map((reexport) => ({ module: entry.module, visibility: reexport.visibility, condition: reexport.condition, doc_hidden: reexport.doc_hidden, reexport: reexport.kind === "glob" ? { kind: "glob" } : { kind: "named", items: reexport.items } }))),
     aggregations: product.crate_role === "runtime" ? [] : product.aggregations.map((role) => ({
       role,
-      children: product.children.flatMap((entry) => {
-        const source = entry.aggregation_sources.find((candidate) => candidate.role === role);
-        return source ? [{
-          source_kind: source.kind, module: entry.module, feature_policy: entry.feature_policy,
-        }] : [];
-      }),
+      children: product.children.flatMap((entry) => entry.aggregation_sources.filter((source) => source.role === role).map((source) => ({ source_kind: source.kind, module: entry.module, declaration_condition: entry.declaration_condition, order: source.order }))).sort((left, right) => left.order - right.order),
     })),
   };
 }
 
-function visibility(value) {
-  return {
-    undefined: "private", "pub(super)": "super", "pub(crate)": "crate",
-    "pub(in crate::catalog)": "catalog", pub: "public",
-  }[String(value)];
+function visibility(value) { return { undefined: "private", "pub(super)": "super", "pub(crate)": "crate", "pub(in crate::catalog)": "catalog", pub: "public" }[String(value)]; }
+function canonicalDeclarations(values) {
+  const keys = values.map((entry) => entry.module);
+  if (new Set(keys.map((entry) => entry.toLowerCase())).size !== keys.length || JSON.stringify(keys) !== JSON.stringify([...keys].sort())) throw new Error("generated module declarations must use unique canonical module order");
 }
-
-function canonicalUnique(values, key, label) {
-  const keys = values.map(key);
-  if (new Set(keys).size !== keys.length || new Set(keys.map((entry) => entry.toLowerCase())).size !== keys.length) throw new Error(`${label} must be unique without case-fold collisions`);
-  if (JSON.stringify(keys) !== JSON.stringify([...keys].sort(compareCodePoint))) throw new Error(`${label} must use canonical code-point order`);
+function canonicalReexports(values) {
+  let priorModule = null;
+  let priorKey = null;
+  for (const value of values) {
+    const key = `${conditionKey(value.condition)}\0${value.visibility}\0${value.doc_hidden ? 1 : 0}\0${value.reexport.kind}\0${JSON.stringify(value.reexport)}`;
+    if (priorModule !== null && (value.module < priorModule || (value.module === priorModule && key <= priorKey))) throw new Error("generated module reexports must use unique canonical order");
+    priorModule = value.module;
+    priorKey = key;
+  }
 }

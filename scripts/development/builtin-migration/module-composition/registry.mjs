@@ -65,9 +65,9 @@ export function moduleCompositionProductRegistry() {
 
 function pairedProducts(suffix) {
   const slug = suffix.replaceAll("/", "-").replaceAll("_", "-");
-  const catalogAggregations = ["array", "array/creation", "constants"].includes(suffix)
+  const catalogAggregations = ["array", "array/creation"].includes(suffix)
     ? ["entries", "constants"]
-    : ["entries"];
+    : suffix === "constants" ? ["constants"] : ["entries"];
   return [
     fixedProduct(`catalog-${slug}`, "catalog", `catalog/entries/${suffix}`, catalogAggregations),
     fixedProduct(`runtime-${slug}`, "runtime", `builtins/${suffix}`, []),

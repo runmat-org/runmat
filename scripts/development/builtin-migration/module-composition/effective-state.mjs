@@ -23,14 +23,38 @@ export function deriveEffectiveModuleComposition({
   }
   const baseline = control.moduleComposition.baseline;
   if (baseline === null) return null;
-  const transitions = state.acceptedSeals.map((reference) =>
-    control.moduleComposition.transitions.get(reference.bundle_id)).filter(Boolean);
-  transitions.push(requiredTransition(control, active.bundle.id, "active"));
+  const transitions = state.acceptedSeals.flatMap((reference) => {
+    if (!control.moduleComposition.transitions.has(reference.bundle_id)) {
+      throw new Error(`${reference.bundle_id}: accepted bundle has no reviewed composition disposition`);
+    }
+    const transition = control.moduleComposition.transitions.get(reference.bundle_id);
+    return transition === null ? [] : [transition];
+  });
+  const activeTransition = transitionForActiveBundle(control, active.bundle);
+  if (activeTransition !== null) transitions.push(activeTransition);
   return deepImmutable(applyModuleCompositionTransitions(baseline, transitions));
 }
 
-function requiredTransition(control, bundleId, role) {
-  const transition = control.moduleComposition.transitions.get(bundleId);
-  if (!transition) throw new Error(`${bundleId}: ${role} bundle has no reviewed composition transition`);
+function transitionForActiveBundle(control, bundle) {
+  if (!control.moduleComposition.transitions.has(bundle.id)) {
+    throw new Error(`${bundle.id}: active bundle has no reviewed composition disposition`);
+  }
+  const transition = control.moduleComposition.transitions.get(bundle.id);
+  const ownsCompositionProduct = bundle.integration_outputs.some((output) => {
+    const product = control.integrationProducts.get(output.product_id);
+    if (!product) {
+      throw new Error(`${bundle.id}: active bundle references unknown integration product ${output.product_id}`);
+    }
+    return product.verification.kind === "rust_module_composition";
+  });
+  if (!ownsCompositionProduct) {
+    if (transition !== null) {
+      throw new Error(`${bundle.id}: active bundle without composition products has a transition`);
+    }
+    return null;
+  }
+  if (transition === null) {
+    throw new Error(`${bundle.id}: active bundle has no reviewed composition transition`);
+  }
   return transition;
 }

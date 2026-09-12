@@ -14,6 +14,7 @@ import { buildDocumentationCutoverArtifact, documentationCutoverChecks } from ".
 import { gatePlanEvidence } from "../gate-plan.mjs";
 import { buildInventory } from "../inventory.mjs";
 import { issueLease, parseLease } from "../lease.mjs";
+import { moduleCompositionProductRegistry } from "../module-composition/registry.mjs";
 import { acceptedSealSet, barrierSealSet, emptyQueueState, validateQueueState } from "../queue.mjs";
 import { validateQueueCheckpoint } from "../queue-checkpoint.mjs";
 import { R31_REQUIRED_LANES } from "../target-policy.mjs";
@@ -39,11 +40,23 @@ export function repositoryFixture({ sidecar = false, identity = "foo", compositi
   write(root, "scripts/development/verify-builtin-generated-products.mjs", `
 import fs from "node:fs"; import crypto from "node:crypto";
 const digest = (bytes) => "sha256:" + crypto.createHash("sha256").update(bytes).digest("hex");
+const canonical = (value) => Array.isArray(value)
+  ? "[" + value.map(canonical).join(",") + "]"
+  : value && typeof value === "object"
+    ? "{" + Object.keys(value).sort().map((key) => JSON.stringify(key) + ":" + canonical(value[key])).join(",") + "}"
+    : JSON.stringify(value);
 const input = JSON.parse(fs.readFileSync(0, "utf8"));
 const observed = fs.readFileSync("crates/runmat-runtime/src/builtins/generated_wasm_registry.rs");
-const generator = fs.readFileSync("scripts/regenerate-wasm-registry.mjs");
 const manifest = input.native_registration_manifest;
-const value = { schema_version: 2, kind: "runmat-builtin-generated-products-proof", authority: "machine-derived-integration-evidence", products: [{ product_id: "wasm-registry", path: "crates/runmat-runtime/src/builtins/generated_wasm_registry.rs", generator: { path: "scripts/regenerate-wasm-registry.mjs", content_digest: digest(generator) }, checked_in: { byte_length: observed.length, content_digest: digest(observed) }, first: { byte_length: observed.length, content_digest: digest(observed) }, second: { byte_length: observed.length, content_digest: digest(observed) }, deterministic: true, synchronized: true, verification: { kind: "native_wasm_registration_manifest", generated_manifest: manifest, native_manifest: manifest, result: "pass" } }], result: "pass" };
+const projection = new Map(input.module_composition_projection.products.map((entry) => [entry.product_id, entry]));
+const empty = { byte_length: 0, content_digest: digest("") };
+const products = input.products.map((product) => {
+  const generator = fs.readFileSync(product.generator.path);
+  const common = { product_id: product.product_id, path: product.path, generator: { path: product.generator.path, content_digest: digest(generator) }, deterministic: true, synchronized: true };
+  if (product.verification.kind === "rust_module_composition") return { ...common, checked_in: empty, first: empty, second: empty, verification: { kind: "rust_module_composition", projection_digest: digest(canonical(projection.get(product.product_id))), result: "pass" } };
+  return { ...common, checked_in: { byte_length: observed.length, content_digest: digest(observed) }, first: { byte_length: observed.length, content_digest: digest(observed) }, second: { byte_length: observed.length, content_digest: digest(observed) }, verification: { kind: "native_wasm_registration_manifest", generated_manifest: manifest, native_manifest: manifest, result: "pass" } };
+});
+const value = { schema_version: 2, kind: "runmat-builtin-generated-products-proof", authority: "machine-derived-integration-evidence", products, result: "pass" };
 process.stdout.write(JSON.stringify(value) + "\\n");
 `);
   write(root, `crates/runmat-runtime/src/builtins/math/basic/${identity}.rs`, `
@@ -103,14 +116,14 @@ export function controlledFixture(options = {}) {
     : { applicability: "not-applicable", reason: "Reviewed as outside this fixture's behavior", evidence: ["fixture review"] }]));
   const draft = buildControlDraft(inventory);
   const topology = topologyFixture(inventory, bundleId, id, { controlDraftDigest: draft.digest });
-  const compositionProduct = "runtime-math-parent";
+  const compositionProduct = "runtime-math";
   const compositionChild = {
     module: "basic", source_kind: "directory",
     source_path: "crates/runmat-runtime/src/builtins/math/basic/mod.rs",
-    role: "group", visibility: "public", feature_policy: { kind: "always" },
-    macro_use: false, reexport: { kind: "none" }, aggregation_sources: [],
+    role: "group", visibility: "public", declaration_condition: { kind: "always" },
+    macro_use: false, reexports: [], aggregation_sources: [],
   };
-  const bundleControl = { prerequisites: [], additional_authored_write_set: [{ kind: "tree", path: `crates/runmat-builtins/src/catalog/entries/math/basic/${id}` }, { kind: "file", path: `crates/runmat-runtime/src/builtins/math/basic/${id}.rs` }, ...(options.composition ? [{ kind: "file", path: compositionChild.source_path }] : []), ...(options.sidecar ? [{ kind: "file", path: `docs/builtins/reference/${id}.json` }] : [])], integration_product_refs: options.composition ? [compositionProduct, "wasm-registry"] : ["wasm-registry"], module_composition_transition: options.composition ? { schema_version: 2, kind: "runmat-builtin-module-composition-transition", transition_id: bundleId, changes: [{ product_id: compositionProduct, operation: "add", before: null, after: compositionChild }] } : null, expected_removals: [], baseline_evidence: bundleBaselineEvidence(inventory, [id]), gate_plans: fixtureGatePlans(inventory, Object.values(options.storageProfiles ?? {})), owner_role: "builtin-migrator", complexity: { class: "low", weight: 1, basis: ["single identity"] }, review: { status: "reviewed", evidence: ["fixture review"] } };
+  const bundleControl = { prerequisites: [], additional_authored_write_set: [{ kind: "tree", path: `crates/runmat-builtins/src/catalog/entries/math/basic/${id}` }, { kind: "file", path: `crates/runmat-runtime/src/builtins/math/basic/${id}.rs` }, ...(options.composition ? [{ kind: "file", path: compositionChild.source_path }] : []), ...(options.sidecar ? [{ kind: "file", path: `docs/builtins/reference/${id}.json` }] : [])], integration_product_refs: options.composition ? [compositionProduct, "wasm-registry"] : ["wasm-registry"], module_composition_transition: options.composition ? { schema_version: 3, kind: "runmat-builtin-module-composition-transition", transition_id: bundleId, changes: [{ product_id: compositionProduct, operation: "add", before: null, after: compositionChild }] } : null, expected_removals: [], baseline_evidence: bundleBaselineEvidence(inventory, [id]), gate_plans: fixtureGatePlans(inventory, Object.values(options.storageProfiles ?? {})), owner_role: "builtin-migrator", complexity: { class: "low", weight: 1, basis: ["single identity"] }, review: { status: "reviewed", evidence: ["fixture review"] } };
   const runtimeOwner = `crates/runmat-runtime/src/builtins/math/basic/${id}.rs`;
   const identityControl = {
     public_identity: {
@@ -222,15 +235,7 @@ function fixtureControlReviewSet(repository, inventory, topology, scaffold, bund
     },
     program_profiles: programProfiles,
     integration_products: fixtureIntegrationProducts(inventory, options.composition),
-    module_composition_baseline: options.composition ? {
-      schema_version: 2,
-      kind: "runmat-builtin-module-composition-projection",
-      products: [{
-        product_id: "runtime-math-parent", crate_role: "runtime",
-        path: "crates/runmat-runtime/src/builtins/math/mod.rs",
-        module_path: "crate::builtins::math", aggregations: [], children: [],
-      }],
-    } : null,
+    module_composition_baseline: fixtureModuleCompositionBaseline(),
     migration_findings: migrationFindings,
     exception_manifest: exceptionManifest,
     target_policy: fixtureTargetPolicy([...new Map(Object.values(storagePolicy.host_profiles).map((profile) => [
@@ -557,24 +562,17 @@ export function fixtureTargetPolicy(migrationExecutionTargets) {
   };
 }
 
-export function fixtureIntegrationProducts(inventory, composition = false) {
+export function fixtureIntegrationProducts(
+  inventory, composition = false,
+) {
   const source = new Map(
     inventory.source.files.map((entry) => [entry.path, entry.content_digest]),
   );
   return {
-    ...(composition ? { "runtime-math-parent": {
-      path: "crates/runmat-runtime/src/builtins/math/mod.rs",
-      producer: "integration",
-      generator: {
-        path: "scripts/regenerate-wasm-registry.mjs",
-        baseline_digest: source.get("scripts/regenerate-wasm-registry.mjs"),
-      },
-      baseline_digest: source.get("crates/runmat-runtime/src/builtins/math/mod.rs"),
-      verification: {
-        kind: "rust_module_composition", crate_role: "runtime",
-        module_path: "crate::builtins::math",
-      },
-    } } : {}),
+    ...fixtureModuleCompositionProducts(inventory, {
+      bundleReferencedProduct: composition ? "runtime-math" : null,
+      generatorPath: "scripts/regenerate-wasm-registry.mjs",
+    }),
     "wasm-registry": {
       path: "crates/runmat-runtime/src/builtins/generated_wasm_registry.rs",
       producer: "integration",
@@ -587,6 +585,47 @@ export function fixtureIntegrationProducts(inventory, composition = false) {
       ),
       verification: { kind: "native_wasm_registration_manifest" },
     },
+  };
+}
+
+export function fixtureModuleCompositionProducts(inventory, {
+  bundleReferencedProduct = null,
+  generatorPath = "scripts/regenerate-wasm-registry.mjs",
+} = {}) {
+  const source = new Map(
+    inventory.source.files.map((entry) => [entry.path, entry.content_digest]),
+  );
+  const generator = {
+    path: generatorPath,
+    baseline_digest: source.get(generatorPath),
+  };
+  return Object.fromEntries(moduleCompositionProductRegistry()
+    .map((definition) => [definition.product_id, {
+      path: definition.path,
+      producer: "integration",
+      generator: { ...generator },
+      baseline_digest: source.get(definition.path) ?? null,
+      verification: {
+        kind: "rust_module_composition",
+        crate_role: definition.crate_role,
+        module_path: definition.module_path,
+      },
+      lifecycle: {
+        kind: definition.product_id === bundleReferencedProduct
+          ? "bundle-referenced"
+          : "reviewed-baseline-only",
+      },
+    }]));
+}
+
+export function fixtureModuleCompositionBaseline(children = new Map()) {
+  return {
+    schema_version: 3,
+    kind: "runmat-builtin-module-composition-projection",
+    products: moduleCompositionProductRegistry().map((definition) => ({
+      ...structuredClone(definition),
+      children: structuredClone(children.get(definition.product_id) ?? []),
+    })),
   };
 }
 

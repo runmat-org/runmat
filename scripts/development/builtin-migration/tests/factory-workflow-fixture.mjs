@@ -14,7 +14,9 @@ import { contentDigest, evidenceDigest } from "../evidence.mjs";
 import { composeTopologyCandidate } from "../topology/compose.mjs";
 import { candidateInputDigests, freezeReviewedTopology, parseReviewedTopology, reviewedTopologyView } from "../topology/freeze.mjs";
 import { fullTopologyChainFixture } from "../topology/tests/full-chain-fixture.mjs";
-import { fixtureTargetPolicy } from "./helpers.mjs";
+import {
+  fixtureModuleCompositionBaseline, fixtureModuleCompositionProducts, fixtureTargetPolicy,
+} from "./helpers.mjs";
 import { createTemporaryDirectory } from "./temporary-directories.mjs";
 
 export function writeFullControlWorkflow(directory, revision, sourceContentDigest = undefined, sourceMode = undefined) {
@@ -240,8 +242,10 @@ function fullChainControl(inventory, topology, scaffold) {
     cohorts: ["prerequisite", "A", "B", "C", "D", "E", "F", "G"].map((semantic, order) => ({ id: `C0${order}`, semantic, order })),
     bundle_controls: bundleControls,
     identity_controls: identityControls,
-    integration_products: {},
-    module_composition_baseline: null,
+    integration_products: fixtureModuleCompositionProducts(inventory, {
+      generatorPath: "scripts/development/check-architecture-boundaries.mjs",
+    }),
+    module_composition_baseline: fixtureModuleCompositionBaseline(),
     migration_findings: {
       schema_version: 1,
       kind: "runmat-builtin-migration-finding-dispositions",

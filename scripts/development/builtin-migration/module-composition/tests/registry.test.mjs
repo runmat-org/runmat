@@ -34,9 +34,9 @@ test("registry declares the exact canonical 99-product census", () => {
       const slug = suffix.replaceAll("/", "-").replaceAll("_", "-");
       return [
         fixed(`catalog-${slug}`, "catalog", `catalog/entries/${suffix}`,
-          ["array", "array/creation", "constants"].includes(suffix)
+          ["array", "array/creation"].includes(suffix)
             ? ["entries", "constants"]
-            : ["entries"]),
+            : suffix === "constants" ? ["constants"] : ["entries"]),
         fixed(`runtime-${slug}`, "runtime", `builtins/${suffix}`, []),
       ];
     }),
@@ -44,12 +44,13 @@ test("registry declares the exact canonical 99-product census", () => {
   assert.deepEqual(products, expected);
 });
 
-test("registry preserves constants in each owning catalog domain", () => {
+test("registry preserves each catalog domain's exact aggregation roles", () => {
   const products = new Map(moduleCompositionProductRegistry()
     .map((entry) => [entry.product_id, entry]));
-  for (const productId of ["catalog-array", "catalog-array-creation", "catalog-constants"]) {
+  for (const productId of ["catalog-array", "catalog-array-creation"]) {
     assert.deepEqual(products.get(productId).aggregations, ["entries", "constants"]);
   }
+  assert.deepEqual(products.get("catalog-constants").aggregations, ["constants"]);
   assert.deepEqual(products.get("catalog-root").aggregations, ["entries", "constants"]);
 });
 
