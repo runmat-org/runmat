@@ -3,6 +3,7 @@ import {
   rustIdentifier, rustModulePath,
 } from "./schema.mjs";
 import { sortedBy, uniqueBy } from "./compiled-schema.mjs";
+import { rustModuleIsWithinScope } from "./rust-module-path.mjs";
 
 const PRECISIONS = ["f32", "f64", "i32", "bool"];
 const CONSTANT_STRATEGIES = ["inline_literal", "uniform_buffer", "workgroup_memory"];
@@ -162,8 +163,7 @@ function string(value, label) { if (typeof value !== "string") throw new Error(`
 function sortedUnique(value, key, label) { sortedBy(value, key, label); uniqueBy(value, key, label); }
 function caseFoldUnique(value, label) { uniqueBy(value, (entry) => entry.key.toLowerCase(), `${label} case-folded keys`); }
 function matchingDeclarationPaths(modulePath, builtinPath, label) {
-  const canonical = (value) => value.replace(/^(?:crate|runmat_runtime)::/, "");
-  if (canonical(modulePath) !== canonical(builtinPath)) {
+  if (!rustModuleIsWithinScope(modulePath, builtinPath)) {
     throw new Error(`${label} builtin path differs from its compiler module path`);
   }
 }

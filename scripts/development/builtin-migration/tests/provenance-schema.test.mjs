@@ -25,7 +25,19 @@ test("compiled provenance requires canonical Rust and repository paths", () => {
     builtin_path: "crate::builtins::foo", authority: "canonical_binding",
   };
   assert.doesNotThrow(() => implementationProvenance(provenance));
+  assert.doesNotThrow(() => implementationProvenance({
+    ...provenance,
+    module_path: "runmat_runtime::builtins::foo::conversions",
+  }));
   assert.throws(() => implementationProvenance({ ...provenance, function: "foo()" }), /Rust identifier/);
+  assert.throws(() => implementationProvenance({
+    ...provenance,
+    module_path: "runmat_runtime::builtins::foobar",
+  }), /differs/);
+  assert.throws(() => implementationProvenance({
+    ...provenance,
+    module_path: "runmat_runtime::builtins::other::foo",
+  }), /differs/);
 });
 
 test("typed registration and spec declarations reject widened provenance", () => {
@@ -72,6 +84,31 @@ test("compiled evidence rejects forged manifest rows even after digest recomposi
   malformed.snapshot.observed.implementation_provenance[0].source_file = "/tmp/foo.rs";
   reseal(malformed);
   assert.throws(() => parseCompiledInventory(malformed), /repository-relative path/);
+});
+
+test("compiled evidence accepts a provider declaration below its implementation owner", () => {
+  const nested = compiledInventoryFixture();
+  nested.snapshot.observed.gpu_specs.push({
+    key: "foo", declaration: "FOO_GPU_SPEC",
+    source_file: "crates/runmat-runtime/src/builtins/foo/specification.rs",
+    module_path: "runmat_runtime::builtins::foo::specification",
+    builtin_path: "crate::builtins::foo::specification",
+    owner: { kind: "exact_builtin", identity: { name: "foo" } },
+    operation: "elementwise", supported_precisions: [], broadcast: "none",
+    provider_hooks: [], constant_strategy: "inline_literal", residency: "inherit_inputs",
+    nan_mode: "include", two_pass_threshold: null, workgroup_size: null,
+    accepts_nan_mode: false, notes: "fixture",
+  });
+  nested.snapshot.observed.registration_manifest.entries.push({
+    kind: "gpu_spec", declaration: "FOO_GPU_SPEC", variant: null,
+    builtin_path: "crate::builtins::foo::specification",
+  });
+  nested.snapshot.observed.registration_manifest.entries.sort((left, right) =>
+    `${left.kind}\0${left.declaration}\0${left.variant ?? ""}\0${left.builtin_path}`
+      .localeCompare(`${right.kind}\0${right.declaration}\0${right.variant ?? ""}\0${right.builtin_path}`, "en", { sensitivity: "variant" }));
+  nested.snapshot.observed.registration_manifest.counts.gpu_spec = 1;
+  reseal(nested);
+  assert.doesNotThrow(() => parseCompiledInventory(nested));
 });
 
 function reseal(value) {
