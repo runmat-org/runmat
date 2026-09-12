@@ -89,6 +89,7 @@ function globalTemplate(scaffold, topology) {
       review: unreviewed(),
     },
     exception_manifest: { entries: [], review: unreviewed() },
+    execution_targets: null,
     storage_policy: { host_profiles: {}, targets_must_be_disjoint: true, occt_default: "disabled-unless-affected" },
     review: unreviewed(),
   };

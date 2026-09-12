@@ -5,7 +5,9 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { auditMigration, parseBatch } from "../audit.mjs";
-import { MATURITY_GATES, parseControlManifest, validateControlManifestStructure } from "../control.mjs";
+import {
+  MATURITY_GATES, assertControlSubject, parseControlManifest, validateControlManifestStructure,
+} from "../control.mjs";
 import { buildControlDraft, freezeReviewedControl, parseControlDraft } from "../control-draft.mjs";
 import { validateControlReviewChain } from "../control-authoring/authority.mjs";
 import { composeControlCandidate, controlCandidateInputDigests } from "../control-authoring/compose.mjs";
@@ -264,6 +266,64 @@ test("validated controls remain bound to their exact baseline and subject target
     artifact_id: "foreign-target",
     inputs: null,
   }), /subject compiled target/);
+});
+
+test("subject admission accepts reviewed cross-platform targets and rechecks every disposition", () => {
+  const fixture = controlledFixture({
+    storageProfiles: {
+      "linux-builder": {
+        operating_system: "linux",
+        architecture: "x86_64",
+        execution_host: "runmat-linux-builder",
+        volume_roles: {
+          source_worktree: { role: "source-worktree", mount_path: "/workspace", filesystem_id: "posix-dev:10", minimum_free_bytes: 1, pause_below_bytes: 2, maximum_observation_age_seconds: 60 },
+          target_temp: { role: "target-temp", mount_path: "/mnt/runmat-build", filesystem_id: "posix-dev:11", minimum_free_bytes: 1, pause_below_bytes: 2, maximum_observation_age_seconds: 60 },
+        },
+      },
+    },
+  });
+  const compiled = structuredClone(fixture.compiledInventory);
+  compiled.snapshot.build.operating_system = "linux";
+  compiled.snapshot.build.architecture = "x86_64";
+  compiled.digest.value = contentDigest(Buffer.from(JSON.stringify(compiled.snapshot))).slice("sha256:".length);
+  const dispositions = {
+    schema_version: 1,
+    kind: "runmat-builtin-dispositions",
+    authority: "review-input-only",
+    identities: Object.fromEntries(fixture.inventory.identities.map((entry) => [
+      entry.identity,
+      structuredClone(entry.classification_input),
+    ])),
+  };
+  const subject = buildInventory(fixture.repository, dispositions, {
+    revision: REVISION,
+    compiledInventory: compiled,
+  });
+  assert.equal(assertControlSubject(fixture.control, subject), subject);
+  assert.throws(() => runGateProducer({
+    control: fixture.control,
+    baseline_inventory: fixture.inventory,
+    subject_inventory: subject,
+    bundle_id: fixture.bundleId,
+    gate: "architecture",
+    artifact_id: "linux-subject-without-executable-approval",
+    inputs: null,
+  }), /no executable approval for linux\/x86_64/);
+
+  const changedDispositions = structuredClone(dispositions);
+  changedDispositions.identities.foo = {
+    disposition: "internal",
+    canonical: null,
+    domain: "math",
+    family: "basic",
+    reason: "Drifted subject classification",
+    review: { status: "reviewed", evidence: ["fixture drift"] },
+  };
+  const drifted = buildInventory(fixture.repository, changedDispositions, {
+    revision: REVISION,
+    compiledInventory: compiled,
+  });
+  assert.throws(() => assertControlSubject(fixture.control, drifted), /disposition differs/);
 });
 
 test("migration operations require the exact validated authored lease", () => {
@@ -562,6 +622,15 @@ test("generated product proof requires two equal runs, checked-in equality, and 
 
 test("inventory delta proof admits only the reviewed bundle authority and path transition", () => {
   const fixture = controlledFixture();
+  const dispositions = {
+    schema_version: 1,
+    kind: "runmat-builtin-dispositions",
+    authority: "review-input-only",
+    identities: Object.fromEntries(fixture.inventory.identities.map((entry) => [
+      entry.identity,
+      structuredClone(entry.classification_input),
+    ])),
+  };
   const proof = buildInventoryDeltaProof(fixture.repository, fixture.inventory, fixture.inventory, fixture.control, fixture.bundleId);
   assert.equal(proof.result, "pass");
   assert.equal(inventoryDeltaChecks(proof)[0].result, "pass");
@@ -569,13 +638,13 @@ test("inventory delta proof admits only the reviewed bundle authority and path t
   const wrongBinding = structuredClone(fixture.compiledInventory);
   wrongBinding.snapshot.observed.implementation_provenance[0].source_file = "crates/runmat-runtime/src/builtins/math/basic/other.rs";
   wrongBinding.digest.value = contentDigest(Buffer.from(JSON.stringify(wrongBinding.snapshot))).slice("sha256:".length);
-  const wrongBindingInventory = buildInventory(fixture.repository, undefined, { revision: REVISION, compiledInventory: wrongBinding });
+  const wrongBindingInventory = buildInventory(fixture.repository, dispositions, { revision: REVISION, compiledInventory: wrongBinding });
   const wrongBindingProof = buildInventoryDeltaProof(fixture.repository, fixture.inventory, wrongBindingInventory, fixture.control, fixture.bundleId);
   assert.equal(wrongBindingProof.result, "fail");
   assert.match(wrongBindingProof.identities[0].failures.join("\n"), /binding provenance differs/);
 
   fs.appendFileSync(path.join(fixture.repository, "Cargo.toml"), "\n# unreviewed\n");
-  const escapedInventory = buildInventory(fixture.repository, undefined, { revision: REVISION, compiledInventory: fixture.compiledInventory });
+  const escapedInventory = buildInventory(fixture.repository, dispositions, { revision: REVISION, compiledInventory: fixture.compiledInventory });
   const escaped = buildInventoryDeltaProof(fixture.repository, fixture.inventory, escapedInventory, fixture.control, fixture.bundleId);
   assert.equal(escaped.result, "fail");
   assert.match(escaped.failures.join("\n"), /source changed outside the reviewed bundle scopes/);
@@ -738,9 +807,9 @@ test("control CLI reconstructs the complete reviewed topology chain before freez
   }
 });
 
-test("gate evidence selects a reviewed host storage profile and rejects stale or mismatched observations", () => {
+test("gate evidence binds the subject execution target through production and later sealing", () => {
   const fixture = controlledFixture();
-  const expected = { source_revision: fixture.inventory.source.revision, source_digest: fixture.inventory.source.digest, baseline_source_revision: fixture.inventory.source.revision, baseline_inventory_digest: fixture.inventory.digest, subject_inventory_digest: fixture.inventory.digest, control_manifest_digest: fixture.control.digest, bundle_id: fixture.bundleId, storage_policy: fixture.control.value.storage_policy, compiled_build: fixture.inventory.compiled_inventory.build };
+  const expected = { source_revision: fixture.inventory.source.revision, source_digest: fixture.inventory.source.digest, baseline_source_revision: fixture.inventory.source.revision, baseline_inventory_digest: fixture.inventory.digest, subject_inventory_digest: fixture.inventory.digest, control_manifest_digest: fixture.control.digest, bundle_id: fixture.bundleId, storage_policy: fixture.control.value.storage_policy, compiled_build: fixture.inventory.compiled_inventory.build, execution_targets: fixture.control.executionTargets };
   const stale = gate(fixture, "architecture"); stale.storage_admission.observed_at = "2026-09-10T23:00:00.000Z";
   assert.throws(() => parseGateResult(stale, expected), /time bound/);
   const filesystem = gate(fixture, "architecture"); filesystem.storage_admission.volumes[0].filesystem_id = "posix-dev:3";
@@ -751,9 +820,39 @@ test("gate evidence selects a reviewed host storage profile and rejects stale or
     volume_roles: structuredClone(foreignPolicy.host_profiles["fixture-host"].volume_roles),
   };
   const foreign = gate(fixture, "architecture");
+  foreign.execution_target = { operating_system: "linux", architecture: "x86_64" };
   foreign.storage_admission.profile_id = "linux-host";
   foreign.storage_admission.execution_host = "linux-builder";
-  assert.throws(() => parseGateResult(foreign, { ...expected, storage_policy: foreignPolicy }), /differs from the subject build target/);
+  assert.throws(() => parseGateResult(foreign, { ...expected, storage_policy: foreignPolicy }), /execution target differs from the subject build target/);
+
+  const sealPlans = new Map([...fixture.control.bundles.get(fixture.bundleId).gate_plans].map(([gateName, plan]) => [
+    gateName,
+    {
+      ...plan,
+      program: {
+        ...plan.program,
+        approved_executables: [
+          { operating_system: "linux", architecture: "x86_64", content_digest: plan.program.approved_executables[0].content_digest },
+          ...plan.program.approved_executables,
+        ],
+      },
+    },
+  ]));
+  const sealExpected = {
+    ...expected,
+    compiled_build: undefined,
+    execution_targets: [
+      { operating_system: "linux", architecture: "x86_64" },
+      ...fixture.control.executionTargets,
+    ],
+    storage_policy: foreignPolicy,
+    gate_plans: sealPlans,
+    repository: fixture.repository,
+  };
+  assert.equal(parseGateResult(foreign, sealExpected).execution_target.operating_system, "linux");
+  const unreviewedTarget = structuredClone(foreign);
+  unreviewedTarget.execution_target = { operating_system: "windows", architecture: "x86_64" };
+  assert.throws(() => parseGateResult(unreviewedTarget, sealExpected), /absent from the reviewed control target set/);
   const samePlatformPolicy = structuredClone(fixture.control.value.storage_policy);
   samePlatformPolicy.host_profiles["other-macos-host"] = {
     operating_system: fixture.inventory.compiled_inventory.build.operating_system,
@@ -1142,6 +1241,10 @@ function fullChainControl(inventory, topology) {
       review,
     },
     exception_manifest: { entries: [], review },
+    execution_targets: [{
+      operating_system: inventory.compiled_inventory.build.operating_system,
+      architecture: inventory.compiled_inventory.build.architecture,
+    }],
     storage_policy: {
       host_profiles: { "fixture-host": {
         operating_system: inventory.compiled_inventory.build.operating_system,
@@ -1186,6 +1289,7 @@ function writeFullControlReviewSet(directory, inventory, topology, scaffold, pol
     program_profiles: programProfiles,
     migration_findings: policies.migration_findings,
     exception_manifest: policies.exception_manifest,
+    execution_targets: policies.execution_targets,
     storage_policy: policies.storage_policy,
     review: reviewed("full-chain global control review"),
   };

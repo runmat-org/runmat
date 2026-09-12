@@ -23,6 +23,7 @@ export function validateControlReviewChain(candidateValue, attestationValue, exp
     identity_controls: structuredClone(candidate.identity_controls),
     migration_findings: structuredClone(candidate.migration_findings),
     exception_manifest: structuredClone(candidate.exception_manifest),
+    execution_targets: structuredClone(candidate.execution_targets),
     storage_policy: structuredClone(candidate.storage_policy),
     review: structuredClone(attestation.review),
   };

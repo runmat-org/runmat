@@ -9,8 +9,8 @@ import { materializeTopologyControl } from "./topology/control-projection.mjs";
 import { assertValidatedTopologyView } from "./topology/freeze.mjs";
 import { assertValidatedControlReview } from "./control-authoring/authority.mjs";
 import {
-  parseExceptionManifestPolicy, parseIdentityControlPolicy,
-  parseOperationalBundleControlPolicy, parseReviewedEvidence, parseStoragePolicy,
+  executionTargetKey, parseExceptionManifestPolicy, parseIdentityControlPolicy,
+  parseOperationalBundleControlPolicy, parseReviewedEvidence,
 } from "./control-authoring/policy-schema.mjs";
 import {
   SAFE_IDENTITY, array, digest, enumValue, exact, identity, integer, kind, nonempty,
@@ -29,7 +29,7 @@ export function validateControlManifestStructure(value, { inventory: current, re
   }
   assertValidatedTopologyView(reviewedTopology);
   kind(value, 2, "runmat-builtin-migration-control-manifest", "control manifest");
-  exact(value, ["schema_version", "kind", "authority", "program", "inputs", "topology_digest", "candidate_digest", "attestation_digest", "baseline_context", "cohorts", "bundle_controls", "identity_controls", "migration_findings", "exception_manifest", "storage_policy", "review", "digest"], "control manifest");
+  exact(value, ["schema_version", "kind", "authority", "program", "inputs", "topology_digest", "candidate_digest", "attestation_digest", "baseline_context", "cohorts", "bundle_controls", "identity_controls", "migration_findings", "exception_manifest", "execution_targets", "storage_policy", "review", "digest"], "control manifest");
   if (value.authority !== "reviewed-development-control") throw new Error("control manifest has invalid authority");
   if (value.program !== "RM-1064/C00-C07") throw new Error("control manifest has unexpected program");
   digest(value.topology_digest, "reviewed topology digest");
@@ -37,7 +37,7 @@ export function validateControlManifestStructure(value, { inventory: current, re
   digest(value.candidate_digest, "control candidate digest");
   digest(value.attestation_digest, "control attestation digest");
   digest(value.digest, "control manifest digest");
-  validateControlProjection({
+  const projection = validateControlProjection({
     inventory: current,
     topology: reviewedTopology,
     baselineContext: value.baseline_context,
@@ -45,6 +45,7 @@ export function validateControlManifestStructure(value, { inventory: current, re
     identityControls: value.identity_controls,
     migrationFindings: value.migration_findings,
     exceptionManifest: value.exception_manifest,
+    executionTargets: value.execution_targets,
     storagePolicy: value.storage_policy,
   });
   const baseline = parseBaselineContext(value.baseline_context, reviewedTopology);
@@ -74,7 +75,6 @@ export function validateControlManifestStructure(value, { inventory: current, re
   if (!bundles.size || !identities.size) throw new Error("control manifest must contain bundles and identities");
   const migrationFindings = parseFindingDispositions(value.migration_findings, bundles, current?.migration_findings ?? null);
   parseExceptionManifestPolicy(value.exception_manifest, bundles);
-  parseStoragePolicy(value.storage_policy);
   parseReviewedEvidence(value.review, "control manifest review");
   validateBundleGraph(bundles, identities);
   validateIdentityGraph(identities);
@@ -82,7 +82,18 @@ export function validateControlManifestStructure(value, { inventory: current, re
   if (current) validateBaseline(baseline, current, identities);
   const { digest: _ignored, ...payload } = value;
   if (evidenceDigest(payload) !== value.digest) throw new Error("control manifest digest mismatch");
-  return deepImmutable({ value, inputs: value.inputs, topology_digest: value.topology_digest, baseline, cohorts, bundles, identities, migrationFindings, digest: value.digest });
+  return deepImmutable({
+    value,
+    inputs: value.inputs,
+    topology_digest: value.topology_digest,
+    baseline,
+    executionTargets: projection.executionTargets,
+    cohorts,
+    bundles,
+    identities,
+    migrationFindings,
+    digest: value.digest,
+  });
 }
 
 export function parseControlManifest(value, { inventory, reviewedTopology, reviewedControl } = {}) {
@@ -136,14 +147,18 @@ export function assertControlSubject(control, inventory) {
   assertValidatedControl(control);
   assertInventoryIntegrity(inventory, "control subject inventory");
   const build = inventory.compiled_inventory?.build;
-  if (build?.operating_system !== control.baseline.compiled_target.operating_system
-    || build?.architecture !== control.baseline.compiled_target.architecture) {
-    throw new Error("control subject compiled target differs from the reviewed baseline target");
+  const target = executionTargetKey(build ?? {});
+  if (!control.executionTargets.some((entry) => executionTargetKey(entry) === target)) {
+    throw new Error("control subject compiled target is not a reviewed execution target");
   }
   const expected = [...control.identities.keys()].sort();
   const observed = inventory.identities.map((entry) => entry.identity).sort();
   if (JSON.stringify(observed) !== JSON.stringify(expected)) {
     throw new Error("control subject identities differ from the reviewed control identity set");
+  }
+  const rows = new Map(inventory.identities.map((entry) => [entry.identity, entry]));
+  for (const [identity, reviewed] of control.identities) {
+    validateReviewedClassification(reviewed, rows.get(identity));
   }
   return inventory;
 }

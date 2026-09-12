@@ -29,6 +29,7 @@ export function auditMigration(repository, baseline, subject, control, lease, ba
     storage_policy: control.value.storage_policy,
     source_files: subject.source.files,
     repository, gate_plans: bundle.gate_plans, compiled_build: subject.compiled_inventory.build,
+    execution_targets: control.executionTargets,
   };
   const gates = parseGates(evidence.gate_results ?? [], expected, requested, failures);
   const prepares = indexPrepare(evidence.prepare_results ?? [], baseline, control, lease, requested, failures);

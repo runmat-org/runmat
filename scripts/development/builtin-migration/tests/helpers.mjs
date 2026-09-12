@@ -95,7 +95,7 @@ export function controlledFixture(options = {}) {
   const identityControl = { public_spelling: id, runtime_owner: `crates/runmat-runtime/src/builtins/math/basic/${id}.rs`, shared_dependencies: [], complexity: { class: "low", weight: 1, basis: ["single identity"] }, maturity, expected_authorities: { catalog_package: `crates/runmat-builtins/src/catalog/entries/math/basic/${id}/mod.rs`, catalog_entry_count: 1, catalog_constant_count: 0, documentation: "catalog", runtime_bindings: [{ path: `crates/runmat-runtime/src/builtins/math/basic/${id}.rs`, function: `${id}_builtin`, variant: "default" }], runtime_constants: [], native_link: "not-applicable", wasm_registry: "not-applicable" }, expected_removals: [], baseline_evidence: [], owner: "fixture", review: { status: "reviewed", evidence: ["fixture review"] } };
   const migrationFindings = { schema_version: 1, kind: "runmat-builtin-migration-finding-dispositions", rows: inventory.migration_findings.map((finding) => ({ finding_digest: evidenceDigest(finding), ...finding, disposition: "bundle-work", bundle_id: bundleId, reason: "Fixture migration work", evidence: ["fixture review"] })), review: { status: "reviewed", evidence: ["fixture review"] } };
   const exceptionManifest = { entries: [], review: { status: "reviewed", evidence: ["fixture review"] } };
-  const storagePolicy = { host_profiles: { "fixture-host": {
+  const hostProfiles = { "fixture-host": {
       operating_system: inventory.compiled_inventory.build.operating_system,
       architecture: inventory.compiled_inventory.build.architecture,
       execution_host: os.hostname(),
@@ -103,7 +103,12 @@ export function controlledFixture(options = {}) {
         source_worktree: { role: "source-worktree", mount_path: "/System/Volumes/Data", filesystem_id: "posix-dev:1", minimum_free_bytes: 1, pause_below_bytes: 2, maximum_observation_age_seconds: 60 },
         target_temp: { role: "target-temp", mount_path: "/private/tmp/runmat-integration-tmp", filesystem_id: "posix-dev:2", minimum_free_bytes: 1, pause_below_bytes: 2, maximum_observation_age_seconds: 60 },
       },
-    } }, targets_must_be_disjoint: true, occt_default: "disabled-unless-affected" };
+    }, ...(options.storageProfiles ?? {}) };
+  const storagePolicy = {
+    host_profiles: Object.fromEntries(Object.entries(hostProfiles).sort(([left], [right]) => left.localeCompare(right))),
+    targets_must_be_disjoint: true,
+    occt_default: "disabled-unless-affected",
+  };
   const scaffold = buildControlOverlayScaffold(inventory, draft, topology);
   const { reviewSet, manifestPath: controlReviewSetPath } = fixtureControlReviewSet(repository, inventory, topology, scaffold, bundleId, bundleControl, id, identityControl, migrationFindings, exceptionManifest, storagePolicy);
   const candidate = composeControlCandidate({ inventory, topology, scaffold, reviewSet });
@@ -142,6 +147,10 @@ function fixtureControlReviewSet(repository, inventory, topology, scaffold, bund
     program_profiles: programProfiles,
     migration_findings: migrationFindings,
     exception_manifest: exceptionManifest,
+    execution_targets: [...new Map(Object.values(storagePolicy.host_profiles).map((profile) => [
+      `${profile.operating_system}\0${profile.architecture}`,
+      { operating_system: profile.operating_system, architecture: profile.architecture },
+    ])).entries()].sort(([left], [right]) => left.localeCompare(right)).map(([, target]) => target),
     storage_policy: storagePolicy,
     review: { status: "reviewed", evidence: ["fixture global review"] },
   };
@@ -335,8 +344,10 @@ export function gate(fixture, name, artifactId = `gate-${name}`, subject = fixtu
     return { role, path: artifactPath, byte_length: bytes.length, content_digest: contentDigest(bytes) };
   });
   return {
-    schema_version: 2, kind: "runmat-builtin-migration-gate-result", authority: "machine-verification-only",
-    producer: namedProducer, producer_evidence: { schema_version: 1, kind: `${namedProducer}-evidence`, contract: { reviewed_source_revision: fixture.inventory.source.revision, executable_digest: executableDigest, producer_source_digest: sourceDigest }, invocation, process: processEvidence, captured_process_digest: evidenceDigest(processEvidence) }, artifact_id: artifactId, produced_at: "2026-09-11T00:00:30.000Z", source_revision: subject.source.revision,
+    schema_version: 3, kind: "runmat-builtin-migration-gate-result", authority: "machine-verification-only",
+    producer: namedProducer, producer_evidence: { schema_version: 1, kind: `${namedProducer}-evidence`, contract: { reviewed_source_revision: fixture.inventory.source.revision, executable_digest: executableDigest, producer_source_digest: sourceDigest }, invocation, process: processEvidence, captured_process_digest: evidenceDigest(processEvidence) }, artifact_id: artifactId, produced_at: "2026-09-11T00:00:30.000Z",
+    execution_target: { operating_system: subject.compiled_inventory.build.operating_system, architecture: subject.compiled_inventory.build.architecture },
+    source_revision: subject.source.revision,
     source_digest: subject.source.digest, baseline_inventory_digest: fixture.inventory.digest, subject_inventory_digest: subject.digest,
     control_manifest_digest: fixture.control.digest, bundle_id: fixture.bundleId, identities: [fixture.id],
     gate: name, result: "pass", checks: [{ id: `${name}:${fixture.id}`, result: "pass", evidence_digest: `sha256:${"a".repeat(64)}` }], artifacts,
