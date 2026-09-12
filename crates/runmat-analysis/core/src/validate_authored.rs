@@ -4,8 +4,10 @@ use crate::{
     AnalysisBoundary, AnalysisConnector, AnalysisConstraint, AnalysisInterface,
     AnalysisInterfaceKind, AnalysisModel, AnalysisValidationError, BoundaryOperator, ConnectorKind,
     CoordinateFrame, EntityDimension, ExpectedTopology, FluidConstraintKind,
-    MagneticConstraintKind, PairingPolicy, PeriodicConstraint, PeriodicTransform, PhysicalSignal,
-    StructuralConstraintKind, ThermalConstraintKind, ValidatedAnalysisSequence,
+    MagneticConstraintKind, PairingPolicy, PeriodicConstraint, PeriodicTransform,
+    PhysicalQuantityKind, PhysicalSignal, SignalDomainKind, SignalPrecision, SignalShape,
+    StructuralConstraintKind, StructuralKinematicHistory, StructuralMotionReconstruction,
+    ThermalConstraintKind, ValidatedAnalysisSequence,
 };
 
 pub(crate) fn validate_authored_model(
@@ -158,6 +160,30 @@ fn validate_constraint_values(
                         .rotations
                         .iter()
                         .any(|entry| !entry.value.is_well_formed(signals))
+            }
+            StructuralConstraintKind::PrescribedMotion(values) => {
+                values.translations.is_empty()
+                    || value.frame != CoordinateFrame::Global
+                    || has_duplicates(values.translations.iter().map(|entry| entry.dof))
+                    || values.translations.iter().any(|entry| {
+                        let StructuralKinematicHistory::AccelerationDriven {
+                            acceleration,
+                            initial_displacement,
+                            initial_velocity,
+                            reconstruction:
+                                StructuralMotionReconstruction::PiecewiseLinearAccelerationExact,
+                        } = &entry.history;
+                        !initial_displacement.is_finite()
+                            || !initial_velocity.is_finite()
+                            || !signals.iter().any(|signal| {
+                                signal.signal_id() == &acceleration.0
+                                    && signal.quantity() == PhysicalQuantityKind::Acceleration
+                                    && signal.shape() == &SignalShape::Vector3
+                                    && signal.frame() == Some(&CoordinateFrame::Global)
+                                    && signal.domain() == SignalDomainKind::Time
+                                    && signal.precision() == SignalPrecision::Real64
+                            })
+                    })
             }
             StructuralConstraintKind::NormalDisplacement { value, .. } => {
                 !value.is_well_formed(signals)
@@ -411,6 +437,105 @@ fn periodic_is_valid(periodic: &PeriodicConstraint) -> bool {
 fn has_duplicates<T: Eq + std::hash::Hash>(values: impl IntoIterator<Item = T>) -> bool {
     let mut seen = HashSet::new();
     values.into_iter().any(|value| !seen.insert(value))
+}
+
+#[cfg(test)]
+mod prescribed_motion_tests {
+    use super::*;
+    use crate::{
+        Acceleration, AccelerationSignalId, Displacement, PrescribedStructuralMotion, RegionTarget,
+        Signal, SignalApproximationEvidence, SignalExtrapolation, SignalId, SignalInterpolation,
+        SignalKnot, SignalOrdinate, SignalProvenance, SignalRepresentation, SignalValue,
+        StructuralConstraint, StructuralKinematicHistory, StructuralMotionReconstruction,
+        StructuralTranslationDof, TabulatedSignal, TabulatedSignalDomain, TranslationDofMotion,
+        Velocity,
+    };
+
+    fn acceleration(shape: SignalShape) -> PhysicalSignal {
+        PhysicalSignal::Acceleration(Signal {
+            signal_id: SignalId("motion".into()),
+            shape,
+            frame: Some(CoordinateFrame::Global),
+            representation: SignalRepresentation::Tabulated(TabulatedSignal {
+                domain: TabulatedSignalDomain::TimeSeconds,
+                knots: [0.0, 1.0]
+                    .into_iter()
+                    .map(|time| {
+                        SignalKnot::continuous(
+                            time,
+                            SignalOrdinate::Real(SignalValue::Vector3([
+                                Acceleration::new(1.0),
+                                Acceleration::new(0.0),
+                                Acceleration::new(0.0),
+                            ])),
+                        )
+                    })
+                    .collect(),
+                interpolation: SignalInterpolation::Linear,
+                extrapolation: SignalExtrapolation::Reject,
+            }),
+            precision: SignalPrecision::Real64,
+            evidence: SignalApproximationEvidence {
+                max_absolute_error: Some(0.0),
+                max_relative_error: Some(0.0),
+                derivative_max_absolute_error: None,
+                sample_count: 2,
+            },
+            provenance: SignalProvenance::Authored,
+        })
+    }
+
+    fn constraint() -> AnalysisConstraint {
+        AnalysisConstraint::Structural(StructuralConstraint {
+            constraint_id: "motion".into(),
+            frame: CoordinateFrame::Global,
+            kind: StructuralConstraintKind::PrescribedMotion(PrescribedStructuralMotion {
+                target: RegionTarget::boundary("support"),
+                translations: vec![TranslationDofMotion {
+                    dof: StructuralTranslationDof::Ux,
+                    history: StructuralKinematicHistory::AccelerationDriven {
+                        acceleration: AccelerationSignalId(SignalId("motion".into())),
+                        initial_displacement: Displacement::new(0.0),
+                        initial_velocity: Velocity::new(0.0),
+                        reconstruction:
+                            StructuralMotionReconstruction::PiecewiseLinearAccelerationExact,
+                    },
+                }],
+            }),
+        })
+    }
+
+    #[test]
+    fn prescribed_motion_requires_a_typed_global_vector_acceleration_history() {
+        validate_constraint_values(&constraint(), &[acceleration(SignalShape::Vector3)])
+            .expect("vector acceleration is the public support-motion contract");
+        assert!(matches!(
+            validate_constraint_values(&constraint(), &[acceleration(SignalShape::Scalar)]),
+            Err(AnalysisValidationError::InvalidConstraint { .. })
+        ));
+        let mut local_signal = acceleration(SignalShape::Vector3);
+        let PhysicalSignal::Acceleration(signal) = &mut local_signal else {
+            unreachable!()
+        };
+        signal.frame = Some(CoordinateFrame::Material);
+        assert!(matches!(
+            validate_constraint_values(&constraint(), &[local_signal]),
+            Err(AnalysisValidationError::InvalidConstraint { .. })
+        ));
+        assert!(matches!(
+            validate_constraint_values(&constraint(), &[]),
+            Err(AnalysisValidationError::InvalidConstraint { .. })
+        ));
+        let mut local = constraint();
+        let AnalysisConstraint::Structural(structural) = &mut local else {
+            unreachable!()
+        };
+        structural.frame = CoordinateFrame::Material;
+        assert!(matches!(
+            validate_constraint_values(&local, &[acceleration(SignalShape::Vector3)]),
+            Err(AnalysisValidationError::InvalidConstraint { .. })
+        ));
+    }
 }
 
 #[cfg(test)]

@@ -84167,6 +84167,78 @@
       }
     },
     {
+      "name": "fea.StructuralConstraint.prescribedMotion",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "constraint = fea.StructuralConstraint.prescribedMotion(id, region, motions)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Constraint identifier."
+            },
+            {
+              "name": "region",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "A geometry.Region selected from the model geometry."
+            },
+            {
+              "name": "motions",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "One typed structural motion or a cell array of component motions."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Concrete constraint constructors accept identifiers, immutable geometry regions, and already-dimensioned values; they have no direct integer input role."
+      }
+    },
+    {
       "name": "fea.StructuralConstraint.rigidCoupling",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -84810,243 +84882,6 @@
       "integer_audit": {
         "kind": "NotApplicable",
         "notes": "Concrete constraint constructors accept identifiers, immutable geometry regions, and already-dimensioned values; they have no direct integer input role."
-      }
-    },
-    {
-      "name": "fea.StructuralExcitation.baseAcceleration",
-      "output_mode": "Fixed",
-      "completion_policy": "Public",
-      "signatures": [
-        {
-          "label": "action = fea.StructuralExcitation.baseAcceleration(id, caseId, region, signal)",
-          "inputs": [
-            {
-              "name": "id",
-              "ty": "StringScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Stable excitation identifier."
-            },
-            {
-              "name": "caseId",
-              "ty": "StringScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Identifier of the containing excitation case."
-            },
-            {
-              "name": "region",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Typed geometry.Region target."
-            },
-            {
-              "name": "signal",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Typed physical signal with the quantity required by this action."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "result",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "FEA object or operation result."
-            }
-          ]
-        }
-      ],
-      "errors": [
-        {
-          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
-          "identifier": "RunMat:fea:LoadFailed",
-          "when": "A .fea document cannot be read, parsed, or resolved.",
-          "message": "fea: failed to load FEA document"
-        },
-        {
-          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
-          "identifier": "RunMat:fea:InvalidInput",
-          "when": "A builtin receives an unsupported argument pattern or object type.",
-          "message": "fea: invalid input"
-        },
-        {
-          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
-          "identifier": "RunMat:fea:OperationFailed",
-          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
-          "message": "fea: operation failed"
-        },
-        {
-          "code": "RM.FEA.BUILTIN.INTERNAL",
-          "identifier": "RunMat:fea:Internal",
-          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
-          "message": "fea: internal error"
-        }
-      ],
-      "integer_audit": {
-        "kind": "NotApplicable",
-        "notes": "Typed excitation constructors accept identifiers, geometry.Region values, and typed signal objects; physical numeric conversion belongs to the signal constructor."
-      }
-    },
-    {
-      "name": "fea.StructuralExcitation.baseDisplacement",
-      "output_mode": "Fixed",
-      "completion_policy": "Public",
-      "signatures": [
-        {
-          "label": "action = fea.StructuralExcitation.baseDisplacement(id, caseId, region, signal)",
-          "inputs": [
-            {
-              "name": "id",
-              "ty": "StringScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Stable excitation identifier."
-            },
-            {
-              "name": "caseId",
-              "ty": "StringScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Identifier of the containing excitation case."
-            },
-            {
-              "name": "region",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Typed geometry.Region target."
-            },
-            {
-              "name": "signal",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Typed physical signal with the quantity required by this action."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "result",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "FEA object or operation result."
-            }
-          ]
-        }
-      ],
-      "errors": [
-        {
-          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
-          "identifier": "RunMat:fea:LoadFailed",
-          "when": "A .fea document cannot be read, parsed, or resolved.",
-          "message": "fea: failed to load FEA document"
-        },
-        {
-          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
-          "identifier": "RunMat:fea:InvalidInput",
-          "when": "A builtin receives an unsupported argument pattern or object type.",
-          "message": "fea: invalid input"
-        },
-        {
-          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
-          "identifier": "RunMat:fea:OperationFailed",
-          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
-          "message": "fea: operation failed"
-        },
-        {
-          "code": "RM.FEA.BUILTIN.INTERNAL",
-          "identifier": "RunMat:fea:Internal",
-          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
-          "message": "fea: internal error"
-        }
-      ],
-      "integer_audit": {
-        "kind": "NotApplicable",
-        "notes": "Typed excitation constructors accept identifiers, geometry.Region values, and typed signal objects; physical numeric conversion belongs to the signal constructor."
-      }
-    },
-    {
-      "name": "fea.StructuralExcitation.baseVelocity",
-      "output_mode": "Fixed",
-      "completion_policy": "Public",
-      "signatures": [
-        {
-          "label": "action = fea.StructuralExcitation.baseVelocity(id, caseId, region, signal)",
-          "inputs": [
-            {
-              "name": "id",
-              "ty": "StringScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Stable excitation identifier."
-            },
-            {
-              "name": "caseId",
-              "ty": "StringScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Identifier of the containing excitation case."
-            },
-            {
-              "name": "region",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Typed geometry.Region target."
-            },
-            {
-              "name": "signal",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Typed physical signal with the quantity required by this action."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "result",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "FEA object or operation result."
-            }
-          ]
-        }
-      ],
-      "errors": [
-        {
-          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
-          "identifier": "RunMat:fea:LoadFailed",
-          "when": "A .fea document cannot be read, parsed, or resolved.",
-          "message": "fea: failed to load FEA document"
-        },
-        {
-          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
-          "identifier": "RunMat:fea:InvalidInput",
-          "when": "A builtin receives an unsupported argument pattern or object type.",
-          "message": "fea: invalid input"
-        },
-        {
-          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
-          "identifier": "RunMat:fea:OperationFailed",
-          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
-          "message": "fea: operation failed"
-        },
-        {
-          "code": "RM.FEA.BUILTIN.INTERNAL",
-          "identifier": "RunMat:fea:Internal",
-          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
-          "message": "fea: internal error"
-        }
-      ],
-      "integer_audit": {
-        "kind": "NotApplicable",
-        "notes": "Typed excitation constructors accept identifiers, geometry.Region values, and typed signal objects; physical numeric conversion belongs to the signal constructor."
       }
     },
     {
@@ -85797,6 +85632,85 @@
           "notes": "Initial-condition authoring is a host-only immutable object construction boundary."
         }
       ]
+    },
+    {
+      "name": "fea.StructuralMotion.acceleration",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "motion = fea.StructuralMotion.acceleration(dof, acceleration, initialDisplacement, initialVelocity)",
+          "inputs": [
+            {
+              "name": "dof",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed translational structural degree of freedom."
+            },
+            {
+              "name": "acceleration",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Real64 three-component time-domain acceleration signal."
+            },
+            {
+              "name": "initialDisplacement",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Support displacement at the start of the step."
+            },
+            {
+              "name": "initialVelocity",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Support velocity at the start of the step."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Concrete constraint constructors accept identifiers, immutable geometry regions, and already-dimensioned values; they have no direct integer input role."
+      }
     },
     {
       "name": "fea.StructuralStep.modal",

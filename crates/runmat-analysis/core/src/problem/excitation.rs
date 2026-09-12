@@ -79,9 +79,6 @@ pub enum ExcitationAction {
     Traction(AnalysisExcitation),
     Pressure(AnalysisExcitation),
     BodyForce(AnalysisExcitation),
-    BaseDisplacement(AnalysisExcitation),
-    BaseVelocity(AnalysisExcitation),
-    BaseAcceleration(AnalysisExcitation),
     HeatGeneration(AnalysisExcitation),
     HeatFlux(AnalysisExcitation),
     TemperatureField(AnalysisExcitation),
@@ -106,9 +103,6 @@ impl ExcitationAction {
             | Self::Traction(value)
             | Self::Pressure(value)
             | Self::BodyForce(value)
-            | Self::BaseDisplacement(value)
-            | Self::BaseVelocity(value)
-            | Self::BaseAcceleration(value)
             | Self::HeatGeneration(value)
             | Self::HeatFlux(value)
             | Self::TemperatureField(value)
@@ -133,12 +127,9 @@ impl ExcitationAction {
             Self::Traction(_) => PhysicalQuantityKind::Traction,
             Self::Pressure(_) | Self::AcousticPressure(_) => PhysicalQuantityKind::Pressure,
             Self::BodyForce(_) => PhysicalQuantityKind::BodyForceDensity,
-            Self::BaseDisplacement(_) => PhysicalQuantityKind::Displacement,
-            Self::BaseVelocity(_)
-            | Self::NormalVelocity(_)
-            | Self::InletVelocity(_)
-            | Self::WallMotion(_) => PhysicalQuantityKind::Velocity,
-            Self::BaseAcceleration(_) => PhysicalQuantityKind::Acceleration,
+            Self::NormalVelocity(_) | Self::InletVelocity(_) | Self::WallMotion(_) => {
+                PhysicalQuantityKind::Velocity
+            }
             Self::HeatGeneration(_) => PhysicalQuantityKind::HeatGenerationDensity,
             Self::HeatFlux(_) => PhysicalQuantityKind::HeatFlux,
             Self::TemperatureField(_) | Self::AmbientTemperature(_) => {
@@ -160,9 +151,6 @@ impl ExcitationAction {
             | Self::Traction(value)
             | Self::Pressure(value)
             | Self::BodyForce(value)
-            | Self::BaseDisplacement(value)
-            | Self::BaseVelocity(value)
-            | Self::BaseAcceleration(value)
             | Self::HeatGeneration(value)
             | Self::HeatFlux(value)
             | Self::TemperatureField(value)

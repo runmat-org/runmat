@@ -261,9 +261,14 @@ validation or assembly.
 
 Rotational structural runs may return `structural.rotation` and `structural.reaction_moment` fields. Beam-specific moment resultants use `structural.beam_torsion_moment` and `structural.beam_bending_moment`; shell-specific resultants use `structural.shell_bending_moment`.
 
+| Structural motion constructor | Exact signature | Contract |
+| --- | --- | --- |
+| `fea.StructuralMotion.acceleration` | `motion = fea.StructuralMotion.acceleration(dof, acceleration, initialDisplacement, initialVelocity)` | `dof` is a typed translational DOF; `acceleration` is a real64 three-component time history; initial values are typed displacement and velocity. The selected global component is integrated with exact piecewise-linear reconstruction. |
+| `fea.StructuralConstraint.prescribedMotion` | `constraint = fea.StructuralConstraint.prescribedMotion(id, region, motions)` | Binds one motion or a cell of distinct translational components to a geometry region. Only structural transient response admits the constraint. |
+
 Structural transient payloads retain one required entry per accepted time point for displacement,
-velocity, acceleration, reaction force, kinetic energy, strain energy, residual norm, external work,
-damping dissipation, signed energy-balance residual, normalized energy-balance error, and the full
+velocity, acceleration, reaction force, kinetic energy, strain energy, residual norm, applied-load
+work, support work, damping dissipation, signed energy-balance residual, normalized energy-balance error, and the full
 `M*a`, `C*v`, `K*u`, applied-load, and equilibrium-residual vectors. Rotation, angular velocity,
 angular acceleration, reaction moment, and continuum recovery histories are present only when the
 executed formulation owns those quantities. Snapshot queries validate the complete inventory before

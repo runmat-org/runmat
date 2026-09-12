@@ -154,10 +154,7 @@ fn validate_action_policy(
             excitation.distribution,
             ExcitationDistribution::IntensityPerVolume | ExcitationDistribution::TopologyField
         ),
-        ExcitationAction::BaseDisplacement(_)
-        | ExcitationAction::BaseVelocity(_)
-        | ExcitationAction::BaseAcceleration(_)
-        | ExcitationAction::WallMotion(_) => {
+        ExcitationAction::WallMotion(_) => {
             excitation.distribution == ExcitationDistribution::UniformKinematic
         }
         _ => true,
@@ -170,9 +167,6 @@ fn validate_action_policy(
         action,
         ExcitationAction::Force(_)
             | ExcitationAction::Moment(_)
-            | ExcitationAction::BaseDisplacement(_)
-            | ExcitationAction::BaseVelocity(_)
-            | ExcitationAction::BaseAcceleration(_)
             | ExcitationAction::NormalVelocity(_)
             | ExcitationAction::InletVelocity(_)
             | ExcitationAction::WallMotion(_)

@@ -147,17 +147,26 @@ M a + C v + K u - f = r
 The projected free-coordinate norm of `r` is the convergence residual. Its constrained-coordinate
 components are the dynamic support reactions; translational and rotational reactions are published
 separately when the formulation owns rotational degrees of freedom. The transient payload also
-contains strain energy, kinetic energy, cumulative external work, cumulative damping dissipation,
-the signed energy-balance residual, and its normalized absolute error at every time point. For an
-initial mechanical energy `E0`, the reported balance is `E - E0 - Wext + D`. Formulation-owned solid
+contains strain energy, kinetic energy, cumulative applied-load work, cumulative support work,
+cumulative damping dissipation, the signed energy-balance residual, and its normalized absolute
+error at every time point. For initial mechanical energy `E0`, the reported balance is
+`E - E0 - Wload - Wsupport + D`. Formulation-owned solid
 strain, stress, von Mises, and strain-energy-density histories are recovered from each accepted
 physical state. Those fields remain absent for operator-only or other formulations that do not own
 the corresponding continuum recovery.
 
 The current direct-transient implementation requires invariant structural K, M, C, DOF layout, and
 constraint operators during one run. A reassembly that changes any of them fails before advancing
-the state. Time-varying loads are supported; prescribed support motion remains unavailable until its
-absolute/relative coordinate and derivative-consistency contract is implemented.
+the state. Time-varying loads and translational prescribed support motion are supported. Support
+motion is an essential constraint, not an excitation: one real64 vector acceleration history plus
+typed initial displacement and velocity determines displacement, velocity, and acceleration for a
+selected global translational DOF. The history must use linear interpolation, reject extrapolation,
+and cover the procedure interval exactly. RunMat integrates each acceleration segment exactly,
+solves in absolute coordinates with a fixed affine reduction, and publishes absolute state. At a
+jump, displacement and velocity remain continuous; the authored point-continuity rule selects the
+public acceleration and reaction, while the right limit starts the next positive-duration interval.
+Point refreshes add no work. Rotational support motion and displacement- or velocity-authored motion
+are outside the current admitted envelope and fail closed.
 
 ## Results After A Run
 

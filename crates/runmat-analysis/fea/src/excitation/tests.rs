@@ -375,6 +375,43 @@ fn event_inventory_ignores_unreferenced_signal_jumps() {
 }
 
 #[test]
+fn prescribed_motion_only_marks_actual_acceleration_jumps_as_discontinuities() {
+    let mut model = fixture_model(FixtureId::StructuralTransientTet4SupportMotionReference);
+    let step = &model.sequence.steps[0];
+    assert!(super::time_discontinuities(&model, step, 0.0, 1.0)
+        .unwrap()
+        .is_empty());
+
+    let runmat_analysis_core::PhysicalSignal::Acceleration(signal) = &mut model.signals[0] else {
+        panic!("support-motion fixture should carry an acceleration signal");
+    };
+    let runmat_analysis_core::SignalRepresentation::Tabulated(table) = &mut signal.representation
+    else {
+        panic!("support-motion acceleration should be tabulated");
+    };
+    let runmat_analysis_core::SignalKnotValue::Continuous(left_limit) =
+        table.knots[1].value.clone()
+    else {
+        panic!("support-motion midpoint should initially be continuous");
+    };
+    let right_limit =
+        runmat_analysis_core::SignalOrdinate::Real(runmat_analysis_core::SignalValue::Vector3([
+            runmat_analysis_core::Acceleration::new(2.0),
+            runmat_analysis_core::Acceleration::new(0.0),
+            runmat_analysis_core::Acceleration::new(0.0),
+        ]));
+    table.knots[1] = runmat_analysis_core::SignalKnot::jump(
+        0.5,
+        left_limit,
+        right_limit,
+        runmat_analysis_core::SignalPointContinuity::Right,
+    );
+
+    let events = super::time_discontinuities(&model, &model.sequence.steps[0], 0.0, 1.0).unwrap();
+    assert_eq!(events, vec![0.5]);
+}
+
+#[test]
 fn extrapolation_policy_is_applied_without_numeric_sentinels() {
     let mut model = tabulated_force_model(
         runmat_analysis_core::TabulatedSignalDomain::TimeSeconds,

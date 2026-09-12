@@ -7,12 +7,14 @@ use crate::{
         fea_transient_damping_dissipation_field_id, fea_transient_energy_balance_residual_field_id,
         fea_transient_external_work_field_id, fea_transient_kinetic_energy_field_id,
         fea_transient_relative_energy_balance_error_field_id, fea_transient_residual_norm_field_id,
-        fea_transient_strain_energy_field_id, ComputeBackend, FeaRunError, FeaRunResult,
-        FeaTransientRunResult, FEA_FIELD_STRUCTURAL_REACTION_FORCE,
+        fea_transient_strain_energy_field_id, fea_transient_support_work_field_id, ComputeBackend,
+        FeaRunError, FeaRunResult, FeaTransientRunResult, FEA_FIELD_STRUCTURAL_REACTION_FORCE,
         FEA_FIELD_STRUCTURAL_REACTION_MOMENT,
     },
     diagnostics::builders::{extend_common_run_diagnostics, CommonRunDiagnosticInputs},
-    excitation::{realize_step_excitations, time_discontinuities, ExcitationSamplePoint},
+    excitation::{
+        realize_step_excitations, time_discontinuities, ExcitationSamplePoint, StructuralMotionSet,
+    },
     physics::structural::dynamics::initial_state::{
         realize as realize_structural_initial_state, StructuralInitialConstraintView,
         StructuralInitialStateRealizationBasis,
@@ -31,6 +33,7 @@ use crate::{
 };
 
 mod constraint_admission;
+mod motion;
 mod recovery;
 
 const TRANSIENT_DISPLACEMENT_HISTORY_SOURCE: &str = "structural.transient.displacement";
@@ -69,7 +72,7 @@ pub fn run_transient_with_options(
     );
     check_cancelled("fea.run_transient")?;
     validate_model(model).map_err(|err| FeaRunError::InvalidModel(err.to_string()))?;
-    let required_history_samples = required_time_history_samples(execution_step)
+    let mut required_history_samples = required_time_history_samples(execution_step)
         .map_err(|error| FeaRunError::Observation(error.to_string()))?;
     emit_phase(
         "fea.run_transient",
@@ -86,9 +89,13 @@ pub fn run_transient_with_options(
     )
     .map_err(FeaRunError::InvalidModel)?;
     let start_time_s = time_grid.start_s();
+    let end_time_s = time_grid.end_s();
     let active_model = super::activation::model_with_active_constraints(model, execution_step);
     constraint_admission::validate(&active_model)
         .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
+    let structural_motions =
+        StructuralMotionSet::materialize(&active_model, execution_step, start_time_s, end_time_s)
+            .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
     let excitations = realize_step_excitations(
         &active_model,
         execution_step,
@@ -165,7 +172,15 @@ pub fn run_transient_with_options(
         Some(2),
         Some(5),
     );
-    let end_time_s = time_grid.end_s();
+    required_history_samples.extend(
+        structural_motions
+            .breakpoints_s()
+            .iter()
+            .copied()
+            .filter(|time| *time >= start_time_s && *time <= end_time_s),
+    );
+    required_history_samples.sort_by(f64::total_cmp);
+    required_history_samples.dedup_by(|left, right| left.to_bits() == right.to_bits());
     let discontinuities =
         time_discontinuities(&active_model, execution_step, start_time_s, end_time_s)
             .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
@@ -176,43 +191,63 @@ pub fn run_transient_with_options(
         end_time_s,
     )
     .map_err(|error| FeaRunError::Observation(error.to_string()))?;
-    let transient = solve_transient_system_with_assembly(
-        &summary,
-        options.clone(),
-        backend,
-        TransientTimeDomain {
-            start_time_s,
-            end_time_s,
-            step_boundaries: &step_boundaries,
-        },
-        initial_state.displacement,
-        initial_state.velocity,
-        |time_s, approach| {
-            let excitations = realize_step_excitations(
-                &active_model,
-                execution_step,
-                ExcitationSamplePoint::TimeSeconds {
-                    value: time_s,
-                    approach,
+    let assemble_at = |time_s, approach| {
+        let excitations = realize_step_excitations(
+            &active_model,
+            execution_step,
+            ExcitationSamplePoint::TimeSeconds {
+                value: time_s,
+                approach,
+            },
+        )
+        .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
+        let assembly = assemble_structural_system(
+            &active_model,
+            &excitations,
+            options.solver_mesh.clone(),
+            StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+        )
+        .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+        if assembly.dof_count != summary.dof_count {
+            return Err(FeaRunError::Assembly(format!(
+                "transient reassembly changed structural DOF count from {} to {}",
+                summary.dof_count, assembly.dof_count
+            )));
+        }
+        Ok::<AssemblySummary, FeaRunError>(assembly)
+    };
+    let transient = if structural_motions.is_empty() {
+        solve_transient_system_with_assembly(
+            &summary,
+            options.clone(),
+            backend,
+            TransientTimeDomain {
+                start_time_s,
+                end_time_s,
+                step_boundaries: &step_boundaries,
+            },
+            initial_state.displacement,
+            initial_state.velocity,
+            assemble_at,
+        )
+    } else {
+        motion::solve_prescribed_motion(
+            motion::StructuralMotionSolveInput {
+                summary: &summary,
+                motions: &structural_motions,
+                options: options.clone(),
+                backend,
+                time_domain: TransientTimeDomain {
+                    start_time_s,
+                    end_time_s,
+                    step_boundaries: &step_boundaries,
                 },
-            )
-            .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
-            let assembly = assemble_structural_system(
-                &active_model,
-                &excitations,
-                options.solver_mesh.clone(),
-                StructuralFormulationRequirement::ExperimentalSyntheticOperator,
-            )
-            .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
-            if assembly.dof_count != summary.dof_count {
-                return Err(FeaRunError::Assembly(format!(
-                    "transient reassembly changed structural DOF count from {} to {}",
-                    summary.dof_count, assembly.dof_count
-                )));
-            }
-            Ok::<AssemblySummary, FeaRunError>(assembly)
-        },
-    )
+                initial_displacement: initial_state.displacement,
+                initial_velocity: initial_state.velocity,
+            },
+            assemble_at,
+        )
+    }
     .map_err(|error| match error {
         TransientSolveError::Assembly(error) => error,
         other => FeaRunError::Solve(other.to_string()),
@@ -289,6 +324,7 @@ pub fn run_transient_with_options(
         &kinetic_energy_values,
         &strain_energy_values,
         &transient.external_work_j,
+        &transient.support_work_j,
         &transient.damping_dissipation_j,
         &transient.energy_balance_residual_j,
         &transient.relative_energy_balance_error,
@@ -343,6 +379,10 @@ pub fn run_transient_with_options(
     let external_work_snapshots = scalar_snapshots(
         &transient.external_work_j,
         fea_transient_external_work_field_id,
+    );
+    let support_work_snapshots = scalar_snapshots(
+        &transient.support_work_j,
+        fea_transient_support_work_field_id,
     );
     let damping_dissipation_snapshots = scalar_snapshots(
         &transient.damping_dissipation_j,
@@ -526,6 +566,7 @@ pub fn run_transient_with_options(
         reaction_force_snapshots,
         reaction_moment_snapshots,
         external_work_snapshots,
+        support_work_snapshots,
         damping_dissipation_snapshots,
         energy_balance_residual_snapshots,
         relative_energy_balance_error_snapshots,

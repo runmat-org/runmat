@@ -168,15 +168,14 @@ const FEA_TYPED_POLICY_CONSTRUCTORS: [&str; 35] = [
     "fea.SpectrumConstruction.fromAccelerationHistoryRecursive",
 ];
 
-const FEA_EXCITATION_CONSTRUCTORS: [&str; 25] = [
+const FEA_EXCITATION_CONSTRUCTORS: [&str; 24] = [
     "fea.StructuralExcitation.force",
     "fea.StructuralExcitation.moment",
     "fea.StructuralExcitation.traction",
     "fea.StructuralExcitation.pressure",
     "fea.StructuralExcitation.bodyForce",
-    "fea.StructuralExcitation.baseDisplacement",
-    "fea.StructuralExcitation.baseVelocity",
-    "fea.StructuralExcitation.baseAcceleration",
+    "fea.StructuralMotion.acceleration",
+    "fea.StructuralConstraint.prescribedMotion",
     "fea.ThermalExcitation.heatGeneration",
     "fea.ThermalExcitation.heatFlux",
     "fea.ThermalExcitation.temperatureField",

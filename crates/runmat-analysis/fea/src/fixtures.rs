@@ -1,18 +1,20 @@
 use runmat_analysis_core::{
-    AnalysisConnector, AnalysisConstraint, AnalysisExcitation, AnalysisModel, AnalysisModelId,
-    AnalysisSequence, BeamElementModel, BeamSectionModel, BodyForceDensity,
-    ConformalSolidAttachment, ConnectorKind, CoordinateFrame, Direction, Displacement,
-    EvidenceConfidence, ExcitationAction, ExcitationCase, ExcitationCaseActivation,
+    Acceleration, AccelerationSignalId, AnalysisConnector, AnalysisConstraint, AnalysisExcitation,
+    AnalysisModel, AnalysisModelId, AnalysisSequence, BeamElementModel, BeamSectionModel,
+    BodyForceDensity, ConformalSolidAttachment, ConnectorKind, CoordinateFrame, Direction,
+    Displacement, EvidenceConfidence, ExcitationAction, ExcitationCase, ExcitationCaseActivation,
     ExcitationCaseId, ExcitationDistribution, ExcitationId, ExcitationKinematics, ExcitationTarget,
     Force, MaterialAssignment, MaterialMechanicalModel, MaterialModel, MaterialThermalModel,
-    MechanicalDampingModel, Moment, PhysicalSignal, PrescribedStructuralDofs, PrescribedValue,
-    Pressure, ProcedureStep, ProjectionRequirement, RayleighMassCoefficient,
-    RayleighStiffnessCoefficient, RegionTarget, Rotation, RotationDofValue, ShellElementModel,
-    ShellSectionModel, Signal, SignalApproximationEvidence, SignalId, SignalPrecision,
-    SignalProvenance, SignalRepresentation, SignalShape, SignalValue, Stiffness,
+    MechanicalDampingModel, Moment, PhysicalSignal, PrescribedStructuralDofs,
+    PrescribedStructuralMotion, PrescribedValue, Pressure, ProcedureStep, ProjectionRequirement,
+    RayleighMassCoefficient, RayleighStiffnessCoefficient, RegionTarget, Rotation,
+    RotationDofValue, ShellElementModel, ShellSectionModel, Signal, SignalApproximationEvidence,
+    SignalExtrapolation, SignalId, SignalInterpolation, SignalKnot, SignalOrdinate,
+    SignalPrecision, SignalProvenance, SignalRepresentation, SignalShape, SignalValue, Stiffness,
     StructuralConstraint, StructuralConstraintKind, StructuralElement, StructuralElementKind,
-    StructuralModel, StructuralNode, StructuralRotationDof, StructuralTranslationDof,
-    TranslationDofValue,
+    StructuralKinematicHistory, StructuralModel, StructuralMotionReconstruction, StructuralNode,
+    StructuralRotationDof, StructuralTranslationDof, TabulatedSignal, TabulatedSignalDomain,
+    TranslationDofMotion, TranslationDofValue, Velocity,
 };
 #[cfg(test)]
 use runmat_analysis_core::{
@@ -532,6 +534,7 @@ pub enum FixtureId {
     TransientLong,
     TransientShock,
     StructuralTransientTet4Reference,
+    StructuralTransientTet4SupportMotionReference,
     NonlinearAssembly,
     NonlinearAssemblyStress,
     NonlinearSofteningBenchmark,
@@ -605,6 +608,9 @@ pub fn fixture_model(fixture: FixtureId) -> AnalysisModel {
         FixtureId::TransientLong => transient_long_fixture(),
         FixtureId::TransientShock => transient_shock_fixture(),
         FixtureId::StructuralTransientTet4Reference => structural_transient_tet4_reference(),
+        FixtureId::StructuralTransientTet4SupportMotionReference => {
+            structural_transient_tet4_support_motion_reference()
+        }
         FixtureId::NonlinearAssembly => nonlinear_assembly_fixture(),
         FixtureId::NonlinearAssemblyStress => nonlinear_assembly_stress_fixture(),
         FixtureId::NonlinearSofteningBenchmark => nonlinear_softening_benchmark_fixture(),
@@ -1039,6 +1045,79 @@ fn structural_transient_tet4_reference() -> AnalysisModel {
         "structural_transient_tet4_reference_sequence",
         vec![ProcedureStep::structural_transient("transient")],
     );
+    model
+}
+
+fn structural_transient_tet4_support_motion_reference() -> AnalysisModel {
+    let mut model = structural_transient_tet4_reference();
+    model.model_id = AnalysisModelId("structural_transient_tet4_support_motion_reference".into());
+    model.geometry_id = "geo:structural_transient_tet4_support_motion_reference".into();
+    replace_fixture_excitations(&mut model, Vec::new());
+    let acceleration_id = SignalId("root-acceleration".into());
+    let ordinate = |x: f64| {
+        SignalOrdinate::Real(SignalValue::Vector3([
+            Acceleration::new(x),
+            Acceleration::new(0.0),
+            Acceleration::new(0.0),
+        ]))
+    };
+    model.signals.push(PhysicalSignal::Acceleration(Signal {
+        signal_id: acceleration_id.clone(),
+        shape: SignalShape::Vector3,
+        frame: Some(CoordinateFrame::Global),
+        representation: SignalRepresentation::Tabulated(TabulatedSignal {
+            domain: TabulatedSignalDomain::TimeSeconds,
+            knots: vec![
+                SignalKnot::continuous(0.0, ordinate(1.0)),
+                SignalKnot::continuous(0.5, ordinate(-1.0)),
+                SignalKnot::continuous(1.0, ordinate(1.0)),
+            ],
+            interpolation: SignalInterpolation::Linear,
+            extrapolation: SignalExtrapolation::Reject,
+        }),
+        precision: SignalPrecision::Real64,
+        evidence: SignalApproximationEvidence {
+            max_absolute_error: Some(0.0),
+            max_relative_error: Some(0.0),
+            derivative_max_absolute_error: None,
+            sample_count: 3,
+        },
+        provenance: SignalProvenance::Authored,
+    }));
+    model.constraints[0] = AnalysisConstraint::Structural(StructuralConstraint {
+        constraint_id: "moving_root_x".into(),
+        frame: CoordinateFrame::Global,
+        kind: StructuralConstraintKind::PrescribedMotion(PrescribedStructuralMotion {
+            target: RegionTarget::boundary("root"),
+            translations: vec![TranslationDofMotion {
+                dof: StructuralTranslationDof::Ux,
+                history: StructuralKinematicHistory::AccelerationDriven {
+                    acceleration: AccelerationSignalId(acceleration_id),
+                    initial_displacement: Displacement::new(0.0),
+                    initial_velocity: Velocity::new(0.0),
+                    reconstruction:
+                        StructuralMotionReconstruction::PiecewiseLinearAccelerationExact,
+                },
+            }],
+        }),
+    });
+    model
+        .constraints
+        .push(AnalysisConstraint::Structural(StructuralConstraint {
+            constraint_id: "fixed_root_yz".into(),
+            frame: CoordinateFrame::Global,
+            kind: StructuralConstraintKind::Prescribed(PrescribedStructuralDofs {
+                target: RegionTarget::boundary("root"),
+                translations: [StructuralTranslationDof::Uy, StructuralTranslationDof::Uz]
+                    .into_iter()
+                    .map(|dof| TranslationDofValue {
+                        dof,
+                        value: PrescribedValue::Constant(Displacement::new(0.0)),
+                    })
+                    .collect(),
+                rotations: Vec::new(),
+            }),
+        }));
     model
 }
 

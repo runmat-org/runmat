@@ -4451,6 +4451,7 @@ execution:
                 reaction_force_snapshots: indexed_fields("reaction_force"),
                 reaction_moment_snapshots: Vec::new(),
                 external_work_snapshots: indexed_fields("external_work"),
+                support_work_snapshots: indexed_fields("support_work"),
                 damping_dissipation_snapshots: indexed_fields("damping_dissipation"),
                 energy_balance_residual_snapshots: indexed_fields("energy_balance_residual"),
                 relative_energy_balance_error_snapshots: indexed_fields(
@@ -4532,6 +4533,7 @@ execution:
         assert!(transient.fields.contains_key("strain_energy_snapshots"));
         assert!(transient.fields.contains_key("reaction_force_snapshots"));
         assert!(transient.fields.contains_key("external_work_snapshots"));
+        assert!(transient.fields.contains_key("support_work_snapshots"));
         assert!(transient
             .fields
             .contains_key("damping_dissipation_snapshots"));

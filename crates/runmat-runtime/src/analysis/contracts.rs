@@ -1498,6 +1498,7 @@ fn infer_field_unit(field_id: &str) -> Option<&'static str> {
         || normalized.contains("strain_energy")
         || normalized.contains("total_strain_energy")
         || normalized.contains("external_work")
+        || normalized.contains("support_work")
         || normalized.contains("damping_dissipation")
         || normalized.contains("energy_balance_residual")
     {
@@ -2708,6 +2709,7 @@ pub struct TransientResultsData {
     pub reaction_force_snapshots: Vec<AnalysisField>,
     pub reaction_moment_snapshots: Vec<AnalysisField>,
     pub external_work_snapshots: Vec<AnalysisField>,
+    pub support_work_snapshots: Vec<AnalysisField>,
     pub damping_dissipation_snapshots: Vec<AnalysisField>,
     pub energy_balance_residual_snapshots: Vec<AnalysisField>,
     pub relative_energy_balance_error_snapshots: Vec<AnalysisField>,
@@ -2740,6 +2742,7 @@ impl TransientResultsData {
             ("residual norm field", self.residual_norm_snapshots.len()),
             ("reaction force", self.reaction_force_snapshots.len()),
             ("external work", self.external_work_snapshots.len()),
+            ("support work", self.support_work_snapshots.len()),
             (
                 "damping dissipation",
                 self.damping_dissipation_snapshots.len(),

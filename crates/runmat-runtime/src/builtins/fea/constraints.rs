@@ -475,7 +475,10 @@ mod tests {
         geometry_asset_from_value_with_builtin, geometry_load_builtin,
     };
     use futures::executor::block_on;
-    use runmat_analysis_core::ReferencePointCoupling;
+    use runmat_analysis_core::{
+        AccelerationSignalId, ReferencePointCoupling, SignalId, StructuralKinematicHistory,
+        StructuralMotionReconstruction,
+    };
 
     fn distinct_region(region: &Value) -> Value {
         let Value::Object(mut object) = region.clone() else {
@@ -1051,6 +1054,90 @@ mod tests {
             let (definition, _) = crate::class_registry::lookup_method(class_name, method)
                 .unwrap_or_else(|| panic!("{class_name}.{method} should be registered"));
             assert!(definition.is_static);
+        }
+    }
+
+    #[test]
+    fn prescribed_support_motion_uses_typed_vector_acceleration_and_has_no_legacy_actions() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let asset = load_stl_fixture(&tmp.path().join("typed-motion.stl"), 1.0);
+        let decoded = geometry_asset_from_value_with_builtin(&asset, STRUCTURAL_FIXED_NAME)
+            .expect("asset should decode");
+        let region = block_on(geometry_region_builtin(
+            asset,
+            decoded.regions[0].region_id.clone(),
+        ))
+        .expect("region");
+        let acceleration = block_on(
+            crate::builtins::fea::signals::time_samples::acceleration_time_samples(
+                "support-acceleration".into(),
+                Value::Tensor(Tensor::new_2d(vec![0.0, 1.0], 2, 1).unwrap()),
+                Value::Tensor(Tensor::new_2d(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], 2, 3).unwrap()),
+                block_on(crate::builtins::fea::signal_policies::interpolation_linear()).unwrap(),
+                block_on(crate::builtins::fea::signal_policies::extrapolation_reject()).unwrap(),
+            ),
+        )
+        .expect("typed acceleration history");
+        let displacement = block_on(crate::builtins::fea::values::displacement_meters_builtin(
+            Value::Num(0.25),
+        ))
+        .unwrap();
+        let velocity = block_on(
+            crate::builtins::fea::values::velocity_meters_per_second_builtin(Value::Num(-0.5)),
+        )
+        .unwrap();
+        let ux = block_on(support::dof::structural_dof_ux_builtin()).unwrap();
+        let motion = block_on(support::motion::structural_acceleration_motion_builtin(
+            ux,
+            acceleration,
+            displacement,
+            velocity,
+        ))
+        .expect("typed support motion");
+        let constraint = block_on(structural::structural_prescribed_motion_builtin(
+            "moving-base".into(),
+            region,
+            motion.clone(),
+        ))
+        .expect("typed prescribed-motion constraint");
+        let bound: BoundStructuralConstraint = object_payload(
+            "fea.StructuralConstraint.prescribedMotion",
+            &constraint,
+            FEA_STRUCTURAL_CONSTRAINT_CLASS,
+        )
+        .unwrap();
+        let StructuralConstraintKind::PrescribedMotion(prescribed) = bound.constraint.kind else {
+            panic!("expected prescribed support motion")
+        };
+        assert_eq!(prescribed.translations.len(), 1);
+        assert!(matches!(
+            &prescribed.translations[0].history,
+            StructuralKinematicHistory::AccelerationDriven {
+                acceleration: AccelerationSignalId(SignalId(id)),
+                initial_displacement,
+                initial_velocity,
+                reconstruction: StructuralMotionReconstruction::PiecewiseLinearAccelerationExact,
+            } if id == "support-acceleration"
+                && initial_displacement.meters == 0.25
+                && initial_velocity.meters_per_second == -0.5
+        ));
+        let duplicate = crate::make_cell_with_shape(vec![motion.clone(), motion], vec![1, 2])
+            .expect("motion cell");
+        assert!(support::motion::structural_motions_from_value("test", &duplicate).is_err());
+
+        ensure_fea_classes_registered();
+        assert!(
+            crate::class_registry::lookup_method("fea.StructuralMotion", "acceleration").is_some()
+        );
+        assert!(crate::class_registry::lookup_method(
+            "fea.StructuralConstraint",
+            "prescribedMotion"
+        )
+        .is_some());
+        for removed in ["baseDisplacement", "baseVelocity", "baseAcceleration"] {
+            assert!(
+                crate::class_registry::lookup_method("fea.StructuralExcitation", removed).is_none()
+            );
         }
     }
 

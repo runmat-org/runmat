@@ -4414,6 +4414,7 @@ pub fn analysis_run_transient_with_options_op(
             reaction_force_snapshots: transient_run.reaction_force_snapshots,
             reaction_moment_snapshots: transient_run.reaction_moment_snapshots,
             external_work_snapshots: transient_run.external_work_snapshots,
+            support_work_snapshots: transient_run.support_work_snapshots,
             damping_dissipation_snapshots: transient_run.damping_dissipation_snapshots,
             energy_balance_residual_snapshots: transient_run.energy_balance_residual_snapshots,
             relative_energy_balance_error_snapshots: transient_run

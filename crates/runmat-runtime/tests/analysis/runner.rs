@@ -3214,6 +3214,7 @@ fn validate_transient_result(run: &AnalysisRunResult) -> Result<(), String> {
         &transient.residual_norm_snapshots,
         &transient.reaction_force_snapshots,
         &transient.external_work_snapshots,
+        &transient.support_work_snapshots,
         &transient.damping_dissipation_snapshots,
         &transient.energy_balance_residual_snapshots,
         &transient.relative_energy_balance_error_snapshots,
@@ -4381,7 +4382,11 @@ fn write_fixture_solver_mesh_artifact(
     fs::create_dir_all(root).map_err(|error| error.to_string())?;
     let mut mesh =
         runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
-    let is_physical_transient_reference = model.model_id.0 == "structural_transient_tet4_reference";
+    let is_physical_transient_reference = matches!(
+        model.model_id.0.as_str(),
+        "structural_transient_tet4_reference"
+            | "structural_transient_tet4_support_motion_reference"
+    );
     if !is_physical_transient_reference {
         subdivide_fixture_tetrahedron(&mut mesh, model);
     }
@@ -4463,7 +4468,8 @@ fn write_fixture_solver_mesh_artifact(
 fn fixture_requires_solver_mesh(spec: &FixtureSpec, model: &AnalysisModel) -> bool {
     spec.expect_validate_error.is_none()
         && spec.expect_run_error.is_none()
-        && (spec.id == "transient_physical_tet4_reference_cpu"
+        && ((spec.id == "transient_physical_tet4_reference_cpu"
+            || spec.id == "transient_physical_tet4_support_motion_reference_cpu")
             || matches!(
                 AnalysisSolverOptions::defaults_for(fixture_procedure_step(model)),
                 Ok(AnalysisSolverOptions::ThermalDiffusion(_))

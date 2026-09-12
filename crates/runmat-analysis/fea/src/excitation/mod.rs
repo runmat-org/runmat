@@ -4,6 +4,7 @@ mod action;
 mod activation;
 mod coupling;
 mod evidence;
+mod kinematics;
 mod model;
 mod projection;
 mod realize;
@@ -16,6 +17,7 @@ pub use evidence::{
     ProjectionSample, ProjectionScalar, ProjectionVector3, SpatialIntegrationRule,
     SpatialProjectionBalance, SpatialProjectionEvidence, SpatialProjectionEvidenceError,
 };
+pub(crate) use kinematics::{StructuralMotionError, StructuralMotionSet};
 #[cfg(test)]
 pub(crate) use model::{ComplexScalar, RealizedExcitationPolicy};
 pub(crate) use model::{

@@ -1559,7 +1559,11 @@ fn single_tetrahedron_solver_mesh_for_model(
     for region in loaded_regions {
         add_face_region(&mut mesh, 1, &region);
     }
-    if model.model_id.0 == "structural_transient_tet4_reference" {
+    if matches!(
+        model.model_id.0.as_str(),
+        "structural_transient_tet4_reference"
+            | "structural_transient_tet4_support_motion_reference"
+    ) {
         add_face_region(&mut mesh, 1, "free_vertex_y_support");
         add_face_region(&mut mesh, 2, "free_vertex_z_support");
         add_face_region(&mut mesh, 3, "dynamic_force");

@@ -171,15 +171,6 @@ pub(super) fn validate_structural_inputs(
             (RealizedExcitationKind::Traction(_), _) => (StructuralLoadKind::Traction, false),
             (RealizedExcitationKind::Pressure(_), _) => (StructuralLoadKind::Pressure, false),
             (RealizedExcitationKind::BodyForce(_), _) => (StructuralLoadKind::BodyForce, false),
-            (RealizedExcitationKind::BaseDisplacement(_), _) => {
-                (StructuralLoadKind::BaseDisplacement, false)
-            }
-            (RealizedExcitationKind::BaseVelocity(_), _) => {
-                (StructuralLoadKind::BaseVelocity, false)
-            }
-            (RealizedExcitationKind::BaseAcceleration(_), _) => {
-                (StructuralLoadKind::BaseAcceleration, false)
-            }
             (RealizedExcitationKind::HeatGeneration(_), _) => {
                 (StructuralLoadKind::HeatGeneration, false)
             }
@@ -253,6 +244,7 @@ pub(super) fn validate_structural_inputs(
                 constraint.kind,
                 StructuralConstraintKind::Fixed { .. }
                     | StructuralConstraintKind::Prescribed(_)
+                    | StructuralConstraintKind::PrescribedMotion(_)
                     | StructuralConstraintKind::NormalDisplacement { .. }
                     | StructuralConstraintKind::Symmetry { .. }
                     | StructuralConstraintKind::Antisymmetry { .. }
@@ -264,7 +256,9 @@ pub(super) fn validate_structural_inputs(
             ),
             StructuralProjectionBasis::ExplicitConnectivity => matches!(
                 constraint.kind,
-                StructuralConstraintKind::Fixed { .. } | StructuralConstraintKind::Prescribed(_)
+                StructuralConstraintKind::Fixed { .. }
+                    | StructuralConstraintKind::Prescribed(_)
+                    | StructuralConstraintKind::PrescribedMotion(_)
             ),
             StructuralProjectionBasis::Synthetic => true,
         };
@@ -297,6 +291,7 @@ pub(super) fn structural_constraint_kind_name(kind: &StructuralConstraintKind) -
     match kind {
         StructuralConstraintKind::Fixed { .. } => "fixed",
         StructuralConstraintKind::Prescribed(_) => "prescribed",
+        StructuralConstraintKind::PrescribedMotion(_) => "prescribed_motion",
         StructuralConstraintKind::NormalDisplacement { .. } => "normal_displacement",
         StructuralConstraintKind::Symmetry { .. } => "symmetry",
         StructuralConstraintKind::Antisymmetry { .. } => "antisymmetry",
@@ -315,9 +310,6 @@ pub(super) fn explicit_load_kind(kind: &RealizedExcitationKind) -> StructuralLoa
         RealizedExcitationKind::Traction(_) => StructuralLoadKind::Traction,
         RealizedExcitationKind::Pressure(_) => StructuralLoadKind::Pressure,
         RealizedExcitationKind::BodyForce(_) => StructuralLoadKind::BodyForce,
-        RealizedExcitationKind::BaseDisplacement(_) => StructuralLoadKind::BaseDisplacement,
-        RealizedExcitationKind::BaseVelocity(_) => StructuralLoadKind::BaseVelocity,
-        RealizedExcitationKind::BaseAcceleration(_) => StructuralLoadKind::BaseAcceleration,
         RealizedExcitationKind::HeatGeneration(_) => StructuralLoadKind::HeatGeneration,
         RealizedExcitationKind::HeatFlux(_) => StructuralLoadKind::HeatFlux,
         RealizedExcitationKind::TemperatureField(_) => StructuralLoadKind::TemperatureField,

@@ -82,33 +82,6 @@ pub(super) fn realize_kind(
             newtons_per_cubic_meter,
             sample
         )?),
-        ExcitationAction::BaseDisplacement(_) => {
-            RealizedExcitationKind::BaseDisplacement(directional_vector_action!(
-                action,
-                signal,
-                PhysicalSignal::Displacement,
-                meters,
-                sample
-            )?)
-        }
-        ExcitationAction::BaseVelocity(_) => {
-            RealizedExcitationKind::BaseVelocity(directional_vector_action!(
-                action,
-                signal,
-                PhysicalSignal::Velocity,
-                meters_per_second,
-                sample
-            )?)
-        }
-        ExcitationAction::BaseAcceleration(_) => {
-            RealizedExcitationKind::BaseAcceleration(directional_vector_action!(
-                action,
-                signal,
-                PhysicalSignal::Acceleration,
-                meters_per_second_squared,
-                sample
-            )?)
-        }
         ExcitationAction::HeatGeneration(_) => {
             RealizedExcitationKind::HeatGeneration(scalar_action!(
                 signal,

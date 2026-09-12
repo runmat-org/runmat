@@ -46,6 +46,20 @@ pub(super) fn require_structural(
         requirement,
     )
     .map_err(FeaRunError::from)?;
+    if procedure != AnalysisProcedure::TransientResponse
+        && model.constraints.iter().any(|constraint| {
+            constraint.structural().is_some_and(|constraint| {
+                matches!(
+                    constraint.kind,
+                    StructuralConstraintKind::PrescribedMotion(_)
+                )
+            })
+        })
+    {
+        return Err(FeaRunError::InvalidModel(format!(
+            "prescribed structural motion is only admitted for transient response, not {procedure:?}"
+        )));
+    }
     if procedure != AnalysisProcedure::Static
         && model.constraints.iter().any(|constraint| {
             constraint
@@ -55,6 +69,7 @@ pub(super) fn require_structural(
                     StructuralConstraintKind::Prescribed(_) => {
                         constraint.frame != runmat_analysis_core::CoordinateFrame::Global
                     }
+                    StructuralConstraintKind::PrescribedMotion(_) => false,
                     _ => true,
                 })
         })

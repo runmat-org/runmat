@@ -41,3 +41,4 @@ pub use result::{
 #[cfg(test)]
 mod tests;
 pub use algebra::{AffineConstraintReduction, ConstraintAlgebraError, ResolvedConstraintMatrix};
+pub(crate) use reaction::solve_constraint_multipliers;

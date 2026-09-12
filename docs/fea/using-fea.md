@@ -210,6 +210,39 @@ term; it does not silently select a point from a time history.
 
 Use `Constraints` for prescribed values and kinematic relations, and `Boundaries` for natural or Robin operators. For fluid models, inlet velocity and wall motion are constraints; outlet pressure is a boundary. For thermal models, prescribed temperature is a constraint; heat flux and convection are boundaries.
 
+Structural support motion is also a constraint. Author one vector acceleration history, select the
+component with a typed translational DOF, and supply the support state at the beginning of the
+transient step:
+
+```matlab
+base = geometry.region(geom, "name:Base");
+times = [0; 0.25; 0.5; 1.0];
+accelerationSI = [0 0 0; 12 0 0; -6 0 0; 0 0 0];
+acceleration = fea.AccelerationSignal.fromTimeSamples( ...
+    "base-acceleration", times, accelerationSI, ...
+    fea.SignalInterpolation.linear(), fea.SignalExtrapolation.reject());
+motionX = fea.StructuralMotion.acceleration( ...
+    fea.StructuralDof.ux(), acceleration, ...
+    fea.Displacement.meters(0), fea.Velocity.metersPerSecond(0));
+movingBase = fea.StructuralConstraint.prescribedMotion( ...
+    "moving-base", base, motionX);
+step = fea.StructuralStep.transient("support-response");
+
+model = fea.model("moving-support-model", geom, ...
+    "Template", "transient_structural", ...
+    "Constraints", {movingBase}, ...
+    "Signals", {acceleration}, ...
+    "Steps", {step});
+```
+
+The acceleration matrix has one row per time and global X/Y/Z columns in meters per second squared.
+The selected DOF chooses the column used by that motion component. Multiple components may share
+the same signal and are passed as a cell array to `prescribedMotion`. RunMat reconstructs their
+displacement and velocity exactly for piecewise-linear acceleration and reports support work
+separately from work done by applied loads. The acceleration signal remains a first-class model
+input: pass it through `Signals` as shown above, while the constraint retains its stable signal
+identity.
+
 The same host-only physical-value boundary applies to `fea.material`, the quantity-specific signal constructors, and the dimensioned quantity constructors. Domain constructors accept only the quantity classes required by their physics: for example, `fea.ElectromagneticDomain.atFrequency` requires `fea.Frequency`, and `fea.FluidDomain.newtonian` requires `fea.MassDensity`, `fea.DynamicViscosity`, and `fea.TurbulenceIntensity`. Bare numbers cannot silently acquire units. Numeric quantity inputs are checked before one binary64 model-storage conversion, so sufficiently wide integers can round. Numerical enforcement controls such as contact penalties and coupling relaxation belong to typed step or solver policy, not to interface physics. Geometry/model revisions, plan counts, field shape/count metadata, and comparison count deltas are structural integers; they remain exact and do not enter the physical-value conversion. The conventional plotting handle remains a double at the scripting boundary. Resident numeric constructor fields are rejected because typed FEA object construction performs no provider execution.
 
 Execution is authored separately from the semantic sequence. `fea.ComputeBackend` and

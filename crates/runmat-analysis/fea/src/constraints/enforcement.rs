@@ -10,7 +10,9 @@ pub(super) fn select(
     kind: &StructuralConstraintKind,
     rows: &[CanonicalStructuralConstraintRow],
 ) -> ConstraintEnforcement {
-    if rows.iter().all(|row| row.terms.len() == 1) {
+    if matches!(kind, StructuralConstraintKind::PrescribedMotion(_)) {
+        ConstraintEnforcement::AffineReduction
+    } else if rows.iter().all(|row| row.terms.len() == 1) {
         ConstraintEnforcement::DirectElimination
     } else if matches!(kind, StructuralConstraintKind::Equation(_))
         && rows
@@ -47,8 +49,7 @@ pub(super) fn matches_rows(
     }
     match enforcement {
         ConstraintEnforcement::DirectElimination => rows.iter().all(|row| row.terms.len() == 1),
-        ConstraintEnforcement::AffineReduction | ConstraintEnforcement::LagrangeMultiplier => {
-            rows.iter().any(|row| row.terms.len() > 1)
-        }
+        ConstraintEnforcement::AffineReduction => true,
+        ConstraintEnforcement::LagrangeMultiplier => rows.iter().any(|row| row.terms.len() > 1),
     }
 }

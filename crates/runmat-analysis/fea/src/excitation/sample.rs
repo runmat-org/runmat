@@ -172,6 +172,15 @@ fn collect_constraint_signal_ids<'a>(
                 StructuralConstraintKind::NormalDisplacement { value, .. } => {
                     insert_prescribed_id(ids, value)
                 }
+                StructuralConstraintKind::PrescribedMotion(motion) => {
+                    for translation in &motion.translations {
+                        let runmat_analysis_core::StructuralKinematicHistory::AccelerationDriven {
+                            acceleration,
+                            ..
+                        } = &translation.history;
+                        ids.insert(acceleration.0 .0.as_str());
+                    }
+                }
                 _ => {}
             },
             AnalysisConstraint::Thermal(constraint) if thermal => match &constraint.kind {

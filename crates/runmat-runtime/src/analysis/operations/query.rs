@@ -52,6 +52,7 @@ macro_rules! visit_analysis_result_fields {
                 $($borrow)* transient.reaction_force_snapshots,
                 $($borrow)* transient.reaction_moment_snapshots,
                 $($borrow)* transient.external_work_snapshots,
+                $($borrow)* transient.support_work_snapshots,
                 $($borrow)* transient.damping_dissipation_snapshots,
                 $($borrow)* transient.energy_balance_residual_snapshots,
                 $($borrow)* transient.relative_energy_balance_error_snapshots,
@@ -910,6 +911,10 @@ pub fn analysis_results_op(
                     &transient.external_work_snapshots,
                     &query.transient_snapshot_indices,
                 );
+                let support_work_snapshots = filter_analysis_fields_by_indices(
+                    &transient.support_work_snapshots,
+                    &query.transient_snapshot_indices,
+                );
                 let damping_dissipation_snapshots = filter_analysis_fields_by_indices(
                     &transient.damping_dissipation_snapshots,
                     &query.transient_snapshot_indices,
@@ -1182,6 +1187,7 @@ pub fn analysis_results_op(
                     reaction_force_snapshots,
                     reaction_moment_snapshots,
                     external_work_snapshots,
+                    support_work_snapshots,
                     damping_dissipation_snapshots,
                     energy_balance_residual_snapshots,
                     relative_energy_balance_error_snapshots,

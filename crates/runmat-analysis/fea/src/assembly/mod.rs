@@ -124,6 +124,9 @@ pub struct AssemblySummary {
     pub constraint_matrix: Option<ResolvedConstraintMatrix>,
     #[serde(default)]
     pub affine_constraint_reduction: Option<AffineConstraintReduction>,
+    /// Physical generalized forcing before essential-constraint elimination. Prescribed values
+    /// are carried by the constraint channel and never overwrite this load authority.
+    pub physical_load: Vec<f64>,
     pub load_count: usize,
     pub structural_material: StructuralMaterialSummary,
     pub thermo_mechanical: Option<ThermoMechanicalAssemblySummary>,
@@ -177,9 +180,6 @@ pub enum StructuralLoadKind {
     Traction,
     Pressure,
     BodyForce,
-    BaseDisplacement,
-    BaseVelocity,
-    BaseAcceleration,
     HeatGeneration,
     HeatFlux,
     TemperatureField,
@@ -204,9 +204,6 @@ impl StructuralLoadKind {
             Self::Traction => "traction",
             Self::Pressure => "pressure",
             Self::BodyForce => "body_force",
-            Self::BaseDisplacement => "base_displacement",
-            Self::BaseVelocity => "base_velocity",
-            Self::BaseAcceleration => "base_acceleration",
             Self::HeatGeneration => "heat_generation",
             Self::HeatFlux => "heat_flux",
             Self::TemperatureField => "temperature_field",
@@ -983,6 +980,7 @@ fn assemble_linear_system_impl(
     }
     let mut structural_moment_projection = Vec::new();
     let mut spatial_projection_evidence = Vec::new();
+    let mut physical_load = rhs.clone();
     let mut constraint_matrix = None;
     let mut affine_constraint_reduction = None;
     if structural_requirement.is_some() {
@@ -1003,8 +1001,11 @@ fn assemble_linear_system_impl(
             .map_err(LinearAssemblyError::SolverMeshRegionMapping)?;
             structural_moment_projection = source_projection.moment_projection;
             spatial_projection_evidence = source_projection.evidence;
+            physical_load = rhs.clone();
             constrained.fill(false);
-            if constraint_plan.rows.iter().any(|row| row.terms.len() > 1) {
+            if constraint_plan.enforcement
+                != crate::constraints::ConstraintEnforcement::DirectElimination
+            {
                 let matrix =
                     resolve_solid_constraint_matrix(constraint_plan, mesh, &structural_dof_layout)
                         .map_err(LinearAssemblyError::ConstraintAlgebra)?;
@@ -1322,6 +1323,7 @@ fn assemble_linear_system_impl(
             },
         ),
         constrained_dof_count,
+        physical_load,
         constraint_matrix: constraint_matrix.clone(),
         affine_constraint_reduction,
         load_count: excitations.len(),
@@ -1607,6 +1609,7 @@ fn assemble_explicit_structural_system(
 
     let source_projection =
         apply_explicit_structural_loads(structural, excitations, &structural_dof_layout, &mut rhs)?;
+    let physical_load = rhs.clone();
     let direct_rotational_moment_load_count = source_projection.direct_rotational_moment_count;
     let structural_moment_projection = source_projection.moment_projection;
     let spatial_projection_evidence = source_projection.evidence;
@@ -1615,7 +1618,7 @@ fn assemble_explicit_structural_system(
     let resolved_constraint_matrix =
         resolve_constraint_matrix(constraint_plan, &topology, &structural_dof_layout)
             .map_err(|error| StructuralAssemblyError::InvalidConstraintPlan(error.to_string()))?;
-    let has_general_rows = constraint_plan.rows.iter().any(|row| row.terms.len() != 1);
+    let has_general_rows = constraint_plan.enforcement != ConstraintEnforcement::DirectElimination;
     let (
         constrained,
         constrained_dof_count,
@@ -1756,6 +1759,7 @@ fn assemble_explicit_structural_system(
             vec![BoundaryTransferImplementation::ExplicitRegionConnectivity]
         },
         constrained_dof_count,
+        physical_load,
         constraint_matrix,
         affine_constraint_reduction,
         load_count: excitations.len(),

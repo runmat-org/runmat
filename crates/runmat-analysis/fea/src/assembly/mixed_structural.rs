@@ -291,7 +291,9 @@ pub(super) fn assemble_mixed_structural_system(
         &topology.explicit_node_indices,
     )
     .map_err(LinearAssemblyError::Structural)?;
-    let has_general_rows = constraint_plan.rows.iter().any(|row| row.terms.len() != 1);
+    let physical_load = rhs.clone();
+    let has_general_rows =
+        constraint_plan.enforcement != crate::constraints::ConstraintEnforcement::DirectElimination;
     let resolved_constraint_matrix = resolve_constraint_matrix(constraint_plan, &topology, &layout)
         .map_err(LinearAssemblyError::ConstraintAlgebra)?;
     let (
@@ -419,6 +421,7 @@ pub(super) fn assemble_mixed_structural_system(
         ),
         structural_boundary_transfers: constraint_boundary_implementations(constraint_plan),
         constrained_dof_count,
+        physical_load,
         constraint_matrix,
         affine_constraint_reduction,
         load_count: excitations.len(),
@@ -514,9 +517,6 @@ fn is_structural_load(kind: &RealizedExcitationKind) -> bool {
             | RealizedExcitationKind::Traction(_)
             | RealizedExcitationKind::Pressure(_)
             | RealizedExcitationKind::BodyForce(_)
-            | RealizedExcitationKind::BaseDisplacement(_)
-            | RealizedExcitationKind::BaseVelocity(_)
-            | RealizedExcitationKind::BaseAcceleration(_)
     )
 }
 

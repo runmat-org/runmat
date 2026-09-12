@@ -230,6 +230,10 @@ pub fn fea_transient_external_work_field_id(snapshot_index: usize) -> String {
     format!("transient.external_work.{snapshot_index}")
 }
 
+pub fn fea_transient_support_work_field_id(snapshot_index: usize) -> String {
+    format!("transient.support_work.{snapshot_index}")
+}
+
 pub fn fea_transient_damping_dissipation_field_id(snapshot_index: usize) -> String {
     format!("transient.damping_dissipation.{snapshot_index}")
 }
@@ -616,6 +620,7 @@ pub struct FeaTransientRunResult {
     pub reaction_force_snapshots: Vec<AnalysisField>,
     pub reaction_moment_snapshots: Vec<AnalysisField>,
     pub external_work_snapshots: Vec<AnalysisField>,
+    pub support_work_snapshots: Vec<AnalysisField>,
     pub damping_dissipation_snapshots: Vec<AnalysisField>,
     pub energy_balance_residual_snapshots: Vec<AnalysisField>,
     pub relative_energy_balance_error_snapshots: Vec<AnalysisField>,

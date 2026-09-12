@@ -352,48 +352,6 @@ action_builtin!(
     ExcitationAction::BodyForce
 );
 action_builtin!(
-    structural_base_displacement,
-    STRUCTURAL_BASE_DISPLACEMENT_DESCRIPTOR,
-    STRUCTURAL_BASE_DISPLACEMENT_SIGNATURES,
-    "fea.StructuralExcitation.baseDisplacement",
-    "baseDisplacement",
-    "Bind a base-displacement signal to a structural boundary region.",
-    STRUCTURAL_EXCITATION_CLASS,
-    Quantity::Displacement,
-    RegionExpectation::Boundary,
-    ExcitationDistribution::UniformKinematic,
-    false,
-    ExcitationAction::BaseDisplacement
-);
-action_builtin!(
-    structural_base_velocity,
-    STRUCTURAL_BASE_VELOCITY_DESCRIPTOR,
-    STRUCTURAL_BASE_VELOCITY_SIGNATURES,
-    "fea.StructuralExcitation.baseVelocity",
-    "baseVelocity",
-    "Bind a base-velocity signal to a structural boundary region.",
-    STRUCTURAL_EXCITATION_CLASS,
-    Quantity::Velocity,
-    RegionExpectation::Boundary,
-    ExcitationDistribution::UniformKinematic,
-    false,
-    ExcitationAction::BaseVelocity
-);
-action_builtin!(
-    structural_base_acceleration,
-    STRUCTURAL_BASE_ACCELERATION_DESCRIPTOR,
-    STRUCTURAL_BASE_ACCELERATION_SIGNATURES,
-    "fea.StructuralExcitation.baseAcceleration",
-    "baseAcceleration",
-    "Bind a base-acceleration signal to a structural boundary region.",
-    STRUCTURAL_EXCITATION_CLASS,
-    Quantity::Acceleration,
-    RegionExpectation::Boundary,
-    ExcitationDistribution::UniformKinematic,
-    false,
-    ExcitationAction::BaseAcceleration
-);
-action_builtin!(
     thermal_heat_generation,
     THERMAL_HEAT_GENERATION_DESCRIPTOR,
     THERMAL_HEAT_GENERATION_SIGNATURES,
@@ -797,10 +755,7 @@ fn action_class(action: &ExcitationAction) -> &'static str {
         | ExcitationAction::Moment(_)
         | ExcitationAction::Traction(_)
         | ExcitationAction::Pressure(_)
-        | ExcitationAction::BodyForce(_)
-        | ExcitationAction::BaseDisplacement(_)
-        | ExcitationAction::BaseVelocity(_)
-        | ExcitationAction::BaseAcceleration(_) => STRUCTURAL_EXCITATION_CLASS,
+        | ExcitationAction::BodyForce(_) => STRUCTURAL_EXCITATION_CLASS,
         ExcitationAction::HeatGeneration(_)
         | ExcitationAction::HeatFlux(_)
         | ExcitationAction::TemperatureField(_)
@@ -907,15 +862,6 @@ fn excitation_methods(class_name: &str) -> HashMap<String, crate::class_registry
             ("traction", "fea.StructuralExcitation.traction"),
             ("pressure", "fea.StructuralExcitation.pressure"),
             ("bodyForce", "fea.StructuralExcitation.bodyForce"),
-            (
-                "baseDisplacement",
-                "fea.StructuralExcitation.baseDisplacement",
-            ),
-            ("baseVelocity", "fea.StructuralExcitation.baseVelocity"),
-            (
-                "baseAcceleration",
-                "fea.StructuralExcitation.baseAcceleration",
-            ),
         ],
         THERMAL_EXCITATION_CLASS => &[
             ("heatGeneration", "fea.ThermalExcitation.heatGeneration"),

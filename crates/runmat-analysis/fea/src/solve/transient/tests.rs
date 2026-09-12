@@ -191,11 +191,13 @@ fn discontinuity_refreshes_acceleration_from_the_right_limit_before_continuing()
         vec![0.0; summary.dof_count],
         |time_s, approach| {
             samples.borrow_mut().push((time_s, approach));
-            Ok::<_, Infallible>(if time_s >= 0.25 && approach == SignalSampleApproach::At {
-                right_limit.clone()
-            } else {
-                summary.clone()
-            })
+            Ok::<_, Infallible>(
+                if time_s >= 0.25 && approach != SignalSampleApproach::LeftLimit {
+                    right_limit.clone()
+                } else {
+                    summary.clone()
+                },
+            )
         },
     )
     .unwrap();
@@ -205,6 +207,7 @@ fn discontinuity_refreshes_acceleration_from_the_right_limit_before_continuing()
         vec![
             (0.25, SignalSampleApproach::LeftLimit),
             (0.25, SignalSampleApproach::At),
+            (0.25, SignalSampleApproach::RightLimit),
             (0.75, SignalSampleApproach::At),
             (1.0, SignalSampleApproach::At),
         ]
@@ -278,11 +281,13 @@ fn endpoint_discontinuity_publishes_the_right_limit_state() {
         vec![0.0; summary.dof_count],
         |time_s, approach| {
             samples.borrow_mut().push((time_s, approach));
-            Ok::<_, Infallible>(if time_s == 1.0 && approach == SignalSampleApproach::At {
-                right_limit.clone()
-            } else {
-                summary.clone()
-            })
+            Ok::<_, Infallible>(
+                if time_s == 1.0 && approach != SignalSampleApproach::LeftLimit {
+                    right_limit.clone()
+                } else {
+                    summary.clone()
+                },
+            )
         },
     )
     .unwrap();
@@ -293,6 +298,7 @@ fn endpoint_discontinuity_publishes_the_right_limit_state() {
             (0.5, SignalSampleApproach::At),
             (1.0, SignalSampleApproach::LeftLimit),
             (1.0, SignalSampleApproach::At),
+            (1.0, SignalSampleApproach::RightLimit),
         ]
     );
     let last = result.time_points_s.len() - 1;

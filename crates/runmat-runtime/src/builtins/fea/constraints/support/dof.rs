@@ -250,7 +250,7 @@ fn dof_value_object(class_name: &str, dof: Value, value: Value) -> BuiltinResult
     Ok(Value::Object(object))
 }
 
-fn translation_dof_from_value(
+pub(super) fn translation_dof_from_value(
     builtin: &'static str,
     value: &Value,
 ) -> BuiltinResult<StructuralTranslationDof> {

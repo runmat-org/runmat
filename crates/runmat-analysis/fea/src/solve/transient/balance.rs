@@ -1,12 +1,25 @@
+use std::collections::BTreeMap;
+
 use thiserror::Error;
 
 use crate::{
     algebra::{spmv, CanonicalRealOperators},
     assembly::AssemblySummary,
+    constraints::solve_constraint_multipliers,
     contracts::StructuralDynamicBalanceSnapshot,
 };
 
 use super::{constraint_state::physical_load, state::SecondOrderState};
+
+pub(super) struct TransientBalanceStep<'a> {
+    pub(super) integration_start_summary: &'a AssemblySummary,
+    pub(super) integration_start_state: &'a SecondOrderState,
+    pub(super) integration_end_summary: &'a AssemblySummary,
+    pub(super) integration_end_state: &'a SecondOrderState,
+    pub(super) published_summary: &'a AssemblySummary,
+    pub(super) published_state: &'a SecondOrderState,
+    pub(super) time_step_s: f64,
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct TransientBalanceHistory {
@@ -16,6 +29,7 @@ pub(super) struct TransientBalanceHistory {
     strain_energy_j: Vec<f64>,
     kinetic_energy_j: Vec<f64>,
     external_work_j: Vec<f64>,
+    support_work_j: Vec<f64>,
     damping_dissipation_j: Vec<f64>,
     energy_balance_residual_j: Vec<f64>,
     relative_energy_balance_error: Vec<f64>,
@@ -29,6 +43,8 @@ pub(super) enum DynamicBalanceError {
     NonFinite,
     #[error("the structural damping work is negative ({increment_j} J)")]
     NegativeDampingDissipation { increment_j: f64 },
+    #[error("constraint-row reactions could not be recovered from the dynamic residual")]
+    ReactionRecovery,
 }
 
 impl StructuralDynamicBalanceSnapshot {
@@ -100,10 +116,11 @@ impl TransientBalanceHistory {
         Ok(Self {
             initial_mechanical_energy_j,
             balances: vec![balance.clone()],
-            reaction_snapshots: vec![constrained_reaction(summary, &balance)],
+            reaction_snapshots: vec![constrained_reaction(summary, &balance)?],
             strain_energy_j: vec![strain],
             kinetic_energy_j: vec![kinetic],
             external_work_j: vec![0.0],
+            support_work_j: vec![0.0],
             damping_dissipation_j: vec![0.0],
             energy_balance_residual_j: vec![0.0],
             relative_energy_balance_error: vec![0.0],
@@ -112,48 +129,66 @@ impl TransientBalanceHistory {
 
     pub(super) fn push_step(
         &mut self,
-        previous_summary: &AssemblySummary,
-        previous_state: &SecondOrderState,
-        current_summary: &AssemblySummary,
-        current_state: &SecondOrderState,
-        time_step_s: f64,
+        step: TransientBalanceStep<'_>,
     ) -> Result<(), DynamicBalanceError> {
-        if !time_step_s.is_finite() || time_step_s <= 0.0 {
+        if !step.time_step_s.is_finite() || step.time_step_s <= 0.0 {
             return Err(DynamicBalanceError::NonFinite);
         }
-        let previous_load = physical_load(previous_summary);
-        let current_load = physical_load(current_summary);
+        let previous_load = physical_load(step.integration_start_summary);
+        let current_load = physical_load(step.integration_end_summary);
         let balance = StructuralDynamicBalanceSnapshot::evaluate(
-            current_summary.operator.operators(),
-            current_state,
-            &current_load,
+            step.published_summary.operator.operators(),
+            step.published_state,
+            &physical_load(step.published_summary),
         )?;
-        let displacement_increment = current_state
+        let displacement_increment = step
+            .integration_end_state
             .displacement()
             .iter()
-            .zip(previous_state.displacement())
+            .zip(step.integration_start_state.displacement())
             .map(|(current, previous)| current - previous)
             .collect::<Vec<_>>();
         let average_load = current_load
             .iter()
-            .zip(previous_load)
+            .zip(&previous_load)
             .map(|(current, previous)| 0.5 * (current + previous))
             .collect::<Vec<_>>();
-        let average_velocity = current_state
+        let average_velocity = step
+            .integration_end_state
             .velocity()
             .iter()
-            .zip(previous_state.velocity())
+            .zip(step.integration_start_state.velocity())
             .map(|(current, previous)| 0.5 * (current + previous))
             .collect::<Vec<_>>();
         let average_damping_force = spmv(
-            current_summary.operator.operators().damping(),
+            step.integration_end_summary.operator.operators().damping(),
             &average_velocity,
         )
         .map_err(|_| DynamicBalanceError::DimensionMismatch)?;
         let external_work_increment = dot(&average_load, &displacement_increment)?;
+        let previous_balance = StructuralDynamicBalanceSnapshot::evaluate(
+            step.integration_start_summary.operator.operators(),
+            step.integration_start_state,
+            &previous_load,
+        )?;
+        let previous_reaction =
+            constrained_reaction(step.integration_start_summary, &previous_balance)?;
+        let integration_end_balance = StructuralDynamicBalanceSnapshot::evaluate(
+            step.integration_end_summary.operator.operators(),
+            step.integration_end_state,
+            &current_load,
+        )?;
+        let integration_end_reaction =
+            constrained_reaction(step.integration_end_summary, &integration_end_balance)?;
+        let average_reaction = previous_reaction
+            .iter()
+            .zip(&integration_end_reaction)
+            .map(|(previous, current)| 0.5 * (previous + current))
+            .collect::<Vec<_>>();
+        let support_work_increment = dot(&average_reaction, &displacement_increment)?;
         let damping_dissipation_increment =
-            time_step_s * dot(&average_velocity, &average_damping_force)?;
-        let damping_scale = time_step_s
+            step.time_step_s * dot(&average_velocity, &average_damping_force)?;
+        let damping_scale = step.time_step_s
             * norm(&average_velocity)
             * norm(&average_damping_force).max(f64::MIN_POSITIVE);
         if damping_dissipation_increment < -1.0e-12 * damping_scale {
@@ -164,17 +199,26 @@ impl TransientBalanceHistory {
         let damping_dissipation_increment = damping_dissipation_increment.max(0.0);
         let external_work =
             self.external_work_j.last().copied().unwrap_or(0.0) + external_work_increment;
+        let support_work =
+            self.support_work_j.last().copied().unwrap_or(0.0) + support_work_increment;
         let damping_dissipation = self.damping_dissipation_j.last().copied().unwrap_or(0.0)
             + damping_dissipation_increment;
-        let strain = strain_energy(current_summary.operator.operators(), current_state)?;
-        let kinetic = kinetic_energy(current_summary.operator.operators(), current_state)?;
+        let strain = strain_energy(
+            step.published_summary.operator.operators(),
+            step.published_state,
+        )?;
+        let kinetic = kinetic_energy(
+            step.published_summary.operator.operators(),
+            step.published_state,
+        )?;
         let mechanical = strain + kinetic;
-        let residual =
-            mechanical - self.initial_mechanical_energy_j - external_work + damping_dissipation;
+        let residual = mechanical - self.initial_mechanical_energy_j - external_work - support_work
+            + damping_dissipation;
         let scale = mechanical
             .abs()
             .max(self.initial_mechanical_energy_j.abs())
             .max(external_work.abs())
+            .max(support_work.abs())
             .max(damping_dissipation.abs());
         let relative = if scale == 0.0 {
             0.0
@@ -183,6 +227,7 @@ impl TransientBalanceHistory {
         };
         if [
             external_work,
+            support_work,
             damping_dissipation,
             strain,
             kinetic,
@@ -195,11 +240,12 @@ impl TransientBalanceHistory {
             return Err(DynamicBalanceError::NonFinite);
         }
         self.reaction_snapshots
-            .push(constrained_reaction(current_summary, &balance));
+            .push(constrained_reaction(step.published_summary, &balance)?);
         self.balances.push(balance);
         self.strain_energy_j.push(strain);
         self.kinetic_energy_j.push(kinetic);
         self.external_work_j.push(external_work);
+        self.support_work_j.push(support_work);
         self.damping_dissipation_j.push(damping_dissipation);
         self.energy_balance_residual_j.push(residual);
         self.relative_energy_balance_error.push(relative);
@@ -218,7 +264,7 @@ impl TransientBalanceHistory {
             .reaction_snapshots
             .last_mut()
             .ok_or(DynamicBalanceError::DimensionMismatch)? =
-            constrained_reaction(summary, &balance);
+            constrained_reaction(summary, &balance)?;
         *self
             .balances
             .last_mut()
@@ -246,6 +292,10 @@ impl TransientBalanceHistory {
         &self.external_work_j
     }
 
+    pub(super) fn support_work_j(&self) -> &[f64] {
+        &self.support_work_j
+    }
+
     pub(super) fn damping_dissipation_j(&self) -> &[f64] {
         &self.damping_dissipation_j
     }
@@ -262,21 +312,41 @@ impl TransientBalanceHistory {
 fn constrained_reaction(
     summary: &AssemblySummary,
     balance: &StructuralDynamicBalanceSnapshot,
-) -> Vec<f64> {
-    let mut owned = summary.operator.constrained_dofs().to_vec();
+) -> Result<Vec<f64>, DynamicBalanceError> {
     if let Some(matrix) = summary.constraint_matrix.as_ref() {
-        for dof in &matrix.column_indices {
-            if let Some(value) = owned.get_mut(*dof) {
-                *value = true;
+        let mut rows = Vec::with_capacity(matrix.row_count());
+        let mut projected_residual = Vec::with_capacity(matrix.row_count());
+        for row_index in 0..matrix.row_count() {
+            let start = matrix.row_offsets[row_index];
+            let end = matrix.row_offsets[row_index + 1];
+            let row = matrix.column_indices[start..end]
+                .iter()
+                .copied()
+                .zip(matrix.coefficients[start..end].iter().copied())
+                .collect::<BTreeMap<_, _>>();
+            projected_residual.push(
+                row.iter()
+                    .map(|(dof, coefficient)| coefficient * balance.equilibrium_residual[*dof])
+                    .sum(),
+            );
+            rows.push(row);
+        }
+        let multipliers = solve_constraint_multipliers(&rows, &projected_residual)
+            .ok_or(DynamicBalanceError::ReactionRecovery)?;
+        let mut reaction = vec![0.0; summary.dof_count];
+        for (row, multiplier) in rows.iter().zip(multipliers) {
+            for (dof, coefficient) in row {
+                reaction[*dof] += coefficient * multiplier;
             }
         }
+        return Ok(reaction);
     }
-    balance
+    Ok(balance
         .equilibrium_residual
         .iter()
-        .zip(owned)
-        .map(|(residual, constrained)| if constrained { *residual } else { 0.0 })
-        .collect()
+        .zip(summary.operator.constrained_dofs())
+        .map(|(residual, constrained)| if *constrained { *residual } else { 0.0 })
+        .collect())
 }
 
 fn strain_energy(

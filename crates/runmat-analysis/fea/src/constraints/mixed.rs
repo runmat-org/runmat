@@ -223,6 +223,30 @@ fn compile_node_constraint(
         StructuralConstraintKind::Prescribed(values) => {
             compile_prescribed(model, mesh, structural, topology, constraint, values)
         }
+        StructuralConstraintKind::PrescribedMotion(motion) => {
+            require_global(constraint)?;
+            let (resolved, nodes) =
+                resolve_target(mesh, structural, topology, constraint, &motion.target)?;
+            let mut rows = Vec::new();
+            for node in nodes {
+                for translation in &motion.translations {
+                    let dof = CanonicalStructuralDof::from(translation.dof);
+                    if !available_dofs(topology, node).contains(&dof) {
+                        return Err(ConstraintPlanError::UnavailableRotationalDof {
+                            constraint_id: constraint.constraint_id.clone(),
+                        });
+                    }
+                    rows.push(row::new_singleton(
+                        &constraint.constraint_id,
+                        topology.nodes[node].identity,
+                        dof,
+                        1.0,
+                        0.0,
+                    )?);
+                }
+            }
+            Ok((vec![resolved], rows))
+        }
         StructuralConstraintKind::Equation(equation) => {
             require_global(constraint)?;
             if equation.terms.is_empty() {
@@ -453,6 +477,7 @@ fn visit_targets(
         | StructuralConstraintKind::Symmetry { target }
         | StructuralConstraintKind::Antisymmetry { target } => visit(target),
         StructuralConstraintKind::Prescribed(values) => visit(&values.target),
+        StructuralConstraintKind::PrescribedMotion(values) => visit(&values.target),
         StructuralConstraintKind::RigidCoupling(coupling)
         | StructuralConstraintKind::DistributingCoupling(coupling) => visit(&coupling.target),
         StructuralConstraintKind::Tie(pair) => {

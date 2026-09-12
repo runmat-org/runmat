@@ -1,9 +1,10 @@
 use super::support::{
     coordinate_frame_from_value, reference_point_from_value, structural_dof_values_from_value,
+    structural_motions_from_value,
 };
 use super::*;
 use crate::builtins::fea::values::DISPLACEMENT_CLASS;
-use runmat_analysis_core::ReferencePointCoupling;
+use runmat_analysis_core::{PrescribedStructuralMotion, ReferencePointCoupling};
 
 const PRESCRIBED_INPUTS: [BuiltinParamDescriptor; 4] = [
     BuiltinParamDescriptor {
@@ -42,6 +43,42 @@ const PRESCRIBED_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignature
 }];
 pub(super) const PRESCRIBED_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &PRESCRIBED_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ERRORS,
+};
+
+const PRESCRIBED_MOTION_INPUTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "id",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Constraint identifier.",
+    },
+    BuiltinParamDescriptor {
+        name: "region",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "A geometry.Region selected from the model geometry.",
+    },
+    BuiltinParamDescriptor {
+        name: "motions",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "One typed structural motion or a cell array of component motions.",
+    },
+];
+const PRESCRIBED_MOTION_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
+    [BuiltinSignatureDescriptor {
+        label: "constraint = fea.StructuralConstraint.prescribedMotion(id, region, motions)",
+        inputs: &PRESCRIBED_MOTION_INPUTS,
+        outputs: &OUT_ANY,
+    }];
+pub(super) const PRESCRIBED_MOTION_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &PRESCRIBED_MOTION_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ERRORS,
@@ -114,6 +151,39 @@ pub async fn structural_prescribed_builtin(
                 target,
                 translations,
                 rotations,
+            }),
+        },
+    )
+}
+
+#[runtime_builtin(
+    name = "fea.StructuralConstraint.prescribedMotion",
+    category = "fea",
+    summary = "Prescribe derivative-consistent translational support motion on a region.",
+    keywords = "fea,structural,constraint,support,motion,transient,typed",
+    descriptor(crate::builtins::fea::constraints::structural::PRESCRIBED_MOTION_DESCRIPTOR),
+    integer_audit(TYPED_CONSTRAINT_INTEGER_AUDIT),
+    builtin_path = "crate::builtins::fea::constraints::structural"
+)]
+pub async fn structural_prescribed_motion_builtin(
+    id: String,
+    region: Value,
+    motions: Value,
+) -> BuiltinResult<Value> {
+    let builtin = "fea.StructuralConstraint.prescribedMotion";
+    let (id, geometry_id, geometry_revision, target) = bound_region(builtin, id, &region)?;
+    let translations = structural_motions_from_value(builtin, &motions)?;
+    bound_constraint_to_object(
+        builtin,
+        FEA_STRUCTURAL_CONSTRAINT_CLASS,
+        geometry_id,
+        geometry_revision,
+        StructuralConstraint {
+            constraint_id: id,
+            frame: CoordinateFrame::Global,
+            kind: StructuralConstraintKind::PrescribedMotion(PrescribedStructuralMotion {
+                target,
+                translations,
             }),
         },
     )

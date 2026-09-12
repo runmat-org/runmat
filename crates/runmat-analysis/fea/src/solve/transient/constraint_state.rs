@@ -179,13 +179,7 @@ pub(super) fn project_vector(
 }
 
 pub(super) fn physical_load(summary: &AssemblySummary) -> Vec<f64> {
-    summary
-        .operator
-        .load()
-        .iter()
-        .zip(summary.operator.constrained_dofs())
-        .map(|(value, constrained)| if *constrained { 0.0 } else { *value })
-        .collect()
+    summary.physical_load.clone()
 }
 
 fn inconsistent_kinematics(

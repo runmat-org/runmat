@@ -4,7 +4,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_analysis_core::{
     AnalysisModel, CoordinateFrame, PairedConstraint, PeriodicConstraint, PeriodicTransform,
-    PrescribedStructuralDofs, PrescribedValue, StructuralConstraint, StructuralConstraintKind,
+    PrescribedStructuralDofs, PrescribedStructuralMotion, PrescribedValue, StructuralConstraint,
+    StructuralConstraintKind,
 };
 use runmat_meshing_core::SolverMeshArtifact;
 
@@ -179,6 +180,9 @@ fn compile_constraint(
         StructuralConstraintKind::Prescribed(values) => {
             compile_prescribed(model, mesh, constraint, values)
         }
+        StructuralConstraintKind::PrescribedMotion(values) => {
+            compile_prescribed_motion(mesh, constraint, values)
+        }
         StructuralConstraintKind::Equation(equation) => {
             require_global(constraint)?;
             if equation.terms.is_empty() {
@@ -333,6 +337,33 @@ fn compile_prescribed(
                 *node_identity,
                 translation_direction(dof, basis),
                 value,
+            )?);
+        }
+    }
+    Ok((vec![resolved], rows, Vec::new(), None))
+}
+
+fn compile_prescribed_motion(
+    mesh: &SolverMeshArtifact,
+    constraint: &StructuralConstraint,
+    motion: &PrescribedStructuralMotion,
+) -> Result<CompiledConstraint, ConstraintPlanError> {
+    require_global(constraint)?;
+    let resolved = resolve_solid_target(mesh, &motion.target, &constraint.constraint_id)?;
+    let mut rows = Vec::with_capacity(
+        resolved
+            .matched_node_identities
+            .len()
+            .saturating_mul(motion.translations.len()),
+    );
+    for node_identity in &resolved.matched_node_identities {
+        for translation in &motion.translations {
+            rows.push(row::new_singleton(
+                &constraint.constraint_id,
+                *node_identity,
+                translation.dof.into(),
+                1.0,
+                0.0,
             )?);
         }
     }

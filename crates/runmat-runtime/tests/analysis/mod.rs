@@ -349,6 +349,22 @@ fn fea_conformance_manifest_uses_physical_fixture_language() {
 }
 
 #[test]
+fn fea_prescribed_motion_release_fixture_gates() {
+    let spec = manifest_specs()
+        .into_iter()
+        .find(|spec| spec.id == "transient_physical_tet4_support_motion_reference_cpu")
+        .expect("the prescribed-motion release fixture must remain in the manifest");
+    let root = tempfile::TempDir::new().expect("temporary release-fixture artifact root");
+    let root = root.path().to_path_buf();
+    let record = run_fixture(&spec, Some(&root));
+    assert!(
+        record.failures.is_empty(),
+        "prescribed-motion release fixture failed: {}",
+        record.failures.join("; ")
+    );
+}
+
+#[test]
 fn fea_benchmark_conformance_manifest_gates() {
     let artifact_root = harness_artifact_root();
     let store_root = artifact_root

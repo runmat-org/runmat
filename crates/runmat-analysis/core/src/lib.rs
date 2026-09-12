@@ -41,13 +41,15 @@ pub use field::{AnalysisField, AnalysisFieldValues, DeviceFieldRef};
 pub use problem::boundary::{AnalysisBoundary, BoundaryOperator};
 pub use problem::connector::{AnalysisConnector, ConnectorKind};
 pub use problem::constraint::{
-    AcousticConstraint, AcousticConstraintKind, AnalysisConstraint, ElectricalConstraint,
-    ElectricalConstraintKind, FluidConstraint, FluidConstraintKind, MagneticConstraint,
-    MagneticConstraintKind, PairedConstraint, PairingPolicy, PeriodicConstraint, PeriodicTransform,
-    PhaseShiftedPeriodicConstraint, PrescribedStructuralDofs, ReferencePointCoupling,
-    RotationDofValue, StructuralConstraint, StructuralConstraintEquation,
-    StructuralConstraintEquationTerm, StructuralConstraintKind, StructuralRotationDof,
-    StructuralTranslationDof, ThermalConstraint, ThermalConstraintKind, TranslationDofValue,
+    AccelerationSignalId, AcousticConstraint, AcousticConstraintKind, AnalysisConstraint,
+    ElectricalConstraint, ElectricalConstraintKind, FluidConstraint, FluidConstraintKind,
+    MagneticConstraint, MagneticConstraintKind, PairedConstraint, PairingPolicy,
+    PeriodicConstraint, PeriodicTransform, PhaseShiftedPeriodicConstraint,
+    PrescribedStructuralDofs, PrescribedStructuralMotion, ReferencePointCoupling, RotationDofValue,
+    StructuralConstraint, StructuralConstraintEquation, StructuralConstraintEquationTerm,
+    StructuralConstraintKind, StructuralKinematicHistory, StructuralMotionReconstruction,
+    StructuralRotationDof, StructuralTranslationDof, ThermalConstraint, ThermalConstraintKind,
+    TranslationDofMotion, TranslationDofValue,
 };
 pub use problem::coordinate_frame::{AxialFrame, CartesianFrame, CoordinateFrame, SphericalFrame};
 pub use problem::domains::{

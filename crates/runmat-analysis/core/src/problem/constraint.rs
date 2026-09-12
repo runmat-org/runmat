@@ -17,9 +17,11 @@ pub use electrical::{ElectricalConstraint, ElectricalConstraintKind};
 pub use fluid::{FluidConstraint, FluidConstraintKind};
 pub use magnetic::{MagneticConstraint, MagneticConstraintKind};
 pub use structural::{
-    PrescribedStructuralDofs, ReferencePointCoupling, RotationDofValue, StructuralConstraint,
-    StructuralConstraintEquation, StructuralConstraintEquationTerm, StructuralConstraintKind,
-    StructuralRotationDof, StructuralTranslationDof, TranslationDofValue,
+    AccelerationSignalId, PrescribedStructuralDofs, PrescribedStructuralMotion,
+    ReferencePointCoupling, RotationDofValue, StructuralConstraint, StructuralConstraintEquation,
+    StructuralConstraintEquationTerm, StructuralConstraintKind, StructuralKinematicHistory,
+    StructuralMotionReconstruction, StructuralRotationDof, StructuralTranslationDof,
+    TranslationDofMotion, TranslationDofValue,
 };
 pub use thermal::{ThermalConstraint, ThermalConstraintKind};
 

@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-pub(super) fn solve_constraint_multipliers(
+pub(crate) fn solve_constraint_multipliers(
     rows: &[BTreeMap<usize, f64>],
     right_hand_side: &[f64],
 ) -> Option<Vec<f64>> {

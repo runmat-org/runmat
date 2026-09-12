@@ -486,6 +486,10 @@ fn structural_constraint_methods() -> HashMap<String, crate::class_registry::Run
         ("fixed", "fea.StructuralConstraint.fixed"),
         ("prescribed", "fea.StructuralConstraint.prescribed"),
         (
+            "prescribedMotion",
+            "fea.StructuralConstraint.prescribedMotion",
+        ),
+        (
             "normalDisplacement",
             "fea.StructuralConstraint.normalDisplacement",
         ),
