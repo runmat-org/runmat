@@ -205,3 +205,5 @@ pub const TAN_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     integer_audit: None,
     suppress_auto_output: false,
 };
+
+pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&TAN_CATALOG_ENTRY];

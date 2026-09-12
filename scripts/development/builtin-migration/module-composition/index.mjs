@@ -20,3 +20,16 @@ export {
   MODULE_COMPOSITION_SUFFIXES, moduleCompositionProductRegistry,
 } from "./registry.mjs";
 export { validateReviewedModuleCompositionAuthority } from "./authority.mjs";
+export {
+  deriveModuleCompositionBaselineCandidate, parseModuleCompositionBaselineCandidate,
+} from "./baseline-candidate.mjs";
+export {
+  buildModuleCompositionBaselineReviewTemplate, parseModuleCompositionBaselineReview,
+  sealModuleCompositionBaselineReview,
+} from "./baseline-review.mjs";
+export {
+  freezeReviewedModuleCompositionBaseline, moduleCompositionBaselineProvenance,
+  parseTrustedReviewedModuleCompositionBaseline, validateReviewedModuleCompositionBaseline,
+} from "./baseline-authority.mjs";
+export { bootstrapModuleComposition } from "./bootstrap.mjs";
+export { materializeEffectiveModuleComposition } from "./materialize.mjs";

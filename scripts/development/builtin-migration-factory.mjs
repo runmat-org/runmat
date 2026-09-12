@@ -20,6 +20,7 @@ import { compileDispositionReview } from "./builtin-migration/disposition-review
 import { buildDispositionSeed, buildInventory, emptyDispositionInput, parseInventoryEvidence } from "./builtin-migration/inventory.mjs";
 import { assertLeaseBaseInventory, issueLease, parseLease } from "./builtin-migration/lease.mjs";
 import { runGateProducer } from "./builtin-migration/gate-adapter.mjs";
+import { materializeEffectiveModuleComposition } from "./builtin-migration/module-composition/materialize.mjs";
 import { prepareIdentity } from "./builtin-migration/prepare.mjs";
 import { buildQueue, emptyQueueState, validateQueueState } from "./builtin-migration/queue.mjs";
 import { validateQueueCheckpoint } from "./builtin-migration/queue-checkpoint.mjs";
@@ -146,6 +147,20 @@ function run(options) {
       compiledInventory: readJson(options.compiledInventory),
     });
     emit(runGateProducer({ control, lease, queue_state: queue.state, queue_checkpoint: queue.checkpoint, control_baseline_inventory: controlBaseline, lease_base_inventory: leaseBase, subject_inventory: subject, bundle_id: options.bundle, gate: options.gate, artifact_id: options.artifact, inputs: options.inputs ? readJson(options.inputs) : null }), options.output);
+    return;
+  }
+  if (options.command === "materialize-composition") {
+    const baseline = parseInventoryEvidence(readJson(options.baselineInventory));
+    const control = parseControlFromOptions(options, baseline);
+    const lease = parseLease(readJson(options.lease), control, repository);
+    const leaseBase = parseInventoryEvidence(readJson(options.leaseBaseInventory));
+    assertLeaseBaseInventory(lease, control, leaseBase);
+    const queue = loadQueueAuthority(
+      options.state, options.queueCheckpoint, options.trustedQueueCheckpointDigest, control,
+    );
+    emit(materializeEffectiveModuleComposition({
+      repository, control, queueState: queue.state, queueCheckpoint: queue.checkpoint, lease,
+    }), options.output);
     return;
   }
   if (options.command === "verify") { runVerify(options); return; }
@@ -280,8 +295,8 @@ function runSeal(options) {
 function parse(arguments_) {
   if (arguments_.includes("--help") || arguments_.includes("-h")) return { help: true };
   const command = arguments_.shift();
-  const commands = ["inventory", "queue", "seed-dispositions", "compile-dispositions", "draft-control", "component-graph", "compose-topology", "freeze-topology", "validate-topology", "scaffold-control", "init-control-reviews", "index-control-reviews", "compose-control", "scaffold-control-attestation", "seal-control-attestation", "freeze-control", "validate-control", "issue-lease", "produce-gate", "prepare", "audit", "verify", "seal"];
-  const controlCommands = ["queue", "prepare", "audit", "freeze-control", "validate-control", "issue-lease", "produce-gate", "seal"];
+  const commands = ["inventory", "queue", "seed-dispositions", "compile-dispositions", "draft-control", "component-graph", "compose-topology", "freeze-topology", "validate-topology", "scaffold-control", "init-control-reviews", "index-control-reviews", "compose-control", "scaffold-control-attestation", "seal-control-attestation", "freeze-control", "validate-control", "issue-lease", "produce-gate", "materialize-composition", "prepare", "audit", "verify", "seal"];
+  const controlCommands = ["queue", "prepare", "audit", "freeze-control", "validate-control", "issue-lease", "produce-gate", "materialize-composition", "seal"];
   const controlAuthoringCommands = ["scaffold-control", "init-control-reviews", "index-control-reviews", "compose-control", "scaffold-control-attestation", "seal-control-attestation"];
   if (!commands.includes(command)) throw new Error(`expected ${commands.join(", ")}; use --help`);
   const options = { command, output: null, compiledInventory: null, baselineInventory: null, leaseBaseInventory: null, dispositions: null, control: null, draft: null, review: null, request: null, lease: null, state: null, queueCheckpoint: null, trustedQueueCheckpointDigest: null, batch: null, evidence: null, identity: null, workspace: null, manifest: null, bundle: null, gate: null, artifact: null, inputs: null, componentGraph: null, c01C03Review: null, c04C05Review: null, c06C07Review: null, reconciliation: null, stabilityCorrections: null, candidate: null, attestation: null, topology: null, controlScaffold: null, controlReviewSet: null, controlCandidate: null, controlAttestation: null, reviewDirectory: null, reviewSetDirectory: null, attestationReview: null, help: false };
@@ -317,6 +332,11 @@ function parse(arguments_) {
   if (command === "produce-gate" && (!options.bundle || !options.gate || !options.artifact
     || !options.state || !options.queueCheckpoint || !options.trustedQueueCheckpointDigest)) {
     throw new Error("produce-gate requires --bundle, --gate, --artifact, --state, --queue-checkpoint, and --trusted-queue-checkpoint-digest");
+  }
+  if (command === "materialize-composition" && (!options.control || !options.lease
+    || !options.leaseBaseInventory || !options.state || !options.queueCheckpoint
+    || !options.trustedQueueCheckpointDigest)) {
+    throw new Error("materialize-composition requires --control, --lease-base-inventory, --lease, --state, --queue-checkpoint, and --trusted-queue-checkpoint-digest");
   }
   if (["prepare", "audit"].includes(command) && !options.lease) throw new Error(`${command} requires --lease`);
   if (["prepare", "audit", "produce-gate"].includes(command) && !options.leaseBaseInventory) throw new Error(`${command} requires --lease-base-inventory`);
@@ -354,6 +374,7 @@ function help() {
     `  builtin-migration-factory.mjs validate-control --control PATH --baseline-inventory PATH ${topology} ${controlReview} [--output PATH]\n` +
     `  builtin-migration-factory.mjs issue-lease --request PATH --control PATH --baseline-inventory PATH --lease-base-inventory PATH --state PATH --queue-checkpoint PATH --trusted-queue-checkpoint-digest SHA256 ${topology} ${controlReview} [--output PATH]\n` +
     `  builtin-migration-factory.mjs produce-gate --compiled-inventory PATH --control PATH --baseline-inventory PATH --lease-base-inventory PATH --lease PATH --state PATH --queue-checkpoint PATH --trusted-queue-checkpoint-digest SHA256 ${topology} ${controlReview} --bundle ID --gate NAME --artifact ID [--inputs PATH] [--output PATH]\n` +
+    `  builtin-migration-factory.mjs materialize-composition --control PATH --baseline-inventory PATH --lease-base-inventory PATH --lease PATH --state PATH --queue-checkpoint PATH --trusted-queue-checkpoint-digest SHA256 ${topology} ${controlReview} [--output PATH]\n` +
     `  builtin-migration-factory.mjs queue --compiled-inventory PATH --control PATH --baseline-inventory PATH ${topology} ${controlReview} [--state PATH --queue-checkpoint PATH --trusted-queue-checkpoint-digest SHA256] [--dispositions PATH] [--output PATH]\n` +
     `  builtin-migration-factory.mjs prepare NAME --compiled-inventory PATH --control PATH --baseline-inventory PATH --lease-base-inventory PATH ${topology} ${controlReview} --lease PATH --workspace PATH [--dispositions PATH] [--output PATH]\n` +
     `  builtin-migration-factory.mjs audit --compiled-inventory PATH --control PATH --baseline-inventory PATH --lease-base-inventory PATH ${topology} ${controlReview} --lease PATH --batch PATH --evidence PATH [--dispositions PATH] [--output PATH]\n` +

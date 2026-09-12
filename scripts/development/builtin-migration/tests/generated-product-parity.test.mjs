@@ -119,12 +119,13 @@ test("module composition input and proof bind the exact reviewed parent projecti
     role: "group",
     visibility: "private",
     declaration_condition: { kind: "always" },
+    declaration_order: 0,
     macro_use: false,
     reexports: [{ kind: "glob", visibility: "public", condition: { kind: "always" }, doc_hidden: false }],
-    aggregation_sources: [{ role: "entries", kind: "slice", order: 0 }],
+    aggregation_sources: [{ role: "entries", kind: "slice", order: 0, condition: { kind: "always" } }],
   };
   const projection = {
-    schema_version: 3,
+    schema_version: 4,
     kind: "runmat-builtin-module-composition-projection",
     products: [{
       product_id: composition.product_id,
@@ -132,6 +133,7 @@ test("module composition input and proof bind the exact reviewed parent projecti
       path: composition.path,
       module_path: "crate::catalog::entries::math",
       aggregations: ["entries"],
+      aggregation_exports: [],
       children: [child],
     }],
   };
@@ -195,10 +197,11 @@ test("empty runtime composition remains a verified baseline product", () => {
     path: composition.path,
     module_path: "crate::builtins::math",
     aggregations: [],
+    aggregation_exports: [],
     children: [],
   };
   const projection = {
-    schema_version: 3,
+    schema_version: 4,
     kind: "runmat-builtin-module-composition-projection",
     products: [product],
   };

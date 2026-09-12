@@ -1,6 +1,6 @@
 use super::{
     aliases::extend_aliases,
-    entries::{extend_catalog_constants, extend_catalog_entries},
+    entries::{extend_constants, extend_entries},
     BuiltinCatalogAlias, BuiltinCatalogEntry, BuiltinConstantCatalogEntry,
 };
 use std::cmp::Ordering;
@@ -13,7 +13,7 @@ use std::sync::LazyLock;
 /// requires editing a second, repository-wide list.
 static CATALOG_ENTRIES: LazyLock<Vec<&'static BuiltinCatalogEntry>> = LazyLock::new(|| {
     let mut entries = Vec::new();
-    extend_catalog_entries(&mut entries);
+    extend_entries(&mut entries);
     entries
 });
 
@@ -25,7 +25,7 @@ static CATALOG_ALIASES: LazyLock<Vec<&'static BuiltinCatalogAlias>> = LazyLock::
 
 static CATALOG_CONSTANTS: LazyLock<Vec<BuiltinConstantCatalogEntry>> = LazyLock::new(|| {
     let mut constants = Vec::new();
-    extend_catalog_constants(&mut constants);
+    extend_constants(&mut constants);
     constants.sort_unstable_by_key(|constant| constant.name);
     constants
 });

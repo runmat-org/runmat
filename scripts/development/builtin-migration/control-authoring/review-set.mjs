@@ -52,7 +52,7 @@ export function loadControlReviewSet(manifestPath, { scaffold, topology, invento
   );
   validateBundleReferences(bundleReviews, topology);
   const moduleComposition = validateModuleCompositionControl(
-    globalReview.value.module_composition_baseline,
+    globalReview.moduleCompositionBaseline,
     globalReview.integrationProducts,
     reviewedCompositionBundles(bundleReviews, topology),
   );

@@ -17,12 +17,12 @@ pub use rounding::*;
 pub use trigonometry::*;
 
 pub(super) fn extend_entries(entries: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
-    super::extend_groups(entries, elementwise::ENTRY_GROUPS);
+    elementwise::extend_entries(entries);
     super::extend_groups(entries, &[bitwise::ENTRIES]);
     super::extend_groups(entries, &[discrete::ENTRIES]);
     super::extend_groups(entries, &[integer_division::ENTRIES]);
-    super::extend_groups(entries, &[linalg::ENTRIES]);
-    super::extend_groups(entries, reduction::ENTRY_GROUPS);
+    linalg::extend_entries(entries);
+    reduction::extend_entries(entries);
     super::extend_groups(entries, &[rounding::ENTRIES]);
-    super::extend_groups(entries, &[trigonometry::ENTRIES]);
+    trigonometry::extend_entries(entries);
 }

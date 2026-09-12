@@ -23,6 +23,7 @@
 
 pub(in crate::catalog) mod acceleration;
 mod aggregate;
+mod aggregation;
 mod array;
 pub(in crate::catalog) mod cells;
 mod constants;
@@ -46,7 +47,9 @@ pub use parallel::*;
 pub use stats::*;
 pub use structs::*;
 
-pub(super) fn extend_catalog_entries(entries: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
+use aggregation::extend_groups;
+
+pub(super) fn extend_entries(entries: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     acceleration::extend_entries(entries);
     aggregate::extend_entries(entries);
     array::extend_entries(entries);
@@ -60,14 +63,7 @@ pub(super) fn extend_catalog_entries(entries: &mut Vec<&'static crate::BuiltinCa
     structs::extend_entries(entries);
 }
 
-pub(super) fn extend_catalog_constants(values: &mut Vec<crate::BuiltinConstantCatalogEntry>) {
+pub(super) fn extend_constants(values: &mut Vec<crate::BuiltinConstantCatalogEntry>) {
     array::extend_constants(values);
     constants::extend_constants(values);
-}
-
-fn extend_groups(
-    entries: &mut Vec<&'static crate::BuiltinCatalogEntry>,
-    groups: &[&[&'static crate::BuiltinCatalogEntry]],
-) {
-    entries.extend(groups.iter().flat_map(|group| group.iter().copied()));
 }

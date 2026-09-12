@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  applyModuleCompositionTransitions, generateModuleCompositionProducts,
+  applyModuleCompositionTransitions, generateModuleCompositionProducts, generatedHeader,
   parseGeneratedModuleComposition, parseModuleCompositionProjection,
   parseModuleCompositionTransition, renderModuleCompositionProduct,
   validateModuleCompositionControl, verifyModuleCompositionProduct,
@@ -29,7 +29,7 @@ test("renders and independently verifies the closed catalog and runtime grammar"
   }
 });
 
-test("generation is deterministic and uses canonical code-point order", () => {
+test("generation is deterministic while declaration order remains explicit", () => {
   const projection = fixtureProjection();
   const first = generateModuleCompositionProducts(projection);
   const second = generateModuleCompositionProducts(structuredClone(projection));
@@ -38,12 +38,42 @@ test("generation is deterministic and uses canonical code-point order", () => {
   assert.ok(first[0].content.indexOf("mod arithmetic") < first[0].content.indexOf("mod plotting"));
 });
 
+test("an empty product retains the complete canonical generated envelope", () => {
+  const product = fixtureProjection().products[1];
+  product.children = [];
+  const source = renderModuleCompositionProduct(product);
+  assert.equal(source, `${generatedHeader()}\n\n`);
+  assert.doesNotThrow(() => verifyModuleCompositionProduct(product, source));
+});
+
+test("canonical child storage does not reorder macro-bearing runtime declarations", () => {
+  const product = fixtureProjection().products[1];
+  product.children = [
+    child({
+      module: "acceleration", source_path: "crates/runmat-runtime/src/builtins/math/acceleration/mod.rs",
+      role: "group", visibility: "public", declarationOrder: 1,
+    }),
+    child({
+      module: "common", source_path: "crates/runmat-runtime/src/builtins/math/common/mod.rs",
+      role: "support", visibility: "public", macroUse: true, declarationOrder: 0,
+    }),
+  ];
+  const parsed = parseModuleCompositionProjection({
+    schema_version: 4, kind: "runmat-builtin-module-composition-projection", products: [product],
+  });
+  assert.deepEqual(parsed.products[0].children.map((entry) => entry.module), ["acceleration", "common"]);
+  const source = renderModuleCompositionProduct(parsed.products[0]);
+  assert.ok(source.indexOf("mod common") < source.indexOf("mod acceleration"));
+  assert.match(source, /#\[macro_use\]\npub mod common;/);
+  assert.doesNotThrow(() => verifyModuleCompositionProduct(parsed.products[0], source));
+});
+
 test("catalog composition models slice, grouped-slice, function, and empty aggregators", () => {
   const product = fixtureProjection().products[0];
   product.aggregations = ["entries"];
-  product.children[0].aggregation_sources = [{ role: "entries", kind: "function", order: 0 }];
+  product.children[0].aggregation_sources = [{ role: "entries", kind: "function", order: 0, condition: { kind: "always" } }];
   product.children[1].declaration_condition = { kind: "always" };
-  product.children[1].aggregation_sources = [{ role: "entries", kind: "groups", order: 1 }];
+  product.children[1].aggregation_sources = [{ role: "entries", kind: "groups", order: 1, condition: { kind: "always" } }];
   const source = renderModuleCompositionProduct(product);
   assert.match(source, /arithmetic::extend_entries\(values\);/);
   assert.match(source, /plotting::ENTRY_GROUPS\.iter\(\)\.flat_map/);
@@ -62,11 +92,39 @@ test("catalog composition models slice, grouped-slice, function, and empty aggre
   assert.doesNotThrow(() => verifyModuleCompositionProduct(aliases, empty));
 });
 
+test("catalog aggregation implementations may be exact typed child exports", () => {
+  const product = fixtureProjection().products[0];
+  product.aggregations = ["entries"];
+  product.aggregation_exports = [{
+    role: "entries", module: "registry", visibility: "super",
+    condition: { kind: "always" }, doc_hidden: false,
+  }];
+  product.children = [child({
+    module: "registry", source_path: "crates/runmat-builtins/src/catalog/entries/math/registry.rs",
+    sourceKind: "file", role: "support", visibility: "private", declarationOrder: 0,
+  })];
+  const source = renderModuleCompositionProduct(product);
+  assert.match(source, /pub\(super\) use registry::extend_entries;/);
+  assert.doesNotMatch(source, /fn extend_entries/);
+  assert.doesNotThrow(() => verifyModuleCompositionProduct(product, source));
+
+  const wrongModule = structuredClone(product);
+  wrongModule.aggregation_exports[0].module = "missing";
+  assert.throws(() => renderModuleCompositionProduct(wrongModule), /references undeclared child/);
+  const danglingEmpty = structuredClone(product);
+  danglingEmpty.children = [];
+  assert.throws(() => renderModuleCompositionProduct(danglingEmpty), /references undeclared child/);
+  assert.throws(
+    () => verifyModuleCompositionProduct(product, source.replace("extend_entries", "extend_aliases")),
+    /differs from its typed projection|canonical/,
+  );
+});
+
 test("projection rejects invalid parents, paths, keywords, enums, and collisions", () => {
-  for (const version of [1, 2, 4]) {
+  for (const version of [1, 2, 3, 5]) {
     const wrongVersion = fixtureProjection();
     wrongVersion.schema_version = version;
-    assert.throws(() => parseModuleCompositionProjection(wrongVersion), /schema_version 3/);
+    assert.throws(() => parseModuleCompositionProjection(wrongVersion), /schema_version 4/);
   }
   const cases = [
     [mutate((value) => { value.products[0].path = "crates/runmat-builtins/src/catalog/entries/other/mod.rs"; }), /does not match its logical parent/],
@@ -78,10 +136,10 @@ test("projection rejects invalid parents, paths, keywords, enums, and collisions
     [mutate((value) => { value.products[0].children[0].role = "builtin"; }), /must be one of/],
     [mutate((value) => { value.products[0].children[0].visibility = "workspace"; }), /must be one of/],
     [mutate((value) => { value.products[0].children[0].declaration_condition = { kind: "cfg", feature: "x" }; }), /unsupported kind/],
-    [mutate((value) => { value.products[0].children[0].aggregation_sources = [{ role: "bindings", kind: "slice", order: 0 }]; }), /must be one of/],
-    [mutate((value) => { value.products[0].children[0].aggregation_sources = [{ role: "entries", kind: "unknown", order: 0 }]; }), /must be one of/],
-    [mutate((value) => { value.products[0].children[0].aggregation_sources = [{ role: "aliases", kind: "groups", order: 0 }]; }), /grouped aggregation/],
-    [mutate((value) => { value.products[1].children[0].aggregation_sources = [{ role: "entries", kind: "slice", order: 0 }]; }), /is not emitted by its parent|runtime children cannot/],
+    [mutate((value) => { value.products[0].children[0].aggregation_sources = [{ role: "bindings", kind: "slice", order: 0, condition: { kind: "always" } }]; }), /must be one of/],
+    [mutate((value) => { value.products[0].children[0].aggregation_sources = [{ role: "entries", kind: "unknown", order: 0, condition: { kind: "always" } }]; }), /must be one of/],
+    [mutate((value) => { value.products[0].children[0].aggregation_sources = [{ role: "aliases", kind: "groups", order: 0, condition: { kind: "always" } }]; }), /grouped aggregation/],
+    [mutate((value) => { value.products[1].children[0].aggregation_sources = [{ role: "entries", kind: "slice", order: 0, condition: { kind: "always" } }]; }), /is not emitted by its parent|runtime children cannot/],
     [mutate((value) => { value.products[1].children[0].visibility = "catalog"; }), /cannot use catalog visibility/],
     [mutate((value) => { value.products[0].children.push({ ...value.products[0].children[0], module: "Arithmetic", source_path: "crates/runmat-builtins/src/catalog/entries/math/Arithmetic/mod.rs" }); }), /collide case-insensitively/],
     [mutate((value) => { value.products[1].path = value.products[0].path.toUpperCase(); }), /product path does not match|outside its crate role/],
@@ -113,6 +171,26 @@ test("parent-scoped declarations and reexports remain closed and verifiable", ()
   assert.doesNotThrow(() => verifyModuleCompositionProduct(product, source));
 });
 
+test("case-distinct Rust item identities survive named reexport composition", () => {
+  const product = fixtureProjection().products[1];
+  product.children = [child({
+    module: "definitions",
+    source_path: "crates/runmat-runtime/src/builtins/math/definitions.rs",
+    sourceKind: "file",
+    role: "support",
+    reexportItems: ["Inf", "NaN", "inf", "nan"],
+    reexportVisibility: "crate",
+  })];
+  const parsed = parseModuleCompositionProjection({
+    schema_version: 4,
+    kind: "runmat-builtin-module-composition-projection",
+    products: [product],
+  });
+  const source = renderModuleCompositionProduct(parsed.products[0]);
+  assert.match(source, /definitions::\{\n    Inf,\n    NaN,\n    inf,\n    nan,/);
+  assert.doesNotThrow(() => verifyModuleCompositionProduct(parsed.products[0], source));
+});
+
 test("conditions, hidden reexports, aliases, and independent reexport conditions round-trip", () => {
   const product = fixtureProjection().products[1];
   product.children = [child({
@@ -127,25 +205,34 @@ test("conditions, hidden reexports, aliases, and independent reexport conditions
     ],
   };
   product.children[0].reexports = [
-    { kind: "glob", visibility: "crate", condition: { kind: "always" }, doc_hidden: false },
-    { kind: "named", visibility: "public", condition: { kind: "target-architecture", architecture: "wasm32" }, doc_hidden: true, items: [{ name: "evaluate", alias: "evaluate_plot" }] },
-    { kind: "named", visibility: "public", condition: { kind: "cargo-feature", feature: "plot-core" }, doc_hidden: false, items: [{ name: "register", alias: null }] },
-    { kind: "named", visibility: "public", condition: { kind: "test" }, doc_hidden: false, items: [{ name: "test_support", alias: null }] },
-    { kind: "named", visibility: "public", condition: { kind: "all", conditions: [{ kind: "target-architecture", architecture: "wasm32" }, { kind: "cargo-feature", feature: "plot-web" }] }, doc_hidden: false, items: [{ name: "evaluate", alias: "evaluate_web" }] },
+    { kind: "glob", visibility: "crate", condition: product.children[0].declaration_condition, doc_hidden: false },
+    { kind: "named", visibility: "public", condition: { kind: "all", conditions: [{ kind: "target-architecture", architecture: "wasm32" }, { kind: "cargo-feature", feature: "plot-web" }, { kind: "test" }] }, doc_hidden: true, items: [{ name: "evaluate", alias: "evaluate_plot" }] },
   ];
   const source = renderModuleCompositionProduct(product);
   assert.match(source, /#\[cfg\(all\(target_arch = "wasm32", feature = "plot-web"\)\)\]\npub mod plotting;/);
-  assert.match(source, /#\[cfg\(target_arch = "wasm32"\)\]\n#\[doc\(hidden\)\]\npub use plotting::\{\n    evaluate as evaluate_plot,/);
+  assert.match(source, /#\[cfg\(all\(target_arch = "wasm32", feature = "plot-web", test\)\)\]\n#\[doc\(hidden\)\]\npub use plotting::\{\n    evaluate as evaluate_plot,/);
   assert.deepEqual(parseGeneratedModuleComposition(source), parseGeneratedModuleComposition(renderModuleCompositionProduct(product)));
   assert.doesNotThrow(() => verifyModuleCompositionProduct(product, source));
 });
 
-test("the v3 grammar rejects raw cfg, malformed conjunctions, aliases, and aggregation order", () => {
+test("the v4 grammar rejects raw cfg, malformed conjunctions, aliases, and aggregation order", () => {
   const invalid = [
     [mutate((value) => { value.products[1].children[0].declaration_condition = { kind: "any", conditions: [] }; }), /unsupported kind/],
     [mutate((value) => { value.products[1].children[0].declaration_condition = { kind: "target-architecture", architecture: "x86_64" }; }), /unsupported target architecture/],
     [mutate((value) => { value.products[1].children[0].declaration_condition = { kind: "all", conditions: [{ kind: "cargo-feature", feature: "plot-web" }] }; }), /at least two/],
     [mutate((value) => { value.products[1].children[0].declaration_condition = { kind: "all", conditions: [{ kind: "cargo-feature", feature: "plot-web" }, { kind: "target-architecture", architecture: "wasm32" }] }; }), /canonical condition order/],
+    [mutate((value) => { value.products[0].children[0].declaration_order = 2; }), /declaration orders.*contiguous/],
+    [mutate((value) => { delete value.products[0].children[0].declaration_order; }), /fields must be exactly/],
+    [mutate((value) => { delete value.products[0].children[0].aggregation_sources[0].condition; }), /fields must be exactly/],
+    [mutate((value) => {
+      value.products[0].children[0].declaration_condition = { kind: "cargo-feature", feature: "catalog-a" };
+      for (const reexport of value.products[0].children[0].reexports) reexport.condition = { kind: "cargo-feature", feature: "catalog-a" };
+      value.products[0].children[0].aggregation_sources[0].condition = { kind: "test" };
+    }), /aggregation condition must imply/],
+    [mutate((value) => {
+      value.products[0].children[0].declaration_condition = { kind: "cargo-feature", feature: "catalog-a" };
+      value.products[0].children[0].aggregation_sources[0].condition = { kind: "cargo-feature", feature: "catalog-a" };
+    }), /reexport condition must imply/],
     [mutate((value) => { value.products[0].children[0].reexports[0].items[0].alias = "not-an-identifier"; }), /Rust item identifier/],
     [mutate((value) => { value.products[0].children[0].reexports[0].items[1].alias = "ADD_CATALOG_ENTRY"; }), /exported item names collide/],
     [mutate((value) => { value.products[0].children[0].reexports.push(structuredClone(value.products[0].children[0].reexports[0])); }), /reexports must be unique/],
@@ -160,10 +247,22 @@ test("the v3 grammar rejects raw cfg, malformed conjunctions, aliases, and aggre
 test("aggregation contributor order is independent of child declaration order", () => {
   const product = fixtureProjection().products[0];
   product.aggregations = ["entries"];
-  product.children[0].aggregation_sources = [{ role: "entries", kind: "slice", order: 1 }];
-  product.children[1].aggregation_sources = [{ role: "entries", kind: "groups", order: 0 }];
+  product.children[0].aggregation_sources = [{ role: "entries", kind: "slice", order: 1, condition: { kind: "always" } }];
+  product.children[1].aggregation_sources = [{ role: "entries", kind: "groups", order: 0, condition: product.children[1].declaration_condition }];
   const source = renderModuleCompositionProduct(product);
   assert.ok(source.indexOf("plotting::ENTRY_GROUPS") < source.indexOf("arithmetic::ENTRIES"));
+  assert.doesNotThrow(() => verifyModuleCompositionProduct(product, source));
+});
+
+test("aggregation conditions remain independent from declaration conditions", () => {
+  const product = fixtureProjection().products[0];
+  product.aggregations = ["entries"];
+  product.children[0].aggregation_sources = [{
+    role: "entries", kind: "slice", order: 0, condition: { kind: "test" },
+  }];
+  product.children[1].aggregation_sources = [];
+  const source = renderModuleCompositionProduct(product);
+  assert.match(source, /pub\(in crate::catalog\) mod arithmetic;[\s\S]*#\[cfg\(test\)\]\n    values\.extend\(arithmetic::ENTRIES/);
   assert.doesNotThrow(() => verifyModuleCompositionProduct(product, source));
 });
 
@@ -171,10 +270,10 @@ test("closed path and macro-use attributes reproduce safe noncanonical module pl
   const product = fixtureProjection().products[1];
   product.children = [child({
     module: "common", source_path: "crates/runmat-runtime/src/builtins/math/helpers/common.rs",
-    sourceKind: "file", role: "support", visibility: "public", macroUse: true,
+    sourceKind: "file", role: "support", visibility: "public", macroUse: true, declarationOrder: 0,
   }), child({
     module: "tests", source_path: "crates/runmat-runtime/src/builtins/math/tests.rs",
-    sourceKind: "file", role: "support", feature: "test",
+    sourceKind: "file", role: "support", feature: "test", declarationOrder: 1,
   })];
   const source = renderModuleCompositionProduct(product);
   assert.match(source, /#\[path = "helpers\/common.rs"\]\n#\[macro_use\]\npub mod common;/);
@@ -218,17 +317,22 @@ test("replacement and removal require the exact effective prior child", () => {
   const after = { ...structuredClone(before), visibility: "crate" };
   const replace = transition("replace-one", [{ product_id: "catalog-math", operation: "replace", before, after }]);
   assert.doesNotThrow(() => parseModuleCompositionTransition(replace, baseline));
-  for (const version of [1, 2, 4]) {
+  for (const version of [1, 2, 3, 5]) {
     assert.throws(
       () => parseModuleCompositionTransition({ ...replace, schema_version: version }, baseline),
-      /schema_version 3/,
+      /schema_version 4/,
     );
   }
   const projected = applyModuleCompositionTransitions(baseline, [replace]);
   assert.equal(projected.products[0].children[0].visibility, "crate");
   const staleRemove = transition("remove-stale", [{ product_id: "catalog-math", operation: "remove", before, after: null }]);
   assert.throws(() => applyModuleCompositionTransitions(baseline, [replace, staleRemove]), /prior state differs/);
-  const remove = transition("remove-current", [{ product_id: "catalog-math", operation: "remove", before: after, after: null }]);
+  const plotting = baseline.products[0].children[1];
+  const reorderedPlotting = { ...structuredClone(plotting), declaration_order: 0 };
+  const remove = transition("remove-current", [
+    { product_id: "catalog-math", operation: "remove", before: after, after: null },
+    { product_id: "catalog-math", operation: "replace", before: plotting, after: reorderedPlotting },
+  ]);
   assert.equal(applyModuleCompositionTransitions(baseline, [replace, remove]).products[0].children.length, 1);
 });
 
@@ -336,7 +440,7 @@ test("reviewed baseline-only composition products require no bundle transition",
 
 function fixtureProjection() {
   return {
-    schema_version: 3,
+    schema_version: 4,
     kind: "runmat-builtin-module-composition-projection",
     products: [
       {
@@ -344,14 +448,15 @@ function fixtureProjection() {
         path: "crates/runmat-builtins/src/catalog/entries/math/mod.rs",
         module_path: "crate::catalog::entries::math",
         aggregations: ["entries", "aliases", "constants"],
+        aggregation_exports: [],
         children: [
           child({
             module: "arithmetic", source_path: "crates/runmat-builtins/src/catalog/entries/math/arithmetic/mod.rs",
-            role: "group", visibility: "catalog", aggregations: ["entries", "constants"], reexportItems: ["ADD_CATALOG_ENTRY", "SUB_CATALOG_ENTRY"],
+            role: "group", visibility: "catalog", declarationOrder: 0, aggregations: ["entries", "constants"], reexportItems: ["ADD_CATALOG_ENTRY", "SUB_CATALOG_ENTRY"],
           }),
           child({
             module: "plotting", source_path: "crates/runmat-builtins/src/catalog/entries/math/plotting/mod.rs",
-            role: "group", visibility: "private", feature: "plot-core", aggregations: ["aliases"],
+            role: "group", visibility: "private", feature: "plot-core", declarationOrder: 1, aggregations: ["aliases"],
           }),
         ],
       },
@@ -360,6 +465,7 @@ function fixtureProjection() {
         path: "crates/runmat-runtime/src/builtins/math/mod.rs",
         module_path: "crate::builtins::math",
         aggregations: [],
+        aggregation_exports: [],
         children: [child({
           module: "arithmetic", source_path: "crates/runmat-runtime/src/builtins/math/arithmetic/mod.rs",
           role: "group", visibility: "public",
@@ -369,19 +475,20 @@ function fixtureProjection() {
   };
 }
 
-function child({ module, source_path, sourceKind = "directory", role = "identity", visibility = "private", feature = null, aggregations = [], reexportItems = null, reexportVisibility = "public", macroUse = false }) {
+function child({ module, source_path, sourceKind = "directory", role = "identity", visibility = "private", feature = null, declarationOrder = 0, aggregations = [], reexportItems = null, reexportVisibility = "public", macroUse = false }) {
+  const declarationCondition = feature === null ? { kind: "always" }
+    : feature === "test" ? { kind: "test" } : { kind: "cargo-feature", feature };
   return {
     module, source_kind: sourceKind, source_path, role, visibility,
-    declaration_condition: feature === null ? { kind: "always" }
-      : feature === "test" ? { kind: "test" } : { kind: "cargo-feature", feature },
+    declaration_condition: declarationCondition, declaration_order: declarationOrder,
     macro_use: macroUse,
     reexports: reexportItems === null ? [] : [{ kind: "named", visibility: reexportVisibility, condition: { kind: "always" }, doc_hidden: false, items: reexportItems.map((name) => ({ name, alias: null })) }],
-    aggregation_sources: aggregations.map((role) => ({ role, kind: "slice", order: 0 })),
+    aggregation_sources: aggregations.map((role) => ({ role, kind: "slice", order: 0, condition: declarationCondition })),
   };
 }
 
 function transition(transition_id, changes) {
-  return { schema_version: 3, kind: "runmat-builtin-module-composition-transition", transition_id, changes };
+  return { schema_version: 4, kind: "runmat-builtin-module-composition-transition", transition_id, changes };
 }
 
 function mutate(callback) {

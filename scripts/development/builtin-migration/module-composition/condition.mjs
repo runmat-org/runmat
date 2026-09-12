@@ -47,6 +47,12 @@ export function conditionKey(condition) {
   return `${LEAF_RANK[condition.kind] + 1}:${detail}`;
 }
 
+export function conditionImplies(left, right) {
+  const leftLeaves = conditionLeaves(left);
+  const rightLeaves = conditionLeaves(right);
+  return [...rightLeaves].every((entry) => leftLeaves.has(entry));
+}
+
 export function parseConditionAttribute(line) {
   if (line === "#[cfg(test)]") return { kind: "test" };
   let match = /^#\[cfg\(feature = "([a-zA-Z0-9][a-zA-Z0-9_+.-]*)"\)\]$/.exec(line);
@@ -66,6 +72,12 @@ function conditionExpression(condition) {
   if (condition.kind === "cargo-feature") return `feature = "${condition.feature}"`;
   if (condition.kind === "target-architecture") return `target_arch = "${condition.architecture}"`;
   return `all(${condition.conditions.map(conditionExpression).join(", ")})`;
+}
+
+function conditionLeaves(condition) {
+  if (condition.kind === "always") return new Set();
+  if (condition.kind === "all") return new Set(condition.conditions.map(conditionKey));
+  return new Set([conditionKey(condition)]);
 }
 
 function canonicalUnique(values, label) {

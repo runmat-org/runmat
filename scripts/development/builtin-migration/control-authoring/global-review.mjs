@@ -3,6 +3,7 @@ import { evidenceDigest } from "../evidence.mjs";
 import { deepImmutable } from "../immutable.mjs";
 import { parseIntegrationProductRegistry } from "../integration-products.mjs";
 import { validateReviewedModuleCompositionAuthority } from "../module-composition/authority.mjs";
+import { parseTrustedReviewedModuleCompositionBaseline } from "../module-composition/baseline-authority.mjs";
 import { bindModuleCompositionProjection } from "../module-composition/binding.mjs";
 import { parseFindingDispositions } from "../migration-findings.mjs";
 import { assertValidatedTopologyView } from "../topology/freeze.mjs";
@@ -22,14 +23,21 @@ export function parseGlobalControlReview(value, scaffoldValue, topology, invento
   const scaffold = assertValidatedControlOverlayScaffold(scaffoldValue);
   assertValidatedTopologyView(topology);
   assertScaffoldTopologyBinding(scaffold, topology);
-  kind(value, 3, GLOBAL_CONTROL_REVIEW_KIND, "global control review");
+  kind(value, 4, GLOBAL_CONTROL_REVIEW_KIND, "global control review");
   exact(value, ["schema_version", "kind", "authority", "program", "bindings", "program_profiles", "integration_products", "module_composition_baseline", "migration_findings", "exception_manifest", "target_policy", "storage_policy", "review", "digest"], "global control review");
   if (value.authority !== "reviewer-authored-development-input" || value.program !== PROGRAM) throw new Error("global control review has invalid authority or program");
   parseArtifactBindings(value.bindings, scaffold, topology);
   const programProfiles = parseProgramProfiles(value.program_profiles);
   const integrationProducts = parseIntegrationProductRegistry(value.integration_products, inventory);
+  const baselineDigest = value.bindings.module_composition_reviewed_baseline_digest;
+  if ((value.module_composition_baseline === null) !== (baselineDigest === null)) {
+    throw new Error("global review module composition baseline and reviewed baseline digest must be present together");
+  }
+  const reviewedModuleCompositionBaseline = value.module_composition_baseline === null
+    ? null
+    : parseTrustedReviewedModuleCompositionBaseline(value.module_composition_baseline, baselineDigest);
   const moduleCompositionBaseline = bindModuleCompositionProjection(
-    [...integrationProducts.values()], value.module_composition_baseline,
+    [...integrationProducts.values()], reviewedModuleCompositionBaseline?.projection ?? null,
   );
   validateReviewedModuleCompositionAuthority(integrationProducts, moduleCompositionBaseline);
   const bundles = new Map([...topology.bundles.keys()].map((id) => [id, true]));
@@ -43,7 +51,7 @@ export function parseGlobalControlReview(value, scaffoldValue, topology, invento
   assertEvidenceDigest(value, "global control review");
   const parsed = deepImmutable({
     value, digest: value.digest, programProfiles, integrationProducts,
-    moduleCompositionBaseline, migrationFindings,
+    moduleCompositionBaseline, reviewedModuleCompositionBaseline, migrationFindings,
     targetPolicy, executionTargets,
   });
   VALIDATED_GLOBAL_REVIEWS.add(parsed);
@@ -56,10 +64,13 @@ export function assertValidatedGlobalControlReview(value) {
 }
 
 function parseArtifactBindings(value, scaffold, topology) {
-  exact(value, ["scaffold_digest", "topology_digest", "migration_finding_rows_digest"], "global review bindings");
+  exact(value, ["scaffold_digest", "topology_digest", "migration_finding_rows_digest", "module_composition_reviewed_baseline_digest"], "global review bindings");
   if (digest(value.scaffold_digest, "global review scaffold digest") !== scaffold.digest) throw new Error("global review does not bind the exact authoring scaffold");
   if (digest(value.topology_digest, "global review topology digest") !== topology.digest) throw new Error("global review does not bind the exact reviewed topology");
   if (digest(value.migration_finding_rows_digest, "global review finding rows digest") !== evidenceDigest(scaffold.migration_finding_rows)) throw new Error("global review does not bind the exact scaffold finding rows");
+  if (value.module_composition_reviewed_baseline_digest !== null) {
+    digest(value.module_composition_reviewed_baseline_digest, "global review module composition reviewed baseline digest");
+  }
 }
 
 function parseProgramProfiles(value) {

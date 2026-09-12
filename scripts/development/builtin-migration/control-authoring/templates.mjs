@@ -66,7 +66,7 @@ export function indexControlReviews(reviewDirectory, outputDirectory, { scaffold
 
 function globalTemplate(scaffold, topology) {
   return {
-    schema_version: 3,
+    schema_version: 4,
     kind: "runmat-builtin-migration-global-control-review",
     authority: "reviewer-authored-development-input",
     program: PROGRAM,
@@ -74,6 +74,7 @@ function globalTemplate(scaffold, topology) {
       scaffold_digest: scaffold.digest,
       topology_digest: topology.digest,
       migration_finding_rows_digest: evidenceDigest(scaffold.migration_finding_rows),
+      module_composition_reviewed_baseline_digest: null,
     },
     program_profiles: {},
     integration_products: {},

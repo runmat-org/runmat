@@ -28,7 +28,7 @@ export function parseBundleControlReview(
   const bundle = parseBindings(value.bindings, scaffold, topology);
   parseBundleControlPolicy(value.bundle_control, bundle.id, bundle.identities, inventory);
   validateModuleCompositionControl(
-    globalReview.value.module_composition_baseline,
+    globalReview.moduleCompositionBaseline,
     globalReview.integrationProducts,
     new Map([[bundle.id, reviewedCompositionBundle(bundle, value.bundle_control)]]),
   );

@@ -161,3 +161,5 @@ pub const ASIN_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     integer_audit: None,
     suppress_auto_output: false,
 };
+
+pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&ASIN_CATALOG_ENTRY];

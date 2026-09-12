@@ -2,6 +2,6 @@ mod matrix_arithmetic;
 
 pub use matrix_arithmetic::*;
 
-use crate::BuiltinCatalogEntry;
-
-pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = matrix_arithmetic::ENTRIES;
+pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
+    values.extend(matrix_arithmetic::ENTRIES.iter().copied());
+}

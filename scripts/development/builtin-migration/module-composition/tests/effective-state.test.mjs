@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { controlledFixture, cleanupRepositoryFixtures } from "../../tests/helpers.mjs";
-import { deriveEffectiveModuleComposition } from "../effective-state.mjs";
+import {
+  deriveEffectiveModuleComposition, deriveModuleCompositionMaterializationState,
+} from "../effective-state.mjs";
 
 test.afterEach(cleanupRepositoryFixtures);
 
@@ -24,6 +26,23 @@ test("effective composition is derived from the reviewed baseline and active lea
     runtimeMath.children[0].source_path,
     "crates/runmat-runtime/src/builtins/math/basic/mod.rs",
   );
+});
+
+test("materialization state keeps the active transition out of its prior projection", () => {
+  const fixture = controlledFixture({ composition: true });
+  const state = deriveModuleCompositionMaterializationState({
+    control: fixture.control,
+    queueState: fixture.queueState,
+    queueCheckpoint: fixture.queueCheckpoint,
+    lease: fixture.lease,
+  });
+  const prior = state.prior.products
+    .find((product) => product.product_id === "runtime-math");
+  const effective = state.effective.products
+    .find((product) => product.product_id === "runtime-math");
+  assert.deepEqual(prior.children, []);
+  assert.deepEqual(effective.children.map((child) => child.module), ["basic"]);
+  assert.deepEqual(state.priorPresentProductIds, ["runtime-math"]);
 });
 
 test("baseline-only products do not require an unrelated active bundle transition", () => {

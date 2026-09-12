@@ -14,20 +14,7 @@ use crate::{
 };
 use runmat_types::EffectKind;
 
-use super::documentation::{FULL_DOCUMENTATION, ZEROS_DOCUMENTATION};
-
-mod constants;
-
-pub(super) fn extend_constants(values: &mut Vec<crate::BuiltinConstantCatalogEntry>) {
-    values.extend(constants::CONSTANTS.iter().copied());
-}
-
-pub const FULL_INTEGER_SPARSE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "full-integer-sparse",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "sparse matrices with integer value storage are a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:FullIntegerSparseExtension"),
-};
+use super::super::documentation::ZEROS_DOCUMENTATION;
 
 pub const ZEROS_COLUMN_SIZE_VECTOR_EXTENSION: BuiltinExtensionDescriptor =
     BuiltinExtensionDescriptor {
@@ -114,131 +101,6 @@ pub const ZEROS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = 
         notes: "Integer prototypes preserve exact class; resident prototypes use typed owning-provider allocation or upload when available.",
     },
 ];
-
-pub const FULL_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [FULL_INTEGER_SPARSE_EXTENSION];
-
-const FULL_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Full matrix or already-full input.",
-}];
-const FULL_INPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "S",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Sparse or full matrix.",
-}];
-const FULL_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "A = full(S)",
-    inputs: &FULL_INPUT,
-    outputs: &FULL_OUTPUT,
-}];
-const FULL_DENSE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "S",
-        classes: &ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "An already-full integer matrix is returned identically, preserving exact class, shape, values, storage, and residency.",
-    }];
-const FULL_SPARSE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "S",
-        classes: &ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "RunMat sparse integer CSC storage densifies exactly to the same integer class; public sparse value storage is limited to double, single, and logical.",
-    }];
-pub const FULL_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "A = full(S) with already-full integer S",
-        inputs: &FULL_DENSE_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "Host values pass through unchanged. Resident values retain the original handle and owning provider without dispatch through the ambient provider.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "A = full(S) with RunMat sparse integer S",
-        inputs: &FULL_SPARSE_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "The host CSC payload is expanded into exact dense integer storage after the independent full-integer-sparse compatibility gate.",
-    },
-];
-pub const FULL_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FULL.INVALID_INPUT",
-    identifier: Some("RunMat:full:InvalidInput"),
-    when: "Input is not a sparse matrix or already-full matrix value.",
-    message: "full: invalid input",
-};
-pub const FULL_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FULL.INTERNAL",
-    identifier: Some("RunMat:full:Internal"),
-    when: "Sparse-to-full materialisation fails internally.",
-    message: "full: internal error",
-};
-const FULL_ERRORS: [BuiltinErrorDescriptor; 2] = [FULL_ERROR_INVALID_INPUT, FULL_ERROR_INTERNAL];
-pub const FULL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &FULL_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &FULL_ERRORS,
-};
-
-const FULL_BINDINGS: [BuiltinBindingDeclaration; 1] = crate::REQUIRED_DEFAULT_BINDING;
-const FULL_EFFECTS: [EffectKind; 1] = [EffectKind::MayThrow];
-
-pub const FULL_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
-    provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
-    identity: BuiltinCatalogIdentity { name: "full" },
-    category: "array/creation",
-    documentation: FULL_DOCUMENTATION,
-    descriptor: &FULL_DESCRIPTOR,
-    contract: BuiltinContractDeclaration {
-        maturity: BuiltinContractMaturity::Complete,
-        inference_rule: BuiltinInferenceRule::Array(ArrayInferenceRule::Creation(
-            ArrayCreationInferenceRule::Full,
-        )),
-        compatibility: BuiltinCompatibility::Matlab,
-        async_behavior: BuiltinAsyncBehavior::NeverSuspends,
-        purity: BuiltinPurity::Pure,
-        semantic_kind: BuiltinSemanticKind::General,
-        workspace_effect: None,
-        environment_effect: None,
-        effects: &FULL_EFFECTS,
-        capabilities: &[],
-    },
-    placement: BuiltinPlacementContract {
-        portability: BuiltinPortability::NativeAndWasm,
-        accelerator: BuiltinAcceleratorPolicy::Optional,
-        residency: BuiltinResidencyPolicy::PreserveInputs,
-        fusion: BuiltinFusionPolicy::Boundary,
-        distributed: crate::BuiltinDistributedPolicy::Unsupported,
-    },
-    link: BuiltinLinkContract {
-        reachability: BuiltinReachability::Always,
-        policy: BuiltinLinkPolicy::PortableRuntime,
-        execution_stack: runmat_types::ExecutionStackRequirement::Any,
-        artifact_dependencies: &[],
-    },
-    bindings: &FULL_BINDINGS,
-    extensions: &FULL_EXTENSIONS,
-    integer_capabilities: &FULL_INTEGER_CAPABILITIES,
-    integer_audit: None,
-    suppress_auto_output: false,
-};
-
-pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&FULL_CATALOG_ENTRY, &ZEROS_CATALOG_ENTRY];
-
 const ZEROS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "A",
     ty: BuiltinParamType::NumericArray,
@@ -428,3 +290,5 @@ pub const ZEROS_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     integer_audit: None,
     suppress_auto_output: false,
 };
+
+pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&ZEROS_CATALOG_ENTRY];

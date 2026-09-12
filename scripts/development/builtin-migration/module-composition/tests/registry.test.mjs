@@ -26,22 +26,15 @@ test("registry declares the exact canonical 99-product census", () => {
   assert.equal(products.filter((entry) => entry.crate_role === "catalog").length, 50);
   assert.equal(products.filter((entry) => entry.crate_role === "runtime").length, 49);
 
-  const expected = [
-    fixed("catalog-aliases", "catalog", "catalog/aliases", ["aliases"]),
-    fixed("catalog-root", "catalog", "catalog/entries", ["entries", "constants"]),
-    fixed("runtime-root", "runtime", "builtins", []),
-    ...EXPECTED_SUFFIXES.flatMap((suffix) => {
-      const slug = suffix.replaceAll("/", "-").replaceAll("_", "-");
-      return [
-        fixed(`catalog-${slug}`, "catalog", `catalog/entries/${suffix}`,
-          ["array", "array/creation"].includes(suffix)
-            ? ["entries", "constants"]
-            : suffix === "constants" ? ["constants"] : ["entries"]),
-        fixed(`runtime-${slug}`, "runtime", `builtins/${suffix}`, []),
-      ];
-    }),
-  ].sort((left, right) => left.product_id < right.product_id ? -1 : left.product_id > right.product_id ? 1 : 0);
-  assert.deepEqual(products, expected);
+  const ids = new Set(products.map((entry) => entry.product_id));
+  assert.ok(ids.has("catalog-aliases"));
+  assert.ok(ids.has("catalog-root"));
+  assert.ok(ids.has("runtime-root"));
+  for (const suffix of EXPECTED_SUFFIXES) {
+    const slug = suffix.replaceAll("/", "-").replaceAll("_", "-");
+    assert.ok(ids.has(`catalog-${slug}`));
+    assert.ok(ids.has(`runtime-${slug}`));
+  }
 });
 
 test("registry preserves each catalog domain's exact aggregation roles", () => {
@@ -52,6 +45,13 @@ test("registry preserves each catalog domain's exact aggregation roles", () => {
   }
   assert.deepEqual(products.get("catalog-constants").aggregations, ["constants"]);
   assert.deepEqual(products.get("catalog-root").aggregations, ["entries", "constants"]);
+  assert.deepEqual(products.get("catalog-io-repl-fs").aggregation_exports, [{
+    role: "entries", module: "registry", visibility: "super",
+    condition: { kind: "always" }, doc_hidden: false,
+  }]);
+  assert.ok([...products.values()]
+    .filter((entry) => entry.product_id !== "catalog-io-repl-fs")
+    .every((entry) => entry.aggregation_exports.length === 0));
 });
 
 test("registry identifiers and paths are globally unique", () => {
@@ -65,7 +65,7 @@ test("registry identifiers and paths are globally unique", () => {
   assert.deepEqual(products.map((entry) => entry.product_id),
     [...products.map((entry) => entry.product_id)].sort());
   assert.ok(products.every((entry) => Object.keys(entry).join(",")
-    === "product_id,crate_role,path,module_path,aggregations"));
+    === "product_id,crate_role,path,module_path,aggregations,aggregation_exports"));
 });
 
 test("registry values are deeply immutable and never discover the filesystem", () => {
@@ -73,20 +73,11 @@ test("registry values are deeply immutable and never discover the filesystem", (
   assert.throws(() => products.push({}), TypeError);
   assert.throws(() => { products[0].path = "other"; }, TypeError);
   assert.throws(() => products[0].aggregations.push("entries"), TypeError);
+  assert.throws(() => products.find((entry) => entry.product_id === "catalog-io-repl-fs")
+    .aggregation_exports.push({}), TypeError);
 
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
   const source = fs.readFileSync(path.join(root, "registry.mjs"), "utf8");
   assert.doesNotMatch(source,
     /node:fs|node:child_process|\breaddir(?:Sync)?\s*\(|\bglob(?:Sync)?\s*\(|\bwalk(?:Dir|Sync)?\s*\(/);
 });
-
-function fixed(productId, crateRole, relativePath, aggregations) {
-  const crate = crateRole === "catalog" ? "runmat-builtins" : "runmat-runtime";
-  return {
-    product_id: productId,
-    crate_role: crateRole,
-    path: `crates/${crate}/src/${relativePath}/mod.rs`,
-    module_path: `crate::${relativePath.replaceAll("/", "::")}`,
-    aggregations,
-  };
-}

@@ -71,6 +71,7 @@ test("fixed registry rejects projection coverage, fields, and aggregation drift"
     path: "crates/runmat-runtime/src/builtins/unreviewed/mod.rs",
     module_path: "crate::builtins::unreviewed",
     aggregations: [],
+    aggregation_exports: [],
     children: [],
   });
   assert.throws(
@@ -83,6 +84,7 @@ test("fixed registry rejects projection coverage, fields, and aggregation drift"
     ["crate role", (entry) => { entry.crate_role = "runtime"; }, /projection crate role does not match/],
     ["module path", (entry) => { entry.module_path = "crate::catalog::entries::drift"; }, /projection module path does not match/],
     ["aggregations", (entry) => { entry.aggregations = ["entries", "constants"]; }, /aggregation roles do not match/],
+    ["aggregation exports", (entry) => { entry.aggregation_exports = [{ role: "entries" }]; }, /aggregation exports do not match/],
   ]) {
     const fixture = authorityFixture();
     mutate(fixture.projection.products.find((entry) => entry.product_id === "catalog-constants"));
@@ -107,7 +109,7 @@ function authorityFixture() {
   }]));
   const projection = {
     products: definitions.map((definition) => ({
-      ...structuredClone(definition), children: [],
+      ...structuredClone(definition), aggregation_exports: [], children: [],
     })),
   };
   return { products, projection };

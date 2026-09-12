@@ -38,25 +38,24 @@ pub use tan::*;
 pub use tand::*;
 pub use tanh::*;
 
-pub(super) const ENTRIES: &[&crate::BuiltinCatalogEntry] = &[
-    &ACOS_CATALOG_ENTRY,
-    &ACOSH_CATALOG_ENTRY,
-    &ASIN_CATALOG_ENTRY,
-    &ASINH_CATALOG_ENTRY,
-    &ATAN_CATALOG_ENTRY,
-    &ATAN2_CATALOG_ENTRY,
-    &ATANH_CATALOG_ENTRY,
-    &DEG2RAD_CATALOG_ENTRY,
-    &RAD2DEG_CATALOG_ENTRY,
-    &COS_CATALOG_ENTRY,
-    &COSH_CATALOG_ENTRY,
-    &COSD_CATALOG_ENTRY,
-    &COSPI_CATALOG_ENTRY,
-    &SIN_CATALOG_ENTRY,
-    &SINPI_CATALOG_ENTRY,
-    &SINH_CATALOG_ENTRY,
-    &SIND_CATALOG_ENTRY,
-    &TAN_CATALOG_ENTRY,
-    &TAND_CATALOG_ENTRY,
-    &TANH_CATALOG_ENTRY,
-];
+pub(super) fn extend_entries(out: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
+    out.extend_from_slice(acos::ENTRIES);
+    out.extend_from_slice(acosh::ENTRIES);
+    out.extend_from_slice(asin::ENTRIES);
+    out.extend_from_slice(asinh::ENTRIES);
+    out.extend_from_slice(atan::ENTRIES);
+    out.extend_from_slice(atan2::ENTRIES);
+    out.extend_from_slice(atanh::ENTRIES);
+    out.extend_from_slice(angle_conversion::ENTRIES);
+    out.extend_from_slice(cos::ENTRIES);
+    out.extend_from_slice(cosh::ENTRIES);
+    out.extend_from_slice(cosd::ENTRIES);
+    out.extend_from_slice(cospi::ENTRIES);
+    out.extend_from_slice(sin::ENTRIES);
+    out.extend_from_slice(sinpi::ENTRIES);
+    out.extend_from_slice(sinh::ENTRIES);
+    out.extend_from_slice(sind::ENTRIES);
+    out.extend_from_slice(tan::ENTRIES);
+    out.extend_from_slice(tand::ENTRIES);
+    out.extend_from_slice(tanh::ENTRIES);
+}

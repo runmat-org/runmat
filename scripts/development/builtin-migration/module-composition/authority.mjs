@@ -35,6 +35,10 @@ export function validateFixedModuleCompositionProjection(projection) {
     if (!same(observed.aggregations, expected.aggregations)) {
       throw new Error(`${expected.product_id}: projection aggregation roles do not match the fixed registry`);
     }
+    const expectedExports = observed.children.length ? expected.aggregation_exports : [];
+    if (!same(observed.aggregation_exports, expectedExports)) {
+      throw new Error(`${expected.product_id}: projection aggregation exports do not match the fixed registry`);
+    }
   }
   return projection;
 }
