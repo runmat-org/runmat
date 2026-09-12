@@ -456,11 +456,21 @@ fn validate_resolved_spatial_reduction(
             "resultant and moment reductions require all source components".into(),
         ));
     }
-    if source.numeric_representation() != RecoveredFieldNumericRepresentation::Real
-        || spec.complex_representation != ComplexRepresentation::Real
-    {
+    let representation_is_valid = matches!(
+        (source.numeric_representation(), spec.complex_representation),
+        (
+            RecoveredFieldNumericRepresentation::Real,
+            ComplexRepresentation::Real
+        ) | (
+            RecoveredFieldNumericRepresentation::ComplexInterleaved,
+            ComplexRepresentation::Real
+                | ComplexRepresentation::Imaginary
+                | ComplexRepresentation::Complex
+        )
+    );
+    if !representation_is_valid {
         return Err(ObservationError::Unsupported(
-            "complex resultants require the production frequency-domain reduction path",
+            "resultants require real values, one Cartesian phasor component, or the complete complex phasor",
         ));
     }
     let source_shape = source.value_shape();

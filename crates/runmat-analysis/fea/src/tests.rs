@@ -1873,6 +1873,88 @@ fn electromagnetic_pipeline_consumes_electric_current_without_structural_admissi
 }
 
 #[test]
+fn electromagnetic_frequency_response_publishes_exact_complex_resultant_history() {
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    replace_fixture_with_electric_current(&mut model, "coil_current", "tip", 120.0);
+    model.electromagnetic = Some(ElectromagneticDomain {
+        reference_frequency: Frequency::new(60.0),
+    });
+    let mut step = ProcedureStep::electromagnetic_harmonic("em");
+    step.independent_domain =
+        runmat_analysis_core::IndependentDomain::FrequencyHertz(vec![40.0, 60.0, 80.0]);
+    let mut observation = history_observation(
+        "flux_resultant",
+        runmat_analysis_core::ObservationQuantity::MagneticFluxDensity,
+        runmat_analysis_core::SamplingPolicy::FrequencyHertz(vec![40.0, 60.0, 80.0]),
+        runmat_analysis_core::FieldLocation::Element,
+    );
+    let spec = observation.spec_mut().unwrap();
+    spec.output_location = runmat_analysis_core::FieldLocation::Global;
+    spec.complex_representation = runmat_analysis_core::ComplexRepresentation::Complex;
+    spec.storage.precision = runmat_analysis_core::SignalPrecision::Complex128;
+    spec.reduction = Some(runmat_analysis_core::ReductionPolicy {
+        spatial: runmat_analysis_core::SpatialReduction::Resultant,
+        series: runmat_analysis_core::SeriesReduction::None,
+        extrema_ties: runmat_analysis_core::ExtremaTiePolicy::FirstCanonical,
+    });
+    step.observations = vec![observation];
+    model.sequence.steps = vec![step];
+    for material in &mut model.materials {
+        material.electrical = Some(MaterialElectricalModel::default());
+    }
+    let mesh = runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(
+        runmat_meshing_core::ElementOrder::Tet4,
+    );
+    let missing_topology = crate::run_electromagnetic_frequency_response(
+        &model,
+        ComputeBackend::Cpu,
+        experimental_electromagnetic_options(),
+        &[],
+    )
+    .unwrap_err();
+    assert!(missing_topology
+        .to_string()
+        .contains("require canonical solver-mesh topology"));
+    let response = crate::run_electromagnetic_frequency_response(
+        &model,
+        ComputeBackend::Cpu,
+        ElectromagneticSolveOptions {
+            solver_mesh: Some(mesh),
+            ..experimental_electromagnetic_options()
+        },
+        &[],
+    )
+    .expect("frequency observations should drive the exact solve plan");
+
+    assert_eq!(response.plan().frequencies_hz(), &[40.0, 60.0, 80.0]);
+    assert_eq!(response.runs().len(), 3);
+    let history = &response.primary().run.observation_histories[0];
+    assert_eq!(history.samples().len(), 3);
+    assert_eq!(
+        history
+            .samples()
+            .iter()
+            .map(|sample| sample.coordinate)
+            .collect::<Vec<_>>(),
+        vec![
+            crate::results::field::RecoveredFieldSample::FrequencyHertz(40.0),
+            crate::results::field::RecoveredFieldSample::FrequencyHertz(60.0),
+            crate::results::field::RecoveredFieldSample::FrequencyHertz(80.0),
+        ]
+    );
+    assert!(history
+        .samples()
+        .iter()
+        .all(|sample| sample.result.field.shape == vec![3, 2]));
+    assert!(response.primary().run.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "FEA_EM_SWEEP"
+            && diagnostic
+                .message
+                .contains(&response.plan().identity().digest().to_string())
+    }));
+}
+
+#[test]
 fn modal_solver_emits_modes_for_modal_step_fixture() {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     model.sequence.steps = vec![ProcedureStep::structural_modal("modal_1".to_string())];

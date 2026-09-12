@@ -598,6 +598,148 @@ fn pressure_resultant_and_offset_moment_match_the_divergence_theorem() {
 }
 
 #[test]
+fn complex_volume_resultant_and_moment_preserve_the_complete_phasor() {
+    let projection =
+        AnalysisProjection::derive(&canonical_tetrahedron_solver_mesh(ElementOrder::Tet10))
+            .unwrap();
+    let definition = RecoveredFieldDefinition::new(
+        "magnetic_flux_density.phasor",
+        ObservationQuantity::MagneticFluxDensity,
+        FieldLocation::Element,
+        RecoveredFieldEntityDomain::SolidElements,
+        ObservationValueShape::Vector3,
+        RecoveredFieldNumericRepresentation::ComplexInterleaved,
+    )
+    .unwrap();
+    let mut resultant = spec("flux_resultant", ObservationTarget::WholeModel);
+    resultant.quantity = ObservationQuantity::MagneticFluxDensity;
+    resultant.value_shape = ObservationValueShape::Vector3;
+    resultant.source_location = FieldLocation::Element;
+    resultant.output_location = FieldLocation::Global;
+    resultant.complex_representation = ComplexRepresentation::Complex;
+    resultant.storage.precision = SignalPrecision::Complex128;
+    resultant.reduction = Some(ReductionPolicy {
+        spatial: SpatialReduction::Resultant,
+        series: SeriesReduction::None,
+        extrema_ties: ExtremaTiePolicy::FirstCanonical,
+    });
+    let about = Position::new([0.25, -0.5, 1.0]);
+    let mut moment = resultant.clone();
+    moment.observation_id = ObservationId("flux_moment".into());
+    moment.reduction.as_mut().unwrap().spatial = SpatialReduction::Moment { about };
+    let mut invalid_magnitude = resultant.clone();
+    invalid_magnitude.observation_id = ObservationId("flux_magnitude_resultant".into());
+    invalid_magnitude.complex_representation = ComplexRepresentation::Magnitude;
+    invalid_magnitude.storage.precision = SignalPrecision::Real64;
+
+    let mut invalid_step = ProcedureStep::electromagnetic_harmonic("invalid-flux-resultant");
+    invalid_step.observations = vec![ObservationRequest::Reduction(invalid_magnitude)];
+    let error = super::resolve_observation_plan(
+        &invalid_step,
+        &projection,
+        std::slice::from_ref(&definition),
+        ObservationLimits::default(),
+    )
+    .unwrap_err();
+    assert!(
+        error.to_string().contains("complete complex phasor"),
+        "{error}"
+    );
+
+    let mut step = ProcedureStep::electromagnetic_harmonic("complex-flux-resultants");
+    step.observations = vec![
+        ObservationRequest::Reduction(resultant),
+        ObservationRequest::Reduction(moment),
+    ];
+    let plan = super::resolve_observation_plan(
+        &step,
+        &projection,
+        std::slice::from_ref(&definition),
+        ObservationLimits::default(),
+    )
+    .unwrap();
+    let phasor = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+    let field = RecoveredField::new(
+        definition,
+        RecoveredFieldSample::Final,
+        AnalysisField::host_f64(
+            "magnetic_flux_density.phasor",
+            vec![projection.elements.len(), 3, 2],
+            phasor.repeat(projection.elements.len()),
+        ),
+    )
+    .unwrap();
+    let topology = StructuralObservationTopology::from_projection(&projection);
+    let volume = projection
+        .elements
+        .iter()
+        .map(|element| element.signed_volume_m3)
+        .sum::<f64>();
+    let expected_resultant = phasor.map(|value| value * volume);
+    let mut expected_moment = [0.0; 6];
+    for element in &projection.elements {
+        let arm = [
+            element.centroid_m[0] - about.meters[0],
+            element.centroid_m[1] - about.meters[1],
+            element.centroid_m[2] - about.meters[2],
+        ];
+        for (offset, force) in [
+            [phasor[0], phasor[2], phasor[4]],
+            [phasor[1], phasor[3], phasor[5]],
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let moment = [
+                arm[1] * force[2] - arm[2] * force[1],
+                arm[2] * force[0] - arm[0] * force[2],
+                arm[0] * force[1] - arm[1] * force[0],
+            ];
+            expected_moment[offset] += moment[0] * element.signed_volume_m3;
+            expected_moment[2 + offset] += moment[1] * element.signed_volume_m3;
+            expected_moment[4 + offset] += moment[2] * element.signed_volume_m3;
+        }
+    }
+    for (observation, expected) in plan
+        .observations
+        .iter()
+        .zip([expected_resultant, expected_moment])
+    {
+        let serial = evaluate_partitioned_observation(
+            &plan,
+            observation,
+            &field,
+            &topology,
+            ObservationExecutionPolicy::serial(),
+            None,
+        )
+        .unwrap();
+        let split = evaluate_partitioned_observation(
+            &plan,
+            observation,
+            &field,
+            &topology,
+            ObservationExecutionPolicy::canonical(std::num::NonZeroU32::new(3).unwrap()),
+            None,
+        )
+        .unwrap();
+        assert_eq!(serial.field.shape, vec![3, 2]);
+        assert_eq!(serial.logical_identity, split.logical_identity);
+        for ((actual, split), expected) in serial
+            .field
+            .as_host_f64()
+            .unwrap()
+            .iter()
+            .zip(split.field.as_host_f64().unwrap())
+            .zip(expected)
+        {
+            assert!((actual - expected).abs() <= 1.0e-12);
+            assert!((split - expected).abs() <= 1.0e-12);
+        }
+    }
+}
+
+#[test]
 fn boundary_stress_resultant_uses_cauchy_traction_and_rejects_ambiguous_pressure_sign() {
     let projection =
         AnalysisProjection::derive(&canonical_tetrahedron_solver_mesh(ElementOrder::Tet10))
@@ -694,6 +836,100 @@ fn boundary_stress_resultant_uses_cauchy_traction_and_rejects_ambiguous_pressure
     .unwrap_err()
     .to_string()
     .contains("explicitly oriented boundary pressure"));
+}
+
+#[test]
+fn complex_boundary_pressure_resultant_is_partition_equivalent() {
+    let projection =
+        AnalysisProjection::derive(&canonical_tetrahedron_solver_mesh(ElementOrder::Tet10))
+            .unwrap();
+    let face = &projection.boundary_faces[0];
+    let target = ObservationTarget::Spatial(runmat_analysis_core::ExcitationTarget::Region(
+        runmat_analysis_core::RegionTarget::boundary(
+            face.provenance[0].analysis_selection_id().unwrap(),
+        ),
+    ));
+    let definition = RecoveredFieldDefinition::new(
+        "pressure.phasor",
+        ObservationQuantity::AcousticPressure,
+        FieldLocation::Node,
+        RecoveredFieldEntityDomain::StructuralNodes,
+        ObservationValueShape::Scalar,
+        RecoveredFieldNumericRepresentation::ComplexInterleaved,
+    )
+    .unwrap();
+    let mut observation = spec("pressure_phasor_resultant", target);
+    observation.quantity = ObservationQuantity::AcousticPressure;
+    observation.output_location = FieldLocation::Global;
+    observation.sign_convention = SignConvention::OutwardPositive;
+    observation.complex_representation = ComplexRepresentation::Complex;
+    observation.storage.precision = SignalPrecision::Complex128;
+    observation.reduction = Some(ReductionPolicy {
+        spatial: SpatialReduction::Resultant,
+        series: SeriesReduction::None,
+        extrema_ties: ExtremaTiePolicy::FirstCanonical,
+    });
+    let mut step = ProcedureStep::acoustic_harmonic("complex-pressure-resultant");
+    step.observations = vec![ObservationRequest::Reduction(observation)];
+    let plan = super::resolve_observation_plan(
+        &step,
+        &projection,
+        std::slice::from_ref(&definition),
+        ObservationLimits::default(),
+    )
+    .unwrap();
+    let pressure = [2.0, -3.0];
+    let field = RecoveredField::new(
+        definition,
+        RecoveredFieldSample::Final,
+        AnalysisField::host_f64(
+            "pressure.phasor",
+            vec![projection.nodes.len(), 2],
+            pressure.repeat(projection.nodes.len()),
+        ),
+    )
+    .unwrap();
+    let topology = StructuralObservationTopology::from_projection(&projection);
+    let serial = evaluate_partitioned_observation(
+        &plan,
+        &plan.observations[0],
+        &field,
+        &topology,
+        ObservationExecutionPolicy::serial(),
+        None,
+    )
+    .unwrap();
+    let split = evaluate_partitioned_observation(
+        &plan,
+        &plan.observations[0],
+        &field,
+        &topology,
+        ObservationExecutionPolicy::canonical(std::num::NonZeroU32::new(3).unwrap()),
+        None,
+    )
+    .unwrap();
+    let area = face.oriented_area_vector_m2;
+    let expected = [
+        pressure[0] * area[0],
+        pressure[1] * area[0],
+        pressure[0] * area[1],
+        pressure[1] * area[1],
+        pressure[0] * area[2],
+        pressure[1] * area[2],
+    ];
+    assert_eq!(serial.field.shape, vec![3, 2]);
+    assert_eq!(serial.logical_identity, split.logical_identity);
+    for ((actual, split), expected) in serial
+        .field
+        .as_host_f64()
+        .unwrap()
+        .iter()
+        .zip(split.field.as_host_f64().unwrap())
+        .zip(expected)
+    {
+        assert!((actual - expected).abs() <= 1.0e-12);
+        assert!((split - expected).abs() <= 1.0e-12);
+    }
 }
 
 #[test]

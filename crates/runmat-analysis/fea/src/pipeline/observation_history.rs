@@ -35,6 +35,12 @@ pub(crate) fn required_load_factor_history_samples(
     required_scalar_history_samples(step, ScalarHistoryDomain::LoadFactor)
 }
 
+pub(crate) fn required_frequency_history_samples(
+    step: &ProcedureStep,
+) -> Result<Vec<f64>, ObservationError> {
+    required_scalar_history_samples(step, ScalarHistoryDomain::FrequencyHertz)
+}
+
 pub(crate) fn required_mode_history_indices(
     step: &ProcedureStep,
 ) -> Result<Vec<usize>, ObservationError> {
@@ -53,6 +59,7 @@ pub(crate) fn required_mode_history_indices(
 #[derive(Clone, Copy)]
 enum ScalarHistoryDomain {
     TimeSeconds,
+    FrequencyHertz,
     LoadFactor,
 }
 
@@ -65,6 +72,7 @@ fn required_scalar_history_samples(
         .into_iter()
         .map(|coordinate| match (domain, coordinate) {
             (ScalarHistoryDomain::TimeSeconds, RecoveredFieldSample::TimeSeconds(value))
+            | (ScalarHistoryDomain::FrequencyHertz, RecoveredFieldSample::FrequencyHertz(value))
             | (ScalarHistoryDomain::LoadFactor, RecoveredFieldSample::LoadFactor(value)) => {
                 Ok(value)
             }
@@ -73,6 +81,9 @@ fn required_scalar_history_samples(
             )),
             (ScalarHistoryDomain::LoadFactor, _) => Err(ObservationError::Invalid(
                 "nonlinear history sampling differs from the load-factor domain".into(),
+            )),
+            (ScalarHistoryDomain::FrequencyHertz, _) => Err(ObservationError::Invalid(
+                "harmonic history sampling differs from the frequency domain".into(),
             )),
         })
         .collect::<Result<Vec<_>, _>>()?;

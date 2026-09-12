@@ -443,7 +443,7 @@ pub(super) fn discrete_reaction_contribution(
                 ))
             }
         };
-        accumulator.add_resultant(contribution, 1.0)?;
+        accumulator.add_resultant(&contribution, 1.0)?;
     }
     accumulator.finish()
 }
@@ -498,8 +498,9 @@ impl WeightedAccumulator {
         Ok(())
     }
 
-    fn add_resultant(&mut self, value: [f64; 3], measure: f64) -> Result<(), ObservationError> {
-        if self.linear_sum.len() != 3
+    fn add_resultant(&mut self, value: &[f64], measure: f64) -> Result<(), ObservationError> {
+        if !matches!(value.len(), 3 | 6)
+            || self.linear_sum.len() != value.len()
             || value.iter().any(|component| !component.is_finite())
             || !measure.is_finite()
             || measure <= 0.0
@@ -509,7 +510,7 @@ impl WeightedAccumulator {
             ));
         }
         for (sum, component) in self.linear_sum.iter_mut().zip(value) {
-            sum.add(component);
+            sum.add(*component);
         }
         self.measure.add(measure);
         Ok(())
@@ -556,11 +557,14 @@ fn accumulate_volume_reduction(
     match operation {
         SpatialReduction::EuclideanNorm => accumulator.add_norm(projected, weight),
         SpatialReduction::Resultant => {
-            accumulator.add_resultant(weighted_vector(projected, weight)?, weight)
+            accumulator.add_resultant(&weighted_vector_components(projected, weight)?, weight)
         }
         SpatialReduction::Moment { about } => {
-            let force = weighted_vector(projected, weight)?;
-            accumulator.add_resultant(cross(subtract(position_m, about.meters), force), weight)
+            let force = weighted_vector_components(projected, weight)?;
+            accumulator.add_resultant(
+                &cross_vector_components(subtract(position_m, about.meters), &force)?,
+                weight,
+            )
         }
         _ => accumulator.add(projected, weight),
     }
@@ -578,7 +582,7 @@ fn accumulate_boundary_reduction(
     match operation {
         SpatialReduction::EuclideanNorm => accumulator.add_norm(projected, area_weight_m2),
         SpatialReduction::Resultant | SpatialReduction::Moment { .. } => {
-            let force = boundary_force(
+            let force = boundary_force_components(
                 observation,
                 projected,
                 area_vector_weight_m2,
@@ -586,26 +590,26 @@ fn accumulate_boundary_reduction(
             )?;
             let value = match operation {
                 SpatialReduction::Moment { about } => {
-                    cross(subtract(position_m, about.meters), force)
+                    cross_vector_components(subtract(position_m, about.meters), &force)?
                 }
                 SpatialReduction::Resultant => force,
                 _ => unreachable!(),
             };
-            accumulator.add_resultant(value, area_weight_m2)
+            accumulator.add_resultant(&value, area_weight_m2)
         }
         _ => accumulator.add(projected, area_weight_m2),
     }
 }
 
-fn boundary_force(
+fn boundary_force_components(
     observation: &ResolvedObservation,
     projected: &[f64],
     area_vector_weight_m2: [f64; 3],
     area_weight_m2: f64,
-) -> Result<[f64; 3], ObservationError> {
+) -> Result<Vec<f64>, ObservationError> {
     match observation.spec.value_shape {
-        ObservationValueShape::Vector3 => weighted_vector(projected, area_weight_m2),
-        ObservationValueShape::SymmetricTensor3 if projected.len() == 6 => Ok([
+        ObservationValueShape::Vector3 => weighted_vector_components(projected, area_weight_m2),
+        ObservationValueShape::SymmetricTensor3 if projected.len() == 6 => Ok(vec![
             projected[0] * area_vector_weight_m2[0]
                 + projected[3] * area_vector_weight_m2[1]
                 + projected[5] * area_vector_weight_m2[2],
@@ -616,7 +620,29 @@ fn boundary_force(
                 + projected[4] * area_vector_weight_m2[1]
                 + projected[2] * area_vector_weight_m2[2],
         ]),
-        ObservationValueShape::Scalar if projected.len() == 1 => {
+        ObservationValueShape::SymmetricTensor3 if projected.len() == 12 => {
+            let real = [
+                projected[0],
+                projected[2],
+                projected[4],
+                projected[6],
+                projected[8],
+                projected[10],
+            ];
+            let imaginary = [
+                projected[1],
+                projected[3],
+                projected[5],
+                projected[7],
+                projected[9],
+                projected[11],
+            ];
+            Ok(interleave_vectors(
+                stress_traction(real, area_vector_weight_m2),
+                stress_traction(imaginary, area_vector_weight_m2),
+            ))
+        }
+        ObservationValueShape::Scalar if matches!(projected.len(), 1 | 2) => {
             let sign = match observation.spec.sign_convention {
                 SignConvention::OutwardPositive => 1.0,
                 SignConvention::InwardPositive => -1.0,
@@ -626,12 +652,63 @@ fn boundary_force(
                     ))
                 }
             };
-            Ok(area_vector_weight_m2.map(|component| sign * projected[0] * component))
+            let real = area_vector_weight_m2.map(|component| sign * projected[0] * component);
+            if projected.len() == 1 {
+                Ok(real.to_vec())
+            } else {
+                let imaginary =
+                    area_vector_weight_m2.map(|component| sign * projected[1] * component);
+                Ok(interleave_vectors(real, imaginary))
+            }
         }
         _ => Err(ObservationError::Invalid(
             "resultant source shape differs from its resolved contract".into(),
         )),
     }
+}
+
+fn stress_traction(stress: [f64; 6], area: [f64; 3]) -> [f64; 3] {
+    [
+        stress[0] * area[0] + stress[3] * area[1] + stress[5] * area[2],
+        stress[3] * area[0] + stress[1] * area[1] + stress[4] * area[2],
+        stress[5] * area[0] + stress[4] * area[1] + stress[2] * area[2],
+    ]
+}
+
+fn weighted_vector_components(values: &[f64], weight: f64) -> Result<Vec<f64>, ObservationError> {
+    if !matches!(values.len(), 3 | 6) || !weight.is_finite() {
+        return Err(ObservationError::Invalid(
+            "resultant source must be one real or complex three-vector".into(),
+        ));
+    }
+    Ok(values.iter().map(|value| value * weight).collect())
+}
+
+fn cross_vector_components(
+    position: [f64; 3],
+    vector: &[f64],
+) -> Result<Vec<f64>, ObservationError> {
+    match vector {
+        [x, y, z] => Ok(cross(position, [*x, *y, *z]).to_vec()),
+        [real_x, imaginary_x, real_y, imaginary_y, real_z, imaginary_z] => Ok(interleave_vectors(
+            cross(position, [*real_x, *real_y, *real_z]),
+            cross(position, [*imaginary_x, *imaginary_y, *imaginary_z]),
+        )),
+        _ => Err(ObservationError::Invalid(
+            "moment source must be one real or complex three-vector".into(),
+        )),
+    }
+}
+
+fn interleave_vectors(real: [f64; 3], imaginary: [f64; 3]) -> Vec<f64> {
+    vec![
+        real[0],
+        imaginary[0],
+        real[1],
+        imaginary[1],
+        real[2],
+        imaginary[2],
+    ]
 }
 
 fn weighted_vector(values: &[f64], weight: f64) -> Result<[f64; 3], ObservationError> {

@@ -55,7 +55,7 @@ pub fn has_nonzero_source_at_frequency(
     Ok(has_source)
 }
 
-fn matching_step(
+pub(super) fn matching_step(
     model: &AnalysisModel,
     procedure: AnalysisProcedure,
 ) -> Result<&ProcedureStep, FeaRunError> {
@@ -76,6 +76,74 @@ fn matching_step(
         ));
     }
     Ok(step)
+}
+
+/// Projects an edge-owned electromagnetic recovery field onto the canonical solid elements.
+///
+/// Harmonic Maxwell unknowns and their immediate recovery live on the curl-conforming edge
+/// topology. Solver-neutral element observations must not relabel those rows as volume elements;
+/// this projection explicitly averages the incident canonical edge rows for each tetrahedron.
+pub(super) fn project_edge_field_to_solid_elements(
+    mesh: &runmat_meshing_core::SolverMeshArtifact,
+    field_id: &str,
+    source: &AnalysisField,
+) -> Result<AnalysisField, FeaRunError> {
+    let topology = solver_mesh_topology::MaxwellMeshTopology::derive(mesh).ok_or_else(|| {
+        FeaRunError::Observation(
+            "electromagnetic field projection requires valid tetrahedral edge topology".into(),
+        )
+    })?;
+    let values = source.as_host_f64().ok_or_else(|| {
+        FeaRunError::Observation("electromagnetic recovery field is not host real64".into())
+    })?;
+    let component_count = match source.shape.as_slice() {
+        [edge_count] if *edge_count == topology.edges.len() => 1,
+        [edge_count, component_count]
+            if *edge_count == topology.edges.len() && *component_count > 0 =>
+        {
+            *component_count
+        }
+        _ => {
+            return Err(FeaRunError::Observation(
+                "electromagnetic recovery field does not match canonical edge topology".into(),
+            ));
+        }
+    };
+    let mut projected = Vec::with_capacity(
+        topology
+            .elements
+            .len()
+            .checked_mul(component_count)
+            .ok_or_else(|| FeaRunError::Observation("element field size overflow".into()))?,
+    );
+    for element in &topology.elements {
+        if element.edge_indices.is_empty() {
+            return Err(FeaRunError::Observation(
+                "electromagnetic element has no canonical incident edges".into(),
+            ));
+        }
+        for component in 0..component_count {
+            let mut sum = 0.0_f64;
+            for &edge_index in &element.edge_indices {
+                let value_index = edge_index
+                    .checked_mul(component_count)
+                    .and_then(|offset| offset.checked_add(component))
+                    .ok_or_else(|| FeaRunError::Observation("edge field index overflow".into()))?;
+                sum += values.get(value_index).copied().ok_or_else(|| {
+                    FeaRunError::Observation(
+                        "electromagnetic element names a missing edge field row".into(),
+                    )
+                })?;
+            }
+            projected.push(sum / element.edge_indices.len() as f64);
+        }
+    }
+    let shape = if component_count == 1 {
+        vec![topology.elements.len()]
+    } else {
+        vec![topology.elements.len(), component_count]
+    };
+    Ok(AnalysisField::host_f64(field_id, shape, projected))
 }
 
 pub fn run_electromagnetic(

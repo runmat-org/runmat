@@ -23,6 +23,12 @@ pub mod topology;
 pub use admission::AnalysisRunIdentity;
 pub use contracts::*;
 pub use pipeline::electromagnetic::{run_electromagnetic, run_electromagnetic_with_options};
+pub use pipeline::electromagnetic_frequency::{
+    run_electromagnetic_frequency_response, ElectromagneticFrequencyPlan,
+    ElectromagneticFrequencyPlanEntry, ElectromagneticFrequencyPlanEntryIdentity,
+    ElectromagneticFrequencyPlanIdentity, ElectromagneticFrequencySummary,
+    FeaElectromagneticFrequencyResponse,
+};
 pub use pipeline::linear_static::{
     run_linear_static, run_linear_static_with_options,
     run_linear_static_with_prepared_constraint_plan,

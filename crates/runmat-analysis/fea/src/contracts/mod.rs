@@ -703,6 +703,10 @@ pub enum FeaRunError {
     Assembly(String),
     #[error("FEA_OBSERVATION_FAILED: {0}")]
     Observation(String),
+    #[error("FEA_FREQUENCY_PLAN_INVALID: {0}")]
+    InvalidFrequencyPlan(String),
+    #[error("FEA_ELECTROMAGNETIC_SOURCE_MISSING: no nonzero source at {frequency_hz} Hz")]
+    MissingElectromagneticSource { frequency_hz: f64 },
     #[error(transparent)]
     FormulationAdmission(#[from] crate::admission::FormulationAdmissionRejection),
     #[error(transparent)]

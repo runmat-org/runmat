@@ -27,11 +27,11 @@ use runmat_analysis_fea::physics::fsi::{couple_fluid_structure, FsiCouplingOptio
 use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
 use runmat_analysis_fea::solve::preconditioner::SpdPreconditionerKind;
 use runmat_analysis_fea::{
-    run_electromagnetic_with_options, run_linear_static_with_options, run_modal_with_options,
+    run_electromagnetic_frequency_response, run_linear_static_with_options, run_modal_with_options,
     run_nonlinear_with_options, run_thermal_with_options, run_transient_with_options,
     AnalysisRunIdentity, ComputeBackend, ElectromagneticSolveOptions, ExecutionBackend,
-    FeaProgressHandler, FeaRunResult, LinearStaticSolveOptions, ModalSolveOptions, SolverMethod,
-    SolverPreconditioner, ThermalProcedureControl, ThermalSolveOptions,
+    FeaProgressHandler, FeaRunError, FeaRunResult, LinearStaticSolveOptions, ModalSolveOptions,
+    SolverMethod, SolverPreconditioner, ThermalProcedureControl, ThermalSolveOptions,
 };
 use runmat_geometry_core::{GeometryAsset, MaterialEvidenceConfidence, UnitSystem};
 use runmat_meshing_core::SolverMeshArtifact;
@@ -5509,60 +5509,11 @@ pub fn analysis_run_electromagnetic_with_options_op(
     }
     validate_electromagnetic_run_model(model, &context)?;
 
-    let sweep_frequency_hz = normalize_em_sweep_frequency_hz(
-        em_domain.reference_frequency.hertz,
-        options.sweep_enabled,
-        &options.sweep_frequency_hz,
-    )
-    .ok_or_else(|| {
-        operation_error(
-            AnalysisOperation::Electromagnetic.name(),
-            AnalysisOperation::Electromagnetic.version(),
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_ELECTROMAGNETIC.INVALID_OPTIONS",
-                error_type: OperationErrorType::Input,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "fea.run_electromagnetic sweep_frequency_hz must contain finite positive values",
-            BTreeMap::new(),
-        )
-    })?;
-    let has_electromagnetic_source = sweep_frequency_hz
-        .iter()
-        .map(|frequency_hz| {
-            runmat_analysis_fea::pipeline::electromagnetic::has_nonzero_source_at_frequency(
-                model,
-                electromagnetic_procedure,
-                *frequency_hz,
-            )
-        })
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| {
-            map_fea_run_error(AnalysisOperation::Electromagnetic, model, &context, error)
-        })?
-        .into_iter()
-        .all(|has_source| has_source);
-    if !has_electromagnetic_source {
-        return Err(operation_error(
-            AnalysisOperation::Electromagnetic.name(),
-            AnalysisOperation::Electromagnetic.version(),
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_ELECTROMAGNETIC.MISSING_ELECTROMAGNETIC_SOURCE",
-                error_type: OperationErrorType::Validation,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "fea.run_electromagnetic requires a nonzero electric-current or current-density excitation at every requested frequency",
-            BTreeMap::from([
-                ("analysis_model_id".to_string(), model.model_id.0.clone()),
-                ("excitation_count".to_string(), model.excitations.len().to_string()),
-                ("frequency_count".to_string(), sweep_frequency_hz.len().to_string()),
-            ]),
-        ));
-    }
+    let requested_frequency_hz = if options.sweep_enabled {
+        options.sweep_frequency_hz.as_slice()
+    } else {
+        &[]
+    };
     let solver_mesh = resolve_solver_mesh_artifact(
         model,
         options.solver_mesh_artifact_path.as_deref(),
@@ -5579,55 +5530,51 @@ pub fn analysis_run_electromagnetic_with_options_op(
         harmonic_max_iterations: options.harmonic_max_iterations,
         solver_mesh: solver_mesh.clone(),
     };
-    let mut sweep_runs = Vec::with_capacity(sweep_frequency_hz.len());
-    let mut sweep_peak_flux_density = Vec::with_capacity(sweep_frequency_hz.len());
-    let mut sweep_solve_quality = Vec::with_capacity(sweep_frequency_hz.len());
-    for frequency_hz in &sweep_frequency_hz {
-        let mut sweep_model = model.clone();
-        if let Some(domain) = sweep_model.electromagnetic.as_mut() {
-            domain.reference_frequency.hertz = *frequency_hz;
-        }
-        let sweep_run =
-            run_electromagnetic_with_options(&sweep_model, backend, solve_options.clone())
-                .map_err(|err| {
-                    map_fea_run_error(AnalysisOperation::Electromagnetic, model, &context, err)
-                })?;
-        sweep_peak_flux_density.push(peak_abs_field_value(
-            &sweep_run.magnetic_flux_density_magnitude_field,
-        ));
-        sweep_solve_quality.push(sweep_run.solve_quality);
-        sweep_runs.push(sweep_run);
-    }
-    let sweep_metrics = summarize_em_sweep(&sweep_frequency_hz, &sweep_peak_flux_density);
-    let primary_index =
-        nearest_frequency_index(&sweep_frequency_hz, em_domain.reference_frequency.hertz)
-            .unwrap_or(0);
-    let em_run = sweep_runs[primary_index].clone();
-    let mut run = em_run.run.clone();
-    run.diagnostics.push(runmat_analysis_fea::diagnostics::FeaDiagnostic {
-        code: "FEA_EM_SWEEP".to_string(),
-        severity: if sweep_metrics.sweep_count > 1 {
-            runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info
-        } else {
-            runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
-        },
-        message: format!(
-            "sweep_count={} resonance_peak_frequency_hz={} resonance_peak_flux_density={} resonance_bandwidth_hz={} resonance_quality_factor={} resonance_flux_gain={}",
-            sweep_metrics.sweep_count,
-            sweep_metrics.resonance_peak_frequency_hz.unwrap_or(0.0),
-            sweep_metrics.resonance_peak_flux_density.unwrap_or(0.0),
-            sweep_metrics.resonance_bandwidth_hz.unwrap_or(0.0),
-            sweep_metrics.resonance_quality_factor.unwrap_or(0.0),
-            sweep_metrics.resonance_flux_gain.unwrap_or(0.0),
+    let frequency_response = run_electromagnetic_frequency_response(
+        model,
+        backend,
+        solve_options,
+        requested_frequency_hz,
+    )
+    .map_err(|error| match error {
+        FeaRunError::InvalidFrequencyPlan(reason) => operation_error(
+            AnalysisOperation::Electromagnetic.name(),
+            AnalysisOperation::Electromagnetic.version(),
+            &context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_ELECTROMAGNETIC.INVALID_OPTIONS",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "fea.run_electromagnetic sweep_frequency_hz must contain finite positive values",
+            BTreeMap::from([("reason".to_string(), reason)]),
         ),
-    });
-    if sweep_metrics.sweep_count > 1 {
-        run.diagnostics.push(em_sweep_known_answer_diagnostic(
-            em_domain.reference_frequency.hertz,
-            &sweep_frequency_hz,
-            &sweep_metrics,
-        ));
-    }
+        FeaRunError::MissingElectromagneticSource { frequency_hz } => operation_error(
+            AnalysisOperation::Electromagnetic.name(),
+            AnalysisOperation::Electromagnetic.version(),
+            &context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_ELECTROMAGNETIC.MISSING_ELECTROMAGNETIC_SOURCE",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "fea.run_electromagnetic requires a nonzero electric-current or current-density excitation at every requested frequency",
+            BTreeMap::from([
+                ("analysis_model_id".to_string(), model.model_id.0.clone()),
+                ("excitation_count".to_string(), model.excitations.len().to_string()),
+                ("frequency_hz".to_string(), frequency_hz.to_string()),
+            ]),
+        ),
+        error => map_fea_run_error(AnalysisOperation::Electromagnetic, model, &context, error),
+    })?;
+    let sweep_frequency_hz = frequency_response.plan().frequencies_hz().to_vec();
+    let sweep_metrics = frequency_response.summary().clone();
+    let sweep_peak_flux_density = sweep_metrics.peak_flux_density.clone();
+    let sweep_solve_quality = sweep_metrics.solve_quality.clone();
+    let em_run = frequency_response.into_primary();
+    let run = em_run.run.clone();
     let solver_convergence = if run.diagnostics.iter().any(|diag| {
         diag.code == "FEA_EM_STATIC"
             && diag.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info
@@ -7169,168 +7116,6 @@ fn select_load_region_id(geometry: &GeometryAsset) -> Option<String> {
                 || key.contains("free")
         })
         .map(|region| region.region_id.clone())
-}
-
-#[derive(Debug, Clone, Default)]
-struct EmSweepSummary {
-    sweep_count: usize,
-    resonance_peak_frequency_hz: Option<f64>,
-    resonance_peak_flux_density: Option<f64>,
-    resonance_bandwidth_hz: Option<f64>,
-    resonance_quality_factor: Option<f64>,
-    resonance_flux_gain: Option<f64>,
-}
-
-fn normalize_em_sweep_frequency_hz(
-    reference_frequency_hz: f64,
-    sweep_enabled: bool,
-    requested: &[f64],
-) -> Option<Vec<f64>> {
-    let mut values = if sweep_enabled {
-        requested.to_vec()
-    } else {
-        Vec::new()
-    };
-    if values.is_empty() {
-        values.push(reference_frequency_hz);
-    }
-    if !values
-        .iter()
-        .all(|frequency_hz| frequency_hz.is_finite() && *frequency_hz > 0.0)
-    {
-        return None;
-    }
-    values.sort_by(|a, b| a.total_cmp(b));
-    values.dedup_by(|a, b| (*a - *b).abs() <= 1.0e-9);
-    Some(values)
-}
-
-fn nearest_frequency_index(frequencies_hz: &[f64], target_hz: f64) -> Option<usize> {
-    frequencies_hz
-        .iter()
-        .enumerate()
-        .min_by(|(_, a), (_, b)| (*a - target_hz).abs().total_cmp(&(*b - target_hz).abs()))
-        .map(|(index, _)| index)
-}
-
-fn peak_abs_field_value(field: &runmat_analysis_core::AnalysisField) -> f64 {
-    field
-        .as_host_f64()
-        .map(|values| values.iter().copied().map(f64::abs).fold(0.0_f64, f64::max))
-        .unwrap_or(0.0)
-}
-
-fn summarize_em_sweep(frequencies_hz: &[f64], peak_flux_density: &[f64]) -> EmSweepSummary {
-    if frequencies_hz.is_empty() || frequencies_hz.len() != peak_flux_density.len() {
-        return EmSweepSummary::default();
-    }
-    let sweep_count = frequencies_hz.len();
-    let (peak_index, peak_flux_density_value) = peak_flux_density
-        .iter()
-        .copied()
-        .enumerate()
-        .max_by(|(_, a), (_, b)| a.total_cmp(b))
-        .unwrap_or((0, 0.0));
-    let peak_frequency_hz = frequencies_hz[peak_index];
-    let min_flux_density_value = peak_flux_density
-        .iter()
-        .copied()
-        .fold(f64::INFINITY, f64::min);
-    let resonance_flux_gain =
-        (peak_flux_density_value / min_flux_density_value.max(1.0e-12)).max(1.0);
-
-    let half_power = peak_flux_density_value * std::f64::consts::FRAC_1_SQRT_2;
-    let mut left = peak_index;
-    while left > 0 && peak_flux_density[left - 1] >= half_power {
-        left -= 1;
-    }
-    let mut right = peak_index;
-    while right + 1 < peak_flux_density.len() && peak_flux_density[right + 1] >= half_power {
-        right += 1;
-    }
-    let resonance_bandwidth_hz = if right > left {
-        Some((frequencies_hz[right] - frequencies_hz[left]).max(0.0))
-    } else {
-        None
-    };
-    let resonance_quality_factor = resonance_bandwidth_hz
-        .filter(|bandwidth| *bandwidth > 0.0)
-        .map(|bandwidth| (peak_frequency_hz / bandwidth).max(0.0));
-
-    EmSweepSummary {
-        sweep_count,
-        resonance_peak_frequency_hz: Some(peak_frequency_hz),
-        resonance_peak_flux_density: Some(peak_flux_density_value),
-        resonance_bandwidth_hz,
-        resonance_quality_factor,
-        resonance_flux_gain: Some(resonance_flux_gain),
-    }
-}
-
-fn em_sweep_known_answer_diagnostic(
-    reference_frequency_hz: f64,
-    frequencies_hz: &[f64],
-    metrics: &EmSweepSummary,
-) -> runmat_analysis_fea::diagnostics::FeaDiagnostic {
-    let min_frequency_hz = frequencies_hz.iter().copied().fold(f64::INFINITY, f64::min);
-    let max_frequency_hz = frequencies_hz.iter().copied().fold(0.0_f64, f64::max);
-    let reference_scale = reference_frequency_hz.abs().max(1.0e-9);
-    let reference_frequency_in_sweep_ratio = if frequencies_hz.iter().any(|frequency_hz| {
-        (*frequency_hz - reference_frequency_hz).abs() <= reference_scale * 1.0e-9
-    }) {
-        1.0
-    } else {
-        0.0
-    };
-    let reference_frequency_bracket_ratio = if min_frequency_hz <= reference_frequency_hz
-        && reference_frequency_hz <= max_frequency_hz
-    {
-        1.0
-    } else {
-        0.0
-    };
-    let normalized_peak_frequency_error_ratio = metrics
-        .resonance_peak_frequency_hz
-        .map(|peak_frequency_hz| {
-            ((peak_frequency_hz - reference_frequency_hz).abs() / reference_scale).clamp(0.0, 1.0)
-        })
-        .unwrap_or(1.0);
-    let resonance_flux_gain = metrics.resonance_flux_gain.unwrap_or(0.0);
-    let resonance_quality_factor = metrics.resonance_quality_factor.unwrap_or(0.0);
-    let sweep_known_answer_coverage_ratio = if metrics.sweep_count >= 3
-        && reference_frequency_in_sweep_ratio >= 1.0
-        && reference_frequency_bracket_ratio >= 1.0
-        && normalized_peak_frequency_error_ratio <= 0.25
-        && resonance_flux_gain >= 1.0
-        && resonance_quality_factor >= 1.5
-    {
-        1.0
-    } else {
-        0.0
-    };
-    let severity = if sweep_known_answer_coverage_ratio >= 1.0 {
-        runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info
-    } else {
-        runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
-    };
-
-    runmat_analysis_fea::diagnostics::FeaDiagnostic {
-        code: "FEA_EM_SWEEP_KNOWN_ANSWER".to_string(),
-        severity,
-        message: format!(
-            "basis=bracketed_reference_frequency sweep_count={} reference_frequency_hz={} sweep_frequency_min_hz={} sweep_frequency_max_hz={} reference_frequency_in_sweep_ratio={} reference_frequency_bracket_ratio={} normalized_peak_frequency_error_ratio={} resonance_flux_gain={} resonance_quality_factor={} sweep_known_answer_coverage_ratio={}",
-            metrics.sweep_count,
-            reference_frequency_hz,
-            min_frequency_hz,
-            max_frequency_hz,
-            reference_frequency_in_sweep_ratio,
-            reference_frequency_bracket_ratio,
-            normalized_peak_frequency_error_ratio,
-            resonance_flux_gain,
-            resonance_quality_factor,
-            sweep_known_answer_coverage_ratio,
-        ),
-    }
 }
 
 fn infer_material_assignments(
