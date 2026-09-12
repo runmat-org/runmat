@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
@@ -522,6 +523,21 @@ impl runmat_execution_artifact::cache::CacheExport for MemoryObjects {
     }
 }
 
+struct RecordingObjects {
+    objects: BTreeMap<Digest, Vec<u8>>,
+    reads: RefCell<Vec<Digest>>,
+}
+
+impl runmat_execution_artifact::cache::CacheImport for RecordingObjects {
+    fn read_verified(
+        &self,
+        digest: Digest,
+    ) -> runmat_execution_artifact::ArtifactResult<Option<Vec<u8>>> {
+        self.reads.borrow_mut().push(digest);
+        Ok(self.objects.get(&digest).cloned())
+    }
+}
+
 #[test]
 fn semantic_partition_import_does_not_gather_unrelated_payloads() {
     let catalog = b"field catalog".to_vec();
@@ -672,10 +688,13 @@ fn observation_history_import_reads_only_the_requested_retained_sample() {
     let root = prepared
         .root_reference(&access(), ValueRefKind::ResultObject)
         .unwrap();
-    let mut store = MemoryObjects::default();
+    let mut store = RecordingObjects {
+        objects: BTreeMap::new(),
+        reads: RefCell::new(Vec::new()),
+    };
     for object in &prepared.objects {
         store
-            .0
+            .objects
             .insert(object.descriptor.digest, object.bytes.clone());
     }
     let imported = import_observation_history(
@@ -713,17 +732,51 @@ fn observation_history_import_reads_only_the_requested_retained_sample() {
         .collect::<BTreeSet<_>>();
     for object in &prepared.objects[start..end] {
         if !retained_chunks.contains(&object.descriptor.digest) {
-            store.0.remove(&object.descriptor.digest);
+            store.objects.remove(&object.descriptor.digest);
         }
     }
+    store.reads.borrow_mut().clear();
+    let selected_limits = ObjectInventoryLimits {
+        max_objects: retained_partition.chunk_count as usize + 1,
+        max_object_bytes: prepared
+            .objects
+            .iter()
+            .map(|object| object.descriptor.encoded_length)
+            .max()
+            .unwrap(),
+        max_total_bytes: root
+            .encoded_length
+            .checked_add(retained_partition.encoded_length)
+            .unwrap(),
+    };
+    assert!(
+        selected_limits.max_total_bytes
+            < root
+                .encoded_length
+                .checked_add(prepared.manifest.encoded_length)
+                .unwrap()
+    );
     let selected = import_observation_history_sample(
         &store,
         &imported,
         RecoveredFieldSample::TimeSeconds(1.0),
-        ObjectInventoryLimits::default(),
+        selected_limits,
     )
     .unwrap();
     assert_eq!(selected.coordinate, RecoveredFieldSample::TimeSeconds(1.0));
+    let expected_reads = std::iter::once(root.logical_digest)
+        .chain(
+            prepared.manifest.chunks[retained_start..retained_end]
+                .iter()
+                .map(|chunk| chunk.digest),
+        )
+        .collect::<Vec<_>>();
+    assert_eq!(*store.reads.borrow(), expected_reads);
+    assert!(store
+        .reads
+        .borrow()
+        .iter()
+        .all(|digest| *digest == root.logical_digest || retained_chunks.contains(digest)));
     assert!(import_observation_history_sample(
         &store,
         &imported,

@@ -360,8 +360,12 @@ magnitude, or phase view so their ordering and output domain are unambiguous.
 Storage declares precision, compression, retention, and partial-access behavior. Retention may be
 canonical, bounded to the latest or an explicit maximum number of samples, or last until dependent
 steps complete. `manifestAndChunks` lets a local or remote consumer fetch metadata and only the
-result chunks it needs. The declared `fea.ObservationCost` feeds resource admission; it is not a
-measured result.
+result chunks it needs. A retained history uses one semantic manifest payload and one independently
+addressable payload per retained sample. The manifest resolves physical coordinates to exact sample
+identities; local and remote importers then verify the root plus only that sample's chunks against a
+sample-sized object and byte bound. Unrelated samples need not be present in the consuming cache and
+are never gathered as a side effect. The declared `fea.ObservationCost` feeds resource admission;
+it is not a measured result.
 
 ## Diagnostics and Monitors
 
