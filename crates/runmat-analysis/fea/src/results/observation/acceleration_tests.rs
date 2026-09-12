@@ -23,7 +23,10 @@ use runmat_analysis_core::{
 use runmat_execution::ExecutionCostComponents;
 
 use super::{
-    acceleration::evaluate_observation_partition_with_provider,
+    acceleration::{
+        classify_observation_partition_acceleration, evaluate_observation_partition_with_provider,
+        ObservationAccelerationEligibility,
+    },
     distributed::combine_observation_partitions,
     evaluate_solid_observation_partition,
     partition_tests::{prepared, spec},
@@ -55,6 +58,17 @@ fn governed_extrema_preserve_scientific_identity_and_publish_execution_evidence(
         &field,
     )
     .unwrap();
+    assert_eq!(
+        classify_observation_partition_acceleration(
+            &plan,
+            &partition_plan,
+            partition,
+            &source,
+            None,
+        )
+        .unwrap(),
+        ObservationAccelerationEligibility::GovernedExactF64Extrema
+    );
     let host = evaluate_solid_observation_partition(
         &plan,
         &partition_plan,
@@ -135,6 +149,19 @@ fn governed_extrema_reject_unsupported_work_before_provider_allocation() {
         .unwrap();
         let provider = GovernedReductionTestProvider::default();
         provider.reject.store(reject_provider, Ordering::Relaxed);
+        if !reject_provider {
+            assert_eq!(
+                classify_observation_partition_acceleration(
+                    &plan,
+                    &partition_plan,
+                    partition,
+                    &source,
+                    None,
+                )
+                .unwrap(),
+                ObservationAccelerationEligibility::Host
+            );
+        }
         assert!(evaluate_observation_partition_with_provider(
             &plan,
             &partition_plan,

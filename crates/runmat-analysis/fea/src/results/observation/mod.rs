@@ -63,5 +63,8 @@ mod acceleration_tests;
 mod partition_tests;
 #[cfg(test)]
 mod tests;
-pub use acceleration::evaluate_structural_observation_partition_accelerated;
-pub use acceleration::{ObservationAccelerationEvidence, ObservationAccelerationEvidenceIdentity};
+pub use acceleration::{
+    classify_observation_partition_acceleration,
+    evaluate_structural_observation_partition_accelerated, ObservationAccelerationEligibility,
+    ObservationAccelerationEvidence, ObservationAccelerationEvidenceIdentity,
+};

@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_analysis_fea::execution::{
     AnalysisNumericalObjectKind, AnalysisWorkKind, ObservationAssemblyRequest,
@@ -115,6 +115,7 @@ pub fn prepare_structural_observation_assembly(
         AnalysisWorkKind::AssembleObservations,
         &inputs,
         vec![AnalysisNumericalObjectKind::Observation],
+        BTreeSet::new(),
     )?;
     let program = prepare_analysis_program(&host, preparation.program_revision, &inputs)?;
     Ok(PreparedStructuralObservationAssembly {

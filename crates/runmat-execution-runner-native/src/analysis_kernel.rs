@@ -10,10 +10,10 @@ use runmat_analysis_fea::execution::{
     AccuracyEvaluationRequest, AnalysisNumericalObjectKind, AnalysisWorkKind,
     CanonicalSemanticState, ConstraintPlanIdentity, FieldRecoveryRequest, HistoryCheckpointRequest,
     ObservationAssemblyRequest, ObservationEvaluationRequest,
-    ObservationPartitionEvaluationRequest, ObservationPartitionReductionRequest,
-    ResultPublicationRequest, SemanticStatePublicationRequest,
-    StructuralLinearNumericalReceiptArtifact, StructuralLinearWorkload,
-    StructuralLinearWorkloadResult,
+    ObservationPartitionEvaluationRequest, ObservationPartitionExecutionTarget,
+    ObservationPartitionReductionRequest, ResultPublicationRequest,
+    SemanticStatePublicationRequest, StructuralLinearNumericalReceiptArtifact,
+    StructuralLinearWorkload, StructuralLinearWorkloadResult,
 };
 use runmat_analysis_fea::planning::resource::{
     build_structural_resource_plan, validate_resource_usage_evidence, FeaResourcePlan,
@@ -31,8 +31,9 @@ use runmat_analysis_fea::results::field::{
     StructuralRecoveredFieldTopology,
 };
 use runmat_analysis_fea::results::observation::{
-    evaluate_structural_observation_partition, reduce_observation_partitions, ObservationArtifact,
-    ObservationArtifactInput, ObservationArtifactManifest, ObservationLimits,
+    evaluate_structural_observation_partition,
+    evaluate_structural_observation_partition_accelerated, reduce_observation_partitions,
+    ObservationArtifact, ObservationArtifactInput, ObservationArtifactManifest, ObservationLimits,
     ObservationPartitionContribution, ObservationPartitionPlan, ObservationResult,
 };
 use runmat_analysis_fea::results::publication::PublishedAnalysisResult;
@@ -363,7 +364,6 @@ fn execute_observation_partition(
         &partition_plan,
         partition,
         &fields,
-        request.event_attribution,
         &resource_plan,
     )?;
     if source_request.identity().digest() != source_request_identity
@@ -384,15 +384,39 @@ fn execute_observation_partition(
                 .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))
         })
         .transpose()?;
-    let contribution = evaluate_structural_observation_partition(
-        &source_request.plan,
-        &partition_plan,
-        partition,
-        &workload.model,
-        mesh.as_ref(),
-        &fields,
-        request.event_attribution,
-    )
+    let contribution = match &request.execution_target {
+        ObservationPartitionExecutionTarget::Host => evaluate_structural_observation_partition(
+            &source_request.plan,
+            &partition_plan,
+            partition,
+            &workload.model,
+            mesh.as_ref(),
+            &fields,
+            request.event_attribution,
+        ),
+        ObservationPartitionExecutionTarget::GovernedAccelerator { class } => {
+            if workload.backend != runmat_analysis_fea::ComputeBackend::Gpu
+                || !invocation.host.workload.required_capabilities.contains(
+                    &runmat_analysis_execution::AnalysisCapabilityRequirement::Accelerator {
+                        class: class.clone(),
+                    },
+                )
+            {
+                return Err(AnalysisBridgeError::Identity(
+                    "observation accelerator target differs from its workload placement",
+                ));
+            }
+            evaluate_structural_observation_partition_accelerated(
+                &source_request.plan,
+                &partition_plan,
+                partition,
+                &workload.model,
+                mesh.as_ref(),
+                &fields,
+                request.event_attribution,
+            )
+        }
+    }
     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     Ok(vec![AnalysisKernelOutput::whole(
         AnalysisNumericalObjectKind::ObservationPartitionContribution,
@@ -1387,8 +1411,15 @@ mod tests {
                 &source_fields,
                 None,
                 &resource_plan,
+                ObservationPartitionExecutionTarget::Host,
             )
             .unwrap();
+            let mut substituted_target = partition_request.clone();
+            substituted_target.execution_target =
+                ObservationPartitionExecutionTarget::GovernedAccelerator {
+                    class: "substituted-gpu".into(),
+                };
+            assert!(substituted_target.canonical_bytes().is_err());
             let partition_request_objects = runmat_analysis_execution::prepare_analysis_objects(
                 AnalysisNumericalObjectKind::ObservationPartitionEvaluationRequest,
                 partition_request.identity().digest(),

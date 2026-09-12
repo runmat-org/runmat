@@ -2,15 +2,18 @@ use std::collections::BTreeSet;
 
 use runmat_analysis_fea::execution::{
     AnalysisNumericalObjectKind, AnalysisWorkKind, ObservationEvaluationRequest,
-    ObservationPartitionEvaluationRequest, ObservationPartitionReductionRequest,
+    ObservationPartitionEvaluationRequest, ObservationPartitionExecutionTarget,
+    ObservationPartitionReductionRequest,
 };
 use runmat_analysis_fea::planning::resource::FeaResourcePlan;
 use runmat_analysis_fea::results::field::{RecoveredFieldPartitionSet, RecoveredFieldSample};
 use runmat_analysis_fea::results::observation::{
-    structural_observation_partition_source_indices, ObservationEventAttribution,
-    ObservationPartition, ObservationPartitionContribution, ObservationPartitionPlan,
-    ObservationResult,
+    classify_observation_partition_acceleration, structural_observation_partition_source_indices,
+    ObservationAccelerationEligibility, ObservationEventAttribution, ObservationPartition,
+    ObservationPartitionContribution, ObservationPartitionPlan, ObservationResult,
 };
+use runmat_analysis_fea::ComputeBackend;
+use runmat_execution::resource::AcceleratorRequest;
 use runmat_execution::value::ValueRefKind;
 use runmat_execution::ProgramRevision;
 use runmat_execution_artifact::cache::CacheImport;
@@ -306,6 +309,7 @@ pub fn prepare_structural_observation_reduction(
         AnalysisWorkKind::ReduceObservationPartitions,
         &inputs,
         vec![AnalysisNumericalObjectKind::ObservationResult],
+        BTreeSet::new(),
     )?;
     let program = prepare_analysis_program(&host, preparation.program_revision.clone(), &inputs)?;
     Ok(PreparedStructuralObservationReduction {
@@ -370,6 +374,14 @@ fn prepare_partition_workload(
     source_fields: RecoveredFieldPartitionSet,
     event_attribution: Option<ObservationEventAttribution>,
 ) -> AnalysisBridgeResult<PreparedStructuralObservationPartition> {
+    let execution_target = observation_execution_target(
+        &preparation.source_host,
+        admitted,
+        &partition_plan,
+        &partition,
+        &source_fields,
+        event_attribution,
+    )?;
     let request = ObservationPartitionEvaluationRequest::new(
         &admitted.request,
         &partition_plan,
@@ -377,6 +389,7 @@ fn prepare_partition_workload(
         &source_fields,
         event_attribution,
         &admitted.resource_plan,
+        execution_target.clone(),
     )?;
     let source_request_objects = prepare_analysis_objects(
         AnalysisNumericalObjectKind::ObservationEvaluationRequest,
@@ -430,6 +443,14 @@ fn prepare_partition_workload(
         AnalysisWorkKind::EvaluateObservationPartition,
         &inputs,
         vec![AnalysisNumericalObjectKind::ObservationPartitionContribution],
+        match &execution_target {
+            ObservationPartitionExecutionTarget::Host => BTreeSet::new(),
+            ObservationPartitionExecutionTarget::GovernedAccelerator { class } => {
+                BTreeSet::from([AnalysisCapabilityRequirement::Accelerator {
+                    class: class.clone(),
+                }])
+            }
+        },
     )?;
     let program = prepare_analysis_program(&host, preparation.program_revision.clone(), &inputs)?;
     Ok(PreparedStructuralObservationPartition {
@@ -444,11 +465,67 @@ fn prepare_partition_workload(
     })
 }
 
+fn observation_execution_target(
+    source_host: &AnalysisHostWorkload,
+    admitted: &AdmittedStructuralObservation,
+    partition_plan: &ObservationPartitionPlan,
+    partition: &ObservationPartition,
+    source_fields: &RecoveredFieldPartitionSet,
+    event_attribution: Option<ObservationEventAttribution>,
+) -> AnalysisBridgeResult<ObservationPartitionExecutionTarget> {
+    let eligibility = classify_observation_partition_acceleration(
+        &admitted.request.plan,
+        partition_plan,
+        partition,
+        source_fields,
+        event_attribution,
+    )
+    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    select_observation_execution_target(
+        admitted.workload.backend,
+        eligibility,
+        &admitted.resource_plan.request.accelerators,
+        &source_host.workload.required_capabilities,
+    )
+}
+
+fn select_observation_execution_target(
+    backend: ComputeBackend,
+    eligibility: ObservationAccelerationEligibility,
+    accelerators: &[AcceleratorRequest],
+    capabilities: &BTreeSet<AnalysisCapabilityRequirement>,
+) -> AnalysisBridgeResult<ObservationPartitionExecutionTarget> {
+    if backend != ComputeBackend::Gpu
+        || eligibility != ObservationAccelerationEligibility::GovernedExactF64Extrema
+    {
+        return Ok(ObservationPartitionExecutionTarget::Host);
+    }
+    let candidates = accelerators
+        .iter()
+        .filter(|accelerator| {
+            capabilities.contains(&AnalysisCapabilityRequirement::Accelerator {
+                class: accelerator.class.clone(),
+            })
+        })
+        .map(|accelerator| accelerator.class.clone())
+        .collect::<BTreeSet<_>>();
+    match candidates.len() {
+        0 => Ok(ObservationPartitionExecutionTarget::Host),
+        1 => Ok(ObservationPartitionExecutionTarget::GovernedAccelerator {
+            class: candidates.into_iter().next().expect("one candidate"),
+        }),
+        _ => Err(AnalysisBridgeError::Invalid(
+            "governed observation acceleration has multiple eligible accelerator classes".into(),
+        )),
+    }
+}
+
 pub(crate) fn prepare_host_workload(
     source_host: &AnalysisHostWorkload,
     kind: AnalysisWorkKind,
     inputs: &[PreparedAnalysisObjects],
     outputs: Vec<AnalysisNumericalObjectKind>,
+    additional_capabilities: BTreeSet<AnalysisCapabilityRequirement>,
 ) -> AnalysisBridgeResult<AnalysisHostWorkload> {
     let workload_inputs = inputs
         .iter()
@@ -461,6 +538,10 @@ pub(crate) fn prepare_host_workload(
             reference_kind: ValueRefKind::DriverObject,
         })
         .collect();
+    let mut required_capabilities = additional_capabilities;
+    required_capabilities.insert(AnalysisCapabilityRequirement::Host {
+        abi: ANALYSIS_HOST_ABI.into(),
+    });
     let workload = AnalysisWorkloadRequest::new(
         source_host.workload.study,
         source_host.workload.step,
@@ -468,9 +549,95 @@ pub(crate) fn prepare_host_workload(
         kind,
         workload_inputs,
         outputs,
-        BTreeSet::from([AnalysisCapabilityRequirement::Host {
-            abi: ANALYSIS_HOST_ABI.into(),
-        }]),
+        required_capabilities,
     )?;
     AnalysisHostWorkload::new(workload, source_host.artifact_access.clone())
+}
+
+#[cfg(test)]
+mod placement_tests {
+    use std::collections::BTreeSet;
+
+    use runmat_analysis_fea::execution::ObservationPartitionExecutionTarget;
+    use runmat_analysis_fea::results::observation::ObservationAccelerationEligibility;
+    use runmat_analysis_fea::ComputeBackend;
+    use runmat_execution::resource::AcceleratorRequest;
+
+    use crate::AnalysisCapabilityRequirement;
+
+    use super::select_observation_execution_target;
+
+    fn accelerator(class: &str) -> AcceleratorRequest {
+        AcceleratorRequest {
+            class: class.into(),
+            count: 1,
+            memory_bytes_each: 1024,
+        }
+    }
+
+    fn capability(class: &str) -> AnalysisCapabilityRequirement {
+        AnalysisCapabilityRequirement::Accelerator {
+            class: class.into(),
+        }
+    }
+
+    #[test]
+    fn governed_placement_requires_gpu_eligibility_allocation_and_capability() {
+        let eligible = ObservationAccelerationEligibility::GovernedExactF64Extrema;
+        let allocations = vec![accelerator("gpu-a")];
+        let capabilities = BTreeSet::from([capability("gpu-a")]);
+        assert_eq!(
+            select_observation_execution_target(
+                ComputeBackend::Gpu,
+                eligible,
+                &allocations,
+                &capabilities,
+            )
+            .unwrap(),
+            ObservationPartitionExecutionTarget::GovernedAccelerator {
+                class: "gpu-a".into(),
+            }
+        );
+        for (backend, eligibility, allocated, capable) in [
+            (ComputeBackend::Cpu, eligible, true, true),
+            (
+                ComputeBackend::Gpu,
+                ObservationAccelerationEligibility::Host,
+                true,
+                true,
+            ),
+            (ComputeBackend::Gpu, eligible, false, true),
+            (ComputeBackend::Gpu, eligible, true, false),
+        ] {
+            let allocations = allocated
+                .then(|| accelerator("gpu-a"))
+                .into_iter()
+                .collect::<Vec<_>>();
+            let capabilities = capable
+                .then(|| capability("gpu-a"))
+                .into_iter()
+                .collect::<BTreeSet<_>>();
+            assert_eq!(
+                select_observation_execution_target(
+                    backend,
+                    eligibility,
+                    &allocations,
+                    &capabilities,
+                )
+                .unwrap(),
+                ObservationPartitionExecutionTarget::Host
+            );
+        }
+    }
+
+    #[test]
+    fn governed_placement_rejects_ambiguous_accelerator_classes() {
+        assert!(select_observation_execution_target(
+            ComputeBackend::Gpu,
+            ObservationAccelerationEligibility::GovernedExactF64Extrema,
+            &[accelerator("gpu-a"), accelerator("gpu-b")],
+            &BTreeSet::from([capability("gpu-a"), capability("gpu-b")]),
+        )
+        .is_err());
+    }
 }

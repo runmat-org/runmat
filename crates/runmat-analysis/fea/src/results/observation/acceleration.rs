@@ -27,6 +27,20 @@ use super::{
 
 static LOCAL_OBSERVATION_ATTEMPT_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ObservationAccelerationEligibility {
+    Host,
+    GovernedExactF64Extrema,
+}
+
+struct GovernedExtremaInput<'a> {
+    observation: &'a super::ResolvedObservation,
+    operation: DenseReductionOperation,
+    indices: &'a [usize],
+    entities: Vec<ObservationEntity>,
+}
+
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct ObservationAccelerationEvidenceIdentity(Digest);
@@ -177,6 +191,24 @@ pub fn evaluate_structural_observation_partition_accelerated(
     )
 }
 
+pub fn classify_observation_partition_acceleration(
+    plan: &ResolvedObservationPlan,
+    partition_plan: &ObservationPartitionPlan,
+    partition: &ObservationPartition,
+    field: &RecoveredFieldPartitionSet,
+    event_attribution: Option<ObservationEventAttribution>,
+) -> Result<ObservationAccelerationEligibility, ObservationError> {
+    Ok(
+        if governed_extrema_input(plan, partition_plan, partition, field, event_attribution)?
+            .is_some()
+        {
+            ObservationAccelerationEligibility::GovernedExactF64Extrema
+        } else {
+            ObservationAccelerationEligibility::Host
+        },
+    )
+}
+
 pub(crate) fn evaluate_observation_partition_with_provider(
     plan: &ResolvedObservationPlan,
     partition_plan: &ObservationPartitionPlan,
@@ -185,73 +217,14 @@ pub(crate) fn evaluate_observation_partition_with_provider(
     event_attribution: Option<ObservationEventAttribution>,
     provider: &dyn AccelProvider,
 ) -> Result<ObservationPartitionContribution, ObservationError> {
-    let observation = validate_observation_partition_input(
-        plan,
-        partition_plan,
-        partition,
-        field,
-        event_attribution,
-    )?;
-    if shape_component_count(&observation.result_value_shape)? != 1
-        || observation.spec.complex_representation
-            == runmat_analysis_core::ComplexRepresentation::Complex
-    {
-        return Err(ObservationError::Unsupported(
-            "accelerated extrema require a scalar real observation",
-        ));
-    }
-    let reduction = observation
-        .spec
-        .reduction
-        .as_ref()
-        .ok_or(ObservationError::Unsupported(
-            "accelerated observation evaluation requires a reduction",
-        ))?;
-    if reduction.extrema_ties != ExtremaTiePolicy::FirstCanonical {
-        return Err(ObservationError::Unsupported(
-            "accelerated extrema currently require first-canonical tie selection",
-        ));
-    }
-    let operation = match reduction.spatial {
-        SpatialReduction::Minimum => DenseReductionOperation::Minimum { dimension: 1 },
-        SpatialReduction::Maximum => DenseReductionOperation::Maximum { dimension: 1 },
-        _ => {
-            return Err(ObservationError::Unsupported(
-                "accelerated observation evaluation currently supports spatial extrema",
-            ))
-        }
-    };
-    let (indices, entities) = match &partition.target {
-        ObservationPartitionTarget::Nodes {
-            indices,
-            identities,
-        } => (
-            indices.as_slice(),
-            identities
-                .iter()
-                .copied()
-                .map(ObservationEntity::Node)
-                .collect::<Vec<_>>(),
-        ),
-        ObservationPartitionTarget::Elements {
-            indices,
-            identities,
-        } => (
-            indices.as_slice(),
-            identities
-                .iter()
-                .copied()
-                .map(ObservationEntity::Element)
-                .collect::<Vec<_>>(),
-        ),
-        _ => {
-            return Err(ObservationError::Unsupported(
-                "accelerated extrema require canonical node or element partitions",
-            ))
-        }
-    };
-    let selected = select_values(field, indices, observation)?;
-    if selected.len() != entities.len() || selected.is_empty() {
+    let governed =
+        governed_extrema_input(plan, partition_plan, partition, field, event_attribution)?.ok_or(
+            ObservationError::Unsupported(
+                "observation partition is outside the governed exact-f64 extrema envelope",
+            ),
+        )?;
+    let selected = select_values(field, governed.indices, governed.observation)?;
+    if selected.len() != governed.entities.len() || selected.is_empty() {
         return Err(ObservationError::Identity(
             "accelerated extrema require one selected value per entity",
         ));
@@ -307,7 +280,7 @@ pub(crate) fn evaluate_observation_partition_with_provider(
         ProviderCancellationToken::from_shared(progress::cancellation_token().shared_flag());
     let request = DenseReductionRequest {
         input: &input,
-        operation,
+        operation: governed.operation,
         attempt_id: observation_attempt_id(partition.identity.digest()),
         input_identity: selected_values_identity,
         provider_capability_schema_version: capability.schema_version,
@@ -350,10 +323,74 @@ pub(crate) fn evaluate_observation_partition_with_provider(
         event_attribution,
         Some(evidence),
         ObservationPartitionPayload::ExtremaCandidates {
-            entities: vec![entities[index].clone()],
+            entities: vec![governed.entities[index].clone()],
             values: vec![value],
         },
     )
+}
+
+fn governed_extrema_input<'a>(
+    plan: &'a ResolvedObservationPlan,
+    partition_plan: &ObservationPartitionPlan,
+    partition: &'a ObservationPartition,
+    field: &RecoveredFieldPartitionSet,
+    event_attribution: Option<ObservationEventAttribution>,
+) -> Result<Option<GovernedExtremaInput<'a>>, ObservationError> {
+    let observation = validate_observation_partition_input(
+        plan,
+        partition_plan,
+        partition,
+        field,
+        event_attribution,
+    )?;
+    if shape_component_count(&observation.result_value_shape)? != 1
+        || observation.spec.complex_representation
+            == runmat_analysis_core::ComplexRepresentation::Complex
+    {
+        return Ok(None);
+    }
+    let Some(reduction) = observation.spec.reduction.as_ref() else {
+        return Ok(None);
+    };
+    if reduction.extrema_ties != ExtremaTiePolicy::FirstCanonical {
+        return Ok(None);
+    }
+    let operation = match reduction.spatial {
+        SpatialReduction::Minimum => DenseReductionOperation::Minimum { dimension: 1 },
+        SpatialReduction::Maximum => DenseReductionOperation::Maximum { dimension: 1 },
+        _ => return Ok(None),
+    };
+    let (indices, entities) = match &partition.target {
+        ObservationPartitionTarget::Nodes {
+            indices,
+            identities,
+        } => (
+            indices.as_slice(),
+            identities
+                .iter()
+                .copied()
+                .map(ObservationEntity::Node)
+                .collect(),
+        ),
+        ObservationPartitionTarget::Elements {
+            indices,
+            identities,
+        } => (
+            indices.as_slice(),
+            identities
+                .iter()
+                .copied()
+                .map(ObservationEntity::Element)
+                .collect(),
+        ),
+        _ => return Ok(None),
+    };
+    Ok(Some(GovernedExtremaInput {
+        observation,
+        operation,
+        indices,
+        entities,
+    }))
 }
 
 fn dense_reduction_feasibility(

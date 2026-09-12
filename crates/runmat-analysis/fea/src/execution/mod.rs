@@ -45,7 +45,8 @@ pub use object::{
 pub use observation::ObservationEvaluationRequest;
 pub use observation_assembly::ObservationAssemblyRequest;
 pub use observation_partition::{
-    ObservationPartitionEvaluationRequest, ObservationPartitionReductionRequest,
+    ObservationPartitionEvaluationRequest, ObservationPartitionExecutionTarget,
+    ObservationPartitionReductionRequest,
 };
 pub use publication::ResultPublicationRequest;
 pub use signal::{
