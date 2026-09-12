@@ -24,6 +24,18 @@ pub enum BuiltinConstantKind {
 }
 
 impl BuiltinConstantCatalogEntry {
+    pub(crate) const fn new(
+        name: &'static str,
+        kind: BuiltinConstantKind,
+        provenance: BuiltinCatalogProvenance,
+    ) -> Self {
+        Self {
+            name,
+            kind,
+            provenance,
+        }
+    }
+
     pub fn fact(self) -> ValueFact {
         match self.kind {
             BuiltinConstantKind::RealDouble => numeric(NumericDomain::Real),
@@ -38,68 +50,4 @@ fn numeric(domain: NumericDomain) -> ValueFact {
         class: NumericClass::Double,
         domain,
     }))
-}
-
-static CONSTANTS: [BuiltinConstantCatalogEntry; 11] = [
-    constant("pi", BuiltinConstantKind::RealDouble),
-    constant("eps", BuiltinConstantKind::RealDouble),
-    constant("sqrt2", BuiltinConstantKind::RealDouble),
-    constant("i", BuiltinConstantKind::ComplexDouble),
-    constant("j", BuiltinConstantKind::ComplexDouble),
-    constant("inf", BuiltinConstantKind::RealDouble),
-    constant("Inf", BuiltinConstantKind::RealDouble),
-    constant("nan", BuiltinConstantKind::RealDouble),
-    constant("NaN", BuiltinConstantKind::RealDouble),
-    constant("true", BuiltinConstantKind::Logical),
-    constant("false", BuiltinConstantKind::Logical),
-];
-
-const fn constant(name: &'static str, kind: BuiltinConstantKind) -> BuiltinConstantCatalogEntry {
-    BuiltinConstantCatalogEntry {
-        name,
-        kind,
-        provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
-    }
-}
-
-pub fn builtin_constant_catalog_entries() -> &'static [BuiltinConstantCatalogEntry] {
-    &CONSTANTS
-}
-
-pub fn builtin_constant_catalog_entry_by_name(
-    name: &str,
-) -> Option<&'static BuiltinConstantCatalogEntry> {
-    CONSTANTS.iter().find(|entry| entry.name == name)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn identities_are_unique_and_facts_cover_the_runtime_constant_set() {
-        let names = builtin_constant_catalog_entries()
-            .iter()
-            .map(|entry| entry.name)
-            .collect::<std::collections::BTreeSet<_>>();
-        assert_eq!(names.len(), builtin_constant_catalog_entries().len());
-        assert!(matches!(
-            builtin_constant_catalog_entry_by_name("pi")
-                .expect("pi")
-                .fact()
-                .kind,
-            ValueKindFact::Numeric(NumericFact {
-                domain: NumericDomain::Real,
-                ..
-            })
-        ));
-        assert_eq!(
-            builtin_constant_catalog_entry_by_name("true")
-                .expect("true")
-                .fact()
-                .kind,
-            ValueKindFact::Logical
-        );
-        assert!(builtin_constant_catalog_entry_by_name("PI").is_none());
-    }
 }

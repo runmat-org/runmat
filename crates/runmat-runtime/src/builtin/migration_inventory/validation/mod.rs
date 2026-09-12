@@ -9,7 +9,9 @@ mod runtime;
 
 use std::collections::BTreeSet;
 
-use runmat_builtins::{builtin_functions, validate_complete_builtin_catalog};
+use runmat_builtins::{
+    builtin_catalog_entries, builtin_functions, validate_complete_builtin_catalog,
+};
 
 use super::schema::{
     CatalogProvenanceRecord, FusionSpecRecord, GpuSpecRecord, ImplementationProvenanceRecord,

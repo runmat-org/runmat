@@ -5,7 +5,7 @@
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
+    ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::introspection::type_resolvers::isstring_type;
 use runmat_builtins::{
@@ -15,7 +15,6 @@ use runmat_builtins::{
 use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
-use runmat_value::{IntValue, IntegerStorage};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::introspection::isstring")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -107,8 +106,8 @@ pub(crate) mod tests {
     use runmat_accelerate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
     use runmat_accelerate_api::HostTensorView;
     use runmat_value::{
-        CellArray, CharArray, Closure, ComplexTensor, LogicalArray, MException, ObjectInstance,
-        StringArray, StructValue, Tensor,
+        CellArray, CharArray, Closure, ComplexTensor, IntValue, IntegerStorage, LogicalArray,
+        MException, ObjectInstance, StringArray, StructValue, Tensor,
     };
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

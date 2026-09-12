@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::builtins::common::fs::expand_user_path;
+use crate::builtins::io::repl_fs::path_root::is_rooted_path;
 use runmat_filesystem as vfs;
 
 #[derive(Default)]
@@ -54,7 +55,7 @@ async fn resolve_segment(segment: &str, root: &super::root::Root) -> Option<Stri
     }
     let expanded = expand_user_path(segment, super::errors::NAME).ok()?;
     let candidate = PathBuf::from(expanded);
-    let rooted = if super::super::is_rooted_path(&candidate) {
+    let rooted = if is_rooted_path(&candidate) {
         candidate
     } else {
         root.path.join(candidate)
@@ -64,7 +65,7 @@ async fn resolve_segment(segment: &str, root: &super::root::Root) -> Option<Stri
     }
 
     let cwd = vfs::current_dir().ok()?;
-    let fallback = if super::super::is_rooted_path(Path::new(segment)) {
+    let fallback = if is_rooted_path(Path::new(segment)) {
         PathBuf::from(segment)
     } else {
         cwd.join(segment)

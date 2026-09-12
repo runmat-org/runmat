@@ -9,7 +9,6 @@ use runmat_builtins::{
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
 };
 use runmat_macros::runtime_builtin;
-use runmat_types::MemberAccess;
 use runmat_value::{NumericScalar, Value};
 use std::sync::OnceLock;
 
@@ -934,6 +933,7 @@ fn exact_count_as_f64(count: usize) -> crate::BuiltinResult<f64> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_types::MemberAccess;
     use runmat_value::{CellArray, IntValue, ObjectInstance, StructArray, StructValue, Tensor};
     use std::collections::HashMap;
 

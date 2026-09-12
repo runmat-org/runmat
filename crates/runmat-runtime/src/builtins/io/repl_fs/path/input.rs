@@ -1,5 +1,6 @@
 use runmat_value::{Tensor, Value};
 
+use crate::builtins::io::repl_fs::text_conversion::tensor_char_codes_to_string;
 use crate::{runtime_descriptor_error, runtime_descriptor_error_with_detail, BuiltinResult};
 
 const BUILTIN_NAME: &str = "path";
@@ -48,7 +49,7 @@ fn decode_numeric_row(tensor: &Tensor) -> BuiltinResult<String> {
     if tensor.shape.len() > 2 || tensor.rows() > 1 {
         return Err(invalid_input());
     }
-    super::super::tensor_char_codes_to_string(tensor).ok_or_else(invalid_input)
+    tensor_char_codes_to_string(tensor).ok_or_else(invalid_input)
 }
 
 fn invalid_input() -> crate::RuntimeError {

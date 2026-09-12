@@ -1,6 +1,7 @@
 use super::{
-    aliases::extend_aliases, entries::extend_catalog_entries, BuiltinCatalogAlias,
-    BuiltinCatalogEntry,
+    aliases::extend_aliases,
+    entries::{extend_catalog_constants, extend_catalog_entries},
+    BuiltinCatalogAlias, BuiltinCatalogEntry, BuiltinConstantCatalogEntry,
 };
 use std::cmp::Ordering;
 use std::sync::LazyLock;
@@ -20,6 +21,13 @@ static CATALOG_ALIASES: LazyLock<Vec<&'static BuiltinCatalogAlias>> = LazyLock::
     let mut aliases = Vec::new();
     extend_aliases(&mut aliases);
     aliases
+});
+
+static CATALOG_CONSTANTS: LazyLock<Vec<BuiltinConstantCatalogEntry>> = LazyLock::new(|| {
+    let mut constants = Vec::new();
+    extend_catalog_constants(&mut constants);
+    constants.sort_unstable_by_key(|constant| constant.name);
+    constants
 });
 
 static CATALOG_ENTRY_NAME_INDEX: LazyLock<Vec<&'static BuiltinCatalogEntry>> =
@@ -46,6 +54,19 @@ pub fn builtin_catalog_entries() -> &'static [&'static BuiltinCatalogEntry] {
 
 pub fn builtin_catalog_aliases() -> &'static [&'static BuiltinCatalogAlias] {
     CATALOG_ALIASES.as_slice()
+}
+
+pub fn builtin_constant_catalog_entries() -> &'static [BuiltinConstantCatalogEntry] {
+    CATALOG_CONSTANTS.as_slice()
+}
+
+pub fn builtin_constant_catalog_entry_by_name(
+    name: &str,
+) -> Option<&'static BuiltinConstantCatalogEntry> {
+    CATALOG_CONSTANTS
+        .binary_search_by(|entry| entry.name.cmp(name))
+        .ok()
+        .map(|index| &CATALOG_CONSTANTS[index])
 }
 
 pub fn builtin_catalog_primary_entry_by_name(name: &str) -> Option<&'static BuiltinCatalogEntry> {
@@ -116,5 +137,42 @@ mod tests {
             compare_ascii_case_insensitive("dataarray.read", "dataarray.write"),
             Ordering::Less,
         );
+    }
+
+    #[test]
+    fn constant_aggregation_has_one_owner_for_each_runtime_identity() {
+        let names = builtin_constant_catalog_entries()
+            .iter()
+            .map(|entry| entry.name)
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(names.len(), builtin_constant_catalog_entries().len());
+        assert!(matches!(
+            builtin_constant_catalog_entry_by_name("pi")
+                .expect("pi")
+                .fact()
+                .kind,
+            runmat_types::ValueKindFact::Numeric(runmat_types::NumericFact {
+                domain: runmat_types::NumericDomain::Real,
+                ..
+            })
+        ));
+        assert_eq!(
+            builtin_constant_catalog_entry_by_name("true")
+                .expect("true")
+                .fact()
+                .kind,
+            runmat_types::ValueKindFact::Logical
+        );
+        assert!(builtin_constant_catalog_entry_by_name("pi")
+            .expect("pi")
+            .provenance
+            .source_file
+            .ends_with("catalog/entries/constants/core/mod.rs"));
+        assert!(builtin_constant_catalog_entry_by_name("inf")
+            .expect("inf")
+            .provenance
+            .source_file
+            .ends_with("catalog/entries/array/creation/constants.rs"));
+        assert!(builtin_constant_catalog_entry_by_name("PI").is_none());
     }
 }

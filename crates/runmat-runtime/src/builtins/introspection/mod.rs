@@ -1,5 +1,3 @@
-#![allow(unused_imports)]
-
 //! Introspection builtins.
 
 pub mod addlistener;
@@ -39,6 +37,7 @@ pub mod notify;
 pub mod object_indexing;
 pub mod object_serialization;
 pub mod on_cleanup;
+mod public_api;
 pub mod runtime_compat;
 pub(crate) mod superclasses;
 pub mod test_classes;
@@ -48,4 +47,5 @@ pub(crate) mod underlying_type;
 pub mod which;
 pub mod who;
 pub mod whos;
-pub use class::*;
+
+pub use public_api::{CLASS_DESCRIPTOR, CLASS_INTEGER_CAPABILITIES, FUSION_SPEC, GPU_SPEC};

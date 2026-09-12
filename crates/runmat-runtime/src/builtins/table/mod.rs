@@ -4,6 +4,7 @@ mod binary;
 pub(crate) mod builtins;
 mod containers;
 mod display;
+mod facade;
 mod import;
 mod metadata;
 mod names;
@@ -12,14 +13,11 @@ mod parsing;
 mod prelude;
 mod registry;
 
-#[cfg(test)]
-use builtins::*;
 pub use metadata::*;
 pub use prelude::{TABLE_CLASS, TIMETABLE_CLASS};
 pub use registry::ensure_table_class_registered;
 
 pub(crate) use binary::{finish_binary, plan_binary};
-use containers::*;
 pub(crate) use containers::{
     categorical_categories, categorical_compare, categorical_declared_levels,
     categorical_extrema_to_value, categorical_from_args, categorical_labels,
@@ -27,11 +25,7 @@ pub(crate) use containers::{
     categorical_observation_labels, timetable_row_times, CategoricalComparison,
 };
 pub(crate) use display::categorical_label_at;
-use display::format_key_number;
 pub use display::{table_display_text, table_summary_text};
-use import::*;
-use names::*;
-use object::*;
 pub use object::{
     is_table_value, is_tabular_object, sortrows_table, table_from_columns, table_height,
     table_replace_variables_like, table_variable_names_from_object, table_variables, table_width,
@@ -40,8 +34,12 @@ pub(crate) use object::{
     parse_variable_selector_for_object, select_rows, selected_row_names, table_from_columns_like,
     value_row_count,
 };
-use parsing::*;
-pub(in crate::builtins::table) use prelude::*;
 
+use facade::*;
+
+#[cfg(test)]
+mod test_support;
+#[cfg(test)]
+use test_support::*;
 #[cfg(test)]
 mod tests;

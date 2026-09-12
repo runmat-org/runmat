@@ -5,7 +5,6 @@ use runmat_builtins::{
     BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
-use runmat_types::MemberAccess;
 use runmat_value::Value;
 
 const GETMETHOD_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {

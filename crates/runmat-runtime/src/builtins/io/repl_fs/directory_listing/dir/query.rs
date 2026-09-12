@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use crate::builtins::common::fs::{
     compare_names, contains_wildcards, expand_user_path, path_to_string,
 };
+use crate::builtins::io::repl_fs::path_root::is_rooted_path;
 use crate::BuiltinResult;
 
 use super::input::Input;
@@ -121,7 +122,7 @@ fn current_directory() -> BuiltinResult<PathBuf> {
 }
 
 async fn absolute_folder(path: &Path) -> BuiltinResult<String> {
-    let joined = if super::super::super::is_rooted_path(path) {
+    let joined = if is_rooted_path(path) {
         path.to_path_buf()
     } else {
         current_directory()?.join(path)

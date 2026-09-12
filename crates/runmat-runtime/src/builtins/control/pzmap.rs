@@ -17,6 +17,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::control::plot_setup_error::is_nonfatal_plot_setup_error;
 use crate::builtins::control::tf_model::{output_complex_column, TfModel, EPS, SS_CLASS, TF_CLASS};
 use crate::builtins::control::type_resolvers::pzmap_type;
 use crate::builtins::plotting::style::{parse_line_style_args, LineStyleParseOptions};
@@ -333,7 +334,7 @@ async fn render_pole_zero_map_args(args: Vec<Value>) -> BuiltinResult<()> {
         return Ok(());
     }
     if let Err(err) = crate::call_builtin_async("plot", &args).await {
-        if super::is_nonfatal_plot_setup_error(&err) {
+        if is_nonfatal_plot_setup_error(&err) {
             return Ok(());
         }
         return Err(pzmap_error(

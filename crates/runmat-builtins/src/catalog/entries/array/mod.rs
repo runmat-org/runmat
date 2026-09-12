@@ -26,3 +26,7 @@ pub(super) fn extend_entries(entries: &mut Vec<&'static crate::BuiltinCatalogEnt
     );
     super::extend_groups(entries, introspection::ENTRY_GROUPS);
 }
+
+pub(super) fn extend_constants(values: &mut Vec<crate::BuiltinConstantCatalogEntry>) {
+    creation::extend_constants(values);
+}

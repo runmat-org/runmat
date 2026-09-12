@@ -34,12 +34,23 @@ test("registry declares the exact canonical 99-product census", () => {
       const slug = suffix.replaceAll("/", "-").replaceAll("_", "-");
       return [
         fixed(`catalog-${slug}`, "catalog", `catalog/entries/${suffix}`,
-          suffix === "constants" ? ["entries", "constants"] : ["entries"]),
+          ["array", "array/creation", "constants"].includes(suffix)
+            ? ["entries", "constants"]
+            : ["entries"]),
         fixed(`runtime-${slug}`, "runtime", `builtins/${suffix}`, []),
       ];
     }),
   ].sort((left, right) => left.product_id < right.product_id ? -1 : left.product_id > right.product_id ? 1 : 0);
   assert.deepEqual(products, expected);
+});
+
+test("registry preserves constants in each owning catalog domain", () => {
+  const products = new Map(moduleCompositionProductRegistry()
+    .map((entry) => [entry.product_id, entry]));
+  for (const productId of ["catalog-array", "catalog-array-creation", "catalog-constants"]) {
+    assert.deepEqual(products.get(productId).aggregations, ["entries", "constants"]);
+  }
+  assert.deepEqual(products.get("catalog-root").aggregations, ["entries", "constants"]);
 });
 
 test("registry identifiers and paths are globally unique", () => {

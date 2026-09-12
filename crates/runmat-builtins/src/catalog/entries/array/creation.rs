@@ -16,6 +16,12 @@ use runmat_types::EffectKind;
 
 use super::documentation::{FULL_DOCUMENTATION, ZEROS_DOCUMENTATION};
 
+mod constants;
+
+pub(super) fn extend_constants(values: &mut Vec<crate::BuiltinConstantCatalogEntry>) {
+    values.extend(constants::CONSTANTS.iter().copied());
+}
+
 pub const FULL_INTEGER_SPARSE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
     id: "full-integer-sparse",
     mode: BuiltinExtensionMode::RunMatOnly,

@@ -13,7 +13,6 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{DynamicPropertyDef, HandleRef, ObjectInstance, StructValue, Tensor, Value};
-use std::collections::HashMap;
 
 pub const DYNAMICPROPS_CLASS: runmat_types::StaticClassIdentity =
     runmat_types::StaticClassIdentity::new("dynamicprops");
@@ -862,6 +861,7 @@ mod tests {
     use super::*;
     use futures::executor::block_on;
     use runmat_value::IntValue;
+    use std::collections::HashMap;
 
     #[test]
     fn addprop_descriptor_is_integer_inapplicable() {
