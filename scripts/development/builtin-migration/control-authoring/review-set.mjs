@@ -7,6 +7,7 @@ import { deepImmutable } from "../immutable.mjs";
 import { validateIntegrationProductCoverage } from "../integration-products.mjs";
 import { parseGatePlans } from "../gate-plan.mjs";
 import { parseInventoryEvidence } from "../inventory.mjs";
+import { validateModuleCompositionControl } from "../module-composition/control.mjs";
 import { array, digest, exact, kind, repositoryPath, stableId } from "../schema.mjs";
 import { assertValidatedTopologyView } from "../topology/freeze.mjs";
 import { parseBundleControlReview } from "./bundle-review.mjs";
@@ -39,6 +40,7 @@ export function loadControlReviewSet(manifestPath, { scaffold, topology, invento
       scaffold,
       topology,
       inventory,
+      globalReview,
     );
     if (review.bundleId !== reference.bundle_id) throw new Error(`${reference.bundle_id}: manifest key and bundle review differ`);
     bundleReviews.set(reference.bundle_id, review);
@@ -49,9 +51,30 @@ export function loadControlReviewSet(manifestPath, { scaffold, topology, invento
     globalReview.integrationProducts,
   );
   validateBundleReferences(bundleReviews, topology);
-  const parsed = deepImmutable({ value, digest: value.digest, bundleReviews, globalReview });
+  const moduleComposition = validateModuleCompositionControl(
+    globalReview.value.module_composition_baseline,
+    globalReview.integrationProducts,
+    reviewedCompositionBundles(bundleReviews, topology),
+  );
+  const parsed = deepImmutable({
+    value, digest: value.digest, bundleReviews, globalReview, moduleComposition,
+  });
   VALIDATED_REVIEW_SETS.add(parsed);
   return parsed;
+}
+
+function reviewedCompositionBundles(bundleReviews, topology) {
+  return new Map([...bundleReviews].map(([bundleId, review]) => {
+    const control = review.bundleControl;
+    return [bundleId, {
+      integration_product_refs: control.integration_product_refs,
+      module_composition_transition: control.module_composition_transition,
+      authored_write_set: [
+        ...topology.bundles.get(bundleId).composition.authored_write_set,
+        ...control.additional_authored_write_set,
+      ],
+    }];
+  }));
 }
 
 export function assertValidatedControlReviewSet(value) {

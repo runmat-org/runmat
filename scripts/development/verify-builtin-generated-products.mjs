@@ -6,12 +6,17 @@ import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { contentDigest } from "./builtin-migration/evidence.mjs";
+import { contentDigest, evidenceDigest } from "./builtin-migration/evidence.mjs";
 import { readGeneratedProductsInput } from "./builtin-migration/generated-products-input.mjs";
+import { verifyModuleCompositionProduct } from "./builtin-migration/module-composition/verify.mjs";
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const productInput = readGeneratedProductsInput(readFileSync(0, "utf8"));
 const productRegistry = productInput.products;
+const compositionProducts = new Map(
+  (productInput.module_composition_projection?.products ?? [])
+    .map((entry) => [entry.product_id, entry]),
+);
 const requestedProducts = selectProducts(process.argv.slice(2), productRegistry);
 
 const directory = mkdtempSync(join(tmpdir(), "runmat-generated-product-proof-"));
@@ -19,8 +24,9 @@ try {
   const records = requestedProducts.map((product) => {
     const firstPath = join(directory, `${product.product_id}-first.rs`);
     const secondPath = join(directory, `${product.product_id}-second.rs`);
-    const first = generate(product, firstPath);
-    const second = generate(product, secondPath);
+    const compositionProduct = compositionProducts.get(product.product_id) ?? null;
+    const first = generate(product, firstPath, compositionProduct);
+    const second = generate(product, secondPath, compositionProduct);
     const checkedIn = observation(repositoryFile(product.path, `${product.product_id} checked-in product`));
     const generatorPath = repositoryFile(product.generator.path, `${product.product_id} generator`);
     return {
@@ -35,11 +41,16 @@ try {
       second,
       deterministic: first.content_digest === second.content_digest,
       synchronized: checkedIn.content_digest === first.content_digest,
-      verification: semanticVerification(product, firstPath, productInput.native_registration_manifest),
+      verification: semanticVerification(
+        product,
+        firstPath,
+        productInput.native_registration_manifest,
+        compositionProduct,
+      ),
     };
   });
   const value = {
-    schema_version: 1,
+    schema_version: 2,
     kind: "runmat-builtin-generated-products-proof",
     authority: "machine-derived-integration-evidence",
     products: records,
@@ -51,9 +62,18 @@ try {
   rmSync(directory, { recursive: true, force: true });
 }
 
-function semanticVerification(product, generatedPath, nativeManifest) {
+function semanticVerification(product, generatedPath, nativeManifest, compositionProduct) {
   if (product.verification.kind === "content_identity") {
     return { kind: "content_identity", result: "pass" };
+  }
+  if (product.verification.kind === "rust_module_composition") {
+    if (!compositionProduct) throw new Error(`${product.product_id}: exact composition projection is absent`);
+    verifyModuleCompositionProduct(compositionProduct, readFileSync(generatedPath, "utf8"));
+    return {
+      kind: "rust_module_composition",
+      projection_digest: evidenceDigest(compositionProduct),
+      result: "pass",
+    };
   }
   const generatedManifest = registryManifestIdentity(readFileSync(generatedPath, "utf8"));
   const matches = generatedManifest.schema_version === nativeManifest.schema_version
@@ -115,7 +135,7 @@ function selectProducts(argumentsList, registry) {
   return requested.map((productId) => registry.find((entry) => entry.product_id === productId));
 }
 
-function generate(product, output) {
+function generate(product, output, compositionProduct) {
   const generatorPath = repositoryFile(product.generator.path, `${product.product_id} generator`);
   if (contentDigest(readFileSync(generatorPath)) !== product.generator.baseline_digest) {
     throw new Error(`${product.product_id}: generator bytes differ from the globally reviewed product registry`);
@@ -125,6 +145,9 @@ function generate(product, output) {
     env: process.env,
     encoding: "utf8",
     maxBuffer: 16 * 1024 * 1024,
+    ...(product.verification.kind === "rust_module_composition"
+      ? { input: `${JSON.stringify(compositionProduct)}\n` }
+      : {}),
   });
   if (completed.error) throw completed.error;
   if (completed.status !== 0) {

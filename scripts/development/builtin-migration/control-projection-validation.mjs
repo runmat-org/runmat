@@ -10,6 +10,7 @@ import {
   validateIntegrationProductCoverage,
 } from "./integration-products.mjs";
 import { parseFindingDispositions } from "./migration-findings.mjs";
+import { validateModuleCompositionControl } from "./module-composition/control.mjs";
 import { materializeTopologyControl } from "./topology/control-projection.mjs";
 import { assertValidatedTopologyView } from "./topology/freeze.mjs";
 import { parseTargetPolicy } from "./target-policy.mjs";
@@ -25,6 +26,7 @@ export function validateControlProjection({
   bundleControls: bundleControlValues,
   identityControls: identityControlValues,
   integrationProducts: integrationProductValues,
+  moduleCompositionBaseline,
   migrationFindings,
   exceptionManifest,
   targetPolicy: targetPolicyValue,
@@ -43,6 +45,9 @@ export function validateControlProjection({
     integrationProducts,
   });
   const bundles = materialized.bundles;
+  const moduleComposition = validateModuleCompositionControl(
+    moduleCompositionBaseline, integrationProducts, bundles,
+  );
   validateBundleGraph(bundles, materialized.identities);
   validateGeneratedRegistryCoverage(
     inventory,
@@ -63,6 +68,7 @@ export function validateControlProjection({
     bundles,
     identities: materialized.identities,
     integrationProducts,
+    moduleComposition,
     targetPolicy,
     executionTargets: parsedExecutionTargets,
   };

@@ -7,6 +7,7 @@ export function parseGeneratedProductsProducer(stdout, status, identities, gate,
     integration_products: context.integrationProducts,
     source_files: context.subject.source.files,
     native_registration_manifest: context.subject.compiled_inventory.snapshot.observed.registration_manifest,
+    module_composition_projection: context.moduleCompositionProjection,
   });
   return {
     checks: generatedProductChecks(proof, identities),

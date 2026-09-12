@@ -2,8 +2,10 @@ import { compareCodePoint } from "../constants.mjs";
 import { evidenceDigest } from "../evidence.mjs";
 import { deepImmutable } from "../immutable.mjs";
 import { assertValidatedTopologyView } from "../topology/freeze.mjs";
+import { validateModuleCompositionControl } from "../module-composition/control.mjs";
 import { array, digest, exact, identity, kind, stableId } from "../schema.mjs";
 import { assertValidatedControlOverlayScaffold } from "./scaffold.mjs";
+import { assertValidatedGlobalControlReview } from "./global-review.mjs";
 import {
   assertEvidenceDigest, assertScaffoldTopologyBinding, parseBundleControlPolicy,
   parseIdentityControlPolicy, parseReviewedEvidence,
@@ -13,21 +15,40 @@ export const BUNDLE_CONTROL_REVIEW_KIND = "runmat-builtin-migration-bundle-contr
 const PROGRAM = "RM-1064/C00-C07";
 const VALIDATED_BUNDLE_REVIEWS = new WeakSet();
 
-export function parseBundleControlReview(value, scaffoldValue, topology, inventory) {
+export function parseBundleControlReview(
+  value, scaffoldValue, topology, inventory, globalReviewValue,
+) {
   const scaffold = assertValidatedControlOverlayScaffold(scaffoldValue);
+  const globalReview = assertValidatedGlobalControlReview(globalReviewValue);
   assertValidatedTopologyView(topology);
   assertScaffoldTopologyBinding(scaffold, topology);
-  kind(value, 3, BUNDLE_CONTROL_REVIEW_KIND, "bundle control review");
+  kind(value, 4, BUNDLE_CONTROL_REVIEW_KIND, "bundle control review");
   exact(value, ["schema_version", "kind", "authority", "program", "bindings", "bundle_control", "identity_controls", "review", "digest"], "bundle control review");
   if (value.authority !== "reviewer-authored-development-input" || value.program !== PROGRAM) throw new Error("bundle control review has invalid authority or program");
   const bundle = parseBindings(value.bindings, scaffold, topology);
   parseBundleControlPolicy(value.bundle_control, bundle.id, bundle.identities, inventory);
+  validateModuleCompositionControl(
+    globalReview.value.module_composition_baseline,
+    globalReview.integrationProducts,
+    new Map([[bundle.id, reviewedCompositionBundle(bundle, value.bundle_control)]]),
+  );
   const identityControls = parseIdentityControls(value.identity_controls, bundle, scaffold, topology);
   parseReviewedEvidence(value.review, `${bundle.id} bundle review artifact`);
   assertEvidenceDigest(value, "bundle control review");
   const parsed = deepImmutable({ value, digest: value.digest, bundleId: bundle.id, bundleControl: value.bundle_control, identityControls });
   VALIDATED_BUNDLE_REVIEWS.add(parsed);
   return parsed;
+}
+
+function reviewedCompositionBundle(bundle, control) {
+  return {
+    integration_product_refs: control.integration_product_refs,
+    module_composition_transition: control.module_composition_transition,
+    authored_write_set: [
+      ...bundle.composition.authored_write_set,
+      ...control.additional_authored_write_set,
+    ],
+  };
 }
 
 export function assertValidatedBundleControlReview(value) {

@@ -6,7 +6,7 @@ import { parseControlDraft } from "../control-draft.mjs";
 import { evidenceDigest } from "../evidence.mjs";
 import { deepImmutable } from "../immutable.mjs";
 import { parseInventoryEvidence } from "../inventory.mjs";
-import { digest } from "../schema.mjs";
+import { digest, kind } from "../schema.mjs";
 import { assertValidatedTopologyView } from "../topology/freeze.mjs";
 import { buildAuthorityProposals, migrationFindingRoutingProposal } from "./authority-proposals.mjs";
 
@@ -19,6 +19,7 @@ const BUNDLE_DECISIONS = Object.freeze([
   "prerequisites",
   "additional_authored_write_set",
   "integration_product_refs",
+  "module_composition_transition",
   "expected_removals",
   "baseline_evidence",
   "gate_plans",
@@ -47,6 +48,7 @@ const FINDING_DECISIONS = Object.freeze([
 const GLOBAL_DECISIONS = Object.freeze([
   "exception_manifest",
   "integration_products",
+  "module_composition_baseline",
   "target_policy",
   "storage_policy",
 ]);
@@ -108,7 +110,7 @@ export function buildControlOverlayScaffold(inventoryValue, draftValue, reviewed
     .sort((left, right) => compareCodePoint(left.finding_digest, right.finding_digest));
 
   const payload = {
-    schema_version: 3,
+    schema_version: 4,
     kind: KIND,
     authority: AUTHORITY,
     program: PROGRAM,
@@ -138,6 +140,7 @@ export function parseControlOverlayScaffold(value, inventoryValue, draftValue, r
   if (value.authority !== AUTHORITY) {
     throw new Error("control overlay scaffold cannot claim or accept reviewed authority");
   }
+  kind(value, 4, KIND, "control overlay scaffold");
   if (value.review?.status !== "unreviewed") {
     throw new Error("control overlay scaffold cannot claim review");
   }

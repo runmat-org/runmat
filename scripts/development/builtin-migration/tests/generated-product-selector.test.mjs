@@ -11,10 +11,11 @@ const verifier = path.join(repository, "scripts/development/verify-builtin-gener
 function run(argumentsList, products = []) {
   const needsManifest = products.some((entry) => entry.verification?.kind === "native_wasm_registration_manifest");
   const input = JSON.stringify({
-    schema_version: 2,
+    schema_version: 3,
     kind: "runmat-builtin-generated-products-input",
     products,
     native_registration_manifest: needsManifest ? MANIFEST : null,
+    module_composition_projection: null,
   });
   return spawnSync(process.execPath, [verifier, ...argumentsList], { cwd: repository, encoding: "utf8", input });
 }
@@ -52,7 +53,7 @@ test("generated product execution is selected only from the adapter-supplied glo
 test("generated product proof must name the exact globally reviewed generator", () => {
   const digest = `sha256:${"a".repeat(64)}`;
   const proof = {
-    schema_version: 1,
+    schema_version: 2,
     kind: "runmat-builtin-generated-products-proof",
     authority: "machine-derived-integration-evidence",
     products: [{

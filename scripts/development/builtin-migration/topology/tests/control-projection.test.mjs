@@ -14,6 +14,7 @@ test("materializes topology-owned facts with control-only execution policy", () 
     atomic_reason: "One frozen authority component",
     prerequisites: [],
     integration_product_refs: [],
+    module_composition_transition: null,
     integration_outputs: [],
     authored_write_set: [
       { kind: "file", path: "crates/runmat-runtime/src/builtins/math/basic/foo.rs" },
@@ -101,6 +102,7 @@ function fixture({ dispositions = false } = {}) {
       prerequisites: [],
       additional_authored_write_set: [{ kind: "file", path: "crates/runmat-runtime/src/builtins/math/basic/foo.rs" }],
       integration_product_refs: [],
+      module_composition_transition: null,
     }]]),
     identityControls: new Map(identityRows.map(([id, row]) => [id, {
       public_identity: row.disposition.kind === "canonical"

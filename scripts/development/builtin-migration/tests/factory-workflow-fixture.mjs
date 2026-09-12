@@ -194,6 +194,7 @@ function fullChainControl(inventory, topology, scaffold) {
       .sort()
       .map((sourcePath) => ({ kind: "file", path: sourcePath })),
     integration_product_refs: [],
+    module_composition_transition: null,
     expected_removals: [],
     baseline_evidence: bundleBaselineEvidence(inventory, topology.bundles[bundleId].identities),
     gate_plans: gatePlans,
@@ -225,7 +226,7 @@ function fullChainControl(inventory, topology, scaffold) {
     }];
   }));
   const payload = {
-    schema_version: 3,
+    schema_version: 4,
     kind: "runmat-builtin-migration-control-manifest",
     authority: "reviewed-development-control",
     program: "RM-1064/C00-C07",
@@ -240,6 +241,7 @@ function fullChainControl(inventory, topology, scaffold) {
     bundle_controls: bundleControls,
     identity_controls: identityControls,
     integration_products: {},
+    module_composition_baseline: null,
     migration_findings: {
       schema_version: 1,
       kind: "runmat-builtin-migration-finding-dispositions",
@@ -283,7 +285,7 @@ function writeFullControlReviewSet(directory, inventory, topology, scaffold, pol
     review: reviewed("full-chain executable review"),
   }]));
   const globalPayload = {
-    schema_version: 2,
+    schema_version: 3,
     kind: "runmat-builtin-migration-global-control-review",
     authority: "reviewer-authored-development-input",
     program: "RM-1064/C00-C07",
@@ -294,6 +296,7 @@ function writeFullControlReviewSet(directory, inventory, topology, scaffold, pol
     },
     program_profiles: programProfiles,
     integration_products: policies.integration_products,
+    module_composition_baseline: policies.module_composition_baseline,
     migration_findings: policies.migration_findings,
     exception_manifest: policies.exception_manifest,
     target_policy: policies.target_policy,
@@ -328,7 +331,7 @@ function writeFullControlReviewSet(directory, inventory, topology, scaffold, pol
         .find((row) => row.identity === identity).proposal_digest,
     }));
     const bundlePayload = {
-      schema_version: 3,
+      schema_version: 4,
       kind: "runmat-builtin-migration-bundle-control-review",
       authority: "reviewer-authored-development-input",
       program: "RM-1064/C00-C07",

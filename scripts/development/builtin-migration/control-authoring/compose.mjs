@@ -43,7 +43,7 @@ export function composeControlCandidate({ inventory: inventoryValue, topology, s
 
   const inputs = inputDigests(inventory, topology, scaffold, reviewSet);
   const payload = {
-    schema_version: 3,
+    schema_version: 4,
     kind: "runmat-builtin-migration-control-candidate",
     authority: "deterministically-composed-unreviewed-candidate",
     program: PROGRAM,
@@ -61,6 +61,9 @@ export function composeControlCandidate({ inventory: inventoryValue, topology, s
     bundle_controls: bundleControls,
     identity_controls: identityControls,
     integration_products: structuredClone(reviewSet.globalReview.value.integration_products),
+    module_composition_baseline: structuredClone(
+      reviewSet.globalReview.value.module_composition_baseline,
+    ),
     migration_findings: structuredClone(reviewSet.globalReview.value.migration_findings),
     exception_manifest: structuredClone(reviewSet.globalReview.value.exception_manifest),
     target_policy: structuredClone(reviewSet.globalReview.value.target_policy),
@@ -73,6 +76,7 @@ export function composeControlCandidate({ inventory: inventoryValue, topology, s
     bundleControls: payload.bundle_controls,
     identityControls: payload.identity_controls,
     integrationProducts: payload.integration_products,
+    moduleCompositionBaseline: payload.module_composition_baseline,
     migrationFindings: payload.migration_findings,
     exceptionManifest: payload.exception_manifest,
     targetPolicy: payload.target_policy,
@@ -85,8 +89,8 @@ export function composeControlCandidate({ inventory: inventoryValue, topology, s
 
 export function parseControlCandidate(value, expected) {
   assertValidatedControlCandidate(expected);
-  kind(value, 3, "runmat-builtin-migration-control-candidate", "control candidate");
-  exact(value, ["schema_version", "kind", "authority", "program", "inputs", "baseline_context", "cohorts", "bundle_controls", "identity_controls", "integration_products", "migration_findings", "exception_manifest", "target_policy", "storage_policy", "digest"], "control candidate");
+  kind(value, 4, "runmat-builtin-migration-control-candidate", "control candidate");
+  exact(value, ["schema_version", "kind", "authority", "program", "inputs", "baseline_context", "cohorts", "bundle_controls", "identity_controls", "integration_products", "module_composition_baseline", "migration_findings", "exception_manifest", "target_policy", "storage_policy", "digest"], "control candidate");
   if (value.authority !== "deterministically-composed-unreviewed-candidate" || value.program !== PROGRAM) {
     throw new Error("control candidate has invalid authority or program");
   }
@@ -120,6 +124,7 @@ function expandBundleControl(control, globalReview) {
     prerequisites: structuredClone(control.prerequisites),
     additional_authored_write_set: structuredClone(control.additional_authored_write_set),
     integration_product_refs: structuredClone(control.integration_product_refs),
+    module_composition_transition: structuredClone(control.module_composition_transition),
     expected_removals: structuredClone(control.expected_removals),
     baseline_evidence: structuredClone(control.baseline_evidence),
     gate_plans: gatePlans,

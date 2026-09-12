@@ -2,6 +2,7 @@ import { compareCodePoint } from "../constants.mjs";
 import { evidenceDigest } from "../evidence.mjs";
 import { deepImmutable } from "../immutable.mjs";
 import { parseIntegrationProductRegistry } from "../integration-products.mjs";
+import { bindModuleCompositionProjection } from "../module-composition/binding.mjs";
 import { parseFindingDispositions } from "../migration-findings.mjs";
 import { assertValidatedTopologyView } from "../topology/freeze.mjs";
 import { parseTargetPolicy } from "../target-policy.mjs";
@@ -20,12 +21,15 @@ export function parseGlobalControlReview(value, scaffoldValue, topology, invento
   const scaffold = assertValidatedControlOverlayScaffold(scaffoldValue);
   assertValidatedTopologyView(topology);
   assertScaffoldTopologyBinding(scaffold, topology);
-  kind(value, 2, GLOBAL_CONTROL_REVIEW_KIND, "global control review");
-  exact(value, ["schema_version", "kind", "authority", "program", "bindings", "program_profiles", "integration_products", "migration_findings", "exception_manifest", "target_policy", "storage_policy", "review", "digest"], "global control review");
+  kind(value, 3, GLOBAL_CONTROL_REVIEW_KIND, "global control review");
+  exact(value, ["schema_version", "kind", "authority", "program", "bindings", "program_profiles", "integration_products", "module_composition_baseline", "migration_findings", "exception_manifest", "target_policy", "storage_policy", "review", "digest"], "global control review");
   if (value.authority !== "reviewer-authored-development-input" || value.program !== PROGRAM) throw new Error("global control review has invalid authority or program");
   parseArtifactBindings(value.bindings, scaffold, topology);
   const programProfiles = parseProgramProfiles(value.program_profiles);
   const integrationProducts = parseIntegrationProductRegistry(value.integration_products, inventory);
+  const moduleCompositionBaseline = bindModuleCompositionProjection(
+    [...integrationProducts.values()], value.module_composition_baseline,
+  );
   const bundles = new Map([...topology.bundles.keys()].map((id) => [id, true]));
   const currentFindings = scaffold.migration_finding_rows.map((entry) => entry.observations);
   const migrationFindings = parseFindingDispositions(value.migration_findings, bundles, currentFindings);
@@ -36,7 +40,8 @@ export function parseGlobalControlReview(value, scaffoldValue, topology, invento
   parseReviewedEvidence(value.review, "global control review");
   assertEvidenceDigest(value, "global control review");
   const parsed = deepImmutable({
-    value, digest: value.digest, programProfiles, integrationProducts, migrationFindings,
+    value, digest: value.digest, programProfiles, integrationProducts,
+    moduleCompositionBaseline, migrationFindings,
     targetPolicy, executionTargets,
   });
   VALIDATED_GLOBAL_REVIEWS.add(parsed);
