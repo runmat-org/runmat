@@ -1,7 +1,7 @@
 import { sorted } from "./constants.mjs";
 import path from "node:path";
 
-export const SAFE_IDENTITY = /^(?:[A-Za-z]|__)[A-Za-z0-9_.]*$/;
+export const SAFE_IDENTITY = /^(?:[A-Za-z][A-Za-z0-9_]*|__[A-Za-z0-9_]+)(?:\.[A-Za-z][A-Za-z0-9_]*)*$/;
 export const SAFE_STABLE_ID = /^[a-z][a-z0-9_.-]*$/;
 export const SAFE_PATH = /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))[A-Za-z0-9_.+@/-]+$/;
 export const DIGEST = /^sha256:[a-f0-9]{64}$/;

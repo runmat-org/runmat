@@ -172,14 +172,24 @@ pub fn validate_builtin_catalog_with_aliases(
 }
 
 fn valid_builtin_identity(value: &str) -> bool {
+    let mut segments = value.split('.');
+    let Some(first) = segments.next() else {
+        return false;
+    };
+    valid_builtin_identity_segment(first, true)
+        && segments.all(|segment| valid_builtin_identity_segment(segment, false))
+}
+
+fn valid_builtin_identity_segment(value: &str, allow_internal: bool) -> bool {
     let mut characters = value.chars();
-    match (characters.next(), characters.next()) {
-        (Some(first), second) if first.is_ascii_alphabetic() => second
-            .into_iter()
-            .chain(characters)
-            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | '.')),
-        (Some('_'), Some('_')) => characters
-            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | '.')),
+    match characters.next() {
+        Some(first) if first.is_ascii_alphabetic() => {
+            characters.all(|character| character.is_ascii_alphanumeric() || character == '_')
+        }
+        Some('_') if allow_internal && characters.next() == Some('_') => {
+            characters.clone().next().is_some()
+                && characters.all(|character| character.is_ascii_alphanumeric() || character == '_')
+        }
         _ => false,
     }
 }
