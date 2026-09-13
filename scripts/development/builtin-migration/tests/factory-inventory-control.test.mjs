@@ -85,6 +85,26 @@ test("source dirty evidence is scoped to the frozen inventory roots", () => {
   assert.equal(sourceSnapshot(repository, ["Cargo.toml"]).dirty, true);
 });
 
+test("migration inventory snapshots generated catalog alias composition", () => {
+  const repository = repositoryFixture();
+  const aliasRoot = path.join(repository, "crates/runmat-builtins/src/catalog/aliases");
+  fs.mkdirSync(aliasRoot, { recursive: true });
+  fs.writeFileSync(path.join(aliasRoot, "mod.rs"), "// generated alias composition\n");
+  execFileSync("git", ["add", "."], { cwd: repository });
+  execFileSync("git", [
+    "-c", "user.name=RunMat Test", "-c", "user.email=test@runmat.invalid",
+    "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "alias composition",
+  ], { cwd: repository });
+
+  const inventory = buildInventory(repository, undefined, {
+    compiledInventory: compiledInventoryFixture(),
+  });
+
+  assert.ok(inventory.generated_from.includes("crates/runmat-builtins/src/catalog/aliases"));
+  assert.ok(inventory.source.files.some((entry) =>
+    entry.path === "crates/runmat-builtins/src/catalog/aliases/mod.rs"));
+});
+
 test("baseline prepare evidence and subject gate evidence retain distinct provenance", () => {
   const fixture = controlledFixture();
   const output = createTemporaryDirectory("runmat-review-");
