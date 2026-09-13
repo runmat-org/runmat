@@ -62,5 +62,7 @@ function statementCondition(value, productId) {
   return { condition, statement: compact(statement) };
 }
 
-function compact(value) { return value.replace(/\s+/g, " ").replace(/\s*([(),.\[\]&])\s*/g, "$1"); }
+function compact(value) {
+  return value.replace(/\s+/g, " ").replace(/\s*([(),.\[\]&|])\s*/g, "$1").replace(/,\)/g, ")");
+}
 function escapeRegExp(value) { return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }

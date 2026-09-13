@@ -17,7 +17,7 @@ test("renders and independently verifies the closed catalog and runtime grammar"
   ]);
   const catalog = generated[0].content;
   assert.match(catalog, /pub\(in crate::catalog\) mod arithmetic;/);
-  assert.match(catalog, /pub use arithmetic::\{\n    ADD_CATALOG_ENTRY,\n    SUB_CATALOG_ENTRY,\n\};/);
+  assert.match(catalog, /pub use arithmetic::\{ADD_CATALOG_ENTRY, SUB_CATALOG_ENTRY\};/);
   assert.match(catalog, /values\.extend\(arithmetic::ENTRIES\.iter\(\)\.copied\(\)\);/);
   assert.match(catalog, /#\[cfg\(feature = "plot-core"\)\][\s\S]*values\.extend\(plotting::ALIASES\.iter\(\)\.copied\(\)\);/);
   assert.match(catalog, /values\.extend\(arithmetic::CONSTANTS\.iter\(\)\.copied\(\)\);/);
@@ -42,7 +42,7 @@ test("an empty product retains the complete canonical generated envelope", () =>
   const product = fixtureProjection().products[1];
   product.children = [];
   const source = renderModuleCompositionProduct(product);
-  assert.equal(source, `${generatedHeader()}\n\n`);
+  assert.equal(source, `${generatedHeader()}\n`);
   assert.doesNotThrow(() => verifyModuleCompositionProduct(product, source));
 });
 
@@ -113,7 +113,7 @@ test("catalog composition models slice, grouped-slice, function, and empty aggre
   product.children[1].aggregation_sources = [{ role: "entries", kind: "groups", order: 1, condition: { kind: "always" } }];
   const source = renderModuleCompositionProduct(product);
   assert.match(source, /arithmetic::extend_entries\(values\);/);
-  assert.match(source, /plotting::ENTRY_GROUPS\.iter\(\)\.flat_map/);
+  assert.match(source, /plotting::ENTRY_GROUPS[\s\S]*\.iter\(\)[\s\S]*\.flat_map/);
   assert.doesNotThrow(() => verifyModuleCompositionProduct(product, source));
 
   const aliases = {
@@ -125,7 +125,7 @@ test("catalog composition models slice, grouped-slice, function, and empty aggre
     children: [],
   };
   const empty = renderModuleCompositionProduct(aliases);
-  assert.match(empty, /fn extend_aliases[^]*\{\n\}/);
+  assert.match(empty, /fn extend_aliases[^]*\{\}/);
   assert.doesNotThrow(() => verifyModuleCompositionProduct(aliases, empty));
 });
 
@@ -204,7 +204,7 @@ test("parent-scoped declarations and reexports remain closed and verifiable", ()
   })];
   const source = renderModuleCompositionProduct(product);
   assert.match(source, /pub\(super\) mod inference;/);
-  assert.match(source, /pub\(super\) use inference::\{\n    infer,\n\};/);
+  assert.match(source, /pub\(super\) use inference::\{infer\};/);
   assert.doesNotThrow(() => verifyModuleCompositionProduct(product, source));
 });
 
@@ -224,7 +224,7 @@ test("case-distinct Rust item identities survive named reexport composition", ()
     products: [product],
   });
   const source = renderModuleCompositionProduct(parsed.products[0]);
-  assert.match(source, /definitions::\{\n    Inf,\n    NaN,\n    inf,\n    nan,/);
+  assert.match(source, /definitions::\{Inf, NaN, inf, nan\}/);
   assert.doesNotThrow(() => verifyModuleCompositionProduct(parsed.products[0], source));
 });
 
@@ -247,7 +247,7 @@ test("conditions, hidden reexports, aliases, and independent reexport conditions
   ];
   const source = renderModuleCompositionProduct(product);
   assert.match(source, /#\[cfg\(all\(target_arch = "wasm32", feature = "plot-web"\)\)\]\npub mod plotting;/);
-  assert.match(source, /#\[cfg\(all\(target_arch = "wasm32", feature = "plot-web", test\)\)\]\n#\[doc\(hidden\)\]\npub use plotting::\{\n    evaluate as evaluate_plot,/);
+  assert.match(source, /#\[cfg\(all\(target_arch = "wasm32", feature = "plot-web", test\)\)\]\n#\[doc\(hidden\)\]\npub use plotting::\{evaluate as evaluate_plot\};/);
   assert.deepEqual(parseGeneratedModuleComposition(source), parseGeneratedModuleComposition(renderModuleCompositionProduct(product)));
   assert.doesNotThrow(() => verifyModuleCompositionProduct(product, source));
 });
@@ -278,7 +278,10 @@ test("the v5 grammar rejects raw cfg, malformed conjunctions, aliases, and aggre
   ];
   for (const [projection, error] of invalid) assert.throws(() => parseModuleCompositionProjection(projection), error);
   const source = renderModuleCompositionProduct(fixtureProjection().products[1]);
-  assert.throws(() => parseGeneratedModuleComposition(source.replace("pub mod arithmetic;", "#[cfg(any())]\npub mod arithmetic;")), /unsupported generated Rust syntax/);
+  assert.throws(
+    () => parseGeneratedModuleComposition(source.replace("pub mod arithmetic;", "#[cfg(any())]\npub mod arithmetic;")),
+    /unsupported composition attribute/,
+  );
 });
 
 test("aggregation contributor order is independent of child declaration order", () => {
@@ -323,9 +326,15 @@ test("closed path and macro-use attributes remain independent of semantic child 
 test("the verifier rejects extra Rust, altered topology, and malformed aggregation", () => {
   const product = fixtureProjection().products[0];
   const source = renderModuleCompositionProduct(product);
-  assert.throws(() => verifyModuleCompositionProduct(product, source.replace("mod arithmetic;", "mod arithmetic;\nfn injected() {}")), /unsupported generated Rust syntax/);
+  assert.throws(
+    () => verifyModuleCompositionProduct(product, source.replace("mod arithmetic;", "mod arithmetic;\nfn injected() {}")),
+    /unsupported handwritten Rust syntax/,
+  );
   assert.throws(() => verifyModuleCompositionProduct(product, source.replace("mod arithmetic;", "mod replacement;")), /(differs from its typed projection|canonical module order)/);
-  assert.throws(() => parseGeneratedModuleComposition(source.replace("arithmetic::ENTRIES", "arithmetic::CONSTANTS")), /aggregation child is invalid/);
+  assert.throws(
+    () => parseGeneratedModuleComposition(source.replace("arithmetic::ENTRIES", "arithmetic::CONSTANTS")),
+    /aggregation statement is not representable/,
+  );
   assert.throws(() => parseGeneratedModuleComposition(source.replace("// @generated", "// handwritten")), /header is invalid/);
   assert.throws(() => verifyModuleCompositionProduct(product, source.replaceAll("\n", "\r\n")), /canonical LF-terminated/);
 });
