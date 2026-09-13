@@ -3,7 +3,9 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 
-import { publishEvidenceBytes } from "../atomic-evidence-publication.mjs";
+import {
+  canonicalEvidencePath, publishEvidenceBytes,
+} from "../atomic-evidence-publication.mjs";
 import {
   cleanupTemporaryDirectories, createTemporaryDirectory,
 } from "./temporary-directories.mjs";
@@ -27,6 +29,24 @@ test("publication preserves caller-supplied bytes and durably creates one new fi
   assert.equal(result.durability.kind, "directory-fsync-required");
   assert.equal(syncs, 2, "the staged file and containing directory must both be synced");
   assert.deepEqual(temporaryEntries(root), []);
+});
+
+test("publication uses ordinary create permissions under the process umask", () => {
+  const root = createTemporaryDirectory("runmat-evidence-publication-");
+  const target = path.join(root, "default-mode.json");
+  publishEvidenceBytes(target, "{}\n", { temporaryToken: "default-mode" });
+  const expected = 0o666 & ~process.umask();
+  assert.equal(fs.statSync(target).mode & 0o777, expected);
+
+  const explicit = path.join(root, "explicit-mode.json");
+  publishEvidenceBytes(explicit, "{}\n", {
+    mode: 0o640, temporaryToken: "explicit-mode",
+  });
+  assert.equal(fs.statSync(explicit).mode & 0o777, 0o640 & ~process.umask());
+  assert.throws(
+    () => publishEvidenceBytes(path.join(root, "invalid-mode.json"), "{}\n", { mode: 0o1000 }),
+    /mode must contain only Unix permission bits/,
+  );
 });
 
 test("parent creation is opt-in and creates only real directory components", () => {
@@ -70,6 +90,10 @@ test("symbolic-link and non-directory parent components are rejected", () => {
     () => publishEvidenceBytes(path.join(alias, "evidence.json"), "{}\n"),
     /parent component is not a real directory/,
   );
+  const normalized = canonicalEvidencePath(path.join(alias, "normalized.json"));
+  assert.equal(normalized, path.join(fs.realpathSync(real), "normalized.json"));
+  publishEvidenceBytes(normalized, "normalized\n");
+  assert.equal(fs.readFileSync(path.join(real, "normalized.json"), "utf8"), "normalized\n");
   const regular = path.join(root, "regular");
   fs.writeFileSync(regular, "not a directory");
   assert.throws(

@@ -4,6 +4,9 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { auditMigration, parseBatch } from "./builtin-migration/audit.mjs";
+import {
+  canonicalEvidencePath, publishEvidenceBytes,
+} from "./builtin-migration/atomic-evidence-publication.mjs";
 import { parseControlManifest } from "./builtin-migration/control.mjs";
 import { buildControlDraft, freezeReviewedControl } from "./builtin-migration/control-draft.mjs";
 import { validateControlReviewChain } from "./builtin-migration/control-authoring/authority.mjs";
@@ -311,7 +314,11 @@ function runSeal(options) {
 }
 
 function readJson(sourcePath) { return JSON.parse(fs.readFileSync(path.resolve(sourcePath), "utf8")); }
-function emit(value, outputPath) { const encoded = `${JSON.stringify(value, null, 2)}\n`; if (outputPath) fs.writeFileSync(path.resolve(outputPath), encoded); else process.stdout.write(encoded); }
+function emit(value, outputPath) {
+  const encoded = `${JSON.stringify(value, null, 2)}\n`;
+  if (outputPath) publishEvidenceBytes(canonicalEvidencePath(path.resolve(outputPath)), encoded);
+  else process.stdout.write(encoded);
+}
 function composeTopologyFromOptions(options) {
   return composeTopologyCandidate({
     baselineInventory: readJson(options.baselineInventory),

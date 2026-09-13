@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { canonicalJson, contentDigest } from "./evidence.mjs";
+import { publishEvidenceBytes } from "./atomic-evidence-publication.mjs";
 import { parseExampleEvidenceRoot, parseExampleGateManifest } from "./example-gate.mjs";
 import { absolutePath, digest, exact, integer, kind } from "./schema.mjs";
 
@@ -22,7 +23,7 @@ export function stageExampleGateInput(inputs, temporaryDirectory, expected) {
   const directory = fs.realpathSync(absolutePath(temporaryDirectory, "example gate temporary directory"));
   const manifestPath = path.join(directory, EXAMPLE_GATE_MANIFEST_FILENAME);
   const bytes = Buffer.from(`${canonicalJson(manifest)}\n`);
-  fs.writeFileSync(manifestPath, bytes, { flag: "wx" });
+  publishEvidenceBytes(manifestPath, bytes);
   const manifestEvidence = {
     path: fs.realpathSync(manifestPath),
     byte_length: bytes.length,

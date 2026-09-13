@@ -1,8 +1,10 @@
 #!/usr/bin/env node
-import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 
+import {
+  canonicalEvidencePath, publishEvidenceBytes,
+} from "./builtin-migration/atomic-evidence-publication.mjs";
 import { deriveModuleCompositionBaselineCandidate } from "./builtin-migration/module-composition/baseline-candidate.mjs";
 import { buildModuleCompositionBaselineReviewTemplate } from "./builtin-migration/module-composition/baseline-review.mjs";
 
@@ -36,6 +38,7 @@ function parse(values) {
 
 function writeNewJson(target, value) {
   const resolved = path.resolve(target);
-  fs.mkdirSync(path.dirname(resolved), { recursive: true });
-  fs.writeFileSync(resolved, `${JSON.stringify(value, null, 2)}\n`, { flag: "wx" });
+  publishEvidenceBytes(canonicalEvidencePath(resolved), `${JSON.stringify(value, null, 2)}\n`, {
+    createParentDirectories: true,
+  });
 }

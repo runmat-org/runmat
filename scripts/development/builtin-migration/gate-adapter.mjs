@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { assertControlBaseline, assertControlSubject } from "./control.mjs";
+import { publishEvidenceBytes } from "./atomic-evidence-publication.mjs";
 import { contentDigest, evidenceDigest } from "./evidence.mjs";
 import { GATE_PRODUCERS, parseGateResult } from "./gate-result.mjs";
 import { prepareGateProcessInput } from "./gate-input.mjs";
@@ -19,7 +20,9 @@ import { parseDocumentationProducer } from "./producer-adapters/documentation.mj
 import { absolutePath, exact } from "./schema.mjs";
 import { prepareGateStorage } from "./storage-admission.mjs";
 
-const REPOSITORY = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
+const REPOSITORY = fs.realpathSync(
+  path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../.."),
+);
 // The reviewed control owns the complete command. Callers select only a bundle
 // and gate; they cannot supply executable, argv, cwd, checks, or process facts.
 export function runGateProducer(input, clock = Date.now) {
@@ -41,7 +44,7 @@ export function runGateProducer(input, clock = Date.now) {
   if (input.inputs && Object.hasOwn(input.inputs, "module_composition_projection")) {
     throw new Error("module composition projection is derived authority and cannot be supplied by a caller");
   }
-  const repository = fs.realpathSync(REPOSITORY);
+  const repository = REPOSITORY;
   const command = commandFor(plan, repository, controlBaseline, subject.compiled_inventory.build);
   const tools = resolveReviewedTools(command.tools, plan.program.kind);
   const executable = tools.find((entry) => entry.role === command.primary_tool)?.path;
@@ -282,7 +285,7 @@ function producerArtifactOutput(context, gate) {
 function writeProducerArtifact(output, role, contents) {
   if (isWithin(REPOSITORY, output)) throw new Error(`${role} evidence output must be outside the canonical repository`);
   const bytes = Buffer.from(contents);
-  fs.writeFileSync(output, bytes, { flag: "wx" });
+  publishEvidenceBytes(output, bytes);
   return { role, path: output, byte_length: bytes.length, content_digest: contentDigest(bytes) };
 }
 

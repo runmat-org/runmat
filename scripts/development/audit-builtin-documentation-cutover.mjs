@@ -7,9 +7,13 @@
 // destination reconciliation used by audit and verification.
 
 import { execFileSync, spawnSync } from "child_process";
-import { existsSync, writeFileSync } from "fs";
+import { existsSync } from "fs";
 import { dirname, join, resolve } from "path";
 import { fileURLToPath } from "url";
+
+import {
+    canonicalEvidencePath, publishEvidenceBytes,
+} from "./builtin-migration/atomic-evidence-publication.mjs";
 
 const FIELD_RULES = Object.freeze({
     // Legacy sidecars used "aliases" for both callable names and search terms.
@@ -143,7 +147,10 @@ const report = {
 };
 
 if (options.output) {
-    writeFileSync(resolve(repository, options.output), `${JSON.stringify(report, null, 2)}\n`, "utf8");
+    publishEvidenceBytes(
+        canonicalEvidencePath(resolve(repository, options.output)),
+        `${JSON.stringify(report, null, 2)}\n`,
+    );
 }
 
 printSummary(report, failures);
