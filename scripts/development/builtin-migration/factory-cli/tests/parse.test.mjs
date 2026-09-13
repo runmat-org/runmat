@@ -14,6 +14,8 @@ test("factory help exposes representative and review-validation command contract
     help,
     /validate-bundle-control-review .*--bundle-review PATH --bundle ID/,
   );
+  assert.match(help, /pilot-session-start .*--authority-root PATH/);
+  assert.match(help, /pilot-transition .*--evaluation PATH --evaluation-digest SHA256/);
   assert.match(help, /never production authority/);
   assert.deepEqual(parseFactoryCliArguments(["--help"]), { help: true });
   assert.deepEqual(parseFactoryCliArguments(["invalid", "-h"]), { help: true });
@@ -104,4 +106,28 @@ test("review validators reject repeated and unrelated recognized options", () =>
     ]),
     /does not accept --request/,
   );
+});
+
+test("pilot lifecycle commands require exact authority references", () => {
+  assert.throws(
+    () => parseFactoryCliArguments([
+      "pilot-evaluate", ...controlAuthorityArguments(),
+    ]),
+    /requires --authority-root, --measurement, --measurement-digest/,
+  );
+  assert.throws(
+    () => parseFactoryCliArguments([
+      "pilot-evaluate", ...controlAuthorityArguments(),
+      "--authority-root", "authority", "--measurement", "measurement.json",
+      "--measurement-digest", "sha256:abc", "--limiter", "limiter.json",
+    ]),
+    /requires --limiter and --limiter-digest together/,
+  );
+  const transition = parseFactoryCliArguments([
+    "pilot-transition", ...controlAuthorityArguments(),
+    "--authority-root", "authority", "--evaluation", "evaluation.json",
+    "--evaluation-digest", "sha256:abc",
+  ]);
+  assert.equal(transition.command, "pilot-transition");
+  assert.equal(transition.authorityRoot, "authority");
 });

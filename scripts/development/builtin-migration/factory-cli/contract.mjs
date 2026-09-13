@@ -1,3 +1,7 @@
+import {
+  PILOT_COMMANDS, PILOT_OPTION_FIELDS, validatePilotCommandOptions,
+} from "./pilot-contract.mjs";
+
 export const COMMANDS = Object.freeze([
   "inventory", "queue", "seed-dispositions", "compile-dispositions", "draft-control",
   "component-graph", "compose-topology", "freeze-topology", "validate-topology",
@@ -5,7 +9,7 @@ export const COMMANDS = Object.freeze([
   "validate-bundle-control-review", "index-control-reviews", "compose-control",
   "scaffold-control-attestation", "seal-control-attestation", "freeze-control",
   "validate-control", "issue-lease", "produce-gate", "materialize-composition",
-  "prepare", "audit", "verify", "seal",
+  "prepare", "audit", "verify", "seal", ...PILOT_COMMANDS,
 ]);
 
 export const OPTION_FIELDS = Object.freeze({
@@ -48,11 +52,12 @@ export const OPTION_FIELDS = Object.freeze({
   "--attestation-review": "attestationReview",
   "--global-review": "globalReview",
   "--bundle-review": "bundleReview",
+  ...PILOT_OPTION_FIELDS,
 });
 
 const CONTROL_COMMANDS = Object.freeze([
   "queue", "prepare", "audit", "freeze-control", "validate-control", "issue-lease",
-  "produce-gate", "materialize-composition", "verify", "seal",
+  "produce-gate", "materialize-composition", "verify", "seal", ...PILOT_COMMANDS,
 ]);
 const CONTROL_AUTHORING_COMMANDS = Object.freeze([
   "scaffold-control", "init-control-reviews", "validate-global-control-review",
@@ -102,6 +107,7 @@ export function validateCommandOptions(options, suppliedOptions) {
   if (command === "index-control-reviews" && !options.reviewSetDirectory) throw new Error("index-control-reviews requires --review-set-directory");
   if (command === "seal-control-attestation" && !options.attestationReview) throw new Error("seal-control-attestation requires --attestation-review");
   validateQueueAndLeaseOptions(options);
+  validatePilotCommandOptions(options);
   if (["prepare", "audit"].includes(command) && !options.lease) throw new Error(`${command} requires --lease`);
   if (["prepare", "audit", "produce-gate"].includes(command) && !options.leaseBaseInventory) throw new Error(`${command} requires --lease-base-inventory`);
   if (command === "produce-gate" && !options.lease) throw new Error("produce-gate requires --lease");

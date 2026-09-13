@@ -25,6 +25,8 @@ import { dispositionInputFromControl } from "./builtin-migration/dispositions.mj
 import { compileDispositionReview } from "./builtin-migration/disposition-review.mjs";
 import { factoryCliHelp } from "./builtin-migration/factory-cli/help.mjs";
 import { parseFactoryCliArguments } from "./builtin-migration/factory-cli/parse.mjs";
+import { PILOT_COMMANDS } from "./builtin-migration/factory-cli/pilot-contract.mjs";
+import { runPilotLifecycleCommand } from "./builtin-migration/factory-cli/pilot-lifecycle.mjs";
 import { buildDispositionSeed, buildInventory, emptyDispositionInput, parseInventoryEvidence } from "./builtin-migration/inventory.mjs";
 import { assertLeaseBaseInventory, issueLease, parseLease } from "./builtin-migration/lease.mjs";
 import { runGateProducer } from "./builtin-migration/gate-adapter.mjs";
@@ -153,6 +155,12 @@ function run(options) {
   if (options.command === "validate-control") {
     const baseline = parseInventoryEvidence(readJson(options.baselineInventory));
     emit(parseControlFromOptions(options, baseline).value, options.output);
+    return;
+  }
+  if (PILOT_COMMANDS.includes(options.command)) {
+    const baseline = parseInventoryEvidence(readJson(options.baselineInventory));
+    const control = parseControlFromOptions(options, baseline);
+    emit(runPilotLifecycleCommand({ options, control, repository }), options.output);
     return;
   }
   if (options.command === "produce-gate") {
