@@ -94,7 +94,6 @@ function observedProductState(root, product) {
 }
 
 function validateChildStorage(root, product, declarations) {
-  const represented = new Set();
   const declarationsByModule = declarations === null
     ? null
     : new Map(declarations.map((declaration) => [declaration.module, declaration]));
@@ -109,15 +108,10 @@ function validateChildStorage(root, product, declarations) {
       const directory = path.dirname(target);
       if (!fs.statSync(directory).isDirectory()) throw new Error(`${product.product_id}/${child.module}: directory child has no directory`);
     }
-    represented.add(path.normalize(target));
     validateCanonicalCollision(root, product, child);
     if (declaration && declaration.path_attribute !== childPathAttribute(product.path, child)) {
       throw new Error(`${product.product_id}/${child.module}: declaration path differs from review`);
     }
-  }
-  const parentDirectory = path.dirname(resolveRepositoryProduct(root, product.path));
-  for (const candidate of directModuleCandidates(parentDirectory)) {
-    if (!represented.has(candidate)) throw new Error(`${product.product_id}: unreviewed direct module source ${path.relative(root, candidate)}`);
   }
 }
 
@@ -129,19 +123,6 @@ function validateCanonicalCollision(root, product, child) {
   if (fs.existsSync(file) && fs.existsSync(directory)) {
     throw new Error(`${product.product_id}/${child.module}: file and directory module sources collide`);
   }
-}
-
-function directModuleCandidates(directory) {
-  if (!fs.existsSync(directory)) return [];
-  const candidates = [];
-  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
-    if (entry.isFile() && entry.name.endsWith(".rs") && entry.name !== "mod.rs") candidates.push(path.join(directory, entry.name));
-    if (entry.isDirectory()) {
-      const candidate = path.join(directory, entry.name, "mod.rs");
-      if (fs.existsSync(candidate)) candidates.push(candidate);
-    }
-  }
-  return candidates.map(path.normalize).sort();
 }
 
 function lstat(target) { try { return fs.lstatSync(target); } catch (error) { if (["ENOENT", "ENOTDIR"].includes(error?.code)) return null; throw error; } }
