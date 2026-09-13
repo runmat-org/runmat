@@ -7,6 +7,7 @@ import { parseInventoryEvidence } from "../inventory.mjs";
 import { assertValidatedTopologyView } from "../topology/freeze.mjs";
 import { parseBundleControlReview } from "./bundle-review.mjs";
 import { parseGlobalControlReview } from "./global-review.mjs";
+import { sealReviewerAuthoredPayload } from "./review-input.mjs";
 import { loadControlReviewSet } from "./review-set.mjs";
 import { assertValidatedControlOverlayScaffold } from "./scaffold.mjs";
 import { identityControlAuthorityTemplate } from "./identity-template.mjs";
@@ -32,11 +33,11 @@ export function indexControlReviews(reviewDirectory, outputDirectory, { scaffold
   const source = fs.realpathSync(path.resolve(reviewDirectory));
   assertExactTemplateFiles(source, topology);
 
-  const global = sealReviewedPayload(readJson(path.join(source, "global.json"), "global control review"), "global control review");
+  const global = sealReviewerAuthoredPayload(readJson(path.join(source, "global.json"), "global control review"), "global control review");
   const globalReview = parseGlobalControlReview(global, scaffold, topology, parsedInventory);
   const bundles = [...topology.bundles.keys()].sort(compareCodePoint).map((bundleId) => {
     const relative = `bundles/${bundleId}.json`;
-    const bundle = sealReviewedPayload(readJson(path.join(source, relative), `${bundleId} control review`), `${bundleId} control review`);
+    const bundle = sealReviewerAuthoredPayload(readJson(path.join(source, relative), `${bundleId} control review`), `${bundleId} control review`);
     parseBundleControlReview(bundle, scaffold, topology, parsedInventory, globalReview);
     return { bundleId, relative, bundle };
   });
@@ -146,11 +147,6 @@ function bundleTemplate(bundleId, scaffold, topology) {
     }])),
     review: unreviewed(),
   };
-}
-
-function sealReviewedPayload(value, label) {
-  if (Object.hasOwn(value, "digest")) throw new Error(`${label} template must not supply its own digest`);
-  return { ...value, digest: evidenceDigest(value) };
 }
 
 function assertExactTemplateFiles(root, topology) {
