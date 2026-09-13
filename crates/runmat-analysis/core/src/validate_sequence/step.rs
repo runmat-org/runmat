@@ -339,6 +339,7 @@ fn family_can_publish_state(family: PhysicsFamily, kind: StateKind) -> bool {
             StateKind::StructuralPrimary
                 | StateKind::StructuralKinematics
                 | StateKind::StructuralStressStrain
+                | StateKind::StructuralComplex
                 | StateKind::GeometricStiffness
                 | StateKind::MaterialHistory
                 | StateKind::ContactHistory

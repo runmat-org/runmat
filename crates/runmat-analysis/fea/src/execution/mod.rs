@@ -73,8 +73,8 @@ pub use solve::{
     StructuralLinearWorkload, StructuralLinearWorkloadResult,
 };
 pub use state::{
-    CanonicalSemanticState, CanonicalSemanticStateInput, CanonicalStateTransition,
-    CanonicalStateTransitionInput, SemanticStatePublicationRequest,
+    CanonicalSemanticState, CanonicalSemanticStateInput, CanonicalSemanticStatePayload,
+    CanonicalStateTransition, CanonicalStateTransitionInput, SemanticStatePublicationRequest,
 };
 pub use study_workloads::{StructuralStudyWorkloads, StructuralTransientBlockPlan};
 pub use sweep::{

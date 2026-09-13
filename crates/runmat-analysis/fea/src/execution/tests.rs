@@ -324,11 +324,13 @@ fn semantic_state_and_reuse_transition_bind_exact_content_and_topology() {
         },
         topology_digest: topology,
         source_result,
-        fields: vec![AnalysisField::host_f64(
-            "structural.displacement",
-            vec![2, 3],
-            vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0],
-        )],
+        payload: CanonicalSemanticStatePayload::Fields {
+            fields: vec![AnalysisField::host_f64(
+                "structural.displacement",
+                vec![2, 3],
+                vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+            )],
+        },
     })
     .unwrap();
     assert_eq!(
@@ -361,7 +363,10 @@ fn semantic_state_and_reuse_transition_bind_exact_content_and_topology() {
     );
 
     let mut substituted_state = state.clone();
-    substituted_state.fields[0] = AnalysisField::host_f64(
+    let CanonicalSemanticStatePayload::Fields { fields } = &mut substituted_state.payload else {
+        panic!("expected field state")
+    };
+    fields[0] = AnalysisField::host_f64(
         "structural.displacement",
         vec![2, 3],
         vec![0.0, 0.0, 0.0, 2.0, 0.0, 0.0],
@@ -401,6 +406,73 @@ fn semantic_state_and_reuse_transition_bind_exact_content_and_topology() {
 }
 
 #[test]
+fn semantic_state_round_trips_a_typed_modal_basis_and_rejects_field_substitution() {
+    use runmat_analysis_core::{
+        FormulationRequirement, ProcedureStep, StateCompleteness, StateId, StateKind, StateOutput,
+        StatePersistence,
+    };
+
+    let mut model =
+        crate::fixtures::fixture_model(crate::fixtures::FixtureId::CantileverLinearStatic);
+    model.sequence.steps = vec![ProcedureStep::structural_modal("modes")];
+    let modal = crate::run_modal_with_options(
+        &model,
+        crate::ComputeBackend::Cpu,
+        crate::ModalSolveOptions {
+            formulation_requirement: FormulationRequirement::Experimental,
+            ..crate::ModalSolveOptions::default()
+        },
+    )
+    .unwrap();
+    let (study, execution_plan, _) = identity_graph();
+    let producer = StepIdentity::from_solver_contract(
+        SequenceIdentity::from_solver_contract(&model.sequence).unwrap(),
+        &model.sequence.steps[0],
+    )
+    .unwrap();
+    let workload = AnalysisWorkloadIdentity::new(
+        study,
+        producer,
+        execution_plan,
+        AnalysisWorkKind::Solve,
+        digest("modal-state-solve"),
+        vec![digest("modal-state-input")],
+    )
+    .unwrap();
+    let state = CanonicalSemanticState::new(CanonicalSemanticStateInput {
+        producer,
+        declaration: StateOutput {
+            state_id: StateId("modal_basis".into()),
+            kind: StateKind::ModalBasis,
+            completeness: StateCompleteness::Complete,
+            persistence: StatePersistence::Canonical,
+        },
+        topology_digest: digest("modal-topology"),
+        source_result: SolverResultIdentity::new(workload, digest("modal-result")).unwrap(),
+        payload: CanonicalSemanticStatePayload::ModalBasis {
+            basis: Box::new(modal.basis.clone()),
+        },
+    })
+    .unwrap();
+    let restored =
+        CanonicalSemanticState::from_canonical_bytes(&state.canonical_bytes().unwrap()).unwrap();
+    assert_eq!(
+        restored.payload.modal_basis().unwrap().identity(),
+        modal.basis.identity()
+    );
+
+    let mut substituted = state;
+    substituted.payload = CanonicalSemanticStatePayload::Fields {
+        fields: vec![runmat_analysis_core::AnalysisField::host_f64(
+            "structural.displacement",
+            vec![1, 3],
+            vec![0.0; 3],
+        )],
+    };
+    assert!(substituted.validate().is_err());
+}
+
+#[test]
 fn semantic_state_rejects_unimplemented_projection_transitions() {
     use runmat_analysis_core::{
         AnalysisField, ProcedureStepId, ReferenceStatePolicy, StateCompleteness, StateId,
@@ -432,11 +504,13 @@ fn semantic_state_rejects_unimplemented_projection_transitions() {
         },
         topology_digest: digest("source-topology"),
         source_result: SolverResultIdentity::new(workload, digest("solver-fields")).unwrap(),
-        fields: vec![AnalysisField::host_f64(
-            "structural.displacement",
-            vec![1, 3],
-            vec![0.0, 0.0, 0.0],
-        )],
+        payload: CanonicalSemanticStatePayload::Fields {
+            fields: vec![AnalysisField::host_f64(
+                "structural.displacement",
+                vec![1, 3],
+                vec![0.0, 0.0, 0.0],
+            )],
+        },
     })
     .unwrap();
     let authored = StateTransition {

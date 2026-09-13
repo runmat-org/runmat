@@ -96,7 +96,18 @@ pub struct CanonicalSemanticState {
     pub persistence: StatePersistence,
     pub topology_digest: Digest,
     pub source_result: SolverResultIdentity,
-    pub fields: Vec<AnalysisField>,
+    pub payload: CanonicalSemanticStatePayload,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind", deny_unknown_fields)]
+pub enum CanonicalSemanticStatePayload {
+    Fields {
+        fields: Vec<AnalysisField>,
+    },
+    ModalBasis {
+        basis: Box<crate::pipeline::modal_basis::ModalBasisArtifact>,
+    },
 }
 
 pub struct CanonicalSemanticStateInput {
@@ -104,7 +115,7 @@ pub struct CanonicalSemanticStateInput {
     pub declaration: StateOutput,
     pub topology_digest: Digest,
     pub source_result: SolverResultIdentity,
-    pub fields: Vec<AnalysisField>,
+    pub payload: CanonicalSemanticStatePayload,
 }
 
 impl CanonicalSemanticState {
@@ -140,7 +151,7 @@ impl CanonicalSemanticState {
             declaration: request.declaration.clone(),
             topology_digest: request.topology_digest,
             source_result: request.source_result,
-            fields: selected,
+            payload: CanonicalSemanticStatePayload::Fields { fields: selected },
         })
     }
 
@@ -162,7 +173,7 @@ impl CanonicalSemanticState {
             persistence: input.declaration.persistence,
             topology_digest: input.topology_digest,
             source_result: input.source_result,
-            fields: input.fields,
+            payload: input.payload,
         };
         state.content_digest = state.derive_content_digest()?;
         state.identity = state.derive_identity()?;
@@ -171,7 +182,7 @@ impl CanonicalSemanticState {
     }
 
     pub fn validate(&self) -> AnalysisExecutionResult<()> {
-        if self.schema_version != 1 || self.state_id.0.trim().is_empty() || self.fields.is_empty() {
+        if self.schema_version != 1 || self.state_id.0.trim().is_empty() {
             return Err(AnalysisExecutionError::Invalid(
                 "semantic state metadata or field inventory is incomplete".into(),
             ));
@@ -183,27 +194,23 @@ impl CanonicalSemanticState {
                 "only complete semantic state may have canonical persistence".into(),
             ));
         }
-        let mut field_ids = BTreeSet::new();
-        for field in &self.fields {
-            let AnalysisFieldValues::HostF64(values) = &field.values else {
-                return Err(AnalysisExecutionError::Invalid(
-                    "portable semantic state cannot contain a device-local field reference".into(),
-                ));
-            };
-            let expected = field
-                .shape
-                .iter()
-                .try_fold(1_usize, |count, extent| count.checked_mul(*extent));
-            if field.field_id.trim().is_empty()
-                || !field_ids.insert(field.field_id.as_str())
-                || expected != Some(values.len())
-                || values.is_empty()
-                || values.iter().any(|value| !value.is_finite())
-            {
-                return Err(AnalysisExecutionError::Invalid(
-                    "semantic state fields must be unique, finite, non-empty host arrays with exact shapes"
-                        .into(),
-                ));
+        match &self.payload {
+            CanonicalSemanticStatePayload::Fields { fields } => {
+                if self.kind == StateKind::ModalBasis || fields.is_empty() {
+                    return Err(AnalysisExecutionError::Invalid(
+                        "field semantic-state payload does not match its declared state kind"
+                            .into(),
+                    ));
+                }
+                validate_portable_fields(fields)?;
+            }
+            CanonicalSemanticStatePayload::ModalBasis { basis } => {
+                if self.kind != StateKind::ModalBasis || basis.modes().is_empty() {
+                    return Err(AnalysisExecutionError::Invalid(
+                        "modal-basis semantic-state payload does not match its declared state kind"
+                            .into(),
+                    ));
+                }
             }
         }
         let content_digest = self.derive_content_digest()?;
@@ -235,7 +242,7 @@ impl CanonicalSemanticState {
         Ok(Digest::sha256(encode_contract(
             STATE_PREFIX,
             "semantic-state-content",
-            &(self.kind, self.topology_digest, &self.fields),
+            &(self.kind, self.topology_digest, &self.payload),
             STATE_LIMITS,
         )?))
     }
@@ -260,6 +267,49 @@ impl CanonicalSemanticState {
             self.content_digest,
         )
     }
+}
+
+impl CanonicalSemanticStatePayload {
+    pub fn fields(&self) -> Option<&[AnalysisField]> {
+        match self {
+            Self::Fields { fields } => Some(fields),
+            Self::ModalBasis { .. } => None,
+        }
+    }
+
+    pub fn modal_basis(&self) -> Option<&crate::pipeline::modal_basis::ModalBasisArtifact> {
+        match self {
+            Self::Fields { .. } => None,
+            Self::ModalBasis { basis } => Some(basis.as_ref()),
+        }
+    }
+}
+
+fn validate_portable_fields(fields: &[AnalysisField]) -> AnalysisExecutionResult<()> {
+    let mut field_ids = BTreeSet::new();
+    for field in fields {
+        let AnalysisFieldValues::HostF64(values) = &field.values else {
+            return Err(AnalysisExecutionError::Invalid(
+                "portable semantic state cannot contain a device-local field reference".into(),
+            ));
+        };
+        let expected = field
+            .shape
+            .iter()
+            .try_fold(1_usize, |count, extent| count.checked_mul(*extent));
+        if field.field_id.trim().is_empty()
+            || !field_ids.insert(field.field_id.as_str())
+            || expected != Some(values.len())
+            || values.is_empty()
+            || values.iter().any(|value| !value.is_finite())
+        {
+            return Err(AnalysisExecutionError::Invalid(
+                "semantic state fields must be unique, finite, non-empty host arrays with exact shapes"
+                    .into(),
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn structural_state_field_ids(kind: StateKind) -> AnalysisExecutionResult<&'static [&'static str]> {

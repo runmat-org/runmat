@@ -241,6 +241,7 @@ pub enum StateKind {
     StructuralPrimary,
     StructuralKinematics,
     StructuralStressStrain,
+    StructuralComplex,
     GeometricStiffness,
     MaterialHistory,
     ContactHistory,
@@ -399,6 +400,41 @@ impl ProcedureStep {
         )
     }
 
+    pub fn structural_harmonic(step_id: impl Into<String>) -> Self {
+        Self::experimental(
+            step_id,
+            PhysicsFamily::Structural,
+            AnalysisProcedure::HarmonicResponse,
+            SolutionSpace::Direct,
+            IndependentDomain::FrequencyHertz(vec![60.0]),
+            vec![state("structural_complex", StateKind::StructuralComplex)],
+        )
+    }
+
+    pub fn structural_modal_transient(
+        step_id: impl Into<String>,
+        producer_step: impl Into<String>,
+        state_id: impl Into<String>,
+    ) -> Self {
+        let mut step = Self::structural_transient(step_id);
+        step.solution_space = SolutionSpace::ModalReduced;
+        step.state_inputs
+            .push(modal_basis_input(producer_step, state_id));
+        step
+    }
+
+    pub fn structural_modal_harmonic(
+        step_id: impl Into<String>,
+        producer_step: impl Into<String>,
+        state_id: impl Into<String>,
+    ) -> Self {
+        let mut step = Self::structural_harmonic(step_id);
+        step.solution_space = SolutionSpace::ModalReduced;
+        step.state_inputs
+            .push(modal_basis_input(producer_step, state_id));
+        step
+    }
+
     pub fn thermal_transient(step_id: impl Into<String>) -> Self {
         Self::experimental(
             step_id,
@@ -551,6 +587,21 @@ fn state(id: &str, kind: StateKind) -> StateOutput {
     }
 }
 
+fn modal_basis_input(producer_step: impl Into<String>, state_id: impl Into<String>) -> StateInput {
+    let producer_step = ProcedureStepId(producer_step.into());
+    let state_id = StateId(state_id.into());
+    StateInput {
+        input_id: format!("{}_{}_input", producer_step.as_str(), state_id.0),
+        required_kind: StateKind::ModalBasis,
+        source: StateSource::Upstream {
+            producer_step,
+            state_id,
+        },
+        use_as: StateUse::ModalBasis,
+        conflict: InitialStateConflictPolicy::Reject,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -593,5 +644,30 @@ mod tests {
             step.state_outputs[0].kind,
             StateKind::ElectromagneticComplex
         );
+    }
+
+    #[test]
+    fn structural_dynamic_templates_distinguish_direct_and_modal_solution_spaces() {
+        let direct = ProcedureStep::structural_harmonic("direct");
+        assert_eq!(direct.solution_space, SolutionSpace::Direct);
+        assert_eq!(direct.procedure, AnalysisProcedure::HarmonicResponse);
+        assert_eq!(direct.state_outputs[0].kind, StateKind::StructuralComplex);
+
+        let transient =
+            ProcedureStep::structural_modal_transient("modal_time", "modes", "modal_basis");
+        assert_eq!(transient.solution_space, SolutionSpace::ModalReduced);
+        assert_eq!(transient.procedure, AnalysisProcedure::TransientResponse);
+        assert_eq!(transient.state_inputs.len(), 1);
+        assert_eq!(transient.state_inputs[0].use_as, StateUse::ModalBasis);
+
+        let harmonic =
+            ProcedureStep::structural_modal_harmonic("modal_frequency", "modes", "modal_basis");
+        assert_eq!(harmonic.solution_space, SolutionSpace::ModalReduced);
+        assert_eq!(harmonic.procedure, AnalysisProcedure::HarmonicResponse);
+        assert_eq!(
+            harmonic.state_inputs[0].required_kind,
+            StateKind::ModalBasis
+        );
+        assert_eq!(harmonic.state_outputs[0].kind, StateKind::StructuralComplex);
     }
 }

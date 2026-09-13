@@ -144,7 +144,9 @@ fn test_structural_sequence_result(
                     *mesh.canonical_digest.bytes(),
                 ),
                 source_result: solver_result_identity,
-                fields: fields.clone(),
+                payload: runmat_analysis_fea::execution::CanonicalSemanticStatePayload::Fields {
+                    fields: fields.clone(),
+                },
             })
             .unwrap()
         })
@@ -9083,8 +9085,8 @@ fn analysis_run_modal_returns_native_modal_result() {
         envelope.data.provenance.solver_method,
         SolverMethod::MatrixFreeSubspaceIteration
     );
-    assert_eq!(envelope.data.run_status, RunStatus::Degraded);
-    assert!(!envelope.data.numerically_acceptable);
+    assert_eq!(envelope.data.run_status, RunStatus::Completed);
+    assert!(envelope.data.numerically_acceptable);
     let modal = envelope
         .data
         .modal_results
@@ -9103,6 +9105,13 @@ fn analysis_run_modal_returns_native_modal_result() {
     assert_eq!(modal.mode_indices.len(), modal.basis.modes().len());
     assert_eq!(modal.mode_units, ModalFrequencyUnits::Hz);
     assert_eq!(modal.frequency_basis, ModalFrequencyBasis::NativeEigenSolve);
+    let declaration = &modal_model.data.sequence.steps[0].state_outputs[0];
+    let payload = semantic_state_payload(&envelope.data, declaration)
+        .expect("modal result should materialize its typed basis state");
+    assert_eq!(
+        payload.modal_basis().unwrap().identity(),
+        modal.basis.identity()
+    );
     let results = analysis_results_op(
         &envelope.data,
         AnalysisResultsQuery::default(),
@@ -9134,7 +9143,7 @@ fn analysis_run_modal_returns_native_modal_result() {
         vec![modal.frequencies_hz().len(), modal.frequencies_hz().len()]
     );
     assert_eq!(orthogonality_descriptor.component_count, None);
-    assert!(envelope
+    assert!(!envelope
         .data
         .quality_reasons
         .iter()

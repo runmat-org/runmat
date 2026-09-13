@@ -591,7 +591,10 @@ fn sequence_result(
                         *mesh.canonical_digest.bytes(),
                     ),
                     source_result: solver_result_identity,
-                    fields: fields.clone(),
+                    payload:
+                        runmat_analysis_fea::execution::CanonicalSemanticStatePayload::Fields {
+                            fields: fields.clone(),
+                        },
                 },
             )
             .unwrap()

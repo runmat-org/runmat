@@ -388,7 +388,10 @@ fn complete_direct_transient(
                     declaration: declaration.clone(),
                     topology_digest,
                     source_result: solver_result_identity,
-                    fields: state_fields.clone(),
+                    payload:
+                        runmat_analysis_fea::execution::CanonicalSemanticStatePayload::Fields {
+                            fields: state_fields.clone(),
+                        },
                 },
             )
             .map_err(|error| {

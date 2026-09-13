@@ -13,13 +13,13 @@ use runmat_analysis_core::{
     CoupledPhysicsFamily, EvidenceConfidence, ExcitationAction, FluidConstraint,
     FluidConstraintKind, MagneticConstraint, MagneticConstraintKind, MaterialAssignment,
     MaterialMechanicalModel, MaterialModel, MaterialThermalModel, PhysicsFamily, PrescribedValue,
-    Pressure, ProcedureStep, ProcedureStepId, RegionTarget, StructuralConstraint,
-    StructuralConstraintKind, Temperature, ThermalConstraint, ThermalConstraintKind,
-    ThermalInterfaceTransfer, Velocity,
+    Pressure, ProcedureStep, ProcedureStepId, RegionTarget, StateKind, StateOutput,
+    StructuralConstraint, StructuralConstraintKind, Temperature, ThermalConstraint,
+    ThermalConstraintKind, ThermalInterfaceTransfer, Velocity,
 };
 use runmat_analysis_fea::execution::{
-    CanonicalSemanticState, CanonicalSemanticStateInput, SequenceIdentity, SolverResultIdentity,
-    StepIdentity, StructuralLinearWorkload, StudyIdentity,
+    CanonicalSemanticState, CanonicalSemanticStateInput, CanonicalSemanticStatePayload,
+    SequenceIdentity, SolverResultIdentity, StepIdentity, StructuralLinearWorkload, StudyIdentity,
 };
 use runmat_analysis_fea::physics::cfd::CfdDomainTopology;
 use runmat_analysis_fea::physics::cht::{couple_thermal_flow, ChtCouplingOptions};
@@ -1321,14 +1321,14 @@ fn analysis_run_study_with_structural_executor(
         )
         .map_err(|error| study_sequence_contract_error(&prepared.context, error))?;
         for declaration in &step.procedure_step.state_outputs {
-            let state_fields = collect_semantic_state_fields(&run.data);
             states.push(
                 CanonicalSemanticState::new(CanonicalSemanticStateInput {
                     producer: step_identity,
                     declaration: declaration.clone(),
                     topology_digest,
                     source_result: solver_result_identity,
-                    fields: state_fields,
+                    payload: semantic_state_payload(&run.data, declaration)
+                        .map_err(|error| study_sequence_contract_error(&prepared.context, error))?,
                 })
                 .map_err(|error| study_sequence_contract_error(&prepared.context, error))?,
             );
@@ -1346,6 +1346,28 @@ fn analysis_run_study_with_structural_executor(
         states,
         None,
     )
+}
+
+fn semantic_state_payload(
+    run: &AnalysisRunResult,
+    declaration: &StateOutput,
+) -> Result<CanonicalSemanticStatePayload, String> {
+    if declaration.kind == StateKind::ModalBasis {
+        let basis = run
+            .modal_results
+            .as_ref()
+            .map(|modal| modal.basis.clone())
+            .ok_or_else(|| {
+                "modal procedure did not produce its declared modal-basis state".to_string()
+            })?;
+        Ok(CanonicalSemanticStatePayload::ModalBasis {
+            basis: Box::new(basis),
+        })
+    } else {
+        Ok(CanonicalSemanticStatePayload::Fields {
+            fields: collect_semantic_state_fields(run),
+        })
+    }
 }
 
 fn collect_semantic_state_fields(run: &AnalysisRunResult) -> Vec<AnalysisField> {
