@@ -76,4 +76,10 @@ export function childPathAttribute(productPath, child) {
   return path.posix.relative(path.posix.dirname(productPath), child.source_path);
 }
 
+export function declaredChildSourcePath(productPath, child, pathAttribute) {
+  if (pathAttribute === null) return canonicalChildSourcePath(productPath, child);
+  if (path.posix.isAbsolute(pathAttribute)) return path.posix.normalize(pathAttribute);
+  return path.posix.normalize(path.posix.join(path.posix.dirname(productPath), pathAttribute));
+}
+
 function stripRaw(value) { return value.startsWith("r#") ? value.slice(2) : value; }

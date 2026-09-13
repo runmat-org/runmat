@@ -57,6 +57,16 @@ test("handwritten audit preserves declaration order independently from canonical
   ), /surface differs/);
 });
 
+test("handwritten audit normalizes a redundant path to the exact reviewed child source", () => {
+  const product = oneChild();
+  assert.equal(auditHandwrittenComposition(
+    "#[path = \"alpha/mod.rs\"]\npub mod alpha;\n", product,
+  ).length, 1);
+  assert.throws(() => auditHandwrittenComposition(
+    "#[path = \"beta/mod.rs\"]\npub mod alpha;\n", product,
+  ), /declaration path differs from review/);
+});
+
 test("handwritten audit keeps aggregation cfg independent from declaration cfg", () => {
   const product = catalogProduct();
   product.children[0].aggregation_sources[0].condition = TEST;

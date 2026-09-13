@@ -1,8 +1,11 @@
 import { parseHandwrittenComposition } from "./handwritten-parser.mjs";
+import { childPathAttribute, declaredChildSourcePath } from "./rust-schema.mjs";
 import { expectedCompositionSurface } from "./surface.mjs";
 
 export function auditHandwrittenComposition(source, product) {
-  const observed = parseHandwrittenComposition(source, product.product_id);
+  const observed = normalizeDeclarationPaths(
+    parseHandwrittenComposition(source, product.product_id), product,
+  );
   const expected = expectedCompositionSurface(product);
   rejectDuplicateDeclarations(observed.declarations, product.product_id);
   rejectNonchildReexports(observed, product.product_id);
@@ -10,6 +13,27 @@ export function auditHandwrittenComposition(source, product) {
     throw new Error(`${product.product_id}: handwritten composition surface differs from review${declarationDifference(observed, expected)}`);
   }
   return observed.declarations;
+}
+
+function normalizeDeclarationPaths(surface, product) {
+  const children = new Map(product.children.map((child) => [child.module, child]));
+  return {
+    ...surface,
+    declarations: surface.declarations.map((declaration) => {
+      const child = children.get(declaration.module);
+      if (!child) return declaration;
+      const sourcePath = declaredChildSourcePath(
+        product.path, child, declaration.path_attribute,
+      );
+      if (sourcePath !== child.source_path) {
+        throw new Error(`${product.product_id}/${child.module}: declaration path differs from review`);
+      }
+      return {
+        ...declaration,
+        path_attribute: childPathAttribute(product.path, child),
+      };
+    }),
+  };
 }
 
 function rejectNonchildReexports(surface, productId) {
