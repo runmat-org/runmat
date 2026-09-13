@@ -107,11 +107,11 @@ function validateSharedProductOrdering(transitions, bundles) {
         const stableSharedState = left.before_state === left.after_state
           && right.before_state === right.after_state
           && left.before_state === right.before_state;
-        if (!stableSharedState
-          && !dependsOn(bundles, left.bundle_id, right.bundle_id)
-          && !dependsOn(bundles, right.bundle_id, left.bundle_id)) {
+        const leftDependsOnRight = dependsOn(bundles, left.bundle_id, right.bundle_id);
+        const rightDependsOnLeft = dependsOn(bundles, right.bundle_id, left.bundle_id);
+        if (!stableSharedState && !leftDependsOnRight && !rightDependsOnLeft) {
           throw new Error(
-            `${productId}: composition transitions ${left.bundle_id} and ${right.bundle_id} must be prerequisite-ordered`,
+            `${productId}: composition transitions ${left.bundle_id} and ${right.bundle_id} must be prerequisite-ordered; neither bundle reaches the other through reviewed prerequisites`,
           );
         }
       }

@@ -43,6 +43,7 @@ export function parseBundleControlReview(
 
 function reviewedCompositionBundle(bundle, control) {
   return {
+    prerequisites: control.prerequisites,
     integration_product_refs: control.integration_product_refs,
     module_composition_transition: control.module_composition_transition,
     authored_write_set: [

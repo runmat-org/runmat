@@ -78,6 +78,7 @@ function reviewedCompositionBundles(bundleReviews, topology) {
   return new Map([...bundleReviews].map(([bundleId, review]) => {
     const control = review.bundleControl;
     return [bundleId, {
+      prerequisites: control.prerequisites,
       integration_product_refs: control.integration_product_refs,
       module_composition_transition: control.module_composition_transition,
       authored_write_set: [
