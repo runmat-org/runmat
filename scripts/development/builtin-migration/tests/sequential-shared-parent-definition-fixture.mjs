@@ -36,13 +36,13 @@ export function compositionChild(identity) {
   };
 }
 
-export function sequentialBundleControls(inventory) {
+export function sequentialBundleControls(inventory, { parallelBundles = false } = {}) {
   const gatePlans = sequentialGatePlans(inventory);
   return new Map(SEQUENTIAL_BUNDLES.map((bundleId, index) => {
     const identity = SEQUENTIAL_IDENTITIES[index];
     const child = compositionChild(identity);
     return [bundleId, {
-      prerequisites: index === 0
+      prerequisites: index === 0 || parallelBundles
         ? [] : [{ bundle_id: SEQUENTIAL_BUNDLES[0], kind: "semantic" }],
       additional_authored_write_set: [
         { kind: "tree", path: `crates/runmat-builtins/src/catalog/entries/math/basic/${identity}` },

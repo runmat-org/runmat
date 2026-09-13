@@ -107,7 +107,7 @@ export function parseLeaseRequest(value, control) {
   if (value.control_manifest_digest !== control.digest) throw new Error("lease request was reviewed for another control manifest");
   const bundleId = stableId(value.bundle_id, "lease request bundle id");
   if (!control.bundles.has(bundleId)) throw new Error(`lease request references unknown bundle ${bundleId}`);
-  nonempty(value.lease_id, "lease request id"); nonempty(value.owner, "lease request owner");
+  stableId(value.lease_id, "lease request id"); nonempty(value.owner, "lease request owner");
   sourceRevision(value.base_revision, "lease request base revision");
   const base = parseLeaseBaseInventoryBinding(value.lease_base_inventory, "lease request base inventory");
   digest(value.queue_checkpoint_digest, "lease request queue checkpoint digest");
@@ -144,7 +144,7 @@ export function parseLease(value, control, repository, changedPaths = null) {
   const bundleId = stableId(value.bundle_id, "lease bundle id");
   const bundle = control.bundles.get(bundleId);
   if (!bundle) throw new Error(`lease references unknown bundle ${bundleId}`);
-  nonempty(value.lease_id, "lease id");
+  stableId(value.lease_id, "lease id");
   nonempty(value.owner, "lease owner");
   sourceRevision(value.base_revision, "lease base revision");
   if (value.base_revision !== request.base_revision) throw new Error("lease base revision differs from the reviewed request");
