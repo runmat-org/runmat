@@ -12,6 +12,15 @@ export const BASELINE_EVIDENCE_KINDS = Object.freeze([
   "catalog-resolver", "provider", "fusion", "generated-registry",
 ]);
 
+export const ATOMIC_AUTHORITY_EVIDENCE_KINDS = Object.freeze([
+  "catalog-owner", "catalog-alias-provenance", "catalog-constant-provenance",
+  "catalog-provenance", "runtime-owner", "implementation-provenance",
+  "catalog-documentation", "legacy-sidecar", "runtime-documentation-shadow",
+  "documentation-source", "runtime-registration", "runtime-constant-registration",
+  "native-link-catalog-contract", "native-link-runtime-input", "legacy-resolver",
+  "catalog-resolver", "provider", "fusion",
+]);
+
 export function bundleBaselineEvidence(inventory, identities) {
   return bundleTypedPathEvidence(inventory, identities, { includeGeneratedRegistry: false });
 }
@@ -124,19 +133,33 @@ export function identityTypedBaselineEvidence(
   sourceFiles,
   { includeGeneratedRegistry = true } = {},
 ) {
+  const records = identityTypedPathRecords(row, { includeGeneratedRegistry });
+  return records.map((entry) => {
+    const source = sourceFiles.get(entry.path) ?? null;
+    const contentDigest = typeof source === "string" ? source : source?.content_digest ?? null;
+    return {
+      ...entry,
+      source_snapshot: contentDigest === null ? "absent" : "present",
+      content_digest: contentDigest,
+    };
+  }).sort(compareEvidence);
+}
+
+export function identityAtomicAuthorityPaths(row) {
+  const atomicKinds = new Set(ATOMIC_AUTHORITY_EVIDENCE_KINDS);
+  return [...new Set(identityTypedPathRecords(row, { includeGeneratedRegistry: false })
+    .filter((entry) => atomicKinds.has(entry.kind))
+    .map((entry) => entry.path))]
+    .sort(compareCodePoint);
+}
+
+function identityTypedPathRecords(row, { includeGeneratedRegistry }) {
   const records = [];
   const add = (kind, values) => {
     for (const value of values ?? []) {
       const sourcePath = typeof value === "string" ? value : value?.path;
       if (typeof sourcePath !== "string" || sourcePath.length === 0) continue;
-      const source = sourceFiles.get(sourcePath) ?? null;
-      const contentDigest = typeof source === "string" ? source : source?.content_digest ?? null;
-      records.push({
-        kind,
-        path: sourcePath,
-        source_snapshot: contentDigest === null ? "absent" : "present",
-        content_digest: contentDigest,
-      });
+      records.push({ kind, path: sourcePath });
     }
   };
   add("catalog-owner", row.ownership?.catalog);
@@ -156,11 +179,18 @@ export function identityTypedBaselineEvidence(
   add("native-link-runtime-input", (row.registrations?.native_link?.runtime_binding_inputs ?? []).map((entry) => entry.path));
   add("legacy-resolver", row.dependencies?.legacy_resolver_paths);
   add("catalog-resolver", row.dependencies?.catalog_resolver_paths);
-  add("provider", row.provider?.gpu_or_wgpu_paths);
-  add("fusion", row.provider?.fusion_paths);
+  add("provider", [
+    ...(row.provider?.gpu_or_wgpu_paths ?? []),
+    ...(row.semantic_authority?.gpu_specs ?? []).map((entry) => entry.source_file),
+  ]);
+  add("fusion", [
+    ...(row.provider?.fusion_paths ?? []),
+    ...(row.semantic_authority?.fusion_specs ?? []).map((entry) => entry.source_file),
+  ]);
   if (includeGeneratedRegistry) add("generated-registry", row.dependencies?.generated_registry);
-  const unique = new Map(records.map((entry) => [evidenceKey(entry), entry]));
-  return [...unique.values()].sort(compareEvidence);
+  const unique = new Map(records.map((entry) => [`${entry.kind}\0${entry.path}`, entry]));
+  return [...unique.values()].sort((left, right) =>
+    compareCodePoint(`${left.kind}\0${left.path}`, `${right.kind}\0${right.path}`));
 }
 
 function evidenceKey(entry) {

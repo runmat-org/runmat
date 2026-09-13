@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { buildAuthorityComponentGraph, buildComponentIndex, validateTopologyClaims } from "../components.mjs";
 
-test("authority graph uses transitive catalog/runtime ownership and ignores non-authority paths", () => {
+test("authority graph uses every writable authority path transitively", () => {
   const inventory = {
     digest: `sha256:${"a".repeat(64)}`,
     identities: [
@@ -15,14 +15,17 @@ test("authority graph uses transitive catalog/runtime ownership and ignores non-
     ],
   };
   const graph = buildAuthorityComponentGraph(inventory);
-  assert.deepEqual(graph.summary, { identities: 5, components: 3, singleton_components: 2, shared_components: 1, maximum_component_size: 3 });
+  assert.deepEqual(graph.summary, { identities: 5, components: 1, singleton_components: 0, shared_components: 1, maximum_component_size: 5 });
   assert.deepEqual(graph.candidates.map((candidate) => [candidate.candidate_id, candidate.identities]), [
-    ["component-alpha", ["alpha", "beta", "gamma"]],
-    ["component-provider_only", ["provider_only"]],
-    ["component-sidecar_only", ["sidecar_only"]],
+    ["component-alpha", ["alpha", "beta", "gamma", "provider_only", "sidecar_only"]],
   ]);
-  assert.deepEqual(graph.candidates[0].shared_sources, ["runtime/shared-a.rs", "runtime/shared-b.rs"]);
-  assert.deepEqual(graph.candidates[0].category_values, ["math/basic", "math/other"]);
+  assert.deepEqual(graph.candidates[0].shared_sources, [
+    "docs/shared.json",
+    "provider/shared.rs",
+    "runtime/shared-a.rs",
+    "runtime/shared-b.rs",
+  ]);
+  assert.deepEqual(graph.candidates[0].category_values, ["acceleration/gpu", "io/data", "math/basic", "math/other"]);
 });
 
 test("component claims conserve exact frozen sets and permit reviewed family packing", () => {

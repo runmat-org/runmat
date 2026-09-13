@@ -72,7 +72,7 @@ export function buildControlOverlayScaffold(inventoryValue, draftValue, reviewed
       source_row_digest: evidenceDigest(sourceRow),
       topology_row_digest: evidenceDigest(topologyRow),
       observations: identityObservations(sourceRow, topologyRow, sourceFilesByPath),
-      candidate_paths: identityCandidatePaths(sourceRow, topologyRow),
+      candidate_paths: identityCandidatePaths(sourceRow, topologyRow, sourceFilesByPath),
       decisions: unresolvedDecisions(IDENTITY_DECISIONS),
       review: unreviewed(),
     };
@@ -229,37 +229,31 @@ function identityObservations(row, topologyRow, sourceFilesByPath) {
   };
 }
 
-function identityCandidatePaths(row, topologyRow) {
+function identityCandidatePaths(row, topologyRow, sourceFilesByPath) {
+  const evidence = identityTypedBaselineEvidence(row, sourceFilesByPath);
+  const select = (...kinds) => paths(evidence
+    .filter((entry) => kinds.includes(entry.kind))
+    .map((entry) => entry.path));
   return {
     observed: {
-      catalog: paths([
-        ...(row.ownership?.catalog ?? []),
-        ...(row.semantic_authority?.catalog_aliases ?? []).map((entry) => entry.provenance?.source_file),
-        ...(row.semantic_authority?.constants ?? []).map((entry) => entry.provenance?.source_file),
-        ...(row.semantic_authority?.catalog_provenance ?? []).map((entry) => entry.provenance?.source_file),
-      ]),
-      runtime: paths([
-        ...(row.ownership?.runtime ?? []),
-        ...(row.semantic_authority?.implementation_provenance ?? []).map((entry) => entry.source_file),
-        ...(row.semantic_authority?.runtime_constants ?? []).map((entry) => entry.source_file),
-      ]),
-      documentation: paths([
-        ...(row.ownership?.catalog_documentation ?? []),
-        ...(row.ownership?.sidecars ?? []),
-        ...(row.ownership?.runtime_documentation_shadows ?? []),
-        ...(row.documentation?.sources ?? []).map((entry) => entry.path),
-      ]),
-      tests: paths(row.tests?.paths ?? []),
-      dependencies: paths([
-        ...(row.dependencies?.legacy_resolver_paths ?? []),
-        ...(row.dependencies?.catalog_resolver_paths ?? []),
-        ...(row.registrations?.native_link?.catalog_contract_paths ?? []),
-      ]),
-      provider: paths([
-        ...(row.provider?.gpu_or_wgpu_paths ?? []),
-        ...(row.provider?.fusion_paths ?? []),
-      ]),
-      generated: paths(row.dependencies?.generated_registry ?? []),
+      catalog: select(
+        "catalog-owner", "catalog-alias-provenance", "catalog-constant-provenance",
+        "catalog-provenance",
+      ),
+      runtime: select(
+        "runtime-owner", "implementation-provenance", "runtime-registration",
+        "runtime-constant-registration", "native-link-runtime-input",
+      ),
+      documentation: select(
+        "catalog-documentation", "legacy-sidecar", "runtime-documentation-shadow",
+        "documentation-source",
+      ),
+      tests: select("test-source"),
+      dependencies: select(
+        "native-link-catalog-contract", "legacy-resolver", "catalog-resolver",
+      ),
+      provider: select("provider", "fusion"),
+      generated: select("generated-registry"),
     },
     topology_target_proposals: topologyTargetProposals(topologyRow, row),
   };
