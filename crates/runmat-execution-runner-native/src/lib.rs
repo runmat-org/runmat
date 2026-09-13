@@ -5,6 +5,8 @@ mod analysis_host;
 mod analysis_kernel;
 mod analysis_placement;
 mod analysis_sequence;
+mod analysis_task;
+mod analysis_transient;
 mod config;
 mod driver;
 mod durable;
@@ -36,6 +38,9 @@ pub use analysis_placement::NativeStructuralStudyPlacement;
 pub use analysis_sequence::{
     execute_structural_sequence_locally, execute_structural_sequence_remotely,
     StructuralSequenceExecutionPolicy,
+};
+pub use analysis_transient::{
+    execute_structural_transient_remotely, StructuralTransientRecoveryPublisher,
 };
 pub use config::NativeExecutionConfig;
 pub use driver::{

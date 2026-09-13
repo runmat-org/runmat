@@ -13,7 +13,9 @@ use runmat_analysis_fea::execution::{
     StructuralLinearWorkloadResult, StudyIdentity,
 };
 use runmat_execution::value::ValueRefKind;
-use runmat_execution::{Digest, ExecutionScopeId, PoolId, ProgramEnvironment, ProgramRevision};
+use runmat_execution::{
+    Digest, ExecutionScopeId, PoolId, ProgramEnvironment, ProgramRevision, TaskId,
+};
 use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_artifact::{ArtifactAccess, ObjectNamespace, ProgramExecutionObjectLocation};
 
@@ -401,6 +403,100 @@ fn logical_task_identity_is_independent_of_pool_placement() {
     .unwrap();
     assert_ne!(first.request.pool_id, second.request.pool_id);
     assert_eq!(first.request.id, second.request.id);
+}
+
+#[test]
+fn analysis_task_retains_logical_dependencies_after_scheduler_replacement() {
+    let (study, step, execution_plan) = execution_identities();
+    let input = prepare_analysis_objects(
+        AnalysisNumericalObjectKind::AccuracyEvidence,
+        Digest::sha256(b"replacement-input"),
+        b"replacement-input",
+        1024,
+        ObjectNamespace::InputValue,
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    let root = input
+        .root_reference(&access(), ValueRefKind::DriverObject)
+        .unwrap();
+    let workload = AnalysisWorkloadRequest::new(
+        study,
+        step,
+        execution_plan,
+        AnalysisWorkKind::EvaluateAccuracy,
+        vec![AnalysisWorkloadInput {
+            kind: input.manifest.kind,
+            logical_identity: input.manifest.logical_identity,
+            payload_digest: input.manifest.payload_digest,
+            manifest_digest: input.root.digest,
+            manifest_encoded_length: input.root.encoded_length,
+            reference_kind: ValueRefKind::DriverObject,
+        }],
+        vec![AnalysisNumericalObjectKind::AccuracyEvidence],
+        BTreeSet::from([AnalysisCapabilityRequirement::Host {
+            abi: ANALYSIS_HOST_ABI.into(),
+        }]),
+    )
+    .unwrap();
+    let capabilities = workload.generic_capabilities().unwrap();
+    let host = AnalysisHostWorkload::new(workload, access()).unwrap();
+    let invocation = host.prepare_program_request(revision(), &[root]).unwrap();
+    let roots = invocation
+        .request()
+        .arguments
+        .iter()
+        .map(|argument| match argument {
+            runmat_execution::value::ValuePayload::Object(reference) => reference.as_ref().clone(),
+            runmat_execution::value::ValuePayload::Inline(_) => unreachable!(),
+        })
+        .collect::<Vec<_>>();
+    let predecessor = AnalysisTaskIdentity::new(host.workload.identity, Vec::new()).unwrap();
+    let context = AnalysisExecutionContext {
+        scope_id: ExecutionScopeId::derive(&[b"replacement-scope"]),
+        pool_id: PoolId::derive(&[b"replacement-pool"]),
+        program_artifact_id: runmat_execution::identity::ArtifactId::derive(&[
+            b"replacement-program",
+        ]),
+        resources: runmat_execution::resource::ResourceRequest {
+            cpu_millicores: 1000,
+            memory_bytes: 1024 * 1024,
+            scratch_bytes: 1024,
+            max_wall_millis: 60_000,
+            max_artifact_bytes: 1024 * 1024,
+            max_egress_bytes: 0,
+            max_relay_bytes: 0,
+            accelerators: Vec::new(),
+            required_capabilities: capabilities,
+        },
+        retry: runmat_execution::task::RetryPolicy::IdempotentInfrastructure,
+        deadline_unix_millis: None,
+        priority: 0,
+    };
+    let submission = build_analysis_task_submission(
+        &host,
+        roots.clone(),
+        vec![predecessor],
+        BTreeSet::new(),
+        context.clone(),
+    )
+    .unwrap();
+    let expected = AnalysisTaskIdentity::new(host.workload.identity, vec![predecessor]).unwrap();
+    assert_eq!(
+        submission.request.id,
+        TaskId::derive(&[expected.digest().bytes()])
+    );
+
+    let excess_live_dependencies =
+        BTreeSet::from([TaskId::derive(&[b"live-a"]), TaskId::derive(&[b"live-b"])]);
+    assert!(build_analysis_task_submission(
+        &host,
+        roots,
+        vec![predecessor],
+        excess_live_dependencies,
+        context,
+    )
+    .is_err());
 }
 
 #[test]

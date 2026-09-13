@@ -91,7 +91,7 @@ pub fn build_analysis_task_submission(
         )
         .is_err()
         || host.validate_inputs(input_roots).is_err()
-        || dependency_identities.len() != dependency_tasks.len()
+        || dependency_tasks.len() > dependency_identities.len()
         || !workload
             .generic_capabilities()?
             .is_subset(&context.resources.required_capabilities)

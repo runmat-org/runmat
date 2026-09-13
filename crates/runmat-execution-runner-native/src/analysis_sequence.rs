@@ -4,16 +4,13 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use runmat_analysis_execution::{
-    build_analysis_task_submission, build_structural_task_submission, AnalysisExecutionContext,
     AnalysisHostWorkload, CompletedStructuralSequence, PreparedAnalysisProgram,
     PreparedStructuralLinearProgram, PreparedStructuralSolveWave, PreparedStructuralStateWave,
     StructuralSequenceCoordinator, StructuralSequenceNode, StructuralSequencePreparation,
 };
 use runmat_analysis_fea::execution::AnalysisTaskIdentity;
-use runmat_execution::identity::ArtifactId;
 use runmat_execution::resource::{Capability, ResourceRequest};
 use runmat_execution::task::RetryPolicy;
-use runmat_execution::value::ValuePayload;
 use runmat_execution::{CancellationReason, Digest, ExecutionScopeId, PoolId, TaskId};
 use runmat_execution_artifact::cache::{CacheImport, FilesystemObjectStore};
 use runmat_execution_artifact::{
@@ -22,6 +19,7 @@ use runmat_execution_artifact::{
 use runmat_execution_runner::{AttemptSuccess, TaskSubmission};
 
 use crate::{
+    analysis_task::{prepare_analysis_task, AnalysisTaskPolicy},
     NativeExecutionConfig, NativeExecutionError, NativeExecutionResult, NativeProgramSession,
     RemotePoolDriver,
 };
@@ -35,7 +33,7 @@ pub struct StructuralSequenceExecutionPolicy {
 }
 
 impl StructuralSequenceExecutionPolicy {
-    fn validate(&self) -> NativeExecutionResult<()> {
+    pub(crate) fn validate(&self) -> NativeExecutionResult<()> {
         self.resources
             .validate()
             .map_err(|error| NativeExecutionError::Protocol(error.to_string()))
@@ -197,66 +195,25 @@ async fn execute_wave<'a>(
             .iter()
             .map(|(_, task_id)| *task_id)
             .collect::<BTreeSet<_>>();
-        let roots = task
-            .program
-            .request
-            .arguments
-            .iter()
-            .map(|argument| match argument {
-                ValuePayload::Object(root) => Ok((**root).clone()),
-                ValuePayload::Inline(_) => Err(NativeExecutionError::Protocol(
-                    "sequence analysis input was unexpectedly inline".into(),
-                )),
-            })
-            .collect::<NativeExecutionResult<Vec<_>>>()?;
-        let mut resources = task.structural.map_or_else(
+        let resources = task.structural.map_or_else(
             || policy.resources.clone(),
             |prepared| prepared.resource_plan.request.clone(),
         );
-        resources.required_capabilities.extend(
-            task.host
-                .workload
-                .generic_capabilities()
-                .map_err(protocol)?,
-        );
-        resources
-            .required_capabilities
-            .insert(Capability::ProcessIsolation);
-        let context = AnalysisExecutionContext {
-            scope_id: pool.scope_id(),
-            pool_id: pool.pool_id(),
-            program_artifact_id: ArtifactId::derive(&[task.program.request.artifact.id.0.bytes()]),
-            resources,
-            retry: policy.retry,
-            deadline_unix_millis: policy.deadline_unix_millis,
-            priority: policy.priority,
-        };
-        let submission = match task.structural {
-            Some(prepared) => build_structural_task_submission(
-                &prepared.host,
-                &prepared.resource_plan,
-                roots,
-                dependency_identities.clone(),
-                dependency_tasks,
-                context,
-            ),
-            None => build_analysis_task_submission(
-                task.host,
-                roots,
-                dependency_identities.clone(),
-                dependency_tasks,
-                context,
-            ),
-        }
-        .map_err(protocol)?;
-        let identity =
-            AnalysisTaskIdentity::new(task.host.workload.identity, dependency_identities)
-                .map_err(protocol)?;
-        if submission.request.id != TaskId::derive(&[identity.digest().bytes()]) {
-            return Err(NativeExecutionError::Protocol(
-                "sequence task identity does not converge".into(),
-            ));
-        }
+        let (submission, identity) = prepare_analysis_task(
+            pool.scope_id(),
+            pool.pool_id(),
+            task.host,
+            task.program,
+            dependency_identities,
+            dependency_tasks,
+            AnalysisTaskPolicy {
+                resources,
+                resource_plan: task.structural.map(|prepared| &prepared.resource_plan),
+                retry: policy.retry,
+                deadline_unix_millis: policy.deadline_unix_millis,
+                priority: policy.priority,
+            },
+        )?;
         if completed_nodes.contains_key(task.node)
             || admitted
                 .iter()
@@ -313,7 +270,7 @@ struct TaskView<'a> {
 }
 
 #[async_trait]
-trait SequencePool {
+pub(crate) trait SequencePool {
     fn scope_id(&self) -> ExecutionScopeId;
     fn pool_id(&self) -> PoolId;
     fn register_program(&mut self, program: &PreparedAnalysisProgram) -> NativeExecutionResult<()>;
@@ -450,8 +407,22 @@ impl SequencePool for LocalSequencePool {
     }
 }
 
-struct RemoteSequencePool {
+pub(crate) struct RemoteSequencePool {
     pool: Arc<RemotePoolDriver>,
+}
+
+impl RemoteSequencePool {
+    pub(crate) fn new(pool: Arc<RemotePoolDriver>) -> Self {
+        Self { pool }
+    }
+
+    pub(crate) fn register_execution_object(
+        &self,
+        reference: runmat_execution::value::ValueRef,
+        bytes: impl Into<std::sync::Arc<[u8]>>,
+    ) -> NativeExecutionResult<()> {
+        self.pool.register_execution_object(reference, bytes)
+    }
 }
 
 impl CacheImport for RemoteSequencePool {

@@ -40,10 +40,11 @@ use runmat_execution_artifact::{
 use runmat_execution_runner::{PoolSpec, WorkerSpec};
 use runmat_execution_runner_native::{
     execute_analysis_program_request, execute_structural_sequence_locally,
-    execute_structural_sequence_remotely, run_remote_worker_quic, NativeAnalysisHostLimits,
-    NativeAnalysisKernel, NativeExecutionConfig, NativeExecutionError, NativeProgramSession,
-    NativeProgramTask, QuicRemoteWorkerChannel, RemotePoolDriver, RemoteWorkerChannel,
-    RemoteWorkerChannelConfig, RemoteWorkerQuicRequest, StructuralSequenceExecutionPolicy,
+    execute_structural_sequence_remotely, execute_structural_transient_remotely,
+    run_remote_worker_quic, NativeAnalysisHostLimits, NativeAnalysisKernel, NativeExecutionConfig,
+    NativeExecutionError, NativeProgramSession, NativeProgramTask, QuicRemoteWorkerChannel,
+    RemotePoolDriver, RemoteWorkerChannel, RemoteWorkerChannelConfig, RemoteWorkerQuicRequest,
+    StructuralSequenceExecutionPolicy,
 };
 use runmat_execution_transport_native::frame::FrameLimits;
 use runmat_execution_transport_native::overlay::{PinnedQuicEndpoint, QuicOverlayListener};
@@ -53,6 +54,8 @@ use runmat_meshing_core::{ElementOrder, PersistentEntityId, PersistentEntityKind
 mod publication_chain;
 #[path = "analysis_process_conformance/signal.rs"]
 mod signal;
+#[path = "analysis_process_conformance/transient.rs"]
+mod transient;
 use publication_chain::{success_response, PublicationChainDriver};
 
 fn main() {
@@ -848,6 +851,30 @@ async fn remote_conformance(
         .await
         .unwrap();
         assert_sequence(&sequence);
+        let mut transient_publisher = transient::RecordingPublisher {
+            closures: Vec::new(),
+        };
+        let transient_result = execute_structural_transient_remotely(
+            Arc::clone(&pool),
+            transient::preparation(revision.clone(), "remote-analysis"),
+            sequence_policy(),
+            None,
+            &mut transient_publisher,
+        )
+        .await
+        .unwrap();
+        assert_eq!(transient_result.result.samples().len(), 5);
+        assert_eq!(transient_result.numerical_receipt.blocks.len(), 2);
+        assert_eq!(transient_publisher.closures.len(), 2);
+        let final_closure = transient_publisher.closures.last().unwrap();
+        let restored = runmat_analysis_execution::StructuralTransientSequenceCoordinator::restore_from_closure(
+            transient::preparation(revision.clone(), "remote-analysis"),
+            &final_closure.root,
+            &final_closure.objects,
+        )
+        .unwrap();
+        assert_eq!(restored.completed_blocks().len(), 2);
+        assert!(!restored.has_remaining_blocks());
         first_channel.drain().await.unwrap();
         second_channel.drain().await.unwrap();
     };

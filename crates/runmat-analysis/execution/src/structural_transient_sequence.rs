@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use runmat_analysis_fea::execution::{
-    AnalysisNumericalObjectKind, StructuralTransientBlockRequest,
+    AnalysisNumericalObjectKind, AnalysisTaskIdentity, StructuralTransientBlockRequest,
     StructuralTransientBlockRequestIdentity, StructuralTransientCheckpointScope,
     StructuralTransientResultAssemblyRequestIdentity,
 };
@@ -53,6 +53,7 @@ pub struct StructuralTransientSequenceCoordinator {
     preparation: StructuralTransientSequencePreparation,
     blocks: Vec<ImportedStructuralTransientBlock>,
     completed_block_responses: Vec<ProgramExecutionResponse>,
+    completed_block_tasks: Vec<AnalysisTaskIdentity>,
     result: Option<ImportedStructuralTransientResult>,
     phase: SequencePhase,
 }
@@ -64,6 +65,7 @@ impl StructuralTransientSequenceCoordinator {
             preparation,
             blocks: Vec::new(),
             completed_block_responses: Vec::new(),
+            completed_block_tasks: Vec::new(),
             result: None,
             phase: SequencePhase::ReadyForBlock,
         })
@@ -145,8 +147,17 @@ impl StructuralTransientSequenceCoordinator {
             prepared,
             self.preparation.inventory_limits,
         )?;
+        let dependency_identities = self
+            .completed_block_tasks
+            .last()
+            .copied()
+            .into_iter()
+            .collect::<Vec<_>>();
+        let task_identity =
+            AnalysisTaskIdentity::new(prepared.host.workload.identity, dependency_identities)?;
         self.blocks.push(block);
         self.completed_block_responses.push(response);
+        self.completed_block_tasks.push(task_identity);
         self.phase = if self.blocks.len() == self.preparation.terminal_schedule_ordinals.len() {
             SequencePhase::ReadyForAssembly
         } else {
@@ -198,6 +209,26 @@ impl StructuralTransientSequenceCoordinator {
 
     pub fn completed_blocks(&self) -> &[ImportedStructuralTransientBlock] {
         &self.blocks
+    }
+
+    pub fn completed_block_task_identities(&self) -> &[AnalysisTaskIdentity] {
+        &self.completed_block_tasks
+    }
+
+    pub fn next_block_dependency_identities(&self) -> Vec<AnalysisTaskIdentity> {
+        self.completed_block_tasks
+            .last()
+            .copied()
+            .into_iter()
+            .collect()
+    }
+
+    pub fn assembly_dependency_identities(&self) -> Vec<AnalysisTaskIdentity> {
+        self.completed_block_tasks.clone()
+    }
+
+    pub fn has_remaining_blocks(&self) -> bool {
+        self.blocks.len() < self.preparation.terminal_schedule_ordinals.len()
     }
 
     pub fn checkpoint(&self) -> AnalysisBridgeResult<StructuralTransientExecutionCheckpoint> {
