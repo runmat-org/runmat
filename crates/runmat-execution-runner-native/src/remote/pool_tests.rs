@@ -1271,6 +1271,37 @@ async fn remote_pool_tick_enforces_task_deadlines() {
 }
 
 #[tokio::test]
+async fn remote_pool_seeds_the_scheduler_clock_before_assigning_work() {
+    let before = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+    let (_, _, bundle) = executable_bundle().await;
+    let pool_id = PoolId::derive(&[b"seeded-clock-pool"]);
+    let pool = RemotePoolDriver::new(
+        ExecutionScopeId::derive(&[b"seeded-clock-scope"]),
+        PoolSpec {
+            id: pool_id,
+            min_workers: 1,
+            max_workers: 1,
+            max_in_flight: 1,
+            resource_limit: inventory(1_000),
+        },
+        1,
+        bundle,
+    )
+    .unwrap();
+    let after = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+
+    let initialized = pool.snapshot().now_millis;
+    assert!(initialized >= before);
+    assert!(initialized <= after);
+}
+
+#[tokio::test]
 async fn pinned_quic_worker_executes_only_the_installed_exact_bundle() {
     let CertifiedKey { cert, signing_key } =
         generate_simple_self_signed(vec!["runmat.execution".into()]).unwrap();

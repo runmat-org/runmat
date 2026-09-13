@@ -338,10 +338,13 @@ jobs:
         run: |
           set -euo pipefail
           set -o pipefail
+          cargo test -p runmat-execution-runner-native --all-features --lib \
+            actual_driver_restarts_from_server_checkpoint_on_a_different_worker \
+            2>&1 | tee "${EVIDENCE_DIR}/execution-conformance.log"
           cargo test -p runmat-execution-runner-native --all-features \
             --test occt_exact_meshing \
             --test meshing_process_conformance \
-            2>&1 | tee "${EVIDENCE_DIR}/execution-conformance.log"
+            2>&1 | tee -a "${EVIDENCE_DIR}/execution-conformance.log"
 
       - name: Build the production native meshing verifiers
         run: cargo build --release -p runmat --example meshing-verification --example meshing-corpus --no-default-features --features occt-native

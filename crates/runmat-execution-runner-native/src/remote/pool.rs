@@ -113,6 +113,9 @@ impl RemotePoolDriver {
             parent: None,
         })?;
         driver.handle(DriverCommand::CreatePool(pool))?;
+        driver.handle(DriverCommand::Tick {
+            now_millis: now_millis(),
+        })?;
         Ok(Arc::new(Self {
             scope_id,
             pool_id,

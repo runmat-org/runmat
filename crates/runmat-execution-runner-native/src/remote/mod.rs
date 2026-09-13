@@ -48,6 +48,8 @@ pub use worker_entry::{
 };
 pub use worker_env::run_remote_worker_from_env;
 
+#[cfg(all(test, feature = "occt-native"))]
+mod driver_replacement_tests;
 #[cfg(test)]
 mod pool_tests;
 #[cfg(test)]
