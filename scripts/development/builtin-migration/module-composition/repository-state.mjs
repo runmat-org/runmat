@@ -95,9 +95,11 @@ function observedProductState(root, product) {
 
 function validateChildStorage(root, product, declarations) {
   const represented = new Set();
-  for (let index = 0; index < product.children.length; index += 1) {
-    const child = product.children[index];
-    const declaration = declarations?.[index] ?? null;
+  const declarationsByModule = declarations === null
+    ? null
+    : new Map(declarations.map((declaration) => [declaration.module, declaration]));
+  for (const child of product.children) {
+    const declaration = declarationsByModule?.get(child.module) ?? null;
     const target = resolveRepositoryProduct(root, child.source_path);
     const state = lstat(target);
     if (state === null || !state.isFile() || fs.realpathSync(target) !== target) {
