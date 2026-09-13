@@ -1619,8 +1619,11 @@ fn modal_run_option_presets_are_ordered_for_cost_vs_accuracy() {
     let balanced = AnalysisModalRunOptions::balanced();
     let high_accuracy = AnalysisModalRunOptions::high_accuracy();
 
-    assert!(coarse.mode_count < balanced.mode_count);
-    assert!(balanced.mode_count < high_accuracy.mode_count);
+    assert!(coarse.truncation.requested_mode_count() < balanced.truncation.requested_mode_count());
+    assert!(
+        balanced.truncation.requested_mode_count()
+            < high_accuracy.truncation.requested_mode_count()
+    );
     assert!(coarse.residual_warn_threshold > balanced.residual_warn_threshold);
     assert!(balanced.residual_warn_threshold > high_accuracy.residual_warn_threshold);
 }
@@ -9364,7 +9367,7 @@ fn analysis_run_modal_with_options_controls_requested_mode_count() {
             deterministic_mode: true,
             precision_mode: PrecisionMode::Fp64,
             quality_policy: QualityPolicy::Balanced,
-            mode_count: 2,
+            truncation: runmat_analysis_fea::ModalTruncationPolicy::requested(2),
             residual_warn_threshold: 1.0e-2,
             solver_mesh_artifact_path: None,
         },
@@ -9378,7 +9381,7 @@ fn analysis_run_modal_with_options_controls_requested_mode_count() {
         .as_ref()
         .expect("modal payload should exist");
     assert!(!modal.frequencies_hz().is_empty());
-    assert!(modal.frequencies_hz().len() <= 2);
+    assert!(modal.frequencies_hz().len() >= 2);
     assert!(envelope.data.provenance.deterministic_mode);
 }
 

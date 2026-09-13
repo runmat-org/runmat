@@ -983,7 +983,7 @@ fn modal_reduction_enforces_the_complete_homogeneous_constraint_matrix() {
     // authored as a multiplier system.
     summary.affine_constraint_reduction = None;
     let constraints = summary.constraint_matrix.clone().unwrap();
-    let result = solve_modal_system(&summary, 1, ComputeBackend::Cpu);
+    let result = solve_modal_system(&summary, 1, 1.0e-6, ComputeBackend::Cpu);
 
     assert!(result.converged, "{:?}", result.diagnostics);
     let mode = &result.mode_shapes[0];
@@ -1012,7 +1012,7 @@ fn modal_reduction_rejects_nonhomogeneous_constraints_before_iteration() {
     )
     .unwrap();
 
-    let result = solve_modal_system(&summary, 1, ComputeBackend::Cpu);
+    let result = solve_modal_system(&summary, 1, 1.0e-6, ComputeBackend::Cpu);
 
     assert!(!result.converged);
     assert!(result.frequencies_hz.is_empty());

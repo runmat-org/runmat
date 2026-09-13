@@ -25,10 +25,11 @@ use crate::{
         transient::{StructuralTimeStepPolicy, TransientSolveOptions},
     },
     ComputeBackend, ElectromagneticSolveOptions, FeaContactInterfaceContext, FeaRunResult,
-    LinearStaticSolveOptions, ModalSolveOptions, ThermalProcedureControl, ThermalSolveOptions,
-    FEA_FIELD_MODAL_CUMULATIVE_EFFECTIVE_MASS, FEA_FIELD_MODAL_CUMULATIVE_MASS_RATIO,
-    FEA_FIELD_MODAL_EFFECTIVE_MASS, FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ,
-    FEA_FIELD_MODAL_MODAL_MASS, FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
+    LinearStaticSolveOptions, ModalSolveOptions, ModalTruncationPolicy, ThermalProcedureControl,
+    ThermalSolveOptions, FEA_FIELD_MODAL_CUMULATIVE_EFFECTIVE_MASS,
+    FEA_FIELD_MODAL_CUMULATIVE_MASS_RATIO, FEA_FIELD_MODAL_EFFECTIVE_MASS,
+    FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ, FEA_FIELD_MODAL_MODAL_MASS,
+    FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
     FEA_FIELD_MODAL_PARTICIPATION_FACTOR, FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION,
     FEA_FIELD_MODAL_RESIDUAL_NORM, FEA_FIELD_MODAL_TOTAL_FREE_MASS,
     FEA_FIELD_STRUCTURAL_BEAM_AXIAL_FORCE, FEA_FIELD_STRUCTURAL_BEAM_BENDING_MOMENT,
@@ -390,7 +391,7 @@ fn solid_physics_pipelines_assemble_from_the_canonical_solver_mesh() {
         &modal_model,
         ComputeBackend::Cpu,
         ModalSolveOptions {
-            mode_count: 2,
+            truncation: ModalTruncationPolicy::requested(2),
             solver_mesh: Some(mesh.clone()),
             ..experimental_modal_options()
         },
@@ -2068,6 +2069,12 @@ fn modal_solver_emits_modes_for_modal_step_fixture() {
     let decoded: crate::ModalBasisArtifact =
         serde_json::from_value(encoded.clone()).expect("canonical modal basis should decode");
     assert_eq!(decoded.identity(), result.basis.identity());
+    assert_eq!(
+        result.basis.truncation().retained_mode_count(),
+        result.basis.modes().len()
+    );
+    assert!(result.basis.truncation().complete_boundary_eigenspace());
+    assert!(!result.basis.eigenspaces().is_empty());
     let mut tampered = encoded;
     tampered["modes"][0]["modal_mass"] = serde_json::json!(17.0);
     assert!(serde_json::from_value::<crate::ModalBasisArtifact>(tampered).is_err());
@@ -2076,6 +2083,35 @@ fn modal_solver_emits_modes_for_modal_step_fixture() {
         .diagnostics
         .iter()
         .any(|diag| diag.code == "FEA_MODAL_CONVERGENCE"));
+}
+
+#[test]
+fn modal_truncation_expands_to_a_complete_governed_eigenspace() {
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    model.sequence.steps = vec![ProcedureStep::structural_modal("modal_cluster")];
+    let result = crate::run_modal_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        ModalSolveOptions {
+            truncation: ModalTruncationPolicy::requested(1)
+                .with_eigenspace_relative_tolerance(0.999_999),
+            ..experimental_modal_options()
+        },
+    )
+    .expect("modal truncation should retain the complete boundary eigenspace");
+
+    assert!(result.basis.modes().len() > 1);
+    assert!(result.basis.truncation().expanded_for_eigenspace());
+    assert!(result.basis.truncation().complete_boundary_eigenspace());
+    assert_eq!(
+        result.basis.truncation().available_mode_count(),
+        result.basis.modes().len()
+    );
+    assert!(result
+        .run
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "FEA_MODAL_TRUNCATION"));
 }
 
 #[test]
@@ -2753,7 +2789,7 @@ fn modal_history_publishes_requested_mode_shapes_with_mode_coordinates() {
         &model,
         ComputeBackend::Cpu,
         ModalSolveOptions {
-            mode_count: 2,
+            truncation: ModalTruncationPolicy::requested(2),
             solver_mesh: Some(mesh),
             ..experimental_modal_options()
         },
@@ -2821,7 +2857,7 @@ fn modal_beam_history_separates_rotation_from_translation() {
         &model,
         ComputeBackend::Cpu,
         ModalSolveOptions {
-            mode_count: 2,
+            truncation: ModalTruncationPolicy::requested(2),
             ..experimental_modal_options()
         },
     )
@@ -3490,7 +3526,7 @@ fn modal_large_fixture_emits_orthogonality_and_separation_diagnostics() {
         ComputeBackend::Cpu,
         ModalSolveOptions {
             formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
-            mode_count: 8,
+            truncation: ModalTruncationPolicy::requested(8),
             solver_mesh: None,
         },
     )

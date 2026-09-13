@@ -728,7 +728,7 @@ pub struct AnalysisModalRunOptions {
     pub deterministic_mode: bool,
     pub precision_mode: PrecisionMode,
     pub quality_policy: QualityPolicy,
-    pub mode_count: usize,
+    pub truncation: runmat_analysis_fea::ModalTruncationPolicy,
     pub residual_warn_threshold: f64,
     #[serde(default)]
     pub solver_mesh_artifact_path: Option<String>,
@@ -844,7 +844,7 @@ impl Default for AnalysisModalRunOptions {
             deterministic_mode: false,
             precision_mode: PrecisionMode::Fp64,
             quality_policy: QualityPolicy::Balanced,
-            mode_count: 3,
+            truncation: runmat_analysis_fea::ModalTruncationPolicy::requested(3),
             residual_warn_threshold: 1.0e-3,
             solver_mesh_artifact_path: None,
         }
@@ -857,7 +857,7 @@ impl AnalysisModalRunOptions {
             deterministic_mode: false,
             precision_mode: PrecisionMode::Fp32,
             quality_policy: QualityPolicy::Exploratory,
-            mode_count: 2,
+            truncation: runmat_analysis_fea::ModalTruncationPolicy::requested(2),
             residual_warn_threshold: 5.0e-3,
             solver_mesh_artifact_path: None,
         }
@@ -872,7 +872,7 @@ impl AnalysisModalRunOptions {
             deterministic_mode: true,
             precision_mode: PrecisionMode::Fp64,
             quality_policy: QualityPolicy::Strict,
-            mode_count: 8,
+            truncation: runmat_analysis_fea::ModalTruncationPolicy::requested(8),
             residual_warn_threshold: 5.0e-4,
             solver_mesh_artifact_path: None,
         }

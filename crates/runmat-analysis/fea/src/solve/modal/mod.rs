@@ -20,6 +20,9 @@ use diagnostics::push_modal_quality_diagnostics;
 use linear_solve::{solve_k_system_cg, CgSolveOptions};
 use math::{dot, normalize_mass, orthonormalize_mass, relative_l2_update};
 
+const BOUNDARY_PROBE_STABILITY_COUNT: usize = 4;
+type ModalCandidate = (f64, Vec<f64>, f64);
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModalSolveResult {
     pub converged: bool,
@@ -33,14 +36,18 @@ pub struct ModalSolveResult {
     pub device_apply_k_count: u32,
     pub device_apply_k_attempt_count: u32,
     pub accelerator_evidence: Vec<crate::solve::accelerator::AcceleratorSolveEvidence>,
+    pub available_mode_count: usize,
+    pub boundary_probe_count: usize,
+    pub boundary_probe_frequency_hz: Option<f64>,
 }
 
 pub fn solve_modal_system(
     summary: &AssemblySummary,
-    mode_count: usize,
+    requested_mode_count: usize,
+    eigenspace_relative_tolerance: f64,
     backend: ComputeBackend,
 ) -> ModalSolveResult {
-    if summary.dof_count == 0 || mode_count == 0 {
+    if summary.dof_count == 0 || requested_mode_count == 0 {
         return ModalSolveResult {
             converged: false,
             frequencies_hz: Vec::new(),
@@ -59,6 +66,9 @@ pub fn solve_modal_system(
             device_apply_k_count: 0,
             device_apply_k_attempt_count: 0,
             accelerator_evidence: Vec::new(),
+            available_mode_count: summary.dof_count,
+            boundary_probe_count: 0,
+            boundary_probe_frequency_hz: None,
         };
     }
 
@@ -104,6 +114,9 @@ pub fn solve_modal_system(
                 device_apply_k_count: 0,
                 device_apply_k_attempt_count: 0,
                 accelerator_evidence: Vec::new(),
+                available_mode_count: summary.dof_count,
+                boundary_probe_count: 0,
+                boundary_probe_frequency_hz: None,
             };
         }
     };
@@ -126,6 +139,9 @@ pub fn solve_modal_system(
                 device_apply_k_count: 0,
                 device_apply_k_attempt_count: 0,
                 accelerator_evidence: Vec::new(),
+                available_mode_count: summary.dof_count,
+                boundary_probe_count: 0,
+                boundary_probe_frequency_hz: None,
             };
         }
     };
@@ -148,6 +164,9 @@ pub fn solve_modal_system(
             device_apply_k_count: 0,
             device_apply_k_attempt_count: 0,
             accelerator_evidence: Vec::new(),
+            available_mode_count: reduced_operator.dof_count(),
+            boundary_probe_count: 0,
+            boundary_probe_frequency_hz: None,
         };
     }
     let mut solve_summary = summary.clone();
@@ -161,10 +180,13 @@ pub fn solve_modal_system(
     let mut device_apply_k_attempt_count = 0u32;
 
     let unconstrained: Vec<usize> = (0..solve_summary.operator.dof_count()).collect();
-    let target_mode_count = mode_count.min(unconstrained.len());
+    let target_mode_count = requested_mode_count.min(unconstrained.len());
 
-    let mut basis: Vec<Vec<f64>> = Vec::with_capacity(target_mode_count);
-    let mut modes: Vec<(f64, Vec<f64>, f64)> = Vec::with_capacity(target_mode_count);
+    let mut basis: Vec<Vec<f64>> = Vec::with_capacity(target_mode_count.saturating_add(1));
+    let mut modes: Vec<ModalCandidate> = Vec::with_capacity(target_mode_count.saturating_add(1));
+    let mut boundary_probe_count = 0usize;
+    let mut complete_boundary_eigenspace = false;
+    let mut boundary_probe_frequency_hz = None;
     let mut prepared_build_ms = 0.0_f64;
     let mut accelerator_admission_fallback = None;
     let prepared_accelerator_system = if accelerator_requested {
@@ -204,6 +226,9 @@ pub fn solve_modal_system(
                         .into_iter()
                         .map(|evidence| *evidence)
                         .collect(),
+                    available_mode_count: unconstrained.len(),
+                    boundary_probe_count: 0,
+                    boundary_probe_frequency_hz: None,
                 };
             }
         }
@@ -221,7 +246,7 @@ pub fn solve_modal_system(
         (8usize, 3usize, 1.0e-4)
     };
 
-    'modes: for mode_idx in 0..target_mode_count {
+    'modes: for mode_idx in 0..unconstrained.len() {
         if crate::is_fea_cancelled() {
             break;
         }
@@ -305,12 +330,25 @@ pub fn solve_modal_system(
             .sqrt()
             .max(1.0e-12);
 
-        basis.push(q.clone());
         let expanded = match prepared_modal.expand(&q) {
             Ok(shape) => shape,
             Err(_) => break,
         };
+        basis.push(q.clone());
         modes.push((freq_hz, expanded, residual / kq_norm));
+        let exhausted = mode_idx + 1 == unconstrained.len();
+        if let Some(boundary) = resolve_truncation_boundary(
+            &modes,
+            target_mode_count,
+            eigenspace_relative_tolerance,
+            exhausted,
+        ) {
+            boundary_probe_count = boundary.probe_count;
+            boundary_probe_frequency_hz = boundary.probe_frequency_hz;
+            modes = boundary.retained;
+            complete_boundary_eigenspace = true;
+            break;
+        }
     }
 
     modes.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
@@ -323,7 +361,9 @@ pub fn solve_modal_system(
         residual_norms.push(residual);
     }
 
-    let converged = !crate::is_fea_cancelled() && !frequencies_hz.is_empty();
+    let converged = !crate::is_fea_cancelled()
+        && frequencies_hz.len() >= target_mode_count
+        && complete_boundary_eigenspace;
     let mut diagnostics = vec![FeaDiagnostic {
         code: "FEA_MODAL_METHOD".to_string(),
         severity: FeaDiagnosticSeverity::Info,
@@ -348,7 +388,7 @@ pub fn solve_modal_system(
         },
         message: format!(
             "mode_count_requested={} mode_count_solved={} converged={}",
-            mode_count,
+            requested_mode_count,
             frequencies_hz.len(),
             converged
         ),
@@ -382,5 +422,90 @@ pub fn solve_modal_system(
         device_apply_k_count,
         device_apply_k_attempt_count,
         accelerator_evidence,
+        available_mode_count: unconstrained.len(),
+        boundary_probe_count,
+        boundary_probe_frequency_hz,
+    }
+}
+
+struct ResolvedTruncationBoundary {
+    retained: Vec<ModalCandidate>,
+    probe_count: usize,
+    probe_frequency_hz: Option<f64>,
+}
+
+fn resolve_truncation_boundary(
+    candidates: &[ModalCandidate],
+    requested_count: usize,
+    tolerance: f64,
+    exhausted: bool,
+) -> Option<ResolvedTruncationBoundary> {
+    if candidates.len() < requested_count {
+        return exhausted.then(|| ResolvedTruncationBoundary {
+            retained: candidates.to_vec(),
+            probe_count: 0,
+            probe_frequency_hz: None,
+        });
+    }
+    let mut ordered = candidates.to_vec();
+    ordered.sort_by(|left, right| left.0.total_cmp(&right.0));
+    let mut retained_count = requested_count;
+    while retained_count < ordered.len()
+        && crate::pipeline::modal_governance::relative_frequency_separation(
+            ordered[retained_count - 1].0,
+            ordered[retained_count].0,
+        ) <= tolerance
+    {
+        retained_count += 1;
+    }
+    let probe_count = ordered.len() - retained_count;
+    if !exhausted && probe_count < BOUNDARY_PROBE_STABILITY_COUNT {
+        return None;
+    }
+    let probe_frequency_hz = ordered.get(retained_count).map(|candidate| candidate.0);
+    ordered.truncate(retained_count);
+    Some(ResolvedTruncationBoundary {
+        retained: ordered,
+        probe_count,
+        probe_frequency_hz,
+    })
+}
+
+#[cfg(test)]
+mod truncation_tests {
+    use super::*;
+
+    fn candidate(frequency_hz: f64) -> ModalCandidate {
+        (frequency_hz, vec![frequency_hz], 0.0)
+    }
+
+    #[test]
+    fn boundary_resolution_orders_a_nonmonotonic_candidate_stream() {
+        let candidates = [10.0, 1.0, 2.0, 6.0, 3.0, 5.0]
+            .into_iter()
+            .map(candidate)
+            .collect::<Vec<_>>();
+        let resolved = resolve_truncation_boundary(&candidates, 2, 1.0e-6, false).unwrap();
+        assert_eq!(
+            resolved
+                .retained
+                .iter()
+                .map(|candidate| candidate.0)
+                .collect::<Vec<_>>(),
+            [1.0, 2.0]
+        );
+        assert_eq!(resolved.probe_count, 4);
+        assert_eq!(resolved.probe_frequency_hz, Some(3.0));
+    }
+
+    #[test]
+    fn boundary_resolution_keeps_a_complete_cluster() {
+        let candidates = [8.0, 1.0, 2.0, 2.000_001, 4.0, 6.0, 10.0]
+            .into_iter()
+            .map(candidate)
+            .collect::<Vec<_>>();
+        let resolved = resolve_truncation_boundary(&candidates, 2, 1.0e-6, false).unwrap();
+        assert_eq!(resolved.retained.len(), 3);
+        assert_eq!(resolved.probe_frequency_hz, Some(4.0));
     }
 }

@@ -2702,9 +2702,13 @@ fn run_fixture_cpu(
             FormulationRequirement::Experimental,
             AnalysisModalRunOptions {
                 solver_mesh_artifact_path: solver_mesh_artifact_path.clone(),
-                mode_count: spec
-                    .modal_mode_count
-                    .unwrap_or(AnalysisModalRunOptions::default().mode_count),
+                truncation: runmat_analysis_fea::ModalTruncationPolicy::requested(
+                    spec.modal_mode_count.unwrap_or_else(|| {
+                        AnalysisModalRunOptions::default()
+                            .truncation
+                            .requested_mode_count()
+                    }),
+                ),
                 ..AnalysisModalRunOptions::balanced()
             },
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
@@ -2831,9 +2835,13 @@ fn run_fixture_gpu(
             FormulationRequirement::Experimental,
             AnalysisModalRunOptions {
                 solver_mesh_artifact_path: solver_mesh_artifact_path.clone(),
-                mode_count: spec
-                    .modal_mode_count
-                    .unwrap_or(AnalysisModalRunOptions::default().mode_count),
+                truncation: runmat_analysis_fea::ModalTruncationPolicy::requested(
+                    spec.modal_mode_count.unwrap_or_else(|| {
+                        AnalysisModalRunOptions::default()
+                            .truncation
+                            .requested_mode_count()
+                    }),
+                ),
                 ..AnalysisModalRunOptions::balanced()
             },
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),

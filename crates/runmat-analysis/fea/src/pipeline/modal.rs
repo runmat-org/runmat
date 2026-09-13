@@ -16,7 +16,7 @@ use crate::{
     },
     diagnostics::builders::{extend_common_run_diagnostics, CommonRunDiagnosticInputs},
     excitation::{realize_step_excitations, ExcitationSamplePoint},
-    pipeline::modal_basis::ModalBasisArtifact,
+    pipeline::modal_basis::{ModalBasisArtifact, ModalBasisInputs},
     pipeline::observation_history::{
         evaluate_field_histories, required_mode_history_indices, HistoryFieldSeries,
         HistoryTopology,
@@ -62,9 +62,10 @@ pub fn run_modal_with_options(
     validate_model(model).map_err(|err| FeaRunError::InvalidModel(err.to_string()))?;
     let required_history_modes = required_mode_history_indices(execution_step)
         .map_err(|error| FeaRunError::Observation(error.to_string()))?;
+    options.truncation.validate()?;
     if required_history_modes
         .last()
-        .is_some_and(|mode| *mode > options.mode_count)
+        .is_some_and(|mode| *mode > options.truncation.requested_mode_count())
     {
         return Err(FeaRunError::Observation(
             "modal history requests a mode beyond the admitted solver mode count".into(),
@@ -123,7 +124,12 @@ pub fn run_modal_with_options(
         Some(2),
         Some(5),
     );
-    let modal = solve_modal_system(&summary, options.mode_count, backend);
+    let modal = solve_modal_system(
+        &summary,
+        options.truncation.requested_mode_count(),
+        options.truncation.eigenspace_relative_tolerance(),
+        backend,
+    );
     emit_phase(
         "fea.run_modal",
         FeaProgressPhase::Solve,
@@ -157,10 +163,44 @@ pub fn run_modal_with_options(
     let basis = ModalBasisArtifact::new(
         identity.clone(),
         &summary,
-        &modal.frequencies_hz,
-        &modal.mode_shapes,
-        &modal.residual_norms,
+        ModalBasisInputs {
+            frequencies_hz: &modal.frequencies_hz,
+            dof_shapes: &modal.mode_shapes,
+            residual_norms: &modal.residual_norms,
+            truncation_policy: options.truncation,
+            available_mode_count: modal.available_mode_count,
+            boundary_probe_count: modal.boundary_probe_count,
+            boundary_probe_frequency_hz: modal.boundary_probe_frequency_hz,
+        },
     )?;
+    diagnostics.push(crate::diagnostics::FeaDiagnostic {
+        code: "FEA_MODAL_TRUNCATION".into(),
+        severity: crate::diagnostics::FeaDiagnosticSeverity::Info,
+        message: format!(
+            "requested_mode_count={} retained_mode_count={} available_mode_count={} boundary_probe_count={} boundary_probe_frequency_hz={:?} expanded_for_eigenspace={} complete_boundary_eigenspace={}",
+            basis.truncation().policy().requested_mode_count(),
+            basis.truncation().retained_mode_count(),
+            basis.truncation().available_mode_count(),
+            basis.truncation().boundary_probe_count(),
+            basis.truncation().boundary_probe_frequency_hz(),
+            basis.truncation().expanded_for_eigenspace(),
+            basis.truncation().complete_boundary_eigenspace(),
+        ),
+    });
+    diagnostics.push(crate::diagnostics::FeaDiagnostic {
+        code: "FEA_MODAL_EIGENSPACES".into(),
+        severity: crate::diagnostics::FeaDiagnosticSeverity::Info,
+        message: format!(
+            "eigenspace_count={} repeated_eigenspace_count={} relative_frequency_tolerance={}",
+            basis.eigenspaces().len(),
+            basis
+                .eigenspaces()
+                .iter()
+                .filter(|eigenspace| eigenspace.is_repeated())
+                .count(),
+            basis.truncation().policy().eigenspace_relative_tolerance(),
+        ),
+    });
     let recovered_modes = modal
         .mode_shapes
         .iter()

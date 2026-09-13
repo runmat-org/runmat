@@ -551,7 +551,7 @@ impl Default for LinearStaticSolveOptions {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ModalSolveOptions {
     pub formulation_requirement: FormulationRequirement,
-    pub mode_count: usize,
+    pub truncation: crate::pipeline::modal_governance::ModalTruncationPolicy,
     pub solver_mesh: Option<SolverMeshArtifact>,
 }
 
@@ -559,7 +559,7 @@ impl Default for ModalSolveOptions {
     fn default() -> Self {
         Self {
             formulation_requirement: FormulationRequirement::Production,
-            mode_count: 3,
+            truncation: crate::pipeline::modal_governance::ModalTruncationPolicy::default(),
             solver_mesh: None,
         }
     }

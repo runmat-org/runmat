@@ -1919,7 +1919,7 @@ pub fn analysis_run_modal_with_options_op(
         ));
     }
 
-    if options.mode_count == 0 {
+    if options.truncation.requested_mode_count() == 0 {
         return Err(operation_error(
             AnalysisOperation::Modal.name(),
             AnalysisOperation::Modal.version(),
@@ -1930,8 +1930,11 @@ pub fn analysis_run_modal_with_options_op(
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "fea.run_modal options require mode_count greater than zero",
-            BTreeMap::from([("mode_count".to_string(), options.mode_count.to_string())]),
+            "fea.run_modal options require a requested modal count greater than zero",
+            BTreeMap::from([(
+                "requested_mode_count".to_string(),
+                options.truncation.requested_mode_count().to_string(),
+            )]),
         ));
     }
 
@@ -1948,7 +1951,7 @@ pub fn analysis_run_modal_with_options_op(
         backend,
         ModalSolveOptions {
             formulation_requirement,
-            mode_count: options.mode_count,
+            truncation: options.truncation,
             solver_mesh: solver_mesh.clone(),
         },
     )

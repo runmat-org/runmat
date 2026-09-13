@@ -1402,7 +1402,7 @@ fn analysis_run_modal_with_options_contract_controls_mode_budget() {
             deterministic_mode: true,
             precision_mode: PrecisionMode::Fp64,
             quality_policy: QualityPolicy::Balanced,
-            mode_count: 2,
+            truncation: runmat_analysis_fea::ModalTruncationPolicy::requested(2),
             residual_warn_threshold: 1.0e-2,
             solver_mesh_artifact_path: None,
         },
@@ -1418,7 +1418,7 @@ fn analysis_run_modal_with_options_contract_controls_mode_budget() {
         .as_ref()
         .expect("modal payload should exist");
     assert!(!modal.frequencies_hz().is_empty());
-    assert!(modal.frequencies_hz().len() <= 2);
+    assert!(modal.frequencies_hz().len() >= 2);
     assert!(envelope.data.provenance.deterministic_mode);
 
     let invalid = analysis_run_modal_with_options_op(
@@ -1429,13 +1429,13 @@ fn analysis_run_modal_with_options_contract_controls_mode_budget() {
             deterministic_mode: false,
             precision_mode: PrecisionMode::Fp64,
             quality_policy: QualityPolicy::Balanced,
-            mode_count: 0,
+            truncation: runmat_analysis_fea::ModalTruncationPolicy::requested(0),
             residual_warn_threshold: 1.0e-3,
             solver_mesh_artifact_path: None,
         },
         OperationContext::new(Some("trace-contract-modal-opts-4".to_string()), None),
     )
-    .expect_err("mode_count=0 should fail");
+    .expect_err("requested modal count zero should fail");
     assert_eq!(invalid.error_code, "RM.FEA.RUN_MODAL.INVALID_OPTIONS");
     assert_eq!(invalid.operation, "fea.run_modal");
     assert_eq!(invalid.op_version, "fea.run_modal/v1");
@@ -2580,7 +2580,7 @@ fn analysis_modal_large_fixture_quality_signals_propagate_to_results() {
         ComputeBackend::Cpu,
         FormulationRequirement::Experimental,
         AnalysisModalRunOptions {
-            mode_count: 8,
+            truncation: runmat_analysis_fea::ModalTruncationPolicy::requested(8),
             ..AnalysisModalRunOptions::balanced()
         },
         OperationContext::new(Some("trace-contract-modal-large-1".to_string()), None),

@@ -9,6 +9,10 @@ use crate::{
     AnalysisRunIdentity,
 };
 
+use super::modal_governance::{
+    build_modal_governance, ModalEigenspaceEvidence, ModalTruncationEvidence, ModalTruncationPolicy,
+};
+
 const MODAL_BASIS_PREFIX: &[u8] = b"runmat-fea-modal-basis/v1\0";
 const MODAL_BASIS_LIMITS: CanonicalLimits =
     CanonicalLimits::new(512 * 1024 * 1024, 20_000_000, 4096, 16);
@@ -105,6 +109,8 @@ pub struct ModalBasisArtifact {
     modes: Vec<ModalBasisMode>,
     total_free_mass: [f64; 3],
     mass_orthogonality: Vec<f64>,
+    truncation: ModalTruncationEvidence,
+    eigenspaces: Vec<ModalEigenspaceEvidence>,
 }
 
 #[derive(Deserialize)]
@@ -117,6 +123,18 @@ struct ModalBasisArtifactData {
     modes: Vec<ModalBasisMode>,
     total_free_mass: [f64; 3],
     mass_orthogonality: Vec<f64>,
+    truncation: ModalTruncationEvidence,
+    eigenspaces: Vec<ModalEigenspaceEvidence>,
+}
+
+pub(crate) struct ModalBasisInputs<'a> {
+    pub frequencies_hz: &'a [f64],
+    pub dof_shapes: &'a [Vec<f64>],
+    pub residual_norms: &'a [f64],
+    pub truncation_policy: ModalTruncationPolicy,
+    pub available_mode_count: usize,
+    pub boundary_probe_count: usize,
+    pub boundary_probe_frequency_hz: Option<f64>,
 }
 
 impl TryFrom<ModalBasisArtifactData> for ModalBasisArtifact {
@@ -131,6 +149,8 @@ impl TryFrom<ModalBasisArtifactData> for ModalBasisArtifact {
             modes: data.modes,
             total_free_mass: data.total_free_mass,
             mass_orthogonality: data.mass_orthogonality,
+            truncation: data.truncation,
+            eigenspaces: data.eigenspaces,
         };
         artifact.validate()?;
         Ok(artifact)
@@ -152,10 +172,17 @@ impl ModalBasisArtifact {
     pub(crate) fn new(
         source_run: AnalysisRunIdentity,
         summary: &AssemblySummary,
-        frequencies_hz: &[f64],
-        dof_shapes: &[Vec<f64>],
-        residual_norms: &[f64],
+        inputs: ModalBasisInputs<'_>,
     ) -> Result<Self, FeaRunError> {
+        let ModalBasisInputs {
+            frequencies_hz,
+            dof_shapes,
+            residual_norms,
+            truncation_policy,
+            available_mode_count,
+            boundary_probe_count,
+            boundary_probe_frequency_hz,
+        } = inputs;
         let count = frequencies_hz.len();
         if count == 0 || dof_shapes.len() != count || residual_norms.len() != count {
             return Err(FeaRunError::Assembly(
@@ -218,7 +245,7 @@ impl ModalBasisArtifact {
                 dof_shape: shape.clone(),
             });
         }
-        let mass_orthogonality = dof_shapes
+        let mass_orthogonality: Vec<f64> = dof_shapes
             .iter()
             .flat_map(|left| {
                 dof_shapes
@@ -226,6 +253,15 @@ impl ModalBasisArtifact {
                     .map(|right| dot(left, &apply_m(&summary.operator, right)))
             })
             .collect();
+        let (truncation, eigenspaces) = build_modal_governance(
+            truncation_policy,
+            frequencies_hz,
+            residual_norms,
+            &mass_orthogonality,
+            available_mode_count,
+            boundary_probe_count,
+            boundary_probe_frequency_hz,
+        )?;
         let mut artifact = Self {
             identity: ModalBasisIdentity(Digest::sha256([])),
             source_run,
@@ -234,6 +270,8 @@ impl ModalBasisArtifact {
             modes,
             total_free_mass,
             mass_orthogonality,
+            truncation,
+            eigenspaces,
         };
         artifact.identity = artifact.derive_identity()?;
         artifact.validate()?;
@@ -260,6 +298,12 @@ impl ModalBasisArtifact {
     }
     pub fn mass_orthogonality(&self) -> &[f64] {
         &self.mass_orthogonality
+    }
+    pub const fn truncation(&self) -> &ModalTruncationEvidence {
+        &self.truncation
+    }
+    pub fn eigenspaces(&self) -> &[ModalEigenspaceEvidence] {
+        &self.eigenspaces
     }
 
     pub fn validate_for(&self, summary: &AssemblySummary) -> Result<(), FeaRunError> {
@@ -292,9 +336,15 @@ impl ModalBasisArtifact {
         let regenerated = Self::new(
             self.source_run.clone(),
             summary,
-            &frequencies,
-            &dof_shapes,
-            &residuals,
+            ModalBasisInputs {
+                frequencies_hz: &frequencies,
+                dof_shapes: &dof_shapes,
+                residual_norms: &residuals,
+                truncation_policy: self.truncation.policy(),
+                available_mode_count: self.truncation.available_mode_count(),
+                boundary_probe_count: self.truncation.boundary_probe_count(),
+                boundary_probe_frequency_hz: self.truncation.boundary_probe_frequency_hz(),
+            },
         )?;
         if regenerated.identity != self.identity {
             return Err(FeaRunError::Assembly(
@@ -307,6 +357,25 @@ impl ModalBasisArtifact {
     fn validate(&self) -> Result<(), FeaRunError> {
         let count = self.modes.len();
         let valid_scalar = |value: f64| value.is_finite();
+        let frequencies = self
+            .modes
+            .iter()
+            .map(|mode| mode.frequency_hz)
+            .collect::<Vec<_>>();
+        let residuals = self
+            .modes
+            .iter()
+            .map(|mode| mode.residual_norm)
+            .collect::<Vec<_>>();
+        let regenerated_governance = build_modal_governance(
+            self.truncation.policy(),
+            &frequencies,
+            &residuals,
+            &self.mass_orthogonality,
+            self.truncation.available_mode_count(),
+            self.truncation.boundary_probe_count(),
+            self.truncation.boundary_probe_frequency_hz(),
+        );
         if count == 0
             || self.node_count == 0
             || self.mass_orthogonality.len() != count.saturating_mul(count)
@@ -358,6 +427,14 @@ impl ModalBasisArtifact {
                 .mass_orthogonality
                 .iter()
                 .any(|value| !valid_scalar(*value))
+            || self.truncation.retained_mode_count() != count
+            || self.eigenspaces.is_empty()
+            || regenerated_governance
+                .as_ref()
+                .map(|(truncation, eigenspaces)| {
+                    truncation != &self.truncation || eigenspaces != &self.eigenspaces
+                })
+                .unwrap_or(true)
             || !directional_metrics_are_consistent(&self.modes, self.total_free_mass)
             || self.identity != self.derive_identity()?
         {
@@ -379,6 +456,8 @@ impl ModalBasisArtifact {
                 &self.modes,
                 self.total_free_mass,
                 &self.mass_orthogonality,
+                &self.truncation,
+                &self.eigenspaces,
             ),
             MODAL_BASIS_LIMITS,
         )
