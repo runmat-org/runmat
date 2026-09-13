@@ -43,7 +43,7 @@ export function composeControlCandidate({ inventory: inventoryValue, topology, s
 
   const inputs = inputDigests(inventory, topology, scaffold, reviewSet);
   const payload = {
-    schema_version: 5,
+    schema_version: 6,
     kind: "runmat-builtin-migration-control-candidate",
     authority: "deterministically-composed-unreviewed-candidate",
     program: PROGRAM,
@@ -68,6 +68,7 @@ export function composeControlCandidate({ inventory: inventoryValue, topology, s
     exception_manifest: structuredClone(reviewSet.globalReview.value.exception_manifest),
     target_policy: structuredClone(reviewSet.globalReview.value.target_policy),
     storage_policy: structuredClone(reviewSet.globalReview.value.storage_policy),
+    pilot_policy: structuredClone(reviewSet.pilotPolicy.value),
   };
   validateControlProjection({
     inventory,
@@ -81,6 +82,7 @@ export function composeControlCandidate({ inventory: inventoryValue, topology, s
     exceptionManifest: payload.exception_manifest,
     targetPolicy: payload.target_policy,
     storagePolicy: payload.storage_policy,
+    pilotPolicy: payload.pilot_policy,
   });
   const candidate = deepImmutable({ ...payload, digest: evidenceDigest(payload) });
   VALIDATED_CONTROL_CANDIDATES.add(candidate);
@@ -89,8 +91,8 @@ export function composeControlCandidate({ inventory: inventoryValue, topology, s
 
 export function parseControlCandidate(value, expected) {
   assertValidatedControlCandidate(expected);
-  kind(value, 5, "runmat-builtin-migration-control-candidate", "control candidate");
-  exact(value, ["schema_version", "kind", "authority", "program", "inputs", "baseline_context", "cohorts", "bundle_controls", "identity_controls", "integration_products", "module_composition_baseline", "migration_findings", "exception_manifest", "target_policy", "storage_policy", "digest"], "control candidate");
+  kind(value, 6, "runmat-builtin-migration-control-candidate", "control candidate");
+  exact(value, ["schema_version", "kind", "authority", "program", "inputs", "baseline_context", "cohorts", "bundle_controls", "identity_controls", "integration_products", "module_composition_baseline", "migration_findings", "exception_manifest", "target_policy", "storage_policy", "pilot_policy", "digest"], "control candidate");
   if (value.authority !== "deterministically-composed-unreviewed-candidate" || value.program !== PROGRAM) {
     throw new Error("control candidate has invalid authority or program");
   }

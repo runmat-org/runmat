@@ -8,6 +8,7 @@ import { validateIntegrationProductCoverage } from "../integration-products.mjs"
 import { parseGatePlans } from "../gate-plan.mjs";
 import { parseInventoryEvidence } from "../inventory.mjs";
 import { validateModuleCompositionControl } from "../module-composition/control.mjs";
+import { parsePilotPolicy } from "../pilot-policy.mjs";
 import { array, digest, exact, kind, repositoryPath, stableId } from "../schema.mjs";
 import { assertValidatedTopologyView } from "../topology/freeze.mjs";
 import {
@@ -54,13 +55,20 @@ export function loadControlReviewSet(manifestPath, { scaffold, topology, invento
     new Map([...bundleReviews].map(([id, review]) => [id, review.bundleControl])),
     globalReview.integrationProducts,
   );
+  const pilotPolicy = parsePilotPolicy(
+    globalReview.pilotPolicyValue,
+    topology,
+    new Map([...bundleReviews].map(([bundleId, review]) => [
+      bundleId, review.bundleControl.prerequisites,
+    ])),
+  );
   const moduleComposition = validateModuleCompositionControl(
     globalReview.moduleCompositionBaseline,
     globalReview.integrationProducts,
     reviewedCompositionBundles(bundleReviews, topology),
   );
   const parsed = deepImmutable({
-    value, digest: value.digest, bundleReviews, globalReview, moduleComposition,
+    value, digest: value.digest, bundleReviews, globalReview, moduleComposition, pilotPolicy,
   });
   VALIDATED_REVIEW_SETS.add(parsed);
   return parsed;

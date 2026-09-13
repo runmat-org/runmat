@@ -14,6 +14,7 @@ import {
   fixtureGatePlans, fixtureTargetPolicy, repositoryFixture,
   fixtureReviewedModuleCompositionBaseline, topologyFixture,
 } from "../../tests/helpers.mjs";
+import { reviewedPilotPolicy } from "../../tests/pilot-policy-fixture.mjs";
 import { parseBundleControlReview } from "../bundle-review.mjs";
 import { validateControlReviewChain } from "../authority.mjs";
 import { buildControlAttestationTemplate, sealControlAttestation } from "../attestation-template.mjs";
@@ -45,7 +46,7 @@ test("bundle and global reviews bind exact scaffold and topology rows", () => {
   assert.deepEqual([...global.programProfiles.keys()], [...new Set(fixture.bundleReview.bundle_control.gate_plans.map((entry) => entry.program_profile_id))]);
   assert.throws(() => bundle.identityControls.set("bar", {}), /immutable/);
 
-  for (const version of [3, 4, 6]) {
+  for (const version of [4, 5, 7]) {
     const wrongVersion = structuredClone(fixture.globalReview);
     wrongVersion.schema_version = version;
     resign(wrongVersion);
@@ -53,7 +54,7 @@ test("bundle and global reviews bind exact scaffold and topology rows", () => {
       () => parseGlobalControlReview(
         wrongVersion, fixture.scaffold, fixture.topology, fixture.inventory,
       ),
-      /schema_version 5/,
+      /schema_version 6/,
     );
   }
   for (const version of [3, 4, 6]) {
@@ -217,11 +218,11 @@ test("control composition and attestation are deterministic capabilities, not re
   };
   const candidate = composeControlCandidate(input);
   assert.deepEqual(candidate, composeControlCandidate(input));
-  assert.equal(candidate.schema_version, 5);
-  for (const version of [3, 4, 6]) {
+  assert.equal(candidate.schema_version, 6);
+  for (const version of [4, 5, 7]) {
     const wrongVersion = structuredClone(candidate);
     wrongVersion.schema_version = version;
-    assert.throws(() => parseControlCandidate(wrongVersion, candidate), /schema_version 5/);
+    assert.throws(() => parseControlCandidate(wrongVersion, candidate), /schema_version 6/);
   }
   assert.throws(
     () => composeControlCandidate({ ...input, reviewSet: { ...reviewSet } }),
@@ -243,7 +244,7 @@ test("control composition and attestation are deterministic capabilities, not re
   };
   const attestation = { ...attestationPayload, digest: evidenceDigest(attestationPayload) };
   const reviewed = validateControlReviewChain(candidate, attestation, candidate);
-  assert.equal(reviewed.controlValue.schema_version, 6);
+  assert.equal(reviewed.controlValue.schema_version, 7);
   assert.doesNotThrow(() => parseControlManifest(reviewed.controlValue, {
     inventory: fixture.inventory,
     reviewedTopology: fixture.topology,
@@ -279,6 +280,75 @@ test("control composition and attestation are deterministic capabilities, not re
   );
 });
 
+test("reviewed pilot policy survives the complete control authority chain exactly", () => {
+  const fixture = reviewFixture();
+  const directory = writeReviewSet(fixture);
+  const reviewSet = loadControlReviewSet(path.join(directory, "manifest.json"), fixture);
+  const candidate = composeControlCandidate({ ...fixture, reviewSet });
+  const attestationPayload = {
+    schema_version: 1,
+    kind: "runmat-builtin-migration-control-attestation",
+    authority: "reviewer-authored-development-input",
+    program: "RM-1064/C00-C07",
+    candidate_digest: candidate.digest,
+    input_digests: controlCandidateInputDigests(candidate),
+    review: { status: "reviewed", evidence: ["independent pilot authority review"] },
+  };
+  const attestation = { ...attestationPayload, digest: evidenceDigest(attestationPayload) };
+  const reviewed = validateControlReviewChain(candidate, attestation, candidate);
+  const control = parseControlManifest(reviewed.controlValue, {
+    inventory: fixture.inventory,
+    reviewedTopology: fixture.topology,
+    reviewedControl: reviewed,
+  });
+  assert.deepEqual(reviewSet.pilotPolicy.value, fixture.globalReview.pilot_policy);
+  assert.deepEqual(candidate.pilot_policy, fixture.globalReview.pilot_policy);
+  assert.deepEqual(reviewed.controlValue.pilot_policy, fixture.globalReview.pilot_policy);
+  assert.deepEqual(control.pilotPolicy.value, fixture.globalReview.pilot_policy);
+  assert.equal(control.pilotPolicyDigest, evidenceDigest(fixture.globalReview.pilot_policy));
+  assert.throws(() => control.pilotPolicy.waveByBundle.set("invented", 1), /immutable/);
+
+  const forgedCandidate = structuredClone(candidate);
+  forgedCandidate.pilot_policy.admission.maximum_elapsed_hours += 1;
+  resign(forgedCandidate);
+  assert.throws(
+    () => parseControlCandidate(forgedCandidate, candidate),
+    /differs from deterministic recomposition/,
+  );
+});
+
+test("control authoring rejects pilot policy count, membership, and digest drift", () => {
+  for (const [name, mutate, expected] of [
+    ["count", (global) => { global.pilot_policy.derived_counts.identities += 1; }, /derived identities does not match topology/],
+    ["membership", (global) => { global.pilot_policy.waves[0].bundle_ids = ["missing-bundle"]; }, /unknown topology bundle/],
+    ["review", (global) => { global.pilot_policy.review.status = "unreviewed"; }, /status must be reviewed/],
+  ]) {
+    const fixture = reviewFixture();
+    const directory = writeReviewSet(fixture);
+    const global = readJson(path.join(directory, "global.json"));
+    mutate(global);
+    resign(global);
+    writeJson(path.join(directory, "global.json"), global);
+    rewriteManifestDigests(directory);
+    assert.throws(
+      () => loadControlReviewSet(path.join(directory, "manifest.json"), fixture),
+      expected,
+      name,
+    );
+  }
+
+  const fixture = reviewFixture();
+  const directory = writeReviewSet(fixture);
+  const global = readJson(path.join(directory, "global.json"));
+  global.pilot_policy.admission.maximum_elapsed_hours += 1;
+  writeJson(path.join(directory, "global.json"), global);
+  rewriteManifestDigests(directory);
+  assert.throws(
+    () => loadControlReviewSet(path.join(directory, "manifest.json"), fixture),
+    /global control review digest mismatch/,
+  );
+});
+
 test("review templates, indexing, and attestation sealing form a non-overwriting authoring workflow", () => {
   const fixture = reviewFixture();
   const parent = fs.mkdtempSync(path.join(os.tmpdir(), "runmat-control-authoring-"));
@@ -286,6 +356,9 @@ test("review templates, indexing, and attestation sealing form a non-overwriting
   const initialized = initializeControlReviewTemplates(path.join(parent, "templates"), fixture.scaffold, fixture.topology);
   assert.equal(initialized.bundle_templates, 1);
   assert.ok(fs.existsSync(path.join(parent, "templates", "bundles", `${fixture.bundleId}.json`)));
+  const globalTemplate = readJson(path.join(parent, "templates", "global.json"));
+  assert.equal(globalTemplate.schema_version, 6);
+  assert.equal(globalTemplate.pilot_policy, null);
   assert.throws(
     () => initializeControlReviewTemplates(path.join(parent, "templates"), fixture.scaffold, fixture.topology),
     /exist|EEXIST/,
@@ -317,7 +390,7 @@ test("review templates, indexing, and attestation sealing form a non-overwriting
 test("candidate composition rejects cross-row defects before independent attestation", () => {
   const fixture = reviewFixture();
   for (const [label, mutate, message] of [
-    ["self prerequisite", (bundle) => { bundle.bundle_control.prerequisites = [{ bundle_id: fixture.bundleId, kind: "semantic" }]; }, /cannot depend on itself/],
+    ["self prerequisite", (bundle) => { bundle.bundle_control.prerequisites = [{ bundle_id: fixture.bundleId, kind: "semantic" }]; }, /cannot depend on itself|pilot prerequisite cannot be self-referential/],
     ["scope overlap", (bundle) => {
       bundle.bundle_control.additional_authored_write_set.push({
         kind: "file",
@@ -333,9 +406,11 @@ test("candidate composition rejects cross-row defects before independent attesta
     resign(bundle);
     writeJson(path.join(directory, "bundle.json"), bundle);
     rewriteManifestDigests(directory);
-    const reviewSet = loadControlReviewSet(path.join(directory, "manifest.json"), fixture);
     assert.throws(
-      () => composeControlCandidate({ ...fixture, reviewSet }),
+      () => {
+        const reviewSet = loadControlReviewSet(path.join(directory, "manifest.json"), fixture);
+        composeControlCandidate({ ...fixture, reviewSet });
+      },
       message,
       label,
     );
@@ -486,7 +561,7 @@ function reviewFixture() {
   const bundleReview = { ...bundlePayload, digest: evidenceDigest(bundlePayload) };
   const moduleCompositionBaseline = fixtureReviewedModuleCompositionBaseline();
   const globalPayload = {
-    schema_version: 5,
+    schema_version: 6,
     kind: "runmat-builtin-migration-global-control-review",
     authority: "reviewer-authored-development-input",
     program: "RM-1064/C00-C07",
@@ -509,6 +584,9 @@ function reviewFixture() {
         target_temp: { role: "target-temp", mount_path: "/private/tmp/runmat-integration-tmp", filesystem_id: "posix-dev:2", minimum_free_bytes: 1, pause_below_bytes: 2, maximum_observation_age_seconds: 60 },
       },
     } }, targets_must_be_disjoint: true, occt_default: "disabled-unless-affected" },
+    pilot_policy: reviewedPilotPolicy(
+      topology, new Map([[bundleId, bundleControl.prerequisites]]),
+    ),
     review: { status: "reviewed", evidence: ["fixture global review"] },
   };
   const globalReview = { ...globalPayload, digest: evidenceDigest(globalPayload) };

@@ -67,7 +67,7 @@ export function indexControlReviews(reviewDirectory, outputDirectory, { scaffold
 
 function globalTemplate(scaffold, topology) {
   return {
-    schema_version: 5,
+    schema_version: 6,
     kind: "runmat-builtin-migration-global-control-review",
     authority: "reviewer-authored-development-input",
     program: PROGRAM,
@@ -96,6 +96,7 @@ function globalTemplate(scaffold, topology) {
     exception_manifest: { entries: [], review: unreviewed() },
     target_policy: null,
     storage_policy: { host_profiles: {}, targets_must_be_disjoint: true, occt_default: "disabled-unless-affected" },
+    pilot_policy: null,
     review: unreviewed(),
   };
 }

@@ -23,8 +23,8 @@ export function parseGlobalControlReview(value, scaffoldValue, topology, invento
   const scaffold = assertValidatedControlOverlayScaffold(scaffoldValue);
   assertValidatedTopologyView(topology);
   assertScaffoldTopologyBinding(scaffold, topology);
-  kind(value, 5, GLOBAL_CONTROL_REVIEW_KIND, "global control review");
-  exact(value, ["schema_version", "kind", "authority", "program", "bindings", "program_profiles", "integration_products", "module_composition_baseline", "migration_findings", "exception_manifest", "target_policy", "storage_policy", "review", "digest"], "global control review");
+  kind(value, 6, GLOBAL_CONTROL_REVIEW_KIND, "global control review");
+  exact(value, ["schema_version", "kind", "authority", "program", "bindings", "program_profiles", "integration_products", "module_composition_baseline", "migration_findings", "exception_manifest", "target_policy", "storage_policy", "pilot_policy", "review", "digest"], "global control review");
   if (value.authority !== "reviewer-authored-development-input" || value.program !== PROGRAM) throw new Error("global control review has invalid authority or program");
   parseArtifactBindings(value.bindings, scaffold, topology);
   const programProfiles = parseProgramProfiles(value.program_profiles);
@@ -47,12 +47,16 @@ export function parseGlobalControlReview(value, scaffoldValue, topology, invento
   const targetPolicy = parseTargetPolicy(value.target_policy);
   const executionTargets = targetPolicy.migrationExecutionTargets;
   validateStorageTargetCoverage(value.storage_policy, executionTargets);
+  if (!value.pilot_policy || typeof value.pilot_policy !== "object"
+    || Array.isArray(value.pilot_policy)) {
+    throw new Error("global control review pilot_policy must be a non-null object");
+  }
   parseReviewedEvidence(value.review, "global control review");
   assertEvidenceDigest(value, "global control review");
   const parsed = deepImmutable({
     value, digest: value.digest, programProfiles, integrationProducts,
     moduleCompositionBaseline, reviewedModuleCompositionBaseline, migrationFindings,
-    targetPolicy, executionTargets,
+    targetPolicy, executionTargets, pilotPolicyValue: value.pilot_policy,
   });
   VALIDATED_GLOBAL_REVIEWS.add(parsed);
   return parsed;

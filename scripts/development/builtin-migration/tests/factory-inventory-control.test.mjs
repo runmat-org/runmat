@@ -302,10 +302,10 @@ test("compiled migration findings and non-identity legacy spec keys remain expli
 test("control is closed, reviewed, reciprocal, and rejects case-fold ambiguity", () => {
   const fixture = controlledFixture();
   assert.equal(fixture.control.identities.get("foo").public_identity.primary_spelling.spelling, "foo");
-  const legacy = structuredClone(fixture.controlValue); legacy.schema_version = 4;
-  assert.throws(() => parseFixtureControl(fixture, legacy), /schema_version 6/);
-  const future = structuredClone(fixture.controlValue); future.schema_version = 7;
-  assert.throws(() => parseFixtureControl(fixture, future), /schema_version 6/);
+  const legacy = structuredClone(fixture.controlValue); legacy.schema_version = 6;
+  assert.throws(() => parseFixtureControl(fixture, legacy), /schema_version 7/);
+  const future = structuredClone(fixture.controlValue); future.schema_version = 8;
+  assert.throws(() => parseFixtureControl(fixture, future), /schema_version 7/);
   const extra = structuredClone(fixture.controlValue); extra.unreviewed = true;
   assert.throws(() => parseFixtureControl(fixture, extra), /fields must be exactly/);
   const collision = structuredClone(fixture.controlValue); collision.identity_controls.Foo = structuredClone(collision.identity_controls.foo);
@@ -520,10 +520,12 @@ test("control draft is deterministic, complete, and leaves review judgments unre
   const first = buildControlDraft(fixture.inventory);
   const second = buildControlDraft(fixture.inventory);
   assert.deepEqual(first, second);
+  assert.equal(first.schema_version, 2);
   assert.equal(first.authority, "unreviewed-scaffold-only");
   assert.deepEqual(first.bundle_drafts, []);
   assert.deepEqual(first.identity_rows.map((entry) => entry.identity), fixture.inventory.identities.map((entry) => entry.identity).sort());
   assert.ok(first.identity_rows.every((entry) => entry.review.status === "unreviewed" && entry.unresolved_fields.includes("topology_disposition") && entry.unresolved_fields.includes("maturity")));
+  assert.ok(first.unresolved_control_fields.includes("pilot_policy"));
   assert.doesNotThrow(() => parseControlDraft(first, fixture.inventory));
 });
 
@@ -541,6 +543,8 @@ test("control draft rejects inferred facts, omissions, tampering, and review cla
   assert.throws(() => parseControlDraft(mutateAndSeal((value) => { value.identity_rows.pop(); }), fixture.inventory), /nonempty array|exactly cover/);
   assert.throws(() => parseControlDraft(mutateAndSeal((value) => { value.identity_rows[0].inventory_row_digest = `sha256:${"0".repeat(64)}`; }), fixture.inventory), /differ from the inventory/);
   assert.throws(() => parseControlDraft(mutateAndSeal((value) => { value.review = { status: "reviewed", evidence: ["self claim"] }; }), fixture.inventory), /cannot claim review/);
+  assert.throws(() => parseControlDraft(mutateAndSeal((value) => { value.schema_version = 1; }), fixture.inventory), /schema_version 2/);
+  assert.throws(() => parseControlDraft(mutateAndSeal((value) => { value.schema_version = 3; }), fixture.inventory), /schema_version 2/);
 });
 
 test("reviewed control freeze binds the exact draft and baseline inventory", () => {

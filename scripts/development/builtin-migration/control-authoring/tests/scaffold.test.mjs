@@ -38,7 +38,7 @@ test("builds a deterministic topology-bound scaffold with no reviewed decisions"
   const second = buildControlOverlayScaffold(fixture.inventory, fixture.draft, fixture.topology);
 
   assert.deepEqual(first, second);
-  assert.equal(first.schema_version, 4);
+  assert.equal(first.schema_version, 5);
   assert.equal(first.bindings.inventory_digest, fixture.inventory.digest);
   assert.equal(first.bindings.control_draft_digest, fixture.draft.digest);
   assert.equal(first.bindings.reviewed_topology_digest, fixture.topology.digest);
@@ -90,14 +90,19 @@ test("builds a deterministic topology-bound scaffold with no reviewed decisions"
   assert.ok(Object.values(math.decisions).every((decision) => decision.status === "unresolved"));
   assert.equal(math.decisions.module_composition_transition.status, "unresolved");
   assert.equal(first.decisions.module_composition_baseline.status, "unresolved");
+  assert.equal(first.decisions.pilot_policy.status, "unresolved");
   assert.ok(Object.isFrozen(first));
   assert.deepEqual(parseControlOverlayScaffold(first, fixture.inventory, fixture.draft, fixture.topology), first);
-  const legacy = structuredClone(first);
-  legacy.schema_version = 3;
-  assert.throws(
-    () => parseControlOverlayScaffold(legacy, fixture.inventory, fixture.draft, fixture.topology),
-    /schema_version 4/,
-  );
+  for (const version of [4, 6]) {
+    const wrongVersion = structuredClone(first);
+    wrongVersion.schema_version = version;
+    assert.throws(
+      () => parseControlOverlayScaffold(
+        wrongVersion, fixture.inventory, fixture.draft, fixture.topology,
+      ),
+      /schema_version 5/,
+    );
+  }
 });
 
 test("keeps alias and internal target proposals separate from canonical authority", () => {
