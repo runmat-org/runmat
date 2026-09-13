@@ -148,7 +148,7 @@ pub(super) async fn run_remote_driver(
     }
     let input_locations = inputs.objects.clone();
     let request = ProgramExecutionRequest::from_parts(descriptor, inputs).map_err(protocol)?;
-    let mut checkpoint_sequence = match bootstrap.checkpoint.as_ref() {
+    let (mut checkpoint_sequence, closure_catalog) = match bootstrap.checkpoint.as_ref() {
         Some(download) => {
             if download.kind != "checkpoint" {
                 return Err(protocol(
@@ -169,14 +169,14 @@ pub(super) async fn run_remote_driver(
                 &bootstrap.project_revision,
                 &request,
             )?;
-            checkpoint.sequence
+            (checkpoint.sequence, checkpoint.closure_catalog)
         }
-        None => 0,
+        None => (0, None),
     };
     let mut input_objects = Vec::with_capacity(input_locations.len());
     for location in input_locations {
         let artifact = control
-            .input_artifact(&config.authority, &location.artifact_id)
+            .execution_artifact(&config.authority, &location.artifact_id)
             .await
             .map_err(protocol)?;
         if artifact.artifact_id != location.artifact_id || artifact.kind != "input" {
@@ -198,6 +198,22 @@ pub(super) async fn run_remote_driver(
         object.validate().map_err(protocol)?;
         input_objects.push(object);
     }
+    let recovered = match closure_catalog.as_ref() {
+        Some(location) => Some(
+            super::recovery::restore(control.as_ref(), &run_key, &config.authority, location)
+                .await?,
+        ),
+        None => None,
+    };
+    if let Some(recovered) = &recovered {
+        input_objects.extend(recovered.objects.iter().cloned());
+        if !input_objects
+            .iter()
+            .any(|object| object.reference == recovered.root)
+        {
+            return Err(protocol("restored recovery closure omits its root object"));
+        }
+    }
     let materialized_project = (bootstrap.desired_worker_count == 0
         && bundle.requires_source_project())
     .then(|| crate::materialized_project::MaterializedProject::from_bundle(&bundle))
@@ -216,6 +232,7 @@ pub(super) async fn run_remote_driver(
             &bootstrap.project_revision,
             &request,
             RemoteDriverCheckpointPhase::ReadyToExecute,
+            closure_catalog.clone(),
         )?,
     )
     .await?;
@@ -241,6 +258,7 @@ pub(super) async fn run_remote_driver(
             &bootstrap.project_revision,
             &request,
             execution_start_phase(&request),
+            closure_catalog,
         )?,
     )
     .await?;

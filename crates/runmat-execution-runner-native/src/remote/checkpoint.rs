@@ -1,12 +1,15 @@
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
+use runmat_execution::value::ValueRefKind;
 use runmat_execution::Digest;
-use runmat_execution_artifact::{ExecutableForm, ProgramExecutionRequest};
+use runmat_execution_artifact::{
+    ExecutableForm, ProgramExecutionObjectLocation, ProgramExecutionRequest,
+};
 use runmat_execution_transport_native::control::{CheckpointDisposition, DriverAuthority};
 use serde::{Deserialize, Serialize};
 
 use crate::{NativeExecutionError, NativeExecutionResult};
 
-const REMOTE_DRIVER_CHECKPOINT_PREFIX: &[u8] = b"runmat-remote-driver-checkpoint/v1\0";
+const REMOTE_DRIVER_CHECKPOINT_PREFIX: &[u8] = b"runmat-remote-driver-checkpoint\0";
 const REMOTE_DRIVER_CHECKPOINT_LIMITS: CanonicalLimits =
     CanonicalLimits::new(256 * 1024, 4096, 1024, 16);
 
@@ -46,6 +49,7 @@ pub(super) struct RemoteDriverCheckpoint {
     project_revision: String,
     request_digest: Digest,
     pub(super) phase: RemoteDriverCheckpointPhase,
+    pub(super) closure_catalog: Option<ProgramExecutionObjectLocation>,
 }
 
 impl RemoteDriverCheckpoint {
@@ -55,6 +59,7 @@ impl RemoteDriverCheckpoint {
         project_revision: &str,
         request: &ProgramExecutionRequest,
         phase: RemoteDriverCheckpointPhase,
+        closure_catalog: Option<ProgramExecutionObjectLocation>,
     ) -> NativeExecutionResult<Self> {
         let checkpoint = Self {
             schema_version: 1,
@@ -64,6 +69,7 @@ impl RemoteDriverCheckpoint {
             project_revision: project_revision.into(),
             request_digest: request_digest(request)?,
             phase,
+            closure_catalog,
         };
         checkpoint.validate_content()?;
         Ok(checkpoint)
@@ -121,6 +127,17 @@ impl RemoteDriverCheckpoint {
         {
             return Err(protocol("remote driver checkpoint is malformed"));
         }
+        if let Some(catalog) = &self.closure_catalog {
+            catalog.validate().map_err(protocol)?;
+            if catalog.reference.kind != ValueRefKind::ResultObject
+                || catalog.reference.authorization_scope != self.run_id
+                || !self.phase.is_resume_safe()
+            {
+                return Err(protocol(
+                    "remote driver checkpoint closure catalog is outside its safe run authority",
+                ));
+            }
+        }
         Ok(())
     }
 }
@@ -136,15 +153,7 @@ pub(super) const fn execution_start_phase(
 }
 
 fn request_digest(request: &ProgramExecutionRequest) -> NativeExecutionResult<Digest> {
-    request.validate().map_err(protocol)?;
-    let bytes = encode_contract(
-        REMOTE_DRIVER_CHECKPOINT_PREFIX,
-        "program-execution-request",
-        request,
-        REMOTE_DRIVER_CHECKPOINT_LIMITS,
-    )
-    .map_err(protocol)?;
-    Ok(Digest::sha256(bytes))
+    request.canonical_digest().map_err(protocol)
 }
 
 fn protocol(error: impl std::fmt::Display) -> NativeExecutionError {
@@ -153,6 +162,8 @@ fn protocol(error: impl std::fmt::Display) -> NativeExecutionError {
 
 #[cfg(test)]
 mod tests {
+    use runmat_execution::identity::ValueId;
+    use runmat_execution::value::ValueRef;
     use runmat_execution::{OutputContract, ProgramEnvironment, ProgramRevision};
     use runmat_execution_artifact::{
         ProgramArtifact, ProgramBuildRecipe, ProgramTarget, PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
@@ -214,6 +225,24 @@ mod tests {
         }
     }
 
+    fn closure_catalog(run_id: &str) -> ProgramExecutionObjectLocation {
+        ProgramExecutionObjectLocation {
+            reference: ValueRef {
+                schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1,
+                id: ValueId::derive(&[b"closure-catalog"]),
+                logical_digest: digest("closure-catalog"),
+                encoded_length: 128,
+                media_type: "application/vnd.runmat.execution-object-closure+json".into(),
+                value_schema: "runmat.execution-object-closure.v1".into(),
+                encryption_context: digest("closure-encryption"),
+                kind: ValueRefKind::ResultObject,
+                authorization_scope: run_id.into(),
+                resident_fence: None,
+            },
+            artifact_id: "closure-artifact".into(),
+        }
+    }
+
     #[test]
     fn replacement_accepts_only_an_older_safe_exact_checkpoint() {
         let analysis_request = request(ExecutableForm::AnalysisWorkload);
@@ -223,6 +252,7 @@ mod tests {
             "revision",
             &analysis_request,
             RemoteDriverCheckpointPhase::ReplayableExecutionStarted,
+            None,
         )
         .unwrap();
         let decoded =
@@ -253,5 +283,38 @@ mod tests {
             execution_start_phase(&request(ExecutableForm::InterpreterBytecodeV1)).disposition(),
             CheckpointDisposition::Indeterminate
         );
+    }
+
+    #[test]
+    fn recovery_catalog_is_bound_to_a_safe_phase_and_exact_run() {
+        let request = request(ExecutableForm::AnalysisWorkload);
+        RemoteDriverCheckpoint::new(
+            8,
+            &authority(2),
+            "revision",
+            &request,
+            RemoteDriverCheckpointPhase::ReplayableExecutionStarted,
+            Some(closure_catalog("run")),
+        )
+        .unwrap();
+
+        assert!(RemoteDriverCheckpoint::new(
+            8,
+            &authority(2),
+            "revision",
+            &request,
+            RemoteDriverCheckpointPhase::EffectsMayHaveStarted,
+            Some(closure_catalog("run")),
+        )
+        .is_err());
+        assert!(RemoteDriverCheckpoint::new(
+            8,
+            &authority(2),
+            "revision",
+            &request,
+            RemoteDriverCheckpointPhase::ReplayableExecutionStarted,
+            Some(closure_catalog("another-run")),
+        )
+        .is_err());
     }
 }

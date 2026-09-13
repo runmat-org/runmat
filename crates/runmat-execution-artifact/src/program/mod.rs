@@ -19,7 +19,9 @@ pub use target::{
     NativeTargetIdentity, ProgramTarget, ProgramTargetCohort, PROGRAM_TARGET_SCHEMA_VERSION,
 };
 pub use transport::{
-    ProgramExecutionInputs, ProgramExecutionObject, ProgramExecutionObjectLocation,
-    ProgramExecutionOutputs, EXTERNALIZED_VALUE_MEDIA_TYPE, EXTERNALIZED_VALUE_SCHEMA,
-    MAX_PROGRAM_EXECUTION_OBJECT_BYTES, MAX_PROGRAM_EXECUTION_OBJECT_TOTAL_BYTES,
+    ProgramExecutionInputs, ProgramExecutionObject, ProgramExecutionObjectClosure,
+    ProgramExecutionObjectLocation, ProgramExecutionOutputs, EXTERNALIZED_VALUE_MEDIA_TYPE,
+    EXTERNALIZED_VALUE_SCHEMA, MAX_PROGRAM_EXECUTION_OBJECT_BYTES,
+    MAX_PROGRAM_EXECUTION_OBJECT_TOTAL_BYTES, PROGRAM_EXECUTION_OBJECT_CLOSURE_MEDIA_TYPE,
+    PROGRAM_EXECUTION_OBJECT_CLOSURE_SCHEMA_VERSION, PROGRAM_EXECUTION_OBJECT_CLOSURE_VALUE_SCHEMA,
 };

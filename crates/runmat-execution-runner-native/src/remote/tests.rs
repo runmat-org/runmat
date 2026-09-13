@@ -15,8 +15,8 @@ use runmat_execution_artifact::encryption::{
 use runmat_execution_artifact::{
     ExecutableForm, ExecutionBundle, ExecutionBundleBuilder, ProgramArtifact, ProgramBuildRecipe,
     ProgramExecutionDescriptor, ProgramExecutionInputs, ProgramExecutionObject,
-    ProgramExecutionOutputs, ProgramExecutionRequest, ProgramExecutionResponse,
-    PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+    ProgramExecutionObjectClosure, ProgramExecutionObjectLocation, ProgramExecutionOutputs,
+    ProgramExecutionRequest, ProgramExecutionResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
 };
 use runmat_execution_transport_native::control::{
     CheckpointDisposition, DriverArtifactDownload, DriverArtifactKind, DriverAuthority,
@@ -38,6 +38,7 @@ use super::driver::run_remote_driver;
 #[derive(Default)]
 struct FakeState {
     downloads: BTreeMap<String, Vec<u8>>,
+    artifact_kinds: BTreeMap<String, String>,
     stored: Vec<FakeStoredArtifact>,
     transitions: Vec<(DriverRunTarget, Option<String>)>,
     usage: Vec<u64>,
@@ -96,6 +97,32 @@ impl DriverControlPlane for FakeControl {
             return Err(TransportError::Integrity);
         }
         Ok(bytes)
+    }
+
+    async fn execution_artifact(
+        &self,
+        _authority: &DriverAuthority,
+        artifact_id: &str,
+    ) -> TransportResult<DriverArtifactDownload> {
+        let state = self.state.lock().unwrap();
+        let bytes = state
+            .downloads
+            .get(artifact_id)
+            .ok_or_else(|| TransportError::Unavailable("missing fixture artifact".into()))?;
+        let kind = state
+            .artifact_kinds
+            .get(artifact_id)
+            .ok_or(TransportError::Integrity)?;
+        Ok(DriverArtifactDownload {
+            artifact_id: artifact_id.into(),
+            kind: kind.clone(),
+            ciphertext_digest: ciphertext_digest(bytes),
+            ciphertext_size_bytes: bytes.len() as u64,
+            media_type: "application/vnd.runmat.execution+ciphertext".into(),
+            method: "GET".into(),
+            url: format!("memory://{artifact_id}"),
+            headers: BTreeMap::new(),
+        })
     }
 
     async fn store_artifact(
@@ -295,6 +322,86 @@ async fn remote_driver_commits_verified_externalized_results() {
     committed.validate().unwrap();
     assert_eq!(committed.objects.len(), 1);
     assert_eq!(committed.objects[0].artifact_id, "stored-1");
+}
+
+#[tokio::test]
+async fn replacement_restores_a_verified_run_scoped_object_closure() {
+    let run_id = "run-recovery-closure";
+    let run_key = RunKeyMaterial::from_entropy([57; 32]).unwrap();
+    let first = result_object(run_id, b"first recovered object");
+    let second = result_object(run_id, b"second recovered object");
+    let first_location = ProgramExecutionObjectLocation {
+        reference: first.reference.clone(),
+        artifact_id: "recovered-object-1".into(),
+    };
+    let second_location = ProgramExecutionObjectLocation {
+        reference: second.reference.clone(),
+        artifact_id: "recovered-object-2".into(),
+    };
+    let closure = ProgramExecutionObjectClosure::new(
+        second.reference.clone(),
+        vec![second_location.clone(), first_location.clone()],
+    )
+    .unwrap();
+    let catalog = result_object(run_id, &closure.canonical_bytes().unwrap());
+    let catalog_location = ProgramExecutionObjectLocation {
+        reference: catalog.reference.clone(),
+        artifact_id: "recovery-catalog".into(),
+    };
+    let encrypted = [
+        (&catalog_location, catalog.bytes.as_slice()),
+        (&first_location, first.bytes.as_slice()),
+        (&second_location, second.bytes.as_slice()),
+    ]
+    .into_iter()
+    .map(|(location, bytes)| {
+        (
+            location.artifact_id.clone(),
+            seal_object(&run_key, run_id, EncryptionPurpose::Result, bytes).unwrap(),
+        )
+    })
+    .collect::<BTreeMap<_, _>>();
+    let control = FakeControl {
+        bootstrap: unused_bootstrap(),
+        state: Mutex::new(FakeState {
+            artifact_kinds: encrypted
+                .keys()
+                .map(|artifact_id| (artifact_id.clone(), "result".into()))
+                .collect(),
+            downloads: encrypted,
+            ..Default::default()
+        }),
+    };
+    let authority = DriverAuthority {
+        server_url: "https://control.invalid".into(),
+        run_id: run_id.into(),
+        org_id: "org-1".into(),
+        project_id: "project-1".into(),
+        allocation_lease_id: "allocation-1".into(),
+        driver_lease_id: "driver-2".into(),
+        fencing_token: 2,
+        credential: "credential".into(),
+    };
+
+    let restored = super::recovery::restore(&control, &run_key, &authority, &catalog_location)
+        .await
+        .unwrap();
+    let mut expected = vec![first, second];
+    expected.sort_by_key(|object| object.reference.id);
+    assert_eq!(restored.root, second_location.reference);
+    assert_eq!(restored.objects, expected);
+
+    control
+        .state
+        .lock()
+        .unwrap()
+        .artifact_kinds
+        .insert(second_location.artifact_id.clone(), "input".into());
+    assert!(
+        super::recovery::restore(&control, &run_key, &authority, &catalog_location)
+            .await
+            .is_err()
+    );
 }
 
 #[tokio::test]
@@ -672,6 +779,7 @@ async fn run_encrypted_remote_request_with_prior_sequence(
             &project_revision,
             &request,
             super::checkpoint::RemoteDriverCheckpointPhase::ReadyToExecute,
+            None,
         )
         .unwrap();
         let ciphertext = seal_object(
@@ -883,5 +991,37 @@ fn download(index: usize, kind: &str, bytes: &[u8]) -> DriverArtifactDownload {
         method: "GET".into(),
         url: format!("memory://download-{index}"),
         headers: BTreeMap::new(),
+    }
+}
+
+fn result_object(run_id: &str, bytes: &[u8]) -> ProgramExecutionObject {
+    ProgramExecutionObject {
+        reference: runmat_execution::value::ValueRef {
+            schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1,
+            id: runmat_execution::identity::ValueId::derive(&[b"recovery-object", bytes]),
+            logical_digest: Digest::sha256(bytes),
+            encoded_length: bytes.len() as u64,
+            media_type: "application/vnd.runmat.analysis-object".into(),
+            value_schema: "runmat.analysis-object.v1".into(),
+            encryption_context: Digest::sha256(b"recovery-object-encryption"),
+            kind: runmat_execution::value::ValueRefKind::ResultObject,
+            authorization_scope: run_id.into(),
+            resident_fence: None,
+        },
+        bytes: bytes.to_vec(),
+    }
+}
+
+fn unused_bootstrap() -> DriverBootstrap {
+    DriverBootstrap {
+        project_revision: "unused".into(),
+        endpoint_fingerprint: "unused".into(),
+        run_key_envelope: Vec::new(),
+        artifacts: Vec::new(),
+        checkpoint: None,
+        cancellation_requested: false,
+        driver_resources: resource_request(),
+        desired_worker_count: 0,
+        worker_resources: resource_request(),
     }
 }

@@ -20,6 +20,7 @@ mod pool_values;
 mod pool_wait;
 mod protocol;
 mod quic_channel;
+mod recovery;
 mod relay_channel;
 mod result_objects;
 mod route;

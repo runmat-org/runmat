@@ -165,7 +165,7 @@ impl DriverControlPlane for HttpDriverControlPlane {
         Ok(bytes)
     }
 
-    async fn input_artifact(
+    async fn execution_artifact(
         &self,
         authority: &DriverAuthority,
         artifact_id: &str,
@@ -192,7 +192,7 @@ impl DriverControlPlane for HttpDriverControlPlane {
             .map_err(|error| TransportError::Unavailable(error.to_string()))?;
         if !response.status().is_success() {
             return Err(TransportError::Unavailable(format!(
-                "input artifact authorization returned {}",
+                "execution artifact authorization returned {}",
                 response.status()
             )));
         }

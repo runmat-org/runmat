@@ -14,6 +14,11 @@ use crate::{ArtifactError, ArtifactResult};
 pub const MAX_PROGRAM_EXECUTION_OBJECT_BYTES: u64 = 64 * 1024 * 1024;
 pub const MAX_PROGRAM_EXECUTION_OBJECT_TOTAL_BYTES: u64 =
     MAX_PROGRAM_EXECUTION_OBJECT_BYTES * MAX_PROGRAM_EXECUTION_RESULT_OBJECTS as u64;
+pub const PROGRAM_EXECUTION_OBJECT_CLOSURE_SCHEMA_VERSION: u16 = 1;
+pub const PROGRAM_EXECUTION_OBJECT_CLOSURE_MEDIA_TYPE: &str =
+    "application/vnd.runmat.execution-object-closure+json";
+pub const PROGRAM_EXECUTION_OBJECT_CLOSURE_VALUE_SCHEMA: &str =
+    "runmat.execution-object-closure.v1";
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProgramExecutionObject {
     pub reference: ValueRef,
@@ -161,6 +166,85 @@ impl ProgramExecutionObjectLocation {
             ));
         }
         Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProgramExecutionObjectClosure {
+    pub schema_version: u16,
+    pub root: ValueRef,
+    pub objects: Vec<ProgramExecutionObjectLocation>,
+}
+
+impl ProgramExecutionObjectClosure {
+    pub fn new(
+        root: ValueRef,
+        mut objects: Vec<ProgramExecutionObjectLocation>,
+    ) -> ArtifactResult<Self> {
+        objects.sort_by_key(|object| object.reference.id);
+        let closure = Self {
+            schema_version: PROGRAM_EXECUTION_OBJECT_CLOSURE_SCHEMA_VERSION,
+            root,
+            objects,
+        };
+        closure.validate()?;
+        Ok(closure)
+    }
+
+    pub fn validate(&self) -> ArtifactResult<()> {
+        if self.schema_version != PROGRAM_EXECUTION_OBJECT_CLOSURE_SCHEMA_VERSION
+            || self.root.kind != ValueRefKind::ResultObject
+        {
+            return Err(ArtifactError::Invalid(
+                "program execution object closure uses an unsupported schema or root kind".into(),
+            ));
+        }
+        validate_locations(&self.objects, ValueRefKind::ResultObject, "closure")?;
+        if self.objects.is_empty()
+            || self
+                .objects
+                .windows(2)
+                .any(|pair| pair[0].reference.id >= pair[1].reference.id)
+            || !self
+                .objects
+                .iter()
+                .any(|object| object.reference == self.root)
+        {
+            return Err(ArtifactError::Invalid(
+                "program execution object closure is empty, unordered, or omits its root".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn canonical_bytes(&self) -> ArtifactResult<Vec<u8>> {
+        self.validate()?;
+        let bytes =
+            serde_json::to_vec(self).map_err(|error| ArtifactError::Encoding(error.to_string()))?;
+        if bytes.len() as u64 > MAX_PROGRAM_EXECUTION_OBJECT_BYTES {
+            return Err(ArtifactError::Limit(
+                "program execution object closure exceeds its byte bound".into(),
+            ));
+        }
+        Ok(bytes)
+    }
+
+    pub fn from_canonical_bytes(bytes: &[u8]) -> ArtifactResult<Self> {
+        if bytes.is_empty() || bytes.len() as u64 > MAX_PROGRAM_EXECUTION_OBJECT_BYTES {
+            return Err(ArtifactError::Limit(
+                "program execution object closure is empty or exceeds its byte bound".into(),
+            ));
+        }
+        let closure: Self = serde_json::from_slice(bytes)
+            .map_err(|error| ArtifactError::Encoding(error.to_string()))?;
+        closure.validate()?;
+        if closure.canonical_bytes()? != bytes {
+            return Err(ArtifactError::Identity(
+                "program execution object closure is not canonically encoded".into(),
+            ));
+        }
+        Ok(closure)
     }
 }
 
@@ -539,5 +623,44 @@ mod tests {
             Vec::new(),
         )
         .unwrap();
+    }
+
+    #[test]
+    fn object_closure_is_canonical_complete_and_scope_bound() {
+        let first = result_reference(b"first");
+        let second = result_reference(b"second");
+        let closure = ProgramExecutionObjectClosure::new(
+            second.clone(),
+            vec![
+                ProgramExecutionObjectLocation {
+                    reference: second.clone(),
+                    artifact_id: "second-artifact".into(),
+                },
+                ProgramExecutionObjectLocation {
+                    reference: first,
+                    artifact_id: "first-artifact".into(),
+                },
+            ],
+        )
+        .unwrap();
+        let bytes = closure.canonical_bytes().unwrap();
+        assert_eq!(
+            ProgramExecutionObjectClosure::from_canonical_bytes(&bytes).unwrap(),
+            closure
+        );
+
+        let mut missing_root = closure.clone();
+        missing_root
+            .objects
+            .retain(|object| object.reference != second);
+        assert!(missing_root.validate().is_err());
+
+        let mut wrong_scope = closure.clone();
+        wrong_scope.objects[0].reference.authorization_scope = "other-run".into();
+        assert!(wrong_scope.validate().is_err());
+
+        let mut reordered = closure;
+        reordered.objects.reverse();
+        assert!(reordered.validate().is_err());
     }
 }

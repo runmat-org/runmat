@@ -1,6 +1,8 @@
 use std::collections::BTreeSet;
 
+use minicbor::Encoder;
 use runmat_execution::value::{ValueLimits, ValuePayload, ValueRef, ValueRefKind};
+use runmat_execution::Digest;
 use serde::{Deserialize, Serialize};
 
 use super::{ExecutableForm, ProgramArtifact, ProgramBuildRecipe, ProgramExecutionInputs};
@@ -117,6 +119,38 @@ impl ProgramExecutionRequest {
         self.validate()?;
         self.artifact.target.validate_for_portable_host()
     }
+
+    pub fn canonical_digest(&self) -> ArtifactResult<Digest> {
+        self.validate()?;
+        let recipe_id = self.recipe.id()?;
+        let function = u64::try_from(self.function)
+            .map_err(|_| ArtifactError::Limit("program function index exceeds u64".into()))?;
+        let argument_count = u64::try_from(self.arguments.len())
+            .map_err(|_| ArtifactError::Limit("program argument count exceeds u64".into()))?;
+        let mut bytes = b"runmat-program-execution-request\0".to_vec();
+        let mut encoder = Encoder::new(&mut bytes);
+        encoder
+            .array(6)
+            .and_then(|encoder| encoder.u16(self.schema_version))
+            .and_then(|encoder| encoder.bytes(recipe_id.0.bytes()))
+            .and_then(|encoder| encoder.bytes(self.artifact.id.0.bytes()))
+            .and_then(|encoder| encoder.u64(function))
+            .and_then(|encoder| encoder.u16(self.requested_outputs))
+            .and_then(|encoder| encoder.array(argument_count))
+            .map_err(encoding)?;
+        for argument in &self.arguments {
+            let argument = serde_json::to_vec(argument)
+                .map_err(|error| ArtifactError::Encoding(error.to_string()))?;
+            encoder
+                .bytes(Digest::sha256(argument).bytes())
+                .map_err(encoding)?;
+        }
+        Ok(Digest::sha256(bytes))
+    }
+}
+
+fn encoding(error: minicbor::encode::Error<std::convert::Infallible>) -> ArtifactError {
+    ArtifactError::Encoding(error.to_string())
 }
 
 fn entrypoint_matches(form: ExecutableForm, function: usize, entrypoint: &str) -> bool {
@@ -319,6 +353,32 @@ mod tests {
         let mut outputs = request();
         outputs.requested_outputs = 2;
         assert!(outputs.validate().is_err());
+    }
+
+    #[test]
+    fn canonical_request_digest_is_exact_without_a_small_envelope_limit() {
+        let mut large = request();
+        large.arguments.push(ValuePayload::Inline(Box::new(
+            runmat_execution::value::InlineValue::String("x".repeat(300_000)),
+        )));
+        let digest = large.canonical_digest().unwrap();
+        let mut changed = large;
+        changed.arguments[0] = ValuePayload::Inline(Box::new(
+            runmat_execution::value::InlineValue::String(format!("{}y", "x".repeat(299_999))),
+        ));
+        assert_ne!(digest, changed.canonical_digest().unwrap());
+
+        let mut referenced = request();
+        let mut reference = result_reference(b"argument");
+        reference.kind = ValueRefKind::DriverObject;
+        referenced
+            .arguments
+            .push(ValuePayload::Object(Box::new(reference.clone())));
+        let digest = referenced.canonical_digest().unwrap();
+        if let ValuePayload::Object(reference) = &mut referenced.arguments[0] {
+            reference.authorization_scope = "another-scope".into();
+        }
+        assert_ne!(digest, referenced.canonical_digest().unwrap());
     }
 
     #[test]

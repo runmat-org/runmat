@@ -125,14 +125,14 @@ pub trait DriverControlPlane: Send + Sync {
         source_sequence: u64,
     ) -> TransportResult<bool>;
     async fn download(&self, artifact: &DriverArtifactDownload) -> TransportResult<Vec<u8>>;
-    async fn input_artifact(
+    async fn execution_artifact(
         &self,
         authority: &DriverAuthority,
         artifact_id: &str,
     ) -> TransportResult<DriverArtifactDownload> {
         let _ = (authority, artifact_id);
         Err(TransportError::Unavailable(
-            "independent input artifact retrieval is not implemented".into(),
+            "run-scoped execution artifact retrieval is not implemented".into(),
         ))
     }
     async fn store_artifact(
