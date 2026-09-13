@@ -1603,6 +1603,7 @@ fn structural_frequency_entries_execute_independently_and_assemble_in_plan_order
         step_id: runmat_analysis_core::ProcedureStepId("frequency_response".into()),
         backend: ComputeBackend::Cpu,
         formulation_requirement: FormulationRequirement::Experimental,
+        observation_execution: crate::results::observation::ObservationExecutionPolicy::scalable(),
         plan,
         solver: StructuralFrequencySolverPlan::Direct {
             policy: DirectHarmonicPolicy::default(),

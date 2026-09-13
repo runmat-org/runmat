@@ -18,6 +18,7 @@ mod observation_history_access;
 mod observation_history_checkpoint;
 mod observation_history_task;
 mod observation_partition;
+mod observation_source;
 mod resource_usage;
 mod response;
 mod result_publication;
@@ -127,6 +128,7 @@ pub use observation_partition::{
     PreparedStructuralObservationFanout, PreparedStructuralObservationPartition,
     PreparedStructuralObservationReduction, StructuralObservationReductionPreparation,
 };
+pub use observation_source::StructuralObservationWorkloadSource;
 pub use resource_usage::{
     extend_structural_resource_usage, prepare_structural_resource_usage,
     validate_structural_resource_usage, PreparedStructuralResourceUsage,

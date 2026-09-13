@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     contracts::ComputeBackend, frequency::FrequencyResponsePlan,
-    solve::dynamics::DirectHarmonicPolicy,
+    results::observation::ObservationExecutionPolicy, solve::dynamics::DirectHarmonicPolicy,
 };
 
 use super::{
@@ -56,6 +56,7 @@ pub struct StructuralFrequencyWorkload {
     step_id: ProcedureStepId,
     backend: ComputeBackend,
     formulation_requirement: FormulationRequirement,
+    observation_execution: ObservationExecutionPolicy,
     plan: FrequencyResponsePlan,
     solver: StructuralFrequencySolverPlan,
 }
@@ -69,6 +70,7 @@ struct StructuralFrequencyWorkloadWire {
     step_id: ProcedureStepId,
     backend: ComputeBackend,
     formulation_requirement: FormulationRequirement,
+    observation_execution: ObservationExecutionPolicy,
     plan: FrequencyResponsePlan,
     solver: StructuralFrequencySolverPlan,
 }
@@ -84,6 +86,7 @@ impl TryFrom<StructuralFrequencyWorkloadWire> for StructuralFrequencyWorkload {
             step_id: wire.step_id,
             backend: wire.backend,
             formulation_requirement: wire.formulation_requirement,
+            observation_execution: wire.observation_execution,
             plan: wire.plan,
             solver: wire.solver,
         };
@@ -97,6 +100,7 @@ pub struct StructuralFrequencyWorkloadInput {
     pub step_id: ProcedureStepId,
     pub backend: ComputeBackend,
     pub formulation_requirement: FormulationRequirement,
+    pub observation_execution: ObservationExecutionPolicy,
     pub plan: FrequencyResponsePlan,
     pub solver: StructuralFrequencySolverPlan,
 }
@@ -113,6 +117,7 @@ impl StructuralFrequencyWorkload {
             step_id: input.step_id,
             backend: input.backend,
             formulation_requirement: input.formulation_requirement,
+            observation_execution: input.observation_execution,
             plan: input.plan,
             solver: input.solver,
         };
@@ -139,6 +144,10 @@ impl StructuralFrequencyWorkload {
 
     pub const fn formulation_requirement(&self) -> FormulationRequirement {
         self.formulation_requirement
+    }
+
+    pub const fn observation_execution(&self) -> ObservationExecutionPolicy {
+        self.observation_execution
     }
 
     pub fn plan(&self) -> &FrequencyResponsePlan {
@@ -257,6 +266,7 @@ impl StructuralFrequencyWorkload {
                 &self.step_id,
                 self.backend,
                 self.formulation_requirement,
+                self.observation_execution,
                 &self.plan,
                 &self.solver,
             ),

@@ -15,6 +15,7 @@ use runmat_analysis_execution::{
     PreparedStructuralResourceUsage, ResultPublicationPreparation, StructuralAccuracyPreparation,
     StructuralFieldRecoveryPreparation, StructuralObservationAssemblyPreparation,
     StructuralObservationPreparation, StructuralObservationReductionPreparation,
+    StructuralObservationWorkloadSource,
 };
 use runmat_analysis_fea::execution::{
     SequenceIdentity, StructuralLinearWorkload, DEFAULT_ANALYSIS_CHUNK_BYTES,
@@ -128,7 +129,7 @@ pub(super) async fn execute_publication_chain<D: PublicationChainDriver>(
             source_host: fields.host.clone(),
             source_request: fields.request.clone(),
             source_fields: imported_fields,
-            source_invocation: source_invocation.clone(),
+            source_workload: StructuralObservationWorkloadSource::Linear(source_invocation.clone()),
             mesh: mesh.clone(),
             resource_plan: resource_plan_objects.clone(),
             sequence,

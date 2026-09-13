@@ -123,7 +123,7 @@ pub(super) async fn execute_for_composition(
     .await
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "occt-native"))]
 pub(crate) async fn execute_for_test(
     pool: Arc<RemotePoolDriver>,
     request: &ProgramExecutionRequest,

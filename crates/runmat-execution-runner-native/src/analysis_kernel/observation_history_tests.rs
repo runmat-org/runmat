@@ -216,8 +216,11 @@ fn native_kernel_advances_exact_history_checkpoint_lineage() {
     let first_sample = result_at(0.0);
     let first_request = ObservationHistoryCheckpointRequest::new(
         plan.clone(),
+        execution_identities().1,
         observation_id.clone(),
         None,
+        0,
+        first_sample.sample,
         first_sample.logical_identity,
     )
     .unwrap();
@@ -241,8 +244,11 @@ fn native_kernel_advances_exact_history_checkpoint_lineage() {
     let second_sample = result_at(1.0);
     let second_request = ObservationHistoryCheckpointRequest::new(
         plan,
+        execution_identities().1,
         observation_id,
         Some(first_checkpoint.manifest().identity),
+        1,
+        second_sample.sample,
         second_sample.logical_identity,
     )
     .unwrap();

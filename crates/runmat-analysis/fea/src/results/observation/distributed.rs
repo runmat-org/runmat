@@ -1,8 +1,6 @@
 use std::collections::BTreeSet;
 
-use runmat_analysis_core::{
-    AnalysisField, AnalysisModel, ObservationId, SamplingPolicy, SpatialReduction,
-};
+use runmat_analysis_core::{AnalysisField, AnalysisModel, ObservationId, SpatialReduction};
 use runmat_canonical_codec::{decode_contract, encode_contract};
 use runmat_execution::Digest;
 use runmat_meshing_core::SolverMeshArtifact;
@@ -677,16 +675,12 @@ pub(super) fn validate_observation_partition_input<'a>(
             "observation partition received a substituted source field",
         ));
     }
-    let sample_matches = if observation.spec.sampling == SamplingPolicy::Final {
-        event_attribution.is_none() && field.sample == RecoveredFieldSample::Final
-    } else {
-        super::history::sample_matches_history_policy(
-            &observation.spec.sampling,
-            field.sample,
-            event_attribution,
-        )? && super::history::sample_matches_domain(&plan.independent_domain, field.sample)
-    };
-    if !sample_matches {
+    if !super::evaluate::resolved_observation_accepts_sample(
+        plan,
+        observation,
+        field.sample,
+        event_attribution,
+    )? {
         return Err(ObservationError::Invalid(
             "observation partition source sample differs from its resolved schedule".into(),
         ));

@@ -169,14 +169,9 @@ fn evaluate_observation_sample_for_topology(
             "a final-only observation cannot be appended to a history".into(),
         ));
     }
-    if !sample_matches_history_policy(&observation.spec.sampling, sample, event_attribution)? {
+    if !resolved_observation_accepts_sample(plan, observation, sample, event_attribution)? {
         return Err(ObservationError::Invalid(
             "sample coordinate differs from the resolved observation schedule".into(),
-        ));
-    }
-    if !sample_matches_domain(&plan.independent_domain, sample) {
-        return Err(ObservationError::Invalid(
-            "sample coordinate differs from the resolved independent domain".into(),
         ));
     }
     evaluate_sample(
@@ -186,6 +181,25 @@ fn evaluate_observation_sample_for_topology(
         fields,
         sample,
         event_attribution,
+    )
+}
+
+/// Returns whether one resolved observation admits the supplied physical sample.
+///
+/// This is the single schedule boundary shared by local evaluation and distributed fan-out. A
+/// false result means no task should be created; malformed attribution or contracts remain errors.
+pub fn resolved_observation_accepts_sample(
+    plan: &ResolvedObservationPlan,
+    observation: &ResolvedObservation,
+    sample: RecoveredFieldSample,
+    event_attribution: Option<ObservationEventAttribution>,
+) -> Result<bool, ObservationError> {
+    if observation.spec.sampling == SamplingPolicy::Final {
+        return Ok(event_attribution.is_none() && sample == RecoveredFieldSample::Final);
+    }
+    Ok(
+        sample_matches_history_policy(&observation.spec.sampling, sample, event_attribution)?
+            && sample_matches_domain(&plan.independent_domain, sample),
     )
 }
 

@@ -35,7 +35,7 @@ pub use distributed::{
 pub use evaluate::{
     evaluate_observation_event_sample, evaluate_observation_sample, evaluate_observations,
     evaluate_structural_observation_event_sample, evaluate_structural_observation_sample,
-    evaluate_structural_observations,
+    evaluate_structural_observations, resolved_observation_accepts_sample,
 };
 pub(crate) use history::{exact_scheduled_coordinates, sample_matches_policy};
 pub use history::{

@@ -196,14 +196,14 @@ fn high_rate_history_checkpoints_write_only_new_chunks_and_resume_exactly() {
         manifest_encoded_length: next_result_objects.root.encoded_length,
         reference_kind: ValueRefKind::ResultObject,
     };
-    let source_host = AnalysisHostWorkload::new(
+    let invalid_source_host = AnalysisHostWorkload::new(
         AnalysisWorkloadRequest::new(
             study_identity,
             step_identity,
             execution_plan,
             AnalysisWorkKind::Solve,
-            vec![source_input],
-            vec![AnalysisNumericalObjectKind::SolverResult],
+            vec![source_input.clone()],
+            vec![AnalysisNumericalObjectKind::ObservationResult],
             BTreeSet::from([AnalysisCapabilityRequirement::Host {
                 abi: ANALYSIS_HOST_ABI.into(),
             }]),
@@ -212,18 +212,60 @@ fn high_rate_history_checkpoints_write_only_new_chunks_and_resume_exactly() {
         artifact_access.clone(),
     )
     .unwrap();
+    let source_host = AnalysisHostWorkload::new(
+        AnalysisWorkloadRequest::new(
+            study_identity,
+            step_identity,
+            execution_plan,
+            AnalysisWorkKind::ReduceObservationPartitions,
+            vec![source_input],
+            vec![AnalysisNumericalObjectKind::ObservationResult],
+            BTreeSet::from([AnalysisCapabilityRequirement::Host {
+                abi: ANALYSIS_HOST_ABI.into(),
+            }]),
+        )
+        .unwrap(),
+        artifact_access.clone(),
+    )
+    .unwrap();
+    let imported_result = ImportedReducedObservation {
+        result: next_result,
+        objects: next_result_objects,
+        producer: source_host.workload.identity,
+    };
+    assert!(
+        prepare_observation_history_checkpoint_task(ObservationHistoryCheckpointPreparation {
+            source_host: invalid_source_host,
+            plan: plan.clone(),
+            observation_id: observation_id.clone(),
+            sample: imported_result.clone(),
+            previous: Some(midpoint.objects.clone()),
+            program_revision: revision(),
+            chunk_bytes: 256,
+            inventory_limits: limits,
+        })
+        .is_err()
+    );
     let scheduled =
         prepare_observation_history_checkpoint_task(ObservationHistoryCheckpointPreparation {
             source_host,
             plan: plan.clone(),
             observation_id: observation_id.clone(),
-            sample: next_result_objects,
+            sample: imported_result,
             previous: Some(midpoint.objects.clone()),
             program_revision: revision(),
             chunk_bytes: 256,
             inventory_limits: limits,
         })
         .unwrap();
+    assert_eq!(scheduled.request.sample_ordinal, (sample_count / 2) as u64);
+    assert_eq!(
+        scheduled.request.sample_coordinate,
+        RecoveredFieldSample::TimeSeconds((sample_count / 2) as f64)
+    );
+    let mut wrong_ordinal = scheduled.request.clone();
+    wrong_ordinal.sample_ordinal += 1;
+    assert!(wrong_ordinal.validate().is_err());
     scheduled.program.write_to(&mut store).unwrap();
     let scheduled_completion = execute_serial_analysis(
         &scheduled.program.request,

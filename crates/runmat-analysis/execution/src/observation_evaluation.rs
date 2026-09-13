@@ -2,8 +2,8 @@ use std::collections::BTreeSet;
 
 use runmat_analysis_core::{ObservationId, ProcedureStep};
 use runmat_analysis_fea::execution::{
-    AnalysisNumericalObjectKind, AnalysisWorkKind, FieldRecoveryRequest,
-    ObservationEvaluationRequest, SequenceIdentity, StepIdentity, StructuralLinearWorkload,
+    AnalysisNumericalObjectKind, AnalysisWorkKind, FieldRecoveryRequest, FieldRecoverySource,
+    ObservationEvaluationRequest, SequenceIdentity, StepIdentity,
 };
 use runmat_analysis_fea::planning::resource::{FeaResourcePlan, ObservationResourceFacts};
 use runmat_analysis_fea::results::field::{
@@ -25,11 +25,15 @@ use crate::{
     ImportedRecoveredFields, PreparedAnalysisObjects,
 };
 
+use crate::observation_source::{
+    AdmittedStructuralObservationWorkload, StructuralObservationWorkloadSource,
+};
+
 pub struct StructuralObservationPreparation {
     pub source_host: AnalysisHostWorkload,
     pub source_request: FieldRecoveryRequest,
     pub source_fields: ImportedRecoveredFields,
-    pub source_invocation: PreparedAnalysisObjects,
+    pub source_workload: StructuralObservationWorkloadSource,
     pub mesh: Option<PreparedAnalysisObjects>,
     pub resource_plan: PreparedAnalysisObjects,
     pub sequence: SequenceIdentity,
@@ -43,7 +47,7 @@ pub struct StructuralObservationPreparation {
 pub(crate) struct AdmittedStructuralObservation {
     pub request: ObservationEvaluationRequest,
     pub selection: RecoveredFieldSelection,
-    pub workload: StructuralLinearWorkload,
+    pub workload: AdmittedStructuralObservationWorkload,
     pub mesh: Option<SolverMeshArtifact>,
     pub resource_plan: FeaResourcePlan,
 }
@@ -64,8 +68,6 @@ pub(crate) fn admit_structural_observation(
     if preparation.source_host.workload.kind != AnalysisWorkKind::RecoverField
         || preparation.source_host.workload.outputs != vec![AnalysisNumericalObjectKind::Field]
         || preparation.source_fields.output.kind != AnalysisNumericalObjectKind::Field
-        || preparation.source_invocation.manifest.kind
-            != AnalysisNumericalObjectKind::SolverInvocation
         || preparation.resource_plan.manifest.kind != AnalysisNumericalObjectKind::ResourcePlan
         || preparation
             .mesh
@@ -74,25 +76,33 @@ pub(crate) fn admit_structural_observation(
         || preparation.chunk_bytes == 0
     {
         return Err(AnalysisBridgeError::Invalid(
-            "observation evaluation requires completed recovered fields, their source invocation, optional canonical mesh, and bounded chunks".into(),
+            "observation evaluation requires completed recovered fields, their typed source workload, optional canonical mesh, and bounded chunks".into(),
         ));
     }
     let request_input = unique_workload_input(
         &preparation.source_host,
         AnalysisNumericalObjectKind::FieldRecoveryRequest,
     )?;
-    let invocation_input = unique_workload_input(
-        &preparation.source_host,
-        AnalysisNumericalObjectKind::SolverInvocation,
-    )?;
+    let source_workload_input =
+        unique_workload_input(&preparation.source_host, preparation.source_workload.kind())?;
     let mesh_input =
         optional_workload_input(&preparation.source_host, AnalysisNumericalObjectKind::Mesh)?;
     if request_input.logical_identity != preparation.source_request.identity().digest()
         || preparation.source_host.workload.step != preparation.source_request.producer
-        || invocation_input.logical_identity
-            != preparation.source_invocation.manifest.logical_identity
-        || invocation_input.payload_digest != preparation.source_invocation.manifest.payload_digest
-        || invocation_input.manifest_digest != preparation.source_invocation.root.digest
+        || source_workload_input.logical_identity
+            != preparation
+                .source_workload
+                .objects()
+                .manifest
+                .logical_identity
+        || source_workload_input.payload_digest
+            != preparation
+                .source_workload
+                .objects()
+                .manifest
+                .payload_digest
+        || source_workload_input.manifest_digest
+            != preparation.source_workload.objects().root.digest
     {
         return Err(AnalysisBridgeError::Identity(
             "observation source differs from its field-recovery workload",
@@ -117,8 +127,22 @@ pub(crate) fn admit_structural_observation(
             "observation procedure step differs from its producing step",
         ));
     }
-    let workload =
-        StructuralLinearWorkload::from_canonical_bytes(&preparation.source_invocation.payload())?;
+    let workload = preparation.source_workload.decode()?;
+    match (&workload, preparation.source_request.source) {
+        (
+            AdmittedStructuralObservationWorkload::Linear(_),
+            FieldRecoverySource::SolverResult(_),
+        )
+        | (
+            AdmittedStructuralObservationWorkload::Frequency(_),
+            FieldRecoverySource::StructuralFrequencyEntry(_),
+        ) => {}
+        _ => {
+            return Err(AnalysisBridgeError::Identity(
+                "observation workload kind differs from the recovered-field source",
+            ))
+        }
+    }
     let resource_plan = FeaResourcePlan::from_canonical_bytes(&preparation.resource_plan.payload())
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let mesh = preparation
@@ -129,7 +153,7 @@ pub(crate) fn admit_structural_observation(
                 .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))
         })
         .transpose()?;
-    let topology = StructuralRecoveredFieldTopology::derive(&workload.model, mesh.as_ref())
+    let topology = StructuralRecoveredFieldTopology::derive(workload.model(), mesh.as_ref())
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     if topology.identity != preparation.source_request.topology {
         return Err(AnalysisBridgeError::Identity(
@@ -152,13 +176,13 @@ pub(crate) fn admit_structural_observation(
         .collect::<Vec<_>>();
     let constraint_plan =
         runmat_analysis_fea::constraints::CanonicalStructuralConstraintPlan::compile_for_model(
-            &workload.model,
+            workload.model(),
             mesh.as_ref(),
         )
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let plan = resolve_structural_observation_plan(
         &preparation.step,
-        &workload.model,
+        workload.model(),
         mesh.as_ref(),
         &constraint_plan,
         &definitions,
@@ -185,7 +209,7 @@ pub(crate) fn admit_structural_observation(
         plan,
     )?;
     let expected_observation_resources =
-        ObservationResourceFacts::from_plan(&request.plan, workload.observation_execution)
+        ObservationResourceFacts::from_plan(&request.plan, workload.observation_execution())
             .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     if resource_plan.input.topology_digest != request.plan.topology_digest
         || resource_plan.input.observations != expected_observation_resources

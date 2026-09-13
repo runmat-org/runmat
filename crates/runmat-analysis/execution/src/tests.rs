@@ -1713,13 +1713,60 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         .find(|input| input.manifest.kind == AnalysisNumericalObjectKind::ResourcePlan)
         .unwrap()
         .clone();
+    assert!(prepare_structural_observation_fanout(
+        &store,
+        StructuralObservationPreparation {
+            source_host: field_prepared.host.clone(),
+            source_request: field_prepared.request.clone(),
+            source_fields: imported_fields.clone(),
+            source_workload: StructuralObservationWorkloadSource::Frequency(
+                prepared.inputs[0].clone(),
+            ),
+            mesh: Some(prepared.inputs[1].clone()),
+            resource_plan: observation_resource_plan_objects.clone(),
+            sequence,
+            step: producer_step.clone(),
+            limits: runmat_analysis_fea::results::observation::ObservationLimits::default(),
+            program_revision: revision(),
+            chunk_bytes: 4096,
+            inventory_limits: ObjectInventoryLimits::default(),
+        },
+        runmat_analysis_fea::results::field::RecoveredFieldSample::Final,
+        None,
+    )
+    .is_err());
+    let skipped_fanout = prepare_structural_observation_fanout(
+        &store,
+        StructuralObservationPreparation {
+            source_host: field_prepared.host.clone(),
+            source_request: field_prepared.request.clone(),
+            source_fields: imported_fields.clone(),
+            source_workload: StructuralObservationWorkloadSource::Linear(
+                prepared.inputs[0].clone(),
+            ),
+            mesh: Some(prepared.inputs[1].clone()),
+            resource_plan: observation_resource_plan_objects.clone(),
+            sequence,
+            step: producer_step.clone(),
+            limits: runmat_analysis_fea::results::observation::ObservationLimits::default(),
+            program_revision: revision(),
+            chunk_bytes: 4096,
+            inventory_limits: ObjectInventoryLimits::default(),
+        },
+        runmat_analysis_fea::results::field::RecoveredFieldSample::TimeSeconds(0.0),
+        None,
+    )
+    .unwrap();
+    assert!(skipped_fanout.partitions.is_empty());
     let observation_fanout = prepare_structural_observation_fanout(
         &store,
         StructuralObservationPreparation {
             source_host: field_prepared.host.clone(),
             source_request: field_prepared.request.clone(),
             source_fields: imported_fields.clone(),
-            source_invocation: prepared.inputs[0].clone(),
+            source_workload: StructuralObservationWorkloadSource::Linear(
+                prepared.inputs[0].clone(),
+            ),
             mesh: Some(prepared.inputs[1].clone()),
             resource_plan: observation_resource_plan_objects.clone(),
             sequence,

@@ -5,7 +5,7 @@ use runmat_analysis_fea::execution::{
     AnalysisNumericalObjectKind, AnalysisWorkKind, ObservationHistoryCheckpointRequest,
 };
 use runmat_analysis_fea::results::observation::{
-    ObservationHistoryCheckpoint, ObservationResult, ResolvedObservationPlan,
+    ObservationHistoryCheckpoint, ResolvedObservationPlan,
 };
 use runmat_execution::value::ValueRefKind;
 use runmat_execution::ProgramRevision;
@@ -17,15 +17,15 @@ use crate::{
     decode_prepared_observation_history_checkpoint, import_analysis_objects,
     import_analysis_output_set, prepare_analysis_objects, prepare_analysis_program,
     AnalysisBridgeError, AnalysisBridgeResult, AnalysisCapabilityRequirement, AnalysisHostWorkload,
-    AnalysisWorkloadInput, AnalysisWorkloadRequest, PreparedAnalysisObjects,
-    PreparedAnalysisProgram, ANALYSIS_HOST_ABI,
+    AnalysisWorkloadInput, AnalysisWorkloadRequest, ImportedReducedObservation,
+    PreparedAnalysisObjects, PreparedAnalysisProgram, ANALYSIS_HOST_ABI,
 };
 
 pub struct ObservationHistoryCheckpointPreparation {
     pub source_host: AnalysisHostWorkload,
     pub plan: ResolvedObservationPlan,
     pub observation_id: ObservationId,
-    pub sample: PreparedAnalysisObjects,
+    pub sample: ImportedReducedObservation,
     pub previous: Option<PreparedAnalysisObjects>,
     pub program_revision: ProgramRevision,
     pub chunk_bytes: usize,
@@ -51,18 +51,21 @@ pub fn prepare_observation_history_checkpoint_task(
 ) -> AnalysisBridgeResult<PreparedObservationHistoryCheckpointTask> {
     preparation.source_host.validate()?;
     if preparation.chunk_bytes == 0
-        || preparation.sample.manifest.kind != AnalysisNumericalObjectKind::ObservationResult
+        || preparation.source_host.workload.kind != AnalysisWorkKind::ReduceObservationPartitions
+        || preparation.source_host.workload.outputs
+            != vec![AnalysisNumericalObjectKind::ObservationResult]
+        || preparation.sample.objects.manifest.kind
+            != AnalysisNumericalObjectKind::ObservationResult
+        || preparation.sample.producer != preparation.source_host.workload.identity
         || preparation.previous.as_ref().is_some_and(|previous| {
             previous.manifest.kind != AnalysisNumericalObjectKind::ObservationHistoryCheckpoint
         })
     {
         return Err(AnalysisBridgeError::Invalid(
-            "history checkpoint task requires one observation result and an optional checkpoint"
-                .into(),
+            "history checkpoint task requires one reduced observation result, its reduction host, and an optional checkpoint".into(),
         ));
     }
-    let sample = ObservationResult::from_canonical_bytes(&preparation.sample.payload())
-        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let sample = preparation.sample.result.clone();
     let previous = preparation
         .previous
         .as_ref()
@@ -71,10 +74,16 @@ pub fn prepare_observation_history_checkpoint_task(
     let predecessor = previous
         .as_ref()
         .map(|checkpoint| checkpoint.manifest().identity);
+    let sample_ordinal = previous
+        .as_ref()
+        .map_or(0, |checkpoint| checkpoint.manifest().observed_sample_count);
     let request = ObservationHistoryCheckpointRequest::new(
         preparation.plan,
+        preparation.source_host.workload.step,
         preparation.observation_id,
         predecessor,
+        sample_ordinal,
+        sample.sample,
         sample.logical_identity,
     )?;
     let expected = request.advance(previous, sample)?;
@@ -88,7 +97,7 @@ pub fn prepare_observation_history_checkpoint_task(
         preparation.inventory_limits,
     )?;
     let mut typed_inputs = vec![(request_objects, ValueRefKind::DriverObject)];
-    typed_inputs.push((preparation.sample, ValueRefKind::ResultObject));
+    typed_inputs.push((preparation.sample.objects, ValueRefKind::ResultObject));
     if let Some(previous) = preparation.previous {
         typed_inputs.push((previous, ValueRefKind::ResultObject));
     }
@@ -109,7 +118,7 @@ pub fn prepare_observation_history_checkpoint_task(
         .collect::<Vec<_>>();
     let workload = AnalysisWorkloadRequest::new(
         preparation.source_host.workload.study,
-        preparation.source_host.workload.step,
+        request.producer,
         preparation.source_host.workload.execution_plan,
         AnalysisWorkKind::CheckpointObservationHistory,
         workload_inputs,

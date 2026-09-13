@@ -19,7 +19,7 @@ use runmat_analysis_fea::execution::{
     ObservationAssemblyRequest, ObservationEvaluationRequest, ObservationHistoryCheckpointRequest,
     ObservationPartitionEvaluationRequest, ObservationPartitionExecutionTarget,
     ObservationPartitionReductionRequest, ResultPublicationRequest,
-    SemanticStatePublicationRequest, StructuralFrequencySolverPlan,
+    SemanticStatePublicationRequest, StructuralFrequencySolverPlan, StructuralFrequencyWorkload,
     StructuralLinearNumericalReceiptArtifact, StructuralLinearWorkload,
     StructuralLinearWorkloadResult, StructuralTransientBlockRequest, StructuralTransientCheckpoint,
     StructuralTransientNumericalReceipt, StructuralTransientSolverResult,
@@ -457,6 +457,7 @@ fn execute_observation_history_checkpoint(
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     if request.identity.digest() != request_identity
         || sample.logical_identity.digest() != sample_identity
+        || request.producer != invocation.host.workload.step
     {
         return Err(AnalysisBridgeError::Identity(
             "history checkpoint request or sample differs from its object identity",
@@ -689,8 +690,17 @@ fn execute_observation_partition(
         AnalysisNumericalObjectKind::ObservationPartitionPlan,
     )?;
     let fields = unique_input(&invocation, AnalysisNumericalObjectKind::FieldPartition)?;
-    let solver_invocation =
-        unique_input(&invocation, AnalysisNumericalObjectKind::SolverInvocation)?;
+    let linear_workload =
+        optional_unique_input(&invocation, AnalysisNumericalObjectKind::SolverInvocation)?;
+    let frequency_workload = optional_unique_input(
+        &invocation,
+        AnalysisNumericalObjectKind::StructuralFrequencyWorkload,
+    )?;
+    if linear_workload.is_some() == frequency_workload.is_some() {
+        return Err(AnalysisBridgeError::Invalid(
+            "observation partition requires exactly one typed structural workload source".into(),
+        ));
+    }
     let resource_plan_input = unique_input(&invocation, AnalysisNumericalObjectKind::ResourcePlan)?;
     let mesh = optional_unique_input(&invocation, AnalysisNumericalObjectKind::Mesh)?;
     if invocation.inputs.len() != 6 + usize::from(mesh.is_some())
@@ -740,7 +750,17 @@ fn execute_observation_partition(
             "observation partition inputs differ from their object identities",
         ));
     }
-    let workload = StructuralLinearWorkload::from_canonical_bytes(&solver_invocation.payload())?;
+    let (model, backend) = if let Some(workload) = linear_workload {
+        let workload = StructuralLinearWorkload::from_canonical_bytes(&workload.payload())?;
+        (workload.model, workload.backend)
+    } else {
+        let workload = StructuralFrequencyWorkload::from_canonical_bytes(
+            &frequency_workload
+                .expect("exclusive source checked")
+                .payload(),
+        )?;
+        (workload.model().clone(), workload.backend())
+    };
     let mesh = mesh
         .map(|mesh| {
             SolverMeshArtifact::canonical_decode(&mesh.payload())
@@ -752,7 +772,7 @@ fn execute_observation_partition(
             &source_request.plan,
             &partition_plan,
             partition,
-            &workload.model,
+            &model,
             mesh.as_ref(),
             &fields,
             request.event_attribution,
@@ -763,7 +783,7 @@ fn execute_observation_partition(
                     "observation accelerator target has no unique admitted allocation",
                 ));
             };
-            if workload.backend != runmat_analysis_fea::ComputeBackend::Gpu
+            if backend != runmat_analysis_fea::ComputeBackend::Gpu
                 || allocation.class != *class
                 || !invocation.host.workload.required_capabilities.contains(
                     &runmat_analysis_execution::AnalysisCapabilityRequirement::Accelerator {
@@ -780,7 +800,7 @@ fn execute_observation_partition(
                 &partition_plan,
                 partition,
                 StructuralObservationAccelerationInput {
-                    model: &workload.model,
+                    model: &model,
                     mesh: mesh.as_ref(),
                     field: &fields,
                     event_attribution: request.event_attribution,

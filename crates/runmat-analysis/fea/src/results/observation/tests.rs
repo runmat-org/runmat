@@ -1335,6 +1335,49 @@ fn complex_frequency_histories_preserve_exact_phasors_and_derived_views() {
 }
 
 #[test]
+fn resolved_frequency_schedule_is_the_single_sample_admission_boundary() {
+    let projection = projection(ElementOrder::Tet4);
+    let definition = complex_pressure_definition();
+    let mut step = ProcedureStep::acoustic_harmonic("frequency-sample-admission");
+    step.independent_domain =
+        runmat_analysis_core::IndependentDomain::FrequencyHertz(vec![100.0, 150.0, 200.0]);
+    step.observations = vec![ObservationRequest::History(complex_pressure_history_spec(
+        "selected_frequencies",
+        ComplexRepresentation::Complex,
+    ))];
+    let plan = resolve_observation_plan(
+        &step,
+        &projection,
+        std::slice::from_ref(&definition),
+        ObservationLimits::default(),
+    )
+    .unwrap();
+    let observation = &plan.observations[0];
+
+    assert!(resolved_observation_accepts_sample(
+        &plan,
+        observation,
+        RecoveredFieldSample::FrequencyHertz(100.0),
+        None,
+    )
+    .unwrap());
+    assert!(!resolved_observation_accepts_sample(
+        &plan,
+        observation,
+        RecoveredFieldSample::FrequencyHertz(150.0),
+        None,
+    )
+    .unwrap());
+    assert!(resolved_observation_accepts_sample(
+        &plan,
+        observation,
+        RecoveredFieldSample::Final,
+        None,
+    )
+    .is_err());
+}
+
+#[test]
 fn complex_observation_precision_and_real_source_mismatch_fail_closed() {
     let projection = projection(ElementOrder::Tet4);
     let complex_definition = complex_pressure_definition();

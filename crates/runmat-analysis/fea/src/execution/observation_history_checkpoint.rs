@@ -2,6 +2,7 @@ use runmat_analysis_core::ObservationId;
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use serde::{Deserialize, Serialize};
 
+use crate::results::field::RecoveredFieldSample;
 use crate::results::observation::{
     BoundedObservationHistory, ObservationHistoryCheckpoint, ObservationHistoryCheckpointIdentity,
     ObservationResult, ObservationResultIdentity, ResolvedObservationPlan,
@@ -25,8 +26,11 @@ pub struct ObservationHistoryCheckpointRequest {
     pub schema_version: u16,
     pub identity: ObservationHistoryCheckpointRequestIdentity,
     pub plan: ResolvedObservationPlan,
+    pub producer: super::StepIdentity,
     pub observation_id: ObservationId,
     pub predecessor: Option<ObservationHistoryCheckpointIdentity>,
+    pub sample_ordinal: u64,
+    pub sample_coordinate: RecoveredFieldSample,
     pub sample: ObservationResultIdentity,
 }
 
@@ -36,8 +40,11 @@ struct ObservationHistoryCheckpointRequestWire {
     schema_version: u16,
     identity: ObservationHistoryCheckpointRequestIdentity,
     plan: ResolvedObservationPlan,
+    producer: super::StepIdentity,
     observation_id: ObservationId,
     predecessor: Option<ObservationHistoryCheckpointIdentity>,
+    sample_ordinal: u64,
+    sample_coordinate: RecoveredFieldSample,
     sample: ObservationResultIdentity,
 }
 
@@ -49,8 +56,11 @@ impl TryFrom<ObservationHistoryCheckpointRequestWire> for ObservationHistoryChec
             schema_version: wire.schema_version,
             identity: wire.identity,
             plan: wire.plan,
+            producer: wire.producer,
             observation_id: wire.observation_id,
             predecessor: wire.predecessor,
+            sample_ordinal: wire.sample_ordinal,
+            sample_coordinate: wire.sample_coordinate,
             sample: wire.sample,
         };
         request.validate()?;
@@ -61,18 +71,31 @@ impl TryFrom<ObservationHistoryCheckpointRequestWire> for ObservationHistoryChec
 impl ObservationHistoryCheckpointRequest {
     pub fn new(
         plan: ResolvedObservationPlan,
+        producer: super::StepIdentity,
         observation_id: ObservationId,
         predecessor: Option<ObservationHistoryCheckpointIdentity>,
+        sample_ordinal: u64,
+        sample_coordinate: RecoveredFieldSample,
         sample: ObservationResultIdentity,
     ) -> AnalysisExecutionResult<Self> {
-        let identity =
-            derive_request_identity(plan.identity, &observation_id, predecessor, sample)?;
+        let identity = derive_request_identity(
+            plan.identity,
+            producer,
+            &observation_id,
+            predecessor,
+            sample_ordinal,
+            sample_coordinate,
+            sample,
+        )?;
         let request = Self {
             schema_version: 1,
             identity,
             plan,
+            producer,
             observation_id,
             predecessor,
+            sample_ordinal,
+            sample_coordinate,
             sample,
         };
         request.validate()?;
@@ -101,8 +124,11 @@ impl ObservationHistoryCheckpointRequest {
             || self.identity
                 != derive_request_identity(
                     self.plan.identity,
+                    self.producer,
                     &self.observation_id,
                     self.predecessor,
+                    self.sample_ordinal,
+                    self.sample_coordinate,
                     self.sample,
                 )?
         {
@@ -122,9 +148,17 @@ impl ObservationHistoryCheckpointRequest {
         result
             .validate()
             .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
-        if result.logical_identity != self.sample {
+        if result.logical_identity != self.sample || result.sample != self.sample_coordinate {
             return Err(AnalysisExecutionError::Identity(
-                "history checkpoint sample differs from its request",
+                "history checkpoint sample identity or coordinate differs from its request",
+            ));
+        }
+        let expected_ordinal = previous
+            .as_ref()
+            .map_or(0, |checkpoint| checkpoint.manifest().observed_sample_count);
+        if self.sample_ordinal != expected_ordinal {
+            return Err(AnalysisExecutionError::Identity(
+                "history checkpoint sample ordinal does not follow its predecessor",
             ));
         }
         let mut history = match (self.predecessor, previous) {
@@ -169,12 +203,23 @@ impl ObservationHistoryCheckpointRequest {
 
 fn derive_request_identity(
     plan: ResolvedObservationPlanIdentity,
+    producer: super::StepIdentity,
     observation_id: &ObservationId,
     predecessor: Option<ObservationHistoryCheckpointIdentity>,
+    sample_ordinal: u64,
+    sample_coordinate: RecoveredFieldSample,
     sample: ObservationResultIdentity,
 ) -> AnalysisExecutionResult<ObservationHistoryCheckpointRequestIdentity> {
     ObservationHistoryCheckpointRequestIdentity::derive(
         "history-checkpoint-request",
-        &(plan, observation_id, predecessor, sample),
+        &(
+            plan,
+            producer,
+            observation_id,
+            predecessor,
+            sample_ordinal,
+            sample_coordinate,
+            sample,
+        ),
     )
 }

@@ -109,6 +109,8 @@ fn direct_fixture() -> (
         step_id: runmat_analysis_core::ProcedureStepId("frequency".into()),
         backend: ComputeBackend::Cpu,
         formulation_requirement: FormulationRequirement::Experimental,
+        observation_execution:
+            runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
         plan: FrequencyResponsePlan::new(20.0, &[40.0], &[]).unwrap(),
         solver: StructuralFrequencySolverPlan::Direct {
             policy: DirectHarmonicPolicy::default(),
@@ -367,6 +369,8 @@ fn native_modal_frequency_uses_the_exact_portable_basis_state() {
         step_id: runmat_analysis_core::ProcedureStepId("frequency".into()),
         backend: ComputeBackend::Cpu,
         formulation_requirement: FormulationRequirement::Experimental,
+        observation_execution:
+            runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
         plan: FrequencyResponsePlan::new(20.0, &[40.0], &[]).unwrap(),
         solver: StructuralFrequencySolverPlan::ModalReduced {
             basis_state: state.identity,

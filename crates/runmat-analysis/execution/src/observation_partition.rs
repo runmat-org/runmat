@@ -1,16 +1,17 @@
 use std::collections::BTreeSet;
 
 use runmat_analysis_fea::execution::{
-    AnalysisNumericalObjectKind, AnalysisWorkKind, ObservationEvaluationRequest,
-    ObservationPartitionEvaluationRequest, ObservationPartitionExecutionTarget,
-    ObservationPartitionReductionRequest,
+    AnalysisNumericalObjectKind, AnalysisWorkKind, AnalysisWorkloadIdentity,
+    ObservationEvaluationRequest, ObservationPartitionEvaluationRequest,
+    ObservationPartitionExecutionTarget, ObservationPartitionReductionRequest,
 };
 use runmat_analysis_fea::planning::resource::FeaResourcePlan;
 use runmat_analysis_fea::results::field::{RecoveredFieldPartitionSet, RecoveredFieldSample};
 use runmat_analysis_fea::results::observation::{
-    classify_observation_partition_acceleration, structural_observation_partition_source_indices,
-    ObservationAccelerationEligibility, ObservationEventAttribution, ObservationPartition,
-    ObservationPartitionContribution, ObservationPartitionPlan, ObservationResult,
+    classify_observation_partition_acceleration, resolved_observation_accepts_sample,
+    structural_observation_partition_source_indices, ObservationAccelerationEligibility,
+    ObservationEventAttribution, ObservationPartition, ObservationPartitionContribution,
+    ObservationPartitionPlan, ObservationResult,
 };
 use runmat_analysis_fea::ComputeBackend;
 use runmat_execution::resource::AcceleratorRequest;
@@ -86,7 +87,7 @@ pub struct PreparedStructuralObservationReduction {
 pub struct ImportedReducedObservation {
     pub result: ObservationResult,
     pub objects: PreparedAnalysisObjects,
-    pub output: AnalysisOutputRoot,
+    pub(crate) producer: AnalysisWorkloadIdentity,
 }
 
 pub fn prepare_structural_observation_fanout(
@@ -108,16 +109,20 @@ pub fn prepare_structural_observation_fanout(
     }
     let mut prepared = Vec::new();
     for observation in &admitted.request.plan.observations {
-        match (&observation.spec.sampling, event_attribution) {
-            (runmat_analysis_core::SamplingPolicy::Event(expected), Some(attribution))
-                if attribution.event() == *expected => {}
-            (runmat_analysis_core::SamplingPolicy::Event(_), _) | (_, Some(_)) => continue,
-            (_, None) => {}
+        if !resolved_observation_accepts_sample(
+            &admitted.request.plan,
+            observation,
+            sample,
+            event_attribution,
+        )
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?
+        {
+            continue;
         }
         let plan = ObservationPartitionPlan::derive(
             &admitted.request.plan,
             &observation.spec.observation_id,
-            admitted.workload.observation_execution,
+            admitted.workload.observation_execution(),
         )
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
         let field_entry = preparation
@@ -140,7 +145,7 @@ pub fn prepare_structural_observation_fanout(
                 &admitted.request.plan,
                 &plan,
                 partition,
-                &admitted.workload.model,
+                admitted.workload.model(),
                 admitted.mesh.as_ref(),
             )
             .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
@@ -173,11 +178,6 @@ pub fn prepare_structural_observation_fanout(
                 event_attribution,
             )?);
         }
-    }
-    if prepared.is_empty() {
-        return Err(AnalysisBridgeError::Invalid(
-            "observation fan-out produced no partition tasks".into(),
-        ));
     }
     Ok(PreparedStructuralObservationFanout {
         source_request: admitted.request,
@@ -362,7 +362,7 @@ pub fn import_reduced_observation(
     Ok(ImportedReducedObservation {
         result,
         objects,
-        output: output.clone(),
+        producer: prepared.host.workload.identity,
     })
 }
 
@@ -432,7 +432,7 @@ fn prepare_partition_workload(
         source_request_objects,
         plan_objects,
         field_objects,
-        preparation.source_invocation.clone(),
+        preparation.source_workload.objects().clone(),
         preparation.resource_plan.clone(),
     ];
     if let Some(mesh) = &preparation.mesh {
@@ -482,7 +482,7 @@ fn observation_execution_target(
     )
     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     select_observation_execution_target(
-        admitted.workload.backend,
+        admitted.workload.backend(),
         eligibility,
         &admitted.resource_plan.request.accelerators,
         &source_host.workload.required_capabilities,
