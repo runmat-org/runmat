@@ -59,7 +59,7 @@ test("builds a deterministic topology-bound scaffold with no reviewed decisions"
       && entry.path === "crates/runmat-runtime/src/builtins/fixture/alpha.rs"));
   assert.deepEqual(alpha.candidate_paths.topology_target_proposals, {
     proposed_catalog_package: "crates/runmat-builtins/src/catalog/entries/math/core/alpha/mod.rs",
-    proposed_callable_owner: "crates/runmat-runtime/src/builtins/math/core/alpha.rs",
+    proposed_callable_owner: "crates/runmat-runtime/src/builtins/math/core/alpha/mod.rs",
     proposed_callable_bindings: [],
     proposed_canonical_identity: null,
     basis: "reviewed-topology-target-package-with-observed-function-candidates",
@@ -182,7 +182,7 @@ test("proposes public spelling, callable and constant forms, and implementation 
   assert.equal(callableProposal.forms.kind, "callable");
   assert.equal(callableProposal.implementation.callable.observed_bindings.length, 1);
   assert.equal(callableProposal.implementation.callable.proposed_owner_path,
-    "crates/runmat-runtime/src/builtins/math/basic/foo.rs");
+    "crates/runmat-runtime/src/builtins/math/basic/foo/mod.rs");
 
   const callableAndConstant = controlledScaffold((row) => {
     row.semantic_authority.constants = [catalogConstant("foo")];
@@ -357,9 +357,9 @@ test("carries exact baseline evidence digests and topology target proposals with
     assert.equal(evidence.content_digest, sourceFiles.get(evidence.path));
   }
   assert.equal(row.candidate_paths.topology_target_proposals.proposed_callable_owner,
-    "crates/runmat-runtime/src/builtins/math/basic/foo.rs");
+    "crates/runmat-runtime/src/builtins/math/basic/foo/mod.rs");
   assert.deepEqual(row.candidate_paths.topology_target_proposals.proposed_callable_bindings, [{
-    path: "crates/runmat-runtime/src/builtins/math/basic/foo.rs",
+    path: "crates/runmat-runtime/src/builtins/math/basic/foo/mod.rs",
     function: "foo_builtin",
     variant: "default",
   }]);
