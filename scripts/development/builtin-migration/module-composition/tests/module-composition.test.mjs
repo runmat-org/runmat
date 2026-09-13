@@ -46,6 +46,43 @@ test("an empty product retains the complete canonical generated envelope", () =>
   assert.doesNotThrow(() => verifyModuleCompositionProduct(product, source));
 });
 
+test("product presence is explicit and independent from an empty child set", () => {
+  const projection = fixtureProjection();
+  projection.products[1].children = [];
+  const present = parseModuleCompositionProjection(projection);
+  assert.equal(present.products[1].state, "present");
+  assert.deepEqual(
+    generateModuleCompositionProducts(present).map((entry) => entry.product_id),
+    ["catalog-math", "runtime-math"],
+  );
+
+  const absent = structuredClone(projection);
+  absent.products[1].state = "absent";
+  const parsedAbsent = parseModuleCompositionProjection(absent);
+  assert.deepEqual(
+    generateModuleCompositionProducts(parsedAbsent).map((entry) => entry.product_id),
+    ["catalog-math"],
+  );
+  assert.throws(
+    () => renderModuleCompositionProduct(parsedAbsent.products[1]),
+    /absent product cannot be rendered/,
+  );
+
+  const missing = structuredClone(projection);
+  delete missing.products[1].state;
+  assert.throws(() => parseModuleCompositionProjection(missing), /fields must be exactly/);
+  const invalid = structuredClone(projection);
+  invalid.products[1].state = "reserved";
+  assert.throws(() => parseModuleCompositionProjection(invalid), /must be one of absent, present/);
+  absent.products[1].children = fixtureProjection().products[1].children;
+  const absentWithChildren = parseModuleCompositionProjection(absent);
+  assert.equal(absentWithChildren.products[1].state, "absent");
+  assert.deepEqual(
+    generateModuleCompositionProducts(absentWithChildren).map((entry) => entry.product_id),
+    ["catalog-math"],
+  );
+});
+
 test("canonical child storage does not reorder macro-bearing runtime declarations", () => {
   const product = fixtureProjection().products[1];
   product.children = [
@@ -59,7 +96,7 @@ test("canonical child storage does not reorder macro-bearing runtime declaration
     }),
   ];
   const parsed = parseModuleCompositionProjection({
-    schema_version: 4, kind: "runmat-builtin-module-composition-projection", products: [product],
+    schema_version: 5, kind: "runmat-builtin-module-composition-projection", products: [product],
   });
   assert.deepEqual(parsed.products[0].children.map((entry) => entry.module), ["acceleration", "common"]);
   const source = renderModuleCompositionProduct(parsed.products[0]);
@@ -121,10 +158,10 @@ test("catalog aggregation implementations may be exact typed child exports", () 
 });
 
 test("projection rejects invalid parents, paths, keywords, enums, and collisions", () => {
-  for (const version of [1, 2, 3, 5]) {
+  for (const version of [1, 2, 3, 4, 6]) {
     const wrongVersion = fixtureProjection();
     wrongVersion.schema_version = version;
-    assert.throws(() => parseModuleCompositionProjection(wrongVersion), /schema_version 4/);
+    assert.throws(() => parseModuleCompositionProjection(wrongVersion), /schema_version 5/);
   }
   const cases = [
     [mutate((value) => { value.products[0].path = "crates/runmat-builtins/src/catalog/entries/other/mod.rs"; }), /does not match its logical parent/],
@@ -182,7 +219,7 @@ test("case-distinct Rust item identities survive named reexport composition", ()
     reexportVisibility: "crate",
   })];
   const parsed = parseModuleCompositionProjection({
-    schema_version: 4,
+    schema_version: 5,
     kind: "runmat-builtin-module-composition-projection",
     products: [product],
   });
@@ -215,7 +252,7 @@ test("conditions, hidden reexports, aliases, and independent reexport conditions
   assert.doesNotThrow(() => verifyModuleCompositionProduct(product, source));
 });
 
-test("the v4 grammar rejects raw cfg, malformed conjunctions, aliases, and aggregation order", () => {
+test("the v5 grammar rejects raw cfg, malformed conjunctions, aliases, and aggregation order", () => {
   const invalid = [
     [mutate((value) => { value.products[1].children[0].declaration_condition = { kind: "any", conditions: [] }; }), /unsupported kind/],
     [mutate((value) => { value.products[1].children[0].declaration_condition = { kind: "target-architecture", architecture: "x86_64" }; }), /unsupported target architecture/],
@@ -316,10 +353,10 @@ test("replacement and removal require the exact effective prior child", () => {
   const after = { ...structuredClone(before), visibility: "crate" };
   const replace = transition("replace-one", [{ product_id: "catalog-math", operation: "replace", before, after }]);
   assert.doesNotThrow(() => parseModuleCompositionTransition(replace, baseline));
-  for (const version of [1, 2, 3, 5]) {
+  for (const version of [1, 2, 3, 4, 6]) {
     assert.throws(
       () => parseModuleCompositionTransition({ ...replace, schema_version: version }, baseline),
-      /schema_version 4/,
+      /schema_version 5/,
     );
   }
   const projected = applyModuleCompositionTransitions(baseline, [replace]);
@@ -333,6 +370,57 @@ test("replacement and removal require the exact effective prior child", () => {
     { product_id: "catalog-math", operation: "replace", before: plotting, after: reorderedPlotting },
   ]);
   assert.equal(applyModuleCompositionTransitions(baseline, [replace, remove]).products[0].children.length, 1);
+});
+
+test("state transitions activate, retain, and deactivate parents atomically", () => {
+  const baseline = fixtureProjection();
+  const runtime = baseline.products[1];
+  const child = structuredClone(runtime.children[0]);
+  runtime.state = "absent";
+  runtime.children = [];
+  const activate = transition("activate-runtime", [{
+    product_id: runtime.product_id, operation: "add", before: null, after: child,
+  }], [{
+    product_id: runtime.product_id, before_state: "absent", after_state: "present",
+  }]);
+  const active = applyModuleCompositionTransitions(baseline, [activate]);
+  assert.equal(active.products[1].state, "present");
+  assert.deepEqual(active.products[1].children.map((entry) => entry.module), ["arithmetic"]);
+
+  const retain = transition("retain-runtime", [{
+    product_id: runtime.product_id, operation: "remove", before: child, after: null,
+  }]);
+  const retained = applyModuleCompositionTransitions(active, [retain]);
+  assert.equal(retained.products[1].state, "present");
+  assert.deepEqual(retained.products[1].children, []);
+  assert.doesNotThrow(() => renderModuleCompositionProduct(retained.products[1]));
+
+  const deactivate = transition("deactivate-runtime", [], [{
+    product_id: runtime.product_id, before_state: "present", after_state: "absent",
+  }]);
+  const inactive = applyModuleCompositionTransitions(retained, [deactivate]);
+  assert.equal(inactive.products[1].state, "absent");
+  assert.deepEqual(inactive.products[1].children, []);
+
+  const stale = structuredClone(deactivate);
+  stale.product_states[0].before_state = "absent";
+  assert.throws(
+    () => applyModuleCompositionTransitions(retained, [stale]),
+    /prior product state differs/,
+  );
+  const implicit = structuredClone(activate);
+  implicit.product_states = [];
+  assert.throws(
+    () => applyModuleCompositionTransitions(baseline, [implicit]),
+    /product states must be a nonempty array/,
+  );
+  const noop = transition("noop-runtime", [], [{
+    product_id: runtime.product_id, before_state: "absent", after_state: "absent",
+  }]);
+  assert.throws(
+    () => applyModuleCompositionTransitions(baseline, [noop]),
+    /unchanged product state requires a child change/,
+  );
 });
 
 test("reviewed bundle transitions exactly cover products, scopes, and disjoint child keys", () => {
@@ -439,13 +527,14 @@ test("reviewed baseline-only composition products require no bundle transition",
 
 function fixtureProjection() {
   return {
-    schema_version: 4,
+    schema_version: 5,
     kind: "runmat-builtin-module-composition-projection",
     products: [
       {
         product_id: "catalog-math", crate_role: "catalog",
         path: "crates/runmat-builtins/src/catalog/entries/math/mod.rs",
         module_path: "crate::catalog::entries::math",
+        state: "present",
         aggregations: ["entries", "aliases", "constants"],
         aggregation_exports: [],
         children: [
@@ -463,6 +552,7 @@ function fixtureProjection() {
         product_id: "runtime-math", crate_role: "runtime",
         path: "crates/runmat-runtime/src/builtins/math/mod.rs",
         module_path: "crate::builtins::math",
+        state: "present",
         aggregations: [],
         aggregation_exports: [],
         children: [child({
@@ -486,8 +576,17 @@ function child({ module, source_path, sourceKind = "directory", role = "identity
   };
 }
 
-function transition(transition_id, changes) {
-  return { schema_version: 4, kind: "runmat-builtin-module-composition-transition", transition_id, changes };
+function transition(transition_id, changes, productStates = null) {
+  const productIds = [...new Set(changes.map((entry) => entry.product_id))].sort();
+  return {
+    schema_version: 5,
+    kind: "runmat-builtin-module-composition-transition",
+    transition_id,
+    product_states: productStates ?? productIds.map((product_id) => ({
+      product_id, before_state: "present", after_state: "present",
+    })),
+    changes,
+  };
 }
 
 function mutate(callback) {

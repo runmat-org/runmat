@@ -36,9 +36,8 @@ export function materializeEffectiveModuleComposition({
     if (!product) throw new Error(`${id}: integration product is absent from prior composition`);
     return product;
   });
-  const authorizedPresent = new Set(state.priorPresentProductIds);
   return withCompositionTransaction(repository, (lock, recovery) => {
-    const priorPresent = priorProducts.filter((product) => authorizedPresent.has(product.product_id));
+    const priorPresent = priorProducts.filter((product) => product.state === "present");
     const priorRendered = renderCompositionSetTwice(priorPresent);
     renewCompositionRepositoryLock(lock);
     const priorContents = new Map(priorRendered
@@ -53,8 +52,7 @@ export function materializeEffectiveModuleComposition({
       validateReviewedModuleCompositionAuthority(control.integrationProducts, observed.prior);
       validateReviewedModuleCompositionAuthority(control.integrationProducts, observed.effective);
       const inventory = inspectCanonicalMaterializationTargets(
-        lock.repository, priorProducts,
-        priorPresent.map((product) => product.product_id), priorContents,
+        lock.repository, priorProducts, priorContents,
       );
       inspectMaterializationTargets(lock.repository, products);
       const childStates = inspectEffectiveChildStates(lock.repository, products);
@@ -67,14 +65,22 @@ export function materializeEffectiveModuleComposition({
     renewCompositionRepositoryLock(lock);
     const { inventory } = initialAuthority;
     options.afterAudit?.({ inventory, lock });
-    const affected = products.filter((product) => product.children.length
-      || authorizedPresent.has(product.product_id));
-    const rendered = renderCompositionSetTwice(affected, options.render);
+    const affectedIds = new Set(products.filter((product) => {
+      const prior = priorById.get(product.product_id);
+      return prior.state === "present" || product.state === "present";
+    }).map((product) => product.product_id));
+    const affected = products.filter((product) => affectedIds.has(product.product_id));
+    const renderedPresent = renderCompositionSetTwice(
+      affected.filter((product) => product.state === "present"), options.render,
+    );
+    const renderedById = new Map(renderedPresent
+      .map((entry) => [entry.product.product_id, entry]));
+    const desired = affected.map((product) => renderedById.get(product.product_id)
+      ?? { product, content: null });
     renewCompositionRepositoryLock(lock);
-    const affectedIds = new Set(affected.map((product) => product.product_id));
     const before = inventory.filter((entry) => affectedIds.has(entry.product_id));
     const transaction = installCompositionSet(
-      lock.repository, rendered, before, lock, options.installHooks,
+      lock.repository, desired, before, lock, options.installHooks,
       () => { proveAuthority(initialAuthority.childStates); },
     );
     return { product_ids: productIds, inventory, installed: transaction.installed, transaction: { recovery, cleanup: transaction.cleanup, cleanup_errors: transaction.cleanup_errors } };

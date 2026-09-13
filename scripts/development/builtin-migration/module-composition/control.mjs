@@ -34,7 +34,7 @@ export function validateModuleCompositionControl(
     if (transition.transition_id !== bundleId) {
       throw new Error(`${bundleId}: module composition transition id must equal its bundle id`);
     }
-    const changedProducts = [...new Set(transition.changes.map((entry) => entry.product_id))]
+    const changedProducts = transition.product_states.map((entry) => entry.product_id)
       .sort(compareCodePoint);
     if (JSON.stringify(changedProducts) !== JSON.stringify(productIds)) {
       throw new Error(`${bundleId}: composition transition must exactly cover its reviewed composition products`);
@@ -51,6 +51,13 @@ export function validateModuleCompositionControl(
           throw new Error(`${bundleId}: composition child ${child.source_path} is outside its authored scope`);
         }
       }
+    }
+    for (const state of transition.product_states.filter((entry) =>
+      entry.before_state !== entry.after_state)) {
+      const key = `${state.product_id}\0@state`;
+      const priorBundle = changedKeys.get(key);
+      if (priorBundle) throw new Error(`${bundleId}: composition product state is also changed by ${priorBundle}`);
+      changedKeys.set(key, bundleId);
     }
     transitions.set(bundleId, transition);
   }

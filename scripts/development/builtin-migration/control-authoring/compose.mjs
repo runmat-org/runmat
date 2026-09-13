@@ -43,7 +43,7 @@ export function composeControlCandidate({ inventory: inventoryValue, topology, s
 
   const inputs = inputDigests(inventory, topology, scaffold, reviewSet);
   const payload = {
-    schema_version: 4,
+    schema_version: 5,
     kind: "runmat-builtin-migration-control-candidate",
     authority: "deterministically-composed-unreviewed-candidate",
     program: PROGRAM,
@@ -89,7 +89,7 @@ export function composeControlCandidate({ inventory: inventoryValue, topology, s
 
 export function parseControlCandidate(value, expected) {
   assertValidatedControlCandidate(expected);
-  kind(value, 4, "runmat-builtin-migration-control-candidate", "control candidate");
+  kind(value, 5, "runmat-builtin-migration-control-candidate", "control candidate");
   exact(value, ["schema_version", "kind", "authority", "program", "inputs", "baseline_context", "cohorts", "bundle_controls", "identity_controls", "integration_products", "module_composition_baseline", "migration_findings", "exception_manifest", "target_policy", "storage_policy", "digest"], "control candidate");
   if (value.authority !== "deterministically-composed-unreviewed-candidate" || value.program !== PROGRAM) {
     throw new Error("control candidate has invalid authority or program");

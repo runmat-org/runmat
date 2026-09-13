@@ -23,5 +23,11 @@ export function bindModuleCompositionProjection(products, value) {
   if (JSON.stringify(observed) !== JSON.stringify(expected)) {
     throw new Error("module composition projection does not exactly cover the reviewed composition products");
   }
+  for (const [index, definition] of definitions.entries()) {
+    const expectedState = definition.baseline_digest === null ? "absent" : "present";
+    if (projection.products[index].state !== expectedState) {
+      throw new Error(`${definition.product_id}: projection state differs from the frozen product baseline`);
+    }
+  }
   return projection;
 }

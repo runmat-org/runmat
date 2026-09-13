@@ -72,6 +72,19 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
   }]);
 }));
 
+test("reviewed authority preserves an empty present parent as distinct from absence", () => withRepository((root) => {
+  write(root, "crates/runmat-builtins/src/catalog/aliases/mod.rs", "pub(super) fn extend_aliases(_aliases: &mut Vec<&'static crate::BuiltinCatalogAlias>) {}\n");
+  const observed = candidate(root);
+  const candidateAliases = observed.products.find((entry) => entry.product_id === "catalog-aliases");
+  assert.equal(candidateAliases.state, "present");
+  assert.deepEqual(candidateAliases.children, []);
+
+  const baseline = freezeReviewedModuleCompositionBaseline(observed, completedReview(observed));
+  const reviewedAliases = baseline.projection.products.find((entry) => entry.product_id === "catalog-aliases");
+  assert.equal(reviewedAliases.state, "present");
+  assert.deepEqual(reviewedAliases.children, []);
+}));
+
 test("candidate rejects unsigned, untrusted, dirty, ambiguous, and unsupported source", () => {
   for (const [label, override, message] of [
     ["unsigned", { signature: "N\0\0" }, /unsigned commit|valid signature/],

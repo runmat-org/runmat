@@ -42,7 +42,8 @@ test("materialization state keeps the active transition out of its prior project
     .find((product) => product.product_id === "runtime-math");
   assert.deepEqual(prior.children, []);
   assert.deepEqual(effective.children.map((child) => child.module), ["basic"]);
-  assert.deepEqual(state.priorPresentProductIds, ["runtime-math"]);
+  assert.equal(prior.state, "present");
+  assert.equal(effective.state, "present");
 });
 
 test("baseline-only products do not require an unrelated active bundle transition", () => {

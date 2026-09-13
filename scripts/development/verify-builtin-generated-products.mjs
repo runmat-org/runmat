@@ -27,7 +27,11 @@ try {
     const compositionProduct = compositionProducts.get(product.product_id) ?? null;
     const first = generate(product, firstPath, compositionProduct);
     const second = generate(product, secondPath, compositionProduct);
-    const checkedIn = observation(repositoryFile(product.path, `${product.product_id} checked-in product`));
+    const allowAbsent = compositionProduct?.state === "absent";
+    const checkedIn = observation(
+      repositoryProduct(product.path, `${product.product_id} checked-in product`, allowAbsent),
+      allowAbsent,
+    );
     const generatorPath = repositoryFile(product.generator.path, `${product.product_id} generator`);
     return {
       product_id: product.product_id,
@@ -39,8 +43,8 @@ try {
       checked_in: checkedIn,
       first,
       second,
-      deterministic: first.content_digest === second.content_digest,
-      synchronized: checkedIn.content_digest === first.content_digest,
+      deterministic: sameObservation(first, second),
+      synchronized: sameObservation(checkedIn, first),
       verification: semanticVerification(
         product,
         firstPath,
@@ -50,7 +54,7 @@ try {
     };
   });
   const value = {
-    schema_version: 2,
+    schema_version: 3,
     kind: "runmat-builtin-generated-products-proof",
     authority: "machine-derived-integration-evidence",
     products: records,
@@ -68,7 +72,11 @@ function semanticVerification(product, generatedPath, nativeManifest, compositio
   }
   if (product.verification.kind === "rust_module_composition") {
     if (!compositionProduct) throw new Error(`${product.product_id}: exact composition projection is absent`);
-    verifyModuleCompositionProduct(compositionProduct, readFileSync(generatedPath, "utf8"));
+    if (compositionProduct.state === "present") {
+      verifyModuleCompositionProduct(compositionProduct, readFileSync(generatedPath, "utf8"));
+    } else if (observation(generatedPath, true).state !== "absent") {
+      throw new Error(`${product.product_id}: absent composition generator created a product`);
+    }
     return {
       kind: "rust_module_composition",
       projection_digest: evidenceDigest(compositionProduct),
@@ -154,23 +162,64 @@ function generate(product, output, compositionProduct) {
     const detail = completed.stderr.trim() || completed.stdout.trim();
     throw new Error(`generated product run failed with status ${completed.status}: ${detail}`);
   }
-  return observation(output);
+  return observation(output, compositionProduct?.state === "absent");
 }
 
-function observation(path) {
-  const bytes = readFileSync(path);
-  return { byte_length: bytes.length, content_digest: contentDigest(bytes) };
-}
-
-function repositoryFile(relativePath, label) {
-  const candidate = resolve(repository, relativePath);
-  const stat = lstatSync(candidate);
-  if (!stat.isFile() || realpathSync(candidate) !== candidate) {
-    throw new Error(`${label} must be a canonical regular repository file`);
+function observation(target, allowAbsent = false) {
+  let stat;
+  try { stat = lstatSync(target); }
+  catch (error) {
+    if (allowAbsent && error?.code === "ENOENT") {
+      return { state: "absent", byte_length: null, content_digest: null };
+    }
+    throw error;
   }
+  if (!stat.isFile()) throw new Error(`${target} is not a regular generated product`);
+  const bytes = readFileSync(target);
+  return { state: "present", byte_length: bytes.length, content_digest: contentDigest(bytes) };
+}
+
+function repositoryProduct(relativePath, label, allowAbsent) {
+  const candidate = resolve(repository, relativePath);
   const fromRepository = relative(repository, candidate);
   if (fromRepository === ".." || fromRepository.startsWith(`..${sep}`) || isAbsolute(fromRepository)) {
     throw new Error(`${label} is outside the canonical repository`);
   }
+  try {
+    const stat = lstatSync(candidate);
+    if (!stat.isFile() || realpathSync(candidate) !== candidate) {
+      throw new Error(`${label} must be a canonical regular repository file`);
+    }
+  } catch (error) {
+    if (!allowAbsent || error?.code !== "ENOENT") throw error;
+    assertCanonicalExistingAncestor(candidate, label);
+  }
   return candidate;
+}
+
+function repositoryFile(relativePath, label) {
+  return repositoryProduct(relativePath, label, false);
+}
+
+function assertCanonicalExistingAncestor(candidate, label) {
+  let ancestor = dirname(candidate);
+  while (ancestor !== dirname(ancestor)) {
+    try {
+      const stat = lstatSync(ancestor);
+      if (!stat.isDirectory() || realpathSync(ancestor) !== ancestor) {
+        throw new Error(`${label} has a noncanonical repository ancestor`);
+      }
+      return;
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+      ancestor = dirname(ancestor);
+    }
+  }
+  throw new Error(`${label} has no canonical repository ancestor`);
+}
+
+function sameObservation(left, right) {
+  return left.state === right.state
+    && left.byte_length === right.byte_length
+    && left.content_digest === right.content_digest;
 }

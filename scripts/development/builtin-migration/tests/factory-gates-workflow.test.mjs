@@ -69,11 +69,13 @@ test("generated product proof requires two equal runs, checked-in equality, and 
   const generatorPath = "scripts/regenerate-wasm-registry.mjs";
   const observed = fs.readFileSync(path.join(fixture.repository, productPath));
   const generator = fs.readFileSync(path.join(fixture.repository, generatorPath));
-  const observation = { byte_length: observed.length, content_digest: contentDigest(observed) };
+  const observation = {
+    state: "present", byte_length: observed.length, content_digest: contentDigest(observed),
+  };
   const nativeManifest = fixture.compiledInventory.snapshot.observed.registration_manifest;
   const manifestIdentity = { schema_version: 1, digest: nativeManifest.digest, counts: structuredClone(nativeManifest.counts) };
   const value = {
-    schema_version: 2,
+    schema_version: 3,
     kind: "runmat-builtin-generated-products-proof",
     authority: "machine-derived-integration-evidence",
     products: [{
@@ -111,7 +113,10 @@ test("generated product proof requires two equal runs, checked-in equality, and 
   assert.equal(parseGeneratedProductsProof(stale, expected).result, "fail");
   const forged = structuredClone(stale);
   forged.products[0].synchronized = true;
-  assert.throws(() => parseGeneratedProductsProof(forged, expected), /conflicts with observed digests/);
+  assert.throws(
+    () => parseGeneratedProductsProof(forged, expected),
+    /conflicts with observed state or content identity/,
+  );
   const extra = structuredClone(value);
   extra.products.push({ ...structuredClone(extra.products[0]), product_id: "invented" });
   extra.products.sort((left, right) => left.product_id.localeCompare(right.product_id));

@@ -32,6 +32,33 @@ test("composition CLI writes the exact typed parent atomically", () => {
   }
 });
 
+test("composition CLI proves reviewed absence without creating or deleting a parent", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "runmat-module-composition-cli-absent-"));
+  try {
+    const output = path.join(directory, "mod.rs");
+    const product = { ...catalogProduct(), state: "absent" };
+    const completed = spawnSync(process.execPath, [cli, "--output", output], {
+      cwd: repository,
+      encoding: "utf8",
+      input: `${JSON.stringify(product)}\n`,
+    });
+    assert.equal(completed.status, 0, completed.stderr);
+    assert.equal(fs.existsSync(output), false);
+
+    fs.writeFileSync(output, "existing parent\n");
+    const occupied = spawnSync(process.execPath, [cli, "--output", output], {
+      cwd: repository,
+      encoding: "utf8",
+      input: `${JSON.stringify(product)}\n`,
+    });
+    assert.notEqual(occupied.status, 0);
+    assert.match(occupied.stderr, /composition output already exists/);
+    assert.equal(fs.readFileSync(output, "utf8"), "existing parent\n");
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("baseline CLIs expose the three-stage reviewed authority chain", () => {
   for (const command of [scaffold, freeze, bootstrap]) {
     const completed = spawnSync(process.execPath, [command, "--help"], { cwd: repository, encoding: "utf8" });
@@ -50,6 +77,7 @@ function catalogProduct() {
     crate_role: "catalog",
     path: "crates/runmat-builtins/src/catalog/entries/math/mod.rs",
     module_path: "crate::catalog::entries::math",
+    state: "present",
     aggregations: ["entries"],
     aggregation_exports: [],
     children: [{
