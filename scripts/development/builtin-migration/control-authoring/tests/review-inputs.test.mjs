@@ -11,8 +11,9 @@ import { contentDigest, evidenceDigest } from "../../evidence.mjs";
 import { buildInventory } from "../../inventory.mjs";
 import {
   REVISION, cleanupRepositoryFixtures, compiledInventoryFixture, fixtureIntegrationProducts,
-  fixtureGatePlans, fixtureTargetPolicy, repositoryFixture,
-  fixtureReviewedModuleCompositionBaseline, topologyFixture,
+  fixtureCatalogCompositionChild, fixtureCompositionChild, fixtureGatePlans, fixtureModuleCompositionBaseline,
+  fixtureTargetPolicy, repositoryFixture, fixtureReviewedModuleCompositionBaseline,
+  topologyFixture,
 } from "../../tests/helpers.mjs";
 import { reviewedPilotPolicy } from "../../tests/pilot-policy-fixture.mjs";
 import { parseBundleControlReview } from "../bundle-review.mjs";
@@ -559,7 +560,15 @@ function reviewFixture() {
     review: { status: "reviewed", evidence: ["fixture bundle review"] },
   };
   const bundleReview = { ...bundlePayload, digest: evidenceDigest(bundlePayload) };
-  const moduleCompositionBaseline = fixtureReviewedModuleCompositionBaseline();
+  const moduleCompositionBaseline = fixtureReviewedModuleCompositionBaseline(
+    fixtureModuleCompositionBaseline(
+      new Map([
+        ["catalog-math", [fixtureCatalogCompositionChild()]],
+        ["runtime-math", [fixtureCompositionChild()]],
+      ]),
+      new Set(["catalog-math", "runtime-math"]),
+    ),
+  );
   const globalPayload = {
     schema_version: 6,
     kind: "runmat-builtin-migration-global-control-review",
