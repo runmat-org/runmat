@@ -77,6 +77,23 @@ test("lease parsing rejects legacy and future wire schemas", () => {
   }
 });
 
+test("lease request and authored lease IDs are canonical stable identifiers", () => {
+  const fixture = controlledFixture();
+  const request = structuredClone(fixture.leaseRequest);
+  request.lease_id = "lane/one";
+  assert.throws(() => issueLease(
+    request, fixture.control, fixture.repository, fixture.inventory,
+    fixture.queueState, fixture.queueCheckpoint,
+  ), /lease request id is not a safe stable identifier/);
+
+  const lease = structuredClone(fixture.leaseValue);
+  lease.lease_id = "lane one";
+  assert.throws(
+    () => parseLease(lease, fixture.control, fixture.repository),
+    /lease id is not a safe stable identifier/,
+  );
+});
+
 test("live prepare, gate, audit, phase capture, and seal reject an expired lease", () => {
   const fixture = controlledFixture();
   const expired = parseLease(historicalLease(fixture), fixture.control, fixture.repository);

@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { compareCodePoint } from "../constants.mjs";
 import { evidenceDigest } from "../evidence.mjs";
 import { requiredGateNames } from "../gate-requirements.mjs";
 import { buildOrdinaryGateProof } from "../ordinary-gate-proof.mjs";
@@ -8,28 +9,46 @@ import { validateQueueState } from "../queue.mjs";
 import { validateQueueCheckpoint } from "../queue-checkpoint.mjs";
 
 export function acceptFirstBundle({ fixture, subjectInventory, phases }) {
+  return acceptBundle({
+    fixture,
+    subjectInventory,
+    phases,
+    leaseRecord: fixture.firstLease,
+    predecessorState: fixture.queueState,
+    predecessorStatePath: "test-artifacts/queue-state-0.json",
+    predecessorCheckpoint: fixture.queueCheckpoint,
+    predecessorCheckpointPath: "test-artifacts/queue-checkpoint-0.json",
+    checkpointHistory: new Map([[
+      fixture.queueCheckpoint.digest, fixture.queueCheckpointValue,
+    ]]),
+    sealId: "seal-alpha",
+    sealPath: "test-artifacts/seal-alpha.json",
+  });
+}
+
+export function acceptBundle({
+  fixture, subjectInventory, phases, leaseRecord,
+  predecessorState, predecessorStatePath,
+  predecessorCheckpoint, predecessorCheckpointPath, checkpointHistory,
+  sealId, sealPath,
+}) {
   const artifactRoot = path.join(path.dirname(fixture.repository), "sequential-authority");
   fs.mkdirSync(artifactRoot, { recursive: true });
-  const initialStatePath = path.join(artifactRoot, "queue-state-0.json");
-  const initialCheckpointPath = path.join(artifactRoot, "queue-checkpoint-0.json");
-  writeJson(initialStatePath, fixture.queueState.value);
-  writeJson(initialCheckpointPath, fixture.queueCheckpointValue);
-  const initialState = validateQueueState(
-    readJson(initialStatePath), fixture.control, () => null,
-  );
-  const initialCheckpointValue = readJson(initialCheckpointPath);
-  const initialCheckpoint = validateQueueCheckpoint(
-    initialCheckpointValue, initialCheckpointValue.digest, initialState, fixture.control,
-  );
-  const seal = passingSeal({ fixture, subjectInventory, phases });
-  const sealPath = path.join(artifactRoot, "seal-alpha.json");
-  writeJson(sealPath, seal);
+  const lease = leaseRecord.lease;
+  const bundleId = lease.value.bundle_id;
+  const seal = passingSeal({
+    fixture, subjectInventory, phases, lease, bundleId, sealId,
+  });
+  const physicalSealPath = path.join(artifactRoot, `${sealId}.json`);
+  writeJson(physicalSealPath, seal);
   const reference = {
-    path: "test-artifacts/seal-alpha.json",
+    path: sealPath,
     artifact_id: seal.seal_id,
     digest: evidenceDigest(seal),
     bundle_id: seal.bundle_id,
   };
+  const references = [...predecessorState.acceptedSeals, reference]
+    .sort((left, right) => compareCodePoint(left.bundle_id, right.bundle_id));
   const queueStatePayload = {
     schema_version: 4,
     kind: "runmat-builtin-migration-queue-state",
@@ -38,32 +57,37 @@ export function acceptFirstBundle({ fixture, subjectInventory, phases }) {
     phase: "pilot",
     pilot_transition: null,
     predecessor: {
-      state_path: "test-artifacts/queue-state-0.json",
-      state_digest: initialState.stateDigest,
-      checkpoint_path: "test-artifacts/queue-checkpoint-0.json",
-      checkpoint_digest: initialCheckpoint.digest,
+      state_path: predecessorStatePath,
+      state_digest: predecessorState.stateDigest,
+      checkpoint_path: predecessorCheckpointPath,
+      checkpoint_digest: predecessorCheckpoint.digest,
     },
     bundles: {
-      [fixture.bundleIds[0]]: { artifact: seal.seal_id, state: "verified" },
+      ...structuredClone(predecessorState.value.bundles),
+      [bundleId]: { artifact: seal.seal_id, state: "verified" },
     },
-    seals: [reference],
+    seals: references,
   };
   const queueStateValue = {
     ...queueStatePayload, digest: evidenceDigest(queueStatePayload),
   };
-  const queueStatePath = path.join(artifactRoot, "queue-state-1.json");
+  const queueStatePath = path.join(artifactRoot, `${sealId}-queue-state.json`);
   writeJson(queueStatePath, queueStateValue);
   const queueState = validateQueueState(
     readJson(queueStatePath), fixture.control,
-    () => readJson(sealPath),
-    () => initialState,
+    (sealReference) => sealReference.bundle_id === bundleId
+      ? readJson(physicalSealPath)
+      : predecessorState.sealedBundles.find(
+        (entry) => entry.reference.bundle_id === sealReference.bundle_id,
+      )?.seal.value,
+    () => predecessorState,
   );
   const acceptedDigest = evidenceDigest({
     schema_version: 1,
     kind: "runmat-builtin-migration-accepted-seal-set",
     authority: "derived-from-validated-seals",
     control_manifest_digest: fixture.control.digest,
-    seals: [reference],
+    seals: references,
   });
   const checkpointPayload = {
     schema_version: 2,
@@ -71,7 +95,7 @@ export function acceptFirstBundle({ fixture, subjectInventory, phases }) {
     authority: "reviewer-authored-current-queue-checkpoint",
     control_manifest_digest: fixture.control.digest,
     queue_state_digest: queueState.stateDigest,
-    predecessor_checkpoint_digest: initialCheckpoint.digest,
+    predecessor_checkpoint_digest: predecessorCheckpoint.digest,
     phase: "pilot",
     head_event: { kind: "seal", seal: reference },
     source_revision: subjectInventory.source.revision,
@@ -83,35 +107,34 @@ export function acceptFirstBundle({ fixture, subjectInventory, phases }) {
   const checkpointValue = {
     ...checkpointPayload, digest: evidenceDigest(checkpointPayload),
   };
-  const checkpointPath = path.join(artifactRoot, "queue-checkpoint-1.json");
+  const checkpointPath = path.join(artifactRoot, `${sealId}-queue-checkpoint.json`);
   writeJson(checkpointPath, checkpointValue);
   const queueCheckpoint = validateQueueCheckpoint(
     readJson(checkpointPath), checkpointValue.digest, queueState, fixture.control,
-    () => readJson(initialCheckpointPath),
+    (predecessor) => checkpointHistory.get(predecessor.checkpoint_digest),
   );
   return {
     seal, reference, queueState, queueStateValue, queueCheckpoint, checkpointValue,
   };
 }
 
-function passingSeal({ fixture, subjectInventory, phases }) {
-  const lease = fixture.firstLease.lease;
+function passingSeal({ fixture, subjectInventory, phases, lease, bundleId, sealId }) {
   const gates = new Map();
-  for (const identity of fixture.control.bundles.get(fixture.bundleIds[0]).identities) {
+  for (const identity of fixture.control.bundles.get(bundleId).identities) {
     for (const gate of requiredGateNames(fixture.control.identities.get(identity))) {
       gates.set(gate, { gate, reference: gateReference(gate) });
     }
   }
   const ordinaryGateProof = buildOrdinaryGateProof(
-    fixture.control, fixture.bundleIds[0], "pilot", gates,
+    fixture.control, bundleId, "pilot", gates,
   );
   return {
     schema_version: 6,
     kind: "runmat-builtin-migration-seal-result",
     authority: "development-integration-evidence-only",
-    seal_id: "seal-alpha",
-    bundle_id: fixture.bundleIds[0],
-    identities: [fixture.identities[0]],
+    seal_id: sealId,
+    bundle_id: bundleId,
+    identities: [...fixture.control.bundles.get(bundleId).identities],
     lease_id: lease.value.lease_id,
     lease_digest: lease.value.digest,
     queue_phase: "pilot",
@@ -119,7 +142,7 @@ function passingSeal({ fixture, subjectInventory, phases }) {
     source_revision: subjectInventory.source.revision,
     source_digest: subjectInventory.source.digest,
     control_baseline_inventory_digest: fixture.inventory.digest,
-    lease_base_inventory_digest: fixture.inventory.digest,
+    lease_base_inventory_digest: lease.value.lease_base_inventory.inventory_digest,
     subject_inventory_digest: subjectInventory.digest,
     control_manifest_digest: fixture.control.digest,
     verification_digest: `sha256:${"a".repeat(64)}`,

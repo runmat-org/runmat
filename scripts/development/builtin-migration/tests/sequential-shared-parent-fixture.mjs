@@ -27,7 +27,7 @@ import { sequentialReviewedTopology } from "./sequential-shared-parent-topology-
 
 export { compositionChild };
 
-export function sequentialSharedParentFixture() {
+export function sequentialSharedParentFixture({ parallelBundles = false } = {}) {
   const repository = repositoryFixture({
     identities: SEQUENTIAL_IDENTITIES, composition: true,
   });
@@ -38,7 +38,7 @@ export function sequentialSharedParentFixture() {
   const draft = buildControlDraft(inventory);
   const topology = sequentialReviewedTopology(inventory, draft.digest);
   const scaffold = buildControlOverlayScaffold(inventory, draft, topology);
-  const bundleControls = sequentialBundleControls(inventory);
+  const bundleControls = sequentialBundleControls(inventory, { parallelBundles });
   const identityControls = sequentialIdentityControls();
   const reviewSet = sequentialReviewedControlSet({
     repository, inventory, topology, scaffold, bundleControls, identityControls,
@@ -76,6 +76,7 @@ export function sequentialSharedParentFixture() {
 
 export function leaseFor({
   repository, control, inventory, queueState, queueCheckpoint, bundleId, leaseId,
+  owner = "sequential-fixture",
 }) {
   const accepted = acceptedSealSet(queueState, control);
   const barriers = barrierSealSet(queueState, control, bundleId);
@@ -86,7 +87,7 @@ export function leaseFor({
     control_manifest_digest: control.digest,
     bundle_id: bundleId,
     lease_id: leaseId,
-    owner: "sequential-fixture",
+    owner,
     base_revision: inventory.source.revision,
     lease_base_inventory: leaseBaseInventoryBinding(inventory),
     queue_checkpoint_digest: queueCheckpoint.digest,
