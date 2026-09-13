@@ -409,6 +409,51 @@ The completion then binds the direct successor queue and its one newly accepted 
 
 Session artifacts live below the already-open canonical authority root and are reloaded through its no-follow, identity-pinned observation layer before they become immutable capabilities. Later measurement derives integer elapsed time from those exact persisted timestamps; lease duration is not counted as work time. This evidence uses the same cooperative-writer boundary as the other development control artifacts. It proves byte identity and lifecycle bindings, but does not treat the host clock as cryptographic evidence or claim protection from an administrator controlling the machine. Clock reversal, artifact replacement, a stale queue edge, an incomplete lifecycle, or an expired lease fails closed.
 
+After every reviewed pilot bundle has one completion, `pilot-measure` reconstructs the queue history from those exact session edges. The measurement review chooses only the initial and final queue authorities and canonical completion references. Counts, order, source identity, accepted seals, aggregate worker milliseconds, and elapsed milliseconds are derived. Overlapping work contributes each lane's duration to aggregate worker time while elapsed time spans the earliest start to latest completion.
+
+`pilot-evaluate` applies the reviewed rational throughput target and integer elapsed limit to that measurement. A result that meets both thresholds cannot carry limiter data. A below-target result requires a separately reviewed limiter and revised forecast bound to the same measurement. `pilot-transition` then creates the sole pilot-to-production state edge. It preserves the final pilot workflow, source, inventory, and accepted seals and records the exact evaluation in both the state and checkpoint. Ordinary queue loading cannot admit this edge; only the transition command supplies the evaluation-bound validator. If publication stops after the state is created, rerunning the command accepts that state only when its bytes are exactly the expected bytes and then creates the missing checkpoint. It never overwrites or repairs a different artifact.
+
+The five lifecycle commands use one explicit authority root. Every artifact path must resolve below that root, and every input reference carries its semantic digest. The control-authority options shown elsewhere in this document remain required and are represented below by `${control_args[@]}`.
+
+```bash
+node scripts/development/builtin-migration-factory.mjs pilot-session-start \
+  --authority-root /tmp/rm1064-authority \
+  --lease leases/array-creation.json --lease-digest "$lease_digest" \
+  --state queue/state-0.json --queue-checkpoint queue/checkpoint-0.json \
+  --trusted-queue-checkpoint-digest "$checkpoint_digest" \
+  "${control_args[@]}"
+
+node scripts/development/builtin-migration-factory.mjs pilot-session-complete \
+  --authority-root /tmp/rm1064-authority \
+  --start pilot-sessions/CONTROL/POLICY/PILOT/BUNDLE/start.json \
+  --start-digest "$start_digest" \
+  --lease leases/array-creation-final.json --lease-digest "$final_lease_digest" \
+  --pre-state queue/state-16.json --pre-queue-checkpoint queue/checkpoint-16.json \
+  --pre-trusted-queue-checkpoint-digest "$pre_checkpoint_digest" \
+  --successor-state queue/state-17.json \
+  --successor-queue-checkpoint queue/checkpoint-17.json \
+  --successor-trusted-queue-checkpoint-digest "$successor_checkpoint_digest" \
+  "${control_args[@]}"
+
+node scripts/development/builtin-migration-factory.mjs pilot-measure \
+  --authority-root /tmp/rm1064-authority \
+  --measurement-review reviews/pilot-measurement.json \
+  --measurement-review-digest "$measurement_review_digest" \
+  "${control_args[@]}"
+
+node scripts/development/builtin-migration-factory.mjs pilot-evaluate \
+  --authority-root /tmp/rm1064-authority \
+  --measurement pilot-measurements/REVIEW/measurement.json \
+  --measurement-digest "$measurement_digest" \
+  "${control_args[@]}"
+
+node scripts/development/builtin-migration-factory.mjs pilot-transition \
+  --authority-root /tmp/rm1064-authority \
+  --evaluation pilot-evaluations/MEASUREMENT/evaluation.json \
+  --evaluation-digest "$evaluation_digest" \
+  "${control_args[@]}"
+```
+
 ```bash
 node scripts/development/builtin-migration-factory.mjs audit \
   --compiled-inventory /tmp/runmat-compiled-inventory.json \

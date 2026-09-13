@@ -26,6 +26,11 @@ export function factoryCliHelp() {
     `  builtin-migration-factory.mjs prepare NAME --compiled-inventory PATH --control PATH --baseline-inventory PATH --lease-base-inventory PATH ${topology} ${controlReview} --lease PATH --workspace PATH [--dispositions PATH] [--output PATH]\n` +
     `  builtin-migration-factory.mjs audit --compiled-inventory PATH --control PATH --baseline-inventory PATH --lease-base-inventory PATH ${topology} ${controlReview} --lease PATH --batch PATH --evidence PATH [--dispositions PATH] [--output PATH]\n` +
     `  builtin-migration-factory.mjs verify --manifest PATH --control PATH --baseline-inventory PATH ${topology} ${controlReview} [--output PATH]\n` +
-    `  builtin-migration-factory.mjs seal --manifest PATH --lease PATH --control PATH --baseline-inventory PATH ${topology} ${controlReview} [--output PATH]\n\n` +
+    `  builtin-migration-factory.mjs seal --manifest PATH --lease PATH --control PATH --baseline-inventory PATH ${topology} ${controlReview} [--output PATH]\n` +
+    `  builtin-migration-factory.mjs pilot-session-start --authority-root PATH --lease PATH --lease-digest SHA256 --state PATH --queue-checkpoint PATH --trusted-queue-checkpoint-digest SHA256 --control PATH --baseline-inventory PATH ${topology} ${controlReview} [--output PATH]\n` +
+    `  builtin-migration-factory.mjs pilot-session-complete --authority-root PATH --start PATH --start-digest SHA256 --lease PATH --lease-digest SHA256 --pre-state PATH --pre-queue-checkpoint PATH --pre-trusted-queue-checkpoint-digest SHA256 --successor-state PATH --successor-queue-checkpoint PATH --successor-trusted-queue-checkpoint-digest SHA256 --control PATH --baseline-inventory PATH ${topology} ${controlReview} [--output PATH]\n` +
+    `  builtin-migration-factory.mjs pilot-measure --authority-root PATH --measurement-review PATH --measurement-review-digest SHA256 --control PATH --baseline-inventory PATH ${topology} ${controlReview} [--output PATH]\n` +
+    `  builtin-migration-factory.mjs pilot-evaluate --authority-root PATH --measurement PATH --measurement-digest SHA256 [--limiter PATH --limiter-digest SHA256] --control PATH --baseline-inventory PATH ${topology} ${controlReview} [--output PATH]\n` +
+    `  builtin-migration-factory.mjs pilot-transition --authority-root PATH --evaluation PATH --evaluation-digest SHA256 --control PATH --baseline-inventory PATH ${topology} ${controlReview} [--output PATH]\n\n` +
     `Generated files are content-addressed development evidence, never production authority.\n`;
 }
