@@ -9,7 +9,7 @@ export function validateControlReviewChain(candidateValue, attestationValue, exp
   const candidate = parseControlCandidate(candidateValue, expectedCandidate);
   const attestation = parseControlAttestation(attestationValue, candidate);
   const payload = {
-    schema_version: 6,
+    schema_version: 7,
     kind: "runmat-builtin-migration-control-manifest",
     authority: "reviewed-development-control",
     program: candidate.program,
@@ -27,6 +27,7 @@ export function validateControlReviewChain(candidateValue, attestationValue, exp
     exception_manifest: structuredClone(candidate.exception_manifest),
     target_policy: structuredClone(candidate.target_policy),
     storage_policy: structuredClone(candidate.storage_policy),
+    pilot_policy: structuredClone(candidate.pilot_policy),
     review: structuredClone(attestation.review),
   };
   const controlValue = { ...payload, digest: evidenceDigest(payload) };

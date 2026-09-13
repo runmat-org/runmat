@@ -23,6 +23,7 @@ import {
   candidateInputDigests, freezeReviewedTopology, parseReviewedTopology, reviewedTopologyView,
 } from "../topology/freeze.mjs";
 import { cleanupTemporaryDirectories, createTemporaryDirectory } from "./temporary-directories.mjs";
+import { reviewedPilotPolicy } from "./pilot-policy-fixture.mjs";
 
 export const REVISION = `git:${"1".repeat(40)}`;
 
@@ -265,7 +266,7 @@ function fixtureControlReviewSet(repository, inventory, topology, scaffold, bund
     ),
   );
   const globalPayload = {
-    schema_version: 5,
+    schema_version: 6,
     kind: "runmat-builtin-migration-global-control-review",
     authority: "reviewer-authored-development-input",
     program: "RM-1064/C00-C07",
@@ -285,6 +286,9 @@ function fixtureControlReviewSet(repository, inventory, topology, scaffold, bund
       { operating_system: profile.operating_system, architecture: profile.architecture },
     ])).entries()].sort(([left], [right]) => left.localeCompare(right)).map(([, target]) => target)),
     storage_policy: storagePolicy,
+    pilot_policy: reviewedPilotPolicy(
+      topology, new Map([[bundleId, bundleControl.prerequisites]]),
+    ),
     review: { status: "reviewed", evidence: ["fixture global review"] },
   };
   const globalValue = { ...globalPayload, digest: evidenceDigest(globalPayload) };

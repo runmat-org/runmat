@@ -19,6 +19,7 @@ import {
   fixtureReviewedModuleCompositionBaseline, fixtureTargetPolicy,
 } from "./helpers.mjs";
 import { createTemporaryDirectory } from "./temporary-directories.mjs";
+import { reviewedPilotPolicy } from "./pilot-policy-fixture.mjs";
 
 export function writeFullControlWorkflow(directory, revision, sourceContentDigest = undefined, sourceMode = undefined) {
   const input = fullTopologyChainFixture({ revision, sourceContentDigest, sourceMode });
@@ -229,7 +230,7 @@ function fullChainControl(inventory, topology, scaffold) {
     }];
   }));
   const payload = {
-    schema_version: 6,
+    schema_version: 7,
     kind: "runmat-builtin-migration-control-manifest",
     authority: "reviewed-development-control",
     program: "RM-1064/C00-C07",
@@ -293,7 +294,7 @@ function writeFullControlReviewSet(directory, inventory, topology, scaffold, pol
     policies.module_composition_baseline,
   );
   const globalPayload = {
-    schema_version: 5,
+    schema_version: 6,
     kind: "runmat-builtin-migration-global-control-review",
     authority: "reviewer-authored-development-input",
     program: "RM-1064/C00-C07",
@@ -310,6 +311,12 @@ function writeFullControlReviewSet(directory, inventory, topology, scaffold, pol
     exception_manifest: policies.exception_manifest,
     target_policy: policies.target_policy,
     storage_policy: policies.storage_policy,
+    pilot_policy: reviewedPilotPolicy(
+      topology,
+      new Map(Object.entries(policies.bundle_controls).map(([bundleId, control]) => [
+        bundleId, control.prerequisites,
+      ])),
+    ),
     review: reviewed("full-chain global control review"),
   };
   const global = { ...globalPayload, digest: evidenceDigest(globalPayload) };

@@ -49,6 +49,7 @@ const GLOBAL_DECISIONS = Object.freeze([
   "exception_manifest",
   "integration_products",
   "module_composition_baseline",
+  "pilot_policy",
   "target_policy",
   "storage_policy",
 ]);
@@ -110,7 +111,7 @@ export function buildControlOverlayScaffold(inventoryValue, draftValue, reviewed
     .sort((left, right) => compareCodePoint(left.finding_digest, right.finding_digest));
 
   const payload = {
-    schema_version: 4,
+    schema_version: 5,
     kind: KIND,
     authority: AUTHORITY,
     program: PROGRAM,
@@ -140,7 +141,7 @@ export function parseControlOverlayScaffold(value, inventoryValue, draftValue, r
   if (value.authority !== AUTHORITY) {
     throw new Error("control overlay scaffold cannot claim or accept reviewed authority");
   }
-  kind(value, 4, KIND, "control overlay scaffold");
+  kind(value, 5, KIND, "control overlay scaffold");
   if (value.review?.status !== "unreviewed") {
     throw new Error("control overlay scaffold cannot claim review");
   }

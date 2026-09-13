@@ -15,6 +15,7 @@ import { validateModuleCompositionControl } from "./module-composition/control.m
 import { materializeTopologyControl } from "./topology/control-projection.mjs";
 import { assertValidatedTopologyView } from "./topology/freeze.mjs";
 import { parseTargetPolicy } from "./target-policy.mjs";
+import { parsePilotPolicy } from "./pilot-policy.mjs";
 import {
   parseExceptionManifestPolicy, parseIdentityControlPolicy,
   parseOperationalBundleControlPolicy, validateStorageTargetCoverage,
@@ -32,6 +33,7 @@ export function validateControlProjection({
   exceptionManifest,
   targetPolicy: targetPolicyValue,
   storagePolicy,
+  pilotPolicy: pilotPolicyValue,
 }) {
   assertValidatedTopologyView(topology);
   validateBaselineContext(baselineContext, inventory, topology);
@@ -68,6 +70,13 @@ export function validateControlProjection({
   const targetPolicy = parseTargetPolicy(targetPolicyValue);
   const parsedExecutionTargets = targetPolicy.migrationExecutionTargets;
   validateStorageTargetCoverage(storagePolicy, parsedExecutionTargets);
+  const pilotPolicy = parsePilotPolicy(
+    pilotPolicyValue,
+    topology,
+    new Map([...bundles].map(([bundleId, bundle]) => [
+      bundleId, bundle.prerequisites,
+    ])),
+  );
   return {
     bundles,
     identities: materialized.identities,
@@ -75,6 +84,7 @@ export function validateControlProjection({
     moduleComposition,
     targetPolicy,
     executionTargets: parsedExecutionTargets,
+    pilotPolicy,
   };
 }
 

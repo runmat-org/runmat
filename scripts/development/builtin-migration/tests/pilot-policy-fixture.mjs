@@ -1,3 +1,4 @@
+import { compareCodePoint } from "../constants.mjs";
 import { evidenceDigest } from "../evidence.mjs";
 import {
   candidateInputDigests, freezeReviewedTopology, parseReviewedTopology, reviewedTopologyView,
@@ -66,6 +67,64 @@ export function cohortCount(cohort, bundles, identities, publicIdentities, inter
     identities,
     public_identities: publicIdentities,
     internal_identities: internalIdentities,
+  };
+}
+
+export function reviewedPilotPolicy(topology, prerequisitesByBundle, selectedBundleIds = null) {
+  const selected = new Set(selectedBundleIds ?? [...topology.bundles.keys()]);
+  const remaining = new Set(selected);
+  const waves = [];
+  while (remaining.size) {
+    const ready = [...remaining].filter((bundleId) => prerequisitesByBundle.get(bundleId)
+      .every((entry) => selected.has(entry.bundle_id) && !remaining.has(entry.bundle_id)))
+      .sort(compareCodePoint);
+    if (!ready.length) throw new Error("fixture pilot selection is not prerequisite-closed and acyclic");
+    const order = waves.length + 1;
+    waves.push({ wave_id: `wave-${order}`, order, bundle_ids: ready });
+    for (const bundleId of ready) remaining.delete(bundleId);
+  }
+  const counts = new Map();
+  let publicIdentities = 0;
+  let internalIdentities = 0;
+  for (const bundleId of selected) {
+    const bundle = topology.bundles.get(bundleId);
+    const count = counts.get(bundle.cohort) ?? cohortCount(bundle.cohort, 0, 0, 0, 0);
+    count.bundles += 1;
+    for (const identityId of bundle.identities) {
+      count.identities += 1;
+      if (topology.identities.get(identityId).disposition.kind === "internal") {
+        count.internal_identities += 1;
+        internalIdentities += 1;
+      } else {
+        count.public_identities += 1;
+        publicIdentities += 1;
+      }
+    }
+    counts.set(bundle.cohort, count);
+  }
+  return {
+    schema_version: 1,
+    kind: "runmat-builtin-migration-pilot-policy",
+    pilot_id: "fixture-accelerated-pilot",
+    waves,
+    derived_counts: {
+      bundles: selected.size,
+      identities: publicIdentities + internalIdentities,
+      public_identities: publicIdentities,
+      internal_identities: internalIdentities,
+      cohorts: [...counts.values()].sort((left, right) => compareCodePoint(left.cohort, right.cohort)),
+    },
+    admission: {
+      minimum_public_identities_per_aggregate_hour: 1,
+      maximum_elapsed_hours: 48,
+      required_waived_gate_count: 0,
+      ordinary_gate_policy: "all-required-gates-must-pass",
+      below_target_obligation: {
+        production_transition: "requires-reviewer-accepted-obligation",
+        required_findings: ["concrete-limiter", "revised-forecast"],
+      },
+    },
+    review: { status: "reviewed", evidence: ["fixture pilot policy review"] },
   };
 }
 

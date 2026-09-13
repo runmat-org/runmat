@@ -28,8 +28,8 @@ export function validateControlManifestStructure(value, { inventory: current, re
     throw new Error("control manifest validation requires the exact inventory and deterministically validated topology");
   }
   assertValidatedTopologyView(reviewedTopology);
-  kind(value, 6, "runmat-builtin-migration-control-manifest", "control manifest");
-  exact(value, ["schema_version", "kind", "authority", "program", "inputs", "topology_digest", "candidate_digest", "attestation_digest", "baseline_context", "cohorts", "bundle_controls", "identity_controls", "integration_products", "module_composition_baseline", "migration_findings", "exception_manifest", "target_policy", "storage_policy", "review", "digest"], "control manifest");
+  kind(value, 7, "runmat-builtin-migration-control-manifest", "control manifest");
+  exact(value, ["schema_version", "kind", "authority", "program", "inputs", "topology_digest", "candidate_digest", "attestation_digest", "baseline_context", "cohorts", "bundle_controls", "identity_controls", "integration_products", "module_composition_baseline", "migration_findings", "exception_manifest", "target_policy", "storage_policy", "pilot_policy", "review", "digest"], "control manifest");
   if (value.authority !== "reviewed-development-control") throw new Error("control manifest has invalid authority");
   if (value.program !== "RM-1064/C00-C07") throw new Error("control manifest has unexpected program");
   digest(value.topology_digest, "reviewed topology digest");
@@ -49,6 +49,7 @@ export function validateControlManifestStructure(value, { inventory: current, re
     exceptionManifest: value.exception_manifest,
     targetPolicy: value.target_policy,
     storagePolicy: value.storage_policy,
+    pilotPolicy: value.pilot_policy,
   });
   const baseline = parseBaselineContext(value.baseline_context, reviewedTopology);
   const cohorts = parseCohorts(value.cohorts);
@@ -80,6 +81,8 @@ export function validateControlManifestStructure(value, { inventory: current, re
     moduleComposition: projection.moduleComposition,
     targetPolicy: projection.targetPolicy,
     executionTargets: projection.executionTargets,
+    pilotPolicy: projection.pilotPolicy,
+    pilotPolicyDigest: projection.pilotPolicy.digest,
     cohorts,
     bundles,
     identities,

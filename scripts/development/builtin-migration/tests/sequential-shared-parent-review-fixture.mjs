@@ -11,6 +11,7 @@ import {
 import {
   SEQUENTIAL_BUNDLES, SEQUENTIAL_IDENTITIES,
 } from "./sequential-shared-parent-definition-fixture.mjs";
+import { reviewedPilotPolicy } from "./pilot-policy-fixture.mjs";
 
 export function sequentialReviewedControlSet({
   repository, inventory, topology, scaffold, bundleControls, identityControls,
@@ -22,7 +23,7 @@ export function sequentialReviewedControlSet({
     fixtureModuleCompositionBaseline(new Map(), new Set(["runtime-math"])),
   );
   const global = globalReview({
-    inventory, topology, scaffold, baseline, programProfiles,
+    inventory, topology, scaffold, baseline, programProfiles, bundleControls,
   });
   const globalBytes = writeJson(path.join(root, "global.json"), global);
   const bundleReviews = SEQUENTIAL_BUNDLES.map((bundleId, index) => bundleReview({
@@ -69,7 +70,9 @@ function programProfilesFor(bundleControls) {
   };
 }
 
-function globalReview({ inventory, topology, scaffold, baseline, programProfiles }) {
+function globalReview({
+  inventory, topology, scaffold, baseline, programProfiles, bundleControls,
+}) {
   const findingRows = inventory.migration_findings.map((finding) => ({
     finding_digest: evidenceDigest(finding),
     ...finding,
@@ -79,7 +82,7 @@ function globalReview({ inventory, topology, scaffold, baseline, programProfiles
     evidence: ["sequential fixture review"],
   }));
   const payload = {
-    schema_version: 5,
+    schema_version: 6,
     kind: "runmat-builtin-migration-global-control-review",
     authority: "reviewer-authored-development-input",
     program: "RM-1064/C00-C07",
@@ -106,6 +109,12 @@ function globalReview({ inventory, topology, scaffold, baseline, programProfiles
       architecture: inventory.compiled_inventory.build.architecture,
     }]),
     storage_policy: storagePolicy(inventory),
+    pilot_policy: reviewedPilotPolicy(
+      topology,
+      new Map([...bundleControls].map(([bundleId, control]) => [
+        bundleId, control.prerequisites,
+      ])),
+    ),
     review: { status: "reviewed", evidence: ["sequential fixture global review"] },
   };
   return { ...payload, digest: evidenceDigest(payload) };

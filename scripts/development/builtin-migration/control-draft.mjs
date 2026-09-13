@@ -11,7 +11,7 @@ const COHORTS = Object.freeze([
 
 const UNRESOLVED_CONTROL_FIELDS = Object.freeze([
   "bundles", "exception_manifest", "gate_plans", "identity_controls",
-  "migration_finding_dispositions", "storage_policy",
+  "migration_finding_dispositions", "pilot_policy", "storage_policy",
 ]);
 
 export function buildControlDraft(inventoryValue) {
@@ -37,7 +37,7 @@ export function buildControlDraft(inventoryValue) {
     review: { status: "unreviewed", evidence: [] },
   })).sort((left, right) => compareCodePoint(left.finding_digest, right.finding_digest));
   const payload = {
-    schema_version: 1,
+    schema_version: 2,
     kind: "runmat-builtin-migration-control-draft",
     authority: "unreviewed-scaffold-only",
     program: "RM-1064/C00-C07",
@@ -53,7 +53,7 @@ export function buildControlDraft(inventoryValue) {
 }
 
 export function parseControlDraft(value, inventoryValue = null) {
-  kind(value, 1, "runmat-builtin-migration-control-draft", "control draft");
+  kind(value, 2, "runmat-builtin-migration-control-draft", "control draft");
   exact(value, ["schema_version", "kind", "authority", "program", "baseline", "cohorts", "identity_rows", "bundle_drafts", "migration_finding_rows", "unresolved_control_fields", "review", "digest"], "control draft");
   if (value.authority !== "unreviewed-scaffold-only" || value.program !== "RM-1064/C00-C07") throw new Error("control draft must remain an unreviewed RM-1064 scaffold");
   parseDraftBaseline(value.baseline);
