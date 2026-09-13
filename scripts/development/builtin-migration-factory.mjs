@@ -261,37 +261,28 @@ function loadQueueAuthority(statePath, checkpointPath, trustedCheckpointDigest, 
     } finally { activeStates.delete(resolved); }
   };
   const state = loadState(resolvedState);
-  const checkpoints = new Map();
-  const activeCheckpoints = new Set();
-  const loadCheckpoint = (resolved, expectedDigest, checkpointState) => {
-    if (activeCheckpoints.has(resolved)) throw new Error("queue checkpoint predecessor chain contains a cycle");
-    if (checkpoints.has(expectedDigest)) return checkpoints.get(expectedDigest);
-    activeCheckpoints.add(resolved);
-    try {
-      const checkpoint = validateQueueCheckpoint(
-        readJson(resolved), expectedDigest, checkpointState, control,
-        (predecessor) => loadCheckpoint(
-          loadWithinBase(predecessor.checkpoint_path, "queue predecessor checkpoint reference"),
-          predecessor.checkpoint_digest,
-          checkpointState.predecessorState,
-        ).value,
-      );
-      checkpoints.set(expectedDigest, checkpoint);
-      return checkpoint;
-    } finally { activeCheckpoints.delete(resolved); }
-  };
-  const checkpoint = loadCheckpoint(
-    loadWithinBase(checkpointPath, "queue checkpoint"), trustedCheckpointDigest, state,
+  const checkpoint = validateQueueCheckpoint(
+    readJson(loadWithinBase(checkpointPath, "queue checkpoint")),
+    trustedCheckpointDigest,
+    state,
+    control,
+    (predecessor) => readJson(loadWithinBase(
+      predecessor.checkpoint_path, "queue predecessor checkpoint reference",
+    )),
   );
   return { state, checkpoint };
 }
 
 function runVerify(options) {
   const manifestPath = path.resolve(options.manifest);
-  const manifest = parseVerificationManifest(readJson(manifestPath));
+  const baseline = parseInventoryEvidence(readJson(options.baselineInventory));
+  const control = parseControlFromOptions(options, baseline);
+  const manifest = parseVerificationManifest(readJson(manifestPath), control);
   const base = path.dirname(manifestPath);
   const load = (reference) => ({ reference, value: readJson(path.resolve(base, reference.path)) });
-  const output = verifyBatch(manifest, load(manifest.audit), manifest.gate_results.map(load));
+  const output = verifyBatch(
+    manifest, load(manifest.audit), manifest.gate_results.map(load), control,
+  );
   emit(output, options.output);
   if (output.result !== "pass") process.exitCode = 1;
 }

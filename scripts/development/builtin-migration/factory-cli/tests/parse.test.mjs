@@ -55,12 +55,28 @@ test("factory parser preserves representative command and positional contracts",
   assert.equal(inventory.output, "inventory.json");
 
   const verify = parseFactoryCliArguments([
-    "verify", "--manifest", "verification.json", "--output", "result.json",
+    "verify", "--manifest", "verification.json", ...controlAuthorityArguments(),
+    "--output", "result.json",
   ]);
   assert.equal(verify.command, "verify");
   assert.equal(verify.manifest, "verification.json");
   assert.equal(verify.output, "result.json");
 });
+
+function controlAuthorityArguments() {
+  return [
+    "--control", "control.json", "--baseline-inventory", "inventory.json",
+    "--topology", "topology.json", "--candidate", "topology-candidate.json",
+    "--attestation", "topology-attestation.json", "--component-graph", "graph.json",
+    "--draft", "draft.json", "--c01-c03-review", "c01-c03.json",
+    "--c04-c05-review", "c04-c05.json", "--c06-c07-review", "c06-c07.json",
+    "--reconciliation", "reconciliation.json",
+    "--stability-corrections", "stability.json",
+    "--control-scaffold", "scaffold.json", "--control-review-set", "reviews.json",
+    "--control-candidate", "control-candidate.json",
+    "--control-attestation", "control-attestation.json",
+  ];
+}
 
 test("prepare requires its positional identity before option validation", () => {
   assert.throws(

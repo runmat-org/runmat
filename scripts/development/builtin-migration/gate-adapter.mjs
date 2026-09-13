@@ -116,6 +116,7 @@ export function runGateProducer(input, clock = Date.now) {
     lease_base_inventory_digest: leaseBase.digest,
     subject_inventory_digest: subject.digest, control_manifest_digest: control.digest,
     lease_id: lease.value.lease_id, lease_digest: lease.value.digest,
+    queue_phase: lease.value.queue_phase,
     bundle_id: bundle.id, storage_policy: control.value.storage_policy,
     gate_plans: bundle.gate_plans, compiled_build: subject.compiled_inventory.build,
     execution_targets: control.executionTargets, repository,
@@ -125,7 +126,7 @@ export function runGateProducer(input, clock = Date.now) {
       : {}),
   };
   return parseGateResult({
-    schema_version: 7, kind: "runmat-builtin-migration-gate-result", authority: "machine-verification-only",
+    schema_version: 8, kind: "runmat-builtin-migration-gate-result", authority: "machine-verification-only",
     producer: GATE_PRODUCERS[input.gate],
     producer_evidence: {
       schema_version: 3, kind: `${GATE_PRODUCERS[input.gate]}-evidence`,
@@ -147,6 +148,7 @@ export function runGateProducer(input, clock = Date.now) {
     control_baseline_inventory_digest: controlBaseline.digest,
     lease_base_inventory_digest: leaseBase.digest, subject_inventory_digest: subject.digest,
     control_manifest_digest: control.digest, lease_id: lease.value.lease_id, lease_digest: lease.value.digest,
+    queue_phase: lease.value.queue_phase,
     bundle_id: bundle.id, identities, gate: input.gate, result, checks, artifacts,
     storage_admission: storage.admission,
   }, expected);

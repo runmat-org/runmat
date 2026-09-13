@@ -3,11 +3,15 @@ import { assertControlBaseline, assertValidatedControl } from "./control.mjs";
 import { findAuthoredCollisions } from "./control-graph.mjs";
 import { deepImmutable } from "./immutable.mjs";
 import { evidenceDigest } from "./evidence.mjs";
-import { requiredBarrierBundleIds } from "./queue-barriers.mjs";
 import {
-  parseQueuePredecessor, validateMonotonicQueueTransition,
-  validateSerializedSealTransition,
+  requiredPilotBarrierBundleIds, requiredProductionBarrierBundleIds,
+} from "./queue-barriers.mjs";
+import {
+  parseQueuePredecessor, validateSerializedSealTransition,
 } from "./queue-history.mjs";
+import {
+  parsePilotTransition, validateQueuePhaseTransition,
+} from "./queue-transition.mjs";
 import { validateQueueSeal } from "./queue-seal.mjs";
 import {
   buildAcceptedSealSet, buildBarrierSealSet, validateAcceptedSealSet,
@@ -30,18 +34,26 @@ export function buildQueue(inventory, control, state = null) {
   const inventoryByIdentity = new Map(inventory.identities.map((entry) => [entry.identity, entry]));
   const rows = [...control.bundles.values()].map((bundle) => queueRow(bundle, control, inventoryByIdentity, queueState));
   rows.sort((left, right) => {
+    if (queueState.value.phase === "pilot") {
+      const leftWave = control.pilotPolicy.waveByBundle.get(left.bundle_id) ?? Number.MAX_SAFE_INTEGER;
+      const rightWave = control.pilotPolicy.waveByBundle.get(right.bundle_id) ?? Number.MAX_SAFE_INTEGER;
+      if (leftWave !== rightWave) return leftWave - rightWave;
+    }
     const order = control.cohorts.get(left.cohort).order - control.cohorts.get(right.cohort).order;
     return order || right.complexity.weight - left.complexity.weight || compareCodePoint(left.bundle_id, right.bundle_id);
   });
   return {
-    schema_version: 3,
+    schema_version: 4,
     kind: "runmat-builtin-migration-work-queue",
     authority: "development-scheduling-evidence-only",
     control_manifest_digest: control.digest,
     source: inventory.source,
     inventory_digest: inventory.digest,
     migration_findings_digest: inventory.migration_findings_digest,
-    ordering: "cohort-then-complexity-weight-descending-then-bundle",
+    phase: queueState.value.phase,
+    ordering: queueState.value.phase === "pilot"
+      ? "pilot-wave-then-cohort-then-complexity-weight-descending-then-bundle"
+      : "cohort-then-complexity-weight-descending-then-bundle",
     authored_write_collisions: findAuthoredCollisions(control.bundles),
     summary: summarize(rows),
     rows,
@@ -51,10 +63,12 @@ export function buildQueue(inventory, control, state = null) {
 export function emptyQueueState(control) {
   assertValidatedControl(control);
   const payload = {
-    schema_version: 3,
+    schema_version: 4,
     kind: "runmat-builtin-migration-queue-state",
     authority: "reviewed-monotonic-scheduling-input",
     control_manifest_digest: control.digest,
+    phase: "pilot",
+    pilot_transition: null,
     predecessor: null,
     bundles: {},
     seals: [],
@@ -68,7 +82,17 @@ function queueRow(bundle, control, inventory, state) {
   const observed = bundle.identities.map((id) => inventory.get(id) ?? null);
   const blockers = [];
   const migrationFindings = control.migrationFindings.filter((entry) => entry.bundle_id === bundle.id);
-  blockers.push(...cohortBarrierBlockers(bundle, control, sealedBundleIds));
+  if (state.value.phase === "production") {
+    blockers.push(...cohortBarrierBlockers(bundle, control, sealedBundleIds));
+  } else {
+    const wave = control.pilotPolicy.waveByBundle.get(bundle.id);
+    if (wave === undefined) blockers.push("queue-phase:pilot");
+    else {
+      for (const required of requiredPilotBarrierBundleIds(control, bundle.id)) {
+        if (!sealedBundleIds.has(required)) blockers.push(`pilot-wave-barrier:${required}`);
+      }
+    }
+  }
   for (const prerequisite of bundle.prerequisites) {
     if (!sealedBundleIds.has(prerequisite.bundle_id)) blockers.push(`prerequisite:${prerequisite.bundle_id}`);
   }
@@ -139,12 +163,14 @@ function requiredMaturity(maturity) {
   return Object.entries(maturity).filter(([, value]) => value.applicability === "required").map(([gate]) => gate).sort(compareCodePoint);
 }
 
-export function validateQueueState(value, control, loadSeal, loadPredecessor = () => null) {
+export function validateQueueState(
+  value, control, loadSeal, loadPredecessor = () => null,
+) {
   assertValidatedControl(control);
-  kind(value, 3, "runmat-builtin-migration-queue-state", "queue state");
+  kind(value, 4, "runmat-builtin-migration-queue-state", "queue state");
   exact(value, [
     "schema_version", "kind", "authority", "control_manifest_digest", "predecessor",
-    "bundles", "seals", "digest",
+    "phase", "pilot_transition", "bundles", "seals", "digest",
   ], "queue state");
   if (value.authority !== "reviewed-monotonic-scheduling-input") {
     throw new Error("queue state has invalid authority");
@@ -152,6 +178,10 @@ export function validateQueueState(value, control, loadSeal, loadPredecessor = (
   if (value.control_manifest_digest !== control.digest) {
     throw new Error("queue state belongs to another control manifest");
   }
+  if (!["pilot", "production"].includes(value.phase)) {
+    throw new Error("queue state phase must be pilot or production");
+  }
+  const pilotTransition = parsePilotTransition(value.pilot_transition);
   const predecessor = parseQueuePredecessor(value.predecessor);
   const predecessorState = predecessor === null ? null : assertValidatedQueueState(
     loadPredecessor(predecessor), control,
@@ -160,6 +190,9 @@ export function validateQueueState(value, control, loadSeal, loadPredecessor = (
     throw new Error("queue state predecessor digest mismatch");
   }
   object(value.bundles, "queue state bundles");
+  if (predecessor === null && Object.keys(value.bundles).length !== 0) {
+    throw new Error("initial queue state cannot contain workflow entries");
+  }
   for (const [bundleId, entry] of Object.entries(value.bundles)) {
     stableId(bundleId, "queue state bundle id");
     if (!control.bundles.has(bundleId)) throw new Error(`queue state references unknown bundle ${bundleId}`);
@@ -190,6 +223,12 @@ export function validateQueueState(value, control, loadSeal, loadPredecessor = (
       reference: acceptedReference,
       integrated_revision: seal.integratedRevision,
       source_digest: seal.sourceDigest,
+      subject_inventory_digest: seal.subjectInventoryDigest,
+      queue_phase: seal.queuePhase,
+      ordinary_gate_proof: seal.ordinaryGateProof,
+      lease_id: seal.leaseId,
+      lease_digest: seal.leaseDigest,
+      seal,
     });
     acceptedSealDependencies.push({
       bundleId, accepted: seal.acceptedSeals, barriers: seal.barrierSeals,
@@ -210,7 +249,15 @@ export function validateQueueState(value, control, loadSeal, loadPredecessor = (
       }
     }
   }
-  validateMonotonicQueueTransition(value, predecessorState, acceptedSeals, acceptedSealDependencies);
+  const pilotEvaluation = validateQueuePhaseTransition({
+    value,
+    predecessorState,
+    acceptedSeals,
+    acceptedSealDependencies,
+    sealedBundles,
+    pilotTransition,
+    control,
+  });
   digest(value.digest, "queue state digest");
   const { digest: _ignored, ...payload } = value;
   if (evidenceDigest(payload) !== value.digest) throw new Error("queue state digest mismatch");
@@ -221,11 +268,21 @@ export function validateQueueState(value, control, loadSeal, loadPredecessor = (
     predecessor,
     sealedBundleIds: [...sealedBundleIds].sort(compareCodePoint),
     acceptedSeals,
-    sealedBundles,
+    sealedBundles: sealedBundles.map(({ seal: _seal, ordinary_gate_proof: _proof, ...entry }) => entry),
+    phase: value.phase,
+    pilotTransition,
   });
-  // A validated predecessor is an authority capability, not caller data. Keep
-  // its exact branded object while deeply copying the serialized state around it.
-  const parsed = Object.freeze({ ...immutable, predecessorState });
+  // Validated predecessors and seals are authority capabilities, not caller
+  // data. Keep their exact branded objects while copying serialized state.
+  const boundSealedBundles = Object.freeze(immutable.sealedBundles.map((entry, index) =>
+    Object.freeze({
+      ...entry,
+      ordinary_gate_proof: sealedBundles[index].ordinary_gate_proof,
+      seal: sealedBundles[index].seal,
+    })));
+  const parsed = Object.freeze({
+    ...immutable, sealedBundles: boundSealedBundles, predecessorState, pilotEvaluation,
+  });
   VALIDATED_QUEUE_STATES.add(parsed);
   return parsed;
 }
@@ -240,7 +297,7 @@ export function assertValidatedQueueState(value, control) {
 
 export function acceptedSealSet(value, control) {
   const state = assertValidatedQueueState(value, control);
-  return deepImmutable({
+  return Object.freeze({
     value: buildAcceptedSealSet(control.digest, state.acceptedSeals),
     sealedBundles: state.sealedBundles,
   });
@@ -250,19 +307,24 @@ export function barrierSealSet(value, control, bundleId) {
   const state = assertValidatedQueueState(value, control);
   const bundle = control.bundles.get(stableId(bundleId, "barrier seal-set bundle id"));
   if (!bundle) throw new Error(`barrier seal set references unknown bundle ${bundleId}`);
-  const required = new Set(requiredBarrierBundleIds(control, bundle.id));
+  const required = new Set(state.value.phase === "pilot"
+    ? requiredPilotBarrierBundleIds(control, bundle.id)
+    : requiredProductionBarrierBundleIds(control, bundle.id));
   const accepted = new Map(state.sealedBundles.map((entry) => [entry.reference.bundle_id, entry]));
   const missing = [...required].filter((id) => !accepted.has(id)).sort(compareCodePoint);
   if (missing.length) throw new Error(`${bundle.id}: barrier seal set is missing ${missing.join(", ")}`);
   const seals = state.acceptedSeals.filter((reference) => required.has(reference.bundle_id));
   const sealedBundles = state.sealedBundles.filter((entry) => required.has(entry.reference.bundle_id));
-  return deepImmutable({
-    value: buildBarrierSealSet(control.digest, bundle.id, seals),
-    sealedBundles,
+  return Object.freeze({
+    value: buildBarrierSealSet({
+      controlManifestDigest: control.digest,
+      bundleId: bundle.id,
+      queuePhase: state.value.phase,
+      seals,
+    }),
+    sealedBundles: Object.freeze(sealedBundles),
   });
 }
-
-export { requiredBarrierBundleIds } from "./queue-barriers.mjs";
 
 function summarize(rows) {
   const byState = {};

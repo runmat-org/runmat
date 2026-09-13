@@ -15,8 +15,8 @@ import { storageStatus } from "./storage-admission.mjs";
 export { GATE_PRODUCERS } from "./gate-kinds.mjs";
 
 export function parseGateResult(value, expected) {
-  kind(value, 7, "runmat-builtin-migration-gate-result", "gate result");
-  exact(value, ["schema_version", "kind", "authority", "producer", "producer_evidence", "artifact_id", "produced_at", "execution_target", "source_revision", "source_digest", "control_baseline_inventory_digest", "lease_base_inventory_digest", "subject_inventory_digest", "control_manifest_digest", "bundle_id", "lease_id", "lease_digest", "identities", "gate", "result", "checks", "artifacts", "storage_admission"], "gate result");
+  kind(value, 8, "runmat-builtin-migration-gate-result", "gate result");
+  exact(value, ["schema_version", "kind", "authority", "producer", "producer_evidence", "artifact_id", "produced_at", "execution_target", "source_revision", "source_digest", "control_baseline_inventory_digest", "lease_base_inventory_digest", "subject_inventory_digest", "control_manifest_digest", "bundle_id", "lease_id", "lease_digest", "queue_phase", "identities", "gate", "result", "checks", "artifacts", "storage_admission"], "gate result");
   if (value.authority !== "machine-verification-only") throw new Error("gate result has invalid authority");
   const gate = enumValue(value.gate, Object.keys(GATE_PRODUCERS), "gate result gate");
   if (value.producer !== GATE_PRODUCERS[gate]) throw new Error(`${gate}: unexpected gate producer`);
@@ -33,6 +33,7 @@ export function parseGateResult(value, expected) {
   stableId(value.bundle_id, "gate bundle id");
   stableId(value.lease_id, "gate lease id");
   digest(value.lease_digest, "gate lease digest");
+  enumValue(value.queue_phase, ["pilot", "production"], "gate queue phase");
   const identities = uniqueStrings(value.identities, "gate identities", { pattern: SAFE_IDENTITY, lower: true });
   enumValue(value.result, ["pass", "fail"], "gate result");
   const checks = array(value.checks, "gate checks").map((entry) => {
@@ -62,7 +63,7 @@ export function parseGateResult(value, expected) {
   );
   validateExecutionEnvironment(producerEvidence.invocation.environment, storageAdmission);
   if (expected) {
-    if (value.source_revision !== expected.source_revision || value.source_digest !== expected.source_digest || value.control_baseline_inventory_digest !== expected.control_baseline_inventory_digest || value.lease_base_inventory_digest !== expected.lease_base_inventory_digest || value.subject_inventory_digest !== expected.subject_inventory_digest || value.control_manifest_digest !== expected.control_manifest_digest || value.bundle_id !== expected.bundle_id || value.lease_id !== expected.lease_id || value.lease_digest !== expected.lease_digest) {
+    if (value.source_revision !== expected.source_revision || value.source_digest !== expected.source_digest || value.control_baseline_inventory_digest !== expected.control_baseline_inventory_digest || value.lease_base_inventory_digest !== expected.lease_base_inventory_digest || value.subject_inventory_digest !== expected.subject_inventory_digest || value.control_manifest_digest !== expected.control_manifest_digest || value.bundle_id !== expected.bundle_id || value.lease_id !== expected.lease_id || value.lease_digest !== expected.lease_digest || value.queue_phase !== expected.queue_phase) {
       throw new Error(`${gate}: stale or mismatched gate provenance`);
     }
     if (expected.gate_plans) validateReviewedPlan(

@@ -25,7 +25,7 @@ export function factoryCliHelp() {
     `  builtin-migration-factory.mjs queue --compiled-inventory PATH --control PATH --baseline-inventory PATH ${topology} ${controlReview} [--state PATH --queue-checkpoint PATH --trusted-queue-checkpoint-digest SHA256] [--dispositions PATH] [--output PATH]\n` +
     `  builtin-migration-factory.mjs prepare NAME --compiled-inventory PATH --control PATH --baseline-inventory PATH --lease-base-inventory PATH ${topology} ${controlReview} --lease PATH --workspace PATH [--dispositions PATH] [--output PATH]\n` +
     `  builtin-migration-factory.mjs audit --compiled-inventory PATH --control PATH --baseline-inventory PATH --lease-base-inventory PATH ${topology} ${controlReview} --lease PATH --batch PATH --evidence PATH [--dispositions PATH] [--output PATH]\n` +
-    `  builtin-migration-factory.mjs verify --manifest PATH [--output PATH]\n` +
+    `  builtin-migration-factory.mjs verify --manifest PATH --control PATH --baseline-inventory PATH ${topology} ${controlReview} [--output PATH]\n` +
     `  builtin-migration-factory.mjs seal --manifest PATH --lease PATH --control PATH --baseline-inventory PATH ${topology} ${controlReview} [--output PATH]\n\n` +
     `Generated files are content-addressed development evidence, never production authority.\n`;
 }

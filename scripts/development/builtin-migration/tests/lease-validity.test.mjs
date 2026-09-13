@@ -65,6 +65,18 @@ test("historical lease parsing remains deterministic after expiration", () => {
   );
 });
 
+test("lease parsing rejects legacy and future wire schemas", () => {
+  const fixture = controlledFixture();
+  for (const version of [4, 6]) {
+    const lease = structuredClone(fixture.leaseValue);
+    lease.schema_version = version;
+    assert.throws(
+      () => parseLease(lease, fixture.control, fixture.repository),
+      /schema_version 5/,
+    );
+  }
+});
+
 test("live prepare, gate, audit, phase capture, and seal reject an expired lease", () => {
   const fixture = controlledFixture();
   const expired = parseLease(historicalLease(fixture), fixture.control, fixture.repository);
@@ -135,13 +147,14 @@ function historicalLease(fixture) {
 
 function sealManifest(fixture, lease, phases) {
   return {
-    schema_version: 5,
+    schema_version: 6,
     kind: "runmat-builtin-migration-seal-manifest",
     authority: "reviewed-integration-request",
     seal_id: "expired-seal",
     bundle_id: fixture.bundleId,
     lease_id: lease.value.lease_id,
     lease_digest: lease.value.digest,
+    queue_phase: lease.value.queue_phase,
     identities: ["foo"],
     source_revision: fixture.inventory.source.revision,
     source_digest: fixture.inventory.source.digest,

@@ -75,13 +75,13 @@ export function writeFullControlWorkflow(directory, revision, sourceContentDiges
   ).controlValue;
   const bundleId = Object.keys(topology.bundles).sort()[0];
   const acceptedSealSet = { schema_version: 1, kind: "runmat-builtin-migration-accepted-seal-set", authority: "derived-from-validated-seals", control_manifest_digest: control.digest, seals: [] };
-  const barrierSealSet = { schema_version: 1, kind: "runmat-builtin-migration-barrier-seal-set", authority: "derived-from-validated-seals", control_manifest_digest: control.digest, bundle_id: bundleId, seals: [] };
-  const queueStatePayload = { schema_version: 3, kind: "runmat-builtin-migration-queue-state", authority: "reviewed-monotonic-scheduling-input", control_manifest_digest: control.digest, predecessor: null, bundles: {}, seals: [] };
+  const barrierSealSet = { schema_version: 2, kind: "runmat-builtin-migration-barrier-seal-set", authority: "derived-from-validated-seals", control_manifest_digest: control.digest, bundle_id: bundleId, queue_phase: "pilot", seals: [] };
+  const queueStatePayload = { schema_version: 4, kind: "runmat-builtin-migration-queue-state", authority: "reviewed-monotonic-scheduling-input", control_manifest_digest: control.digest, phase: "pilot", pilot_transition: null, predecessor: null, bundles: {}, seals: [] };
   const queueState = { ...queueStatePayload, digest: evidenceDigest(queueStatePayload) };
-  const queueCheckpointPayload = { schema_version: 1, kind: "runmat-builtin-migration-queue-checkpoint", authority: "reviewer-authored-current-queue-checkpoint", control_manifest_digest: control.digest, queue_state_digest: queueState.digest, predecessor_checkpoint_digest: null, head_seal: null, source_revision: input.baselineInventory.source.revision, source_digest: input.baselineInventory.source.digest, accepted_seal_set_digest: evidenceDigest(acceptedSealSet), review: reviewed("full-chain current queue checkpoint") };
+  const queueCheckpointPayload = { schema_version: 2, kind: "runmat-builtin-migration-queue-checkpoint", authority: "reviewer-authored-current-queue-checkpoint", control_manifest_digest: control.digest, queue_state_digest: queueState.digest, predecessor_checkpoint_digest: null, phase: "pilot", head_event: null, source_revision: input.baselineInventory.source.revision, source_digest: input.baselineInventory.source.digest, inventory_digest: input.baselineInventory.digest, accepted_seal_set_digest: evidenceDigest(acceptedSealSet), review: reviewed("full-chain current queue checkpoint") };
   const queueCheckpoint = { ...queueCheckpointPayload, digest: evidenceDigest(queueCheckpointPayload) };
   const leaseRequest = {
-    schema_version: 4,
+    schema_version: 5,
     kind: "runmat-builtin-migration-lease-request",
     authority: "reviewed-development-request",
     control_manifest_digest: control.digest,
@@ -91,6 +91,7 @@ export function writeFullControlWorkflow(directory, revision, sourceContentDiges
     base_revision: revision,
     lease_base_inventory: { source_revision: input.baselineInventory.source.revision, source_digest: input.baselineInventory.source.digest, inventory_digest: input.baselineInventory.digest, compiled_inventory_digest: input.baselineInventory.compiled_inventory.digest },
     queue_checkpoint_digest: queueCheckpoint.digest,
+    queue_phase: "pilot",
     accepted_seals: [],
     accepted_seal_set_digest: evidenceDigest(acceptedSealSet),
     barrier_seals: [],

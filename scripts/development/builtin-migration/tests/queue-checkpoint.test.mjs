@@ -8,7 +8,7 @@ import {
 } from "../inventory-delta.mjs";
 import { validateQueueCheckpoint } from "../queue-checkpoint.mjs";
 import { validateMonotonicQueueTransition } from "../queue-history.mjs";
-import { validateSerializedSealTransition } from "../queue.mjs";
+import { validateQueueState, validateSerializedSealTransition } from "../queue.mjs";
 import { cleanupRepositoryFixtures, controlledFixture } from "./helpers.mjs";
 
 test.afterEach(cleanupRepositoryFixtures);
@@ -33,6 +33,28 @@ test("trusted current checkpoint rejects replay of an older queue prefix", () =>
     ),
     /differs from the trusted current checkpoint digest/,
   );
+});
+
+test("queue state and checkpoint reject legacy and future wire schemas", () => {
+  const fixture = controlledFixture();
+  for (const version of [3, 5]) {
+    const state = structuredClone(fixture.queueState.value);
+    state.schema_version = version;
+    assert.throws(
+      () => validateQueueState(state, fixture.control, () => null),
+      /schema_version 4/,
+    );
+  }
+  for (const version of [1, 3]) {
+    const checkpoint = structuredClone(fixture.queueCheckpointValue);
+    checkpoint.schema_version = version;
+    assert.throws(
+      () => validateQueueCheckpoint(
+        checkpoint, checkpoint.digest, fixture.queueState, fixture.control,
+      ),
+      /schema_version 2/,
+    );
+  }
 });
 
 test("serialized finalization rejects a same-base peer seal after the queue advances", () => {
@@ -66,6 +88,31 @@ test("queue history cannot omit an accepted seal or regress workflow state", () 
       [{ bundleId: "second", accepted: [first] }],
     ),
     /workflow state was removed or regressed/,
+  );
+});
+
+test("same-phase queue history requires exactly one appended seal before admission", () => {
+  const first = sealReference("first");
+  const predecessor = {
+    acceptedSeals: [first],
+    value: { bundles: { first: { artifact: "seal-first", state: "verified" } } },
+  };
+  const unchanged = {
+    bundles: { first: { artifact: "seal-first", state: "verified" } },
+  };
+  assert.throws(
+    () => validateMonotonicQueueTransition(unchanged, predecessor, [first], []),
+    /exactly one new serialized seal/,
+  );
+  const second = sealReference("second");
+  const third = {
+    ...sealReference("third"), digest: `sha256:${"3".repeat(64)}`,
+  };
+  assert.throws(
+    () => validateMonotonicQueueTransition(
+      unchanged, predecessor, [first, second, third], [],
+    ),
+    /exactly one new serialized seal/,
   );
 });
 
