@@ -61,6 +61,36 @@ test("repository inspection keeps product state orthogonal to reviewed children 
   });
 });
 
+test("repository inspection binds declarations to reviewed children by module identity", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "runmat-composition-declaration-order-"));
+  try {
+    const definition = moduleCompositionProductRegistry()
+      .find((entry) => entry.product_id === "runtime-math");
+    const alpha = {
+      ...child("alpha", "file", "crates/runmat-runtime/src/builtins/math/ops/alpha.rs"),
+      declaration_order: 1,
+    };
+    const beta = {
+      ...child("beta", "file", "crates/runmat-runtime/src/builtins/math/ops/beta.rs"),
+      declaration_order: 0,
+    };
+    const product = {
+      ...structuredClone(definition), state: "present", children: [alpha, beta],
+    };
+    write(root, product.path, [
+      "#[path = \"ops/beta.rs\"]", "pub mod beta;",
+      "#[path = \"ops/alpha.rs\"]", "pub mod alpha;", "",
+    ].join("\n"));
+    write(root, alpha.source_path, "pub fn alpha() {}\n");
+    write(root, beta.source_path, "pub fn beta() {}\n");
+    const inventory = inspectCompositionRepository(root, [product]);
+    assert.deepEqual(
+      inventory.products[0].children.map((entry) => entry.module),
+      ["beta", "alpha"],
+    );
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
 test("bootstrap rejects source-kind mismatches and file-directory collisions", () => {
   withRepository(({ root, projection, baseline }) => {
     const child = product(projection, "runtime-math").children[0];
