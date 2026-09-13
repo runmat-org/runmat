@@ -11,6 +11,7 @@ import {
 } from "./integration-products.mjs";
 import { parseFindingDispositions } from "./migration-findings.mjs";
 import { validateReviewedModuleCompositionAuthority } from "./module-composition/authority.mjs";
+import { validateAuthorityReachability } from "./module-composition/authority-reachability.mjs";
 import { validateModuleCompositionControl } from "./module-composition/control.mjs";
 import { materializeTopologyControl } from "./topology/control-projection.mjs";
 import { assertValidatedTopologyView } from "./topology/freeze.mjs";
@@ -63,6 +64,7 @@ export function validateControlProjection({
   );
   validateAuthorityDependencyPolicy(bundles, materialized.identities, integrationProducts);
   validateIdentityAuthorityGraph(materialized.identities);
+  validateAuthorityReachability(moduleComposition, materialized.identities);
   validateGateCoverage(bundles, materialized.identities);
   validateInventoryAuthority(materialized.identities, inventory);
   parseFindingDispositions(migrationFindings, bundles, inventory.migration_findings);

@@ -29,7 +29,7 @@ export const REVISION = `git:${"1".repeat(40)}`;
 
 export function repositoryFixture({
   sidecar = false, identity = "foo", identities = null, composition = false,
-  compositionTransition = "retain",
+  compositionTransition = "retain", compositionBaseChild = false,
 } = {}) {
   const fixtureIdentities = identities ?? [identity];
   const fixtureRoot = createTemporaryDirectory("runmat-migration-factory-");
@@ -39,26 +39,41 @@ export function repositoryFixture({
   write(root, "scripts/development/check-architecture-boundaries.mjs", "process.exit(0);\n");
   write(root, "scripts/development/builtin-migration/documentation-export-cli.mjs", "process.stdout.write('{}\\n');\n");
   write(root, "scripts/regenerate-wasm-registry.mjs", "// fixture generator identity\n");
-  if (composition) {
+  write(
+    root,
+    "crates/runmat-builtins/src/catalog/entries/math/mod.rs",
+    renderModuleCompositionProduct({
+      ...structuredClone(moduleCompositionProductRegistry()
+        .find((entry) => entry.product_id === "catalog-math")),
+      state: "present",
+      children: [fixtureCatalogCompositionChild()],
+    }),
+  );
+  write(
+    root,
+    "crates/runmat-builtins/src/catalog/entries/math/basic/mod.rs",
+    `${fixtureIdentities.map((name) => `pub mod ${name};`).join("\n")}\n`,
+  );
+  const runtimeCompositionAbsent = composition
+    && ["activate", "stage-while-absent"].includes(compositionTransition);
+  if (!runtimeCompositionAbsent) {
     const runtimeMath = moduleCompositionProductRegistry()
       .find((entry) => entry.product_id === "runtime-math");
-    if (!["activate", "stage-while-absent"].includes(compositionTransition)) {
-      const children = compositionTransition === "deactivate"
-        ? [fixtureCompositionChild()] : [];
-      write(
-        root,
-        runtimeMath.path,
-        renderModuleCompositionProduct({
-          ...structuredClone(runtimeMath), state: "present", children,
-        }),
-      );
-    }
+    const children = !composition || compositionBaseChild || compositionTransition === "deactivate"
+      ? [fixtureCompositionChild()] : [];
     write(
       root,
-      "crates/runmat-runtime/src/builtins/math/basic/mod.rs",
-      `${fixtureIdentities.map((name) => `pub mod ${name};`).join("\n")}\n`,
+      runtimeMath.path,
+      renderModuleCompositionProduct({
+        ...structuredClone(runtimeMath), state: "present", children,
+      }),
     );
   }
+  write(
+    root,
+    "crates/runmat-runtime/src/builtins/math/basic/mod.rs",
+    `${fixtureIdentities.map((name) => `pub mod ${name};`).join("\n")}\n`,
+  );
   write(root, "scripts/development/verify-builtin-generated-products.mjs", `
 import fs from "node:fs"; import crypto from "node:crypto";
 const digest = (bytes) => "sha256:" + crypto.createHash("sha256").update(bytes).digest("hex");
@@ -260,11 +275,17 @@ function fixtureControlReviewSet(repository, inventory, topology, scaffold, bund
   }]));
   const moduleCompositionBaseline = fixtureReviewedModuleCompositionBaseline(
     fixtureModuleCompositionBaseline(
-      new Map(options.compositionTransition === "deactivate"
-        ? [[compositionProduct, [compositionChild]]] : []),
-      options.composition
-        && !["activate", "stage-while-absent"].includes(options.compositionTransition)
-        ? new Set(["runtime-math"]) : new Set(),
+      new Map([
+        ["catalog-math", [fixtureCatalogCompositionChild()]],
+        ...(!options.composition || options.compositionTransition === "deactivate"
+          ? [[compositionProduct, [compositionChild]]] : []),
+      ]),
+      new Set([
+        "catalog-math",
+        ...(!options.composition
+          || !["activate", "stage-while-absent"].includes(options.compositionTransition)
+          ? ["runtime-math"] : []),
+      ]),
     ),
   );
   const globalPayload = {
@@ -710,7 +731,7 @@ export function fixtureReviewedModuleCompositionBaseline(
   return { ...payload, digest: evidenceDigest(payload) };
 }
 
-function fixtureCompositionChild() {
+export function fixtureCompositionChild() {
   return {
     module: "basic",
     source_kind: "directory",
@@ -722,6 +743,23 @@ function fixtureCompositionChild() {
     macro_use: false,
     reexports: [],
     aggregation_sources: [],
+  };
+}
+
+export function fixtureCatalogCompositionChild() {
+  return {
+    module: "basic",
+    source_kind: "directory",
+    source_path: "crates/runmat-builtins/src/catalog/entries/math/basic/mod.rs",
+    role: "group",
+    visibility: "catalog",
+    declaration_condition: { kind: "always" },
+    declaration_order: 0,
+    macro_use: false,
+    reexports: [],
+    aggregation_sources: [{
+      role: "entries", kind: "slice", order: 0, condition: { kind: "always" },
+    }],
   };
 }
 

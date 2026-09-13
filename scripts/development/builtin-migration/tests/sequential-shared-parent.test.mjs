@@ -29,7 +29,7 @@ test("a second sealed-plus-active integration retains the first shared-parent ch
   assert.ok(parent.indexOf("alpha_support") < parent.indexOf("beta_support"));
   assert.deepEqual(second.projection.products
     .find((product) => product.product_id === "runtime-math")
-    .children.map((child) => child.module), ["alpha_support", "beta_support"]);
+    .children.map((child) => child.module), ["alpha_support", "basic", "beta_support"]);
   assert.deepEqual(second.nativeManifest.entries
     .filter((entry) => entry.kind === "builtin")
     .map((entry) => entry.declaration), ["alpha", "beta"]);
