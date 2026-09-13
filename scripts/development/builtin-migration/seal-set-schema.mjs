@@ -2,7 +2,7 @@ import { compareCodePoint } from "./constants.mjs";
 import { evidenceDigest } from "./evidence.mjs";
 import { deepImmutable } from "./immutable.mjs";
 import {
-  array, digest, exact, repositoryPath, stableId,
+  array, digest, enumValue, exact, repositoryPath, stableId,
 } from "./schema.mjs";
 
 export function parseSealReferences(value, label) {
@@ -35,16 +35,17 @@ export function buildAcceptedSealSet(controlManifestDigest, value, label = "acce
   return deepImmutable({ ...payload, digest: evidenceDigest(payload) });
 }
 
-export function buildBarrierSealSet(
-  controlManifestDigest, bundleId, value, label = "barrier",
-) {
+export function buildBarrierSealSet({
+  controlManifestDigest, bundleId, queuePhase, seals: value, label = "barrier",
+}) {
   const seals = parseSealReferences(value, label);
   const payload = {
-    schema_version: 1,
+    schema_version: 2,
     kind: "runmat-builtin-migration-barrier-seal-set",
     authority: "derived-from-validated-seals",
     control_manifest_digest: digest(controlManifestDigest, `${label} control manifest digest`),
     bundle_id: stableId(bundleId, `${label} bundle id`),
+    queue_phase: enumValue(queuePhase, ["pilot", "production"], `${label} queue phase`),
     seals,
   };
   return deepImmutable({ ...payload, digest: evidenceDigest(payload) });
@@ -60,10 +61,13 @@ export function validateAcceptedSealSet(
   return set;
 }
 
-export function validateBarrierSealSet(
-  controlManifestDigest, bundleId, value, observedDigest, label = "barrier",
-) {
-  const set = buildBarrierSealSet(controlManifestDigest, bundleId, value, label);
+export function validateBarrierSealSet({
+  controlManifestDigest, bundleId, queuePhase, seals, observedDigest,
+  label = "barrier",
+}) {
+  const set = buildBarrierSealSet({
+    controlManifestDigest, bundleId, queuePhase, seals, label,
+  });
   if (set.digest !== digest(observedDigest, `${label} seal-set digest`)) {
     throw new Error(`${label} seal-set digest mismatch`);
   }

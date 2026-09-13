@@ -14,7 +14,9 @@ import { assertValidatedQueueCheckpoint } from "./queue-checkpoint.mjs";
 import {
   parseSealReferences, validateAcceptedSealSet, validateBarrierSealSet,
 } from "./seal-set-schema.mjs";
-import { array, digest, exact, kind, nonempty, sourceRevision, stableId, uniqueStrings } from "./schema.mjs";
+import {
+  array, digest, enumValue, exact, kind, nonempty, sourceRevision, stableId, uniqueStrings,
+} from "./schema.mjs";
 
 const VALIDATED_LEASES = new WeakSet();
 
@@ -36,8 +38,16 @@ export function issueLease(
   if (request.queue_checkpoint_digest !== checkpoint.digest) {
     throw new Error("lease request differs from the trusted current queue checkpoint");
   }
+  if (request.queue_phase !== queueState.value.phase
+    || request.queue_phase !== checkpoint.value.phase) {
+    throw new Error("lease request queue phase differs from the validated queue authority");
+  }
+  if (request.queue_phase === "pilot" && !control.pilotPolicy.waveByBundle.has(bundle.id)) {
+    throw new Error(`${bundle.id}: bundle is not admitted by the reviewed pilot policy`);
+  }
   if (request.base_revision !== checkpoint.value.source_revision
-    || request.lease_base_inventory.source_digest !== checkpoint.value.source_digest) {
+    || request.lease_base_inventory.source_digest !== checkpoint.value.source_digest
+    || request.lease_base_inventory.inventory_digest !== checkpoint.value.inventory_digest) {
     throw new Error("lease base differs from the trusted current queue checkpoint source");
   }
   if (JSON.stringify(request.accepted_seals) !== JSON.stringify(accepted.value.seals)
@@ -65,7 +75,7 @@ export function issueLease(
     throw new Error(`lease base does not preserve sealed semantic authority: ${semanticFailures.join("; ")}`);
   }
   const payload = {
-    schema_version: 4,
+    schema_version: 5,
     kind: "runmat-builtin-migration-authored-lease",
     authority: "derived-from-reviewed-control",
     request: structuredClone(requestValue),
@@ -76,6 +86,7 @@ export function issueLease(
     base_revision: request.base_revision,
     lease_base_inventory: structuredClone(request.lease_base_inventory),
     queue_checkpoint_digest: request.queue_checkpoint_digest,
+    queue_phase: request.queue_phase,
     accepted_seals: structuredClone(request.accepted_seals),
     accepted_seal_set_digest: request.accepted_seal_set_digest,
     barrier_seals: structuredClone(request.barrier_seals),
@@ -90,8 +101,8 @@ export function issueLease(
 
 export function parseLeaseRequest(value, control) {
   assertValidatedControl(control);
-  kind(value, 4, "runmat-builtin-migration-lease-request", "lease request");
-  exact(value, ["schema_version", "kind", "authority", "control_manifest_digest", "bundle_id", "lease_id", "owner", "base_revision", "lease_base_inventory", "queue_checkpoint_digest", "accepted_seals", "accepted_seal_set_digest", "barrier_seals", "barrier_seal_set_digest", "issued_at", "expires_at", "review"], "lease request");
+  kind(value, 5, "runmat-builtin-migration-lease-request", "lease request");
+  exact(value, ["schema_version", "kind", "authority", "control_manifest_digest", "bundle_id", "lease_id", "owner", "base_revision", "lease_base_inventory", "queue_checkpoint_digest", "queue_phase", "accepted_seals", "accepted_seal_set_digest", "barrier_seals", "barrier_seal_set_digest", "issued_at", "expires_at", "review"], "lease request");
   if (value.authority !== "reviewed-development-request") throw new Error("lease request has invalid authority");
   if (value.control_manifest_digest !== control.digest) throw new Error("lease request was reviewed for another control manifest");
   const bundleId = stableId(value.bundle_id, "lease request bundle id");
@@ -100,15 +111,20 @@ export function parseLeaseRequest(value, control) {
   sourceRevision(value.base_revision, "lease request base revision");
   const base = parseLeaseBaseInventoryBinding(value.lease_base_inventory, "lease request base inventory");
   digest(value.queue_checkpoint_digest, "lease request queue checkpoint digest");
+  const queuePhase = enumValue(value.queue_phase, ["pilot", "production"], "lease request queue phase");
   if (base.source_revision !== value.base_revision) throw new Error("lease request base inventory revision differs from its base revision");
   validateAcceptedSealSet(
     control.digest, value.accepted_seals, value.accepted_seal_set_digest,
     "lease request accepted seals",
   );
-  validateBarrierSealSet(
-    control.digest, bundleId, value.barrier_seals, value.barrier_seal_set_digest,
-    "lease request barrier seals",
-  );
+  validateBarrierSealSet({
+    controlManifestDigest: control.digest,
+    bundleId,
+    queuePhase,
+    seals: value.barrier_seals,
+    observedDigest: value.barrier_seal_set_digest,
+    label: "lease request barrier seals",
+  });
   const issued = timestamp(value.issued_at, "lease request issued_at");
   const expires = timestamp(value.expires_at, "lease request expires_at");
   if (expires <= issued) throw new Error("lease request expiry must follow issuance");
@@ -120,8 +136,8 @@ export function parseLeaseRequest(value, control) {
 
 export function parseLease(value, control, repository, changedPaths = null) {
   assertValidatedControl(control);
-  kind(value, 4, "runmat-builtin-migration-authored-lease", "authored lease");
-  exact(value, ["schema_version", "kind", "authority", "request", "control_manifest_digest", "bundle_id", "lease_id", "owner", "base_revision", "lease_base_inventory", "queue_checkpoint_digest", "accepted_seals", "accepted_seal_set_digest", "barrier_seals", "barrier_seal_set_digest", "authored_write_set", "forbidden_integration_outputs", "issued_at", "expires_at", "digest"], "authored lease");
+  kind(value, 5, "runmat-builtin-migration-authored-lease", "authored lease");
+  exact(value, ["schema_version", "kind", "authority", "request", "control_manifest_digest", "bundle_id", "lease_id", "owner", "base_revision", "lease_base_inventory", "queue_checkpoint_digest", "queue_phase", "accepted_seals", "accepted_seal_set_digest", "barrier_seals", "barrier_seal_set_digest", "authored_write_set", "forbidden_integration_outputs", "issued_at", "expires_at", "digest"], "authored lease");
   if (value.authority !== "derived-from-reviewed-control") throw new Error("authored lease has invalid authority");
   const request = parseLeaseRequest(value.request, control);
   if (value.control_manifest_digest !== control.digest) throw new Error("lease was issued for another control manifest");
@@ -134,14 +150,19 @@ export function parseLease(value, control, repository, changedPaths = null) {
   if (value.base_revision !== request.base_revision) throw new Error("lease base revision differs from the reviewed request");
   parseLeaseBaseInventoryBinding(value.lease_base_inventory, "lease base inventory");
   digest(value.queue_checkpoint_digest, "lease queue checkpoint digest");
+  const queuePhase = enumValue(value.queue_phase, ["pilot", "production"], "lease queue phase");
   validateAcceptedSealSet(
     control.digest, value.accepted_seals, value.accepted_seal_set_digest,
     "lease accepted seals",
   );
-  validateBarrierSealSet(
-    control.digest, bundle.id, value.barrier_seals, value.barrier_seal_set_digest,
-    "lease barrier seals",
-  );
+  validateBarrierSealSet({
+    controlManifestDigest: control.digest,
+    bundleId: bundle.id,
+    queuePhase,
+    seals: value.barrier_seals,
+    observedDigest: value.barrier_seal_set_digest,
+    label: "lease barrier seals",
+  });
   const acceptedByBundle = new Map(value.accepted_seals.map((entry) => [entry.bundle_id, entry]));
   for (const barrier of value.barrier_seals) {
     if (JSON.stringify(acceptedByBundle.get(barrier.bundle_id)) !== JSON.stringify(barrier)) {
@@ -150,6 +171,7 @@ export function parseLease(value, control, repository, changedPaths = null) {
   }
   if (JSON.stringify(value.lease_base_inventory) !== JSON.stringify(request.lease_base_inventory)
     || value.queue_checkpoint_digest !== request.queue_checkpoint_digest
+    || value.queue_phase !== request.queue_phase
     || JSON.stringify(value.accepted_seals) !== JSON.stringify(request.accepted_seals)
     || value.accepted_seal_set_digest !== request.accepted_seal_set_digest
     || JSON.stringify(value.barrier_seals) !== JSON.stringify(request.barrier_seals)

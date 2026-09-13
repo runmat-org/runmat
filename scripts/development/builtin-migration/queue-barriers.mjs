@@ -2,7 +2,7 @@ import { compareCodePoint } from "./constants.mjs";
 import { assertValidatedControl } from "./control.mjs";
 import { stableId } from "./schema.mjs";
 
-export function requiredBarrierBundleIds(control, bundleId) {
+export function requiredProductionBarrierBundleIds(control, bundleId) {
   assertValidatedControl(control);
   const bundle = control.bundles.get(stableId(bundleId, "barrier bundle id"));
   if (!bundle) throw new Error(`barrier bundle set references unknown bundle ${bundleId}`);
@@ -17,6 +17,21 @@ export function requiredBarrierBundleIds(control, bundleId) {
       .map((id) => control.identities.get(id)?.cohort))].filter(Boolean);
     if (candidates.length !== 1) continue;
     if (control.cohorts.get(candidates[0])?.order < cohort.order) result.add(candidate.id);
+  }
+  return [...result].sort(compareCodePoint);
+}
+
+export function requiredPilotBarrierBundleIds(control, bundleId) {
+  assertValidatedControl(control);
+  const bundle = control.bundles.get(stableId(bundleId, "barrier bundle id"));
+  if (!bundle) throw new Error(`barrier bundle set references unknown bundle ${bundleId}`);
+  const activeWave = control.pilotPolicy.waveByBundle.get(bundle.id);
+  if (activeWave === undefined) {
+    throw new Error(`${bundle.id}: bundle is not admitted by the reviewed pilot policy`);
+  }
+  const result = new Set(bundle.prerequisites.map((entry) => entry.bundle_id));
+  for (const [candidateId, candidateWave] of control.pilotPolicy.waveByBundle) {
+    if (candidateWave < activeWave) result.add(candidateId);
   }
   return [...result].sort(compareCodePoint);
 }

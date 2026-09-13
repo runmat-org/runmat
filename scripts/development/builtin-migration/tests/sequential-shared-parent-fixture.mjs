@@ -80,7 +80,7 @@ export function leaseFor({
   const accepted = acceptedSealSet(queueState, control);
   const barriers = barrierSealSet(queueState, control, bundleId);
   const request = {
-    schema_version: 4,
+    schema_version: 5,
     kind: "runmat-builtin-migration-lease-request",
     authority: "reviewed-development-request",
     control_manifest_digest: control.digest,
@@ -90,6 +90,7 @@ export function leaseFor({
     base_revision: inventory.source.revision,
     lease_base_inventory: leaseBaseInventoryBinding(inventory),
     queue_checkpoint_digest: queueCheckpoint.digest,
+    queue_phase: queueState.value.phase,
     accepted_seals: accepted.value.seals,
     accepted_seal_set_digest: accepted.value.digest,
     barrier_seals: barriers.value.seals,

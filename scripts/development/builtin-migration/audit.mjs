@@ -39,6 +39,7 @@ export function auditMigration(
     control_manifest_digest: control.digest, bundle_id: bundle.id,
     lease_id: lease.value.lease_id,
     lease_digest: lease.value.digest,
+    queue_phase: lease.value.queue_phase,
     storage_policy: control.value.storage_policy,
     source_files: subject.source.files,
     repository, gate_plans: bundle.gate_plans, compiled_build: subject.compiled_inventory.build,
@@ -58,13 +59,14 @@ export function auditMigration(
   failures.push(...subject.diagnostics.filter((entry) => entry.severity === "error").map((entry) => issue("inventory-error", `${entry.code}:${entry.path ?? ""}`)));
   const passed = identities.filter((entry) => entry.result === "pass").length;
   return {
-    schema_version: 7, kind: "runmat-builtin-migration-audit", authority: "development-verification-evidence-only",
+    schema_version: 8, kind: "runmat-builtin-migration-audit", authority: "development-verification-evidence-only",
     artifact_id: evidence.artifact_id, source: subject.source,
     control_baseline_inventory_digest: controlBaseline.digest,
     lease_base_inventory_digest: leaseBase.digest,
     subject_inventory_digest: subject.digest,
     control_manifest_digest: control.digest, bundle_id: bundle.id, lease_id: lease.value.lease_id,
     lease_digest: lease.value.digest,
+    queue_phase: lease.value.queue_phase,
     accepted_seals: lease.value.accepted_seals,
     accepted_seal_set_digest: lease.value.accepted_seal_set_digest,
     barrier_seals: lease.value.barrier_seals,

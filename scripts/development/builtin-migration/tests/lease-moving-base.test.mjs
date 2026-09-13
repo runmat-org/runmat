@@ -45,6 +45,7 @@ test("a same-cohort accepted seal admits its exact checkpoint but not later comm
     reference: { path: "seals/c01-peer.json", artifact_id: "seal-c01-peer", digest: `sha256:${"a".repeat(64)}`, bundle_id: "c01-peer" },
     integrated_revision: sealedInventory.source.revision,
     source_digest: sealedInventory.source.digest,
+    subject_inventory_digest: sealedInventory.digest,
   }];
   const frozen = { revision: fixture.inventory.source.revision, inventory_digest: fixture.inventory.digest };
   assert.doesNotThrow(() => validateAcceptedIntegrationCheckpoint(
@@ -168,7 +169,7 @@ function request(fixture, baseInventory, leaseId) {
   const accepted = acceptedSealSet(fixture.queueState, fixture.control);
   const barriers = barrierSealSet(fixture.queueState, fixture.control, fixture.bundleId);
   return {
-    schema_version: 4,
+    schema_version: 5,
     kind: "runmat-builtin-migration-lease-request",
     authority: "reviewed-development-request",
     control_manifest_digest: fixture.control.digest,
@@ -178,6 +179,7 @@ function request(fixture, baseInventory, leaseId) {
     base_revision: baseInventory.source.revision,
     lease_base_inventory: leaseBaseInventoryBinding(baseInventory),
     queue_checkpoint_digest: fixture.queueCheckpoint.digest,
+    queue_phase: fixture.queueState.value.phase,
     accepted_seals: accepted.value.seals,
     accepted_seal_set_digest: accepted.value.digest,
     barrier_seals: barriers.value.seals,

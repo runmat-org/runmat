@@ -2,6 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { evidenceDigest } from "../evidence.mjs";
+import { requiredGateNames } from "../gate-requirements.mjs";
+import { buildOrdinaryGateProof } from "../ordinary-gate-proof.mjs";
 import { validateQueueState } from "../queue.mjs";
 import { validateQueueCheckpoint } from "../queue-checkpoint.mjs";
 
@@ -29,10 +31,12 @@ export function acceptFirstBundle({ fixture, subjectInventory, phases }) {
     bundle_id: seal.bundle_id,
   };
   const queueStatePayload = {
-    schema_version: 3,
+    schema_version: 4,
     kind: "runmat-builtin-migration-queue-state",
     authority: "reviewed-monotonic-scheduling-input",
     control_manifest_digest: fixture.control.digest,
+    phase: "pilot",
+    pilot_transition: null,
     predecessor: {
       state_path: "test-artifacts/queue-state-0.json",
       state_digest: initialState.stateDigest,
@@ -62,15 +66,17 @@ export function acceptFirstBundle({ fixture, subjectInventory, phases }) {
     seals: [reference],
   });
   const checkpointPayload = {
-    schema_version: 1,
+    schema_version: 2,
     kind: "runmat-builtin-migration-queue-checkpoint",
     authority: "reviewer-authored-current-queue-checkpoint",
     control_manifest_digest: fixture.control.digest,
     queue_state_digest: queueState.stateDigest,
     predecessor_checkpoint_digest: initialCheckpoint.digest,
-    head_seal: reference,
+    phase: "pilot",
+    head_event: { kind: "seal", seal: reference },
     source_revision: subjectInventory.source.revision,
     source_digest: subjectInventory.source.digest,
+    inventory_digest: subjectInventory.digest,
     accepted_seal_set_digest: acceptedDigest,
     review: { status: "reviewed", evidence: ["serialized successor checkpoint review"] },
   };
@@ -90,8 +96,17 @@ export function acceptFirstBundle({ fixture, subjectInventory, phases }) {
 
 function passingSeal({ fixture, subjectInventory, phases }) {
   const lease = fixture.firstLease.lease;
+  const gates = new Map();
+  for (const identity of fixture.control.bundles.get(fixture.bundleIds[0]).identities) {
+    for (const gate of requiredGateNames(fixture.control.identities.get(identity))) {
+      gates.set(gate, { gate, reference: gateReference(gate) });
+    }
+  }
+  const ordinaryGateProof = buildOrdinaryGateProof(
+    fixture.control, fixture.bundleIds[0], "pilot", gates,
+  );
   return {
-    schema_version: 5,
+    schema_version: 6,
     kind: "runmat-builtin-migration-seal-result",
     authority: "development-integration-evidence-only",
     seal_id: "seal-alpha",
@@ -99,6 +114,7 @@ function passingSeal({ fixture, subjectInventory, phases }) {
     identities: [fixture.identities[0]],
     lease_id: lease.value.lease_id,
     lease_digest: lease.value.digest,
+    queue_phase: "pilot",
     phases: structuredClone(phases),
     source_revision: subjectInventory.source.revision,
     source_digest: subjectInventory.source.digest,
@@ -111,9 +127,18 @@ function passingSeal({ fixture, subjectInventory, phases }) {
     accepted_seal_set_digest: lease.value.accepted_seal_set_digest,
     barrier_seals: lease.value.barrier_seals,
     barrier_seal_set_digest: lease.value.barrier_seal_set_digest,
-    integration_gate_artifacts: ["generated-products", "inventory-delta"],
+    ordinary_gate_proof: ordinaryGateProof,
+    integration_gate_results: ["deterministic-products", "inventory-delta"]
+      .map((gate) => ({ gate, ...gateReference(gate) })),
     result: "pass",
     failures: [],
+  };
+}
+
+function gateReference(gate) {
+  return {
+    path: `test-artifacts/gates/${gate}.json`, artifact_id: `gate-${gate}`,
+    digest: `sha256:${Buffer.from(gate).toString("hex").padEnd(64, "0").slice(0, 64)}`,
   };
 }
 

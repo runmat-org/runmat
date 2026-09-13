@@ -19,7 +19,7 @@ test.afterEach(cleanupRepositoryFixtures);
 test("queue is derived by bundle and carries prerequisite, scope, and maturity facts", () => {
   const fixture = controlledFixture();
   const queue = buildQueue(fixture.inventory, fixture.control);
-  assert.equal(queue.schema_version, 3);
+  assert.equal(queue.schema_version, 4);
   assert.equal(queue.rows.length, 1);
   assert.deepEqual(queue.rows[0].identities, ["foo"]);
   assert.equal(queue.rows[0].inventory_observations[0].discovery_only, true);
@@ -104,7 +104,7 @@ test("completed field dispositions require exact prepared leaves and review evid
   assert.throws(() => parseCompletedSourceDisposition(checklist, "foo", result.checklist_baseline_digest), /prepared baseline/);
 });
 
-test("audit v7 cannot pass on file presence or example tokens without exact gate evidence", () => {
+test("audit v8 cannot pass on file presence or example tokens without exact gate evidence", () => {
   const fixture = controlledFixture();
   const output = createTemporaryDirectory("runmat-review-");
   const prepared = prepareIdentity(fixture.repository, fixture.inventory, fixture.control, fixture.lease, "foo", output);

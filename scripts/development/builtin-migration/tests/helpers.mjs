@@ -208,7 +208,7 @@ export function controlledFixture(options = {}) {
   );
   const accepted = acceptedSealSet(queueState, control);
   const barriers = barrierSealSet(queueState, control, bundleId);
-  const leaseRequest = { schema_version: 4, kind: "runmat-builtin-migration-lease-request", authority: "reviewed-development-request", control_manifest_digest: control.digest, bundle_id: bundleId, lease_id: "lease-foo", owner: "fixture", base_revision: revision, lease_base_inventory: leaseBaseInventoryBinding(inventory), queue_checkpoint_digest: queueCheckpoint.digest, accepted_seals: accepted.value.seals, accepted_seal_set_digest: accepted.value.digest, barrier_seals: barriers.value.seals, barrier_seal_set_digest: barriers.value.digest, issued_at: "2020-01-01T00:00:00.000Z", expires_at: "2099-01-01T00:00:00.000Z", review: { status: "reviewed", evidence: ["fixture review"] } };
+  const leaseRequest = { schema_version: 5, kind: "runmat-builtin-migration-lease-request", authority: "reviewed-development-request", control_manifest_digest: control.digest, bundle_id: bundleId, lease_id: "lease-foo", owner: "fixture", base_revision: revision, lease_base_inventory: leaseBaseInventoryBinding(inventory), queue_checkpoint_digest: queueCheckpoint.digest, queue_phase: queueState.value.phase, accepted_seals: accepted.value.seals, accepted_seal_set_digest: accepted.value.digest, barrier_seals: barriers.value.seals, barrier_seal_set_digest: barriers.value.digest, issued_at: "2020-01-01T00:00:00.000Z", expires_at: "2099-01-01T00:00:00.000Z", review: { status: "reviewed", evidence: ["fixture review"] } };
   const leaseValue = issueLease(
     leaseRequest, control, repository, inventory, queueState, queueCheckpoint,
   );
@@ -219,15 +219,17 @@ export function controlledFixture(options = {}) {
 export function initialQueueCheckpointValue(control, queueState) {
   const accepted = acceptedSealSet(queueState, control);
   const payload = {
-    schema_version: 1,
+    schema_version: 2,
     kind: "runmat-builtin-migration-queue-checkpoint",
     authority: "reviewer-authored-current-queue-checkpoint",
     control_manifest_digest: control.digest,
     queue_state_digest: queueState.stateDigest,
     predecessor_checkpoint_digest: null,
-    head_seal: null,
+    phase: "pilot",
+    head_event: null,
     source_revision: control.baseline.revision,
     source_digest: control.baseline.source_digest,
+    inventory_digest: control.baseline.inventory_digest,
     accepted_seal_set_digest: accepted.value.digest,
     review: { status: "reviewed", evidence: ["fixture current queue checkpoint review"] },
   };
@@ -553,7 +555,7 @@ export function gate(fixture, name, artifactId = `gate-${name}`, subject = fixtu
     return { role, path: artifactPath, byte_length: bytes.length, content_digest: contentDigest(bytes) };
   });
   return {
-    schema_version: 7, kind: "runmat-builtin-migration-gate-result", authority: "machine-verification-only",
+    schema_version: 8, kind: "runmat-builtin-migration-gate-result", authority: "machine-verification-only",
     producer: namedProducer, producer_evidence: { schema_version: 3, kind: `${namedProducer}-evidence`, contract: { reviewed_source_revision: fixture.inventory.source.revision, primary_tool: reviewed.primary_tool, tools: reviewed.tools, producer_source_digest: sourceDigest }, invocation, process: processEvidence, captured_process_digest: evidenceDigest(processEvidence) }, artifact_id: artifactId, produced_at: "2026-09-11T00:00:30.000Z",
     execution_target: { operating_system: subject.compiled_inventory.build.operating_system, architecture: subject.compiled_inventory.build.architecture },
     source_revision: subject.source.revision,
@@ -562,6 +564,7 @@ export function gate(fixture, name, artifactId = `gate-${name}`, subject = fixtu
     subject_inventory_digest: subject.digest,
     control_manifest_digest: fixture.control.digest, bundle_id: fixture.bundleId,
     lease_id: fixture.lease.value.lease_id, lease_digest: fixture.lease.value.digest,
+    queue_phase: fixture.lease.value.queue_phase,
     identities: [fixture.id],
     gate: name, result: "pass", checks: documentationArtifact ? documentationCutoverChecks(documentationArtifact) : [{ id: `${name}:${fixture.id}`, result: "pass", evidence_digest: `sha256:${"a".repeat(64)}` }], artifacts,
     storage_admission: { profile_id: "fixture-host", execution_host: os.hostname(), observed_at: "2026-09-11T00:00:00.000Z", path_bindings: {

@@ -52,7 +52,7 @@ export const OPTION_FIELDS = Object.freeze({
 
 const CONTROL_COMMANDS = Object.freeze([
   "queue", "prepare", "audit", "freeze-control", "validate-control", "issue-lease",
-  "produce-gate", "materialize-composition", "seal",
+  "produce-gate", "materialize-composition", "verify", "seal",
 ]);
 const CONTROL_AUTHORING_COMMANDS = Object.freeze([
   "scaffold-control", "init-control-reviews", "validate-global-control-review",
@@ -84,7 +84,7 @@ export function validateCommandOptions(options, suppliedOptions) {
     "inventory", "queue", "seed-dispositions", "prepare", "audit", "produce-gate",
   ].includes(command);
   if (requiresCompiled && !options.compiledInventory) throw new Error(`${command} requires --compiled-inventory`);
-  if (["queue", "prepare", "audit", "validate-control", "produce-gate"].includes(command) && !options.control) throw new Error(`${command} requires --control`);
+  if (["queue", "prepare", "audit", "validate-control", "produce-gate", "verify"].includes(command) && !options.control) throw new Error(`${command} requires --control`);
   if (["queue", "prepare", "audit", "compile-dispositions", "draft-control", "component-graph", "compose-topology", "freeze-topology", "validate-topology", ...CONTROL_AUTHORING_COMMANDS, ...CONTROL_COMMANDS].includes(command) && !options.baselineInventory) throw new Error(`${command} requires --baseline-inventory`);
   if (["compose-topology", "freeze-topology", "validate-topology", ...CONTROL_AUTHORING_COMMANDS, ...CONTROL_COMMANDS].includes(command) && (!options.componentGraph || !options.draft || !options.c01C03Review || !options.c04C05Review || !options.c06C07Review || !options.reconciliation || !options.stabilityCorrections)) {
     throw new Error(`${command} requires --component-graph, --draft, all three cohort reviews, --reconciliation, and --stability-corrections`);

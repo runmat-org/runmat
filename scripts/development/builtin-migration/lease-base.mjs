@@ -52,8 +52,9 @@ export function validateAcceptedIntegrationCheckpoint(repository, baseRevision, 
       `${sealed.reference.bundle_id}: lease base does not descend from its accepted seal`);
     if (sealed.integrated_revision === baseRevision) {
       exactCheckpoint = true;
-      if (sealed.source_digest !== base.source.digest) {
-        throw new Error(`${sealed.reference.bundle_id}: lease base source differs from its accepted seal`);
+      if (sealed.source_digest !== base.source.digest
+        || sealed.subject_inventory_digest !== base.digest) {
+        throw new Error(`${sealed.reference.bundle_id}: lease base source or inventory differs from its accepted seal`);
       }
     }
   }

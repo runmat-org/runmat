@@ -27,6 +27,7 @@ import {
   parseFixtureControl, resealEvidence, reviewed, runtimeConstant, setRegistrationManifest,
 } from "./factory-workflow-fixture.mjs";
 import { createTemporaryDirectory } from "./temporary-directories.mjs";
+import { reviewedPilotPolicy } from "./pilot-policy-fixture.mjs";
 
 test.afterEach(cleanupRepositoryFixtures);
 
@@ -615,6 +616,10 @@ test("internal double-underscore identities retain typed implementation authorit
   value.topology_digest = topology.digest;
   value.baseline_context.dispositions_digest = inventory.dispositions_digest;
   value.baseline_context.migration_findings_digest = inventory.migration_findings_digest;
+  value.pilot_policy = reviewedPilotPolicy(
+    topology,
+    new Map([[fixture.bundleId, value.bundle_controls[fixture.bundleId].prerequisites]]),
+  );
   resealEvidence(value);
   const parsed = parseFixtureControl(fixture, value, inventory, topology)
     .identities.get("__register_test_classes");
