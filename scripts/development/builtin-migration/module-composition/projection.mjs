@@ -1,7 +1,9 @@
 import { compareCodePoint } from "../constants.mjs";
 import { array, enumValue, exact, kind, stableId } from "../schema.mjs";
 import {
-  parseCompositionChild, parseModuleCompositionProjection,
+  parseCompositionChild,
+  parseModuleCompositionProjection,
+  PRODUCT_STATES,
 } from "./schema.mjs";
 
 export function applyModuleCompositionTransitions(baselineValue, transitionValues) {
@@ -15,7 +17,7 @@ export function applyModuleCompositionTransitions(baselineValue, transitionValue
     applyTransition(products, transition);
   }
   return parseModuleCompositionProjection({
-    schema_version: 4,
+    schema_version: 5,
     kind: "runmat-builtin-module-composition-projection",
     products: [...products.values()].sort((left, right) => compareCodePoint(left.product_id, right.product_id)),
   });
@@ -27,14 +29,44 @@ export function parseModuleCompositionTransition(value, projectionValue) {
 }
 
 function parseTransition(value, products) {
-  kind(value, 4, "runmat-builtin-module-composition-transition", "module composition transition");
-  exact(value, ["schema_version", "kind", "transition_id", "changes"], "module composition transition");
+  kind(value, 5, "runmat-builtin-module-composition-transition", "module composition transition");
+  exact(value, ["schema_version", "kind", "transition_id", "product_states", "changes"], "module composition transition");
   const transitionId = stableId(value.transition_id, "module composition transition id");
-  const changes = array(value.changes, `${transitionId} composition changes`).map((entry) => parseChange(entry, products, transitionId));
+  const productStates = array(value.product_states, `${transitionId} composition product states`)
+    .map((entry) => parseProductState(entry, products, transitionId));
+  const stateIds = productStates.map((entry) => entry.product_id);
+  if (new Set(stateIds).size !== stateIds.length
+    || JSON.stringify(stateIds) !== JSON.stringify([...stateIds].sort(compareCodePoint))) {
+    throw new Error(`${transitionId}: composition product states must be unique and canonically ordered`);
+  }
+  const changes = array(value.changes, `${transitionId} composition changes`, { empty: true })
+    .map((entry) => parseChange(entry, products, transitionId));
   const keys = changes.map(changeKey);
   if (new Set(keys).size !== keys.length) throw new Error(`${transitionId}: composition changes must be unique`);
   if (JSON.stringify(keys) !== JSON.stringify([...keys].sort(compareCodePoint))) throw new Error(`${transitionId}: composition changes must use canonical code-point order`);
-  return { ...value, transition_id: transitionId, changes };
+  const changedProductIds = new Set(changes.map((entry) => entry.product_id));
+  if ([...changedProductIds].some((productId) => !stateIds.includes(productId))) {
+    throw new Error(`${transitionId}: every child change requires an explicit product state`);
+  }
+  for (const state of productStates) {
+    if (state.before_state === state.after_state && !changedProductIds.has(state.product_id)) {
+      throw new Error(`${transitionId}: unchanged product state requires a child change`);
+    }
+  }
+  return { ...value, transition_id: transitionId, product_states: productStates, changes };
+}
+
+function parseProductState(value, products, transitionId) {
+  exact(value, ["product_id", "before_state", "after_state"], `${transitionId} composition product state`);
+  const productId = stableId(value.product_id, `${transitionId} product state id`);
+  const product = products.get(productId);
+  if (!product) throw new Error(`${transitionId}: unknown composition product state ${productId}`);
+  const beforeState = enumValue(value.before_state, PRODUCT_STATES, `${transitionId}/${productId} before state`);
+  const afterState = enumValue(value.after_state, PRODUCT_STATES, `${transitionId}/${productId} after state`);
+  if (product.state !== beforeState) {
+    throw new Error(`${transitionId}: ${productId} prior product state differs from the effective projection`);
+  }
+  return { product_id: productId, before_state: beforeState, after_state: afterState };
 }
 
 function parseChange(value, products, transitionId) {
@@ -73,6 +105,9 @@ function applyTransition(products, transition) {
     if (change.after === null) children.delete(module);
     else children.set(module, structuredClone(change.after));
     product.children = [...children.values()].sort((left, right) => compareCodePoint(left.module, right.module));
+  }
+  for (const state of transition.product_states) {
+    products.get(state.product_id).state = state.after_state;
   }
 }
 

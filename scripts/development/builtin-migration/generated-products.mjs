@@ -24,7 +24,7 @@ export function parseGeneratedProductDefinitions(value) {
 }
 
 export function parseGeneratedProductsProof(value, expected) {
-  kind(value, 2, "runmat-builtin-generated-products-proof", "generated products proof");
+  kind(value, 3, "runmat-builtin-generated-products-proof", "generated products proof");
   exact(value, ["schema_version", "kind", "authority", "products", "result"], "generated products proof");
   if (value.authority !== "machine-derived-integration-evidence") throw new Error("generated products proof has invalid authority");
   enumValue(value.result, ["pass", "fail"], "generated products result");
@@ -93,11 +93,14 @@ function parseProduct(value, reviewed, nativeManifest, compositionProduct) {
   digest(value.generator.content_digest, `${value.product_id} generator digest`);
   for (const field of ["checked_in", "first", "second"]) parseObservation(value[field], `${value.product_id} ${field}`);
   if (typeof value.deterministic !== "boolean" || typeof value.synchronized !== "boolean") throw new Error(`${value.product_id}: generated product result fields must be booleans`);
-  const deterministic = value.first.content_digest === value.second.content_digest;
-  const synchronized = value.checked_in.content_digest === value.first.content_digest;
-  if (value.deterministic !== deterministic || value.synchronized !== synchronized) throw new Error(`${value.product_id}: generated product result conflicts with observed digests`);
-  if (value.first.byte_length !== value.second.byte_length || (synchronized && value.checked_in.byte_length !== value.first.byte_length)) {
-    throw new Error(`${value.product_id}: generated product byte lengths conflict with content identity`);
+  const deterministic = sameObservation(value.first, value.second);
+  const synchronized = sameObservation(value.checked_in, value.first);
+  if (value.deterministic !== deterministic || value.synchronized !== synchronized) {
+    throw new Error(`${value.product_id}: generated product result conflicts with observed state or content identity`);
+  }
+  if (compositionProduct && [value.first, value.second]
+    .some((observation) => observation.state !== compositionProduct.state)) {
+    throw new Error(`${value.product_id}: generated product state differs from the reviewed composition projection`);
   }
   parseProductVerification(
     value.verification,
@@ -158,7 +161,20 @@ function sameRegistrationManifestIdentity(left, right) {
 }
 
 function parseObservation(value, label) {
-  exact(value, ["byte_length", "content_digest"], label);
+  exact(value, ["state", "byte_length", "content_digest"], label);
+  const state = enumValue(value.state, ["absent", "present"], `${label} state`);
+  if (state === "absent") {
+    if (value.byte_length !== null || value.content_digest !== null) {
+      throw new Error(`${label} absent observation cannot contain file identity`);
+    }
+    return;
+  }
   integer(value.byte_length, `${label} byte length`);
   digest(value.content_digest, `${label} content digest`);
+}
+
+function sameObservation(left, right) {
+  return left.state === right.state
+    && left.byte_length === right.byte_length
+    && left.content_digest === right.content_digest;
 }

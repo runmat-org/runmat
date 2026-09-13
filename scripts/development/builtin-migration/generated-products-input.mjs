@@ -10,7 +10,7 @@ export function stageGeneratedProductsInput(products, nativeRegistrationManifest
   const needsManifest = parsedProducts.some((entry) => entry.verification.kind === "native_wasm_registration_manifest");
   const compositionProjection = bindModuleCompositionProjection(parsedProducts, compositionProjectionValue);
   const envelope = {
-    schema_version: 3,
+    schema_version: 4,
     kind: INPUT_KIND,
     products: parsedProducts,
     native_registration_manifest: needsManifest
@@ -24,7 +24,7 @@ export function stageGeneratedProductsInput(products, nativeRegistrationManifest
 export function readGeneratedProductsInput(encoded) {
   let value;
   try { value = JSON.parse(encoded); } catch (error) { throw new Error(`generated product input is not valid JSON: ${error.message}`); }
-  kind(value, 3, INPUT_KIND, "generated product input");
+  kind(value, 4, INPUT_KIND, "generated product input");
   exact(value, ["schema_version", "kind", "products", "native_registration_manifest", "module_composition_projection"], "generated product input");
   const products = parseGeneratedProductDefinitions(value.products);
   const needsManifest = products.some((entry) => entry.verification.kind === "native_wasm_registration_manifest");

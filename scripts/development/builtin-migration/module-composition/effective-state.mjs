@@ -1,5 +1,4 @@
 import { assertValidatedControl } from "../control.mjs";
-import { compareCodePoint } from "../constants.mjs";
 import { deepImmutable } from "../immutable.mjs";
 import { assertActiveLease } from "../lease.mjs";
 import { acceptedSealSet, assertValidatedQueueState } from "../queue.mjs";
@@ -44,17 +43,9 @@ export function deriveModuleCompositionMaterializationState({
   const effective = activeTransition === null
     ? prior
     : applyModuleCompositionTransitions(prior, [activeTransition]);
-  const priorPresentProductIds = new Set([...control.integrationProducts.values()]
-    .filter((product) => product.verification.kind === "rust_module_composition"
-      && product.baseline_digest !== null)
-    .map((product) => product.product_id));
-  for (const transition of acceptedTransitions) {
-    for (const change of transition.changes) priorPresentProductIds.add(change.product_id);
-  }
   return deepImmutable({
     prior,
     effective,
-    priorPresentProductIds: [...priorPresentProductIds].sort(compareCodePoint),
   });
 }
 

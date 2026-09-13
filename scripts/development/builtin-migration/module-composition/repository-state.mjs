@@ -67,11 +67,7 @@ function inspectProduct(root, product) {
   const state = lstat(target);
   if (state !== null && !state.isFile()) throw new Error(`${product.product_id}: product path is not a regular file`);
   if (state === null) {
-    if (product.children.length) throw new Error(`${product.product_id}: absent product has reviewed children`);
-    const directory = path.dirname(target);
-    if (fs.existsSync(directory) && fs.readdirSync(directory).length) {
-      throw new Error(`${product.product_id}: absent product directory is not empty`);
-    }
+    validateChildStorage(root, product, null);
     return { ...observedProductState(root, product), children: [] };
   }
   if (fs.realpathSync(target) !== target) throw new Error(`${product.product_id}: product path is not canonical`);

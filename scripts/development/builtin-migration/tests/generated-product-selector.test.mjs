@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { contentDigest } from "../evidence.mjs";
 import { parseGeneratedProductsProof } from "../generated-products.mjs";
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
@@ -11,7 +13,7 @@ const verifier = path.join(repository, "scripts/development/verify-builtin-gener
 function run(argumentsList, products = []) {
   const needsManifest = products.some((entry) => entry.verification?.kind === "native_wasm_registration_manifest");
   const input = JSON.stringify({
-    schema_version: 3,
+    schema_version: 4,
     kind: "runmat-builtin-generated-products-input",
     products,
     native_registration_manifest: needsManifest ? MANIFEST : null,
@@ -50,19 +52,78 @@ test("generated product execution is selected only from the adapter-supplied glo
   assert.match(forged.stderr, /generator bytes differ from the globally reviewed product registry/);
 });
 
+test("generated product execution proves a reviewed composition parent remains absent", () => {
+  const generatorPath = "scripts/development/generate-builtin-module-composition.mjs";
+  const productPath = "crates/runmat-runtime/src/builtins/runmat_absence_evidence_test/mod.rs";
+  assert.equal(fs.existsSync(path.join(repository, productPath)), false);
+  const product = {
+    product_id: "runtime-absence-evidence-test",
+    path: productPath,
+    producer: "integration",
+    generator: {
+      path: generatorPath,
+      baseline_digest: contentDigest(fs.readFileSync(path.join(repository, generatorPath))),
+    },
+    baseline_digest: null,
+    verification: {
+      kind: "rust_module_composition",
+      crate_role: "runtime",
+      module_path: "crate::builtins::runmat_absence_evidence_test",
+    },
+  };
+  const composition = {
+    product_id: product.product_id,
+    crate_role: "runtime",
+    path: product.path,
+    module_path: product.verification.module_path,
+    state: "absent",
+    aggregations: [],
+    aggregation_exports: [],
+    children: [],
+  };
+  const projection = {
+    schema_version: 5,
+    kind: "runmat-builtin-module-composition-projection",
+    products: [composition],
+  };
+  const input = JSON.stringify({
+    schema_version: 4,
+    kind: "runmat-builtin-generated-products-input",
+    products: [product],
+    native_registration_manifest: null,
+    module_composition_projection: projection,
+  });
+  const completed = spawnSync(
+    process.execPath,
+    [verifier, "--product", product.product_id],
+    { cwd: repository, encoding: "utf8", input },
+  );
+  assert.equal(completed.status, 0, completed.stderr);
+  const proof = JSON.parse(completed.stdout);
+  assert.deepEqual(proof.products[0].checked_in, {
+    state: "absent", byte_length: null, content_digest: null,
+  });
+  assert.equal(parseGeneratedProductsProof(proof, {
+    integration_products: [product],
+    source_files: [{ path: generatorPath, content_digest: product.generator.baseline_digest }],
+    native_registration_manifest: null,
+    module_composition_projection: projection,
+  }).result, "pass");
+});
+
 test("generated product proof must name the exact globally reviewed generator", () => {
   const digest = `sha256:${"a".repeat(64)}`;
   const proof = {
-    schema_version: 2,
+    schema_version: 3,
     kind: "runmat-builtin-generated-products-proof",
     authority: "machine-derived-integration-evidence",
     products: [{
       product_id: "registry",
       path: "generated/registry.rs",
       generator: { path: "scripts/forged.mjs", content_digest: digest },
-      checked_in: { byte_length: 1, content_digest: digest },
-      first: { byte_length: 1, content_digest: digest },
-      second: { byte_length: 1, content_digest: digest },
+      checked_in: { state: "present", byte_length: 1, content_digest: digest },
+      first: { state: "present", byte_length: 1, content_digest: digest },
+      second: { state: "present", byte_length: 1, content_digest: digest },
       deterministic: true,
       synchronized: true,
       verification: { kind: "content_identity", result: "pass" },

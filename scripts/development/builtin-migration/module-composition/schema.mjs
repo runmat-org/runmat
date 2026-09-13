@@ -12,9 +12,10 @@ export const CHILD_ROLES = Object.freeze(["group", "identity", "support"]);
 export const VISIBILITIES = Object.freeze(["private", "super", "crate", "catalog", "public"]);
 export const AGGREGATION_ROLES = Object.freeze(["entries", "aliases", "constants"]);
 export const AGGREGATION_SOURCES = Object.freeze(["slice", "groups", "function"]);
+export const PRODUCT_STATES = Object.freeze(["absent", "present"]);
 
 export function parseModuleCompositionProjection(value) {
-  kind(value, 4, "runmat-builtin-module-composition-projection", "module composition projection");
+  kind(value, 5, "runmat-builtin-module-composition-projection", "module composition projection");
   exact(value, ["schema_version", "kind", "products"], "module composition projection");
   const products = array(value.products, "module composition products").map(parseCompositionProduct);
   canonicalUnique(products, (entry) => entry.product_id, "module composition product ids", true);
@@ -24,11 +25,12 @@ export function parseModuleCompositionProjection(value) {
 }
 
 export function parseCompositionProduct(value) {
-  exact(value, ["product_id", "crate_role", "path", "module_path", "aggregations", "aggregation_exports", "children"], "module composition product");
+  exact(value, ["product_id", "crate_role", "path", "module_path", "state", "aggregations", "aggregation_exports", "children"], "module composition product");
   const productId = stableId(value.product_id, "module composition product id");
   const crateRole = enumValue(value.crate_role, CRATE_ROLES, `${productId} crate role`);
   const productPath = repositoryPath(value.path, `${productId} product path`);
   const modulePath = rustParentModule(value.module_path, `${productId} parent module`);
+  const state = enumValue(value.state, PRODUCT_STATES, `${productId} product state`);
   validateParentPath(crateRole, productPath, modulePath, productId);
   const aggregations = array(value.aggregations, `${productId} aggregations`, { empty: true }).map((entry) => enumValue(entry, AGGREGATION_ROLES, `${productId} aggregation`));
   aggregationRoleOrder(aggregations, `${productId} aggregations`);
@@ -40,9 +42,9 @@ export function parseCompositionProduct(value) {
   canonicalUnique(children, (entry) => entry.module, `${productId} child modules`, true);
   caseFoldUnique(children, (entry) => entry.source_path, `${productId} child source paths`);
   validateDeclarationOrders(children, productId);
-  validateAggregationExports(aggregationExports, children, productId);
+  if (state === "present") validateAggregationExports(aggregationExports, children, productId);
   validateAggregationOrders(children, localAggregations, productId);
-  return { ...value, product_id: productId, crate_role: crateRole, path: productPath, module_path: modulePath, aggregations, aggregation_exports: aggregationExports, children };
+  return { ...value, product_id: productId, crate_role: crateRole, path: productPath, module_path: modulePath, state, aggregations, aggregation_exports: aggregationExports, children };
 }
 
 export function parseModuleCompositionContract(value, productPath, productId) {

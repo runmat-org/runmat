@@ -14,7 +14,10 @@ import { bootstrapModuleComposition } from "../bootstrap.mjs";
 import { renderModuleCompositionProduct } from "../generate.mjs";
 import { materializeEffectiveModuleComposition } from "../materialize.mjs";
 import { moduleCompositionProductRegistry } from "../registry.mjs";
-import { inspectMaterializationTargets } from "../repository-state.mjs";
+import {
+  inspectCompositionRepository,
+  inspectMaterializationTargets,
+} from "../repository-state.mjs";
 import { installCompositionSet, renderCompositionSetTwice, withCompositionTransaction } from "../transaction.mjs";
 import { markTransactionCommitted, writeTransactionJournal } from "../transaction-journal.mjs";
 import { cleanupRepositoryFixtures, controlledFixture } from "../../tests/helpers.mjs";
@@ -41,15 +44,20 @@ test("bootstrap rejects missing and unexpected direct children", () => withRepos
   assert.throws(() => bootstrap(root, baseline), /deterministic source observation|resolve exactly once/);
 }));
 
-test("bootstrap rejects absent products with reviewed children or filesystem content", () => {
-  withRepository(({ root, projection, baseline }) => {
+test("repository inspection keeps product state orthogonal to reviewed children and rejects unreviewed sources", () => {
+  withRepository(({ root, projection }) => {
     fs.unlinkSync(path.join(root, product(projection, "runtime-math").path));
-    assert.throws(() => bootstrap(root, baseline), /deterministic source observation|resolve exactly once/);
+    const runtimeMath = product(projection, "runtime-math");
+    const inventory = inspectCompositionRepository(root, [runtimeMath]);
+    assert.equal(
+      inventory.products.find((entry) => entry.product_id === "runtime-math").state,
+      "absent",
+    );
   });
   withRepository(({ root, projection, baseline }) => {
     const absent = product(projection, "catalog-argument-validation");
     write(root, path.posix.join(path.posix.dirname(absent.path), "orphan.rs"), "// orphan\n");
-    assert.throws(() => bootstrap(root, baseline), /absent product directory is not empty/);
+    assert.throws(() => bootstrap(root, baseline), /unreviewed direct module source/);
   });
 });
 
@@ -157,7 +165,7 @@ test("expected-absent installation never overwrites a racing target", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "runmat-composition-absent-"));
   try {
     const definition = moduleCompositionProductRegistry().find((entry) => entry.product_id === "runtime-math");
-    const value = { ...structuredClone(definition), children: [child("alpha", "directory", "crates/runmat-runtime/src/builtins/math/alpha/mod.rs")] };
+    const value = { ...structuredClone(definition), state: "present", children: [child("alpha", "directory", "crates/runmat-runtime/src/builtins/math/alpha/mod.rs")] };
     write(root, value.children[0].source_path, "pub fn value() {}\n");
     withCompositionTransaction(root, (lock) => {
       const before = inspectMaterializationTargets(root, [value]);
@@ -173,7 +181,7 @@ test("installation requires exact before-state coverage and cleans staging after
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "runmat-composition-authority-"));
   try {
     const definition = moduleCompositionProductRegistry().find((entry) => entry.product_id === "runtime-math");
-    const value = { ...structuredClone(definition), children: [child("alpha", "directory", "crates/runmat-runtime/src/builtins/math/alpha/mod.rs")] };
+    const value = { ...structuredClone(definition), state: "present", children: [child("alpha", "directory", "crates/runmat-runtime/src/builtins/math/alpha/mod.rs")] };
     write(root, value.children[0].source_path, "pub fn value() {}\n");
     withCompositionTransaction(root, (lock) => {
       const before = inspectMaterializationTargets(root, [value]);
@@ -220,10 +228,10 @@ test("an interrupted installing journal rolls the complete set back before new w
     const backup = `${target}.runmat-backup-${token}`;
     fs.renameSync(target, backup);
     fs.writeFileSync(target, replacement);
-    writeTransactionJournal(root, { schema_version: 1, kind: "runmat-module-composition-transaction", phase: "installing", registry_digest: registryDigest(), token, entries: [{
+    writeTransactionJournal(root, { schema_version: 2, kind: "runmat-module-composition-transaction", phase: "installing", registry_digest: registryDigest(), token, entries: [{
       product_id: "runtime-math", path: relative, existed: true,
       before_digest: sha256(original), before_file_identity: { device: String(stat.dev), inode: String(stat.ino) },
-      new_digest: sha256(replacement),
+      desired_state: "present", new_digest: sha256(replacement),
     }] });
     withCompositionTransaction(root, (_lock, recovery) => {
       assert.deepEqual(recovery, { recovered: true, phase: "installing" });
@@ -236,11 +244,11 @@ test("recovery rejects symlink substitution for backups and committed targets", 
   const makeJournal = (root, relative, token, existed, before, replacement) => {
     const target = path.join(root, relative);
     const stat = fs.statSync(target);
-    writeTransactionJournal(root, { schema_version: 1, kind: "runmat-module-composition-transaction", phase: "installing", registry_digest: registryDigest(), token, entries: [{
+    writeTransactionJournal(root, { schema_version: 2, kind: "runmat-module-composition-transaction", phase: "installing", registry_digest: registryDigest(), token, entries: [{
       product_id: "runtime-math", path: relative, existed,
       before_digest: existed ? sha256(before) : null,
       before_file_identity: existed ? { device: String(stat.dev), inode: String(stat.ino) } : null,
-      new_digest: sha256(replacement),
+      desired_state: "present", new_digest: sha256(replacement),
     }] });
     return { target, stat };
   };
@@ -290,24 +298,25 @@ test("recovery rejects registry drift and duplicate products before mutation", (
     const token = `999-${"d".repeat(24)}`;
     const entry = {
       product_id: "runtime-math", path: relative, existed: false,
-      before_digest: null, before_file_identity: null, new_digest: sha256(replacement),
+      before_digest: null, before_file_identity: null,
+      desired_state: "present", new_digest: sha256(replacement),
     };
     writeTransactionJournal(root, {
-      schema_version: 1, kind: "runmat-module-composition-transaction", phase: "installing",
+      schema_version: 2, kind: "runmat-module-composition-transaction", phase: "installing",
       registry_digest: `sha256:${"0".repeat(64)}`, token, entries: [entry],
     });
     assert.throws(() => withCompositionTransaction(root, () => {}), /recovery journal is invalid/);
     assert.equal(fs.readFileSync(target, "utf8"), replacement);
     fs.unlinkSync(path.join(root, ".runmat-module-composition.transaction.json"));
     writeTransactionJournal(root, {
-      schema_version: 1, kind: "runmat-module-composition-transaction", phase: "installing",
+      schema_version: 2, kind: "runmat-module-composition-transaction", phase: "installing",
       registry_digest: registryDigest(), token, entries: [entry, entry],
     });
     assert.throws(() => withCompositionTransaction(root, () => {}), /duplicate products/);
     assert.equal(fs.readFileSync(target, "utf8"), replacement);
     fs.unlinkSync(path.join(root, ".runmat-module-composition.transaction.json"));
     writeTransactionJournal(root, {
-      schema_version: 1, kind: "runmat-module-composition-transaction", phase: "installing",
+      schema_version: 2, kind: "runmat-module-composition-transaction", phase: "installing",
       registry_digest: registryDigest(), token,
       entries: [{ ...entry, path: "crates/runmat-runtime/src/builtins/mod.rs" }],
     });
@@ -336,6 +345,74 @@ test("operational materialization derives authority and writes active plus basel
   assert.deepEqual(result.installed.map((entry) => entry.product_id), ["runtime-math"]);
   const effective = fixture.control.moduleComposition.transitions.get(fixture.bundleId).changes[0].after;
   assert.match(fs.readFileSync(path.join(fixture.repository, "crates/runmat-runtime/src/builtins/math/mod.rs"), "utf8"), new RegExp(`mod ${effective.module};`));
+});
+
+test("operational materialization activates an absent reviewed parent", () => {
+  const fixture = controlledFixture({
+    composition: true, compositionTransition: "activate",
+  });
+  const target = path.join(
+    fixture.repository, "crates/runmat-runtime/src/builtins/math/mod.rs",
+  );
+  assert.equal(fs.existsSync(target), false);
+  const result = materializeEffectiveModuleComposition({
+    repository: fixture.repository, control: fixture.control,
+    queueState: fixture.queueState, queueCheckpoint: fixture.queueCheckpoint,
+    lease: fixture.lease,
+  });
+  assert.equal(fs.existsSync(target), true);
+  assert.deepEqual(
+    result.installed.find((entry) => entry.product_id === "runtime-math"),
+    {
+      product_id: "runtime-math",
+      path: "crates/runmat-runtime/src/builtins/math/mod.rs",
+      state: "present",
+    },
+  );
+});
+
+test("operational materialization deactivates a present parent while retaining reviewed children", () => {
+  const fixture = controlledFixture({
+    composition: true, compositionTransition: "deactivate",
+  });
+  const target = path.join(
+    fixture.repository, "crates/runmat-runtime/src/builtins/math/mod.rs",
+  );
+  assert.equal(fs.existsSync(target), true);
+  const result = materializeEffectiveModuleComposition({
+    repository: fixture.repository, control: fixture.control,
+    queueState: fixture.queueState, queueCheckpoint: fixture.queueCheckpoint,
+    lease: fixture.lease,
+  });
+  assert.equal(fs.existsSync(target), false);
+  assert.deepEqual(
+    result.installed.find((entry) => entry.product_id === "runtime-math"),
+    {
+      product_id: "runtime-math",
+      path: "crates/runmat-runtime/src/builtins/math/mod.rs",
+      state: "absent",
+    },
+  );
+});
+
+test("operational child composition while absent does not create its parent", () => {
+  const fixture = controlledFixture({
+    composition: true, compositionTransition: "stage-while-absent",
+  });
+  const target = path.join(
+    fixture.repository, "crates/runmat-runtime/src/builtins/math/mod.rs",
+  );
+  assert.equal(fs.existsSync(target), false);
+  const result = materializeEffectiveModuleComposition({
+    repository: fixture.repository, control: fixture.control,
+    queueState: fixture.queueState, queueCheckpoint: fixture.queueCheckpoint,
+    lease: fixture.lease,
+  });
+  assert.equal(fs.existsSync(target), false);
+  assert.equal(
+    result.installed.some((entry) => entry.product_id === "runtime-math"),
+    false,
+  );
 });
 
 test("operational materialization rejects stale or unvalidated queue authority before writing", () => {
@@ -370,7 +447,9 @@ test("operational materialization rejects an unauthorized present parent", () =>
   write(
     fixture.repository,
     definition.path,
-    renderModuleCompositionProduct({ ...structuredClone(definition), children: [] }),
+    renderModuleCompositionProduct({
+      ...structuredClone(definition), state: "present", children: [],
+    }),
   );
   assert.throws(() => materializeEffectiveModuleComposition({
     repository: fixture.repository, control: fixture.control,
@@ -491,13 +570,12 @@ function fixedProjection() {
     ["runtime-math", [child("alpha", "directory", "crates/runmat-runtime/src/builtins/math/alpha/mod.rs")]],
   ]);
   return {
-    schema_version: 4, kind: "runmat-builtin-module-composition-projection",
+    schema_version: 5, kind: "runmat-builtin-module-composition-projection",
     products: moduleCompositionProductRegistry().map((entry) => {
       const productChildren = children.get(entry.product_id) ?? [];
       return {
         ...structuredClone(entry),
-        aggregation_exports: productChildren.length
-          ? structuredClone(entry.aggregation_exports) : [],
+        state: productChildren.length ? "present" : "absent",
         children: productChildren,
       };
     }),

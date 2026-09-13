@@ -109,7 +109,7 @@ function authorityFixture() {
   }]));
   const projection = {
     products: definitions.map((definition) => ({
-      ...structuredClone(definition), aggregation_exports: [], children: [],
+      ...structuredClone(definition), state: "absent", children: [],
     })),
   };
   return { products, projection };

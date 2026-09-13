@@ -28,7 +28,7 @@ export function validateControlManifestStructure(value, { inventory: current, re
     throw new Error("control manifest validation requires the exact inventory and deterministically validated topology");
   }
   assertValidatedTopologyView(reviewedTopology);
-  kind(value, 5, "runmat-builtin-migration-control-manifest", "control manifest");
+  kind(value, 6, "runmat-builtin-migration-control-manifest", "control manifest");
   exact(value, ["schema_version", "kind", "authority", "program", "inputs", "topology_digest", "candidate_digest", "attestation_digest", "baseline_context", "cohorts", "bundle_controls", "identity_controls", "integration_products", "module_composition_baseline", "migration_findings", "exception_manifest", "target_policy", "storage_policy", "review", "digest"], "control manifest");
   if (value.authority !== "reviewed-development-control") throw new Error("control manifest has invalid authority");
   if (value.program !== "RM-1064/C00-C07") throw new Error("control manifest has unexpected program");

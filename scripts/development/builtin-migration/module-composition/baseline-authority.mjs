@@ -10,6 +10,7 @@ import {
   parseModuleCompositionBaselineReview,
 } from "./baseline-review.mjs";
 import { validateFixedModuleCompositionProjection } from "./authority.mjs";
+import { moduleCompositionProductRegistry } from "./registry.mjs";
 import { parseModuleCompositionProjection } from "./schema.mjs";
 import { gitTreeOid, signerFingerprint } from "./baseline-schema.mjs";
 
@@ -22,23 +23,28 @@ export function freezeReviewedModuleCompositionBaseline(candidateValue, reviewVa
   const review = assertValidatedModuleCompositionBaselineReview(reviewValue);
   if (review.candidate_digest !== candidate.digest) throw new Error("module composition baseline review belongs to another candidate");
   const roles = new Map(review.roles.map((entry) => [`${entry.product_id}\0${entry.module}`, entry.role]));
+  const definitions = new Map(moduleCompositionProductRegistry()
+    .map((entry) => [entry.product_id, entry]));
   const projection = validateFixedModuleCompositionProjection(parseModuleCompositionProjection({
-    schema_version: 4,
+    schema_version: 5,
     kind: "runmat-builtin-module-composition-projection",
     products: candidate.products.map((product) => ({
       product_id: product.product_id,
       crate_role: product.crate_role,
       path: product.path,
       module_path: product.module_path,
+      state: product.state,
       aggregations: product.aggregations,
-      aggregation_exports: product.aggregation_exports,
+      aggregation_exports: structuredClone(
+        definitions.get(product.product_id).aggregation_exports,
+      ),
       children: product.children.map(({ source_evidence: _ignored, ...child }) => ({
         ...child, role: roles.get(`${product.product_id}\0${child.module}`),
       })),
     })),
   }));
   const payload = {
-    schema_version: 1,
+    schema_version: 2,
     kind: KIND,
     authority: "reviewed-bootstrap-baseline",
     bindings: {
@@ -121,7 +127,7 @@ export function moduleCompositionBaselineProvenance(value) {
 }
 
 function parseIntegrity(value, trustedDigest) {
-  kind(value, 1, KIND, "reviewed module composition baseline");
+  kind(value, 2, KIND, "reviewed module composition baseline");
   exact(value, ["schema_version", "kind", "authority", "bindings", "projection", "review", "digest"], "reviewed module composition baseline");
   if (value.authority !== "reviewed-bootstrap-baseline") throw new Error("reviewed module composition baseline has invalid authority");
   exact(value.bindings, [

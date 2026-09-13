@@ -12,7 +12,10 @@ import {
   installCompositionSet, recoverCompositionAfterStoppedOwner, renderCompositionSetTwice,
   withCompositionTransaction,
 } from "../transaction.mjs";
-import { writeTransactionJournal } from "../transaction-journal.mjs";
+import {
+  markTransactionCommitted,
+  writeTransactionJournal,
+} from "../transaction-journal.mjs";
 import {
   COMPOSITION_REPOSITORY_LOCK_LEASE_MS, withCompositionRepositoryLock,
 } from "../transaction-lock.mjs";
@@ -75,6 +78,128 @@ test("an existing target has a recoverable durable backup before replacement pub
     assert.equal(fs.readFileSync(target, "utf8"), original);
     assert.equal(fs.readdirSync(path.dirname(target)).some((name) => name.includes(".runmat-backup-")), false);
   });
+}));
+
+test("deletion is committed atomically and leaves the reviewed parent absent", () => withRepository((root, product) => {
+  const target = path.join(root, product.path);
+  write(root, product.path, renderCompositionSetTwice([product])[0].content);
+  withCompositionTransaction(root, (lock) => {
+    const before = inspectMaterializationTargets(root, [product]);
+    const absent = { ...structuredClone(product), state: "absent", children: [] };
+    const result = installCompositionSet(
+      root, [{ product: absent, content: null }], before, lock,
+    );
+    assert.deepEqual(result.installed, [{
+      product_id: product.product_id, path: product.path, state: "absent",
+    }]);
+  });
+  assert.equal(fs.existsSync(target), false);
+  assert.equal(fs.existsSync(path.join(root, JOURNAL)), false);
+}));
+
+test("interrupted deletion restores the exact prior parent", () => withRepository((root, product) => {
+  const target = path.join(root, product.path);
+  const original = renderCompositionSetTwice([product])[0].content;
+  write(root, product.path, original);
+  withCompositionTransaction(root, (lock) => {
+    const before = inspectMaterializationTargets(root, [product]);
+    const absent = { ...structuredClone(product), state: "absent", children: [] };
+    assert.throws(() => installCompositionSet(
+      root, [{ product: absent, content: null }], before, lock, {
+        afterBackupDurable() { throw new Error("stop after deletion backup"); },
+      },
+    ), /stop after deletion backup/);
+  });
+  assert.equal(fs.readFileSync(target, "utf8"), original);
+  assert.equal(fs.existsSync(path.join(root, JOURNAL)), false);
+}));
+
+test("committed deletion recovery preserves absence and removes its backup", () => withRepository((root, product) => {
+  const target = path.join(root, product.path);
+  write(root, product.path, renderCompositionSetTwice([product])[0].content);
+  withCompositionTransaction(root, (lock) => {
+    const before = inspectMaterializationTargets(root, [product]);
+    const absent = { ...structuredClone(product), state: "absent", children: [] };
+    const result = installCompositionSet(
+      root, [{ product: absent, content: null }], before, lock, {
+        beforeCleanup() { throw new Error("defer committed deletion cleanup"); },
+      },
+    );
+    assert.equal(result.cleanup, "recovery-required");
+    assert.equal(fs.existsSync(target), false);
+    assert.equal(fs.existsSync(path.join(root, JOURNAL)), true);
+  });
+  withCompositionTransaction(root, (_lock, recovery) => {
+    assert.deepEqual(recovery, { recovered: true, phase: "committed" });
+    assert.equal(fs.existsSync(target), false);
+  });
+  assert.equal(fs.existsSync(path.join(root, JOURNAL)), false);
+}));
+
+test("mixed creation, replacement, and deletion roll back as one transaction", () => withRepository((root, baseProduct) => {
+  const definitions = new Map(moduleCompositionProductRegistry()
+    .map((entry) => [entry.product_id, entry]));
+  const create = { ...structuredClone(definitions.get("runtime-root")), state: "present", children: [] };
+  const replace = structuredClone(baseProduct);
+  const deletedPrior = { ...structuredClone(definitions.get("catalog-aliases")), state: "present", children: [] };
+  const deleted = { ...structuredClone(deletedPrior), state: "absent" };
+  const replacePrior = "pub mod prior;\n";
+  const deletePrior = renderCompositionSetTwice([deletedPrior])[0].content;
+  write(root, replace.path, replacePrior);
+  write(root, deletedPrior.path, deletePrior);
+
+  withCompositionTransaction(root, (lock) => {
+    const products = [create, replace, deleted];
+    const before = inspectMaterializationTargets(root, products);
+    const desired = [
+      ...renderCompositionSetTwice([create, replace]),
+      { product: deleted, content: null },
+    ];
+    assert.throws(() => installCompositionSet(root, desired, before, lock, {
+      afterBackupDurable({ index }) {
+        if (index === 2) throw new Error("interrupt mixed transaction");
+      },
+    }), /interrupt mixed transaction/);
+  });
+
+  assert.equal(fs.existsSync(path.join(root, create.path)), false);
+  assert.equal(fs.readFileSync(path.join(root, replace.path), "utf8"), replacePrior);
+  assert.equal(fs.readFileSync(path.join(root, deletedPrior.path), "utf8"), deletePrior);
+}));
+
+test("journal validation rejects inconsistent desired absence before recovery mutation", () => withRepository((root, product) => {
+  const token = `999-${"e".repeat(24)}`;
+  const target = path.join(root, product.path);
+  const original = renderCompositionSetTwice([product])[0].content;
+  write(root, product.path, original);
+  const stat = fs.statSync(target);
+  const journal = transactionJournal(token, product.path, true, original, "replacement\n", stat);
+  journal.entries[0].desired_state = "absent";
+  writeTransactionJournal(root, journal);
+  assert.throws(() => withCompositionTransaction(root, () => {}), /recovery journal entry is invalid/);
+  assert.equal(fs.readFileSync(target, "utf8"), original);
+}));
+
+test("committed absent recovery refuses an unexpected replacement target", () => withRepository((root, product) => {
+  const token = `999-${"f".repeat(24)}`;
+  const target = path.join(root, product.path);
+  const original = renderCompositionSetTwice([product])[0].content;
+  write(root, product.path, original);
+  const stat = fs.statSync(target);
+  const journal = transactionJournal(token, product.path, true, original, "replacement\n", stat);
+  journal.entries[0].desired_state = "absent";
+  journal.entries[0].new_digest = null;
+  writeTransactionJournal(root, journal);
+  fs.renameSync(target, `${target}.runmat-backup-${token}`);
+  markTransactionCommitted(root, token);
+  write(root, product.path, "unexpected replacement\n");
+
+  assert.throws(
+    () => withCompositionTransaction(root, () => {}),
+    /committed absent target unexpectedly exists/,
+  );
+  assert.equal(fs.readFileSync(target, "utf8"), "unexpected replacement\n");
+  assert.equal(fs.existsSync(`${target}.runmat-backup-${token}`), true);
 }));
 
 test("metadata expiry during installation cannot admit a successor past the process fence", () => withRepository((root, product) => {
@@ -297,7 +422,7 @@ const JOURNAL = ".runmat-module-composition.transaction.json";
 function withRepository(run) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "runmat-composition-transaction-"));
   const definition = moduleCompositionProductRegistry().find((entry) => entry.product_id === "runtime-math");
-  const product = { ...structuredClone(definition), children: [child("alpha", "crates/runmat-runtime/src/builtins/math/alpha/mod.rs")] };
+  const product = { ...structuredClone(definition), state: "present", children: [child("alpha", "crates/runmat-runtime/src/builtins/math/alpha/mod.rs")] };
   try {
     write(root, product.children[0].source_path, "pub fn value() {}\n");
     return run(root, product);
@@ -306,11 +431,12 @@ function withRepository(run) {
 
 function transactionJournal(token, relative, existed, before, replacement, stat) {
   return {
-    schema_version: 1, kind: "runmat-module-composition-transaction", phase: "installing",
+    schema_version: 2, kind: "runmat-module-composition-transaction", phase: "installing",
     registry_digest: evidenceDigest(moduleCompositionProductRegistry()), token, entries: [{
       product_id: "runtime-math", path: relative, existed,
       before_digest: existed ? sha256(before) : null,
       before_file_identity: existed ? { device: String(stat.dev), inode: String(stat.ino) } : null,
+      desired_state: "present",
       new_digest: sha256(replacement),
     }],
   };

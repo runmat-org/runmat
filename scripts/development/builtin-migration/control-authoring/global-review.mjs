@@ -23,7 +23,7 @@ export function parseGlobalControlReview(value, scaffoldValue, topology, invento
   const scaffold = assertValidatedControlOverlayScaffold(scaffoldValue);
   assertValidatedTopologyView(topology);
   assertScaffoldTopologyBinding(scaffold, topology);
-  kind(value, 4, GLOBAL_CONTROL_REVIEW_KIND, "global control review");
+  kind(value, 5, GLOBAL_CONTROL_REVIEW_KIND, "global control review");
   exact(value, ["schema_version", "kind", "authority", "program", "bindings", "program_profiles", "integration_products", "module_composition_baseline", "migration_findings", "exception_manifest", "target_policy", "storage_policy", "review", "digest"], "global control review");
   if (value.authority !== "reviewer-authored-development-input" || value.program !== PROGRAM) throw new Error("global control review has invalid authority or program");
   parseArtifactBindings(value.bindings, scaffold, topology);

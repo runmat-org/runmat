@@ -3,14 +3,10 @@ import crypto from "node:crypto";
 import { inspectMaterializationParentStates } from "./repository-state.mjs";
 
 export function inspectCanonicalMaterializationTargets(
-  repository, products, expectedPresentProductIds, expectedContents,
+  repository, products, expectedContents,
 ) {
-  const present = new Set(expectedPresentProductIds);
-  const productIds = new Set(products.map((product) => product.product_id));
-  if (present.size !== expectedPresentProductIds.length
-    || [...present].some((productId) => !productIds.has(productId))) {
-    throw new Error("canonical composition presence does not exactly cover selected products");
-  }
+  const present = new Set(products.filter((product) => product.state === "present")
+    .map((product) => product.product_id));
   if (!(expectedContents instanceof Map) || expectedContents.size !== present.size
     || [...expectedContents.keys()].some((productId) => !present.has(productId))) {
     throw new Error("canonical composition render set differs from expected present products");

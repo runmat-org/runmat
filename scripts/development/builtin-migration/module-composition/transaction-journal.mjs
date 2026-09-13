@@ -2,10 +2,12 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
-import { evidenceDigest } from "../evidence.mjs";
 import { syncDirectory } from "./durability.mjs";
-import { moduleCompositionProductRegistry } from "./registry.mjs";
 import { resolveRepositoryProduct } from "./repository-state.mjs";
+import {
+  parseTransactionJournal,
+  validateJournalEntry,
+} from "./transaction-journal-schema.mjs";
 
 const JOURNAL = ".runmat-module-composition.transaction.json";
 const JOURNAL_DRAFT = `${JOURNAL}.new`;
@@ -80,7 +82,11 @@ export function markTransactionCommitted(repository, expectedToken) {
 function finishCommitted(repository, journal) {
   for (const entry of journal.entries) {
     const paths = entryPaths(repository, journal.token, entry);
-    assertDigest(paths.target, entry.new_digest, `${entry.product_id}: committed target`);
+    if (entry.desired_state === "present") {
+      assertDigest(paths.target, entry.new_digest, `${entry.product_id}: committed target`);
+    } else if (lstatOrNull(paths.target) !== null) {
+      throw new Error(`${entry.product_id}: committed absent target unexpectedly exists`);
+    }
     unlinkIfPresent(paths.temporary);
     unlinkIfPresent(paths.backup);
     fsyncDirectory(path.dirname(paths.target));
@@ -110,33 +116,7 @@ function readJournal(target) {
   const descriptor = fs.openSync(target, fs.constants.O_RDONLY | noFollow());
   let value;
   try { const stat = fs.fstatSync(descriptor); if (stat.dev !== prior.dev || stat.ino !== prior.ino) throw new Error("module composition recovery journal changed while opening"); value = JSON.parse(fs.readFileSync(descriptor, "utf8")); } finally { fs.closeSync(descriptor); }
-  const keys = ["entries", "kind", "phase", "registry_digest", "schema_version", "token"];
-  if (value?.schema_version !== 1 || value.kind !== "runmat-module-composition-transaction"
-    || value.phase !== "installing" || value.registry_digest !== registryDigest()
-    || !/^[0-9]+-[a-f0-9]{24}$/.test(value.token) || !Array.isArray(value.entries)
-    || JSON.stringify(Object.keys(value).sort()) !== JSON.stringify(keys)) {
-    throw new Error("module composition recovery journal is invalid");
-  }
-  validateRegistryEntries(value.entries);
-  return value;
-}
-
-function validateRegistryEntries(entries) {
-  const registry = new Map(moduleCompositionProductRegistry()
-    .map((entry) => [entry.product_id, entry.path]));
-  const productIds = new Set();
-  const paths = new Set();
-  for (const entry of entries) {
-    validateJournalEntry(entry);
-    if (registry.get(entry?.product_id) !== entry?.path) {
-      throw new Error("module composition recovery journal product differs from the fixed registry");
-    }
-    if (productIds.has(entry.product_id) || paths.has(entry.path)) {
-      throw new Error("module composition recovery journal contains duplicate products");
-    }
-    productIds.add(entry.product_id);
-    paths.add(entry.path);
-  }
+  return parseTransactionJournal(value);
 }
 
 function assertExpectedToken(journal, expectedToken) {
@@ -149,12 +129,6 @@ function entryPaths(repository, token, entry) {
   validateJournalEntry(entry);
   const target = resolveRepositoryProduct(repository, entry.path);
   return { target, temporary: `${target}.runmat-stage-${token}`, backup: `${target}.runmat-backup-${token}` };
-}
-
-function validateJournalEntry(entry) {
-  const keys = ["before_digest", "before_file_identity", "existed", "new_digest", "path", "product_id"];
-  const identityValid = entry?.before_file_identity && typeof entry.before_file_identity.device === "string" && typeof entry.before_file_identity.inode === "string" && JSON.stringify(Object.keys(entry.before_file_identity).sort()) === JSON.stringify(["device", "inode"]);
-  if (!entry || JSON.stringify(Object.keys(entry).sort()) !== JSON.stringify(keys) || typeof entry.product_id !== "string" || typeof entry.path !== "string" || typeof entry.existed !== "boolean" || !digestValue(entry.new_digest) || (entry.existed && (!digestValue(entry.before_digest) || !identityValid)) || (!entry.existed && (entry.before_digest !== null || entry.before_file_identity !== null))) throw new Error("module composition recovery journal entry is invalid");
 }
 
 function unlinkKnownTarget(target, entry) {
@@ -181,10 +155,8 @@ function unlinkBoundedArtifact(target) {
   }
   fs.unlinkSync(target);
 }
-function digestValue(value) { return typeof value === "string" && /^sha256:[a-f0-9]{64}$/.test(value); }
 function readRegularNoFollow(target) { const prior = fs.lstatSync(target); if (!prior.isFile()) throw new Error(`${target} is not a regular recovery file`); const descriptor = fs.openSync(target, fs.constants.O_RDONLY | noFollow()); try { const stat = fs.fstatSync(descriptor); if (!stat.isFile() || stat.dev !== prior.dev || stat.ino !== prior.ino) throw new Error(`${target} changed while opening for recovery`); return { bytes: fs.readFileSync(descriptor), stat }; } finally { fs.closeSync(descriptor); } }
 function digestBytes(bytes) { return `sha256:${crypto.createHash("sha256").update(bytes).digest("hex")}`; }
-function registryDigest() { return evidenceDigest(moduleCompositionProductRegistry()); }
 function lstatOrNull(target) { try { return fs.lstatSync(target); } catch (error) { if (["ENOENT", "ENOTDIR"].includes(error?.code)) return null; throw error; } }
 function unlinkIfPresent(target) { try { fs.unlinkSync(target); } catch (error) { if (error?.code !== "ENOENT") throw error; } }
 function fsyncDirectory(directory) { syncDirectory(directory); }

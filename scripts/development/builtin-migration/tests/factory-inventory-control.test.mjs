@@ -303,9 +303,9 @@ test("control is closed, reviewed, reciprocal, and rejects case-fold ambiguity",
   const fixture = controlledFixture();
   assert.equal(fixture.control.identities.get("foo").public_identity.primary_spelling.spelling, "foo");
   const legacy = structuredClone(fixture.controlValue); legacy.schema_version = 4;
-  assert.throws(() => parseFixtureControl(fixture, legacy), /schema_version 5/);
-  const future = structuredClone(fixture.controlValue); future.schema_version = 6;
-  assert.throws(() => parseFixtureControl(fixture, future), /schema_version 5/);
+  assert.throws(() => parseFixtureControl(fixture, legacy), /schema_version 6/);
+  const future = structuredClone(fixture.controlValue); future.schema_version = 7;
+  assert.throws(() => parseFixtureControl(fixture, future), /schema_version 6/);
   const extra = structuredClone(fixture.controlValue); extra.unreviewed = true;
   assert.throws(() => parseFixtureControl(fixture, extra), /fields must be exactly/);
   const collision = structuredClone(fixture.controlValue); collision.identity_controls.Foo = structuredClone(collision.identity_controls.foo);

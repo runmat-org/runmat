@@ -45,7 +45,7 @@ test("bundle and global reviews bind exact scaffold and topology rows", () => {
   assert.deepEqual([...global.programProfiles.keys()], [...new Set(fixture.bundleReview.bundle_control.gate_plans.map((entry) => entry.program_profile_id))]);
   assert.throws(() => bundle.identityControls.set("bar", {}), /immutable/);
 
-  for (const version of [3, 5]) {
+  for (const version of [3, 4, 6]) {
     const wrongVersion = structuredClone(fixture.globalReview);
     wrongVersion.schema_version = version;
     resign(wrongVersion);
@@ -53,10 +53,10 @@ test("bundle and global reviews bind exact scaffold and topology rows", () => {
       () => parseGlobalControlReview(
         wrongVersion, fixture.scaffold, fixture.topology, fixture.inventory,
       ),
-      /schema_version 4/,
+      /schema_version 5/,
     );
   }
-  for (const version of [3, 5]) {
+  for (const version of [3, 4, 6]) {
     const wrongVersion = structuredClone(fixture.bundleReview);
     wrongVersion.schema_version = version;
     resign(wrongVersion);
@@ -64,7 +64,7 @@ test("bundle and global reviews bind exact scaffold and topology rows", () => {
       () => parseBundleControlReview(
         wrongVersion, fixture.scaffold, fixture.topology, fixture.inventory, global,
       ),
-      /schema_version 4/,
+      /schema_version 5/,
     );
   }
 
@@ -217,11 +217,11 @@ test("control composition and attestation are deterministic capabilities, not re
   };
   const candidate = composeControlCandidate(input);
   assert.deepEqual(candidate, composeControlCandidate(input));
-  assert.equal(candidate.schema_version, 4);
-  for (const version of [3, 5]) {
+  assert.equal(candidate.schema_version, 5);
+  for (const version of [3, 4, 6]) {
     const wrongVersion = structuredClone(candidate);
     wrongVersion.schema_version = version;
-    assert.throws(() => parseControlCandidate(wrongVersion, candidate), /schema_version 4/);
+    assert.throws(() => parseControlCandidate(wrongVersion, candidate), /schema_version 5/);
   }
   assert.throws(
     () => composeControlCandidate({ ...input, reviewSet: { ...reviewSet } }),
@@ -243,7 +243,7 @@ test("control composition and attestation are deterministic capabilities, not re
   };
   const attestation = { ...attestationPayload, digest: evidenceDigest(attestationPayload) };
   const reviewed = validateControlReviewChain(candidate, attestation, candidate);
-  assert.equal(reviewed.controlValue.schema_version, 5);
+  assert.equal(reviewed.controlValue.schema_version, 6);
   assert.doesNotThrow(() => parseControlManifest(reviewed.controlValue, {
     inventory: fixture.inventory,
     reviewedTopology: fixture.topology,
@@ -461,7 +461,7 @@ function reviewFixture() {
   const scaffoldBundle = scaffold.bundle_rows.find((entry) => entry.bundle_id === bundleId);
   const scaffoldIdentity = scaffold.identity_rows.find((entry) => entry.identity === id);
   const bundlePayload = {
-    schema_version: 4,
+    schema_version: 5,
     kind: "runmat-builtin-migration-bundle-control-review",
     authority: "reviewer-authored-development-input",
     program: "RM-1064/C00-C07",
@@ -486,7 +486,7 @@ function reviewFixture() {
   const bundleReview = { ...bundlePayload, digest: evidenceDigest(bundlePayload) };
   const moduleCompositionBaseline = fixtureReviewedModuleCompositionBaseline();
   const globalPayload = {
-    schema_version: 4,
+    schema_version: 5,
     kind: "runmat-builtin-migration-global-control-review",
     authority: "reviewer-authored-development-input",
     program: "RM-1064/C00-C07",

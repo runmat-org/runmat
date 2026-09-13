@@ -66,7 +66,7 @@ export function indexControlReviews(reviewDirectory, outputDirectory, { scaffold
 
 function globalTemplate(scaffold, topology) {
   return {
-    schema_version: 4,
+    schema_version: 5,
     kind: "runmat-builtin-migration-global-control-review",
     authority: "reviewer-authored-development-input",
     program: PROGRAM,
@@ -103,7 +103,7 @@ function bundleTemplate(bundleId, scaffold, topology) {
   const bundle = topology.bundles.get(bundleId);
   const scaffoldBundle = scaffold.bundle_rows.find((row) => row.bundle_id === bundleId);
   return {
-    schema_version: 4,
+    schema_version: 5,
     kind: "runmat-builtin-migration-bundle-control-review",
     authority: "reviewer-authored-development-input",
     program: PROGRAM,

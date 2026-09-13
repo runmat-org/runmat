@@ -229,7 +229,7 @@ function fullChainControl(inventory, topology, scaffold) {
     }];
   }));
   const payload = {
-    schema_version: 4,
+    schema_version: 6,
     kind: "runmat-builtin-migration-control-manifest",
     authority: "reviewed-development-control",
     program: "RM-1064/C00-C07",
@@ -293,7 +293,7 @@ function writeFullControlReviewSet(directory, inventory, topology, scaffold, pol
     policies.module_composition_baseline,
   );
   const globalPayload = {
-    schema_version: 4,
+    schema_version: 5,
     kind: "runmat-builtin-migration-global-control-review",
     authority: "reviewer-authored-development-input",
     program: "RM-1064/C00-C07",
@@ -340,7 +340,7 @@ function writeFullControlReviewSet(directory, inventory, topology, scaffold, pol
         .find((row) => row.identity === identity).proposal_digest,
     }));
     const bundlePayload = {
-      schema_version: 4,
+      schema_version: 5,
       kind: "runmat-builtin-migration-bundle-control-review",
       authority: "reviewer-authored-development-input",
       program: "RM-1064/C00-C07",

@@ -27,11 +27,16 @@ export function bootstrapModuleComposition({
     const inventory = inspectCompositionRepository(lock.repository, reviewed.products);
     renewCompositionRepositoryLock(lock);
     options.afterAudit?.({ inventory, lock });
-    const present = new Set(inventory.products.filter((entry) => entry.state === "present").map((entry) => entry.product_id));
-    const products = reviewed.products.filter((product) => present.has(product.product_id));
+    for (const observed of inventory.products) {
+      const expected = reviewed.products.find((product) => product.product_id === observed.product_id);
+      if (observed.state !== expected.state) {
+        throw new Error(`${observed.product_id}: repository presence differs from the reviewed baseline`);
+      }
+    }
+    const products = reviewed.products.filter((product) => product.state === "present");
     const rendered = renderCompositionSetTwice(products, options.render);
     renewCompositionRepositoryLock(lock);
-    const before = inventory.products.filter((entry) => present.has(entry.product_id));
+    const before = inventory.products.filter((entry) => entry.state === "present");
     validateBaseline();
     renewCompositionRepositoryLock(lock);
     const authorityGuard = ({ repository: root, transactionArtifacts }) => {
