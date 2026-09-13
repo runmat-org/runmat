@@ -31,7 +31,9 @@ import { runGateProducer } from "./builtin-migration/gate-adapter.mjs";
 import { materializeEffectiveModuleComposition } from "./builtin-migration/module-composition/materialize.mjs";
 import { prepareIdentity } from "./builtin-migration/prepare.mjs";
 import { buildQueue, emptyQueueState, validateQueueState } from "./builtin-migration/queue.mjs";
-import { validateQueueCheckpoint } from "./builtin-migration/queue-checkpoint.mjs";
+import {
+  loadQueueAuthorityFromCliPaths,
+} from "./builtin-migration/queue-authority/index.mjs";
 import { sealBundle, parseSealManifest } from "./builtin-migration/seal.mjs";
 import { exact, kind } from "./builtin-migration/schema.mjs";
 import { parseVerificationManifest } from "./builtin-migration/verify-schema.mjs";
@@ -142,9 +144,7 @@ function run(options) {
     const baseline = parseInventoryEvidence(readJson(options.baselineInventory));
     const control = parseControlFromOptions(options, baseline);
     const leaseBase = parseInventoryEvidence(readJson(options.leaseBaseInventory));
-    const queue = loadQueueAuthority(
-      options.state, options.queueCheckpoint, options.trustedQueueCheckpointDigest, control,
-    );
+    const queue = queueAuthorityFromOptions(options, control);
     emit(issueLease(
       readJson(options.request), control, repository, leaseBase, queue.state, queue.checkpoint,
     ), options.output);
@@ -161,9 +161,7 @@ function run(options) {
     const leaseBase = parseInventoryEvidence(readJson(options.leaseBaseInventory));
     const lease = parseLease(readJson(options.lease), control, repository);
     assertLeaseBaseInventory(lease, control, leaseBase);
-    const queue = loadQueueAuthority(
-      options.state, options.queueCheckpoint, options.trustedQueueCheckpointDigest, control,
-    );
+    const queue = queueAuthorityFromOptions(options, control);
     const subject = buildInventory(repository, dispositionInputFromControl(control), {
       compiledInventory: readJson(options.compiledInventory),
     });
@@ -176,9 +174,7 @@ function run(options) {
     const lease = parseLease(readJson(options.lease), control, repository);
     const leaseBase = parseInventoryEvidence(readJson(options.leaseBaseInventory));
     assertLeaseBaseInventory(lease, control, leaseBase);
-    const queue = loadQueueAuthority(
-      options.state, options.queueCheckpoint, options.trustedQueueCheckpointDigest, control,
-    );
+    const queue = queueAuthorityFromOptions(options, control);
     emit(materializeEffectiveModuleComposition({
       repository, control, queueState: queue.state, queueCheckpoint: queue.checkpoint, lease,
     }), options.output);
@@ -197,9 +193,7 @@ function run(options) {
     if (options.command === "queue" && inventory.digest !== baselineInventory.digest) throw new Error("queue requires the current inventory to equal the reviewed baseline inventory");
     if (options.command === "queue") {
       const queueState = options.state
-        ? loadQueueAuthority(
-          options.state, options.queueCheckpoint, options.trustedQueueCheckpointDigest, control,
-        ).state
+        ? queueAuthorityFromOptions(options, control).state
         : validateQueueState(emptyQueueState(control), control, () => null);
       emit(buildQueue(inventory, control, queueState), options.output);
     }
@@ -230,47 +224,13 @@ function runAudit(options, controlBaseline, leaseBase, subject, control, lease) 
   if (output.result !== "pass") process.exitCode = 1;
 }
 
-function loadQueueAuthority(statePath, checkpointPath, trustedCheckpointDigest, control) {
-  const resolvedState = fs.realpathSync(path.resolve(statePath));
-  const base = fs.realpathSync(path.dirname(resolvedState));
-  const states = new Map();
-  const activeStates = new Set();
-  const loadWithinBase = (relativePath, label) => {
-    const resolved = fs.realpathSync(path.resolve(base, relativePath));
-    const relative = path.relative(base, resolved);
-    if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
-      throw new Error(`${label} escapes the queue authority directory: ${relativePath}`);
-    }
-    return resolved;
-  };
-  const loadState = (resolved) => {
-    if (activeStates.has(resolved)) throw new Error("queue state predecessor chain contains a cycle");
-    const raw = readJson(resolved);
-    if (states.has(raw.digest)) return states.get(raw.digest);
-    activeStates.add(resolved);
-    try {
-      const state = validateQueueState(
-        raw, control,
-        (reference) => readJson(loadWithinBase(reference.path, "queue seal reference")),
-        (predecessor) => loadState(loadWithinBase(
-          predecessor.state_path, "queue predecessor state reference",
-        )),
-      );
-      states.set(state.stateDigest, state);
-      return state;
-    } finally { activeStates.delete(resolved); }
-  };
-  const state = loadState(resolvedState);
-  const checkpoint = validateQueueCheckpoint(
-    readJson(loadWithinBase(checkpointPath, "queue checkpoint")),
-    trustedCheckpointDigest,
-    state,
+function queueAuthorityFromOptions(options, control) {
+  return loadQueueAuthorityFromCliPaths({
+    statePath: options.state,
+    checkpointPath: options.queueCheckpoint,
+    trustedCheckpointDigest: options.trustedQueueCheckpointDigest,
     control,
-    (predecessor) => readJson(loadWithinBase(
-      predecessor.checkpoint_path, "queue predecessor checkpoint reference",
-    )),
-  );
-  return { state, checkpoint };
+  });
 }
 
 function runVerify(options) {

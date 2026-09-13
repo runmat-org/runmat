@@ -116,7 +116,10 @@ function validateCheckpoint(
   digest(value.digest, "queue checkpoint digest");
   const { digest: _ignored, ...payload } = value;
   if (evidenceDigest(payload) !== value.digest) throw new Error("queue checkpoint digest mismatch");
-  const result = deepImmutable({ value, digest: value.digest, queueState: state });
+  const immutable = deepImmutable({ value, digest: value.digest });
+  // The queue state is an authority capability. Preserve its exact brand instead of
+  // turning it into structurally identical caller data during immutable copying.
+  const result = Object.freeze({ ...immutable, queueState: state });
   VALIDATED_QUEUE_CHECKPOINTS.add(result);
   return result;
 }
