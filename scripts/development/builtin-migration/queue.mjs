@@ -12,7 +12,7 @@ import {
 import {
   parsePilotTransition, validateQueuePhaseTransition,
 } from "./queue-transition.mjs";
-import { validateQueueSeal } from "./queue-seal.mjs";
+import { assertValidatedQueueSeal, validateQueueSeal } from "./queue-seal.mjs";
 import {
   buildAcceptedSealSet, buildBarrierSealSet, validateAcceptedSealSet,
   validateBarrierSealSet,
@@ -166,6 +166,22 @@ function requiredMaturity(maturity) {
 export function validateQueueState(
   value, control, loadSeal, loadPredecessor = () => null,
 ) {
+  return validateQueueStateWithSealPolicy(
+    value, control, loadSeal, loadPredecessor, false,
+  );
+}
+
+export function validateQueueStateFromAuthority(
+  value, control, loadSeal, loadPredecessor = () => null,
+) {
+  return validateQueueStateWithSealPolicy(
+    value, control, loadSeal, loadPredecessor, true,
+  );
+}
+
+function validateQueueStateWithSealPolicy(
+  value, control, loadSeal, loadPredecessor, sealsAreValidated,
+) {
   assertValidatedControl(control);
   kind(value, 4, "runmat-builtin-migration-queue-state", "queue state");
   exact(value, [
@@ -216,7 +232,10 @@ export function validateQueueState(
     const acceptedReference = {
       path: referencePath, artifact_id: artifactId, digest: referenceDigest, bundle_id: bundleId,
     };
-    const seal = validateQueueSeal(loadSeal(acceptedReference), acceptedReference, control);
+    const loadedSeal = loadSeal(acceptedReference);
+    const seal = sealsAreValidated
+      ? assertValidatedQueueSeal(loadedSeal, control, acceptedReference)
+      : validateQueueSeal(loadedSeal, acceptedReference, control);
     referenceKeys.push(`${bundleId}\0${artifactId}`);
     acceptedSeals.push(acceptedReference);
     sealedBundles.push({

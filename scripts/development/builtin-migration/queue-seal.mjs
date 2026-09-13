@@ -113,13 +113,16 @@ export function validateQueueSeal(value, reference, control) {
   return result;
 }
 
-export function assertValidatedQueueSeal(value, control) {
+export function assertValidatedQueueSeal(value, control, reference = null) {
   assertValidatedControl(control);
   if (!VALIDATED_QUEUE_SEALS.has(value)) {
     throw new Error("operation requires the exact validated queue seal");
   }
   if (value.controlDigest !== control.digest) {
     throw new Error("queue seal was validated for another control manifest");
+  }
+  if (reference !== null && JSON.stringify(value.reference) !== JSON.stringify(reference)) {
+    throw new Error("queue seal was validated for another reference");
   }
   return value;
 }
