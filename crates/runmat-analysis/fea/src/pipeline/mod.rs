@@ -1,8 +1,9 @@
 pub mod electro_thermal;
 pub mod electromagnetic;
 pub mod electromagnetic_frequency;
-mod electromagnetic_frequency_contract;
 mod electromagnetic_frequency_history;
+mod electromagnetic_frequency_result;
+pub mod frequency_plan;
 pub mod linear_static;
 pub mod modal;
 pub mod modal_basis;

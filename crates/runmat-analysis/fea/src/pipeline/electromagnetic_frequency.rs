@@ -8,11 +8,10 @@ use crate::{
     topology::AnalysisProjection,
 };
 
-pub use super::electromagnetic_frequency_contract::{
-    ElectromagneticFrequencyPlan, ElectromagneticFrequencyPlanEntry,
-    ElectromagneticFrequencyPlanEntryIdentity, ElectromagneticFrequencyPlanIdentity,
+pub use super::electromagnetic_frequency_result::{
     ElectromagneticFrequencySummary, FeaElectromagneticFrequencyResponse,
 };
+use super::frequency_plan::FrequencyResponsePlan;
 
 use super::{
     electromagnetic_frequency_history::complex_history_series,
@@ -36,7 +35,7 @@ pub fn run_electromagnetic_frequency_response(
         .ok_or_else(|| FeaRunError::InvalidModel("electromagnetic domain is absent".into()))?
         .reference_frequency
         .hertz;
-    let plan = ElectromagneticFrequencyPlan::new(
+    let plan = FrequencyResponsePlan::new(
         reference_frequency_hz,
         requested_frequencies_hz,
         &observation_frequencies_hz,
@@ -69,7 +68,7 @@ pub fn run_electromagnetic_frequency_response(
 
 pub(crate) fn assemble_electromagnetic_frequency_response(
     model: &AnalysisModel,
-    plan: ElectromagneticFrequencyPlan,
+    plan: FrequencyResponsePlan,
     mut runs: Vec<FeaElectromagneticRunResult>,
     solver_mesh: Option<&runmat_meshing_core::SolverMeshArtifact>,
 ) -> Result<FeaElectromagneticFrequencyResponse, FeaRunError> {
@@ -203,7 +202,7 @@ fn summarize(
 }
 
 fn frequency_evidence(
-    plan: &ElectromagneticFrequencyPlan,
+    plan: &FrequencyResponsePlan,
     summary: &ElectromagneticFrequencySummary,
 ) -> FeaDiagnostic {
     FeaDiagnostic {
@@ -230,7 +229,7 @@ fn frequency_evidence(
 }
 
 fn frequency_known_answer_evidence(
-    plan: &ElectromagneticFrequencyPlan,
+    plan: &FrequencyResponsePlan,
     summary: &ElectromagneticFrequencySummary,
 ) -> FeaDiagnostic {
     let minimum = plan.frequencies_hz().first().copied().unwrap_or(0.0);

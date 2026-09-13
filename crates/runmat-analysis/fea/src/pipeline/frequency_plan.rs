@@ -2,16 +2,16 @@ use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
 use serde::{Deserialize, Serialize};
 
-use crate::contracts::{FeaElectromagneticRunResult, FeaRunError};
+use crate::contracts::FeaRunError;
 
-const FREQUENCY_PLAN_PREFIX: &[u8] = b"runmat-fea-electromagnetic-frequency-plan/v1\0";
+const FREQUENCY_PLAN_PREFIX: &[u8] = b"runmat-fea-frequency-response-plan/v1\0";
 const FREQUENCY_PLAN_LIMITS: CanonicalLimits = CanonicalLimits::new(1024 * 1024, 100_000, 4096, 8);
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct ElectromagneticFrequencyPlanIdentity(Digest);
+pub struct FrequencyResponsePlanIdentity(Digest);
 
-impl ElectromagneticFrequencyPlanIdentity {
+impl FrequencyResponsePlanIdentity {
     pub const fn digest(self) -> Digest {
         self.0
     }
@@ -19,9 +19,9 @@ impl ElectromagneticFrequencyPlanIdentity {
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct ElectromagneticFrequencyPlanEntryIdentity(Digest);
+pub struct FrequencyResponsePlanEntryIdentity(Digest);
 
-impl ElectromagneticFrequencyPlanEntryIdentity {
+impl FrequencyResponsePlanEntryIdentity {
     pub const fn digest(self) -> Digest {
         self.0
     }
@@ -32,30 +32,27 @@ impl ElectromagneticFrequencyPlanEntryIdentity {
 /// A generic execution request binds this entry alongside the immutable model and solver inputs;
 /// the entry identifies schedule membership and order, not authority to execute those inputs.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(
-    deny_unknown_fields,
-    try_from = "ElectromagneticFrequencyPlanEntryData"
-)]
-pub struct ElectromagneticFrequencyPlanEntry {
-    identity: ElectromagneticFrequencyPlanEntryIdentity,
-    plan_identity: ElectromagneticFrequencyPlanIdentity,
+#[serde(deny_unknown_fields, try_from = "FrequencyResponsePlanEntryData")]
+pub struct FrequencyResponsePlanEntry {
+    identity: FrequencyResponsePlanEntryIdentity,
+    plan_identity: FrequencyResponsePlanIdentity,
     ordinal: u32,
     frequency_hz: f64,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct ElectromagneticFrequencyPlanEntryData {
-    identity: ElectromagneticFrequencyPlanEntryIdentity,
-    plan_identity: ElectromagneticFrequencyPlanIdentity,
+struct FrequencyResponsePlanEntryData {
+    identity: FrequencyResponsePlanEntryIdentity,
+    plan_identity: FrequencyResponsePlanIdentity,
     ordinal: u32,
     frequency_hz: f64,
 }
 
-impl TryFrom<ElectromagneticFrequencyPlanEntryData> for ElectromagneticFrequencyPlanEntry {
+impl TryFrom<FrequencyResponsePlanEntryData> for FrequencyResponsePlanEntry {
     type Error = FeaRunError;
 
-    fn try_from(data: ElectromagneticFrequencyPlanEntryData) -> Result<Self, Self::Error> {
+    fn try_from(data: FrequencyResponsePlanEntryData) -> Result<Self, Self::Error> {
         let entry = Self {
             identity: data.identity,
             plan_identity: data.plan_identity,
@@ -67,14 +64,14 @@ impl TryFrom<ElectromagneticFrequencyPlanEntryData> for ElectromagneticFrequency
     }
 }
 
-impl ElectromagneticFrequencyPlanEntry {
+impl FrequencyResponsePlanEntry {
     fn new(
-        plan_identity: ElectromagneticFrequencyPlanIdentity,
+        plan_identity: FrequencyResponsePlanIdentity,
         ordinal: u32,
         frequency_hz: f64,
     ) -> Result<Self, FeaRunError> {
         let mut entry = Self {
-            identity: ElectromagneticFrequencyPlanEntryIdentity(Digest::sha256([])),
+            identity: FrequencyResponsePlanEntryIdentity(Digest::sha256([])),
             plan_identity,
             ordinal,
             frequency_hz,
@@ -84,11 +81,11 @@ impl ElectromagneticFrequencyPlanEntry {
         Ok(entry)
     }
 
-    pub const fn identity(self) -> ElectromagneticFrequencyPlanEntryIdentity {
+    pub const fn identity(self) -> FrequencyResponsePlanEntryIdentity {
         self.identity
     }
 
-    pub const fn plan_identity(self) -> ElectromagneticFrequencyPlanIdentity {
+    pub const fn plan_identity(self) -> FrequencyResponsePlanIdentity {
         self.plan_identity
     }
 
@@ -103,49 +100,49 @@ impl ElectromagneticFrequencyPlanEntry {
     fn validate(&self) -> Result<(), FeaRunError> {
         if !valid_frequency(self.frequency_hz) || self.identity != self.derive_identity()? {
             return Err(FeaRunError::InvalidFrequencyPlan(
-                "electromagnetic frequency plan entry is not canonical".into(),
+                "frequency response plan entry is not canonical".into(),
             ));
         }
         Ok(())
     }
 
-    fn derive_identity(&self) -> Result<ElectromagneticFrequencyPlanEntryIdentity, FeaRunError> {
+    fn derive_identity(&self) -> Result<FrequencyResponsePlanEntryIdentity, FeaRunError> {
         encode_contract(
             FREQUENCY_PLAN_PREFIX,
-            "electromagnetic-frequency-plan-entry",
+            "frequency-response-plan-entry",
             &(self.plan_identity, self.ordinal, self.frequency_hz),
             FREQUENCY_PLAN_LIMITS,
         )
         .map(Digest::sha256)
-        .map(ElectromagneticFrequencyPlanEntryIdentity)
+        .map(FrequencyResponsePlanEntryIdentity)
         .map_err(|error| FeaRunError::InvalidFrequencyPlan(error.to_string()))
     }
 }
 
-/// Canonical independent-frequency work for one harmonic electromagnetic step.
+/// Canonical independent-frequency work for one harmonic response step.
 ///
 /// Each entry is independently executable. Ordering and the reference entry are fixed here so
 /// direct, parallel, and distributed execution can assemble the same response artifact.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields, try_from = "ElectromagneticFrequencyPlanData")]
-pub struct ElectromagneticFrequencyPlan {
-    identity: ElectromagneticFrequencyPlanIdentity,
+#[serde(deny_unknown_fields, try_from = "FrequencyResponsePlanData")]
+pub struct FrequencyResponsePlan {
+    identity: FrequencyResponsePlanIdentity,
     reference_frequency_hz: f64,
     frequencies_hz: Vec<f64>,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct ElectromagneticFrequencyPlanData {
-    identity: ElectromagneticFrequencyPlanIdentity,
+struct FrequencyResponsePlanData {
+    identity: FrequencyResponsePlanIdentity,
     reference_frequency_hz: f64,
     frequencies_hz: Vec<f64>,
 }
 
-impl TryFrom<ElectromagneticFrequencyPlanData> for ElectromagneticFrequencyPlan {
+impl TryFrom<FrequencyResponsePlanData> for FrequencyResponsePlan {
     type Error = FeaRunError;
 
-    fn try_from(data: ElectromagneticFrequencyPlanData) -> Result<Self, Self::Error> {
+    fn try_from(data: FrequencyResponsePlanData) -> Result<Self, Self::Error> {
         let plan = Self {
             identity: data.identity,
             reference_frequency_hz: data.reference_frequency_hz,
@@ -156,7 +153,7 @@ impl TryFrom<ElectromagneticFrequencyPlanData> for ElectromagneticFrequencyPlan 
     }
 }
 
-impl ElectromagneticFrequencyPlan {
+impl FrequencyResponsePlan {
     pub fn new(
         reference_frequency_hz: f64,
         requested_frequencies_hz: &[f64],
@@ -167,14 +164,14 @@ impl ElectromagneticFrequencyPlan {
         frequencies_hz.push(reference_frequency_hz);
         if frequencies_hz.iter().any(|value| !valid_frequency(*value)) {
             return Err(FeaRunError::InvalidFrequencyPlan(
-                "electromagnetic frequencies must be finite, positive, and not negative zero"
+                "response frequencies must be finite, positive, and not negative zero"
                     .into(),
             ));
         }
         frequencies_hz.sort_by(f64::total_cmp);
         frequencies_hz.dedup_by(|left, right| left.to_bits() == right.to_bits());
         let mut plan = Self {
-            identity: ElectromagneticFrequencyPlanIdentity(Digest::sha256([])),
+            identity: FrequencyResponsePlanIdentity(Digest::sha256([])),
             reference_frequency_hz,
             frequencies_hz,
         };
@@ -183,7 +180,7 @@ impl ElectromagneticFrequencyPlan {
         Ok(plan)
     }
 
-    pub const fn identity(&self) -> ElectromagneticFrequencyPlanIdentity {
+    pub const fn identity(&self) -> FrequencyResponsePlanIdentity {
         self.identity
     }
 
@@ -195,7 +192,7 @@ impl ElectromagneticFrequencyPlan {
         &self.frequencies_hz
     }
 
-    pub fn entries(&self) -> Result<Vec<ElectromagneticFrequencyPlanEntry>, FeaRunError> {
+    pub fn entries(&self) -> Result<Vec<FrequencyResponsePlanEntry>, FeaRunError> {
         self.validate()?;
         self.frequencies_hz
             .iter()
@@ -204,18 +201,15 @@ impl ElectromagneticFrequencyPlan {
             .map(|(ordinal, frequency_hz)| {
                 let ordinal = u32::try_from(ordinal).map_err(|_| {
                     FeaRunError::InvalidFrequencyPlan(
-                        "electromagnetic frequency plan exceeds the entry ordinal domain".into(),
+                        "frequency response plan exceeds the entry ordinal domain".into(),
                     )
                 })?;
-                ElectromagneticFrequencyPlanEntry::new(self.identity, ordinal, frequency_hz)
+                FrequencyResponsePlanEntry::new(self.identity, ordinal, frequency_hz)
             })
             .collect()
     }
 
-    pub fn validate_entry(
-        &self,
-        entry: ElectromagneticFrequencyPlanEntry,
-    ) -> Result<(), FeaRunError> {
+    pub fn validate_entry(&self, entry: FrequencyResponsePlanEntry) -> Result<(), FeaRunError> {
         self.validate()?;
         entry.validate()?;
         let frequency = usize::try_from(entry.ordinal)
@@ -225,7 +219,7 @@ impl ElectromagneticFrequencyPlan {
             || frequency.is_none_or(|frequency| frequency.to_bits() != entry.frequency_hz.to_bits())
         {
             return Err(FeaRunError::InvalidFrequencyPlan(
-                "electromagnetic frequency plan entry is absent from its claimed plan".into(),
+                "frequency response plan entry is absent from its claimed plan".into(),
             ));
         }
         Ok(())
@@ -255,7 +249,7 @@ impl ElectromagneticFrequencyPlan {
             || self.identity != self.derive_identity()?
         {
             return Err(FeaRunError::InvalidFrequencyPlan(
-                "electromagnetic frequency plan is not canonical".into(),
+                "frequency response plan is not canonical".into(),
             ));
         }
         Ok(())
@@ -265,7 +259,7 @@ impl ElectromagneticFrequencyPlan {
         self.validate()?;
         encode_contract(
             FREQUENCY_PLAN_PREFIX,
-            "electromagnetic-frequency-plan-artifact",
+            "frequency-response-plan-artifact",
             self,
             FREQUENCY_PLAN_LIMITS,
         )
@@ -275,66 +269,23 @@ impl ElectromagneticFrequencyPlan {
     pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, FeaRunError> {
         decode_contract(
             FREQUENCY_PLAN_PREFIX,
-            "electromagnetic-frequency-plan-artifact",
+            "frequency-response-plan-artifact",
             bytes,
             FREQUENCY_PLAN_LIMITS,
         )
         .map_err(|error| FeaRunError::InvalidFrequencyPlan(error.to_string()))
     }
 
-    fn derive_identity(&self) -> Result<ElectromagneticFrequencyPlanIdentity, FeaRunError> {
+    fn derive_identity(&self) -> Result<FrequencyResponsePlanIdentity, FeaRunError> {
         encode_contract(
             FREQUENCY_PLAN_PREFIX,
-            "electromagnetic-frequency-plan",
+            "frequency-response-plan",
             &(self.reference_frequency_hz, &self.frequencies_hz),
             FREQUENCY_PLAN_LIMITS,
         )
         .map(Digest::sha256)
-        .map(ElectromagneticFrequencyPlanIdentity)
+        .map(FrequencyResponsePlanIdentity)
         .map_err(|error| FeaRunError::InvalidFrequencyPlan(error.to_string()))
-    }
-}
-
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct ElectromagneticFrequencySummary {
-    pub peak_flux_density: Vec<f64>,
-    pub solve_quality: Vec<f64>,
-    pub resonance_peak_frequency_hz: Option<f64>,
-    pub resonance_peak_flux_density: Option<f64>,
-    pub resonance_bandwidth_hz: Option<f64>,
-    pub resonance_quality_factor: Option<f64>,
-    pub resonance_flux_gain: Option<f64>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct FeaElectromagneticFrequencyResponse {
-    pub(super) plan: ElectromagneticFrequencyPlan,
-    pub(super) runs: Vec<FeaElectromagneticRunResult>,
-    pub(super) summary: ElectromagneticFrequencySummary,
-}
-
-impl FeaElectromagneticFrequencyResponse {
-    pub const fn plan(&self) -> &ElectromagneticFrequencyPlan {
-        &self.plan
-    }
-
-    pub fn runs(&self) -> &[FeaElectromagneticRunResult] {
-        &self.runs
-    }
-
-    pub const fn summary(&self) -> &ElectromagneticFrequencySummary {
-        &self.summary
-    }
-
-    pub fn primary(&self) -> &FeaElectromagneticRunResult {
-        &self.runs[self.plan.reference_index()]
-    }
-
-    pub fn into_primary(self) -> FeaElectromagneticRunResult {
-        self.runs
-            .into_iter()
-            .nth(self.plan.reference_index())
-            .expect("validated frequency response contains its reference run")
     }
 }
 
@@ -348,8 +299,7 @@ mod tests {
 
     #[test]
     fn frequency_plan_is_canonical_and_rejects_identity_substitution() {
-        let plan =
-            ElectromagneticFrequencyPlan::new(60.0, &[80.0, 40.0, 80.0], &[60.0, 40.0]).unwrap();
+        let plan = FrequencyResponsePlan::new(60.0, &[80.0, 40.0, 80.0], &[60.0, 40.0]).unwrap();
         assert_eq!(plan.frequencies_hz(), &[40.0, 60.0, 80.0]);
         assert_eq!(plan.reference_index(), 1);
         let entries = plan.entries().unwrap();
@@ -357,7 +307,7 @@ mod tests {
             entries
                 .iter()
                 .copied()
-                .map(ElectromagneticFrequencyPlanEntry::frequency_hz)
+                .map(FrequencyResponsePlanEntry::frequency_hz)
                 .collect::<Vec<_>>(),
             plan.frequencies_hz()
         );
@@ -369,26 +319,25 @@ mod tests {
             .windows(2)
             .all(|pair| pair[0].identity() != pair[1].identity()));
         assert_eq!(
-            ElectromagneticFrequencyPlan::from_canonical_bytes(&plan.canonical_bytes().unwrap())
-                .unwrap(),
+            FrequencyResponsePlan::from_canonical_bytes(&plan.canonical_bytes().unwrap()).unwrap(),
             plan
         );
 
         let mut substituted = plan.clone();
-        substituted.identity = ElectromagneticFrequencyPlanIdentity(Digest::sha256(b"other"));
-        assert!(serde_json::from_value::<ElectromagneticFrequencyPlan>(
+        substituted.identity = FrequencyResponsePlanIdentity(Digest::sha256(b"other"));
+        assert!(serde_json::from_value::<FrequencyResponsePlan>(
             serde_json::to_value(substituted).unwrap()
         )
         .unwrap_err()
         .to_string()
         .contains("not canonical"));
-        assert!(ElectromagneticFrequencyPlan::new(60.0, &[f64::NAN], &[]).is_err());
-        assert!(ElectromagneticFrequencyPlan::new(-0.0, &[], &[]).is_err());
+        assert!(FrequencyResponsePlan::new(60.0, &[f64::NAN], &[]).is_err());
+        assert!(FrequencyResponsePlan::new(-0.0, &[], &[]).is_err());
 
         let mut substituted_entry = entries[0];
         substituted_entry.plan_identity =
-            ElectromagneticFrequencyPlanIdentity(Digest::sha256(b"another-plan"));
-        assert!(serde_json::from_value::<ElectromagneticFrequencyPlanEntry>(
+            FrequencyResponsePlanIdentity(Digest::sha256(b"another-plan"));
+        assert!(serde_json::from_value::<FrequencyResponsePlanEntry>(
             serde_json::to_value(substituted_entry).unwrap()
         )
         .is_err());
