@@ -626,4 +626,14 @@ fn preserves_complex_frequency_domain_current_density() {
         RealizedExcitationKind::CurrentDensity(value)
             if value.real == [1.0, 2.0, 3.0] && value.imaginary == [4.0, 5.0, 6.0]
     ));
+    assert!(matches!(
+        realized
+            .component(super::ComplexComponent::Imaginary)
+            .iter()
+            .next()
+            .expect("one imaginary current")
+            .kind,
+        RealizedExcitationKind::CurrentDensity(value)
+            if value.real == [4.0, 5.0, 6.0] && value.imaginary == [0.0; 3]
+    ));
 }

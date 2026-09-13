@@ -18,6 +18,13 @@ impl ComplexScalar {
             imaginary: 0.0,
         }
     }
+
+    fn component(self, component: ComplexComponent) -> Self {
+        Self::real(match component {
+            ComplexComponent::Real => self.real,
+            ComplexComponent::Imaginary => self.imaginary,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -33,6 +40,19 @@ impl ComplexVector3 {
             imaginary: [0.0; 3],
         }
     }
+
+    fn component(self, component: ComplexComponent) -> Self {
+        Self::real(match component {
+            ComplexComponent::Real => self.real,
+            ComplexComponent::Imaginary => self.imaginary,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ComplexComponent {
+    Real,
+    Imaginary,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -131,5 +151,46 @@ impl RealizedExcitations {
                 .cloned()
                 .collect(),
         )
+    }
+
+    pub(crate) fn component(&self, component: ComplexComponent) -> Self {
+        Self::new(
+            self.entries
+                .iter()
+                .cloned()
+                .map(|mut entry| {
+                    entry.kind = entry.kind.component(component);
+                    entry
+                })
+                .collect(),
+        )
+    }
+}
+
+impl RealizedExcitationKind {
+    fn component(self, component: ComplexComponent) -> Self {
+        match self {
+            Self::Force(value) => Self::Force(value.component(component)),
+            Self::Moment(value) => Self::Moment(value.component(component)),
+            Self::Traction(value) => Self::Traction(value.component(component)),
+            Self::Pressure(value) => Self::Pressure(value.component(component)),
+            Self::BodyForce(value) => Self::BodyForce(value.component(component)),
+            Self::HeatGeneration(value) => Self::HeatGeneration(value.component(component)),
+            Self::HeatFlux(value) => Self::HeatFlux(value.component(component)),
+            Self::TemperatureField(value) => Self::TemperatureField(value.component(component)),
+            Self::AmbientTemperature(value) => Self::AmbientTemperature(value.component(component)),
+            Self::TerminalVoltage(value) => Self::TerminalVoltage(value.component(component)),
+            Self::ElectricCurrent(value) => Self::ElectricCurrent(value.component(component)),
+            Self::ElectricCharge(value) => Self::ElectricCharge(value.component(component)),
+            Self::CurrentDensity(value) => Self::CurrentDensity(value.component(component)),
+            Self::MagneticVectorPotential(value) => {
+                Self::MagneticVectorPotential(value.component(component))
+            }
+            Self::AcousticPressure(value) => Self::AcousticPressure(value.component(component)),
+            Self::NormalVelocity(value) => Self::NormalVelocity(value.component(component)),
+            Self::InletVelocity(value) => Self::InletVelocity(value.component(component)),
+            Self::MassFlow(value) => Self::MassFlow(value.component(component)),
+            Self::WallMotion(value) => Self::WallMotion(value.component(component)),
+        }
     }
 }

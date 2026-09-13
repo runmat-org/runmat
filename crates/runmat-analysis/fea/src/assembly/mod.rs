@@ -1,3 +1,4 @@
+pub mod complex_structural;
 mod constraint_projection;
 mod direct_constraints;
 pub mod dofs;
