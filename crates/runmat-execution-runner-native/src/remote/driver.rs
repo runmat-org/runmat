@@ -16,6 +16,9 @@ use runmat_execution_transport_native::control::{
 };
 use runmat_execution_transport_native::identity::EndpointIdentityMaterial;
 
+use super::checkpoint::{
+    execution_start_phase, RemoteDriverCheckpoint, RemoteDriverCheckpointPhase,
+};
 use super::config::RemoteDriverConfig;
 use super::crypto::{ciphertext_digest, open_object, project_revision_identity, seal_object};
 use crate::{NativeExecutionError, NativeExecutionResult};
@@ -145,6 +148,31 @@ pub(super) async fn run_remote_driver(
     }
     let input_locations = inputs.objects.clone();
     let request = ProgramExecutionRequest::from_parts(descriptor, inputs).map_err(protocol)?;
+    let mut checkpoint_sequence = match bootstrap.checkpoint.as_ref() {
+        Some(download) => {
+            if download.kind != "checkpoint" {
+                return Err(protocol(
+                    "driver bootstrap checkpoint has the wrong artifact kind",
+                ));
+            }
+            let plaintext = open_download(
+                control.as_ref(),
+                &run_key,
+                download,
+                &config.authority.run_id,
+                EncryptionPurpose::Checkpoint,
+            )
+            .await?;
+            let checkpoint = RemoteDriverCheckpoint::from_canonical_bytes(&plaintext)?;
+            checkpoint.validate_for_replacement(
+                &config.authority,
+                &bootstrap.project_revision,
+                &request,
+            )?;
+            checkpoint.sequence
+        }
+        None => 0,
+    };
     let mut input_objects = Vec::with_capacity(input_locations.len());
     for location in input_locations {
         let artifact = control
@@ -175,13 +203,20 @@ pub(super) async fn run_remote_driver(
     .then(|| crate::materialized_project::MaterializedProject::from_bundle(&bundle))
     .transpose()?;
 
-    store_checkpoint(
+    checkpoint_sequence = checkpoint_sequence
+        .checked_add(1)
+        .ok_or_else(|| protocol("remote driver checkpoint sequence overflow"))?;
+    store_driver_checkpoint(
         control.as_ref(),
         &config,
         &run_key,
-        1,
-        CheckpointDisposition::ResumeSafe,
-        b"ready",
+        &RemoteDriverCheckpoint::new(
+            checkpoint_sequence,
+            &config.authority,
+            &bootstrap.project_revision,
+            &request,
+            RemoteDriverCheckpointPhase::ReadyToExecute,
+        )?,
     )
     .await?;
     transition(
@@ -193,13 +228,20 @@ pub(super) async fn run_remote_driver(
         None,
     )
     .await?;
-    store_checkpoint(
+    checkpoint_sequence = checkpoint_sequence
+        .checked_add(1)
+        .ok_or_else(|| protocol("remote driver checkpoint sequence overflow"))?;
+    store_driver_checkpoint(
         control.as_ref(),
         &config,
         &run_key,
-        2,
-        CheckpointDisposition::Indeterminate,
-        b"execution-started",
+        &RemoteDriverCheckpoint::new(
+            checkpoint_sequence,
+            &config.authority,
+            &bootstrap.project_revision,
+            &request,
+            execution_start_phase(&request),
+        )?,
     )
     .await?;
 
@@ -491,22 +533,21 @@ async fn open_download(
     open_object(run_key, &ciphertext, run_id, purpose)
 }
 
-async fn store_checkpoint(
+async fn store_driver_checkpoint(
     control: &dyn DriverControlPlane,
     config: &RemoteDriverConfig,
     run_key: &runmat_execution_artifact::encryption::RunKeyMaterial,
-    sequence: u64,
-    disposition: CheckpointDisposition,
-    plaintext: &[u8],
+    checkpoint: &RemoteDriverCheckpoint,
 ) -> NativeExecutionResult<String> {
+    let plaintext = checkpoint.canonical_bytes()?;
     store_encrypted(
         control,
         config,
         run_key,
         DriverArtifactKind::Checkpoint,
         EncryptionPurpose::Checkpoint,
-        plaintext,
-        Some((sequence, disposition)),
+        &plaintext,
+        Some((checkpoint.sequence, checkpoint.phase.disposition())),
     )
     .await
 }

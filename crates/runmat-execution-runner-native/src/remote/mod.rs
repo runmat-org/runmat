@@ -1,5 +1,6 @@
 mod bundle_cache;
 mod channel;
+mod checkpoint;
 mod config;
 mod crypto;
 mod driver;

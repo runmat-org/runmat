@@ -15,12 +15,13 @@ use runmat_execution_artifact::encryption::{
 use runmat_execution_artifact::{
     ExecutableForm, ExecutionBundle, ExecutionBundleBuilder, ProgramArtifact, ProgramBuildRecipe,
     ProgramExecutionDescriptor, ProgramExecutionInputs, ProgramExecutionObject,
-    ProgramExecutionOutputs, ProgramExecutionResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+    ProgramExecutionOutputs, ProgramExecutionRequest, ProgramExecutionResponse,
+    PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
 };
 use runmat_execution_transport_native::control::{
-    DriverArtifactDownload, DriverArtifactKind, DriverAuthority, DriverBootstrap,
-    DriverControlPlane, DriverHeartbeat, DriverRunTarget, DriverRunTransition, StoreDriverArtifact,
-    StoredDriverArtifact,
+    CheckpointDisposition, DriverArtifactDownload, DriverArtifactKind, DriverAuthority,
+    DriverBootstrap, DriverControlPlane, DriverHeartbeat, DriverRunTarget, DriverRunTransition,
+    StoreDriverArtifact, StoredDriverArtifact,
 };
 use runmat_execution_transport_native::identity::EndpointIdentityMaterial;
 use runmat_execution_transport_native::{TransportError, TransportResult};
@@ -37,9 +38,15 @@ use super::driver::run_remote_driver;
 #[derive(Default)]
 struct FakeState {
     downloads: BTreeMap<String, Vec<u8>>,
-    stored: Vec<(String, DriverArtifactKind, Vec<u8>)>,
+    stored: Vec<FakeStoredArtifact>,
     transitions: Vec<(DriverRunTarget, Option<String>)>,
     usage: Vec<u64>,
+}
+
+struct FakeStoredArtifact {
+    kind: DriverArtifactKind,
+    ciphertext: Vec<u8>,
+    checkpoint: Option<(u64, CheckpointDisposition)>,
 }
 
 struct FakeControl {
@@ -101,11 +108,11 @@ impl DriverControlPlane for FakeControl {
         }
         let mut state = self.state.lock().unwrap();
         let artifact_id = format!("stored-{}", state.stored.len() + 1);
-        state.stored.push((
-            artifact_id.clone(),
-            artifact.kind,
-            artifact.ciphertext.to_vec(),
-        ));
+        state.stored.push(FakeStoredArtifact {
+            kind: artifact.kind,
+            ciphertext: artifact.ciphertext.to_vec(),
+            checkpoint: artifact.checkpoint,
+        });
         Ok(StoredDriverArtifact {
             artifact_id,
             kind: format!("{:?}", artifact.kind).to_ascii_lowercase(),
@@ -161,6 +168,43 @@ async fn remote_driver_executes_exact_encrypted_program_and_commits_once() {
         .build()
         .unwrap();
     let response = run_encrypted_remote_request(run_id, bundle).await;
+    assert!(matches!(response, ProgramExecutionResponse::Success { .. }));
+}
+
+#[tokio::test]
+async fn replacement_driver_consumes_an_exact_resume_safe_checkpoint() {
+    let run_id = "run-remote-replacement";
+    let (_project_root, project, revision) =
+        project_fixture("function y = remote_answer(); y = 42; end\n");
+    let mut registry = runmat_vm::FunctionRegistry::default();
+    registry.insert_replacing_name(runmat_vm::FunctionBytecode {
+        display_name: "remote_answer".into(),
+        instructions: vec![
+            runmat_vm::Instr::LoadConst(42.0),
+            runmat_vm::Instr::StoreVar(0),
+            runmat_vm::Instr::Return,
+        ],
+        var_count: 1,
+        output_slots: vec![0],
+        ..Default::default()
+    });
+    let recipe = recipe(revision.clone());
+    let artifact = ProgramArtifact::materialize(
+        &recipe,
+        ExecutableForm::InterpreterBytecodeV1,
+        serde_json::to_vec(&registry).unwrap(),
+    )
+    .unwrap();
+    let bundle = ExecutionBundleBuilder::native(&project, revision)
+        .unwrap()
+        .with_materialized_program(
+            recipe.clone(),
+            ExecutableForm::InterpreterBytecodeV1,
+            artifact.executable_bytes.clone(),
+        )
+        .build()
+        .unwrap();
+    let response = run_encrypted_remote_request_from_safe_checkpoint(run_id, bundle).await;
     assert!(matches!(response, ProgramExecutionResponse::Success { .. }));
 }
 
@@ -234,7 +278,7 @@ async fn remote_driver_commits_verified_externalized_results() {
     );
     let object_plaintext = open_object(
         &run_key,
-        &state.stored[0].2,
+        &state.stored[0].ciphertext,
         run_id,
         EncryptionPurpose::Result,
     )
@@ -242,7 +286,7 @@ async fn remote_driver_commits_verified_externalized_results() {
     assert_eq!(object_plaintext, b"canonical analysis result object");
     let plaintext = open_object(
         &run_key,
-        &state.stored[1].2,
+        &state.stored[1].ciphertext,
         run_id,
         EncryptionPurpose::Result,
     )
@@ -533,25 +577,43 @@ async fn run_encrypted_remote_request(
     run_id: &str,
     bundle: ExecutionBundle,
 ) -> ProgramExecutionResponse {
+    run_encrypted_remote_request_with_prior_sequence(run_id, bundle, None).await
+}
+
+async fn run_encrypted_remote_request_from_safe_checkpoint(
+    run_id: &str,
+    bundle: ExecutionBundle,
+) -> ProgramExecutionResponse {
+    run_encrypted_remote_request_with_prior_sequence(run_id, bundle, Some(7)).await
+}
+
+async fn run_encrypted_remote_request_with_prior_sequence(
+    run_id: &str,
+    bundle: ExecutionBundle,
+    prior_checkpoint_sequence: Option<u64>,
+) -> ProgramExecutionResponse {
     let revision = bundle.manifest.program_revision.clone();
     let recipe = bundle.manifest.recipes.first().cloned().unwrap();
     let artifact = bundle.manifest.artifacts.first().cloned().unwrap();
     let mut bundle_bytes = Vec::new();
     write_bundle(&bundle, &mut bundle_bytes, ArchiveLimits::default()).unwrap();
-    let descriptor = serde_json::to_vec(&ProgramExecutionDescriptor {
+    let descriptor_contract = ProgramExecutionDescriptor {
         schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
         recipe,
         artifact,
         function: 0,
         requested_outputs: 1,
-    })
-    .unwrap();
-    let inputs = serde_json::to_vec(&ProgramExecutionInputs {
+    };
+    let inputs_contract = ProgramExecutionInputs {
         schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
         arguments: Vec::new(),
         objects: Vec::new(),
-    })
-    .unwrap();
+    };
+    let request =
+        ProgramExecutionRequest::from_parts(descriptor_contract.clone(), inputs_contract.clone())
+            .unwrap();
+    let descriptor = serde_json::to_vec(&descriptor_contract).unwrap();
+    let inputs = serde_json::to_vec(&inputs_contract).unwrap();
 
     let run_key = RunKeyMaterial::from_entropy([9; 32]).unwrap();
     let recipient_entropy = [7; 32];
@@ -582,13 +644,54 @@ async fn run_encrypted_remote_request(
         .enumerate()
         .map(|(index, (kind, bytes))| download(index, kind, bytes))
         .collect::<Vec<_>>();
+    let project_revision = project_revision_identity(&revision);
+    let driver_fence = if prior_checkpoint_sequence.is_some() {
+        2
+    } else {
+        1
+    };
+    let authority = DriverAuthority {
+        server_url: "https://control.invalid".into(),
+        run_id: run_id.into(),
+        org_id: "org-1".into(),
+        project_id: "project-1".into(),
+        allocation_lease_id: "allocation-1".into(),
+        driver_lease_id: format!("driver-{driver_fence}"),
+        fencing_token: driver_fence,
+        credential: "driver-secret".into(),
+    };
+    let prior_checkpoint = prior_checkpoint_sequence.map(|sequence| {
+        let prior_authority = DriverAuthority {
+            driver_lease_id: "driver-1".into(),
+            fencing_token: 1,
+            ..authority.clone()
+        };
+        let checkpoint = super::checkpoint::RemoteDriverCheckpoint::new(
+            sequence,
+            &prior_authority,
+            &project_revision,
+            &request,
+            super::checkpoint::RemoteDriverCheckpointPhase::ReadyToExecute,
+        )
+        .unwrap();
+        let ciphertext = seal_object(
+            &run_key,
+            run_id,
+            EncryptionPurpose::Checkpoint,
+            &checkpoint.canonical_bytes().unwrap(),
+        )
+        .unwrap();
+        (download(99, "checkpoint", &ciphertext), ciphertext)
+    });
     let control = Arc::new(FakeControl {
         bootstrap: DriverBootstrap {
-            project_revision: project_revision_identity(&revision),
+            project_revision,
             endpoint_fingerprint: recipient.fingerprint.clone(),
             run_key_envelope: encode_run_key_envelope(&envelope).unwrap(),
             artifacts: downloads.clone(),
-            checkpoint: None,
+            checkpoint: prior_checkpoint
+                .as_ref()
+                .map(|(download, _)| download.clone()),
             cancellation_requested: false,
             driver_resources: resource_request(),
             desired_worker_count: 0,
@@ -599,21 +702,17 @@ async fn run_encrypted_remote_request(
                 .iter()
                 .zip(encrypted)
                 .map(|(download, (_, bytes))| (download.artifact_id.clone(), bytes))
+                .chain(
+                    prior_checkpoint
+                        .iter()
+                        .map(|(download, bytes)| (download.artifact_id.clone(), bytes.clone())),
+                )
                 .collect(),
             ..Default::default()
         }),
     });
     let config = RemoteDriverConfig {
-        authority: DriverAuthority {
-            server_url: "https://control.invalid".into(),
-            run_id: run_id.into(),
-            org_id: "org-1".into(),
-            project_id: "project-1".into(),
-            allocation_lease_id: "allocation-1".into(),
-            driver_lease_id: "driver-1".into(),
-            fencing_token: 1,
-            credential: "driver-secret".into(),
-        },
+        authority,
         endpoint_identity_file: identity_path,
     };
 
@@ -630,12 +729,49 @@ async fn run_encrypted_remote_request(
     assert_eq!(state.usage.len(), 1);
     assert_eq!(state.usage[0], 1);
     assert_eq!(state.stored.len(), 3);
-    assert_eq!(state.stored[0].1, DriverArtifactKind::Checkpoint);
-    assert_eq!(state.stored[1].1, DriverArtifactKind::Checkpoint);
-    assert_eq!(state.stored[2].1, DriverArtifactKind::Result);
+    assert_eq!(state.stored[0].kind, DriverArtifactKind::Checkpoint);
+    assert_eq!(state.stored[1].kind, DriverArtifactKind::Checkpoint);
+    assert_eq!(state.stored[2].kind, DriverArtifactKind::Result);
+    let first_sequence = prior_checkpoint_sequence.map_or(1, |sequence| sequence + 1);
+    assert_eq!(
+        state.stored[0].checkpoint,
+        Some((first_sequence, CheckpointDisposition::ResumeSafe))
+    );
+    assert_eq!(
+        state.stored[1].checkpoint,
+        Some((first_sequence + 1, CheckpointDisposition::Indeterminate))
+    );
+    let ready_checkpoint = super::checkpoint::RemoteDriverCheckpoint::from_canonical_bytes(
+        &open_object(
+            &run_key,
+            &state.stored[0].ciphertext,
+            run_id,
+            EncryptionPurpose::Checkpoint,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        ready_checkpoint.phase,
+        super::checkpoint::RemoteDriverCheckpointPhase::ReadyToExecute
+    );
+    let started_checkpoint = super::checkpoint::RemoteDriverCheckpoint::from_canonical_bytes(
+        &open_object(
+            &run_key,
+            &state.stored[1].ciphertext,
+            run_id,
+            EncryptionPurpose::Checkpoint,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        started_checkpoint.phase,
+        super::checkpoint::RemoteDriverCheckpointPhase::EffectsMayHaveStarted
+    );
     let result = open_object(
         &run_key,
-        &state.stored[2].2,
+        &state.stored[2].ciphertext,
         run_id,
         EncryptionPurpose::Result,
     )
