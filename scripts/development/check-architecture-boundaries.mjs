@@ -5,6 +5,8 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
+import { parseHandwrittenComposition } from "./builtin-migration/module-composition/handwritten-parser.mjs";
+
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 let failed = false;
 
@@ -356,6 +358,10 @@ if (fs.existsSync(path.join(repo, "crates/runmat-builtins/src/catalog/definition
 
 const catalogEntriesRootPath = "crates/runmat-builtins/src/catalog/entries/mod.rs";
 const catalogEntriesRoot = read(catalogEntriesRootPath);
+const catalogEntriesComposition = parseHandwrittenComposition(
+  catalogEntriesRoot,
+  catalogEntriesRootPath,
+);
 const catalogEntriesRootLines = catalogEntriesRoot.split("\n").length;
 if (catalogEntriesRootLines > 80) {
   fail(`${catalogEntriesRootPath} must remain a domain-only composition root (found ${catalogEntriesRootLines} lines; maximum 80)`);
@@ -363,13 +369,15 @@ if (catalogEntriesRootLines > 80) {
 if (/::(?:ENTRIES|ENTRY_GROUPS)\b/.test(catalogEntriesRoot)) {
   fail(`${catalogEntriesRootPath} must register domains, not family or identity entry slices`);
 }
-const declaredCatalogDomains = [...catalogEntriesRoot.matchAll(/^(?:pub\(in\s+crate::catalog\)\s+)?mod\s+([a-z][a-z0-9_]*)\s*;/gm)]
-  .map((match) => match[1])
+const catalogSupportModules = new Set(catalogEntriesComposition.reexports
+  .filter((entry) => entry.visibility === "private" && entry.reexport.kind === "named")
+  .map((entry) => entry.module));
+const declaredCatalogDomains = catalogEntriesComposition.declarations
+  .map((entry) => entry.module)
+  .filter((module) => !catalogSupportModules.has(module))
   .sort();
-const registeredCatalogDomains = [...catalogEntriesRoot.matchAll(/^\s+([a-z][a-z0-9_]*)::extend_entries\(entries\);$/gm)]
-  .map((match) => match[1]);
-const registeredConstantDomains = [...catalogEntriesRoot.matchAll(/^\s+([a-z][a-z0-9_]*)::extend_constants\(values\);$/gm)]
-  .map((match) => match[1]);
+const registeredCatalogDomains = aggregationModules(catalogEntriesComposition, "entries");
+const registeredConstantDomains = aggregationModules(catalogEntriesComposition, "constants");
 const duplicateCatalogDomains = [...new Set([
   ...registeredCatalogDomains.filter((domain, index, domains) => domains.indexOf(domain) !== index),
   ...registeredConstantDomains.filter((domain, index, domains) => domains.indexOf(domain) !== index),
@@ -381,6 +389,12 @@ if (duplicateCatalogDomains.length > 0 || declaredCatalogDomains.join("\n") !== 
     `declared=${declaredCatalogDomains.join(",")}, composed=${composedCatalogDomains.join(",")}, ` +
     `duplicates=${duplicateCatalogDomains.join(",")}`
   );
+}
+
+function aggregationModules(composition, role) {
+  return composition.aggregations
+    .filter((aggregation) => aggregation.role === role)
+    .flatMap((aggregation) => aggregation.children.map((child) => child.module));
 }
 
 const inferenceRootPath = "crates/runmat-builtins/src/catalog/inference.rs";

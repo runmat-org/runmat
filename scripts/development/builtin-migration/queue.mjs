@@ -214,16 +214,18 @@ export function validateQueueState(value, control, loadSeal, loadPredecessor = (
   digest(value.digest, "queue state digest");
   const { digest: _ignored, ...payload } = value;
   if (evidenceDigest(payload) !== value.digest) throw new Error("queue state digest mismatch");
-  const parsed = deepImmutable({
+  const immutable = deepImmutable({
     value,
     controlDigest: control.digest,
     stateDigest: value.digest,
     predecessor,
-    predecessorState,
     sealedBundleIds: [...sealedBundleIds].sort(compareCodePoint),
     acceptedSeals,
     sealedBundles,
   });
+  // A validated predecessor is an authority capability, not caller data. Keep
+  // its exact branded object while deeply copying the serialized state around it.
+  const parsed = Object.freeze({ ...immutable, predecessorState });
   VALIDATED_QUEUE_STATES.add(parsed);
   return parsed;
 }
