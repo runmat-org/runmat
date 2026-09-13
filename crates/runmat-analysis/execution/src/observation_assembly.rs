@@ -173,7 +173,7 @@ pub fn import_structural_observation_assembly(
         || manifest.producer != prepared.source_request.producer
         || manifest.field_recovery_request != prepared.source_request.field_recovery_request
         || manifest.source_fields != prepared.source_request.source_fields
-        || manifest.source_result != prepared.source_request.source_result
+        || manifest.source != prepared.source_request.source
         || manifest.topology_digest != prepared.source_request.plan.topology_digest
         || manifest.plan_identity != prepared.source_request.plan.identity
     {

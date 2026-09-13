@@ -67,3 +67,59 @@ pub fn recover_constraint_group_observable_fields(
     })
     .collect()
 }
+
+/// Recovers exact authored-constraint reaction phasors without collapsing row ownership.
+pub fn recover_complex_constraint_group_observable_fields(
+    real: &CanonicalStructuralConstraintResult,
+    imaginary: &CanonicalStructuralConstraintResult,
+    frequency_hz: f64,
+) -> Result<Vec<RecoveredField>, RecoveredFieldError> {
+    real.validate()
+        .map_err(|error| RecoveredFieldError::InvalidArtifact(error.to_string()))?;
+    imaginary
+        .validate()
+        .map_err(|error| RecoveredFieldError::InvalidArtifact(error.to_string()))?;
+    if real.constraint_plan_digest != imaginary.constraint_plan_digest
+        || real.topology != imaginary.topology
+        || real.groups.len() != imaginary.groups.len()
+        || real
+            .groups
+            .iter()
+            .zip(&imaginary.groups)
+            .any(|(left, right)| {
+                left.constraint_id != right.constraint_id
+                    || left.active_row_count != right.active_row_count
+                    || left.redundant_row_count != right.redundant_row_count
+                    || left
+                        .row_reactions
+                        .iter()
+                        .map(|row| row.row_identity)
+                        .ne(right.row_reactions.iter().map(|row| row.row_identity))
+            })
+    {
+        return Err(RecoveredFieldError::InvalidArtifact(
+            "complex constraint reaction components have different canonical ownership".into(),
+        ));
+    }
+    let real_fields = recover_constraint_group_observable_fields(real)?;
+    let imaginary_fields = recover_constraint_group_observable_fields(imaginary)?;
+    real_fields
+        .iter()
+        .zip(&imaginary_fields)
+        .map(|(real, imaginary)| {
+            RecoveredField::new(
+                RecoveredFieldDefinition::new(
+                    real.definition().field_id(),
+                    real.definition().quantity(),
+                    real.definition().location(),
+                    real.definition().entity_domain(),
+                    real.definition().value_shape().clone(),
+                    RecoveredFieldNumericRepresentation::ComplexInterleaved,
+                )?,
+                RecoveredFieldSample::FrequencyHertz(frequency_hz),
+                super::complex_fields::interleave(real.storage(), imaginary.storage())
+                    .map_err(|error| RecoveredFieldError::InvalidArtifact(error.to_string()))?,
+            )
+        })
+        .collect()
+}

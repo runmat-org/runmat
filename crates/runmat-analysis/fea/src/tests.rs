@@ -1579,14 +1579,16 @@ fn structural_frequency_entries_execute_independently_and_assemble_in_plan_order
 
     use crate::{
         execution::{
-            StructuralFrequencyEntryRequest, StructuralFrequencyResultAssemblyRequest,
-            StructuralFrequencySolverPlan, StructuralFrequencyWorkload,
-            StructuralFrequencyWorkloadInput,
+            FieldRecoveryRequest, FieldRecoverySource, StructuralFrequencyEntryRequest,
+            StructuralFrequencyResultAssemblyRequest, StructuralFrequencySolverPlan,
+            StructuralFrequencyWorkload, StructuralFrequencyWorkloadInput,
         },
         frequency::FrequencyResponsePlan,
         pipeline::structural_frequency::{
             execute_structural_frequency_entry, prepare_structural_frequency,
+            recover_structural_frequency_entry_fields,
         },
+        results::field::{RecoveredFieldSample, StructuralRecoveredFieldTopology},
         solve::dynamics::DirectHarmonicPolicy,
     };
 
@@ -1658,6 +1660,34 @@ fn structural_frequency_entries_execute_independently_and_assemble_in_plan_order
         vec![20.0, 40.0]
     );
     assert_eq!(assembled.receipt.samples().len(), 2);
+    let topology = StructuralRecoveredFieldTopology::derive(workload.model(), Some(&mesh)).unwrap();
+    let fields = results
+        .iter()
+        .map(|entry| {
+            let recovery_request = FieldRecoveryRequest::new(
+                prepared.step,
+                FieldRecoverySource::StructuralFrequencyEntry(entry.identity()),
+                topology.identity,
+            )
+            .unwrap();
+            recover_structural_frequency_entry_fields(&workload, &mesh, &recovery_request, entry)
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+    assert!(fields
+        .iter()
+        .any(|artifact| artifact.fields().iter().any(|field| {
+            field.sample() == RecoveredFieldSample::FrequencyHertz(20.0)
+                && field.definition().quantity()
+                    == runmat_analysis_core::ObservationQuantity::ReactionForce
+        })));
+    assert!(fields
+        .iter()
+        .any(|artifact| artifact.fields().iter().any(|field| {
+            field.sample() == RecoveredFieldSample::FrequencyHertz(40.0)
+                && field.definition().quantity()
+                    == runmat_analysis_core::ObservationQuantity::Stress
+        })));
 }
 
 fn multi_region_tetrahedron_solver_mesh() -> SolverMeshArtifact {

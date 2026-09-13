@@ -139,7 +139,7 @@ pub(crate) fn admit_structural_observation(
     let fields = &preparation.source_fields.manifest;
     if fields.identity.digest() != preparation.source_fields.output.logical_identity
         || fields.recovery_request != preparation.source_request.identity()
-        || fields.source_result != preparation.source_request.source_result
+        || fields.source != preparation.source_request.source
     {
         return Err(AnalysisBridgeError::Identity(
             "recovered-field artifact differs from its source request",

@@ -1670,7 +1670,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
     );
     let recovered_artifact = runmat_analysis_fea::results::field::RecoveredFieldArtifact::new(
         field_prepared.request.identity(),
-        field_prepared.request.source_result,
+        field_prepared.request.source,
         field_prepared.request.topology.discretization_digest(),
         runmat_analysis_fea::results::field::RecoveredFieldEntityCounts {
             structural_nodes: projection.nodes.len(),
@@ -1930,7 +1930,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
                 producer: distributed_source_request.producer,
                 field_recovery_request: distributed_source_request.field_recovery_request,
                 source_fields: distributed_source_request.source_fields,
-                source_result: distributed_source_request.source_result,
+                source: distributed_source_request.source,
                 topology_digest: distributed_source_request.plan.topology_digest,
                 plan_identity: distributed_source_request.plan.identity,
                 results: canonical_distributed_results,

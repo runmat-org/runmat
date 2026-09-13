@@ -71,7 +71,8 @@ impl AccuracyEvaluationRequest {
                 observations
                     .validate()
                     .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
-                if observations.producer != producer || observations.source_result != source_result
+                if observations.producer != producer
+                    || observations.source.solver_result() != Some(source_result)
                 {
                     return Err(AnalysisExecutionError::Identity(
                         "accuracy observations differ from their solver source",

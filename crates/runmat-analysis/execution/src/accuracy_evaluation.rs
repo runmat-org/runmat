@@ -96,7 +96,7 @@ pub fn prepare_structural_accuracy(
                 .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
             if observations.manifest.identity.digest() != observations.output.logical_identity
                 || observations.manifest.producer != producer
-                || observations.manifest.source_result != source_result
+                || observations.manifest.source.solver_result() != Some(source_result)
             {
                 return Err(AnalysisBridgeError::Identity(
                     "accuracy observations differ from their producing solve",

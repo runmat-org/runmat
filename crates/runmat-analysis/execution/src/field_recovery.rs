@@ -1,8 +1,8 @@
 use std::collections::BTreeSet;
 
 use runmat_analysis_fea::execution::{
-    AnalysisNumericalObjectKind, AnalysisWorkKind, FieldRecoveryRequest, SolverResultIdentity,
-    StructuralLinearWorkload, StructuralLinearWorkloadResult,
+    AnalysisNumericalObjectKind, AnalysisWorkKind, FieldRecoveryRequest, FieldRecoverySource,
+    SolverResultIdentity, StructuralLinearWorkload, StructuralLinearWorkloadResult,
 };
 use runmat_analysis_fea::results::field::{
     reconstruct_recovered_field, RecoveredFieldArtifact, RecoveredFieldArtifactManifest,
@@ -146,7 +146,7 @@ pub fn prepare_structural_field_recovery(
         })?;
     let request = FieldRecoveryRequest::new(
         preparation.source_host.workload.step,
-        source_result,
+        FieldRecoverySource::SolverResult(source_result),
         topology.identity,
     )?;
     let request_bytes = request.canonical_bytes()?;
@@ -209,8 +209,26 @@ pub fn import_structural_recovered_fields(
     prepared: &PreparedStructuralFieldRecovery,
     limits: ObjectInventoryLimits,
 ) -> AnalysisBridgeResult<ImportedRecoveredFields> {
-    response.validate_against(&prepared.program.request)?;
-    let output_set = import_analysis_output_set(source, response, &prepared.host)?;
+    import_recovered_fields(
+        source,
+        response,
+        &prepared.request,
+        &prepared.host,
+        &prepared.program,
+        limits,
+    )
+}
+
+pub(crate) fn import_recovered_fields(
+    source: &impl CacheImport,
+    response: ProgramExecutionResponse,
+    request: &FieldRecoveryRequest,
+    host: &AnalysisHostWorkload,
+    program: &PreparedAnalysisProgram,
+    limits: ObjectInventoryLimits,
+) -> AnalysisBridgeResult<ImportedRecoveredFields> {
+    response.validate_against(&program.request)?;
+    let output_set = import_analysis_output_set(source, response, host)?;
     let [output] = output_set.manifest.outputs.as_slice() else {
         return Err(AnalysisBridgeError::Invalid(
             "field recovery must return exactly one field artifact root".into(),
@@ -224,14 +242,14 @@ pub fn import_structural_recovered_fields(
             expected_logical_identity: output.logical_identity,
             expected_payload_digest: output.payload_digest,
             partition_identity: output.logical_identity,
-            access: &prepared.host.artifact_access,
+            access: &host.artifact_access,
             limits,
         },
     )?;
     let mut expected = analysis_object_references(
         &imported.manifest,
         &output.root,
-        &prepared.host.artifact_access,
+        &host.artifact_access,
         ValueRefKind::ResultObject,
     )?;
     expected.push(output_set.root);
@@ -243,9 +261,9 @@ pub fn import_structural_recovered_fields(
     let manifest = RecoveredFieldArtifactManifest::from_canonical_bytes(&imported.payload())
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     if manifest.identity.digest() != output.logical_identity
-        || manifest.source_result != prepared.request.source_result
-        || manifest.topology_digest != prepared.request.topology.discretization_digest()
-        || manifest.recovery_request != prepared.request.identity()
+        || manifest.source != request.source
+        || manifest.topology_digest != request.topology.discretization_digest()
+        || manifest.recovery_request != request.identity()
     {
         return Err(AnalysisBridgeError::Identity(
             "recovered fields differ from their admitted source request",

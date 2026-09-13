@@ -8,7 +8,7 @@ use runmat_execution::Digest;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::execution::{FieldRecoveryRequestIdentity, SolverResultIdentity};
+use crate::execution::{FieldRecoveryRequestIdentity, FieldRecoverySource};
 
 use super::partition_set::{
     canonical_field_partition_descriptors, RecoveredFieldPartitionDescriptor,
@@ -459,7 +459,7 @@ impl Deref for RecoveredField {
     }
 }
 
-/// Canonical, source-bound recovered fields for one solver topology and result.
+/// Canonical, source-bound recovered fields for one topology and numerical result.
 ///
 /// This artifact is the portable boundary between family-owned recovery and solver-neutral
 /// observation evaluation. Its identity excludes chunking and placement.
@@ -469,7 +469,7 @@ pub struct RecoveredFieldArtifact {
     pub schema_version: u16,
     identity: RecoveredFieldArtifactIdentity,
     pub recovery_request: FieldRecoveryRequestIdentity,
-    pub source_result: SolverResultIdentity,
+    pub source: FieldRecoverySource,
     pub topology_digest: Digest,
     pub entity_counts: RecoveredFieldEntityCounts,
     fields: Vec<RecoveredField>,
@@ -494,7 +494,7 @@ pub struct RecoveredFieldArtifactManifest {
     pub schema_version: u16,
     pub identity: RecoveredFieldArtifactIdentity,
     pub recovery_request: FieldRecoveryRequestIdentity,
-    pub source_result: SolverResultIdentity,
+    pub source: FieldRecoverySource,
     pub topology_digest: Digest,
     pub entity_counts: RecoveredFieldEntityCounts,
     pub fields: Vec<RecoveredFieldArtifactEntry>,
@@ -680,7 +680,7 @@ struct RecoveredFieldArtifactWire {
     schema_version: u16,
     identity: RecoveredFieldArtifactIdentity,
     recovery_request: FieldRecoveryRequestIdentity,
-    source_result: SolverResultIdentity,
+    source: FieldRecoverySource,
     topology_digest: Digest,
     entity_counts: RecoveredFieldEntityCounts,
     fields: Vec<RecoveredField>,
@@ -694,7 +694,7 @@ impl TryFrom<RecoveredFieldArtifactWire> for RecoveredFieldArtifact {
             schema_version: wire.schema_version,
             identity: wire.identity,
             recovery_request: wire.recovery_request,
-            source_result: wire.source_result,
+            source: wire.source,
             topology_digest: wire.topology_digest,
             entity_counts: wire.entity_counts,
             fields: wire.fields,
@@ -707,7 +707,7 @@ impl TryFrom<RecoveredFieldArtifactWire> for RecoveredFieldArtifact {
 impl RecoveredFieldArtifact {
     pub fn new(
         recovery_request: FieldRecoveryRequestIdentity,
-        source_result: SolverResultIdentity,
+        source: FieldRecoverySource,
         topology_digest: Digest,
         entity_counts: RecoveredFieldEntityCounts,
         fields: Vec<RecoveredField>,
@@ -716,7 +716,7 @@ impl RecoveredFieldArtifact {
             schema_version: 1,
             identity: RecoveredFieldArtifactIdentity(Digest::sha256([])),
             recovery_request,
-            source_result,
+            source,
             topology_digest,
             entity_counts,
             fields,
@@ -743,7 +743,7 @@ impl RecoveredFieldArtifact {
             schema_version: self.schema_version,
             identity: self.identity,
             recovery_request: self.recovery_request,
-            source_result: self.source_result,
+            source: self.source,
             topology_digest: self.topology_digest,
             entity_counts: self.entity_counts,
             fields: self
@@ -786,7 +786,7 @@ impl RecoveredFieldArtifact {
             schema_version: manifest.schema_version,
             identity: manifest.identity,
             recovery_request: manifest.recovery_request,
-            source_result: manifest.source_result,
+            source: manifest.source,
             topology_digest: manifest.topology_digest,
             entity_counts: manifest.entity_counts,
             fields,
@@ -852,7 +852,7 @@ impl RecoveredFieldArtifact {
             schema_version: self.schema_version,
             identity: self.identity,
             recovery_request: self.recovery_request,
-            source_result: self.source_result,
+            source: self.source,
             topology_digest: self.topology_digest,
             entity_counts: self.entity_counts,
             fields: self
@@ -880,7 +880,7 @@ fn derive_artifact_identity(
         &(
             manifest.schema_version,
             manifest.recovery_request,
-            manifest.source_result,
+            manifest.source,
             manifest.topology_digest,
             manifest.entity_counts,
             &manifest.fields,

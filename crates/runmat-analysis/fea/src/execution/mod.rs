@@ -36,7 +36,7 @@ mod transient_workload;
 
 pub use accuracy::AccuracyEvaluationRequest;
 pub use error::{AnalysisExecutionError, AnalysisExecutionResult};
-pub use field::FieldRecoveryRequest;
+pub use field::{FieldRecoveryRequest, FieldRecoverySource};
 pub use frequency_assembly::{
     StructuralFrequencyAssemblyEntry, StructuralFrequencyAssemblyOutput,
     StructuralFrequencyResultAssemblyRequest,

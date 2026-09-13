@@ -15,7 +15,7 @@ use runmat_analysis_fea::constraints::{
 };
 use runmat_analysis_fea::execution::{
     AccuracyEvaluationRequest, AnalysisNumericalObjectKind, AnalysisWorkKind,
-    CanonicalSemanticState, ConstraintPlanIdentity, FieldRecoveryRequest,
+    CanonicalSemanticState, ConstraintPlanIdentity, FieldRecoveryRequest, FieldRecoverySource,
     ObservationAssemblyRequest, ObservationEvaluationRequest, ObservationHistoryCheckpointRequest,
     ObservationPartitionEvaluationRequest, ObservationPartitionExecutionTarget,
     ObservationPartitionReductionRequest, ResultPublicationRequest,
@@ -609,7 +609,7 @@ fn execute_accuracy_evaluation(
             || Some(observations.identity) != request.source_observations
             || Some(observations.evaluation_request) != request.observation_request
             || observations.producer != request.producer
-            || observations.source_result != request.source_result
+            || observations.source.solver_result() != Some(request.source_result)
         {
             return Err(AnalysisBridgeError::Identity(
                 "accuracy observation artifact differs from its admitted source",
@@ -947,7 +947,7 @@ fn execute_observation_assembly(
         producer: source_request.producer,
         field_recovery_request: source_request.field_recovery_request,
         source_fields: source_request.source_fields,
-        source_result: source_request.source_result,
+        source: source_request.source,
         topology_digest: source_request.plan.topology_digest,
         plan_identity: source_request.plan.identity,
         results,
@@ -987,6 +987,11 @@ fn observation_artifact_output(
 fn execute_field_recovery(
     invocation: AnalysisKernelInvocation<'_>,
 ) -> AnalysisBridgeResult<Vec<AnalysisKernelOutput>> {
+    if invocation.inputs.iter().any(|input| {
+        input.manifest.kind == AnalysisNumericalObjectKind::StructuralFrequencyWorkload
+    }) {
+        return execute_structural_frequency_field_recovery(invocation);
+    }
     let request = unique_input(
         &invocation,
         AnalysisNumericalObjectKind::FieldRecoveryRequest,
@@ -1006,7 +1011,8 @@ fn execute_field_recovery(
     let request = FieldRecoveryRequest::from_canonical_bytes(&request.payload())?;
     if request.identity().digest() != request_manifest_identity
         || request.producer != invocation.host.workload.step
-        || request.source_result.digest() != solver_result.manifest.logical_identity
+        || request.source.solver_result().map(|result| result.digest())
+            != Some(solver_result.manifest.logical_identity)
     {
         return Err(AnalysisBridgeError::Identity(
             "field recovery inputs differ from the admitted source request",
@@ -1054,12 +1060,70 @@ fn execute_field_recovery(
     entity_counts.constraint_groups = solver_result.constraint_result.groups.len();
     let artifact = RecoveredFieldArtifact::new(
         request.identity(),
-        request.source_result,
+        request.source,
         topology.identity.discretization_digest(),
         entity_counts,
         fields,
     )
     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    recovered_field_output(&artifact)
+}
+
+fn execute_structural_frequency_field_recovery(
+    invocation: AnalysisKernelInvocation<'_>,
+) -> AnalysisBridgeResult<Vec<AnalysisKernelOutput>> {
+    let request = unique_input(
+        &invocation,
+        AnalysisNumericalObjectKind::FieldRecoveryRequest,
+    )?;
+    let workload = unique_input(
+        &invocation,
+        AnalysisNumericalObjectKind::StructuralFrequencyWorkload,
+    )?;
+    let mesh = unique_input(&invocation, AnalysisNumericalObjectKind::Mesh)?;
+    let result = unique_input(
+        &invocation,
+        AnalysisNumericalObjectKind::StructuralFrequencyEntryResult,
+    )?;
+    if invocation.inputs.len() != 4
+        || invocation.host.workload.outputs != vec![AnalysisNumericalObjectKind::Field]
+    {
+        return Err(AnalysisBridgeError::Invalid(
+            "structural frequency field recovery requires one request, workload, mesh, entry result, and field output"
+                .into(),
+        ));
+    }
+    let request_identity = request.manifest.logical_identity;
+    let request = FieldRecoveryRequest::from_canonical_bytes(&request.payload())?;
+    let workload_identity = workload.manifest.logical_identity;
+    let workload = decode_prepared_structural_frequency_workload(workload)?;
+    let mesh_identity = mesh.manifest.logical_identity;
+    let mesh = SolverMeshArtifact::canonical_decode(&mesh.payload())
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let result = decode_prepared_structural_frequency_entry_result(result)?;
+    if request.identity().digest() != request_identity
+        || request.producer != invocation.host.workload.step
+        || request.source != FieldRecoverySource::StructuralFrequencyEntry(result.identity())
+        || workload.identity().digest() != workload_identity
+        || runmat_execution::Digest::from_bytes(*mesh.canonical_digest.bytes()) != mesh_identity
+    {
+        return Err(AnalysisBridgeError::Identity(
+            "structural frequency field recovery inputs differ from their object identities",
+        ));
+    }
+    let artifact =
+        runmat_analysis_fea::pipeline::structural_frequency::recover_structural_frequency_entry_fields(
+            &workload,
+            &mesh,
+            &request,
+            &result,
+        )?;
+    recovered_field_output(&artifact)
+}
+
+fn recovered_field_output(
+    artifact: &RecoveredFieldArtifact,
+) -> AnalysisBridgeResult<Vec<AnalysisKernelOutput>> {
     let manifest = artifact
         .manifest()
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
@@ -1641,9 +1705,12 @@ mod tests {
             .source_result,
             field_source_result
         );
-        let field_recovery_request =
-            FieldRecoveryRequest::new(step, field_source_result, executed_constraint_plan.topology)
-                .unwrap();
+        let field_recovery_request = FieldRecoveryRequest::new(
+            step,
+            FieldRecoverySource::SolverResult(field_source_result),
+            executed_constraint_plan.topology,
+        )
+        .unwrap();
         let field_recovery_request = runmat_analysis_execution::prepare_analysis_objects(
             AnalysisNumericalObjectKind::FieldRecoveryRequest,
             field_recovery_request.identity().digest(),
@@ -1700,7 +1767,10 @@ mod tests {
             .unwrap();
         let recovered_fields = prepare_kernel_output(&field_outputs[0]);
         let recovered = decode_recovered_field_artifact(&recovered_fields).unwrap();
-        assert_eq!(recovered.source_result, field_source_result);
+        assert_eq!(
+            recovered.source,
+            FieldRecoverySource::SolverResult(field_source_result)
+        );
         assert!(recovered.fields().iter().any(|field| {
             field.storage().field_id == runmat_analysis_fea::FEA_FIELD_STRUCTURAL_DISPLACEMENT
         }));
@@ -2399,7 +2469,7 @@ mod tests {
         .unwrap();
         let recovery_request = FieldRecoveryRequest::new(
             prepared.host.workload.step,
-            source_result,
+            FieldRecoverySource::SolverResult(source_result),
             result.constraint_result.topology,
         )
         .unwrap();

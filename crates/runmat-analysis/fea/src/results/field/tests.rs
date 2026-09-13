@@ -40,7 +40,7 @@ fn recovery_request() -> crate::execution::FieldRecoveryRequestIdentity {
     let step = crate::execution::StepIdentity::new(sequence, Digest::sha256("step")).unwrap();
     crate::execution::FieldRecoveryRequest::new(
         step,
-        source_result(),
+        crate::execution::FieldRecoverySource::SolverResult(source_result()),
         crate::constraints::CanonicalStructuralTopologyIdentity::Explicit {
             structural_topology_digest: Digest::sha256("topology"),
         },
@@ -132,7 +132,7 @@ fn recovered_field_artifact_binds_source_topology_and_content() {
     .unwrap();
     let artifact = RecoveredFieldArtifact::new(
         recovery_request(),
-        source_result(),
+        crate::execution::FieldRecoverySource::SolverResult(source_result()),
         projection.projection_digest,
         RecoveredFieldEntityCounts {
             structural_nodes: projection.nodes.len(),
@@ -171,7 +171,7 @@ fn field_manifest_resolves_semantics_without_values_and_reconstructs_exact_conte
     .unwrap();
     let artifact = RecoveredFieldArtifact::new(
         recovery_request(),
-        source_result(),
+        crate::execution::FieldRecoverySource::SolverResult(source_result()),
         projection.projection_digest,
         RecoveredFieldEntityCounts {
             structural_nodes: projection.nodes.len(),
@@ -260,7 +260,7 @@ fn field_storage_partitions_are_canonical_complete_and_reconstruct_exactly() {
 
     let artifact = RecoveredFieldArtifact::new(
         recovery_request(),
-        source_result(),
+        crate::execution::FieldRecoverySource::SolverResult(source_result()),
         Digest::sha256("large-topology"),
         RecoveredFieldEntityCounts {
             structural_nodes: entity_count,

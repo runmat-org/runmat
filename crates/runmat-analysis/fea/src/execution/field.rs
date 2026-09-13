@@ -5,20 +5,37 @@ use crate::physics::structural::topology::CanonicalStructuralTopologyIdentity;
 
 use super::{
     AnalysisExecutionError, AnalysisExecutionResult, FieldRecoveryRequestIdentity,
-    SolverResultIdentity, StepIdentity,
+    SolverResultIdentity, StepIdentity, StructuralFrequencyEntryResultIdentity,
 };
 
 const FIELD_RECOVERY_PREFIX: &[u8] = b"runmat-analysis-field-recovery/v1\0";
 const FIELD_RECOVERY_LIMITS: CanonicalLimits = CanonicalLimits::new(1024 * 1024, 65_536, 4096, 32);
 
-/// Immutable request for family-owned recovery from one exact solver result.
+/// Exact numerical output whose physical fields are being recovered.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FieldRecoverySource {
+    SolverResult(SolverResultIdentity),
+    StructuralFrequencyEntry(StructuralFrequencyEntryResultIdentity),
+}
+
+impl FieldRecoverySource {
+    pub const fn solver_result(self) -> Option<SolverResultIdentity> {
+        match self {
+            Self::SolverResult(result) => Some(result),
+            Self::StructuralFrequencyEntry(_) => None,
+        }
+    }
+}
+
+/// Immutable request for family-owned recovery from one exact numerical result.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, try_from = "FieldRecoveryRequestWire")]
 pub struct FieldRecoveryRequest {
     pub schema_version: u16,
     identity: FieldRecoveryRequestIdentity,
     pub producer: StepIdentity,
-    pub source_result: SolverResultIdentity,
+    pub source: FieldRecoverySource,
     pub topology: CanonicalStructuralTopologyIdentity,
 }
 
@@ -28,7 +45,7 @@ struct FieldRecoveryRequestWire {
     schema_version: u16,
     identity: FieldRecoveryRequestIdentity,
     producer: StepIdentity,
-    source_result: SolverResultIdentity,
+    source: FieldRecoverySource,
     topology: CanonicalStructuralTopologyIdentity,
 }
 
@@ -40,7 +57,7 @@ impl TryFrom<FieldRecoveryRequestWire> for FieldRecoveryRequest {
             schema_version: wire.schema_version,
             identity: wire.identity,
             producer: wire.producer,
-            source_result: wire.source_result,
+            source: wire.source,
             topology: wire.topology,
         };
         request.validate()?;
@@ -51,17 +68,17 @@ impl TryFrom<FieldRecoveryRequestWire> for FieldRecoveryRequest {
 impl FieldRecoveryRequest {
     pub fn new(
         producer: StepIdentity,
-        source_result: SolverResultIdentity,
+        source: FieldRecoverySource,
         topology: CanonicalStructuralTopologyIdentity,
     ) -> AnalysisExecutionResult<Self> {
         let request = Self {
             schema_version: 1,
             identity: FieldRecoveryRequestIdentity::derive(
                 "field-recovery-request",
-                &(producer, source_result, topology),
+                &(producer, source, topology),
             )?,
             producer,
-            source_result,
+            source,
             topology,
         };
         request.validate()?;
@@ -75,7 +92,7 @@ impl FieldRecoveryRequest {
     pub fn validate(&self) -> AnalysisExecutionResult<()> {
         let expected = FieldRecoveryRequestIdentity::derive(
             "field-recovery-request",
-            &(self.producer, self.source_result, self.topology),
+            &(self.producer, self.source, self.topology),
         )?;
         if self.schema_version != 1
             || !self.topology.has_valid_identity()
@@ -106,5 +123,50 @@ impl FieldRecoveryRequest {
             FIELD_RECOVERY_LIMITS,
         )?;
         Ok(request)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use runmat_execution::Digest;
+
+    use crate::physics::structural::topology::CanonicalStructuralTopologyIdentity;
+
+    use super::*;
+
+    #[test]
+    fn recovery_source_kind_is_canonical_and_identity_significant() {
+        let sequence = super::super::SequenceIdentity::new(Digest::sha256("sequence")).unwrap();
+        let step = StepIdentity::new(sequence, Digest::sha256("step")).unwrap();
+        let solver =
+            SolverResultIdentity::from_step_result(step, Digest::sha256("result")).unwrap();
+        let entry = StructuralFrequencyEntryResultIdentity::derive(
+            "test-frequency-entry",
+            &Digest::sha256("result"),
+        )
+        .unwrap();
+        let topology = CanonicalStructuralTopologyIdentity::Explicit {
+            structural_topology_digest: Digest::sha256("topology"),
+        };
+        let solver_request =
+            FieldRecoveryRequest::new(step, FieldRecoverySource::SolverResult(solver), topology)
+                .unwrap();
+        let frequency_request = FieldRecoveryRequest::new(
+            step,
+            FieldRecoverySource::StructuralFrequencyEntry(entry),
+            topology,
+        )
+        .unwrap();
+
+        assert_ne!(solver_request.identity(), frequency_request.identity());
+        assert_eq!(
+            FieldRecoveryRequest::from_canonical_bytes(
+                &frequency_request.canonical_bytes().unwrap()
+            )
+            .unwrap(),
+            frequency_request
+        );
+        assert_eq!(solver_request.source.solver_result(), Some(solver));
+        assert_eq!(frequency_request.source.solver_result(), None);
     }
 }

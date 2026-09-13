@@ -17,13 +17,19 @@ use crate::{
             StructuralPreparedIdentityInput,
         },
         AnalysisExecutionError, AnalysisExecutionResult, CanonicalSemanticState,
-        ExecutionPlanIdentity, StepIdentity, StructuralFrequencyEntryRequest,
-        StructuralFrequencyEntryResult, StructuralFrequencyEntrySolverEvidence,
-        StructuralFrequencyPhysicalSample, StructuralFrequencyProblemIdentity,
-        StructuralFrequencyScope, StructuralFrequencyScopeInput, StructuralFrequencySolutionSpace,
+        ExecutionPlanIdentity, FieldRecoveryRequest, FieldRecoverySource, StepIdentity,
+        StructuralFrequencyEntryRequest, StructuralFrequencyEntryResult,
+        StructuralFrequencyEntrySolverEvidence, StructuralFrequencyPhysicalSample,
+        StructuralFrequencyProblemIdentity, StructuralFrequencyScope,
+        StructuralFrequencyScopeInput, StructuralFrequencySolutionSpace,
         StructuralFrequencySolverEvidenceInput, StructuralFrequencySolverPlan,
         StructuralFrequencyWorkload, StructuralPhasorConvention, StudyIdentity,
     },
+    post::{
+        recover_complex_constraint_group_observable_fields,
+        recover_complex_structural_result_fields, ComplexStructuralFieldState,
+    },
+    results::field::{RecoveredFieldArtifact, StructuralRecoveredFieldTopology},
     solve::{
         backend::kind::LinearAlgebraBackendKind,
         dynamics::{
@@ -309,6 +315,85 @@ fn execute_prepared_entry(
         },
     )?;
     StructuralFrequencyEntryResult::new(request.clone(), sample, solution_space, evidence)
+}
+
+/// Recovers formulation-owned complex fields for one independently completed frequency entry.
+///
+/// Recovery remains colocatable with the entry solve: it reassembles only this exact frequency,
+/// consumes solver-authoritative dynamic reactions, and retains authored-constraint ownership as
+/// a separate complex field domain.
+pub fn recover_structural_frequency_entry_fields(
+    workload: &StructuralFrequencyWorkload,
+    solver_mesh: &SolverMeshArtifact,
+    request: &FieldRecoveryRequest,
+    result: &StructuralFrequencyEntryResult,
+) -> AnalysisExecutionResult<RecoveredFieldArtifact> {
+    request.validate()?;
+    result.validate()?;
+    let (prepared, assembly) = prepare_entry_execution(workload, solver_mesh, result.request())?;
+    let topology = StructuralRecoveredFieldTopology::derive(workload.model(), Some(solver_mesh))
+        .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+    if request.producer != prepared.step
+        || request.source != FieldRecoverySource::StructuralFrequencyEntry(result.identity())
+        || request.topology != topology.identity
+        || result.request().scope() != &prepared.scope
+    {
+        return Err(AnalysisExecutionError::Identity(
+            "structural frequency recovery inputs differ from the completed frequency entry",
+        ));
+    }
+    let constraint_plan = crate::constraints::CanonicalStructuralConstraintPlan::compile_for_model(
+        workload.model(),
+        Some(solver_mesh),
+    )
+    .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+    let sample = result.sample();
+    let frequency_hz = sample.entry().frequency_hz();
+    let mut fields = recover_complex_structural_result_fields(
+        &assembly.real,
+        frequency_hz,
+        ComplexStructuralFieldState {
+            displacement_real: sample.displacement().real(),
+            displacement_imaginary: sample.displacement().imaginary(),
+            reaction_real: sample.reaction().real(),
+            reaction_imaginary: sample.reaction().imaginary(),
+        },
+    )
+    .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+    let real_constraints =
+        crate::constraints::CanonicalStructuralConstraintResult::recover_from_solver_state(
+            &constraint_plan,
+            solver_mesh,
+            sample.displacement().real(),
+            sample.reaction().real(),
+        )
+        .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+    let imaginary_constraints =
+        crate::constraints::CanonicalStructuralConstraintResult::recover_from_solver_state(
+            &constraint_plan,
+            solver_mesh,
+            sample.displacement().imaginary(),
+            sample.reaction().imaginary(),
+        )
+        .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+    fields.extend(
+        recover_complex_constraint_group_observable_fields(
+            &real_constraints,
+            &imaginary_constraints,
+            frequency_hz,
+        )
+        .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?,
+    );
+    let mut entity_counts = topology.entity_counts;
+    entity_counts.constraint_groups = constraint_plan.groups.len();
+    RecoveredFieldArtifact::new(
+        request.identity(),
+        request.source,
+        topology.identity.discretization_digest(),
+        entity_counts,
+        fields,
+    )
+    .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))
 }
 
 fn assemble_entry(

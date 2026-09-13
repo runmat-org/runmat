@@ -303,7 +303,7 @@ fn validate_event_attribution(
                 },
             ) = attribution
             {
-                if result != source.source_result {
+                if source.source.solver_result() != Some(result) {
                     return Err(AnalysisExecutionError::Identity(
                         "completed solver event names a different source result",
                     ));
@@ -576,7 +576,7 @@ fn validate_contribution_attribution(
                 },
             ) = attribution
             {
-                if result != source.source_result {
+                if source.source.solver_result() != Some(result) {
                     return Err(AnalysisExecutionError::Identity(
                         "observation reduction event names a different source result",
                     ));
@@ -611,8 +611,8 @@ mod tests {
 
     use crate::{
         execution::{
-            FieldRecoveryRequest, ObservationEvaluationRequest, SequenceIdentity,
-            SolverResultIdentity, StepIdentity,
+            FieldRecoveryRequest, FieldRecoverySource, ObservationEvaluationRequest,
+            SequenceIdentity, SolverResultIdentity, StepIdentity,
         },
         physics::structural::topology::CanonicalStructuralTopologyIdentity,
         results::{
@@ -712,10 +712,15 @@ mod tests {
         let topology = CanonicalStructuralTopologyIdentity::Explicit {
             structural_topology_digest: projection.projection_digest,
         };
-        let recovery = FieldRecoveryRequest::new(producer, source_result, topology).unwrap();
+        let recovery = FieldRecoveryRequest::new(
+            producer,
+            FieldRecoverySource::SolverResult(source_result),
+            topology,
+        )
+        .unwrap();
         let artifact = RecoveredFieldArtifact::new(
             recovery.identity(),
-            source_result,
+            FieldRecoverySource::SolverResult(source_result),
             projection.projection_digest,
             RecoveredFieldEntityCounts {
                 structural_nodes: projection.nodes.len(),

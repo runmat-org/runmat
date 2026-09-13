@@ -5,12 +5,15 @@ use runmat_analysis_core::{
     StructuralConstraint, StructuralConstraintKind, TopologyTransitionPolicy, TransitionId,
 };
 use runmat_analysis_execution::{
-    execute_serial_analysis, import_structural_frequency_entry, import_structural_frequency_result,
+    execute_serial_analysis, import_structural_frequency_entry,
+    import_structural_frequency_recovered_fields, import_structural_frequency_result,
     prepare_analysis_objects, prepare_structural_frequency_fanout,
+    prepare_structural_frequency_field_recovery,
     prepare_structural_frequency_result_assembly_request_objects,
     prepare_structural_frequency_result_task, prepare_structural_frequency_workload_objects,
-    AnalysisHostResponse, ImportedStructuralFrequencyResult, PreparedAnalysisObjects,
-    StructuralFrequencyFanoutPreparation, StructuralFrequencyResultPreparation,
+    AnalysisHostResponse, ImportedRecoveredFields, ImportedStructuralFrequencyResult,
+    PreparedAnalysisObjects, StructuralFrequencyFanoutPreparation,
+    StructuralFrequencyFieldRecoveryPreparation, StructuralFrequencyResultPreparation,
 };
 use runmat_analysis_fea::{
     execution::{
@@ -119,7 +122,11 @@ fn execute_frequency(
     workload: &StructuralFrequencyWorkload,
     mesh: &runmat_meshing_core::SolverMeshArtifact,
     modal_state: Option<PreparedAnalysisObjects>,
-) -> ImportedStructuralFrequencyResult {
+    recover_fields: bool,
+) -> (
+    ImportedStructuralFrequencyResult,
+    Vec<ImportedRecoveredFields>,
+) {
     let limits = ObjectInventoryLimits::default();
     let namespace = ObjectNamespace::InputValue;
     let workload_objects =
@@ -140,8 +147,8 @@ fn execute_frequency(
     )
     .unwrap();
     let fanout = prepare_structural_frequency_fanout(StructuralFrequencyFanoutPreparation {
-        workload: workload_objects,
-        mesh: mesh_objects,
+        workload: workload_objects.clone(),
+        mesh: mesh_objects.clone(),
         modal_state,
         artifact_access: access(),
         program_revision: revision(),
@@ -150,6 +157,8 @@ fn execute_frequency(
     })
     .unwrap();
     let mut imported = Vec::new();
+    let mut recovered = Vec::new();
+    let mut recovery_sources = Vec::new();
     for task in fanout {
         task.program.write_to(&mut store).unwrap();
         let completed = execute_serial_analysis(
@@ -163,7 +172,73 @@ fn execute_frequency(
         let response = AnalysisHostResponse::completed(&task.host, &completed)
             .unwrap()
             .program_response();
-        imported.push(import_structural_frequency_entry(&store, response, &task, limits).unwrap());
+        let entry = import_structural_frequency_entry(&store, response, &task, limits).unwrap();
+        recovery_sources.push((task.host.clone(), entry.objects.clone()));
+        if recover_fields {
+            let recovery = prepare_structural_frequency_field_recovery(
+                StructuralFrequencyFieldRecoveryPreparation {
+                    source_host: task.host.clone(),
+                    workload: workload_objects.clone(),
+                    mesh: mesh_objects.clone(),
+                    source_entry: entry.objects.clone(),
+                    artifact_access: access(),
+                    program_revision: revision(),
+                    chunk_bytes: 256,
+                    inventory_limits: limits,
+                },
+            )
+            .unwrap();
+            assert!(recovery
+                .host
+                .workload
+                .inputs
+                .iter()
+                .all(|input| input.kind != AnalysisNumericalObjectKind::SolverResult));
+            assert_eq!(
+                recovery
+                    .host
+                    .workload
+                    .inputs
+                    .iter()
+                    .filter(|input| {
+                        input.kind == AnalysisNumericalObjectKind::StructuralFrequencyEntryResult
+                    })
+                    .count(),
+                1
+            );
+            recovery.program.write_to(&mut store).unwrap();
+            let completed = execute_serial_analysis(
+                &recovery.program.request,
+                &mut store,
+                &NativeAnalysisKernel,
+                256,
+                limits,
+            )
+            .unwrap();
+            let response = AnalysisHostResponse::completed(&recovery.host, &completed)
+                .unwrap()
+                .program_response();
+            recovered.push(
+                import_structural_frequency_recovered_fields(&store, response, &recovery, limits)
+                    .unwrap(),
+            );
+        }
+        imported.push(entry);
+    }
+    if recover_fields && recovery_sources.len() > 1 {
+        assert!(prepare_structural_frequency_field_recovery(
+            StructuralFrequencyFieldRecoveryPreparation {
+                source_host: recovery_sources[0].0.clone(),
+                workload: workload_objects.clone(),
+                mesh: mesh_objects.clone(),
+                source_entry: recovery_sources[1].1.clone(),
+                artifact_access: access(),
+                program_revision: revision(),
+                chunk_bytes: 256,
+                inventory_limits: limits,
+            },
+        )
+        .is_err());
     }
     imported.reverse();
     let entries = imported
@@ -194,13 +269,14 @@ fn execute_frequency(
     let response = AnalysisHostResponse::completed(&task.host, &completed)
         .unwrap()
         .program_response();
-    import_structural_frequency_result(&store, response, &task, limits).unwrap()
+    let result = import_structural_frequency_result(&store, response, &task, limits).unwrap();
+    (result, recovered)
 }
 
 #[test]
 fn native_frequency_fanout_and_fanin_are_portable_and_order_independent() {
     let (workload, mesh) = direct_fixture();
-    let result = execute_frequency(&workload, &mesh, None);
+    let (result, recovered) = execute_frequency(&workload, &mesh, None, true);
     assert_eq!(
         result
             .result
@@ -211,6 +287,22 @@ fn native_frequency_fanout_and_fanin_are_portable_and_order_independent() {
         vec![20.0, 40.0]
     );
     assert_eq!(result.numerical_receipt.samples().len(), 2);
+    assert_eq!(recovered.len(), 2);
+    assert!(recovered
+        .iter()
+        .any(|artifact| artifact.manifest.fields.iter().any(|field| {
+            field.sample
+                == runmat_analysis_fea::results::field::RecoveredFieldSample::FrequencyHertz(20.0)
+                && field.definition.quantity()
+                    == runmat_analysis_core::ObservationQuantity::ReactionForce
+        })));
+    assert!(recovered
+        .iter()
+        .any(|artifact| artifact.manifest.fields.iter().any(|field| {
+            field.sample
+                == runmat_analysis_fea::results::field::RecoveredFieldSample::FrequencyHertz(40.0)
+                && field.definition.quantity() == runmat_analysis_core::ObservationQuantity::Stress
+        })));
 }
 
 #[test]
@@ -282,7 +374,7 @@ fn native_modal_frequency_uses_the_exact_portable_basis_state() {
     })
     .unwrap();
 
-    let result = execute_frequency(&workload, &mesh, Some(state_objects));
+    let (result, _) = execute_frequency(&workload, &mesh, Some(state_objects), false);
     assert_eq!(result.result.samples().len(), 2);
     match result.numerical_receipt.solution_space() {
         runmat_analysis_fea::execution::StructuralFrequencySolutionSpace::ModalReduced {

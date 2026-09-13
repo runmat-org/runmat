@@ -4,6 +4,7 @@ mod accuracy_evaluation;
 mod callable;
 mod error;
 mod field_recovery;
+mod frequency_field_recovery;
 mod frequency_object_access;
 mod frequency_task;
 mod graph;
@@ -49,6 +50,10 @@ pub use field_recovery::{
     decode_recovered_field_artifact, import_structural_recovered_fields,
     prepare_structural_field_recovery, ImportedRecoveredFields, PreparedStructuralFieldRecovery,
     StructuralFieldRecoveryPreparation,
+};
+pub use frequency_field_recovery::{
+    import_structural_frequency_recovered_fields, prepare_structural_frequency_field_recovery,
+    PreparedStructuralFrequencyFieldRecovery, StructuralFrequencyFieldRecoveryPreparation,
 };
 pub use frequency_object_access::{
     decode_prepared_structural_frequency_entry_request,

@@ -69,7 +69,7 @@ impl ResultPublicationRequest {
                     .validate()
                     .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
                 if observations.producer != accuracy.producer
-                    || observations.source_result != accuracy.source_result
+                    || observations.source.solver_result() != Some(accuracy.source_result)
                     || Some(observations.identity) != accuracy.source_observations
                 {
                     return Err(AnalysisExecutionError::Identity(

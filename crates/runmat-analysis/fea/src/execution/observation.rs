@@ -9,7 +9,7 @@ use crate::results::observation::ResolvedObservationPlan;
 
 use super::{
     AnalysisExecutionError, AnalysisExecutionResult, FieldRecoveryRequestIdentity,
-    ObservationEvaluationRequestIdentity, SolverResultIdentity, StepIdentity,
+    FieldRecoverySource, ObservationEvaluationRequestIdentity, StepIdentity,
 };
 
 const OBSERVATION_EVALUATION_PREFIX: &[u8] = b"runmat-analysis-observation-evaluation/v1\0";
@@ -25,7 +25,7 @@ pub struct ObservationEvaluationRequest {
     pub field_recovery_request: FieldRecoveryRequestIdentity,
     pub source_fields: RecoveredFieldArtifactIdentity,
     pub source_selection: RecoveredFieldSelectionIdentity,
-    pub source_result: SolverResultIdentity,
+    pub source: FieldRecoverySource,
     pub topology: CanonicalStructuralTopologyIdentity,
     pub plan: ResolvedObservationPlan,
 }
@@ -39,7 +39,7 @@ struct ObservationEvaluationRequestWire {
     field_recovery_request: FieldRecoveryRequestIdentity,
     source_fields: RecoveredFieldArtifactIdentity,
     source_selection: RecoveredFieldSelectionIdentity,
-    source_result: SolverResultIdentity,
+    source: FieldRecoverySource,
     topology: CanonicalStructuralTopologyIdentity,
     plan: ResolvedObservationPlan,
 }
@@ -55,7 +55,7 @@ impl TryFrom<ObservationEvaluationRequestWire> for ObservationEvaluationRequest 
             field_recovery_request: wire.field_recovery_request,
             source_fields: wire.source_fields,
             source_selection: wire.source_selection,
-            source_result: wire.source_result,
+            source: wire.source,
             topology: wire.topology,
             plan: wire.plan,
         };
@@ -90,7 +90,7 @@ impl ObservationEvaluationRequest {
                     source.source.recovery_request,
                     source.source.identity,
                     source.identity,
-                    source.source.source_result,
+                    source.source.source,
                     topology,
                     plan.identity,
                     plan.topology_digest,
@@ -100,7 +100,7 @@ impl ObservationEvaluationRequest {
             field_recovery_request: source.source.recovery_request,
             source_fields: source.source.identity,
             source_selection: source.identity,
-            source_result: source.source.source_result,
+            source: source.source.source,
             topology,
             plan,
         };
@@ -128,7 +128,7 @@ impl ObservationEvaluationRequest {
                 self.field_recovery_request,
                 self.source_fields,
                 self.source_selection,
-                self.source_result,
+                self.source,
                 self.topology,
                 self.plan.identity,
                 self.plan.topology_digest,
