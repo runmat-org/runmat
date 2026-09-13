@@ -81,7 +81,7 @@ function callableOwnerProposal(topologyRow, forms, observedOwnerPaths) {
     return observedOwnerPaths.length === 1 ? observedOwnerPaths[0] : null;
   }
   return typeof topologyRow.domain === "string" && typeof topologyRow.family === "string"
-    ? `${RUNTIME_ROOT}/${topologyRow.domain}/${topologyRow.family}/${rustLeaf(topologyRow.identity)}.rs`
+    ? `${RUNTIME_ROOT}/${topologyRow.domain}/${topologyRow.family}/${rustLeaf(topologyRow.identity)}/mod.rs`
     : null;
 }
 

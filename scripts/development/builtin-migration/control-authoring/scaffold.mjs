@@ -298,7 +298,7 @@ function topologyTargetProposals(row, sourceRow) {
       basis: "reviewed-internal-identity-observed-paths-only",
     };
   }
-  const runtimeOwner = `${RUNTIME_ROOT}/${row.domain}/${row.family}/${leaf}.rs`;
+  const runtimeOwner = `${RUNTIME_ROOT}/${row.domain}/${row.family}/${leaf}/mod.rs`;
   return {
     proposed_catalog_package: `${CATALOG_ROOT}/${row.domain}/${row.family}/${leaf}/mod.rs`,
     proposed_callable_owner: runtimeOwner,
