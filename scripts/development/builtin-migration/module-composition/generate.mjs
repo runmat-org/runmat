@@ -1,3 +1,4 @@
+import { formatRustModule } from "../rust-format.mjs";
 import { conditionAttribute } from "./condition.mjs";
 import { childPathAttribute, parseCompositionProduct, parseModuleCompositionProjection } from "./schema.mjs";
 
@@ -27,7 +28,7 @@ export function renderModuleCompositionProduct(value) {
     }
   }
   const body = sections.filter(Boolean).join("\n\n");
-  return `${HEADER}\n\n${body}${body ? "\n" : ""}`;
+  return formatRustModule(`${HEADER}\n\n${body}${body ? "\n" : ""}`);
 }
 
 function renderAggregationExports(exports) {
@@ -76,7 +77,8 @@ function aggregation(role, contributions) {
     ...conditionLines(source.condition).map((line) => `    ${line}`),
     `    ${aggregationStatement(child.module, source.kind, functionName, constant)}`,
   ]);
-  return [`pub(super) fn ${functionName}(values: &mut Vec<${type}>) {`, ...rows, "}"].join("\n");
+  const parameter = rows.length === 0 ? "_values" : "values";
+  return [`pub(super) fn ${functionName}(${parameter}: &mut Vec<${type}>) {`, ...rows, "}"].join("\n");
 }
 
 function aggregationFunction(role) {
