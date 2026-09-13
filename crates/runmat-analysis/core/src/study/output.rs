@@ -79,9 +79,20 @@ pub enum ObservationQuantity {
     Acceleration,
     Strain,
     Stress,
+    VonMisesStress,
     ReactionForce,
     ReactionMoment,
     StrainEnergy,
+    BeamAxialForce,
+    BeamShearForce,
+    BeamTorsionMoment,
+    BeamBendingMoment,
+    BeamBendingStress,
+    BeamTorsionStress,
+    ShellMembraneForce,
+    ShellBendingMoment,
+    ShellTransverseShear,
+    ShellVonMises,
     Temperature,
     TemperatureGradient,
     HeatFlux,
@@ -138,6 +149,13 @@ impl ObservationQuantity {
             | Self::Vorticity
             | Self::WallShearStress => ObservationValueShape::Vector3,
             Self::Strain | Self::Stress => ObservationValueShape::SymmetricTensor3,
+            Self::BeamShearForce
+            | Self::BeamBendingMoment
+            | Self::BeamBendingStress
+            | Self::ShellTransverseShear => ObservationValueShape::Tensor { extents: vec![2] },
+            Self::ShellMembraneForce | Self::ShellBendingMoment => {
+                ObservationValueShape::Tensor { extents: vec![3] }
+            }
             _ => ObservationValueShape::Scalar,
         }
     }

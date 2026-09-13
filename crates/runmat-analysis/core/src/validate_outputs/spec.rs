@@ -119,9 +119,20 @@ fn is_structural(quantity: ObservationQuantity) -> bool {
             | ObservationQuantity::Acceleration
             | ObservationQuantity::Strain
             | ObservationQuantity::Stress
+            | ObservationQuantity::VonMisesStress
             | ObservationQuantity::ReactionForce
             | ObservationQuantity::ReactionMoment
             | ObservationQuantity::StrainEnergy
+            | ObservationQuantity::BeamAxialForce
+            | ObservationQuantity::BeamShearForce
+            | ObservationQuantity::BeamTorsionMoment
+            | ObservationQuantity::BeamBendingMoment
+            | ObservationQuantity::BeamBendingStress
+            | ObservationQuantity::BeamTorsionStress
+            | ObservationQuantity::ShellMembraneForce
+            | ObservationQuantity::ShellBendingMoment
+            | ObservationQuantity::ShellTransverseShear
+            | ObservationQuantity::ShellVonMises
             | ObservationQuantity::ContactGap
             | ObservationQuantity::ContactPressure
             | ObservationQuantity::ModalFrequency
@@ -288,9 +299,7 @@ fn validate_component(
                 | C::MaximumPrincipal
                 | C::MinimumPrincipal
         ),
-        ObservationValueShape::Tensor { .. } => {
-            unreachable!("canonical observation quantity shapes never use arbitrary tensor extents")
-        }
+        ObservationValueShape::Tensor { .. } => matches!(spec.component, C::All),
     };
     if valid {
         Ok(())
@@ -428,6 +437,21 @@ mod tests {
     fn quantity_support_follows_physics_family() {
         let structural = ProcedureStep::structural_static("structural");
         assert!(quantity_supported(&structural, ObservationQuantity::Stress));
+        for quantity in [
+            ObservationQuantity::VonMisesStress,
+            ObservationQuantity::BeamAxialForce,
+            ObservationQuantity::BeamShearForce,
+            ObservationQuantity::BeamTorsionMoment,
+            ObservationQuantity::BeamBendingMoment,
+            ObservationQuantity::BeamBendingStress,
+            ObservationQuantity::BeamTorsionStress,
+            ObservationQuantity::ShellMembraneForce,
+            ObservationQuantity::ShellBendingMoment,
+            ObservationQuantity::ShellTransverseShear,
+            ObservationQuantity::ShellVonMises,
+        ] {
+            assert!(quantity_supported(&structural, quantity));
+        }
         assert!(!quantity_supported(
             &structural,
             ObservationQuantity::Temperature

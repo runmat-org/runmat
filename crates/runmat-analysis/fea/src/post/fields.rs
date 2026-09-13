@@ -203,10 +203,13 @@ pub fn take_structural_observable_fields(
     let declarations = structural_observable_field_definitions()?;
     let mut recovered = Vec::with_capacity(declarations.len());
     for definition in declarations {
-        let Some(index) = fields
-            .iter()
-            .position(|field| field.field_id == definition.field_id())
-        else {
+        let Some(index) = fields.iter().position(|field| {
+            field.field_id == definition.field_id()
+                && field
+                    .shape
+                    .first()
+                    .is_some_and(|entity_count| *entity_count > 0)
+        }) else {
             continue;
         };
         let storage = fields.remove(index);
@@ -234,6 +237,13 @@ pub fn structural_observable_field_definitions(
             ObservationValueShape::Vector3,
         ),
         (
+            FEA_FIELD_STRUCTURAL_ROTATION,
+            ObservationQuantity::Rotation,
+            FieldLocation::Node,
+            RecoveredFieldEntityDomain::StructuralNodes,
+            ObservationValueShape::Vector3,
+        ),
+        (
             FEA_FIELD_STRUCTURAL_STRAIN,
             ObservationQuantity::Strain,
             FieldLocation::Element,
@@ -246,6 +256,20 @@ pub fn structural_observable_field_definitions(
             FieldLocation::Element,
             RecoveredFieldEntityDomain::SolidElements,
             ObservationValueShape::SymmetricTensor3,
+        ),
+        (
+            FEA_FIELD_STRUCTURAL_VON_MISES,
+            ObservationQuantity::VonMisesStress,
+            FieldLocation::Element,
+            RecoveredFieldEntityDomain::SolidElements,
+            ObservationValueShape::Scalar,
+        ),
+        (
+            FEA_FIELD_STRUCTURAL_NODAL_VON_MISES,
+            ObservationQuantity::VonMisesStress,
+            FieldLocation::Node,
+            RecoveredFieldEntityDomain::StructuralNodes,
+            ObservationValueShape::Scalar,
         ),
         (
             FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY,
@@ -274,6 +298,76 @@ pub fn structural_observable_field_definitions(
             FieldLocation::Constraint,
             RecoveredFieldEntityDomain::ConstraintGroups,
             ObservationValueShape::Vector3,
+        ),
+        (
+            FEA_FIELD_STRUCTURAL_BEAM_AXIAL_FORCE,
+            ObservationQuantity::BeamAxialForce,
+            FieldLocation::Element,
+            RecoveredFieldEntityDomain::BeamElements,
+            ObservationValueShape::Scalar,
+        ),
+        (
+            FEA_FIELD_STRUCTURAL_BEAM_SHEAR_FORCE,
+            ObservationQuantity::BeamShearForce,
+            FieldLocation::Element,
+            RecoveredFieldEntityDomain::BeamElements,
+            ObservationValueShape::Tensor { extents: vec![2] },
+        ),
+        (
+            FEA_FIELD_STRUCTURAL_BEAM_TORSION_MOMENT,
+            ObservationQuantity::BeamTorsionMoment,
+            FieldLocation::Element,
+            RecoveredFieldEntityDomain::BeamElements,
+            ObservationValueShape::Scalar,
+        ),
+        (
+            FEA_FIELD_STRUCTURAL_BEAM_BENDING_MOMENT,
+            ObservationQuantity::BeamBendingMoment,
+            FieldLocation::Element,
+            RecoveredFieldEntityDomain::BeamElements,
+            ObservationValueShape::Tensor { extents: vec![2] },
+        ),
+        (
+            FEA_FIELD_STRUCTURAL_BEAM_BENDING_STRESS,
+            ObservationQuantity::BeamBendingStress,
+            FieldLocation::Element,
+            RecoveredFieldEntityDomain::BeamElements,
+            ObservationValueShape::Tensor { extents: vec![2] },
+        ),
+        (
+            FEA_FIELD_STRUCTURAL_BEAM_TORSION_STRESS,
+            ObservationQuantity::BeamTorsionStress,
+            FieldLocation::Element,
+            RecoveredFieldEntityDomain::BeamElements,
+            ObservationValueShape::Scalar,
+        ),
+        (
+            FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE,
+            ObservationQuantity::ShellMembraneForce,
+            FieldLocation::Element,
+            RecoveredFieldEntityDomain::ShellElements,
+            ObservationValueShape::Tensor { extents: vec![3] },
+        ),
+        (
+            FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT,
+            ObservationQuantity::ShellBendingMoment,
+            FieldLocation::Element,
+            RecoveredFieldEntityDomain::ShellElements,
+            ObservationValueShape::Tensor { extents: vec![3] },
+        ),
+        (
+            FEA_FIELD_STRUCTURAL_SHELL_TRANSVERSE_SHEAR,
+            ObservationQuantity::ShellTransverseShear,
+            FieldLocation::Element,
+            RecoveredFieldEntityDomain::ShellElements,
+            ObservationValueShape::Tensor { extents: vec![2] },
+        ),
+        (
+            FEA_FIELD_STRUCTURAL_SHELL_VON_MISES,
+            ObservationQuantity::ShellVonMises,
+            FieldLocation::Element,
+            RecoveredFieldEntityDomain::ShellElements,
+            ObservationValueShape::Scalar,
         ),
     ];
     declarations
@@ -1397,6 +1491,42 @@ mod tests {
             field_shape(&fields, FEA_FIELD_STRUCTURAL_DISPLACEMENT),
             &[4, 3]
         );
+    }
+
+    #[test]
+    fn observable_catalog_types_every_structural_deformation_family() {
+        let definitions = structural_observable_field_definitions().unwrap();
+        let expected = [
+            (FEA_FIELD_STRUCTURAL_ROTATION, ObservationQuantity::Rotation),
+            (
+                FEA_FIELD_STRUCTURAL_BEAM_AXIAL_FORCE,
+                ObservationQuantity::BeamAxialForce,
+            ),
+            (
+                FEA_FIELD_STRUCTURAL_BEAM_SHEAR_FORCE,
+                ObservationQuantity::BeamShearForce,
+            ),
+            (
+                FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE,
+                ObservationQuantity::ShellMembraneForce,
+            ),
+            (
+                FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT,
+                ObservationQuantity::ShellBendingMoment,
+            ),
+        ];
+        for (field_id, quantity) in expected {
+            assert!(definitions.iter().any(|definition| {
+                definition.field_id() == field_id && definition.quantity() == quantity
+            }));
+        }
+        let mut identities = definitions
+            .iter()
+            .map(|definition| definition.identity())
+            .collect::<Vec<_>>();
+        identities.sort();
+        identities.dedup();
+        assert_eq!(identities.len(), definitions.len());
     }
 
     fn field_shape<'a>(fields: &'a [AnalysisField], field_id: &str) -> &'a [usize] {

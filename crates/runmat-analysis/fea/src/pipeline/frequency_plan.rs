@@ -164,8 +164,7 @@ impl FrequencyResponsePlan {
         frequencies_hz.push(reference_frequency_hz);
         if frequencies_hz.iter().any(|value| !valid_frequency(*value)) {
             return Err(FeaRunError::InvalidFrequencyPlan(
-                "response frequencies must be finite, positive, and not negative zero"
-                    .into(),
+                "response frequencies must be finite, positive, and not negative zero".into(),
             ));
         }
         frequencies_hz.sort_by(f64::total_cmp);

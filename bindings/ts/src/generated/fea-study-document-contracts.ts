@@ -60,6 +60,8 @@ export type FeaAnalysisProcedure = "static" | "modal_extraction" | "prestressed_
 export type FeaFormulationRequirement = "production" | "experimental";
 
 export type FeaStructuralTimeStepPolicy = { fixed: { interval_count: number } };
+export interface FeaModalTruncationPolicy { requested_mode_count: number; eigenspace_relative_tolerance: number; }
+export interface FeaModalConvergencePolicy { relative_residual_tolerance: number; maximum_subspace_iterations: number; }
 
 export type FeaPhysicsFamily = "structural" | "thermal" | "electromagnetic" | "acoustic" | "fluid" | { coupled: "thermomechanical" | "electrothermal" | "conjugate_heat_transfer" | "fluid_structure_interaction" };
 
@@ -86,7 +88,7 @@ export type FeaInitialStateConflictPolicy = "reject" | "replace_initial_conditio
 export interface FeaStateInput { input_id: string; required_kind: FeaStateKind; source: FeaStateSource; use_as: FeaStateUse; conflict: FeaInitialStateConflictPolicy; }
 export interface FeaStateOutput { state_id: string; kind: FeaStateKind; completeness: "complete" | "checkpoint" | "partial"; persistence: "canonical" | "until_dependents_complete" | "checkpoint_only"; }
 export type FeaRestartPolicy = "fresh" | { continue_from_completed_state: { producer_step: string; state_id: string } } | { resume_checkpoint: { checkpoint_id: string; required_state_digest: string } };
-export type FeaObservationQuantity = "displacement" | "rotation" | "velocity" | "acceleration" | "strain" | "stress" | "reaction_force" | "reaction_moment" | "strain_energy" | "temperature" | "temperature_gradient" | "heat_flux" | "heat_rate" | "electric_potential" | "electric_field" | "electric_current" | "electric_current_density" | "electric_charge" | "magnetic_vector_potential" | "magnetic_flux_density" | "magnetic_field_intensity" | "acoustic_pressure" | "acoustic_particle_velocity" | "sound_pressure_level" | "fluid_pressure" | "fluid_velocity" | "vorticity" | "mass_flow_rate" | "wall_shear_stress" | "modal_frequency" | "modal_participation" | "eigenvalue" | "residual" | "balance" | "constraint_violation" | "contact_gap" | "contact_pressure";
+export type FeaObservationQuantity = "displacement" | "rotation" | "velocity" | "acceleration" | "strain" | "stress" | "von_mises_stress" | "reaction_force" | "reaction_moment" | "strain_energy" | "beam_axial_force" | "beam_shear_force" | "beam_torsion_moment" | "beam_bending_moment" | "beam_bending_stress" | "beam_torsion_stress" | "shell_membrane_force" | "shell_bending_moment" | "shell_transverse_shear" | "shell_von_mises" | "temperature" | "temperature_gradient" | "heat_flux" | "heat_rate" | "electric_potential" | "electric_field" | "electric_current" | "electric_current_density" | "electric_charge" | "magnetic_vector_potential" | "magnetic_flux_density" | "magnetic_field_intensity" | "acoustic_pressure" | "acoustic_particle_velocity" | "sound_pressure_level" | "fluid_pressure" | "fluid_velocity" | "vorticity" | "mass_flow_rate" | "wall_shear_stress" | "modal_frequency" | "modal_participation" | "eigenvalue" | "residual" | "balance" | "constraint_violation" | "contact_gap" | "contact_pressure";
 export type FeaSamplingPolicy = "final" | "every_accepted_increment" | { time_seconds: number[] } | { time_interval_seconds: { start: number; end: number; interval: number } } | { frequency_hertz: number[] } | { frequency_interval_hertz: { start: number; end: number; interval: number } } | { load_factors: number[] } | { load_factor_interval: { start: number; end: number; interval: number } } | { mode_indices: number[] } | { event: "first_yield" | "contact_status_change" | "peak_response" | "convergence_failure" | "accuracy_criterion_crossing" } | { adaptive: { minimum_interval: number; maximum_samples: number; relative_change: number } };
 export type FeaRetentionPolicy = "canonical" | "until_dependents_complete" | { latest_samples: { count: number } } | { explicit_samples: { maximum_count: number } };
 export interface FeaObservationSpec {
@@ -458,8 +460,8 @@ export interface FeaStructuralModesOptions {
   deterministic_mode: boolean;
   precision_mode: FeaPrecisionMode;
   quality_policy: FeaQualityPolicy;
-  mode_count: number;
-  residual_warn_threshold: number;
+  truncation: FeaModalTruncationPolicy;
+  convergence: FeaModalConvergencePolicy;
   solver_mesh_artifact_path: string | null;
 }
 
@@ -485,6 +487,7 @@ export interface FeaStructuralTransientOptions {
   quality_policy: FeaQualityPolicy;
   time_step_policy: FeaStructuralTimeStepPolicy;
   residual_target: number;
+  maximum_intervals_per_block: number;
   solver_mesh_artifact_path: string | null;
 }
 
@@ -677,7 +680,7 @@ export type FeaExcitationTarget = { region: FeaRegionTarget } | { reference_poin
 
 export interface FeaExcitationBody { excitation_id: string; case_id: string; target: FeaExcitationTarget; frame: FeaCoordinateFrame; direction: { vector: [number, number, number] } | null; distribution: "concentrated" | "preserve_resultant" | "intensity_per_area" | "intensity_per_volume" | "uniform_kinematic" | "topology_field"; kinematics: "fixed_frame" | "follower"; signal_id: string; active_step_ids: string[]; combination_group: string | null; projection: { preserve_resultant: boolean; preserve_moment: boolean; relative_tolerance: number }; }
 
-export type FeaExcitationInput = { force: FeaExcitationBody } | { moment: FeaExcitationBody } | { traction: FeaExcitationBody } | { pressure: FeaExcitationBody } | { body_force: FeaExcitationBody } | { base_displacement: FeaExcitationBody } | { base_velocity: FeaExcitationBody } | { base_acceleration: FeaExcitationBody } | { heat_generation: FeaExcitationBody } | { heat_flux: FeaExcitationBody } | { temperature_field: FeaExcitationBody } | { ambient_temperature: FeaExcitationBody } | { terminal_voltage: FeaExcitationBody } | { electric_current: FeaExcitationBody } | { electric_charge: FeaExcitationBody } | { current_density: FeaExcitationBody } | { magnetic_vector_potential: FeaExcitationBody } | { acoustic_pressure: FeaExcitationBody } | { normal_velocity: FeaExcitationBody } | { inlet_velocity: FeaExcitationBody } | { mass_flow: FeaExcitationBody } | { wall_motion: FeaExcitationBody };
+export type FeaExcitationInput = { force: FeaExcitationBody } | { moment: FeaExcitationBody } | { traction: FeaExcitationBody } | { pressure: FeaExcitationBody } | { body_force: FeaExcitationBody } | { heat_generation: FeaExcitationBody } | { heat_flux: FeaExcitationBody } | { temperature_field: FeaExcitationBody } | { ambient_temperature: FeaExcitationBody } | { terminal_voltage: FeaExcitationBody } | { electric_current: FeaExcitationBody } | { electric_charge: FeaExcitationBody } | { current_density: FeaExcitationBody } | { magnetic_vector_potential: FeaExcitationBody } | { acoustic_pressure: FeaExcitationBody } | { normal_velocity: FeaExcitationBody } | { inlet_velocity: FeaExcitationBody } | { mass_flow: FeaExcitationBody } | { wall_motion: FeaExcitationBody };
 
 export interface FeaExcitationCaseInput { case_id: string; action_ids: string[]; activation: "always" | { steps: string[] } | { mutually_exclusive_group: { group_id: string } }; }
 

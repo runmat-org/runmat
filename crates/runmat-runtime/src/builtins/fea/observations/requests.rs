@@ -59,28 +59,7 @@ descriptor!(PROBE_DESCRIPTOR, PROBE_SIGNATURES, "observation = fea.Observation.p
 descriptor!(REDUCTION_OBSERVATION_DESCRIPTOR, REDUCTION_OBSERVATION_SIGNATURES, "observation = fea.Observation.reduction(id, quantity, target, sourceLocation, outputLocation, recovery, component, frame, sign, complexRepresentation, sampling, reduction, storage, purpose, cost)", &SPEC_INPUTS);
 
 fn canonical_shape(quantity: ObservationQuantity) -> ObservationValueShape {
-    use ObservationQuantity as Q;
-    match quantity {
-        Q::Displacement
-        | Q::Rotation
-        | Q::Velocity
-        | Q::Acceleration
-        | Q::ReactionForce
-        | Q::ReactionMoment
-        | Q::TemperatureGradient
-        | Q::HeatFlux
-        | Q::ElectricField
-        | Q::ElectricCurrentDensity
-        | Q::MagneticVectorPotential
-        | Q::MagneticFluxDensity
-        | Q::MagneticFieldIntensity
-        | Q::AcousticParticleVelocity
-        | Q::FluidVelocity
-        | Q::Vorticity
-        | Q::WallShearStress => ObservationValueShape::Vector3,
-        Q::Strain | Q::Stress => ObservationValueShape::SymmetricTensor3,
-        _ => ObservationValueShape::Scalar,
-    }
+    quantity.canonical_value_shape()
 }
 
 enum ObservationForm {

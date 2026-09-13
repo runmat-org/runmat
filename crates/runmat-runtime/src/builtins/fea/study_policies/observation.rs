@@ -123,6 +123,13 @@ quantity_choices!(
         Stress
     ),
     (
+        quantity_von_mises_stress,
+        Q_VON_MISES_STRESS_DESCRIPTOR,
+        Q_VON_MISES_STRESS_SIGNATURES,
+        "fea.ObservationQuantity.vonMisesStress",
+        VonMisesStress
+    ),
+    (
         quantity_reaction_force,
         Q_REACTION_FORCE_DESCRIPTOR,
         Q_REACTION_FORCE_SIGNATURES,
@@ -142,6 +149,76 @@ quantity_choices!(
         Q_STRAIN_ENERGY_SIGNATURES,
         "fea.ObservationQuantity.strainEnergy",
         StrainEnergy
+    ),
+    (
+        quantity_beam_axial_force,
+        Q_BEAM_AXIAL_FORCE_DESCRIPTOR,
+        Q_BEAM_AXIAL_FORCE_SIGNATURES,
+        "fea.ObservationQuantity.beamAxialForce",
+        BeamAxialForce
+    ),
+    (
+        quantity_beam_shear_force,
+        Q_BEAM_SHEAR_FORCE_DESCRIPTOR,
+        Q_BEAM_SHEAR_FORCE_SIGNATURES,
+        "fea.ObservationQuantity.beamShearForce",
+        BeamShearForce
+    ),
+    (
+        quantity_beam_torsion_moment,
+        Q_BEAM_TORSION_MOMENT_DESCRIPTOR,
+        Q_BEAM_TORSION_MOMENT_SIGNATURES,
+        "fea.ObservationQuantity.beamTorsionMoment",
+        BeamTorsionMoment
+    ),
+    (
+        quantity_beam_bending_moment,
+        Q_BEAM_BENDING_MOMENT_DESCRIPTOR,
+        Q_BEAM_BENDING_MOMENT_SIGNATURES,
+        "fea.ObservationQuantity.beamBendingMoment",
+        BeamBendingMoment
+    ),
+    (
+        quantity_beam_bending_stress,
+        Q_BEAM_BENDING_STRESS_DESCRIPTOR,
+        Q_BEAM_BENDING_STRESS_SIGNATURES,
+        "fea.ObservationQuantity.beamBendingStress",
+        BeamBendingStress
+    ),
+    (
+        quantity_beam_torsion_stress,
+        Q_BEAM_TORSION_STRESS_DESCRIPTOR,
+        Q_BEAM_TORSION_STRESS_SIGNATURES,
+        "fea.ObservationQuantity.beamTorsionStress",
+        BeamTorsionStress
+    ),
+    (
+        quantity_shell_membrane_force,
+        Q_SHELL_MEMBRANE_FORCE_DESCRIPTOR,
+        Q_SHELL_MEMBRANE_FORCE_SIGNATURES,
+        "fea.ObservationQuantity.shellMembraneForce",
+        ShellMembraneForce
+    ),
+    (
+        quantity_shell_bending_moment,
+        Q_SHELL_BENDING_MOMENT_DESCRIPTOR,
+        Q_SHELL_BENDING_MOMENT_SIGNATURES,
+        "fea.ObservationQuantity.shellBendingMoment",
+        ShellBendingMoment
+    ),
+    (
+        quantity_shell_transverse_shear,
+        Q_SHELL_TRANSVERSE_SHEAR_DESCRIPTOR,
+        Q_SHELL_TRANSVERSE_SHEAR_SIGNATURES,
+        "fea.ObservationQuantity.shellTransverseShear",
+        ShellTransverseShear
+    ),
+    (
+        quantity_shell_von_mises,
+        Q_SHELL_VON_MISES_DESCRIPTOR,
+        Q_SHELL_VON_MISES_SIGNATURES,
+        "fea.ObservationQuantity.shellVonMises",
+        ShellVonMises
     ),
     (
         quantity_temperature,
@@ -1165,16 +1242,48 @@ pub(super) fn ensure_classes_registered() {
     });
 }
 
-const QUANTITY_METHODS: [(&str, &str); 37] = [
+const QUANTITY_METHODS: [(&str, &str); 48] = [
     ("displacement", "fea.ObservationQuantity.displacement"),
     ("rotation", "fea.ObservationQuantity.rotation"),
     ("velocity", "fea.ObservationQuantity.velocity"),
     ("acceleration", "fea.ObservationQuantity.acceleration"),
     ("strain", "fea.ObservationQuantity.strain"),
     ("stress", "fea.ObservationQuantity.stress"),
+    ("vonMisesStress", "fea.ObservationQuantity.vonMisesStress"),
     ("reactionForce", "fea.ObservationQuantity.reactionForce"),
     ("reactionMoment", "fea.ObservationQuantity.reactionMoment"),
     ("strainEnergy", "fea.ObservationQuantity.strainEnergy"),
+    ("beamAxialForce", "fea.ObservationQuantity.beamAxialForce"),
+    ("beamShearForce", "fea.ObservationQuantity.beamShearForce"),
+    (
+        "beamTorsionMoment",
+        "fea.ObservationQuantity.beamTorsionMoment",
+    ),
+    (
+        "beamBendingMoment",
+        "fea.ObservationQuantity.beamBendingMoment",
+    ),
+    (
+        "beamBendingStress",
+        "fea.ObservationQuantity.beamBendingStress",
+    ),
+    (
+        "beamTorsionStress",
+        "fea.ObservationQuantity.beamTorsionStress",
+    ),
+    (
+        "shellMembraneForce",
+        "fea.ObservationQuantity.shellMembraneForce",
+    ),
+    (
+        "shellBendingMoment",
+        "fea.ObservationQuantity.shellBendingMoment",
+    ),
+    (
+        "shellTransverseShear",
+        "fea.ObservationQuantity.shellTransverseShear",
+    ),
+    ("shellVonMises", "fea.ObservationQuantity.shellVonMises"),
     ("temperature", "fea.ObservationQuantity.temperature"),
     (
         "temperatureGradient",
@@ -1345,6 +1454,59 @@ mod tests {
     use futures::executor::block_on;
 
     use super::*;
+
+    #[test]
+    fn structural_recovery_quantity_constructors_preserve_every_typed_value() {
+        let values = [
+            (
+                block_on(quantity_von_mises_stress()).unwrap(),
+                ObservationQuantity::VonMisesStress,
+            ),
+            (
+                block_on(quantity_beam_axial_force()).unwrap(),
+                ObservationQuantity::BeamAxialForce,
+            ),
+            (
+                block_on(quantity_beam_shear_force()).unwrap(),
+                ObservationQuantity::BeamShearForce,
+            ),
+            (
+                block_on(quantity_beam_torsion_moment()).unwrap(),
+                ObservationQuantity::BeamTorsionMoment,
+            ),
+            (
+                block_on(quantity_beam_bending_moment()).unwrap(),
+                ObservationQuantity::BeamBendingMoment,
+            ),
+            (
+                block_on(quantity_beam_bending_stress()).unwrap(),
+                ObservationQuantity::BeamBendingStress,
+            ),
+            (
+                block_on(quantity_beam_torsion_stress()).unwrap(),
+                ObservationQuantity::BeamTorsionStress,
+            ),
+            (
+                block_on(quantity_shell_membrane_force()).unwrap(),
+                ObservationQuantity::ShellMembraneForce,
+            ),
+            (
+                block_on(quantity_shell_bending_moment()).unwrap(),
+                ObservationQuantity::ShellBendingMoment,
+            ),
+            (
+                block_on(quantity_shell_transverse_shear()).unwrap(),
+                ObservationQuantity::ShellTransverseShear,
+            ),
+            (
+                block_on(quantity_shell_von_mises()).unwrap(),
+                ObservationQuantity::ShellVonMises,
+            ),
+        ];
+        for (value, expected) in values {
+            assert_eq!(quantity("test", &value).unwrap(), expected);
+        }
+    }
 
     #[test]
     fn point_field_location_constructor_preserves_the_typed_location() {

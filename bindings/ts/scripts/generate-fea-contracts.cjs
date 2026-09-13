@@ -33,6 +33,10 @@ const rustCoreFormulationPath = path.resolve(
   repoRoot,
   "crates/runmat-analysis/core/src/study/formulation.rs"
 );
+const rustCoreOutputPath = path.resolve(
+  repoRoot,
+  "crates/runmat-analysis/core/src/study/output.rs"
+);
 const rustSignalPath = path.resolve(repoRoot, "crates/runmat-analysis/core/src/problem/signal.rs");
 const rustExcitationPath = path.resolve(repoRoot, "crates/runmat-analysis/core/src/problem/excitation.rs");
 const rustGeometryUnitsPath = path.resolve(
@@ -212,6 +216,10 @@ function rustTypeToTs(type) {
       return { type: "{ field: string; location: string }", nullable: false };
     case "AnalysisStructuralTimeStepPolicy":
       return { type: "FeaStructuralTimeStepPolicy", nullable: false };
+    case "runmat_analysis_fea::ModalTruncationPolicy":
+      return { type: "FeaModalTruncationPolicy", nullable: false };
+    case "runmat_analysis_fea::ModalConvergencePolicy":
+      return { type: "FeaModalConvergencePolicy", nullable: false };
     default:
       if (/^BTreeMap<String,\s*String>$/.test(trimmed)) {
         return { type: "Record<string, string>", nullable: false };
@@ -521,6 +529,7 @@ function main() {
   const progressSource = fs.readFileSync(rustFeaProgressPath, "utf8");
   const coreIdentitySource = fs.readFileSync(rustCoreIdentityPath, "utf8");
   const coreFormulationSource = fs.readFileSync(rustCoreFormulationPath, "utf8");
+  const coreOutputSource = fs.readFileSync(rustCoreOutputPath, "utf8");
   const signalSource = fs.readFileSync(rustSignalPath, "utf8");
   const excitationSource = fs.readFileSync(rustExcitationPath, "utf8");
   const geometryUnitsSource = fs.readFileSync(rustGeometryUnitsPath, "utf8");
@@ -551,6 +560,7 @@ function main() {
     ),
   ];
   const coupledFamilies = readEnumValues(coreIdentitySource, "CoupledPhysicsFamily");
+  const observationQuantities = readEnumValues(coreOutputSource, "ObservationQuantity");
   const physicsFamily = `export type FeaPhysicsFamily = "structural" | "thermal" | "electromagnetic" | "acoustic" | "fluid" | { coupled: ${coupledFamilies.map((value) => JSON.stringify(value)).join(" | ")} };`;
   const procedureStep = `export type FeaIndependentDomain =
   | "static"
@@ -575,7 +585,7 @@ export type FeaInitialStateConflictPolicy = "reject" | "replace_initial_conditio
 export interface FeaStateInput { input_id: string; required_kind: FeaStateKind; source: FeaStateSource; use_as: FeaStateUse; conflict: FeaInitialStateConflictPolicy; }
 export interface FeaStateOutput { state_id: string; kind: FeaStateKind; completeness: "complete" | "checkpoint" | "partial"; persistence: "canonical" | "until_dependents_complete" | "checkpoint_only"; }
 export type FeaRestartPolicy = "fresh" | { continue_from_completed_state: { producer_step: string; state_id: string } } | { resume_checkpoint: { checkpoint_id: string; required_state_digest: string } };
-export type FeaObservationQuantity = "displacement" | "rotation" | "velocity" | "acceleration" | "strain" | "stress" | "reaction_force" | "reaction_moment" | "strain_energy" | "temperature" | "temperature_gradient" | "heat_flux" | "heat_rate" | "electric_potential" | "electric_field" | "electric_current" | "electric_current_density" | "electric_charge" | "magnetic_vector_potential" | "magnetic_flux_density" | "magnetic_field_intensity" | "acoustic_pressure" | "acoustic_particle_velocity" | "sound_pressure_level" | "fluid_pressure" | "fluid_velocity" | "vorticity" | "mass_flow_rate" | "wall_shear_stress" | "modal_frequency" | "modal_participation" | "eigenvalue" | "residual" | "balance" | "constraint_violation" | "contact_gap" | "contact_pressure";
+export type FeaObservationQuantity = ${observationQuantities.map((value) => JSON.stringify(value)).join(" | ")};
 export type FeaSamplingPolicy = "final" | "every_accepted_increment" | { time_seconds: number[] } | { time_interval_seconds: { start: number; end: number; interval: number } } | { frequency_hertz: number[] } | { frequency_interval_hertz: { start: number; end: number; interval: number } } | { load_factors: number[] } | { load_factor_interval: { start: number; end: number; interval: number } } | { mode_indices: number[] } | { event: "first_yield" | "contact_status_change" | "peak_response" | "convergence_failure" | "accuracy_criterion_crossing" } | { adaptive: { minimum_interval: number; maximum_samples: number; relative_change: number } };
 export type FeaRetentionPolicy = "canonical" | "until_dependents_complete" | { latest_samples: { count: number } } | { explicit_samples: { maximum_count: number } };
 export interface FeaObservationSpec {
@@ -728,6 +738,8 @@ export interface FeaSequenceBranch { branch_id: string; producer_step: string; s
     ...progressEnums.flatMap((typeSource) => [typeSource, ""]),
     ...authoringEnums.flatMap((typeSource) => [typeSource, ""]),
     "export type FeaStructuralTimeStepPolicy = { fixed: { interval_count: number } };",
+    "export interface FeaModalTruncationPolicy { requested_mode_count: number; eigenspace_relative_tolerance: number; }",
+    "export interface FeaModalConvergencePolicy { relative_residual_tolerance: number; maximum_subspace_iterations: number; }",
     "",
     physicsFamily,
     "",
