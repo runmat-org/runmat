@@ -19,6 +19,29 @@ function read(relativePath) {
   return fs.readFileSync(path.join(repo, relativePath), "utf8");
 }
 
+function enforceAtomicEvidenceWriters() {
+  const writers = [
+    "scripts/development/audit-builtin-documentation-cutover.mjs",
+    "scripts/development/builtin-migration-factory.mjs",
+    "scripts/development/builtin-migration/example-gate-input.mjs",
+    "scripts/development/builtin-migration/gate-adapter.mjs",
+    "scripts/development/freeze-builtin-module-composition-baseline.mjs",
+    "scripts/development/generate-builtin-module-composition.mjs",
+    "scripts/development/scaffold-builtin-module-composition-baseline.mjs",
+  ];
+  const directWrite = /\b(?:fs\.)?(?:promises\.)?writeFile(?:Sync)?\s*\(/;
+  for (const sourcePath of writers) {
+    const source = read(sourcePath);
+    if (!source.includes("atomic-evidence-publication.mjs")
+        || !/\bpublishEvidenceBytes\s*\(/.test(source)) {
+      fail(`${sourcePath} must publish create-new output through publishEvidenceBytes`);
+    }
+    if (directWrite.test(source)) {
+      fail(`${sourcePath} must not bypass atomic evidence publication with a direct file write`);
+    }
+  }
+}
+
 function rustSources(relativeDirectory) {
   const root = path.join(repo, relativeDirectory);
   if (!fs.existsSync(root)) return [];
@@ -3256,6 +3279,7 @@ for (const modulePackage of [
 }
 
 enforceTransientSequenceQuarantine();
+enforceAtomicEvidenceWriters();
 
 if (failed) process.exit(1);
 console.log("crate architecture boundaries are valid");

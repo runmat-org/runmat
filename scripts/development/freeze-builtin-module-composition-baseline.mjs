@@ -3,6 +3,9 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 
+import {
+  canonicalEvidencePath, publishEvidenceBytes,
+} from "./builtin-migration/atomic-evidence-publication.mjs";
 import { parseModuleCompositionBaselineCandidate } from "./builtin-migration/module-composition/baseline-candidate.mjs";
 import { freezeReviewedModuleCompositionBaseline } from "./builtin-migration/module-composition/baseline-authority.mjs";
 import { sealModuleCompositionBaselineReview } from "./builtin-migration/module-composition/baseline-review.mjs";
@@ -14,7 +17,10 @@ try {
     const candidate = parseModuleCompositionBaselineCandidate(read(options.candidate), options.repository, options.trustedSourceSigner);
     const review = sealModuleCompositionBaselineReview(read(options.review), candidate);
     const baseline = freezeReviewedModuleCompositionBaseline(candidate, review);
-    fs.writeFileSync(path.resolve(options.output), `${JSON.stringify(baseline, null, 2)}\n`, { flag: "wx" });
+    publishEvidenceBytes(
+      canonicalEvidencePath(path.resolve(options.output)),
+      `${JSON.stringify(baseline, null, 2)}\n`,
+    );
     process.stdout.write(`${baseline.digest}\n`);
   }
 } catch (error) {

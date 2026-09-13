@@ -3,6 +3,9 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import {
+  canonicalEvidencePath, publishEvidenceBytes,
+} from "./builtin-migration/atomic-evidence-publication.mjs";
 import { renderModuleCompositionProduct } from "./builtin-migration/module-composition/generate.mjs";
 import { parseCompositionProduct } from "./builtin-migration/module-composition/schema.mjs";
 
@@ -13,14 +16,7 @@ if (product.state === "absent") {
   // A successful absent product intentionally leaves the create-new output unmaterialized.
 } else {
   const source = renderModuleCompositionProduct(product);
-  const temporary = `${output}.runmat-${process.pid}.tmp`;
-  try {
-    fs.writeFileSync(temporary, source, { encoding: "utf8", flag: "wx" });
-    fs.linkSync(temporary, output);
-    fs.unlinkSync(temporary);
-  } finally {
-    fs.rmSync(temporary, { force: true });
-  }
+  publishEvidenceBytes(output, source);
 }
 
 function outputArgument(argumentsList) {
@@ -29,7 +25,7 @@ function outputArgument(argumentsList) {
   }
   const result = path.resolve(argumentsList[1]);
   if (result === path.parse(result).root) throw new Error("composition output must be a file path");
-  return result;
+  return canonicalEvidencePath(result);
 }
 
 function lstatOrNull(target) {

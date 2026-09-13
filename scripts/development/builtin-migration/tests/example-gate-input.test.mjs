@@ -21,7 +21,7 @@ test("adapter stages a canonical example manifest at its fixed admitted-temp pat
 
     assert.throws(
       () => stageExampleGateInput(fixture, temporary, expectation(temporary, ["alpha", "beta"])),
-      /EEXIST/,
+      /target already exists/,
     );
   });
 });

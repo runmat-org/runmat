@@ -4,9 +4,23 @@ import path from "node:path";
 
 import { syncDirectory } from "./directory-durability.mjs";
 
+export function canonicalEvidencePath(target, options = {}) {
+  const filesystem = options.filesystem ?? fs;
+  const remainder = [];
+  let existing = path.resolve(target);
+  while (!filesystem.existsSync(existing)) {
+    const parent = path.dirname(existing);
+    if (parent === existing) throw new Error(`cannot resolve an existing ancestor for ${target}`);
+    remainder.unshift(path.basename(existing));
+    existing = parent;
+  }
+  return path.join(filesystem.realpathSync(existing), ...remainder);
+}
+
 export function publishEvidenceBytes(target, bytes, options = {}) {
   const filesystem = options.filesystem ?? fs;
   const platform = options.platform ?? process.platform;
+  const mode = publicationMode(options.mode);
   const absolute = path.resolve(target);
   const parent = path.dirname(absolute);
   if (absolute === parent) throw new Error("evidence target must name a file");
@@ -17,7 +31,7 @@ export function publishEvidenceBytes(target, bytes, options = {}) {
   const token = options.temporaryToken ?? crypto.randomBytes(16).toString("hex");
   if (!/^[A-Za-z0-9_-]+$/.test(token)) throw new Error("temporary token is invalid");
   const temporary = path.join(parent, `.${path.basename(absolute)}.runmat-new-${token}`);
-  const staged = stageBytes(temporary, contents, filesystem, platform);
+  const staged = stageBytes(temporary, contents, mode, filesystem, platform);
   let published = false;
   try {
     options.hooks?.afterStage?.({ target: absolute, temporary });
@@ -43,6 +57,13 @@ export function publishEvidenceBytes(target, bytes, options = {}) {
     }
     throw error;
   }
+}
+
+function publicationMode(value = 0o666) {
+  if (!Number.isInteger(value) || value < 0 || value > 0o777) {
+    throw new TypeError("evidence publication mode must contain only Unix permission bits");
+  }
+  return value;
 }
 
 function exactBytes(value) {
@@ -75,7 +96,7 @@ function rejectExistingTarget(target, filesystem) {
   if (state !== null) throw new Error(`evidence target already exists: ${target}`);
 }
 
-function stageBytes(temporary, contents, filesystem, platform) {
+function stageBytes(temporary, contents, mode, filesystem, platform) {
   const constants = filesystem.constants ?? fs.constants;
   if (platform !== "win32" && constants.O_NOFOLLOW === undefined) {
     throw new Error("exclusive no-follow staging is unavailable on this platform");
@@ -86,7 +107,7 @@ function stageBytes(temporary, contents, filesystem, platform) {
   let identity = null;
   let failure = null;
   try {
-    descriptor = filesystem.openSync(temporary, flags, 0o600);
+    descriptor = filesystem.openSync(temporary, flags, mode);
     identity = filesystem.fstatSync(descriptor);
     if (!identity.isFile()) throw new Error("evidence temporary is not a regular file");
     filesystem.writeFileSync(descriptor, contents);

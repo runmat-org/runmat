@@ -852,13 +852,16 @@ test("reviewed target disposition may replace an existing catalog authority", ()
 });
 
 test("compile-dispositions CLI expands only a baseline-bound reviewed input", () => {
-  const fixture = controlledFixture();
+  const repository = repositoryFixture();
+  const inventory = buildInventory(repository, undefined, {
+    revision: REVISION, compiledInventory: compiledInventoryFixture(),
+  });
   const directory = createTemporaryDirectory("runmat-disposition-review-");
   const inventoryPath = path.join(directory, "inventory.json");
   const reviewPath = path.join(directory, "review.json");
   const outputPath = path.join(directory, "dispositions.json");
-  fs.writeFileSync(inventoryPath, JSON.stringify(fixture.inventory));
-  fs.writeFileSync(reviewPath, JSON.stringify(dispositionReviewFixture(fixture.inventory)));
+  fs.writeFileSync(inventoryPath, JSON.stringify(inventory));
+  fs.writeFileSync(reviewPath, JSON.stringify(dispositionReviewFixture(inventory)));
   const cli = path.resolve("scripts/development/builtin-migration-factory.mjs");
   const result = spawnSync(process.execPath, [
     cli, "compile-dispositions", "--review", reviewPath,
@@ -866,6 +869,14 @@ test("compile-dispositions CLI expands only a baseline-bound reviewed input", ()
   ], { encoding: "utf8" });
   assert.equal(result.status, 0, result.stderr);
   assert.doesNotThrow(() => validateDispositionInput(JSON.parse(fs.readFileSync(outputPath))));
+  const publishedBytes = fs.readFileSync(outputPath);
+  const occupied = spawnSync(process.execPath, [
+    cli, "compile-dispositions", "--review", reviewPath,
+    "--baseline-inventory", inventoryPath, "--output", outputPath,
+  ], { encoding: "utf8" });
+  assert.equal(occupied.status, 2);
+  assert.match(occupied.stderr, /target already exists/);
+  assert.deepEqual(fs.readFileSync(outputPath), publishedBytes);
 
   const missingReview = spawnSync(process.execPath, [
     cli, "compile-dispositions", "--baseline-inventory", inventoryPath,
