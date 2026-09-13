@@ -14,6 +14,9 @@ export function parseFactoryCliArguments(arguments_) {
     const option = remaining.shift();
     const field = OPTION_FIELDS[option];
     if (!field) throw new Error(`unknown option ${option}`);
+    if (suppliedOptions.includes(option)) {
+      throw new Error(`${command} does not accept repeated options`);
+    }
     suppliedOptions.push(option);
     options[field] = requireValue(remaining, option);
   }

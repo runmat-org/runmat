@@ -1,5 +1,6 @@
 import { compareCodePoint } from "../constants.mjs";
 import { evidenceDigest } from "../evidence.mjs";
+import { parseCanonicalReviewedEvidence } from "../reviewed-evidence.mjs";
 import { array, exact, kind, nonempty, stableId } from "../schema.mjs";
 import {
   canonicalCohorts,
@@ -13,7 +14,6 @@ import {
   parseIdentityTarget,
   parseComponentId,
   parseReviewBaseline,
-  parseReviewedEvidence,
   TOPOLOGY_PROGRAM,
 } from "./schema.mjs";
 import { validateBundleComposition } from "./composition.mjs";
@@ -26,7 +26,7 @@ export function parseCohortReview(value, componentIndex) {
   parseReviewBaseline(value.baseline);
   const cohorts = canonicalCohorts(value.cohorts, "cohort review cohorts");
   if (array(value.ambiguities, "cohort review ambiguities", { empty: true }).length !== 0) throw new Error("reviewed cohort review cannot retain ambiguities");
-  parseReviewedEvidence(value.review, "cohort review review");
+  parseCanonicalReviewedEvidence(value.review, "cohort review review");
 
   const components = parseComponentIndex(componentIndex);
   const bundles = array(value.bundles, "cohort review bundles").map((entry, index) => parseReviewedBundle(entry, index, components, new Set(cohorts)));
@@ -69,7 +69,7 @@ export function parseReviewedBundle(value, index, componentIndex, declaredCohort
   nonempty(value.atomic_reason, `${id} atomic reason`);
   const identityTargets = array(value.identity_targets, `${id} identity targets`).map((entry, targetIndex) => parseIdentityTarget(entry, `${id} identity target ${targetIndex}`));
   canonicalUnique(identityTargets, (entry) => entry.identity.toLowerCase(), `${id} identity targets`);
-  parseReviewedEvidence(value.review, `${id} review`);
+  parseCanonicalReviewedEvidence(value.review, `${id} review`);
 
   const componentIdentities = [];
   for (const component of authorityComponents) {

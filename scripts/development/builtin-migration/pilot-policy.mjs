@@ -1,12 +1,13 @@
 import { compareCodePoint } from "./constants.mjs";
 import { evidenceDigest } from "./evidence.mjs";
 import { deepImmutable } from "./immutable.mjs";
+import { parseCanonicalReviewedEvidence } from "./reviewed-evidence.mjs";
 import {
   array, enumValue, exact, integer, kind, stableId,
 } from "./schema.mjs";
 import { assertValidatedTopologyView } from "./topology/freeze.mjs";
 import {
-  canonicalCohorts, canonicalStrings, parseCohort, parseReviewedEvidence,
+  canonicalCohorts, canonicalStrings, parseCohort,
 } from "./topology/schema.mjs";
 
 export const PILOT_POLICY_KIND = "runmat-builtin-migration-pilot-policy";
@@ -41,7 +42,7 @@ export function parsePilotPolicy(value, topologyValue, prerequisitesByBundle) {
   const counts = deriveCounts(topology, waveByBundle);
   parseDerivedCounts(value.derived_counts, counts);
   const admission = parseAdmission(value.admission);
-  parseReviewedEvidence(value.review, "pilot policy review");
+  parseCanonicalReviewedEvidence(value.review, "pilot policy review");
   const parsed = deepImmutable({
     value,
     digest: evidenceDigest(value),

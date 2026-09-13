@@ -7,6 +7,7 @@ import { executionTargetKey, parseExecutionTargets } from "../execution-target.m
 import { GATE_PRODUCERS } from "../gate-kinds.mjs";
 import { GATE_PARSERS, parseGatePlans, parseGateProgram } from "../gate-plan.mjs";
 import { parseIntegrationProductReferences } from "../integration-products.mjs";
+import { parseUniqueReviewedEvidence } from "../reviewed-evidence.mjs";
 import {
   parseIdentityForms, parseImplementationAuthority, parsePublicIdentity,
 } from "../identity-authority.mjs";
@@ -84,7 +85,7 @@ function parseBundlePolicy(value, id, identities, inventory, parsePlans) {
   parsePlans(value.gate_plans);
   nonempty(value.owner_role, `${id} owner role`);
   parseComplexity(value.complexity, `${id} complexity`);
-  parseReviewedEvidence(value.review, `${id} bundle control review`);
+  parseUniqueReviewedEvidence(value.review, `${id} bundle control review`);
   return value;
 }
 
@@ -108,7 +109,7 @@ export function parseIdentityControlPolicy(value, id) {
   parseAuthorities(value.expected_authorities, id);
   validateAuthorityCoherence(value, id);
   nonempty(value.owner, `${id} owner`);
-  parseReviewedEvidence(value.review, `${id} identity control review`);
+  parseUniqueReviewedEvidence(value.review, `${id} identity control review`);
   return value;
 }
 
@@ -116,7 +117,7 @@ export function parseProgramProfile(value, id) {
   stableId(id, "global program profile id");
   exact(value, ["program", "review"], `${id} global program profile`);
   parseGateProgram(value.program, id);
-  parseReviewedEvidence(value.review, `${id} global program profile review`);
+  parseUniqueReviewedEvidence(value.review, `${id} global program profile review`);
   return value;
 }
 
@@ -133,7 +134,7 @@ export function parseExceptionManifestPolicy(value, bundles) {
     return id;
   });
   requireCanonicalUnique(ids, "exception entries");
-  parseReviewedEvidence(value.review, "exception manifest review");
+  parseUniqueReviewedEvidence(value.review, "exception manifest review");
   return value;
 }
 
@@ -169,13 +170,6 @@ export function validateStorageTargetCoverage(storagePolicy, executionTargets) {
   if (JSON.stringify(profileTargets) !== JSON.stringify(reviewedTargets)) {
     throw new Error("storage host profiles must exactly cover every reviewed execution target");
   }
-}
-
-export function parseReviewedEvidence(value, label) {
-  exact(value, ["status", "evidence"], label);
-  if (value.status !== "reviewed") throw new Error(`${label} must be reviewed`);
-  uniqueStrings(value.evidence, `${label} evidence`);
-  return value;
 }
 
 function parseGateReferences(value, id) {

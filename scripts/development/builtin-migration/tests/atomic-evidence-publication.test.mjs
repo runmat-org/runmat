@@ -4,7 +4,7 @@ import path from "node:path";
 import test from "node:test";
 
 import {
-  canonicalEvidencePath, publishEvidenceBytes,
+  canonicalEvidencePath, EvidenceTargetExistsError, publishEvidenceBytes,
 } from "../atomic-evidence-publication.mjs";
 import {
   cleanupTemporaryDirectories, createTemporaryDirectory,
@@ -73,9 +73,16 @@ test("existing regular, directory, and symbolic-link targets are never replaced"
   for (const target of [existing, directory, symlink]) {
     assert.throws(
       () => publishEvidenceBytes(target, "replacement\n", { temporaryToken: "exists" }),
-      /target already exists/,
+      (error) => error instanceof EvidenceTargetExistsError
+        && error.code === "RUNMAT_EVIDENCE_TARGET_EXISTS"
+        && error.target === target,
     );
   }
+  assert.equal(
+    new Error(`evidence target already exists: ${existing}`) instanceof EvidenceTargetExistsError,
+    false,
+    "matching message text must not acquire the typed idempotency discriminator",
+  );
   assert.equal(fs.readFileSync(existing, "utf8"), "original\n");
   assert.deepEqual(temporaryEntries(root), []);
 });
@@ -105,10 +112,13 @@ test("symbolic-link and non-directory parent components are rejected", () => {
 test("a target racing publication wins without being overwritten", () => {
   const root = createTemporaryDirectory("runmat-evidence-publication-");
   const target = path.join(root, "evidence.json");
-  assert.throws(() => publishEvidenceBytes(target, "ours\n", {
-    temporaryToken: "race",
-    hooks: { beforePublish() { fs.writeFileSync(target, "racer\n"); } },
-  }), /EEXIST|already exists/);
+  assert.throws(
+    () => publishEvidenceBytes(target, "ours\n", {
+      temporaryToken: "race",
+      hooks: { beforePublish() { fs.writeFileSync(target, "racer\n"); } },
+    }),
+    (error) => error instanceof EvidenceTargetExistsError && error.target === target,
+  );
   assert.equal(fs.readFileSync(target, "utf8"), "racer\n");
   assert.deepEqual(temporaryEntries(root), []);
 });

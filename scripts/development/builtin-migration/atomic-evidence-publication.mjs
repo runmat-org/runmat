@@ -4,6 +4,15 @@ import path from "node:path";
 
 import { syncDirectory } from "./directory-durability.mjs";
 
+export class EvidenceTargetExistsError extends Error {
+  constructor(target, options = {}) {
+    super(`evidence target already exists: ${target}`, options);
+    this.name = "EvidenceTargetExistsError";
+    this.code = "RUNMAT_EVIDENCE_TARGET_EXISTS";
+    this.target = target;
+  }
+}
+
 export function canonicalEvidencePath(target, options = {}) {
   const filesystem = options.filesystem ?? fs;
   const remainder = [];
@@ -39,7 +48,7 @@ export function publishEvidenceBytes(target, bytes, options = {}) {
     rejectExistingTarget(absolute, filesystem);
     assertOwnedTemporary(temporary, staged, filesystem, platform);
     options.hooks?.beforePublish?.({ target: absolute, temporary });
-    filesystem.linkSync(temporary, absolute);
+    linkWithoutReplacement(temporary, absolute, filesystem);
     published = true;
     filesystem.unlinkSync(temporary);
     const durability = syncDirectory(parent, { filesystem, platform });
@@ -54,6 +63,17 @@ export function publishEvidenceBytes(target, bytes, options = {}) {
         `evidence target was published but publication finalization failed: ${error.message}`,
         { cause: error },
       );
+    }
+    throw error;
+  }
+}
+
+function linkWithoutReplacement(temporary, target, filesystem) {
+  try {
+    filesystem.linkSync(temporary, target);
+  } catch (error) {
+    if (error?.code === "EEXIST" && lstatOrNull(target, filesystem) !== null) {
+      throw new EvidenceTargetExistsError(target, { cause: error });
     }
     throw error;
   }
@@ -93,7 +113,7 @@ function ensureDirectory(directory, create, filesystem, platform) {
 
 function rejectExistingTarget(target, filesystem) {
   const state = lstatOrNull(target, filesystem);
-  if (state !== null) throw new Error(`evidence target already exists: ${target}`);
+  if (state !== null) throw new EvidenceTargetExistsError(target);
 }
 
 function stageBytes(temporary, contents, mode, filesystem, platform) {

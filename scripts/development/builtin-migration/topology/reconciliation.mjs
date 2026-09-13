@@ -1,5 +1,6 @@
 import { compareCodePoint } from "../constants.mjs";
 import { evidenceDigest } from "../evidence.mjs";
+import { parseCanonicalReviewedEvidence } from "../reviewed-evidence.mjs";
 import { digest, enumValue, exact, identity, kind, nonempty, stableId } from "../schema.mjs";
 import { parseBoundBaseline, parseBoundReviewDigests, validateAffectedBundleUpdates } from "./artifact-schema.mjs";
 import { claimsMap, exactComponentIdentityUnion, validateTopologyClaims } from "./components.mjs";
@@ -7,7 +8,6 @@ import {
   canonicalStrings,
   canonicalUnique,
   parseCohort,
-  parseReviewedEvidence,
   parseTargetPackage,
   TOPOLOGY_PROGRAM,
 } from "./schema.mjs";
@@ -23,7 +23,7 @@ export function parseReconciliationArtifact(value, context) {
   parseBoundBaseline(value.baseline, context?.baseline, "topology reconciliation");
   parseBoundReviewDigests(value.review_digests, context?.reviewDigests, "topology reconciliation");
   digest(value.discrepancy_digest, "topology reconciliation discrepancy digest");
-  parseReviewedEvidence(value.review, "topology reconciliation review");
+  parseCanonicalReviewedEvidence(value.review, "topology reconciliation review");
 
   const discrepancies = claimDiscrepancies(context?.componentIndex, context?.claims);
   const observedDiscrepancyDigest = evidenceDigest(discrepancies);

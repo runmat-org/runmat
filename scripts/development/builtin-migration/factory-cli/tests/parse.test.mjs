@@ -15,6 +15,7 @@ test("factory help exposes representative and review-validation command contract
     /validate-bundle-control-review .*--bundle-review PATH --bundle ID/,
   );
   assert.match(help, /pilot-session-start .*--authority-root PATH/);
+  assert.match(help, /initialize-queue .*--initial-queue-review PATH/);
   assert.match(help, /pilot-transition .*--evaluation PATH --evaluation-digest SHA256/);
   assert.match(help, /never production authority/);
   assert.deepEqual(parseFactoryCliArguments(["--help"]), { help: true });
@@ -130,4 +131,44 @@ test("pilot lifecycle commands require exact authority references", () => {
   ]);
   assert.equal(transition.command, "pilot-transition");
   assert.equal(transition.authorityRoot, "authority");
+});
+
+test("initial queue publication requires its exact reviewed authority", () => {
+  assert.throws(
+    () => parseFactoryCliArguments(["initialize-queue", ...controlAuthorityArguments()]),
+    /requires --authority-root, --initial-queue-review, and --initial-queue-review-digest/,
+  );
+  const parsed = parseFactoryCliArguments([
+    "initialize-queue", ...controlAuthorityArguments(),
+    "--authority-root", "authority", "--initial-queue-review", "review.json",
+    "--initial-queue-review-digest", "sha256:abc",
+  ]);
+  assert.equal(parsed.command, "initialize-queue");
+  assert.equal(parsed.initialQueueReview, "review.json");
+  assert.throws(() => parseFactoryCliArguments([
+    "initialize-queue", ...controlAuthorityArguments(),
+    "--authority-root", "authority", "--initial-queue-review", "one.json",
+    "--initial-queue-review", "two.json",
+    "--initial-queue-review-digest", "sha256:abc",
+  ]), /does not accept repeated options/);
+  assert.throws(() => parseFactoryCliArguments([
+    "initialize-queue", ...controlAuthorityArguments(),
+    "--authority-root", "authority", "--initial-queue-review", "review.json",
+    "--initial-queue-review-digest", "sha256:abc", "--request", "ignored.json",
+  ]), /initialize-queue does not accept --request/);
+});
+
+test("all factory commands reject duplicate option spellings", () => {
+  assert.throws(() => parseFactoryCliArguments([
+    "inventory", "--compiled-inventory", "one.json",
+    "--compiled-inventory", "two.json",
+  ]), /inventory does not accept repeated options/);
+});
+
+test("initial queue review options are rejected outside their owning command", () => {
+  for (const option of ["--initial-queue-review", "--initial-queue-review-digest"]) {
+    assert.throws(() => parseFactoryCliArguments([
+      "inventory", "--compiled-inventory", "compiled.json", option, "ignored.json",
+    ]), new RegExp(`${option} is not accepted by inventory`));
+  }
 });

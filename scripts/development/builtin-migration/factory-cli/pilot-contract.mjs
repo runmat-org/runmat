@@ -4,7 +4,6 @@ export const PILOT_COMMANDS = Object.freeze([
 ]);
 
 export const PILOT_OPTION_FIELDS = Object.freeze({
-  "--authority-root": "authorityRoot",
   "--lease-digest": "leaseDigest",
   "--start": "start",
   "--start-digest": "startDigest",
