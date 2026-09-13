@@ -26,7 +26,7 @@ export function pilotFixture() {
     cohortCount("C07", 1, 1, 1, 0),
   ];
   const policy = {
-    schema_version: 1,
+    schema_version: 2,
     kind: "runmat-builtin-migration-pilot-policy",
     pilot_id: "rm-1064-accelerated",
     waves: [1, 2, 3, 4, 5, 6, 7].map((order) => ({
@@ -42,8 +42,8 @@ export function pilotFixture() {
       cohorts,
     },
     admission: {
-      minimum_public_identities_per_aggregate_hour: 4.5,
-      maximum_elapsed_hours: 48,
+      minimum_public_identities_per_aggregate_hour: { numerator: 9, denominator: 2 },
+      maximum_elapsed_milliseconds: 172_800_000,
       required_waived_gate_count: 0,
       ordinary_gate_policy: "all-required-gates-must-pass",
       below_target_obligation: {
@@ -103,7 +103,7 @@ export function reviewedPilotPolicy(topology, prerequisitesByBundle, selectedBun
     counts.set(bundle.cohort, count);
   }
   return {
-    schema_version: 1,
+    schema_version: 2,
     kind: "runmat-builtin-migration-pilot-policy",
     pilot_id: "fixture-accelerated-pilot",
     waves,
@@ -115,8 +115,8 @@ export function reviewedPilotPolicy(topology, prerequisitesByBundle, selectedBun
       cohorts: [...counts.values()].sort((left, right) => compareCodePoint(left.cohort, right.cohort)),
     },
     admission: {
-      minimum_public_identities_per_aggregate_hour: 1,
-      maximum_elapsed_hours: 48,
+      minimum_public_identities_per_aggregate_hour: { numerator: 1, denominator: 1 },
+      maximum_elapsed_milliseconds: 172_800_000,
       required_waived_gate_count: 0,
       ordinary_gate_policy: "all-required-gates-must-pass",
       below_target_obligation: {

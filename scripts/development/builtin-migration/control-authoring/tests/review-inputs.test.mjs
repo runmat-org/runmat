@@ -309,7 +309,7 @@ test("reviewed pilot policy survives the complete control authority chain exactl
   assert.throws(() => control.pilotPolicy.waveByBundle.set("invented", 1), /immutable/);
 
   const forgedCandidate = structuredClone(candidate);
-  forgedCandidate.pilot_policy.admission.maximum_elapsed_hours += 1;
+  forgedCandidate.pilot_policy.admission.maximum_elapsed_milliseconds += 1;
   resign(forgedCandidate);
   assert.throws(
     () => parseControlCandidate(forgedCandidate, candidate),
@@ -340,7 +340,7 @@ test("control authoring rejects pilot policy count, membership, and digest drift
   const fixture = reviewFixture();
   const directory = writeReviewSet(fixture);
   const global = readJson(path.join(directory, "global.json"));
-  global.pilot_policy.admission.maximum_elapsed_hours += 1;
+  global.pilot_policy.admission.maximum_elapsed_milliseconds += 1;
   writeJson(path.join(directory, "global.json"), global);
   rewriteManifestDigests(directory);
   assert.throws(
