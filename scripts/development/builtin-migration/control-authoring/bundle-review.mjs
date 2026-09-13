@@ -31,6 +31,7 @@ export function parseBundleControlReview(
     globalReview.moduleCompositionBaseline,
     globalReview.integrationProducts,
     new Map([[bundle.id, reviewedCompositionBundle(bundle, value.bundle_control)]]),
+    { deferEffectiveSequence: true },
   );
   const identityControls = parseIdentityControls(value.identity_controls, bundle, scaffold, topology);
   parseReviewedEvidence(value.review, `${bundle.id} bundle review artifact`);
