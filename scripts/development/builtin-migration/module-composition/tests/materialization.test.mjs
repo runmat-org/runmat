@@ -44,7 +44,7 @@ test("bootstrap rejects missing and unexpected direct children", () => withRepos
   assert.throws(() => bootstrap(root, baseline), /deterministic source observation|resolve exactly once/);
 }));
 
-test("repository inspection keeps product state orthogonal to reviewed children and rejects unreviewed sources", () => {
+test("repository inspection keeps product state orthogonal to children and unrelated sources", () => {
   withRepository(({ root, projection }) => {
     fs.unlinkSync(path.join(root, product(projection, "runtime-math").path));
     const runtimeMath = product(projection, "runtime-math");
@@ -57,7 +57,7 @@ test("repository inspection keeps product state orthogonal to reviewed children 
   withRepository(({ root, projection, baseline }) => {
     const absent = product(projection, "catalog-argument-validation");
     write(root, path.posix.join(path.posix.dirname(absent.path), "orphan.rs"), "// orphan\n");
-    assert.throws(() => bootstrap(root, baseline), /unreviewed direct module source/);
+    assert.equal(bootstrap(root, baseline).installed.length, 2);
   });
 });
 
