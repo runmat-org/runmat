@@ -5,6 +5,7 @@ import path from "node:path";
 import { contentDigest, evidenceDigest } from "../evidence.mjs";
 import { loadControlReviewSet } from "../control-authoring/review-set.mjs";
 import {
+  fixtureCatalogCompositionChild, fixtureCompositionChild,
   fixtureIntegrationProducts, fixtureModuleCompositionBaseline,
   fixtureReviewedModuleCompositionBaseline, fixtureTargetPolicy,
 } from "./helpers.mjs";
@@ -20,7 +21,13 @@ export function sequentialReviewedControlSet({
   fs.mkdirSync(path.join(root, "bundles"), { recursive: true });
   const { profileByProgram, programProfiles } = programProfilesFor(bundleControls);
   const baseline = fixtureReviewedModuleCompositionBaseline(
-    fixtureModuleCompositionBaseline(new Map(), new Set(["runtime-math"])),
+    fixtureModuleCompositionBaseline(
+      new Map([
+        ["catalog-math", [fixtureCatalogCompositionChild()]],
+        ["runtime-math", [fixtureCompositionChild()]],
+      ]),
+      new Set(["catalog-math", "runtime-math"]),
+    ),
   );
   const global = globalReview({
     inventory, topology, scaffold, baseline, programProfiles, bundleControls,

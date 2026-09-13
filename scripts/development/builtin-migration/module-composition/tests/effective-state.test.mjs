@@ -64,7 +64,11 @@ test("baseline-only products do not require an unrelated active bundle transitio
     lease: fixture.lease,
   });
 
-  assert.ok(projection.products.every((product) => product.children.length === 0));
+  assert.deepEqual(
+    projection.products.find((product) => product.product_id === "runtime-math").children,
+    fixture.control.moduleComposition.baseline.products
+      .find((product) => product.product_id === "runtime-math").children,
+  );
 });
 
 test("effective composition requires branded queue authority and its exact lease checkpoint", () => {

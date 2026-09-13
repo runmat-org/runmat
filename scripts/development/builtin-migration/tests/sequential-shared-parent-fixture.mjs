@@ -29,7 +29,7 @@ export { compositionChild };
 
 export function sequentialSharedParentFixture({ parallelBundles = false } = {}) {
   const repository = repositoryFixture({
-    identities: SEQUENTIAL_IDENTITIES, composition: true,
+    identities: SEQUENTIAL_IDENTITIES, composition: true, compositionBaseChild: true,
   });
   const revision = repositoryRevision(repository);
   const compiledInventory = compiledInventoryFixture(SEQUENTIAL_IDENTITIES);

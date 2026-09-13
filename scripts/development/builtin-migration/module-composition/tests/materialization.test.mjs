@@ -372,7 +372,7 @@ test("operational materialization derives authority and writes active plus basel
     lease: fixture.lease,
   });
   assert.deepEqual(result.product_ids, moduleCompositionProductRegistry().map((entry) => entry.product_id));
-  assert.deepEqual(result.installed.map((entry) => entry.product_id), ["runtime-math"]);
+  assert.deepEqual(result.installed.map((entry) => entry.product_id), ["catalog-math", "runtime-math"]);
   const effective = fixture.control.moduleComposition.transitions.get(fixture.bundleId).changes[0].after;
   assert.match(fs.readFileSync(path.join(fixture.repository, "crates/runmat-runtime/src/builtins/math/mod.rs"), "utf8"), new RegExp(`mod ${effective.module};`));
 });

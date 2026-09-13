@@ -29,7 +29,7 @@ export function compositionChild(identity) {
     role: "group",
     visibility: "public",
     declaration_condition: { kind: "always" },
-    declaration_order: identity === "alpha" ? 0 : 1,
+    declaration_order: identity === "alpha" ? 1 : 2,
     macro_use: false,
     reexports: [],
     aggregation_sources: [],

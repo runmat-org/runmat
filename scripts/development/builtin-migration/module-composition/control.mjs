@@ -64,11 +64,12 @@ export function validateModuleCompositionControl(
     }
     transitions.set(bundleId, transition);
   }
-  if (!deferEffectiveSequence) {
-    validateEffectiveSequence(baseline, transitions, bundles);
-  }
+  const effective = deferEffectiveSequence
+    ? null
+    : validateEffectiveSequence(baseline, transitions, bundles);
   return {
     baseline,
+    effective,
     transitions: new Map([...transitions].sort(([left], [right]) => compareCodePoint(left, right))),
   };
 }
@@ -83,6 +84,7 @@ function validateEffectiveSequence(baseline, transitions, bundles) {
       effective = applyModuleCompositionTransitions(effective, [transition]);
     }
   }
+  return effective;
 }
 
 function validateSharedProductOrdering(transitions, bundles) {
