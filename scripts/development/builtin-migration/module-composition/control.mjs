@@ -42,6 +42,9 @@ export function validateModuleCompositionControl(
     if (JSON.stringify(changedProducts) !== JSON.stringify(productIds)) {
       throw new Error(`${bundleId}: composition transition must exactly cover its reviewed composition products`);
     }
+    const referencedProductPaths = new Set(
+      productIds.map((productId) => integrationProducts.get(productId).path),
+    );
     for (const change of transition.changes) {
       const key = `${change.product_id}\0${(change.after ?? change.before).module}`;
       const priorBundle = changedKeys.get(key);
@@ -50,7 +53,8 @@ export function validateModuleCompositionControl(
       }
       changedKeys.set(key, bundleId);
       for (const child of [change.before, change.after].filter(Boolean)) {
-        if (!pathAllowed(bundle.authored_write_set, child.source_path)) {
+        if (!pathAllowed(bundle.authored_write_set, child.source_path)
+            && !referencedProductPaths.has(child.source_path)) {
           throw new Error(`${bundleId}: composition child ${child.source_path} is outside its authored scope`);
         }
       }
