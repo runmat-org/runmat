@@ -105,6 +105,35 @@ test("migration inventory snapshots generated catalog alias composition", () => 
     entry.path === "crates/runmat-builtins/src/catalog/aliases/mod.rs"));
 });
 
+test("migration inventory snapshots the module composition generator", () => {
+  const repository = repositoryFixture();
+  const generatorPath = "scripts/development/generate-builtin-module-composition.mjs";
+  const generator = "// fixture module composition generator\n";
+  fs.writeFileSync(path.join(repository, generatorPath), generator);
+  execFileSync("git", ["add", generatorPath], { cwd: repository });
+  execFileSync("git", [
+    "-c", "user.name=RunMat Test", "-c", "user.email=test@runmat.invalid",
+    "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "module composition generator",
+  ], { cwd: repository });
+
+  const first = buildInventory(repository, undefined, {
+    compiledInventory: compiledInventoryFixture(),
+  });
+  const firstEntry = first.source.files.find((entry) => entry.path === generatorPath);
+  assert.ok(first.generated_from.includes(generatorPath));
+  assert.equal(firstEntry?.content_digest, contentDigest(Buffer.from(generator)));
+
+  fs.appendFileSync(path.join(repository, generatorPath), "// changed\n");
+  const changed = buildInventory(repository, undefined, {
+    compiledInventory: compiledInventoryFixture(),
+  });
+  const changedEntry = changed.source.files.find((entry) => entry.path === generatorPath);
+  assert.equal(changed.source.dirty, true);
+  assert.notEqual(changedEntry?.content_digest, firstEntry?.content_digest);
+  assert.notEqual(changed.source.digest, first.source.digest);
+  assert.notEqual(changed.digest, first.digest);
+});
+
 test("baseline prepare evidence and subject gate evidence retain distinct provenance", () => {
   const fixture = controlledFixture();
   const output = createTemporaryDirectory("runmat-review-");
