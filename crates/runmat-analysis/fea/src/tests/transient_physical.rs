@@ -300,31 +300,31 @@ fn prescribed_motion_blocks_restart_from_only_the_physical_checkpoint() {
     for (index, sample) in samples.into_iter().enumerate() {
         let snapshot = index + 1;
         assert_eq!(
-            sample.state.displacement,
+            sample.physical.state.displacement,
             uninterrupted.displacement_snapshots[snapshot]
                 .as_host_f64()
                 .unwrap()
         );
         assert_eq!(
-            sample.state.velocity,
+            sample.physical.state.velocity,
             uninterrupted.velocity_snapshots[snapshot]
                 .as_host_f64()
                 .unwrap()
         );
         assert_eq!(
-            sample.state.acceleration,
+            sample.physical.state.acceleration,
             uninterrupted.acceleration_snapshots[snapshot]
                 .as_host_f64()
                 .unwrap()
         );
         assert_eq!(
-            sample.support_work_j,
+            sample.physical.support_work_j,
             uninterrupted.support_work_snapshots[snapshot]
                 .as_host_f64()
                 .unwrap()[0]
         );
         assert_eq!(
-            sample.energy_balance_residual_j,
+            sample.physical.energy_balance_residual_j,
             uninterrupted.energy_balance_residual_snapshots[snapshot]
                 .as_host_f64()
                 .unwrap()[0]
@@ -494,23 +494,23 @@ fn fully_prescribed_tet4_advances_the_complete_motion_schedule() {
     for (index, sample) in first.samples().iter().chain(second.samples()).enumerate() {
         let snapshot = index + 1;
         assert_eq!(
-            sample.state.displacement,
+            sample.physical.state.displacement,
             result.displacement_snapshots[snapshot]
                 .as_host_f64()
                 .unwrap()
         );
         assert_eq!(
-            sample.state.velocity,
+            sample.physical.state.velocity,
             result.velocity_snapshots[snapshot].as_host_f64().unwrap()
         );
         assert_eq!(
-            sample.state.acceleration,
+            sample.physical.state.acceleration,
             result.acceleration_snapshots[snapshot]
                 .as_host_f64()
                 .unwrap()
         );
         assert_eq!(
-            sample.support_work_j,
+            sample.physical.support_work_j,
             result.support_work_snapshots[snapshot]
                 .as_host_f64()
                 .unwrap()[0]

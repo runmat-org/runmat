@@ -1,6 +1,8 @@
 use runmat_analysis_core::{AccuracyTarget, ErrorContributionKind, RequiredAccuracyEvidence};
 use runmat_analysis_execution::{
-    decode_prepared_observation_history_checkpoint, AnalysisBridgeError, AnalysisBridgeResult,
+    decode_prepared_observation_history_checkpoint,
+    decode_prepared_structural_transient_result_assembly_request,
+    decode_prepared_structural_transient_segment, AnalysisBridgeError, AnalysisBridgeResult,
     AnalysisKernel, AnalysisKernelInvocation, AnalysisKernelOutput, AnalysisKernelOutputPartition,
 };
 use runmat_analysis_fea::constraints::{
@@ -14,7 +16,8 @@ use runmat_analysis_fea::execution::{
     ObservationPartitionReductionRequest, ResultPublicationRequest,
     SemanticStatePublicationRequest, StructuralLinearNumericalReceiptArtifact,
     StructuralLinearWorkload, StructuralLinearWorkloadResult, StructuralTransientBlockRequest,
-    StructuralTransientCheckpoint, StructuralTransientWorkload,
+    StructuralTransientCheckpoint, StructuralTransientNumericalReceipt,
+    StructuralTransientSolverResult, StructuralTransientWorkload,
 };
 use runmat_analysis_fea::planning::resource::{
     build_structural_resource_plan, validate_resource_usage_evidence, FeaResourcePlan,
@@ -72,11 +75,108 @@ impl AnalysisKernel for NativeAnalysisKernel {
             AnalysisWorkKind::SolveStructuralTransientBlock => {
                 execute_structural_transient_block(invocation)
             }
+            AnalysisWorkKind::AssembleStructuralTransientResult => {
+                execute_structural_transient_result_assembly(invocation)
+            }
             _ => Err(AnalysisBridgeError::Invalid(
                 "native analysis kernel does not yet implement this work kind".into(),
             )),
         }
     }
+}
+
+fn execute_structural_transient_result_assembly(
+    invocation: AnalysisKernelInvocation<'_>,
+) -> AnalysisBridgeResult<Vec<AnalysisKernelOutput>> {
+    let request_input = unique_input(
+        &invocation,
+        AnalysisNumericalObjectKind::StructuralTransientResultAssemblyRequest,
+    )?;
+    let request = decode_prepared_structural_transient_result_assembly_request(request_input)?;
+    let segment_inputs = invocation
+        .inputs
+        .iter()
+        .filter(|input| {
+            input.manifest.kind == AnalysisNumericalObjectKind::StructuralTransientSegment
+        })
+        .collect::<Vec<_>>();
+    if invocation.inputs.len() != request.segments.len() + 1
+        || segment_inputs.len() != request.segments.len()
+        || invocation.host.workload.outputs
+            != vec![
+                AnalysisNumericalObjectKind::SolverResult,
+                AnalysisNumericalObjectKind::NumericalReceipt,
+            ]
+        || invocation.host.workload.study != request.scope.study
+        || invocation.host.workload.step != request.scope.step
+        || invocation.host.workload.execution_plan != request.scope.execution_plan
+    {
+        return Err(AnalysisBridgeError::Invalid(
+            "structural transient result inputs or outputs differ from the workload contract"
+                .into(),
+        ));
+    }
+    let decoded = segment_inputs
+        .into_iter()
+        .map(|input| {
+            let segment = decode_prepared_structural_transient_segment(input)?;
+            if input.manifest.logical_identity != segment.manifest().identity.digest() {
+                return Err(AnalysisBridgeError::Identity(
+                    "structural transient segment object has the wrong logical identity",
+                ));
+            }
+            Ok(segment)
+        })
+        .collect::<AnalysisBridgeResult<Vec<_>>>()?;
+    let mut segments = Vec::with_capacity(decoded.len());
+    let mut remaining = decoded;
+    for expected in &request.segments {
+        let Some(position) = remaining
+            .iter()
+            .position(|segment| segment.manifest().identity == *expected)
+        else {
+            return Err(AnalysisBridgeError::Identity(
+                "structural transient result assembly is missing a requested segment",
+            ));
+        };
+        segments.push(remaining.remove(position));
+    }
+    if !remaining.is_empty() {
+        return Err(AnalysisBridgeError::Identity(
+            "structural transient result assembly contains an unrelated segment",
+        ));
+    }
+    let result = StructuralTransientSolverResult::assemble(&request, &segments)?;
+    let receipt = StructuralTransientNumericalReceipt::new(&result, &request, &segments)?;
+    let mut result_partitions = Vec::with_capacity(result.samples().len() + 1);
+    result_partitions.push(AnalysisKernelOutputPartition {
+        logical_identity: result.manifest().identity.digest(),
+        payload: result.manifest().canonical_bytes()?,
+    });
+    result_partitions.extend(
+        result
+            .samples()
+            .iter()
+            .map(|sample| {
+                Ok(AnalysisKernelOutputPartition {
+                    logical_identity: sample.identity.digest(),
+                    payload: sample.canonical_bytes()?,
+                })
+            })
+            .collect::<AnalysisBridgeResult<Vec<_>>>()?,
+    );
+    Ok(vec![
+        AnalysisKernelOutput::partitioned(
+            AnalysisNumericalObjectKind::SolverResult,
+            result.manifest().identity.digest(),
+            result_partitions,
+        ),
+        AnalysisKernelOutput::whole(
+            AnalysisNumericalObjectKind::NumericalReceipt,
+            receipt.identity.digest(),
+            receipt.canonical_bytes()?,
+        ),
+    ])
 }
 
 fn execute_structural_transient_block(
@@ -143,11 +243,19 @@ fn execute_structural_transient_block(
         },
     )
     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    let mut partitions = Vec::with_capacity(segment.samples().len() + 1);
+    let mut partitions = Vec::with_capacity(
+        segment.samples().len() + 1 + usize::from(segment.initial_sample().is_some()),
+    );
     partitions.push(AnalysisKernelOutputPartition {
         logical_identity: segment.manifest().identity.digest(),
         payload: segment.manifest().canonical_bytes()?,
     });
+    if let Some(initial) = segment.initial_sample() {
+        partitions.push(AnalysisKernelOutputPartition {
+            logical_identity: initial.identity.digest(),
+            payload: initial.canonical_bytes()?,
+        });
+    }
     partitions.extend(
         segment
             .samples()

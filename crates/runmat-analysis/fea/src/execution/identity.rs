@@ -75,9 +75,12 @@ identity_type!(StructuralExcitationSetIdentity);
 identity_type!(StructuralKinematicsIdentity);
 identity_type!(StructuralTransientSolverOptionsIdentity);
 identity_type!(StructuralTransientCheckpointIdentity);
+identity_type!(StructuralTransientCheckpointScopeIdentity);
 identity_type!(StructuralTransientBlockRequestIdentity);
 identity_type!(StructuralTransientSegmentIdentity);
 identity_type!(StructuralTransientSegmentSampleIdentity);
+identity_type!(StructuralTransientPhysicalSampleIdentity);
+identity_type!(StructuralTransientResultAssemblyRequestIdentity);
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

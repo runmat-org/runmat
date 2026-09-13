@@ -1,6 +1,7 @@
 use runmat_analysis_fea::execution::{
     AnalysisNumericalObjectKind, AnalysisPayloadPartition, AnalysisWorkloadIdentity,
-    StructuralTransientBlockRequest, StructuralTransientCheckpoint, StructuralTransientSegment,
+    StructuralTransientBlockRequest, StructuralTransientCheckpoint,
+    StructuralTransientPhysicalSample, StructuralTransientSegment,
     StructuralTransientSegmentManifest, StructuralTransientSegmentSample,
     StructuralTransientSegmentSampleIdentity, StructuralTransientWorkload,
 };
@@ -122,16 +123,27 @@ pub fn prepare_structural_transient_segment_objects(
 ) -> AnalysisBridgeResult<PreparedAnalysisObjects> {
     segment.validate()?;
     let manifest_bytes = segment.manifest().canonical_bytes()?;
+    let initial_bytes = segment
+        .initial_sample()
+        .map(StructuralTransientPhysicalSample::canonical_bytes)
+        .transpose()?;
     let sample_bytes = segment
         .samples()
         .iter()
         .map(StructuralTransientSegmentSample::canonical_bytes)
         .collect::<Result<Vec<_>, _>>()?;
-    let mut partitions = Vec::with_capacity(sample_bytes.len() + 1);
+    let mut partitions =
+        Vec::with_capacity(sample_bytes.len() + 1 + usize::from(initial_bytes.is_some()));
     partitions.push(AnalysisPayloadPartition {
         logical_identity: segment.manifest().identity.digest(),
         payload: &manifest_bytes,
     });
+    if let (Some(initial), Some(payload)) = (segment.initial_sample(), initial_bytes.as_ref()) {
+        partitions.push(AnalysisPayloadPartition {
+            logical_identity: initial.identity.digest(),
+            payload,
+        });
+    }
     partitions.extend(
         segment
             .samples()
@@ -164,6 +176,7 @@ pub fn decode_prepared_structural_transient_segment(
         &prepared.partition_payload(prepared.manifest.logical_identity)?,
     )?;
     let expected_partitions = std::iter::once(manifest.identity.digest())
+        .chain(manifest.initial_sample.map(|identity| identity.digest()))
         .chain(manifest.samples.iter().map(|entry| entry.sample.digest()))
         .collect::<Vec<_>>();
     if prepared.manifest.logical_identity != manifest.identity.digest()
@@ -179,6 +192,15 @@ pub fn decode_prepared_structural_transient_segment(
             "structural transient segment partitions differ from its semantic manifest",
         ));
     }
+    let initial_sample = manifest
+        .initial_sample
+        .map(|identity| {
+            StructuralTransientPhysicalSample::from_canonical_bytes(
+                &prepared.partition_payload(identity.digest())?,
+            )
+            .map_err(AnalysisBridgeError::from)
+        })
+        .transpose()?;
     let samples = manifest
         .samples
         .iter()
@@ -190,7 +212,9 @@ pub fn decode_prepared_structural_transient_segment(
         })
         .collect::<Result<Vec<_>, _>>()?;
     Ok(StructuralTransientSegment::from_manifest_and_samples(
-        manifest, samples,
+        manifest,
+        initial_sample,
+        samples,
     )?)
 }
 
@@ -228,6 +252,7 @@ pub fn import_structural_transient_segment_sample(
     let manifest =
         StructuralTransientSegmentManifest::from_canonical_bytes(&manifest_partition.payload())?;
     let expected_partitions = std::iter::once(manifest.identity.digest())
+        .chain(manifest.initial_sample.map(|identity| identity.digest()))
         .chain(manifest.samples.iter().map(|entry| entry.sample.digest()))
         .collect::<Vec<_>>();
     if manifest.identity.digest() != import.expected_segment

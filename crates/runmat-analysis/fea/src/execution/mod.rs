@@ -19,6 +19,7 @@ mod state;
 mod sweep;
 mod transient_block;
 mod transient_checkpoint;
+mod transient_result;
 mod transient_schedule;
 mod transient_segment;
 mod transient_workload;
@@ -42,9 +43,10 @@ pub use identity::{
     StructuralExcitationSetIdentity, StructuralFormulationIdentity, StructuralKinematicsIdentity,
     StructuralMassOperatorIdentity, StructuralStiffnessOperatorIdentity,
     StructuralTransientBlockRequestIdentity, StructuralTransientCheckpointIdentity,
-    StructuralTransientScheduleIdentity, StructuralTransientSegmentIdentity,
-    StructuralTransientSegmentSampleIdentity, StructuralTransientSolverOptionsIdentity,
-    StudyIdentity, SweepIdentity, SweepResultIdentity,
+    StructuralTransientCheckpointScopeIdentity, StructuralTransientPhysicalSampleIdentity,
+    StructuralTransientResultAssemblyRequestIdentity, StructuralTransientScheduleIdentity,
+    StructuralTransientSegmentIdentity, StructuralTransientSegmentSampleIdentity,
+    StructuralTransientSolverOptionsIdentity, StudyIdentity, SweepIdentity, SweepResultIdentity,
 };
 pub use object::{
     chunk_numerical_payload, chunk_partitioned_numerical_payload, AnalysisChunkDescriptor,
@@ -84,15 +86,22 @@ pub use transient_checkpoint::{
     StructuralTransientContinuationPoint, StructuralTransientContinuationState,
     StructuralTransientObservationCursor, StructuralTransientSolverCounters,
 };
+pub use transient_result::{
+    StructuralTransientBlockReceipt, StructuralTransientNumericalReceipt,
+    StructuralTransientResultAssemblyRequest, StructuralTransientResultEntry,
+    StructuralTransientSolverResult, StructuralTransientSolverResultManifest,
+};
 pub use transient_schedule::{
     StructuralTransientContinuationApproach, StructuralTransientIntegrator,
     StructuralTransientPrecision, StructuralTransientSchedule, StructuralTransientScheduleArrival,
     StructuralTransientSchedulePoint,
 };
 pub use transient_segment::{
-    StructuralTransientBlockSolverEvidence, StructuralTransientSegment,
-    StructuralTransientSegmentEntry, StructuralTransientSegmentManifest,
-    StructuralTransientSegmentSample, StructuralTransientSegmentSampleInput,
+    StructuralTransientBlockSolverEvidence, StructuralTransientPhysicalSample,
+    StructuralTransientPhysicalSampleInput, StructuralTransientSampleStep,
+    StructuralTransientSegment, StructuralTransientSegmentEntry,
+    StructuralTransientSegmentManifest, StructuralTransientSegmentSample,
+    StructuralTransientSegmentSampleInput,
 };
 pub use transient_workload::{
     StructuralTransientCheckpointScopeInput, StructuralTransientWorkload,

@@ -2838,11 +2838,14 @@ fn structural_transient_objects_round_trip_and_one_segment_sample_imports_indepe
         StructuralTransientCheckpoint, StructuralTransientCheckpointInput,
         StructuralTransientCheckpointScope, StructuralTransientContinuationApproach,
         StructuralTransientContinuationPoint, StructuralTransientContinuationState,
-        StructuralTransientIntegrator, StructuralTransientPrecision, StructuralTransientSchedule,
+        StructuralTransientIntegrator, StructuralTransientNumericalReceipt,
+        StructuralTransientPhysicalSample, StructuralTransientPhysicalSampleInput,
+        StructuralTransientPrecision, StructuralTransientResultAssemblyRequest,
+        StructuralTransientSampleStep, StructuralTransientSchedule,
         StructuralTransientScheduleArrival, StructuralTransientSchedulePoint,
         StructuralTransientSegment, StructuralTransientSegmentSample,
         StructuralTransientSegmentSampleInput, StructuralTransientSolverCounters,
-        StructuralTransientSolverOptionsIdentity,
+        StructuralTransientSolverOptionsIdentity, StructuralTransientSolverResult,
     };
     use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
 
@@ -2987,6 +2990,36 @@ fn structural_transient_objects_round_trip_and_one_segment_sample_imports_indepe
         )
         .unwrap()
     };
+    let initial_sample = StructuralTransientPhysicalSample::new(
+        &request.scope,
+        StructuralTransientPhysicalSampleInput {
+            schedule_ordinal: 0,
+            time_s: 0.0,
+            step: StructuralTransientSampleStep::Initial,
+            state: StructuralTransientContinuationState {
+                displacement: vec![0.0, 0.0],
+                velocity: vec![0.0, 0.0],
+                acceleration: vec![0.0, 0.0],
+            },
+            projected_residual_norm: 0.0,
+            reaction: vec![0.0, 0.0],
+            strain_energy_j: 0.0,
+            kinetic_energy_j: 0.0,
+            applied_load_work_j: 0.0,
+            support_work_j: 0.0,
+            damping_dissipation_j: 0.0,
+            energy_balance_residual_j: 0.0,
+            relative_energy_balance_error: 0.0,
+            dynamic_balance: StructuralDynamicBalanceSnapshot {
+                applied_load: vec![0.0, 0.0],
+                inertia_force: vec![0.0, 0.0],
+                damping_force: vec![0.0, 0.0],
+                elastic_force: vec![0.0, 0.0],
+                equilibrium_residual: vec![0.0, 0.0],
+            },
+        },
+    )
+    .unwrap();
     let segment = StructuralTransientSegment::new(
         request.clone(),
         checkpoint.clone(),
@@ -3000,6 +3033,7 @@ fn structural_transient_objects_round_trip_and_one_segment_sample_imports_indepe
             },
             accelerator_evidence: Vec::new(),
         },
+        Some(initial_sample),
         vec![sample(1, 7.0), sample(2, 1.0)],
     )
     .unwrap();
@@ -3092,4 +3126,107 @@ fn structural_transient_objects_round_trip_and_one_segment_sample_imports_indepe
     assert_eq!(imported.sample, segment.samples()[0]);
     assert_eq!(imported.manifest, *segment.manifest());
     assert!(decode_prepared_structural_transient_segment(&prepared).is_ok());
+
+    let assembly_request =
+        StructuralTransientResultAssemblyRequest::new(std::slice::from_ref(&segment)).unwrap();
+    let result = StructuralTransientSolverResult::assemble(
+        &assembly_request,
+        std::slice::from_ref(&segment),
+    )
+    .unwrap();
+    let receipt = StructuralTransientNumericalReceipt::new(
+        &result,
+        &assembly_request,
+        std::slice::from_ref(&segment),
+    )
+    .unwrap();
+    let assembly_request_objects = prepare_structural_transient_result_assembly_request_objects(
+        &assembly_request,
+        64,
+        ObjectNamespace::InputValue,
+        limits,
+    )
+    .unwrap();
+    assert_eq!(
+        decode_prepared_structural_transient_result_assembly_request(&assembly_request_objects)
+            .unwrap(),
+        assembly_request
+    );
+    let result_objects = prepare_structural_transient_solver_result_objects(
+        &result,
+        64,
+        ObjectNamespace::ResultValue,
+        limits,
+    )
+    .unwrap();
+    assert_eq!(
+        decode_prepared_structural_transient_solver_result(&result_objects).unwrap(),
+        result
+    );
+    let receipt_objects = prepare_structural_transient_numerical_receipt_objects(
+        &receipt,
+        64,
+        ObjectNamespace::ResultValue,
+        limits,
+    )
+    .unwrap();
+    assert_eq!(
+        decode_prepared_structural_transient_numerical_receipt(&receipt_objects).unwrap(),
+        receipt
+    );
+
+    let result_root = result_objects
+        .root_reference(&access(), ValueRefKind::ResultObject)
+        .unwrap();
+    let mut result_store = MemoryObjects::default();
+    for object in &result_objects.objects {
+        result_store
+            .0
+            .insert(object.descriptor.digest, object.bytes.clone());
+    }
+    let selected_sample = result.samples()[1].identity;
+    let unrelated_sample = result.samples()[2].identity;
+    let unrelated_partition = result_objects
+        .manifest
+        .partitions
+        .iter()
+        .find(|partition| partition.logical_identity == unrelated_sample.digest())
+        .unwrap();
+    let protected_chunk_digests = result_objects
+        .manifest
+        .partitions
+        .iter()
+        .filter(|partition| {
+            partition.logical_identity == result.manifest().identity.digest()
+                || partition.logical_identity == selected_sample.digest()
+        })
+        .flat_map(|partition| {
+            let start = partition.first_chunk_ordinal as usize;
+            let end = start + partition.chunk_count as usize;
+            result_objects.manifest.chunks[start..end]
+                .iter()
+                .map(|chunk| chunk.digest)
+        })
+        .collect::<BTreeSet<_>>();
+    let unrelated_start = unrelated_partition.first_chunk_ordinal as usize + 1;
+    let unrelated_end = unrelated_start + unrelated_partition.chunk_count as usize;
+    for object in &result_objects.objects[unrelated_start..unrelated_end] {
+        if !protected_chunk_digests.contains(&object.descriptor.digest) {
+            result_store.0.remove(&object.descriptor.digest);
+        }
+    }
+    let selected = import_structural_transient_result_sample(
+        &result_store,
+        StructuralTransientResultSampleImport {
+            root: &result_root,
+            expected_result: result.manifest().identity,
+            expected_payload_digest: result_objects.manifest.payload_digest,
+            sample: selected_sample,
+            access: &access(),
+            limits,
+        },
+    )
+    .unwrap();
+    assert_eq!(selected.manifest, *result.manifest());
+    assert_eq!(selected.sample, result.samples()[1]);
 }

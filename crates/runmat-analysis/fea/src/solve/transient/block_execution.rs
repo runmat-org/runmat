@@ -14,7 +14,10 @@ use crate::{
 
 use super::state::SecondOrderState;
 use super::{
-    advance::{self, TransientAcceptedSample, TransientResumeInput, TransientSolverAccounting},
+    advance::{
+        self, TransientAcceptedSample, TransientInitialSample, TransientResumeInput,
+        TransientSolverAccounting,
+    },
     balance::{TransientBalanceHistory, TransientBalanceStep},
     empty::{self, EmptyTransientAdvanceState},
     require_stable_system,
@@ -108,9 +111,9 @@ pub(crate) fn solve_structural_transient_block_with_physical_mapping<E>(
         ComputeBackend::Cpu => LinearAlgebraBackendKind::CpuReference,
         ComputeBackend::Gpu => LinearAlgebraBackendKind::Accelerator,
     };
-    let state = match (input.predecessor, input.initial_conditions) {
+    let (state, initial_sample) = match (input.predecessor, input.initial_conditions) {
         (None, Some(initial)) => {
-            advance::initialize::<E>(
+            let (state, sample) = advance::initialize::<E>(
                 input.initial_summary,
                 input.options,
                 backend_kind,
@@ -118,8 +121,8 @@ pub(crate) fn solve_structural_transient_block_with_physical_mapping<E>(
                 initial.displacement,
                 initial.velocity,
                 map_physical_state,
-            )?
-            .0
+            )?;
+            (state, Some(sample))
         }
         (Some(predecessor), None) => {
             let approach = match predecessor.continuation.approach {
@@ -150,7 +153,7 @@ pub(crate) fn solve_structural_transient_block_with_physical_mapping<E>(
                         .into(),
                 });
             }
-            advance::resume::<E>(
+            let state = advance::resume::<E>(
                 schedule,
                 TransientResumeInput {
                     schedule_ordinal: predecessor.continuation.schedule_ordinal,
@@ -164,7 +167,8 @@ pub(crate) fn solve_structural_transient_block_with_physical_mapping<E>(
                     solver_backend: backend_kind,
                     preconditioner: SolverPreconditioner::None,
                 },
-            )?
+            )?;
+            (state, None)
         }
         _ => {
             return Err(TransientSolveError::ExecutionContract {
@@ -189,6 +193,7 @@ pub(crate) fn solve_structural_transient_block_with_physical_mapping<E>(
         input.request.clone(),
         input.predecessor,
         block,
+        initial_sample,
         input.observation_cursors,
     )
 }
@@ -220,8 +225,13 @@ pub(crate) fn solve_fully_prescribed_transient_block_with_physical_mapping<E>(
     if input.request.scope.dof_count != physical_dof_count || input.initial_summary.dof_count != 0 {
         return Err(TransientSolveError::DofCountChanged);
     }
-    let (mut continuation_summary, mut continuation_state, continuation_approach, accumulator) =
-        match (input.predecessor, input.initial_conditions) {
+    let (
+        mut continuation_summary,
+        mut continuation_state,
+        continuation_approach,
+        accumulator,
+        initial_sample,
+    ) = match (input.predecessor, input.initial_conditions) {
             (None, Some(initial_conditions)) => {
                 let (summary, state) = map_physical_state(
                     schedule.points[0].time_s,
@@ -242,11 +252,24 @@ pub(crate) fn solve_fully_prescribed_transient_block_with_physical_mapping<E>(
                         detail: error.to_string(),
                     }
                 })?;
+                let initial_sample = TransientInitialSample {
+                    time_s: schedule.points[0].time_s,
+                    state: state.clone(),
+                    summary: summary.clone(),
+                    projected_residual_norm: 0.0,
+                    reaction: history.reaction_snapshots()[0].clone(),
+                    strain_energy_j: history.strain_energy_j()[0],
+                    kinetic_energy_j: history.kinetic_energy_j()[0],
+                    energy_balance_residual_j: history.energy_balance_residual_j()[0],
+                    relative_energy_balance_error: history.relative_energy_balance_error()[0],
+                    dynamic_balance: history.balances()[0].clone(),
+                };
                 (
                     summary,
                     state,
                     SignalSampleApproach::At,
                     history.accumulator(),
+                    Some(initial_sample),
                 )
             }
             (Some(predecessor), None) => {
@@ -272,7 +295,7 @@ pub(crate) fn solve_fully_prescribed_transient_block_with_physical_mapping<E>(
                     .map_err(|error| TransientSolveError::DynamicBalance {
                         detail: error.to_string(),
                     })?;
-                (summary, state, approach, predecessor.balance.clone())
+                (summary, state, approach, predecessor.balance.clone(), None)
             }
             _ => {
                 return Err(TransientSolveError::ExecutionContract {
@@ -399,6 +422,7 @@ pub(crate) fn solve_fully_prescribed_transient_block_with_physical_mapping<E>(
                 preconditioner: SolverPreconditioner::None,
                 accelerator_evidence: Vec::new(),
             },
+            initial_sample,
             samples,
         },
         input.observation_cursors,

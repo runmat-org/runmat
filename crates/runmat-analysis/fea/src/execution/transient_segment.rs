@@ -9,24 +9,35 @@ use crate::{
 use super::{
     AnalysisExecutionError, AnalysisExecutionResult, StructuralTransientBlockRequest,
     StructuralTransientBlockRequestIdentity, StructuralTransientCheckpoint,
+    StructuralTransientCheckpointScope, StructuralTransientCheckpointScopeIdentity,
     StructuralTransientContinuationApproach, StructuralTransientContinuationState,
-    StructuralTransientSegmentIdentity, StructuralTransientSegmentSampleIdentity,
-    StructuralTransientSolverCounters,
+    StructuralTransientPhysicalSampleIdentity, StructuralTransientSegmentIdentity,
+    StructuralTransientSegmentSampleIdentity, StructuralTransientSolverCounters,
 };
 
 const TRANSIENT_SEGMENT_PREFIX: &[u8] = b"runmat-structural-transient-segment/v1\0";
 const TRANSIENT_SEGMENT_LIMITS: CanonicalLimits =
     CanonicalLimits::new(1024 * 1024 * 1024, 4_000_000, 65_536, 64);
 
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind", deny_unknown_fields)]
+pub enum StructuralTransientSampleStep {
+    Initial,
+    Accepted { time_step_s: f64 },
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields, try_from = "StructuralTransientSegmentSampleWire")]
-pub struct StructuralTransientSegmentSample {
+#[serde(
+    deny_unknown_fields,
+    try_from = "StructuralTransientPhysicalSampleWire"
+)]
+pub struct StructuralTransientPhysicalSample {
     pub schema_version: u16,
-    pub identity: StructuralTransientSegmentSampleIdentity,
-    pub request: StructuralTransientBlockRequestIdentity,
+    pub identity: StructuralTransientPhysicalSampleIdentity,
+    pub scope: StructuralTransientCheckpointScopeIdentity,
     pub schedule_ordinal: u64,
     pub time_s: f64,
-    pub accepted_time_step_s: f64,
+    pub step: StructuralTransientSampleStep,
     pub state: StructuralTransientContinuationState,
     pub projected_residual_norm: f64,
     pub reaction: Vec<f64>,
@@ -42,13 +53,13 @@ pub struct StructuralTransientSegmentSample {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct StructuralTransientSegmentSampleWire {
+struct StructuralTransientPhysicalSampleWire {
     schema_version: u16,
-    identity: StructuralTransientSegmentSampleIdentity,
-    request: StructuralTransientBlockRequestIdentity,
+    identity: StructuralTransientPhysicalSampleIdentity,
+    scope: StructuralTransientCheckpointScopeIdentity,
     schedule_ordinal: u64,
     time_s: f64,
-    accepted_time_step_s: f64,
+    step: StructuralTransientSampleStep,
     state: StructuralTransientContinuationState,
     projected_residual_norm: f64,
     reaction: Vec<f64>,
@@ -62,17 +73,17 @@ struct StructuralTransientSegmentSampleWire {
     dynamic_balance: StructuralDynamicBalanceSnapshot,
 }
 
-impl TryFrom<StructuralTransientSegmentSampleWire> for StructuralTransientSegmentSample {
+impl TryFrom<StructuralTransientPhysicalSampleWire> for StructuralTransientPhysicalSample {
     type Error = AnalysisExecutionError;
 
-    fn try_from(wire: StructuralTransientSegmentSampleWire) -> Result<Self, Self::Error> {
-        Ok(Self {
+    fn try_from(wire: StructuralTransientPhysicalSampleWire) -> Result<Self, Self::Error> {
+        let sample = Self {
             schema_version: wire.schema_version,
             identity: wire.identity,
-            request: wire.request,
+            scope: wire.scope,
             schedule_ordinal: wire.schedule_ordinal,
             time_s: wire.time_s,
-            accepted_time_step_s: wire.accepted_time_step_s,
+            step: wire.step,
             state: wire.state,
             projected_residual_norm: wire.projected_residual_norm,
             reaction: wire.reaction,
@@ -84,7 +95,226 @@ impl TryFrom<StructuralTransientSegmentSampleWire> for StructuralTransientSegmen
             energy_balance_residual_j: wire.energy_balance_residual_j,
             relative_energy_balance_error: wire.relative_energy_balance_error,
             dynamic_balance: wire.dynamic_balance,
-        })
+        };
+        sample.validate_content()?;
+        Ok(sample)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct StructuralTransientPhysicalSampleInput {
+    pub schedule_ordinal: u64,
+    pub time_s: f64,
+    pub step: StructuralTransientSampleStep,
+    pub state: StructuralTransientContinuationState,
+    pub projected_residual_norm: f64,
+    pub reaction: Vec<f64>,
+    pub strain_energy_j: f64,
+    pub kinetic_energy_j: f64,
+    pub applied_load_work_j: f64,
+    pub support_work_j: f64,
+    pub damping_dissipation_j: f64,
+    pub energy_balance_residual_j: f64,
+    pub relative_energy_balance_error: f64,
+    pub dynamic_balance: StructuralDynamicBalanceSnapshot,
+}
+
+impl StructuralTransientPhysicalSample {
+    pub fn new(
+        scope: &StructuralTransientCheckpointScope,
+        input: StructuralTransientPhysicalSampleInput,
+    ) -> AnalysisExecutionResult<Self> {
+        scope.validate()?;
+        let scope_identity = scope.identity()?;
+        let identity = physical_sample_input_identity(1, scope_identity, &input)?;
+        let sample = Self {
+            schema_version: 1,
+            identity,
+            scope: scope_identity,
+            schedule_ordinal: input.schedule_ordinal,
+            time_s: input.time_s,
+            step: input.step,
+            state: input.state,
+            projected_residual_norm: input.projected_residual_norm,
+            reaction: input.reaction,
+            strain_energy_j: input.strain_energy_j,
+            kinetic_energy_j: input.kinetic_energy_j,
+            applied_load_work_j: input.applied_load_work_j,
+            support_work_j: input.support_work_j,
+            damping_dissipation_j: input.damping_dissipation_j,
+            energy_balance_residual_j: input.energy_balance_residual_j,
+            relative_energy_balance_error: input.relative_energy_balance_error,
+            dynamic_balance: input.dynamic_balance,
+        };
+        sample.validate_against(scope)?;
+        Ok(sample)
+    }
+
+    pub fn validate_against(
+        &self,
+        scope: &StructuralTransientCheckpointScope,
+    ) -> AnalysisExecutionResult<()> {
+        scope.validate()?;
+        self.validate_content()?;
+        let ordinal = usize::try_from(self.schedule_ordinal).map_err(|_| {
+            AnalysisExecutionError::Invalid(
+                "structural transient segment ordinal exceeds the platform index range".into(),
+            )
+        })?;
+        let schedule_point = scope.schedule.points.get(ordinal).ok_or_else(|| {
+            AnalysisExecutionError::Invalid(
+                "structural transient segment sample lies outside its exact schedule".into(),
+            )
+        })?;
+        if self.schema_version != 1
+            || self.scope != scope.identity()?
+            || self.time_s.to_bits() != schedule_point.time_s.to_bits()
+        {
+            return Err(AnalysisExecutionError::Identity(
+                "structural transient physical sample differs from its exact scope or schedule",
+            ));
+        }
+        match self.step {
+            StructuralTransientSampleStep::Initial
+                if self.schedule_ordinal == 0
+                    && schedule_point.arrival
+                        == super::StructuralTransientScheduleArrival::Initial => {}
+            StructuralTransientSampleStep::Accepted { time_step_s }
+                if self.schedule_ordinal > 0 =>
+            {
+                let previous = &scope.schedule.points[ordinal - 1];
+                if time_step_s.to_bits() != (schedule_point.time_s - previous.time_s).to_bits() {
+                    return Err(AnalysisExecutionError::Identity(
+                        "structural transient physical sample time step differs from its schedule",
+                    ));
+                }
+            }
+            _ => {
+                return Err(AnalysisExecutionError::Identity(
+                    "structural transient physical sample step kind differs from its ordinal",
+                ));
+            }
+        }
+        if self.identity != physical_sample_identity(self)? {
+            return Err(AnalysisExecutionError::Identity(
+                "structural transient physical sample identity does not converge",
+            ));
+        }
+        Ok(())
+    }
+
+    fn validate_content(&self) -> AnalysisExecutionResult<()> {
+        self.state.validate(self.reaction.len())?;
+        self.dynamic_balance
+            .validate()
+            .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+        let scalars = [
+            self.projected_residual_norm,
+            self.strain_energy_j,
+            self.kinetic_energy_j,
+            self.applied_load_work_j,
+            self.support_work_j,
+            self.damping_dissipation_j,
+            self.energy_balance_residual_j,
+            self.relative_energy_balance_error,
+        ];
+        if self.reaction.is_empty()
+            || self.dynamic_balance.applied_load.len() != self.reaction.len()
+        {
+            return Err(AnalysisExecutionError::Invalid(
+                "structural transient physical sample vectors have the wrong shape".into(),
+            ));
+        }
+        if self.reaction.iter().any(|value| !value.is_finite())
+            || scalars.iter().any(|value| !value.is_finite())
+        {
+            return Err(AnalysisExecutionError::Invalid(
+                "structural transient physical sample contains non-finite values".into(),
+            ));
+        }
+        if self.projected_residual_norm < 0.0
+            || self.strain_energy_j < 0.0
+            || self.kinetic_energy_j < 0.0
+            || self.damping_dissipation_j < 0.0
+            || self.relative_energy_balance_error < 0.0
+        {
+            return Err(AnalysisExecutionError::Invalid(format!(
+                "structural transient physical sample has a negative nonnegative quantity: residual={}, strain_energy_j={}, kinetic_energy_j={}, damping_dissipation_j={}, relative_energy_balance_error={}",
+                self.projected_residual_norm,
+                self.strain_energy_j,
+                self.kinetic_energy_j,
+                self.damping_dissipation_j,
+                self.relative_energy_balance_error,
+            )));
+        }
+        Ok(())
+    }
+
+    pub fn canonical_bytes(&self) -> AnalysisExecutionResult<Vec<u8>> {
+        self.validate_content()?;
+        if self.schema_version != 1 || self.identity != physical_sample_identity(self)? {
+            return Err(AnalysisExecutionError::Identity(
+                "structural transient physical sample identity does not converge",
+            ));
+        }
+        Ok(encode_contract(
+            TRANSIENT_SEGMENT_PREFIX,
+            "structural-transient-physical-sample",
+            self,
+            TRANSIENT_SEGMENT_LIMITS,
+        )?)
+    }
+
+    pub fn from_canonical_bytes(bytes: &[u8]) -> AnalysisExecutionResult<Self> {
+        let sample: Self = decode_contract(
+            TRANSIENT_SEGMENT_PREFIX,
+            "structural-transient-physical-sample",
+            bytes,
+            TRANSIENT_SEGMENT_LIMITS,
+        )?;
+        if sample.schema_version != 1 || sample.identity != physical_sample_identity(&sample)? {
+            return Err(AnalysisExecutionError::Identity(
+                "structural transient physical sample identity does not converge",
+            ));
+        }
+        Ok(sample)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, try_from = "StructuralTransientSegmentSampleWire")]
+pub struct StructuralTransientSegmentSample {
+    pub schema_version: u16,
+    pub identity: StructuralTransientSegmentSampleIdentity,
+    pub request: StructuralTransientBlockRequestIdentity,
+    pub physical: StructuralTransientPhysicalSample,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StructuralTransientSegmentSampleWire {
+    schema_version: u16,
+    identity: StructuralTransientSegmentSampleIdentity,
+    request: StructuralTransientBlockRequestIdentity,
+    physical: StructuralTransientPhysicalSample,
+}
+
+impl TryFrom<StructuralTransientSegmentSampleWire> for StructuralTransientSegmentSample {
+    type Error = AnalysisExecutionError;
+
+    fn try_from(wire: StructuralTransientSegmentSampleWire) -> Result<Self, Self::Error> {
+        let sample = Self {
+            schema_version: wire.schema_version,
+            identity: wire.identity,
+            request: wire.request,
+            physical: wire.physical,
+        };
+        if sample.schema_version != 1 || sample.identity != segment_sample_identity(&sample)? {
+            return Err(AnalysisExecutionError::Identity(
+                "structural transient segment sample identity does not converge",
+            ));
+        }
+        Ok(sample)
     }
 }
 
@@ -111,25 +341,35 @@ impl StructuralTransientSegmentSample {
         request: &StructuralTransientBlockRequest,
         input: StructuralTransientSegmentSampleInput,
     ) -> AnalysisExecutionResult<Self> {
-        let identity = sample_input_identity(1, request.identity, &input)?;
+        let physical = StructuralTransientPhysicalSample::new(
+            &request.scope,
+            StructuralTransientPhysicalSampleInput {
+                schedule_ordinal: input.schedule_ordinal,
+                time_s: input.time_s,
+                step: StructuralTransientSampleStep::Accepted {
+                    time_step_s: input.accepted_time_step_s,
+                },
+                state: input.state,
+                projected_residual_norm: input.projected_residual_norm,
+                reaction: input.reaction,
+                strain_energy_j: input.strain_energy_j,
+                kinetic_energy_j: input.kinetic_energy_j,
+                applied_load_work_j: input.applied_load_work_j,
+                support_work_j: input.support_work_j,
+                damping_dissipation_j: input.damping_dissipation_j,
+                energy_balance_residual_j: input.energy_balance_residual_j,
+                relative_energy_balance_error: input.relative_energy_balance_error,
+                dynamic_balance: input.dynamic_balance,
+            },
+        )?;
         let sample = Self {
             schema_version: 1,
-            identity,
+            identity: StructuralTransientSegmentSampleIdentity::derive(
+                "structural-transient-segment-sample",
+                &(1_u16, request.identity, &physical),
+            )?,
             request: request.identity,
-            schedule_ordinal: input.schedule_ordinal,
-            time_s: input.time_s,
-            accepted_time_step_s: input.accepted_time_step_s,
-            state: input.state,
-            projected_residual_norm: input.projected_residual_norm,
-            reaction: input.reaction,
-            strain_energy_j: input.strain_energy_j,
-            kinetic_energy_j: input.kinetic_energy_j,
-            applied_load_work_j: input.applied_load_work_j,
-            support_work_j: input.support_work_j,
-            damping_dissipation_j: input.damping_dissipation_j,
-            energy_balance_residual_j: input.energy_balance_residual_j,
-            relative_energy_balance_error: input.relative_energy_balance_error,
-            dynamic_balance: input.dynamic_balance,
+            physical,
         };
         sample.validate_against(request)?;
         Ok(sample)
@@ -140,95 +380,26 @@ impl StructuralTransientSegmentSample {
         request: &StructuralTransientBlockRequest,
     ) -> AnalysisExecutionResult<()> {
         request.validate()?;
-        let ordinal = usize::try_from(self.schedule_ordinal).map_err(|_| {
-            AnalysisExecutionError::Invalid(
-                "structural transient segment ordinal exceeds the platform index range".into(),
-            )
-        })?;
-        let schedule_point = request.scope.schedule.points.get(ordinal).ok_or_else(|| {
-            AnalysisExecutionError::Invalid(
-                "structural transient segment sample lies outside its exact schedule".into(),
-            )
-        })?;
-        let previous = request
-            .scope
-            .schedule
-            .points
-            .get(ordinal.checked_sub(1).ok_or_else(|| {
-                AnalysisExecutionError::Invalid(
-                    "structural transient segment cannot publish the initial point".into(),
-                )
-            })?)
-            .ok_or_else(|| {
-                AnalysisExecutionError::Invalid(
-                    "structural transient segment sample lacks its preceding schedule point".into(),
-                )
-            })?;
+        self.physical.validate_against(&request.scope)?;
         if self.schema_version != 1
             || self.request != request.identity
-            || self.schedule_ordinal <= request.start_schedule_ordinal
-            || self.schedule_ordinal > request.terminal_schedule_ordinal
-            || self.time_s.to_bits() != schedule_point.time_s.to_bits()
-            || self.accepted_time_step_s.to_bits()
-                != (schedule_point.time_s - previous.time_s).to_bits()
+            || !matches!(
+                self.physical.step,
+                StructuralTransientSampleStep::Accepted { .. }
+            )
+            || self.physical.schedule_ordinal <= request.start_schedule_ordinal
+            || self.physical.schedule_ordinal > request.terminal_schedule_ordinal
+            || self.identity != segment_sample_identity(self)?
         {
             return Err(AnalysisExecutionError::Identity(
-                "structural transient segment sample differs from its exact request or schedule",
-            ));
-        }
-        self.state.validate(request.scope.dof_count)?;
-        self.dynamic_balance
-            .validate()
-            .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
-        let scalars = [
-            self.projected_residual_norm,
-            self.strain_energy_j,
-            self.kinetic_energy_j,
-            self.applied_load_work_j,
-            self.support_work_j,
-            self.damping_dissipation_j,
-            self.energy_balance_residual_j,
-            self.relative_energy_balance_error,
-        ];
-        if self.reaction.len() != request.scope.dof_count
-            || self.dynamic_balance.applied_load.len() != request.scope.dof_count
-        {
-            return Err(AnalysisExecutionError::Invalid(
-                "structural transient segment sample physical vectors have the wrong shape".into(),
-            ));
-        }
-        if self.reaction.iter().any(|value| !value.is_finite())
-            || scalars.iter().any(|value| !value.is_finite())
-        {
-            return Err(AnalysisExecutionError::Invalid(
-                "structural transient segment sample contains non-finite physical values".into(),
-            ));
-        }
-        if self.projected_residual_norm < 0.0
-            || self.strain_energy_j < 0.0
-            || self.kinetic_energy_j < 0.0
-            || self.damping_dissipation_j < 0.0
-            || self.relative_energy_balance_error < 0.0
-        {
-            return Err(AnalysisExecutionError::Invalid(format!(
-                "structural transient segment sample has a negative nonnegative quantity: residual={}, strain_energy_j={}, kinetic_energy_j={}, damping_dissipation_j={}, relative_energy_balance_error={}",
-                self.projected_residual_norm,
-                self.strain_energy_j,
-                self.kinetic_energy_j,
-                self.damping_dissipation_j,
-                self.relative_energy_balance_error,
-            )));
-        }
-        if self.identity != sample_identity(self)? {
-            return Err(AnalysisExecutionError::Identity(
-                "structural transient segment sample identity does not converge",
+                "structural transient segment sample differs from its exact request",
             ));
         }
         Ok(())
     }
 
     pub fn canonical_bytes(&self) -> AnalysisExecutionResult<Vec<u8>> {
-        if self.schema_version != 1 || self.identity != sample_identity(self)? {
+        if self.schema_version != 1 || self.identity != segment_sample_identity(self)? {
             return Err(AnalysisExecutionError::Identity(
                 "structural transient segment sample identity does not converge",
             ));
@@ -242,18 +413,12 @@ impl StructuralTransientSegmentSample {
     }
 
     pub fn from_canonical_bytes(bytes: &[u8]) -> AnalysisExecutionResult<Self> {
-        let sample: Self = decode_contract(
+        Ok(decode_contract(
             TRANSIENT_SEGMENT_PREFIX,
             "structural-transient-segment-sample",
             bytes,
             TRANSIENT_SEGMENT_LIMITS,
-        )?;
-        if sample.schema_version != 1 || sample.identity != sample_identity(&sample)? {
-            return Err(AnalysisExecutionError::Identity(
-                "structural transient segment sample identity does not converge",
-            ));
-        }
-        Ok(sample)
+        )?)
     }
 }
 
@@ -319,6 +484,7 @@ pub struct StructuralTransientSegmentManifest {
     pub request: StructuralTransientBlockRequest,
     pub terminal_checkpoint: StructuralTransientCheckpoint,
     pub solver_evidence: StructuralTransientBlockSolverEvidence,
+    pub initial_sample: Option<StructuralTransientPhysicalSampleIdentity>,
     pub samples: Vec<StructuralTransientSegmentEntry>,
 }
 
@@ -330,6 +496,7 @@ struct StructuralTransientSegmentManifestWire {
     request: StructuralTransientBlockRequest,
     terminal_checkpoint: StructuralTransientCheckpoint,
     solver_evidence: StructuralTransientBlockSolverEvidence,
+    initial_sample: Option<StructuralTransientPhysicalSampleIdentity>,
     samples: Vec<StructuralTransientSegmentEntry>,
 }
 
@@ -343,6 +510,7 @@ impl TryFrom<StructuralTransientSegmentManifestWire> for StructuralTransientSegm
             request: wire.request,
             terminal_checkpoint: wire.terminal_checkpoint,
             solver_evidence: wire.solver_evidence,
+            initial_sample: wire.initial_sample,
             samples: wire.samples,
         };
         manifest.validate()?;
@@ -355,12 +523,13 @@ impl StructuralTransientSegmentManifest {
         request: StructuralTransientBlockRequest,
         terminal_checkpoint: StructuralTransientCheckpoint,
         solver_evidence: StructuralTransientBlockSolverEvidence,
+        initial_sample: Option<&StructuralTransientPhysicalSample>,
         samples: &[StructuralTransientSegmentSample],
     ) -> AnalysisExecutionResult<Self> {
         let entries = samples
             .iter()
             .map(|sample| StructuralTransientSegmentEntry {
-                schedule_ordinal: sample.schedule_ordinal,
+                schedule_ordinal: sample.physical.schedule_ordinal,
                 sample: sample.identity,
             })
             .collect::<Vec<_>>();
@@ -369,6 +538,7 @@ impl StructuralTransientSegmentManifest {
             &request,
             &terminal_checkpoint,
             &solver_evidence,
+            initial_sample.map(|sample| sample.identity),
             &entries,
         )?;
         let manifest = Self {
@@ -377,6 +547,7 @@ impl StructuralTransientSegmentManifest {
             request,
             terminal_checkpoint,
             solver_evidence,
+            initial_sample: initial_sample.map(|sample| sample.identity),
             samples: entries,
         };
         manifest.validate()?;
@@ -423,6 +594,7 @@ impl StructuralTransientSegmentManifest {
         };
         if self.schema_version != 1
             || self.samples.len() != expected_sample_count
+            || self.initial_sample.is_some() != (self.request.block_ordinal == 0)
             || self.terminal_checkpoint.scope != self.request.scope
             || self.terminal_checkpoint.predecessor != self.request.predecessor
             || self.terminal_checkpoint.block_ordinal != self.request.block_ordinal
@@ -459,6 +631,7 @@ impl StructuralTransientSegmentManifest {
                 &self.request,
                 &self.terminal_checkpoint,
                 &self.solver_evidence,
+                self.initial_sample,
                 &self.samples,
             )?
         {
@@ -492,6 +665,7 @@ impl StructuralTransientSegmentManifest {
 #[derive(Clone, Debug, PartialEq)]
 pub struct StructuralTransientSegment {
     manifest: StructuralTransientSegmentManifest,
+    initial_sample: Option<StructuralTransientPhysicalSample>,
     samples: Vec<StructuralTransientSegmentSample>,
 }
 
@@ -500,36 +674,57 @@ impl StructuralTransientSegment {
         request: StructuralTransientBlockRequest,
         terminal_checkpoint: StructuralTransientCheckpoint,
         solver_evidence: StructuralTransientBlockSolverEvidence,
+        initial_sample: Option<StructuralTransientPhysicalSample>,
         samples: Vec<StructuralTransientSegmentSample>,
     ) -> AnalysisExecutionResult<Self> {
         let manifest = StructuralTransientSegmentManifest::new(
             request,
             terminal_checkpoint,
             solver_evidence,
+            initial_sample.as_ref(),
             &samples,
         )?;
-        Self::from_manifest_and_samples(manifest, samples)
+        Self::from_manifest_and_samples(manifest, initial_sample, samples)
     }
 
     pub fn from_manifest_and_samples(
         manifest: StructuralTransientSegmentManifest,
+        initial_sample: Option<StructuralTransientPhysicalSample>,
         samples: Vec<StructuralTransientSegmentSample>,
     ) -> AnalysisExecutionResult<Self> {
-        let segment = Self { manifest, samples };
+        let segment = Self {
+            manifest,
+            initial_sample,
+            samples,
+        };
         segment.validate()?;
         Ok(segment)
     }
 
     pub fn validate(&self) -> AnalysisExecutionResult<()> {
         self.manifest.validate()?;
-        if self.samples.len() != self.manifest.samples.len() {
+        if self.samples.len() != self.manifest.samples.len()
+            || self.initial_sample.as_ref().map(|sample| sample.identity)
+                != self.manifest.initial_sample
+        {
             return Err(AnalysisExecutionError::Identity(
                 "structural transient segment payload count differs from its manifest",
             ));
         }
+        if let Some(initial) = &self.initial_sample {
+            initial.validate_against(&self.manifest.request.scope)?;
+            if !matches!(initial.step, StructuralTransientSampleStep::Initial)
+                || self.manifest.request.block_ordinal != 0
+            {
+                return Err(AnalysisExecutionError::Identity(
+                    "structural transient initial sample is not owned by block zero",
+                ));
+            }
+        }
         for (entry, sample) in self.manifest.samples.iter().zip(&self.samples) {
             sample.validate_against(&self.manifest.request)?;
-            if entry.schedule_ordinal != sample.schedule_ordinal || entry.sample != sample.identity
+            if entry.schedule_ordinal != sample.physical.schedule_ordinal
+                || entry.sample != sample.identity
             {
                 return Err(AnalysisExecutionError::Identity(
                     "structural transient segment sample differs from its manifest entry",
@@ -542,14 +737,15 @@ impl StructuralTransientSegment {
             )
         })?;
         let checkpoint = &self.manifest.terminal_checkpoint;
-        if terminal.state.displacement != checkpoint.state.displacement
-            || terminal.state.velocity != checkpoint.state.velocity
+        if terminal.physical.state.displacement != checkpoint.state.displacement
+            || terminal.physical.state.velocity != checkpoint.state.velocity
             || checkpoint.continuation.approach == StructuralTransientContinuationApproach::At
-                && terminal.state.acceleration != checkpoint.state.acceleration
-            || terminal.applied_load_work_j.to_bits()
+                && terminal.physical.state.acceleration != checkpoint.state.acceleration
+            || terminal.physical.applied_load_work_j.to_bits()
                 != checkpoint.balance.applied_load_work_j.to_bits()
-            || terminal.support_work_j.to_bits() != checkpoint.balance.support_work_j.to_bits()
-            || terminal.damping_dissipation_j.to_bits()
+            || terminal.physical.support_work_j.to_bits()
+                != checkpoint.balance.support_work_j.to_bits()
+            || terminal.physical.damping_dissipation_j.to_bits()
                 != checkpoint.balance.damping_dissipation_j.to_bits()
         {
             return Err(AnalysisExecutionError::Identity(
@@ -563,50 +759,37 @@ impl StructuralTransientSegment {
         &self.manifest
     }
 
+    pub fn initial_sample(&self) -> Option<&StructuralTransientPhysicalSample> {
+        self.initial_sample.as_ref()
+    }
+
     pub fn samples(&self) -> &[StructuralTransientSegmentSample] {
         &self.samples
     }
 }
 
-fn sample_identity(
+fn segment_sample_identity(
     sample: &StructuralTransientSegmentSample,
 ) -> AnalysisExecutionResult<StructuralTransientSegmentSampleIdentity> {
     StructuralTransientSegmentSampleIdentity::derive(
         "structural-transient-segment-sample",
-        &SegmentSampleIdentityInput {
-            schema_version: sample.schema_version,
-            request: sample.request,
-            schedule_ordinal: sample.schedule_ordinal,
-            time_s: sample.time_s,
-            accepted_time_step_s: sample.accepted_time_step_s,
-            state: &sample.state,
-            projected_residual_norm: sample.projected_residual_norm,
-            reaction: &sample.reaction,
-            strain_energy_j: sample.strain_energy_j,
-            kinetic_energy_j: sample.kinetic_energy_j,
-            applied_load_work_j: sample.applied_load_work_j,
-            support_work_j: sample.support_work_j,
-            damping_dissipation_j: sample.damping_dissipation_j,
-            energy_balance_residual_j: sample.energy_balance_residual_j,
-            relative_energy_balance_error: sample.relative_energy_balance_error,
-            dynamic_balance: &sample.dynamic_balance,
-        },
+        &(sample.schema_version, sample.request, &sample.physical),
     )
 }
 
-fn sample_input_identity(
+fn physical_sample_input_identity(
     schema_version: u16,
-    request: StructuralTransientBlockRequestIdentity,
-    input: &StructuralTransientSegmentSampleInput,
-) -> AnalysisExecutionResult<StructuralTransientSegmentSampleIdentity> {
-    StructuralTransientSegmentSampleIdentity::derive(
-        "structural-transient-segment-sample",
-        &SegmentSampleIdentityInput {
+    scope: StructuralTransientCheckpointScopeIdentity,
+    input: &StructuralTransientPhysicalSampleInput,
+) -> AnalysisExecutionResult<StructuralTransientPhysicalSampleIdentity> {
+    StructuralTransientPhysicalSampleIdentity::derive(
+        "structural-transient-physical-sample",
+        &PhysicalSampleIdentityInput {
             schema_version,
-            request,
+            scope,
             schedule_ordinal: input.schedule_ordinal,
             time_s: input.time_s,
-            accepted_time_step_s: input.accepted_time_step_s,
+            step: input.step,
             state: &input.state,
             projected_residual_norm: input.projected_residual_norm,
             reaction: &input.reaction,
@@ -622,13 +805,39 @@ fn sample_input_identity(
     )
 }
 
+fn physical_sample_identity(
+    sample: &StructuralTransientPhysicalSample,
+) -> AnalysisExecutionResult<StructuralTransientPhysicalSampleIdentity> {
+    StructuralTransientPhysicalSampleIdentity::derive(
+        "structural-transient-physical-sample",
+        &PhysicalSampleIdentityInput {
+            schema_version: sample.schema_version,
+            scope: sample.scope,
+            schedule_ordinal: sample.schedule_ordinal,
+            time_s: sample.time_s,
+            step: sample.step,
+            state: &sample.state,
+            projected_residual_norm: sample.projected_residual_norm,
+            reaction: &sample.reaction,
+            strain_energy_j: sample.strain_energy_j,
+            kinetic_energy_j: sample.kinetic_energy_j,
+            applied_load_work_j: sample.applied_load_work_j,
+            support_work_j: sample.support_work_j,
+            damping_dissipation_j: sample.damping_dissipation_j,
+            energy_balance_residual_j: sample.energy_balance_residual_j,
+            relative_energy_balance_error: sample.relative_energy_balance_error,
+            dynamic_balance: &sample.dynamic_balance,
+        },
+    )
+}
+
 #[derive(Serialize)]
-struct SegmentSampleIdentityInput<'a> {
+struct PhysicalSampleIdentityInput<'a> {
     schema_version: u16,
-    request: StructuralTransientBlockRequestIdentity,
+    scope: StructuralTransientCheckpointScopeIdentity,
     schedule_ordinal: u64,
     time_s: f64,
-    accepted_time_step_s: f64,
+    step: StructuralTransientSampleStep,
     state: &'a StructuralTransientContinuationState,
     projected_residual_norm: f64,
     reaction: &'a [f64],
@@ -647,6 +856,7 @@ fn segment_identity(
     request: &StructuralTransientBlockRequest,
     terminal_checkpoint: &StructuralTransientCheckpoint,
     solver_evidence: &StructuralTransientBlockSolverEvidence,
+    initial_sample: Option<StructuralTransientPhysicalSampleIdentity>,
     samples: &[StructuralTransientSegmentEntry],
 ) -> AnalysisExecutionResult<StructuralTransientSegmentIdentity> {
     StructuralTransientSegmentIdentity::derive(
@@ -656,6 +866,7 @@ fn segment_identity(
             request,
             terminal_checkpoint,
             solver_evidence,
+            initial_sample,
             samples,
         ),
     )
@@ -717,6 +928,41 @@ mod tests {
         .unwrap()
     }
 
+    fn initial_sample(
+        scope: &StructuralTransientCheckpointScope,
+    ) -> StructuralTransientPhysicalSample {
+        StructuralTransientPhysicalSample::new(
+            scope,
+            StructuralTransientPhysicalSampleInput {
+                schedule_ordinal: 0,
+                time_s: 0.0,
+                step: StructuralTransientSampleStep::Initial,
+                state: StructuralTransientContinuationState {
+                    displacement: vec![0.0, 0.0],
+                    velocity: vec![0.0, 0.0],
+                    acceleration: vec![0.0, 0.0],
+                },
+                projected_residual_norm: 0.0,
+                reaction: vec![0.0, 0.0],
+                strain_energy_j: 0.0,
+                kinetic_energy_j: 0.0,
+                applied_load_work_j: 0.0,
+                support_work_j: 0.0,
+                damping_dissipation_j: 0.0,
+                energy_balance_residual_j: 0.0,
+                relative_energy_balance_error: 0.0,
+                dynamic_balance: StructuralDynamicBalanceSnapshot {
+                    applied_load: vec![0.0, 0.0],
+                    inertia_force: vec![0.0, 0.0],
+                    damping_force: vec![0.0, 0.0],
+                    elastic_force: vec![0.0, 0.0],
+                    equilibrium_residual: vec![0.0, 0.0],
+                },
+            },
+        )
+        .unwrap()
+    }
+
     #[test]
     fn partitioned_segment_round_trips_and_preserves_right_limit_continuation() {
         let request = StructuralTransientBlockRequest::new(scope(), None, 1).unwrap();
@@ -724,15 +970,20 @@ mod tests {
             request.clone(),
             checkpoint(None, 1),
             solver_evidence(),
+            Some(initial_sample(&request.scope)),
             vec![sample(&request, 1, vec![7.0, 0.0])],
         )
         .unwrap();
         assert_ne!(
-            segment.samples()[0].state.acceleration,
+            segment.samples()[0].physical.state.acceleration,
             segment.manifest().terminal_checkpoint.state.acceleration
         );
         let manifest = StructuralTransientSegmentManifest::from_canonical_bytes(
             &segment.manifest().canonical_bytes().unwrap(),
+        )
+        .unwrap();
+        let initial = StructuralTransientPhysicalSample::from_canonical_bytes(
+            &segment.initial_sample().unwrap().canonical_bytes().unwrap(),
         )
         .unwrap();
         let samples = segment
@@ -746,7 +997,12 @@ mod tests {
             })
             .collect();
         assert_eq!(
-            StructuralTransientSegment::from_manifest_and_samples(manifest, samples).unwrap(),
+            StructuralTransientSegment::from_manifest_and_samples(
+                manifest,
+                Some(initial),
+                samples,
+            )
+            .unwrap(),
             segment
         );
     }
@@ -758,22 +1014,25 @@ mod tests {
             request.clone(),
             checkpoint(None, 1),
             solver_evidence(),
+            Some(initial_sample(&request.scope)),
             vec![sample(&request, 1, vec![7.0, 0.0])],
         )
         .unwrap();
 
         let mut samples = segment.samples().to_vec();
-        samples[0].time_s = 0.75;
+        samples[0].physical.time_s = 0.75;
         assert!(StructuralTransientSegment::from_manifest_and_samples(
             segment.manifest().clone(),
+            segment.initial_sample().cloned(),
             samples
         )
         .is_err());
 
         let mut samples = segment.samples().to_vec();
-        samples[0].reaction.pop();
+        samples[0].physical.reaction.pop();
         assert!(StructuralTransientSegment::from_manifest_and_samples(
             segment.manifest().clone(),
+            segment.initial_sample().cloned(),
             samples
         )
         .is_err());
@@ -782,6 +1041,7 @@ mod tests {
         samples[0] = sample(&request, 1, vec![8.0, 0.0]);
         assert!(StructuralTransientSegment::from_manifest_and_samples(
             segment.manifest().clone(),
+            segment.initial_sample().cloned(),
             samples
         )
         .is_err());
@@ -790,6 +1050,7 @@ mod tests {
         manifest.terminal_checkpoint.state.displacement[0] = 9.0;
         assert!(StructuralTransientSegment::from_manifest_and_samples(
             manifest,
+            segment.initial_sample().cloned(),
             segment.samples().to_vec()
         )
         .is_err());

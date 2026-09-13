@@ -28,6 +28,8 @@ mod structural_sequence;
 mod task;
 mod transient_block_task;
 mod transient_object_access;
+mod transient_result_access;
+mod transient_result_task;
 mod transport;
 mod workload;
 
@@ -157,6 +159,20 @@ pub use transient_object_access::{
     prepare_structural_transient_checkpoint_objects, prepare_structural_transient_segment_objects,
     prepare_structural_transient_workload_objects, ImportedStructuralTransientSegmentSample,
     StructuralTransientSegmentSampleImport,
+};
+pub use transient_result_access::{
+    decode_prepared_structural_transient_numerical_receipt,
+    decode_prepared_structural_transient_result_assembly_request,
+    decode_prepared_structural_transient_solver_result, import_structural_transient_result_sample,
+    prepare_structural_transient_numerical_receipt_objects,
+    prepare_structural_transient_result_assembly_request_objects,
+    prepare_structural_transient_solver_result_objects, ImportedStructuralTransientResultSample,
+    StructuralTransientResultSampleImport,
+};
+pub use transient_result_task::{
+    import_structural_transient_result, prepare_structural_transient_result_task,
+    ImportedStructuralTransientResult, PreparedStructuralTransientResultTask,
+    StructuralTransientResultPreparation,
 };
 pub use transport::{prepare_analysis_program, PreparedAnalysisProgram};
 pub use workload::{

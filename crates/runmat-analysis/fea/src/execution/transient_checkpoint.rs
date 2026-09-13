@@ -12,8 +12,9 @@ use super::{
     StepIdentity, StructuralDampingOperatorIdentity, StructuralDofLayoutIdentity,
     StructuralExcitationSetIdentity, StructuralFormulationIdentity, StructuralKinematicsIdentity,
     StructuralMassOperatorIdentity, StructuralStiffnessOperatorIdentity,
-    StructuralTransientCheckpointIdentity, StructuralTransientContinuationApproach,
-    StructuralTransientIntegrator, StructuralTransientPrecision, StructuralTransientSchedule,
+    StructuralTransientCheckpointIdentity, StructuralTransientCheckpointScopeIdentity,
+    StructuralTransientContinuationApproach, StructuralTransientIntegrator,
+    StructuralTransientPrecision, StructuralTransientSchedule,
     StructuralTransientSolverOptionsIdentity, StudyIdentity,
 };
 
@@ -54,6 +55,14 @@ impl StructuralTransientCheckpointScope {
             ));
         }
         Ok(())
+    }
+
+    pub fn identity(&self) -> AnalysisExecutionResult<StructuralTransientCheckpointScopeIdentity> {
+        self.validate()?;
+        StructuralTransientCheckpointScopeIdentity::derive(
+            "structural-transient-checkpoint-scope",
+            self,
+        )
     }
 }
 

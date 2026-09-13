@@ -7,13 +7,18 @@ use crate::{
         StructuralTransientCheckpoint, StructuralTransientCheckpointInput,
         StructuralTransientContinuationApproach, StructuralTransientContinuationPoint,
         StructuralTransientContinuationState, StructuralTransientObservationCursor,
-        StructuralTransientSegment, StructuralTransientSegmentSample,
-        StructuralTransientSegmentSampleInput, StructuralTransientSolverCounters,
+        StructuralTransientPhysicalSample, StructuralTransientPhysicalSampleInput,
+        StructuralTransientSampleStep, StructuralTransientSegment,
+        StructuralTransientSegmentSample, StructuralTransientSegmentSampleInput,
+        StructuralTransientSolverCounters,
     },
 };
 
 use super::{
-    advance::{TransientAcceptedSample, TransientBlockResult, TransientSolverAccounting},
+    advance::{
+        TransientAcceptedSample, TransientBlockResult, TransientInitialSample,
+        TransientSolverAccounting,
+    },
     state::SecondOrderState,
     TransientSolveError,
 };
@@ -24,6 +29,7 @@ pub(super) struct CanonicalTransientBlockParts {
     pub(super) physical_continuation_state: SecondOrderState,
     pub(super) balance: crate::execution::StructuralTransientBalanceAccumulator,
     pub(super) accounting: TransientSolverAccounting,
+    pub(super) initial_sample: Option<TransientInitialSample>,
     pub(super) samples: Vec<TransientAcceptedSample>,
 }
 
@@ -31,6 +37,7 @@ pub(super) fn into_canonical_segment<E>(
     request: StructuralTransientBlockRequest,
     predecessor: Option<&StructuralTransientCheckpoint>,
     block: TransientBlockResult,
+    initial_sample: Option<TransientInitialSample>,
     observation_cursors: Vec<StructuralTransientObservationCursor>,
 ) -> Result<StructuralTransientSegment, TransientSolveError<E>> {
     into_canonical_segment_parts(
@@ -42,6 +49,7 @@ pub(super) fn into_canonical_segment<E>(
             physical_continuation_state: block.terminal.physical_continuation_state,
             balance: block.terminal.balance,
             accounting: block.terminal.accounting,
+            initial_sample,
             samples: block.samples,
         },
         observation_cursors,
@@ -101,6 +109,35 @@ pub(super) fn into_canonical_segment_parts<E>(
         counters: block_counters,
         accelerator_evidence: block.accounting.accelerator_evidence,
     };
+    let initial_sample = block
+        .initial_sample
+        .map(|sample| {
+            StructuralTransientPhysicalSample::new(
+                &request.scope,
+                StructuralTransientPhysicalSampleInput {
+                    schedule_ordinal: 0,
+                    time_s: sample.time_s,
+                    step: StructuralTransientSampleStep::Initial,
+                    state: StructuralTransientContinuationState {
+                        displacement: sample.state.displacement().to_vec(),
+                        velocity: sample.state.velocity().to_vec(),
+                        acceleration: sample.state.acceleration().to_vec(),
+                    },
+                    projected_residual_norm: sample.projected_residual_norm,
+                    reaction: sample.reaction,
+                    strain_energy_j: sample.strain_energy_j,
+                    kinetic_energy_j: sample.kinetic_energy_j,
+                    applied_load_work_j: 0.0,
+                    support_work_j: 0.0,
+                    damping_dissipation_j: 0.0,
+                    energy_balance_residual_j: sample.energy_balance_residual_j,
+                    relative_energy_balance_error: sample.relative_energy_balance_error,
+                    dynamic_balance: sample.dynamic_balance,
+                },
+            )
+            .map_err(contract_error)
+        })
+        .transpose()?;
     let samples = block
         .samples
         .into_iter()
@@ -131,8 +168,14 @@ pub(super) fn into_canonical_segment_parts<E>(
             .map_err(contract_error)
         })
         .collect::<Result<Vec<_>, _>>()?;
-    StructuralTransientSegment::new(request, checkpoint, solver_evidence, samples)
-        .map_err(contract_error)
+    StructuralTransientSegment::new(
+        request,
+        checkpoint,
+        solver_evidence,
+        initial_sample,
+        samples,
+    )
+    .map_err(contract_error)
 }
 
 fn subtract_counters<E>(

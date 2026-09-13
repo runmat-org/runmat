@@ -630,28 +630,31 @@ fn canonical_block_entrypoint_emits_a_restartable_segment_chain() {
         .collect::<Vec<_>>();
     for (sample, index) in samples.iter().zip(1..) {
         assert_eq!(
-            sample.state.displacement,
+            sample.physical.state.displacement,
             uninterrupted.displacement_snapshots[index]
         );
         assert_eq!(
-            sample.state.velocity,
+            sample.physical.state.velocity,
             uninterrupted.velocity_snapshots[index]
         );
         assert_eq!(
-            sample.state.acceleration,
+            sample.physical.state.acceleration,
             uninterrupted.acceleration_snapshots[index]
         );
         assert_eq!(
-            sample.applied_load_work_j,
+            sample.physical.applied_load_work_j,
             uninterrupted.external_work_j[index]
         );
-        assert_eq!(sample.support_work_j, uninterrupted.support_work_j[index]);
         assert_eq!(
-            sample.damping_dissipation_j,
+            sample.physical.support_work_j,
+            uninterrupted.support_work_j[index]
+        );
+        assert_eq!(
+            sample.physical.damping_dissipation_j,
             uninterrupted.damping_dissipation_j[index]
         );
         assert_eq!(
-            sample.dynamic_balance,
+            sample.physical.dynamic_balance,
             uninterrupted.dynamic_balance_snapshots[index]
         );
     }

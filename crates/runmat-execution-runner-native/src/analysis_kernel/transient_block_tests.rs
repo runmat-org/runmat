@@ -3,11 +3,13 @@ use runmat_analysis_core::{
     RegionTarget, StructuralConstraint, StructuralConstraintKind,
 };
 use runmat_analysis_execution::{
-    execute_serial_analysis, import_structural_transient_block, prepare_analysis_objects,
-    prepare_structural_transient_block_request_objects, prepare_structural_transient_block_task,
-    prepare_structural_transient_checkpoint_objects, prepare_structural_transient_workload_objects,
+    execute_serial_analysis, import_structural_transient_block, import_structural_transient_result,
+    prepare_analysis_objects, prepare_structural_transient_block_request_objects,
+    prepare_structural_transient_block_task, prepare_structural_transient_checkpoint_objects,
+    prepare_structural_transient_result_task, prepare_structural_transient_workload_objects,
     AnalysisHostResponse, PreparedStructuralTransientBlockTask,
-    StructuralTransientBlockPreparation,
+    PreparedStructuralTransientResultTask, StructuralTransientBlockPreparation,
+    StructuralTransientResultPreparation,
 };
 use runmat_analysis_fea::{
     execution::{
@@ -105,6 +107,25 @@ fn execute_durable_block(
         .program_response()
 }
 
+fn execute_durable_result(
+    store: &mut runmat_execution_artifact::cache::FilesystemObjectStore,
+    prepared: &PreparedStructuralTransientResultTask,
+) -> runmat_execution_artifact::ProgramExecutionResponse {
+    let limits = ObjectInventoryLimits::default();
+    prepared.program.write_to(store).unwrap();
+    let completed = execute_serial_analysis(
+        &prepared.program.request,
+        store,
+        &NativeAnalysisKernel,
+        256,
+        limits,
+    )
+    .unwrap();
+    AnalysisHostResponse::completed(&prepared.host, &completed)
+        .unwrap()
+        .program_response()
+}
+
 #[test]
 fn native_kernel_executes_a_two_block_physical_transient_chain() {
     let (model, mesh) = transient_fixture();
@@ -173,7 +194,8 @@ fn native_kernel_executes_a_two_block_physical_transient_chain() {
     let first_import =
         import_structural_transient_block(&store, first_response, &first, limits).unwrap();
     let checkpoint = first_import.segment.manifest().terminal_checkpoint.clone();
-    let second_request = StructuralTransientBlockRequest::new(scope, Some(&checkpoint), 4).unwrap();
+    let second_request =
+        StructuralTransientBlockRequest::new(scope.clone(), Some(&checkpoint), 4).unwrap();
     let second_request_objects =
         prepare_structural_transient_block_request_objects(&second_request, 256, namespace, limits)
             .unwrap();
@@ -185,8 +207,8 @@ fn native_kernel_executes_a_two_block_physical_transient_chain() {
     )
     .unwrap();
     let second = prepare_structural_transient_block_task(StructuralTransientBlockPreparation {
-        workload: workload_objects,
-        mesh: mesh_objects,
+        workload: workload_objects.clone(),
+        mesh: mesh_objects.clone(),
         request: second_request_objects,
         predecessor: Some(checkpoint_objects),
         artifact_access: access(),
@@ -203,12 +225,12 @@ fn native_kernel_executes_a_two_block_physical_transient_chain() {
     .unwrap();
     let second_import =
         import_structural_transient_block(&store, second_response, &second, limits).unwrap();
-    let second_segment = second_import.segment;
 
     assert_eq!(first_import.segment.samples().len(), 2);
-    assert_eq!(second_segment.samples().len(), 2);
+    assert_eq!(second_import.segment.samples().len(), 2);
     assert_eq!(
-        second_segment
+        second_import
+            .segment
             .manifest()
             .terminal_checkpoint
             .continuation
@@ -216,7 +238,105 @@ fn native_kernel_executes_a_two_block_physical_transient_chain() {
         4
     );
     assert_eq!(
-        second_segment.manifest().terminal_checkpoint.predecessor,
+        second_import
+            .segment
+            .manifest()
+            .terminal_checkpoint
+            .predecessor,
         Some(checkpoint.identity)
+    );
+
+    let result_task =
+        prepare_structural_transient_result_task(StructuralTransientResultPreparation {
+            blocks: vec![second_import, first_import],
+            artifact_access: access(),
+            program_revision: revision(),
+            chunk_bytes: 256,
+            inventory_limits: limits,
+        })
+        .unwrap();
+    let mut store = runmat_execution_artifact::cache::FilesystemObjectStore::open(
+        &store_root,
+        limits.max_object_bytes,
+    )
+    .unwrap();
+    let result_response = execute_durable_result(&mut store, &result_task);
+    drop(store);
+
+    let store = runmat_execution_artifact::cache::FilesystemObjectStore::open(
+        &store_root,
+        limits.max_object_bytes,
+    )
+    .unwrap();
+    let imported =
+        import_structural_transient_result(&store, result_response, &result_task, limits).unwrap();
+    assert_eq!(imported.result.samples().len(), 5);
+    assert_eq!(
+        imported.result.samples()[0].schedule_ordinal,
+        0,
+        "the first computed physical state must survive block partitioning"
+    );
+    assert_eq!(imported.numerical_receipt.blocks.len(), 2);
+    assert_eq!(
+        imported.numerical_receipt.source_result,
+        imported.result.manifest().identity
+    );
+
+    let one_request = StructuralTransientBlockRequest::new(scope, None, 4).unwrap();
+    let one_request_objects =
+        prepare_structural_transient_block_request_objects(&one_request, 256, namespace, limits)
+            .unwrap();
+    let one_block = prepare_structural_transient_block_task(StructuralTransientBlockPreparation {
+        workload: workload_objects,
+        mesh: mesh_objects,
+        request: one_request_objects,
+        predecessor: None,
+        artifact_access: access(),
+        program_revision: revision(),
+    })
+    .unwrap();
+    let mut store = runmat_execution_artifact::cache::FilesystemObjectStore::open(
+        &store_root,
+        limits.max_object_bytes,
+    )
+    .unwrap();
+    let one_response = execute_durable_block(&mut store, &one_block);
+    drop(store);
+    let store = runmat_execution_artifact::cache::FilesystemObjectStore::open(
+        &store_root,
+        limits.max_object_bytes,
+    )
+    .unwrap();
+    let one_import =
+        import_structural_transient_block(&store, one_response, &one_block, limits).unwrap();
+    let one_result_task =
+        prepare_structural_transient_result_task(StructuralTransientResultPreparation {
+            blocks: vec![one_import],
+            artifact_access: access(),
+            program_revision: revision(),
+            chunk_bytes: 256,
+            inventory_limits: limits,
+        })
+        .unwrap();
+    let mut store = runmat_execution_artifact::cache::FilesystemObjectStore::open(
+        &store_root,
+        limits.max_object_bytes,
+    )
+    .unwrap();
+    let one_result_response = execute_durable_result(&mut store, &one_result_task);
+    drop(store);
+    let store = runmat_execution_artifact::cache::FilesystemObjectStore::open(
+        &store_root,
+        limits.max_object_bytes,
+    )
+    .unwrap();
+    let one_result =
+        import_structural_transient_result(&store, one_result_response, &one_result_task, limits)
+            .unwrap();
+
+    assert_eq!(one_result.result, imported.result);
+    assert_ne!(
+        one_result.numerical_receipt.identity, imported.numerical_receipt.identity,
+        "execution partitioning belongs to the receipt, not the physical result"
     );
 }
