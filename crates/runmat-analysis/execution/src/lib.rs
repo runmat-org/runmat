@@ -25,6 +25,8 @@ mod signal_program;
 mod state_publication;
 mod structural;
 mod structural_sequence;
+mod structural_transient_recovery;
+mod structural_transient_sequence;
 mod task;
 mod transient_block_task;
 mod transient_object_access;
@@ -141,6 +143,14 @@ pub use structural_sequence::{
     PreparedStructuralSolveTask, PreparedStructuralSolveWave, PreparedStructuralStateTask,
     PreparedStructuralStateWave, StructuralSequenceCoordinator, StructuralSequenceNode,
     StructuralSequencePreparation, StructuralSequenceResultClosure,
+};
+pub use structural_transient_recovery::{
+    StructuralTransientExecutionCheckpoint, StructuralTransientExecutionCheckpointIdentity,
+    StructuralTransientRecoveryClosure, STRUCTURAL_TRANSIENT_EXECUTION_CHECKPOINT_MEDIA_TYPE,
+    STRUCTURAL_TRANSIENT_EXECUTION_CHECKPOINT_VALUE_SCHEMA,
+};
+pub use structural_transient_sequence::{
+    StructuralTransientSequenceCoordinator, StructuralTransientSequencePreparation,
 };
 pub use task::{
     build_analysis_task_submission, build_structural_task_submission, AnalysisExecutionContext,
