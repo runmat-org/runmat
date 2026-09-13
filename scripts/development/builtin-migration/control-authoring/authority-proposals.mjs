@@ -80,9 +80,20 @@ function callableOwnerProposal(topologyRow, forms, observedOwnerPaths) {
   if (topologyRow.disposition.kind === "internal") {
     return observedOwnerPaths.length === 1 ? observedOwnerPaths[0] : null;
   }
-  return typeof topologyRow.domain === "string" && typeof topologyRow.family === "string"
-    ? `${RUNTIME_ROOT}/${topologyRow.domain}/${topologyRow.family}/${rustLeaf(topologyRow.identity)}/mod.rs`
-    : null;
+  return canonicalCallableOwnerPath(topologyRow, observedOwnerPaths);
+}
+
+export function canonicalCallableOwnerPath(topologyRow, observedOwnerPaths) {
+  if (typeof topologyRow.domain !== "string" || typeof topologyRow.family !== "string") return null;
+  const leaf = rustLeaf(topologyRow.identity);
+  const familyRoot = `${RUNTIME_ROOT}/${topologyRow.domain}/${topologyRow.family}`;
+  const flatOwner = `${familyRoot}/${leaf}.rs`;
+  const packageRoot = `${familyRoot}/${leaf}`;
+  if (observedOwnerPaths.length === 1
+    && (observedOwnerPaths[0] === flatOwner || observedOwnerPaths[0].startsWith(`${packageRoot}/`))) {
+    return observedOwnerPaths[0];
+  }
+  return `${packageRoot}/mod.rs`;
 }
 
 function formOwnerProposal(topologyRow, formSpellings, observedOwnerPaths) {
