@@ -27,9 +27,10 @@ import { cleanupTemporaryDirectories, createTemporaryDirectory } from "./tempora
 export const REVISION = `git:${"1".repeat(40)}`;
 
 export function repositoryFixture({
-  sidecar = false, identity = "foo", composition = false,
+  sidecar = false, identity = "foo", identities = null, composition = false,
   compositionTransition = "retain",
 } = {}) {
+  const fixtureIdentities = identities ?? [identity];
   const fixtureRoot = createTemporaryDirectory("runmat-migration-factory-");
   const root = path.join(fixtureRoot, "repository");
   fs.mkdirSync(root);
@@ -51,7 +52,11 @@ export function repositoryFixture({
         }),
       );
     }
-    write(root, "crates/runmat-runtime/src/builtins/math/basic/mod.rs", "pub mod foo;\n");
+    write(
+      root,
+      "crates/runmat-runtime/src/builtins/math/basic/mod.rs",
+      `${fixtureIdentities.map((name) => `pub mod ${name};`).join("\n")}\n`,
+    );
   }
   write(root, "scripts/development/verify-builtin-generated-products.mjs", `
 import fs from "node:fs"; import crypto from "node:crypto";
@@ -77,20 +82,24 @@ const products = input.products.map((product) => {
 const value = { schema_version: 3, kind: "runmat-builtin-generated-products-proof", authority: "machine-derived-integration-evidence", products, result: "pass" };
 process.stdout.write(JSON.stringify(value) + "\\n");
 `);
-  write(root, `crates/runmat-runtime/src/builtins/math/basic/${identity}.rs`, `
-#[runtime_builtin(name = "${identity}", category = "math/basic", builtin_path = "crate::builtins::math::basic::${identity}")]
-fn ${identity.replaceAll(".", "_")}_builtin() {}
+  for (const fixtureIdentity of fixtureIdentities) {
+    write(root, `crates/runmat-runtime/src/builtins/math/basic/${fixtureIdentity}.rs`, `
+#[runtime_builtin(name = "${fixtureIdentity}", category = "math/basic", builtin_path = "crate::builtins::math::basic::${fixtureIdentity}")]
+fn ${fixtureIdentity.replaceAll(".", "_")}_builtin() {}
 #[cfg(test)] mod tests {}
 `);
+  }
   write(root, "crates/runmat-runtime/src/builtins/generated_wasm_registry.rs", "// no fixture WASM registrations\n");
-  write(root, `crates/runmat-builtins/src/catalog/entries/math/basic/${identity}/mod.rs`, `
+  for (const fixtureIdentity of fixtureIdentities) {
+    write(root, `crates/runmat-builtins/src/catalog/entries/math/basic/${fixtureIdentity}/mod.rs`, `
 pub const ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
- identity: BuiltinCatalogIdentity { name: "${identity}" },
+ identity: BuiltinCatalogIdentity { name: "${fixtureIdentity}" },
  link: BuiltinLinkContract {},
  contract: BuiltinContractDeclaration { inference_rule: BuiltinInferenceRule::Math(Rule::Foo) },
- documentation: BuiltinDocumentation { summary: "Foo", examples: &["${identity}(1)"] },
+ documentation: BuiltinDocumentation { summary: "Foo", examples: &["${fixtureIdentity}(1)"] },
 };`);
-  if (sidecar) write(root, `docs/builtins/reference/${identity}.json`, JSON.stringify({ name: identity, summary: "Foo", examples: [{ input: `${identity}(1)` }] }));
+    if (sidecar) write(root, `docs/builtins/reference/${fixtureIdentity}.json`, JSON.stringify({ name: fixtureIdentity, summary: "Foo", examples: [{ input: `${fixtureIdentity}(1)` }] }));
+  }
   execFileSync("git", ["init", "--quiet"], { cwd: root });
   execFileSync("git", ["add", "."], { cwd: root });
   execFileSync("git", ["-c", "user.name=RunMat Test", "-c", "user.email=test@runmat.invalid", "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "fixture"], { cwd: root });
@@ -409,18 +418,22 @@ export function topologyFixture(inventory, bundleId, id, options = {}) {
 }
 
 export function compiledInventoryFixture(id = "foo", options = {}) {
-  const catalog = catalogEntryFixture(id);
-  const manifestEntries = [{ kind: "builtin", declaration: id, variant: "default", builtin_path: `builtins::${id}` }, ...(options.legacyGroup ? [{ kind: "gpu_spec", declaration: "FIXTURE_GPU_SPEC", variant: null, builtin_path: `builtins::${id}` }] : [])].sort((left, right) => `${left.kind}\0${left.declaration}`.localeCompare(`${right.kind}\0${right.declaration}`, "en", { sensitivity: "variant" }));
+  const ids = Array.isArray(id) ? id : [id];
+  const catalogs = ids.map(catalogEntryFixture);
+  const manifestEntries = [
+    ...ids.map((name) => ({ kind: "builtin", declaration: name, variant: "default", builtin_path: `builtins::${name}` })),
+    ...(options.legacyGroup ? [{ kind: "gpu_spec", declaration: "FIXTURE_GPU_SPEC", variant: null, builtin_path: `builtins::${ids[0]}` }] : []),
+  ].sort((left, right) => `${left.kind}\0${left.declaration}`.localeCompare(`${right.kind}\0${right.declaration}`, "en", { sensitivity: "variant" }));
   const registrationManifest = {
     schema_version: 1,
     digest: contentDigest(Buffer.from(JSON.stringify(manifestEntries))).slice("sha256:".length),
-    counts: { builtin: 1, constant: 0, gpu_spec: options.legacyGroup ? 1 : 0, fusion_spec: 0 },
+    counts: { builtin: ids.length, constant: 0, gpu_spec: options.legacyGroup ? 1 : 0, fusion_spec: 0 },
     entries: manifestEntries,
   };
   const snapshot = {
     build: { architecture: "aarch64", operating_system: "macos", family: "unix", pointer_width: 64, endianness: "little", crate_feature_inventory: { crate_name: "runmat-runtime", schema_version: 1, known_features: ["blas-lapack", "blas-only", "gui", "interaction-test-hooks", "occt-native", "occt-wasm-host", "plot-core", "plot-web", "test-classes", "wgpu"], enabled_features: [] } },
-    declared: { namespace_scope: "function_callables_and_constants_are_reported_separately", catalog_schema_version: 6, catalog_fingerprint: "a".repeat(64), catalog_entries: [catalog], catalog_aliases: [], catalog_provenance: [{ identity: { builtin: { name: id }, variant: "default" }, provenance: { source_file: `crates/runmat-builtins/src/catalog/entries/math/basic/${id}/mod.rs`, module_path: `catalog::${id}` } }], constants: [], legacy_functions: [], legacy_documentation: [] },
-    observed: { registration_manifest: registrationManifest, runtime_constants: [], runtime_bindings: [{ name: id, variant: "default", native_symbol: nativeSymbol(id, "default") }], implementation_provenance: [{ name: id, binding_variant: "default", source_file: `crates/runmat-runtime/src/builtins/math/basic/${id}.rs`, module_path: `builtins::${id}`, function: `${id}_builtin`, builtin_path: `builtins::${id}`, authority: "canonical_binding" }], gpu_specs: options.legacyGroup ? [gpuGroupFixture(id)] : [], fusion_specs: [] },
+    declared: { namespace_scope: "function_callables_and_constants_are_reported_separately", catalog_schema_version: 6, catalog_fingerprint: "a".repeat(64), catalog_entries: catalogs, catalog_aliases: [], catalog_provenance: ids.map((name) => ({ identity: { builtin: { name }, variant: "default" }, provenance: { source_file: `crates/runmat-builtins/src/catalog/entries/math/basic/${name}/mod.rs`, module_path: `catalog::${name}` } })), constants: [], legacy_functions: [], legacy_documentation: [] },
+    observed: { registration_manifest: registrationManifest, runtime_constants: [], runtime_bindings: ids.map((name) => ({ name, variant: "default", native_symbol: nativeSymbol(name, "default") })), implementation_provenance: ids.map((name) => ({ name, binding_variant: "default", source_file: `crates/runmat-runtime/src/builtins/math/basic/${name}.rs`, module_path: `builtins::${name}`, function: `${name}_builtin`, builtin_path: `builtins::${name}`, authority: "canonical_binding" })), gpu_specs: options.legacyGroup ? [gpuGroupFixture(ids[0])] : [], fusion_specs: [] },
     validation: { status: "valid", errors: [], migration_readiness: options.finding ? { status: "incomplete", findings: [options.finding] } : { status: "ready", findings: [] } },
   };
   const value = contentDigest(Buffer.from(JSON.stringify(snapshot))).slice("sha256:".length);
