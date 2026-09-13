@@ -1,4 +1,5 @@
 import { compareCodePoint } from "../constants.mjs";
+import { identityAtomicAuthorityPaths } from "../baseline-evidence.mjs";
 import { array, digest, exact, identity, nonempty, object, stableId } from "../schema.mjs";
 import { validateBundleComposition } from "./composition.mjs";
 
@@ -38,7 +39,7 @@ export function buildAuthorityComponentGraph(inventory) {
   };
   const owner = new Map();
   for (const [name, row] of byIdentity) {
-    for (const source of [...row.ownership.catalog, ...row.ownership.runtime]) {
+    for (const source of authorityOwnerPaths(row)) {
       const prior = owner.get(source);
       if (prior) union(name, prior);
       else owner.set(source, name);
@@ -251,8 +252,11 @@ function validateAuthorityOwnership(row, name) {
 
 function authorityCandidate(members, byIdentity) {
   const rows = members.map((member) => byIdentity.get(member));
-  const allSources = [...new Set(rows.flatMap((row) => [...row.ownership.catalog, ...row.ownership.runtime]))];
-  const sharedSources = allSources.filter((source) => rows.filter((row) => row.ownership.catalog.includes(source) || row.ownership.runtime.includes(source)).length > 1).sort(compareCodePoint);
+  const pathsByRow = rows.map(authorityOwnerPaths);
+  const allSources = [...new Set(pathsByRow.flat())];
+  const sharedSources = allSources
+    .filter((source) => pathsByRow.filter((paths) => paths.includes(source)).length > 1)
+    .sort(compareCodePoint);
   const categoryEvidence = Object.fromEntries(rows.map((row) => [row.identity, observedCategories(row)]));
   const categoryValues = [...new Set(Object.values(categoryEvidence).flatMap((entries) => entries.map((entry) => entry.value)))].sort(compareCodePoint);
   return {
@@ -263,6 +267,10 @@ function authorityCandidate(members, byIdentity) {
     category_evidence: categoryEvidence,
     review: { status: "unreviewed", domain: null, family: null, cohort: null, atomic_bundle: null, evidence: [] },
   };
+}
+
+function authorityOwnerPaths(row) {
+  return identityAtomicAuthorityPaths(row);
 }
 
 function observedCategories(row) {
