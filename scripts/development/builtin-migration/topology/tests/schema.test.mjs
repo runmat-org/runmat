@@ -6,8 +6,10 @@ import {
   parseBundleComposition,
   parseIdentityTarget,
   parseReviewBaseline,
-  parseReviewedEvidence,
 } from "../schema.mjs";
+import {
+  parseCanonicalReviewedEvidence, parseUniqueReviewedEvidence,
+} from "../../reviewed-evidence.mjs";
 
 const SHA = `sha256:${"a".repeat(64)}`;
 
@@ -32,7 +34,7 @@ test("topology schema accepts only exact v2 review primitives", () => {
     classification: "newly-classified",
     evidence: ["review:first explicit target classification"],
   }, "target"));
-  assert.doesNotThrow(() => parseReviewedEvidence({ status: "reviewed", evidence: ["review:root"] }, "review"));
+  assert.doesNotThrow(() => parseCanonicalReviewedEvidence({ status: "reviewed", evidence: ["review:root"] }, "review"));
 });
 
 test("topology schema rejects unknown fields, invalid package paths, and implicit review", () => {
@@ -48,7 +50,16 @@ test("topology schema rejects unknown fields, invalid package paths, and implici
   assert.throws(() => parseIdentityTarget({
     identity: "alpha", domain: "math", family: "basic", classification: "unresolved-baseline", evidence: ["review:alpha"],
   }, "target"), /classification must be one of/);
-  assert.throws(() => parseReviewedEvidence({ status: "unreviewed", evidence: [] }, "review"), /status must be reviewed/);
+  assert.throws(() => parseCanonicalReviewedEvidence({ status: "unreviewed", evidence: [] }, "review"), /status must be reviewed/);
+  assert.throws(() => parseCanonicalReviewedEvidence({
+    status: "reviewed", evidence: ["review:zeta", "review:alpha"],
+  }, "review"), /canonically ordered/);
+  assert.throws(() => parseCanonicalReviewedEvidence({
+    status: "reviewed", evidence: ["review:alpha", "review:alpha"],
+  }, "review"), /must be unique/);
+  assert.doesNotThrow(() => parseUniqueReviewedEvidence({
+    status: "reviewed", evidence: ["review:zeta", "review:alpha"],
+  }, "review"));
 });
 
 test("composition evidence and component identifiers use canonical exact sets", () => {

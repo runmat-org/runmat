@@ -229,6 +229,70 @@ node scripts/development/builtin-migration-factory.mjs queue \
   --output /tmp/runmat-builtin-queue.json
 ```
 
+Before the first lease is issued, publish the reviewed initial queue authority below the same authority root used by the pilot lifecycle. The reviewer-authored input contains only the frozen control digest and reviewed evidence; the initializer derives the empty pilot state, frozen-baseline source and inventory bindings, empty accepted-seal set, and both artifact digests. Paths are deterministic for the control manifest. Publication creates the state first and the checkpoint second; the checkpoint is the commit point, so an exact rerun can finish an interrupted publication but cannot overwrite or repair different bytes. Publish the returned checkpoint digest to the durable progress ledger before using it as `--trusted-queue-checkpoint-digest`.
+
+Author the review with this exact closed shape. Evidence strings must be nonempty, unique, and sorted by Unicode code point. `control_manifest_digest` is the `digest` field from the frozen control; `digest` is the canonical RunMat evidence digest of the other five fields, not a hash of pretty-printed JSON bytes.
+
+```json
+{
+  "schema_version": 1,
+  "kind": "runmat-builtin-migration-initial-queue-review",
+  "authority": "reviewer-authored-development-input",
+  "control_manifest_digest": "sha256:...",
+  "review": {
+    "status": "reviewed",
+    "evidence": ["review:current-control-approved-as-initial-queue-root"]
+  },
+  "digest": "sha256:..."
+}
+```
+
+The following command reads the frozen control, computes the canonical digest with the factory's source-of-truth implementation, and creates the review without overwriting an existing file:
+
+```bash
+node --input-type=module <<'EOF'
+import fs from "node:fs";
+import path from "node:path";
+import {
+  canonicalEvidencePath,
+  publishEvidenceBytes,
+} from "./scripts/development/builtin-migration/atomic-evidence-publication.mjs";
+import { evidenceDigest } from "./scripts/development/builtin-migration/evidence.mjs";
+
+const control = JSON.parse(fs.readFileSync("/tmp/rm1064-control.json", "utf8"));
+const payload = {
+  schema_version: 1,
+  kind: "runmat-builtin-migration-initial-queue-review",
+  authority: "reviewer-authored-development-input",
+  control_manifest_digest: control.digest,
+  review: {
+    status: "reviewed",
+    evidence: ["review:current-control-approved-as-initial-queue-root"],
+  },
+};
+const review = { ...payload, digest: evidenceDigest(payload) };
+const authorityRoot = canonicalEvidencePath("/tmp/rm1064-authority");
+publishEvidenceBytes(
+  path.join(authorityRoot, "initial-queue-review.json"),
+  `${JSON.stringify(review, null, 2)}\n`,
+  { createParentDirectories: true },
+);
+console.log(review.digest);
+EOF
+```
+
+```bash
+node scripts/development/builtin-migration-factory.mjs initialize-queue \
+  --authority-root /tmp/rm1064-authority \
+  --initial-queue-review /tmp/rm1064-authority/initial-queue-review.json \
+  --initial-queue-review-digest sha256:... \
+  --control /tmp/rm1064-control.json \
+  --baseline-inventory /tmp/runmat-builtin-inventory.json \
+  "${topology_args[@]}" \
+  "${control_args[@]}" \
+  --output /tmp/rm1064-initial-queue-result.json
+```
+
 Queue v4 is derived at bundle granularity. It exposes prerequisite and phase-specific barriers, migration-finding work items, reviewed complexity, applicable maturity gates, authored scopes, integration outputs, and source observations. The initial state is empty and begins in the reviewed pilot phase. A finding assigned to the bundle is work the bundle must resolve and is verified by the inventory-delta gate; it does not block the bundle from starting. Pilot bundles follow the exact reviewed wave membership and barriers. Production bundles follow prerequisites and earlier-cohort barriers. Queue-state schema v4 may record `leased`, `submitted`, `integrated`, or `verified` workflow progress. A seal edge appends exactly one seal and changes exactly that bundle's workflow entry to the seal's exact artifact in `verified` state; it cannot carry an unrelated workflow edit, substitute an artifact, skip through an independent state change, remove or replace an accepted seal, or regress recorded state. Each accepted seal retains its serialized phase, subject inventory, ordinary-gate proof, and exact lease identity. Historical pilot seals remain valid after a later phase transition, while a newly appended seal must match the current queue phase. Recorded progress cannot override blockers or create seal authority.
 
 A reviewed queue-checkpoint v2 binds the queue-state digest, phase, complete accepted-seal set, current integrated source revision and digest, current inventory digest, head event, and predecessor checkpoint. The initial checkpoint binds the frozen baseline inventory. A seal checkpoint binds the appended seal's exact subject inventory; a phase-transition checkpoint preserves the predecessor's source, inventory, and accepted seals. The factory loads the state, checkpoint, predecessor states, predecessor checkpoints, and accepted seals below one canonical authority root. Each canonical relative path is pinned to one semantic digest independently of its raw byte digest, and every file observation is revalidated before the resulting authority snapshot is returned. Symlinks, non-regular files, path escapes, path or digest rebinding, recursive cycles, and changes after observation fail closed. Checkpoint validation owns one recursive predecessor walk against the corresponding predecessor state and rejects cycles rather than allowing a loader to validate and then revalidate the same chain. The hash chain proves that a supplied state is an append-only successor of its supplied predecessor; it does not prove that a local file is the newest state. Orchestration must publish the current checkpoint digest to a durable progress ledger or control-wave record and pass that exact trusted digest when issuing a lease. Replaying an older queue prefix, even with the repository rewound to its former `HEAD`, then fails against the published checkpoint digest.

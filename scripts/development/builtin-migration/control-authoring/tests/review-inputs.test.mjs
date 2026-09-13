@@ -241,7 +241,10 @@ test("control composition and attestation are deterministic capabilities, not re
     program: "RM-1064/C00-C07",
     candidate_digest: candidate.digest,
     input_digests: controlCandidateInputDigests(candidate),
-    review: { status: "reviewed", evidence: ["independent fixture review"] },
+    review: {
+      status: "reviewed",
+      evidence: ["review:zeta independent fixture review", "review:alpha independent fixture review"],
+    },
   };
   const attestation = { ...attestationPayload, digest: evidenceDigest(attestationPayload) };
   const reviewed = validateControlReviewChain(candidate, attestation, candidate);
@@ -279,6 +282,16 @@ test("control composition and attestation are deterministic capabilities, not re
     () => validateControlReviewChain(forgedCandidate, forgedAttestation, candidate),
     /deterministic recomposition/,
   );
+});
+
+test("existing control reviews retain uniqueness-only evidence ordering", () => {
+  const fixture = reviewFixture();
+  const global = structuredClone(fixture.globalReview);
+  global.review.evidence = ["review:zeta", "review:alpha"];
+  resign(global);
+  assert.doesNotThrow(() => parseGlobalControlReview(
+    global, fixture.scaffold, fixture.topology, fixture.inventory,
+  ));
 });
 
 test("reviewed pilot policy survives the complete control authority chain exactly", () => {

@@ -3,7 +3,9 @@ import path from "node:path";
 import {
   assertAuthorityLoadSession, loadJsonArtifact, loadedJsonValue,
 } from "../authority-loading/index.mjs";
-import { publishEvidenceBytes } from "../atomic-evidence-publication.mjs";
+import {
+  EvidenceTargetExistsError, publishEvidenceBytes,
+} from "../atomic-evidence-publication.mjs";
 import { assertValidatedControl } from "../control.mjs";
 import { contentDigest } from "../evidence.mjs";
 import { assertLoadedPilotEvaluation } from "../pilot-evaluation.mjs";
@@ -29,7 +31,7 @@ function publishOrVerify(session, relativePath, value) {
       createParentDirectories: true,
     });
   } catch (error) {
-    if (!String(error?.message).includes("evidence target already exists")) throw error;
+    if (!(error instanceof EvidenceTargetExistsError)) throw error;
     const artifact = loadJsonArtifact(session, relativePath, "existing pilot transition artifact");
     if (artifact.contentDigest !== contentDigest(Buffer.from(bytes, "utf8"))
       || JSON.stringify(loadedJsonValue(artifact, session.root)) !== JSON.stringify(value)) {

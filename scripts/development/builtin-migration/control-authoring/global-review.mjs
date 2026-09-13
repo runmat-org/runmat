@@ -6,13 +6,14 @@ import { validateReviewedModuleCompositionAuthority } from "../module-compositio
 import { parseTrustedReviewedModuleCompositionBaseline } from "../module-composition/baseline-authority.mjs";
 import { bindModuleCompositionProjection } from "../module-composition/binding.mjs";
 import { parseFindingDispositions } from "../migration-findings.mjs";
+import { parseUniqueReviewedEvidence } from "../reviewed-evidence.mjs";
 import { assertValidatedTopologyView } from "../topology/freeze.mjs";
 import { parseTargetPolicy } from "../target-policy.mjs";
 import { digest, exact, kind } from "../schema.mjs";
 import { assertValidatedControlOverlayScaffold } from "./scaffold.mjs";
 import {
   assertEvidenceDigest, assertScaffoldTopologyBinding, parseExceptionManifestPolicy,
-  parseProgramProfile, parseReviewedEvidence, validateStorageTargetCoverage,
+  parseProgramProfile, validateStorageTargetCoverage,
 } from "./policy-schema.mjs";
 
 export const GLOBAL_CONTROL_REVIEW_KIND = "runmat-builtin-migration-global-control-review";
@@ -51,7 +52,7 @@ export function parseGlobalControlReview(value, scaffoldValue, topology, invento
     || Array.isArray(value.pilot_policy)) {
     throw new Error("global control review pilot_policy must be a non-null object");
   }
-  parseReviewedEvidence(value.review, "global control review");
+  parseUniqueReviewedEvidence(value.review, "global control review");
   assertEvidenceDigest(value, "global control review");
   const parsed = deepImmutable({
     value, digest: value.digest, programProfiles, integrationProducts,

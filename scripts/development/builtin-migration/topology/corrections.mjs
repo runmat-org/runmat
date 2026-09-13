@@ -1,5 +1,6 @@
 import { compareCodePoint } from "../constants.mjs";
 import { evidenceDigest } from "../evidence.mjs";
+import { parseCanonicalReviewedEvidence } from "../reviewed-evidence.mjs";
 import { digest, enumValue, exact, identity, kind, nonempty, stableId } from "../schema.mjs";
 import { parseBoundBaseline, parseBoundReviewDigests, validateAffectedBundleUpdates } from "./artifact-schema.mjs";
 import { claimsMap, validateTopologyClaims } from "./components.mjs";
@@ -9,7 +10,6 @@ import {
   parseCohort,
   parseComponentId,
   parseIdentityTarget,
-  parseReviewedEvidence,
   parseTargetPackage,
   TOPOLOGY_PROGRAM,
 } from "./schema.mjs";
@@ -36,7 +36,7 @@ export function parseStabilityCorrectionArtifact(value, context) {
     throw new Error("topology stability corrections do not bind the expected reconciliation");
   }
   digest(value.pre_state_digest, "topology stability corrections pre-state digest");
-  parseReviewedEvidence(value.review, "topology stability corrections review");
+  parseCanonicalReviewedEvidence(value.review, "topology stability corrections review");
 
   const before = validateTopologyClaims(context?.componentIndex, context?.claims, {
     requireComplete: true,

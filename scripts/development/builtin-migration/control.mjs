@@ -7,10 +7,11 @@ import { parseGatePlans, validateGatePlanTargetCoverage } from "./gate-plan.mjs"
 import { requiredGatePlanNames } from "./gate-requirements.mjs";
 import { primarySpelling, validateIdentityAuthorityGraph } from "./identity-authority.mjs";
 import { parseEffectivePathScope } from "./path-scope.mjs";
+import { parseUniqueReviewedEvidence } from "./reviewed-evidence.mjs";
 import { assertValidatedTopologyView } from "./topology/freeze.mjs";
 import { assertValidatedControlReview } from "./control-authoring/authority.mjs";
 import {
-  executionTargetKey, parseExceptionManifestPolicy, parseReviewedEvidence,
+  executionTargetKey, parseExceptionManifestPolicy,
 } from "./control-authoring/policy-schema.mjs";
 import {
   SAFE_IDENTITY, array, digest, enumValue, exact, identity, integer, kind, nonempty,
@@ -63,7 +64,7 @@ export function validateControlManifestStructure(value, { inventory: current, re
   if (!bundles.size || !identities.size) throw new Error("control manifest must contain bundles and identities");
   const migrationFindings = parseFindingDispositions(value.migration_findings, bundles, current?.migration_findings ?? null);
   parseExceptionManifestPolicy(value.exception_manifest, bundles);
-  parseReviewedEvidence(value.review, "control manifest review");
+  parseUniqueReviewedEvidence(value.review, "control manifest review");
   validateBundleGraph(bundles, identities, projection.integrationProducts);
   validateGatePlanCoverage(bundles, identities);
   for (const bundle of bundles.values()) {
@@ -203,7 +204,7 @@ function parseBundle(id, value, current) {
     owner_role: nonempty(value.owner_role, `${id} owner role`),
     complexity: parseComplexity(value.complexity, `${id} complexity`),
   };
-  parseReviewedEvidence(value.review, `${id} bundle review`);
+  parseUniqueReviewedEvidence(value.review, `${id} bundle review`);
   return result;
 }
 

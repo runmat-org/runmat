@@ -1,8 +1,9 @@
 import { evidenceDigest } from "../evidence.mjs";
 import { deepImmutable } from "../immutable.mjs";
+import { parseCanonicalReviewedEvidence } from "../reviewed-evidence.mjs";
 import { digest, exact, kind, object } from "../schema.mjs";
 import { parseTopologyCandidate } from "./candidate.mjs";
-import { parseReviewedEvidence, TOPOLOGY_PROGRAM } from "./schema.mjs";
+import { TOPOLOGY_PROGRAM } from "./schema.mjs";
 
 export const TOPOLOGY_ATTESTATION_KIND = "runmat-builtin-topology-attestation";
 export const REVIEWED_TOPOLOGY_KIND = "runmat-builtin-migration-reviewed-topology";
@@ -57,7 +58,7 @@ export function parseTopologyAttestation(value, candidate) {
       throw new Error(`topology attestation ${field} digest differs from the candidate`);
     }
   }
-  parseReviewedEvidence(value.review, "topology attestation review");
+  parseCanonicalReviewedEvidence(value.review, "topology attestation review");
   return value;
 }
 
@@ -110,7 +111,7 @@ function parseReviewedTopologyIntegrity(value) {
   object(value.bundles, "reviewed topology bundles");
   object(value.identities, "reviewed topology identities");
   object(value.summary, "reviewed topology summary");
-  parseReviewedEvidence(value.review, "reviewed topology review");
+  parseCanonicalReviewedEvidence(value.review, "reviewed topology review");
   digest(value.digest, "reviewed topology digest");
   const { digest: _ignored, ...payload } = value;
   if (evidenceDigest(payload) !== value.digest) throw new Error("reviewed topology digest mismatch");

@@ -1,10 +1,11 @@
 import { canonicalAuthorityPath } from "../authority-loading/index.mjs";
 import { compareCodePoint } from "../constants.mjs";
 import { evidenceDigest } from "../evidence.mjs";
+import { parseCanonicalReviewedEvidence } from "../reviewed-evidence.mjs";
 import {
   array, digest, exact, integer, kind, sourceRevision, stableId, uniqueStrings,
 } from "../schema.mjs";
-import { parseCohort, parseReviewedEvidence } from "../topology/schema.mjs";
+import { parseCohort } from "../topology/schema.mjs";
 
 export const REVIEW_KIND = "runmat-builtin-migration-pilot-measurement-review";
 export const RESULT_KIND = "runmat-builtin-migration-pilot-measurement-result";
@@ -29,7 +30,7 @@ export function parseReviewValue(value) {
     || JSON.stringify(keys) !== JSON.stringify([...keys].sort(compareCodePoint))) {
     throw new Error("pilot measurement session references must be unique and canonical");
   }
-  parseReviewedEvidence(value.review, "pilot measurement review evidence");
+  parseCanonicalReviewedEvidence(value.review, "pilot measurement review evidence");
   assertSelfDigest(value, "pilot measurement review");
   return Object.freeze({
     ...value,

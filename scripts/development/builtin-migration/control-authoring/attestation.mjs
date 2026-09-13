@@ -1,6 +1,7 @@
 import { evidenceDigest } from "../evidence.mjs";
 import { deepImmutable } from "../immutable.mjs";
-import { digest, exact, kind, uniqueStrings } from "../schema.mjs";
+import { parseUniqueReviewedEvidence } from "../reviewed-evidence.mjs";
+import { digest, exact, kind } from "../schema.mjs";
 import { controlCandidateInputDigests } from "./compose.mjs";
 
 const PROGRAM = "RM-1064/C00-C07";
@@ -17,9 +18,7 @@ export function parseControlAttestation(value, candidate) {
   if (JSON.stringify(value.input_digests) !== JSON.stringify(controlCandidateInputDigests(candidate))) {
     throw new Error("control attestation input digests differ from the control candidate");
   }
-  exact(value.review, ["status", "evidence"], "control attestation review");
-  if (value.review.status !== "reviewed") throw new Error("control attestation must be reviewed");
-  uniqueStrings(value.review.evidence, "control attestation review evidence");
+  parseUniqueReviewedEvidence(value.review, "control attestation review");
   digest(value.digest, "control attestation digest");
   const { digest: _ignored, ...payload } = value;
   if (evidenceDigest(payload) !== value.digest) throw new Error("control attestation digest mismatch");

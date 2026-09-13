@@ -33,13 +33,6 @@ export function parseCohort(value, label = "cohort") {
   return enumValue(value, COHORTS, label);
 }
 
-export function parseReviewedEvidence(value, label) {
-  exact(value, ["status", "evidence"], label);
-  if (value.status !== "reviewed") throw new Error(`${label} status must be reviewed`);
-  canonicalStrings(value.evidence, `${label} evidence`);
-  return value;
-}
-
 export function parseIdentityTarget(value, label) {
   exact(value, ["identity", "domain", "family", "classification", "evidence"], label);
   identity(value.identity, `${label} identity`);

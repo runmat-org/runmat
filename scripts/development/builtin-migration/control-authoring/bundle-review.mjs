@@ -1,6 +1,7 @@
 import { compareCodePoint } from "../constants.mjs";
 import { evidenceDigest } from "../evidence.mjs";
 import { deepImmutable } from "../immutable.mjs";
+import { parseUniqueReviewedEvidence } from "../reviewed-evidence.mjs";
 import { assertValidatedTopologyView } from "../topology/freeze.mjs";
 import { validateModuleCompositionControl } from "../module-composition/control.mjs";
 import { array, digest, exact, identity, kind, stableId } from "../schema.mjs";
@@ -8,7 +9,7 @@ import { assertValidatedControlOverlayScaffold } from "./scaffold.mjs";
 import { assertValidatedGlobalControlReview } from "./global-review.mjs";
 import {
   assertEvidenceDigest, assertScaffoldTopologyBinding, parseBundleControlPolicy,
-  parseIdentityControlPolicy, parseReviewedEvidence,
+  parseIdentityControlPolicy,
 } from "./policy-schema.mjs";
 
 export const BUNDLE_CONTROL_REVIEW_KIND = "runmat-builtin-migration-bundle-control-review";
@@ -34,7 +35,7 @@ export function parseBundleControlReview(
     { deferEffectiveSequence: true },
   );
   const identityControls = parseIdentityControls(value.identity_controls, bundle, scaffold, topology);
-  parseReviewedEvidence(value.review, `${bundle.id} bundle review artifact`);
+  parseUniqueReviewedEvidence(value.review, `${bundle.id} bundle review artifact`);
   assertEvidenceDigest(value, "bundle control review");
   const parsed = deepImmutable({ value, digest: value.digest, bundleId: bundle.id, bundleControl: value.bundle_control, identityControls });
   VALIDATED_BUNDLE_REVIEWS.add(parsed);
