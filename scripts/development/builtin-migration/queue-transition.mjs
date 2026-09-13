@@ -21,7 +21,7 @@ export function parsePilotTransition(value) {
 
 export function validateQueuePhaseTransition({
   value, predecessorState, acceptedSeals, acceptedSealDependencies,
-  sealedBundles, pilotTransition, control,
+  sealedBundles, pilotTransition, control, validatePilotTransition = null,
 }) {
   if (predecessorState === null) {
     if (value.phase !== "pilot" || pilotTransition !== null) {
@@ -55,7 +55,12 @@ export function validateQueuePhaseTransition({
   if (JSON.stringify(value.bundles) !== JSON.stringify(predecessorState.value.bundles)) {
     throw new Error("pilot-to-production transition cannot change queue workflow state");
   }
-  throw new Error("pilot-to-production transition requires branded evaluation authority");
+  if (typeof validatePilotTransition !== "function") {
+    throw new Error("pilot-to-production transition requires branded evaluation authority");
+  }
+  return validatePilotTransition({
+    predecessorState, pilotTransition, acceptedSeals, sealedBundles,
+  });
 }
 
 function validateAddedSealAdmission(control, predecessorState, sealedBundles, phase) {
