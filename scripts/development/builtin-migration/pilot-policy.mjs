@@ -65,17 +65,54 @@ export function assertValidatedPilotPolicy(value) {
 
 export function pilotRateMeetsMinimum(value, publicIdentities, aggregateWorkerMilliseconds) {
   const policy = assertValidatedPilotPolicy(value);
-  integer(publicIdentities, "pilot measured public identities", 0);
-  integer(aggregateWorkerMilliseconds, "pilot aggregate worker milliseconds", 1);
-  const { numerator, denominator } = policy.admission.rate;
-  return BigInt(publicIdentities) * BigInt(denominator) * MILLISECONDS_PER_HOUR
-    >= BigInt(aggregateWorkerMilliseconds) * BigInt(numerator);
+  return comparePilotRate(policy, publicIdentities, aggregateWorkerMilliseconds).meets_minimum;
 }
 
 export function pilotElapsedWithinMaximum(value, elapsedMilliseconds) {
   const policy = assertValidatedPilotPolicy(value);
+  return comparePilotElapsed(policy, elapsedMilliseconds).within_maximum;
+}
+
+export function pilotAdmissionComparison(value, {
+  publicIdentities, aggregateWorkerMilliseconds, elapsedMilliseconds,
+}) {
+  const policy = assertValidatedPilotPolicy(value);
+  const rate = comparePilotRate(policy, publicIdentities, aggregateWorkerMilliseconds);
+  const elapsed = comparePilotElapsed(policy, elapsedMilliseconds);
+  return deepImmutable({
+    rate,
+    elapsed,
+    threshold_met: rate.meets_minimum && elapsed.within_maximum,
+  });
+}
+
+function comparePilotRate(policy, publicIdentities, aggregateWorkerMilliseconds) {
+  integer(publicIdentities, "pilot measured public identities", 0);
+  integer(aggregateWorkerMilliseconds, "pilot aggregate worker milliseconds", 1);
+  const { numerator, denominator } = policy.admission.rate;
+  const measuredOperand = BigInt(publicIdentities) * BigInt(denominator)
+    * MILLISECONDS_PER_HOUR;
+  const requiredOperand = BigInt(aggregateWorkerMilliseconds) * BigInt(numerator);
+  return {
+    public_identities: publicIdentities,
+    aggregate_worker_milliseconds: aggregateWorkerMilliseconds,
+    minimum_rate_numerator: numerator,
+    minimum_rate_denominator: denominator,
+    milliseconds_per_hour: Number(MILLISECONDS_PER_HOUR),
+    measured_operand: measuredOperand.toString(),
+    required_operand: requiredOperand.toString(),
+    meets_minimum: measuredOperand >= requiredOperand,
+  };
+}
+
+function comparePilotElapsed(policy, elapsedMilliseconds) {
   integer(elapsedMilliseconds, "pilot measured elapsed milliseconds", 1);
-  return elapsedMilliseconds <= policy.admission.maximumElapsedMilliseconds;
+  const maximum = policy.admission.maximumElapsedMilliseconds;
+  return {
+    elapsed_milliseconds: elapsedMilliseconds,
+    maximum_elapsed_milliseconds: maximum,
+    within_maximum: elapsedMilliseconds <= maximum,
+  };
 }
 
 function parseWaves(value, topology) {

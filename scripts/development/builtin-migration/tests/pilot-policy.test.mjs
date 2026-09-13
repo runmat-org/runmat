@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  parsePilotPolicy, pilotElapsedWithinMaximum, pilotRateMeetsMinimum,
+  parsePilotPolicy, pilotAdmissionComparison, pilotElapsedWithinMaximum,
+  pilotRateMeetsMinimum,
 } from "../pilot-policy.mjs";
 import {
   cohortCount, pilotFixture, prerequisite,
@@ -268,5 +269,94 @@ test("pilot admission compares elapsed time and throughput with exact integer ar
   assert.throws(
     () => pilotRateMeetsMinimum({ ...parsed }, 9, 7_200_000),
     /exact validated pilot policy/,
+  );
+});
+
+test("pilot admission exposes the canonical exact comparison and preserves helper parity", () => {
+  const fixture = pilotFixture();
+  const policy = parsePilotPolicy(fixture.policy, fixture.topology, fixture.prerequisites);
+  const exactBoundary = pilotAdmissionComparison(policy, {
+    publicIdentities: 9,
+    aggregateWorkerMilliseconds: 7_200_000,
+    elapsedMilliseconds: 172_800_000,
+  });
+  assert.deepEqual(exactBoundary, {
+    rate: {
+      public_identities: 9,
+      aggregate_worker_milliseconds: 7_200_000,
+      minimum_rate_numerator: 9,
+      minimum_rate_denominator: 2,
+      milliseconds_per_hour: 3_600_000,
+      measured_operand: "64800000",
+      required_operand: "64800000",
+      meets_minimum: true,
+    },
+    elapsed: {
+      elapsed_milliseconds: 172_800_000,
+      maximum_elapsed_milliseconds: 172_800_000,
+      within_maximum: true,
+    },
+    threshold_met: true,
+  });
+  assert.equal(
+    pilotRateMeetsMinimum(policy, 9, 7_200_000),
+    exactBoundary.rate.meets_minimum,
+  );
+  assert.equal(
+    pilotElapsedWithinMaximum(policy, 172_800_000),
+    exactBoundary.elapsed.within_maximum,
+  );
+
+  const missesBoth = pilotAdmissionComparison(policy, {
+    publicIdentities: 9,
+    aggregateWorkerMilliseconds: 7_200_001,
+    elapsedMilliseconds: 172_800_001,
+  });
+  assert.equal(missesBoth.rate.meets_minimum, false);
+  assert.equal(missesBoth.elapsed.within_maximum, false);
+  assert.equal(missesBoth.threshold_met, false);
+
+  const rateOnly = pilotAdmissionComparison(policy, {
+    publicIdentities: 9,
+    aggregateWorkerMilliseconds: 7_200_000,
+    elapsedMilliseconds: 172_800_001,
+  });
+  assert.equal(rateOnly.rate.meets_minimum, true);
+  assert.equal(rateOnly.elapsed.within_maximum, false);
+  assert.equal(rateOnly.threshold_met, false);
+
+  const elapsedOnly = pilotAdmissionComparison(policy, {
+    publicIdentities: 9,
+    aggregateWorkerMilliseconds: 7_200_001,
+    elapsedMilliseconds: 172_800_000,
+  });
+  assert.equal(elapsedOnly.rate.meets_minimum, false);
+  assert.equal(elapsedOnly.elapsed.within_maximum, true);
+  assert.equal(elapsedOnly.threshold_met, false);
+});
+
+test("pilot admission keeps products exact at the safe-integer boundary", () => {
+  const fixture = pilotFixture();
+  const policy = parsePilotPolicy(fixture.policy, fixture.topology, fixture.prerequisites);
+  const comparison = pilotAdmissionComparison(policy, {
+    publicIdentities: Number.MAX_SAFE_INTEGER,
+    aggregateWorkerMilliseconds: Number.MAX_SAFE_INTEGER,
+    elapsedMilliseconds: Number.MAX_SAFE_INTEGER,
+  });
+  assert.equal(
+    comparison.rate.measured_operand,
+    (BigInt(Number.MAX_SAFE_INTEGER) * 2n * 3_600_000n).toString(),
+  );
+  assert.equal(
+    comparison.rate.required_operand,
+    (BigInt(Number.MAX_SAFE_INTEGER) * 9n).toString(),
+  );
+  assert.throws(
+    () => pilotAdmissionComparison(policy, {
+      publicIdentities: Number.MAX_SAFE_INTEGER + 1,
+      aggregateWorkerMilliseconds: 1,
+      elapsedMilliseconds: 1,
+    }),
+    /public identities must be an integer/,
   );
 });
