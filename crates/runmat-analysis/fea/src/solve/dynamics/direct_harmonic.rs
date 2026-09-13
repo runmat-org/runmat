@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
@@ -6,7 +7,8 @@ use crate::{
     solve::krylov::{restarted_gmres, GmresPolicy},
 };
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DirectHarmonicPolicy {
     pub relative_tolerance: f64,
     pub restart: usize,
@@ -20,6 +22,19 @@ impl Default for DirectHarmonicPolicy {
             restart: 32,
             maximum_iterations: 2_048,
         }
+    }
+}
+
+impl DirectHarmonicPolicy {
+    pub fn validate(self) -> Result<(), DirectHarmonicError> {
+        if !self.relative_tolerance.is_finite()
+            || self.relative_tolerance <= 0.0
+            || self.restart == 0
+            || self.maximum_iterations == 0
+        {
+            return Err(DirectHarmonicError::NonFinite);
+        }
+        Ok(())
     }
 }
 
@@ -62,15 +77,12 @@ pub fn solve_direct_harmonic(
         return Err(DirectHarmonicError::DimensionMismatch);
     }
     if !angular_frequency_rad_s.is_finite()
-        || angular_frequency_rad_s < 0.0
-        || !policy.relative_tolerance.is_finite()
-        || policy.relative_tolerance <= 0.0
-        || policy.restart == 0
-        || policy.maximum_iterations == 0
+        || angular_frequency_rad_s <= 0.0
         || imaginary_load.iter().any(|value| !value.is_finite())
     {
         return Err(DirectHarmonicError::NonFinite);
     }
+    policy.validate()?;
     let prepared = prepare(summary)?;
     let reduced_real = prepared
         .reduction()

@@ -2249,7 +2249,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
     )
     .unwrap();
     assert_eq!(
-        state.fields[0].field_id,
+        state.payload.fields().unwrap()[0].field_id,
         runmat_analysis_fea::FEA_FIELD_STRUCTURAL_DISPLACEMENT
     );
     assert_eq!(state.source_result, state_prepared.request.source_result);

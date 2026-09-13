@@ -36,7 +36,7 @@ pub enum StructuralFrequencySolutionSpace {
 }
 
 impl StructuralFrequencySolutionSpace {
-    fn validate(&self, scope: &StructuralFrequencyScope) -> AnalysisExecutionResult<()> {
+    pub(super) fn validate(&self, scope: &StructuralFrequencyScope) -> AnalysisExecutionResult<()> {
         match self {
             Self::Direct => Ok(()),
             Self::ModalReduced { projection, .. } => projection
@@ -152,7 +152,7 @@ impl StructuralFrequencyEntrySolverEvidence {
         self.sample
     }
 
-    fn validate_for_sample(
+    pub(super) fn validate_for_sample(
         &self,
         sample: &StructuralFrequencyPhysicalSample,
         solution_space: &StructuralFrequencySolutionSpace,
@@ -447,9 +447,8 @@ mod tests {
     fn scope() -> StructuralFrequencyScope {
         let plan = FrequencyResponsePlan::new(20.0, &[10.0], &[]).unwrap();
         StructuralFrequencyScope::new(StructuralFrequencyScopeInput {
-            problem: StructuralFrequencyProblemIdentity::from_physical_contract(&(
-                "test-problem",
-                1_u8,
+            problem: StructuralFrequencyProblemIdentity::from_physical_digest(Digest::sha256(
+                b"test-frequency-problem",
             ))
             .unwrap(),
             plan,

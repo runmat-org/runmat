@@ -1,6 +1,11 @@
 use runmat_analysis_core::{AccuracyTarget, ErrorContributionKind, RequiredAccuracyEvidence};
 use runmat_analysis_execution::{
     decode_prepared_observation_history_checkpoint,
+    decode_prepared_structural_frequency_entry_request,
+    decode_prepared_structural_frequency_entry_result,
+    decode_prepared_structural_frequency_modal_state,
+    decode_prepared_structural_frequency_result_assembly_request,
+    decode_prepared_structural_frequency_workload,
     decode_prepared_structural_transient_result_assembly_request,
     decode_prepared_structural_transient_segment, AnalysisBridgeError, AnalysisBridgeResult,
     AnalysisKernel, AnalysisKernelInvocation, AnalysisKernelOutput, AnalysisKernelOutputPartition,
@@ -14,10 +19,11 @@ use runmat_analysis_fea::execution::{
     ObservationAssemblyRequest, ObservationEvaluationRequest, ObservationHistoryCheckpointRequest,
     ObservationPartitionEvaluationRequest, ObservationPartitionExecutionTarget,
     ObservationPartitionReductionRequest, ResultPublicationRequest,
-    SemanticStatePublicationRequest, StructuralLinearNumericalReceiptArtifact,
-    StructuralLinearWorkload, StructuralLinearWorkloadResult, StructuralTransientBlockRequest,
-    StructuralTransientCheckpoint, StructuralTransientNumericalReceipt,
-    StructuralTransientSolverResult, StructuralTransientWorkload,
+    SemanticStatePublicationRequest, StructuralFrequencySolverPlan,
+    StructuralLinearNumericalReceiptArtifact, StructuralLinearWorkload,
+    StructuralLinearWorkloadResult, StructuralTransientBlockRequest, StructuralTransientCheckpoint,
+    StructuralTransientNumericalReceipt, StructuralTransientSolverResult,
+    StructuralTransientWorkload,
 };
 use runmat_analysis_fea::planning::resource::{
     build_structural_resource_plan, validate_resource_usage_evidence, FeaResourcePlan,
@@ -78,11 +84,160 @@ impl AnalysisKernel for NativeAnalysisKernel {
             AnalysisWorkKind::AssembleStructuralTransientResult => {
                 execute_structural_transient_result_assembly(invocation)
             }
+            AnalysisWorkKind::SolveStructuralFrequencyEntry => {
+                execute_structural_frequency_entry(invocation)
+            }
+            AnalysisWorkKind::AssembleStructuralFrequencyResult => {
+                execute_structural_frequency_result_assembly(invocation)
+            }
             _ => Err(AnalysisBridgeError::Invalid(
                 "native analysis kernel does not yet implement this work kind".into(),
             )),
         }
     }
+}
+
+fn execute_structural_frequency_entry(
+    invocation: AnalysisKernelInvocation<'_>,
+) -> AnalysisBridgeResult<Vec<AnalysisKernelOutput>> {
+    let workload_input = unique_input(
+        &invocation,
+        AnalysisNumericalObjectKind::StructuralFrequencyWorkload,
+    )?;
+    let mesh_input = unique_input(&invocation, AnalysisNumericalObjectKind::Mesh)?;
+    let request_input = unique_input(
+        &invocation,
+        AnalysisNumericalObjectKind::StructuralFrequencyEntryRequest,
+    )?;
+    let modal_input =
+        optional_unique_input(&invocation, AnalysisNumericalObjectKind::SemanticState)?;
+    if invocation.inputs.len() != 3 + usize::from(modal_input.is_some())
+        || invocation.host.workload.outputs
+            != vec![AnalysisNumericalObjectKind::StructuralFrequencyEntryResult]
+    {
+        return Err(AnalysisBridgeError::Invalid(
+            "structural frequency entry inputs or output differ from the workload contract".into(),
+        ));
+    }
+    let workload = decode_prepared_structural_frequency_workload(workload_input)?;
+    let request = decode_prepared_structural_frequency_entry_request(request_input)?;
+    let mesh = SolverMeshArtifact::canonical_decode(&mesh_input.payload())
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let modal_state = modal_input
+        .map(decode_prepared_structural_frequency_modal_state)
+        .transpose()?;
+    let state_matches = match (workload.solver(), modal_state.as_ref()) {
+        (StructuralFrequencySolverPlan::Direct { .. }, None) => true,
+        (StructuralFrequencySolverPlan::ModalReduced { basis_state }, Some(state)) => {
+            state.identity == *basis_state
+        }
+        _ => false,
+    };
+    let state_topology_matches = modal_state.as_ref().is_none_or(|state| {
+        state.topology_digest
+            == runmat_execution::Digest::from_bytes(*mesh.canonical_digest.bytes())
+    });
+    if workload_input.manifest.logical_identity != workload.identity().digest()
+        || mesh_input.manifest.logical_identity
+            != runmat_execution::Digest::from_bytes(*mesh.canonical_digest.bytes())
+        || invocation.host.workload.study != request.study()
+        || invocation.host.workload.step != request.step()
+        || invocation.host.workload.execution_plan != request.execution_plan()
+        || !state_matches
+        || !state_topology_matches
+    {
+        return Err(AnalysisBridgeError::Identity(
+            "structural frequency entry inputs differ from their exact identities",
+        ));
+    }
+    let result =
+        runmat_analysis_fea::pipeline::structural_frequency::execute_structural_frequency_entry(
+            &workload,
+            &mesh,
+            &request,
+            modal_state.as_ref(),
+        )?;
+    Ok(vec![AnalysisKernelOutput::whole(
+        AnalysisNumericalObjectKind::StructuralFrequencyEntryResult,
+        result.identity().digest(),
+        result.canonical_bytes()?,
+    )])
+}
+
+fn execute_structural_frequency_result_assembly(
+    invocation: AnalysisKernelInvocation<'_>,
+) -> AnalysisBridgeResult<Vec<AnalysisKernelOutput>> {
+    let request_input = unique_input(
+        &invocation,
+        AnalysisNumericalObjectKind::StructuralFrequencyResultAssemblyRequest,
+    )?;
+    let request = decode_prepared_structural_frequency_result_assembly_request(request_input)?;
+    let entry_inputs = invocation
+        .inputs
+        .iter()
+        .filter(|input| {
+            input.manifest.kind == AnalysisNumericalObjectKind::StructuralFrequencyEntryResult
+        })
+        .collect::<Vec<_>>();
+    if invocation.inputs.len() != request.entries().len() + 1
+        || entry_inputs.len() != request.entries().len()
+        || invocation.host.workload.outputs
+            != vec![
+                AnalysisNumericalObjectKind::SolverResult,
+                AnalysisNumericalObjectKind::NumericalReceipt,
+            ]
+    {
+        return Err(AnalysisBridgeError::Invalid(
+            "structural frequency assembly inputs or outputs differ from the workload contract"
+                .into(),
+        ));
+    }
+    let entries = entry_inputs
+        .into_iter()
+        .map(decode_prepared_structural_frequency_entry_result)
+        .collect::<AnalysisBridgeResult<Vec<_>>>()?;
+    let first = entries.first().ok_or_else(|| {
+        AnalysisBridgeError::Invalid("structural frequency assembly has no entries".into())
+    })?;
+    if invocation.host.workload.study != first.request().study()
+        || invocation.host.workload.step != first.request().step()
+        || invocation.host.workload.execution_plan != first.request().execution_plan()
+    {
+        return Err(AnalysisBridgeError::Identity(
+            "structural frequency assembly has the wrong task authority",
+        ));
+    }
+    let assembled = request.assemble(&entries)?;
+    let mut partitions = Vec::with_capacity(assembled.result.samples().len() + 1);
+    partitions.push(AnalysisKernelOutputPartition {
+        logical_identity: assembled.result.manifest().identity().digest(),
+        payload: assembled.result.manifest().canonical_bytes()?,
+    });
+    partitions.extend(
+        assembled
+            .result
+            .samples()
+            .iter()
+            .map(|sample| {
+                Ok(AnalysisKernelOutputPartition {
+                    logical_identity: sample.identity().digest(),
+                    payload: sample.canonical_bytes()?,
+                })
+            })
+            .collect::<AnalysisBridgeResult<Vec<_>>>()?,
+    );
+    Ok(vec![
+        AnalysisKernelOutput::partitioned(
+            AnalysisNumericalObjectKind::SolverResult,
+            assembled.result.manifest().identity().digest(),
+            partitions,
+        ),
+        AnalysisKernelOutput::whole(
+            AnalysisNumericalObjectKind::NumericalReceipt,
+            assembled.receipt.identity().digest(),
+            assembled.receipt.canonical_bytes()?,
+        ),
+    ])
 }
 
 fn execute_structural_transient_result_assembly(
@@ -1018,7 +1173,13 @@ fn execute_structural_linear(
                 ));
             }
             let field = state
-                .fields
+                .payload
+                .fields()
+                .ok_or_else(|| {
+                    AnalysisBridgeError::Invalid(
+                        "structural-primary state has no field payload".into(),
+                    )
+                })?
                 .iter()
                 .find(|field| {
                     field.field_id == runmat_analysis_fea::FEA_FIELD_STRUCTURAL_DISPLACEMENT
@@ -1206,6 +1367,10 @@ fn optional_unique_input<'a>(
 #[cfg(test)]
 #[path = "analysis_kernel/observation_history_tests.rs"]
 mod observation_history_tests;
+
+#[cfg(test)]
+#[path = "analysis_kernel/frequency_tests.rs"]
+mod frequency_tests;
 
 #[cfg(test)]
 #[path = "analysis_kernel/transient_block_tests.rs"]
@@ -2095,7 +2260,7 @@ mod tests {
         let state =
             CanonicalSemanticState::from_canonical_bytes(&state_outputs[0].payload).unwrap();
         assert_eq!(
-            state.fields[0].field_id,
+            state.payload.fields().unwrap()[0].field_id,
             runmat_analysis_fea::FEA_FIELD_STRUCTURAL_DISPLACEMENT
         );
         assert_eq!(state.topology_digest, inputs[1].manifest.logical_identity);

@@ -82,8 +82,12 @@ identity_type!(StructuralTransientSegmentSampleIdentity);
 identity_type!(StructuralTransientPhysicalSampleIdentity);
 identity_type!(StructuralTransientResultAssemblyRequestIdentity);
 identity_type!(StructuralFrequencyScopeIdentity);
-identity_type!(StructuralFrequencyPhysicalSampleIdentity);
 identity_type!(StructuralFrequencyProblemIdentity);
+identity_type!(StructuralFrequencyWorkloadIdentity);
+identity_type!(StructuralFrequencyPhysicalSampleIdentity);
+identity_type!(StructuralFrequencyEntryRequestIdentity);
+identity_type!(StructuralFrequencyEntryResultIdentity);
+identity_type!(StructuralFrequencyResultAssemblyRequestIdentity);
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -97,6 +101,8 @@ pub enum AnalysisWorkKind {
     CheckpointObservationHistory,
     SolveStructuralTransientBlock,
     AssembleStructuralTransientResult,
+    SolveStructuralFrequencyEntry,
+    AssembleStructuralFrequencyResult,
     EvaluateObservationPartition,
     ReduceObservationPartitions,
     AssembleObservations,
@@ -418,8 +424,8 @@ impl StructuralTransientSolverOptionsIdentity {
 }
 
 impl StructuralFrequencyProblemIdentity {
-    pub fn from_physical_contract<T: Serialize>(contract: &T) -> AnalysisExecutionResult<Self> {
-        Self::derive("structural-frequency-physical-problem", contract)
+    pub(crate) fn from_physical_digest(digest: Digest) -> AnalysisExecutionResult<Self> {
+        Self::derive("structural-frequency-physical-problem", &digest)
     }
 }
 

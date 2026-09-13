@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use runmat_analysis_core::AnalysisField;
+use runmat_analysis_core::{AnalysisField, ObservationQuantity};
 use thiserror::Error;
 
 use crate::{
@@ -37,8 +37,9 @@ pub enum ComplexStructuralFieldRecoveryError {
 /// Recovers one physical complex structural response from its real and imaginary DOF vectors.
 ///
 /// Formulation-owned real recovery remains the single authority for the physical quantities. This
-/// boundary only proves that both phasor components have the same inventory and interleaves them
-/// into the canonical complex recovered-field representation.
+/// boundary only interleaves quantities whose recovery is linear in displacement. Nonlinear
+/// invariants such as von Mises stress and quadratic energy require their own explicitly defined
+/// harmonic representation and are therefore omitted rather than mislabeled as phasors.
 pub fn recover_complex_deformation_result_fields(
     summary: &AssemblySummary,
     frequency_hz: f64,
@@ -59,6 +60,11 @@ pub fn recover_complex_deformation_result_fields(
         .filter(|(real, imaginary)| {
             real.shape.first().copied().unwrap_or_default() > 0
                 || imaginary.shape.first().copied().unwrap_or_default() > 0
+        })
+        .filter(|(real, _)| {
+            definitions
+                .get(&real.field_id)
+                .is_some_and(|definition| is_linear_phasor_quantity(definition.quantity()))
         })
         .map(|(real, imaginary)| {
             let definition = definitions.get(&real.field_id).ok_or_else(|| {
@@ -81,6 +87,15 @@ pub fn recover_complex_deformation_result_fields(
             )?)
         })
         .collect()
+}
+
+fn is_linear_phasor_quantity(quantity: ObservationQuantity) -> bool {
+    !matches!(
+        quantity,
+        ObservationQuantity::VonMisesStress
+            | ObservationQuantity::StrainEnergy
+            | ObservationQuantity::ShellVonMises
+    )
 }
 
 fn interleave(
@@ -158,5 +173,11 @@ mod tests {
             .unwrap()
             .chunks_exact(2)
             .all(|pair| pair == [0.1, -0.2]));
+        assert!(fields.iter().all(|field| !matches!(
+            field.definition().quantity(),
+            ObservationQuantity::VonMisesStress
+                | ObservationQuantity::StrainEnergy
+                | ObservationQuantity::ShellVonMises
+        )));
     }
 }

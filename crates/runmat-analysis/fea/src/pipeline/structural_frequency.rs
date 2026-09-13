@@ -1,0 +1,327 @@
+use std::f64::consts::TAU;
+
+use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
+
+use crate::{
+    assembly::{
+        complex_structural::{
+            assemble_complex_structural_system, ComplexStructuralAssemblySummary,
+        },
+        identity::structural_operator_digest,
+        StructuralFormulationRequirement,
+    },
+    contracts::{SolverMethod, SolverPreconditioner},
+    execution::{
+        structural_identity::{
+            derive_structural_prepared_identities, structural_contract_digest,
+            StructuralPreparedIdentityInput,
+        },
+        AnalysisExecutionError, AnalysisExecutionResult, CanonicalSemanticState,
+        ExecutionPlanIdentity, StepIdentity, StructuralFrequencyEntryRequest,
+        StructuralFrequencyEntryResult, StructuralFrequencyEntrySolverEvidence,
+        StructuralFrequencyPhysicalSample, StructuralFrequencyProblemIdentity,
+        StructuralFrequencyScope, StructuralFrequencyScopeInput, StructuralFrequencySolutionSpace,
+        StructuralFrequencySolverEvidenceInput, StructuralFrequencySolverPlan,
+        StructuralFrequencyWorkload, StructuralPhasorConvention, StudyIdentity,
+    },
+    solve::{
+        backend::kind::LinearAlgebraBackendKind,
+        dynamics::{
+            evaluate_harmonic_physical_state, solve_direct_harmonic, solve_modal_harmonic,
+            ModalHarmonicLoad, ModalReducedSystem,
+        },
+    },
+};
+
+/// Canonical physical scope plus standard execution identities for frequency fan-out.
+pub struct PreparedStructuralFrequency {
+    pub study: StudyIdentity,
+    pub step: StepIdentity,
+    pub execution_plan: ExecutionPlanIdentity,
+    pub scope: StructuralFrequencyScope,
+}
+
+pub fn prepare_structural_frequency(
+    workload: &StructuralFrequencyWorkload,
+    solver_mesh: &SolverMeshArtifact,
+) -> AnalysisExecutionResult<PreparedStructuralFrequency> {
+    workload.validate()?;
+    solver_mesh
+        .validate_canonical()
+        .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+    let reference = assemble_entry(
+        workload,
+        solver_mesh,
+        workload.plan().reference_frequency_hz(),
+    )?;
+    let operator_digest = structural_operator_digest(&reference.real)
+        .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+    for entry in workload
+        .plan()
+        .entries()
+        .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?
+    {
+        let assembly = assemble_entry(workload, solver_mesh, entry.frequency_hz())?;
+        let entry_digest = structural_operator_digest(&assembly.real)
+            .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+        if entry_digest != operator_digest {
+            return Err(AnalysisExecutionError::Invalid(
+                "structural frequency entries do not share one physical operator".into(),
+            ));
+        }
+    }
+    derive_prepared_frequency(workload, solver_mesh, &reference)
+}
+
+fn derive_prepared_frequency(
+    workload: &StructuralFrequencyWorkload,
+    solver_mesh: &SolverMeshArtifact,
+    reference: &ComplexStructuralAssemblySummary,
+) -> AnalysisExecutionResult<PreparedStructuralFrequency> {
+    let step = workload.procedure_step()?;
+    let operator_digest = structural_operator_digest(&reference.real)
+        .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+    let identities = derive_structural_prepared_identities(StructuralPreparedIdentityInput {
+        model: workload.model(),
+        step,
+        solver_mesh,
+        assembly: &reference.real,
+        input_state: None,
+        excitation_contract: &(
+            &workload.model().signals,
+            &workload.model().excitations,
+            &workload.model().excitation_cases,
+            workload.plan(),
+        ),
+        solver_contract: &(workload.backend(), workload.solver()),
+        execution_contract: &(
+            "independent-frequency-entry-fanout",
+            workload.plan().identity(),
+        ),
+        kinematics_contract: &(&workload.model().constraints, workload.plan()),
+    })?;
+    let physical_problem_digest = structural_contract_digest(
+        "structural-frequency-physical-problem",
+        &(
+            &workload.model().geometry_id,
+            workload.model().geometry_revision,
+            workload.model().units,
+            &workload.model().frame,
+            &workload.model().materials,
+            &workload.model().material_assignments,
+            &workload.model().structural,
+            &workload.model().constraints,
+            &workload.model().boundaries,
+            &workload.model().connectors,
+            &workload.model().signals,
+            &workload.model().excitations,
+            &workload.model().excitation_cases,
+            &step.activations,
+            workload.plan(),
+        ),
+    )?;
+    let scope = StructuralFrequencyScope::new(StructuralFrequencyScopeInput {
+        problem: StructuralFrequencyProblemIdentity::from_physical_digest(physical_problem_digest)?,
+        plan: workload.plan().clone(),
+        discretization: identities.discretization,
+        constraint_plan: identities.constraint_plan,
+        stiffness_operator: identities.stiffness_operator,
+        mass_operator: identities.mass_operator,
+        damping_operator: identities.damping_operator,
+        operator_digest,
+        excitations: identities.excitations,
+        dof_layout: identities.dof_layout,
+        formulation: identities.formulation,
+        kinematics: identities.kinematics,
+        physical_dof_count: reference.real.dof_count,
+        phasor_convention: StructuralPhasorConvention::PeakAmplitude,
+    })?;
+    Ok(PreparedStructuralFrequency {
+        study: identities.study,
+        step: identities.step,
+        execution_plan: identities.execution_plan,
+        scope,
+    })
+}
+
+pub fn execute_structural_frequency_entry(
+    workload: &StructuralFrequencyWorkload,
+    solver_mesh: &SolverMeshArtifact,
+    request: &StructuralFrequencyEntryRequest,
+    modal_state: Option<&CanonicalSemanticState>,
+) -> AnalysisExecutionResult<StructuralFrequencyEntryResult> {
+    let (_, assembly) = prepare_entry_execution(workload, solver_mesh, request)?;
+    if modal_state.is_some_and(|state| {
+        state.topology_digest
+            != runmat_execution::Digest::from_bytes(*solver_mesh.canonical_digest.bytes())
+    }) {
+        return Err(AnalysisExecutionError::Identity(
+            "modal structural frequency state names another solver topology",
+        ));
+    }
+    let omega = TAU * request.entry().frequency_hz();
+    execute_prepared_entry(workload, request, modal_state, assembly, omega)
+}
+
+/// Re-derives one entry's canonical physical scope without evaluating unrelated frequencies.
+pub fn validate_structural_frequency_entry(
+    workload: &StructuralFrequencyWorkload,
+    solver_mesh: &SolverMeshArtifact,
+    request: &StructuralFrequencyEntryRequest,
+) -> AnalysisExecutionResult<PreparedStructuralFrequency> {
+    prepare_entry_execution(workload, solver_mesh, request).map(|(prepared, _)| prepared)
+}
+
+fn prepare_entry_execution(
+    workload: &StructuralFrequencyWorkload,
+    solver_mesh: &SolverMeshArtifact,
+    request: &StructuralFrequencyEntryRequest,
+) -> AnalysisExecutionResult<(
+    PreparedStructuralFrequency,
+    ComplexStructuralAssemblySummary,
+)> {
+    request.validate_for_workload(workload)?;
+    solver_mesh
+        .validate_canonical()
+        .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+    let assembly = assemble_entry(workload, solver_mesh, request.entry().frequency_hz())?;
+    let prepared = derive_prepared_frequency(workload, solver_mesh, &assembly)?;
+    if request.scope() != &prepared.scope
+        || request.study() != prepared.study
+        || request.step() != prepared.step
+        || request.execution_plan() != prepared.execution_plan
+    {
+        return Err(AnalysisExecutionError::Identity(
+            "structural frequency entry authority or scope differs from canonical preparation",
+        ));
+    }
+    Ok((prepared, assembly))
+}
+
+fn execute_prepared_entry(
+    workload: &StructuralFrequencyWorkload,
+    request: &StructuralFrequencyEntryRequest,
+    modal_state: Option<&CanonicalSemanticState>,
+    assembly: ComplexStructuralAssemblySummary,
+    omega: f64,
+) -> AnalysisExecutionResult<StructuralFrequencyEntryResult> {
+    let (real, imaginary, iterations, residual_norm, relative_residual, solution_space) =
+        match workload.solver() {
+            StructuralFrequencySolverPlan::Direct { policy } => {
+                if modal_state.is_some() {
+                    return Err(AnalysisExecutionError::Invalid(
+                        "direct structural frequency entry received a modal state".into(),
+                    ));
+                }
+                let response =
+                    solve_direct_harmonic(&assembly.real, &assembly.imaginary_load, omega, *policy)
+                        .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+                (
+                    response.displacement_real,
+                    response.displacement_imaginary,
+                    response.iterations,
+                    response.residual_norm,
+                    response.relative_residual,
+                    StructuralFrequencySolutionSpace::Direct,
+                )
+            }
+            StructuralFrequencySolverPlan::ModalReduced { basis_state } => {
+                let state = modal_state.ok_or_else(|| {
+                    AnalysisExecutionError::Invalid(
+                        "modal structural frequency entry is missing its basis state".into(),
+                    )
+                })?;
+                state.validate()?;
+                if state.identity != *basis_state {
+                    return Err(AnalysisExecutionError::Identity(
+                        "modal structural frequency entry received another basis state",
+                    ));
+                }
+                let basis = state.payload.modal_basis().ok_or_else(|| {
+                    AnalysisExecutionError::Invalid(
+                        "modal structural frequency entry state has no modal basis".into(),
+                    )
+                })?;
+                let reduced = ModalReducedSystem::project(&assembly.real, basis)
+                    .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+                let load = ModalHarmonicLoad {
+                    real: reduced
+                        .project_vector(assembly.real.operator.load())
+                        .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?,
+                    imaginary: reduced
+                        .project_vector(&assembly.imaginary_load)
+                        .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?,
+                };
+                let response = solve_modal_harmonic(&reduced, omega, &load)
+                    .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+                let real = reduced
+                    .expand_vector(&response.displacement_real)
+                    .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+                let imaginary = reduced
+                    .expand_vector(&response.displacement_imaginary)
+                    .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+                (
+                    real,
+                    imaginary,
+                    0,
+                    response.residual_norm,
+                    response.relative_residual,
+                    StructuralFrequencySolutionSpace::ModalReduced {
+                        basis_state: *basis_state,
+                        projection: reduced.evidence().clone(),
+                    },
+                )
+            }
+        };
+    let physical = evaluate_harmonic_physical_state(
+        &assembly.real,
+        omega,
+        &real,
+        &imaginary,
+        assembly.real.operator.load(),
+        &assembly.imaginary_load,
+    )
+    .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+    let sample = StructuralFrequencyPhysicalSample::new(
+        request.scope(),
+        request.entry(),
+        physical.displacement,
+        physical.reaction,
+        physical.balance,
+    )?;
+    let evidence = StructuralFrequencyEntrySolverEvidence::new(
+        &sample,
+        StructuralFrequencySolverEvidenceInput {
+            solver_method: match solution_space {
+                StructuralFrequencySolutionSpace::Direct => {
+                    SolverMethod::StructuralDirectHarmonicGmres
+                }
+                StructuralFrequencySolutionSpace::ModalReduced { .. } => {
+                    SolverMethod::StructuralModalHarmonicDenseDirect
+                }
+            },
+            solver_backend: LinearAlgebraBackendKind::CpuReference,
+            preconditioner: SolverPreconditioner::None,
+            iterations,
+            solver_residual_norm: residual_norm,
+            solver_relative_residual: relative_residual,
+            accelerator_evidence: Vec::new(),
+        },
+    )?;
+    StructuralFrequencyEntryResult::new(request.clone(), sample, solution_space, evidence)
+}
+
+fn assemble_entry(
+    workload: &StructuralFrequencyWorkload,
+    solver_mesh: &SolverMeshArtifact,
+    frequency_hz: f64,
+) -> AnalysisExecutionResult<ComplexStructuralAssemblySummary> {
+    assemble_complex_structural_system(
+        workload.model(),
+        workload.procedure_step()?,
+        frequency_hz,
+        Some(solver_mesh.clone()),
+        StructuralFormulationRequirement::PhysicalDiscretization,
+    )
+    .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))
+}

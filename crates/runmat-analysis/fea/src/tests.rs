@@ -1573,6 +1573,93 @@ fn single_tetrahedron_solver_mesh_for_model(
     mesh
 }
 
+#[test]
+fn structural_frequency_entries_execute_independently_and_assemble_in_plan_order() {
+    use runmat_analysis_core::{FormulationRequirement, IndependentDomain};
+
+    use crate::{
+        execution::{
+            StructuralFrequencyEntryRequest, StructuralFrequencyResultAssemblyRequest,
+            StructuralFrequencySolverPlan, StructuralFrequencyWorkload,
+            StructuralFrequencyWorkloadInput,
+        },
+        frequency::FrequencyResponsePlan,
+        pipeline::structural_frequency::{
+            execute_structural_frequency_entry, prepare_structural_frequency,
+        },
+        solve::dynamics::DirectHarmonicPolicy,
+    };
+
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    let mut step = ProcedureStep::structural_harmonic("frequency_response");
+    step.independent_domain = IndependentDomain::FrequencyHertz(vec![20.0, 40.0]);
+    model.sequence.steps = vec![step];
+    let mesh = single_tetrahedron_solver_mesh_for_model(&model);
+    let plan = FrequencyResponsePlan::new(20.0, &[40.0], &[]).unwrap();
+    let workload = StructuralFrequencyWorkload::new(StructuralFrequencyWorkloadInput {
+        model,
+        step_id: runmat_analysis_core::ProcedureStepId("frequency_response".into()),
+        backend: ComputeBackend::Cpu,
+        formulation_requirement: FormulationRequirement::Experimental,
+        plan,
+        solver: StructuralFrequencySolverPlan::Direct {
+            policy: DirectHarmonicPolicy::default(),
+        },
+    })
+    .unwrap();
+    assert_eq!(
+        StructuralFrequencyWorkload::from_canonical_bytes(&workload.canonical_bytes().unwrap())
+            .unwrap(),
+        workload
+    );
+    let prepared = prepare_structural_frequency(&workload, &mesh).unwrap();
+    let mut results = workload
+        .plan()
+        .entries()
+        .unwrap()
+        .into_iter()
+        .map(|entry| {
+            let request = StructuralFrequencyEntryRequest::new(
+                &workload,
+                prepared.study,
+                prepared.step,
+                prepared.execution_plan,
+                prepared.scope.clone(),
+                entry,
+            )
+            .unwrap();
+            let decoded = StructuralFrequencyEntryRequest::from_canonical_bytes(
+                &request.canonical_bytes().unwrap(),
+            )
+            .unwrap();
+            assert_eq!(decoded, request);
+            execute_structural_frequency_entry(&workload, &mesh, &request, None).unwrap()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(results.len(), 2);
+    assert!(results.iter().all(|result| result
+        .sample()
+        .balance()
+        .equilibrium_residual()
+        .real()
+        .iter()
+        .chain(result.sample().balance().equilibrium_residual().imaginary())
+        .all(|value| value.is_finite())));
+    results.reverse();
+    let request = StructuralFrequencyResultAssemblyRequest::new(&results).unwrap();
+    let assembled = request.assemble(&results).unwrap();
+    assert_eq!(
+        assembled
+            .result
+            .samples()
+            .iter()
+            .map(|sample| sample.entry().frequency_hz())
+            .collect::<Vec<_>>(),
+        vec![20.0, 40.0]
+    );
+    assert_eq!(assembled.receipt.samples().len(), 2);
+}
+
 fn multi_region_tetrahedron_solver_mesh() -> SolverMeshArtifact {
     let template = single_tetrahedron_solver_mesh();
     let mut mesh = template.clone();

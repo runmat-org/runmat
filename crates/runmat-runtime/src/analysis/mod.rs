@@ -5590,7 +5590,7 @@ pub fn analysis_run_electromagnetic_with_options_op(
         requested_frequency_hz,
     )
     .map_err(|error| match error {
-        FeaRunError::InvalidFrequencyPlan(reason) => operation_error(
+        FeaRunError::FrequencyPlan(reason) => operation_error(
             AnalysisOperation::Electromagnetic.name(),
             AnalysisOperation::Electromagnetic.version(),
             &context,
@@ -5601,7 +5601,7 @@ pub fn analysis_run_electromagnetic_with_options_op(
                 severity: OperationErrorSeverity::Error,
             },
             "fea.run_electromagnetic sweep_frequency_hz must contain finite positive values",
-            BTreeMap::from([("reason".to_string(), reason)]),
+            BTreeMap::from([("reason".to_string(), reason.to_string())]),
         ),
         FeaRunError::MissingElectromagneticSource { frequency_hz } => operation_error(
             AnalysisOperation::Electromagnetic.name(),

@@ -189,7 +189,7 @@ impl ModalBasisArtifact {
                 "modal basis inputs must be non-empty and have identical mode counts".into(),
             ));
         }
-        let operator_digest = operator_digest(summary)?;
+        let operator_digest = crate::assembly::identity::structural_operator_digest(summary)?;
         let influence = directional_influence_vectors(summary);
         let total_free_mass = influence
             .each_ref()
@@ -308,7 +308,7 @@ impl ModalBasisArtifact {
 
     pub fn validate_for(&self, summary: &AssemblySummary) -> Result<(), FeaRunError> {
         self.validate()?;
-        if self.operator_digest != operator_digest(summary)?
+        if self.operator_digest != crate::assembly::identity::structural_operator_digest(summary)?
             || self
                 .modes
                 .iter()
@@ -465,24 +465,6 @@ impl ModalBasisArtifact {
         .map(ModalBasisIdentity)
         .map_err(|error| FeaRunError::Assembly(error.to_string()))
     }
-}
-
-fn operator_digest(summary: &AssemblySummary) -> Result<Digest, FeaRunError> {
-    encode_contract(
-        MODAL_BASIS_PREFIX,
-        "modal-basis-operator",
-        &(
-            &summary.operator,
-            &summary.constraint_matrix,
-            &summary.structural_dof_layout,
-            &summary.structural_solid_recovery,
-            &summary.structural_beam_recovery,
-            &summary.structural_shell_recovery,
-        ),
-        MODAL_BASIS_LIMITS,
-    )
-    .map(Digest::sha256)
-    .map_err(|error| FeaRunError::Assembly(error.to_string()))
 }
 
 fn directional_influence_vectors(summary: &AssemblySummary) -> [Vec<f64>; 3] {

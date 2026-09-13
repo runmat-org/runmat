@@ -39,9 +39,7 @@ pub(super) fn map_fea_run_error(
             "FEA run cancelled by user",
             model_details(),
         ),
-        FeaRunError::InvalidModel(message)
-        | FeaRunError::Observation(message)
-        | FeaRunError::InvalidFrequencyPlan(message) => operation_error(
+        FeaRunError::InvalidModel(message) | FeaRunError::Observation(message) => operation_error(
             operation.name(),
             operation.version(),
             context,
@@ -52,6 +50,19 @@ pub(super) fn map_fea_run_error(
                 severity: OperationErrorSeverity::Error,
             },
             message,
+            model_details(),
+        ),
+        FeaRunError::FrequencyPlan(error) => operation_error(
+            operation.name(),
+            operation.version(),
+            context,
+            OperationErrorSpec {
+                error_code: operation.invalid_model_error_code(),
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            error.to_string(),
             model_details(),
         ),
         FeaRunError::MissingElectromagneticSource { frequency_hz } => operation_error(

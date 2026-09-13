@@ -6,6 +6,7 @@ pub mod elements;
 mod explicit_connectors;
 mod explicit_elements;
 mod explicit_loads;
+pub mod identity;
 mod mixed_structural;
 mod moment_projection;
 mod reduced_rhs;

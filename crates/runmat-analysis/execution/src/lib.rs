@@ -4,6 +4,8 @@ mod accuracy_evaluation;
 mod callable;
 mod error;
 mod field_recovery;
+mod frequency_object_access;
+mod frequency_task;
 mod graph;
 mod host;
 mod materialized_signal;
@@ -47,6 +49,29 @@ pub use field_recovery::{
     decode_recovered_field_artifact, import_structural_recovered_fields,
     prepare_structural_field_recovery, ImportedRecoveredFields, PreparedStructuralFieldRecovery,
     StructuralFieldRecoveryPreparation,
+};
+pub use frequency_object_access::{
+    decode_prepared_structural_frequency_entry_request,
+    decode_prepared_structural_frequency_entry_result,
+    decode_prepared_structural_frequency_modal_state,
+    decode_prepared_structural_frequency_numerical_receipt,
+    decode_prepared_structural_frequency_result_assembly_request,
+    decode_prepared_structural_frequency_solver_result,
+    decode_prepared_structural_frequency_workload,
+    prepare_structural_frequency_entry_request_objects,
+    prepare_structural_frequency_entry_result_objects,
+    prepare_structural_frequency_numerical_receipt_objects,
+    prepare_structural_frequency_result_assembly_request_objects,
+    prepare_structural_frequency_solver_result_objects,
+    prepare_structural_frequency_workload_objects,
+};
+pub use frequency_task::{
+    import_structural_frequency_entry, import_structural_frequency_result,
+    prepare_structural_frequency_entry_task, prepare_structural_frequency_fanout,
+    prepare_structural_frequency_result_task, ImportedStructuralFrequencyEntry,
+    ImportedStructuralFrequencyResult, PreparedStructuralFrequencyEntryTask,
+    PreparedStructuralFrequencyResultTask, StructuralFrequencyEntryPreparation,
+    StructuralFrequencyFanoutPreparation, StructuralFrequencyResultPreparation,
 };
 pub use graph::{
     compile_analysis_sequence_graph, AnalysisSequenceExecutionGraph, AnalysisSequenceTask,

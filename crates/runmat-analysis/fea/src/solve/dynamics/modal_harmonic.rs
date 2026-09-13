@@ -13,6 +13,7 @@ pub struct ModalHarmonicResponse {
     pub angular_frequency_rad_s: f64,
     pub displacement_real: Vec<f64>,
     pub displacement_imaginary: Vec<f64>,
+    pub residual_norm: f64,
     pub relative_residual: f64,
 }
 
@@ -74,7 +75,7 @@ fn solve_operators(
         return Err(ModalHarmonicError::DimensionMismatch);
     }
     if !angular_frequency_rad_s.is_finite()
-        || angular_frequency_rad_s < 0.0
+        || angular_frequency_rad_s <= 0.0
         || operators
             .stiffness
             .iter()
@@ -119,16 +120,18 @@ fn solve_operators(
         })?;
     let displacement_real = solution[..size].to_vec();
     let displacement_imaginary = solution[size..].to_vec();
-    let relative_residual = relative_residual(&block, &solution, &right_hand_side, block_size);
+    let (residual_norm, relative_residual) =
+        residual_metrics(&block, &solution, &right_hand_side, block_size);
     Ok(ModalHarmonicResponse {
         angular_frequency_rad_s,
         displacement_real,
         displacement_imaginary,
+        residual_norm,
         relative_residual,
     })
 }
 
-fn relative_residual(matrix: &[f64], solution: &[f64], load: &[f64], size: usize) -> f64 {
+fn residual_metrics(matrix: &[f64], solution: &[f64], load: &[f64], size: usize) -> (f64, f64) {
     let applied = (0..size)
         .map(|row| {
             (0..size)
@@ -139,16 +142,15 @@ fn relative_residual(matrix: &[f64], solution: &[f64], load: &[f64], size: usize
     let residual_norm = load
         .iter()
         .zip(&applied)
-        .map(|(load, applied)| (load - applied).powi(2))
-        .sum::<f64>()
-        .sqrt();
-    let load_norm = load.iter().map(|value| value.powi(2)).sum::<f64>().sqrt();
+        .fold(0.0_f64, |norm, (load, applied)| norm.hypot(load - applied));
+    let load_norm = load.iter().fold(0.0_f64, |norm, value| norm.hypot(*value));
     let applied_norm = applied
         .iter()
-        .map(|value| value.powi(2))
-        .sum::<f64>()
-        .sqrt();
-    residual_norm / (load_norm + applied_norm).max(f64::MIN_POSITIVE)
+        .fold(0.0_f64, |norm, value| norm.hypot(*value));
+    (
+        residual_norm,
+        residual_norm / (load_norm + applied_norm).max(f64::MIN_POSITIVE),
+    )
 }
 
 #[cfg(test)]
