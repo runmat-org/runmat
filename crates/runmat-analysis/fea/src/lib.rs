@@ -10,6 +10,7 @@ pub mod diagnostics;
 pub mod excitation;
 pub mod execution;
 pub mod fixtures;
+pub mod frequency;
 pub mod parity;
 pub mod physics;
 pub mod pipeline;
@@ -22,14 +23,14 @@ pub mod topology;
 
 pub use admission::AnalysisRunIdentity;
 pub use contracts::*;
+pub use frequency::{
+    FrequencyResponsePlan, FrequencyResponsePlanEntry, FrequencyResponsePlanEntryIdentity,
+    FrequencyResponsePlanIdentity,
+};
 pub use pipeline::electromagnetic::{run_electromagnetic, run_electromagnetic_with_options};
 pub use pipeline::electromagnetic_frequency::{
     run_electromagnetic_frequency_response, ElectromagneticFrequencySummary,
     FeaElectromagneticFrequencyResponse,
-};
-pub use pipeline::frequency_plan::{
-    FrequencyResponsePlan, FrequencyResponsePlanEntry, FrequencyResponsePlanEntryIdentity,
-    FrequencyResponsePlanIdentity,
 };
 pub use pipeline::linear_static::{
     run_linear_static, run_linear_static_with_options,

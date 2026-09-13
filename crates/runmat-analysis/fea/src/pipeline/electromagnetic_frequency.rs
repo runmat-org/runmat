@@ -11,7 +11,7 @@ use crate::{
 pub use super::electromagnetic_frequency_result::{
     ElectromagneticFrequencySummary, FeaElectromagneticFrequencyResponse,
 };
-use super::frequency_plan::FrequencyResponsePlan;
+use crate::frequency::FrequencyResponsePlan;
 
 use super::{
     electromagnetic_frequency_history::complex_history_series,
@@ -79,9 +79,10 @@ pub(crate) fn assemble_electromagnetic_frequency_response(
             .zip(plan.frequencies_hz())
             .any(|(run, frequency)| run.reference_frequency_hz.to_bits() != frequency.to_bits())
     {
-        return Err(FeaRunError::InvalidFrequencyPlan(
-            "electromagnetic frequency results do not exactly cover their canonical plan".into(),
-        ));
+        return Err(crate::frequency::FrequencyPlanError::invalid(
+            "electromagnetic frequency results do not exactly cover their canonical plan",
+        )
+        .into());
     }
     let summary = summarize(plan.frequencies_hz(), &runs)?;
     let reference_index = plan.reference_index();

@@ -1,11 +1,20 @@
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
 use serde::{Deserialize, Serialize};
-
-use crate::contracts::FeaRunError;
+use thiserror::Error;
 
 const FREQUENCY_PLAN_PREFIX: &[u8] = b"runmat-fea-frequency-response-plan/v1\0";
 const FREQUENCY_PLAN_LIMITS: CanonicalLimits = CanonicalLimits::new(1024 * 1024, 100_000, 4096, 8);
+
+#[derive(Clone, Debug, Error, Eq, PartialEq)]
+#[error("FEA_FREQUENCY_PLAN_INVALID: {0}")]
+pub struct FrequencyPlanError(String);
+
+impl FrequencyPlanError {
+    pub(crate) fn invalid(message: impl Into<String>) -> Self {
+        Self(message.into())
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -50,7 +59,7 @@ struct FrequencyResponsePlanEntryData {
 }
 
 impl TryFrom<FrequencyResponsePlanEntryData> for FrequencyResponsePlanEntry {
-    type Error = FeaRunError;
+    type Error = FrequencyPlanError;
 
     fn try_from(data: FrequencyResponsePlanEntryData) -> Result<Self, Self::Error> {
         let entry = Self {
@@ -69,7 +78,7 @@ impl FrequencyResponsePlanEntry {
         plan_identity: FrequencyResponsePlanIdentity,
         ordinal: u32,
         frequency_hz: f64,
-    ) -> Result<Self, FeaRunError> {
+    ) -> Result<Self, FrequencyPlanError> {
         let mut entry = Self {
             identity: FrequencyResponsePlanEntryIdentity(Digest::sha256([])),
             plan_identity,
@@ -97,16 +106,16 @@ impl FrequencyResponsePlanEntry {
         self.frequency_hz
     }
 
-    fn validate(&self) -> Result<(), FeaRunError> {
+    fn validate(&self) -> Result<(), FrequencyPlanError> {
         if !valid_frequency(self.frequency_hz) || self.identity != self.derive_identity()? {
-            return Err(FeaRunError::InvalidFrequencyPlan(
-                "frequency response plan entry is not canonical".into(),
+            return Err(FrequencyPlanError::invalid(
+                "frequency response plan entry is not canonical",
             ));
         }
         Ok(())
     }
 
-    fn derive_identity(&self) -> Result<FrequencyResponsePlanEntryIdentity, FeaRunError> {
+    fn derive_identity(&self) -> Result<FrequencyResponsePlanEntryIdentity, FrequencyPlanError> {
         encode_contract(
             FREQUENCY_PLAN_PREFIX,
             "frequency-response-plan-entry",
@@ -115,7 +124,7 @@ impl FrequencyResponsePlanEntry {
         )
         .map(Digest::sha256)
         .map(FrequencyResponsePlanEntryIdentity)
-        .map_err(|error| FeaRunError::InvalidFrequencyPlan(error.to_string()))
+        .map_err(|error| FrequencyPlanError::invalid(error.to_string()))
     }
 }
 
@@ -140,7 +149,7 @@ struct FrequencyResponsePlanData {
 }
 
 impl TryFrom<FrequencyResponsePlanData> for FrequencyResponsePlan {
-    type Error = FeaRunError;
+    type Error = FrequencyPlanError;
 
     fn try_from(data: FrequencyResponsePlanData) -> Result<Self, Self::Error> {
         let plan = Self {
@@ -158,13 +167,13 @@ impl FrequencyResponsePlan {
         reference_frequency_hz: f64,
         requested_frequencies_hz: &[f64],
         observation_frequencies_hz: &[f64],
-    ) -> Result<Self, FeaRunError> {
+    ) -> Result<Self, FrequencyPlanError> {
         let mut frequencies_hz = requested_frequencies_hz.to_vec();
         frequencies_hz.extend_from_slice(observation_frequencies_hz);
         frequencies_hz.push(reference_frequency_hz);
         if frequencies_hz.iter().any(|value| !valid_frequency(*value)) {
-            return Err(FeaRunError::InvalidFrequencyPlan(
-                "response frequencies must be finite, positive, and not negative zero".into(),
+            return Err(FrequencyPlanError::invalid(
+                "response frequencies must be finite, positive, and not negative zero",
             ));
         }
         frequencies_hz.sort_by(f64::total_cmp);
@@ -191,7 +200,7 @@ impl FrequencyResponsePlan {
         &self.frequencies_hz
     }
 
-    pub fn entries(&self) -> Result<Vec<FrequencyResponsePlanEntry>, FeaRunError> {
+    pub fn entries(&self) -> Result<Vec<FrequencyResponsePlanEntry>, FrequencyPlanError> {
         self.validate()?;
         self.frequencies_hz
             .iter()
@@ -199,8 +208,8 @@ impl FrequencyResponsePlan {
             .enumerate()
             .map(|(ordinal, frequency_hz)| {
                 let ordinal = u32::try_from(ordinal).map_err(|_| {
-                    FeaRunError::InvalidFrequencyPlan(
-                        "frequency response plan exceeds the entry ordinal domain".into(),
+                    FrequencyPlanError::invalid(
+                        "frequency response plan exceeds the entry ordinal domain",
                     )
                 })?;
                 FrequencyResponsePlanEntry::new(self.identity, ordinal, frequency_hz)
@@ -208,7 +217,10 @@ impl FrequencyResponsePlan {
             .collect()
     }
 
-    pub fn validate_entry(&self, entry: FrequencyResponsePlanEntry) -> Result<(), FeaRunError> {
+    pub fn validate_entry(
+        &self,
+        entry: FrequencyResponsePlanEntry,
+    ) -> Result<(), FrequencyPlanError> {
         self.validate()?;
         entry.validate()?;
         let frequency = usize::try_from(entry.ordinal)
@@ -217,8 +229,8 @@ impl FrequencyResponsePlan {
         if entry.plan_identity != self.identity
             || frequency.is_none_or(|frequency| frequency.to_bits() != entry.frequency_hz.to_bits())
         {
-            return Err(FeaRunError::InvalidFrequencyPlan(
-                "frequency response plan entry is absent from its claimed plan".into(),
+            return Err(FrequencyPlanError::invalid(
+                "frequency response plan entry is absent from its claimed plan",
             ));
         }
         Ok(())
@@ -230,7 +242,7 @@ impl FrequencyResponsePlan {
             .expect("validated frequency plan contains its reference frequency")
     }
 
-    pub fn validate(&self) -> Result<(), FeaRunError> {
+    pub fn validate(&self) -> Result<(), FrequencyPlanError> {
         if !valid_frequency(self.reference_frequency_hz)
             || self.frequencies_hz.is_empty()
             || self
@@ -247,14 +259,14 @@ impl FrequencyResponsePlan {
                 .is_err()
             || self.identity != self.derive_identity()?
         {
-            return Err(FeaRunError::InvalidFrequencyPlan(
-                "frequency response plan is not canonical".into(),
+            return Err(FrequencyPlanError::invalid(
+                "frequency response plan is not canonical",
             ));
         }
         Ok(())
     }
 
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, FeaRunError> {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, FrequencyPlanError> {
         self.validate()?;
         encode_contract(
             FREQUENCY_PLAN_PREFIX,
@@ -262,20 +274,20 @@ impl FrequencyResponsePlan {
             self,
             FREQUENCY_PLAN_LIMITS,
         )
-        .map_err(|error| FeaRunError::InvalidFrequencyPlan(error.to_string()))
+        .map_err(|error| FrequencyPlanError::invalid(error.to_string()))
     }
 
-    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, FeaRunError> {
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, FrequencyPlanError> {
         decode_contract(
             FREQUENCY_PLAN_PREFIX,
             "frequency-response-plan-artifact",
             bytes,
             FREQUENCY_PLAN_LIMITS,
         )
-        .map_err(|error| FeaRunError::InvalidFrequencyPlan(error.to_string()))
+        .map_err(|error| FrequencyPlanError::invalid(error.to_string()))
     }
 
-    fn derive_identity(&self) -> Result<FrequencyResponsePlanIdentity, FeaRunError> {
+    fn derive_identity(&self) -> Result<FrequencyResponsePlanIdentity, FrequencyPlanError> {
         encode_contract(
             FREQUENCY_PLAN_PREFIX,
             "frequency-response-plan",
@@ -284,7 +296,7 @@ impl FrequencyResponsePlan {
         )
         .map(Digest::sha256)
         .map(FrequencyResponsePlanIdentity)
-        .map_err(|error| FeaRunError::InvalidFrequencyPlan(error.to_string()))
+        .map_err(|error| FrequencyPlanError::invalid(error.to_string()))
     }
 }
 

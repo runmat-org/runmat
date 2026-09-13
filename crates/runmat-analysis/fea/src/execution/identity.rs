@@ -81,6 +81,9 @@ identity_type!(StructuralTransientSegmentIdentity);
 identity_type!(StructuralTransientSegmentSampleIdentity);
 identity_type!(StructuralTransientPhysicalSampleIdentity);
 identity_type!(StructuralTransientResultAssemblyRequestIdentity);
+identity_type!(StructuralFrequencyScopeIdentity);
+identity_type!(StructuralFrequencyPhysicalSampleIdentity);
+identity_type!(StructuralFrequencyProblemIdentity);
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -414,6 +417,12 @@ impl StructuralTransientSolverOptionsIdentity {
     }
 }
 
+impl StructuralFrequencyProblemIdentity {
+    pub fn from_physical_contract<T: Serialize>(contract: &T) -> AnalysisExecutionResult<Self> {
+        Self::derive("structural-frequency-physical-problem", contract)
+    }
+}
+
 impl OperatorIdentity {
     pub fn new(
         discretization: DiscretizationIdentity,
@@ -537,6 +546,16 @@ impl SolverResultIdentity {
         content_digest: Digest,
     ) -> AnalysisExecutionResult<Self> {
         Self::derive("in-process-solver-result", &(step, content_digest))
+    }
+
+    pub(super) fn from_structural_frequency_response(
+        scope: StructuralFrequencyScopeIdentity,
+        content_digest: Digest,
+    ) -> AnalysisExecutionResult<Self> {
+        Self::derive(
+            "structural-frequency-physical-result",
+            &(scope, content_digest),
+        )
     }
 }
 

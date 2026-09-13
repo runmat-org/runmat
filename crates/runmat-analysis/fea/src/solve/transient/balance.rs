@@ -1,13 +1,11 @@
-use std::collections::BTreeMap;
-
 use thiserror::Error;
 
 use crate::{
     algebra::{spmv, CanonicalRealOperators, RealSparseMatrix},
     assembly::AssemblySummary,
-    constraints::solve_constraint_multipliers,
     contracts::StructuralDynamicBalanceSnapshot,
     execution::StructuralTransientBalanceAccumulator,
+    solve::reaction::recover_structural_reaction,
 };
 
 use super::{constraint_state::physical_load, state::SecondOrderState};
@@ -385,40 +383,8 @@ fn constrained_reaction(
     summary: &AssemblySummary,
     balance: &StructuralDynamicBalanceSnapshot,
 ) -> Result<Vec<f64>, DynamicBalanceError> {
-    if let Some(matrix) = summary.constraint_matrix.as_ref() {
-        let mut rows = Vec::with_capacity(matrix.row_count());
-        let mut projected_residual = Vec::with_capacity(matrix.row_count());
-        for row_index in 0..matrix.row_count() {
-            let start = matrix.row_offsets[row_index];
-            let end = matrix.row_offsets[row_index + 1];
-            let row = matrix.column_indices[start..end]
-                .iter()
-                .copied()
-                .zip(matrix.coefficients[start..end].iter().copied())
-                .collect::<BTreeMap<_, _>>();
-            projected_residual.push(
-                row.iter()
-                    .map(|(dof, coefficient)| coefficient * balance.equilibrium_residual[*dof])
-                    .sum(),
-            );
-            rows.push(row);
-        }
-        let multipliers = solve_constraint_multipliers(&rows, &projected_residual)
-            .ok_or(DynamicBalanceError::ReactionRecovery)?;
-        let mut reaction = vec![0.0; summary.dof_count];
-        for (row, multiplier) in rows.iter().zip(multipliers) {
-            for (dof, coefficient) in row {
-                reaction[*dof] += coefficient * multiplier;
-            }
-        }
-        return Ok(reaction);
-    }
-    Ok(balance
-        .equilibrium_residual
-        .iter()
-        .zip(summary.operator.constrained_dofs())
-        .map(|(residual, constrained)| if *constrained { *residual } else { 0.0 })
-        .collect())
+    recover_structural_reaction(summary, &balance.equilibrium_residual)
+        .map_err(|_| DynamicBalanceError::ReactionRecovery)
 }
 
 fn strain_energy(

@@ -1,6 +1,6 @@
 use crate::contracts::FeaElectromagneticRunResult;
 
-use super::frequency_plan::FrequencyResponsePlan;
+use crate::frequency::FrequencyResponsePlan;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ElectromagneticFrequencySummary {

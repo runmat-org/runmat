@@ -351,6 +351,8 @@ pub enum SolverMethod {
     MatrixFreeSaddlePointGmres,
     MatrixFreeSubspaceIteration,
     NewmarkAverageAccelerationPcg,
+    StructuralDirectHarmonicGmres,
+    StructuralModalHarmonicDenseDirect,
     IncrementalNewtonRaphson,
     ElectromagneticEdgeCurlCurlHarmonicBlockBicgstab,
     AcousticDomainGraphHelmholtzHarmonic,
@@ -368,6 +370,8 @@ impl SolverMethod {
             Self::MatrixFreeSaddlePointGmres => "matrix_free_saddle_point_gmres",
             Self::MatrixFreeSubspaceIteration => "matrix_free_subspace_iteration",
             Self::NewmarkAverageAccelerationPcg => "newmark_average_acceleration_pcg",
+            Self::StructuralDirectHarmonicGmres => "structural_direct_harmonic_gmres",
+            Self::StructuralModalHarmonicDenseDirect => "structural_modal_harmonic_dense_direct",
             Self::IncrementalNewtonRaphson => "incremental_newton_raphson",
             Self::ElectromagneticEdgeCurlCurlHarmonicBlockBicgstab => {
                 "electromagnetic_edge_curl_curl_harmonic_block_bicgstab"
@@ -1024,8 +1028,8 @@ pub enum FeaRunError {
     Solve(String),
     #[error("FEA_OBSERVATION_FAILED: {0}")]
     Observation(String),
-    #[error("FEA_FREQUENCY_PLAN_INVALID: {0}")]
-    InvalidFrequencyPlan(String),
+    #[error(transparent)]
+    FrequencyPlan(#[from] crate::frequency::FrequencyPlanError),
     #[error("FEA_ELECTROMAGNETIC_SOURCE_MISSING: no nonzero source at {frequency_hz} Hz")]
     MissingElectromagneticSource { frequency_hz: f64 },
     #[error(transparent)]

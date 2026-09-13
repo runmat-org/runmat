@@ -6,6 +6,11 @@
 mod accuracy;
 mod error;
 mod field;
+mod frequency_balance;
+mod frequency_receipt;
+mod frequency_result;
+mod frequency_sample;
+mod frequency_scope;
 mod identity;
 mod object;
 mod observation;
@@ -28,6 +33,19 @@ mod transient_workload;
 pub use accuracy::AccuracyEvaluationRequest;
 pub use error::{AnalysisExecutionError, AnalysisExecutionResult};
 pub use field::FieldRecoveryRequest;
+pub use frequency_balance::{ComplexStructuralBalance, StructuralComplexVector};
+pub use frequency_receipt::{
+    StructuralFrequencyEntrySolverEvidence, StructuralFrequencyNumericalReceipt,
+    StructuralFrequencySolutionSpace, StructuralFrequencySolverEvidenceInput,
+};
+pub use frequency_result::{
+    StructuralFrequencyResultEntry, StructuralFrequencySolverResult,
+    StructuralFrequencySolverResultManifest,
+};
+pub use frequency_sample::StructuralFrequencyPhysicalSample;
+pub use frequency_scope::{
+    StructuralFrequencyScope, StructuralFrequencyScopeInput, StructuralPhasorConvention,
+};
 pub use identity::{
     AccuracyEvaluationRequestIdentity, AccuracyIdentity, AnalysisAttemptIdentity,
     AnalysisResultIdentity, AnalysisTaskIdentity, AnalysisWorkKind, AnalysisWorkloadIdentity,
@@ -41,13 +59,15 @@ pub use identity::{
     SignalMaterializationIdentity, SignalRealizationIdentity, SolverExcitationIdentity,
     SolverResultIdentity, StateIdentity, StateTransitionIdentity, StepIdentity,
     StructuralDampingOperatorIdentity, StructuralDofLayoutIdentity,
-    StructuralExcitationSetIdentity, StructuralFormulationIdentity, StructuralKinematicsIdentity,
-    StructuralMassOperatorIdentity, StructuralStiffnessOperatorIdentity,
-    StructuralTransientBlockRequestIdentity, StructuralTransientCheckpointIdentity,
-    StructuralTransientCheckpointScopeIdentity, StructuralTransientPhysicalSampleIdentity,
-    StructuralTransientResultAssemblyRequestIdentity, StructuralTransientScheduleIdentity,
-    StructuralTransientSegmentIdentity, StructuralTransientSegmentSampleIdentity,
-    StructuralTransientSolverOptionsIdentity, StudyIdentity, SweepIdentity, SweepResultIdentity,
+    StructuralExcitationSetIdentity, StructuralFormulationIdentity,
+    StructuralFrequencyPhysicalSampleIdentity, StructuralFrequencyProblemIdentity,
+    StructuralFrequencyScopeIdentity, StructuralKinematicsIdentity, StructuralMassOperatorIdentity,
+    StructuralStiffnessOperatorIdentity, StructuralTransientBlockRequestIdentity,
+    StructuralTransientCheckpointIdentity, StructuralTransientCheckpointScopeIdentity,
+    StructuralTransientPhysicalSampleIdentity, StructuralTransientResultAssemblyRequestIdentity,
+    StructuralTransientScheduleIdentity, StructuralTransientSegmentIdentity,
+    StructuralTransientSegmentSampleIdentity, StructuralTransientSolverOptionsIdentity,
+    StudyIdentity, SweepIdentity, SweepResultIdentity,
 };
 pub use object::{
     chunk_numerical_payload, chunk_partitioned_numerical_payload, AnalysisChunkDescriptor,

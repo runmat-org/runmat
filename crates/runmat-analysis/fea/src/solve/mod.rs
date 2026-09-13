@@ -8,4 +8,5 @@ pub mod modal;
 mod multiplier;
 pub mod nonlinear;
 pub mod preconditioner;
+mod reaction;
 pub mod transient;

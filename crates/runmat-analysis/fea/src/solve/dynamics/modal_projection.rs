@@ -37,6 +37,34 @@ pub struct ModalProjectionEvidence {
     pub maximum_damping_asymmetry_ratio: f64,
 }
 
+impl ModalProjectionEvidence {
+    /// Validate evidence against the exact physical operator and full-order coordinate space.
+    pub fn validate_for(
+        &self,
+        operator_digest: Digest,
+        full_dof_count: usize,
+    ) -> Result<(), ModalProjectionError> {
+        if self.operator_digest != operator_digest
+            || self.full_dof_count != full_dof_count
+            || self.mode_count == 0
+            || self.mode_count > full_dof_count
+        {
+            return Err(ModalProjectionError::DimensionMismatch);
+        }
+        if [
+            self.maximum_mass_off_diagonal_ratio,
+            self.maximum_stiffness_off_diagonal_ratio,
+            self.maximum_damping_asymmetry_ratio,
+        ]
+        .iter()
+        .any(|value| !value.is_finite() || *value < 0.0)
+        {
+            return Err(ModalProjectionError::NonFinite);
+        }
+        Ok(())
+    }
+}
+
 /// Dense reduced K/M/C operators derived from one immutable modal basis and full-order assembly.
 ///
 /// Reduced systems are deliberately dense: modal coupling is small enough to retain every term,
@@ -178,6 +206,8 @@ impl ModalReducedSystem {
     }
 
     fn validate(&self) -> Result<(), ModalProjectionError> {
+        self.evidence
+            .validate_for(self.evidence.operator_digest, self.evidence.full_dof_count)?;
         let mode_count = self.mode_count();
         let matrix_size = mode_count
             .checked_mul(mode_count)
