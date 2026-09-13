@@ -110,6 +110,7 @@ pub use result_publication::{
     PreparedResultPublication, ResultPublicationPreparation,
 };
 pub use runmat_analysis_fea::execution::SignalInputAdmission;
+pub use runmat_analysis_fea::execution::{StructuralStudyWorkloads, StructuralTransientBlockPlan};
 pub use serial::{
     execute_serial_analysis, AnalysisKernel, AnalysisKernelInvocation, AnalysisKernelOutput,
     AnalysisKernelOutputPartition, CompletedAnalysisWorkload,
@@ -150,7 +151,8 @@ pub use structural_transient_recovery::{
     STRUCTURAL_TRANSIENT_EXECUTION_CHECKPOINT_VALUE_SCHEMA,
 };
 pub use structural_transient_sequence::{
-    StructuralTransientSequenceCoordinator, StructuralTransientSequencePreparation,
+    prepare_structural_transient_sequence, StructuralTransientSequenceCoordinator,
+    StructuralTransientSequencePreparation, StructuralTransientSequencePreparationInput,
 };
 pub use task::{
     build_analysis_task_submission, build_structural_task_submission, AnalysisExecutionContext,

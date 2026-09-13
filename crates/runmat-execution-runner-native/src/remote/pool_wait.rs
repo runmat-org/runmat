@@ -8,17 +8,17 @@ use super::pool_execution::RemotePoolExecutionOutcome;
 use super::RemotePoolDriver;
 use crate::NativeExecutionResult;
 
-pub(super) type ExecutionFuture =
-    Pin<Box<dyn Future<Output = NativeExecutionResult<RemotePoolExecutionOutcome>>>>;
+pub(super) type ExecutionFuture<'a> =
+    Pin<Box<dyn Future<Output = NativeExecutionResult<RemotePoolExecutionOutcome>> + 'a>>;
 
 pub(super) enum RunningWait<T> {
     Operation(T, Option<NativeExecutionResult<RemotePoolExecutionOutcome>>),
     Deadline(Option<NativeExecutionResult<RemotePoolExecutionOutcome>>),
 }
 
-pub(super) async fn await_running_operation<T, F>(
+pub(super) async fn await_running_operation<'a, T, F>(
     operation: F,
-    execution: &mut ExecutionFuture,
+    execution: &mut ExecutionFuture<'a>,
     driver_ticks: &mut tokio::time::Interval,
     pool: &Arc<RemotePoolDriver>,
     cancellation: &mut tokio::sync::watch::Receiver<bool>,

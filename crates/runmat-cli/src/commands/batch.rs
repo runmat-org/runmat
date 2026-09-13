@@ -122,13 +122,32 @@ pub async fn run_driver() -> std::process::ExitCode {
             working_directory,
             ..
         } => run_script_driver(source_path, arguments, working_directory).await,
-        BatchDriverInvocation::Program { submission, .. } => {
-            let response = execute_program_batch(*submission).await;
+        BatchDriverInvocation::Program {
+            attempt,
+            submission,
+            ..
+        } => {
+            let execution = match execute_program_batch(attempt, *submission).await {
+                Ok(execution) => execution,
+                Err(error) => {
+                    let message = error.to_string();
+                    if let Err(commit_error) =
+                        complete_batch_driver(&job_directory, false, None, Some(message.clone()))
+                    {
+                        eprintln!(
+                            "runmat batch driver failed to commit execution error: {commit_error}"
+                        );
+                        return std::process::ExitCode::from(2);
+                    }
+                    eprintln!("runmat batch driver failed: {message}");
+                    return std::process::ExitCode::from(1);
+                }
+            };
             let success = matches!(
-                response,
+                &execution.response,
                 WorkerResponse::Success { .. } | WorkerResponse::ExternalizedSuccess { .. }
             );
-            if let Err(error) = complete_batch_driver_with_response(&job_directory, response) {
+            if let Err(error) = complete_batch_driver_with_response(&job_directory, execution) {
                 Err(error.to_string())
             } else if success {
                 return std::process::ExitCode::SUCCESS;

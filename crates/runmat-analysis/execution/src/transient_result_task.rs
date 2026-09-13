@@ -42,6 +42,7 @@ pub struct ImportedStructuralTransientResult {
     pub numerical_receipt: StructuralTransientNumericalReceipt,
     pub result_objects: PreparedAnalysisObjects,
     pub receipt_objects: PreparedAnalysisObjects,
+    pub response: ProgramExecutionResponse,
 }
 
 pub fn prepare_structural_transient_result_task(
@@ -126,7 +127,7 @@ pub fn import_structural_transient_result(
     limits: ObjectInventoryLimits,
 ) -> AnalysisBridgeResult<ImportedStructuralTransientResult> {
     response.validate_against(&prepared.program.request)?;
-    let output_set = import_analysis_output_set(source, response, &prepared.host)?;
+    let output_set = import_analysis_output_set(source, response.clone(), &prepared.host)?;
     let [result_output, receipt_output] = output_set.manifest.outputs.as_slice() else {
         return Err(AnalysisBridgeError::Invalid(
             "structural transient assembly must return result and numerical-receipt roots".into(),
@@ -184,5 +185,6 @@ pub fn import_structural_transient_result(
         numerical_receipt,
         result_objects,
         receipt_objects,
+        response,
     })
 }

@@ -17,6 +17,7 @@ use crate::{
 mod advance;
 mod balance;
 mod block_execution;
+mod completed_result;
 mod constraint_state;
 mod diagnostics;
 mod effective_solve;
@@ -37,6 +38,9 @@ pub(crate) use block_execution::{
 pub use block_execution::{
     solve_structural_transient_block_with_assembly, StructuralTransientBlockSolveInput,
     StructuralTransientInitialConditions,
+};
+pub(crate) use completed_result::{
+    reconstruct_completed_transient_solve, CompletedTransientSolveInput,
 };
 pub(crate) use diagnostics::mechanical_energy_history_diagnostic;
 use diagnostics::transient_diagnostics;

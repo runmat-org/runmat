@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use runmat_analysis_fea::execution::{
     AnalysisNumericalObjectKind, AnalysisTaskIdentity, StructuralTransientBlockRequest,
     StructuralTransientBlockRequestIdentity, StructuralTransientCheckpointScope,
-    StructuralTransientResultAssemblyRequestIdentity,
+    StructuralTransientResultAssemblyRequestIdentity, StructuralTransientWorkload,
 };
 use runmat_execution::value::{ValueRef, ValueRefKind};
 use runmat_execution::Digest;
@@ -14,18 +14,19 @@ use runmat_execution_artifact::{
     ArtifactAccess, ArtifactResult, ObjectNamespace, ProgramExecutionObject,
     ProgramExecutionResponse,
 };
-use runmat_meshing_core::CanonicalMeshingContract;
+use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
 
 use crate::{
     decode_prepared_structural_transient_workload, import_structural_transient_block,
-    import_structural_transient_result, prepare_structural_transient_block_request_objects,
-    prepare_structural_transient_block_task, prepare_structural_transient_checkpoint_objects,
-    prepare_structural_transient_result_task, AnalysisBridgeError, AnalysisBridgeResult,
+    import_structural_transient_result, prepare_analysis_objects,
+    prepare_structural_transient_block_request_objects, prepare_structural_transient_block_task,
+    prepare_structural_transient_checkpoint_objects, prepare_structural_transient_result_task,
+    prepare_structural_transient_workload_objects, AnalysisBridgeError, AnalysisBridgeResult,
     ImportedStructuralTransientBlock, ImportedStructuralTransientResult, PreparedAnalysisObjects,
     PreparedStructuralTransientBlockTask, PreparedStructuralTransientResultTask,
-    StructuralTransientBlockPreparation, StructuralTransientExecutionCheckpoint,
-    StructuralTransientRecoveryClosure, StructuralTransientResultPreparation,
-    STRUCTURAL_TRANSIENT_EXECUTION_CHECKPOINT_VALUE_SCHEMA,
+    StructuralTransientBlockPlan, StructuralTransientBlockPreparation,
+    StructuralTransientExecutionCheckpoint, StructuralTransientRecoveryClosure,
+    StructuralTransientResultPreparation, STRUCTURAL_TRANSIENT_EXECUTION_CHECKPOINT_VALUE_SCHEMA,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -38,6 +39,67 @@ pub struct StructuralTransientSequencePreparation {
     pub program_revision: ProgramRevision,
     pub chunk_bytes: usize,
     pub inventory_limits: ObjectInventoryLimits,
+}
+
+pub struct StructuralTransientSequencePreparationInput<'a> {
+    pub workload: &'a StructuralTransientWorkload,
+    pub mesh: &'a SolverMeshArtifact,
+    pub block_plan: StructuralTransientBlockPlan,
+    pub artifact_access: ArtifactAccess,
+    pub program_revision: ProgramRevision,
+    pub chunk_bytes: usize,
+    pub inventory_limits: ObjectInventoryLimits,
+}
+
+pub fn prepare_structural_transient_sequence(
+    input: StructuralTransientSequencePreparationInput<'_>,
+) -> AnalysisBridgeResult<StructuralTransientSequencePreparation> {
+    input.workload.validate()?;
+    input
+        .mesh
+        .validate_canonical()
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let scope = runmat_analysis_fea::pipeline::transient::prepare_transient_checkpoint_scope(
+        input.workload,
+        input.mesh,
+    )
+    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let terminal_schedule_ordinal = u64::try_from(scope.schedule.points.len() - 1)
+        .map_err(|_| invalid("transient schedule exceeds u64 ordinals"))?;
+    let terminal_schedule_ordinals = input
+        .block_plan
+        .terminal_schedule_ordinals(terminal_schedule_ordinal)?;
+    let workload = prepare_structural_transient_workload_objects(
+        input.workload,
+        scope.source_workload,
+        input.chunk_bytes,
+        ObjectNamespace::InputValue,
+        input.inventory_limits,
+    )?;
+    let mesh_bytes = input
+        .mesh
+        .canonical_encode()
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let mesh = prepare_analysis_objects(
+        AnalysisNumericalObjectKind::Mesh,
+        Digest::from_bytes(*input.mesh.canonical_digest.bytes()),
+        &mesh_bytes,
+        input.chunk_bytes,
+        ObjectNamespace::InputValue,
+        input.inventory_limits,
+    )?;
+    let preparation = StructuralTransientSequencePreparation {
+        workload,
+        mesh,
+        scope,
+        terminal_schedule_ordinals,
+        artifact_access: input.artifact_access,
+        program_revision: input.program_revision,
+        chunk_bytes: input.chunk_bytes,
+        inventory_limits: input.inventory_limits,
+    };
+    validate_preparation(&preparation)?;
+    Ok(preparation)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

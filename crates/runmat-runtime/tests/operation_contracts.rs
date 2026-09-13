@@ -2553,6 +2553,7 @@ fn analysis_run_transient_with_options_contract_controls_execution_window() {
             quality_policy: QualityPolicy::Balanced,
             time_step_policy: AnalysisStructuralTimeStepPolicy::Fixed { interval_count: 4 },
             residual_target: 1.0e-6,
+            maximum_intervals_per_block: 256,
             solver_mesh_artifact_path: None,
         },
         OperationContext::new(Some("trace-contract-transient-opts-1".to_string()), None),

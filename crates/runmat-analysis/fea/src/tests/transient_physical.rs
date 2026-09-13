@@ -187,15 +187,7 @@ fn transient_checkpoint_scope(
         crate::assembly::StructuralFormulationRequirement::PhysicalDiscretization,
     )
     .unwrap();
-    let workload = crate::execution::StructuralTransientWorkload {
-        schema_version: 1,
-        model: model.clone(),
-        step_id: step.step_id.clone(),
-        backend: ComputeBackend::Cpu,
-        formulation_requirement: options.formulation_requirement,
-        time_step_policy: options.time_step_policy,
-        residual_target: options.residual_target,
-    };
+    let workload = transient_workload(model, options);
     crate::execution::StructuralTransientCheckpointScope::from_prepared_workload(
         crate::execution::StructuralTransientCheckpointScopeInput {
             workload: &workload,
@@ -205,6 +197,22 @@ fn transient_checkpoint_scope(
         },
     )
     .unwrap()
+}
+
+fn transient_workload(
+    model: &runmat_analysis_core::AnalysisModel,
+    options: &TransientSolveOptions,
+) -> crate::execution::StructuralTransientWorkload {
+    let step = &model.sequence.steps[0];
+    crate::execution::StructuralTransientWorkload {
+        schema_version: 1,
+        model: model.clone(),
+        step_id: step.step_id.clone(),
+        backend: ComputeBackend::Cpu,
+        formulation_requirement: options.formulation_requirement,
+        time_step_policy: options.time_step_policy,
+        residual_target: options.residual_target,
+    }
 }
 
 #[test]
@@ -356,6 +364,122 @@ fn prescribed_motion_blocks_restart_from_only_the_physical_checkpoint() {
                 .to_vec(),
         }
     );
+    let segments = vec![first, second];
+    let request =
+        crate::execution::StructuralTransientResultAssemblyRequest::new(&segments).unwrap();
+    let solver_result =
+        crate::execution::StructuralTransientSolverResult::assemble(&request, &segments).unwrap();
+    let receipt = crate::execution::StructuralTransientNumericalReceipt::new(
+        &solver_result,
+        &request,
+        &segments,
+    )
+    .unwrap();
+    let recovered = crate::pipeline::transient::recover_completed_transient_run(
+        crate::pipeline::transient::CompletedStructuralTransientRunInput {
+            workload: &transient_workload(&model, &options),
+            solver_mesh: options.solver_mesh.as_ref().unwrap(),
+            result: &solver_result,
+            numerical_receipt: &receipt,
+        },
+    )
+    .unwrap();
+    assert_eq!(recovered, uninterrupted);
+}
+
+#[test]
+fn prescribed_motion_uneven_blocks_preserve_discontinuity_and_final_result() {
+    use runmat_analysis_core::*;
+
+    let mut model = support_motion_model();
+    let PhysicalSignal::Acceleration(signal) = &mut model.signals[0] else {
+        panic!("support motion should use an acceleration signal")
+    };
+    let value = |x: f64| {
+        SignalOrdinate::Real(SignalValue::Vector3([
+            Acceleration::new(x),
+            Acceleration::new(x),
+            Acceleration::new(x),
+        ]))
+    };
+    signal.representation = SignalRepresentation::Tabulated(TabulatedSignal {
+        domain: TabulatedSignalDomain::TimeSeconds,
+        knots: vec![
+            SignalKnot::continuous(0.0, value(1.0)),
+            SignalKnot::jump(0.5, value(-1.0), value(2.0), SignalPointContinuity::Right),
+            SignalKnot::continuous(1.0, value(1.0)),
+        ],
+        interpolation: SignalInterpolation::Linear,
+        extrapolation: SignalExtrapolation::Reject,
+    });
+    let mesh = single_tetrahedron_solver_mesh_for_model(&model);
+    let options = TransientSolveOptions {
+        time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 9 },
+        residual_target: 1.0e-10,
+        solver_mesh: Some(mesh.clone()),
+        ..experimental_transient_options()
+    };
+    let workload = transient_workload(&model, &options);
+    let uninterrupted =
+        crate::run_transient_with_options(&model, ComputeBackend::Cpu, options.clone()).unwrap();
+    let scope =
+        crate::pipeline::transient::prepare_transient_checkpoint_scope(&workload, &mesh).unwrap();
+    let terminal = u64::try_from(scope.schedule.points.len() - 1).unwrap();
+    let terminals = crate::execution::StructuralTransientBlockPlan::new(4)
+        .unwrap()
+        .terminal_schedule_ordinals(terminal)
+        .unwrap();
+    assert_eq!(terminals.len(), 3);
+    assert!(terminals[2] - terminals[1] < terminals[1] - terminals[0]);
+
+    let mut predecessor = None;
+    let mut segments = Vec::new();
+    for terminal in terminals {
+        let request = crate::execution::StructuralTransientBlockRequest::new(
+            scope.clone(),
+            predecessor.as_ref(),
+            terminal,
+        )
+        .unwrap();
+        let segment = crate::pipeline::transient::run_transient_block(
+            crate::pipeline::transient::StructuralTransientRunBlockInput {
+                model: &model,
+                backend: ComputeBackend::Cpu,
+                options: &options,
+                request: &request,
+                predecessor: predecessor.as_ref(),
+                observation_cursors: Vec::new(),
+            },
+        )
+        .unwrap();
+        predecessor = Some(segment.manifest().terminal_checkpoint.clone());
+        segments.push(segment);
+    }
+    assert!(segments
+        .iter()
+        .flat_map(|segment| segment.samples())
+        .any(|sample| {
+            sample.physical.time_s == 0.5
+                && scope.schedule.points[sample.physical.schedule_ordinal as usize].arrival
+                    == crate::execution::StructuralTransientScheduleArrival::LeftLimit
+        }));
+    let request =
+        crate::execution::StructuralTransientResultAssemblyRequest::new(&segments).unwrap();
+    let result =
+        crate::execution::StructuralTransientSolverResult::assemble(&request, &segments).unwrap();
+    let numerical_receipt =
+        crate::execution::StructuralTransientNumericalReceipt::new(&result, &request, &segments)
+            .unwrap();
+    let recovered = crate::pipeline::transient::recover_completed_transient_run(
+        crate::pipeline::transient::CompletedStructuralTransientRunInput {
+            workload: &workload,
+            solver_mesh: &mesh,
+            result: &result,
+            numerical_receipt: &numerical_receipt,
+        },
+    )
+    .unwrap();
+    assert_eq!(recovered, uninterrupted);
 }
 
 #[test]

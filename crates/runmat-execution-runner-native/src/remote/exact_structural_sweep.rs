@@ -106,6 +106,7 @@ pub(crate) async fn execute(
                         completed,
                         &signal_outcomes,
                         &resources,
+                        super::exact_structural_study::StructuralTransientRecoveryAdmission::Unavailable,
                     )
                     .await?
                 }

@@ -11,9 +11,8 @@ use super::{
     analysis_prepare_structural_study_op, analysis_study_sweep_identity, AnalysisStudyRunData,
     AnalysisStudySpec, AnalysisStudySweepData, AnalysisStudySweepRunOutcome,
     AnalysisStudySweepSpec, PreparedStructuralStudy, StructuralStudyExecutionFailure,
-    StructuralStudySequenceExecutionOutcome, ANALYSIS_RUN_STUDY_OPERATION,
-    ANALYSIS_RUN_STUDY_OP_VERSION, ANALYSIS_RUN_STUDY_SWEEP_OPERATION,
-    ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION,
+    StructuralStudyExecutionOutcome, ANALYSIS_RUN_STUDY_OPERATION, ANALYSIS_RUN_STUDY_OP_VERSION,
+    ANALYSIS_RUN_STUDY_SWEEP_OPERATION, ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION,
 };
 
 pub type StructuralStudyPlacementFuture<'a> =
@@ -32,7 +31,7 @@ pub struct StructuralStudyPlacementEntry<'a> {
 #[derive(Debug, Clone)]
 pub struct StructuralStudyPlacementResult {
     pub study_index: usize,
-    pub outcome: StructuralStudySequenceExecutionOutcome,
+    pub outcome: StructuralStudyExecutionOutcome,
 }
 
 /// Placement-only execution boundary for already validated structural studies.
@@ -251,7 +250,7 @@ enum PlacementTerminalKind {
     Indeterminate,
 }
 
-fn terminal_kind(outcome: &StructuralStudySequenceExecutionOutcome) -> PlacementTerminalKind {
+fn terminal_kind(outcome: &StructuralStudyExecutionOutcome) -> PlacementTerminalKind {
     match outcome {
         Ok(_) => PlacementTerminalKind::Completed,
         Err(StructuralStudyExecutionFailure::Failed(_)) => PlacementTerminalKind::Failed,

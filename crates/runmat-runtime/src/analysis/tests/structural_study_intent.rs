@@ -97,6 +97,166 @@ fn structural_study_intent_identity_is_independent_of_local_paths() {
 }
 
 #[test]
+fn structural_study_intent_admits_one_typed_direct_transient_workload() {
+    let _guard = analysis_test_guard();
+    let spec = sample_direct_transient_study_spec("44".repeat(32), 9, 4);
+    let step = spec.model.as_ref().unwrap().sequence.steps[0].clone();
+
+    let intent = analysis_prepare_structural_study_intent_op(
+        &spec,
+        OperationContext::new(Some("trace-direct-transient-intent".into()), None),
+    )
+    .expect("direct transient intent should prepare without a local mesh");
+    let runmat_analysis_fea::execution::StructuralStudyWorkloads::DirectTransient {
+        workload,
+        block_plan,
+    } = intent.workloads()
+    else {
+        panic!("direct transient study produced the wrong workload kind")
+    };
+    assert_eq!(workload.step_id, step.step_id);
+    assert_eq!(workload.time_step_policy.interval_count(), 9);
+    assert_eq!(block_plan.maximum_intervals_per_block(), 4);
+    assert_eq!(
+        block_plan.terminal_schedule_ordinals(9).unwrap(),
+        vec![4, 8, 9]
+    );
+
+    let restored = PreparedStructuralStudyIntent::from_continuation_bytes(
+        &intent.continuation_bytes().unwrap(),
+    )
+    .expect("direct transient intent continuation should restore");
+    assert_eq!(restored.workloads(), intent.workloads());
+
+    let mut substituted = intent.clone();
+    let runmat_analysis_fea::execution::StructuralStudyWorkloads::DirectTransient {
+        workload, ..
+    } = &mut substituted.workloads
+    else {
+        unreachable!("test prepared a direct transient")
+    };
+    workload.residual_target *= 2.0;
+    substituted.intent_digest = substituted.semantic_digest().unwrap();
+    assert!(substituted.continuation_bytes().is_err());
+}
+
+#[test]
+fn structural_study_intent_completes_a_partitioned_direct_transient_with_state() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let root = temp_artifact_root("remote-direct-transient-completion");
+    let _ = fs::remove_dir_all(&root);
+    let _runtime_guard = scoped_fea_artifact_roots(&root);
+    let meshing_output = ready_minimal_meshing_output();
+    let spec = sample_direct_transient_study_spec(
+        digest_hex(meshing_output.artifact.geometry.source_digest),
+        4,
+        2,
+    );
+    let intent = analysis_prepare_structural_study_intent_op(
+        &spec,
+        OperationContext::new(Some("trace-direct-transient-completion".into()), None),
+    )
+    .expect("direct transient intent should prepare");
+    let runmat_analysis_fea::execution::StructuralStudyWorkloads::DirectTransient {
+        mut workload,
+        block_plan,
+    } = intent.workloads()
+    else {
+        panic!("test requires a direct transient workload")
+    };
+    let aliases = runmat_analysis_core::BoundaryRegionAliases::new(
+        meshing_output.boundary_region_ids.clone(),
+    )
+    .unwrap();
+    workload.model =
+        runmat_analysis_core::resolve_boundary_region_aliases(&workload.model, &aliases).unwrap();
+    let options = runmat_analysis_fea::solve::transient::TransientSolveOptions {
+        formulation_requirement: workload.formulation_requirement,
+        time_step_policy: workload.time_step_policy,
+        residual_target: workload.residual_target,
+        progress_operation: "test.remote_direct_transient".into(),
+        solver_mesh: Some(meshing_output.artifact.clone()),
+    };
+    let scope = runmat_analysis_fea::pipeline::transient::prepare_transient_checkpoint_scope(
+        &workload,
+        &meshing_output.artifact,
+    )
+    .unwrap();
+    let terminal_schedule_ordinal = u64::try_from(scope.schedule.points.len() - 1).unwrap();
+    let mut predecessor = None;
+    let mut segments = Vec::new();
+    for terminal in block_plan
+        .terminal_schedule_ordinals(terminal_schedule_ordinal)
+        .unwrap()
+    {
+        let request = runmat_analysis_fea::execution::StructuralTransientBlockRequest::new(
+            scope.clone(),
+            predecessor.as_ref(),
+            terminal,
+        )
+        .unwrap();
+        let segment = runmat_analysis_fea::pipeline::transient::run_transient_block(
+            runmat_analysis_fea::pipeline::transient::StructuralTransientRunBlockInput {
+                model: &workload.model,
+                backend: workload.backend,
+                options: &options,
+                request: &request,
+                predecessor: predecessor.as_ref(),
+                observation_cursors: Vec::new(),
+            },
+        )
+        .unwrap();
+        predecessor = Some(segment.manifest().terminal_checkpoint.clone());
+        segments.push(segment);
+    }
+    let assembly =
+        runmat_analysis_fea::execution::StructuralTransientResultAssemblyRequest::new(&segments)
+            .unwrap();
+    let result = runmat_analysis_fea::execution::StructuralTransientSolverResult::assemble(
+        &assembly, &segments,
+    )
+    .unwrap();
+    let numerical_receipt =
+        runmat_analysis_fea::execution::StructuralTransientNumericalReceipt::new(
+            &result, &assembly, &segments,
+        )
+        .unwrap();
+    let result_identity = result.manifest().identity;
+    let envelope = analysis_complete_structural_study_intent_op(
+        intent,
+        meshing_output,
+        StructuralStudyNumericalResult::DirectTransient(Box::new(
+            StructuralStudyTransientNumericalResult {
+                frozen_project_digest: None,
+                step_id: workload.step_id.clone(),
+                result,
+                numerical_receipt,
+            },
+        )),
+        StructuralStudyCompletionIdentity::new("server-run-direct-transient").unwrap(),
+    )
+    .expect("partitioned direct transient should enter normal study publication");
+
+    assert_eq!(envelope.data.steps.len(), 1);
+    assert_eq!(
+        envelope.data.states.len(),
+        spec.model.as_ref().unwrap().sequence.steps[0]
+            .state_outputs
+            .len()
+    );
+    assert!(envelope
+        .data
+        .states
+        .iter()
+        .all(|state| state.source_result == result_identity
+            && Path::new(&state.artifact_path).is_file()));
+    assert_eq!(storage::list_run_results().unwrap().len(), 1);
+    drop(_runtime_guard);
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
 fn structural_study_intent_continuation_rejects_semantic_tampering() {
     let _guard = analysis_test_guard();
     let mut spec = sample_linear_static_study_spec();
@@ -132,6 +292,17 @@ fn structural_study_intent_continuation_rejects_semantic_tampering() {
         &serde_json::to_vec(&invalid_settings).unwrap()
     )
     .is_err());
+
+    let mut substituted_workload = intent.clone();
+    let runmat_analysis_fea::execution::StructuralStudyWorkloads::LinearSequence { workloads } =
+        &mut substituted_workload.workloads
+    else {
+        unreachable!("test prepared a linear sequence")
+    };
+    workloads.values_mut().next().unwrap().preconditioner =
+        runmat_analysis_fea::solve::preconditioner::SpdPreconditionerKind::Ilu0;
+    substituted_workload.intent_digest = substituted_workload.semantic_digest().unwrap();
+    assert!(substituted_workload.continuation_bytes().is_err());
 }
 
 #[test]
@@ -299,6 +470,40 @@ fn structural_study_intent_completion_rejects_a_different_meshing_request() {
     );
 }
 
+fn sample_direct_transient_study_spec(
+    geometry_sha256: String,
+    interval_count: usize,
+    maximum_intervals_per_block: u64,
+) -> AnalysisStudySpec {
+    let mut spec = sample_linear_static_study_spec();
+    spec.geometry.source.sha256 = geometry_sha256;
+    let mut model = analysis_create_model_op(
+        &spec.geometry,
+        spec.create_model_intent.clone(),
+        OperationContext::new(None, None),
+    )
+    .expect("sample structural model should resolve")
+    .data;
+    let step = ProcedureStep::structural_transient("step_direct_transient");
+    model.sequence = AnalysisSequence::from_steps("sequence_direct_transient", vec![step.clone()]);
+    spec.model = Some(model);
+    spec.execution = AnalysisExecutionPlan {
+        steps: vec![AnalysisExecutionStep {
+            step_id: step.step_id,
+            backend: ComputeBackend::Cpu,
+            requirement: FormulationRequirement::Experimental,
+            solver_options: AnalysisSolverOptions::StructuralTransient(
+                AnalysisTransientRunOptions {
+                    time_step_policy: AnalysisStructuralTimeStepPolicy::Fixed { interval_count },
+                    maximum_intervals_per_block,
+                    ..AnalysisTransientRunOptions::solid_recommended()
+                },
+            ),
+        }],
+    };
+    spec
+}
+
 fn ready_minimal_meshing_output() -> crate::meshing::MeshingExecutionOutput {
     let mut artifact =
         runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
@@ -340,7 +545,11 @@ fn digest_hex(digest: StableDigest) -> String {
 fn only_workload(
     intent: &PreparedStructuralStudyIntent,
 ) -> runmat_analysis_fea::execution::StructuralLinearWorkload {
-    let workloads = intent.workloads();
+    let runmat_analysis_fea::execution::StructuralStudyWorkloads::LinearSequence { workloads } =
+        intent.workloads()
+    else {
+        panic!("test requires a structural-linear sequence intent")
+    };
     assert_eq!(workloads.len(), 1);
     workloads.into_values().next().unwrap()
 }
@@ -349,7 +558,7 @@ fn sequence_result(
     intent: &PreparedStructuralStudyIntent,
     mesh: &runmat_meshing_core::SolverMeshArtifact,
     result: runmat_analysis_fea::FeaRunResult,
-) -> StructuralStudySequenceNumericalResult {
+) -> StructuralStudyNumericalResult {
     let workload = only_workload(intent);
     let _study = runmat_analysis_fea::execution::StudyIdentity::from_authored_digest(
         intent.authored_study_digest(),
@@ -388,7 +597,7 @@ fn sequence_result(
             .unwrap()
         })
         .collect();
-    StructuralStudySequenceNumericalResult {
+    StructuralStudyNumericalResult::LinearSequence(StructuralStudySequenceNumericalResult {
         frozen_project_digest: None,
         steps: vec![StructuralStudyStepNumericalResult {
             step_id: workload.step_id.clone(),
@@ -396,5 +605,5 @@ fn sequence_result(
             result,
         }],
         states,
-    }
+    })
 }

@@ -46,6 +46,9 @@ pub(super) struct RemotePoolExecution<'a> {
     pub(super) bundle_archive: Vec<u8>,
     pub(super) request: ProgramExecutionRequest,
     pub(super) input_objects: Vec<ProgramExecutionObject>,
+    pub(super) recovered: Option<super::recovery::RestoredObjectClosure>,
+    pub(super) project_revision: String,
+    pub(super) checkpoint_sequence: u64,
     pub(super) desired_workers: u32,
     pub(super) resources: AllocationResources,
     pub(super) cancellation: tokio::sync::watch::Receiver<bool>,
@@ -61,6 +64,9 @@ pub(super) async fn execute(
         bundle_archive,
         request,
         input_objects,
+        recovered,
+        project_revision,
+        checkpoint_sequence,
         desired_workers,
         resources,
         mut cancellation,
@@ -145,6 +151,9 @@ pub(super) async fn execute(
                 pool,
                 pool_id,
                 request,
+                recovered,
+                project_revision,
+                checkpoint_sequence,
                 desired_workers,
                 resources: resources.clone(),
                 cancellation,
@@ -174,6 +183,9 @@ struct AllocatedExecution<'a> {
     pool: Arc<RemotePoolDriver>,
     pool_id: PoolId,
     request: ProgramExecutionRequest,
+    recovered: Option<super::recovery::RestoredObjectClosure>,
+    project_revision: String,
+    checkpoint_sequence: u64,
     desired_workers: u32,
     resources: AllocationResources,
     cancellation: tokio::sync::watch::Receiver<bool>,
@@ -193,6 +205,9 @@ async fn execute_with_allocated_workers(
         pool,
         pool_id,
         request,
+        recovered,
+        project_revision,
+        checkpoint_sequence,
         desired_workers,
         resources,
         mut cancellation,
@@ -305,27 +320,44 @@ async fn execute_with_allocated_workers(
         request.recipe.execution_mode == EXACT_STRUCTURAL_SWEEP_ROOT_EXECUTION_MODE;
     let pool_for_execution = Arc::clone(&pool);
     let resources_for_execution = resources.clone();
+    let mut recovery_publisher = exact_structural_study
+        .then(|| {
+            super::recovery::RemoteRecoveryPublisher::new(
+                control,
+                run_key,
+                authority,
+                &project_revision,
+                &request,
+                checkpoint_sequence,
+                recovered.as_ref(),
+            )
+        })
+        .transpose()?;
     let mut execution = if exact_meshing {
         Box::pin(super::exact_meshing::execute(
             pool_for_execution,
             request,
             run_id,
             resources_for_execution,
-        )) as std::pin::Pin<Box<dyn std::future::Future<Output = _>>>
+        )) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + '_>>
     } else if exact_structural_study {
         Box::pin(super::exact_structural_study::execute(
             pool_for_execution,
             request,
             run_id,
             resources_for_execution,
-        )) as std::pin::Pin<Box<dyn std::future::Future<Output = _>>>
+            recovered.as_ref(),
+            recovery_publisher
+                .as_mut()
+                .ok_or_else(|| protocol("structural study recovery publisher is absent"))?,
+        )) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + '_>>
     } else if exact_structural_sweep {
         Box::pin(super::exact_structural_sweep::execute(
             pool_for_execution,
             request,
             run_id,
             resources_for_execution,
-        )) as std::pin::Pin<Box<dyn std::future::Future<Output = _>>>
+        )) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + '_>>
     } else {
         Box::pin(super::pool_tasks::execute_single_root(
             pool_for_execution,

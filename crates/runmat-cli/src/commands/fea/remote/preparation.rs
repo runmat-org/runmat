@@ -40,8 +40,12 @@ pub(super) fn prepare_study_source(
         .to_owned();
     let intent = analysis_prepare_structural_study_intent_op(spec, context)
         .map_err(super::super::report_operation_error)?;
-    for workload in intent.workloads().values() {
-        validate_remote_study_backend(workload.backend)?;
+    for backend in intent
+        .workloads()
+        .backends()
+        .map_err(|error| anyhow::anyhow!(error.to_string()))?
+    {
+        validate_remote_study_backend(backend)?;
     }
     let geometry_bytes = std::fs::read(&geometry_path)
         .with_context(|| format!("read FEA geometry {}", geometry_path.display()))?;
@@ -128,6 +132,7 @@ pub(super) fn prepare_root(
             frozen_project_digest: Some(*revision.graph_digest()),
             geometry_source_digest: study.geometry_source_digest(),
             workloads: study.workloads(),
+            analysis_accelerator_requests: Vec::new(),
             signal_materializations,
             exact_meshing,
         },

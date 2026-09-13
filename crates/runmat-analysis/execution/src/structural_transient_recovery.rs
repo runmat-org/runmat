@@ -1,11 +1,12 @@
 use std::collections::BTreeSet;
 
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
-use runmat_execution::value::ValueRefKind;
+use runmat_execution::value::{ValueRef, ValueRefKind};
 use runmat_execution::Digest;
 use runmat_execution_artifact::cache::CacheImport;
 use runmat_execution_artifact::{
-    LogicalObject, ObjectNamespace, ProgramExecutionObject, ProgramExecutionResponse,
+    ArtifactAccess, LogicalObject, ObjectNamespace, ProgramExecutionObject,
+    ProgramExecutionResponse,
 };
 use serde::{Deserialize, Serialize};
 
@@ -46,6 +47,47 @@ pub struct StructuralTransientRecoveryClosure {
     pub checkpoint: StructuralTransientExecutionCheckpoint,
     pub root: runmat_execution::value::ValueRef,
     pub objects: Vec<ProgramExecutionObject>,
+}
+
+impl StructuralTransientRecoveryClosure {
+    pub fn from_objects(
+        artifact_access: &ArtifactAccess,
+        root: ValueRef,
+        mut objects: Vec<ProgramExecutionObject>,
+    ) -> AnalysisBridgeResult<Self> {
+        artifact_access.validate_reference(
+            &root,
+            ValueRefKind::ResultObject,
+            STRUCTURAL_TRANSIENT_EXECUTION_CHECKPOINT_MEDIA_TYPE,
+            STRUCTURAL_TRANSIENT_EXECUTION_CHECKPOINT_VALUE_SCHEMA,
+        )?;
+        let mut by_digest = std::collections::BTreeMap::new();
+        for object in &objects {
+            object.validate()?;
+            match by_digest.insert(object.reference.logical_digest, object.bytes.as_slice()) {
+                Some(existing) if existing != object.bytes.as_slice() => {
+                    return Err(AnalysisBridgeError::Identity(
+                        "transient recovery closure reuses a digest for different content",
+                    ))
+                }
+                _ => {}
+            }
+        }
+        let checkpoint_bytes =
+            by_digest
+                .get(&root.logical_digest)
+                .ok_or(AnalysisBridgeError::Identity(
+                    "transient recovery closure omits its checkpoint root",
+                ))?;
+        let checkpoint =
+            StructuralTransientExecutionCheckpoint::from_canonical_bytes(checkpoint_bytes)?;
+        objects.sort_by_key(|object| object.reference.id);
+        Ok(Self {
+            checkpoint,
+            root,
+            objects,
+        })
+    }
 }
 
 #[derive(Deserialize)]

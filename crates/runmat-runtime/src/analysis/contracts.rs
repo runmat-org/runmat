@@ -535,6 +535,8 @@ pub struct AnalysisTransientRunOptions {
     pub quality_policy: QualityPolicy,
     pub time_step_policy: AnalysisStructuralTimeStepPolicy,
     pub residual_target: f64,
+    #[serde(default = "default_transient_block_intervals")]
+    pub maximum_intervals_per_block: u64,
     #[serde(default)]
     pub solver_mesh_artifact_path: Option<String>,
 }
@@ -546,9 +548,14 @@ impl Default for AnalysisTransientRunOptions {
             quality_policy: QualityPolicy::Balanced,
             time_step_policy: AnalysisStructuralTimeStepPolicy::Fixed { interval_count: 10 },
             residual_target: 1.0e-6,
+            maximum_intervals_per_block: default_transient_block_intervals(),
             solver_mesh_artifact_path: None,
         }
     }
+}
+
+const fn default_transient_block_intervals() -> u64 {
+    256
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -687,6 +694,7 @@ impl AnalysisTransientRunOptions {
             quality_policy: QualityPolicy::Exploratory,
             time_step_policy: AnalysisStructuralTimeStepPolicy::Fixed { interval_count: 6 },
             residual_target: 1.0e-4,
+            maximum_intervals_per_block: default_transient_block_intervals(),
             solver_mesh_artifact_path: None,
         }
     }
@@ -709,6 +717,7 @@ impl AnalysisTransientRunOptions {
             quality_policy: QualityPolicy::Strict,
             time_step_policy: AnalysisStructuralTimeStepPolicy::Fixed { interval_count: 24 },
             residual_target: 1.0e-7,
+            maximum_intervals_per_block: default_transient_block_intervals(),
             solver_mesh_artifact_path: None,
         }
     }

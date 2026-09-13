@@ -113,7 +113,7 @@ fn test_structural_sequence_result(
     workload: &runmat_analysis_fea::execution::StructuralLinearWorkload,
     mesh: &runmat_meshing_core::SolverMeshArtifact,
     result: runmat_analysis_fea::FeaRunResult,
-) -> StructuralStudySequenceNumericalResult {
+) -> StructuralStudyNumericalResult {
     let _study = runmat_analysis_fea::execution::StudyIdentity::from_authored_digest(
         analysis_study_content_digest(spec),
         None,
@@ -149,7 +149,7 @@ fn test_structural_sequence_result(
             .unwrap()
         })
         .collect();
-    StructuralStudySequenceNumericalResult {
+    StructuralStudyNumericalResult::LinearSequence(StructuralStudySequenceNumericalResult {
         frozen_project_digest: None,
         steps: vec![StructuralStudyStepNumericalResult {
             step_id: workload.step_id.clone(),
@@ -157,7 +157,7 @@ fn test_structural_sequence_result(
             result,
         }],
         states,
-    }
+    })
 }
 
 fn fixed_constraint(
@@ -8858,6 +8858,7 @@ fn analysis_run_transient_with_options_controls_timeline() {
             quality_policy: QualityPolicy::Balanced,
             time_step_policy: AnalysisStructuralTimeStepPolicy::Fixed { interval_count: 3 },
             residual_target: 1.0e-6,
+            maximum_intervals_per_block: 256,
             solver_mesh_artifact_path: None,
         },
         OperationContext::new(None, None),

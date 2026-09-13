@@ -241,6 +241,15 @@ impl StructuralMotionSnapshot {
     }
 }
 
+pub(super) fn physical_summary_for_recovery(
+    summary: AssemblySummary,
+    motions: &StructuralMotionSet,
+    time_s: f64,
+    approach: SignalSampleApproach,
+) -> Result<AssemblySummary, StructuralMotionReductionError> {
+    Ok(StructuralMotionSnapshot::reduce(summary, motions, time_s, approach)?.full_summary)
+}
+
 pub(super) fn solve_prescribed_motion_block(
     input: StructuralMotionBlockSolveInput<'_>,
     mut assembly_at: impl FnMut(f64, SignalSampleApproach) -> Result<AssemblySummary, FeaRunError>,

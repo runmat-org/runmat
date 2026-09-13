@@ -1,14 +1,17 @@
 use std::collections::BTreeMap;
 
 use runmat_analysis_core::{AnalysisModel, ProcedureStep, ProcedureStepId};
-use runmat_analysis_fea::execution::StructuralLinearWorkload;
+use runmat_analysis_fea::execution::{StructuralLinearWorkload, StructuralStudyWorkloads};
+use runmat_analysis_fea::results::observation::ObservationExecutionPolicy;
+use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
+use runmat_analysis_fea::solve::preconditioner::SpdPreconditionerKind;
 use runmat_meshing_core::SolverMeshArtifact;
 
 use crate::operations::OperationContext;
 
 use super::{
-    AnalysisExecutionStep, AnalysisModelTemplate, AnalysisRunOptions, AnalysisSolverOptions,
-    AnalysisStudySpec, PreparedStructuralLinearRun, StructuralStudySequenceNumericalResult,
+    AnalysisExecutionStep, AnalysisModelTemplate, AnalysisStudySpec, PreparedStructuralLinearRun,
+    StructuralStudyNumericalResult,
 };
 
 mod lifecycle;
@@ -115,6 +118,7 @@ pub struct PreparedStructuralStudyIntent {
     pub(super) intent_digest: runmat_execution::Digest,
     pub(super) model: AnalysisModel,
     pub(super) steps: Vec<PreparedStructuralStudyIntentStep>,
+    pub(super) workloads: StructuralStudyWorkloads,
     pub(super) operation_sequence: Vec<String>,
 }
 
@@ -123,8 +127,6 @@ pub struct PreparedStructuralStudyIntent {
 pub(super) struct PreparedStructuralStudyIntentStep {
     pub(super) authored_execution: AnalysisExecutionStep,
     pub(super) procedure_step: ProcedureStep,
-    pub(super) workload: StructuralLinearWorkload,
-    pub(super) options: AnalysisRunOptions,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -134,8 +136,8 @@ pub enum StructuralStudyExecutionFailure {
     Indeterminate(String),
 }
 
-pub type StructuralStudySequenceExecutionOutcome =
-    Result<StructuralStudySequenceNumericalResult, StructuralStudyExecutionFailure>;
+pub type StructuralStudyExecutionOutcome =
+    Result<StructuralStudyNumericalResult, StructuralStudyExecutionFailure>;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -153,6 +155,7 @@ struct StructuralStudyIntentContinuation {
     intent_digest: runmat_execution::Digest,
     model: AnalysisModel,
     steps: Vec<PreparedStructuralStudyIntentStep>,
+    workloads: StructuralStudyWorkloads,
     operation_sequence: Vec<String>,
 }
 
@@ -177,11 +180,8 @@ impl PreparedStructuralStudyIntent {
         &self.model
     }
 
-    pub fn workloads(&self) -> BTreeMap<ProcedureStepId, StructuralLinearWorkload> {
-        self.steps
-            .iter()
-            .map(|step| (step.procedure_step.step_id.clone(), step.workload.clone()))
-            .collect()
+    pub fn workloads(&self) -> StructuralStudyWorkloads {
+        self.workloads.clone()
     }
 
     pub fn operation_sequence(&self) -> &[String] {
@@ -224,6 +224,7 @@ impl PreparedStructuralStudyIntent {
             intent_digest: self.intent_digest,
             model: self.model.clone(),
             steps: self.steps.clone(),
+            workloads: self.workloads.clone(),
             operation_sequence: self.operation_sequence.clone(),
         })
         .map_err(|error| error.to_string())?;
@@ -255,6 +256,7 @@ impl PreparedStructuralStudyIntent {
             intent_digest: continuation.intent_digest,
             model: continuation.model,
             steps: continuation.steps,
+            workloads: continuation.workloads,
             operation_sequence: continuation.operation_sequence,
         };
         intent.validate()?;
@@ -279,6 +281,18 @@ impl PreparedStructuralStudyIntent {
         if self.steps.len() != self.model.sequence.steps.len() {
             return Err("structural study intent does not cover every sequence step".into());
         }
+        self.workloads
+            .validate()
+            .map_err(|error| error.to_string())?;
+        if self
+            .workloads
+            .authored_model()
+            .map_err(|error| error.to_string())?
+            != &self.model
+        {
+            return Err("structural study workload model differs from its intent model".into());
+        }
+        self.validate_workload_alignment()?;
         for (index, step) in self.steps.iter().enumerate() {
             let authored = self
                 .model
@@ -286,29 +300,110 @@ impl PreparedStructuralStudyIntent {
                 .steps
                 .get(index)
                 .ok_or_else(|| "structural study intent step order is invalid".to_string())?;
-            let AnalysisSolverOptions::StructuralLinear(mut expected_options) =
-                step.authored_execution.solver_options.clone()
-            else {
-                return Err("structural study intent is not structural-linear".into());
-            };
-            expected_options.solver_mesh_artifact_path = None;
             if step.procedure_step != *authored
                 || step.authored_execution.step_id != authored.step_id
-                || step.workload.model != self.model
-                || step.workload.step_id != authored.step_id
-                || step.workload.backend != step.authored_execution.backend
-                || step.workload.formulation_requirement != step.authored_execution.requirement
-                || step.options != expected_options
             {
                 return Err("structural study intent step semantics are inconsistent".into());
             }
-            step.workload
-                .validate_sequence_template()
-                .map_err(|error| error.to_string())?;
         }
         let semantic_digest = self.semantic_digest()?;
         if self.intent_digest != semantic_digest {
             return Err("structural study intent digest differs from its identity".into());
+        }
+        Ok(())
+    }
+
+    fn validate_workload_alignment(&self) -> Result<(), String> {
+        match &self.workloads {
+            StructuralStudyWorkloads::LinearSequence { workloads } => {
+                if workloads.len() != self.steps.len() {
+                    return Err(
+                        "structural linear workloads do not cover the prepared intent steps".into(),
+                    );
+                }
+                for step in &self.steps {
+                    let super::AnalysisSolverOptions::StructuralLinear(options) =
+                        &step.authored_execution.solver_options
+                    else {
+                        return Err(
+                            "structural linear workload has non-linear authored options".into()
+                        );
+                    };
+                    let workload =
+                        workloads.get(&step.procedure_step.step_id).ok_or_else(|| {
+                            "structural linear workload is missing its step".to_string()
+                        })?;
+                    let expected_preconditioner = match options.preconditioner_mode {
+                        super::PreconditionerMode::Auto | super::PreconditionerMode::Jacobi => {
+                            SpdPreconditionerKind::Jacobi
+                        }
+                        super::PreconditionerMode::Ilu => SpdPreconditionerKind::Ilu0,
+                        super::PreconditionerMode::Amg => SpdPreconditionerKind::Jacobi,
+                    };
+                    let backend_matches = match step.authored_execution.backend {
+                        runmat_analysis_fea::ComputeBackend::Cpu => {
+                            workload.algebra_backend == LinearAlgebraBackendKind::CpuReference
+                        }
+                        runmat_analysis_fea::ComputeBackend::Gpu => matches!(
+                            workload.algebra_backend,
+                            LinearAlgebraBackendKind::CpuReference
+                                | LinearAlgebraBackendKind::Accelerator
+                        ),
+                    };
+                    if workload.backend != step.authored_execution.backend
+                        || workload.formulation_requirement != step.authored_execution.requirement
+                        || workload.preconditioner != expected_preconditioner
+                        || !backend_matches
+                        || workload.observation_execution != ObservationExecutionPolicy::scalable()
+                        || !workload.require_solver_mesh_for_solid
+                        || workload.initial_guess_transition.is_some()
+                        || options.solver_mesh_artifact_path.is_some()
+                    {
+                        return Err(
+                            "structural linear workload differs from its prepared execution".into(),
+                        );
+                    }
+                }
+            }
+            StructuralStudyWorkloads::DirectTransient {
+                workload,
+                block_plan,
+            } => {
+                let [step] = self.steps.as_slice() else {
+                    return Err(
+                        "direct structural transient requires exactly one prepared step".into(),
+                    );
+                };
+                let super::AnalysisSolverOptions::StructuralTransient(options) =
+                    &step.authored_execution.solver_options
+                else {
+                    return Err(
+                        "direct structural transient workload has non-transient authored options"
+                            .into(),
+                    );
+                };
+                let expected_time_step_policy = match options.time_step_policy {
+                    super::AnalysisStructuralTimeStepPolicy::Fixed { interval_count } => {
+                        runmat_analysis_fea::solve::transient::StructuralTimeStepPolicy::Fixed {
+                            interval_count,
+                        }
+                    }
+                };
+                if workload.step_id != step.procedure_step.step_id
+                    || workload.backend != step.authored_execution.backend
+                    || workload.formulation_requirement != step.authored_execution.requirement
+                    || workload.time_step_policy != expected_time_step_policy
+                    || workload.residual_target != options.residual_target
+                    || block_plan.maximum_intervals_per_block()
+                        != options.maximum_intervals_per_block
+                    || options.solver_mesh_artifact_path.is_some()
+                {
+                    return Err(
+                        "direct structural transient workload differs from its prepared execution"
+                            .into(),
+                    );
+                }
+            }
         }
         Ok(())
     }
@@ -324,6 +419,7 @@ impl PreparedStructuralStudyIntent {
             &self.meshing_contacts,
             &self.model,
             &self.steps,
+            &self.workloads,
             &self.operation_sequence,
         ))
         .map_err(|error| error.to_string())?;

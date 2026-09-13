@@ -675,7 +675,7 @@ async fn remote_conformance(
                 resource_limit: scaled_inventory(2),
             },
             41,
-            bundle_bytes,
+            bundle_bytes.clone(),
             "remote-analysis",
         )
         .unwrap();
@@ -863,8 +863,8 @@ async fn remote_conformance(
         )
         .await
         .unwrap();
-        assert_eq!(transient_result.result.samples().len(), 5);
-        assert_eq!(transient_result.numerical_receipt.blocks.len(), 2);
+        assert_eq!(transient_result.result.result.samples().len(), 5);
+        assert_eq!(transient_result.result.numerical_receipt.blocks.len(), 2);
         assert_eq!(transient_publisher.closures.len(), 2);
         let final_closure = transient_publisher.closures.last().unwrap();
         let restored = runmat_analysis_execution::StructuralTransientSequenceCoordinator::restore_from_closure(
@@ -875,8 +875,108 @@ async fn remote_conformance(
         .unwrap();
         assert_eq!(restored.completed_blocks().len(), 2);
         assert!(!restored.has_remaining_blocks());
-        first_channel.drain().await.unwrap();
-        second_channel.drain().await.unwrap();
+
+        let replacement_preparation = transient::preparation_with_encryption(
+            revision.clone(),
+            "remote-analysis",
+            "remote-transient-replacement-encryption",
+        );
+        let replacement_pool = RemotePoolDriver::new_with_value_scope(
+            runmat_execution::ExecutionScopeId::derive(&[b"remote-analysis-replacement-scope"]),
+            PoolSpec {
+                id: pool_id,
+                min_workers: 1,
+                max_workers: 2,
+                max_in_flight: 2,
+                resource_limit: scaled_inventory(2),
+            },
+            41,
+            bundle_bytes.clone(),
+            "remote-analysis",
+        )
+        .unwrap();
+        replacement_pool
+            .add_worker(first_channel.clone())
+            .await
+            .unwrap();
+        replacement_pool
+            .add_worker(second_channel.clone())
+            .await
+            .unwrap();
+        let mut interrupted_publisher = transient::FailAfterFirstPublisher {
+            closures: Vec::new(),
+        };
+        let interruption = execute_structural_transient_remotely(
+            Arc::clone(&replacement_pool),
+            replacement_preparation.clone(),
+            sequence_policy(),
+            None,
+            &mut interrupted_publisher,
+        )
+        .await
+        .expect_err("the injected driver loss must interrupt transient execution");
+        assert_eq!(
+            interrupted_publisher.closures.len(),
+            1,
+            "interruption occurred before recovery publication: {interruption}"
+        );
+        let accepted_before_replacement = interrupted_publisher.closures.pop().unwrap();
+        let restored_before_replacement =
+            runmat_analysis_execution::StructuralTransientSequenceCoordinator::restore_from_closure(
+                replacement_preparation.clone(),
+                &accepted_before_replacement.root,
+                &accepted_before_replacement.objects,
+            )
+            .unwrap();
+        assert_eq!(restored_before_replacement.completed_blocks().len(), 1);
+        assert!(restored_before_replacement.has_remaining_blocks());
+        let first_block_worker = replacement_pool
+            .snapshot()
+            .attempts
+            .values()
+            .next()
+            .expect("first transient block must have one worker attempt")
+            .request
+            .worker_id;
+        replacement_pool
+            .remove_worker(first_block_worker, false)
+            .await
+            .unwrap();
+        let mut replacement_publisher = transient::RecordingPublisher {
+            closures: Vec::new(),
+        };
+        let replacement_result = execute_structural_transient_remotely(
+            Arc::clone(&replacement_pool),
+            replacement_preparation,
+            sequence_policy(),
+            Some(&accepted_before_replacement),
+            &mut replacement_publisher,
+        )
+        .await
+        .unwrap();
+        assert_eq!(replacement_publisher.closures.len(), 1);
+        assert_eq!(
+            replacement_result.result.result,
+            transient_result.result.result
+        );
+        assert_eq!(
+            replacement_result.result.numerical_receipt,
+            transient_result.result.numerical_receipt
+        );
+        let replacement_workers = replacement_pool
+            .snapshot()
+            .attempts
+            .values()
+            .map(|attempt| attempt.request.worker_id)
+            .collect::<BTreeSet<_>>();
+        assert_eq!(replacement_workers.len(), 2);
+        let first_worker_id =
+            runmat_execution::identity::WorkerId::derive(&[b"remote-analysis-worker-a"]);
+        if first_block_worker == first_worker_id {
+            second_channel.drain().await.unwrap();
+        } else {
+            first_channel.drain().await.unwrap();
+        }
     };
     let (first_server, second_server, ()) = tokio::join!(first_server, second_server, client);
     first_server.unwrap();

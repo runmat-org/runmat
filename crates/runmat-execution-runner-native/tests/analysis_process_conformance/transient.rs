@@ -21,6 +21,10 @@ pub(super) struct RecordingPublisher {
     pub(super) closures: Vec<StructuralTransientRecoveryClosure>,
 }
 
+pub(super) struct FailAfterFirstPublisher {
+    pub(super) closures: Vec<StructuralTransientRecoveryClosure>,
+}
+
 #[async_trait]
 impl StructuralTransientRecoveryPublisher for RecordingPublisher {
     async fn publish(
@@ -32,9 +36,32 @@ impl StructuralTransientRecoveryPublisher for RecordingPublisher {
     }
 }
 
+#[async_trait]
+impl StructuralTransientRecoveryPublisher for FailAfterFirstPublisher {
+    async fn publish(
+        &mut self,
+        closure: StructuralTransientRecoveryClosure,
+    ) -> NativeExecutionResult<()> {
+        self.closures.push(closure);
+        Err(
+            runmat_execution_runner_native::NativeExecutionError::Protocol(
+                "injected driver loss after first accepted transient block".into(),
+            ),
+        )
+    }
+}
+
 pub(super) fn preparation(
     revision: ProgramRevision,
     authorization_scope: &str,
+) -> StructuralTransientSequencePreparation {
+    preparation_with_encryption(revision, authorization_scope, "remote-transient-encryption")
+}
+
+pub(super) fn preparation_with_encryption(
+    revision: ProgramRevision,
+    authorization_scope: &str,
+    encryption_context: &str,
 ) -> StructuralTransientSequencePreparation {
     let mut model = fixture_model(FixtureId::StructuralTransientTet4Reference);
     model.material_assignments[0].region_id = "region".into();
@@ -100,7 +127,7 @@ pub(super) fn preparation(
         terminal_schedule_ordinals: vec![2, 4],
         artifact_access: ArtifactAccess {
             authorization_scope: authorization_scope.into(),
-            encryption_context: Digest::sha256("remote-transient-encryption"),
+            encryption_context: Digest::sha256(encryption_context),
         },
         program_revision: revision,
         chunk_bytes: 256,

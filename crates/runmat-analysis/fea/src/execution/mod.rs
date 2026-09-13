@@ -16,6 +16,7 @@ mod publication;
 mod signal;
 mod solve;
 mod state;
+mod study_workloads;
 mod sweep;
 mod transient_block;
 mod transient_checkpoint;
@@ -75,6 +76,7 @@ pub use state::{
     CanonicalSemanticState, CanonicalSemanticStateInput, CanonicalStateTransition,
     CanonicalStateTransitionInput, SemanticStatePublicationRequest,
 };
+pub use study_workloads::{StructuralStudyWorkloads, StructuralTransientBlockPlan};
 pub use sweep::{
     ComposedSweepResult, SweepCompositionPolicy, SweepDefinition, SweepEntryDisposition,
     SweepEntryOutcome,

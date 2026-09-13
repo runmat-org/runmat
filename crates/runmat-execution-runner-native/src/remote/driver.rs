@@ -11,8 +11,9 @@ use runmat_execution_artifact::{
     ProgramExecutionResponse,
 };
 use runmat_execution_transport_native::control::{
-    CheckpointDisposition, DriverArtifactDownload, DriverArtifactKind, DriverControlPlane,
-    DriverRunTarget, DriverRunTransition, HttpDriverControlPlane, StoreDriverArtifact,
+    CheckpointDisposition, DriverArtifactDownload, DriverArtifactKind, DriverAuthority,
+    DriverControlPlane, DriverRunTarget, DriverRunTransition, HttpDriverControlPlane,
+    StoreDriverArtifact,
 };
 use runmat_execution_transport_native::identity::EndpointIdentityMaterial;
 
@@ -224,7 +225,7 @@ pub(super) async fn run_remote_driver(
         .ok_or_else(|| protocol("remote driver checkpoint sequence overflow"))?;
     store_driver_checkpoint(
         control.as_ref(),
-        &config,
+        &config.authority,
         &run_key,
         &RemoteDriverCheckpoint::new(
             checkpoint_sequence,
@@ -250,7 +251,7 @@ pub(super) async fn run_remote_driver(
         .ok_or_else(|| protocol("remote driver checkpoint sequence overflow"))?;
     store_driver_checkpoint(
         control.as_ref(),
-        &config,
+        &config.authority,
         &run_key,
         &RemoteDriverCheckpoint::new(
             checkpoint_sequence,
@@ -312,6 +313,9 @@ pub(super) async fn run_remote_driver(
                 bundle_archive,
                 request,
                 input_objects,
+                recovered,
+                project_revision: bootstrap.project_revision.clone(),
+                checkpoint_sequence,
                 desired_workers: bootstrap.desired_worker_count,
                 resources: bootstrap.worker_resources,
                 cancellation: cancellation_receiver,
@@ -346,7 +350,7 @@ pub(super) async fn run_remote_driver(
                     super::pool_execution::RemotePoolExecutionOutcome::Indeterminate(message) => {
                         let diagnostic = store_encrypted(
                             control.as_ref(),
-                            &config,
+                            &config.authority,
                             &run_key,
                             DriverArtifactKind::Diagnostic,
                             EncryptionPurpose::DetailedEvent,
@@ -434,7 +438,7 @@ pub(super) async fn commit_response(
         return {
             let diagnostic = store_encrypted(
                 control,
-                config,
+                &config.authority,
                 run_key,
                 DriverArtifactKind::Diagnostic,
                 EncryptionPurpose::DetailedEvent,
@@ -498,7 +502,7 @@ pub(super) async fn commit_response(
     let plaintext = serde_json::to_vec(&outputs).map_err(protocol)?;
     let result = store_encrypted(
         control,
-        config,
+        &config.authority,
         run_key,
         DriverArtifactKind::Result,
         EncryptionPurpose::Result,
@@ -551,16 +555,16 @@ async fn open_download(
     open_object(run_key, &ciphertext, run_id, purpose)
 }
 
-async fn store_driver_checkpoint(
+pub(super) async fn store_driver_checkpoint(
     control: &dyn DriverControlPlane,
-    config: &RemoteDriverConfig,
+    authority: &DriverAuthority,
     run_key: &runmat_execution_artifact::encryption::RunKeyMaterial,
     checkpoint: &RemoteDriverCheckpoint,
 ) -> NativeExecutionResult<String> {
     let plaintext = checkpoint.canonical_bytes()?;
     store_encrypted(
         control,
-        config,
+        authority,
         run_key,
         DriverArtifactKind::Checkpoint,
         EncryptionPurpose::Checkpoint,
@@ -570,19 +574,19 @@ async fn store_driver_checkpoint(
     .await
 }
 
-async fn store_encrypted(
+pub(super) async fn store_encrypted(
     control: &dyn DriverControlPlane,
-    config: &RemoteDriverConfig,
+    authority: &DriverAuthority,
     run_key: &runmat_execution_artifact::encryption::RunKeyMaterial,
     kind: DriverArtifactKind,
     purpose: EncryptionPurpose,
     plaintext: &[u8],
     checkpoint: Option<(u64, CheckpointDisposition)>,
 ) -> NativeExecutionResult<String> {
-    let ciphertext = seal_object(run_key, &config.authority.run_id, purpose, plaintext)?;
+    let ciphertext = seal_object(run_key, &authority.run_id, purpose, plaintext)?;
     let artifact = control
         .store_artifact(
-            &config.authority,
+            authority,
             StoreDriverArtifact {
                 kind,
                 ciphertext_digest: ciphertext_digest(&ciphertext),

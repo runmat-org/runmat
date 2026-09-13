@@ -1,0 +1,377 @@
+use super::*;
+
+pub fn import_exact_structural_study_result(
+    source: &impl CacheImport,
+    response: ProgramExecutionResponse,
+    expected: &ExactStructuralStudyResultExpectation,
+    limits: ObjectInventoryLimits,
+) -> NativeExecutionResult<ExactStructuralStudyResult> {
+    expected.validate()?;
+    let ProgramExecutionResponse::ExternalizedSuccess {
+        outputs,
+        result_objects,
+    } = response
+    else {
+        return Err(protocol(
+            "whole-study execution did not return a result closure",
+        ));
+    };
+    let [ValuePayload::Object(root)] = outputs.as_slice() else {
+        return Err(protocol("whole-study result root is invalid"));
+    };
+    expected
+        .artifact_access
+        .validate_reference(
+            root,
+            ValueRefKind::ResultObject,
+            PUBLICATION_MEDIA_TYPE,
+            PUBLICATION_VALUE_SCHEMA,
+        )
+        .map_err(protocol)?;
+    let publication =
+        ExactStructuralStudyPublication::decode(&read(source, root)?, &expected.artifact_access)?;
+    if publication.program_revision != expected.program_revision {
+        return Err(protocol("whole-study program revision changed"));
+    }
+    if publication.authored_study_digest != expected.authored_study_digest {
+        return Err(protocol("whole-study authored study identity changed"));
+    }
+    let expected_workloads_digest = structural_workload_inventory_digest(&expected.workloads)?;
+    if publication.unresolved_workloads_digest != expected_workloads_digest {
+        return Err(protocol("whole-study workload identity changed"));
+    }
+    let expected_meshing_request_digest = Digest::from_bytes(
+        *expected
+            .expected_meshing_request
+            .canonical_digest()
+            .map_err(protocol)?
+            .bytes(),
+    );
+    if publication.meshing_request_digest != expected_meshing_request_digest {
+        return Err(protocol("whole-study meshing request identity changed"));
+    }
+    let expected_inventory = publication
+        .meshing_objects
+        .iter()
+        .chain(&publication.boundary_objects)
+        .chain(&publication.signal_objects)
+        .chain(publication.analysis.objects())
+        .cloned()
+        .chain(std::iter::once((**root).clone()))
+        .collect::<Vec<_>>();
+    if reference_inventory(&expected_inventory)? != reference_inventory(&result_objects)? {
+        return Err(protocol(
+            "whole-study result inventory differs from its canonical closure",
+        ));
+    }
+    let mesh = runmat_meshing_execution::import_exact_meshing_result(
+        source,
+        publication.meshing_root,
+        publication.meshing_objects,
+        expected.artifact_access.clone(),
+        limits,
+    )
+    .map_err(protocol)?;
+    let mut expected_resolved_request = expected.expected_meshing_request.clone();
+    if !crate::exact_geometry_admission::same_requested_tolerance(
+        &expected_resolved_request.tolerance,
+        &mesh.artifact.resolved_request.tolerance,
+    ) {
+        return Err(protocol(
+            "whole-study mesh tolerance differs from the authored meshing request",
+        ));
+    }
+    expected_resolved_request.tolerance = mesh.artifact.resolved_request.tolerance;
+    if mesh.artifact.resolved_request != expected_resolved_request {
+        return Err(protocol(
+            "whole-study mesh differs from the authored meshing request",
+        ));
+    }
+    let boundary_manifest_bytes = read(source, &publication.boundary_root)?;
+    let boundary_manifest =
+        runmat_analysis_fea::execution::AnalysisObjectManifest::from_canonical_bytes(
+            &boundary_manifest_bytes,
+        )
+        .map_err(protocol)?;
+    let boundary_objects = runmat_analysis_execution::import_analysis_objects(
+        source,
+        &publication.boundary_root,
+        AnalysisNumericalObjectKind::BoundaryResolution,
+        boundary_manifest.logical_identity,
+        boundary_manifest.payload_digest,
+        &expected.artifact_access,
+        limits,
+    )
+    .map_err(protocol)?;
+    let expected_boundary_objects = boundary_objects
+        .references(&expected.artifact_access, ValueRefKind::ResultObject)
+        .map_err(protocol)?;
+    if expected_boundary_objects != publication.boundary_objects {
+        return Err(protocol(
+            "boundary resolution inventory differs from its canonical closure",
+        ));
+    }
+    let boundary_resolution =
+        BoundaryRegionResolution::from_canonical_bytes(&boundary_objects.payload())?;
+    if boundary_resolution.geometry_source_digest != expected.geometry_source_digest
+        || boundary_resolution.solver_mesh_digest
+            != Digest::from_bytes(*mesh.artifact.canonical_digest.bytes())
+    {
+        return Err(protocol(
+            "boundary resolution differs from the returned geometry or mesh",
+        ));
+    }
+    if publication.signal_roots.len() != expected.signal_materializations.len() {
+        return Err(protocol(
+            "whole-study signal result roots differ from the expected materializations",
+        ));
+    }
+    let mut materialized_signals = BTreeMap::new();
+    let mut admitted_signal_objects = Vec::new();
+    for (root, prepared) in publication
+        .signal_roots
+        .iter()
+        .zip(&expected.signal_materializations)
+    {
+        let manifest =
+            runmat_analysis_fea::execution::AnalysisObjectManifest::from_canonical_bytes(&read(
+                source, root,
+            )?)
+            .map_err(protocol)?;
+        let objects = runmat_analysis_execution::import_analysis_objects(
+            source,
+            root,
+            AnalysisNumericalObjectKind::Signal,
+            manifest.logical_identity,
+            manifest.payload_digest,
+            &expected.artifact_access,
+            limits,
+        )
+        .map_err(protocol)?;
+        let references = objects
+            .references(&expected.artifact_access, ValueRefKind::ResultObject)
+            .map_err(protocol)?;
+        for reference in references {
+            if !publication.signal_objects.contains(&reference) {
+                return Err(protocol(
+                    "signal realization closure contains an undeclared object",
+                ));
+            }
+            admitted_signal_objects.push(reference);
+        }
+        let realization =
+            runmat_analysis_fea::execution::CanonicalSignalRealization::from_canonical_bytes(
+                &objects.payload(),
+            )
+            .map_err(protocol)?;
+        let signal = runmat_analysis_execution::materialize_signal_for_solver(
+            &prepared.authored,
+            &prepared.admitted,
+            &realization,
+        )
+        .map_err(protocol)?;
+        materialized_signals.insert(prepared.authored.signal_id().clone(), signal);
+    }
+    let admitted_signal_objects = unique_references(admitted_signal_objects)?;
+    if reference_inventory(&admitted_signal_objects)?
+        != reference_inventory(&publication.signal_objects)?
+    {
+        return Err(protocol(
+            "signal realization inventory contains unreferenced objects",
+        ));
+    }
+    let aliases =
+        runmat_analysis_core::BoundaryRegionAliases::new(boundary_resolution.aliases.clone())
+            .map_err(protocol)?;
+    let mut resolved_model = expected
+        .workloads
+        .authored_model()
+        .map_err(protocol)?
+        .clone();
+    resolved_model.signals = resolved_model
+        .signals
+        .iter()
+        .map(|signal| {
+            materialized_signals
+                .get(signal.signal_id())
+                .cloned()
+                .unwrap_or_else(|| signal.clone())
+        })
+        .collect();
+    if resolved_model
+        .signals
+        .iter()
+        .any(|signal| signal.generator().is_some())
+    {
+        return Err(protocol(
+            "whole-study result retained an unmaterialized signal generator",
+        ));
+    }
+    resolved_model =
+        runmat_analysis_core::resolve_boundary_region_aliases(&resolved_model, &aliases)
+            .map_err(protocol)?;
+    let mut resolved_workloads = expected.workloads.clone();
+    resolved_workloads
+        .replace_model(resolved_model)
+        .map_err(protocol)?;
+    let analysis = match (resolved_workloads, publication.analysis) {
+        (
+            StructuralStudyWorkloads::LinearSequence { workloads },
+            ExactStructuralStudyAnalysisClosure::LinearSequence { closures, .. },
+        ) => {
+            let sequence = runmat_analysis_execution::import_structural_sequence_completion(
+                source,
+                StructuralSequencePreparation {
+                    authored_study_digest: expected.authored_study_digest,
+                    frozen_project_digest: expected.frozen_project_digest,
+                    program_revision: expected.program_revision.clone(),
+                    artifact_access: expected.artifact_access.clone(),
+                    workloads: workloads.clone(),
+                    mesh: Some(mesh.artifact.clone()),
+                    chunk_bytes: runmat_analysis_fea::execution::DEFAULT_ANALYSIS_CHUNK_BYTES,
+                    inventory_limits: limits,
+                    required_capabilities: BTreeSet::new(),
+                    accelerator_requests: expected.analysis_accelerator_requests.clone(),
+                },
+                closures,
+            )
+            .map_err(protocol)?;
+            ExactStructuralStudyAnalysisResult::LinearSequence {
+                resolved_workloads: workloads,
+                sequence,
+            }
+        }
+        (
+            StructuralStudyWorkloads::DirectTransient {
+                workload,
+                block_plan: _,
+            },
+            ExactStructuralStudyAnalysisClosure::DirectTransient {
+                result_root,
+                receipt_root,
+                objects,
+            },
+        ) => {
+            let result_objects = import_transient_analysis_objects(
+                source,
+                &result_root,
+                &objects,
+                AnalysisNumericalObjectKind::SolverResult,
+                &expected.artifact_access,
+                limits,
+            )?;
+            let receipt_objects = import_transient_analysis_objects(
+                source,
+                &receipt_root,
+                &objects,
+                AnalysisNumericalObjectKind::NumericalReceipt,
+                &expected.artifact_access,
+                limits,
+            )?;
+            let admitted_objects = unique_references(
+                result_objects
+                    .unique_references(&expected.artifact_access, ValueRefKind::ResultObject)
+                    .map_err(protocol)?
+                    .into_iter()
+                    .chain(
+                        receipt_objects
+                            .unique_references(
+                                &expected.artifact_access,
+                                ValueRefKind::ResultObject,
+                            )
+                            .map_err(protocol)?,
+                    ),
+            )?;
+            if reference_inventory(&admitted_objects)? != reference_inventory(&objects)? {
+                return Err(protocol(
+                    "transient result closure contains missing or unreferenced objects",
+                ));
+            }
+            let result =
+                runmat_analysis_execution::decode_prepared_structural_transient_solver_result(
+                    &result_objects,
+                )
+                .map_err(protocol)?;
+            let numerical_receipt =
+                runmat_analysis_execution::decode_prepared_structural_transient_numerical_receipt(
+                    &receipt_objects,
+                )
+                .map_err(protocol)?;
+            numerical_receipt
+                .validate_for_result(&result)
+                .map_err(protocol)?;
+            let expected_scope =
+                runmat_analysis_fea::pipeline::transient::prepare_transient_checkpoint_scope(
+                    &workload,
+                    &mesh.artifact,
+                )
+                .map_err(protocol)?;
+            if result.manifest().scope != expected_scope {
+                return Err(protocol(
+                    "transient result names a different resolved workload",
+                ));
+            }
+            ExactStructuralStudyAnalysisResult::DirectTransient {
+                resolved_workload: workload,
+                result: Box::new(result),
+                numerical_receipt,
+            }
+        }
+        _ => {
+            return Err(protocol(
+                "whole-study analysis result kind differs from its authored workload kind",
+            ))
+        }
+    };
+    Ok(ExactStructuralStudyResult {
+        frozen_project_digest: expected.frozen_project_digest,
+        mesh,
+        boundary_resolution,
+        analysis,
+    })
+}
+
+fn import_transient_analysis_objects(
+    source: &impl CacheImport,
+    root: &ValueRef,
+    declared_objects: &[ValueRef],
+    kind: AnalysisNumericalObjectKind,
+    access: &ArtifactAccess,
+    limits: ObjectInventoryLimits,
+) -> NativeExecutionResult<runmat_analysis_execution::PreparedAnalysisObjects> {
+    if !declared_objects.contains(root) {
+        return Err(protocol(
+            "transient numerical object root is absent from its declared closure",
+        ));
+    }
+    let manifest = runmat_analysis_fea::execution::AnalysisObjectManifest::from_canonical_bytes(
+        &read(source, root)?,
+    )
+    .map_err(protocol)?;
+    if manifest.kind != kind {
+        return Err(protocol(
+            "transient numerical object kind differs from its declared role",
+        ));
+    }
+    let imported = runmat_analysis_execution::import_analysis_objects(
+        source,
+        root,
+        kind,
+        manifest.logical_identity,
+        manifest.payload_digest,
+        access,
+        limits,
+    )
+    .map_err(protocol)?;
+    for reference in imported
+        .unique_references(access, ValueRefKind::ResultObject)
+        .map_err(protocol)?
+    {
+        if !declared_objects.contains(&reference) {
+            return Err(protocol(
+                "transient numerical object references an undeclared closure member",
+            ));
+        }
+    }
+    Ok(imported)
+}

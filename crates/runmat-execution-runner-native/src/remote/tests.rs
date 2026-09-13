@@ -42,6 +42,7 @@ struct FakeState {
     stored: Vec<FakeStoredArtifact>,
     transitions: Vec<(DriverRunTarget, Option<String>)>,
     usage: Vec<u64>,
+    fail_store_at: Option<usize>,
 }
 
 struct FakeStoredArtifact {
@@ -134,15 +135,28 @@ impl DriverControlPlane for FakeControl {
             return Err(TransportError::Integrity);
         }
         let mut state = self.state.lock().unwrap();
-        let artifact_id = format!("stored-{}", state.stored.len() + 1);
+        let store_index = state.stored.len() + 1;
+        if state.fail_store_at == Some(store_index) {
+            return Err(TransportError::Unavailable(
+                "injected artifact store failure".into(),
+            ));
+        }
+        let artifact_id = format!("stored-{store_index}");
+        let kind = format!("{:?}", artifact.kind).to_ascii_lowercase();
         state.stored.push(FakeStoredArtifact {
             kind: artifact.kind,
             ciphertext: artifact.ciphertext.to_vec(),
             checkpoint: artifact.checkpoint,
         });
+        state
+            .downloads
+            .insert(artifact_id.clone(), artifact.ciphertext.to_vec());
+        state
+            .artifact_kinds
+            .insert(artifact_id.clone(), kind.clone());
         Ok(StoredDriverArtifact {
             artifact_id,
-            kind: format!("{:?}", artifact.kind).to_ascii_lowercase(),
+            kind,
             ciphertext_size_bytes: artifact.ciphertext.len() as u64,
         })
     }
@@ -401,6 +415,156 @@ async fn replacement_restores_a_verified_run_scoped_object_closure() {
         super::recovery::restore(&control, &run_key, &authority, &catalog_location)
             .await
             .is_err()
+    );
+}
+
+#[tokio::test]
+async fn recovery_publication_commits_objects_then_catalog_then_checkpoint() {
+    let run_id = "run-recovery-publication";
+    let run_key = RunKeyMaterial::from_entropy([67; 32]).unwrap();
+    let authority = DriverAuthority {
+        server_url: "https://control.invalid".into(),
+        run_id: run_id.into(),
+        org_id: "org-1".into(),
+        project_id: "project-1".into(),
+        allocation_lease_id: "allocation-1".into(),
+        driver_lease_id: "driver-4".into(),
+        fencing_token: 4,
+        credential: "credential".into(),
+    };
+    let revision = ProgramRevision::new(
+        Digest::sha256("recovery-graph"),
+        Digest::sha256("recovery-source"),
+        runmat_core::program_environment(runmat_core::CompatMode::Matlab),
+    )
+    .unwrap();
+    let mut recipe = recipe(revision);
+    recipe.entrypoint = "analysis_workload".into();
+    recipe.execution_mode = "recovery-publication-test".into();
+    let artifact =
+        ProgramArtifact::materialize(&recipe, ExecutableForm::AnalysisWorkload, vec![1]).unwrap();
+    let request = ProgramExecutionRequest {
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+        recipe,
+        artifact,
+        function: 0,
+        arguments: Vec::new(),
+        requested_outputs: 1,
+    };
+    let control = FakeControl {
+        bootstrap: unused_bootstrap(),
+        state: Mutex::new(FakeState::default()),
+    };
+    let first = result_object(run_id, b"first transaction object");
+    let second = result_object(run_id, b"second transaction object");
+    let third = result_object(run_id, b"third transaction object");
+    let fourth = result_object(run_id, b"fourth transaction object");
+    let mut publisher = super::recovery::RemoteRecoveryPublisher::new(
+        &control,
+        &run_key,
+        &authority,
+        "project-revision",
+        &request,
+        4,
+        None,
+    )
+    .unwrap();
+
+    publisher
+        .publish_objects(
+            second.reference.clone(),
+            vec![second.clone(), first.clone()],
+        )
+        .await
+        .unwrap();
+    assert_eq!(publisher.checkpoint_sequence(), 5);
+    let first_catalog = {
+        let state = control.state.lock().unwrap();
+        assert_eq!(state.stored.len(), 4);
+        assert_eq!(
+            state
+                .stored
+                .iter()
+                .map(|stored| stored.kind)
+                .collect::<Vec<_>>(),
+            vec![
+                DriverArtifactKind::Result,
+                DriverArtifactKind::Result,
+                DriverArtifactKind::Result,
+                DriverArtifactKind::Checkpoint,
+            ]
+        );
+        assert_eq!(
+            state.stored[3].checkpoint,
+            Some((5, CheckpointDisposition::ResumeSafe))
+        );
+        super::checkpoint::RemoteDriverCheckpoint::from_canonical_bytes(
+            &open_object(
+                &run_key,
+                &state.stored[3].ciphertext,
+                run_id,
+                EncryptionPurpose::Checkpoint,
+            )
+            .unwrap(),
+        )
+        .unwrap()
+        .closure_catalog
+        .unwrap()
+    };
+    let restored = super::recovery::restore(&control, &run_key, &authority, &first_catalog)
+        .await
+        .unwrap();
+    assert_eq!(restored.root, second.reference);
+    assert_eq!(restored.objects.len(), 2);
+
+    publisher
+        .publish_objects(
+            third.reference.clone(),
+            vec![third.clone(), first.clone(), second.clone()],
+        )
+        .await
+        .unwrap();
+    assert_eq!(publisher.checkpoint_sequence(), 6);
+    {
+        let state = control.state.lock().unwrap();
+        assert_eq!(state.stored.len(), 7);
+        assert_eq!(state.stored[4].kind, DriverArtifactKind::Result);
+        assert_eq!(state.stored[5].kind, DriverArtifactKind::Result);
+        assert_eq!(state.stored[6].kind, DriverArtifactKind::Checkpoint);
+        assert_eq!(
+            state.stored[6].checkpoint,
+            Some((6, CheckpointDisposition::ResumeSafe))
+        );
+    }
+
+    control.state.lock().unwrap().fail_store_at = Some(10);
+    assert!(publisher
+        .publish_objects(
+            fourth.reference.clone(),
+            vec![first.clone(), second.clone(), third.clone(), fourth.clone()],
+        )
+        .await
+        .is_err());
+    assert_eq!(publisher.checkpoint_sequence(), 6);
+    {
+        let state = control.state.lock().unwrap();
+        assert_eq!(state.stored.len(), 9);
+        assert_eq!(state.stored[8].kind, DriverArtifactKind::Result);
+        assert_eq!(state.stored[6].kind, DriverArtifactKind::Checkpoint);
+    }
+
+    control.state.lock().unwrap().fail_store_at = None;
+    publisher
+        .publish_objects(fourth.reference.clone(), vec![first, second, third, fourth])
+        .await
+        .unwrap();
+    assert_eq!(publisher.checkpoint_sequence(), 7);
+    let state = control.state.lock().unwrap();
+    assert_eq!(state.stored.len(), 12);
+    assert_eq!(state.stored[11].kind, DriverArtifactKind::Checkpoint);
+    assert_eq!(
+        state.stored[11].checkpoint,
+        Some((7, CheckpointDisposition::ResumeSafe))
     );
 }
 

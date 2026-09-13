@@ -10,7 +10,7 @@ use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_artifact::ArtifactAccess;
 use runmat_runtime::analysis::{
     analysis_study_content_digest, AnalysisStudySpec, PreparedStructuralStudy,
-    StructuralStudyExecutionFailure, StructuralStudyPlacementEntry,
+    StructuralStudyExecutionFailure, StructuralStudyNumericalResult, StructuralStudyPlacementEntry,
     StructuralStudyPlacementExecutor, StructuralStudyPlacementFuture,
     StructuralStudyPlacementResult, StructuralStudySequenceNumericalResult,
     StructuralStudyStepNumericalResult,
@@ -100,7 +100,7 @@ async fn execute_one(
     prepared: &PreparedStructuralStudy,
     placement: &NativeStructuralStudyPlacement,
     workers_per_study: u32,
-) -> crate::NativeExecutionResult<StructuralStudySequenceNumericalResult> {
+) -> crate::NativeExecutionResult<StructuralStudyNumericalResult> {
     let study_digest = analysis_study_content_digest(study);
     let revision = ProgramRevision::new(
         study_digest,
@@ -162,23 +162,25 @@ async fn execute_one(
         },
     )
     .await?;
-    Ok(StructuralStudySequenceNumericalResult {
-        frozen_project_digest: None,
-        steps: completed
-            .steps
-            .into_iter()
-            .map(|step| StructuralStudyStepNumericalResult {
-                step_id: step.step_id,
-                solver_result_identity: step.result_identity,
-                result: step.result.run,
-            })
-            .collect(),
-        states: completed
-            .states
-            .into_iter()
-            .map(|state| state.state)
-            .collect(),
-    })
+    Ok(StructuralStudyNumericalResult::LinearSequence(
+        StructuralStudySequenceNumericalResult {
+            frozen_project_digest: None,
+            steps: completed
+                .steps
+                .into_iter()
+                .map(|step| StructuralStudyStepNumericalResult {
+                    step_id: step.step_id,
+                    solver_result_identity: step.result_identity,
+                    result: step.result.run,
+                })
+                .collect(),
+            states: completed
+                .states
+                .into_iter()
+                .map(|state| state.state)
+                .collect(),
+        },
+    ))
 }
 
 fn local_accelerator_requests(

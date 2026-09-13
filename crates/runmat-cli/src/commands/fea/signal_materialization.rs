@@ -162,8 +162,8 @@ fn execute_compiled_materializations(
     let session = NativeProgramSession::new(native_config)?;
     let prepared = prepare_compiled_materializations(
         document_path,
-        &generator_signals,
-        &compiled,
+        generator_signals,
+        compiled,
         immutable_values,
         session.artifact_access(),
     )?;

@@ -436,6 +436,26 @@ impl StructuralTransientNumericalReceipt {
         Ok(())
     }
 
+    /// Validates the self-contained numerical evidence retained with an imported solver result.
+    ///
+    /// The result-assembly task has already checked the full segment/request chain before it emits
+    /// this receipt. Result consumers do not need to retain those potentially large intermediate
+    /// segments, but they must still bind the receipt to the exact solver result and reject
+    /// inconsistent aggregate accounting.
+    pub fn validate_for_result(
+        &self,
+        result: &StructuralTransientSolverResult,
+    ) -> AnalysisExecutionResult<()> {
+        self.validate_identity()?;
+        result.validate()?;
+        if self.source_result != result.manifest().identity {
+            return Err(AnalysisExecutionError::Identity(
+                "structural transient numerical receipt names a different solver result",
+            ));
+        }
+        Ok(())
+    }
+
     pub fn canonical_bytes(&self) -> AnalysisExecutionResult<Vec<u8>> {
         self.validate_identity()?;
         Ok(encode_contract(
@@ -456,10 +476,51 @@ impl StructuralTransientNumericalReceipt {
     }
 
     fn validate_identity(&self) -> AnalysisExecutionResult<()> {
-        if self.schema_version != 1
-            || self.blocks.is_empty()
-            || self.terminal_counters.device_apply_k_count
-                > self.terminal_counters.device_apply_k_attempt_count
+        if self.schema_version != 1 || self.blocks.is_empty() {
+            return Err(AnalysisExecutionError::Identity(
+                "structural transient numerical receipt identity does not converge",
+            ));
+        }
+        let mut aggregate = StructuralTransientSolverCounters::default();
+        let first = &self.blocks[0];
+        for block in &self.blocks {
+            super::StructuralTransientBlockSolverEvidence {
+                solver_method: block.solver_method,
+                solver_backend: block.solver_backend,
+                preconditioner: block.preconditioner,
+                counters: block.counters.clone(),
+                accelerator_evidence: block.accelerator_evidence.clone(),
+            }
+            .validate()?;
+            if block.solver_method != first.solver_method
+                || block.solver_backend != first.solver_backend
+                || block.preconditioner != first.preconditioner
+            {
+                return Err(AnalysisExecutionError::Invalid(
+                    "structural transient numerical receipt changes solver semantics between blocks"
+                        .into(),
+                ));
+            }
+            aggregate.host_sync_count = aggregate
+                .host_sync_count
+                .checked_add(block.counters.host_sync_count)
+                .ok_or(AnalysisExecutionError::Limit(
+                    "structural transient receipt host synchronization count overflow",
+                ))?;
+            aggregate.device_apply_k_count = aggregate
+                .device_apply_k_count
+                .checked_add(block.counters.device_apply_k_count)
+                .ok_or(AnalysisExecutionError::Limit(
+                    "structural transient receipt device apply count overflow",
+                ))?;
+            aggregate.device_apply_k_attempt_count = aggregate
+                .device_apply_k_attempt_count
+                .checked_add(block.counters.device_apply_k_attempt_count)
+                .ok_or(AnalysisExecutionError::Limit(
+                    "structural transient receipt device apply-attempt count overflow",
+                ))?;
+        }
+        if aggregate != self.terminal_counters
             || self.identity
                 != receipt_identity(
                     self.source_result,
@@ -469,7 +530,7 @@ impl StructuralTransientNumericalReceipt {
                 )?
         {
             return Err(AnalysisExecutionError::Identity(
-                "structural transient numerical receipt identity does not converge",
+                "structural transient numerical receipt identity or aggregate accounting does not converge",
             ));
         }
         Ok(())
@@ -732,5 +793,29 @@ mod tests {
             segments[0].clone(),
         ])
         .is_err());
+    }
+
+    #[test]
+    fn imported_receipt_rejects_a_self_consistent_different_result_binding() {
+        let segments = one_block();
+        let request = StructuralTransientResultAssemblyRequest::new(&segments).unwrap();
+        let result = StructuralTransientSolverResult::assemble(&request, &segments).unwrap();
+        let mut receipt =
+            StructuralTransientNumericalReceipt::new(&result, &request, &segments).unwrap();
+        receipt.source_result = SolverResultIdentity::new(
+            result.manifest().scope.source_workload,
+            Digest::sha256(b"substituted-transient-result"),
+        )
+        .unwrap();
+        receipt.identity = receipt_identity(
+            receipt.source_result,
+            receipt.assembly_request,
+            &receipt.blocks,
+            &receipt.terminal_counters,
+        )
+        .unwrap();
+
+        receipt.validate_identity().unwrap();
+        assert!(receipt.validate_for_result(&result).is_err());
     }
 }

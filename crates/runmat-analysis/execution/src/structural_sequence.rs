@@ -677,12 +677,16 @@ fn validate_accelerator_requests(
 pub fn validate_structural_sequence_workloads(
     workloads: &BTreeMap<ProcedureStepId, StructuralLinearWorkload>,
 ) -> AnalysisBridgeResult<()> {
-    validated_structural_sequence_model(workloads).map(|_| ())
+    runmat_analysis_fea::execution::StructuralStudyWorkloads::validate_linear_sequence_workloads(
+        workloads,
+    )
+    .map_err(Into::into)
 }
 
 fn validated_structural_sequence_model(
     workloads: &BTreeMap<ProcedureStepId, StructuralLinearWorkload>,
 ) -> AnalysisBridgeResult<runmat_analysis_core::AnalysisModel> {
+    validate_structural_sequence_workloads(workloads)?;
     let model = workloads
         .values()
         .next()
@@ -693,31 +697,5 @@ fn validated_structural_sequence_model(
         })?
         .model
         .clone();
-    let sequence = validate_model_sequence(&model)
-        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    let expected_steps = sequence
-        .sequence()
-        .steps
-        .iter()
-        .map(|step| step.step_id.clone())
-        .collect::<BTreeSet<_>>();
-    if workloads.keys().cloned().collect::<BTreeSet<_>>() != expected_steps {
-        return Err(AnalysisBridgeError::Invalid(
-            "structural sequence workloads do not exactly cover the authored steps".into(),
-        ));
-    }
-    for (step_id, workload) in workloads {
-        workload.validate_sequence_template()?;
-        if workload.model != model || workload.step_id != *step_id {
-            return Err(AnalysisBridgeError::Identity(
-                "structural sequence workload differs from its authored step or model",
-            ));
-        }
-        if workload.initial_guess_transition.is_some() {
-            return Err(AnalysisBridgeError::Invalid(
-                "sequence preparation does not accept a prebound state transition".into(),
-            ));
-        }
-    }
     Ok(model)
 }

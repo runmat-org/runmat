@@ -13,12 +13,13 @@ use runmat_analysis_execution::{
     prepare_signal_materialization, PreparedSignalMaterialization, ResolvedSignalArtifact,
 };
 use runmat_analysis_fea::execution::{
-    SignalMaterializationIdentity, StructuralLinearWorkload, StudyIdentity, SweepCompositionPolicy,
-    SweepDefinition,
+    SignalMaterializationIdentity, StructuralLinearWorkload, StructuralTransientBlockPlan,
+    StructuralTransientWorkload, StudyIdentity, SweepCompositionPolicy, SweepDefinition,
 };
 use runmat_analysis_fea::fixtures::{fixture_model, FixtureId};
 use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
 use runmat_analysis_fea::solve::preconditioner::SpdPreconditionerKind;
+use runmat_analysis_fea::solve::transient::StructuralTimeStepPolicy;
 use runmat_analysis_fea::ComputeBackend;
 use runmat_analysis_fea::FEA_FIELD_STRUCTURAL_DISPLACEMENT;
 use runmat_execution::resource::{Capability, ResourceInventory};
@@ -38,17 +39,33 @@ use runmat_meshing_core::{MeshingRequest, MetricTensor3};
 use runmat_meshing_execution::exact_meshing_worker_capabilities;
 
 use crate::{
-    import_exact_structural_sweep_result, native_meshing_kernel_dispatcher,
-    prepare_exact_meshing_root, prepare_exact_structural_study_root,
-    run_remote_meshing_worker_quic, ExactMeshingRootPreparation,
-    ExactStructuralStudyRootPreparation, ExactStructuralSweepTerminal, QuicRemoteWorkerChannel,
-    RemoteMeshingWorkerQuicRequest, RemotePoolDriver, RemoteWorkerChannelConfig,
-    RemoteWorkerQuicRequest,
+    import_exact_structural_study_result, import_exact_structural_sweep_result,
+    native_meshing_kernel_dispatcher, prepare_exact_meshing_root,
+    prepare_exact_structural_study_root, run_remote_meshing_worker_quic,
+    ExactMeshingRootPreparation, ExactStructuralStudyRootPreparation, ExactStructuralSweepTerminal,
+    QuicRemoteWorkerChannel, RemoteMeshingWorkerQuicRequest, RemotePoolDriver,
+    RemoteWorkerChannelConfig, RemoteWorkerQuicRequest, StructuralTransientRecoveryPublisher,
 };
 
 use super::{prepare_exact_structural_sweep_root, ExactStructuralSweepRootPreparation};
 
 const BOX: &[u8] = include_bytes!("../../../runmat-geometry/io/tests/fixtures/box.brep");
+
+#[derive(Default)]
+struct RecordingRecoveryPublisher {
+    closures: Vec<runmat_analysis_execution::StructuralTransientRecoveryClosure>,
+}
+
+#[async_trait::async_trait]
+impl StructuralTransientRecoveryPublisher for RecordingRecoveryPublisher {
+    async fn publish(
+        &mut self,
+        closure: runmat_analysis_execution::StructuralTransientRecoveryClosure,
+    ) -> crate::NativeExecutionResult<()> {
+        self.closures.push(closure);
+        Ok(())
+    }
+}
 
 #[tokio::test(flavor = "current_thread")]
 async fn exact_structural_sweep_reaches_ordered_admitted_results_over_encrypted_quic() {
@@ -109,7 +126,10 @@ async fn exact_structural_sweep_reaches_ordered_admitted_results_over_encrypted_
         authored_study_digest: first_study_digest,
         frozen_project_digest: Some(Digest::from_bytes(*project_identity.graph_digest.bytes())),
         geometry_source_digest: source_digest,
-        workloads: independent_structural_workloads(&workload),
+        workloads: runmat_analysis_execution::StructuralStudyWorkloads::LinearSequence {
+            workloads: independent_structural_workloads(&workload),
+        },
+        analysis_accelerator_requests: Vec::new(),
         signal_materializations: vec![signal_materialization.clone()],
         exact_meshing: exact_meshing.clone(),
     })
@@ -120,11 +140,35 @@ async fn exact_structural_sweep_reaches_ordered_admitted_results_over_encrypted_
         authored_study_digest: second_study_digest,
         frozen_project_digest: Some(Digest::from_bytes(*project_identity.graph_digest.bytes())),
         geometry_source_digest: source_digest,
-        workloads: std::collections::BTreeMap::from([(workload.step_id.clone(), workload.clone())]),
+        workloads: runmat_analysis_execution::StructuralStudyWorkloads::LinearSequence {
+            workloads: std::collections::BTreeMap::from([(
+                workload.step_id.clone(),
+                workload.clone(),
+            )]),
+        },
+        analysis_accelerator_requests: Vec::new(),
         signal_materializations: vec![signal_materialization.clone()],
         exact_meshing: exact_meshing.clone(),
     })
     .unwrap();
+    let direct_study_digest = Digest::sha256(b"box direct transient study");
+    let direct_workload = box_direct_transient_workload();
+    let direct = prepare_exact_structural_study_root(ExactStructuralStudyRootPreparation {
+        program_revision: revision.clone(),
+        artifact_access: access.clone(),
+        authored_study_digest: direct_study_digest,
+        frozen_project_digest: Some(Digest::from_bytes(*project_identity.graph_digest.bytes())),
+        geometry_source_digest: source_digest,
+        workloads: runmat_analysis_execution::StructuralStudyWorkloads::DirectTransient {
+            workload: Box::new(direct_workload),
+            block_plan: StructuralTransientBlockPlan::new(1).unwrap(),
+        },
+        analysis_accelerator_requests: Vec::new(),
+        signal_materializations: Vec::new(),
+        exact_meshing: exact_meshing.clone(),
+    })
+    .unwrap();
+    let direct_expectation = direct.result_expectation();
     let mut invalid_workload = workload;
     invalid_workload.model.constraints[0].visit_targets_mut(|target| {
         *target = runmat_analysis_core::RegionTarget::boundary("face_999999");
@@ -135,12 +179,15 @@ async fn exact_structural_sweep_reaches_ordered_admitted_results_over_encrypted_
         authored_study_digest: invalid_study_digest,
         frozen_project_digest: Some(Digest::from_bytes(*project_identity.graph_digest.bytes())),
         geometry_source_digest: source_digest,
-        workloads: std::collections::BTreeMap::from([(
-            invalid_workload.step_id.clone(),
-            invalid_workload,
-        )]),
+        workloads: runmat_analysis_execution::StructuralStudyWorkloads::LinearSequence {
+            workloads: std::collections::BTreeMap::from([(
+                invalid_workload.step_id.clone(),
+                invalid_workload,
+            )]),
+        },
+        analysis_accelerator_requests: Vec::new(),
         signal_materializations: vec![signal_materialization],
-        exact_meshing,
+        exact_meshing: exact_meshing.clone(),
     })
     .unwrap();
     let definition = SweepDefinition::new(
@@ -275,10 +322,10 @@ async fn exact_structural_sweep_reaches_ordered_admitted_results_over_encrypted_
                 min_workers: 1,
                 max_workers: 1,
                 max_in_flight: 2,
-                resource_limit: inventory,
+                resource_limit: inventory.clone(),
             },
             59,
-            bundle,
+            bundle.clone(),
             access.authorization_scope.clone(),
         )
         .unwrap();
@@ -299,7 +346,7 @@ async fn exact_structural_sweep_reaches_ordered_admitted_results_over_encrypted_
                 Arc::clone(&pool),
                 prepared.into_request(),
                 access.authorization_scope.clone(),
-                resources,
+                resources.clone(),
             ),
         )
         .await
@@ -398,12 +445,16 @@ async fn exact_structural_sweep_reaches_ordered_admitted_results_over_encrypted_
         let ExactStructuralSweepTerminal::Succeeded(result) = first.terminal else {
             panic!("first remote structural sweep entry did not succeed")
         };
-        assert_eq!(result.sequence.steps.len(), 2);
-        assert_eq!(result.sequence.states.len(), 2);
-        assert_eq!(
-            result.sequence.steps[1].step_id.as_str(),
-            "step_static_second"
-        );
+        let crate::ExactStructuralStudyAnalysisResult::LinearSequence {
+            resolved_workloads,
+            sequence,
+        } = &result.analysis
+        else {
+            panic!("first remote structural sweep entry returned a non-linear result")
+        };
+        assert_eq!(sequence.steps.len(), 2);
+        assert_eq!(sequence.states.len(), 2);
+        assert_eq!(sequence.steps[1].step_id.as_str(), "step_static_second");
         let second = entries.next().unwrap();
         let ExactStructuralSweepTerminal::Succeeded(second_result) = second.terminal else {
             panic!(
@@ -411,8 +462,15 @@ async fn exact_structural_sweep_reaches_ordered_admitted_results_over_encrypted_
                 second.terminal
             )
         };
+        let crate::ExactStructuralStudyAnalysisResult::LinearSequence {
+            sequence: second_sequence,
+            ..
+        } = &second_result.analysis
+        else {
+            panic!("second remote structural sweep entry returned a non-linear result")
+        };
         assert_eq!(
-            second_result.sequence.steps[0].result.run.identity.family(),
+            second_sequence.steps[0].result.run.identity.family(),
             runmat_analysis_core::PhysicsFamily::Structural
         );
         let invalid = entries.next().unwrap();
@@ -427,8 +485,8 @@ async fn exact_structural_sweep_reaches_ordered_admitted_results_over_encrypted_
             .evidence
             .validate(&result.mesh.artifact)
             .unwrap();
-        let analysis = &result.sequence.steps[0].result;
-        let resolved_workload = result.resolved_workloads.values().next().unwrap();
+        let analysis = &sequence.steps[0].result;
+        let resolved_workload = resolved_workloads.values().next().unwrap();
         analysis.validate().unwrap();
         assert!(!analysis.run.fields_are_empty());
         let displacement = analysis
@@ -498,6 +556,141 @@ async fn exact_structural_sweep_reaches_ordered_admitted_results_over_encrypted_
                 alias
             }) if alias == "face_999999"
         ));
+
+        pool.remove_worker(worker.id, false).await.unwrap();
+    };
+    let (server_result, ()) = tokio::join!(server, client);
+    server_result.unwrap();
+    run_direct_exact_study_conformance(
+        direct,
+        direct_expectation,
+        bundle,
+        inventory,
+        resources,
+        access,
+    )
+    .await;
+}
+
+async fn run_direct_exact_study_conformance(
+    direct: crate::PreparedExactStructuralStudyRoot,
+    expectation: crate::ExactStructuralStudyResultExpectation,
+    bundle: Vec<u8>,
+    inventory: ResourceInventory,
+    resources: ResourceRequest,
+    access: ArtifactAccess,
+) {
+    let scope_id = runmat_execution::ExecutionScopeId::derive(&[b"direct-exact-study-scope"]);
+    let pool_id = runmat_execution::PoolId::derive(&[b"direct-exact-study-pool"]);
+    let worker = WorkerSpec {
+        id: runmat_execution::identity::WorkerId::derive(&[b"direct-exact-study-worker"]),
+        pool_id,
+        resources: inventory.clone(),
+    };
+    let CertifiedKey { cert, signing_key } =
+        generate_simple_self_signed(vec!["runmat.execution".into()]).unwrap();
+    let certificate_der = cert.der().to_vec();
+    let listener = QuicOverlayListener::bind(
+        SocketAddr::from((Ipv4Addr::LOCALHOST, 0)),
+        vec![certificate_der.clone()],
+        signing_key.serialize_der(),
+        FrameLimits::default(),
+    )
+    .unwrap();
+    let authority = listener.local_addr().unwrap();
+    let run_key =
+        runmat_execution_artifact::encryption::RunKeyMaterial::from_entropy([67; 32]).unwrap();
+    let server = run_remote_meshing_worker_quic(RemoteMeshingWorkerQuicRequest {
+        worker: RemoteWorkerQuicRequest {
+            listener,
+            run_identity: access.authorization_scope.clone(),
+            worker: worker.clone(),
+            driver_fence: 71,
+            session_id: [73; 16],
+            run_key: run_key.clone(),
+            limits: FrameLimits::default(),
+        },
+        kernel: Arc::new(native_meshing_kernel_dispatcher()),
+        meshing_limits: crate::NativeMeshingHostLimits::default(),
+    });
+    let client = async {
+        let channel = QuicRemoteWorkerChannel::connect(
+            RemoteWorkerChannelConfig {
+                run_identity: access.authorization_scope.clone(),
+                node_identity: "direct-exact-structural-study-node".into(),
+                worker: worker.clone(),
+                driver_fence: 71,
+                session_id: [73; 16],
+                run_key,
+                limits: FrameLimits::default(),
+            },
+            &PinnedQuicEndpoint {
+                authority,
+                server_name: "runmat.execution".into(),
+                certificate_der,
+            },
+        )
+        .await
+        .unwrap();
+        let pool = RemotePoolDriver::new_with_value_scope(
+            scope_id,
+            PoolSpec {
+                id: pool_id,
+                min_workers: 1,
+                max_workers: 1,
+                max_in_flight: 2,
+                resource_limit: inventory,
+            },
+            71,
+            bundle,
+            access.authorization_scope.clone(),
+        )
+        .unwrap();
+        pool.add_worker(channel).await.unwrap();
+        for object in direct.transport_objects().unwrap() {
+            if object.is_externalized_value() {
+                pool.register_value_object(object.reference, object.bytes)
+                    .unwrap();
+            } else {
+                pool.register_execution_object(object.reference, object.bytes)
+                    .unwrap();
+            }
+        }
+        let mut recovery = RecordingRecoveryPublisher::default();
+        let response = tokio::time::timeout(
+            Duration::from_secs(180),
+            crate::remote::exact_structural_study::execute_for_test(
+                Arc::clone(&pool),
+                direct.request(),
+                &access.authorization_scope,
+                &resources,
+                &mut recovery,
+            ),
+        )
+        .await
+        .expect("remote direct-transient exact study timed out")
+        .unwrap()
+        .unwrap_or_else(|message| panic!("remote direct-transient exact study failed: {message}"));
+        let imported = import_exact_structural_study_result(
+            pool.as_ref(),
+            response,
+            &expectation,
+            ObjectInventoryLimits::default(),
+        )
+        .unwrap();
+        let crate::ExactStructuralStudyAnalysisResult::DirectTransient {
+            resolved_workload,
+            result,
+            numerical_receipt,
+        } = imported.analysis
+        else {
+            panic!("direct-transient exact study returned a linear result")
+        };
+        assert_eq!(resolved_workload.step_id.as_str(), "transient");
+        assert_eq!(result.samples().len(), 3);
+        assert_eq!(numerical_receipt.blocks.len(), 2);
+        numerical_receipt.validate_for_result(&result).unwrap();
+        assert_eq!(recovery.closures.len(), 2);
         pool.remove_worker(worker.id, false).await.unwrap();
     };
     let (server_result, ()) = tokio::join!(server, client);
@@ -693,6 +886,25 @@ fn box_structural_workload() -> StructuralLinearWorkload {
             runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
         require_solver_mesh_for_solid: true,
         initial_guess_transition: None,
+    }
+}
+
+fn box_direct_transient_workload() -> StructuralTransientWorkload {
+    let mut model = box_structural_workload().model;
+    model.sequence = runmat_analysis_core::AnalysisSequence::from_steps(
+        "box-direct-transient-sequence",
+        vec![runmat_analysis_core::ProcedureStep::structural_transient(
+            "transient",
+        )],
+    );
+    StructuralTransientWorkload {
+        schema_version: 1,
+        step_id: model.sequence.steps[0].step_id.clone(),
+        model,
+        backend: ComputeBackend::Cpu,
+        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+        time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 2 },
+        residual_target: 1.0e-8,
     }
 }
 

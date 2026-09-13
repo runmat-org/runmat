@@ -14,8 +14,9 @@ use runmat_execution_runner_native::{
 use runmat_runtime::analysis::{
     analysis_complete_study_sweep_op, structural_study_execution_failure, AnalysisStudyRunData,
     AnalysisStudySweepData, AnalysisStudySweepRunOutcome, AnalysisStudySweepSpec,
-    PreparedStructuralStudyIntent, StructuralStudyExecutionFailure,
+    PreparedStructuralStudyIntent, StructuralStudyExecutionFailure, StructuralStudyNumericalResult,
     StructuralStudySequenceNumericalResult, StructuralStudyStepNumericalResult,
+    StructuralStudyTransientNumericalResult,
 };
 use runmat_runtime::operations::OperationEnvelope;
 
@@ -42,7 +43,7 @@ pub(crate) fn materialize_remote_outputs(
         &expectation,
         ObjectInventoryLimits::default(),
     )?;
-    let numerical = sequence_result(&result)?;
+    let numerical = study_result(&result)?;
     runmat_runtime::analysis::analysis_complete_structural_study_intent_op(
         study,
         runmat_runtime::meshing::MeshingExecutionOutput {
@@ -113,7 +114,7 @@ pub(crate) fn materialize_remote_sweep_outputs(
                     format!("{run_id}_study_{}", entry.study_index),
                 )
                 .map_err(anyhow::Error::msg)?;
-                let numerical = sequence_result(&result)?;
+                let numerical = study_result(&result)?;
                 let envelope =
                     runmat_runtime::analysis::analysis_complete_structural_study_intent_op(
                         intent,
@@ -183,6 +184,7 @@ fn result_expectation(
         frozen_project_digest: Some(*revision.graph_digest()),
         geometry_source_digest: study.geometry_source_digest(),
         workloads: study.workloads(),
+        analysis_accelerator_requests: Vec::new(),
         signal_materializations: signal_materializations.to_vec(),
         expected_meshing_request: authored_meshing_request(study)?,
     };
@@ -190,27 +192,44 @@ fn result_expectation(
     Ok(expectation)
 }
 
-fn sequence_result(
+fn study_result(
     result: &runmat_execution_runner_native::ExactStructuralStudyResult,
-) -> Result<StructuralStudySequenceNumericalResult> {
-    Ok(StructuralStudySequenceNumericalResult {
-        frozen_project_digest: result.frozen_project_digest,
-        steps: result
-            .sequence
-            .steps
-            .iter()
-            .map(|step| StructuralStudyStepNumericalResult {
-                step_id: step.step_id.clone(),
-                solver_result_identity: step.result_identity,
-                result: step.result.run.clone(),
+) -> Result<StructuralStudyNumericalResult> {
+    Ok(match &result.analysis {
+        runmat_execution_runner_native::ExactStructuralStudyAnalysisResult::LinearSequence {
+            sequence,
+            ..
+        } => {
+            StructuralStudyNumericalResult::LinearSequence(StructuralStudySequenceNumericalResult {
+                frozen_project_digest: result.frozen_project_digest,
+                steps: sequence
+                    .steps
+                    .iter()
+                    .map(|step| StructuralStudyStepNumericalResult {
+                        step_id: step.step_id.clone(),
+                        solver_result_identity: step.result_identity,
+                        result: step.result.run.clone(),
+                    })
+                    .collect(),
+                states: sequence
+                    .states
+                    .iter()
+                    .map(|state| state.state.clone())
+                    .collect(),
             })
-            .collect(),
-        states: result
-            .sequence
-            .states
-            .iter()
-            .map(|state| state.state.clone())
-            .collect(),
+        }
+        runmat_execution_runner_native::ExactStructuralStudyAnalysisResult::DirectTransient {
+            resolved_workload,
+            result: transient,
+            numerical_receipt,
+        } => StructuralStudyNumericalResult::DirectTransient(Box::new(
+            StructuralStudyTransientNumericalResult {
+                frozen_project_digest: result.frozen_project_digest,
+                step_id: resolved_workload.step_id.clone(),
+                result: (**transient).clone(),
+                numerical_receipt: numerical_receipt.clone(),
+            },
+        )),
     })
 }
 

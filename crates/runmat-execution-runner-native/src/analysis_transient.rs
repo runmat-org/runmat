@@ -23,13 +23,18 @@ pub trait StructuralTransientRecoveryPublisher: Send {
     ) -> NativeExecutionResult<()>;
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct CompletedStructuralTransientSequence {
+    pub result: ImportedStructuralTransientResult,
+}
+
 pub async fn execute_structural_transient_remotely(
     pool: Arc<RemotePoolDriver>,
     preparation: StructuralTransientSequencePreparation,
     policy: StructuralSequenceExecutionPolicy,
     recovery: Option<&StructuralTransientRecoveryClosure>,
     publisher: &mut (impl StructuralTransientRecoveryPublisher + ?Sized),
-) -> NativeExecutionResult<ImportedStructuralTransientResult> {
+) -> NativeExecutionResult<CompletedStructuralTransientSequence> {
     policy.validate()?;
     let mut pool = RemoteSequencePool::new(pool);
     let mut coordinator = match recovery {
@@ -71,9 +76,8 @@ pub async fn execute_structural_transient_remotely(
                 "transient coordinator and remote task identities differ".into(),
             ));
         }
-        publisher
-            .publish(coordinator.recovery_closure(&pool).map_err(protocol)?)
-            .await?;
+        let recovery = coordinator.recovery_closure(&pool).map_err(protocol)?;
+        publisher.publish(recovery).await?;
         live_block_tasks.push((identity, task_id));
     }
 
@@ -93,7 +97,8 @@ pub async fn execute_structural_transient_remotely(
     coordinator
         .complete_assembly(&pool, response, &prepared)
         .map_err(protocol)?;
-    coordinator.finish().map_err(protocol)
+    let result = coordinator.finish().map_err(protocol)?;
+    Ok(CompletedStructuralTransientSequence { result })
 }
 
 async fn execute_task(

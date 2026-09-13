@@ -40,7 +40,8 @@ pub use analysis_sequence::{
     StructuralSequenceExecutionPolicy,
 };
 pub use analysis_transient::{
-    execute_structural_transient_remotely, StructuralTransientRecoveryPublisher,
+    execute_structural_transient_remotely, CompletedStructuralTransientSequence,
+    StructuralTransientRecoveryPublisher,
 };
 pub use config::NativeExecutionConfig;
 pub use driver::{
@@ -64,8 +65,9 @@ pub use exact_meshing_root::{
 pub use exact_structural_study_root::{
     decode_exact_structural_study_root, import_exact_structural_study_result,
     prepare_exact_structural_study_root, BoundaryRegionResolution, DecodedExactStructuralStudyRoot,
-    ExactStructuralStudyResult, ExactStructuralStudyResultExpectation,
-    ExactStructuralStudyRootPreparation, PreparedExactStructuralStudyRoot, RequiredStudyProgram,
+    ExactStructuralStudyAnalysisResult, ExactStructuralStudyResult,
+    ExactStructuralStudyResultExpectation, ExactStructuralStudyRootPreparation,
+    PreparedExactStructuralStudyRoot, RequiredStudyProgram,
     EXACT_STRUCTURAL_STUDY_ROOT_EXECUTION_MODE, EXACT_STRUCTURAL_STUDY_ROOT_TARGET_PROFILE,
 };
 pub use exact_structural_sweep_root::{

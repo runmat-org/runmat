@@ -94,7 +94,7 @@ pub use structural_study::{
     analysis_complete_structural_study_intent_op, analysis_prepare_structural_study_intent_op,
     structural_study_execution_failure, PreparedStructuralStudy, PreparedStructuralStudyIntent,
     StructuralStudyCompletionIdentity, StructuralStudyExecutionFailure,
-    StructuralStudySequenceExecutionOutcome, STRUCTURAL_STUDY_INTENT_MAX_BYTES,
+    StructuralStudyExecutionOutcome, STRUCTURAL_STUDY_INTENT_MAX_BYTES,
 };
 use structural_study::{
     complete_study_run, persist_content_addressed_study_evidence, study_completion_from_prepared,
@@ -152,6 +152,20 @@ pub struct StructuralStudySequenceNumericalResult {
     pub frozen_project_digest: Option<runmat_execution::Digest>,
     pub steps: Vec<StructuralStudyStepNumericalResult>,
     pub states: Vec<runmat_analysis_fea::execution::CanonicalSemanticState>,
+}
+
+#[derive(Debug, Clone)]
+pub struct StructuralStudyTransientNumericalResult {
+    pub frozen_project_digest: Option<runmat_execution::Digest>,
+    pub step_id: ProcedureStepId,
+    pub result: runmat_analysis_fea::execution::StructuralTransientSolverResult,
+    pub numerical_receipt: runmat_analysis_fea::execution::StructuralTransientNumericalReceipt,
+}
+
+#[derive(Debug, Clone)]
+pub enum StructuralStudyNumericalResult {
+    LinearSequence(StructuralStudySequenceNumericalResult),
+    DirectTransient(Box<StructuralStudyTransientNumericalResult>),
 }
 
 impl PreparedStructuralLinearRun {
@@ -1138,10 +1152,19 @@ pub fn analysis_prepare_structural_study_op(
 
 pub fn analysis_complete_structural_study_op(
     mut prepared: PreparedStructuralStudy,
-    outcome: StructuralStudySequenceExecutionOutcome,
+    outcome: StructuralStudyExecutionOutcome,
 ) -> Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope> {
     let result = match outcome {
-        Ok(result) => result,
+        Ok(StructuralStudyNumericalResult::LinearSequence(result)) => result,
+        Ok(StructuralStudyNumericalResult::DirectTransient(_)) => {
+            return Err(structural_study_completion_failure(
+                &prepared,
+                "RM.FEA.RUN_STUDY.RESULT_KIND_MISMATCH",
+                OperationErrorType::Contract,
+                OperationErrorSeverity::Fatal,
+                "linear structural-study completion received a direct-transient result",
+            ))
+        }
         Err(StructuralStudyExecutionFailure::Failed(message)) => {
             return Err(structural_study_completion_failure(
                 &prepared,
@@ -1298,21 +1321,7 @@ fn analysis_run_study_with_structural_executor(
         )
         .map_err(|error| study_sequence_contract_error(&prepared.context, error))?;
         for declaration in &step.procedure_step.state_outputs {
-            let state_fields = collect_analysis_result_fields(&run.data)
-                .into_iter()
-                .filter(|field| match &field.values {
-                    runmat_analysis_core::AnalysisFieldValues::HostF64(values) => {
-                        !values.is_empty()
-                            && values.iter().all(|value| value.is_finite())
-                            && field
-                                .shape
-                                .iter()
-                                .try_fold(1_usize, |count, extent| count.checked_mul(*extent))
-                                == Some(values.len())
-                    }
-                    runmat_analysis_core::AnalysisFieldValues::DeviceRef(_) => false,
-                })
-                .collect();
+            let state_fields = collect_semantic_state_fields(&run.data);
             states.push(
                 CanonicalSemanticState::new(CanonicalSemanticStateInput {
                     producer: step_identity,
@@ -1337,6 +1346,24 @@ fn analysis_run_study_with_structural_executor(
         states,
         None,
     )
+}
+
+fn collect_semantic_state_fields(run: &AnalysisRunResult) -> Vec<AnalysisField> {
+    collect_analysis_result_fields(run)
+        .into_iter()
+        .filter(|field| match &field.values {
+            runmat_analysis_core::AnalysisFieldValues::HostF64(values) => {
+                !values.is_empty()
+                    && values.iter().all(|value| value.is_finite())
+                    && field
+                        .shape
+                        .iter()
+                        .try_fold(1_usize, |count, extent| count.checked_mul(*extent))
+                        == Some(values.len())
+            }
+            runmat_analysis_core::AnalysisFieldValues::DeviceRef(_) => false,
+        })
+        .collect()
 }
 
 fn in_process_study_topology_digest(
@@ -4184,6 +4211,24 @@ pub fn analysis_run_transient_with_options_op(
     )
     .map_err(|err| map_fea_run_error(AnalysisOperation::Transient, model, &context, err))?;
 
+    analysis_admit_transient_run_with_id(
+        backend,
+        options,
+        &context,
+        solver_mesh,
+        transient_run,
+        None,
+    )
+}
+
+fn analysis_admit_transient_run_with_id(
+    backend: ComputeBackend,
+    options: AnalysisTransientRunOptions,
+    context: &OperationContext,
+    solver_mesh: Option<SolverMeshArtifact>,
+    transient_run: runmat_analysis_fea::FeaTransientRunResult,
+    assigned_run_id: Option<&str>,
+) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
     let run = transient_run.run;
     let mut fallback_events = Vec::new();
     if backend == ComputeBackend::Gpu && run.execution_backend != ExecutionBackend::Accelerator {
@@ -4389,7 +4434,9 @@ pub fn analysis_run_transient_with_options_op(
     let selected_preconditioner = run.preconditioner;
 
     let result = AnalysisRunResult {
-        run_id: storage::next_run_id(),
+        run_id: assigned_run_id
+            .map(str::to_owned)
+            .unwrap_or_else(storage::next_run_id),
         run,
         render_topology: render_topology_from_solver_mesh(solver_mesh.as_ref()),
         modal_results: None,
@@ -4456,14 +4503,14 @@ pub fn analysis_run_transient_with_options_op(
         AnalysisOperation::Transient.name(),
         AnalysisOperation::Transient.version(),
         "RM.FEA.RUN_TRANSIENT.ARTIFACT_STORE_FAILED",
-        &context,
+        context,
         &result,
     )?;
 
     Ok(OperationEnvelope::new(
         AnalysisOperation::Transient.name(),
         AnalysisOperation::Transient.version(),
-        &context,
+        context,
         result,
     ))
 }

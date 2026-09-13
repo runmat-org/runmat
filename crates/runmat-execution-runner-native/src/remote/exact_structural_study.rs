@@ -3,7 +3,10 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use runmat_analysis_execution::StructuralSequencePreparation;
+use runmat_analysis_execution::{
+    StructuralSequencePreparation, StructuralStudyWorkloads, StructuralTransientRecoveryClosure,
+    StructuralTransientSequencePreparationInput,
+};
 use runmat_analysis_fea::execution::DEFAULT_ANALYSIS_CHUNK_BYTES;
 use runmat_execution::state::TaskState;
 use runmat_execution::task::RetryPolicy;
@@ -16,6 +19,7 @@ use super::exact_meshing::RemoteExactMeshingComposition;
 use super::pool_execution::RemotePoolExecutionOutcome;
 use super::pool_tasks::{execution_failure_outcome, packaged};
 use super::RemotePoolDriver;
+use crate::StructuralTransientRecoveryPublisher;
 use crate::{BoundaryRegionResolution, NativeExecutionError, NativeExecutionResult};
 
 #[derive(Clone, Debug)]
@@ -26,13 +30,32 @@ pub(super) enum RemoteExactStructuralStudyComposition {
     Indeterminate(String),
 }
 
-pub(crate) async fn execute(
+pub(super) enum StructuralTransientRecoveryAdmission<'a> {
+    Unavailable,
+    Available {
+        restored: Option<&'a super::recovery::RestoredObjectClosure>,
+        publisher: &'a mut dyn StructuralTransientRecoveryPublisher,
+    },
+}
+
+pub(super) async fn execute(
     pool: Arc<RemotePoolDriver>,
     request: ProgramExecutionRequest,
     run_id: String,
     resources: AllocationResources,
+    recovered: Option<&super::recovery::RestoredObjectClosure>,
+    recovery_publisher: &mut super::recovery::RemoteRecoveryPublisher<'_>,
 ) -> NativeExecutionResult<RemotePoolExecutionOutcome> {
-    match execute_for_composition(Arc::clone(&pool), &request, &run_id, &resources).await? {
+    match execute_for_composition(
+        Arc::clone(&pool),
+        &request,
+        &run_id,
+        &resources,
+        recovered,
+        Some(recovery_publisher),
+    )
+    .await?
+    {
         RemoteExactStructuralStudyComposition::Completed(response) => {
             packaged(response, pool).map(RemotePoolExecutionOutcome::Completed)
         }
@@ -53,6 +76,8 @@ pub(super) async fn execute_for_composition(
     request: &ProgramExecutionRequest,
     run_id: &str,
     resources: &AllocationResources,
+    recovered: Option<&super::recovery::RestoredObjectClosure>,
+    recovery_publisher: Option<&mut dyn StructuralTransientRecoveryPublisher>,
 ) -> NativeExecutionResult<RemoteExactStructuralStudyComposition> {
     let decoded = crate::decode_exact_structural_study_root(request, pool.as_ref())?;
     let signal_materializations = decoded.signal_materializations.clone();
@@ -74,6 +99,18 @@ pub(super) async fn execute_for_composition(
         RemoteExactMeshingComposition::Completed(completed) => completed,
         RemoteExactMeshingComposition::Terminal(outcome) => return Ok(composition(outcome)),
     };
+    let recovery = match recovery_publisher {
+        Some(publisher) => StructuralTransientRecoveryAdmission::Available {
+            restored: recovered,
+            publisher,
+        },
+        None if recovered.is_none() => StructuralTransientRecoveryAdmission::Unavailable,
+        None => {
+            return Err(protocol(
+                "restored structural transient state requires a recovery publisher",
+            ))
+        }
+    };
     execute_with_completed_meshing(
         pool,
         request,
@@ -81,8 +118,31 @@ pub(super) async fn execute_for_composition(
         completed,
         &signal_outcomes?,
         resources,
+        recovery,
     )
     .await
+}
+
+#[cfg(test)]
+pub(crate) async fn execute_for_test(
+    pool: Arc<RemotePoolDriver>,
+    request: &ProgramExecutionRequest,
+    run_id: &str,
+    resources: &AllocationResources,
+    publisher: &mut dyn StructuralTransientRecoveryPublisher,
+) -> NativeExecutionResult<Result<ProgramExecutionResponse, String>> {
+    Ok(
+        match execute_for_composition(pool, request, run_id, resources, None, Some(publisher))
+            .await?
+        {
+            RemoteExactStructuralStudyComposition::Completed(response) => Ok(response),
+            RemoteExactStructuralStudyComposition::Failed(message)
+            | RemoteExactStructuralStudyComposition::Indeterminate(message) => Err(message),
+            RemoteExactStructuralStudyComposition::Cancelled => {
+                Err("exact structural study was cancelled".into())
+            }
+        },
+    )
 }
 
 pub(super) async fn execute_with_completed_meshing(
@@ -95,6 +155,7 @@ pub(super) async fn execute_with_completed_meshing(
         super::signal_materialization::RemoteSignalMaterializationOutcome,
     >,
     resources: &AllocationResources,
+    recovery: StructuralTransientRecoveryAdmission<'_>,
 ) -> NativeExecutionResult<RemoteExactStructuralStudyComposition> {
     if completed.result.artifact.geometry.source_digest.bytes()
         != decoded.geometry_source_digest.bytes()
@@ -133,72 +194,202 @@ pub(super) async fn execute_with_completed_meshing(
             &decoded.workloads,
         )?;
     let mut workloads = decoded.workloads.clone();
-    let mut completed_signals = None;
-    for workload in workloads.values_mut() {
-        let completed_for_step = match super::signal_materialization::apply_to_workload(
-            workload,
-            &decoded.signal_materializations,
-            signal_outcomes,
-        ) {
-            Ok(completed) => completed,
-            Err(terminal) => return Ok(signal_composition(terminal)),
-        };
-        completed_signals.get_or_insert(completed_for_step);
-        if let Err(error) = resolve_workload_boundary_aliases(workload, &resolution) {
-            return Ok(RemoteExactStructuralStudyComposition::Failed(error));
-        }
-    }
-    let completed_signals = completed_signals
-        .ok_or_else(|| protocol("remote structural sequence contains no workload"))?;
-    let task_resources = super::pool_resources::task_resources(resources)?;
-    let analysis_accelerator_requests = task_resources.accelerators.clone();
-    let sequence = match crate::execute_structural_sequence_remotely(
-        Arc::clone(&pool),
-        StructuralSequencePreparation {
-            authored_study_digest: decoded.authored_study_digest,
-            frozen_project_digest: decoded.frozen_project_digest,
-            program_revision: request.recipe.program_revision.clone(),
-            artifact_access: decoded.artifact_access.clone(),
-            workloads,
-            mesh: Some(completed.result.artifact.clone()),
-            chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
-            inventory_limits: ObjectInventoryLimits::default(),
-            required_capabilities: Default::default(),
-            accelerator_requests: task_resources.accelerators.clone(),
-        },
-        crate::StructuralSequenceExecutionPolicy {
-            resources: task_resources,
-            retry: RetryPolicy::ExplicitlyIdempotent {
-                max_attempts: runmat_analysis_execution::DEFAULT_ANALYSIS_MAXIMUM_ATTEMPTS,
-            },
-            deadline_unix_millis: Some(super::pool_resources::task_deadline_unix_millis(
-                resources,
-            )?),
-            priority: 0,
-        },
-    )
-    .await
-    {
-        Ok(sequence) => sequence,
-        Err(error) => return Ok(sequence_error_composition(&pool, error.to_string())),
+    let mut resolved_model = workloads.authored_model().map_err(protocol)?.clone();
+    let completed_signals = match super::signal_materialization::apply_to_model(
+        &mut resolved_model,
+        &decoded.signal_materializations,
+        signal_outcomes,
+    ) {
+        Ok(completed) => completed,
+        Err(terminal) => return Ok(signal_composition(terminal)),
     };
-    let (response, objects) =
-        crate::exact_structural_study_root::package_exact_structural_study_result(
-            request,
-            &decoded,
-            &completed.result,
-            &boundary_objects,
-            crate::exact_structural_study_root::ExactStructuralAnalysisPublication {
-                signals: &completed_signals,
-                sequence: &sequence,
-                unresolved_workloads_digest,
-                accelerator_requests: &analysis_accelerator_requests,
-            },
-        )?;
+    if let Err(error) = resolve_model_boundary_aliases(&mut resolved_model, &resolution) {
+        return Ok(RemoteExactStructuralStudyComposition::Failed(error));
+    }
+    workloads.replace_model(resolved_model).map_err(protocol)?;
+    let task_resources =
+        match admit_analysis_task_resources(resources, &decoded.analysis_accelerator_requests) {
+            Ok(resources) => resources,
+            Err(error) => return Ok(RemoteExactStructuralStudyComposition::Failed(error)),
+        };
+    let analysis_accelerator_requests = decoded.analysis_accelerator_requests.clone();
+    let policy = crate::StructuralSequenceExecutionPolicy {
+        resources: task_resources,
+        retry: RetryPolicy::ExplicitlyIdempotent {
+            max_attempts: runmat_analysis_execution::DEFAULT_ANALYSIS_MAXIMUM_ATTEMPTS,
+        },
+        deadline_unix_millis: Some(super::pool_resources::task_deadline_unix_millis(resources)?),
+        priority: 0,
+    };
+    let (response, objects) = match workloads {
+        StructuralStudyWorkloads::LinearSequence { workloads } => {
+            if matches!(
+                &recovery,
+                StructuralTransientRecoveryAdmission::Available {
+                    restored: Some(_),
+                    ..
+                }
+            ) {
+                return Ok(RemoteExactStructuralStudyComposition::Failed(
+                    "linear structural study cannot consume a transient recovery closure".into(),
+                ));
+            }
+            let sequence = match crate::execute_structural_sequence_remotely(
+                Arc::clone(&pool),
+                StructuralSequencePreparation {
+                    authored_study_digest: decoded.authored_study_digest,
+                    frozen_project_digest: decoded.frozen_project_digest,
+                    program_revision: request.recipe.program_revision.clone(),
+                    artifact_access: decoded.artifact_access.clone(),
+                    workloads,
+                    mesh: Some(completed.result.artifact.clone()),
+                    chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
+                    inventory_limits: ObjectInventoryLimits::default(),
+                    required_capabilities: Default::default(),
+                    accelerator_requests: analysis_accelerator_requests.clone(),
+                },
+                policy,
+            )
+            .await
+            {
+                Ok(sequence) => sequence,
+                Err(error) => return Ok(sequence_error_composition(&pool, error.to_string())),
+            };
+            crate::exact_structural_study_root::package_exact_structural_study_result(
+                request,
+                &decoded,
+                &completed.result,
+                &boundary_objects,
+                crate::exact_structural_study_root::ExactStructuralAnalysisPublication::LinearSequence {
+                    signals: &completed_signals,
+                    sequence: &sequence,
+                    unresolved_workloads_digest,
+                },
+            )?
+        }
+        StructuralStudyWorkloads::DirectTransient {
+            workload,
+            block_plan,
+        } => {
+            let (recovered, recovery_publisher) = match recovery {
+                StructuralTransientRecoveryAdmission::Available {
+                    restored,
+                    publisher,
+                } => (restored, publisher),
+                StructuralTransientRecoveryAdmission::Unavailable => {
+                    return Ok(RemoteExactStructuralStudyComposition::Failed(
+                        "direct transient execution requires a transactional recovery publisher"
+                            .into(),
+                    ))
+                }
+            };
+            let recovery = recovered
+                .map(|restored| {
+                    StructuralTransientRecoveryClosure::from_objects(
+                        &decoded.artifact_access,
+                        restored.root.clone(),
+                        restored.objects.clone(),
+                    )
+                    .map_err(protocol)
+                })
+                .transpose()?;
+            let preparation = runmat_analysis_execution::prepare_structural_transient_sequence(
+                StructuralTransientSequencePreparationInput {
+                    workload: &workload,
+                    mesh: &completed.result.artifact,
+                    block_plan,
+                    artifact_access: decoded.artifact_access.clone(),
+                    program_revision: request.recipe.program_revision.clone(),
+                    chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
+                    inventory_limits: ObjectInventoryLimits::default(),
+                },
+            )
+            .map_err(protocol)?;
+            let completion = match crate::execute_structural_transient_remotely(
+                Arc::clone(&pool),
+                preparation,
+                policy,
+                recovery.as_ref(),
+                recovery_publisher,
+            )
+            .await
+            {
+                Ok(completion) => completion,
+                Err(error) => return Ok(sequence_error_composition(&pool, error.to_string())),
+            };
+            crate::exact_structural_study_root::package_exact_structural_study_result(
+                request,
+                &decoded,
+                &completed.result,
+                &boundary_objects,
+                crate::exact_structural_study_root::ExactStructuralAnalysisPublication::DirectTransient {
+                    signals: &completed_signals,
+                    completion: &completion,
+                    unresolved_workloads_digest,
+                },
+            )?
+        }
+    };
     for object in objects {
         pool.register_execution_object(object.reference, object.bytes)?;
     }
     Ok(RemoteExactStructuralStudyComposition::Completed(response))
+}
+
+fn admit_analysis_task_resources(
+    resources: &AllocationResources,
+    expected_accelerators: &[runmat_execution::resource::AcceleratorRequest],
+) -> Result<runmat_execution::resource::ResourceRequest, String> {
+    let task_resources =
+        super::pool_resources::task_resources(resources).map_err(|error| error.to_string())?;
+    if task_resources.accelerators != expected_accelerators {
+        return Err(
+            "allocated accelerators differ from the immutable structural-study request".into(),
+        );
+    }
+    Ok(task_resources)
+}
+
+#[cfg(test)]
+mod allocation_tests {
+    use super::*;
+
+    fn resources(accelerator_count: u32) -> AllocationResources {
+        AllocationResources {
+            cpu_millicores: 500,
+            memory_bytes: 1 << 20,
+            scratch_bytes: 1 << 20,
+            accelerator_count,
+            accelerator_class: (accelerator_count > 0).then(|| "gpu.test".into()),
+            accelerator_memory_bytes: if accelerator_count > 0 { 1 << 18 } else { 0 },
+            maximum_wall_millis: 10_000,
+        }
+    }
+
+    #[test]
+    fn remote_allocation_must_match_the_immutable_study_request() {
+        assert!(admit_analysis_task_resources(&resources(0), &[]).is_ok());
+        assert!(admit_analysis_task_resources(&resources(1), &[])
+            .unwrap_err()
+            .contains("immutable structural-study request"));
+        let requested = runmat_execution::resource::AcceleratorRequest {
+            class: "gpu.test".into(),
+            count: 1,
+            memory_bytes_each: 1 << 18,
+        };
+        assert!(
+            admit_analysis_task_resources(&resources(0), std::slice::from_ref(&requested))
+                .unwrap_err()
+                .contains("immutable structural-study request")
+        );
+        assert_eq!(
+            admit_analysis_task_resources(&resources(1), &[requested])
+                .unwrap()
+                .accelerators
+                .len(),
+            1
+        );
+    }
 }
 
 fn sequence_error_composition(
@@ -265,15 +456,14 @@ fn protocol(error: impl std::fmt::Display) -> NativeExecutionError {
     NativeExecutionError::Protocol(error.to_string())
 }
 
-fn resolve_workload_boundary_aliases(
-    workload: &mut runmat_analysis_fea::execution::StructuralLinearWorkload,
+fn resolve_model_boundary_aliases(
+    model: &mut runmat_analysis_core::AnalysisModel,
     resolution: &BoundaryRegionResolution,
 ) -> Result<(), String> {
     let aliases = runmat_analysis_core::BoundaryRegionAliases::new(resolution.aliases.clone())
         .map_err(|error| error.to_string())?;
-    workload.model =
-        runmat_analysis_core::resolve_boundary_region_aliases(&workload.model, &aliases)
-            .map_err(|error| error.to_string())?;
+    *model = runmat_analysis_core::resolve_boundary_region_aliases(model, &aliases)
+        .map_err(|error| error.to_string())?;
     Ok(())
 }
 
@@ -323,7 +513,7 @@ mod tests {
             )]),
         };
 
-        let error = resolve_workload_boundary_aliases(&mut workload, &resolution).unwrap_err();
+        let error = resolve_model_boundary_aliases(&mut workload.model, &resolution).unwrap_err();
         assert!(error.contains("face_000002"));
     }
 }

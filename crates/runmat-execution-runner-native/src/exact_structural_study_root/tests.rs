@@ -63,6 +63,19 @@ pub(crate) fn prepared(
     expected_source: Digest,
     authored_study_digest: Digest,
 ) -> PreparedExactStructuralStudyRoot {
+    prepare_exact_structural_study_root(preparation(
+        authority,
+        expected_source,
+        authored_study_digest,
+    ))
+    .unwrap()
+}
+
+fn preparation(
+    authority: &str,
+    expected_source: Digest,
+    authored_study_digest: Digest,
+) -> ExactStructuralStudyRootPreparation {
     let source = b"portable exact CAD source";
     let revision = revision();
     let access = access(authority);
@@ -91,17 +104,47 @@ pub(crate) fn prepared(
         maximum_chunk_bytes: 8,
     })
     .unwrap();
-    prepare_exact_structural_study_root(ExactStructuralStudyRootPreparation {
+    ExactStructuralStudyRootPreparation {
         program_revision: revision,
         artifact_access: access,
         authored_study_digest,
         frozen_project_digest: Some(Digest::sha256(b"project")),
         geometry_source_digest: expected_source,
-        workloads: workloads(),
+        workloads: runmat_analysis_execution::StructuralStudyWorkloads::LinearSequence {
+            workloads: workloads(),
+        },
+        analysis_accelerator_requests: Vec::new(),
         signal_materializations: Vec::new(),
         exact_meshing,
-    })
-    .unwrap()
+    }
+}
+
+#[test]
+fn whole_study_root_binds_accelerator_requests_to_the_authored_backend() {
+    let source_digest = Digest::sha256(b"portable exact CAD source");
+    let mut request = preparation("run-accelerator", source_digest, Digest::sha256(b"study"));
+    request.analysis_accelerator_requests = vec![runmat_execution::resource::AcceleratorRequest {
+        class: "gpu.test".into(),
+        count: 1,
+        memory_bytes_each: 1024,
+    }];
+    assert!(prepare_exact_structural_study_root(request).is_err());
+
+    let mut request = preparation(
+        "run-missing-accelerator",
+        source_digest,
+        Digest::sha256(b"gpu-study"),
+    );
+    let runmat_analysis_execution::StructuralStudyWorkloads::LinearSequence { workloads } =
+        &mut request.workloads
+    else {
+        unreachable!("test preparation is linear")
+    };
+    for workload in workloads.values_mut() {
+        workload.backend = ComputeBackend::Gpu;
+        workload.algebra_backend = LinearAlgebraBackendKind::Accelerator;
+    }
+    assert!(prepare_exact_structural_study_root(request).is_err());
 }
 
 #[test]
@@ -130,7 +173,12 @@ fn whole_study_root_is_path_free_and_reuses_fixed_programs() {
     first.write_to(&mut store).unwrap();
     let decoded = decode_exact_structural_study_root(first.request(), &store).unwrap();
     assert_eq!(decoded.geometry_source_digest, source_digest);
-    assert_eq!(decoded.workloads, workloads());
+    assert_eq!(
+        decoded.workloads,
+        runmat_analysis_execution::StructuralStudyWorkloads::LinearSequence {
+            workloads: workloads(),
+        }
+    );
     assert_eq!(decoded.artifact_access, access("run-a"));
 }
 

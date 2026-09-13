@@ -219,8 +219,8 @@ fn validate_registered_inputs(
     Ok(())
 }
 
-pub(super) fn apply_to_workload(
-    workload: &mut runmat_analysis_fea::execution::StructuralLinearWorkload,
+pub(super) fn apply_to_model(
+    model: &mut runmat_analysis_core::AnalysisModel,
     required: &[PreparedSignalMaterialization],
     outcomes: &BTreeMap<SignalMaterializationIdentity, RemoteSignalMaterializationOutcome>,
 ) -> Result<Vec<CompletedRemoteSignalMaterialization>, RemoteSignalMaterializationOutcome> {
@@ -241,8 +241,7 @@ pub(super) fn apply_to_workload(
         replacements.insert(prepared.authored.signal_id().clone(), result.signal.clone());
         completed.push(result);
     }
-    workload.model.signals = workload
-        .model
+    model.signals = model
         .signals
         .iter()
         .map(|signal| {
@@ -256,8 +255,7 @@ pub(super) fn apply_to_workload(
             }
         })
         .collect();
-    if workload
-        .model
+    if model
         .signals
         .iter()
         .any(|signal| signal.generator().is_some())
