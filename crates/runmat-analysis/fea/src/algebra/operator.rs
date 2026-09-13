@@ -305,6 +305,14 @@ impl TryFrom<PreparedModalSystemData> for PreparedModalSystem {
 }
 
 impl PreparedModalSystem {
+    pub fn operators(&self) -> &CanonicalRealOperators {
+        &self.operators
+    }
+
+    pub fn reduction(&self) -> &AffineConstraintReduction {
+        &self.reduction
+    }
+
     pub fn as_assembled(&self) -> Result<AssembledRealSystem, RealSystemError> {
         let dof_count = self.operators.dof_count();
         AssembledRealSystem::try_new(

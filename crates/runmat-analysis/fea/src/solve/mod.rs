@@ -2,6 +2,7 @@ pub mod accelerator;
 mod affine;
 pub mod backend;
 pub mod dynamics;
+mod krylov;
 pub mod linear;
 pub mod modal;
 mod multiplier;

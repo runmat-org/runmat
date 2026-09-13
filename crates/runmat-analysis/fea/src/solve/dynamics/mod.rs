@@ -1,10 +1,14 @@
 //! Structural response solvers that operate on the canonical second-order system.
 
 mod dense;
+mod direct_harmonic;
 mod modal_harmonic;
 mod modal_projection;
 mod modal_transient;
 
+pub use direct_harmonic::{
+    solve_direct_harmonic, DirectHarmonicError, DirectHarmonicPolicy, DirectHarmonicResponse,
+};
 pub use modal_harmonic::{
     solve_modal_harmonic, ModalHarmonicError, ModalHarmonicLoad, ModalHarmonicResponse,
 };
