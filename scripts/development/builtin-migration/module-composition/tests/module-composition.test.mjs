@@ -534,6 +534,87 @@ test("reviewed baseline-only composition products require no bundle transition",
   );
 });
 
+test("prerequisite order validates sequential additions after parent activation", () => {
+  const baseline = fixtureProjection();
+  const catalog = baseline.products[0];
+  catalog.state = "absent";
+  catalog.children = [];
+  const products = new Map(baseline.products.map((product) => [product.product_id, {
+    product_id: product.product_id,
+    path: product.path,
+    baseline_digest: product.state === "absent" ? null : `sha256:${"1".repeat(64)}`,
+    lifecycle: {
+      kind: product.product_id === catalog.product_id
+        ? "bundle-referenced"
+        : "reviewed-baseline-only",
+    },
+    verification: {
+      kind: "rust_module_composition",
+      crate_role: product.crate_role,
+      module_path: product.module_path,
+    },
+  }]));
+  const alpha = child({
+    module: "alpha",
+    source_path: "crates/runmat-builtins/src/catalog/entries/math/alpha/mod.rs",
+    role: "group",
+    visibility: "private",
+    declarationOrder: 0,
+    aggregations: ["entries"],
+  });
+  const beta = child({
+    module: "beta",
+    source_path: "crates/runmat-builtins/src/catalog/entries/math/beta/mod.rs",
+    role: "group",
+    visibility: "private",
+    declarationOrder: 1,
+    aggregations: ["entries"],
+  });
+  beta.aggregation_sources[0].order = 1;
+  const activating = {
+    prerequisites: [],
+    integration_product_refs: [catalog.product_id],
+    module_composition_transition: transition("z-activate", [{
+      product_id: catalog.product_id,
+      operation: "add",
+      before: null,
+      after: alpha,
+    }], [{
+      product_id: catalog.product_id,
+      before_state: "absent",
+      after_state: "present",
+    }]),
+    authored_write_set: [{ kind: "tree", path: alpha.source_path.slice(0, -"/mod.rs".length) }],
+  };
+  const extending = {
+    prerequisites: [{ bundle_id: "z-activate", kind: "infrastructure" }],
+    integration_product_refs: [catalog.product_id],
+    module_composition_transition: transition("a-extend", [{
+      product_id: catalog.product_id,
+      operation: "add",
+      before: null,
+      after: beta,
+    }]),
+    authored_write_set: [{ kind: "tree", path: beta.source_path.slice(0, -"/mod.rs".length) }],
+  };
+  assert.doesNotThrow(() => validateModuleCompositionControl(
+    baseline,
+    products,
+    new Map([["a-extend", extending], ["z-activate", activating]]),
+  ));
+
+  const unordered = structuredClone(extending);
+  unordered.prerequisites = [];
+  assert.throws(
+    () => validateModuleCompositionControl(
+      baseline,
+      products,
+      new Map([["a-extend", unordered], ["z-activate", activating]]),
+    ),
+    /composition transitions a-extend and z-activate must be prerequisite-ordered/,
+  );
+});
+
 function fixtureProjection() {
   return {
     schema_version: 5,

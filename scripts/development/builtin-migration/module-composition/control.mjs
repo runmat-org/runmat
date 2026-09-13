@@ -1,10 +1,13 @@
 import { compareCodePoint } from "../constants.mjs";
 import { pathAllowed } from "../path-scope.mjs";
 import { bindModuleCompositionProjection } from "./binding.mjs";
-import { parseModuleCompositionTransition } from "./projection.mjs";
+import {
+  applyModuleCompositionTransitions,
+  parseModuleCompositionTransitionShape,
+} from "./projection.mjs";
 
 export function validateModuleCompositionControl(
-  baselineValue, integrationProducts, bundles,
+  baselineValue, integrationProducts, bundles, { deferEffectiveSequence = false } = {},
 ) {
   const products = [...integrationProducts.values()];
   const baseline = bindModuleCompositionProjection(products, baselineValue);
@@ -30,7 +33,7 @@ export function validateModuleCompositionControl(
     if (baseline === null || value === null) {
       throw new Error(`${bundleId}: reviewed composition products require a bundle transition`);
     }
-    const transition = parseModuleCompositionTransition(value, baseline);
+    const transition = parseModuleCompositionTransitionShape(value, baseline);
     if (transition.transition_id !== bundleId) {
       throw new Error(`${bundleId}: module composition transition id must equal its bundle id`);
     }
@@ -61,8 +64,93 @@ export function validateModuleCompositionControl(
     }
     transitions.set(bundleId, transition);
   }
+  if (!deferEffectiveSequence) {
+    validateEffectiveSequence(baseline, transitions, bundles);
+  }
   return {
     baseline,
     transitions: new Map([...transitions].sort(([left], [right]) => compareCodePoint(left, right))),
   };
+}
+
+function validateEffectiveSequence(baseline, transitions, bundles) {
+  const order = prerequisiteOrder(bundles);
+  validateSharedProductOrdering(transitions, bundles);
+  let effective = baseline;
+  for (const bundleId of order) {
+    const transition = transitions.get(bundleId);
+    if (transition !== null) {
+      effective = applyModuleCompositionTransitions(effective, [transition]);
+    }
+  }
+}
+
+function validateSharedProductOrdering(transitions, bundles) {
+  const productBundles = new Map();
+  for (const [bundleId, transition] of transitions) {
+    if (transition === null) continue;
+    for (const state of transition.product_states) {
+      const owners = productBundles.get(state.product_id) ?? [];
+      owners.push({
+        bundle_id: bundleId,
+        before_state: state.before_state,
+        after_state: state.after_state,
+      });
+      productBundles.set(state.product_id, owners);
+    }
+  }
+  for (const [productId, owners] of productBundles) {
+    for (let leftIndex = 0; leftIndex < owners.length; leftIndex += 1) {
+      for (let rightIndex = leftIndex + 1; rightIndex < owners.length; rightIndex += 1) {
+        const left = owners[leftIndex];
+        const right = owners[rightIndex];
+        const stableSharedState = left.before_state === left.after_state
+          && right.before_state === right.after_state
+          && left.before_state === right.before_state;
+        if (!stableSharedState
+          && !dependsOn(bundles, left.bundle_id, right.bundle_id)
+          && !dependsOn(bundles, right.bundle_id, left.bundle_id)) {
+          throw new Error(
+            `${productId}: composition transitions ${left.bundle_id} and ${right.bundle_id} must be prerequisite-ordered`,
+          );
+        }
+      }
+    }
+  }
+}
+
+function dependsOn(bundles, bundleId, expectedPrerequisite, visited = new Set()) {
+  if (visited.has(bundleId)) return false;
+  visited.add(bundleId);
+  const bundle = bundles.get(bundleId);
+  for (const prerequisite of bundle?.prerequisites ?? []) {
+    if (prerequisite.bundle_id === expectedPrerequisite
+      || dependsOn(bundles, prerequisite.bundle_id, expectedPrerequisite, visited)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function prerequisiteOrder(bundles) {
+  const remaining = new Map([...bundles].map(([bundleId, bundle]) => [
+    bundleId,
+    new Set((bundle.prerequisites ?? []).map((entry) => entry.bundle_id)),
+  ]));
+  const result = [];
+  while (remaining.size > 0) {
+    const ready = [...remaining]
+      .filter(([, prerequisites]) => [...prerequisites]
+        .every((bundleId) => !remaining.has(bundleId)))
+      .map(([bundleId]) => bundleId)
+      .sort(compareCodePoint);
+    if (ready.length === 0) {
+      throw new Error("module composition prerequisites contain a cycle");
+    }
+    for (const bundleId of ready) {
+      remaining.delete(bundleId);
+      result.push(bundleId);
+    }
+  }
+  return result;
 }

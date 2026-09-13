@@ -25,15 +25,39 @@ export function applyModuleCompositionTransitions(baselineValue, transitionValue
 
 export function parseModuleCompositionTransition(value, projectionValue) {
   const projection = parseModuleCompositionProjection(projectionValue);
-  return parseTransition(value, new Map(projection.products.map((entry) => [entry.product_id, entry])));
+  return parseTransition(
+    value,
+    new Map(projection.products.map((entry) => [entry.product_id, entry])),
+    { requireEffectiveProductState: true },
+  );
 }
 
-function parseTransition(value, products) {
+// Review inputs are authored independently, while their effective product
+// states are established by prerequisite-ordered transitions. This parser
+// validates the complete transition shape against the frozen product
+// definitions without pretending that every bundle executes directly against
+// the original baseline. The control graph performs the effective-state check
+// after it has established an unambiguous prerequisite order.
+export function parseModuleCompositionTransitionShape(value, projectionValue) {
+  const projection = parseModuleCompositionProjection(projectionValue);
+  return parseTransition(
+    value,
+    new Map(projection.products.map((entry) => [entry.product_id, entry])),
+    { requireEffectiveProductState: false },
+  );
+}
+
+function parseTransition(value, products, { requireEffectiveProductState = true } = {}) {
   kind(value, 5, "runmat-builtin-module-composition-transition", "module composition transition");
   exact(value, ["schema_version", "kind", "transition_id", "product_states", "changes"], "module composition transition");
   const transitionId = stableId(value.transition_id, "module composition transition id");
   const productStates = array(value.product_states, `${transitionId} composition product states`)
-    .map((entry) => parseProductState(entry, products, transitionId));
+    .map((entry) => parseProductState(
+      entry,
+      products,
+      transitionId,
+      requireEffectiveProductState,
+    ));
   const stateIds = productStates.map((entry) => entry.product_id);
   if (new Set(stateIds).size !== stateIds.length
     || JSON.stringify(stateIds) !== JSON.stringify([...stateIds].sort(compareCodePoint))) {
@@ -56,14 +80,19 @@ function parseTransition(value, products) {
   return { ...value, transition_id: transitionId, product_states: productStates, changes };
 }
 
-function parseProductState(value, products, transitionId) {
+function parseProductState(
+  value,
+  products,
+  transitionId,
+  requireEffectiveProductState,
+) {
   exact(value, ["product_id", "before_state", "after_state"], `${transitionId} composition product state`);
   const productId = stableId(value.product_id, `${transitionId} product state id`);
   const product = products.get(productId);
   if (!product) throw new Error(`${transitionId}: unknown composition product state ${productId}`);
   const beforeState = enumValue(value.before_state, PRODUCT_STATES, `${transitionId}/${productId} before state`);
   const afterState = enumValue(value.after_state, PRODUCT_STATES, `${transitionId}/${productId} after state`);
-  if (product.state !== beforeState) {
+  if (requireEffectiveProductState && product.state !== beforeState) {
     throw new Error(`${transitionId}: ${productId} prior product state differs from the effective projection`);
   }
   return { product_id: productId, before_state: beforeState, after_state: afterState };
