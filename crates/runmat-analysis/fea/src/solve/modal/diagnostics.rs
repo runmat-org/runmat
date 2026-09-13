@@ -11,12 +11,13 @@ pub(super) fn push_modal_quality_diagnostics(
     frequencies_hz: &[f64],
     mode_shapes: &[Vec<f64>],
     residual_norms: &[f64],
+    residual_tolerance: f64,
 ) {
     if !residual_norms.is_empty() {
         let max_residual = residual_norms.iter().copied().fold(0.0_f64, f64::max);
         diagnostics.push(FeaDiagnostic {
             code: "FEA_MODAL_RESIDUAL".to_string(),
-            severity: if max_residual <= 1.0e-3 {
+            severity: if max_residual <= residual_tolerance {
                 FeaDiagnosticSeverity::Info
             } else {
                 FeaDiagnosticSeverity::Warning

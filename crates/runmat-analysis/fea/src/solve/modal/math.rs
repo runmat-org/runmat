@@ -12,6 +12,10 @@ pub(super) fn normalize_mass(system: &AssembledRealSystem, vector: &mut [f64]) {
     }
 }
 
+pub(super) fn mass_inner_product(system: &AssembledRealSystem, left: &[f64], right: &[f64]) -> f64 {
+    dot(left, &apply_m(system, right))
+}
+
 pub(super) fn orthonormalize_mass(
     system: &AssembledRealSystem,
     vector: &mut [f64],
@@ -26,23 +30,18 @@ pub(super) fn orthonormalize_mass(
     }
 }
 
-pub(super) fn relative_l2_update(previous: &[f64], current: &[f64]) -> f64 {
-    if previous.len() != current.len() || previous.is_empty() {
-        return 0.0;
+pub(super) fn orthonormalize_mass_block(system: &AssembledRealSystem, vectors: &mut Vec<Vec<f64>>) {
+    let mut basis = Vec::with_capacity(vectors.len());
+    for mut vector in vectors.drain(..) {
+        // Two passes materially improve orthogonality for clustered eigenspaces.
+        for _ in 0..2 {
+            orthonormalize_mass(system, &mut vector, &basis);
+        }
+        let norm_squared = mass_inner_product(system, &vector, &vector);
+        if norm_squared.is_finite() && norm_squared > 1.0e-24 {
+            normalize_mass(system, &mut vector);
+            basis.push(vector);
+        }
     }
-    let delta_norm = previous
-        .iter()
-        .zip(current.iter())
-        .map(|(a, b)| {
-            let d = b - a;
-            d * d
-        })
-        .sum::<f64>()
-        .sqrt();
-    let current_norm = current
-        .iter()
-        .map(|value| value * value)
-        .sum::<f64>()
-        .sqrt();
-    delta_norm / current_norm.max(1.0e-12)
+    *vectors = basis;
 }

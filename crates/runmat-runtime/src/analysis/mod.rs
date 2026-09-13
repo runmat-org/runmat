@@ -1952,6 +1952,7 @@ pub fn analysis_run_modal_with_options_op(
         ModalSolveOptions {
             formulation_requirement,
             truncation: options.truncation,
+            convergence: options.convergence,
             solver_mesh: solver_mesh.clone(),
         },
     )
@@ -1979,7 +1980,7 @@ pub fn analysis_run_modal_with_options_op(
         .iter()
         .map(|mode| mode.residual_norm())
         .fold(0.0_f64, f64::max)
-        > options.residual_warn_threshold
+        > options.convergence.relative_residual_tolerance()
     {
         QualityGate::Warn
     } else {
@@ -2006,7 +2007,7 @@ pub fn analysis_run_modal_with_options_op(
             code: QualityReasonCode::ModalResidualExceeded,
             detail: format!(
                 "modal residual exceeds threshold {}",
-                options.residual_warn_threshold
+                options.convergence.relative_residual_tolerance()
             ),
         });
     }

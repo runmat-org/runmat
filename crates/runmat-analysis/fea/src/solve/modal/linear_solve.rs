@@ -3,7 +3,7 @@ use crate::{
     solve::{
         accelerator::{solve_prepared_accelerator_system, AcceleratorPreparedLinearSystem},
         linear::{linear_result_from_accelerator_error, linear_result_from_accelerator_output},
-        preconditioner::SpdPreconditionerKind,
+        preconditioner::{SpdPreconditioner, SpdPreconditionerKind},
     },
 };
 
@@ -11,6 +11,7 @@ use super::math::dot;
 
 pub(super) struct LinearSolveAttempt {
     pub(super) vector: Vec<f64>,
+    pub(super) converged: bool,
     pub(super) accelerator: Option<crate::solve::linear::LinearSolveResult>,
 }
 
@@ -18,6 +19,7 @@ pub(super) struct CgSolveOptions<'a> {
     pub(super) max_iters: usize,
     pub(super) tol: f64,
     pub(super) prepared_accelerator_system: Option<&'a AcceleratorPreparedLinearSystem>,
+    pub(super) cpu_preconditioner: Option<&'a dyn SpdPreconditioner>,
     pub(super) initial_guess: Option<&'a [f64]>,
 }
 
@@ -45,6 +47,7 @@ pub(super) fn solve_k_system_cg(
         };
         return LinearSolveAttempt {
             vector: result.solution.clone(),
+            converged: result.converged,
             accelerator: Some(result),
         };
     }
@@ -60,36 +63,55 @@ pub(super) fn solve_k_system_cg(
             .map(|(rhs_i, kx_i)| rhs_i - kx_i)
             .collect::<Vec<f64>>()
     };
-    let mut p = r.clone();
-    let mut rr_old = dot(&r, &r);
-    if rr_old.sqrt() <= options.tol {
+    let apply_preconditioner = |residual: &[f64]| {
+        options.cpu_preconditioner.map_or_else(
+            || residual.to_vec(),
+            |preconditioner| preconditioner.apply(residual),
+        )
+    };
+    let mut z = apply_preconditioner(&r);
+    let mut p = z.clone();
+    let mut rz_old = dot(&r, &z);
+    let rhs_norm = dot(rhs, rhs).sqrt().max(1.0);
+    if dot(&r, &r).sqrt() <= options.tol * rhs_norm {
         return LinearSolveAttempt {
             vector: x,
+            converged: true,
             accelerator: None,
         };
     }
 
+    let mut converged = false;
     for _ in 0..options.max_iters {
         let ap = apply_k(system, &p);
-        let denom = dot(&p, &ap).abs().max(1.0e-12);
-        let alpha = rr_old / denom;
+        let denom = dot(&p, &ap);
+        if !denom.is_finite() || denom <= 1.0e-24 {
+            break;
+        }
+        let alpha = rz_old / denom;
         for i in 0..x.len() {
             x[i] += alpha * p[i];
             r[i] -= alpha * ap[i];
         }
-        let rr_new = dot(&r, &r);
-        if rr_new.sqrt() <= options.tol {
+        if dot(&r, &r).sqrt() <= options.tol * rhs_norm {
+            converged = true;
             break;
         }
-        let beta = rr_new / rr_old.max(1.0e-12);
-        for i in 0..p.len() {
-            p[i] = r[i] + beta * p[i];
+        z = apply_preconditioner(&r);
+        let rz_new = dot(&r, &z);
+        if rz_old.abs() <= 1.0e-24 {
+            break;
         }
-        rr_old = rr_new;
+        let beta = rz_new / rz_old;
+        for i in 0..p.len() {
+            p[i] = z[i] + beta * p[i];
+        }
+        rz_old = rz_new;
     }
 
     LinearSolveAttempt {
         vector: x,
+        converged,
         accelerator: None,
     }
 }

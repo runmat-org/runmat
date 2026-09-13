@@ -1354,9 +1354,9 @@ fn analysis_run_modal_contract_is_v1_and_typed() {
         .run
         .field(FEA_FIELD_MODAL_M_ORTHOGONALITY)
         .is_some());
-    assert_eq!(modal_envelope.data.run_status, RunStatus::Degraded);
-    assert!(!modal_envelope.data.numerically_acceptable);
-    assert!(modal_envelope
+    assert_eq!(modal_envelope.data.run_status, RunStatus::Completed);
+    assert!(modal_envelope.data.numerically_acceptable);
+    assert!(!modal_envelope
         .data
         .quality_reasons
         .iter()
@@ -1403,7 +1403,7 @@ fn analysis_run_modal_with_options_contract_controls_mode_budget() {
             precision_mode: PrecisionMode::Fp64,
             quality_policy: QualityPolicy::Balanced,
             truncation: runmat_analysis_fea::ModalTruncationPolicy::requested(2),
-            residual_warn_threshold: 1.0e-2,
+            convergence: runmat_analysis_fea::ModalConvergencePolicy::production(),
             solver_mesh_artifact_path: None,
         },
         OperationContext::new(Some("trace-contract-modal-opts-3".to_string()), None),
@@ -1430,7 +1430,7 @@ fn analysis_run_modal_with_options_contract_controls_mode_budget() {
             precision_mode: PrecisionMode::Fp64,
             quality_policy: QualityPolicy::Balanced,
             truncation: runmat_analysis_fea::ModalTruncationPolicy::requested(0),
-            residual_warn_threshold: 1.0e-3,
+            convergence: runmat_analysis_fea::ModalConvergencePolicy::production(),
             solver_mesh_artifact_path: None,
         },
         OperationContext::new(Some("trace-contract-modal-opts-4".to_string()), None),

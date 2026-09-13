@@ -1624,8 +1624,22 @@ fn modal_run_option_presets_are_ordered_for_cost_vs_accuracy() {
         balanced.truncation.requested_mode_count()
             < high_accuracy.truncation.requested_mode_count()
     );
-    assert!(coarse.residual_warn_threshold > balanced.residual_warn_threshold);
-    assert!(balanced.residual_warn_threshold > high_accuracy.residual_warn_threshold);
+    assert!(
+        coarse.convergence.relative_residual_tolerance()
+            > balanced.convergence.relative_residual_tolerance()
+    );
+    assert!(
+        balanced.convergence.relative_residual_tolerance()
+            > high_accuracy.convergence.relative_residual_tolerance()
+    );
+    assert!(
+        coarse.convergence.maximum_subspace_iterations()
+            < balanced.convergence.maximum_subspace_iterations()
+    );
+    assert!(
+        balanced.convergence.maximum_subspace_iterations()
+            < high_accuracy.convergence.maximum_subspace_iterations()
+    );
 }
 
 #[test]
@@ -9368,7 +9382,7 @@ fn analysis_run_modal_with_options_controls_requested_mode_count() {
             precision_mode: PrecisionMode::Fp64,
             quality_policy: QualityPolicy::Balanced,
             truncation: runmat_analysis_fea::ModalTruncationPolicy::requested(2),
-            residual_warn_threshold: 1.0e-2,
+            convergence: runmat_analysis_fea::ModalConvergencePolicy::production(),
             solver_mesh_artifact_path: None,
         },
         OperationContext::new(None, None),

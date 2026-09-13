@@ -552,6 +552,7 @@ impl Default for LinearStaticSolveOptions {
 pub struct ModalSolveOptions {
     pub formulation_requirement: FormulationRequirement,
     pub truncation: crate::pipeline::modal_governance::ModalTruncationPolicy,
+    pub convergence: crate::pipeline::modal_governance::ModalConvergencePolicy,
     pub solver_mesh: Option<SolverMeshArtifact>,
 }
 
@@ -560,6 +561,7 @@ impl Default for ModalSolveOptions {
         Self {
             formulation_requirement: FormulationRequirement::Production,
             truncation: crate::pipeline::modal_governance::ModalTruncationPolicy::default(),
+            convergence: crate::pipeline::modal_governance::ModalConvergencePolicy::default(),
             solver_mesh: None,
         }
     }

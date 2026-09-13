@@ -38,7 +38,7 @@ pub use pipeline::modal_basis::{
     ModalBasisArtifact, ModalBasisIdentity, ModalBasisMode, ModalDirectionalMetric,
 };
 pub use pipeline::modal_governance::{
-    ModalEigenspaceEvidence, ModalTruncationEvidence, ModalTruncationPolicy,
+    ModalConvergencePolicy, ModalEigenspaceEvidence, ModalTruncationEvidence, ModalTruncationPolicy,
 };
 pub use pipeline::nonlinear::{run_nonlinear, run_nonlinear_with_options};
 pub use pipeline::thermal::run_thermal_with_options;

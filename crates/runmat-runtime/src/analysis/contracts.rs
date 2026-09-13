@@ -729,7 +729,7 @@ pub struct AnalysisModalRunOptions {
     pub precision_mode: PrecisionMode,
     pub quality_policy: QualityPolicy,
     pub truncation: runmat_analysis_fea::ModalTruncationPolicy,
-    pub residual_warn_threshold: f64,
+    pub convergence: runmat_analysis_fea::ModalConvergencePolicy,
     #[serde(default)]
     pub solver_mesh_artifact_path: Option<String>,
 }
@@ -845,7 +845,7 @@ impl Default for AnalysisModalRunOptions {
             precision_mode: PrecisionMode::Fp64,
             quality_policy: QualityPolicy::Balanced,
             truncation: runmat_analysis_fea::ModalTruncationPolicy::requested(3),
-            residual_warn_threshold: 1.0e-3,
+            convergence: runmat_analysis_fea::ModalConvergencePolicy::production(),
             solver_mesh_artifact_path: None,
         }
     }
@@ -858,7 +858,7 @@ impl AnalysisModalRunOptions {
             precision_mode: PrecisionMode::Fp32,
             quality_policy: QualityPolicy::Exploratory,
             truncation: runmat_analysis_fea::ModalTruncationPolicy::requested(2),
-            residual_warn_threshold: 5.0e-3,
+            convergence: runmat_analysis_fea::ModalConvergencePolicy::exploratory(),
             solver_mesh_artifact_path: None,
         }
     }
@@ -873,7 +873,9 @@ impl AnalysisModalRunOptions {
             precision_mode: PrecisionMode::Fp64,
             quality_policy: QualityPolicy::Strict,
             truncation: runmat_analysis_fea::ModalTruncationPolicy::requested(8),
-            residual_warn_threshold: 5.0e-4,
+            convergence: runmat_analysis_fea::ModalConvergencePolicy::production()
+                .with_relative_residual_tolerance(1.0e-10)
+                .with_maximum_subspace_iterations(512),
             solver_mesh_artifact_path: None,
         }
     }

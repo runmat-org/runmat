@@ -2897,6 +2897,39 @@ fn modal_beam_history_separates_rotation_from_translation() {
 }
 
 #[test]
+fn modal_beam_recovers_the_closed_form_lumped_mass_axial_frequency() {
+    let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
+    model.sequence.steps = vec![ProcedureStep::structural_modal("beam_modal_reference")];
+    let policy = crate::ModalConvergencePolicy::production();
+    let result = crate::run_modal_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        ModalSolveOptions {
+            truncation: ModalTruncationPolicy::requested(6),
+            convergence: policy,
+            ..experimental_modal_options()
+        },
+    )
+    .expect("one-element beam modal reference should solve");
+
+    let expected_hz = (2.0 * 200.0e9_f64 / 7_850.0).sqrt() / (2.0 * std::f64::consts::PI);
+    let axial_hz = result
+        .frequencies_hz()
+        .into_iter()
+        .min_by(|left, right| {
+            (left - expected_hz)
+                .abs()
+                .total_cmp(&(right - expected_hz).abs())
+        })
+        .expect("beam should have modes");
+    assert!((axial_hz - expected_hz).abs() / expected_hz <= 1.0e-10);
+    assert!(result
+        .residual_norms()
+        .iter()
+        .all(|residual| *residual <= policy.relative_residual_tolerance()));
+}
+
+#[test]
 fn thermal_history_schedule_adds_exact_solve_points_and_publishes_temperature() {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     model.thermal = Some(runmat_analysis_core::ThermalDomain {
@@ -3527,6 +3560,7 @@ fn modal_large_fixture_emits_orthogonality_and_separation_diagnostics() {
         ModalSolveOptions {
             formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
             truncation: ModalTruncationPolicy::requested(8),
+            convergence: crate::ModalConvergencePolicy::default(),
             solver_mesh: None,
         },
     )

@@ -4,6 +4,71 @@ use crate::contracts::FeaRunError;
 
 pub const DEFAULT_EIGENSPACE_RELATIVE_TOLERANCE: f64 = 1.0e-6;
 
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModalConvergencePolicy {
+    relative_residual_tolerance: f64,
+    maximum_subspace_iterations: usize,
+}
+
+impl ModalConvergencePolicy {
+    pub const fn production() -> Self {
+        Self {
+            relative_residual_tolerance: 1.0e-8,
+            maximum_subspace_iterations: 256,
+        }
+    }
+
+    pub const fn exploratory() -> Self {
+        Self {
+            relative_residual_tolerance: 5.0e-4,
+            maximum_subspace_iterations: 64,
+        }
+    }
+
+    pub const fn with_relative_residual_tolerance(mut self, tolerance: f64) -> Self {
+        self.relative_residual_tolerance = tolerance;
+        self
+    }
+
+    pub const fn with_maximum_subspace_iterations(mut self, iterations: usize) -> Self {
+        self.maximum_subspace_iterations = iterations;
+        self
+    }
+
+    pub const fn relative_residual_tolerance(self) -> f64 {
+        self.relative_residual_tolerance
+    }
+
+    pub const fn maximum_subspace_iterations(self) -> usize {
+        self.maximum_subspace_iterations
+    }
+
+    pub(crate) fn validate(self) -> Result<(), FeaRunError> {
+        if !self.relative_residual_tolerance.is_finite()
+            || self.relative_residual_tolerance <= 0.0
+            || self.relative_residual_tolerance >= 1.0
+        {
+            return Err(FeaRunError::InvalidModel(
+                "modal relative residual tolerance must be finite and lie strictly between zero and one"
+                    .into(),
+            ));
+        }
+        if self.maximum_subspace_iterations == 0 {
+            return Err(FeaRunError::InvalidModel(
+                "modal convergence requires at least one subspace iteration".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl Default for ModalConvergencePolicy {
+    fn default() -> Self {
+        Self::production()
+    }
+}
+
 /// Governs the retained modal subspace.
 ///
 /// `requested_mode_count` is the desired cut. Fewer modes are retained only when the constrained
@@ -253,6 +318,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn convergence_policy_rejects_unbounded_or_empty_controls() {
+        assert!(ModalConvergencePolicy::production()
+            .with_relative_residual_tolerance(f64::NAN)
+            .validate()
+            .is_err());
+        assert!(ModalConvergencePolicy::production()
+            .with_relative_residual_tolerance(1.0)
+            .validate()
+            .is_err());
+        assert!(ModalConvergencePolicy::production()
+            .with_maximum_subspace_iterations(0)
+            .validate()
+            .is_err());
+    }
+
+    #[test]
     fn rejects_an_unproven_truncation_boundary() {
         let error = build_modal_governance(
             ModalTruncationPolicy::requested(2),
@@ -275,7 +356,7 @@ mod tests {
             &[1.0e-8, 2.0e-8, 3.0e-8],
             &[1.0, 0.0, 0.0, 0.0, 1.0, 2.0e-9, 0.0, 2.0e-9, 1.0],
             4,
-            2,
+            1,
             Some(3.0),
         )
         .unwrap();

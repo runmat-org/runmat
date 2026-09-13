@@ -63,6 +63,7 @@ pub fn run_modal_with_options(
     let required_history_modes = required_mode_history_indices(execution_step)
         .map_err(|error| FeaRunError::Observation(error.to_string()))?;
     options.truncation.validate()?;
+    options.convergence.validate()?;
     if required_history_modes
         .last()
         .is_some_and(|mode| *mode > options.truncation.requested_mode_count())
@@ -128,6 +129,7 @@ pub fn run_modal_with_options(
         &summary,
         options.truncation.requested_mode_count(),
         options.truncation.eigenspace_relative_tolerance(),
+        options.convergence,
         backend,
     );
     emit_phase(
@@ -149,6 +151,12 @@ pub fn run_modal_with_options(
         Some(5),
     );
     let mut diagnostics = modal.diagnostics.clone();
+    if !modal.converged {
+        return Err(FeaRunError::Assembly(format!(
+            "modal eigensolver did not qualify its requested subspace: {:?}",
+            modal.diagnostics
+        )));
+    }
     extend_common_run_diagnostics(
         &mut diagnostics,
         CommonRunDiagnosticInputs {
@@ -246,11 +254,7 @@ pub fn run_modal_with_options(
             modal.device_apply_k_count as f64 / modal.device_apply_k_attempt_count as f64
         },
         solver_method: modal.solver_method,
-        preconditioner: if backend == ComputeBackend::Gpu {
-            crate::contracts::SolverPreconditioner::Jacobi
-        } else {
-            crate::contracts::SolverPreconditioner::None
-        },
+        preconditioner: modal.preconditioner,
         solver_host_sync_count: modal.solver_host_sync_count,
         accelerator_evidence: modal.accelerator_evidence.clone(),
         diagnostics,
