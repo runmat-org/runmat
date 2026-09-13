@@ -22,6 +22,7 @@ use super::*;
 fn input(partitioning: PartitioningPolicy) -> FeaResourcePlanningInput {
     FeaResourcePlanningInput {
         estimation_model_revision: RESOURCE_ESTIMATION_MODEL_REVISION,
+        phase: FeaResourcePhase::StructuralLinearPipeline,
         topology_digest: Digest::sha256("topology"),
         operator_pattern_digest: Digest::sha256("pattern"),
         topology: TopologyResourceFacts {
@@ -78,6 +79,7 @@ fn input(partitioning: PartitioningPolicy) -> FeaResourcePlanningInput {
             collective_count: Count(0),
         },
         publication: CheckpointArtifactPolicy {
+            result_artifact_bytes: ByteCount(33),
             checkpoint_bytes: ByteCount(50),
             artifact_overhead_bytes: ByteCount(20),
             relay_bytes: ByteCount(12),
@@ -488,7 +490,7 @@ fn exact_small_estimate_separates_all_resource_classes() {
     assert_eq!(plan.breakdown.csr_column_index_bytes, ByteCount(144));
     assert_eq!(plan.breakdown.csr_value_bytes, ByteCount(144));
     assert_eq!(plan.breakdown.assembly_contribution_bytes, ByteCount(240));
-    assert_eq!(plan.breakdown.solve_vector_bytes, ByteCount(160));
+    assert_eq!(plan.breakdown.solve_workspace_bytes, ByteCount(160));
     assert_eq!(plan.breakdown.preconditioner_bytes, ByteCount(32));
     assert_eq!(plan.breakdown.factorization_bytes, ByteCount(200));
     assert_eq!(plan.breakdown.constraint_bytes, ByteCount(120));
@@ -501,7 +503,9 @@ fn exact_small_estimate_separates_all_resource_classes() {
     assert_eq!(plan.breakdown.observation_retained_sample_count, Count(1));
     assert_eq!(plan.request.memory_bytes, 2_108);
     assert_eq!(plan.request.scratch_bytes, 45);
-    assert_eq!(plan.request.max_artifact_bytes, 302);
+    assert_eq!(plan.breakdown.result_artifact_bytes, ByteCount(33));
+    assert_eq!(plan.breakdown.recovery_retained_bytes, ByteCount(32));
+    assert_eq!(plan.request.max_artifact_bytes, 303);
     assert_eq!(plan.request.max_egress_bytes, 220);
     assert_eq!(plan.request.max_relay_bytes, 12);
     plan.validate_identity().unwrap();
@@ -618,9 +622,62 @@ fn complex_solve_vectors_and_diagonal_storage_use_complex_width() {
     };
     let complex = build_resource_plan(complex_input).unwrap();
 
-    assert_eq!(complex.breakdown.solve_vector_bytes, ByteCount(320));
+    assert_eq!(complex.breakdown.solve_workspace_bytes, ByteCount(320));
     assert_eq!(complex.breakdown.preconditioner_bytes, ByteCount(64));
     assert!(complex.request.memory_bytes > real.request.memory_bytes);
+}
+
+#[test]
+fn explicit_frequency_workspaces_require_valid_dimensions_and_bounds() {
+    let mut gmres = input(PartitioningPolicy::Monolithic);
+    gmres.solve = SolveResourcePolicy::RestartedGmres {
+        block_dimension: Count(8),
+        restart: Count(9),
+        maximum_iterations: Count(16),
+        workspace_bytes_upper_bound: ByteCount(1_024),
+    };
+    assert!(matches!(
+        build_resource_plan(gmres),
+        Err(ResourcePlanningError::Invalid(_))
+    ));
+
+    let mut modal = input(PartitioningPolicy::Monolithic);
+    modal.solve = SolveResourcePolicy::ModalDenseHarmonic {
+        full_dimension: Count(4),
+        mode_count: Count(5),
+        workspace_bytes_upper_bound: ByteCount(1_024),
+    };
+    assert!(matches!(
+        build_resource_plan(modal),
+        Err(ResourcePlanningError::Invalid(_))
+    ));
+
+    let mut valid = input(PartitioningPolicy::Monolithic);
+    valid.solve = SolveResourcePolicy::RestartedGmres {
+        block_dimension: Count(8),
+        restart: Count(4),
+        maximum_iterations: Count(16),
+        workspace_bytes_upper_bound: ByteCount(1_024),
+    };
+    let plan = build_resource_plan(valid).unwrap();
+    assert_eq!(plan.breakdown.solve_workspace_bytes, ByteCount(1_024));
+}
+
+#[test]
+fn result_artifacts_are_accounted_independently_from_recovery_retention() {
+    let baseline = build_resource_plan(input(PartitioningPolicy::Monolithic)).unwrap();
+    let mut retained = input(PartitioningPolicy::Monolithic);
+    retained.recovery.retained_bytes = ByteCount(99);
+    let retained = build_resource_plan(retained).unwrap();
+    assert_eq!(
+        retained.request.max_artifact_bytes,
+        baseline.request.max_artifact_bytes
+    );
+
+    let mut result = input(PartitioningPolicy::Monolithic);
+    result.publication.result_artifact_bytes = ByteCount(100);
+    let result = build_resource_plan(result).unwrap();
+    assert!(result.request.max_artifact_bytes > baseline.request.max_artifact_bytes);
 }
 
 #[test]
@@ -754,7 +811,7 @@ fn reconciliation_reports_every_overrun_without_mutating_the_plan() {
             wall_millis: 1_001,
             egress_bytes: 221,
             relay_bytes: 13,
-            retained_byte_millis: 302_001,
+            retained_byte_millis: 303_001,
             ..ResourceUsage::default()
         },
         peak_cpu_millicores: 1_001,

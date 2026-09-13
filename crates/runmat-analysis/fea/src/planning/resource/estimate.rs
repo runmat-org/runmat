@@ -40,15 +40,22 @@ pub fn build_resource_plan(
         )?,
         "assembly scratch",
     )?);
-    let solve_vector_bytes = ByteCount(bytes(
-        mul(
-            input.sparse.rows.0,
-            input.solve.vector_count(),
-            "solve vector values",
-        )?,
-        input.solve.scalar_bytes(),
-        "solve vectors",
-    )?);
+    let solve_workspace_bytes = match input.solve.explicit_workspace_bytes() {
+        Some(bytes) => bytes,
+        None => ByteCount(bytes(
+            mul(
+                input.sparse.rows.0,
+                input.solve.vector_count().ok_or_else(|| {
+                    ResourcePlanningError::Invalid(
+                        "solve policy omits both vectors and explicit workspace".into(),
+                    )
+                })?,
+                "solve vector values",
+            )?,
+            input.solve.scalar_bytes(),
+            "solve vectors",
+        )?),
+    };
     let (preconditioner_bytes, factorization_bytes) = solve_storage(&input)?;
     let constraint_bytes = input.constraints.estimated_resident_bytes;
     let recovery_resident_bytes = input.recovery.resident_bytes_upper_bound;
@@ -64,7 +71,7 @@ pub fn build_resource_plan(
     )?;
     let solve_phase = sum(
         &[
-            solve_vector_bytes.0,
+            solve_workspace_bytes.0,
             preconditioner_bytes.0,
             factorization_bytes.0,
         ],
@@ -99,7 +106,7 @@ pub fn build_resource_plan(
     let artifact_bytes = sum(
         &[
             input.observations.stored_bytes.0,
-            input.recovery.retained_bytes.0,
+            input.publication.result_artifact_bytes.0,
             input.publication.checkpoint_bytes.0,
             input.publication.artifact_overhead_bytes.0,
         ],
@@ -148,13 +155,14 @@ pub fn build_resource_plan(
         csr_value_bytes,
         assembly_contribution_bytes,
         assembly_scratch_bytes,
-        solve_vector_bytes,
+        solve_workspace_bytes,
         preconditioner_bytes,
         factorization_bytes,
         constraint_bytes,
         recovery_resident_bytes,
         recovery_scratch_bytes: input.recovery.scratch_bytes,
         recovery_retained_bytes: input.recovery.retained_bytes,
+        result_artifact_bytes: input.publication.result_artifact_bytes,
         observation_maximum_samples_per_observation: input
             .observations
             .maximum_samples_per_observation,
@@ -354,10 +362,45 @@ fn validate_input(input: &FeaResourcePlanningInput) -> Result<(), ResourcePlanni
             "assembly contribution count and byte bounds must cover canonical nonzeros".into(),
         ));
     }
-    if input.solve.vector_count() == 0 {
-        return Err(ResourcePlanningError::Invalid(
-            "solve policy requires at least one vector".into(),
-        ));
+    match input.solve {
+        SolveResourcePolicy::Iterative { vector_count, .. }
+        | SolveResourcePolicy::DirectFactorization { vector_count, .. }
+            if vector_count.0 == 0 =>
+        {
+            return Err(ResourcePlanningError::Invalid(
+                "solve policy requires at least one vector".into(),
+            ));
+        }
+        SolveResourcePolicy::RestartedGmres {
+            block_dimension,
+            restart,
+            maximum_iterations,
+            workspace_bytes_upper_bound,
+        } if maximum_iterations.0 == 0
+            || (block_dimension.0 == 0 && restart.0 != 0)
+            || (block_dimension.0 != 0 && restart.0 == 0)
+            || restart.0 > block_dimension.0
+            || restart.0 > maximum_iterations.0
+            || workspace_bytes_upper_bound.0 == 0 =>
+        {
+            return Err(ResourcePlanningError::Invalid(
+                "restarted GMRES dimensions, iteration bounds, and workspace must be valid".into(),
+            ));
+        }
+        SolveResourcePolicy::ModalDenseHarmonic {
+            full_dimension,
+            mode_count,
+            workspace_bytes_upper_bound,
+        } if full_dimension.0 == 0
+            || mode_count.0 == 0
+            || mode_count.0 > full_dimension.0
+            || workspace_bytes_upper_bound.0 == 0 =>
+        {
+            return Err(ResourcePlanningError::Invalid(
+                "modal harmonic dimensions and workspace must be valid".into(),
+            ));
+        }
+        _ => {}
     }
     match (&input.partitioning, &input.solve) {
         (
@@ -540,6 +583,8 @@ fn solve_storage(
             }
             Ok((ByteCount(0), factor_bytes_upper_bound))
         }
+        SolveResourcePolicy::RestartedGmres { .. }
+        | SolveResourcePolicy::ModalDenseHarmonic { .. } => Ok((ByteCount(0), ByteCount(0))),
     }
 }
 

@@ -26,8 +26,8 @@ use runmat_analysis_fea::execution::{
     StructuralTransientWorkload,
 };
 use runmat_analysis_fea::planning::resource::{
-    build_structural_resource_plan, validate_resource_usage_evidence, FeaResourcePlan,
-    ResourceUsageEvidence,
+    build_structural_frequency_entry_resource_plan, build_structural_resource_plan,
+    validate_resource_usage_evidence, FeaResourcePlan, ResourceUsageEvidence,
 };
 use runmat_analysis_fea::post::fields::{
     structural_observable_field_definitions, take_structural_observable_fields,
@@ -109,9 +109,10 @@ fn execute_structural_frequency_entry(
         &invocation,
         AnalysisNumericalObjectKind::StructuralFrequencyEntryRequest,
     )?;
+    let resource_plan_input = unique_input(&invocation, AnalysisNumericalObjectKind::ResourcePlan)?;
     let modal_input =
         optional_unique_input(&invocation, AnalysisNumericalObjectKind::SemanticState)?;
-    if invocation.inputs.len() != 3 + usize::from(modal_input.is_some())
+    if invocation.inputs.len() != 4 + usize::from(modal_input.is_some())
         || invocation.host.workload.outputs
             != vec![AnalysisNumericalObjectKind::StructuralFrequencyEntryResult]
     {
@@ -126,6 +127,8 @@ fn execute_structural_frequency_entry(
     let modal_state = modal_input
         .map(decode_prepared_structural_frequency_modal_state)
         .transpose()?;
+    let resource_plan = FeaResourcePlan::from_canonical_bytes(&resource_plan_input.payload())
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let state_matches = match (workload.solver(), modal_state.as_ref()) {
         (StructuralFrequencySolverPlan::Direct { .. }, None) => true,
         (StructuralFrequencySolverPlan::ModalReduced { basis_state }, Some(state)) => {
@@ -145,9 +148,27 @@ fn execute_structural_frequency_entry(
         || invocation.host.workload.execution_plan != request.execution_plan()
         || !state_matches
         || !state_topology_matches
+        || resource_plan_input.manifest.logical_identity != resource_plan.identity.digest()
     {
         return Err(AnalysisBridgeError::Identity(
             "structural frequency entry inputs differ from their exact identities",
+        ));
+    }
+    let constraints =
+        CanonicalStructuralConstraintPlan::compile_for_model(workload.model(), Some(&mesh))
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let expected_resource_plan = build_structural_frequency_entry_resource_plan(
+        &mesh,
+        &constraints,
+        &workload,
+        &request,
+        modal_state.as_ref(),
+        &resource_plan.request.accelerators,
+    )
+    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    if resource_plan != expected_resource_plan {
+        return Err(AnalysisBridgeError::Identity(
+            "frequency entry resource plan does not converge from authoritative inputs",
         ));
     }
     let result =

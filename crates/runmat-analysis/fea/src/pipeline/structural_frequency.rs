@@ -60,22 +60,10 @@ pub fn prepare_structural_frequency(
         solver_mesh,
         workload.plan().reference_frequency_hz(),
     )?;
-    let operator_digest = structural_operator_digest(&reference.real)
-        .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
-    for entry in workload
-        .plan()
-        .entries()
-        .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?
-    {
-        let assembly = assemble_entry(workload, solver_mesh, entry.frequency_hz())?;
-        let entry_digest = structural_operator_digest(&assembly.real)
-            .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
-        if entry_digest != operator_digest {
-            return Err(AnalysisExecutionError::Invalid(
-                "structural frequency entries do not share one physical operator".into(),
-            ));
-        }
-    }
+    // The admitted structural formulation owns frequency-invariant K/M/C, constraints, DOF
+    // layout, and recovery maps. Frequency changes only the sampled complex excitation and the
+    // dynamic coefficients applied by each entry solve, so one reference assembly establishes the
+    // shared physical scope without performing an O(entry-count) driver-side assembly scan.
     derive_prepared_frequency(workload, solver_mesh, &reference)
 }
 

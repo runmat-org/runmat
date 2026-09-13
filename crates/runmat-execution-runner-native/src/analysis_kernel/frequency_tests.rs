@@ -7,13 +7,14 @@ use runmat_analysis_core::{
 use runmat_analysis_execution::{
     execute_serial_analysis, import_structural_frequency_entry,
     import_structural_frequency_recovered_fields, import_structural_frequency_result,
-    prepare_analysis_objects, prepare_structural_frequency_fanout,
-    prepare_structural_frequency_field_recovery,
+    prepare_analysis_objects, prepare_structural_frequency_entry_task,
+    prepare_structural_frequency_fanout, prepare_structural_frequency_field_recovery,
     prepare_structural_frequency_result_assembly_request_objects,
     prepare_structural_frequency_result_task, prepare_structural_frequency_workload_objects,
     AnalysisHostResponse, ImportedRecoveredFields, ImportedStructuralFrequencyResult,
-    PreparedAnalysisObjects, StructuralFrequencyFanoutPreparation,
-    StructuralFrequencyFieldRecoveryPreparation, StructuralFrequencyResultPreparation,
+    PreparedAnalysisObjects, StructuralFrequencyEntryPreparation,
+    StructuralFrequencyFanoutPreparation, StructuralFrequencyFieldRecoveryPreparation,
+    StructuralFrequencyResultPreparation,
 };
 use runmat_analysis_fea::{
     execution::{
@@ -24,6 +25,7 @@ use runmat_analysis_fea::{
     },
     fixtures::{fixture_model, FixtureId},
     frequency::FrequencyResponsePlan,
+    planning::resource::{build_resource_plan, ByteCount},
     solve::dynamics::DirectHarmonicPolicy,
     ComputeBackend, ModalSolveOptions, ModalTruncationPolicy,
 };
@@ -305,6 +307,71 @@ fn native_frequency_fanout_and_fanin_are_portable_and_order_independent() {
                 == runmat_analysis_fea::results::field::RecoveredFieldSample::FrequencyHertz(40.0)
                 && field.definition.quantity() == runmat_analysis_core::ObservationQuantity::Stress
         })));
+}
+
+#[test]
+fn standalone_frequency_preparation_rederives_its_resource_envelope() {
+    let (workload, mesh) = direct_fixture();
+    let limits = ObjectInventoryLimits::default();
+    let workload_objects = prepare_structural_frequency_workload_objects(
+        &workload,
+        256,
+        ObjectNamespace::InputValue,
+        limits,
+    )
+    .unwrap();
+    let mesh_objects = prepare_analysis_objects(
+        AnalysisNumericalObjectKind::Mesh,
+        Digest::from_bytes(*mesh.canonical_digest.bytes()),
+        &mesh.canonical_encode().unwrap(),
+        256,
+        ObjectNamespace::InputValue,
+        limits,
+    )
+    .unwrap();
+    let mut fanout = prepare_structural_frequency_fanout(StructuralFrequencyFanoutPreparation {
+        workload: workload_objects.clone(),
+        mesh: mesh_objects.clone(),
+        modal_state: None,
+        artifact_access: access(),
+        program_revision: revision(),
+        chunk_bytes: 256,
+        inventory_limits: limits,
+    })
+    .unwrap();
+    let prepared = fanout.remove(0);
+    let mut understated_input = prepared.resource_plan.input.clone();
+    understated_input.worker.fixed_memory_bytes = ByteCount(
+        understated_input
+            .worker
+            .fixed_memory_bytes
+            .0
+            .checked_sub(1)
+            .unwrap(),
+    );
+    let understated = build_resource_plan(understated_input).unwrap();
+    let understated_objects = prepare_analysis_objects(
+        AnalysisNumericalObjectKind::ResourcePlan,
+        understated.identity.digest(),
+        &understated.canonical_bytes().unwrap(),
+        256,
+        ObjectNamespace::InputValue,
+        limits,
+    )
+    .unwrap();
+
+    assert!(
+        prepare_structural_frequency_entry_task(StructuralFrequencyEntryPreparation {
+            workload: workload_objects,
+            mesh: mesh_objects,
+            request: prepared.inputs[2].clone(),
+            modal_state: None,
+            resource_plan: understated_objects,
+            artifact_access: access(),
+            program_revision: revision(),
+        })
+        .is_err()
+    );
 }
 
 #[test]

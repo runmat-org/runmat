@@ -6,6 +6,9 @@ use runmat_analysis_fea::execution::{
     StructuralFrequencyResultAssemblyRequest, StructuralFrequencySolverPlan,
     StructuralFrequencyWorkload,
 };
+use runmat_analysis_fea::planning::resource::{
+    FeaResourcePhase, FeaResourcePlan, StructuralFrequencyEntryResourceProjection,
+};
 use runmat_execution::value::ValueRefKind;
 use runmat_execution::ProgramRevision;
 use runmat_execution_artifact::cache::CacheImport;
@@ -31,6 +34,7 @@ pub struct StructuralFrequencyEntryPreparation {
     pub mesh: PreparedAnalysisObjects,
     pub request: PreparedAnalysisObjects,
     pub modal_state: Option<PreparedAnalysisObjects>,
+    pub resource_plan: PreparedAnalysisObjects,
     pub artifact_access: ArtifactAccess,
     pub program_revision: ProgramRevision,
 }
@@ -49,6 +53,8 @@ pub struct PreparedStructuralFrequencyEntryTask {
     pub workload: StructuralFrequencyWorkload,
     pub request: StructuralFrequencyEntryRequest,
     pub modal_state: Option<CanonicalSemanticState>,
+    pub resource_plan: FeaResourcePlan,
+    pub resource_plan_objects: PreparedAnalysisObjects,
     pub host: AnalysisHostWorkload,
     pub program: PreparedAnalysisProgram,
     pub inputs: Vec<PreparedAnalysisObjects>,
@@ -75,13 +81,32 @@ pub fn prepare_structural_frequency_fanout(
         runmat_analysis_fea::pipeline::structural_frequency::prepare_structural_frequency(
             &workload, &mesh,
         )?;
+    let modal_state = preparation
+        .modal_state
+        .as_ref()
+        .map(decode_prepared_structural_frequency_modal_state)
+        .transpose()?;
+    let constraints =
+        runmat_analysis_fea::constraints::CanonicalStructuralConstraintPlan::compile_for_model(
+            workload.model(),
+            Some(&mesh),
+        )
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let resource_projection = StructuralFrequencyEntryResourceProjection::new(
+        &mesh,
+        &constraints,
+        &workload,
+        modal_state.as_ref(),
+        &[],
+    )
+    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     workload
         .plan()
         .entries()
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?
         .into_iter()
         .map(|entry| {
-            let request = StructuralFrequencyEntryRequest::new(
+            let request_value = StructuralFrequencyEntryRequest::new(
                 &workload,
                 prepared.study,
                 prepared.step,
@@ -89,20 +114,37 @@ pub fn prepare_structural_frequency_fanout(
                 prepared.scope.clone(),
                 entry,
             )?;
+            let resource_plan = resource_projection
+                .plan_for(&request_value)
+                .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
             let request = crate::prepare_structural_frequency_entry_request_objects(
-                &request,
+                &request_value,
                 preparation.chunk_bytes,
                 ObjectNamespace::InputValue,
                 preparation.inventory_limits,
             )?;
-            prepare_structural_frequency_entry_task(StructuralFrequencyEntryPreparation {
-                workload: preparation.workload.clone(),
-                mesh: preparation.mesh.clone(),
-                request,
-                modal_state: preparation.modal_state.clone(),
-                artifact_access: preparation.artifact_access.clone(),
-                program_revision: preparation.program_revision.clone(),
-            })
+            let resource_plan_objects = crate::prepare_analysis_objects(
+                AnalysisNumericalObjectKind::ResourcePlan,
+                resource_plan.identity.digest(),
+                &resource_plan
+                    .canonical_bytes()
+                    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
+                preparation.chunk_bytes,
+                ObjectNamespace::InputValue,
+                preparation.inventory_limits,
+            )?;
+            prepare_structural_frequency_entry_task_with_admitted_resource_plan(
+                StructuralFrequencyEntryPreparation {
+                    workload: preparation.workload.clone(),
+                    mesh: preparation.mesh.clone(),
+                    request,
+                    modal_state: preparation.modal_state.clone(),
+                    resource_plan: resource_plan_objects,
+                    artifact_access: preparation.artifact_access.clone(),
+                    program_revision: preparation.program_revision.clone(),
+                },
+                Some(resource_plan),
+            )
         })
         .collect()
 }
@@ -115,6 +157,13 @@ pub struct ImportedStructuralFrequencyEntry {
 
 pub fn prepare_structural_frequency_entry_task(
     preparation: StructuralFrequencyEntryPreparation,
+) -> AnalysisBridgeResult<PreparedStructuralFrequencyEntryTask> {
+    prepare_structural_frequency_entry_task_with_admitted_resource_plan(preparation, None)
+}
+
+fn prepare_structural_frequency_entry_task_with_admitted_resource_plan(
+    preparation: StructuralFrequencyEntryPreparation,
+    admitted_resource_plan: Option<FeaResourcePlan>,
 ) -> AnalysisBridgeResult<PreparedStructuralFrequencyEntryTask> {
     let workload = decode_prepared_structural_frequency_workload(&preparation.workload)?;
     let request = decode_prepared_structural_frequency_entry_request(&preparation.request)?;
@@ -131,9 +180,13 @@ pub fn prepare_structural_frequency_entry_task(
         .as_ref()
         .map(decode_prepared_structural_frequency_modal_state)
         .transpose()?;
-    runmat_analysis_fea::pipeline::structural_frequency::validate_structural_frequency_entry(
-        &workload, &mesh, &request,
-    )?;
+    if preparation.resource_plan.manifest.kind != AnalysisNumericalObjectKind::ResourcePlan {
+        return Err(AnalysisBridgeError::Invalid(
+            "structural frequency entry requires one canonical resource plan".into(),
+        ));
+    }
+    let resource_plan = FeaResourcePlan::from_canonical_bytes(&preparation.resource_plan.payload())
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let state_matches = match (workload.solver(), modal_state.as_ref()) {
         (StructuralFrequencySolverPlan::Direct { .. }, None) => true,
         (StructuralFrequencySolverPlan::ModalReduced { basis_state }, Some(state)) => {
@@ -150,15 +203,52 @@ pub fn prepare_structural_frequency_entry_task(
             != runmat_execution::Digest::from_bytes(*mesh.canonical_digest.bytes())
         || !state_matches
         || !state_topology_matches
+        || preparation.resource_plan.manifest.logical_identity != resource_plan.identity.digest()
     {
         return Err(AnalysisBridgeError::Identity(
             "structural frequency inputs differ from their canonical identities",
         ));
     }
+    if resource_plan.input.phase != FeaResourcePhase::StructuralFrequencyEntry(request.identity())
+        || !resource_plan.request.accelerators.is_empty()
+    {
+        return Err(AnalysisBridgeError::Identity(
+            "frequency entry task received a resource plan for another task",
+        ));
+    }
+    let expected_resource_plan = if let Some(admitted_resource_plan) = admitted_resource_plan {
+        admitted_resource_plan
+    } else {
+        runmat_analysis_fea::pipeline::structural_frequency::validate_structural_frequency_entry(
+            &workload, &mesh, &request,
+        )?;
+        let constraints =
+            runmat_analysis_fea::constraints::CanonicalStructuralConstraintPlan::compile_for_model(
+                workload.model(),
+                Some(&mesh),
+            )
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+        runmat_analysis_fea::planning::resource::build_structural_frequency_entry_resource_plan(
+            &mesh,
+            &constraints,
+            &workload,
+            &request,
+            modal_state.as_ref(),
+            &resource_plan.request.accelerators,
+        )
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?
+    };
+    if resource_plan != expected_resource_plan {
+        return Err(AnalysisBridgeError::Identity(
+            "frequency entry resource plan does not converge from authoritative inputs",
+        ));
+    }
+    let resource_plan_objects = preparation.resource_plan.clone();
     let mut typed_inputs = vec![
         (preparation.workload, ValueRefKind::DriverObject),
         (preparation.mesh, ValueRefKind::DriverObject),
         (preparation.request, ValueRefKind::DriverObject),
+        (preparation.resource_plan, ValueRefKind::DriverObject),
     ];
     if let Some(state) = preparation.modal_state {
         typed_inputs.push((state, ValueRefKind::ResultObject));
@@ -195,6 +285,8 @@ pub fn prepare_structural_frequency_entry_task(
         workload,
         request,
         modal_state,
+        resource_plan,
+        resource_plan_objects,
         host,
         program,
         inputs,

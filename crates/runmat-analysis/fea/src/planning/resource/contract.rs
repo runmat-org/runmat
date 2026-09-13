@@ -12,6 +12,13 @@ use runmat_execution::{
 };
 use serde::{Deserialize, Serialize};
 
+use crate::execution::{
+    FieldRecoveryRequestIdentity, ObservationAssemblyRequestIdentity,
+    ObservationHistoryCheckpointRequestIdentity, ObservationPartitionEvaluationRequestIdentity,
+    ObservationPartitionReductionRequestIdentity, StructuralFrequencyEntryRequestIdentity,
+    StructuralFrequencyResultAssemblyRequestIdentity,
+};
+
 const RESOURCE_PREFIX: &[u8] = b"runmat-fea-resource-plan/v1\0";
 const RESOURCE_USAGE_PREFIX: &[u8] = b"runmat-fea-resource-usage/v1\0";
 const RESOURCE_LIMITS: CanonicalLimits =
@@ -147,23 +154,52 @@ pub enum SolveResourcePolicy {
         factor_nonzero_upper_bound: Count,
         factor_bytes_upper_bound: ByteCount,
     },
+    RestartedGmres {
+        block_dimension: Count,
+        restart: Count,
+        maximum_iterations: Count,
+        workspace_bytes_upper_bound: ByteCount,
+    },
+    ModalDenseHarmonic {
+        full_dimension: Count,
+        mode_count: Count,
+        workspace_bytes_upper_bound: ByteCount,
+    },
 }
 
 impl SolveResourcePolicy {
-    pub(crate) fn vector_count(&self) -> u64 {
+    pub(crate) fn vector_count(&self) -> Option<u64> {
         match self {
             Self::Iterative { vector_count, .. }
-            | Self::DirectFactorization { vector_count, .. } => vector_count.0,
+            | Self::DirectFactorization { vector_count, .. } => Some(vector_count.0),
+            Self::RestartedGmres { .. } | Self::ModalDenseHarmonic { .. } => None,
         }
     }
 
     pub(crate) fn scalar_bytes(&self) -> u64 {
         let scalar = match self {
             Self::Iterative { scalar, .. } | Self::DirectFactorization { scalar, .. } => scalar,
+            Self::RestartedGmres { .. } | Self::ModalDenseHarmonic { .. } => {
+                return 8;
+            }
         };
         match scalar {
             NumericalScalar::RealF64 => 8,
             NumericalScalar::ComplexF64 => 16,
+        }
+    }
+
+    pub(crate) const fn explicit_workspace_bytes(&self) -> Option<ByteCount> {
+        match self {
+            Self::RestartedGmres {
+                workspace_bytes_upper_bound,
+                ..
+            }
+            | Self::ModalDenseHarmonic {
+                workspace_bytes_upper_bound,
+                ..
+            } => Some(*workspace_bytes_upper_bound),
+            Self::Iterative { .. } | Self::DirectFactorization { .. } => None,
         }
     }
 }
@@ -180,6 +216,7 @@ pub struct RecoveryResourcePolicy {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CheckpointArtifactPolicy {
+    pub result_artifact_bytes: ByteCount,
     pub checkpoint_bytes: ByteCount,
     pub artifact_overhead_bytes: ByteCount,
     pub relay_bytes: ByteCount,
@@ -231,11 +268,30 @@ pub enum PartitioningPolicy {
     },
 }
 
+/// Canonical numerical phase governed by one exact resource request.
+///
+/// Task request identities prevent a plan estimated for one frequency entry or observation task
+/// from authorizing another. The linear-pipeline variant preserves the existing whole-step
+/// envelope until that path is decomposed into independently scheduled phases.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind", content = "request")]
+pub enum FeaResourcePhase {
+    StructuralLinearPipeline,
+    StructuralFrequencyEntry(StructuralFrequencyEntryRequestIdentity),
+    StructuralFrequencyFieldRecovery(FieldRecoveryRequestIdentity),
+    StructuralObservationPartition(ObservationPartitionEvaluationRequestIdentity),
+    StructuralObservationReduction(ObservationPartitionReductionRequestIdentity),
+    StructuralObservationHistoryCheckpoint(ObservationHistoryCheckpointRequestIdentity),
+    StructuralObservationAssembly(ObservationAssemblyRequestIdentity),
+    StructuralFrequencyResultAssembly(StructuralFrequencyResultAssemblyRequestIdentity),
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FeaResourcePlanningInput {
     /// Version of the deterministic projection and numerical accounting model.
     pub estimation_model_revision: u16,
+    pub phase: FeaResourcePhase,
     pub topology_digest: Digest,
     pub operator_pattern_digest: Digest,
     pub topology: TopologyResourceFacts,
@@ -261,13 +317,14 @@ pub struct ResourceBreakdown {
     pub csr_value_bytes: ByteCount,
     pub assembly_contribution_bytes: ByteCount,
     pub assembly_scratch_bytes: ByteCount,
-    pub solve_vector_bytes: ByteCount,
+    pub solve_workspace_bytes: ByteCount,
     pub preconditioner_bytes: ByteCount,
     pub factorization_bytes: ByteCount,
     pub constraint_bytes: ByteCount,
     pub recovery_resident_bytes: ByteCount,
     pub recovery_scratch_bytes: ByteCount,
     pub recovery_retained_bytes: ByteCount,
+    pub result_artifact_bytes: ByteCount,
     pub observation_maximum_samples_per_observation: Count,
     pub observation_produced_sample_count: Count,
     pub observation_retained_sample_count: Count,

@@ -1503,7 +1503,7 @@ fn single_tetrahedron_solver_mesh() -> SolverMeshArtifact {
     mesh
 }
 
-fn single_tetrahedron_solver_mesh_for_model(
+pub(crate) fn single_tetrahedron_solver_mesh_for_model(
     model: &runmat_analysis_core::AnalysisModel,
 ) -> SolverMeshArtifact {
     let mut mesh = single_tetrahedron_solver_mesh();
