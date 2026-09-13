@@ -1,4 +1,4 @@
-import { CATALOG_ROOT, RUNTIME_ROOT, compareCodePoint, rustLeaf } from "../constants.mjs";
+import { CATALOG_ROOT, compareCodePoint, rustLeaf } from "../constants.mjs";
 import {
   bundleTypedPathEvidence, identityTypedBaselineEvidence,
 } from "../baseline-evidence.mjs";
@@ -8,7 +8,9 @@ import { deepImmutable } from "../immutable.mjs";
 import { parseInventoryEvidence } from "../inventory.mjs";
 import { digest, kind } from "../schema.mjs";
 import { assertValidatedTopologyView } from "../topology/freeze.mjs";
-import { buildAuthorityProposals, migrationFindingRoutingProposal } from "./authority-proposals.mjs";
+import {
+  buildAuthorityProposals, canonicalCallableOwnerPath, migrationFindingRoutingProposal,
+} from "./authority-proposals.mjs";
 
 const PROGRAM = "RM-1064/C00-C07";
 const KIND = "runmat-builtin-migration-control-overlay-scaffold";
@@ -298,7 +300,9 @@ function topologyTargetProposals(row, sourceRow) {
       basis: "reviewed-internal-identity-observed-paths-only",
     };
   }
-  const runtimeOwner = `${RUNTIME_ROOT}/${row.domain}/${row.family}/${leaf}/mod.rs`;
+  const observedOwners = [...new Set((sourceRow.semantic_authority?.implementation_provenance ?? [])
+    .map((entry) => entry.source_file))].sort(compareCodePoint);
+  const runtimeOwner = canonicalCallableOwnerPath(row, observedOwners);
   return {
     proposed_catalog_package: `${CATALOG_ROOT}/${row.domain}/${row.family}/${leaf}/mod.rs`,
     proposed_callable_owner: runtimeOwner,
