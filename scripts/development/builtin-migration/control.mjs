@@ -72,7 +72,7 @@ export function validateControlManifestStructure(value, { inventory: current, re
   if (current) validateBaseline(baseline, current, bundles, identities);
   const { digest: _ignored, ...payload } = value;
   if (evidenceDigest(payload) !== value.digest) throw new Error("control manifest digest mismatch");
-  return deepImmutable({
+  const immutable = deepImmutable({
     value,
     inputs: value.inputs,
     topology_digest: value.topology_digest,
@@ -81,7 +81,6 @@ export function validateControlManifestStructure(value, { inventory: current, re
     moduleComposition: projection.moduleComposition,
     targetPolicy: projection.targetPolicy,
     executionTargets: projection.executionTargets,
-    pilotPolicy: projection.pilotPolicy,
     pilotPolicyDigest: projection.pilotPolicy.digest,
     cohorts,
     bundles,
@@ -89,6 +88,9 @@ export function validateControlManifestStructure(value, { inventory: current, re
     migrationFindings,
     digest: value.digest,
   });
+  // The policy is a validated authority capability. Preserve that exact brand while
+  // immutably copying the surrounding control projection.
+  return Object.freeze({ ...immutable, pilotPolicy: projection.pilotPolicy });
 }
 
 export function parseControlManifest(value, { inventory, reviewedTopology, reviewedControl } = {}) {
