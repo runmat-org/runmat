@@ -534,6 +534,73 @@ test("reviewed baseline-only composition products require no bundle transition",
   );
 });
 
+test("a parent may reference an exact integration-owned child product", () => {
+  const baseline = fixtureProjection();
+  const parent = baseline.products[0];
+  parent.children = [];
+  const childProduct = {
+    product_id: "catalog-math-arithmetic",
+    crate_role: "catalog",
+    path: "crates/runmat-builtins/src/catalog/entries/math/arithmetic/mod.rs",
+    module_path: "crate::catalog::entries::math::arithmetic",
+    state: "absent",
+    aggregations: ["entries"],
+    aggregation_exports: [],
+    children: [],
+  };
+  baseline.products.push(childProduct);
+  baseline.products.sort((left, right) =>
+    left.product_id < right.product_id ? -1 : left.product_id > right.product_id ? 1 : 0);
+  const products = new Map(baseline.products.map((product) => [product.product_id, {
+    product_id: product.product_id,
+    path: product.path,
+    baseline_digest: product.state === "absent" ? null : `sha256:${"1".repeat(64)}`,
+    lifecycle: { kind: "bundle-referenced" },
+    verification: {
+      kind: "rust_module_composition",
+      crate_role: product.crate_role,
+      module_path: product.module_path,
+    },
+  }]));
+  const parentChild = child({
+    module: "arithmetic",
+    source_path: childProduct.path,
+    role: "group",
+    visibility: "private",
+    aggregations: ["entries"],
+  });
+  const leaf = child({
+    module: "add",
+    source_path: "crates/runmat-builtins/src/catalog/entries/math/arithmetic/add.rs",
+    sourceKind: "file",
+  });
+  const bundle = {
+    prerequisites: [],
+    integration_product_refs: ["catalog-math", "catalog-math-arithmetic"],
+    module_composition_transition: transition("bundle-one", [
+      { product_id: "catalog-math", operation: "add", before: null, after: parentChild },
+      { product_id: "catalog-math-arithmetic", operation: "add", before: null, after: leaf },
+    ], [
+      { product_id: "catalog-math", before_state: "present", after_state: "present" },
+      { product_id: "catalog-math-arithmetic", before_state: "absent", after_state: "present" },
+    ]),
+    authored_write_set: [{ kind: "file", path: leaf.source_path }],
+  };
+  assert.doesNotThrow(() => validateModuleCompositionControl(
+    baseline, products, new Map([["bundle-one", bundle]]),
+  ));
+
+  const unreviewed = structuredClone(bundle);
+  unreviewed.module_composition_transition.changes[0].after.source_path =
+    "crates/runmat-builtins/src/catalog/entries/math/unreviewed/mod.rs";
+  assert.throws(
+    () => validateModuleCompositionControl(
+      baseline, products, new Map([["bundle-one", unreviewed]]),
+    ),
+    /outside its authored scope/,
+  );
+});
+
 test("prerequisite order validates sequential additions after parent activation", () => {
   const baseline = fixtureProjection();
   const catalog = baseline.products[0];
