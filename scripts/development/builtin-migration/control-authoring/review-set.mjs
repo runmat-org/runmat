@@ -10,8 +10,12 @@ import { parseInventoryEvidence } from "../inventory.mjs";
 import { validateModuleCompositionControl } from "../module-composition/control.mjs";
 import { array, digest, exact, kind, repositoryPath, stableId } from "../schema.mjs";
 import { assertValidatedTopologyView } from "../topology/freeze.mjs";
-import { parseBundleControlReview } from "./bundle-review.mjs";
-import { parseGlobalControlReview } from "./global-review.mjs";
+import {
+  assertValidatedBundleControlReview, parseBundleControlReview,
+} from "./bundle-review.mjs";
+import {
+  assertValidatedGlobalControlReview, parseGlobalControlReview,
+} from "./global-review.mjs";
 import { assertValidatedControlOverlayScaffold } from "./scaffold.mjs";
 
 export const CONTROL_REVIEW_SET_KIND = "runmat-builtin-migration-control-review-set";
@@ -45,12 +49,11 @@ export function loadControlReviewSet(manifestPath, { scaffold, topology, invento
     if (review.bundleId !== reference.bundle_id) throw new Error(`${reference.bundle_id}: manifest key and bundle review differ`);
     bundleReviews.set(reference.bundle_id, review);
   }
-  validateProfileReferences(bundleReviews, globalReview, inventory);
+  validateProfileReferences(bundleReviews, globalReview, inventory, topology);
   validateIntegrationProductCoverage(
     new Map([...bundleReviews].map(([id, review]) => [id, review.bundleControl])),
     globalReview.integrationProducts,
   );
-  validateBundleReferences(bundleReviews, topology);
   const moduleComposition = validateModuleCompositionControl(
     globalReview.moduleCompositionBaseline,
     globalReview.integrationProducts,
@@ -131,30 +134,46 @@ function parseJson(bytes, label) {
   catch (error) { throw new Error(`${label} is not valid UTF-8 JSON: ${error.message}`); }
 }
 
-function validateProfileReferences(bundleReviews, globalReview, inventory) {
+function validateProfileReferences(bundleReviews, globalReview, inventory, topology) {
   const used = new Set();
-  for (const [bundleId, review] of bundleReviews) {
-    const expanded = review.bundleControl.gate_plans.map(({ program_profile_id: profileId, ...row }) => {
-      const profile = globalReview.programProfiles.get(profileId);
-      if (!profile) throw new Error(`${bundleId}: gate plan references unknown global program profile ${profileId}`);
-      used.add(profileId);
-      return { ...row, program: profile.program };
-    });
-    parseGatePlans(expanded, bundleId, inventory);
+  for (const review of bundleReviews.values()) {
+    for (const profileId of validateBundleControlReferences(
+      review, globalReview, inventory, topology,
+    )) used.add(profileId);
   }
   const defined = [...globalReview.programProfiles.keys()].sort(compareCodePoint);
   const referenced = [...used].sort(compareCodePoint);
   if (JSON.stringify(referenced) !== JSON.stringify(defined)) throw new Error("global program profiles must exactly equal the set referenced by bundle gate plans");
 }
 
-function validateBundleReferences(bundleReviews, topology) {
-  for (const [bundleId, review] of bundleReviews) {
-    for (const prerequisite of review.bundleControl.prerequisites) {
-      if (!topology.bundles.has(prerequisite.bundle_id)) {
-        throw new Error(`${bundleId}: prerequisite references unknown topology bundle ${prerequisite.bundle_id}`);
-      }
+export function validateBundleControlReferences(
+  reviewValue, globalReviewValue, inventory, topology,
+) {
+  const review = assertValidatedBundleControlReview(reviewValue);
+  const globalReview = assertValidatedGlobalControlReview(globalReviewValue);
+  const used = new Set();
+  const expanded = review.bundleControl.gate_plans.map(({
+    program_profile_id: profileId, ...row
+  }) => {
+    const profile = globalReview.programProfiles.get(profileId);
+    if (!profile) {
+      throw new Error(
+        `${review.bundleId}: gate plan references unknown global program profile ${profileId}`,
+      );
+    }
+    used.add(profileId);
+    return { ...row, program: profile.program };
+  });
+  parseGatePlans(expanded, review.bundleId, inventory);
+  assertValidatedTopologyView(topology);
+  for (const prerequisite of review.bundleControl.prerequisites) {
+    if (!topology.bundles.has(prerequisite.bundle_id)) {
+      throw new Error(
+        `${review.bundleId}: prerequisite references unknown topology bundle ${prerequisite.bundle_id}`,
+      );
     }
   }
+  return used;
 }
 
 function assertInputBindings(scaffold, topology, inventory) {

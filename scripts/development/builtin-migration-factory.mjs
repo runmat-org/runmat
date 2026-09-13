@@ -10,6 +10,9 @@ import { validateControlReviewChain } from "./builtin-migration/control-authorin
 import { buildControlAttestationTemplate, sealControlAttestation } from "./builtin-migration/control-authoring/attestation-template.mjs";
 import { composeControlCandidate, parseControlCandidate } from "./builtin-migration/control-authoring/compose.mjs";
 import { loadControlReviewSet } from "./builtin-migration/control-authoring/review-set.mjs";
+import {
+  validateBundleControlReviewInput, validateGlobalControlReviewInput,
+} from "./builtin-migration/control-authoring/review-validation.mjs";
 import { buildControlOverlayScaffold, parseControlOverlayScaffold } from "./builtin-migration/control-authoring/scaffold.mjs";
 import { indexControlReviews, initializeControlReviewTemplates } from "./builtin-migration/control-authoring/templates.mjs";
 import { buildAuthorityComponentGraph } from "./builtin-migration/topology/components.mjs";
@@ -17,6 +20,8 @@ import { composeTopologyCandidate } from "./builtin-migration/topology/compose.m
 import { freezeReviewedTopology, parseReviewedTopology, reviewedTopologyView } from "./builtin-migration/topology/freeze.mjs";
 import { dispositionInputFromControl } from "./builtin-migration/dispositions.mjs";
 import { compileDispositionReview } from "./builtin-migration/disposition-review.mjs";
+import { factoryCliHelp } from "./builtin-migration/factory-cli/help.mjs";
+import { parseFactoryCliArguments } from "./builtin-migration/factory-cli/parse.mjs";
 import { buildDispositionSeed, buildInventory, emptyDispositionInput, parseInventoryEvidence } from "./builtin-migration/inventory.mjs";
 import { assertLeaseBaseInventory, issueLease, parseLease } from "./builtin-migration/lease.mjs";
 import { runGateProducer } from "./builtin-migration/gate-adapter.mjs";
@@ -32,14 +37,14 @@ import { verifyBatch } from "./builtin-migration/verify.mjs";
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
 try {
-  run(parse(process.argv.slice(2)));
+  run(parseFactoryCliArguments(process.argv.slice(2)));
 } catch (error) {
   process.stderr.write(`builtin migration factory: ${error instanceof Error ? error.message : String(error)}\n`);
   process.exitCode = 2;
 }
 
 function run(options) {
-  if (options.help) { process.stdout.write(help()); return; }
+  if (options.help) { process.stdout.write(factoryCliHelp()); return; }
   if (options.command === "draft-control") {
     emit(buildControlDraft(readJson(options.baselineInventory)), options.output);
     return;
@@ -77,6 +82,19 @@ function run(options) {
   if (options.command === "scaffold-control") {
     const inventory = parseInventoryEvidence(readJson(options.baselineInventory));
     emit(buildControlOverlayScaffold(inventory, readJson(options.draft), validatedTopologyFromOptions(options)), options.output);
+    return;
+  }
+  if (["validate-global-control-review", "validate-bundle-control-review"].includes(options.command)) {
+    const inventory = parseInventoryEvidence(readJson(options.baselineInventory));
+    const topology = validatedTopologyFromOptions(options);
+    const scaffold = validatedScaffoldFromOptions(options, inventory, topology);
+    const context = { scaffold, topology, inventory };
+    const report = options.command === "validate-global-control-review"
+      ? validateGlobalControlReviewInput(readJson(options.globalReview), context)
+      : validateBundleControlReviewInput(
+        readJson(options.bundleReview), options.bundle, readJson(options.globalReview), context,
+      );
+    emit(report, null);
     return;
   }
   if (options.command === "compose-control") {
@@ -292,97 +310,8 @@ function runSeal(options) {
   if (output.result !== "pass") process.exitCode = 1;
 }
 
-function parse(arguments_) {
-  if (arguments_.includes("--help") || arguments_.includes("-h")) return { help: true };
-  const command = arguments_.shift();
-  const commands = ["inventory", "queue", "seed-dispositions", "compile-dispositions", "draft-control", "component-graph", "compose-topology", "freeze-topology", "validate-topology", "scaffold-control", "init-control-reviews", "index-control-reviews", "compose-control", "scaffold-control-attestation", "seal-control-attestation", "freeze-control", "validate-control", "issue-lease", "produce-gate", "materialize-composition", "prepare", "audit", "verify", "seal"];
-  const controlCommands = ["queue", "prepare", "audit", "freeze-control", "validate-control", "issue-lease", "produce-gate", "materialize-composition", "seal"];
-  const controlAuthoringCommands = ["scaffold-control", "init-control-reviews", "index-control-reviews", "compose-control", "scaffold-control-attestation", "seal-control-attestation"];
-  if (!commands.includes(command)) throw new Error(`expected ${commands.join(", ")}; use --help`);
-  const options = { command, output: null, compiledInventory: null, baselineInventory: null, leaseBaseInventory: null, dispositions: null, control: null, draft: null, review: null, request: null, lease: null, state: null, queueCheckpoint: null, trustedQueueCheckpointDigest: null, batch: null, evidence: null, identity: null, workspace: null, manifest: null, bundle: null, gate: null, artifact: null, inputs: null, componentGraph: null, c01C03Review: null, c04C05Review: null, c06C07Review: null, reconciliation: null, stabilityCorrections: null, candidate: null, attestation: null, topology: null, controlScaffold: null, controlReviewSet: null, controlCandidate: null, controlAttestation: null, reviewDirectory: null, reviewSetDirectory: null, attestationReview: null, help: false };
-  if (command === "prepare") options.identity = requireValue(arguments_, "prepare identity");
-  while (arguments_.length) {
-    const option = arguments_.shift();
-    const fields = { "--output": "output", "--compiled-inventory": "compiledInventory", "--baseline-inventory": "baselineInventory", "--lease-base-inventory": "leaseBaseInventory", "--dispositions": "dispositions", "--control": "control", "--draft": "draft", "--review": "review", "--request": "request", "--lease": "lease", "--state": "state", "--queue-checkpoint": "queueCheckpoint", "--trusted-queue-checkpoint-digest": "trustedQueueCheckpointDigest", "--batch": "batch", "--evidence": "evidence", "--workspace": "workspace", "--manifest": "manifest", "--bundle": "bundle", "--gate": "gate", "--artifact": "artifact", "--inputs": "inputs", "--component-graph": "componentGraph", "--c01-c03-review": "c01C03Review", "--c04-c05-review": "c04C05Review", "--c06-c07-review": "c06C07Review", "--reconciliation": "reconciliation", "--stability-corrections": "stabilityCorrections", "--candidate": "candidate", "--attestation": "attestation", "--topology": "topology", "--control-scaffold": "controlScaffold", "--control-review-set": "controlReviewSet", "--control-candidate": "controlCandidate", "--control-attestation": "controlAttestation", "--review-directory": "reviewDirectory", "--review-set-directory": "reviewSetDirectory", "--attestation-review": "attestationReview" };
-    if (!fields[option]) throw new Error(`unknown option ${option}`);
-    options[fields[option]] = requireValue(arguments_, option);
-  }
-  const requiresCompiled = ["inventory", "queue", "seed-dispositions", "prepare", "audit", "produce-gate"].includes(command);
-  if (requiresCompiled && !options.compiledInventory) throw new Error(`${command} requires --compiled-inventory`);
-  if (["queue", "prepare", "audit", "validate-control", "produce-gate"].includes(command) && !options.control) throw new Error(`${command} requires --control`);
-  if (["queue", "prepare", "audit", "compile-dispositions", "draft-control", "component-graph", "compose-topology", "freeze-topology", "validate-topology", ...controlAuthoringCommands, ...controlCommands].includes(command) && !options.baselineInventory) throw new Error(`${command} requires --baseline-inventory`);
-  if (["compose-topology", "freeze-topology", "validate-topology", ...controlAuthoringCommands, ...controlCommands].includes(command) && (!options.componentGraph || !options.draft || !options.c01C03Review || !options.c04C05Review || !options.c06C07Review || !options.reconciliation || !options.stabilityCorrections)) {
-    throw new Error(`${command} requires --component-graph, --draft, all three cohort reviews, --reconciliation, and --stability-corrections`);
-  }
-  if (["freeze-topology", "validate-topology", ...controlAuthoringCommands, ...controlCommands].includes(command) && (!options.candidate || !options.attestation)) throw new Error(`${command} requires --candidate and --attestation`);
-  if (["validate-topology", ...controlAuthoringCommands, ...controlCommands].includes(command) && !options.topology) throw new Error(`${command} requires --topology`);
-  if (command === "compile-dispositions" && !options.review) throw new Error("compile-dispositions requires --review");
-  if (["init-control-reviews", "index-control-reviews", "compose-control", "scaffold-control-attestation", "seal-control-attestation", ...controlCommands].includes(command) && !options.controlScaffold) throw new Error(`${command} requires --control-scaffold`);
-  if (["compose-control", "scaffold-control-attestation", "seal-control-attestation", ...controlCommands].includes(command) && !options.controlReviewSet) throw new Error(`${command} requires --control-review-set`);
-  if (["scaffold-control-attestation", "seal-control-attestation", ...controlCommands].includes(command) && !options.controlCandidate) throw new Error(`${command} requires --control-candidate`);
-  if (controlCommands.includes(command) && (!options.controlCandidate || !options.controlAttestation)) throw new Error(`${command} requires --control-candidate and --control-attestation`);
-  if (["init-control-reviews", "index-control-reviews"].includes(command) && !options.reviewDirectory) throw new Error(`${command} requires --review-directory`);
-  if (command === "index-control-reviews" && !options.reviewSetDirectory) throw new Error("index-control-reviews requires --review-set-directory");
-  if (command === "seal-control-attestation" && !options.attestationReview) throw new Error("seal-control-attestation requires --attestation-review");
-  if (command === "issue-lease" && (!options.control || !options.request || !options.leaseBaseInventory || !options.state || !options.queueCheckpoint || !options.trustedQueueCheckpointDigest)) throw new Error("issue-lease requires --control, --request, --lease-base-inventory, --state, --queue-checkpoint, and --trusted-queue-checkpoint-digest");
-  if (command === "queue" && options.state
-    && (!options.queueCheckpoint || !options.trustedQueueCheckpointDigest)) {
-    throw new Error("queue with --state requires --queue-checkpoint and --trusted-queue-checkpoint-digest");
-  }
-  if (command === "produce-gate" && (!options.bundle || !options.gate || !options.artifact
-    || !options.state || !options.queueCheckpoint || !options.trustedQueueCheckpointDigest)) {
-    throw new Error("produce-gate requires --bundle, --gate, --artifact, --state, --queue-checkpoint, and --trusted-queue-checkpoint-digest");
-  }
-  if (command === "materialize-composition" && (!options.control || !options.lease
-    || !options.leaseBaseInventory || !options.state || !options.queueCheckpoint
-    || !options.trustedQueueCheckpointDigest)) {
-    throw new Error("materialize-composition requires --control, --lease-base-inventory, --lease, --state, --queue-checkpoint, and --trusted-queue-checkpoint-digest");
-  }
-  if (["prepare", "audit"].includes(command) && !options.lease) throw new Error(`${command} requires --lease`);
-  if (["prepare", "audit", "produce-gate"].includes(command) && !options.leaseBaseInventory) throw new Error(`${command} requires --lease-base-inventory`);
-  if (command === "produce-gate" && !options.lease) throw new Error("produce-gate requires --lease");
-  if (command === "prepare" && !options.workspace) throw new Error("prepare requires --workspace outside the repository");
-  if (command === "audit" && (!options.batch || !options.evidence)) throw new Error("audit requires --batch and --evidence");
-  if (["verify", "seal"].includes(command) && !options.manifest) throw new Error(`${command} requires --manifest`);
-  if (command === "seal" && (!options.control || !options.lease)) {
-    throw new Error("seal requires --control and --lease");
-  }
-  return options;
-}
-
-function requireValue(arguments_, option) { const value = arguments_.shift(); if (!value || value.startsWith("-")) throw new Error(`${option} requires a value`); return value; }
 function readJson(sourcePath) { return JSON.parse(fs.readFileSync(path.resolve(sourcePath), "utf8")); }
 function emit(value, outputPath) { const encoded = `${JSON.stringify(value, null, 2)}\n`; if (outputPath) fs.writeFileSync(path.resolve(outputPath), encoded); else process.stdout.write(encoded); }
-function help() {
-  const topology = "--topology PATH --candidate PATH --attestation PATH --component-graph PATH --draft PATH --c01-c03-review PATH --c04-c05-review PATH --c06-c07-review PATH --reconciliation PATH --stability-corrections PATH";
-  const controlReview = "--control-scaffold PATH --control-review-set PATH --control-candidate PATH --control-attestation PATH";
-  return `Usage:\n` +
-    `  builtin-migration-factory.mjs inventory|seed-dispositions --compiled-inventory PATH [--dispositions PATH] [--output PATH]\n` +
-    `  builtin-migration-factory.mjs compile-dispositions --review PATH --baseline-inventory PATH [--output PATH]\n` +
-    `  builtin-migration-factory.mjs draft-control --baseline-inventory PATH [--output PATH]\n` +
-    `  builtin-migration-factory.mjs component-graph --baseline-inventory PATH [--output PATH]\n` +
-    `  builtin-migration-factory.mjs compose-topology --baseline-inventory PATH --component-graph PATH --draft PATH --c01-c03-review PATH --c04-c05-review PATH --c06-c07-review PATH --reconciliation PATH --stability-corrections PATH [--output PATH]\n` +
-    `  builtin-migration-factory.mjs freeze-topology --candidate PATH --attestation PATH --baseline-inventory PATH --component-graph PATH --draft PATH --c01-c03-review PATH --c04-c05-review PATH --c06-c07-review PATH --reconciliation PATH --stability-corrections PATH [--output PATH]\n` +
-    `  builtin-migration-factory.mjs validate-topology --topology PATH --candidate PATH --attestation PATH --baseline-inventory PATH --component-graph PATH --draft PATH --c01-c03-review PATH --c04-c05-review PATH --c06-c07-review PATH --reconciliation PATH --stability-corrections PATH [--output PATH]\n` +
-    `  builtin-migration-factory.mjs scaffold-control --baseline-inventory PATH ${topology} [--output PATH]\n` +
-    `  builtin-migration-factory.mjs init-control-reviews --baseline-inventory PATH ${topology} --control-scaffold PATH --review-directory PATH [--output PATH]\n` +
-    `  builtin-migration-factory.mjs index-control-reviews --baseline-inventory PATH ${topology} --control-scaffold PATH --review-directory PATH --review-set-directory PATH [--output PATH]\n` +
-    `  builtin-migration-factory.mjs compose-control --baseline-inventory PATH ${topology} --control-scaffold PATH --control-review-set PATH [--output PATH]\n` +
-    `  builtin-migration-factory.mjs scaffold-control-attestation --baseline-inventory PATH ${topology} --control-scaffold PATH --control-review-set PATH --control-candidate PATH [--output PATH]\n` +
-    `  builtin-migration-factory.mjs seal-control-attestation --baseline-inventory PATH ${topology} --control-scaffold PATH --control-review-set PATH --control-candidate PATH --attestation-review PATH [--output PATH]\n` +
-    `  builtin-migration-factory.mjs freeze-control --baseline-inventory PATH ${topology} ${controlReview} [--output PATH]\n` +
-    `  builtin-migration-factory.mjs validate-control --control PATH --baseline-inventory PATH ${topology} ${controlReview} [--output PATH]\n` +
-    `  builtin-migration-factory.mjs issue-lease --request PATH --control PATH --baseline-inventory PATH --lease-base-inventory PATH --state PATH --queue-checkpoint PATH --trusted-queue-checkpoint-digest SHA256 ${topology} ${controlReview} [--output PATH]\n` +
-    `  builtin-migration-factory.mjs produce-gate --compiled-inventory PATH --control PATH --baseline-inventory PATH --lease-base-inventory PATH --lease PATH --state PATH --queue-checkpoint PATH --trusted-queue-checkpoint-digest SHA256 ${topology} ${controlReview} --bundle ID --gate NAME --artifact ID [--inputs PATH] [--output PATH]\n` +
-    `  builtin-migration-factory.mjs materialize-composition --control PATH --baseline-inventory PATH --lease-base-inventory PATH --lease PATH --state PATH --queue-checkpoint PATH --trusted-queue-checkpoint-digest SHA256 ${topology} ${controlReview} [--output PATH]\n` +
-    `  builtin-migration-factory.mjs queue --compiled-inventory PATH --control PATH --baseline-inventory PATH ${topology} ${controlReview} [--state PATH --queue-checkpoint PATH --trusted-queue-checkpoint-digest SHA256] [--dispositions PATH] [--output PATH]\n` +
-    `  builtin-migration-factory.mjs prepare NAME --compiled-inventory PATH --control PATH --baseline-inventory PATH --lease-base-inventory PATH ${topology} ${controlReview} --lease PATH --workspace PATH [--dispositions PATH] [--output PATH]\n` +
-    `  builtin-migration-factory.mjs audit --compiled-inventory PATH --control PATH --baseline-inventory PATH --lease-base-inventory PATH ${topology} ${controlReview} --lease PATH --batch PATH --evidence PATH [--dispositions PATH] [--output PATH]\n` +
-    `  builtin-migration-factory.mjs verify --manifest PATH [--output PATH]\n` +
-    `  builtin-migration-factory.mjs seal --manifest PATH --lease PATH --control PATH --baseline-inventory PATH ${topology} ${controlReview} [--output PATH]\n\n` +
-    `Generated files are content-addressed development evidence, never production authority.\n`;
-}
-
 function composeTopologyFromOptions(options) {
   return composeTopologyCandidate({
     baselineInventory: readJson(options.baselineInventory),
