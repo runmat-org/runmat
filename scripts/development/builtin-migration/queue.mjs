@@ -173,14 +173,16 @@ export function validateQueueState(
 
 export function validateQueueStateFromAuthority(
   value, control, loadSeal, loadPredecessor = () => null,
+  validatePilotTransition = null,
 ) {
   return validateQueueStateWithSealPolicy(
-    value, control, loadSeal, loadPredecessor, true,
+    value, control, loadSeal, loadPredecessor, true, validatePilotTransition,
   );
 }
 
 function validateQueueStateWithSealPolicy(
   value, control, loadSeal, loadPredecessor, sealsAreValidated,
+  validatePilotTransition = null,
 ) {
   assertValidatedControl(control);
   kind(value, 4, "runmat-builtin-migration-queue-state", "queue state");
@@ -276,6 +278,7 @@ function validateQueueStateWithSealPolicy(
     sealedBundles,
     pilotTransition,
     control,
+    validatePilotTransition,
   });
   digest(value.digest, "queue state digest");
   const { digest: _ignored, ...payload } = value;

@@ -11,7 +11,9 @@ import { loadQueueSeal } from "./seal-loader.mjs";
 
 const LOADERS = new WeakMap();
 
-export function openQueueStateLoader({ session, references, seals, control }) {
+export function openQueueStateLoader({
+  session, references, seals, control, validatePilotTransition = null,
+}) {
   const authoritySession = assertAuthorityLoadSession(session);
   assertQueueReferenceIndex(references, authoritySession);
   const loader = Object.freeze({});
@@ -20,6 +22,7 @@ export function openQueueStateLoader({ session, references, seals, control }) {
     references,
     seals,
     control: assertValidatedControl(control),
+    validatePilotTransition,
     states: new Map(),
   });
   return loader;
@@ -60,6 +63,7 @@ export function loadQueueState(loaderValue, reference) {
         path: predecessor.state_path,
         digest: predecessor.state_digest,
       }).value,
+      loader.validatePilotTransition,
     );
     const loaded = Object.freeze({
       path: binding.path,
