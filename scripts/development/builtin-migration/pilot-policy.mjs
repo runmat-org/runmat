@@ -10,13 +10,13 @@ import {
 } from "./topology/schema.mjs";
 
 export const PILOT_POLICY_KIND = "runmat-builtin-migration-pilot-policy";
-export const PILOT_POLICY_VERSION = 1;
-
-const MAXIMUM_SAFE_ELAPSED_HOURS = Math.floor(Number.MAX_SAFE_INTEGER / 3_600_000);
+export const PILOT_POLICY_VERSION = 2;
 const REQUIRED_BELOW_TARGET_FINDINGS = Object.freeze([
   "concrete-limiter", "revised-forecast",
 ]);
 const IDENTITY_DISPOSITIONS = new Set(["canonical", "alias", "internal"]);
+const MILLISECONDS_PER_HOUR = 3_600_000n;
+const VALIDATED_PILOT_POLICIES = new WeakSet();
 
 export function parsePilotPolicy(value, topologyValue, prerequisitesByBundle) {
   const topology = assertValidatedTopologyView(topologyValue);
@@ -40,9 +40,9 @@ export function parsePilotPolicy(value, topologyValue, prerequisitesByBundle) {
   validatePrerequisiteClosure(waveByBundle, prerequisites);
   const counts = deriveCounts(topology, waveByBundle);
   parseDerivedCounts(value.derived_counts, counts);
-  parseAdmission(value.admission);
+  const admission = parseAdmission(value.admission);
   parseReviewedEvidence(value.review, "pilot policy review");
-  return deepImmutable({
+  const parsed = deepImmutable({
     value,
     digest: evidenceDigest(value),
     pilotId,
@@ -50,7 +50,32 @@ export function parsePilotPolicy(value, topologyValue, prerequisitesByBundle) {
     bundleIds: [...waveByBundle.keys()].sort(compareCodePoint),
     waveByBundle,
     counts,
+    admission,
   });
+  VALIDATED_PILOT_POLICIES.add(parsed);
+  return parsed;
+}
+
+export function assertValidatedPilotPolicy(value) {
+  if (!VALIDATED_PILOT_POLICIES.has(value)) {
+    throw new Error("operation requires the exact validated pilot policy");
+  }
+  return value;
+}
+
+export function pilotRateMeetsMinimum(value, publicIdentities, aggregateWorkerMilliseconds) {
+  const policy = assertValidatedPilotPolicy(value);
+  integer(publicIdentities, "pilot measured public identities", 0);
+  integer(aggregateWorkerMilliseconds, "pilot aggregate worker milliseconds", 1);
+  const { numerator, denominator } = policy.admission.rate;
+  return BigInt(publicIdentities) * BigInt(denominator) * MILLISECONDS_PER_HOUR
+    >= BigInt(aggregateWorkerMilliseconds) * BigInt(numerator);
+}
+
+export function pilotElapsedWithinMaximum(value, elapsedMilliseconds) {
+  const policy = assertValidatedPilotPolicy(value);
+  integer(elapsedMilliseconds, "pilot measured elapsed milliseconds", 1);
+  return elapsedMilliseconds <= policy.admission.maximumElapsedMilliseconds;
 }
 
 function parseWaves(value, topology) {
@@ -204,17 +229,18 @@ function parseDerivedCounts(value, expected) {
 
 function parseAdmission(value) {
   exact(value, [
-    "minimum_public_identities_per_aggregate_hour", "maximum_elapsed_hours",
+    "minimum_public_identities_per_aggregate_hour", "maximum_elapsed_milliseconds",
     "required_waived_gate_count", "ordinary_gate_policy", "below_target_obligation",
   ], "pilot admission policy");
-  positiveFiniteNumber(
+  const rate = parsePositiveRational(
     value.minimum_public_identities_per_aggregate_hour,
     "pilot minimum public identities per aggregate hour",
   );
-  positiveFiniteNumber(value.maximum_elapsed_hours, "pilot maximum elapsed hours");
-  if (value.maximum_elapsed_hours > MAXIMUM_SAFE_ELAPSED_HOURS) {
-    throw new Error("pilot maximum elapsed hours must remain safe for millisecond timing arithmetic");
-  }
+  const maximumElapsedMilliseconds = integer(
+    value.maximum_elapsed_milliseconds,
+    "pilot maximum elapsed milliseconds",
+    1,
+  );
   integer(value.required_waived_gate_count, "pilot required waived gate count", 0);
   if (value.required_waived_gate_count !== 0) {
     throw new Error("pilot required waived gate count must be zero");
@@ -234,11 +260,22 @@ function parseAdmission(value) {
   if (JSON.stringify(findings) !== JSON.stringify(REQUIRED_BELOW_TARGET_FINDINGS)) {
     throw new Error("below-target obligation must require a concrete limiter and revised forecast");
   }
+  return { rate, maximumElapsedMilliseconds };
 }
 
-function positiveFiniteNumber(value, label) {
-  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
-    throw new Error(`${label} must be a finite positive number`);
+function parsePositiveRational(value, label) {
+  exact(value, ["numerator", "denominator"], label);
+  const numerator = integer(value.numerator, `${label} numerator`, 1);
+  const denominator = integer(value.denominator, `${label} denominator`, 1);
+  if (greatestCommonDivisor(numerator, denominator) !== 1) {
+    throw new Error(`${label} must use a reduced positive rational`);
   }
-  return value;
+  return { numerator, denominator };
+}
+
+function greatestCommonDivisor(left, right) {
+  let a = left;
+  let b = right;
+  while (b !== 0) [a, b] = [b, a % b];
+  return a;
 }

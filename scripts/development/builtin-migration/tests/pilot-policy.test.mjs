@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { parsePilotPolicy } from "../pilot-policy.mjs";
+import {
+  parsePilotPolicy, pilotElapsedWithinMaximum, pilotRateMeetsMinimum,
+} from "../pilot-policy.mjs";
 import {
   cohortCount, pilotFixture, prerequisite,
 } from "./pilot-policy-fixture.mjs";
@@ -90,12 +92,14 @@ test("pilot schema accepts an explicitly reviewed topology subset and authored r
       cohortCount("C02", 1, 2, 1, 1),
     ],
   };
-  fixture.policy.admission.minimum_public_identities_per_aggregate_hour = 6.25;
-  fixture.policy.admission.maximum_elapsed_hours = 12.5;
+  fixture.policy.admission.minimum_public_identities_per_aggregate_hour = {
+    numerator: 25, denominator: 4,
+  };
+  fixture.policy.admission.maximum_elapsed_milliseconds = 45_000_000;
   const parsed = parsePilotPolicy(fixture.policy, fixture.topology, fixture.prerequisites);
   assert.deepEqual(parsed.counts, fixture.policy.derived_counts);
-  assert.equal(parsed.value.admission.minimum_public_identities_per_aggregate_hour, 6.25);
-  assert.equal(parsed.value.admission.maximum_elapsed_hours, 12.5);
+  assert.deepEqual(parsed.admission.rate, { numerator: 25, denominator: 4 });
+  assert.equal(parsed.admission.maximumElapsedMilliseconds, 45_000_000);
 });
 
 test("pilot prerequisite authority is complete and every selected prerequisite is in an earlier wave", () => {
@@ -138,34 +142,39 @@ test("pilot prerequisite authority is complete and every selected prerequisite i
 });
 
 test("pilot admission requires positive bounded measurements, zero waivers, full gates, and a typed below-target obligation", () => {
-  for (const rate of [0, -1, Number.NaN, Number.POSITIVE_INFINITY, "4.5"]) {
+  for (const rate of [
+    { numerator: 0, denominator: 1 },
+    { numerator: 1, denominator: 0 },
+    { numerator: 9, denominator: 2, scale: 1 },
+    4.5,
+  ]) {
     const fixture = pilotFixture();
     fixture.policy.admission.minimum_public_identities_per_aggregate_hour = rate;
     assert.throws(
       () => parsePilotPolicy(fixture.policy, fixture.topology, fixture.prerequisites),
-      /minimum public identities per aggregate hour must be a finite positive number/,
+      /minimum public identities per aggregate hour/,
     );
   }
 
-  for (const elapsed of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
-    const fixture = pilotFixture();
-    fixture.policy.admission.maximum_elapsed_hours = elapsed;
-    assert.throws(
-      () => parsePilotPolicy(fixture.policy, fixture.topology, fixture.prerequisites),
-      /maximum elapsed hours must be a finite positive number/,
-    );
-  }
-
-  const unsafeElapsed = pilotFixture();
-  unsafeElapsed.policy.admission.maximum_elapsed_hours = Number.MAX_SAFE_INTEGER;
+  const unreducedRate = pilotFixture();
+  unreducedRate.policy.admission.minimum_public_identities_per_aggregate_hour = {
+    numerator: 18, denominator: 4,
+  };
   assert.throws(
     () => parsePilotPolicy(
-      unsafeElapsed.policy,
-      unsafeElapsed.topology,
-      unsafeElapsed.prerequisites,
+      unreducedRate.policy, unreducedRate.topology, unreducedRate.prerequisites,
     ),
-    /safe for millisecond timing arithmetic/,
+    /must use a reduced positive rational/,
   );
+
+  for (const elapsed of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+    const fixture = pilotFixture();
+    fixture.policy.admission.maximum_elapsed_milliseconds = elapsed;
+    assert.throws(
+      () => parsePilotPolicy(fixture.policy, fixture.topology, fixture.prerequisites),
+      /maximum elapsed milliseconds must be an integer >= 1/,
+    );
+  }
 
   const waiver = pilotFixture();
   waiver.policy.admission.required_waived_gate_count = 1;
@@ -203,12 +212,12 @@ test("pilot admission requires positive bounded measurements, zero waivers, full
 });
 
 test("pilot policy rejects legacy and future schema versions and requires exact reviewed authority", () => {
-  for (const version of [0, 2]) {
+  for (const version of [1, 3]) {
     const fixture = pilotFixture();
     fixture.policy.schema_version = version;
     assert.throws(
       () => parsePilotPolicy(fixture.policy, fixture.topology, fixture.prerequisites),
-      /must use schema_version 1/,
+      /must use schema_version 2/,
     );
   }
 
@@ -246,4 +255,18 @@ test("validated pilot policy is deeply immutable and does not retain caller-owne
   assert.equal(parsed.waves[0].bundle_ids[0], "pilot-c01");
   assert.throws(() => parsed.value.waves.push({}), TypeError);
   assert.throws(() => parsed.waveByBundle.set("other", 1), /immutable/);
+});
+
+test("pilot admission compares elapsed time and throughput with exact integer arithmetic", () => {
+  const fixture = pilotFixture();
+  const parsed = parsePilotPolicy(fixture.policy, fixture.topology, fixture.prerequisites);
+  assert.equal(pilotRateMeetsMinimum(parsed, 9, 7_200_000), true);
+  assert.equal(pilotRateMeetsMinimum(parsed, 9, 7_200_001), false);
+  assert.equal(pilotRateMeetsMinimum(parsed, 18, 14_400_000), true);
+  assert.equal(pilotElapsedWithinMaximum(parsed, 172_800_000), true);
+  assert.equal(pilotElapsedWithinMaximum(parsed, 172_800_001), false);
+  assert.throws(
+    () => pilotRateMeetsMinimum({ ...parsed }, 9, 7_200_000),
+    /exact validated pilot policy/,
+  );
 });
