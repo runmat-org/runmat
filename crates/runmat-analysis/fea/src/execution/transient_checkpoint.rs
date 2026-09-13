@@ -501,8 +501,8 @@ pub(in crate::execution) mod tests {
                 },
                 counters: StructuralTransientSolverCounters {
                     host_sync_count: ordinal,
-                    device_apply_k_count: ordinal,
-                    device_apply_k_attempt_count: ordinal,
+                    device_apply_k_count: 0,
+                    device_apply_k_attempt_count: 0,
                 },
                 observation_cursors: Vec::new(),
             },

@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::{cell::RefCell, collections::BTreeMap};
 
 use runmat_analysis_core::{SignalSampleApproach, StructuralTranslationDof};
 use thiserror::Error;
@@ -9,9 +9,17 @@ use crate::{
     constraints::{AffineConstraintReduction, ConstraintAlgebraError},
     contracts::{ComputeBackend, FeaRunError},
     excitation::{StructuralMotionError, StructuralMotionSet},
+    execution::{
+        StructuralTransientBlockRequest, StructuralTransientCheckpoint,
+        StructuralTransientObservationCursor, StructuralTransientSegment,
+    },
     solve::transient::{
-        rebuild_transient_balance, solve_transient_system_with_assembly, TransientSolveError,
-        TransientSolveOptions, TransientSolveResult, TransientTimeDomain,
+        rebuild_transient_balance, solve_fully_prescribed_transient_block_with_physical_mapping,
+        solve_structural_transient_block_with_physical_mapping,
+        solve_transient_system_with_assembly, solve_transient_system_with_physical_mapping,
+        SecondOrderState, StructuralTransientBlockSolveInput, StructuralTransientInitialConditions,
+        TransientPhysicalMappingInput, TransientSolveError, TransientSolveOptions,
+        TransientSolveResult, TransientTimeDomain,
     },
 };
 
@@ -33,6 +41,17 @@ pub(super) struct StructuralMotionSolveInput<'a> {
     pub(super) time_domain: TransientTimeDomain<'a>,
     pub(super) initial_displacement: Vec<f64>,
     pub(super) initial_velocity: Vec<f64>,
+}
+
+pub(super) struct StructuralMotionBlockSolveInput<'a> {
+    pub(super) summary: &'a AssemblySummary,
+    pub(super) motions: &'a StructuralMotionSet,
+    pub(super) options: &'a TransientSolveOptions,
+    pub(super) backend: ComputeBackend,
+    pub(super) request: &'a StructuralTransientBlockRequest,
+    pub(super) predecessor: Option<&'a StructuralTransientCheckpoint>,
+    pub(super) initial_conditions: Option<StructuralTransientInitialConditions>,
+    pub(super) observation_cursors: Vec<StructuralTransientObservationCursor>,
 }
 
 struct ExpandedStructuralState {
@@ -179,6 +198,14 @@ impl StructuralMotionSnapshot {
             .collect()
     }
 
+    pub(super) fn reduce_acceleration(&self, full: &[f64]) -> Vec<f64> {
+        self.reduction
+            .free_dof_indices
+            .iter()
+            .map(|index| full[*index] - self.acceleration_lift[*index])
+            .collect()
+    }
+
     pub(super) fn expand_displacement(
         &self,
         reduced: &[f64],
@@ -214,6 +241,140 @@ impl StructuralMotionSnapshot {
     }
 }
 
+pub(super) fn solve_prescribed_motion_block(
+    input: StructuralMotionBlockSolveInput<'_>,
+    mut assembly_at: impl FnMut(f64, SignalSampleApproach) -> Result<AssemblySummary, FeaRunError>,
+) -> Result<StructuralTransientSegment, TransientSolveError<FeaRunError>> {
+    let schedule = &input.request.scope.schedule;
+    let initial_time_s = schedule.points[0].time_s;
+    let initial = StructuralMotionSnapshot::reduce(
+        input.summary.clone(),
+        input.motions,
+        initial_time_s,
+        SignalSampleApproach::At,
+    )
+    .map_err(assembly_error)?;
+    let snapshots = RefCell::new(BTreeMap::from([(
+        snapshot_key(initial_time_s, SignalSampleApproach::At),
+        initial.clone(),
+    )]));
+    let mut reduced_assembly_at = |time_s, approach| {
+        let snapshot = StructuralMotionSnapshot::reduce(
+            assembly_at(time_s, approach)?,
+            input.motions,
+            time_s,
+            approach,
+        )
+        .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+        let reduced = snapshot.reduced_summary.clone();
+        snapshots
+            .borrow_mut()
+            .insert(snapshot_key(time_s, approach), snapshot);
+        Ok(reduced)
+    };
+    if initial.reduced_summary.dof_count == 0 {
+        let mut map_physical_state = |time_s, approach, _: &AssemblySummary| {
+            let snapshot = snapshots
+                .borrow()
+                .get(&snapshot_key(time_s, approach))
+                .cloned()
+                .ok_or_else(|| {
+                    FeaRunError::Assembly(format!(
+                        "fully prescribed block snapshot at {time_s} s ({approach:?}) was not retained"
+                    ))
+                })?;
+            let expanded = snapshot
+                .expand_state(&[], &[], &[])
+                .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+            let state = SecondOrderState::try_new(
+                expanded.displacement,
+                expanded.velocity,
+                expanded.acceleration,
+            )
+            .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+            Ok((snapshot.full_summary, state))
+        };
+        return solve_fully_prescribed_transient_block_with_physical_mapping(
+            StructuralTransientBlockSolveInput {
+                request: input.request,
+                predecessor: input.predecessor,
+                initial_summary: &initial.reduced_summary,
+                options: input.options,
+                backend: input.backend,
+                initial_conditions: input.initial_conditions.clone(),
+                observation_cursors: input.observation_cursors,
+            },
+            input.summary.dof_count,
+            &mut reduced_assembly_at,
+            &mut map_physical_state,
+        );
+    }
+    let initial_conditions =
+        input
+            .initial_conditions
+            .map(|conditions| StructuralTransientInitialConditions {
+                displacement: initial.reduce_displacement(&conditions.displacement),
+                velocity: initial.reduce_velocity(&conditions.velocity),
+            });
+    let mut map_physical_state =
+        |time_s, approach, _: &AssemblySummary, state: &SecondOrderState| {
+            let snapshot = snapshots
+                .borrow()
+                .get(&snapshot_key(time_s, approach))
+                .cloned()
+                .ok_or_else(|| {
+                    FeaRunError::Assembly(format!(
+                    "support-motion block snapshot at {time_s} s ({approach:?}) was not retained"
+                ))
+                })?;
+            let expanded = snapshot
+                .expand_state(state.displacement(), state.velocity(), state.acceleration())
+                .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+            let physical_state = SecondOrderState::try_new(
+                expanded.displacement,
+                expanded.velocity,
+                expanded.acceleration,
+            )
+            .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+            Ok((snapshot.full_summary, physical_state))
+        };
+    let mut reduce_checkpoint_state =
+        |time_s, approach, state: &crate::execution::StructuralTransientContinuationState| {
+            let snapshot = snapshots
+            .borrow()
+            .get(&snapshot_key(time_s, approach))
+            .cloned()
+            .ok_or_else(|| TransientSolveError::InvalidContinuationState {
+                detail: format!(
+                    "support-motion continuation snapshot at {time_s} s ({approach:?}) was not retained"
+                ),
+            })?;
+            SecondOrderState::try_new(
+                snapshot.reduce_displacement(&state.displacement),
+                snapshot.reduce_velocity(&state.velocity),
+                snapshot.reduce_acceleration(&state.acceleration),
+            )
+            .map_err(|error| TransientSolveError::InvalidContinuationState {
+                detail: error.to_string(),
+            })
+        };
+    solve_structural_transient_block_with_physical_mapping(
+        StructuralTransientBlockSolveInput {
+            request: input.request,
+            predecessor: input.predecessor,
+            initial_summary: &initial.reduced_summary,
+            options: input.options,
+            backend: input.backend,
+            initial_conditions,
+            observation_cursors: input.observation_cursors,
+        },
+        input.summary.dof_count,
+        &mut reduced_assembly_at,
+        &mut map_physical_state,
+        &mut reduce_checkpoint_state,
+    )
+}
+
 pub(super) fn solve_prescribed_motion(
     input: StructuralMotionSolveInput<'_>,
     mut assembly_at: impl FnMut(f64, SignalSampleApproach) -> Result<AssemblySummary, FeaRunError>,
@@ -236,38 +397,86 @@ pub(super) fn solve_prescribed_motion(
     .map_err(assembly_error)?;
     let reduced_displacement = initial.reduce_displacement(&initial_displacement);
     let reduced_velocity = initial.reduce_velocity(&initial_velocity);
-    let mut snapshots = BTreeMap::from([(
+    let snapshots = RefCell::new(BTreeMap::from([(
         snapshot_key(time_domain.start_time_s, SignalSampleApproach::At),
         initial.clone(),
-    )]);
-    let mut result = solve_transient_system_with_assembly(
-        &initial.reduced_summary,
-        options,
-        backend,
-        time_domain,
-        reduced_displacement,
-        reduced_velocity,
-        |time_s, approach| {
-            let snapshot = StructuralMotionSnapshot::reduce(
-                assembly_at(time_s, approach)?,
-                motions,
-                time_s,
-                approach,
+    )]));
+    let mut reduced_assembly_at = |time_s, approach| {
+        let snapshot = StructuralMotionSnapshot::reduce(
+            assembly_at(time_s, approach)?,
+            motions,
+            time_s,
+            approach,
+        )
+        .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+        let reduced = snapshot.reduced_summary.clone();
+        snapshots
+            .borrow_mut()
+            .insert(snapshot_key(time_s, approach), snapshot);
+        Ok(reduced)
+    };
+    let mut map_physical_state =
+        |time_s, approach, _: &AssemblySummary, state: &SecondOrderState| {
+            let snapshot = snapshots
+                .borrow()
+                .get(&snapshot_key(time_s, approach))
+                .cloned()
+                .ok_or_else(|| {
+                    FeaRunError::Assembly(format!(
+                    "support-motion physical snapshot at {time_s} s ({approach:?}) was not retained"
+                ))
+                })?;
+            let expanded = snapshot
+                .expand_state(state.displacement(), state.velocity(), state.acceleration())
+                .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+            let physical_state = SecondOrderState::try_new(
+                expanded.displacement,
+                expanded.velocity,
+                expanded.acceleration,
             )
             .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
-            let reduced = snapshot.reduced_summary.clone();
-            snapshots.insert(snapshot_key(time_s, approach), snapshot);
-            Ok(reduced)
-        },
-    )?;
+            Ok((snapshot.full_summary, physical_state))
+        };
+    let mut result = if initial.reduced_summary.dof_count == 0 {
+        solve_transient_system_with_assembly(
+            &initial.reduced_summary,
+            options,
+            backend,
+            time_domain,
+            reduced_displacement,
+            reduced_velocity,
+            &mut reduced_assembly_at,
+        )?
+    } else {
+        solve_transient_system_with_physical_mapping(
+            TransientPhysicalMappingInput {
+                summary: &initial.reduced_summary,
+                options,
+                backend,
+                time_domain,
+                initial_displacement: reduced_displacement,
+                initial_velocity: reduced_velocity,
+            },
+            &mut reduced_assembly_at,
+            &mut map_physical_state,
+        )?
+    };
+
+    if initial.reduced_summary.dof_count != 0 {
+        return Ok(result);
+    }
 
     for interval in &mut result.integration_intervals {
-        let start = retained_snapshot(
-            &snapshots,
-            interval.start_time_s,
-            interval.start_approach,
-            "integration",
-        )?;
+        let start = {
+            let snapshots = snapshots.borrow();
+            retained_snapshot(
+                &snapshots,
+                interval.start_time_s,
+                interval.start_approach,
+                "integration",
+            )?
+            .clone()
+        };
         let expanded = start
             .expand_state(
                 &interval.start_displacement,
@@ -278,14 +487,18 @@ pub(super) fn solve_prescribed_motion(
         interval.start_displacement = expanded.displacement;
         interval.start_velocity = expanded.velocity;
         interval.start_acceleration = expanded.acceleration;
-        interval.start_summary = start.full_summary.clone();
+        interval.start_summary = start.full_summary;
 
-        let end = retained_snapshot(
-            &snapshots,
-            interval.end_time_s,
-            interval.end_approach,
-            "integration",
-        )?;
+        let end = {
+            let snapshots = snapshots.borrow();
+            retained_snapshot(
+                &snapshots,
+                interval.end_time_s,
+                interval.end_approach,
+                "integration",
+            )?
+            .clone()
+        };
         let expanded = end
             .expand_state(
                 &interval.end_displacement,
@@ -296,17 +509,21 @@ pub(super) fn solve_prescribed_motion(
         interval.end_displacement = expanded.displacement;
         interval.end_velocity = expanded.velocity;
         interval.end_acceleration = expanded.acceleration;
-        interval.end_summary = end.full_summary.clone();
+        interval.end_summary = end.full_summary;
     }
 
     let mut full_summaries = Vec::with_capacity(result.time_points_s.len());
     for index in 0..result.time_points_s.len() {
-        let snapshot = retained_snapshot(
-            &snapshots,
-            result.time_points_s[index],
-            SignalSampleApproach::At,
-            "public",
-        )?;
+        let snapshot = {
+            let snapshots = snapshots.borrow();
+            retained_snapshot(
+                &snapshots,
+                result.time_points_s[index],
+                SignalSampleApproach::At,
+                "public",
+            )?
+            .clone()
+        };
         let expanded = snapshot
             .expand_state(
                 &result.displacement_snapshots[index],
@@ -317,7 +534,7 @@ pub(super) fn solve_prescribed_motion(
         result.displacement_snapshots[index] = expanded.displacement;
         result.velocity_snapshots[index] = expanded.velocity;
         result.acceleration_snapshots[index] = expanded.acceleration;
-        full_summaries.push(snapshot.full_summary.clone());
+        full_summaries.push(snapshot.full_summary);
     }
     result.assembly_snapshots = full_summaries;
     rebuild_transient_balance(&mut result)

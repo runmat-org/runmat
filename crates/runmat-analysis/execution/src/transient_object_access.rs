@@ -1,8 +1,40 @@
 use runmat_analysis_fea::execution::{
-    AnalysisNumericalObjectKind, AnalysisPayloadPartition, StructuralTransientBlockRequest,
-    StructuralTransientCheckpoint, StructuralTransientSegment, StructuralTransientSegmentManifest,
-    StructuralTransientSegmentSample, StructuralTransientSegmentSampleIdentity,
+    AnalysisNumericalObjectKind, AnalysisPayloadPartition, AnalysisWorkloadIdentity,
+    StructuralTransientBlockRequest, StructuralTransientCheckpoint, StructuralTransientSegment,
+    StructuralTransientSegmentManifest, StructuralTransientSegmentSample,
+    StructuralTransientSegmentSampleIdentity, StructuralTransientWorkload,
 };
+
+pub fn prepare_structural_transient_workload_objects(
+    workload: &StructuralTransientWorkload,
+    identity: AnalysisWorkloadIdentity,
+    chunk_bytes: usize,
+    namespace: ObjectNamespace,
+    limits: ObjectInventoryLimits,
+) -> AnalysisBridgeResult<PreparedAnalysisObjects> {
+    let bytes = workload.canonical_bytes()?;
+    prepare_analysis_objects(
+        AnalysisNumericalObjectKind::StructuralTransientWorkload,
+        identity.digest(),
+        &bytes,
+        chunk_bytes,
+        namespace,
+        limits,
+    )
+}
+
+pub fn decode_prepared_structural_transient_workload(
+    prepared: &PreparedAnalysisObjects,
+) -> AnalysisBridgeResult<StructuralTransientWorkload> {
+    if prepared.manifest.kind != AnalysisNumericalObjectKind::StructuralTransientWorkload {
+        return Err(AnalysisBridgeError::Invalid(
+            "expected a structural transient workload object".into(),
+        ));
+    }
+    Ok(StructuralTransientWorkload::from_canonical_bytes(
+        &prepared.payload(),
+    )?)
+}
 use runmat_execution::value::ValueRef;
 use runmat_execution::Digest;
 use runmat_execution_artifact::cache::CacheImport;

@@ -1,4 +1,6 @@
-use runmat_analysis_core::{validate_model, AnalysisField, AnalysisModel, AnalysisProcedure};
+use runmat_analysis_core::{
+    validate_model, AnalysisField, AnalysisModel, AnalysisProcedure, ProcedureStep,
+};
 
 use crate::assembly::AssemblySummary;
 use crate::{
@@ -15,6 +17,12 @@ use crate::{
     excitation::{
         realize_step_excitations, time_discontinuities, ExcitationSamplePoint, StructuralMotionSet,
     },
+    execution::{
+        StructuralTransientBlockRequest, StructuralTransientCheckpoint,
+        StructuralTransientCheckpointScope, StructuralTransientCheckpointScopeInput,
+        StructuralTransientObservationCursor, StructuralTransientSegment,
+        StructuralTransientWorkload,
+    },
     physics::structural::dynamics::initial_state::{
         realize as realize_structural_initial_state, StructuralInitialConstraintView,
         StructuralInitialStateRealizationBasis,
@@ -27,8 +35,9 @@ use crate::{
     progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
     solve::transient::{
         canonical_transient_step_boundaries, mechanical_energy_history_diagnostic,
-        solve_transient_system_with_assembly, TransientSolveError, TransientSolveOptions,
-        TransientTimeDomain,
+        solve_structural_transient_block_with_assembly, solve_transient_system_with_assembly,
+        StructuralTransientBlockSolveInput, StructuralTransientInitialConditions,
+        TransientSolveError, TransientSolveOptions, TransientTimeDomain,
     },
 };
 
@@ -50,6 +59,255 @@ pub fn run_transient(
     backend: ComputeBackend,
 ) -> Result<FeaTransientRunResult, FeaRunError> {
     run_transient_with_options(model, backend, TransientSolveOptions::default())
+}
+
+pub struct StructuralTransientRunBlockInput<'a> {
+    pub model: &'a AnalysisModel,
+    pub backend: ComputeBackend,
+    pub options: &'a TransientSolveOptions,
+    pub request: &'a StructuralTransientBlockRequest,
+    pub predecessor: Option<&'a StructuralTransientCheckpoint>,
+    pub observation_cursors: Vec<StructuralTransientObservationCursor>,
+}
+
+struct PreparedTransientBlockBasis {
+    execution_step: ProcedureStep,
+    active_model: AnalysisModel,
+    motions: StructuralMotionSet,
+    initial_assembly: AssemblySummary,
+    schedule: crate::execution::StructuralTransientSchedule,
+}
+
+fn prepare_transient_block_basis(
+    model: &AnalysisModel,
+    options: &TransientSolveOptions,
+) -> Result<PreparedTransientBlockBasis, FeaRunError> {
+    let execution_step = super::admission::require_structural(
+        model,
+        AnalysisProcedure::TransientResponse,
+        options.formulation_requirement,
+    )?
+    .clone();
+    validate_model(model).map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
+    let mut required_history_samples = required_time_history_samples(&execution_step)
+        .map_err(|error| FeaRunError::Observation(error.to_string()))?;
+    let time_grid = crate::excitation::ProcedureTimeGrid::from_interval_count(
+        &execution_step,
+        options.time_step_policy.interval_count(),
+    )
+    .map_err(FeaRunError::InvalidModel)?;
+    let start_time_s = time_grid.start_s();
+    let end_time_s = time_grid.end_s();
+    let active_model = super::activation::model_with_active_constraints(model, &execution_step);
+    constraint_admission::validate(&active_model)
+        .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
+    let motions =
+        StructuralMotionSet::materialize(&active_model, &execution_step, start_time_s, end_time_s)
+            .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
+    required_history_samples.extend(
+        motions
+            .breakpoints_s()
+            .iter()
+            .copied()
+            .filter(|time| *time >= start_time_s && *time <= end_time_s),
+    );
+    required_history_samples.sort_by(f64::total_cmp);
+    required_history_samples.dedup_by(|left, right| left.to_bits() == right.to_bits());
+    let discontinuities =
+        time_discontinuities(&active_model, &execution_step, start_time_s, end_time_s)
+            .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
+    let step_boundaries = canonical_transient_step_boundaries(
+        &discontinuities,
+        &required_history_samples,
+        start_time_s,
+        end_time_s,
+    )
+    .map_err(|error| FeaRunError::Observation(error.to_string()))?;
+    let schedule = crate::solve::transient::canonical_transient_schedule(
+        options.time_step_policy.interval_count(),
+        start_time_s,
+        end_time_s,
+        &step_boundaries,
+    )
+    .map_err(FeaRunError::Solve)?;
+    let excitations = realize_step_excitations(
+        &active_model,
+        &execution_step,
+        ExcitationSamplePoint::time(start_time_s),
+    )
+    .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
+    let initial_assembly = assemble_structural_system(
+        &active_model,
+        &excitations,
+        options.solver_mesh.clone(),
+        StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+    )
+    .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+    Ok(PreparedTransientBlockBasis {
+        execution_step,
+        active_model,
+        motions,
+        initial_assembly,
+        schedule,
+    })
+}
+
+/// Derives the immutable restart scope from the same authored preparation authority used to run
+/// each block. Callers cannot manufacture operator, excitation, schedule, or constraint identities.
+pub fn prepare_transient_checkpoint_scope(
+    workload: &StructuralTransientWorkload,
+    solver_mesh: &runmat_meshing_core::SolverMeshArtifact,
+) -> Result<StructuralTransientCheckpointScope, FeaRunError> {
+    workload
+        .validate()
+        .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
+    let options = workload.solve_options(solver_mesh.clone());
+    let basis = prepare_transient_block_basis(&workload.model, &options)?;
+    StructuralTransientCheckpointScope::from_prepared_workload(
+        StructuralTransientCheckpointScopeInput {
+            workload,
+            solver_mesh,
+            initial_assembly: &basis.initial_assembly,
+            schedule: basis.schedule,
+        },
+    )
+    .map_err(|error| FeaRunError::Solve(error.to_string()))
+}
+
+pub fn run_transient_block(
+    input: StructuralTransientRunBlockInput<'_>,
+) -> Result<StructuralTransientSegment, FeaRunError> {
+    let basis = prepare_transient_block_basis(input.model, input.options)?;
+    if input.request.scope.schedule != basis.schedule {
+        return Err(FeaRunError::Solve(
+            "transient block request schedule differs from the authored model schedule".into(),
+        ));
+    }
+    let solver_mesh = input.options.solver_mesh.as_ref().ok_or_else(|| {
+        FeaRunError::InvalidModel(
+            "portable structural transient block execution requires a canonical solver mesh".into(),
+        )
+    })?;
+    let workload = StructuralTransientWorkload {
+        schema_version: 1,
+        model: input.model.clone(),
+        step_id: basis.execution_step.step_id.clone(),
+        backend: input.backend,
+        formulation_requirement: input.options.formulation_requirement,
+        time_step_policy: input.options.time_step_policy,
+        residual_target: input.options.residual_target,
+    };
+    let expected_scope = StructuralTransientCheckpointScope::from_prepared_workload(
+        StructuralTransientCheckpointScopeInput {
+            workload: &workload,
+            solver_mesh,
+            initial_assembly: &basis.initial_assembly,
+            schedule: basis.schedule.clone(),
+        },
+    )
+    .map_err(|error| FeaRunError::Solve(error.to_string()))?;
+    if input.request.scope != expected_scope {
+        return Err(FeaRunError::Solve(
+            "transient block request scope differs from the actual prepared workload".into(),
+        ));
+    }
+    let initial_state_basis = match basis.initial_assembly.structural_formulations.as_slice() {
+        [realization]
+            if realization.operator
+                == runmat_analysis_core::StructuralOperatorImplementation::SyntheticDiagonalChain =>
+        {
+            StructuralInitialStateRealizationBasis::OperatorBoundZeroDefault {
+                dof_count: basis.initial_assembly.operator.dof_count(),
+                operator_identity: basis
+                    .initial_assembly
+                    .operator
+                    .operators()
+                    .stiffness()
+                    .numerical_identity()
+                    .map_err(|error| FeaRunError::Assembly(error.to_string()))?,
+            }
+        }
+        _ => StructuralInitialStateRealizationBasis::CanonicalTopology,
+    };
+    let initial_state = realize_structural_initial_state(
+        &basis.active_model,
+        input.options.solver_mesh.as_ref(),
+        &basis.initial_assembly.structural_dof_layout,
+        initial_state_basis,
+        StructuralInitialConstraintView {
+            constraint_matrix: basis.initial_assembly.constraint_matrix.as_ref(),
+            affine_reduction: basis.initial_assembly.affine_constraint_reduction.as_ref(),
+            direct_constrained_dofs: basis.initial_assembly.operator.constrained_dofs(),
+            direct_prescribed_displacement: basis.initial_assembly.operator.load(),
+        },
+        basis.execution_step.step_id.as_str(),
+    )
+    .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
+    let initial_conditions =
+        input
+            .predecessor
+            .is_none()
+            .then_some(StructuralTransientInitialConditions {
+                displacement: initial_state.displacement,
+                velocity: initial_state.velocity,
+            });
+    let mut assemble_at = |time_s, approach| {
+        let excitations = realize_step_excitations(
+            &basis.active_model,
+            &basis.execution_step,
+            ExcitationSamplePoint::TimeSeconds {
+                value: time_s,
+                approach,
+            },
+        )
+        .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
+        let assembly = assemble_structural_system(
+            &basis.active_model,
+            &excitations,
+            input.options.solver_mesh.clone(),
+            StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+        )
+        .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+        if assembly.dof_count != basis.initial_assembly.dof_count {
+            return Err(FeaRunError::Assembly(format!(
+                "transient reassembly changed structural DOF count from {} to {}",
+                basis.initial_assembly.dof_count, assembly.dof_count
+            )));
+        }
+        Ok(assembly)
+    };
+    let result = if basis.motions.is_empty() {
+        solve_structural_transient_block_with_assembly(
+            StructuralTransientBlockSolveInput {
+                request: input.request,
+                predecessor: input.predecessor,
+                initial_summary: &basis.initial_assembly,
+                options: input.options,
+                backend: input.backend,
+                initial_conditions,
+                observation_cursors: input.observation_cursors,
+            },
+            &mut assemble_at,
+        )
+    } else {
+        motion::solve_prescribed_motion_block(
+            motion::StructuralMotionBlockSolveInput {
+                summary: &basis.initial_assembly,
+                motions: &basis.motions,
+                options: input.options,
+                backend: input.backend,
+                request: input.request,
+                predecessor: input.predecessor,
+                initial_conditions,
+                observation_cursors: input.observation_cursors,
+            },
+            &mut assemble_at,
+        )
+    };
+    result.map_err(|error| match error {
+        TransientSolveError::Assembly(error) => error,
+        other => FeaRunError::Solve(other.to_string()),
+    })
 }
 
 pub fn run_transient_with_options(

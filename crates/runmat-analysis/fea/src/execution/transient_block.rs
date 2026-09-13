@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use super::{
     AnalysisExecutionError, AnalysisExecutionResult, StructuralTransientBlockRequestIdentity,
     StructuralTransientCheckpoint, StructuralTransientCheckpointIdentity,
-    StructuralTransientCheckpointScope,
+    StructuralTransientCheckpointScope, StructuralTransientSolverCounters,
 };
 
 const TRANSIENT_BLOCK_PREFIX: &[u8] = b"runmat-structural-transient-block/v1\0";
@@ -21,6 +21,7 @@ pub struct StructuralTransientBlockRequest {
     pub block_ordinal: u64,
     pub start_schedule_ordinal: u64,
     pub terminal_schedule_ordinal: u64,
+    pub start_counters: StructuralTransientSolverCounters,
 }
 
 #[derive(Deserialize)]
@@ -33,6 +34,7 @@ struct StructuralTransientBlockRequestWire {
     block_ordinal: u64,
     start_schedule_ordinal: u64,
     terminal_schedule_ordinal: u64,
+    start_counters: StructuralTransientSolverCounters,
 }
 
 impl TryFrom<StructuralTransientBlockRequestWire> for StructuralTransientBlockRequest {
@@ -47,6 +49,7 @@ impl TryFrom<StructuralTransientBlockRequestWire> for StructuralTransientBlockRe
             block_ordinal: wire.block_ordinal,
             start_schedule_ordinal: wire.start_schedule_ordinal,
             terminal_schedule_ordinal: wire.terminal_schedule_ordinal,
+            start_counters: wire.start_counters,
         };
         request.validate()?;
         Ok(request)
@@ -73,6 +76,9 @@ impl StructuralTransientBlockRequest {
         };
         let start_schedule_ordinal =
             predecessor.map_or(0, |value| value.continuation.schedule_ordinal);
+        let start_counters = predecessor
+            .map(|value| value.counters.clone())
+            .unwrap_or_default();
         let request = Self {
             schema_version: 1,
             identity: block_request_identity(BlockRequestIdentityInput {
@@ -82,12 +88,14 @@ impl StructuralTransientBlockRequest {
                 block_ordinal,
                 start_schedule_ordinal,
                 terminal_schedule_ordinal,
+                start_counters: &start_counters,
             })?,
             scope,
             predecessor: predecessor_identity,
             block_ordinal,
             start_schedule_ordinal,
             terminal_schedule_ordinal,
+            start_counters,
         };
         request.validate_against_predecessor(predecessor)?;
         Ok(request)
@@ -97,7 +105,11 @@ impl StructuralTransientBlockRequest {
         self.scope.validate()?;
         if self.schema_version != 1
             || (self.block_ordinal == 0) != self.predecessor.is_none()
-            || self.predecessor.is_none() && self.start_schedule_ordinal != 0
+            || (self.predecessor.is_none()
+                && (self.start_schedule_ordinal != 0
+                    || self.start_counters != StructuralTransientSolverCounters::default()))
+            || self.start_counters.device_apply_k_count
+                > self.start_counters.device_apply_k_attempt_count
             || self.terminal_schedule_ordinal <= self.start_schedule_ordinal
             || usize::try_from(self.terminal_schedule_ordinal)
                 .ok()
@@ -115,6 +127,7 @@ impl StructuralTransientBlockRequest {
                 block_ordinal: self.block_ordinal,
                 start_schedule_ordinal: self.start_schedule_ordinal,
                 terminal_schedule_ordinal: self.terminal_schedule_ordinal,
+                start_counters: &self.start_counters,
             })?
         {
             return Err(AnalysisExecutionError::Identity(
@@ -142,6 +155,7 @@ impl StructuralTransientBlockRequest {
                     || self.scope != predecessor.scope
                     || self.block_ordinal != expected_block
                     || self.start_schedule_ordinal != predecessor.continuation.schedule_ordinal
+                    || self.start_counters != predecessor.counters
                 {
                     return Err(AnalysisExecutionError::Identity(
                         "structural transient block does not continue its exact predecessor",
@@ -183,6 +197,7 @@ struct BlockRequestIdentityInput<'a> {
     block_ordinal: u64,
     start_schedule_ordinal: u64,
     terminal_schedule_ordinal: u64,
+    start_counters: &'a StructuralTransientSolverCounters,
 }
 
 fn block_request_identity(

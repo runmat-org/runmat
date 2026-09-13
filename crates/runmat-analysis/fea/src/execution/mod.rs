@@ -21,6 +21,7 @@ mod transient_block;
 mod transient_checkpoint;
 mod transient_schedule;
 mod transient_segment;
+mod transient_workload;
 
 pub use accuracy::AccuracyEvaluationRequest;
 pub use error::{AnalysisExecutionError, AnalysisExecutionResult};
@@ -89,9 +90,12 @@ pub use transient_schedule::{
     StructuralTransientSchedulePoint,
 };
 pub use transient_segment::{
-    StructuralTransientSegment, StructuralTransientSegmentEntry,
-    StructuralTransientSegmentManifest, StructuralTransientSegmentSample,
-    StructuralTransientSegmentSampleInput,
+    StructuralTransientBlockSolverEvidence, StructuralTransientSegment,
+    StructuralTransientSegmentEntry, StructuralTransientSegmentManifest,
+    StructuralTransientSegmentSample, StructuralTransientSegmentSampleInput,
+};
+pub use transient_workload::{
+    StructuralTransientCheckpointScopeInput, StructuralTransientWorkload,
 };
 
 #[cfg(test)]

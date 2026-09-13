@@ -298,6 +298,25 @@ impl ProblemIdentity {
             ),
         )
     }
+
+    pub fn from_structural_contract(
+        step: StepIdentity,
+        model_digest: Digest,
+        input_state: Option<StateTransitionIdentity>,
+        constraint_plan: ConstraintPlanIdentity,
+        excitations: StructuralExcitationSetIdentity,
+    ) -> AnalysisExecutionResult<Self> {
+        Self::derive(
+            "structural-problem-contract",
+            &(
+                step,
+                model_digest,
+                input_state,
+                constraint_plan,
+                excitations,
+            ),
+        )
+    }
 }
 
 impl DiscretizationIdentity {
@@ -363,6 +382,13 @@ impl StructuralExcitationSetIdentity {
             ));
         }
         Self::derive("structural-excitation-set", &excitations)
+    }
+
+    pub fn from_authored_contract<T: Serialize>(
+        step: StepIdentity,
+        contract: &T,
+    ) -> AnalysisExecutionResult<Self> {
+        Self::derive("structural-excitation-set-contract", &(step, contract))
     }
 }
 

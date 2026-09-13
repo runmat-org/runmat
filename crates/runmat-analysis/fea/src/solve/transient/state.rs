@@ -1,14 +1,14 @@
 use thiserror::Error;
 
 #[derive(Clone, Debug, PartialEq)]
-pub(super) struct SecondOrderState {
+pub(crate) struct SecondOrderState {
     displacement: Vec<f64>,
     velocity: Vec<f64>,
     acceleration: Vec<f64>,
 }
 
 #[derive(Clone, Copy, Debug, Error, Eq, PartialEq)]
-pub(super) enum SecondOrderStateError {
+pub(crate) enum SecondOrderStateError {
     #[error("a structural dynamics state must contain at least one degree of freedom")]
     Empty,
     #[error("structural dynamics state vectors must have identical dimensions")]
@@ -18,7 +18,7 @@ pub(super) enum SecondOrderStateError {
 }
 
 impl SecondOrderState {
-    pub(super) fn try_new(
+    pub(crate) fn try_new(
         displacement: Vec<f64>,
         velocity: Vec<f64>,
         acceleration: Vec<f64>,
@@ -44,19 +44,19 @@ impl SecondOrderState {
         })
     }
 
-    pub(super) fn dof_count(&self) -> usize {
+    pub(crate) fn dof_count(&self) -> usize {
         self.displacement.len()
     }
 
-    pub(super) fn displacement(&self) -> &[f64] {
+    pub(crate) fn displacement(&self) -> &[f64] {
         &self.displacement
     }
 
-    pub(super) fn velocity(&self) -> &[f64] {
+    pub(crate) fn velocity(&self) -> &[f64] {
         &self.velocity
     }
 
-    pub(super) fn acceleration(&self) -> &[f64] {
+    pub(crate) fn acceleration(&self) -> &[f64] {
         &self.acceleration
     }
 }

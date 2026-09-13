@@ -26,6 +26,7 @@ mod state_publication;
 mod structural;
 mod structural_sequence;
 mod task;
+mod transient_block_task;
 mod transient_object_access;
 mod transport;
 mod workload;
@@ -143,12 +144,19 @@ pub use task::{
     build_analysis_task_submission, build_structural_task_submission, AnalysisExecutionContext,
     DEFAULT_ANALYSIS_MAXIMUM_ATTEMPTS,
 };
+pub use transient_block_task::{
+    import_structural_transient_block, prepare_structural_transient_block_task,
+    ImportedStructuralTransientBlock, PreparedStructuralTransientBlockTask,
+    StructuralTransientBlockPreparation,
+};
 pub use transient_object_access::{
     decode_prepared_structural_transient_block_request,
     decode_prepared_structural_transient_checkpoint, decode_prepared_structural_transient_segment,
-    import_structural_transient_segment_sample, prepare_structural_transient_block_request_objects,
+    decode_prepared_structural_transient_workload, import_structural_transient_segment_sample,
+    prepare_structural_transient_block_request_objects,
     prepare_structural_transient_checkpoint_objects, prepare_structural_transient_segment_objects,
-    ImportedStructuralTransientSegmentSample, StructuralTransientSegmentSampleImport,
+    prepare_structural_transient_workload_objects, ImportedStructuralTransientSegmentSample,
+    StructuralTransientSegmentSampleImport,
 };
 pub use transport::{prepare_analysis_program, PreparedAnalysisProgram};
 pub use workload::{

@@ -14,25 +14,37 @@ use crate::{
     ComputeBackend,
 };
 
+mod advance;
 mod balance;
+mod block_execution;
 mod constraint_state;
 mod diagnostics;
 mod effective_solve;
 mod empty;
 mod newmark;
 mod schedule;
+mod segment;
 mod state;
 #[cfg(test)]
 mod tests;
 
+use advance::solve_complete;
 use balance::{TransientBalanceHistory, TransientBalanceStep};
+pub(crate) use block_execution::{
+    solve_fully_prescribed_transient_block_with_physical_mapping,
+    solve_structural_transient_block_with_physical_mapping,
+};
+pub use block_execution::{
+    solve_structural_transient_block_with_assembly, StructuralTransientBlockSolveInput,
+    StructuralTransientInitialConditions,
+};
 pub(crate) use diagnostics::mechanical_energy_history_diagnostic;
 use diagnostics::transient_diagnostics;
-use effective_solve::{
-    solve_average_acceleration_step, solve_initial_acceleration, EffectiveDynamicsSolveResult,
+use effective_solve::EffectiveDynamicsSolveResult;
+pub(crate) use schedule::{
+    canonical_transient_schedule, canonical_transient_step_boundaries, TransientStepBoundary,
 };
-use schedule::next_step_boundary;
-pub(crate) use schedule::{canonical_transient_step_boundaries, TransientStepBoundary};
+pub(crate) use state::SecondOrderState;
 
 pub(crate) fn rebuild_transient_balance(result: &mut TransientSolveResult) -> Result<(), String> {
     let snapshot_count = result.time_points_s.len();
@@ -130,6 +142,7 @@ impl Default for TransientSolveOptions {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TransientSolveResult {
+    pub schedule: crate::execution::StructuralTransientSchedule,
     pub converged_steps: usize,
     pub total_steps: usize,
     pub time_points_s: Vec<f64>,
@@ -230,6 +243,8 @@ pub enum TransientSolveError<E> {
     InvalidOptions(&'static str),
     #[error("transient solve was cancelled before a complete result was available")]
     Cancelled,
+    #[error("structural transient schedule is invalid: {detail}")]
+    Schedule { detail: String },
     #[error("initial structural acceleration could not be established: {detail}")]
     InitialAcceleration { detail: String },
     #[error(
@@ -254,6 +269,18 @@ pub enum TransientSolveError<E> {
     StructuralSystemChanged { component: &'static str },
     #[error("structural dynamic-balance evaluation failed: {detail}")]
     DynamicBalance { detail: String },
+    #[error("structural transient solver accounting exceeded its supported range")]
+    SolverCounterOverflow,
+    #[error("structural transient schedule ordinal exceeds the platform index range")]
+    ScheduleOrdinalLimit,
+    #[error("structural transient block bounds ({start}, {terminal}] are invalid")]
+    InvalidBlockBounds { start: u64, terminal: u64 },
+    #[error("structural transient continuation side does not match its schedule point")]
+    InvalidContinuation,
+    #[error("structural transient continuation state is invalid: {detail}")]
+    InvalidContinuationState { detail: String },
+    #[error("structural transient execution contract is invalid: {detail}")]
+    ExecutionContract { detail: String },
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -312,13 +339,13 @@ pub(crate) fn solve_transient_system_with_assembly<E>(
     initial_velocity: Vec<f64>,
     mut assembly_at: impl FnMut(f64, SignalSampleApproach) -> Result<AssemblySummary, E>,
 ) -> Result<TransientSolveResult, TransientSolveError<E>> {
-    let TransientTimeDomain {
-        start_time_s,
-        end_time_s,
-        step_boundaries,
-    } = time_domain;
-    validate_options(&options, start_time_s, end_time_s)?;
     if summary.dof_count == 0 {
+        let TransientTimeDomain {
+            start_time_s,
+            end_time_s,
+            step_boundaries,
+        } = time_domain;
+        validate_options(&options, start_time_s, end_time_s)?;
         if !initial_displacement.is_empty() || !initial_velocity.is_empty() {
             return Err(TransientSolveError::InvalidOptions(
                 "a zero-DOF transient system requires empty initial state vectors",
@@ -333,208 +360,149 @@ pub(crate) fn solve_transient_system_with_assembly<E>(
             &mut assembly_at,
         );
     }
+    let mut identity_physical_state =
+        |_: f64, _: SignalSampleApproach, summary: &AssemblySummary, state: &SecondOrderState| {
+            Ok::<_, E>((summary.clone(), state.clone()))
+        };
+    solve_transient_system_with_physical_mapping(
+        TransientPhysicalMappingInput {
+            summary,
+            options,
+            backend,
+            time_domain,
+            initial_displacement,
+            initial_velocity,
+        },
+        assembly_at,
+        &mut identity_physical_state,
+    )
+}
+
+pub(crate) struct TransientPhysicalMappingInput<'a> {
+    pub(crate) summary: &'a AssemblySummary,
+    pub(crate) options: TransientSolveOptions,
+    pub(crate) backend: ComputeBackend,
+    pub(crate) time_domain: TransientTimeDomain<'a>,
+    pub(crate) initial_displacement: Vec<f64>,
+    pub(crate) initial_velocity: Vec<f64>,
+}
+
+pub(crate) fn solve_transient_system_with_physical_mapping<E>(
+    input: TransientPhysicalMappingInput<'_>,
+    mut assembly_at: impl FnMut(f64, SignalSampleApproach) -> Result<AssemblySummary, E>,
+    mut map_physical_state: impl FnMut(
+        f64,
+        SignalSampleApproach,
+        &AssemblySummary,
+        &SecondOrderState,
+    ) -> Result<(AssemblySummary, SecondOrderState), E>,
+) -> Result<TransientSolveResult, TransientSolveError<E>> {
+    let TransientPhysicalMappingInput {
+        summary,
+        options,
+        backend,
+        time_domain,
+        initial_displacement,
+        initial_velocity,
+    } = input;
+    let TransientTimeDomain {
+        start_time_s,
+        end_time_s,
+        step_boundaries,
+    } = time_domain;
+    validate_options(&options, start_time_s, end_time_s)?;
+    if summary.dof_count == 0 {
+        return Err(TransientSolveError::InvalidOptions(
+            "a physically mapped transient solve requires at least one numerical DOF",
+        ));
+    }
     let backend_kind = match backend {
         ComputeBackend::Cpu => LinearAlgebraBackendKind::CpuReference,
         ComputeBackend::Gpu => LinearAlgebraBackendKind::Accelerator,
     };
-    let initial = solve_initial_acceleration(
-        summary,
-        initial_displacement,
-        initial_velocity,
-        backend_kind,
-        options.residual_target,
-    )
-    .map_err(|error| TransientSolveError::InitialAcceleration {
-        detail: error.to_string(),
-    })?;
-    require_residual_target(&initial, start_time_s, options.residual_target)?;
-    let mut state = initial.state().clone();
-    let mut time_points_s = vec![start_time_s];
-    let mut displacement_snapshots = vec![state.displacement().to_vec()];
-    let mut velocity_snapshots = vec![state.velocity().to_vec()];
-    let mut acceleration_snapshots = vec![state.acceleration().to_vec()];
     let interval_count = options.time_step_policy.interval_count();
-    let mut residual_norms = Vec::with_capacity(interval_count + 1);
-    residual_norms.push(initial.projected_residual().relative_norm());
-    let mut accepted_time_steps_s = Vec::with_capacity(interval_count);
-    let mut assembly_snapshots = vec![summary.clone()];
-    let mut integration_summary = summary.clone();
-    let mut integration_approach = SignalSampleApproach::At;
-    let mut integration_intervals = Vec::with_capacity(interval_count);
-    let mut balance_history = TransientBalanceHistory::start(summary, &state).map_err(|error| {
-        TransientSolveError::DynamicBalance {
-            detail: error.to_string(),
-        }
-    })?;
-    let mut aggregate = SolveAggregate::default();
-    aggregate.push(&initial);
-    let nominal_time_step_s = (end_time_s - start_time_s) / interval_count as f64;
-    let progress_operation = options.progress_operation.as_str();
-
-    while time_points_s.last().is_some_and(|time| *time < end_time_s) {
-        if is_cancelled() {
-            emit_phase(
-                progress_operation,
-                FeaProgressPhase::Solve,
-                FeaProgressStatus::Cancelled,
-                "transient solve cancelled",
-                Some(accepted_time_steps_s.len() as u64),
-                None,
-            );
-            return Err(TransientSolveError::Cancelled);
-        }
-        let current_time_s = time_points_s.last().copied().unwrap_or(start_time_s);
-        let proposed_dt_s = nominal_time_step_s.min(end_time_s - current_time_s);
-        let (next_time_s, approach) =
-            next_step_boundary(current_time_s, proposed_dt_s, end_time_s, step_boundaries);
-        let time_step_s = next_time_s - current_time_s;
-        emit_phase(
-            progress_operation,
-            FeaProgressPhase::Solve,
-            FeaProgressStatus::Advanced,
-            format!("solving transient step ending at {next_time_s} s"),
-            Some(accepted_time_steps_s.len() as u64),
-            None,
-        );
-        let step_summary =
-            assembly_at(next_time_s, approach).map_err(TransientSolveError::Assembly)?;
-        require_stable_system(summary, &step_summary)?;
-        let previous_state = state.clone();
-        let previous_summary = &integration_summary;
-        let solved = solve_average_acceleration_step(
-            &step_summary,
-            &state,
-            time_step_s,
+    let schedule =
+        canonical_transient_schedule(interval_count, start_time_s, end_time_s, step_boundaries)
+            .map_err(|detail| TransientSolveError::Schedule { detail })?;
+    let (initial, block) = solve_complete(
+        advance::TransientAdvanceContext {
+            initial_summary: summary,
+            options: &options,
             backend_kind,
-            options.residual_target,
-        )
-        .map_err(|source| TransientSolveError::Step {
-            time_s: next_time_s,
-            detail: source.to_string(),
-        })?;
-        require_residual_target(&solved, next_time_s, options.residual_target)?;
-        balance_history
-            .push_step(TransientBalanceStep {
-                integration_start_summary: previous_summary,
-                integration_start_state: &previous_state,
-                integration_end_summary: &step_summary,
-                integration_end_state: solved.state(),
-                published_summary: &step_summary,
-                published_state: solved.state(),
-                time_step_s,
-            })
-            .map_err(|error| TransientSolveError::DynamicBalance {
-                detail: error.to_string(),
-            })?;
-        integration_intervals.push(TransientIntegrationInterval {
-            start_time_s: current_time_s,
-            start_approach: integration_approach,
-            start_summary: previous_summary.clone(),
-            start_displacement: previous_state.displacement().to_vec(),
-            start_velocity: previous_state.velocity().to_vec(),
-            start_acceleration: previous_state.acceleration().to_vec(),
-            end_time_s: next_time_s,
-            end_approach: approach,
-            end_summary: step_summary.clone(),
-            end_displacement: solved.state().displacement().to_vec(),
-            end_velocity: solved.state().velocity().to_vec(),
-            end_acceleration: solved.state().acceleration().to_vec(),
-        });
-
-        // A candidate becomes visible only after its linear solve, physical residual, and state
-        // invariants have all succeeded.
-        state = solved.state().clone();
-        aggregate.push(&solved);
-        accepted_time_steps_s.push(time_step_s);
-        time_points_s.push(next_time_s);
-        displacement_snapshots.push(state.displacement().to_vec());
-        velocity_snapshots.push(state.velocity().to_vec());
-        acceleration_snapshots.push(state.acceleration().to_vec());
-        integration_summary = step_summary.clone();
-        assembly_snapshots.push(step_summary);
-        residual_norms.push(solved.projected_residual().relative_norm());
-
-        if approach == SignalSampleApproach::LeftLimit {
-            let point_summary = assembly_at(next_time_s, SignalSampleApproach::At)
-                .map_err(TransientSolveError::Assembly)?;
-            require_stable_system(summary, &point_summary)?;
-            let point_state = solve_initial_acceleration(
-                &point_summary,
-                state.displacement().to_vec(),
-                state.velocity().to_vec(),
-                backend_kind,
-                options.residual_target,
-            )
-            .map_err(|error| TransientSolveError::AccelerationRefresh {
-                time_s: next_time_s,
-                detail: error.to_string(),
-            })?;
-            require_residual_target(&point_state, next_time_s, options.residual_target)?;
-            aggregate.push(&point_state);
-
-            // A public time point denotes the signal value `At` that coordinate. The left-limit
-            // state is an internal integration boundary only. Publish the point-continuity state,
-            // then establish a distinct right-limit state for the next positive-duration interval.
-            *acceleration_snapshots
-                .last_mut()
-                .expect("the accepted state was published above") =
-                point_state.state().acceleration().to_vec();
-            balance_history
-                .refresh_reaction(&point_summary, point_state.state())
-                .map_err(|error| TransientSolveError::DynamicBalance {
-                    detail: error.to_string(),
-                })?;
-            *assembly_snapshots
-                .last_mut()
-                .expect("the accepted state was published above") = point_summary;
-            *residual_norms
-                .last_mut()
-                .expect("the accepted state was published above") =
-                point_state.projected_residual().relative_norm();
-
-            let right_limit_summary = assembly_at(next_time_s, SignalSampleApproach::RightLimit)
-                .map_err(TransientSolveError::Assembly)?;
-            require_stable_system(summary, &right_limit_summary)?;
-            let right_limit_state = solve_initial_acceleration(
-                &right_limit_summary,
-                state.displacement().to_vec(),
-                state.velocity().to_vec(),
-                backend_kind,
-                options.residual_target,
-            )
-            .map_err(|error| TransientSolveError::AccelerationRefresh {
-                time_s: next_time_s,
-                detail: error.to_string(),
-            })?;
-            require_residual_target(&right_limit_state, next_time_s, options.residual_target)?;
-            state = right_limit_state.state().clone();
-            aggregate.push(&right_limit_state);
-            integration_summary = right_limit_summary;
-            integration_approach = SignalSampleApproach::RightLimit;
-        } else {
-            integration_approach = approach;
-        }
-    }
-
-    let total_steps = accepted_time_steps_s.len();
+            schedule: &schedule,
+        },
+        advance::TransientInitialVectors {
+            displacement: initial_displacement,
+            velocity: initial_velocity,
+        },
+        &mut assembly_at,
+        &mut map_physical_state,
+    )?;
+    let total_steps = block.samples.len();
     emit_phase(
-        progress_operation,
+        options.progress_operation.as_str(),
         FeaProgressPhase::Solve,
         FeaProgressStatus::Advanced,
         "second-order transient solve loop complete",
         Some(total_steps as u64),
         Some(total_steps as u64),
     );
+    let mut time_points_s = vec![initial.time_s];
+    let mut displacement_snapshots = vec![initial.state.displacement().to_vec()];
+    let mut velocity_snapshots = vec![initial.state.velocity().to_vec()];
+    let mut acceleration_snapshots = vec![initial.state.acceleration().to_vec()];
+    let mut residual_norms = vec![initial.projected_residual_norm];
+    let mut accepted_time_steps_s = Vec::with_capacity(total_steps);
+    let mut assembly_snapshots = vec![initial.summary];
+    let mut reaction_snapshots = vec![initial.reaction];
+    let mut integration_intervals = Vec::with_capacity(total_steps);
+    let mut strain_energy_snapshots = vec![initial.strain_energy_j];
+    let mut kinetic_energy_snapshots = vec![initial.kinetic_energy_j];
+    let mut external_work_j = vec![0.0];
+    let mut support_work_j = vec![0.0];
+    let mut damping_dissipation_j = vec![0.0];
+    let mut energy_balance_residual_j = vec![initial.energy_balance_residual_j];
+    let mut relative_energy_balance_error = vec![initial.relative_energy_balance_error];
+    let mut dynamic_balance_snapshots = vec![initial.dynamic_balance];
+    for sample in block.samples {
+        debug_assert_eq!(sample.schedule_ordinal as usize, time_points_s.len());
+        time_points_s.push(sample.time_s);
+        displacement_snapshots.push(sample.state.displacement().to_vec());
+        velocity_snapshots.push(sample.state.velocity().to_vec());
+        acceleration_snapshots.push(sample.state.acceleration().to_vec());
+        residual_norms.push(sample.projected_residual_norm);
+        accepted_time_steps_s.push(sample.accepted_time_step_s);
+        assembly_snapshots.push(sample.summary);
+        reaction_snapshots.push(sample.reaction);
+        integration_intervals.push(sample.integration_interval);
+        strain_energy_snapshots.push(sample.strain_energy_j);
+        kinetic_energy_snapshots.push(sample.kinetic_energy_j);
+        external_work_j.push(sample.applied_load_work_j);
+        support_work_j.push(sample.support_work_j);
+        damping_dissipation_j.push(sample.damping_dissipation_j);
+        energy_balance_residual_j.push(sample.energy_balance_residual_j);
+        relative_energy_balance_error.push(sample.relative_energy_balance_error);
+        dynamic_balance_snapshots.push(sample.dynamic_balance);
+    }
+    let accounting = block.terminal.accounting;
+    let solver_host_sync_count = u32::try_from(accounting.counters.host_sync_count)
+        .map_err(|_| TransientSolveError::SolverCounterOverflow)?;
+    let device_apply_k_count = u32::try_from(accounting.counters.device_apply_k_count)
+        .map_err(|_| TransientSolveError::SolverCounterOverflow)?;
+    let device_apply_k_attempt_count =
+        u32::try_from(accounting.counters.device_apply_k_attempt_count)
+            .map_err(|_| TransientSolveError::SolverCounterOverflow)?;
     let diagnostics = transient_diagnostics(
         &options,
         &accepted_time_steps_s,
         &residual_norms,
-        balance_history.strain_energy_j(),
-        balance_history.kinetic_energy_j(),
-        balance_history.relative_energy_balance_error(),
-        aggregate.solver_backend,
+        &strain_energy_snapshots,
+        &kinetic_energy_snapshots,
+        &relative_energy_balance_error,
+        accounting.solver_backend,
     );
     Ok(TransientSolveResult {
+        schedule,
         converged_steps: total_steps,
         total_steps,
         time_points_s,
@@ -545,23 +513,23 @@ pub(crate) fn solve_transient_system_with_assembly<E>(
         accepted_time_steps_s,
         diagnostics,
         solver_method: SolverMethod::NewmarkAverageAccelerationPcg,
-        solver_backend: aggregate.solver_backend,
-        solver_host_sync_count: aggregate.host_sync_count,
-        device_apply_k_count: aggregate.device_apply_k_count,
-        device_apply_k_attempt_count: aggregate.device_apply_k_attempt_count,
-        preconditioner: aggregate.preconditioner,
-        accelerator_evidence: aggregate.accelerator_evidence,
+        solver_backend: accounting.solver_backend,
+        solver_host_sync_count,
+        device_apply_k_count,
+        device_apply_k_attempt_count,
+        preconditioner: accounting.preconditioner,
+        accelerator_evidence: accounting.accelerator_evidence,
         assembly_snapshots,
-        reaction_snapshots: balance_history.reaction_snapshots().to_vec(),
+        reaction_snapshots,
         integration_intervals,
-        strain_energy_snapshots: balance_history.strain_energy_j().to_vec(),
-        kinetic_energy_snapshots: balance_history.kinetic_energy_j().to_vec(),
-        external_work_j: balance_history.external_work_j().to_vec(),
-        support_work_j: balance_history.support_work_j().to_vec(),
-        damping_dissipation_j: balance_history.damping_dissipation_j().to_vec(),
-        energy_balance_residual_j: balance_history.energy_balance_residual_j().to_vec(),
-        relative_energy_balance_error: balance_history.relative_energy_balance_error().to_vec(),
-        dynamic_balance_snapshots: balance_history.balances().to_vec(),
+        strain_energy_snapshots,
+        kinetic_energy_snapshots,
+        external_work_j,
+        support_work_j,
+        damping_dissipation_j,
+        energy_balance_residual_j,
+        relative_energy_balance_error,
+        dynamic_balance_snapshots,
     })
 }
 
@@ -636,50 +604,10 @@ fn validate_options<E>(
             "residual_target must be finite and positive",
         ));
     }
-    if !start_time_s.is_finite() || !end_time_s.is_finite() || end_time_s < start_time_s {
+    if !start_time_s.is_finite() || !end_time_s.is_finite() || end_time_s <= start_time_s {
         return Err(TransientSolveError::InvalidOptions(
             "the time domain must be finite and ordered",
         ));
     }
     Ok(())
-}
-
-struct SolveAggregate {
-    solver_backend: LinearAlgebraBackendKind,
-    host_sync_count: u32,
-    device_apply_k_count: u32,
-    device_apply_k_attempt_count: u32,
-    preconditioner: SolverPreconditioner,
-    accelerator_evidence: Vec<crate::solve::accelerator::AcceleratorSolveEvidence>,
-}
-
-impl Default for SolveAggregate {
-    fn default() -> Self {
-        Self {
-            solver_backend: LinearAlgebraBackendKind::CpuReference,
-            host_sync_count: 0,
-            device_apply_k_count: 0,
-            device_apply_k_attempt_count: 0,
-            preconditioner: SolverPreconditioner::None,
-            accelerator_evidence: Vec::new(),
-        }
-    }
-}
-
-impl SolveAggregate {
-    fn push(&mut self, solved: &EffectiveDynamicsSolveResult) {
-        for linear in solved.linear_solves() {
-            self.solver_backend = linear.solver_backend;
-            self.host_sync_count = self.host_sync_count.saturating_add(linear.host_sync_count);
-            self.device_apply_k_count = self
-                .device_apply_k_count
-                .saturating_add(linear.device_apply_k_count);
-            self.device_apply_k_attempt_count = self
-                .device_apply_k_attempt_count
-                .saturating_add(linear.device_apply_k_attempt_count);
-            self.preconditioner = linear.preconditioner;
-            self.accelerator_evidence
-                .extend(linear.accelerator_evidence.iter().cloned());
-        }
-    }
 }

@@ -2825,23 +2825,26 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
 
 #[test]
 fn structural_transient_objects_round_trip_and_one_segment_sample_imports_independently() {
-    use runmat_analysis_fea::contracts::StructuralDynamicBalanceSnapshot;
+    use runmat_analysis_fea::contracts::{
+        SolverMethod, SolverPreconditioner, StructuralDynamicBalanceSnapshot,
+    };
     use runmat_analysis_fea::execution::{
         AnalysisWorkloadIdentity, SignalMaterializationIdentity, SignalRealizationIdentity,
         SolverExcitationIdentity, StructuralDampingOperatorIdentity, StructuralDofLayoutIdentity,
         StructuralExcitationSetIdentity, StructuralFormulationIdentity,
         StructuralKinematicsIdentity, StructuralMassOperatorIdentity,
         StructuralStiffnessOperatorIdentity, StructuralTransientBalanceAccumulator,
-        StructuralTransientBlockRequest, StructuralTransientCheckpoint,
-        StructuralTransientCheckpointInput, StructuralTransientCheckpointScope,
-        StructuralTransientContinuationApproach, StructuralTransientContinuationPoint,
-        StructuralTransientContinuationState, StructuralTransientIntegrator,
-        StructuralTransientPrecision, StructuralTransientSchedule,
+        StructuralTransientBlockRequest, StructuralTransientBlockSolverEvidence,
+        StructuralTransientCheckpoint, StructuralTransientCheckpointInput,
+        StructuralTransientCheckpointScope, StructuralTransientContinuationApproach,
+        StructuralTransientContinuationPoint, StructuralTransientContinuationState,
+        StructuralTransientIntegrator, StructuralTransientPrecision, StructuralTransientSchedule,
         StructuralTransientScheduleArrival, StructuralTransientSchedulePoint,
         StructuralTransientSegment, StructuralTransientSegmentSample,
         StructuralTransientSegmentSampleInput, StructuralTransientSolverCounters,
         StructuralTransientSolverOptionsIdentity,
     };
+    use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
 
     let study =
         StudyIdentity::from_authored_digest(digest("transient-study"), Some(digest("project")))
@@ -2944,8 +2947,8 @@ fn structural_transient_objects_round_trip_and_one_segment_sample_imports_indepe
             },
             counters: StructuralTransientSolverCounters {
                 host_sync_count: 2,
-                device_apply_k_count: 2,
-                device_apply_k_attempt_count: 2,
+                device_apply_k_count: 0,
+                device_apply_k_attempt_count: 0,
             },
             observation_cursors: Vec::new(),
         },
@@ -2987,6 +2990,16 @@ fn structural_transient_objects_round_trip_and_one_segment_sample_imports_indepe
     let segment = StructuralTransientSegment::new(
         request.clone(),
         checkpoint.clone(),
+        StructuralTransientBlockSolverEvidence {
+            solver_method: SolverMethod::NewmarkAverageAccelerationPcg,
+            solver_backend: LinearAlgebraBackendKind::CpuReference,
+            preconditioner: SolverPreconditioner::None,
+            counters: StructuralTransientSolverCounters {
+                host_sync_count: 2,
+                ..StructuralTransientSolverCounters::default()
+            },
+            accelerator_evidence: Vec::new(),
+        },
         vec![sample(1, 7.0), sample(2, 1.0)],
     )
     .unwrap();

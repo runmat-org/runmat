@@ -1,6 +1,11 @@
 use runmat_analysis_core::SignalSampleApproach;
 use thiserror::Error;
 
+use crate::execution::{
+    StructuralTransientContinuationApproach, StructuralTransientSchedule,
+    StructuralTransientScheduleArrival, StructuralTransientSchedulePoint,
+};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TransientStepBoundaryKind {
     RequiredSample,
@@ -108,6 +113,56 @@ pub(super) fn next_step_boundary(
     }
 }
 
+pub(crate) fn canonical_transient_schedule(
+    interval_count: usize,
+    start_time_s: f64,
+    end_time_s: f64,
+    step_boundaries: &[TransientStepBoundary],
+) -> Result<StructuralTransientSchedule, String> {
+    if interval_count == 0
+        || !start_time_s.is_finite()
+        || !end_time_s.is_finite()
+        || end_time_s <= start_time_s
+    {
+        return Err("a transient integration schedule requires a finite positive time span".into());
+    }
+    let nominal_time_step_s = (end_time_s - start_time_s) / interval_count as f64;
+    let mut points = vec![StructuralTransientSchedulePoint {
+        time_s: start_time_s,
+        arrival: StructuralTransientScheduleArrival::Initial,
+        continuation: StructuralTransientContinuationApproach::At,
+    }];
+    let mut current_time_s = start_time_s;
+    while current_time_s < end_time_s {
+        let proposed_dt_s = nominal_time_step_s.min(end_time_s - current_time_s);
+        let (next_time_s, approach) =
+            next_step_boundary(current_time_s, proposed_dt_s, end_time_s, step_boundaries);
+        let (arrival, continuation) = match approach {
+            SignalSampleApproach::LeftLimit => (
+                StructuralTransientScheduleArrival::LeftLimit,
+                StructuralTransientContinuationApproach::RightLimit,
+            ),
+            SignalSampleApproach::At => (
+                StructuralTransientScheduleArrival::Continuous,
+                StructuralTransientContinuationApproach::At,
+            ),
+            SignalSampleApproach::RightLimit => {
+                return Err(
+                    "a positive-duration transient schedule cannot arrive from the right limit"
+                        .into(),
+                )
+            }
+        };
+        points.push(StructuralTransientSchedulePoint {
+            time_s: next_time_s,
+            arrival,
+            continuation,
+        });
+        current_time_s = next_time_s;
+    }
+    StructuralTransientSchedule::new(points).map_err(|error| error.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -170,5 +225,40 @@ mod tests {
         }
         assert_eq!(time, final_time);
         assert_eq!(step_count, 160);
+    }
+
+    #[test]
+    fn canonical_schedule_retains_exact_ordinals_and_jump_continuation_side() {
+        let boundaries = canonical_transient_step_boundaries(&[0.5], &[0.75], 0.0, 1.0).unwrap();
+        let schedule = canonical_transient_schedule(2, 0.0, 1.0, &boundaries).unwrap();
+        assert_eq!(
+            schedule
+                .points
+                .iter()
+                .map(|point| (point.time_s, point.arrival, point.continuation))
+                .collect::<Vec<_>>(),
+            vec![
+                (
+                    0.0,
+                    StructuralTransientScheduleArrival::Initial,
+                    StructuralTransientContinuationApproach::At
+                ),
+                (
+                    0.5,
+                    StructuralTransientScheduleArrival::LeftLimit,
+                    StructuralTransientContinuationApproach::RightLimit
+                ),
+                (
+                    0.75,
+                    StructuralTransientScheduleArrival::Continuous,
+                    StructuralTransientContinuationApproach::At
+                ),
+                (
+                    1.0,
+                    StructuralTransientScheduleArrival::Continuous,
+                    StructuralTransientContinuationApproach::At
+                ),
+            ]
+        );
     }
 }

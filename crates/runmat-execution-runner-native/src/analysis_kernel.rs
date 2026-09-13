@@ -13,7 +13,8 @@ use runmat_analysis_fea::execution::{
     ObservationPartitionEvaluationRequest, ObservationPartitionExecutionTarget,
     ObservationPartitionReductionRequest, ResultPublicationRequest,
     SemanticStatePublicationRequest, StructuralLinearNumericalReceiptArtifact,
-    StructuralLinearWorkload, StructuralLinearWorkloadResult,
+    StructuralLinearWorkload, StructuralLinearWorkloadResult, StructuralTransientBlockRequest,
+    StructuralTransientCheckpoint, StructuralTransientWorkload,
 };
 use runmat_analysis_fea::planning::resource::{
     build_structural_resource_plan, validate_resource_usage_evidence, FeaResourcePlan,
@@ -68,11 +69,102 @@ impl AnalysisKernel for NativeAnalysisKernel {
             AnalysisWorkKind::CheckpointObservationHistory => {
                 execute_observation_history_checkpoint(invocation)
             }
+            AnalysisWorkKind::SolveStructuralTransientBlock => {
+                execute_structural_transient_block(invocation)
+            }
             _ => Err(AnalysisBridgeError::Invalid(
                 "native analysis kernel does not yet implement this work kind".into(),
             )),
         }
     }
+}
+
+fn execute_structural_transient_block(
+    invocation: AnalysisKernelInvocation<'_>,
+) -> AnalysisBridgeResult<Vec<AnalysisKernelOutput>> {
+    let workload_input = unique_input(
+        &invocation,
+        AnalysisNumericalObjectKind::StructuralTransientWorkload,
+    )?;
+    let mesh_input = unique_input(&invocation, AnalysisNumericalObjectKind::Mesh)?;
+    let request_input = unique_input(
+        &invocation,
+        AnalysisNumericalObjectKind::StructuralTransientBlockRequest,
+    )?;
+    let predecessor_input = optional_unique_input(
+        &invocation,
+        AnalysisNumericalObjectKind::StructuralTransientCheckpoint,
+    )?;
+    if invocation.inputs.len() != 3 + usize::from(predecessor_input.is_some())
+        || invocation.host.workload.outputs
+            != vec![AnalysisNumericalObjectKind::StructuralTransientSegment]
+    {
+        return Err(AnalysisBridgeError::Invalid(
+            "structural transient block inputs or output differ from the workload contract".into(),
+        ));
+    }
+    let workload = StructuralTransientWorkload::from_canonical_bytes(&workload_input.payload())?;
+    let mesh = SolverMeshArtifact::canonical_decode(&mesh_input.payload())
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let request = StructuralTransientBlockRequest::from_canonical_bytes(&request_input.payload())?;
+    let predecessor = predecessor_input
+        .map(|input| StructuralTransientCheckpoint::from_canonical_bytes(&input.payload()))
+        .transpose()?;
+    if workload_input.manifest.logical_identity != request.scope.source_workload.digest()
+        || mesh_input.manifest.logical_identity
+            != runmat_execution::Digest::from_bytes(*mesh.canonical_digest.bytes())
+        || request_input.manifest.logical_identity != request.identity.digest()
+        || predecessor_input
+            .zip(predecessor.as_ref())
+            .is_some_and(|(input, checkpoint)| {
+                input.manifest.logical_identity != checkpoint.identity.digest()
+            })
+        || invocation.host.workload.study != request.scope.study
+        || invocation.host.workload.step != request.scope.step
+        || invocation.host.workload.execution_plan != request.scope.execution_plan
+    {
+        return Err(AnalysisBridgeError::Identity(
+            "structural transient block inputs differ from their exact scope or object identities",
+        ));
+    }
+    request.validate_against_predecessor(predecessor.as_ref())?;
+    let options = workload.solve_options(mesh);
+    let segment = runmat_analysis_fea::pipeline::transient::run_transient_block(
+        runmat_analysis_fea::pipeline::transient::StructuralTransientRunBlockInput {
+            model: &workload.model,
+            backend: workload.backend,
+            options: &options,
+            request: &request,
+            predecessor: predecessor.as_ref(),
+            observation_cursors: predecessor
+                .as_ref()
+                .map(|checkpoint| checkpoint.observation_cursors.clone())
+                .unwrap_or_default(),
+        },
+    )
+    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let mut partitions = Vec::with_capacity(segment.samples().len() + 1);
+    partitions.push(AnalysisKernelOutputPartition {
+        logical_identity: segment.manifest().identity.digest(),
+        payload: segment.manifest().canonical_bytes()?,
+    });
+    partitions.extend(
+        segment
+            .samples()
+            .iter()
+            .map(|sample| {
+                Ok(AnalysisKernelOutputPartition {
+                    logical_identity: sample.identity.digest(),
+                    payload: sample.canonical_bytes()?,
+                })
+            })
+            .collect::<AnalysisBridgeResult<Vec<_>>>()?,
+    );
+    Ok(vec![AnalysisKernelOutput::partitioned(
+        AnalysisNumericalObjectKind::StructuralTransientSegment,
+        segment.manifest().identity.digest(),
+        partitions,
+    )])
 }
 
 fn execute_observation_history_checkpoint(
@@ -1006,6 +1098,10 @@ fn optional_unique_input<'a>(
 #[cfg(test)]
 #[path = "analysis_kernel/observation_history_tests.rs"]
 mod observation_history_tests;
+
+#[cfg(test)]
+#[path = "analysis_kernel/transient_block_tests.rs"]
+mod transient_block_tests;
 
 #[cfg(test)]
 mod tests {

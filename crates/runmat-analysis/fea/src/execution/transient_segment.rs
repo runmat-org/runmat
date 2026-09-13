@@ -1,13 +1,17 @@
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use serde::{Deserialize, Serialize};
 
-use crate::contracts::StructuralDynamicBalanceSnapshot;
+use crate::{
+    contracts::{SolverMethod, SolverPreconditioner, StructuralDynamicBalanceSnapshot},
+    solve::{accelerator::AcceleratorSolveEvidence, backend::kind::LinearAlgebraBackendKind},
+};
 
 use super::{
     AnalysisExecutionError, AnalysisExecutionResult, StructuralTransientBlockRequest,
     StructuralTransientBlockRequestIdentity, StructuralTransientCheckpoint,
     StructuralTransientContinuationApproach, StructuralTransientContinuationState,
     StructuralTransientSegmentIdentity, StructuralTransientSegmentSampleIdentity,
+    StructuralTransientSolverCounters,
 };
 
 const TRANSIENT_SEGMENT_PREFIX: &[u8] = b"runmat-structural-transient-segment/v1\0";
@@ -188,18 +192,36 @@ impl StructuralTransientSegmentSample {
         ];
         if self.reaction.len() != request.scope.dof_count
             || self.dynamic_balance.applied_load.len() != request.scope.dof_count
-            || self.reaction.iter().any(|value| !value.is_finite())
+        {
+            return Err(AnalysisExecutionError::Invalid(
+                "structural transient segment sample physical vectors have the wrong shape".into(),
+            ));
+        }
+        if self.reaction.iter().any(|value| !value.is_finite())
             || scalars.iter().any(|value| !value.is_finite())
-            || self.projected_residual_norm < 0.0
+        {
+            return Err(AnalysisExecutionError::Invalid(
+                "structural transient segment sample contains non-finite physical values".into(),
+            ));
+        }
+        if self.projected_residual_norm < 0.0
             || self.strain_energy_j < 0.0
             || self.kinetic_energy_j < 0.0
             || self.damping_dissipation_j < 0.0
             || self.relative_energy_balance_error < 0.0
-            || self.identity != sample_identity(self)?
         {
-            return Err(AnalysisExecutionError::Invalid(
-                "structural transient segment sample has invalid physical values or identity"
-                    .into(),
+            return Err(AnalysisExecutionError::Invalid(format!(
+                "structural transient segment sample has a negative nonnegative quantity: residual={}, strain_energy_j={}, kinetic_energy_j={}, damping_dissipation_j={}, relative_energy_balance_error={}",
+                self.projected_residual_norm,
+                self.strain_energy_j,
+                self.kinetic_energy_j,
+                self.damping_dissipation_j,
+                self.relative_energy_balance_error,
+            )));
+        }
+        if self.identity != sample_identity(self)? {
+            return Err(AnalysisExecutionError::Identity(
+                "structural transient segment sample identity does not converge",
             ));
         }
         Ok(())
@@ -243,6 +265,50 @@ pub struct StructuralTransientSegmentEntry {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StructuralTransientBlockSolverEvidence {
+    pub solver_method: SolverMethod,
+    pub solver_backend: LinearAlgebraBackendKind,
+    pub preconditioner: SolverPreconditioner,
+    pub counters: StructuralTransientSolverCounters,
+    pub accelerator_evidence: Vec<AcceleratorSolveEvidence>,
+}
+
+impl StructuralTransientBlockSolverEvidence {
+    pub fn validate(&self) -> AnalysisExecutionResult<()> {
+        if self.solver_method != SolverMethod::NewmarkAverageAccelerationPcg
+            || self.counters.device_apply_k_count > self.counters.device_apply_k_attempt_count
+            || self
+                .accelerator_evidence
+                .iter()
+                .any(|evidence| evidence.validate().is_err() || !evidence.satisfies_tolerance())
+        {
+            return Err(AnalysisExecutionError::Invalid(
+                "structural transient block solver evidence is invalid".into(),
+            ));
+        }
+        match self.solver_backend {
+            LinearAlgebraBackendKind::CpuReference
+                if self.counters.device_apply_k_count != 0
+                    || self.counters.device_apply_k_attempt_count != 0
+                    || !self.accelerator_evidence.is_empty() =>
+            {
+                Err(AnalysisExecutionError::Invalid(
+                    "CPU structural transient block evidence contains accelerator execution".into(),
+                ))
+            }
+            LinearAlgebraBackendKind::Accelerator if self.accelerator_evidence.is_empty() => {
+                Err(AnalysisExecutionError::Invalid(
+                    "accelerated structural transient block evidence is missing provider records"
+                        .into(),
+                ))
+            }
+            _ => Ok(()),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(
     deny_unknown_fields,
     try_from = "StructuralTransientSegmentManifestWire"
@@ -252,6 +318,7 @@ pub struct StructuralTransientSegmentManifest {
     pub identity: StructuralTransientSegmentIdentity,
     pub request: StructuralTransientBlockRequest,
     pub terminal_checkpoint: StructuralTransientCheckpoint,
+    pub solver_evidence: StructuralTransientBlockSolverEvidence,
     pub samples: Vec<StructuralTransientSegmentEntry>,
 }
 
@@ -262,6 +329,7 @@ struct StructuralTransientSegmentManifestWire {
     identity: StructuralTransientSegmentIdentity,
     request: StructuralTransientBlockRequest,
     terminal_checkpoint: StructuralTransientCheckpoint,
+    solver_evidence: StructuralTransientBlockSolverEvidence,
     samples: Vec<StructuralTransientSegmentEntry>,
 }
 
@@ -274,6 +342,7 @@ impl TryFrom<StructuralTransientSegmentManifestWire> for StructuralTransientSegm
             identity: wire.identity,
             request: wire.request,
             terminal_checkpoint: wire.terminal_checkpoint,
+            solver_evidence: wire.solver_evidence,
             samples: wire.samples,
         };
         manifest.validate()?;
@@ -285,6 +354,7 @@ impl StructuralTransientSegmentManifest {
     fn new(
         request: StructuralTransientBlockRequest,
         terminal_checkpoint: StructuralTransientCheckpoint,
+        solver_evidence: StructuralTransientBlockSolverEvidence,
         samples: &[StructuralTransientSegmentSample],
     ) -> AnalysisExecutionResult<Self> {
         let entries = samples
@@ -294,12 +364,19 @@ impl StructuralTransientSegmentManifest {
                 sample: sample.identity,
             })
             .collect::<Vec<_>>();
-        let identity = segment_identity(1, &request, &terminal_checkpoint, &entries)?;
+        let identity = segment_identity(
+            1,
+            &request,
+            &terminal_checkpoint,
+            &solver_evidence,
+            &entries,
+        )?;
         let manifest = Self {
             schema_version: 1,
             identity,
             request,
             terminal_checkpoint,
+            solver_evidence,
             samples: entries,
         };
         manifest.validate()?;
@@ -309,6 +386,7 @@ impl StructuralTransientSegmentManifest {
     pub fn validate(&self) -> AnalysisExecutionResult<()> {
         self.request.validate()?;
         self.terminal_checkpoint.validate()?;
+        self.solver_evidence.validate()?;
         let expected_sample_count = self
             .request
             .terminal_schedule_ordinal
@@ -317,6 +395,32 @@ impl StructuralTransientSegmentManifest {
             .ok_or(AnalysisExecutionError::Limit(
                 "structural transient segment sample count exceeds platform limits",
             ))?;
+        let expected_terminal_counters = StructuralTransientSolverCounters {
+            host_sync_count: self
+                .request
+                .start_counters
+                .host_sync_count
+                .checked_add(self.solver_evidence.counters.host_sync_count)
+                .ok_or(AnalysisExecutionError::Limit(
+                    "structural transient host synchronization count overflow",
+                ))?,
+            device_apply_k_count: self
+                .request
+                .start_counters
+                .device_apply_k_count
+                .checked_add(self.solver_evidence.counters.device_apply_k_count)
+                .ok_or(AnalysisExecutionError::Limit(
+                    "structural transient device apply count overflow",
+                ))?,
+            device_apply_k_attempt_count: self
+                .request
+                .start_counters
+                .device_apply_k_attempt_count
+                .checked_add(self.solver_evidence.counters.device_apply_k_attempt_count)
+                .ok_or(AnalysisExecutionError::Limit(
+                    "structural transient device apply-attempt count overflow",
+                ))?,
+        };
         if self.schema_version != 1
             || self.samples.len() != expected_sample_count
             || self.terminal_checkpoint.scope != self.request.scope
@@ -324,6 +428,7 @@ impl StructuralTransientSegmentManifest {
             || self.terminal_checkpoint.block_ordinal != self.request.block_ordinal
             || self.terminal_checkpoint.continuation.schedule_ordinal
                 != self.request.terminal_schedule_ordinal
+            || self.terminal_checkpoint.counters != expected_terminal_counters
         {
             return Err(AnalysisExecutionError::Identity(
                 "structural transient segment does not close its exact block request",
@@ -353,6 +458,7 @@ impl StructuralTransientSegmentManifest {
                 self.schema_version,
                 &self.request,
                 &self.terminal_checkpoint,
+                &self.solver_evidence,
                 &self.samples,
             )?
         {
@@ -393,10 +499,15 @@ impl StructuralTransientSegment {
     pub fn new(
         request: StructuralTransientBlockRequest,
         terminal_checkpoint: StructuralTransientCheckpoint,
+        solver_evidence: StructuralTransientBlockSolverEvidence,
         samples: Vec<StructuralTransientSegmentSample>,
     ) -> AnalysisExecutionResult<Self> {
-        let manifest =
-            StructuralTransientSegmentManifest::new(request, terminal_checkpoint, &samples)?;
+        let manifest = StructuralTransientSegmentManifest::new(
+            request,
+            terminal_checkpoint,
+            solver_evidence,
+            &samples,
+        )?;
         Self::from_manifest_and_samples(manifest, samples)
     }
 
@@ -535,11 +646,18 @@ fn segment_identity(
     schema_version: u16,
     request: &StructuralTransientBlockRequest,
     terminal_checkpoint: &StructuralTransientCheckpoint,
+    solver_evidence: &StructuralTransientBlockSolverEvidence,
     samples: &[StructuralTransientSegmentEntry],
 ) -> AnalysisExecutionResult<StructuralTransientSegmentIdentity> {
     StructuralTransientSegmentIdentity::derive(
         "structural-transient-segment",
-        &(schema_version, request, terminal_checkpoint, samples),
+        &(
+            schema_version,
+            request,
+            terminal_checkpoint,
+            solver_evidence,
+            samples,
+        ),
     )
 }
 
@@ -548,6 +666,19 @@ mod tests {
     use crate::execution::transient_checkpoint::tests::{checkpoint, scope};
 
     use super::*;
+
+    fn solver_evidence() -> StructuralTransientBlockSolverEvidence {
+        StructuralTransientBlockSolverEvidence {
+            solver_method: SolverMethod::NewmarkAverageAccelerationPcg,
+            solver_backend: LinearAlgebraBackendKind::CpuReference,
+            preconditioner: SolverPreconditioner::None,
+            counters: StructuralTransientSolverCounters {
+                host_sync_count: 1,
+                ..StructuralTransientSolverCounters::default()
+            },
+            accelerator_evidence: Vec::new(),
+        }
+    }
 
     fn sample(
         request: &StructuralTransientBlockRequest,
@@ -592,6 +723,7 @@ mod tests {
         let segment = StructuralTransientSegment::new(
             request.clone(),
             checkpoint(None, 1),
+            solver_evidence(),
             vec![sample(&request, 1, vec![7.0, 0.0])],
         )
         .unwrap();
@@ -625,6 +757,7 @@ mod tests {
         let segment = StructuralTransientSegment::new(
             request.clone(),
             checkpoint(None, 1),
+            solver_evidence(),
             vec![sample(&request, 1, vec![7.0, 0.0])],
         )
         .unwrap();

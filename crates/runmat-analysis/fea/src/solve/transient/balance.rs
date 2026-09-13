@@ -3,10 +3,11 @@ use std::collections::BTreeMap;
 use thiserror::Error;
 
 use crate::{
-    algebra::{spmv, CanonicalRealOperators},
+    algebra::{spmv, CanonicalRealOperators, RealSparseMatrix},
     assembly::AssemblySummary,
     constraints::solve_constraint_multipliers,
     contracts::StructuralDynamicBalanceSnapshot,
+    execution::StructuralTransientBalanceAccumulator,
 };
 
 use super::{constraint_state::physical_load, state::SecondOrderState};
@@ -43,6 +44,11 @@ pub(super) enum DynamicBalanceError {
     NonFinite,
     #[error("the structural damping work is negative ({increment_j} J)")]
     NegativeDampingDissipation { increment_j: f64 },
+    #[error("the {quantity} quadratic energy is materially negative ({value_j} J)")]
+    NegativeQuadraticEnergy {
+        quantity: &'static str,
+        value_j: f64,
+    },
     #[error("constraint-row reactions could not be recovered from the dynamic residual")]
     ReactionRecovery,
 }
@@ -125,6 +131,72 @@ impl TransientBalanceHistory {
             energy_balance_residual_j: vec![0.0],
             relative_energy_balance_error: vec![0.0],
         })
+    }
+
+    pub(super) fn resume(
+        summary: &AssemblySummary,
+        state: &SecondOrderState,
+        accumulator: StructuralTransientBalanceAccumulator,
+    ) -> Result<Self, DynamicBalanceError> {
+        if [
+            accumulator.initial_mechanical_energy_j,
+            accumulator.applied_load_work_j,
+            accumulator.support_work_j,
+            accumulator.damping_dissipation_j,
+        ]
+        .iter()
+        .any(|value| !value.is_finite())
+            || accumulator.initial_mechanical_energy_j < 0.0
+            || accumulator.damping_dissipation_j < 0.0
+        {
+            return Err(DynamicBalanceError::NonFinite);
+        }
+        let load = physical_load(summary);
+        let balance =
+            StructuralDynamicBalanceSnapshot::evaluate(summary.operator.operators(), state, &load)?;
+        let strain = strain_energy(summary.operator.operators(), state)?;
+        let kinetic = kinetic_energy(summary.operator.operators(), state)?;
+        let mechanical = strain + kinetic;
+        let residual = mechanical
+            - accumulator.initial_mechanical_energy_j
+            - accumulator.applied_load_work_j
+            - accumulator.support_work_j
+            + accumulator.damping_dissipation_j;
+        let scale = mechanical
+            .abs()
+            .max(accumulator.initial_mechanical_energy_j.abs())
+            .max(accumulator.applied_load_work_j.abs())
+            .max(accumulator.support_work_j.abs())
+            .max(accumulator.damping_dissipation_j.abs());
+        let relative = if scale == 0.0 {
+            0.0
+        } else {
+            residual.abs() / scale
+        };
+        if !residual.is_finite() || !relative.is_finite() {
+            return Err(DynamicBalanceError::NonFinite);
+        }
+        Ok(Self {
+            initial_mechanical_energy_j: accumulator.initial_mechanical_energy_j,
+            reaction_snapshots: vec![constrained_reaction(summary, &balance)?],
+            balances: vec![balance],
+            strain_energy_j: vec![strain],
+            kinetic_energy_j: vec![kinetic],
+            external_work_j: vec![accumulator.applied_load_work_j],
+            support_work_j: vec![accumulator.support_work_j],
+            damping_dissipation_j: vec![accumulator.damping_dissipation_j],
+            energy_balance_residual_j: vec![residual],
+            relative_energy_balance_error: vec![relative],
+        })
+    }
+
+    pub(super) fn accumulator(&self) -> StructuralTransientBalanceAccumulator {
+        StructuralTransientBalanceAccumulator {
+            initial_mechanical_energy_j: self.initial_mechanical_energy_j,
+            applied_load_work_j: self.external_work_j.last().copied().unwrap_or(0.0),
+            support_work_j: self.support_work_j.last().copied().unwrap_or(0.0),
+            damping_dissipation_j: self.damping_dissipation_j.last().copied().unwrap_or(0.0),
+        }
     }
 
     pub(super) fn push_step(
@@ -355,7 +427,12 @@ fn strain_energy(
 ) -> Result<f64, DynamicBalanceError> {
     let force = spmv(operators.stiffness(), state.displacement())
         .map_err(|_| DynamicBalanceError::DimensionMismatch)?;
-    Ok(0.5 * dot(state.displacement(), &force)?)
+    nonnegative_quadratic_energy(
+        "strain",
+        operators.stiffness(),
+        state.displacement(),
+        &force,
+    )
 }
 
 fn kinetic_energy(
@@ -364,7 +441,34 @@ fn kinetic_energy(
 ) -> Result<f64, DynamicBalanceError> {
     let momentum = spmv(operators.mass(), state.velocity())
         .map_err(|_| DynamicBalanceError::DimensionMismatch)?;
-    Ok(0.5 * dot(state.velocity(), &momentum)?)
+    nonnegative_quadratic_energy("kinetic", operators.mass(), state.velocity(), &momentum)
+}
+
+fn nonnegative_quadratic_energy(
+    quantity: &'static str,
+    operator: &RealSparseMatrix,
+    state: &[f64],
+    conjugate: &[f64],
+) -> Result<f64, DynamicBalanceError> {
+    if state.len() != conjugate.len() || operator.rows() != state.len() {
+        return Err(DynamicBalanceError::DimensionMismatch);
+    }
+    let value_j = 0.5 * dot(state, conjugate)?;
+    let mut absolute_sum_j = 0.0;
+    for (row, row_state) in state.iter().copied().enumerate() {
+        for entry in operator.pattern().row_range(row) {
+            let column = operator.pattern().column(entry);
+            absolute_sum_j += 0.5 * (row_state * operator.values()[entry] * state[column]).abs();
+        }
+    }
+    if !absolute_sum_j.is_finite() {
+        return Err(DynamicBalanceError::NonFinite);
+    }
+    let roundoff_bound_j = 64.0 * f64::EPSILON * absolute_sum_j;
+    if value_j < -roundoff_bound_j {
+        return Err(DynamicBalanceError::NegativeQuadraticEnergy { quantity, value_j });
+    }
+    Ok(value_j.max(0.0))
 }
 
 fn dot(left: &[f64], right: &[f64]) -> Result<f64, DynamicBalanceError> {
@@ -434,5 +538,23 @@ mod tests {
                     - balance.applied_load[dof]
             );
         }
+    }
+
+    #[test]
+    fn materially_negative_quadratic_energy_is_rejected() {
+        let operator = RealSparseMatrix::diagonal(
+            vec![-1.0],
+            OperatorRole::Stiffness,
+            MatrixProperties::GENERAL,
+        )
+        .unwrap();
+
+        assert_eq!(
+            nonnegative_quadratic_energy("strain", &operator, &[1.0], &[-1.0]),
+            Err(DynamicBalanceError::NegativeQuadraticEnergy {
+                quantity: "strain",
+                value_j: -0.5,
+            })
+        );
     }
 }
