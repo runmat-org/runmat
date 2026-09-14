@@ -5,6 +5,7 @@ import { gatePlanEvidence, parseGatePlans, validateGatePlanTargetCoverage } from
 
 const DIGEST = `sha256:${"a".repeat(64)}`;
 const BUILD = { operating_system: "linux", architecture: "x86_64" };
+const MAC_BUILD = { operating_system: "macos", architecture: "aarch64" };
 
 function tools(roles) {
   return [{ ...BUILD, tools: [...roles].sort().map((role) => ({ role, content_digest: DIGEST })) }];
@@ -82,5 +83,34 @@ test("every gate toolchain exactly covers the reviewed execution targets", () =>
   assert.throws(
     () => validateGatePlanTargetCoverage(plans, [BUILD, { operating_system: "windows", architecture: "x86_64" }], "fixture"),
     /exactly cover every execution target/,
+  );
+});
+
+test("source inventory platform does not constrain reviewed execution targets", () => {
+  const crossTargetPlan = plan("check");
+  crossTargetPlan.program.approved_toolchains = [{
+    ...MAC_BUILD,
+    tools: crossTargetPlan.program.approved_toolchains[0].tools,
+  }];
+  const sourceInventory = {
+    compiled_inventory: { build: BUILD },
+    source: { files: [{ path: "Cargo.toml", content_digest: DIGEST }] },
+  };
+  const plans = parseGatePlans([crossTargetPlan], "fixture", sourceInventory);
+  assert.doesNotThrow(() => validateGatePlanTargetCoverage(plans, [MAC_BUILD], "fixture"));
+  assert.doesNotThrow(() => gatePlanEvidence(crossTargetPlan, MAC_BUILD, "/workspace/runmat"));
+  assert.throws(
+    () => gatePlanEvidence(crossTargetPlan, BUILD, "/workspace/runmat"),
+    /no reviewed toolchain for the evidence platform/,
+  );
+  assert.throws(
+    () => validateGatePlanTargetCoverage(plans, [BUILD], "fixture"),
+    /exactly cover every execution target/,
+  );
+  const staleSourcePlan = structuredClone(crossTargetPlan);
+  staleSourcePlan.program.manifest_digest = `sha256:${"b".repeat(64)}`;
+  assert.throws(
+    () => parseGatePlans([staleSourcePlan], "fixture", sourceInventory),
+    /absent from or differs from the frozen source snapshot/,
   );
 });

@@ -36,8 +36,9 @@ const ARTIFACT_ROLES_BY_PARSER = Object.freeze({
   inventory_delta: ["inventory-delta"],
 });
 
-export function parseGatePlans(value, bundleId, current = null) {
-  const rows = array(value, `${bundleId} gate plans`, { empty: true }).map((entry) => parseGatePlan(entry, bundleId, current));
+export function parseGatePlans(value, bundleId, sourceInventory = null) {
+  const rows = array(value, `${bundleId} gate plans`, { empty: true })
+    .map((entry) => parseGatePlan(entry, bundleId, sourceInventory));
   const keys = rows.map((entry) => entry.gate);
   if (new Set(keys).size !== keys.length) throw new Error(`${bundleId}: gate plans must be unique by gate`);
   if (JSON.stringify(keys) !== JSON.stringify([...keys].sort())) throw new Error(`${bundleId}: gate plans must use canonical gate ordering`);
@@ -74,7 +75,7 @@ export function validateGatePlanTargetCoverage(plans, executionTargets, bundleId
   }
 }
 
-function parseGatePlan(value, bundleId, current) {
+function parseGatePlan(value, bundleId, sourceInventory) {
   exact(value, ["gate", "program", "arguments", "working_directory", "parser", "expected_artifact_roles"], `${bundleId} gate plan`);
   const gate = enumValue(value.gate, Object.keys(GATE_PRODUCERS), `${bundleId} gate`);
   const parser = enumValue(value.parser, GATE_PARSERS, `${bundleId} gate parser`);
@@ -88,7 +89,7 @@ function parseGatePlan(value, bundleId, current) {
   const roles = uniqueStrings(value.expected_artifact_roles, `${bundleId} gate artifact roles`, { empty: true });
   if (JSON.stringify(roles) !== JSON.stringify([...roles].sort())) throw new Error(`${bundleId}: gate artifact roles must use canonical ordering`);
   if (JSON.stringify(roles) !== JSON.stringify(ARTIFACT_ROLES_BY_PARSER[parser])) throw new Error(`${bundleId}: ${parser} must emit its exact typed artifact role set`);
-  parseGateProgram(value.program, bundleId, current);
+  parseGateProgram(value.program, bundleId, sourceInventory);
   if (value.program.kind !== "repository_script") validateCargoArguments(argumentsList, bundleId);
   if (parser === "documentation_cutover") requireRepositoryProducer(
     value, bundleId, "documentation cutover",
@@ -104,12 +105,12 @@ function parseGatePlan(value, bundleId, current) {
   return value;
 }
 
-export function parseGateProgram(value, bundleId, current = null) {
+export function parseGateProgram(value, bundleId, sourceInventory = null) {
   if (value?.kind === "repository_script") {
     exact(value, ["kind", "path", "content_digest", "approved_toolchains"], `${bundleId} repository script`);
     repositoryPath(value.path, `${bundleId} repository script path`);
-    validateSourceDigest(value.path, value.content_digest, current, `${bundleId} repository script`);
-    parseApprovedToolchains(value.approved_toolchains, bundleId, current, ["node"], [
+    validateSourceDigest(value.path, value.content_digest, sourceInventory, `${bundleId} repository script`);
+    parseApprovedToolchains(value.approved_toolchains, bundleId, ["node"], [
       "cargo", "cargo-clippy", "cargo-fmt", "clippy-driver", "git", "node", "rustc", "rustdoc", "rustfmt",
     ]);
     return value;
@@ -117,20 +118,20 @@ export function parseGateProgram(value, bundleId, current = null) {
     exact(value, ["kind", "package", "binary", "manifest_path", "manifest_digest", "approved_toolchains"], `${bundleId} cargo binary`);
     cargoName(value.package, `${bundleId} cargo package`); cargoName(value.binary, `${bundleId} cargo binary`);
     repositoryPath(value.manifest_path, `${bundleId} Cargo manifest path`);
-    validateSourceDigest(value.manifest_path, value.manifest_digest, current, `${bundleId} Cargo manifest`);
-    parseApprovedToolchains(value.approved_toolchains, bundleId, current, requiredToolRoles("run"));
+    validateSourceDigest(value.manifest_path, value.manifest_digest, sourceInventory, `${bundleId} Cargo manifest`);
+    parseApprovedToolchains(value.approved_toolchains, bundleId, requiredToolRoles("run"));
     return value;
   } else if (value?.kind === "cargo_operation") {
     exact(value, ["kind", "operation", "manifest_path", "manifest_digest", "approved_toolchains"], `${bundleId} cargo operation`);
     const operation = enumValue(value.operation, ["check", "clippy", "fmt", "test"], `${bundleId} Cargo operation`);
     repositoryPath(value.manifest_path, `${bundleId} Cargo manifest path`);
-    validateSourceDigest(value.manifest_path, value.manifest_digest, current, `${bundleId} Cargo manifest`);
-    parseApprovedToolchains(value.approved_toolchains, bundleId, current, requiredToolRoles(operation));
+    validateSourceDigest(value.manifest_path, value.manifest_digest, sourceInventory, `${bundleId} Cargo manifest`);
+    parseApprovedToolchains(value.approved_toolchains, bundleId, requiredToolRoles(operation));
     return value;
   } else throw new Error(`${bundleId}: unsupported gate program kind`);
 }
 
-function parseApprovedToolchains(value, bundleId, current, requiredRoles, allowedRoles = requiredRoles) {
+function parseApprovedToolchains(value, bundleId, requiredRoles, allowedRoles = requiredRoles) {
   const rows = array(value, `${bundleId} approved gate toolchains`);
   const keys = rows.map((entry) => {
     exact(entry, ["operating_system", "architecture", "tools"], `${bundleId} approved gate toolchain`);
@@ -151,12 +152,6 @@ function parseApprovedToolchains(value, bundleId, current, requiredRoles, allowe
   });
   if (new Set(keys).size !== keys.length) throw new Error(`${bundleId}: approved gate toolchains must be unique by platform`);
   if (JSON.stringify(keys) !== JSON.stringify([...keys].sort())) throw new Error(`${bundleId}: approved gate toolchains must use canonical platform ordering`);
-  if (current) {
-    const build = current.compiled_inventory.build;
-    if (!rows.some((entry) => entry.operating_system === build.operating_system && entry.architecture === build.architecture)) {
-      throw new Error(`${bundleId}: gate program has no approved toolchain for the compiled baseline platform`);
-    }
-  }
 }
 
 function approvedTools(program, build, gate) {
@@ -211,9 +206,9 @@ function requiredToolRoles(operation) {
   return ["cargo", "rustc"];
 }
 
-function validateSourceDigest(sourcePath, expectedDigest, current, label) {
+function validateSourceDigest(sourcePath, expectedDigest, sourceInventory, label) {
   digest(expectedDigest, `${label} digest`);
-  if (!current) return;
-  const observed = current.source.files.find((entry) => entry.path === sourcePath);
+  if (!sourceInventory) return;
+  const observed = sourceInventory.source.files.find((entry) => entry.path === sourcePath);
   if (!observed || observed.content_digest !== expectedDigest) throw new Error(`${label} is absent from or differs from the frozen source snapshot`);
 }
