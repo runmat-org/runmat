@@ -114,6 +114,7 @@ pub fn builtin_catalog_entry_for_class_method(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::BuiltinConstantKind;
 
     #[test]
     fn primary_name_index_is_case_insensitive_without_changing_canonical_spelling() {
@@ -140,39 +141,102 @@ mod tests {
     }
 
     #[test]
-    fn constant_aggregation_has_one_owner_for_each_runtime_identity() {
-        let names = builtin_constant_catalog_entries()
+    fn constant_aggregation_preserves_typed_identity_and_fact_authority() {
+        let entries = builtin_constant_catalog_entries();
+        assert!(
+            !entries.is_empty(),
+            "the constant catalog must not be empty"
+        );
+        let names = entries
             .iter()
             .map(|entry| entry.name)
             .collect::<std::collections::BTreeSet<_>>();
-        assert_eq!(names.len(), builtin_constant_catalog_entries().len());
-        assert!(matches!(
-            builtin_constant_catalog_entry_by_name("pi")
-                .expect("pi")
-                .fact()
-                .kind,
-            runmat_types::ValueKindFact::Numeric(runmat_types::NumericFact {
-                domain: runmat_types::NumericDomain::Real,
-                ..
-            })
-        ));
-        assert_eq!(
-            builtin_constant_catalog_entry_by_name("true")
-                .expect("true")
-                .fact()
-                .kind,
-            runmat_types::ValueKindFact::Logical
+        assert_eq!(names.len(), entries.len());
+
+        let mut represented_kinds = [false; 3];
+        for entry in entries {
+            assert!(!entry.name.is_empty());
+            assert_eq!(
+                builtin_constant_catalog_entry_by_name(entry.name),
+                Some(entry),
+                "the exact declared identity must resolve to its typed catalog entry"
+            );
+            match entry.kind {
+                BuiltinConstantKind::RealDouble => {
+                    represented_kinds[0] = true;
+                    assert!(matches!(
+                        entry.fact().kind,
+                        runmat_types::ValueKindFact::Numeric(runmat_types::NumericFact {
+                            class: runmat_types::NumericClass::Double,
+                            domain: runmat_types::NumericDomain::Real,
+                        })
+                    ));
+                }
+                BuiltinConstantKind::ComplexDouble => {
+                    represented_kinds[1] = true;
+                    assert!(matches!(
+                        entry.fact().kind,
+                        runmat_types::ValueKindFact::Numeric(runmat_types::NumericFact {
+                            class: runmat_types::NumericClass::Double,
+                            domain: runmat_types::NumericDomain::Complex,
+                        })
+                    ));
+                }
+                BuiltinConstantKind::Logical => {
+                    represented_kinds[2] = true;
+                    assert_eq!(entry.fact().kind, runmat_types::ValueKindFact::Logical)
+                }
+            }
+        }
+        assert!(
+            represented_kinds.into_iter().all(std::convert::identity),
+            "the catalog must exercise every typed constant projection"
         );
-        assert!(builtin_constant_catalog_entry_by_name("pi")
-            .expect("pi")
-            .provenance
-            .source_file
-            .ends_with("catalog/entries/constants/core/mod.rs"));
-        assert!(builtin_constant_catalog_entry_by_name("inf")
-            .expect("inf")
-            .provenance
-            .source_file
-            .ends_with("catalog/entries/array/creation/constants.rs"));
-        assert!(builtin_constant_catalog_entry_by_name("PI").is_none());
+        assert!(builtin_constant_catalog_entry_by_name("not_a_runmat_constant").is_none());
+    }
+
+    #[test]
+    fn constant_provenance_matches_its_declaring_catalog_module() {
+        fn source_module_suffix(source_file: &str) -> String {
+            let normalized = source_file.replace('\\', "/");
+            let (_, catalog_relative) = normalized
+                .rsplit_once("/src/catalog/")
+                .or_else(|| normalized.split_once("src/catalog/"))
+                .unwrap_or_else(|| {
+                    panic!("catalog provenance is outside src/catalog: {source_file}")
+                });
+            let module_relative = catalog_relative
+                .strip_suffix("/mod.rs")
+                .or_else(|| catalog_relative.strip_suffix(".rs"))
+                .unwrap_or_else(|| panic!("catalog provenance is not Rust source: {source_file}"));
+            format!("catalog::{}", module_relative.replace('/', "::"))
+        }
+
+        let mut source_by_module = std::collections::BTreeMap::new();
+        let mut module_by_source = std::collections::BTreeMap::new();
+        for entry in builtin_constant_catalog_entries() {
+            let provenance = entry.provenance;
+            assert!(!provenance.source_file.is_empty(), "{}", entry.name);
+            assert!(!provenance.module_path.is_empty(), "{}", entry.name);
+            assert!(
+                provenance
+                    .module_path
+                    .ends_with(&source_module_suffix(provenance.source_file)),
+                "constant {} reports source {} but module {}",
+                entry.name,
+                provenance.source_file,
+                provenance.module_path
+            );
+            if let Some(previous) =
+                source_by_module.insert(provenance.module_path, provenance.source_file)
+            {
+                assert_eq!(previous, provenance.source_file);
+            }
+            if let Some(previous) =
+                module_by_source.insert(provenance.source_file, provenance.module_path)
+            {
+                assert_eq!(previous, provenance.module_path);
+            }
+        }
     }
 }

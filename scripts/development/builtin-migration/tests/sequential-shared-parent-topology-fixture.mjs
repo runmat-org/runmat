@@ -4,7 +4,7 @@ import {
   reviewedTopologyView,
 } from "../topology/freeze.mjs";
 import {
-  SEQUENTIAL_BUNDLES, SEQUENTIAL_IDENTITIES,
+  SEQUENTIAL_BUNDLES, SEQUENTIAL_FAMILY, SEQUENTIAL_IDENTITIES,
 } from "./sequential-shared-parent-definition-fixture.mjs";
 
 export function sequentialReviewedTopology(inventory, controlDraftDigest) {
@@ -62,13 +62,13 @@ function topologyBundle(bundleId, identity) {
     atomic_reason: "One runtime and catalog contract",
     composition: {
       kind: "single-component",
-      target_packages: [{ domain: "math", family: "basic" }],
+      target_packages: [{ domain: "math", family: SEQUENTIAL_FAMILY }],
       authored_write_set: [],
       shared_authority_sources: [],
       evidence: ["sequential fixture topology review"],
     },
     identity_targets: [{
-      identity, domain: "math", family: "basic", classification: "preserved",
+      identity, domain: "math", family: SEQUENTIAL_FAMILY, classification: "preserved",
       evidence: ["sequential fixture topology review"],
     }],
     review: { status: "reviewed", evidence: ["sequential fixture topology review"] },
@@ -81,7 +81,7 @@ function topologyIdentity(identity, bundleId) {
     bundle_id: bundleId,
     cohort: "C01",
     domain: "math",
-    family: "basic",
+    family: SEQUENTIAL_FAMILY,
     disposition: { kind: "canonical", canonical: null, reason: null, source: "reviewed-input" },
     classification: "preserved",
     evidence: ["sequential fixture topology review"],

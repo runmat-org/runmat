@@ -3,7 +3,8 @@ import { MATURITY_GATES } from "../control.mjs";
 import { fixtureGatePlans } from "./helpers.mjs";
 
 export const SEQUENTIAL_IDENTITIES = ["alpha", "beta"];
-export const SEQUENTIAL_BUNDLES = ["math-basic-alpha", "math-basic-beta"];
+export const SEQUENTIAL_BUNDLES = ["math-reduction-alpha", "math-reduction-beta"];
+export const SEQUENTIAL_FAMILY = "reduction";
 
 export function sequentialDispositionInput() {
   return {
@@ -14,7 +15,7 @@ export function sequentialDispositionInput() {
       disposition: "canonical",
       canonical: null,
       domain: "math",
-      family: "basic",
+      family: SEQUENTIAL_FAMILY,
       reason: null,
       review: { status: "reviewed", evidence: ["sequential fixture review"] },
     }])),
@@ -25,11 +26,11 @@ export function compositionChild(identity) {
   return {
     module: `${identity}_support`,
     source_kind: "directory",
-    source_path: `crates/runmat-runtime/src/builtins/math/${identity}_support/mod.rs`,
+    source_path: `crates/runmat-runtime/src/builtins/math/${SEQUENTIAL_FAMILY}/${identity}_support/mod.rs`,
     role: "group",
     visibility: "public",
     declaration_condition: { kind: "always" },
-    declaration_order: identity === "alpha" ? 1 : 2,
+    declaration_order: identity === "alpha" ? 2 : 3,
     macro_use: false,
     reexports: [],
     aggregation_sources: [],
@@ -45,20 +46,20 @@ export function sequentialBundleControls(inventory, { parallelBundles = false } 
       prerequisites: index === 0 || parallelBundles
         ? [] : [{ bundle_id: SEQUENTIAL_BUNDLES[0], kind: "semantic" }],
       additional_authored_write_set: [
-        { kind: "tree", path: `crates/runmat-builtins/src/catalog/entries/math/basic/${identity}` },
-        { kind: "file", path: `crates/runmat-runtime/src/builtins/math/basic/${identity}.rs` },
+        { kind: "tree", path: `crates/runmat-builtins/src/catalog/entries/math/${SEQUENTIAL_FAMILY}/${identity}` },
+        { kind: "file", path: `crates/runmat-runtime/src/builtins/math/${SEQUENTIAL_FAMILY}/${identity}.rs` },
         { kind: "tree", path: child.source_path.slice(0, -"/mod.rs".length) },
       ],
-      integration_product_refs: ["runtime-math", "wasm-registry"],
+      integration_product_refs: ["runtime-math-reduction", "wasm-registry"],
       module_composition_transition: {
         schema_version: 5,
         kind: "runmat-builtin-module-composition-transition",
         transition_id: bundleId,
         product_states: [{
-          product_id: "runtime-math", before_state: "present", after_state: "present",
+          product_id: "runtime-math-reduction", before_state: "present", after_state: "present",
         }],
         changes: [{
-          product_id: "runtime-math", operation: "add", before: null, after: child,
+          product_id: "runtime-math-reduction", operation: "add", before: null, after: child,
         }],
       },
       expected_removals: [],
@@ -101,7 +102,7 @@ function identityControl(identity, bundleId) {
     implementation: {
       callable: {
         kind: "owned",
-        owner_path: `crates/runmat-runtime/src/builtins/math/basic/${identity}.rs`,
+        owner_path: `crates/runmat-runtime/src/builtins/math/${SEQUENTIAL_FAMILY}/${identity}.rs`,
         bindings: [{
           kind: "canonical_binding", function: `${identity}_builtin`, variant: "default",
           builtin_path: `builtins::${identity}`, native_symbol: nativeSymbol(identity),
@@ -113,7 +114,7 @@ function identityControl(identity, bundleId) {
     complexity: { class: "low", weight: 1, basis: ["single identity"] },
     maturity,
     expected_authorities: {
-      catalog_package: `crates/runmat-builtins/src/catalog/entries/math/basic/${identity}/mod.rs`,
+      catalog_package: `crates/runmat-builtins/src/catalog/entries/math/${SEQUENTIAL_FAMILY}/${identity}/mod.rs`,
       catalog_alias_package: null,
       catalog_constant_package: null,
       catalog_entry_count: 1,

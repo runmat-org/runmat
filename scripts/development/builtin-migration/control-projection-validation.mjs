@@ -13,6 +13,7 @@ import { parseFindingDispositions } from "./migration-findings.mjs";
 import { validateReviewedModuleCompositionAuthority } from "./module-composition/authority.mjs";
 import { validateAuthorityReachability } from "./module-composition/authority-reachability.mjs";
 import { validateModuleCompositionControl } from "./module-composition/control.mjs";
+import { validateSharedTargetPackageAuthority } from "./module-composition/target-package-authority.mjs";
 import { materializeTopologyControl } from "./topology/control-projection.mjs";
 import { assertValidatedTopologyView } from "./topology/freeze.mjs";
 import { parseTargetPolicy } from "./target-policy.mjs";
@@ -39,6 +40,7 @@ export function validateControlProjection({
   assertValidatedTopologyView(topology);
   validateBaselineContext(baselineContext, inventory, topology);
   const integrationProducts = parseIntegrationProductRegistry(integrationProductValues, inventory);
+  validateSharedTargetPackageAuthority(topology, integrationProducts);
   const bundleControls = parseBundleControls(bundleControlValues, inventory, topology);
   const identityControls = parseIdentityControls(identityControlValues);
   validateIntegrationProductCoverage(bundleControls, integrationProducts);

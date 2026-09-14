@@ -7,7 +7,9 @@ import {
 } from "./child-state.mjs";
 import { deriveModuleCompositionMaterializationState } from "./effective-state.mjs";
 import { inspectCanonicalMaterializationTargets } from "./prior-state.mjs";
-import { inspectMaterializationTargets } from "./repository-state.mjs";
+import {
+  inspectMaterializationTargets, materializationChildKey,
+} from "./repository-state.mjs";
 import { renewCompositionRepositoryLock } from "./transaction-lock.mjs";
 import { installCompositionSet, renderCompositionSetTwice, withCompositionTransaction } from "./transaction.mjs";
 
@@ -36,6 +38,9 @@ export function materializeEffectiveModuleComposition({
     if (!product) throw new Error(`${id}: integration product is absent from prior composition`);
     return product;
   });
+  const authorizedPendingChildKeys = deriveAuthorizedPendingChildKeys(
+    products, priorById,
+  );
   return withCompositionTransaction(repository, (lock, recovery) => {
     const priorPresent = priorProducts.filter((product) => product.state === "present");
     const priorRendered = renderCompositionSetTwice(priorPresent);
@@ -54,8 +59,10 @@ export function materializeEffectiveModuleComposition({
       const inventory = inspectCanonicalMaterializationTargets(
         lock.repository, priorProducts, priorContents,
       );
-      inspectMaterializationTargets(lock.repository, products);
-      const childStates = inspectEffectiveChildStates(lock.repository, products);
+      inspectMaterializationTargets(lock.repository, products, { authorizedPendingChildKeys });
+      const childStates = inspectEffectiveChildStates(
+        lock.repository, products, { authorizedPendingChildKeys },
+      );
       if (expectedChildStates !== null) {
         assertEffectiveChildStatesUnchanged(expectedChildStates, childStates);
       }
@@ -85,6 +92,24 @@ export function materializeEffectiveModuleComposition({
     );
     return { product_ids: productIds, inventory, installed: transaction.installed, transaction: { recovery, cleanup: transaction.cleanup, cleanup_errors: transaction.cleanup_errors } };
   });
+}
+
+function deriveAuthorizedPendingChildKeys(products, priorById) {
+  const activatedPaths = new Set(products
+    .filter((product) => product.state === "present"
+      && priorById.get(product.product_id)?.state === "absent")
+    .map((product) => product.path));
+  const keys = new Set();
+  for (const product of products) {
+    const priorChildren = new Set((priorById.get(product.product_id)?.children ?? [])
+      .map((child) => child.source_path));
+    for (const child of product.children) {
+      if (activatedPaths.has(child.source_path) && !priorChildren.has(child.source_path)) {
+        keys.add(materializationChildKey(product.product_id, child.source_path));
+      }
+    }
+  }
+  return keys;
 }
 
 function selectedProductIds(control, bundle) {

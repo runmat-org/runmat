@@ -17,6 +17,7 @@ use crate::builtins::array::type_resolvers::tensor_type_from_rank;
 use crate::builtins::common::random;
 use crate::builtins::common::random_args::{
     complex_tensor_into_value, extract_constructor_dimensions, keyword_of,
+    validate_constructor_gpu_output,
 };
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -286,6 +287,7 @@ struct ParsedRandn {
 #[derive(Clone)]
 enum RandnTemplate {
     Double,
+    GpuArray,
     Like(Value),
 }
 
@@ -325,10 +327,9 @@ impl ParsedRandn {
                     }
                     "gpuarray" => {
                         // MATLAB class-specification syntax: randn(m,n,"gpuArray") or
-                        // gpuArray.randn(m,n). Produce a GPU-resident double-precision
-                        // array; randn_double routes through try_gpu_normal which
-                        // prefers the GPU provider when one is registered.
-                        template = Some(RandnTemplate::Double);
+                        // gpuArray.randn(m,n). Keep explicit residency in the parsed
+                        // template so the producer, rather than the dispatcher, owns it.
+                        template = Some(RandnTemplate::GpuArray);
                         dtype = NumericDType::F64;
                         idx += 1;
                         continue;
@@ -420,8 +421,37 @@ async fn build_output(parsed: ParsedRandn) -> crate::BuiltinResult<Value> {
             | NumericDType::U32
             | NumericDType::U64 => randn_double(&parsed.shape),
         },
+        RandnTemplate::GpuArray => randn_gpu(&parsed.shape),
         RandnTemplate::Like(proto) => randn_like(&proto, &parsed.shape).await,
     }
+}
+
+fn randn_gpu(shape: &[usize]) -> crate::BuiltinResult<Value> {
+    let Some(provider) = runmat_accelerate_api::provider() else {
+        return Err(builtin_error(
+            "randn: gpuArray output requires an active double-precision provider",
+        ));
+    };
+    if provider.precision() != ProviderPrecision::F64 {
+        return Err(builtin_error(
+            "randn: gpuArray output requires an active double-precision provider",
+        ));
+    }
+    let output = provider
+        .random_normal(shape)
+        .map_err(|error| builtin_error(format!("randn: provider random_normal failed: {error}")))?;
+    validate_constructor_gpu_output(
+        "randn",
+        provider,
+        output,
+        shape,
+        runmat_accelerate_api::GpuTensorStorage::Real,
+        Some(ProviderPrecision::F64),
+        None,
+        false,
+    )
+    .map(Value::GpuTensor)
+    .map_err(builtin_error)
 }
 
 fn try_gpu_normal(shape: &[usize]) -> crate::BuiltinResult<Option<Value>> {
@@ -555,7 +585,47 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::{random, test_support};
     use futures::executor::block_on;
+    use runmat_accelerate_api::AccelProvider;
     use runmat_value::{IntValue, IntegerComplexStorage, IntegerStorage};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct InvalidExplicitRandnProvider {
+        inner: runmat_accelerate::simple_provider::InProcessProvider,
+        frees: AtomicUsize,
+    }
+
+    impl AccelProvider for InvalidExplicitRandnProvider {
+        fn upload(
+            &self,
+            host: &runmat_accelerate_api::HostTensorView,
+        ) -> anyhow::Result<GpuTensorHandle> {
+            self.inner.upload(host)
+        }
+
+        fn download<'a>(
+            &'a self,
+            handle: &'a GpuTensorHandle,
+        ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
+            self.inner.download(handle)
+        }
+
+        fn free(&self, handle: &GpuTensorHandle) -> anyhow::Result<()> {
+            self.frees.fetch_add(1, Ordering::SeqCst);
+            self.inner.free(handle)
+        }
+
+        fn device_info(&self) -> String {
+            self.inner.device_info()
+        }
+
+        fn device_id(&self) -> u32 {
+            self.inner.device_id()
+        }
+
+        fn random_normal(&self, _shape: &[usize]) -> anyhow::Result<GpuTensorHandle> {
+            self.inner.random_normal(&[1, 1])
+        }
+    }
 
     fn reset_rng_clean() -> impl Drop {
         let guard = random::test_guard();
@@ -824,9 +894,34 @@ pub(crate) mod tests {
             }
             Value::GpuTensor(h) => {
                 assert_eq!(h.shape, vec![3, 4]);
+                assert!(runmat_accelerate_api::handle_is_explicit(&h));
             }
             other => panic!("expected tensor or gpu tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn randn_parser_records_explicit_residency_in_its_typed_template() {
+        let parsed =
+            block_on(ParsedRandn::parse(vec![Value::from("gpuArray")])).expect("gpuArray form");
+        assert!(matches!(parsed.template, RandnTemplate::GpuArray));
+
+        let parsed = block_on(ParsedRandn::parse(Vec::new())).expect("default form");
+        assert!(matches!(parsed.template, RandnTemplate::Double));
+    }
+
+    #[test]
+    fn randn_gpu_rejects_and_frees_invalid_provider_output() {
+        let _guard = test_support::accel_test_lock();
+        let provider = Box::leak(Box::new(InvalidExplicitRandnProvider {
+            inner: runmat_accelerate::simple_provider::InProcessProvider::new(),
+            frees: AtomicUsize::new(0),
+        }));
+        let _thread = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+
+        let error = randn_gpu(&[2, 2]).expect_err("invalid provider output must be terminal");
+        assert!(error.message().contains("invalid constructor result"));
+        assert_eq!(provider.frees.load(Ordering::SeqCst), 1);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

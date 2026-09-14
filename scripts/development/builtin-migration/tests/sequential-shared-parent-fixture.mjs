@@ -19,7 +19,7 @@ import {
   repositoryFixture,
 } from "./helpers.mjs";
 import {
-  SEQUENTIAL_BUNDLES, SEQUENTIAL_IDENTITIES, compositionChild,
+  SEQUENTIAL_BUNDLES, SEQUENTIAL_FAMILY, SEQUENTIAL_IDENTITIES, compositionChild,
   sequentialBundleControls, sequentialDispositionInput, sequentialIdentityControls,
 } from "./sequential-shared-parent-definition-fixture.mjs";
 import { sequentialReviewedControlSet } from "./sequential-shared-parent-review-fixture.mjs";
@@ -30,9 +30,12 @@ export { compositionChild };
 export function sequentialSharedParentFixture({ parallelBundles = false } = {}) {
   const repository = repositoryFixture({
     identities: SEQUENTIAL_IDENTITIES, composition: true, compositionBaseChild: true,
+    family: SEQUENTIAL_FAMILY, familyCompositionProduct: true,
   });
   const revision = repositoryRevision(repository);
-  const compiledInventory = compiledInventoryFixture(SEQUENTIAL_IDENTITIES);
+  const compiledInventory = compiledInventoryFixture(SEQUENTIAL_IDENTITIES, {
+    family: SEQUENTIAL_FAMILY,
+  });
   const dispositions = sequentialDispositionInput();
   const inventory = buildInventory(repository, dispositions, { revision, compiledInventory });
   const draft = buildControlDraft(inventory);

@@ -12,7 +12,9 @@ export function inspectCompositionRepository(repository, products) {
   return { repository: root, products: inventory };
 }
 
-export function inspectMaterializationTargets(repository, products) {
+export function inspectMaterializationTargets(
+  repository, products, { authorizedPendingChildKeys = new Set() } = {},
+) {
   const root = canonicalRepository(repository);
   return products.map((product) => {
     const target = resolveRepositoryProduct(root, product.path);
@@ -22,9 +24,13 @@ export function inspectMaterializationTargets(repository, products) {
     if (state === null && product.children.length === 0) {
       return observedProductState(root, product);
     }
-    validateChildStorage(root, product, null);
+    validateChildStorage(root, product, null, authorizedPendingChildKeys);
     return observedProductState(root, product);
   });
+}
+
+export function materializationChildKey(productId, sourcePath) {
+  return `${productId}\0${sourcePath}`;
 }
 
 export function inspectMaterializationParentStates(repository, products) {
@@ -93,7 +99,7 @@ function observedProductState(root, product) {
   return { ...result, file_identity: identity(observed.stat), content_digest: digestBytes(observed.bytes) };
 }
 
-function validateChildStorage(root, product, declarations) {
+function validateChildStorage(root, product, declarations, authorizedPendingChildKeys = new Set()) {
   const declarationsByModule = declarations === null
     ? null
     : new Map(declarations.map((declaration) => [declaration.module, declaration]));
@@ -101,6 +107,17 @@ function validateChildStorage(root, product, declarations) {
     const declaration = declarationsByModule?.get(child.module) ?? null;
     const target = resolveRepositoryProduct(root, child.source_path);
     const state = lstat(target);
+    const pending = authorizedPendingChildKeys.has(materializationChildKey(
+      product.product_id, child.source_path,
+    ));
+    if (pending && state !== null) {
+      throw new Error(
+        `${product.product_id}/${child.module}: authorized pending product source is unexpectedly present`,
+      );
+    }
+    if (pending) {
+      continue;
+    }
     if (state === null || !state.isFile() || fs.realpathSync(target) !== target) {
       throw new Error(`${product.product_id}/${child.module}: reviewed ${child.source_kind} source is not a canonical regular file`);
     }

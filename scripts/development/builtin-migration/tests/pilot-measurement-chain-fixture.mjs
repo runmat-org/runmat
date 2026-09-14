@@ -20,7 +20,7 @@ import {
   buildSubjectInventory, commitFixture, leaseFor, writeFixture,
 } from "./sequential-shared-parent-fixture.mjs";
 import {
-  SEQUENTIAL_BUNDLES, SEQUENTIAL_IDENTITIES, sequentialBundleControls,
+  SEQUENTIAL_BUNDLES, SEQUENTIAL_FAMILY, SEQUENTIAL_IDENTITIES, sequentialBundleControls,
   sequentialDispositionInput, sequentialIdentityControls,
 } from "./sequential-shared-parent-definition-fixture.mjs";
 import { sequentialReviewedControlSet } from "./sequential-shared-parent-review-fixture.mjs";
@@ -131,7 +131,7 @@ function reverseParallelChain({ duplicateInitialLeaseId }) {
 function integrateBundle(fixture, index, leaseRecord, queueState, queueCheckpoint) {
   const identity = fixture.identities[index];
   writeFixture(
-    fixture.repository, `crates/runmat-runtime/src/builtins/math/basic/${identity}.rs`,
+    fixture.repository, `crates/runmat-runtime/src/builtins/math/${SEQUENTIAL_FAMILY}/${identity}.rs`,
     `#[runtime_builtin(name = "${identity}")]\nfn ${identity}_builtin() {}\n`,
   );
   const authoredRevision = commitFixture(fixture.repository, `author ${identity} child`);
@@ -139,10 +139,11 @@ function integrateBundle(fixture, index, leaseRecord, queueState, queueCheckpoin
     const projection = deriveEffectiveModuleComposition({
       control: fixture.control, queueState, queueCheckpoint, lease: leaseRecord.lease,
     });
-    const product = projection.products.find((entry) => entry.product_id === "runtime-math");
+    const product = projection.products
+      .find((entry) => entry.product_id === "runtime-math-reduction");
     writeFixture(
       fixture.repository,
-      fixture.control.integrationProducts.get("runtime-math").path,
+      fixture.control.integrationProducts.get("runtime-math-reduction").path,
       renderModuleCompositionProduct(product),
     );
   } else {
@@ -161,11 +162,19 @@ function integrateBundle(fixture, index, leaseRecord, queueState, queueCheckpoin
 }
 
 function independentParallelFixture() {
-  const repository = repositoryFixture({ identities: SEQUENTIAL_IDENTITIES, composition: true });
+  const repository = repositoryFixture({
+    identities: SEQUENTIAL_IDENTITIES,
+    composition: true,
+    compositionBaseChild: true,
+    family: SEQUENTIAL_FAMILY,
+    familyCompositionProduct: true,
+  });
   const revision = `git:${execFileSync("git", ["rev-parse", "HEAD"], {
     cwd: repository, encoding: "utf8",
   }).trim()}`;
-  const compiledInventory = compiledInventoryFixture(SEQUENTIAL_IDENTITIES);
+  const compiledInventory = compiledInventoryFixture(SEQUENTIAL_IDENTITIES, {
+    family: SEQUENTIAL_FAMILY,
+  });
   const dispositions = sequentialDispositionInput();
   const inventory = buildInventory(repository, dispositions, { revision, compiledInventory });
   const draft = buildControlDraft(inventory);
@@ -213,7 +222,7 @@ function independentBundleControls(inventory) {
       : value.additional_authored_write_set.filter(
         (entry) => !entry.path.includes(`${SEQUENTIAL_IDENTITIES[index]}_support`),
       ),
-    integration_product_refs: [index === 0 ? "runtime-math" : "wasm-registry"],
+    integration_product_refs: [index === 0 ? "runtime-math-reduction" : "wasm-registry"],
     module_composition_transition: index === 0 ? value.module_composition_transition : null,
   }]));
 }
