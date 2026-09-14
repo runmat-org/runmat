@@ -62,6 +62,59 @@ test("parent creation is opt-in and creates only real directory components", () 
   assert.equal(fs.readFileSync(target, "utf8"), "{}\n");
 });
 
+test("concurrent parent creation is revalidated before publication", () => {
+  const root = createTemporaryDirectory("runmat-evidence-publication-");
+  const parent = path.join(root, "raced-parent");
+  const target = path.join(parent, "evidence.json");
+  let raced = false;
+  const filesystem = interceptedFilesystem({
+    mkdirSync(directory, options) {
+      if (!raced && directory === parent) {
+        raced = true;
+        fs.mkdirSync(directory, options);
+        const error = new Error("injected concurrent parent creation");
+        error.code = "EEXIST";
+        throw error;
+      }
+      return fs.mkdirSync(directory, options);
+    },
+  });
+  publishEvidenceBytes(target, "{}\n", {
+    createParentDirectories: true,
+    filesystem,
+    temporaryToken: "parent-race",
+  });
+  assert.equal(raced, true);
+  assert.equal(fs.readFileSync(target, "utf8"), "{}\n");
+  assert.deepEqual(temporaryEntries(parent), []);
+});
+
+test("a non-directory winning the parent-creation race is rejected", () => {
+  const root = createTemporaryDirectory("runmat-evidence-publication-");
+  const parent = path.join(root, "raced-parent");
+  const target = path.join(parent, "evidence.json");
+  const filesystem = interceptedFilesystem({
+    mkdirSync(directory, options) {
+      if (directory === parent) {
+        fs.writeFileSync(directory, "racer\n");
+        const error = new Error("injected concurrent non-directory creation");
+        error.code = "EEXIST";
+        throw error;
+      }
+      return fs.mkdirSync(directory, options);
+    },
+  });
+  assert.throws(
+    () => publishEvidenceBytes(target, "{}\n", {
+      createParentDirectories: true,
+      filesystem,
+      temporaryToken: "parent-race-file",
+    }),
+    /parent component is not a real directory/,
+  );
+  assert.equal(fs.readFileSync(parent, "utf8"), "racer\n");
+});
+
 test("existing regular, directory, and symbolic-link targets are never replaced", () => {
   const root = createTemporaryDirectory("runmat-evidence-publication-");
   const existing = path.join(root, "existing.json");

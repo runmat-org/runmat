@@ -11,6 +11,7 @@ import { loadControlReviewSet } from "../control-authoring/review-set.mjs";
 import { buildControlOverlayScaffold } from "../control-authoring/scaffold.mjs";
 import { identityControlAuthorityTemplate } from "../control-authoring/identity-template.mjs";
 import { contentDigest, evidenceDigest } from "../evidence.mjs";
+import { sourceSnapshot } from "../snapshot.mjs";
 import { composeTopologyCandidate } from "../topology/compose.mjs";
 import { candidateInputDigests, freezeReviewedTopology, parseReviewedTopology, reviewedTopologyView } from "../topology/freeze.mjs";
 import { fullTopologyChainFixture } from "../topology/tests/full-chain-fixture.mjs";
@@ -146,6 +147,23 @@ export function writeFullControlWorkflow(directory, revision, sourceContentDiges
   return { values, paths: { ...paths, controlReviewSet }, topologyArguments, controlArguments, control, bundleId };
 }
 
+export function writeRepositoryControlWorkflow(
+  directory,
+  repository,
+  sourcePath = "scripts/development/check-architecture-boundaries.mjs",
+) {
+  const snapshot = sourceSnapshot(repository, [sourcePath]);
+  if (snapshot.files.length !== 1) throw new Error("control workflow fixture requires exactly one source file");
+  const [source] = snapshot.files;
+  if (source.path !== sourcePath) throw new Error("control workflow fixture source path differs from its snapshot");
+  return writeFullControlWorkflow(
+    directory,
+    snapshot.revision,
+    source.content_digest,
+    source.mode,
+  );
+}
+
 export function cleanFactoryCliRepository() {
   const repository = createTemporaryDirectory("runmat-factory-cli-repository-");
   fs.cpSync(path.resolve("scripts"), path.join(repository, "scripts"), { recursive: true });
@@ -157,6 +175,14 @@ export function cleanFactoryCliRepository() {
     "-c", "commit.gpgsign=false",
     "commit", "--quiet", "-m", "factory CLI fixture",
   ], { cwd: repository });
+  if (process.platform !== "win32") {
+    // Read/write permission differences are checkout policy, not source
+    // identity. Keep this fixture group-writable so callers cannot regress to
+    // recording raw stat(2) mode bits instead of Git executable intent.
+    const sourcePath = "scripts/development/check-architecture-boundaries.mjs";
+    const [source] = sourceSnapshot(repository, [sourcePath]).files;
+    fs.chmodSync(path.join(repository, sourcePath), source.mode | 0o020);
+  }
   return repository;
 }
 

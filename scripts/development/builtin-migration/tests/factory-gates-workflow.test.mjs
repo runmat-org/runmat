@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -16,7 +16,7 @@ import {
 } from "./helpers.mjs";
 import {
   cleanFactoryCliRepository, copyReviewSetAsAuthoringFiles, parseFixtureControl,
-  resealEvidence, reviewed, writeFullControlWorkflow,
+  resealEvidence, reviewed, writeRepositoryControlWorkflow,
 } from "./factory-workflow-fixture.mjs";
 import { createTemporaryDirectory } from "./temporary-directories.mjs";
 
@@ -194,16 +194,7 @@ test("control draft CLI remains separate while control freeze requires reviewed 
 test("control CLI reconstructs the complete reviewed topology chain before freeze, validation, and lease issuance", () => {
   const directory = createTemporaryDirectory("runmat-full-control-workflow-");
   const cliRepository = cleanFactoryCliRepository();
-  const revision = `git:${execFileSync("git", ["rev-parse", "HEAD"], {
-    cwd: cliRepository,
-    encoding: "utf8",
-  }).trim()}`;
-  const workflow = writeFullControlWorkflow(
-    directory,
-    revision,
-    contentDigest(fs.readFileSync(path.join(cliRepository, "scripts/development/check-architecture-boundaries.mjs"))),
-    fs.statSync(path.join(cliRepository, "scripts/development/check-architecture-boundaries.mjs")).mode & 0o777,
-  );
+  const workflow = writeRepositoryControlWorkflow(directory, cliRepository);
   const cli = path.join(cliRepository, "scripts/development/builtin-migration-factory.mjs");
   const frozenPath = path.join(directory, "frozen-control.json");
   const leasePath = path.join(directory, "lease.json");
