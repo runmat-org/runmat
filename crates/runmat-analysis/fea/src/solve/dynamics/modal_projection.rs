@@ -1,11 +1,10 @@
-use runmat_execution::Digest;
-use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
     algebra::{spmv, RealSparseMatrix},
     assembly::AssemblySummary,
-    pipeline::modal_basis::{ModalBasisArtifact, ModalBasisIdentity},
+    execution::ModalProjectionEvidence,
+    pipeline::modal_basis::ModalBasisArtifact,
 };
 
 const SYMMETRY_TOLERANCE: f64 = 1.0e-11;
@@ -22,47 +21,6 @@ pub enum ModalProjectionError {
     NonPositiveMass,
     #[error("the projected structural operators are not symmetric")]
     AsymmetricOperator,
-}
-
-/// Recomputed evidence for the exact full-order operators and modal basis used by a response step.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ModalProjectionEvidence {
-    pub basis: ModalBasisIdentity,
-    pub operator_digest: Digest,
-    pub full_dof_count: usize,
-    pub mode_count: usize,
-    pub maximum_mass_off_diagonal_ratio: f64,
-    pub maximum_stiffness_off_diagonal_ratio: f64,
-    pub maximum_damping_asymmetry_ratio: f64,
-}
-
-impl ModalProjectionEvidence {
-    /// Validate evidence against the exact physical operator and full-order coordinate space.
-    pub fn validate_for(
-        &self,
-        operator_digest: Digest,
-        full_dof_count: usize,
-    ) -> Result<(), ModalProjectionError> {
-        if self.operator_digest != operator_digest
-            || self.full_dof_count != full_dof_count
-            || self.mode_count == 0
-            || self.mode_count > full_dof_count
-        {
-            return Err(ModalProjectionError::DimensionMismatch);
-        }
-        if [
-            self.maximum_mass_off_diagonal_ratio,
-            self.maximum_stiffness_off_diagonal_ratio,
-            self.maximum_damping_asymmetry_ratio,
-        ]
-        .iter()
-        .any(|value| !value.is_finite() || *value < 0.0)
-        {
-            return Err(ModalProjectionError::NonFinite);
-        }
-        Ok(())
-    }
 }
 
 /// Dense reduced K/M/C operators derived from one immutable modal basis and full-order assembly.
@@ -207,7 +165,8 @@ impl ModalReducedSystem {
 
     fn validate(&self) -> Result<(), ModalProjectionError> {
         self.evidence
-            .validate_for(self.evidence.operator_digest, self.evidence.full_dof_count)?;
+            .validate_for(self.evidence.operator_digest, self.evidence.full_dof_count)
+            .map_err(|error| ModalProjectionError::IncompatibleBasis(error.to_string()))?;
         let mode_count = self.mode_count();
         let matrix_size = mode_count
             .checked_mul(mode_count)

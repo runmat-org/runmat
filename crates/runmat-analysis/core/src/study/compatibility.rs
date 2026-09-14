@@ -5,6 +5,15 @@ pub fn is_exposed_analysis_identity(
     procedure: AnalysisProcedure,
     solution_space: SolutionSpace,
 ) -> bool {
+    if solution_space == SolutionSpace::ModalReduced {
+        return matches!(
+            (family, procedure),
+            (
+                PhysicsFamily::Structural,
+                AnalysisProcedure::TransientResponse | AnalysisProcedure::HarmonicResponse
+            )
+        );
+    }
     if solution_space != SolutionSpace::Direct {
         return false;
     }
@@ -115,6 +124,16 @@ mod tests {
         assert!(!is_exposed_analysis_identity(
             PhysicsFamily::Structural,
             AnalysisProcedure::Static,
+            SolutionSpace::ModalReduced
+        ));
+        assert!(is_exposed_analysis_identity(
+            PhysicsFamily::Structural,
+            AnalysisProcedure::TransientResponse,
+            SolutionSpace::ModalReduced
+        ));
+        assert!(is_exposed_analysis_identity(
+            PhysicsFamily::Structural,
+            AnalysisProcedure::HarmonicResponse,
             SolutionSpace::ModalReduced
         ));
         assert!(!is_exposed_analysis_identity(

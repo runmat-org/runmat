@@ -11,7 +11,10 @@ pub(super) fn require_available(
     solution_space: SolutionSpace,
     requirement: FormulationRequirement,
 ) -> Result<(), FormulationAdmissionRejectionReason> {
-    if solution_space != SolutionSpace::Direct {
+    if solution_space != SolutionSpace::Direct
+        && !(family == PhysicsFamily::Structural
+            && is_exposed_analysis_identity(family, procedure, solution_space))
+    {
         return Err(FormulationAdmissionRejectionReason::UnsupportedSolutionSpace);
     }
     if !is_exposed_analysis_identity(family, procedure, solution_space) {
@@ -41,7 +44,14 @@ use super::{
 pub(super) fn qualification(
     request: &FormulationAdmissionRequest,
 ) -> Result<FormulationMaturity, FormulationAdmissionRejectionReason> {
-    if request.solution_space != SolutionSpace::Direct {
+    if request.solution_space != SolutionSpace::Direct
+        && !(request.family == PhysicsFamily::Structural
+            && is_exposed_analysis_identity(
+                request.family,
+                request.procedure,
+                request.solution_space,
+            ))
+    {
         return Err(FormulationAdmissionRejectionReason::UnsupportedSolutionSpace);
     }
     if !is_exposed_analysis_identity(request.family, request.procedure, request.solution_space) {

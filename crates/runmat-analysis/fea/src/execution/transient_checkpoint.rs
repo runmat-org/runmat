@@ -9,7 +9,7 @@ use crate::results::observation::{
 use super::{
     AnalysisExecutionError, AnalysisExecutionResult, AnalysisWorkloadIdentity,
     ConstraintPlanIdentity, DiscretizationIdentity, ExecutionPlanIdentity, NumericalPlanIdentity,
-    StepIdentity, StructuralDampingOperatorIdentity, StructuralDofLayoutIdentity,
+    StateIdentity, StepIdentity, StructuralDampingOperatorIdentity, StructuralDofLayoutIdentity,
     StructuralExcitationSetIdentity, StructuralFormulationIdentity, StructuralKinematicsIdentity,
     StructuralMassOperatorIdentity, StructuralStiffnessOperatorIdentity,
     StructuralTransientCheckpointIdentity, StructuralTransientCheckpointScopeIdentity,
@@ -17,10 +17,121 @@ use super::{
     StructuralTransientPrecision, StructuralTransientSchedule,
     StructuralTransientSolverOptionsIdentity, StudyIdentity,
 };
+use crate::{
+    execution::{ModalProjectionEvidence, ModalTransientCoordinateState},
+    pipeline::modal_basis::ModalBasisIdentity,
+};
 
 const TRANSIENT_CHECKPOINT_PREFIX: &[u8] = b"runmat-structural-transient-checkpoint/v1\0";
 const TRANSIENT_CHECKPOINT_LIMITS: CanonicalLimits =
     CanonicalLimits::new(1024 * 1024 * 1024, 4_000_000, 65_536, 64);
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind", deny_unknown_fields)]
+pub enum StructuralTransientCoordinateSpace {
+    Direct,
+    ModalReduced {
+        basis_state: StateIdentity,
+        basis: ModalBasisIdentity,
+        projection: ModalProjectionEvidence,
+        coordinate_count: usize,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind", deny_unknown_fields)]
+pub enum StructuralTransientNumericalState {
+    Direct,
+    ModalReduced {
+        basis_state: StateIdentity,
+        coordinates: ModalTransientCoordinateState,
+    },
+}
+
+impl StructuralTransientNumericalState {
+    fn validate_against(
+        &self,
+        coordinate_space: &StructuralTransientCoordinateSpace,
+        physical_state: &StructuralTransientContinuationState,
+    ) -> AnalysisExecutionResult<()> {
+        match (self, coordinate_space) {
+            (Self::Direct, StructuralTransientCoordinateSpace::Direct) => Ok(()),
+            (
+                Self::ModalReduced {
+                    basis_state,
+                    coordinates,
+                },
+                StructuralTransientCoordinateSpace::ModalReduced {
+                    basis_state: expected_basis,
+                    coordinate_count,
+                    ..
+                },
+            ) if basis_state == expected_basis => {
+                if coordinates.displacement.len() != *coordinate_count
+                    || coordinates.velocity.len() != *coordinate_count
+                    || coordinates.acceleration.len() != *coordinate_count
+                    || coordinates
+                        .displacement
+                        .iter()
+                        .chain(&coordinates.velocity)
+                        .chain(&coordinates.acceleration)
+                        .any(|value| !value.is_finite())
+                {
+                    return Err(AnalysisExecutionError::Invalid(
+                        "modal transient checkpoint has invalid reduced coordinates".into(),
+                    ));
+                }
+                if physical_state.displacement.is_empty() {
+                    return Err(AnalysisExecutionError::Invalid(
+                        "modal transient checkpoint is missing reconstructed physical state".into(),
+                    ));
+                }
+                Ok(())
+            }
+            _ => Err(AnalysisExecutionError::Identity(
+                "structural transient checkpoint numerical state differs from its coordinate space",
+            )),
+        }
+    }
+}
+
+impl StructuralTransientCoordinateSpace {
+    pub fn coordinate_count(&self, physical_dof_count: usize) -> usize {
+        match self {
+            Self::Direct => physical_dof_count,
+            Self::ModalReduced {
+                coordinate_count, ..
+            } => *coordinate_count,
+        }
+    }
+
+    fn validate(&self, physical_dof_count: usize) -> AnalysisExecutionResult<()> {
+        match self {
+            Self::Direct => Ok(()),
+            Self::ModalReduced {
+                basis,
+                projection,
+                coordinate_count,
+                ..
+            } => {
+                projection
+                    .validate_for(projection.operator_digest, physical_dof_count)
+                    .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+                if *coordinate_count == 0
+                    || *coordinate_count != projection.mode_count
+                    || *coordinate_count > physical_dof_count
+                    || *basis != projection.basis
+                {
+                    return Err(AnalysisExecutionError::Invalid(
+                        "modal transient coordinate space differs from its projection evidence"
+                            .into(),
+                    ));
+                }
+                Ok(())
+            }
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -40,6 +151,7 @@ pub struct StructuralTransientCheckpointScope {
     pub formulation: StructuralFormulationIdentity,
     pub kinematics: StructuralKinematicsIdentity,
     pub dof_count: usize,
+    pub coordinate_space: StructuralTransientCoordinateSpace,
     pub integrator: StructuralTransientIntegrator,
     pub precision: StructuralTransientPrecision,
     pub solver_options: StructuralTransientSolverOptionsIdentity,
@@ -54,6 +166,7 @@ impl StructuralTransientCheckpointScope {
                 "structural transient checkpoint scope must contain physical DOFs".into(),
             ));
         }
+        self.coordinate_space.validate(self.dof_count)?;
         Ok(())
     }
 
@@ -117,6 +230,23 @@ pub struct StructuralTransientSolverCounters {
     pub host_sync_count: u64,
     pub device_apply_k_count: u64,
     pub device_apply_k_attempt_count: u64,
+    pub dense_factorization_count: u64,
+    pub dense_solve_count: u64,
+}
+
+impl StructuralTransientSolverCounters {
+    pub(super) fn application_counts_are_valid(&self) -> bool {
+        self.device_apply_k_count <= self.device_apply_k_attempt_count
+    }
+
+    pub(super) fn direct_counts_are_valid(&self) -> bool {
+        self.dense_factorization_count == 0 && self.dense_solve_count == 0
+    }
+
+    pub(super) fn modal_dense_counts_are_valid(&self) -> bool {
+        self.dense_factorization_count > 0
+            && self.dense_factorization_count == self.dense_solve_count
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -139,6 +269,7 @@ pub struct StructuralTransientCheckpoint {
     pub block_ordinal: u64,
     pub continuation: StructuralTransientContinuationPoint,
     pub state: StructuralTransientContinuationState,
+    pub numerical_state: StructuralTransientNumericalState,
     pub balance: StructuralTransientBalanceAccumulator,
     pub counters: StructuralTransientSolverCounters,
     pub observation_cursors: Vec<StructuralTransientObservationCursor>,
@@ -149,6 +280,7 @@ pub struct StructuralTransientCheckpointInput {
     pub block_ordinal: u64,
     pub continuation: StructuralTransientContinuationPoint,
     pub state: StructuralTransientContinuationState,
+    pub numerical_state: StructuralTransientNumericalState,
     pub balance: StructuralTransientBalanceAccumulator,
     pub counters: StructuralTransientSolverCounters,
     pub observation_cursors: Vec<StructuralTransientObservationCursor>,
@@ -164,6 +296,7 @@ struct StructuralTransientCheckpointWire {
     block_ordinal: u64,
     continuation: StructuralTransientContinuationPoint,
     state: StructuralTransientContinuationState,
+    numerical_state: StructuralTransientNumericalState,
     balance: StructuralTransientBalanceAccumulator,
     counters: StructuralTransientSolverCounters,
     observation_cursors: Vec<StructuralTransientObservationCursor>,
@@ -181,6 +314,7 @@ impl TryFrom<StructuralTransientCheckpointWire> for StructuralTransientCheckpoin
             block_ordinal: wire.block_ordinal,
             continuation: wire.continuation,
             state: wire.state,
+            numerical_state: wire.numerical_state,
             balance: wire.balance,
             counters: wire.counters,
             observation_cursors: wire.observation_cursors,
@@ -203,6 +337,7 @@ impl StructuralTransientCheckpoint {
             block_ordinal: input.block_ordinal,
             continuation: &input.continuation,
             state: &input.state,
+            numerical_state: &input.numerical_state,
             balance: &input.balance,
             counters: &input.counters,
             observation_cursors: &input.observation_cursors,
@@ -215,6 +350,7 @@ impl StructuralTransientCheckpoint {
             block_ordinal: input.block_ordinal,
             continuation: input.continuation,
             state: input.state,
+            numerical_state: input.numerical_state,
             balance: input.balance,
             counters: input.counters,
             observation_cursors: input.observation_cursors,
@@ -255,6 +391,8 @@ impl StructuralTransientCheckpoint {
             ));
         }
         self.state.validate(self.scope.dof_count)?;
+        self.numerical_state
+            .validate_against(&self.scope.coordinate_space, &self.state)?;
         let balance = &self.balance;
         if [
             balance.initial_mechanical_energy_j,
@@ -266,7 +404,15 @@ impl StructuralTransientCheckpoint {
         .any(|value| !value.is_finite())
             || balance.initial_mechanical_energy_j < 0.0
             || balance.damping_dissipation_j < 0.0
-            || self.counters.device_apply_k_count > self.counters.device_apply_k_attempt_count
+            || !self.counters.application_counts_are_valid()
+            || match &self.scope.coordinate_space {
+                StructuralTransientCoordinateSpace::Direct => {
+                    !self.counters.direct_counts_are_valid()
+                }
+                StructuralTransientCoordinateSpace::ModalReduced { .. } => {
+                    !self.counters.modal_dense_counts_are_valid()
+                }
+            }
         {
             return Err(AnalysisExecutionError::Invalid(
                 "structural transient checkpoint balance or counters are invalid".into(),
@@ -294,6 +440,7 @@ impl StructuralTransientCheckpoint {
                 block_ordinal: self.block_ordinal,
                 continuation: &self.continuation,
                 state: &self.state,
+                numerical_state: &self.numerical_state,
                 balance: &self.balance,
                 counters: &self.counters,
                 observation_cursors: &self.observation_cursors,
@@ -327,6 +474,9 @@ impl StructuralTransientCheckpoint {
             || self.counters.device_apply_k_count < predecessor.counters.device_apply_k_count
             || self.counters.device_apply_k_attempt_count
                 < predecessor.counters.device_apply_k_attempt_count
+            || self.counters.dense_factorization_count
+                < predecessor.counters.dense_factorization_count
+            || self.counters.dense_solve_count < predecessor.counters.dense_solve_count
             || !observation_cursors_continue(
                 &predecessor.observation_cursors,
                 &self.observation_cursors,
@@ -367,6 +517,7 @@ struct CheckpointIdentityInput<'a> {
     block_ordinal: u64,
     continuation: &'a StructuralTransientContinuationPoint,
     state: &'a StructuralTransientContinuationState,
+    numerical_state: &'a StructuralTransientNumericalState,
     balance: &'a StructuralTransientBalanceAccumulator,
     counters: &'a StructuralTransientSolverCounters,
     observation_cursors: &'a [StructuralTransientObservationCursor],
@@ -470,6 +621,7 @@ pub(in crate::execution) mod tests {
             )
             .unwrap(),
             dof_count: 2,
+            coordinate_space: StructuralTransientCoordinateSpace::Direct,
             integrator: StructuralTransientIntegrator::NewmarkAverageAcceleration,
             precision: StructuralTransientPrecision::Real64,
             solver_options: StructuralTransientSolverOptionsIdentity::new(
@@ -502,6 +654,7 @@ pub(in crate::execution) mod tests {
                     velocity: vec![0.5, 0.0],
                     acceleration: vec![1.0, 0.0],
                 },
+                numerical_state: StructuralTransientNumericalState::Direct,
                 balance: StructuralTransientBalanceAccumulator {
                     initial_mechanical_energy_j: 1.0,
                     applied_load_work_j: ordinal as f64,
@@ -510,8 +663,7 @@ pub(in crate::execution) mod tests {
                 },
                 counters: StructuralTransientSolverCounters {
                     host_sync_count: ordinal,
-                    device_apply_k_count: 0,
-                    device_apply_k_attempt_count: 0,
+                    ..StructuralTransientSolverCounters::default()
                 },
                 observation_cursors: Vec::new(),
             },
@@ -587,6 +739,7 @@ pub(in crate::execution) mod tests {
                 block_ordinal: 0,
                 continuation: first.continuation.clone(),
                 state: first.state.clone(),
+                numerical_state: first.numerical_state.clone(),
                 balance: first.balance.clone(),
                 counters: first.counters.clone(),
                 observation_cursors: first.observation_cursors.clone(),

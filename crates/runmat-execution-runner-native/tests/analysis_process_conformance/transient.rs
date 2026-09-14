@@ -95,11 +95,12 @@ pub(super) fn preparation_with_encryption(
         model,
         backend: ComputeBackend::Cpu,
         formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+        solver: runmat_analysis_fea::execution::StructuralTransientSolverPlan::Direct,
         time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 4 },
         residual_target: 1.0e-10,
     };
     let scope = runmat_analysis_fea::pipeline::transient::prepare_transient_checkpoint_scope(
-        &workload, &mesh,
+        &workload, &mesh, None,
     )
     .unwrap();
     let limits = ObjectInventoryLimits::default();
@@ -123,6 +124,7 @@ pub(super) fn preparation_with_encryption(
     StructuralTransientSequencePreparation {
         workload: workload_objects,
         mesh: mesh_objects,
+        modal_state: None,
         scope,
         terminal_schedule_ordinals: vec![2, 4],
         artifact_access: ArtifactAccess {

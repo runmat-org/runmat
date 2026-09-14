@@ -51,7 +51,7 @@ pub(super) fn exact_study_fixture() -> ExactStudyFixture {
         authored_study_digest: Digest::sha256(b"driver replacement direct transient"),
         frozen_project_digest: Some(Digest::from_bytes(*project_identity.graph_digest.bytes())),
         geometry_source_digest: Digest::sha256(BOX),
-        workloads: StructuralStudyWorkloads::DirectTransient {
+        workloads: StructuralStudyWorkloads::StructuralTransient {
             workload: Box::new(box_direct_transient_workload()),
             block_plan: StructuralTransientBlockPlan::new(1).unwrap(),
         },
@@ -206,6 +206,7 @@ fn box_direct_transient_workload() -> StructuralTransientWorkload {
         model,
         backend: ComputeBackend::Cpu,
         formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+        solver: runmat_analysis_fea::execution::StructuralTransientSolverPlan::Direct,
         time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 2 },
         residual_target: 1.0e-8,
     }

@@ -45,7 +45,7 @@ pub(crate) fn package_exact_structural_study_result(
             let objects = unique_references(closure_objects)?;
             ExactStructuralStudyAnalysisClosure::LinearSequence { closures, objects }
         }
-        ExactStructuralAnalysisPublication::DirectTransient { completion, .. } => {
+        ExactStructuralAnalysisPublication::StructuralTransient { completion, .. } => {
             transient_closure(
                 &completion.result.result_objects,
                 &completion.result.receipt_objects,
@@ -155,7 +155,7 @@ fn transient_closure(
                     .map_err(protocol)?,
             ),
     )?;
-    Ok(ExactStructuralStudyAnalysisClosure::DirectTransient {
+    Ok(ExactStructuralStudyAnalysisClosure::StructuralTransient {
         result_root: Box::new(result_root),
         receipt_root: Box::new(receipt_root),
         objects,

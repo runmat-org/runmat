@@ -67,7 +67,7 @@ enum ExactStructuralStudyAnalysisClosure {
         closures: Vec<StructuralSequenceResultClosure>,
         objects: Vec<ValueRef>,
     },
-    DirectTransient {
+    StructuralTransient {
         result_root: Box<ValueRef>,
         receipt_root: Box<ValueRef>,
         objects: Vec<ValueRef>,
@@ -105,7 +105,7 @@ impl ExactStructuralStudyAnalysisClosure {
     fn objects(&self) -> &[ValueRef] {
         match self {
             Self::LinearSequence { objects, .. }
-            | Self::DirectTransient { objects, .. }
+            | Self::StructuralTransient { objects, .. }
             | Self::StructuralFrequency { objects, .. } => objects,
         }
     }
@@ -135,7 +135,7 @@ impl ExactStructuralStudyAnalysisClosure {
                     ));
                 }
             }
-            Self::DirectTransient {
+            Self::StructuralTransient {
                 result_root,
                 receipt_root,
                 objects,
@@ -284,7 +284,7 @@ pub enum ExactStructuralStudyAnalysisResult {
             BTreeMap<runmat_analysis_core::ProcedureStepId, StructuralLinearWorkload>,
         sequence: CompletedStructuralSequence,
     },
-    DirectTransient {
+    StructuralTransient {
         resolved_workload: Box<StructuralTransientWorkload>,
         result: Box<StructuralTransientSolverResult>,
         numerical_receipt: StructuralTransientNumericalReceipt,
@@ -325,7 +325,7 @@ pub(crate) enum ExactStructuralAnalysisPublication<'a> {
         sequence: &'a CompletedStructuralSequence,
         unresolved_workloads_digest: Digest,
     },
-    DirectTransient {
+    StructuralTransient {
         signals:
             &'a [crate::remote::signal_materialization::CompletedRemoteSignalMaterialization],
         completion: &'a CompletedStructuralTransientSequence,
@@ -345,7 +345,7 @@ impl ExactStructuralAnalysisPublication<'_> {
     ) -> &[crate::remote::signal_materialization::CompletedRemoteSignalMaterialization] {
         match self {
             Self::LinearSequence { signals, .. }
-            | Self::DirectTransient { signals, .. }
+            | Self::StructuralTransient { signals, .. }
             | Self::StructuralFrequency { signals, .. } => signals,
         }
     }
@@ -356,7 +356,7 @@ impl ExactStructuralAnalysisPublication<'_> {
                 unresolved_workloads_digest,
                 ..
             }
-            | Self::DirectTransient {
+            | Self::StructuralTransient {
                 unresolved_workloads_digest,
                 ..
             }

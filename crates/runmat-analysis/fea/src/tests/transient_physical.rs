@@ -193,6 +193,7 @@ fn transient_checkpoint_scope(
             workload: &workload,
             solver_mesh: options.solver_mesh.as_ref().unwrap(),
             initial_assembly: &summary,
+            modal_state: None,
             schedule,
         },
     )
@@ -210,6 +211,7 @@ fn transient_workload(
         step_id: step.step_id.clone(),
         backend: ComputeBackend::Cpu,
         formulation_requirement: options.formulation_requirement,
+        solver: crate::execution::StructuralTransientSolverPlan::Direct,
         time_step_policy: options.time_step_policy,
         residual_target: options.residual_target,
     }
@@ -250,7 +252,7 @@ fn prescribed_motion_blocks_restart_from_only_the_physical_checkpoint() {
     let options = TransientSolveOptions {
         time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 8 },
         residual_target: 1.0e-10,
-        solver_mesh: Some(mesh),
+        solver_mesh: Some(mesh.clone()),
         ..experimental_transient_options()
     };
     let uninterrupted =
@@ -269,15 +271,16 @@ fn prescribed_motion_blocks_restart_from_only_the_physical_checkpoint() {
     )
     .unwrap();
     let scope = transient_checkpoint_scope(&model, &options, schedule);
+    let workload = transient_workload(&model, &options);
     let first_request =
         crate::execution::StructuralTransientBlockRequest::new(scope.clone(), None, 4).unwrap();
     let first = crate::pipeline::transient::run_transient_block(
         crate::pipeline::transient::StructuralTransientRunBlockInput {
-            model: &model,
-            backend: ComputeBackend::Cpu,
-            options: &options,
+            workload: &workload,
+            solver_mesh: &mesh,
             request: &first_request,
             predecessor: None,
+            modal_state: None,
             observation_cursors: Vec::new(),
         },
     )
@@ -290,11 +293,11 @@ fn prescribed_motion_blocks_restart_from_only_the_physical_checkpoint() {
     .unwrap();
     let second = crate::pipeline::transient::run_transient_block(
         crate::pipeline::transient::StructuralTransientRunBlockInput {
-            model: &model,
-            backend: ComputeBackend::Cpu,
-            options: &options,
+            workload: &workload,
+            solver_mesh: &mesh,
             request: &second_request,
             predecessor: Some(&first.manifest().terminal_checkpoint),
+            modal_state: None,
             observation_cursors: Vec::new(),
         },
     )
@@ -379,6 +382,7 @@ fn prescribed_motion_blocks_restart_from_only_the_physical_checkpoint() {
         crate::pipeline::transient::CompletedStructuralTransientRunInput {
             workload: &transient_workload(&model, &options),
             solver_mesh: options.solver_mesh.as_ref().unwrap(),
+            modal_state: None,
             result: &solver_result,
             numerical_receipt: &receipt,
         },
@@ -423,7 +427,8 @@ fn prescribed_motion_uneven_blocks_preserve_discontinuity_and_final_result() {
     let uninterrupted =
         crate::run_transient_with_options(&model, ComputeBackend::Cpu, options.clone()).unwrap();
     let scope =
-        crate::pipeline::transient::prepare_transient_checkpoint_scope(&workload, &mesh).unwrap();
+        crate::pipeline::transient::prepare_transient_checkpoint_scope(&workload, &mesh, None)
+            .unwrap();
     let terminal = u64::try_from(scope.schedule.points.len() - 1).unwrap();
     let terminals = crate::execution::StructuralTransientBlockPlan::new(4)
         .unwrap()
@@ -443,11 +448,11 @@ fn prescribed_motion_uneven_blocks_preserve_discontinuity_and_final_result() {
         .unwrap();
         let segment = crate::pipeline::transient::run_transient_block(
             crate::pipeline::transient::StructuralTransientRunBlockInput {
-                model: &model,
-                backend: ComputeBackend::Cpu,
-                options: &options,
+                workload: &workload,
+                solver_mesh: &mesh,
                 request: &request,
                 predecessor: predecessor.as_ref(),
+                modal_state: None,
                 observation_cursors: Vec::new(),
             },
         )
@@ -474,6 +479,7 @@ fn prescribed_motion_uneven_blocks_preserve_discontinuity_and_final_result() {
         crate::pipeline::transient::CompletedStructuralTransientRunInput {
             workload: &workload,
             solver_mesh: &mesh,
+            modal_state: None,
             result: &result,
             numerical_receipt: &numerical_receipt,
         },
@@ -544,7 +550,7 @@ fn fully_prescribed_tet4_advances_the_complete_motion_schedule() {
     let options = TransientSolveOptions {
         time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 8 },
         residual_target: 1.0e-10,
-        solver_mesh: Some(mesh),
+        solver_mesh: Some(mesh.clone()),
         ..experimental_transient_options()
     };
     let result = crate::run_transient_with_options(&model, ComputeBackend::Cpu, options.clone())
@@ -585,15 +591,16 @@ fn fully_prescribed_tet4_advances_the_complete_motion_schedule() {
     )
     .unwrap();
     let scope = transient_checkpoint_scope(&model, &options, schedule);
+    let workload = transient_workload(&model, &options);
     let first_request =
         crate::execution::StructuralTransientBlockRequest::new(scope.clone(), None, 4).unwrap();
     let first = crate::pipeline::transient::run_transient_block(
         crate::pipeline::transient::StructuralTransientRunBlockInput {
-            model: &model,
-            backend: ComputeBackend::Cpu,
-            options: &options,
+            workload: &workload,
+            solver_mesh: &mesh,
             request: &first_request,
             predecessor: None,
+            modal_state: None,
             observation_cursors: Vec::new(),
         },
     )
@@ -606,11 +613,11 @@ fn fully_prescribed_tet4_advances_the_complete_motion_schedule() {
     .unwrap();
     let second = crate::pipeline::transient::run_transient_block(
         crate::pipeline::transient::StructuralTransientRunBlockInput {
-            model: &model,
-            backend: ComputeBackend::Cpu,
-            options: &options,
+            workload: &workload,
+            solver_mesh: &mesh,
             request: &second_request,
             predecessor: Some(&first.manifest().terminal_checkpoint),
+            modal_state: None,
             observation_cursors: Vec::new(),
         },
     )

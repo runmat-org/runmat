@@ -22,9 +22,8 @@ use runmat_execution_artifact::{ArtifactAccess, ProgramExecutionResponse};
 use runmat_meshing_core::CanonicalMeshingContract;
 
 use crate::{
-    decode_prepared_structural_frequency_entry_request,
+    decode_prepared_semantic_state, decode_prepared_structural_frequency_entry_request,
     decode_prepared_structural_frequency_entry_result,
-    decode_prepared_structural_frequency_modal_state,
     decode_prepared_structural_frequency_result_assembly_request,
     decode_prepared_structural_frequency_workload, import_analysis_objects,
     import_analysis_output_set, prepare_analysis_program, AnalysisBridgeError,
@@ -88,7 +87,7 @@ pub fn prepare_structural_frequency_fanout(
     let modal_state = preparation
         .modal_state
         .as_ref()
-        .map(decode_prepared_structural_frequency_modal_state)
+        .map(decode_prepared_semantic_state)
         .transpose()?;
     let constraints =
         runmat_analysis_fea::constraints::CanonicalStructuralConstraintPlan::compile_for_model(
@@ -197,7 +196,7 @@ fn prepare_structural_frequency_entry_task_with_admitted_resource_plan(
     let modal_state = preparation
         .modal_state
         .as_ref()
-        .map(decode_prepared_structural_frequency_modal_state)
+        .map(decode_prepared_semantic_state)
         .transpose()?;
     if preparation.resource_plan.manifest.kind != AnalysisNumericalObjectKind::ResourcePlan {
         return Err(AnalysisBridgeError::Invalid(

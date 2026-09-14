@@ -22,6 +22,7 @@ mod observation_source;
 mod resource_usage;
 mod response;
 mod result_publication;
+mod semantic_state_object_access;
 mod serial;
 mod signal_input;
 mod signal_materialization;
@@ -59,7 +60,6 @@ pub use frequency_field_recovery::{
 pub use frequency_object_access::{
     decode_prepared_structural_frequency_entry_request,
     decode_prepared_structural_frequency_entry_result,
-    decode_prepared_structural_frequency_modal_state,
     decode_prepared_structural_frequency_numerical_receipt,
     decode_prepared_structural_frequency_result_assembly_request,
     decode_prepared_structural_frequency_solver_result,
@@ -146,6 +146,9 @@ pub use result_publication::{
 };
 pub use runmat_analysis_fea::execution::SignalInputAdmission;
 pub use runmat_analysis_fea::execution::{StructuralStudyWorkloads, StructuralTransientBlockPlan};
+pub use semantic_state_object_access::{
+    decode_prepared_semantic_state, prepare_semantic_state_objects,
+};
 pub use serial::{
     execute_serial_analysis, AnalysisKernel, AnalysisKernelInvocation, AnalysisKernelOutput,
     AnalysisKernelOutputPartition, CompletedAnalysisWorkload,

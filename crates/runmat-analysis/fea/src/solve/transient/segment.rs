@@ -6,7 +6,8 @@ use crate::{
         StructuralTransientBlockRequest, StructuralTransientBlockSolverEvidence,
         StructuralTransientCheckpoint, StructuralTransientCheckpointInput,
         StructuralTransientContinuationApproach, StructuralTransientContinuationPoint,
-        StructuralTransientContinuationState, StructuralTransientObservationCursor,
+        StructuralTransientContinuationState, StructuralTransientCoordinateSpace,
+        StructuralTransientNumericalState, StructuralTransientObservationCursor,
         StructuralTransientPhysicalSample, StructuralTransientPhysicalSampleInput,
         StructuralTransientSampleStep, StructuralTransientSegment,
         StructuralTransientSegmentSample, StructuralTransientSegmentSampleInput,
@@ -27,8 +28,10 @@ pub(super) struct CanonicalTransientBlockParts {
     pub(super) terminal_schedule_ordinal: u64,
     pub(super) continuation_approach: SignalSampleApproach,
     pub(super) physical_continuation_state: SecondOrderState,
+    pub(super) numerical_continuation_state: SecondOrderState,
     pub(super) balance: crate::execution::StructuralTransientBalanceAccumulator,
     pub(super) accounting: TransientSolverAccounting,
+    pub(super) solver_method: SolverMethod,
     pub(super) initial_sample: Option<TransientInitialSample>,
     pub(super) samples: Vec<TransientAcceptedSample>,
 }
@@ -39,6 +42,7 @@ pub(super) fn into_canonical_segment<E>(
     block: TransientBlockResult,
     initial_sample: Option<TransientInitialSample>,
     observation_cursors: Vec<StructuralTransientObservationCursor>,
+    solver_method: SolverMethod,
 ) -> Result<StructuralTransientSegment, TransientSolveError<E>> {
     into_canonical_segment_parts(
         request,
@@ -47,8 +51,10 @@ pub(super) fn into_canonical_segment<E>(
             terminal_schedule_ordinal: block.terminal.schedule_ordinal,
             continuation_approach: block.terminal.continuation_approach,
             physical_continuation_state: block.terminal.physical_continuation_state,
+            numerical_continuation_state: block.terminal.numerical_continuation_state,
             balance: block.terminal.balance,
             accounting: block.terminal.accounting,
+            solver_method,
             initial_sample,
             samples: block.samples,
         },
@@ -77,6 +83,19 @@ pub(super) fn into_canonical_segment_parts<E>(
     };
     let terminal_counters = block.accounting.counters.clone();
     let block_counters = subtract_counters(&terminal_counters, &request.start_counters)?;
+    let numerical_state = match &request.scope.coordinate_space {
+        StructuralTransientCoordinateSpace::Direct => StructuralTransientNumericalState::Direct,
+        StructuralTransientCoordinateSpace::ModalReduced { basis_state, .. } => {
+            StructuralTransientNumericalState::ModalReduced {
+                basis_state: *basis_state,
+                coordinates: crate::execution::ModalTransientCoordinateState {
+                    displacement: block.numerical_continuation_state.displacement().to_vec(),
+                    velocity: block.numerical_continuation_state.velocity().to_vec(),
+                    acceleration: block.numerical_continuation_state.acceleration().to_vec(),
+                },
+            }
+        }
+    };
     let checkpoint = StructuralTransientCheckpoint::new(
         StructuralTransientCheckpointInput {
             scope: request.scope.clone(),
@@ -95,6 +114,7 @@ pub(super) fn into_canonical_segment_parts<E>(
                 velocity: block.physical_continuation_state.velocity().to_vec(),
                 acceleration: block.physical_continuation_state.acceleration().to_vec(),
             },
+            numerical_state,
             balance: block.balance,
             counters: terminal_counters,
             observation_cursors,
@@ -103,7 +123,7 @@ pub(super) fn into_canonical_segment_parts<E>(
     )
     .map_err(contract_error)?;
     let solver_evidence = StructuralTransientBlockSolverEvidence {
-        solver_method: SolverMethod::NewmarkAverageAccelerationPcg,
+        solver_method: block.solver_method,
         solver_backend: block.accounting.solver_backend,
         preconditioner: block.accounting.preconditioner,
         counters: block_counters,
@@ -200,6 +220,18 @@ fn subtract_counters<E>(
             .checked_sub(start.device_apply_k_attempt_count)
             .ok_or(TransientSolveError::ExecutionContract {
                 detail: "transient device apply-attempt counter regressed".into(),
+            })?,
+        dense_factorization_count: terminal
+            .dense_factorization_count
+            .checked_sub(start.dense_factorization_count)
+            .ok_or(TransientSolveError::ExecutionContract {
+                detail: "transient dense factorization counter regressed".into(),
+            })?,
+        dense_solve_count: terminal
+            .dense_solve_count
+            .checked_sub(start.dense_solve_count)
+            .ok_or(TransientSolveError::ExecutionContract {
+                detail: "transient dense solve counter regressed".into(),
             })?,
     })
 }

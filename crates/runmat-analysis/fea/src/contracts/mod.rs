@@ -417,6 +417,7 @@ pub enum SolverMethod {
     MatrixFreeSaddlePointGmres,
     MatrixFreeSubspaceIteration,
     NewmarkAverageAccelerationPcg,
+    StructuralModalTransientNewmarkDenseFactorization,
     StructuralDirectHarmonicGmres,
     StructuralModalHarmonicDenseDirect,
     IncrementalNewtonRaphson,
@@ -436,6 +437,9 @@ impl SolverMethod {
             Self::MatrixFreeSaddlePointGmres => "matrix_free_saddle_point_gmres",
             Self::MatrixFreeSubspaceIteration => "matrix_free_subspace_iteration",
             Self::NewmarkAverageAccelerationPcg => "newmark_average_acceleration_pcg",
+            Self::StructuralModalTransientNewmarkDenseFactorization => {
+                "structural_modal_transient_newmark_dense_factorization"
+            }
             Self::StructuralDirectHarmonicGmres => "structural_direct_harmonic_gmres",
             Self::StructuralModalHarmonicDenseDirect => "structural_modal_harmonic_dense_direct",
             Self::IncrementalNewtonRaphson => "incremental_newton_raphson",

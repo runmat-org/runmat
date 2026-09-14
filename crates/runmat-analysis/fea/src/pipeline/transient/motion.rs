@@ -348,7 +348,16 @@ pub(super) fn solve_prescribed_motion_block(
             Ok((snapshot.full_summary, physical_state))
         };
     let mut reduce_checkpoint_state =
-        |time_s, approach, state: &crate::execution::StructuralTransientContinuationState| {
+        |checkpoint: &crate::execution::StructuralTransientCheckpoint| {
+            let time_s = checkpoint.continuation.time_s;
+            let approach = match checkpoint.continuation.approach {
+                crate::execution::StructuralTransientContinuationApproach::At => {
+                    SignalSampleApproach::At
+                }
+                crate::execution::StructuralTransientContinuationApproach::RightLimit => {
+                    SignalSampleApproach::RightLimit
+                }
+            };
             let snapshot = snapshots
             .borrow()
             .get(&snapshot_key(time_s, approach))
@@ -359,9 +368,9 @@ pub(super) fn solve_prescribed_motion_block(
                 ),
             })?;
             SecondOrderState::try_new(
-                snapshot.reduce_displacement(&state.displacement),
-                snapshot.reduce_velocity(&state.velocity),
-                snapshot.reduce_acceleration(&state.acceleration),
+                snapshot.reduce_displacement(&checkpoint.state.displacement),
+                snapshot.reduce_velocity(&checkpoint.state.velocity),
+                snapshot.reduce_acceleration(&checkpoint.state.acceleration),
             )
             .map_err(|error| TransientSolveError::InvalidContinuationState {
                 detail: error.to_string(),

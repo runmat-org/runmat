@@ -161,7 +161,7 @@ async fn exact_structural_sweep_reaches_ordered_admitted_results_over_encrypted_
         authored_study_digest: direct_study_digest,
         frozen_project_digest: Some(Digest::from_bytes(*project_identity.graph_digest.bytes())),
         geometry_source_digest: source_digest,
-        workloads: runmat_analysis_execution::StructuralStudyWorkloads::DirectTransient {
+        workloads: runmat_analysis_execution::StructuralStudyWorkloads::StructuralTransient {
             workload: Box::new(direct_workload),
             block_plan: StructuralTransientBlockPlan::new(1).unwrap(),
         },
@@ -709,7 +709,7 @@ async fn run_direct_exact_study_conformance(
             ObjectInventoryLimits::default(),
         )
         .unwrap();
-        let crate::ExactStructuralStudyAnalysisResult::DirectTransient {
+        let crate::ExactStructuralStudyAnalysisResult::StructuralTransient {
             resolved_workload,
             result,
             numerical_receipt,
@@ -985,6 +985,7 @@ fn box_direct_transient_workload() -> StructuralTransientWorkload {
         model,
         backend: ComputeBackend::Cpu,
         formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+        solver: runmat_analysis_fea::execution::StructuralTransientSolverPlan::Direct,
         time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 2 },
         residual_target: 1.0e-8,
     }

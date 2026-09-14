@@ -30,6 +30,7 @@ mod study_workloads;
 mod sweep;
 mod transient_block;
 mod transient_checkpoint;
+mod transient_coordinates;
 mod transient_result;
 mod transient_schedule;
 mod transient_segment;
@@ -128,8 +129,10 @@ pub use transient_checkpoint::{
     StructuralTransientBalanceAccumulator, StructuralTransientCheckpoint,
     StructuralTransientCheckpointInput, StructuralTransientCheckpointScope,
     StructuralTransientContinuationPoint, StructuralTransientContinuationState,
+    StructuralTransientCoordinateSpace, StructuralTransientNumericalState,
     StructuralTransientObservationCursor, StructuralTransientSolverCounters,
 };
+pub use transient_coordinates::{ModalProjectionEvidence, ModalTransientCoordinateState};
 pub use transient_result::{
     StructuralTransientBlockReceipt, StructuralTransientNumericalReceipt,
     StructuralTransientResultAssemblyRequest, StructuralTransientResultEntry,
@@ -147,9 +150,8 @@ pub use transient_segment::{
     StructuralTransientSegmentManifest, StructuralTransientSegmentSample,
     StructuralTransientSegmentSampleInput,
 };
-pub use transient_workload::{
-    StructuralTransientCheckpointScopeInput, StructuralTransientWorkload,
-};
+pub(crate) use transient_workload::StructuralTransientCheckpointScopeInput;
+pub use transient_workload::{StructuralTransientSolverPlan, StructuralTransientWorkload};
 
 #[cfg(test)]
 mod tests;

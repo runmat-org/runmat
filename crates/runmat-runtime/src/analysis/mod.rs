@@ -168,7 +168,7 @@ pub struct StructuralStudyTransientNumericalResult {
 #[derive(Debug, Clone)]
 pub enum StructuralStudyNumericalResult {
     LinearSequence(StructuralStudySequenceNumericalResult),
-    DirectTransient(Box<StructuralStudyTransientNumericalResult>),
+    StructuralTransient(Box<StructuralStudyTransientNumericalResult>),
     StructuralFrequency(Box<StructuralStudyFrequencyNumericalResult>),
 }
 
@@ -1226,7 +1226,7 @@ pub fn analysis_complete_structural_study_op(
 ) -> Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope> {
     let result = match outcome {
         Ok(StructuralStudyNumericalResult::LinearSequence(result)) => result,
-        Ok(StructuralStudyNumericalResult::DirectTransient(_)) => {
+        Ok(StructuralStudyNumericalResult::StructuralTransient(_)) => {
             return Err(structural_study_completion_failure(
                 &prepared,
                 "RM.FEA.RUN_STUDY.RESULT_KIND_MISMATCH",

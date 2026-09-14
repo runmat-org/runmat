@@ -418,7 +418,7 @@ async fn actual_driver_restarts_from_server_checkpoint_on_a_different_worker() {
         ObjectInventoryLimits::default(),
     )
     .unwrap();
-    let ExactStructuralStudyAnalysisResult::DirectTransient {
+    let ExactStructuralStudyAnalysisResult::StructuralTransient {
         result,
         numerical_receipt,
         ..

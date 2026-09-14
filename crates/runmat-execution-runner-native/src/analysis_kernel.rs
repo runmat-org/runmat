@@ -1,9 +1,8 @@
 use runmat_analysis_core::{AccuracyTarget, ErrorContributionKind, RequiredAccuracyEvidence};
 use runmat_analysis_execution::{
-    decode_prepared_observation_history_checkpoint,
+    decode_prepared_observation_history_checkpoint, decode_prepared_semantic_state,
     decode_prepared_structural_frequency_entry_request,
     decode_prepared_structural_frequency_entry_result,
-    decode_prepared_structural_frequency_modal_state,
     decode_prepared_structural_frequency_result_assembly_request,
     decode_prepared_structural_frequency_workload,
     decode_prepared_structural_transient_result_assembly_request,
@@ -227,7 +226,10 @@ fn execute_structural_transient_block(
         &invocation,
         AnalysisNumericalObjectKind::StructuralTransientCheckpoint,
     )?;
-    if invocation.inputs.len() != 3 + usize::from(predecessor_input.is_some())
+    let modal_input =
+        optional_unique_input(&invocation, AnalysisNumericalObjectKind::SemanticState)?;
+    if invocation.inputs.len()
+        != 3 + usize::from(predecessor_input.is_some()) + usize::from(modal_input.is_some())
         || invocation.host.workload.outputs
             != vec![AnalysisNumericalObjectKind::StructuralTransientSegment]
     {
@@ -241,6 +243,9 @@ fn execute_structural_transient_block(
     let request = StructuralTransientBlockRequest::from_canonical_bytes(&request_input.payload())?;
     let predecessor = predecessor_input
         .map(|input| StructuralTransientCheckpoint::from_canonical_bytes(&input.payload()))
+        .transpose()?;
+    let modal_state = modal_input
+        .map(decode_prepared_semantic_state)
         .transpose()?;
     if workload_input.manifest.logical_identity != request.scope.source_workload.digest()
         || mesh_input.manifest.logical_identity
@@ -259,15 +264,46 @@ fn execute_structural_transient_block(
             "structural transient block inputs differ from their exact scope or object identities",
         ));
     }
+    let modal_state_matches = match (
+        &workload.solver,
+        &request.scope.coordinate_space,
+        modal_state.as_ref(),
+    ) {
+        (
+            runmat_analysis_fea::execution::StructuralTransientSolverPlan::Direct,
+            runmat_analysis_fea::execution::StructuralTransientCoordinateSpace::Direct,
+            None,
+        ) => true,
+        (
+            runmat_analysis_fea::execution::StructuralTransientSolverPlan::ModalReduced {
+                basis_state,
+            },
+            runmat_analysis_fea::execution::StructuralTransientCoordinateSpace::ModalReduced {
+                basis_state: scoped_basis,
+                ..
+            },
+            Some(state),
+        ) => {
+            state.identity == *basis_state
+                && state.identity == *scoped_basis
+                && state.topology_digest
+                    == runmat_execution::Digest::from_bytes(*mesh.canonical_digest.bytes())
+        }
+        _ => false,
+    };
+    if !modal_state_matches {
+        return Err(AnalysisBridgeError::Identity(
+            "structural transient modal state differs from its workload and checkpoint scope",
+        ));
+    }
     request.validate_against_predecessor(predecessor.as_ref())?;
-    let options = workload.solve_options(mesh);
     let segment = runmat_analysis_fea::pipeline::transient::run_transient_block(
         runmat_analysis_fea::pipeline::transient::StructuralTransientRunBlockInput {
-            model: &workload.model,
-            backend: workload.backend,
-            options: &options,
+            workload: &workload,
+            solver_mesh: &mesh,
             request: &request,
             predecessor: predecessor.as_ref(),
+            modal_state: modal_state.as_ref(),
             observation_cursors: predecessor
                 .as_ref()
                 .map(|checkpoint| checkpoint.observation_cursors.clone())

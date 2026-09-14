@@ -35,9 +35,11 @@ use crate::{
     progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
     solve::transient::{
         canonical_transient_step_boundaries, mechanical_energy_history_diagnostic,
+        solve_structural_modal_transient_block_with_assembly,
         solve_structural_transient_block_with_assembly, solve_transient_system_with_assembly,
-        StructuralTransientBlockSolveInput, StructuralTransientInitialConditions,
-        TransientSolveError, TransientSolveOptions, TransientTimeDomain,
+        StructuralModalTransientBlockSolveInput, StructuralTransientBlockSolveInput,
+        StructuralTransientInitialConditions, TransientSolveError, TransientSolveOptions,
+        TransientTimeDomain,
     },
 };
 
@@ -68,11 +70,11 @@ pub fn run_transient(
 }
 
 pub struct StructuralTransientRunBlockInput<'a> {
-    pub model: &'a AnalysisModel,
-    pub backend: ComputeBackend,
-    pub options: &'a TransientSolveOptions,
+    pub workload: &'a StructuralTransientWorkload,
+    pub solver_mesh: &'a runmat_meshing_core::SolverMeshArtifact,
     pub request: &'a StructuralTransientBlockRequest,
     pub predecessor: Option<&'a StructuralTransientCheckpoint>,
+    pub modal_state: Option<&'a crate::execution::CanonicalSemanticState>,
     pub observation_cursors: Vec<StructuralTransientObservationCursor>,
 }
 
@@ -202,6 +204,7 @@ fn prepare_transient_block_basis(
 pub fn prepare_transient_checkpoint_scope(
     workload: &StructuralTransientWorkload,
     solver_mesh: &runmat_meshing_core::SolverMeshArtifact,
+    modal_state: Option<&crate::execution::CanonicalSemanticState>,
 ) -> Result<StructuralTransientCheckpointScope, FeaRunError> {
     workload
         .validate()
@@ -213,6 +216,7 @@ pub fn prepare_transient_checkpoint_scope(
             workload,
             solver_mesh,
             initial_assembly: &basis.initial_assembly,
+            modal_state,
             schedule: basis.schedule,
         },
     )
@@ -222,31 +226,23 @@ pub fn prepare_transient_checkpoint_scope(
 pub fn run_transient_block(
     input: StructuralTransientRunBlockInput<'_>,
 ) -> Result<StructuralTransientSegment, FeaRunError> {
-    let basis = prepare_transient_block_basis(input.model, input.options)?;
+    input
+        .workload
+        .validate()
+        .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
+    let options = input.workload.solve_options(input.solver_mesh.clone());
+    let basis = prepare_transient_block_basis(&input.workload.model, &options)?;
     if input.request.scope.schedule != basis.schedule {
         return Err(FeaRunError::Solve(
             "transient block request schedule differs from the authored model schedule".into(),
         ));
     }
-    let solver_mesh = input.options.solver_mesh.as_ref().ok_or_else(|| {
-        FeaRunError::InvalidModel(
-            "portable structural transient block execution requires a canonical solver mesh".into(),
-        )
-    })?;
-    let workload = StructuralTransientWorkload {
-        schema_version: 1,
-        model: input.model.clone(),
-        step_id: basis.execution_step.step_id.clone(),
-        backend: input.backend,
-        formulation_requirement: input.options.formulation_requirement,
-        time_step_policy: input.options.time_step_policy,
-        residual_target: input.options.residual_target,
-    };
     let expected_scope = StructuralTransientCheckpointScope::from_prepared_workload(
         StructuralTransientCheckpointScopeInput {
-            workload: &workload,
-            solver_mesh,
+            workload: input.workload,
+            solver_mesh: input.solver_mesh,
             initial_assembly: &basis.initial_assembly,
+            modal_state: input.modal_state,
             schedule: basis.schedule.clone(),
         },
     )
@@ -260,7 +256,7 @@ pub fn run_transient_block(
         &basis.active_model,
         &basis.execution_step,
         &basis.initial_assembly,
-        input.options.solver_mesh.as_ref(),
+        Some(input.solver_mesh),
     )?;
     let initial_conditions =
         input
@@ -283,7 +279,7 @@ pub fn run_transient_block(
         let assembly = assemble_structural_system(
             &basis.active_model,
             &excitations,
-            input.options.solver_mesh.clone(),
+            Some(input.solver_mesh.clone()),
             StructuralFormulationRequirement::ExperimentalSyntheticOperator,
         )
         .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
@@ -295,33 +291,60 @@ pub fn run_transient_block(
         }
         Ok(assembly)
     };
-    let result = if basis.motions.is_empty() {
-        solve_structural_transient_block_with_assembly(
-            StructuralTransientBlockSolveInput {
-                request: input.request,
-                predecessor: input.predecessor,
-                initial_summary: &basis.initial_assembly,
-                options: input.options,
-                backend: input.backend,
-                initial_conditions,
-                observation_cursors: input.observation_cursors,
-            },
-            &mut assemble_at,
-        )
-    } else {
-        motion::solve_prescribed_motion_block(
-            motion::StructuralMotionBlockSolveInput {
-                summary: &basis.initial_assembly,
-                motions: &basis.motions,
-                options: input.options,
-                backend: input.backend,
-                request: input.request,
-                predecessor: input.predecessor,
-                initial_conditions,
-                observation_cursors: input.observation_cursors,
-            },
-            &mut assemble_at,
-        )
+    let block_input = StructuralTransientBlockSolveInput {
+        request: input.request,
+        predecessor: input.predecessor,
+        initial_summary: &basis.initial_assembly,
+        options: &options,
+        backend: input.workload.backend,
+        initial_conditions,
+        observation_cursors: input.observation_cursors,
+    };
+    let result = match &input.workload.solver {
+        crate::execution::StructuralTransientSolverPlan::Direct if basis.motions.is_empty() => {
+            solve_structural_transient_block_with_assembly(block_input, &mut assemble_at)
+        }
+        crate::execution::StructuralTransientSolverPlan::Direct => {
+            motion::solve_prescribed_motion_block(
+                motion::StructuralMotionBlockSolveInput {
+                    summary: &basis.initial_assembly,
+                    motions: &basis.motions,
+                    options: &options,
+                    backend: input.workload.backend,
+                    request: input.request,
+                    predecessor: input.predecessor,
+                    initial_conditions: block_input.initial_conditions,
+                    observation_cursors: block_input.observation_cursors,
+                },
+                &mut assemble_at,
+            )
+        }
+        crate::execution::StructuralTransientSolverPlan::ModalReduced { basis_state } => {
+            if !basis.motions.is_empty() {
+                return Err(FeaRunError::InvalidModel(
+                    "modal transient execution with prescribed support motion requires the governed affine modal projection"
+                        .into(),
+                ));
+            }
+            let modal_state = input.modal_state.ok_or_else(|| {
+                FeaRunError::InvalidModel(
+                    "modal transient execution is missing its admitted modal-basis state".into(),
+                )
+            })?;
+            let modal_basis = modal_state.payload.modal_basis().ok_or_else(|| {
+                FeaRunError::InvalidModel(
+                    "modal transient semantic state does not contain a modal basis".into(),
+                )
+            })?;
+            solve_structural_modal_transient_block_with_assembly(
+                StructuralModalTransientBlockSolveInput {
+                    block: block_input,
+                    basis_state: *basis_state,
+                    basis: modal_basis,
+                },
+                &mut assemble_at,
+            )
+        }
     };
     result.map_err(|error| match error {
         TransientSolveError::Assembly(error) => error,

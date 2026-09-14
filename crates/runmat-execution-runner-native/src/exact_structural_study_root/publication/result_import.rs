@@ -242,11 +242,11 @@ pub fn import_exact_structural_study_result(
             }
         }
         (
-            StructuralStudyWorkloads::DirectTransient {
+            StructuralStudyWorkloads::StructuralTransient {
                 workload,
                 block_plan: _,
             },
-            ExactStructuralStudyAnalysisClosure::DirectTransient {
+            ExactStructuralStudyAnalysisClosure::StructuralTransient {
                 result_root,
                 receipt_root,
                 objects,
@@ -291,6 +291,7 @@ pub fn import_exact_structural_study_result(
                 runmat_analysis_fea::pipeline::transient::prepare_transient_checkpoint_scope(
                     &workload,
                     &mesh.artifact,
+                    None,
                 )
                 .map_err(protocol)?;
             if result.manifest().scope != expected_scope {
@@ -298,7 +299,7 @@ pub fn import_exact_structural_study_result(
                     "transient result names a different resolved workload",
                 ));
             }
-            ExactStructuralStudyAnalysisResult::DirectTransient {
+            ExactStructuralStudyAnalysisResult::StructuralTransient {
                 resolved_workload: workload,
                 result: Box::new(result),
                 numerical_receipt,

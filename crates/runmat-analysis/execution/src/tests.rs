@@ -3081,6 +3081,8 @@ fn structural_transient_objects_round_trip_and_one_segment_sample_imports_indepe
         )
         .unwrap(),
         dof_count: 2,
+        coordinate_space:
+            runmat_analysis_fea::execution::StructuralTransientCoordinateSpace::Direct,
         integrator: StructuralTransientIntegrator::NewmarkAverageAcceleration,
         precision: StructuralTransientPrecision::Real64,
         solver_options: StructuralTransientSolverOptionsIdentity::new(digest("options")).unwrap(),
@@ -3101,6 +3103,8 @@ fn structural_transient_objects_round_trip_and_one_segment_sample_imports_indepe
                 velocity: vec![0.5, 0.0],
                 acceleration: vec![1.0, 0.0],
             },
+            numerical_state:
+                runmat_analysis_fea::execution::StructuralTransientNumericalState::Direct,
             balance: StructuralTransientBalanceAccumulator {
                 initial_mechanical_energy_j: 1.0,
                 applied_load_work_j: 2.0,
@@ -3109,8 +3113,7 @@ fn structural_transient_objects_round_trip_and_one_segment_sample_imports_indepe
             },
             counters: StructuralTransientSolverCounters {
                 host_sync_count: 2,
-                device_apply_k_count: 0,
-                device_apply_k_attempt_count: 0,
+                ..StructuralTransientSolverCounters::default()
             },
             observation_cursors: Vec::new(),
         },

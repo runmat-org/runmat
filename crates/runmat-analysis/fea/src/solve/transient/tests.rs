@@ -2,6 +2,7 @@ use super::*;
 use crate::{
     assembly::{assemble_structural_system, StructuralFormulationRequirement},
     excitation::{realize_step_excitations, ExcitationSamplePoint},
+    execution::StructuralTransientCoordinateSpace,
     fixtures::{fixture_model, FixtureId},
 };
 use std::cell::RefCell;
@@ -304,13 +305,18 @@ fn bounded_restart_at_a_jump_matches_uninterrupted_physical_histories() {
          state: &state::SecondOrderState| {
             Ok::<_, Infallible>((summary.clone(), state.clone()))
         };
-    let (state, initial) = advance::initialize::<Infallible>(
+    let mut strategy = advance::DirectTransientStepStrategy::new(
+        &summary,
+        LinearAlgebraBackendKind::CpuReference,
+        options.residual_target,
+    );
+    let (state, initial) = advance::initialize::<Infallible, Infallible>(
         &summary,
         &options,
-        LinearAlgebraBackendKind::CpuReference,
         &schedule,
         vec![0.0; summary.dof_count],
         vec![0.0; summary.dof_count],
+        &mut strategy,
         &mut identity_physical_state,
     )
     .unwrap();
@@ -334,6 +340,7 @@ fn bounded_restart_at_a_jump_matches_uninterrupted_physical_histories() {
         1,
         &mut restarted_assembly,
         &mut identity_physical_state,
+        &mut strategy,
     )
     .unwrap();
     assert_eq!(
@@ -353,13 +360,15 @@ fn bounded_restart_at_a_jump_matches_uninterrupted_physical_histories() {
             },
             continuation_approach:
                 crate::execution::StructuralTransientContinuationApproach::RightLimit,
-            numerical_summary: terminal.numerical_continuation_summary,
+            integration_summary: terminal.integration_continuation_summary,
             physical_summary: terminal.physical_continuation_summary,
             balance: terminal.balance,
-            counters: terminal.accounting.counters,
-            solver_backend: terminal.accounting.solver_backend,
-            preconditioner: terminal.accounting.preconditioner,
+            accounting: advance::TransientStepStrategy::resumed_accounting(
+                &strategy,
+                terminal.accounting.counters,
+            ),
         },
+        summary.dof_count,
     )
     .unwrap();
     let last_ordinal = u64::try_from(schedule.points.len() - 1).unwrap();
@@ -374,6 +383,7 @@ fn bounded_restart_at_a_jump_matches_uninterrupted_physical_histories() {
         last_ordinal,
         &mut restarted_assembly,
         &mut identity_physical_state,
+        &mut strategy,
     )
     .unwrap();
     let mut samples = first.samples;
@@ -536,6 +546,7 @@ fn canonical_block_entrypoint_emits_a_restartable_segment_chain() {
         )
         .unwrap(),
         dof_count: summary.dof_count,
+        coordinate_space: StructuralTransientCoordinateSpace::Direct,
         integrator: StructuralTransientIntegrator::NewmarkAverageAcceleration,
         precision: StructuralTransientPrecision::Real64,
         solver_options: StructuralTransientSolverOptionsIdentity::new(digest("options")).unwrap(),

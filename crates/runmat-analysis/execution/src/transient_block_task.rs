@@ -1,8 +1,10 @@
 use std::collections::BTreeSet;
 
 use runmat_analysis_fea::execution::{
-    AnalysisNumericalObjectKind, AnalysisWorkKind, StructuralTransientBlockRequest,
-    StructuralTransientCheckpoint, StructuralTransientSegment, StructuralTransientWorkload,
+    AnalysisNumericalObjectKind, AnalysisWorkKind, CanonicalSemanticState,
+    StructuralTransientBlockRequest, StructuralTransientCheckpoint,
+    StructuralTransientCoordinateSpace, StructuralTransientSegment, StructuralTransientSolverPlan,
+    StructuralTransientWorkload,
 };
 use runmat_execution::value::ValueRefKind;
 use runmat_execution::ProgramRevision;
@@ -25,6 +27,7 @@ pub struct StructuralTransientBlockPreparation {
     pub mesh: PreparedAnalysisObjects,
     pub request: PreparedAnalysisObjects,
     pub predecessor: Option<PreparedAnalysisObjects>,
+    pub modal_state: Option<PreparedAnalysisObjects>,
     pub artifact_access: runmat_execution_artifact::ArtifactAccess,
     pub program_revision: ProgramRevision,
 }
@@ -33,6 +36,7 @@ pub struct PreparedStructuralTransientBlockTask {
     pub workload: StructuralTransientWorkload,
     pub request: StructuralTransientBlockRequest,
     pub predecessor: Option<StructuralTransientCheckpoint>,
+    pub modal_state: Option<CanonicalSemanticState>,
     pub host: AnalysisHostWorkload,
     pub program: PreparedAnalysisProgram,
     pub inputs: Vec<PreparedAnalysisObjects>,
@@ -59,6 +63,11 @@ pub fn prepare_structural_transient_block_task(
         .as_ref()
         .map(decode_prepared_structural_transient_checkpoint)
         .transpose()?;
+    let modal_state = preparation
+        .modal_state
+        .as_ref()
+        .map(crate::decode_prepared_semantic_state)
+        .transpose()?;
     request.validate_against_predecessor(predecessor.as_ref())?;
     let solver_mesh =
         runmat_meshing_core::SolverMeshArtifact::canonical_decode(&preparation.mesh.payload())
@@ -71,6 +80,36 @@ pub fn prepare_structural_transient_block_task(
             "structural transient workload or mesh differs from the block scope",
         ));
     }
+    let modal_state_matches = match (
+        &workload.solver,
+        &request.scope.coordinate_space,
+        modal_state.as_ref(),
+    ) {
+        (
+            StructuralTransientSolverPlan::Direct,
+            StructuralTransientCoordinateSpace::Direct,
+            None,
+        ) => true,
+        (
+            StructuralTransientSolverPlan::ModalReduced { basis_state },
+            StructuralTransientCoordinateSpace::ModalReduced {
+                basis_state: scoped_basis,
+                ..
+            },
+            Some(state),
+        ) => {
+            state.identity == *basis_state
+                && state.identity == *scoped_basis
+                && state.topology_digest
+                    == runmat_execution::Digest::from_bytes(*solver_mesh.canonical_digest.bytes())
+        }
+        _ => false,
+    };
+    if !modal_state_matches {
+        return Err(AnalysisBridgeError::Identity(
+            "structural transient modal state differs from its workload and checkpoint scope",
+        ));
+    }
     let mut typed_inputs = vec![
         (preparation.workload, ValueRefKind::DriverObject),
         (preparation.mesh, ValueRefKind::DriverObject),
@@ -78,6 +117,9 @@ pub fn prepare_structural_transient_block_task(
     ];
     if let Some(predecessor) = preparation.predecessor {
         typed_inputs.push((predecessor, ValueRefKind::ResultObject));
+    }
+    if let Some(modal_state) = preparation.modal_state {
+        typed_inputs.push((modal_state, ValueRefKind::ResultObject));
     }
     let workload_inputs = typed_inputs
         .iter()
@@ -111,6 +153,7 @@ pub fn prepare_structural_transient_block_task(
         workload,
         request,
         predecessor,
+        modal_state,
         host,
         program,
         inputs,

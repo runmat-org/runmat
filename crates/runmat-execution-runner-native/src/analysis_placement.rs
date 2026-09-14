@@ -220,9 +220,9 @@ async fn execute_one(
                 ),
             ))
         }
-        StructuralStudyWorkloads::DirectTransient { .. } => {
+        StructuralStudyWorkloads::StructuralTransient { .. } => {
             Err(crate::NativeExecutionError::Configuration(
-                "local placement does not execute direct transient studies through this boundary"
+                "local placement does not execute structural transient studies through this boundary"
                     .into(),
             ))
         }

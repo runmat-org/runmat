@@ -52,6 +52,8 @@ pub fn analysis_prepare_structural_study_intent_op(
                         step_id: step.procedure_step.step_id.clone(),
                         backend: step.authored_execution.backend,
                         formulation_requirement: step.authored_execution.requirement,
+                        solver:
+                            runmat_analysis_fea::execution::StructuralTransientSolverPlan::Direct,
                         time_step_policy:
                             runmat_analysis_fea::solve::transient::StructuralTimeStepPolicy::Fixed {
                                 interval_count,
@@ -83,7 +85,7 @@ pub fn analysis_prepare_structural_study_intent_op(
     }
     let workloads = match (transient_workload, transient_block_plan, frequency_workload) {
         (Some(workload), Some(block_plan), None) => {
-            runmat_analysis_fea::execution::StructuralStudyWorkloads::DirectTransient {
+            runmat_analysis_fea::execution::StructuralStudyWorkloads::StructuralTransient {
                 workload: Box::new(workload),
                 block_plan,
             }

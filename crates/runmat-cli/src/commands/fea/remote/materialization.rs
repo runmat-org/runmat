@@ -223,11 +223,11 @@ fn study_result(
                     .collect(),
             })
         }
-        runmat_execution_runner_native::ExactStructuralStudyAnalysisResult::DirectTransient {
+        runmat_execution_runner_native::ExactStructuralStudyAnalysisResult::StructuralTransient {
             resolved_workload,
             result: transient,
             numerical_receipt,
-        } => StructuralStudyNumericalResult::DirectTransient(Box::new(
+        } => StructuralStudyNumericalResult::StructuralTransient(Box::new(
             StructuralStudyTransientNumericalResult {
                 frozen_project_digest: result.frozen_project_digest,
                 step_id: resolved_workload.step_id.clone(),

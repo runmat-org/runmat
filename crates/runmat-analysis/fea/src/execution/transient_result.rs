@@ -519,6 +519,18 @@ impl StructuralTransientNumericalReceipt {
                 .ok_or(AnalysisExecutionError::Limit(
                     "structural transient receipt device apply-attempt count overflow",
                 ))?;
+            aggregate.dense_factorization_count = aggregate
+                .dense_factorization_count
+                .checked_add(block.counters.dense_factorization_count)
+                .ok_or(AnalysisExecutionError::Limit(
+                    "structural transient receipt dense factorization count overflow",
+                ))?;
+            aggregate.dense_solve_count = aggregate
+                .dense_solve_count
+                .checked_add(block.counters.dense_solve_count)
+                .ok_or(AnalysisExecutionError::Limit(
+                    "structural transient receipt dense solve count overflow",
+                ))?;
         }
         if aggregate != self.terminal_counters
             || self.identity

@@ -441,8 +441,11 @@ pub struct StructuralTransientBlockSolverEvidence {
 
 impl StructuralTransientBlockSolverEvidence {
     pub fn validate(&self) -> AnalysisExecutionResult<()> {
-        if self.solver_method != SolverMethod::NewmarkAverageAccelerationPcg
-            || self.counters.device_apply_k_count > self.counters.device_apply_k_attempt_count
+        if !matches!(
+            self.solver_method,
+            SolverMethod::NewmarkAverageAccelerationPcg
+                | SolverMethod::StructuralModalTransientNewmarkDenseFactorization
+        ) || !self.counters.application_counts_are_valid()
             || self
                 .accelerator_evidence
                 .iter()
@@ -451,6 +454,30 @@ impl StructuralTransientBlockSolverEvidence {
             return Err(AnalysisExecutionError::Invalid(
                 "structural transient block solver evidence is invalid".into(),
             ));
+        }
+        match self.solver_method {
+            SolverMethod::NewmarkAverageAccelerationPcg
+                if !self.counters.direct_counts_are_valid() =>
+            {
+                return Err(AnalysisExecutionError::Invalid(
+                    "direct structural transient evidence contains modal dense solves".into(),
+                ));
+            }
+            SolverMethod::StructuralModalTransientNewmarkDenseFactorization
+                if self.solver_backend != LinearAlgebraBackendKind::CpuReference
+                    || self.preconditioner != SolverPreconditioner::None
+                    || self.counters.host_sync_count != 0
+                    || self.counters.device_apply_k_count != 0
+                    || self.counters.device_apply_k_attempt_count != 0
+                    || !self.counters.modal_dense_counts_are_valid()
+                    || !self.accelerator_evidence.is_empty() =>
+            {
+                return Err(AnalysisExecutionError::Invalid(
+                    "modal structural transient evidence does not describe CPU dense-direct execution"
+                        .into(),
+                ));
+            }
+            _ => {}
         }
         match self.solver_backend {
             LinearAlgebraBackendKind::CpuReference
@@ -470,6 +497,29 @@ impl StructuralTransientBlockSolverEvidence {
             }
             _ => Ok(()),
         }
+    }
+
+    pub fn validate_for(
+        &self,
+        coordinate_space: &super::StructuralTransientCoordinateSpace,
+    ) -> AnalysisExecutionResult<()> {
+        let method_matches = matches!(
+            (coordinate_space, self.solver_method),
+            (
+                super::StructuralTransientCoordinateSpace::Direct,
+                SolverMethod::NewmarkAverageAccelerationPcg
+            ) | (
+                super::StructuralTransientCoordinateSpace::ModalReduced { .. },
+                SolverMethod::StructuralModalTransientNewmarkDenseFactorization
+            )
+        );
+        self.validate()?;
+        if !method_matches {
+            return Err(AnalysisExecutionError::Invalid(
+                "structural transient block solver evidence is invalid".into(),
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -557,7 +607,8 @@ impl StructuralTransientSegmentManifest {
     pub fn validate(&self) -> AnalysisExecutionResult<()> {
         self.request.validate()?;
         self.terminal_checkpoint.validate()?;
-        self.solver_evidence.validate()?;
+        self.solver_evidence
+            .validate_for(&self.request.scope.coordinate_space)?;
         let expected_sample_count = self
             .request
             .terminal_schedule_ordinal
@@ -590,6 +641,22 @@ impl StructuralTransientSegmentManifest {
                 .checked_add(self.solver_evidence.counters.device_apply_k_attempt_count)
                 .ok_or(AnalysisExecutionError::Limit(
                     "structural transient device apply-attempt count overflow",
+                ))?,
+            dense_factorization_count: self
+                .request
+                .start_counters
+                .dense_factorization_count
+                .checked_add(self.solver_evidence.counters.dense_factorization_count)
+                .ok_or(AnalysisExecutionError::Limit(
+                    "structural transient dense factorization count overflow",
+                ))?,
+            dense_solve_count: self
+                .request
+                .start_counters
+                .dense_solve_count
+                .checked_add(self.solver_evidence.counters.dense_solve_count)
+                .ok_or(AnalysisExecutionError::Limit(
+                    "structural transient dense solve count overflow",
                 ))?,
         };
         if self.schema_version != 1

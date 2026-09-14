@@ -22,6 +22,7 @@ use crate::{
 pub struct CompletedStructuralTransientRunInput<'a> {
     pub workload: &'a StructuralTransientWorkload,
     pub solver_mesh: &'a SolverMeshArtifact,
+    pub modal_state: Option<&'a crate::execution::CanonicalSemanticState>,
     pub result: &'a StructuralTransientSolverResult,
     pub numerical_receipt: &'a StructuralTransientNumericalReceipt,
 }
@@ -54,6 +55,7 @@ pub fn recover_completed_transient_run(
             workload: input.workload,
             solver_mesh: input.solver_mesh,
             initial_assembly: &basis.initial_assembly,
+            modal_state: input.modal_state,
             schedule: basis.schedule.clone(),
         },
     )

@@ -1,9 +1,8 @@
 use runmat_analysis_fea::execution::{
-    AnalysisNumericalObjectKind, CanonicalSemanticState, StructuralFrequencyEntryRequest,
-    StructuralFrequencyEntryResult, StructuralFrequencyNumericalReceipt,
-    StructuralFrequencyPhysicalSample, StructuralFrequencyResultAssemblyRequest,
-    StructuralFrequencySolverResult, StructuralFrequencySolverResultManifest,
-    StructuralFrequencyWorkload,
+    AnalysisNumericalObjectKind, StructuralFrequencyEntryRequest, StructuralFrequencyEntryResult,
+    StructuralFrequencyNumericalReceipt, StructuralFrequencyPhysicalSample,
+    StructuralFrequencyResultAssemblyRequest, StructuralFrequencySolverResult,
+    StructuralFrequencySolverResultManifest, StructuralFrequencyWorkload,
 };
 use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_artifact::ObjectNamespace;
@@ -90,23 +89,6 @@ whole_object_access!(
     "a structural frequency numerical receipt object",
     |value: &StructuralFrequencyNumericalReceipt| value.identity().digest()
 );
-
-pub fn decode_prepared_structural_frequency_modal_state(
-    prepared: &PreparedAnalysisObjects,
-) -> AnalysisBridgeResult<CanonicalSemanticState> {
-    if prepared.manifest.kind != AnalysisNumericalObjectKind::SemanticState {
-        return Err(AnalysisBridgeError::Invalid(
-            "expected a structural frequency modal state object".into(),
-        ));
-    }
-    let state = CanonicalSemanticState::from_canonical_bytes(&prepared.payload())?;
-    if prepared.manifest.logical_identity != state.identity.digest() {
-        return Err(AnalysisBridgeError::Identity(
-            "structural frequency modal state has the wrong logical identity",
-        ));
-    }
-    Ok(state)
-}
 
 pub fn prepare_structural_frequency_solver_result_objects(
     result: &StructuralFrequencySolverResult,

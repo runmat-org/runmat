@@ -22,6 +22,7 @@ mod constraint_state;
 mod diagnostics;
 mod effective_solve;
 mod empty;
+mod modal_block;
 mod newmark;
 mod schedule;
 mod segment;
@@ -45,6 +46,9 @@ pub(crate) use completed_result::{
 pub(crate) use diagnostics::mechanical_energy_history_diagnostic;
 use diagnostics::transient_diagnostics;
 use effective_solve::EffectiveDynamicsSolveResult;
+pub use modal_block::{
+    solve_structural_modal_transient_block_with_assembly, StructuralModalTransientBlockSolveInput,
+};
 pub(crate) use schedule::{
     canonical_transient_schedule, canonical_transient_step_boundaries, TransientStepBoundary,
 };
@@ -267,6 +271,8 @@ pub enum TransientSolveError<E> {
     },
     #[error("transient reassembly failed: {0}")]
     Assembly(E),
+    #[error("transient physical-state reconstruction failed: {detail}")]
+    PhysicalMapping { detail: String },
     #[error("transient reassembly changed the structural degree-of-freedom count")]
     DofCountChanged,
     #[error("transient reassembly changed the invariant structural {component}")]
@@ -334,7 +340,7 @@ pub fn solve_transient_system(
     )
 }
 
-pub(crate) fn solve_transient_system_with_assembly<E>(
+pub(crate) fn solve_transient_system_with_assembly<E: std::fmt::Display>(
     summary: &AssemblySummary,
     options: TransientSolveOptions,
     backend: ComputeBackend,
@@ -391,7 +397,7 @@ pub(crate) struct TransientPhysicalMappingInput<'a> {
     pub(crate) initial_velocity: Vec<f64>,
 }
 
-pub(crate) fn solve_transient_system_with_physical_mapping<E>(
+pub(crate) fn solve_transient_system_with_physical_mapping<E: std::fmt::Display>(
     input: TransientPhysicalMappingInput<'_>,
     mut assembly_at: impl FnMut(f64, SignalSampleApproach) -> Result<AssemblySummary, E>,
     mut map_physical_state: impl FnMut(
@@ -572,22 +578,6 @@ fn require_stable_system<E>(
     if candidate_operators.damping() != initial_operators.damping() {
         return Err(TransientSolveError::StructuralSystemChanged {
             component: "damping operator",
-        });
-    }
-    Ok(())
-}
-
-fn require_residual_target<E>(
-    solved: &EffectiveDynamicsSolveResult,
-    time_s: f64,
-    target: f64,
-) -> Result<(), TransientSolveError<E>> {
-    let residual_norm = solved.projected_residual().relative_norm();
-    if !residual_norm.is_finite() || residual_norm > target {
-        return Err(TransientSolveError::ResidualTargetExceeded {
-            time_s,
-            residual_norm,
-            target,
         });
     }
     Ok(())

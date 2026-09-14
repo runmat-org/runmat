@@ -1,5 +1,7 @@
 use thiserror::Error;
 
+use crate::execution::ModalTransientCoordinateState;
+
 use super::{dense::solve_square, ModalReducedSystem};
 
 const BETA: f64 = 0.25;
@@ -12,12 +14,32 @@ pub struct ModalTransientInitialState {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct ModalTransientSample {
+    pub time_s: f64,
+    pub coordinates: ModalTransientCoordinateState,
+    pub relative_residual: f64,
+}
+
+/// One accepted average-acceleration update in modal coordinates.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ModalTransientStep {
+    pub coordinates: ModalTransientCoordinateState,
+    pub relative_residual: f64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct ModalTransientHistory {
-    pub time_points_s: Vec<f64>,
-    pub displacement_snapshots: Vec<Vec<f64>>,
-    pub velocity_snapshots: Vec<Vec<f64>>,
-    pub acceleration_snapshots: Vec<Vec<f64>>,
-    pub relative_residuals: Vec<f64>,
+    pub samples: Vec<ModalTransientSample>,
+}
+
+impl ModalTransientHistory {
+    pub fn terminal_coordinates(&self) -> &ModalTransientCoordinateState {
+        &self
+            .samples
+            .last()
+            .expect("a validated modal transient history is nonempty")
+            .coordinates
+    }
 }
 
 #[derive(Clone, Debug, Error, PartialEq)]
@@ -40,7 +62,7 @@ pub fn solve_modal_transient(
     projected_loads: &[Vec<f64>],
     initial: ModalTransientInitialState,
 ) -> Result<ModalTransientHistory, ModalTransientError> {
-    integrate(
+    integrate_initial(
         DenseSecondOrderOperators {
             size: system.mode_count(),
             stiffness: system.stiffness(),
@@ -53,6 +75,168 @@ pub fn solve_modal_transient(
     )
 }
 
+/// Continue a modal transient from explicit generalized displacement, velocity, and acceleration.
+///
+/// The first returned sample is the supplied continuation boundary. Persisting all three vectors
+/// avoids silently recomputing a different reduced state after a durable or remote restart.
+pub fn continue_modal_transient(
+    system: &ModalReducedSystem,
+    time_points_s: &[f64],
+    projected_loads: &[Vec<f64>],
+    continuation: ModalTransientCoordinateState,
+) -> Result<ModalTransientHistory, ModalTransientError> {
+    integrate_continuation(
+        DenseSecondOrderOperators {
+            size: system.mode_count(),
+            stiffness: system.stiffness(),
+            mass: system.mass(),
+            damping: system.damping(),
+        },
+        time_points_s,
+        projected_loads,
+        continuation,
+    )
+}
+
+/// Establish the reduced acceleration that closes the governing equation at one sample.
+pub fn initialize_modal_transient_state(
+    system: &ModalReducedSystem,
+    projected_load: &[f64],
+    initial: ModalTransientInitialState,
+) -> Result<ModalTransientStep, ModalTransientError> {
+    let operators = operators(system);
+    validate_operators_and_load(operators, projected_load)?;
+    if initial.displacement.len() != operators.size
+        || initial.velocity.len() != operators.size
+        || initial
+            .displacement
+            .iter()
+            .chain(&initial.velocity)
+            .any(|value| !value.is_finite())
+    {
+        return Err(
+            if initial.displacement.len() == operators.size
+                && initial.velocity.len() == operators.size
+            {
+                ModalTransientError::NonFinite
+            } else {
+                ModalTransientError::DimensionMismatch
+            },
+        );
+    }
+    refresh_modal_transient_state(
+        system,
+        projected_load,
+        initial.displacement,
+        initial.velocity,
+    )
+}
+
+/// Re-establish acceleration after an instantaneous load-side transition without changing q or qdot.
+pub fn refresh_modal_transient_state(
+    system: &ModalReducedSystem,
+    projected_load: &[f64],
+    displacement: Vec<f64>,
+    velocity: Vec<f64>,
+) -> Result<ModalTransientStep, ModalTransientError> {
+    let operators = operators(system);
+    validate_operators_and_load(operators, projected_load)?;
+    if displacement.len() != operators.size
+        || velocity.len() != operators.size
+        || displacement
+            .iter()
+            .chain(&velocity)
+            .any(|value| !value.is_finite())
+    {
+        return Err(
+            if displacement.len() == operators.size && velocity.len() == operators.size {
+                ModalTransientError::NonFinite
+            } else {
+                ModalTransientError::DimensionMismatch
+            },
+        );
+    }
+    let right_hand_side = subtract_three(
+        projected_load,
+        &multiply(operators.damping, operators.size, &velocity),
+        &multiply(operators.stiffness, operators.size, &displacement),
+    );
+    let acceleration = solve_square(operators.mass, &right_hand_side, operators.size)
+        .map_err(|_| ModalTransientError::Singular)?;
+    let coordinates = ModalTransientCoordinateState {
+        displacement,
+        velocity,
+        acceleration,
+    };
+    Ok(ModalTransientStep {
+        relative_residual: relative_residual(
+            operators,
+            &coordinates.displacement,
+            &coordinates.velocity,
+            &coordinates.acceleration,
+            projected_load,
+        ),
+        coordinates,
+    })
+}
+
+/// Advance one strictly positive interval using the complete coupled reduced K/M/C system.
+pub fn advance_modal_transient_state(
+    system: &ModalReducedSystem,
+    time_step_s: f64,
+    projected_load: &[f64],
+    continuation: ModalTransientCoordinateState,
+) -> Result<ModalTransientStep, ModalTransientError> {
+    let operators = operators(system);
+    validate_operators_and_load(operators, projected_load)?;
+    validate_coordinate_state(operators.size, &continuation)?;
+    if !time_step_s.is_finite() || time_step_s <= 0.0 {
+        return Err(ModalTransientError::InvalidTimeDomain);
+    }
+    if crate::is_fea_cancelled() {
+        return Err(ModalTransientError::Cancelled);
+    }
+    advance_dense_modal_state(operators, time_step_s, projected_load, continuation)
+}
+
+fn operators(system: &ModalReducedSystem) -> DenseSecondOrderOperators<'_> {
+    DenseSecondOrderOperators {
+        size: system.mode_count(),
+        stiffness: system.stiffness(),
+        mass: system.mass(),
+        damping: system.damping(),
+    }
+}
+
+fn validate_operators_and_load(
+    operators: DenseSecondOrderOperators<'_>,
+    load: &[f64],
+) -> Result<(), ModalTransientError> {
+    let matrix_size = operators
+        .size
+        .checked_mul(operators.size)
+        .ok_or(ModalTransientError::DimensionMismatch)?;
+    if operators.size == 0
+        || operators.stiffness.len() != matrix_size
+        || operators.mass.len() != matrix_size
+        || operators.damping.len() != matrix_size
+        || load.len() != operators.size
+    {
+        return Err(ModalTransientError::DimensionMismatch);
+    }
+    if operators
+        .stiffness
+        .iter()
+        .chain(operators.mass)
+        .chain(operators.damping)
+        .chain(load)
+        .any(|value| !value.is_finite())
+    {
+        return Err(ModalTransientError::NonFinite);
+    }
+    Ok(())
+}
+
 #[derive(Clone, Copy)]
 struct DenseSecondOrderOperators<'a> {
     size: usize,
@@ -61,95 +245,168 @@ struct DenseSecondOrderOperators<'a> {
     damping: &'a [f64],
 }
 
-fn integrate(
+fn integrate_initial(
     operators: DenseSecondOrderOperators<'_>,
     time_points_s: &[f64],
     loads: &[Vec<f64>],
     initial: ModalTransientInitialState,
 ) -> Result<ModalTransientHistory, ModalTransientError> {
-    validate_inputs(operators, time_points_s, loads, &initial)?;
-    let size = operators.size;
-    let mut displacement = initial.displacement;
-    let mut velocity = initial.velocity;
+    validate_common_inputs(operators, time_points_s, loads)?;
+    if initial.displacement.len() != operators.size
+        || initial.velocity.len() != operators.size
+        || initial
+            .displacement
+            .iter()
+            .chain(&initial.velocity)
+            .any(|value| !value.is_finite())
+    {
+        return Err(
+            if initial.displacement.len() == operators.size
+                && initial.velocity.len() == operators.size
+            {
+                ModalTransientError::NonFinite
+            } else {
+                ModalTransientError::DimensionMismatch
+            },
+        );
+    }
+    let displacement = initial.displacement;
+    let velocity = initial.velocity;
     let initial_right_hand_side = subtract_three(
         &loads[0],
-        &multiply(operators.damping, size, &velocity),
-        &multiply(operators.stiffness, size, &displacement),
+        &multiply(operators.damping, operators.size, &velocity),
+        &multiply(operators.stiffness, operators.size, &displacement),
     );
-    let mut acceleration = solve_square(operators.mass, &initial_right_hand_side, size)
+    let acceleration = solve_square(operators.mass, &initial_right_hand_side, operators.size)
         .map_err(|_| ModalTransientError::Singular)?;
+    integrate_from_state(
+        operators,
+        time_points_s,
+        loads,
+        ModalTransientCoordinateState {
+            displacement,
+            velocity,
+            acceleration,
+        },
+    )
+}
+
+fn integrate_continuation(
+    operators: DenseSecondOrderOperators<'_>,
+    time_points_s: &[f64],
+    loads: &[Vec<f64>],
+    continuation: ModalTransientCoordinateState,
+) -> Result<ModalTransientHistory, ModalTransientError> {
+    validate_common_inputs(operators, time_points_s, loads)?;
+    validate_coordinate_state(operators.size, &continuation)?;
+    integrate_from_state(operators, time_points_s, loads, continuation)
+}
+
+fn integrate_from_state(
+    operators: DenseSecondOrderOperators<'_>,
+    time_points_s: &[f64],
+    loads: &[Vec<f64>],
+    initial: ModalTransientCoordinateState,
+) -> Result<ModalTransientHistory, ModalTransientError> {
+    let mut coordinates = initial;
     let mut history = ModalTransientHistory {
-        time_points_s: time_points_s.to_vec(),
-        displacement_snapshots: vec![displacement.clone()],
-        velocity_snapshots: vec![velocity.clone()],
-        acceleration_snapshots: vec![acceleration.clone()],
-        relative_residuals: vec![relative_residual(
-            operators,
-            &displacement,
-            &velocity,
-            &acceleration,
-            &loads[0],
-        )],
+        samples: vec![ModalTransientSample {
+            time_s: time_points_s[0],
+            coordinates: coordinates.clone(),
+            relative_residual: relative_residual(
+                operators,
+                &coordinates.displacement,
+                &coordinates.velocity,
+                &coordinates.acceleration,
+                &loads[0],
+            ),
+        }],
     };
 
     for index in 1..time_points_s.len() {
         if crate::is_fea_cancelled() {
             return Err(ModalTransientError::Cancelled);
         }
-        let time_step_s = time_points_s[index] - time_points_s[index - 1];
-        let predicted_displacement = (0..size)
-            .map(|row| {
-                displacement[row]
-                    + time_step_s * velocity[row]
-                    + time_step_s.powi(2) * (0.5 - BETA) * acceleration[row]
-            })
-            .collect::<Vec<_>>();
-        let predicted_velocity = (0..size)
-            .map(|row| velocity[row] + time_step_s * (1.0 - GAMMA) * acceleration[row])
-            .collect::<Vec<_>>();
-        let right_hand_side = subtract_three(
-            &loads[index],
-            &multiply(operators.damping, size, &predicted_velocity),
-            &multiply(operators.stiffness, size, &predicted_displacement),
-        );
-        let effective = linear_combination(
-            operators.mass,
-            GAMMA * time_step_s,
-            operators.damping,
-            BETA * time_step_s.powi(2),
-            operators.stiffness,
-        );
-        acceleration = solve_square(&effective, &right_hand_side, size)
-            .map_err(|_| ModalTransientError::Singular)?;
-        displacement = predicted_displacement
-            .iter()
-            .zip(&acceleration)
-            .map(|(predicted, acceleration)| predicted + BETA * time_step_s.powi(2) * acceleration)
-            .collect();
-        velocity = predicted_velocity
-            .iter()
-            .zip(&acceleration)
-            .map(|(predicted, acceleration)| predicted + GAMMA * time_step_s * acceleration)
-            .collect();
-        history.displacement_snapshots.push(displacement.clone());
-        history.velocity_snapshots.push(velocity.clone());
-        history.acceleration_snapshots.push(acceleration.clone());
-        history.relative_residuals.push(relative_residual(
+        let step = advance_dense_modal_state(
             operators,
-            &displacement,
-            &velocity,
-            &acceleration,
+            time_points_s[index] - time_points_s[index - 1],
             &loads[index],
-        ));
+            coordinates,
+        )?;
+        coordinates = step.coordinates;
+        history.samples.push(ModalTransientSample {
+            time_s: time_points_s[index],
+            coordinates: coordinates.clone(),
+            relative_residual: step.relative_residual,
+        });
     }
     Ok(history)
 }
 
-fn validate_inputs(
+fn advance_dense_modal_state(
+    operators: DenseSecondOrderOperators<'_>,
+    time_step_s: f64,
+    projected_load: &[f64],
+    continuation: ModalTransientCoordinateState,
+) -> Result<ModalTransientStep, ModalTransientError> {
+    let predicted_displacement = (0..operators.size)
+        .map(|row| {
+            continuation.displacement[row]
+                + time_step_s * continuation.velocity[row]
+                + time_step_s.powi(2) * (0.5 - BETA) * continuation.acceleration[row]
+        })
+        .collect::<Vec<_>>();
+    let predicted_velocity = (0..operators.size)
+        .map(|row| {
+            continuation.velocity[row]
+                + time_step_s * (1.0 - GAMMA) * continuation.acceleration[row]
+        })
+        .collect::<Vec<_>>();
+    let right_hand_side = subtract_three(
+        projected_load,
+        &multiply(operators.damping, operators.size, &predicted_velocity),
+        &multiply(operators.stiffness, operators.size, &predicted_displacement),
+    );
+    let effective = linear_combination(
+        operators.mass,
+        GAMMA * time_step_s,
+        operators.damping,
+        BETA * time_step_s.powi(2),
+        operators.stiffness,
+    );
+    let acceleration = solve_square(&effective, &right_hand_side, operators.size)
+        .map_err(|_| ModalTransientError::Singular)?;
+    let displacement = predicted_displacement
+        .iter()
+        .zip(&acceleration)
+        .map(|(predicted, acceleration)| predicted + BETA * time_step_s.powi(2) * acceleration)
+        .collect::<Vec<_>>();
+    let velocity = predicted_velocity
+        .iter()
+        .zip(&acceleration)
+        .map(|(predicted, acceleration)| predicted + GAMMA * time_step_s * acceleration)
+        .collect::<Vec<_>>();
+    let coordinates = ModalTransientCoordinateState {
+        displacement,
+        velocity,
+        acceleration,
+    };
+    Ok(ModalTransientStep {
+        relative_residual: relative_residual(
+            operators,
+            &coordinates.displacement,
+            &coordinates.velocity,
+            &coordinates.acceleration,
+            projected_load,
+        ),
+        coordinates,
+    })
+}
+
+fn validate_common_inputs(
     operators: DenseSecondOrderOperators<'_>,
     time_points_s: &[f64],
     loads: &[Vec<f64>],
-    initial: &ModalTransientInitialState,
 ) -> Result<(), ModalTransientError> {
     let matrix_size = operators
         .size
@@ -162,8 +419,6 @@ fn validate_inputs(
         || time_points_s.len() < 2
         || loads.len() != time_points_s.len()
         || loads.iter().any(|load| load.len() != operators.size)
-        || initial.displacement.len() != operators.size
-        || initial.velocity.len() != operators.size
     {
         return Err(ModalTransientError::DimensionMismatch);
     }
@@ -178,8 +433,28 @@ fn validate_inputs(
         .chain(operators.mass)
         .chain(operators.damping)
         .chain(loads.iter().flatten())
-        .chain(&initial.displacement)
-        .chain(&initial.velocity)
+        .any(|value| !value.is_finite())
+    {
+        return Err(ModalTransientError::NonFinite);
+    }
+    Ok(())
+}
+
+fn validate_coordinate_state(
+    size: usize,
+    state: &ModalTransientCoordinateState,
+) -> Result<(), ModalTransientError> {
+    if state.displacement.len() != size
+        || state.velocity.len() != size
+        || state.acceleration.len() != size
+    {
+        return Err(ModalTransientError::DimensionMismatch);
+    }
+    if state
+        .displacement
+        .iter()
+        .chain(&state.velocity)
+        .chain(&state.acceleration)
         .any(|value| !value.is_finite())
     {
         return Err(ModalTransientError::NonFinite);
@@ -261,7 +536,7 @@ mod tests {
         let times = (0..=interval_count)
             .map(|index| index as f64 / interval_count as f64)
             .collect::<Vec<_>>();
-        integrate(
+        integrate_initial(
             operators,
             &times,
             &vec![vec![0.0]; times.len()],
@@ -278,7 +553,7 @@ mod tests {
         let exact = 2.0_f64.cos();
         let error = |interval_count| {
             let history = free_oscillator(interval_count);
-            (history.displacement_snapshots.last().unwrap()[0] - exact).abs()
+            (history.samples.last().unwrap().coordinates.displacement[0] - exact).abs()
         };
         let coarse = error(10);
         let medium = error(20);
@@ -286,9 +561,9 @@ mod tests {
         assert!(coarse / medium > 3.8);
         assert!(medium / fine > 3.8);
         assert!(free_oscillator(20)
-            .relative_residuals
+            .samples
             .iter()
-            .all(|residual| *residual <= 2.0e-15));
+            .all(|sample| sample.relative_residual <= 2.0e-15));
     }
 
     #[test]
@@ -299,7 +574,7 @@ mod tests {
             mass: &[1.0, 0.0, 0.0, 1.0],
             damping: &[0.2, 0.05, 0.05, 0.3],
         };
-        let history = integrate(
+        let history = integrate_initial(
             operators,
             &[0.0, 0.1, 0.2],
             &[vec![1.0, 0.0], vec![1.0, 0.0], vec![1.0, 0.0]],
@@ -309,10 +584,83 @@ mod tests {
             },
         )
         .unwrap();
-        assert_ne!(history.displacement_snapshots[1][1], 0.0);
+        assert_ne!(history.samples[1].coordinates.displacement[1], 0.0);
         assert!(history
-            .relative_residuals
+            .samples
             .iter()
-            .all(|residual| *residual <= 2.0e-15));
+            .all(|sample| sample.relative_residual <= 2.0e-15));
+    }
+
+    #[test]
+    fn explicit_modal_coordinates_restart_without_changing_the_solution() {
+        let operators = DenseSecondOrderOperators {
+            size: 2,
+            stiffness: &[4.0, 0.0, 0.0, 9.0],
+            mass: &[1.0, 0.0, 0.0, 1.0],
+            damping: &[0.2, 0.05, 0.05, 0.3],
+        };
+        let times = [0.0, 0.05, 0.1, 0.15, 0.2];
+        let loads = [
+            vec![1.0, 0.0],
+            vec![0.8, 0.1],
+            vec![0.4, 0.2],
+            vec![0.0, 0.1],
+            vec![-0.2, 0.0],
+        ];
+        let initial = ModalTransientInitialState {
+            displacement: vec![0.0; 2],
+            velocity: vec![0.0; 2],
+        };
+        let uninterrupted = integrate_initial(operators, &times, &loads, initial.clone()).unwrap();
+        let first = integrate_initial(operators, &times[..=2], &loads[..=2], initial).unwrap();
+        let second = integrate_continuation(
+            operators,
+            &times[2..],
+            &loads[2..],
+            first.terminal_coordinates().clone(),
+        )
+        .unwrap();
+        let mut restarted = first.samples;
+        restarted.extend(second.samples.into_iter().skip(1));
+
+        assert_eq!(restarted, uninterrupted.samples);
+    }
+
+    #[test]
+    fn continuation_rejects_missing_or_nonfinite_reduced_coordinates() {
+        let operators = DenseSecondOrderOperators {
+            size: 1,
+            stiffness: &[4.0],
+            mass: &[1.0],
+            damping: &[0.0],
+        };
+        let invalid_shape = ModalTransientCoordinateState {
+            displacement: vec![],
+            velocity: vec![0.0],
+            acceleration: vec![0.0],
+        };
+        assert_eq!(
+            integrate_continuation(
+                operators,
+                &[0.0, 0.1],
+                &[vec![0.0], vec![0.0]],
+                invalid_shape
+            ),
+            Err(ModalTransientError::DimensionMismatch)
+        );
+        let invalid_value = ModalTransientCoordinateState {
+            displacement: vec![0.0],
+            velocity: vec![0.0],
+            acceleration: vec![f64::NAN],
+        };
+        assert_eq!(
+            integrate_continuation(
+                operators,
+                &[0.0, 0.1],
+                &[vec![0.0], vec![0.0]],
+                invalid_value
+            ),
+            Err(ModalTransientError::NonFinite)
+        );
     }
 }

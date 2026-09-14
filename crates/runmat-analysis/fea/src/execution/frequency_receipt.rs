@@ -6,11 +6,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     contracts::{SolverMethod, SolverPreconditioner},
+    execution::ModalProjectionEvidence,
     frequency::FrequencyResponsePlanEntryIdentity,
-    solve::{
-        accelerator::AcceleratorSolveEvidence, backend::kind::LinearAlgebraBackendKind,
-        dynamics::ModalProjectionEvidence,
-    },
+    solve::{accelerator::AcceleratorSolveEvidence, backend::kind::LinearAlgebraBackendKind},
 };
 
 use super::{

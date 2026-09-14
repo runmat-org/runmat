@@ -28,7 +28,7 @@ pub(super) fn execute_structural_frequency_entry(
     let mesh = SolverMeshArtifact::canonical_decode(&mesh_input.payload())
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let modal_state = modal_input
-        .map(decode_prepared_structural_frequency_modal_state)
+        .map(decode_prepared_semantic_state)
         .transpose()?;
     let resource_plan = FeaResourcePlan::from_canonical_bytes(&resource_plan_input.payload())
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;

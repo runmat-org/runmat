@@ -2,11 +2,11 @@ use runmat_analysis_core::SignalSampleApproach;
 
 use crate::{
     assembly::AssemblySummary,
-    contracts::SolverPreconditioner,
+    contracts::{SolverMethod, SolverPreconditioner},
     execution::{
         StructuralTransientBlockRequest, StructuralTransientCheckpoint,
-        StructuralTransientContinuationApproach, StructuralTransientContinuationState,
-        StructuralTransientObservationCursor, StructuralTransientSegment,
+        StructuralTransientContinuationApproach, StructuralTransientObservationCursor,
+        StructuralTransientSegment,
     },
     solve::backend::kind::LinearAlgebraBackendKind,
     ComputeBackend,
@@ -15,8 +15,8 @@ use crate::{
 use super::state::SecondOrderState;
 use super::{
     advance::{
-        self, TransientAcceptedSample, TransientInitialSample, TransientResumeInput,
-        TransientSolverAccounting,
+        self, DirectTransientStepStrategy, TransientAcceptedSample, TransientInitialSample,
+        TransientResumeInput, TransientSolverAccounting, TransientStepStrategy,
     },
     balance::{TransientBalanceHistory, TransientBalanceStep},
     empty::{self, EmptyTransientAdvanceState},
@@ -41,7 +41,7 @@ pub struct StructuralTransientBlockSolveInput<'a> {
     pub observation_cursors: Vec<StructuralTransientObservationCursor>,
 }
 
-pub fn solve_structural_transient_block_with_assembly<E>(
+pub fn solve_structural_transient_block_with_assembly<E: std::fmt::Display>(
     input: StructuralTransientBlockSolveInput<'_>,
     mut assembly_at: impl FnMut(f64, SignalSampleApproach) -> Result<AssemblySummary, E>,
 ) -> Result<StructuralTransientSegment, TransientSolveError<E>> {
@@ -54,17 +54,16 @@ pub fn solve_structural_transient_block_with_assembly<E>(
         |_: f64, _: SignalSampleApproach, summary: &AssemblySummary, state: &SecondOrderState| {
             Ok::<_, E>((summary.clone(), state.clone()))
         };
-    let mut identity_numerical_state =
-        |_: f64, _: SignalSampleApproach, state: &StructuralTransientContinuationState| {
-            SecondOrderState::try_new(
-                state.displacement.clone(),
-                state.velocity.clone(),
-                state.acceleration.clone(),
-            )
-            .map_err(|error| TransientSolveError::InvalidContinuationState {
-                detail: error.to_string(),
-            })
-        };
+    let mut identity_numerical_state = |checkpoint: &StructuralTransientCheckpoint| {
+        SecondOrderState::try_new(
+            checkpoint.state.displacement.clone(),
+            checkpoint.state.velocity.clone(),
+            checkpoint.state.acceleration.clone(),
+        )
+        .map_err(|error| TransientSolveError::InvalidContinuationState {
+            detail: error.to_string(),
+        })
+    };
     solve_structural_transient_block_with_physical_mapping(
         input,
         physical_dof_count,
@@ -74,7 +73,7 @@ pub fn solve_structural_transient_block_with_assembly<E>(
     )
 }
 
-pub(crate) fn solve_structural_transient_block_with_physical_mapping<E>(
+pub(crate) fn solve_structural_transient_block_with_physical_mapping<E: std::fmt::Display>(
     input: StructuralTransientBlockSolveInput<'_>,
     physical_dof_count: usize,
     assembly_at: &mut impl FnMut(f64, SignalSampleApproach) -> Result<AssemblySummary, E>,
@@ -85,10 +84,42 @@ pub(crate) fn solve_structural_transient_block_with_physical_mapping<E>(
         &SecondOrderState,
     ) -> Result<(AssemblySummary, SecondOrderState), E>,
     reduce_checkpoint_state: &mut impl FnMut(
+        &StructuralTransientCheckpoint,
+    ) -> Result<SecondOrderState, TransientSolveError<E>>,
+) -> Result<StructuralTransientSegment, TransientSolveError<E>> {
+    let backend_kind = match input.backend {
+        ComputeBackend::Cpu => LinearAlgebraBackendKind::CpuReference,
+        ComputeBackend::Gpu => LinearAlgebraBackendKind::Accelerator,
+    };
+    let mut strategy = DirectTransientStepStrategy::new(
+        input.initial_summary,
+        backend_kind,
+        input.options.residual_target,
+    );
+    solve_structural_transient_block_with_strategy(
+        input,
+        physical_dof_count,
+        assembly_at,
+        map_physical_state,
+        reduce_checkpoint_state,
+        &mut strategy,
+    )
+}
+
+pub(super) fn solve_structural_transient_block_with_strategy<E, M: std::fmt::Display>(
+    input: StructuralTransientBlockSolveInput<'_>,
+    physical_dof_count: usize,
+    assembly_at: &mut impl FnMut(f64, SignalSampleApproach) -> Result<AssemblySummary, E>,
+    map_physical_state: &mut impl FnMut(
         f64,
         SignalSampleApproach,
-        &StructuralTransientContinuationState,
+        &AssemblySummary,
+        &SecondOrderState,
+    ) -> Result<(AssemblySummary, SecondOrderState), M>,
+    restore_checkpoint_state: &mut impl FnMut(
+        &StructuralTransientCheckpoint,
     ) -> Result<SecondOrderState, TransientSolveError<E>>,
+    strategy: &mut impl TransientStepStrategy,
 ) -> Result<StructuralTransientSegment, TransientSolveError<E>> {
     input
         .request
@@ -113,13 +144,13 @@ pub(crate) fn solve_structural_transient_block_with_physical_mapping<E>(
     };
     let (state, initial_sample) = match (input.predecessor, input.initial_conditions) {
         (None, Some(initial)) => {
-            let (state, sample) = advance::initialize::<E>(
+            let (state, sample) = advance::initialize(
                 input.initial_summary,
                 input.options,
-                backend_kind,
                 schedule,
                 initial.displacement,
                 initial.velocity,
+                strategy,
                 map_physical_state,
             )?;
             (state, Some(sample))
@@ -134,15 +165,16 @@ pub(crate) fn solve_structural_transient_block_with_physical_mapping<E>(
             let continuation_summary = assembly_at(predecessor.continuation.time_s, approach)
                 .map_err(TransientSolveError::Assembly)?;
             require_stable_system(input.initial_summary, &continuation_summary)?;
-            let numerical_state =
-                reduce_checkpoint_state(predecessor.continuation.time_s, approach, &predecessor.state)?;
+            let numerical_state = restore_checkpoint_state(predecessor)?;
             let (physical_summary, mapped_physical_state) = map_physical_state(
                 predecessor.continuation.time_s,
                 approach,
                 &continuation_summary,
                 &numerical_state,
             )
-            .map_err(TransientSolveError::Assembly)?;
+            .map_err(|error| TransientSolveError::PhysicalMapping {
+                detail: error.to_string(),
+            })?;
             if mapped_physical_state.displacement() != predecessor.state.displacement.as_slice()
                 || mapped_physical_state.velocity() != predecessor.state.velocity.as_slice()
                 || mapped_physical_state.acceleration()
@@ -160,13 +192,12 @@ pub(crate) fn solve_structural_transient_block_with_physical_mapping<E>(
                     numerical_state,
                     physical_state: predecessor.state.clone(),
                     continuation_approach: predecessor.continuation.approach,
-                    numerical_summary: continuation_summary.clone(),
+                    integration_summary: continuation_summary.clone(),
                     physical_summary,
                     balance: predecessor.balance.clone(),
-                    counters: predecessor.counters.clone(),
-                    solver_backend: backend_kind,
-                    preconditioner: SolverPreconditioner::None,
+                    accounting: strategy.resumed_accounting(predecessor.counters.clone()),
                 },
+                strategy.coordinate_count(),
             )?;
             (state, None)
         }
@@ -188,6 +219,7 @@ pub(crate) fn solve_structural_transient_block_with_physical_mapping<E>(
         input.request.terminal_schedule_ordinal,
         assembly_at,
         map_physical_state,
+        strategy,
     )?;
     segment::into_canonical_segment(
         input.request.clone(),
@@ -195,6 +227,7 @@ pub(crate) fn solve_structural_transient_block_with_physical_mapping<E>(
         block,
         initial_sample,
         input.observation_cursors,
+        strategy.solver_method(),
     )
 }
 
@@ -411,7 +444,8 @@ pub(crate) fn solve_fully_prescribed_transient_block_with_physical_mapping<E>(
         CanonicalTransientBlockParts {
             terminal_schedule_ordinal: empty_block.terminal.schedule_ordinal,
             continuation_approach: empty_block.terminal.continuation_approach,
-            physical_continuation_state: continuation_state,
+            physical_continuation_state: continuation_state.clone(),
+            numerical_continuation_state: continuation_state,
             balance: history.accumulator(),
             accounting: TransientSolverAccounting {
                 solver_backend: LinearAlgebraBackendKind::CpuReference,
@@ -422,6 +456,7 @@ pub(crate) fn solve_fully_prescribed_transient_block_with_physical_mapping<E>(
                 preconditioner: SolverPreconditioner::None,
                 accelerator_evidence: Vec::new(),
             },
+            solver_method: SolverMethod::NewmarkAverageAccelerationPcg,
             initial_sample,
             samples,
         },

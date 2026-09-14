@@ -132,11 +132,11 @@ pub fn analysis_complete_structural_study_intent_op(
             completion_identity,
         ),
         (
-            runmat_analysis_fea::execution::StructuralStudyWorkloads::DirectTransient {
+            runmat_analysis_fea::execution::StructuralStudyWorkloads::StructuralTransient {
                 workload,
                 ..
             },
-            StructuralStudyNumericalResult::DirectTransient(result),
+            StructuralStudyNumericalResult::StructuralTransient(result),
         ) => complete_direct_transient(
             intent,
             resolved_model,
@@ -530,6 +530,7 @@ fn complete_direct_transient(
         runmat_analysis_fea::pipeline::transient::CompletedStructuralTransientRunInput {
             workload: &workload,
             solver_mesh: &solver_mesh,
+            modal_state: None,
             result: &result.result,
             numerical_receipt: &result.numerical_receipt,
         },

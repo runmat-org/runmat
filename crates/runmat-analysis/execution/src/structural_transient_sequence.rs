@@ -1,9 +1,11 @@
 use std::collections::BTreeMap;
 
 use runmat_analysis_fea::execution::{
-    AnalysisNumericalObjectKind, AnalysisTaskIdentity, StructuralTransientBlockRequest,
-    StructuralTransientBlockRequestIdentity, StructuralTransientCheckpointScope,
-    StructuralTransientResultAssemblyRequestIdentity, StructuralTransientWorkload,
+    AnalysisNumericalObjectKind, AnalysisTaskIdentity, CanonicalSemanticState,
+    StructuralTransientBlockRequest, StructuralTransientBlockRequestIdentity,
+    StructuralTransientCheckpointScope, StructuralTransientCoordinateSpace,
+    StructuralTransientResultAssemblyRequestIdentity, StructuralTransientSolverPlan,
+    StructuralTransientWorkload,
 };
 use runmat_execution::value::{ValueRef, ValueRefKind};
 use runmat_execution::Digest;
@@ -18,7 +20,7 @@ use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
 
 use crate::{
     decode_prepared_structural_transient_workload, import_structural_transient_block,
-    import_structural_transient_result, prepare_analysis_objects,
+    import_structural_transient_result, prepare_analysis_objects, prepare_semantic_state_objects,
     prepare_structural_transient_block_request_objects, prepare_structural_transient_block_task,
     prepare_structural_transient_checkpoint_objects, prepare_structural_transient_result_task,
     prepare_structural_transient_workload_objects, AnalysisBridgeError, AnalysisBridgeResult,
@@ -33,6 +35,7 @@ use crate::{
 pub struct StructuralTransientSequencePreparation {
     pub workload: PreparedAnalysisObjects,
     pub mesh: PreparedAnalysisObjects,
+    pub modal_state: Option<PreparedAnalysisObjects>,
     pub scope: StructuralTransientCheckpointScope,
     pub terminal_schedule_ordinals: Vec<u64>,
     pub artifact_access: ArtifactAccess,
@@ -44,6 +47,7 @@ pub struct StructuralTransientSequencePreparation {
 pub struct StructuralTransientSequencePreparationInput<'a> {
     pub workload: &'a StructuralTransientWorkload,
     pub mesh: &'a SolverMeshArtifact,
+    pub modal_state: Option<&'a CanonicalSemanticState>,
     pub block_plan: StructuralTransientBlockPlan,
     pub artifact_access: ArtifactAccess,
     pub program_revision: ProgramRevision,
@@ -62,6 +66,7 @@ pub fn prepare_structural_transient_sequence(
     let scope = runmat_analysis_fea::pipeline::transient::prepare_transient_checkpoint_scope(
         input.workload,
         input.mesh,
+        input.modal_state,
     )
     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let terminal_schedule_ordinal = u64::try_from(scope.schedule.points.len() - 1)
@@ -88,9 +93,21 @@ pub fn prepare_structural_transient_sequence(
         ObjectNamespace::InputValue,
         input.inventory_limits,
     )?;
+    let modal_state = input
+        .modal_state
+        .map(|state| {
+            prepare_semantic_state_objects(
+                state,
+                input.chunk_bytes,
+                ObjectNamespace::ResultValue,
+                input.inventory_limits,
+            )
+        })
+        .transpose()?;
     let preparation = StructuralTransientSequencePreparation {
         workload,
         mesh,
+        modal_state,
         scope,
         terminal_schedule_ordinals,
         artifact_access: input.artifact_access,
@@ -175,6 +192,7 @@ impl StructuralTransientSequenceCoordinator {
                 mesh: self.preparation.mesh.clone(),
                 request: request_objects,
                 predecessor: predecessor_objects,
+                modal_state: self.preparation.modal_state.clone(),
                 artifact_access: self.preparation.artifact_access.clone(),
                 program_revision: self.preparation.program_revision.clone(),
             })?;
@@ -396,6 +414,11 @@ fn validate_preparation(
     let mesh =
         runmat_meshing_core::SolverMeshArtifact::canonical_decode(&preparation.mesh.payload())
             .map_err(|error| invalid(error.to_string()))?;
+    let modal_state = preparation
+        .modal_state
+        .as_ref()
+        .map(crate::decode_prepared_semantic_state)
+        .transpose()?;
     preparation.scope.identity()?;
     let terminal_schedule_ordinal = u64::try_from(
         preparation
@@ -423,6 +446,41 @@ fn validate_preparation(
     {
         return Err(invalid(
             "transient sequence preparation has invalid scope, workload, or block boundaries",
+        ));
+    }
+    let modal_state_matches = match (
+        &workload.solver,
+        &preparation.scope.coordinate_space,
+        modal_state.as_ref(),
+    ) {
+        (
+            StructuralTransientSolverPlan::Direct,
+            StructuralTransientCoordinateSpace::Direct,
+            None,
+        ) => true,
+        (
+            StructuralTransientSolverPlan::ModalReduced { basis_state },
+            StructuralTransientCoordinateSpace::ModalReduced {
+                basis_state: scoped_basis,
+                basis,
+                coordinate_count,
+                ..
+            },
+            Some(state),
+        ) => {
+            state.identity == *basis_state
+                && state.identity == *scoped_basis
+                && state.topology_digest == Digest::from_bytes(*mesh.canonical_digest.bytes())
+                && state.payload.modal_basis().is_some_and(|state_basis| {
+                    state_basis.identity() == *basis
+                        && state_basis.modes().len() == *coordinate_count
+                })
+        }
+        _ => false,
+    };
+    if !modal_state_matches {
+        return Err(AnalysisBridgeError::Identity(
+            "transient sequence modal state differs from its workload and checkpoint scope",
         ));
     }
     Ok(())

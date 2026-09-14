@@ -377,7 +377,7 @@ impl PreparedStructuralStudyIntent {
                     }
                 }
             }
-            StructuralStudyWorkloads::DirectTransient {
+            StructuralStudyWorkloads::StructuralTransient {
                 workload,
                 block_plan,
             } => {
@@ -404,6 +404,8 @@ impl PreparedStructuralStudyIntent {
                 if workload.step_id != step.procedure_step.step_id
                     || workload.backend != step.authored_execution.backend
                     || workload.formulation_requirement != step.authored_execution.requirement
+                    || workload.solver
+                        != runmat_analysis_fea::execution::StructuralTransientSolverPlan::Direct
                     || workload.time_step_policy != expected_time_step_policy
                     || workload.residual_target != options.residual_target
                     || block_plan.maximum_intervals_per_block()

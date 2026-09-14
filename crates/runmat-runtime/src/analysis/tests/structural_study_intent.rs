@@ -107,7 +107,7 @@ fn structural_study_intent_admits_one_typed_direct_transient_workload() {
         OperationContext::new(Some("trace-direct-transient-intent".into()), None),
     )
     .expect("direct transient intent should prepare without a local mesh");
-    let runmat_analysis_fea::execution::StructuralStudyWorkloads::DirectTransient {
+    let runmat_analysis_fea::execution::StructuralStudyWorkloads::StructuralTransient {
         workload,
         block_plan,
     } = intent.workloads()
@@ -129,8 +129,9 @@ fn structural_study_intent_admits_one_typed_direct_transient_workload() {
     assert_eq!(restored.workloads(), intent.workloads());
 
     let mut substituted = intent.clone();
-    let runmat_analysis_fea::execution::StructuralStudyWorkloads::DirectTransient {
-        workload, ..
+    let runmat_analysis_fea::execution::StructuralStudyWorkloads::StructuralTransient {
+        workload,
+        ..
     } = &mut substituted.workloads
     else {
         unreachable!("test prepared a direct transient")
@@ -158,7 +159,7 @@ fn structural_study_intent_completes_a_partitioned_direct_transient_with_state()
         OperationContext::new(Some("trace-direct-transient-completion".into()), None),
     )
     .expect("direct transient intent should prepare");
-    let runmat_analysis_fea::execution::StructuralStudyWorkloads::DirectTransient {
+    let runmat_analysis_fea::execution::StructuralStudyWorkloads::StructuralTransient {
         mut workload,
         block_plan,
     } = intent.workloads()
@@ -171,16 +172,10 @@ fn structural_study_intent_completes_a_partitioned_direct_transient_with_state()
     .unwrap();
     workload.model =
         runmat_analysis_core::resolve_boundary_region_aliases(&workload.model, &aliases).unwrap();
-    let options = runmat_analysis_fea::solve::transient::TransientSolveOptions {
-        formulation_requirement: workload.formulation_requirement,
-        time_step_policy: workload.time_step_policy,
-        residual_target: workload.residual_target,
-        progress_operation: "test.remote_direct_transient".into(),
-        solver_mesh: Some(meshing_output.artifact.clone()),
-    };
     let scope = runmat_analysis_fea::pipeline::transient::prepare_transient_checkpoint_scope(
         &workload,
         &meshing_output.artifact,
+        None,
     )
     .unwrap();
     let terminal_schedule_ordinal = u64::try_from(scope.schedule.points.len() - 1).unwrap();
@@ -198,11 +193,11 @@ fn structural_study_intent_completes_a_partitioned_direct_transient_with_state()
         .unwrap();
         let segment = runmat_analysis_fea::pipeline::transient::run_transient_block(
             runmat_analysis_fea::pipeline::transient::StructuralTransientRunBlockInput {
-                model: &workload.model,
-                backend: workload.backend,
-                options: &options,
+                workload: &workload,
+                solver_mesh: &meshing_output.artifact,
                 request: &request,
                 predecessor: predecessor.as_ref(),
+                modal_state: None,
                 observation_cursors: Vec::new(),
             },
         )
@@ -226,7 +221,7 @@ fn structural_study_intent_completes_a_partitioned_direct_transient_with_state()
     let envelope = analysis_complete_structural_study_intent_op(
         intent,
         meshing_output,
-        StructuralStudyNumericalResult::DirectTransient(Box::new(
+        StructuralStudyNumericalResult::StructuralTransient(Box::new(
             StructuralStudyTransientNumericalResult {
                 frozen_project_digest: None,
                 step_id: workload.step_id.clone(),

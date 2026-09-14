@@ -80,7 +80,7 @@ pub enum StructuralStudyWorkloads {
     LinearSequence {
         workloads: BTreeMap<ProcedureStepId, StructuralLinearWorkload>,
     },
-    DirectTransient {
+    StructuralTransient {
         workload: Box<StructuralTransientWorkload>,
         block_plan: StructuralTransientBlockPlan,
     },
@@ -99,17 +99,20 @@ impl StructuralStudyWorkloads {
     pub fn validate(&self) -> AnalysisExecutionResult<()> {
         match self {
             Self::LinearSequence { workloads } => validate_linear_sequence(workloads),
-            Self::DirectTransient {
+            Self::StructuralTransient {
                 workload,
                 block_plan,
             } => {
                 workload.validate()?;
                 block_plan.validate()?;
-                if workload.model.sequence.steps.len() != 1
+                if !matches!(
+                    workload.solver,
+                    super::StructuralTransientSolverPlan::Direct
+                ) || workload.model.sequence.steps.len() != 1
                     || workload.model.sequence.steps[0].step_id != workload.step_id
                 {
                     return Err(invalid(
-                        "direct structural transient execution requires exactly one authored step",
+                        "standalone structural transient execution requires one direct authored step; modal response must resolve its basis through an authored sequence",
                     ));
                 }
                 Ok(())
@@ -136,7 +139,7 @@ impl StructuralStudyWorkloads {
                 .next()
                 .map(|workload| &workload.model)
                 .ok_or_else(|| invalid("structural linear sequence has no workload")),
-            Self::DirectTransient { workload, .. } => Ok(&workload.model),
+            Self::StructuralTransient { workload, .. } => Ok(&workload.model),
             Self::StructuralFrequency { workload } => Ok(workload.model()),
         }
     }
@@ -148,7 +151,7 @@ impl StructuralStudyWorkloads {
                     workload.model = model.clone();
                 }
             }
-            Self::DirectTransient { workload, .. } => workload.model = model,
+            Self::StructuralTransient { workload, .. } => workload.model = model,
             Self::StructuralFrequency { workload } => workload.replace_model(model)?,
         }
         self.validate()
@@ -158,7 +161,7 @@ impl StructuralStudyWorkloads {
         self.validate()?;
         Ok(match self {
             Self::LinearSequence { workloads } => workloads.keys().cloned().collect(),
-            Self::DirectTransient { workload, .. } => vec![workload.step_id.clone()],
+            Self::StructuralTransient { workload, .. } => vec![workload.step_id.clone()],
             Self::StructuralFrequency { workload } => vec![workload.step_id().clone()],
         })
     }
@@ -170,7 +173,7 @@ impl StructuralStudyWorkloads {
                 .values()
                 .map(|workload| workload.backend)
                 .collect(),
-            Self::DirectTransient { workload, .. } => vec![workload.backend],
+            Self::StructuralTransient { workload, .. } => vec![workload.backend],
             Self::StructuralFrequency { workload } => vec![workload.backend()],
         })
     }
@@ -264,10 +267,11 @@ mod tests {
             model,
             backend: ComputeBackend::Cpu,
             formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+            solver: crate::execution::StructuralTransientSolverPlan::Direct,
             time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 8 },
             residual_target: 1.0e-10,
         };
-        let mut workloads = StructuralStudyWorkloads::DirectTransient {
+        let mut workloads = StructuralStudyWorkloads::StructuralTransient {
             workload: Box::new(workload),
             block_plan: StructuralTransientBlockPlan::new(3).unwrap(),
         };

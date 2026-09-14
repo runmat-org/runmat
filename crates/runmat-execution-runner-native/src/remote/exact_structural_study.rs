@@ -267,7 +267,7 @@ pub(super) async fn execute_with_completed_meshing(
                 },
             )?
         }
-        StructuralStudyWorkloads::DirectTransient {
+        StructuralStudyWorkloads::StructuralTransient {
             workload,
             block_plan,
         } => {
@@ -278,7 +278,7 @@ pub(super) async fn execute_with_completed_meshing(
                 } => (restored, publisher),
                 StructuralTransientRecoveryAdmission::Unavailable => {
                     return Ok(RemoteExactStructuralStudyComposition::Failed(
-                        "direct transient execution requires a transactional recovery publisher"
+                        "structural transient execution requires a transactional recovery publisher"
                             .into(),
                     ))
                 }
@@ -297,6 +297,7 @@ pub(super) async fn execute_with_completed_meshing(
                 StructuralTransientSequencePreparationInput {
                     workload: &workload,
                     mesh: &completed.result.artifact,
+                    modal_state: None,
                     block_plan,
                     artifact_access: decoded.artifact_access.clone(),
                     program_revision: request.recipe.program_revision.clone(),
@@ -322,7 +323,7 @@ pub(super) async fn execute_with_completed_meshing(
                 &decoded,
                 &completed.result,
                 &boundary_objects,
-                crate::exact_structural_study_root::ExactStructuralAnalysisPublication::DirectTransient {
+                crate::exact_structural_study_root::ExactStructuralAnalysisPublication::StructuralTransient {
                     signals: &completed_signals,
                     completion: &completion,
                     unresolved_workloads_digest,
