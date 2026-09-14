@@ -22,6 +22,7 @@ const BUNDLE_DECISIONS = Object.freeze([
   "additional_authored_write_set",
   "integration_product_refs",
   "module_composition_transition",
+  "source_migrations",
   "expected_removals",
   "baseline_evidence",
   "gate_plans",
@@ -113,7 +114,7 @@ export function buildControlOverlayScaffold(inventoryValue, draftValue, reviewed
     .sort((left, right) => compareCodePoint(left.finding_digest, right.finding_digest));
 
   const payload = {
-    schema_version: 5,
+    schema_version: 6,
     kind: KIND,
     authority: AUTHORITY,
     program: PROGRAM,
@@ -143,7 +144,7 @@ export function parseControlOverlayScaffold(value, inventoryValue, draftValue, r
   if (value.authority !== AUTHORITY) {
     throw new Error("control overlay scaffold cannot claim or accept reviewed authority");
   }
-  kind(value, 5, KIND, "control overlay scaffold");
+  kind(value, 6, KIND, "control overlay scaffold");
   if (value.review?.status !== "unreviewed") {
     throw new Error("control overlay scaffold cannot claim review");
   }

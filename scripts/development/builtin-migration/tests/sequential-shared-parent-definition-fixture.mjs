@@ -62,6 +62,7 @@ export function sequentialBundleControls(inventory, { parallelBundles = false } 
           product_id: "runtime-math-reduction", operation: "add", before: null, after: child,
         }],
       },
+      source_migrations: [],
       expected_removals: [],
       baseline_evidence: bundleBaselineEvidence(inventory, [identity]),
       gate_plans: structuredClone(gatePlans),

@@ -16,7 +16,7 @@ import {
 
 export function parseVerificationResult(value, control, { requirePassing = false } = {}) {
   assertValidatedControl(control);
-  kind(value, 7, "runmat-builtin-migration-verification-result", "verification result");
+  kind(value, 8, "runmat-builtin-migration-verification-result", "verification result");
   exact(value, [
     "schema_version", "kind", "authority", "artifact_id", "source_revision",
     "source_digest", "control_baseline_inventory_digest", "lease_base_inventory_digest",

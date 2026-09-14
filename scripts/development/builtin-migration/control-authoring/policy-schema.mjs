@@ -8,6 +8,7 @@ import { GATE_PRODUCERS } from "../gate-kinds.mjs";
 import { GATE_PARSERS, parseGatePlans, parseGateProgram } from "../gate-plan.mjs";
 import { parseIntegrationProductReferences } from "../integration-products.mjs";
 import { parseUniqueReviewedEvidence } from "../reviewed-evidence.mjs";
+import { parseSourceMigrations } from "../source-migrations.mjs";
 import {
   parseIdentityForms, parseImplementationAuthority, parsePublicIdentity,
 } from "../identity-authority.mjs";
@@ -62,7 +63,7 @@ export function parseOperationalBundleControlPolicy(value, id, inventory, identi
 }
 
 function parseBundlePolicy(value, id, identities, inventory, parsePlans) {
-  exact(value, ["prerequisites", "additional_authored_write_set", "integration_product_refs", "module_composition_transition", "expected_removals", "baseline_evidence", "gate_plans", "owner_role", "complexity", "review"], `${id} bundle control`);
+  exact(value, ["prerequisites", "additional_authored_write_set", "integration_product_refs", "module_composition_transition", "source_migrations", "expected_removals", "baseline_evidence", "gate_plans", "owner_role", "complexity", "review"], `${id} bundle control`);
   array(value.prerequisites, `${id} prerequisites`, { empty: true }).forEach((entry) => {
     exact(entry, ["bundle_id", "kind"], `${id} prerequisite`);
     stableId(entry.bundle_id, `${id} prerequisite bundle`);
@@ -81,6 +82,7 @@ function parseBundlePolicy(value, id, identities, inventory, parsePlans) {
     identities,
     id,
   );
+  parseSourceMigrations(value.source_migrations, id, identities, inventory, baselineEvidence);
   parseBundleRemovals(value.expected_removals, id, identities, baselineEvidence);
   parsePlans(value.gate_plans);
   nonempty(value.owner_role, `${id} owner role`);

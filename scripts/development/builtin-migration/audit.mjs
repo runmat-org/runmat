@@ -59,7 +59,7 @@ export function auditMigration(
   failures.push(...subject.diagnostics.filter((entry) => entry.severity === "error").map((entry) => issue("inventory-error", `${entry.code}:${entry.path ?? ""}`)));
   const passed = identities.filter((entry) => entry.result === "pass").length;
   return {
-    schema_version: 8, kind: "runmat-builtin-migration-audit", authority: "development-verification-evidence-only",
+    schema_version: 9, kind: "runmat-builtin-migration-audit", authority: "development-verification-evidence-only",
     artifact_id: evidence.artifact_id, source: subject.source,
     control_baseline_inventory_digest: controlBaseline.digest,
     lease_base_inventory_digest: leaseBase.digest,

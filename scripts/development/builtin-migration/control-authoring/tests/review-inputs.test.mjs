@@ -59,7 +59,7 @@ test("bundle and global reviews bind exact scaffold and topology rows", () => {
       /schema_version 6/,
     );
   }
-  for (const version of [3, 4, 6]) {
+  for (const version of [4, 5, 7]) {
     const wrongVersion = structuredClone(fixture.bundleReview);
     wrongVersion.schema_version = version;
     resign(wrongVersion);
@@ -67,7 +67,7 @@ test("bundle and global reviews bind exact scaffold and topology rows", () => {
       () => parseBundleControlReview(
         wrongVersion, fixture.scaffold, fixture.topology, fixture.inventory, global,
       ),
-      /schema_version 5/,
+      /schema_version 6/,
     );
   }
 
@@ -220,11 +220,11 @@ test("control composition and attestation are deterministic capabilities, not re
   };
   const candidate = composeControlCandidate(input);
   assert.deepEqual(candidate, composeControlCandidate(input));
-  assert.equal(candidate.schema_version, 6);
-  for (const version of [4, 5, 7]) {
+  assert.equal(candidate.schema_version, 7);
+  for (const version of [5, 6, 8]) {
     const wrongVersion = structuredClone(candidate);
     wrongVersion.schema_version = version;
-    assert.throws(() => parseControlCandidate(wrongVersion, candidate), /schema_version 6/);
+    assert.throws(() => parseControlCandidate(wrongVersion, candidate), /schema_version 7/);
   }
   assert.throws(
     () => composeControlCandidate({ ...input, reviewSet: { ...reviewSet } }),
@@ -249,7 +249,7 @@ test("control composition and attestation are deterministic capabilities, not re
   };
   const attestation = { ...attestationPayload, digest: evidenceDigest(attestationPayload) };
   const reviewed = validateControlReviewChain(candidate, attestation, candidate);
-  assert.equal(reviewed.controlValue.schema_version, 7);
+  assert.equal(reviewed.controlValue.schema_version, 8);
   assert.doesNotThrow(() => parseControlManifest(reviewed.controlValue, {
     inventory: fixture.inventory,
     reviewedTopology: fixture.topology,
@@ -281,6 +281,53 @@ test("control composition and attestation are deterministic capabilities, not re
   resign(forgedAttestation);
   assert.throws(
     () => validateControlReviewChain(forgedCandidate, forgedAttestation, candidate),
+    /deterministic recomposition/,
+  );
+});
+
+test("nonempty source migrations survive the complete reviewed control chain exactly", () => {
+  const fixture = reviewFixture({ sourceMigration: true });
+  const expected = fixture.bundleReview.bundle_control.source_migrations;
+  const directory = writeReviewSet(fixture);
+  const reviewSet = loadControlReviewSet(path.join(directory, "manifest.json"), fixture);
+  const reviewedBundle = reviewSet.bundleReviews.get(fixture.bundleId).bundleControl;
+  assert.deepEqual(reviewedBundle.source_migrations, expected);
+
+  const candidate = composeControlCandidate({ ...fixture, reviewSet });
+  assert.deepEqual(candidate.bundle_controls[fixture.bundleId].source_migrations, expected);
+  const attestationPayload = {
+    schema_version: 1,
+    kind: "runmat-builtin-migration-control-attestation",
+    authority: "reviewer-authored-development-input",
+    program: "RM-1064/C00-C07",
+    candidate_digest: candidate.digest,
+    input_digests: controlCandidateInputDigests(candidate),
+    review: { status: "reviewed", evidence: ["independent source-migration review"] },
+  };
+  const attestation = { ...attestationPayload, digest: evidenceDigest(attestationPayload) };
+  const reviewed = validateControlReviewChain(candidate, attestation, candidate);
+  assert.deepEqual(
+    reviewed.controlValue.bundle_controls[fixture.bundleId].source_migrations,
+    expected,
+  );
+  const control = parseControlManifest(reviewed.controlValue, {
+    inventory: fixture.inventory,
+    reviewedTopology: fixture.topology,
+    reviewedControl: reviewed,
+  });
+  assert.deepEqual(control.bundles.get(fixture.bundleId).source_migrations, expected);
+
+  const dropped = structuredClone(candidate);
+  dropped.bundle_controls[fixture.bundleId].source_migrations = [];
+  resign(dropped);
+  const forgedAttestation = {
+    ...structuredClone(attestation),
+    candidate_digest: dropped.digest,
+    input_digests: controlCandidateInputDigests(dropped),
+  };
+  resign(forgedAttestation);
+  assert.throws(
+    () => validateControlReviewChain(dropped, forgedAttestation, candidate),
     /deterministic recomposition/,
   );
 });
@@ -487,10 +534,16 @@ test("storage policy supports distinct host profiles and rejects ambiguous selec
   assert.throws(() => parseStoragePolicy(policy), /selectors must be unique/);
 });
 
-function reviewFixture() {
+function reviewFixture({ sourceMigration = false } = {}) {
   const id = "foo";
   const bundleId = "math-basic-foo";
   const repository = repositoryFixture({ identity: id });
+  const migrationSource = "crates/runmat-runtime/src/builtins/math/legacy.rs";
+  const migrationTarget = "crates/runmat-runtime/src/builtins/math/legacy/mod.rs";
+  const migrationSupport = "crates/runmat-runtime/src/builtins/math/legacy/support.rs";
+  if (sourceMigration) {
+    fs.writeFileSync(path.join(repository, migrationSource), "pub(crate) fn legacy_support() {}\n");
+  }
   const compiledInventory = compiledInventoryFixture(id);
   const dispositions = { schema_version: 1, kind: "runmat-builtin-dispositions", authority: "review-input-only", identities: {
     [id]: { disposition: "canonical", canonical: null, domain: "math", family: "basic", reason: null, review: { status: "reviewed", evidence: ["fixture review"] } },
@@ -507,14 +560,52 @@ function reviewFixture() {
   const maturity = Object.fromEntries(MATURITY_GATES.map((gate) => [gate, requiredMaturity.has(gate)
     ? { applicability: "required", reason: null, evidence: [] }
     : { applicability: "not-applicable", reason: "Outside the review-input fixture", evidence: ["fixture review"] }]));
+  const sourceMigrations = sourceMigration ? [{
+    strategy: "module-support-reparent",
+    source_path: migrationSource,
+    source_baseline_digest: inventory.source.files
+      .find((entry) => entry.path === migrationSource).content_digest,
+    promoted_target: { kind: "authored", path: migrationTarget },
+    destination_paths: [migrationTarget, migrationSupport],
+    support_destinations: [{ destination_path: migrationSupport, reexports: [] }],
+    identity_destinations: [],
+    reason: "Reparent shared legacy support beneath its authored module",
+    review: { status: "reviewed", evidence: ["fixture source-migration review"] },
+  }] : [];
+  const legacyBefore = {
+    module: "legacy", source_kind: "file", source_path: migrationSource,
+    role: "support", visibility: "private",
+    declaration_condition: { kind: "always" }, declaration_order: 1,
+    macro_use: false, reexports: [], aggregation_sources: [],
+  };
+  const legacyAfter = {
+    ...legacyBefore, source_kind: "directory", source_path: migrationTarget,
+  };
   const bundleControl = {
     prerequisites: [],
     additional_authored_write_set: [
       { kind: "tree", path: `crates/runmat-builtins/src/catalog/entries/math/basic/${id}` },
       { kind: "file", path: `crates/runmat-runtime/src/builtins/math/basic/${id}.rs` },
+      ...(sourceMigration ? [
+        { kind: "file", path: migrationSource },
+        { kind: "tree", path: path.posix.dirname(migrationTarget) },
+      ] : []),
     ],
-    integration_product_refs: ["wasm-registry"],
-    module_composition_transition: null,
+    integration_product_refs: sourceMigration
+      ? ["runtime-math", "wasm-registry"] : ["wasm-registry"],
+    module_composition_transition: sourceMigration ? {
+      schema_version: 5,
+      kind: "runmat-builtin-module-composition-transition",
+      transition_id: bundleId,
+      product_states: [{
+        product_id: "runtime-math", before_state: "present", after_state: "present",
+      }],
+      changes: [{
+        product_id: "runtime-math", operation: "replace",
+        before: legacyBefore, after: legacyAfter,
+      }],
+    } : null,
+    source_migrations: sourceMigrations,
     expected_removals: [],
     baseline_evidence: bundleBaselineEvidence(inventory, [id]),
     gate_plans: gatePolicy.gatePlans,
@@ -551,7 +642,7 @@ function reviewFixture() {
   const scaffoldBundle = scaffold.bundle_rows.find((entry) => entry.bundle_id === bundleId);
   const scaffoldIdentity = scaffold.identity_rows.find((entry) => entry.identity === id);
   const bundlePayload = {
-    schema_version: 5,
+    schema_version: 6,
     kind: "runmat-builtin-migration-bundle-control-review",
     authority: "reviewer-authored-development-input",
     program: "RM-1064/C00-C07",
@@ -580,7 +671,9 @@ function reviewFixture() {
         ["catalog-root", [fixtureRootCompositionChild("catalog")]],
         ["catalog-math", [fixtureCatalogCompositionChild()]],
         ["runtime-root", [fixtureRootCompositionChild("runtime")]],
-        ["runtime-math", [fixtureCompositionChild()]],
+        ["runtime-math", sourceMigration
+          ? [fixtureCompositionChild(), legacyBefore]
+          : [fixtureCompositionChild()]],
       ]),
       new Set(["catalog-math", "catalog-root", "runtime-math", "runtime-root"]),
     ),
@@ -592,7 +685,9 @@ function reviewFixture() {
     program: "RM-1064/C00-C07",
     bindings: { scaffold_digest: scaffold.digest, topology_digest: topology.digest, migration_finding_rows_digest: evidenceDigest(scaffold.migration_finding_rows), module_composition_reviewed_baseline_digest: moduleCompositionBaseline.digest },
     program_profiles: gatePolicy.programProfiles,
-    integration_products: fixtureIntegrationProducts(inventory),
+    integration_products: fixtureIntegrationProducts(
+      inventory, sourceMigration, "runtime-math",
+    ),
     module_composition_baseline: moduleCompositionBaseline,
     migration_findings: { schema_version: 1, kind: "runmat-builtin-migration-finding-dispositions", rows: [], review: { status: "reviewed", evidence: ["fixture review"] } },
     exception_manifest: { entries: [], review: { status: "reviewed", evidence: ["fixture review"] } },

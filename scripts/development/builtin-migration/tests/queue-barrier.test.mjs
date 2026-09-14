@@ -237,6 +237,7 @@ function bundle(id, identity) {
 function passingSeal(fixture) {
   const bundle = fixture.control.bundles.get(fixture.bundleId);
   const reviewedAuthoredWriteSet = structuredClone(bundle.authored_write_set);
+  const reviewedSourceMigrations = structuredClone(bundle.source_migrations);
   const reviewedIntegrationOutputs = bundle.integration_outputs.map(
     ({ product_id, path, producer }) => ({ product_id, path, producer }),
   );
@@ -247,8 +248,10 @@ function passingSeal(fixture) {
     authored_changed_paths: [],
     integration_changed_paths: [],
     reviewed_authored_write_set: reviewedAuthoredWriteSet,
+    reviewed_source_migrations: reviewedSourceMigrations,
     reviewed_integration_outputs: reviewedIntegrationOutputs,
     authored_write_set_digest: evidenceDigest(reviewedAuthoredWriteSet),
+    source_migrations_digest: evidenceDigest(reviewedSourceMigrations),
     integration_outputs_digest: evidenceDigest(reviewedIntegrationOutputs),
   };
   const barrierSeals = [];
@@ -279,7 +282,7 @@ function passingSeal(fixture) {
     fixture.control, fixture.bundleId, "pilot", gates,
   );
   return {
-    schema_version: 6,
+    schema_version: 7,
     kind: "runmat-builtin-migration-seal-result",
     authority: "development-integration-evidence-only",
     seal_id: "seal-fixture",

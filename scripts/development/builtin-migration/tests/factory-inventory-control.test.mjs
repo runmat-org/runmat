@@ -352,10 +352,10 @@ test("compiled migration findings and non-identity legacy spec keys remain expli
 test("control is closed, reviewed, reciprocal, and rejects case-fold ambiguity", () => {
   const fixture = controlledFixture();
   assert.equal(fixture.control.identities.get("foo").public_identity.primary_spelling.spelling, "foo");
-  const legacy = structuredClone(fixture.controlValue); legacy.schema_version = 6;
-  assert.throws(() => parseFixtureControl(fixture, legacy), /schema_version 7/);
-  const future = structuredClone(fixture.controlValue); future.schema_version = 8;
-  assert.throws(() => parseFixtureControl(fixture, future), /schema_version 7/);
+  const legacy = structuredClone(fixture.controlValue); legacy.schema_version = 7;
+  assert.throws(() => parseFixtureControl(fixture, legacy), /schema_version 8/);
+  const future = structuredClone(fixture.controlValue); future.schema_version = 9;
+  assert.throws(() => parseFixtureControl(fixture, future), /schema_version 8/);
   const extra = structuredClone(fixture.controlValue); extra.unreviewed = true;
   assert.throws(() => parseFixtureControl(fixture, extra), /fields must be exactly/);
   const collision = structuredClone(fixture.controlValue); collision.identity_controls.Foo = structuredClone(collision.identity_controls.foo);

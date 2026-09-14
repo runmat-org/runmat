@@ -20,7 +20,7 @@ function evidence() {
   const auditReference = digestReference("audit.json", "audit-foo", audit);
   const gateReferences = gates.map((value) => digestReference(`${value.artifact_id}.json`, value.artifact_id, value));
   const manifest = {
-    schema_version: 7, kind: "runmat-builtin-migration-verification-manifest", authority: "reviewed-verification-request",
+    schema_version: 8, kind: "runmat-builtin-migration-verification-manifest", authority: "reviewed-verification-request",
     batch: { artifact_id: "verify-foo", source_revision: fixture.inventory.source.revision, source_digest: fixture.inventory.source.digest, control_baseline_inventory_digest: fixture.inventory.digest, lease_base_inventory_digest: fixture.inventory.digest, subject_inventory_digest: fixture.inventory.digest, control_manifest_digest: fixture.control.digest, bundle_id: fixture.bundleId, lease_id: fixture.lease.value.lease_id, lease_digest: fixture.lease.value.digest, queue_phase: fixture.lease.value.queue_phase, accepted_seals: fixture.lease.value.accepted_seals, accepted_seal_set_digest: fixture.lease.value.accepted_seal_set_digest, barrier_seals: fixture.lease.value.barrier_seals, barrier_seal_set_digest: fixture.lease.value.barrier_seal_set_digest, identities: ["foo"], phases: audit.phases },
     audit: auditReference, gate_results: gateReferences,
     expectations: [{ identity: "foo", required_gates: ["architecture", "catalog-contract", "documentation-cutover", "focused-tests", "format-diff", "native-link", "runtime-binding", "strict-clippy"] }],
@@ -30,10 +30,10 @@ function evidence() {
   return { fixture, audit, gates, manifest, loadedAudit, loadedGates };
 }
 
-test("verification v7 passes only exact, content-addressed audit and gate evidence", () => {
+test("verification v8 passes only exact, content-addressed audit and gate evidence", () => {
   const input = evidence();
   const result = verifyBatch(input.manifest, input.loadedAudit, input.loadedGates, input.fixture.control);
-  assert.equal(result.schema_version, 7);
+  assert.equal(result.schema_version, 8);
   assert.equal(result.result, "pass");
 });
 
@@ -44,10 +44,10 @@ test("verification rejects missing, duplicate, stale, and mutated evidence", () 
   assert.throws(() => verifyBatch(duplicate, input.loadedAudit, input.loadedGates, input.fixture.control), /unique/);
   const mutated = structuredClone(input.loadedGates); mutated[0].value.checks[0].evidence_digest = `sha256:${"f".repeat(64)}`;
   assert.ok(verifyBatch(input.manifest, input.loadedAudit, mutated, input.fixture.control).global_failures.some((entry) => entry.code === "gate-digest-mismatch"));
-  const future = structuredClone(input.manifest); future.schema_version = 8;
-  assert.throws(() => verifyBatch(future, input.loadedAudit, input.loadedGates, input.fixture.control), /schema_version 7/);
-  const legacy = structuredClone(input.manifest); legacy.schema_version = 6;
-  assert.throws(() => verifyBatch(legacy, input.loadedAudit, input.loadedGates, input.fixture.control), /schema_version 7/);
+  const future = structuredClone(input.manifest); future.schema_version = 9;
+  assert.throws(() => verifyBatch(future, input.loadedAudit, input.loadedGates, input.fixture.control), /schema_version 8/);
+  const legacy = structuredClone(input.manifest); legacy.schema_version = 7;
+  assert.throws(() => verifyBatch(legacy, input.loadedAudit, input.loadedGates, input.fixture.control), /schema_version 8/);
   const inconsistentAudit = structuredClone(input.loadedAudit);
   inconsistentAudit.value.identities[0].failures.push({ code: "forged", detail: "ignored" });
   inconsistentAudit.reference.digest = evidenceDigest(inconsistentAudit.value);
@@ -113,7 +113,7 @@ test("seal requires a passing exact verification plus deterministic products and
   const integration = [gate(input.fixture, "deterministic-products"), gate(input.fixture, "inventory-delta")];
   const references = integration.map((value) => digestReference(`${value.artifact_id}.json`, value.artifact_id, value));
   const manifest = {
-    schema_version: 6, kind: "runmat-builtin-migration-seal-manifest", authority: "reviewed-integration-request", seal_id: "seal-foo", bundle_id: input.fixture.bundleId, lease_id: input.fixture.lease.value.lease_id, lease_digest: input.fixture.lease.value.digest, queue_phase: input.fixture.lease.value.queue_phase, identities: ["foo"], phases: verification.phases,
+    schema_version: 7, kind: "runmat-builtin-migration-seal-manifest", authority: "reviewed-integration-request", seal_id: "seal-foo", bundle_id: input.fixture.bundleId, lease_id: input.fixture.lease.value.lease_id, lease_digest: input.fixture.lease.value.digest, queue_phase: input.fixture.lease.value.queue_phase, identities: ["foo"], phases: verification.phases,
     source_revision: input.fixture.inventory.source.revision, source_digest: input.fixture.inventory.source.digest, control_baseline_inventory_digest: input.fixture.inventory.digest, lease_base_inventory_digest: input.fixture.inventory.digest, subject_inventory_digest: input.fixture.inventory.digest, control_manifest_digest: input.fixture.control.digest,
     accepted_seals: input.fixture.lease.value.accepted_seals, accepted_seal_set_digest: input.fixture.lease.value.accepted_seal_set_digest,
     barrier_seals: input.fixture.lease.value.barrier_seals, barrier_seal_set_digest: input.fixture.lease.value.barrier_seal_set_digest,

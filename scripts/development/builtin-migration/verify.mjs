@@ -48,7 +48,7 @@ export function verifyBatch(manifestValue, loadedAudit, loadedGates, control) {
   });
   const passed = identities.filter((entry) => entry.result === "pass").length;
   const value = {
-    schema_version: 7, kind: "runmat-builtin-migration-verification-result", authority: "development-verification-evidence-only",
+    schema_version: 8, kind: "runmat-builtin-migration-verification-result", authority: "development-verification-evidence-only",
     artifact_id: manifest.batch.artifact_id, source_revision: manifest.batch.source_revision, source_digest: manifest.batch.source_digest,
     control_baseline_inventory_digest: manifest.batch.control_baseline_inventory_digest,
     lease_base_inventory_digest: manifest.batch.lease_base_inventory_digest,

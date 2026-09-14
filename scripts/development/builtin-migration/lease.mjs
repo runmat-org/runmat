@@ -75,7 +75,7 @@ export function issueLease(
     throw new Error(`lease base does not preserve sealed semantic authority: ${semanticFailures.join("; ")}`);
   }
   const payload = {
-    schema_version: 5,
+    schema_version: 6,
     kind: "runmat-builtin-migration-authored-lease",
     authority: "derived-from-reviewed-control",
     request: structuredClone(requestValue),
@@ -92,6 +92,7 @@ export function issueLease(
     barrier_seals: structuredClone(request.barrier_seals),
     barrier_seal_set_digest: request.barrier_seal_set_digest,
     authored_write_set: bundle.authored_write_set,
+    source_migrations: bundle.source_migrations,
     forbidden_integration_outputs: bundle.integration_outputs.map(({ product_id, path, producer }) => ({ product_id, path, producer })),
     issued_at: request.issued_at,
     expires_at: request.expires_at,
@@ -136,8 +137,8 @@ export function parseLeaseRequest(value, control) {
 
 export function parseLease(value, control, repository, changedPaths = null) {
   assertValidatedControl(control);
-  kind(value, 5, "runmat-builtin-migration-authored-lease", "authored lease");
-  exact(value, ["schema_version", "kind", "authority", "request", "control_manifest_digest", "bundle_id", "lease_id", "owner", "base_revision", "lease_base_inventory", "queue_checkpoint_digest", "queue_phase", "accepted_seals", "accepted_seal_set_digest", "barrier_seals", "barrier_seal_set_digest", "authored_write_set", "forbidden_integration_outputs", "issued_at", "expires_at", "digest"], "authored lease");
+  kind(value, 6, "runmat-builtin-migration-authored-lease", "authored lease");
+  exact(value, ["schema_version", "kind", "authority", "request", "control_manifest_digest", "bundle_id", "lease_id", "owner", "base_revision", "lease_base_inventory", "queue_checkpoint_digest", "queue_phase", "accepted_seals", "accepted_seal_set_digest", "barrier_seals", "barrier_seal_set_digest", "authored_write_set", "source_migrations", "forbidden_integration_outputs", "issued_at", "expires_at", "digest"], "authored lease");
   if (value.authority !== "derived-from-reviewed-control") throw new Error("authored lease has invalid authority");
   const request = parseLeaseRequest(value.request, control);
   if (value.control_manifest_digest !== control.digest) throw new Error("lease was issued for another control manifest");
@@ -180,8 +181,10 @@ export function parseLease(value, control, repository, changedPaths = null) {
   }
   if (value.bundle_id !== request.bundle_id || value.lease_id !== request.lease_id || value.owner !== request.owner || value.issued_at !== request.issued_at || value.expires_at !== request.expires_at) throw new Error("lease fields differ from the reviewed request");
   const authored = array(value.authored_write_set, "lease authored write set");
+  const sourceMigrations = array(value.source_migrations, "lease source migrations", { empty: true });
   const generated = array(value.forbidden_integration_outputs, "lease forbidden integration outputs", { empty: true });
   if (JSON.stringify(authored) !== JSON.stringify(bundle.authored_write_set)) throw new Error("lease authored write set differs from reviewed bundle scope");
+  if (JSON.stringify(sourceMigrations) !== JSON.stringify(bundle.source_migrations)) throw new Error("lease source migrations differ from reviewed bundle control");
   if (JSON.stringify(generated) !== JSON.stringify(bundle.integration_outputs.map(({ product_id, path, producer }) => ({ product_id, path, producer })))) {
     throw new Error("lease integration-output exclusions differ from reviewed bundle scope");
   }

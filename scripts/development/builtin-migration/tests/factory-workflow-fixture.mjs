@@ -200,6 +200,7 @@ function fullChainControl(inventory, topology, scaffold) {
       .map((sourcePath) => ({ kind: "file", path: sourcePath })),
     integration_product_refs: [],
     module_composition_transition: null,
+    source_migrations: [],
     expected_removals: [],
     baseline_evidence: bundleBaselineEvidence(inventory, topology.bundles[bundleId].identities),
     gate_plans: gatePlans,
@@ -231,7 +232,7 @@ function fullChainControl(inventory, topology, scaffold) {
     }];
   }));
   const payload = {
-    schema_version: 7,
+    schema_version: 8,
     kind: "runmat-builtin-migration-control-manifest",
     authority: "reviewed-development-control",
     program: "RM-1064/C00-C07",
@@ -348,7 +349,7 @@ function writeFullControlReviewSet(directory, inventory, topology, scaffold, pol
         .find((row) => row.identity === identity).proposal_digest,
     }));
     const bundlePayload = {
-      schema_version: 5,
+      schema_version: 6,
       kind: "runmat-builtin-migration-bundle-control-review",
       authority: "reviewer-authored-development-input",
       program: "RM-1064/C00-C07",

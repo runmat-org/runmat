@@ -105,7 +105,7 @@ function bundleTemplate(bundleId, scaffold, topology) {
   const bundle = topology.bundles.get(bundleId);
   const scaffoldBundle = scaffold.bundle_rows.find((row) => row.bundle_id === bundleId);
   return {
-    schema_version: 5,
+    schema_version: 6,
     kind: "runmat-builtin-migration-bundle-control-review",
     authority: "reviewer-authored-development-input",
     program: PROGRAM,
@@ -128,6 +128,7 @@ function bundleTemplate(bundleId, scaffold, topology) {
       additional_authored_write_set: null,
       integration_product_refs: null,
       module_composition_transition: null,
+      source_migrations: [],
       expected_removals: null,
       baseline_evidence: scaffoldBundle.observations.typed_paths
         .filter((entry) => entry.kind !== "generated-registry")

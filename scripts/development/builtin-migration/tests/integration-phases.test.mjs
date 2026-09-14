@@ -104,12 +104,13 @@ test("integration path policy handles shared products and bundles with no produc
       { product_id: "wasm-registry", path: sharedProduct, producer: "integration" },
       { product_id: "wasm-registry-alias", path: sharedProduct, producer: "integration" },
     ],
+    source_migrations: [],
   }, ["crates/runmat-runtime/src/builtins/math/basic/foo.rs"], [sharedProduct]));
   assert.doesNotThrow(() => validateMigrationPhasePaths({
-    authored_write_set: authored, integration_outputs: [],
+    authored_write_set: authored, integration_outputs: [], source_migrations: [],
   }, ["crates/runmat-runtime/src/builtins/math/basic/foo.rs"], []));
   assert.throws(() => validateMigrationPhasePaths({
-    authored_write_set: authored, integration_outputs: [],
+    authored_write_set: authored, integration_outputs: [], source_migrations: [],
   }, [], [sharedProduct]), /non-product paths/);
 });
 

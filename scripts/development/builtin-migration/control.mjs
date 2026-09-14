@@ -29,7 +29,7 @@ export function validateControlManifestStructure(value, { inventory: current, re
     throw new Error("control manifest validation requires the exact inventory and deterministically validated topology");
   }
   assertValidatedTopologyView(reviewedTopology);
-  kind(value, 7, "runmat-builtin-migration-control-manifest", "control manifest");
+  kind(value, 8, "runmat-builtin-migration-control-manifest", "control manifest");
   exact(value, ["schema_version", "kind", "authority", "program", "inputs", "topology_digest", "candidate_digest", "attestation_digest", "baseline_context", "cohorts", "bundle_controls", "identity_controls", "integration_products", "module_composition_baseline", "migration_findings", "exception_manifest", "target_policy", "storage_policy", "pilot_policy", "review", "digest"], "control manifest");
   if (value.authority !== "reviewed-development-control") throw new Error("control manifest has invalid authority");
   if (value.program !== "RM-1064/C00-C07") throw new Error("control manifest has unexpected program");
@@ -191,7 +191,7 @@ function parseCohorts(value) {
 
 function parseBundle(id, value, current) {
   stableId(id, "bundle id");
-  exact(value, ["id", "identities", "atomic_reason", "prerequisites", "integration_product_refs", "module_composition_transition", "expected_removals", "baseline_evidence", "authored_write_set", "integration_outputs", "gate_plans", "owner_role", "complexity", "review"], `${id} bundle`);
+  exact(value, ["id", "identities", "atomic_reason", "prerequisites", "integration_product_refs", "module_composition_transition", "source_migrations", "expected_removals", "baseline_evidence", "authored_write_set", "integration_outputs", "gate_plans", "owner_role", "complexity", "review"], `${id} bundle`);
   if (value.id !== id) throw new Error(`${id}: bundle key and id differ`);
   const result = {
     ...value,
@@ -269,6 +269,16 @@ function validateBaseline(baseline, current, bundles, identities) {
   for (const bundle of bundles.values()) for (const removal of bundle.expected_removals) {
     if (sourceFiles.get(removal.path) !== removal.baseline_digest) {
       throw new Error(`${bundle.id}: file removal baseline does not match the content-derived source snapshot`);
+    }
+  }
+  for (const bundle of bundles.values()) for (const migration of bundle.source_migrations) {
+    if (sourceFiles.get(migration.source_path) !== migration.source_baseline_digest) {
+      throw new Error(`${bundle.id}: source migration baseline does not match the content-derived source snapshot`);
+    }
+    for (const destination of migration.destination_paths) {
+      if (sourceFiles.has(destination)) {
+        throw new Error(`${bundle.id}: source migration destination exists in the baseline snapshot`);
+      }
     }
   }
 }

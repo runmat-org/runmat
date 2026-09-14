@@ -145,7 +145,7 @@ function bundleReview({
   profileByProgram,
 }) {
   const payload = {
-    schema_version: 5,
+    schema_version: 6,
     kind: "runmat-builtin-migration-bundle-control-review",
     authority: "reviewer-authored-development-input",
     program: "RM-1064/C00-C07",
