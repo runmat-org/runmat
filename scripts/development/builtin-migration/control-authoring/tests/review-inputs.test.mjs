@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -543,6 +544,11 @@ function reviewFixture({ sourceMigration = false } = {}) {
   const migrationSupport = "crates/runmat-runtime/src/builtins/math/legacy/support.rs";
   if (sourceMigration) {
     fs.writeFileSync(path.join(repository, migrationSource), "pub(crate) fn legacy_support() {}\n");
+    execFileSync("git", ["add", migrationSource], { cwd: repository });
+    execFileSync("git", [
+      "-c", "user.name=RunMat Test", "-c", "user.email=test@runmat.invalid",
+      "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "add legacy source",
+    ], { cwd: repository });
   }
   const compiledInventory = compiledInventoryFixture(id);
   const dispositions = { schema_version: 1, kind: "runmat-builtin-dispositions", authority: "review-input-only", identities: {
