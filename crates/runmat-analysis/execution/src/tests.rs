@@ -20,6 +20,7 @@ use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_artifact::{ArtifactAccess, ObjectNamespace, ProgramExecutionObjectLocation};
 
 use super::*;
+use crate::response::prepare_analysis_output_set;
 
 #[path = "tests/observation_history_checkpoint.rs"]
 mod observation_history_checkpoint_tests;
@@ -998,6 +999,31 @@ fn serial_execution_imports_closed_inputs_and_publishes_closed_results() {
     response.validate_against(&host, &completed).unwrap();
     assert_eq!(completed.output_set.outputs.len(), 1);
     assert_eq!(completed.output_set.outputs[0].root, completed.roots[0]);
+    let prepared_output_set = prepare_analysis_output_set(
+        &host,
+        completed.identity,
+        &completed.outputs,
+        &completed.roots,
+    )
+    .unwrap();
+    assert!(prepared_output_set
+        .validate_resource_facts(
+            &runmat_analysis_fea::planning::resource::PreparedOutputSetResourceFacts {
+                encoded_bytes_upper_bound: runmat_analysis_fea::planning::resource::ByteCount(
+                    prepared_output_set.object.bytes.len() as u64,
+                ),
+            }
+        )
+        .is_ok());
+    assert!(prepared_output_set
+        .validate_resource_facts(
+            &runmat_analysis_fea::planning::resource::PreparedOutputSetResourceFacts {
+                encoded_bytes_upper_bound: runmat_analysis_fea::planning::resource::ByteCount(
+                    prepared_output_set.object.bytes.len() as u64 - 1,
+                ),
+            }
+        )
+        .is_err());
     let mut substituted_output_set = completed.output_set.clone();
     substituted_output_set.outputs[0].payload_digest = digest("substituted-field-payload");
     assert!(substituted_output_set.validate_against(&host).is_err());
@@ -1781,7 +1807,6 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
     )
     .unwrap();
     assert_eq!(observation_fanout.partitions.len(), 5);
-    let observation_resource_plan = observation_fanout.resource_plan.clone();
     let mut partition_dependencies = BTreeMap::new();
     for partition in &observation_fanout.partitions {
         assert_eq!(
@@ -1810,13 +1835,13 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
                 ValuePayload::Inline(_) => unreachable!(),
             })
             .collect::<Vec<_>>();
-        let mut resources = observation_resource_plan.request.clone();
+        let mut resources = partition.resource_plan.request.clone();
         resources
             .required_capabilities
             .extend(partition.host.workload.generic_capabilities().unwrap());
         let submission = build_structural_task_submission(
             &partition.host,
-            &observation_resource_plan,
+            &partition.resource_plan,
             roots,
             Vec::new(),
             BTreeSet::new(),
@@ -1889,8 +1914,6 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
                 source_request: distributed_source_request.clone(),
                 partition_plan,
                 contributions,
-                expected_resource_plan: observation_resource_plan.clone(),
-                resource_plan: observation_resource_plan_objects.clone(),
                 program_revision: revision(),
                 chunk_bytes: 4096,
                 inventory_limits: ObjectInventoryLimits::default(),
@@ -1989,8 +2012,6 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
             source_host: field_prepared.host.clone(),
             source_request: distributed_source_request.clone(),
             results: distributed_results,
-            expected_resource_plan: observation_resource_plan.clone(),
-            resource_plan: observation_resource_plan_objects.clone(),
             program_revision: revision(),
             chunk_bytes: 4096,
             inventory_limits: ObjectInventoryLimits::default(),

@@ -1,7 +1,6 @@
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use serde::{Deserialize, Serialize};
 
-use crate::planning::resource::{FeaResourcePlan, FeaResourcePlanIdentity};
 use crate::results::{
     field::{RecoveredFieldPartitionSet, RecoveredFieldPartitionSetIdentity},
     observation::{
@@ -22,31 +21,6 @@ const PARTITION_REDUCTION_PREFIX: &[u8] = b"runmat-analysis-observation-partitio
 const PARTITION_REQUEST_LIMITS: CanonicalLimits =
     CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64);
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", tag = "kind")]
-pub enum ObservationPartitionExecutionTarget {
-    Host,
-    GovernedAccelerator { class: String },
-}
-
-impl ObservationPartitionExecutionTarget {
-    fn validate(&self) -> AnalysisExecutionResult<()> {
-        let Self::GovernedAccelerator { class } = self else {
-            return Ok(());
-        };
-        if class.is_empty()
-            || class.len() > 256
-            || !class.is_ascii()
-            || class.chars().any(char::is_control)
-        {
-            return Err(AnalysisExecutionError::Invalid(
-                "observation accelerator class is invalid".into(),
-            ));
-        }
-        Ok(())
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(
     deny_unknown_fields,
@@ -61,8 +35,6 @@ pub struct ObservationPartitionEvaluationRequest {
     pub partition: ObservationPartitionIdentity,
     pub source_field_partitions: RecoveredFieldPartitionSetIdentity,
     pub event_attribution: Option<ObservationEventAttribution>,
-    pub resource_plan: FeaResourcePlanIdentity,
-    pub execution_target: ObservationPartitionExecutionTarget,
 }
 
 #[derive(Deserialize)]
@@ -76,8 +48,6 @@ struct ObservationPartitionEvaluationRequestWire {
     partition: ObservationPartitionIdentity,
     source_field_partitions: RecoveredFieldPartitionSetIdentity,
     event_attribution: Option<ObservationEventAttribution>,
-    resource_plan: FeaResourcePlanIdentity,
-    execution_target: ObservationPartitionExecutionTarget,
 }
 
 impl TryFrom<ObservationPartitionEvaluationRequestWire> for ObservationPartitionEvaluationRequest {
@@ -93,8 +63,6 @@ impl TryFrom<ObservationPartitionEvaluationRequestWire> for ObservationPartition
             partition: wire.partition,
             source_field_partitions: wire.source_field_partitions,
             event_attribution: wire.event_attribution,
-            resource_plan: wire.resource_plan,
-            execution_target: wire.execution_target,
         };
         request.validate_identity()?;
         Ok(request)
@@ -108,8 +76,6 @@ impl ObservationPartitionEvaluationRequest {
         partition: &ObservationPartition,
         source_field: &RecoveredFieldPartitionSet,
         event_attribution: Option<ObservationEventAttribution>,
-        resource_plan: &FeaResourcePlan,
-        execution_target: ObservationPartitionExecutionTarget,
     ) -> AnalysisExecutionResult<Self> {
         source.validate()?;
         partition_plan
@@ -119,10 +85,6 @@ impl ObservationPartitionEvaluationRequest {
             .validate()
             .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
         validate_event_attribution(source, partition_plan, source_field, event_attribution)?;
-        resource_plan
-            .validate_identity()
-            .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
-        validate_target_for_resource(&execution_target, resource_plan)?;
         if partition_plan
             .partitions
             .get(partition.ordinal as usize)
@@ -143,8 +105,6 @@ impl ObservationPartitionEvaluationRequest {
                     partition.identity,
                     source_field.identity,
                     event_attribution,
-                    resource_plan.identity,
-                    &execution_target,
                 ),
             )?,
             producer: source.producer,
@@ -153,8 +113,6 @@ impl ObservationPartitionEvaluationRequest {
             partition: partition.identity,
             source_field_partitions: source_field.identity,
             event_attribution,
-            resource_plan: resource_plan.identity,
-            execution_target,
         };
         request.validate_identity()?;
         Ok(request)
@@ -170,7 +128,6 @@ impl ObservationPartitionEvaluationRequest {
         partition_plan: &ObservationPartitionPlan,
         partition: &ObservationPartition,
         source_field: &RecoveredFieldPartitionSet,
-        resource_plan: &FeaResourcePlan,
     ) -> AnalysisExecutionResult<()> {
         self.validate_identity()?;
         source.validate()?;
@@ -181,16 +138,11 @@ impl ObservationPartitionEvaluationRequest {
             .validate()
             .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
         validate_event_attribution(source, partition_plan, source_field, self.event_attribution)?;
-        resource_plan
-            .validate_identity()
-            .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
-        validate_target_for_resource(&self.execution_target, resource_plan)?;
         if self.producer != source.producer
             || self.source_request != source.identity()
             || self.partition_plan != partition_plan.identity
             || self.partition != partition.identity
             || self.source_field_partitions != source_field.identity
-            || self.resource_plan != resource_plan.identity
             || partition_plan
                 .partitions
                 .get(partition.ordinal as usize)
@@ -232,8 +184,6 @@ impl ObservationPartitionEvaluationRequest {
                 self.partition,
                 self.source_field_partitions,
                 self.event_attribution,
-                self.resource_plan,
-                &self.execution_target,
             ),
         )?;
         if let Some(attribution) = self.event_attribution {
@@ -241,7 +191,6 @@ impl ObservationPartitionEvaluationRequest {
                 .validate()
                 .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
         }
-        self.execution_target.validate()?;
         if self.schema_version != 1 || self.identity != expected {
             return Err(AnalysisExecutionError::Identity(
                 "observation partition evaluation request identity does not converge",
@@ -249,27 +198,6 @@ impl ObservationPartitionEvaluationRequest {
         }
         Ok(())
     }
-}
-
-fn validate_target_for_resource(
-    target: &ObservationPartitionExecutionTarget,
-    resource_plan: &FeaResourcePlan,
-) -> AnalysisExecutionResult<()> {
-    target.validate()?;
-    if let ObservationPartitionExecutionTarget::GovernedAccelerator { class } = target {
-        let matches = resource_plan
-            .request
-            .accelerators
-            .iter()
-            .filter(|accelerator| accelerator.class == *class)
-            .count();
-        if matches != 1 {
-            return Err(AnalysisExecutionError::Invalid(
-                "observation accelerator target lacks one exact resource allocation".into(),
-            ));
-        }
-    }
-    Ok(())
 }
 
 fn validate_event_attribution(
@@ -335,7 +263,6 @@ pub struct ObservationPartitionReductionRequest {
     pub source_request: ObservationEvaluationRequestIdentity,
     pub partition_plan: ObservationPartitionPlanIdentity,
     pub contributions: Vec<ObservationPartitionContributionIdentity>,
-    pub resource_plan: FeaResourcePlanIdentity,
 }
 
 #[derive(Deserialize)]
@@ -347,7 +274,6 @@ struct ObservationPartitionReductionRequestWire {
     source_request: ObservationEvaluationRequestIdentity,
     partition_plan: ObservationPartitionPlanIdentity,
     contributions: Vec<ObservationPartitionContributionIdentity>,
-    resource_plan: FeaResourcePlanIdentity,
 }
 
 impl TryFrom<ObservationPartitionReductionRequestWire> for ObservationPartitionReductionRequest {
@@ -361,7 +287,6 @@ impl TryFrom<ObservationPartitionReductionRequestWire> for ObservationPartitionR
             source_request: wire.source_request,
             partition_plan: wire.partition_plan,
             contributions: wire.contributions,
-            resource_plan: wire.resource_plan,
         };
         request.validate_identity()?;
         Ok(request)
@@ -373,7 +298,6 @@ impl ObservationPartitionReductionRequest {
         source: &ObservationEvaluationRequest,
         partition_plan: &ObservationPartitionPlan,
         contributions: &[ObservationPartitionContribution],
-        resource_plan: &FeaResourcePlan,
     ) -> AnalysisExecutionResult<Self> {
         source.validate()?;
         partition_plan
@@ -381,10 +305,6 @@ impl ObservationPartitionReductionRequest {
             .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
         validate_contributions(partition_plan, contributions)?;
         validate_contribution_attribution(source, partition_plan, contributions)?;
-        validate_acceleration_allocations(resource_plan, contributions)?;
-        resource_plan
-            .validate_identity()
-            .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
         let contribution_identities = contributions
             .iter()
             .map(|contribution| contribution.identity)
@@ -398,14 +318,12 @@ impl ObservationPartitionReductionRequest {
                     source.identity(),
                     partition_plan.identity,
                     &contribution_identities,
-                    resource_plan.identity,
                 ),
             )?,
             producer: source.producer,
             source_request: source.identity(),
             partition_plan: partition_plan.identity,
             contributions: contribution_identities,
-            resource_plan: resource_plan.identity,
         };
         request.validate_identity()?;
         Ok(request)
@@ -420,7 +338,6 @@ impl ObservationPartitionReductionRequest {
         source: &ObservationEvaluationRequest,
         partition_plan: &ObservationPartitionPlan,
         contributions: &[ObservationPartitionContribution],
-        resource_plan: &FeaResourcePlan,
     ) -> AnalysisExecutionResult<()> {
         self.validate_identity()?;
         source.validate()?;
@@ -429,14 +346,9 @@ impl ObservationPartitionReductionRequest {
             .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
         validate_contributions(partition_plan, contributions)?;
         validate_contribution_attribution(source, partition_plan, contributions)?;
-        validate_acceleration_allocations(resource_plan, contributions)?;
-        resource_plan
-            .validate_identity()
-            .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
         if self.producer != source.producer
             || self.source_request != source.identity()
             || self.partition_plan != partition_plan.identity
-            || self.resource_plan != resource_plan.identity
             || self.contributions
                 != contributions
                     .iter()
@@ -477,7 +389,6 @@ impl ObservationPartitionReductionRequest {
                 self.source_request,
                 self.partition_plan,
                 &self.contributions,
-                self.resource_plan,
             ),
         )?;
         if self.schema_version != 1 || self.contributions.is_empty() || self.identity != expected {
@@ -510,33 +421,6 @@ fn validate_contributions(
                 "observation contribution order or ownership differs from its plan",
             ));
         }
-    }
-    Ok(())
-}
-
-fn validate_acceleration_allocations(
-    resource_plan: &FeaResourcePlan,
-    contributions: &[ObservationPartitionContribution],
-) -> AnalysisExecutionResult<()> {
-    let accelerations = contributions
-        .iter()
-        .filter_map(|contribution| contribution.acceleration.as_ref())
-        .collect::<Vec<_>>();
-    if accelerations.is_empty() {
-        return Ok(());
-    }
-    let [allocation] = resource_plan.request.accelerators.as_slice() else {
-        return Err(AnalysisExecutionError::Identity(
-            "accelerated observation evidence has no unique resource-plan allocation",
-        ));
-    };
-    if accelerations
-        .iter()
-        .any(|evidence| evidence.validate_for_allocation(allocation).is_err())
-    {
-        return Err(AnalysisExecutionError::Identity(
-            "accelerated observation evidence differs from its resource-plan allocation",
-        ));
     }
     Ok(())
 }

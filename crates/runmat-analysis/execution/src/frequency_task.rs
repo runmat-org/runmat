@@ -7,7 +7,11 @@ use runmat_analysis_fea::execution::{
     StructuralFrequencyWorkload,
 };
 use runmat_analysis_fea::planning::resource::{
-    FeaResourcePhase, FeaResourcePlan, StructuralFrequencyEntryResourceProjection,
+    build_structural_frequency_result_assembly_resource_plan,
+    structural_frequency_entry_payload_bytes_upper_bound,
+    structural_frequency_receipt_payload_bytes_upper_bound,
+    structural_frequency_result_payload_bytes_upper_bound, FeaResourcePhase, FeaResourcePlan,
+    PreparedPhaseResourceFacts, StructuralFrequencyEntryResourceProjection,
 };
 use runmat_execution::value::ValueRefKind;
 use runmat_execution::ProgramRevision;
@@ -114,15 +118,30 @@ pub fn prepare_structural_frequency_fanout(
                 prepared.scope.clone(),
                 entry,
             )?;
-            let resource_plan = resource_projection
-                .plan_for(&request_value)
-                .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+            let output = crate::projected_output_resource_facts(
+                structural_frequency_entry_payload_bytes_upper_bound(&request_value)
+                    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
+            )?;
             let request = crate::prepare_structural_frequency_entry_request_objects(
                 &request_value,
                 preparation.chunk_bytes,
                 ObjectNamespace::InputValue,
                 preparation.inventory_limits,
             )?;
+            let mut phase_inputs = vec![
+                preparation.workload.clone(),
+                preparation.mesh.clone(),
+                request.clone(),
+            ];
+            phase_inputs.extend(preparation.modal_state.iter().cloned());
+            let resource_plan = resource_projection
+                .plan_for(
+                    &request_value,
+                    crate::prepared_input_resource_facts(&phase_inputs)?,
+                    output,
+                    crate::projected_output_set_resource_facts(),
+                )
+                .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
             let resource_plan_objects = crate::prepare_analysis_objects(
                 AnalysisNumericalObjectKind::ResourcePlan,
                 resource_plan.identity.digest(),
@@ -228,6 +247,12 @@ fn prepare_structural_frequency_entry_task_with_admitted_resource_plan(
                 Some(&mesh),
             )
             .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+        let mut phase_inputs = vec![
+            preparation.workload.clone(),
+            preparation.mesh.clone(),
+            preparation.request.clone(),
+        ];
+        phase_inputs.extend(preparation.modal_state.iter().cloned());
         runmat_analysis_fea::planning::resource::build_structural_frequency_entry_resource_plan(
             &mesh,
             &constraints,
@@ -235,6 +260,14 @@ fn prepare_structural_frequency_entry_task_with_admitted_resource_plan(
             &request,
             modal_state.as_ref(),
             &resource_plan.request.accelerators,
+            PreparedPhaseResourceFacts {
+                inputs: crate::prepared_input_resource_facts(&phase_inputs)?,
+                output: crate::projected_output_resource_facts(
+                    structural_frequency_entry_payload_bytes_upper_bound(&request)
+                        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
+                )?,
+                output_set: crate::projected_output_set_resource_facts(),
+            },
         )
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?
     };
@@ -329,11 +362,15 @@ pub struct StructuralFrequencyResultPreparation {
     pub entries: Vec<PreparedAnalysisObjects>,
     pub artifact_access: ArtifactAccess,
     pub program_revision: ProgramRevision,
+    pub chunk_bytes: usize,
+    pub inventory_limits: ObjectInventoryLimits,
 }
 
 pub struct PreparedStructuralFrequencyResultTask {
     pub request: StructuralFrequencyResultAssemblyRequest,
     pub entries: Vec<StructuralFrequencyEntryResult>,
+    pub resource_plan: FeaResourcePlan,
+    pub resource_plan_objects: PreparedAnalysisObjects,
     pub host: AnalysisHostWorkload,
     pub program: PreparedAnalysisProgram,
     pub inputs: Vec<PreparedAnalysisObjects>,
@@ -351,6 +388,11 @@ pub struct ImportedStructuralFrequencyResult {
 pub fn prepare_structural_frequency_result_task(
     preparation: StructuralFrequencyResultPreparation,
 ) -> AnalysisBridgeResult<PreparedStructuralFrequencyResultTask> {
+    if preparation.chunk_bytes == 0 {
+        return Err(AnalysisBridgeError::Invalid(
+            "structural frequency assembly requires bounded nonzero chunks".into(),
+        ));
+    }
     let request =
         decode_prepared_structural_frequency_result_assembly_request(&preparation.request)?;
     let entries = preparation
@@ -371,7 +413,42 @@ pub fn prepare_structural_frequency_result_task(
             "structural frequency entries have inconsistent task authority",
         ));
     }
-    let mut typed_inputs = vec![(preparation.request, ValueRefKind::DriverObject)];
+    let mut numerical_inputs = vec![preparation.request.clone()];
+    numerical_inputs.extend(preparation.entries.iter().cloned());
+    let input_facts = crate::prepared_input_resource_facts(&numerical_inputs)?;
+    let output_record_count = u64::try_from(entries.len())
+        .map_err(|_| AnalysisBridgeError::Invalid("frequency entry count overflows".into()))?
+        .checked_add(1)
+        .ok_or_else(|| AnalysisBridgeError::Invalid("frequency output count overflows".into()))?;
+    let result_payload_upper_bound =
+        structural_frequency_result_payload_bytes_upper_bound(&input_facts, output_record_count)
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let receipt_payload_upper_bound =
+        structural_frequency_receipt_payload_bytes_upper_bound(&input_facts, output_record_count)
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let resource_plan = build_structural_frequency_result_assembly_resource_plan(
+        &request,
+        &entries,
+        input_facts,
+        crate::projected_output_resource_facts(result_payload_upper_bound)?,
+        crate::projected_output_resource_facts(receipt_payload_upper_bound)?,
+        crate::projected_output_set_resource_facts(),
+    )
+    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let resource_plan_objects = crate::prepare_analysis_objects(
+        AnalysisNumericalObjectKind::ResourcePlan,
+        resource_plan.identity.digest(),
+        &resource_plan
+            .canonical_bytes()
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
+        preparation.chunk_bytes,
+        ObjectNamespace::InputValue,
+        preparation.inventory_limits,
+    )?;
+    let mut typed_inputs = vec![
+        (preparation.request, ValueRefKind::DriverObject),
+        (resource_plan_objects.clone(), ValueRefKind::DriverObject),
+    ];
     typed_inputs.extend(
         preparation
             .entries
@@ -412,6 +489,8 @@ pub fn prepare_structural_frequency_result_task(
     Ok(PreparedStructuralFrequencyResultTask {
         request,
         entries,
+        resource_plan,
+        resource_plan_objects,
         host,
         program,
         inputs,
@@ -453,8 +532,8 @@ pub fn import_structural_frequency_result(
     let numerical_receipt =
         crate::decode_prepared_structural_frequency_numerical_receipt(&receipt_objects)?;
     numerical_receipt.validate_for_result(&result)?;
-    let assembled = prepared.request.assemble(&prepared.entries)?;
-    if result != assembled.result || numerical_receipt != assembled.receipt {
+    let expected = prepared.request.assemble(&prepared.entries)?;
+    if result != expected.result || numerical_receipt != expected.receipt {
         return Err(AnalysisBridgeError::Identity(
             "structural frequency outputs differ from the prepared fan-in",
         ));

@@ -8,25 +8,38 @@ use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
 use crate::{
     constraints::CanonicalStructuralConstraintPlan,
     execution::{
-        CanonicalSemanticState, StructuralFrequencyEntryRequest, StructuralFrequencySolverPlan,
-        StructuralFrequencyWorkload,
+        CanonicalSemanticState, FieldRecoveryRequest, FieldRecoverySource,
+        StructuralFrequencyEntryRequest, StructuralFrequencyEntryResult,
+        StructuralFrequencySolverPlan, StructuralFrequencyWorkload,
     },
+    post::{complex_structural_field_layout, ComplexStructuralFieldCardinality},
     ComputeBackend,
 };
 
 use super::{
     build_resource_plan, structural_facts::derive_structural_resource_facts,
     AccuracyResourceDemand, AssemblyResourcePolicy, ByteCount, CheckpointArtifactPolicy, Count,
-    FeaResourcePhase, FeaResourcePlan, FeaResourcePlanningInput, ObservationResourceFacts,
-    PartitioningPolicy, RecoveryResourcePolicy, ResourcePlanningError, SolveResourcePolicy,
-    WorkerResourcePolicy, RESOURCE_ESTIMATION_MODEL_REVISION,
+    FeaResourceDemand, FeaResourcePhase, FeaResourcePlan, FeaResourcePlanningInput,
+    ObservationResourceFacts, PartitioningPolicy, PhaseResourcePolicy, PreparedInputResourceFacts,
+    PreparedOutputResourceFacts, PreparedOutputSetResourceFacts, PreparedPhaseResourceFacts,
+    ResourcePlanningError, SolveResourcePolicy, StructuralFrequencyOperatorResourceDemand,
+    StructuralOperatorResourceDemand, WorkerResourcePolicy, RESOURCE_ESTIMATION_MODEL_REVISION,
+};
+
+mod accounting;
+mod payload;
+
+use accounting::{direct_workspace_bytes, modal_workspace_bytes};
+use payload::recovery_payload_bytes_upper_bound;
+pub use payload::{
+    structural_frequency_entry_payload_bytes_upper_bound,
+    structural_frequency_recovery_payload_bytes_upper_bound,
 };
 
 const ASSEMBLY_SCRATCH_BYTES_PER_ELEMENT: u64 = 8 * 1024;
 const FIXED_ASSEMBLY_SCRATCH_BYTES: u64 = 64 * 1024;
 const FIXED_WORKER_MEMORY_BYTES: u64 = 16 * 1024 * 1024;
 const FIXED_WORKER_SCRATCH_BYTES: u64 = 8 * 1024 * 1024;
-const ARTIFACT_OVERHEAD_BYTES: u64 = 64 * 1024;
 
 /// Assembly-free reusable projection for every independently scheduled entry in one frequency
 /// workload. Expensive topology and reduced-pattern derivation occurs once per fan-out.
@@ -34,13 +47,16 @@ const ARTIFACT_OVERHEAD_BYTES: u64 = 64 * 1024;
 pub struct StructuralFrequencyEntryResourceProjection {
     workload: StructuralFrequencyWorkload,
     topology_digest: Digest,
-    operator_pattern_digest: Digest,
+    structural_topology: crate::physics::structural::topology::CanonicalStructuralTopologyIdentity,
+    numerical_scope_digest: Digest,
     topology: super::TopologyResourceFacts,
     sparse: super::SparseResourceFacts,
     constraints: super::ConstraintResourceFacts,
     assembly: AssemblyResourcePolicy,
     solve: SolveResourcePolicy,
     modal_operator_digest: Option<Digest>,
+    recovery_layout: crate::post::ComplexStructuralFieldLayout,
+    constraint_group_count: usize,
     worker: WorkerResourcePolicy,
     accuracy_ceiling: AccuracyResourceCeiling,
 }
@@ -176,13 +192,23 @@ impl StructuralFrequencyEntryResourceProjection {
         )?;
         let contribution_bytes =
             multiply(contribution_nonzeros, 24, "assembly contribution bytes")?;
+        let recovery_layout = complex_structural_field_layout(ComplexStructuralFieldCardinality {
+            structural_nodes: facts.recovery_node_count,
+            solid_elements: facts.recovery_solid_element_count,
+            beam_elements: facts.recovery_beam_element_count,
+            shell_elements: facts.recovery_shell_element_count,
+            constraint_groups: constraints.groups.len(),
+            has_rotational_dofs: facts.recovery_has_rotational_dofs,
+        })
+        .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
         let step = workload
             .procedure_step()
             .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
         Ok(Self {
             workload: workload.clone(),
             topology_digest: facts.topology_digest,
-            operator_pattern_digest: facts.symbolic.identity(),
+            structural_topology: constraints.topology,
+            numerical_scope_digest: facts.symbolic.identity(),
             topology: facts.topology,
             sparse: facts.sparse,
             constraints: facts.constraints,
@@ -194,6 +220,87 @@ impl StructuralFrequencyEntryResourceProjection {
             },
             solve,
             modal_operator_digest,
+            recovery_layout,
+            constraint_group_count: constraints.groups.len(),
+            worker: WorkerResourcePolicy {
+                cpu_millicores: 1_000,
+                maximum_wall_milliseconds: step.accuracy.resources.maximum_wall_time_milliseconds,
+                fixed_memory_bytes: ByteCount(FIXED_WORKER_MEMORY_BYTES),
+                fixed_scratch_bytes: ByteCount(FIXED_WORKER_SCRATCH_BYTES),
+                required_capabilities: BTreeSet::new(),
+                accelerators: Vec::new(),
+            },
+            accuracy_ceiling: step.accuracy.resources,
+        })
+    }
+
+    pub(super) fn for_recovery(
+        mesh: &SolverMeshArtifact,
+        constraints: &CanonicalStructuralConstraintPlan,
+        workload: &StructuralFrequencyWorkload,
+        accelerator_requests: &[AcceleratorRequest],
+    ) -> Result<Self, ResourcePlanningError> {
+        workload
+            .validate()
+            .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+        mesh.validate_canonical()
+            .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+        if workload.backend() != ComputeBackend::Cpu || !accelerator_requests.is_empty() {
+            return Err(ResourcePlanningError::Invalid(
+                "structural frequency recovery currently requires CPU resources without accelerators"
+                    .into(),
+            ));
+        }
+        let facts = derive_structural_resource_facts(workload.model(), Some(mesh), constraints)?;
+        let contribution_nonzeros = count(
+            facts
+                .symbolic
+                .stiffness_upper_bound()
+                .column_indices()
+                .len(),
+            "frequency recovery assembly contributions",
+        )?;
+        let recovery_layout = complex_structural_field_layout(ComplexStructuralFieldCardinality {
+            structural_nodes: facts.recovery_node_count,
+            solid_elements: facts.recovery_solid_element_count,
+            beam_elements: facts.recovery_beam_element_count,
+            shell_elements: facts.recovery_shell_element_count,
+            constraint_groups: constraints.groups.len(),
+            has_rotational_dofs: facts.recovery_has_rotational_dofs,
+        })
+        .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+        let step = workload
+            .procedure_step()
+            .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+        let full_dofs = facts.sparse.rows.0;
+        Ok(Self {
+            workload: workload.clone(),
+            topology_digest: facts.topology_digest,
+            structural_topology: constraints.topology,
+            numerical_scope_digest: facts.symbolic.identity(),
+            topology: facts.topology,
+            sparse: facts.sparse,
+            constraints: facts.constraints,
+            assembly: AssemblyResourcePolicy {
+                contribution_nonzero_upper_bound: Count(contribution_nonzeros),
+                contribution_bytes_upper_bound: ByteCount(multiply(
+                    contribution_nonzeros,
+                    24,
+                    "frequency recovery contribution bytes",
+                )?),
+                scratch_bytes_per_element: ByteCount(ASSEMBLY_SCRATCH_BYTES_PER_ELEMENT),
+                fixed_scratch_bytes_per_worker: ByteCount(FIXED_ASSEMBLY_SCRATCH_BYTES),
+            },
+            solve: SolveResourcePolicy::NoSolve {
+                workspace_bytes_upper_bound: ByteCount(multiply(
+                    full_dofs,
+                    32,
+                    "complex recovery operator workspace",
+                )?),
+            },
+            modal_operator_digest: None,
+            recovery_layout,
+            constraint_group_count: constraints.groups.len(),
             worker: WorkerResourcePolicy {
                 cpu_millicores: 1_000,
                 maximum_wall_milliseconds: step.accuracy.resources.maximum_wall_time_milliseconds,
@@ -209,6 +316,9 @@ impl StructuralFrequencyEntryResourceProjection {
     pub fn plan_for(
         &self,
         request: &StructuralFrequencyEntryRequest,
+        inputs: PreparedInputResourceFacts,
+        output: PreparedOutputResourceFacts,
+        output_set: PreparedOutputSetResourceFacts,
     ) -> Result<FeaResourcePlan, ResourcePlanningError> {
         request
             .validate_for_workload(&self.workload)
@@ -226,44 +336,197 @@ impl StructuralFrequencyEntryResourceProjection {
                 "frequency request, symbolic topology, and modal basis are incompatible".into(),
             ));
         }
-        let result_bytes = multiply(full_dofs, 32, "complex frequency result vectors")?;
-        let result_egress_bytes = add(
-            result_bytes,
-            ARTIFACT_OVERHEAD_BYTES,
-            "frequency result egress bytes",
-        )?;
+        let result_bytes = structural_frequency_entry_payload_bytes_upper_bound(request)?;
+        if output.encoded_payload_bytes_upper_bound.0 != result_bytes
+            || output.transport_closure_bytes_upper_bound.0 < result_bytes
+            || output.construction_resident_bytes_admission_budget.0 < result_bytes
+        {
+            return Err(ResourcePlanningError::Invalid(
+                "frequency entry output facts differ from its canonical payload ceiling".into(),
+            ));
+        }
+        let artifact_overhead_bytes = output
+            .transport_closure_bytes_upper_bound
+            .0
+            .checked_sub(result_bytes)
+            .ok_or_else(|| {
+                ResourcePlanningError::Invalid(
+                    "frequency entry transport closure is smaller than its payload".into(),
+                )
+            })?;
         build_resource_plan(FeaResourcePlanningInput {
             estimation_model_revision: RESOURCE_ESTIMATION_MODEL_REVISION,
             phase: FeaResourcePhase::StructuralFrequencyEntry(request.identity()),
-            topology_digest: self.topology_digest,
-            operator_pattern_digest: self.operator_pattern_digest,
-            topology: self.topology.clone(),
-            sparse: self.sparse.clone(),
-            constraints: self.constraints.clone(),
-            assembly: self.assembly.clone(),
-            solve: self.solve.clone(),
-            recovery: RecoveryResourcePolicy {
-                resident_value_count: Count(0),
-                resident_bytes_upper_bound: ByteCount(0),
-                scratch_bytes: ByteCount(0),
-                retained_bytes: ByteCount(0),
-            },
-            observations: empty_observations(),
-            publication: CheckpointArtifactPolicy {
-                result_artifact_bytes: ByteCount(result_bytes),
-                checkpoint_bytes: ByteCount(0),
-                artifact_overhead_bytes: ByteCount(ARTIFACT_OVERHEAD_BYTES),
-                relay_bytes: ByteCount(0),
-                result_egress_bytes: ByteCount(result_egress_bytes),
-                checkpoint_egress_bytes: ByteCount(0),
-            },
+            demand: FeaResourceDemand::StructuralFrequencyEntry(
+                StructuralFrequencyOperatorResourceDemand {
+                    inputs,
+                    output: output.clone(),
+                    operator: StructuralOperatorResourceDemand {
+                        topology_digest: self.topology_digest,
+                        numerical_scope_digest: self.numerical_scope_digest,
+                        topology: self.topology.clone(),
+                        sparse: self.sparse.clone(),
+                        constraints: self.constraints.clone(),
+                        assembly: self.assembly.clone(),
+                        solve: self.solve.clone(),
+                        phase_resources: PhaseResourcePolicy {
+                            resident_value_count: Count(0),
+                            resident_bytes_upper_bound: output
+                                .construction_resident_bytes_admission_budget,
+                            scratch_bytes: ByteCount(0),
+                            retained_bytes: ByteCount(result_bytes),
+                        },
+                        observations: empty_observations(),
+                        publication: CheckpointArtifactPolicy {
+                            result_artifact_bytes: ByteCount(result_bytes),
+                            checkpoint_bytes: ByteCount(0),
+                            artifact_overhead_bytes: ByteCount(artifact_overhead_bytes),
+                            relay_bytes: ByteCount(0),
+                            result_egress_bytes: output.transport_closure_bytes_upper_bound,
+                            checkpoint_egress_bytes: ByteCount(0),
+                        },
+                        partitioning: PartitioningPolicy::Monolithic,
+                        accuracy_demand: AccuracyResourceDemand {
+                            refinement_cycles: Count(0),
+                            solver_tightenings: Count(0),
+                            samples: Count(1),
+                        },
+                    },
+                },
+            ),
+            output_set: Some(output_set),
             worker: self.worker.clone(),
-            partitioning: PartitioningPolicy::Monolithic,
-            accuracy_demand: AccuracyResourceDemand {
-                refinement_cycles: Count(0),
-                solver_tightenings: Count(0),
-                samples: Count(1),
-            },
+            accuracy_ceiling: self.accuracy_ceiling,
+        })
+    }
+
+    pub fn recovery_plan_for(
+        &self,
+        request: &FieldRecoveryRequest,
+        result: &StructuralFrequencyEntryResult,
+        inputs: PreparedInputResourceFacts,
+        output: PreparedOutputResourceFacts,
+        output_set: PreparedOutputSetResourceFacts,
+    ) -> Result<FeaResourcePlan, ResourcePlanningError> {
+        request
+            .validate()
+            .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+        result
+            .validate()
+            .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+        result
+            .request()
+            .validate_for_workload(&self.workload)
+            .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+        if request.producer != result.request().step()
+            || request.source != FieldRecoverySource::StructuralFrequencyEntry(result.identity())
+            || request.topology != self.structural_topology
+        {
+            return Err(ResourcePlanningError::Invalid(
+                "frequency recovery request differs from its workload, entry, or topology".into(),
+            ));
+        }
+        let full_dofs = self.sparse.rows.0;
+        let output_values = count(
+            self.recovery_layout.storage_value_count,
+            "complex recovery output values",
+        )?;
+        let constraint_rows = count(
+            self.constraint_group_count,
+            "complex recovery constraint groups",
+        )?;
+        let recovery_values = add(
+            multiply(
+                output_values,
+                2,
+                "real, imaginary, and complex recovery values",
+            )?,
+            add(
+                multiply(
+                    full_dofs,
+                    4,
+                    "complex displacement and reaction work values",
+                )?,
+                multiply(constraint_rows, 12, "complex constraint recovery values")?,
+                "complex recovery work values",
+            )?,
+            "complex recovery live values",
+        )?;
+        let recovery_bytes = multiply(recovery_values, 8, "complex recovery live bytes")?;
+        let output_payload_bytes = recovery_payload_bytes_upper_bound(&self.recovery_layout)?;
+        if output.encoded_payload_bytes_upper_bound.0 != output_payload_bytes
+            || output.transport_closure_bytes_upper_bound.0 < output_payload_bytes
+            || output.construction_resident_bytes_admission_budget.0 < output_payload_bytes
+        {
+            return Err(ResourcePlanningError::Invalid(
+                "frequency recovery output facts differ from its canonical payload ceiling".into(),
+            ));
+        }
+        let output_overhead = output
+            .transport_closure_bytes_upper_bound
+            .0
+            .checked_sub(output_payload_bytes)
+            .ok_or_else(|| {
+                ResourcePlanningError::Invalid(
+                    "frequency recovery closure is smaller than its payload".into(),
+                )
+            })?;
+        let resident_bytes = add(
+            recovery_bytes,
+            output.construction_resident_bytes_admission_budget.0,
+            "complex recovery output construction residency",
+        )?;
+        build_resource_plan(FeaResourcePlanningInput {
+            estimation_model_revision: RESOURCE_ESTIMATION_MODEL_REVISION,
+            phase: FeaResourcePhase::StructuralFrequencyFieldRecovery(request.identity()),
+            demand: FeaResourceDemand::StructuralFrequencyFieldRecovery(
+                StructuralFrequencyOperatorResourceDemand {
+                    inputs,
+                    output: output.clone(),
+                    operator: StructuralOperatorResourceDemand {
+                        topology_digest: self.topology_digest,
+                        numerical_scope_digest: self.numerical_scope_digest,
+                        topology: self.topology.clone(),
+                        sparse: self.sparse.clone(),
+                        constraints: self.constraints.clone(),
+                        assembly: self.assembly.clone(),
+                        solve: SolveResourcePolicy::NoSolve {
+                            workspace_bytes_upper_bound: ByteCount(multiply(
+                                full_dofs,
+                                32,
+                                "complex recovery operator workspace",
+                            )?),
+                        },
+                        phase_resources: PhaseResourcePolicy {
+                            resident_value_count: Count(recovery_values),
+                            resident_bytes_upper_bound: ByteCount(resident_bytes),
+                            scratch_bytes: ByteCount(0),
+                            retained_bytes: ByteCount(multiply(
+                                output_values,
+                                8,
+                                "complex recovery retained bytes",
+                            )?),
+                        },
+                        observations: empty_observations(),
+                        publication: CheckpointArtifactPolicy {
+                            result_artifact_bytes: ByteCount(output_payload_bytes),
+                            checkpoint_bytes: ByteCount(0),
+                            artifact_overhead_bytes: ByteCount(output_overhead),
+                            relay_bytes: ByteCount(0),
+                            result_egress_bytes: output.transport_closure_bytes_upper_bound,
+                            checkpoint_egress_bytes: ByteCount(0),
+                        },
+                        partitioning: PartitioningPolicy::Monolithic,
+                        accuracy_demand: AccuracyResourceDemand {
+                            refinement_cycles: Count(0),
+                            solver_tightenings: Count(0),
+                            samples: Count(1),
+                        },
+                    },
+                },
+            ),
+            output_set: Some(output_set),
+            worker: self.worker.clone(),
             accuracy_ceiling: self.accuracy_ceiling,
         })
     }
@@ -277,6 +540,7 @@ pub fn build_structural_frequency_entry_resource_plan(
     request: &StructuralFrequencyEntryRequest,
     modal_state: Option<&CanonicalSemanticState>,
     accelerator_requests: &[AcceleratorRequest],
+    prepared: PreparedPhaseResourceFacts,
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
     StructuralFrequencyEntryResourceProjection::new(
         mesh,
@@ -285,110 +549,37 @@ pub fn build_structural_frequency_entry_resource_plan(
         modal_state,
         accelerator_requests,
     )?
-    .plan_for(request)
-}
-
-fn direct_workspace_bytes(
-    full_dofs: u64,
-    reduced_dofs: u64,
-    reduced_nonzeros: u64,
-    reduction: &crate::constraints::AffineConstraintReduction,
-    restart: u64,
-) -> Result<u64, ResourcePlanningError> {
-    let block_dimension = multiply(reduced_dofs, 2, "real block dimension")?;
-    let reduced_csr = add(
-        multiply(
-            add(
-                multiply(reduced_dofs, 3, "reduced CSR rows")?,
-                3,
-                "reduced CSR rows",
-            )?,
-            8,
-            "reduced CSR row bytes",
-        )?,
-        multiply(reduced_nonzeros, 16, "reduced CSR entry bytes")?,
-        "reduced CSR bytes",
-    )?;
-    let reduction_indices = [
-        reduction.free_dof_indices.len(),
-        reduction.pivot_dof_indices.len(),
-        reduction.recovery_row_offsets.len(),
-        reduction.recovery_column_indices.len(),
-    ]
-    .into_iter()
-    .try_fold(0_u64, |total, value| {
-        add(
-            total,
-            count(value, "affine reduction indices")?,
-            "affine reduction indices",
-        )
-    })?;
-    let reduction_values = add(
-        count(
-            reduction.recovery_coefficients.len(),
-            "affine reduction coefficients",
-        )?,
-        count(reduction.offset.len(), "affine reduction offsets")?,
-        "affine reduction values",
-    )?;
-    let reduction_bytes = multiply(
-        add(
-            reduction_indices,
-            reduction_values,
-            "affine reduction storage",
-        )?,
-        8,
-        "affine reduction bytes",
-    )?;
-    let krylov_vectors = multiply(
-        add(restart, 9, "GMRES live vector count")?,
-        block_dimension,
-        "GMRES live vector values",
-    )?;
-    let hessenberg = multiply(
-        add(restart, 1, "Hessenberg rows")?,
-        restart,
-        "Hessenberg values",
-    )?;
-    let small_vectors = add(
-        multiply(restart, 3, "GMRES rotations and coefficients")?,
-        1,
-        "GMRES projected RHS",
-    )?;
-    let full_order_vectors = multiply(full_dofs, 14, "full-order harmonic work vectors")?;
-    let floating_values = add(
-        add(krylov_vectors, hessenberg, "direct harmonic workspace")?,
-        add(
-            small_vectors,
-            full_order_vectors,
-            "direct harmonic workspace",
-        )?,
-        "direct harmonic workspace",
-    )?;
-    add(
-        add(reduced_csr, reduction_bytes, "direct harmonic workspace")?,
-        multiply(floating_values, 8, "direct harmonic floating workspace")?,
-        "direct harmonic workspace",
+    .plan_for(
+        request,
+        prepared.inputs,
+        prepared.output,
+        prepared.output_set,
     )
 }
 
-fn modal_workspace_bytes(full_dofs: u64, mode_count: u64) -> Result<u64, ResourcePlanningError> {
-    let full_by_modes = multiply(full_dofs, mode_count, "modal shape values")?;
-    let dense = multiply(mode_count, mode_count, "modal dense values")?;
-    let values = add(
-        multiply(full_by_modes, 4, "modal projection workspaces")?,
-        add(
-            multiply(dense, 11, "modal dense workspaces")?,
-            add(
-                multiply(full_dofs, 14, "modal full-order work vectors")?,
-                multiply(mode_count, 8, "modal reduced work vectors")?,
-                "modal vector workspaces",
-            )?,
-            "modal dense and vector workspaces",
-        )?,
-        "modal harmonic workspace",
-    )?;
-    multiply(values, 8, "modal harmonic workspace bytes")
+/// Builds the exact CPU resource envelope for one independently scheduled frequency recovery.
+pub fn build_structural_frequency_recovery_resource_plan(
+    mesh: &SolverMeshArtifact,
+    constraints: &CanonicalStructuralConstraintPlan,
+    workload: &StructuralFrequencyWorkload,
+    request: &FieldRecoveryRequest,
+    result: &StructuralFrequencyEntryResult,
+    accelerator_requests: &[AcceleratorRequest],
+    prepared: PreparedPhaseResourceFacts,
+) -> Result<FeaResourcePlan, ResourcePlanningError> {
+    StructuralFrequencyEntryResourceProjection::for_recovery(
+        mesh,
+        constraints,
+        workload,
+        accelerator_requests,
+    )?
+    .recovery_plan_for(
+        request,
+        result,
+        prepared.inputs,
+        prepared.output,
+        prepared.output_set,
+    )
 }
 
 fn empty_observations() -> ObservationResourceFacts {

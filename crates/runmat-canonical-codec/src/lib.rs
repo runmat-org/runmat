@@ -7,6 +7,71 @@ mod value;
 
 use serde::{de::DeserializeOwned, Serialize};
 
+/// Deterministic resident-memory estimate for canonical serde-value materialization when only an
+/// encoded-size ceiling is known. Domain payloads use the structural profiler below once bytes
+/// exist; pre-execution output projection uses this deliberately conservative multiplier.
+// Every canonical value node consumes at least one encoded byte. This factor covers two complete
+// `serde_json::Value`-sized representations per possible node, worst-density map/string metadata,
+// typed materialization, and simultaneous input/output buffers. The fixed allowance covers the
+// collection allocators and envelope metadata that do not scale linearly with payload bytes.
+const PROJECTED_MATERIALIZATION_BYTES_PER_ENCODED_BYTE: u64 = 128;
+const CANONICAL_MATERIALIZATION_FIXED_BYTES_PER_CONTRACT: u64 = 64 * 1024;
+
+pub fn projected_canonical_materialization_resident_bytes_estimate(
+    encoded_bytes: u64,
+    contract_count: u64,
+) -> Option<u64> {
+    encoded_bytes
+        .checked_mul(PROJECTED_MATERIALIZATION_BYTES_PER_ENCODED_BYTE)?
+        .checked_add(
+            contract_count.checked_mul(CANONICAL_MATERIALIZATION_FIXED_BYTES_PER_CONTRACT)?,
+        )
+}
+
+/// Profiles an existing canonical payload without allocating its value tree, then estimates the
+/// peak of canonical verification plus typed materialization. The estimate counts actual value
+/// nodes, map entries, and string bytes instead of multiplying numeric-array payloads by a generic
+/// worst case. Domain execution still records authoritative allocator/scheduler usage.
+pub fn canonical_payload_materialization_resident_bytes_estimate(
+    encoded: &[u8],
+) -> Result<u64, CanonicalCodecError> {
+    let profile = value::materialization_profile(encoded)?;
+    let value_bytes = profile
+        .value_nodes
+        .checked_mul(std::mem::size_of::<serde_json::Value>() as u64)
+        .and_then(|bytes| bytes.checked_mul(2))
+        .ok_or_else(|| {
+            CanonicalCodecError::invalid("materialization estimate", "value bytes overflow")
+        })?;
+    let map_entry_bytes = profile
+        .map_entries
+        .checked_mul(
+            (std::mem::size_of::<String>()
+                + std::mem::size_of::<serde_json::Value>()
+                + 4 * std::mem::size_of::<usize>()) as u64,
+        )
+        .ok_or_else(|| {
+            CanonicalCodecError::invalid("materialization estimate", "map bytes overflow")
+        })?;
+    let string_bytes = profile.string_bytes.checked_mul(2).ok_or_else(|| {
+        CanonicalCodecError::invalid("materialization estimate", "string bytes overflow")
+    })?;
+    let encoded_bytes = u64::try_from(encoded.len())
+        .ok()
+        .and_then(|bytes| bytes.checked_mul(2))
+        .ok_or_else(|| {
+            CanonicalCodecError::invalid("materialization estimate", "payload bytes overflow")
+        })?;
+    value_bytes
+        .checked_add(map_entry_bytes)
+        .and_then(|bytes| bytes.checked_add(string_bytes))
+        .and_then(|bytes| bytes.checked_add(encoded_bytes))
+        .and_then(|bytes| bytes.checked_add(CANONICAL_MATERIALIZATION_FIXED_BYTES_PER_CONTRACT))
+        .ok_or_else(|| {
+            CanonicalCodecError::invalid("materialization estimate", "resident bytes overflow")
+        })
+}
+
 pub trait CanonicalCodecControl: Send + Sync {
     fn is_cancelled(&self) -> bool;
 }
@@ -344,5 +409,64 @@ mod tests {
             .and_then(|encoder| encoder.array(33))
             .unwrap();
         assert!(decode_contract::<Fixture>(PREFIX, DOMAIN, &oversized, LIMITS).is_err());
+    }
+
+    #[test]
+    fn materialization_envelope_is_checked_and_scales_with_contract_count() {
+        assert_eq!(
+            projected_canonical_materialization_resident_bytes_estimate(1, 1),
+            Some(128 + 64 * 1024)
+        );
+        assert_eq!(
+            projected_canonical_materialization_resident_bytes_estimate(2, 3),
+            Some(256 + 3 * 64 * 1024)
+        );
+        assert_eq!(
+            projected_canonical_materialization_resident_bytes_estimate(u64::MAX, 1),
+            None
+        );
+        assert_eq!(
+            projected_canonical_materialization_resident_bytes_estimate(1, u64::MAX),
+            None
+        );
+
+        let bytes = encode_contract(PREFIX, DOMAIN, &fixture(), LIMITS).unwrap();
+        let structural = canonical_payload_materialization_resident_bytes_estimate(&bytes).unwrap();
+        assert!(structural > bytes.len() as u64);
+
+        let mut malformed = bytes;
+        malformed.push(0);
+        assert!(canonical_payload_materialization_resident_bytes_estimate(&malformed).is_err());
+    }
+
+    #[test]
+    fn numeric_payload_profile_avoids_the_size_only_scaling_cliff() {
+        let values = vec![1.0_f64; 100_000];
+        let limits = CanonicalLimits::new(2 * 1024 * 1024, 200_000, 128, 8);
+        let bytes = encode_contract(PREFIX, "test.numeric/v1", &values, limits).unwrap();
+        let profiled = canonical_payload_materialization_resident_bytes_estimate(&bytes).unwrap();
+        let projected =
+            projected_canonical_materialization_resident_bytes_estimate(bytes.len() as u64, 1)
+                .unwrap();
+        assert!(profiled < projected);
+        assert!(profiled > bytes.len() as u64);
+    }
+
+    #[test]
+    fn projected_envelope_covers_compact_scalar_collections() {
+        let limits = CanonicalLimits::new(2 * 1024 * 1024, 400_000, 128, 8);
+        let payloads = [
+            encode_contract(PREFIX, "test.nulls/v1", &vec![(); 100_000], limits).unwrap(),
+            encode_contract(PREFIX, "test.bools/v1", &vec![true; 100_000], limits).unwrap(),
+            encode_contract(PREFIX, "test.ints/v1", &vec![0_u8; 100_000], limits).unwrap(),
+        ];
+        for bytes in payloads {
+            let profiled =
+                canonical_payload_materialization_resident_bytes_estimate(&bytes).unwrap();
+            let projected =
+                projected_canonical_materialization_resident_bytes_estimate(bytes.len() as u64, 1)
+                    .unwrap();
+            assert!(profiled <= projected);
+        }
     }
 }

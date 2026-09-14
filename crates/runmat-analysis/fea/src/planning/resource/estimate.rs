@@ -1,26 +1,111 @@
+mod post_process;
+
+use post_process::{
+    build_frequency_result_assembly_resource_plan, build_observation_assembly_resource_plan,
+    build_observation_history_resource_plan, build_observation_partition_resource_plan,
+    build_observation_reduction_resource_plan,
+};
+
 use runmat_execution::{resource::ResourceRequest, Digest};
 
 use super::contract::{
-    ByteCount, FeaResourcePlan, FeaResourcePlanIdentity, FeaResourcePlanningInput,
-    PartitioningPolicy, PreconditionerStorage, ResourceBreakdown, ResourcePlanningError,
-    SolveResourcePolicy, SparseResourceFacts, RESOURCE_ESTIMATION_MODEL_REVISION,
+    AccuracyResourceDemand, ByteCount, Count, FeaResourceDemand, FeaResourcePhase, FeaResourcePlan,
+    FeaResourcePlanIdentity, FeaResourcePlanningInput, ObservationAssemblyResourceDemand,
+    ObservationHistoryCheckpointResourceDemand, ObservationPartitionResourceDemand,
+    ObservationReductionResourceDemand, ObservationResourceFacts, PartitioningPolicy,
+    PreconditionerStorage, PreparedInputResourceFacts, PreparedOutputResourceFacts,
+    ResourceBreakdown, ResourcePlanningError, SolveResourcePolicy, SparseResourceFacts,
+    StructuralFrequencyResultAssemblyResourceDemand, StructuralOperatorResourceDemand,
+    RESOURCE_ESTIMATION_MODEL_REVISION, RESOURCE_PLAN_MAX_ENCODED_BYTES,
 };
+
+fn implicit_resource_plan_input_facts() -> Result<PreparedInputResourceFacts, ResourcePlanningError>
+{
+    let decoded =
+        runmat_canonical_codec::projected_canonical_materialization_resident_bytes_estimate(
+            RESOURCE_PLAN_MAX_ENCODED_BYTES,
+            1,
+        )
+        .ok_or(ResourcePlanningError::Overflow(
+            "resource-plan decoded residency budget",
+        ))?;
+    let transport = add(
+        RESOURCE_PLAN_MAX_ENCODED_BYTES,
+        crate::execution::ANALYSIS_MANIFEST_MAX_ENCODED_BYTES,
+        "resource-plan transport closure budget",
+    )?;
+    Ok(PreparedInputResourceFacts {
+        encoded_payload_bytes: ByteCount(RESOURCE_PLAN_MAX_ENCODED_BYTES),
+        transport_closure_bytes: ByteCount(transport),
+        decoded_resident_bytes_admission_budget: ByteCount(decoded),
+    })
+}
 
 pub fn build_resource_plan(
     input: FeaResourcePlanningInput,
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
-    validate_input(&input)?;
-    let topology_bytes = input.topology.estimated_resident_bytes;
-    let operator_count = u64::try_from(input.sparse.operator_nonzeros.len())
+    validate_common(&input)?;
+    match (&input.phase, &input.demand) {
+        (
+            FeaResourcePhase::StructuralLinearPipeline,
+            FeaResourceDemand::StructuralLinearPipeline(demand),
+        ) => build_operator_resource_plan(input.clone(), demand, None),
+        (
+            FeaResourcePhase::StructuralFrequencyEntry(_),
+            FeaResourceDemand::StructuralFrequencyEntry(demand),
+        )
+        | (
+            FeaResourcePhase::StructuralFrequencyFieldRecovery(_),
+            FeaResourceDemand::StructuralFrequencyFieldRecovery(demand),
+        ) => build_operator_resource_plan(input.clone(), &demand.operator, Some(&demand.inputs)),
+        (
+            FeaResourcePhase::StructuralObservationPartition(_),
+            FeaResourceDemand::StructuralObservationPartition(demand),
+        ) => build_observation_partition_resource_plan(input.clone(), demand),
+        (
+            FeaResourcePhase::StructuralObservationReduction(_),
+            FeaResourceDemand::StructuralObservationReduction(demand),
+        ) => build_observation_reduction_resource_plan(input.clone(), demand),
+        (
+            FeaResourcePhase::StructuralObservationHistoryCheckpoint(_),
+            FeaResourceDemand::StructuralObservationHistoryCheckpoint(demand),
+        ) => build_observation_history_resource_plan(input.clone(), demand),
+        (
+            FeaResourcePhase::StructuralObservationAssembly(_),
+            FeaResourceDemand::StructuralObservationAssembly(demand),
+        ) => build_observation_assembly_resource_plan(input.clone(), demand),
+        (
+            FeaResourcePhase::StructuralFrequencyResultAssembly(_),
+            FeaResourceDemand::StructuralFrequencyResultAssembly(demand),
+        ) => build_frequency_result_assembly_resource_plan(input.clone(), demand),
+        _ => Err(ResourcePlanningError::Invalid(
+            "resource phase and typed demand variant differ".into(),
+        )),
+    }
+}
+
+fn build_operator_resource_plan(
+    input: FeaResourcePlanningInput,
+    demand: &StructuralOperatorResourceDemand,
+    inputs: Option<&PreparedInputResourceFacts>,
+) -> Result<FeaResourcePlan, ResourcePlanningError> {
+    validate_operator_demand(&input, demand)?;
+    let resource_plan_input = implicit_resource_plan_input_facts()?;
+    let output_set_bytes = input
+        .output_set
+        .as_ref()
+        .map_or(ByteCount(0), |facts| facts.encoded_bytes_upper_bound);
+    let topology_bytes = demand.topology.estimated_resident_bytes;
+    let operator_count = u64::try_from(demand.sparse.operator_nonzeros.len())
         .map_err(|_| ResourcePlanningError::Overflow("sparse operator count"))?;
-    let total_operator_nonzeros = input
+    let total_operator_nonzeros = demand
         .sparse
         .operator_nonzeros
         .iter()
         .try_fold(0_u64, |total, count| add(total, count.0, "sparse nonzeros"))?;
     let csr_row_offset_bytes = ByteCount(bytes(
         mul(
-            add(input.sparse.rows.0, 1, "CSR row offsets")?,
+            add(demand.sparse.rows.0, 1, "CSR row offsets")?,
             operator_count,
             "CSR row offsets",
         )?,
@@ -30,36 +115,39 @@ pub fn build_resource_plan(
     let csr_column_index_bytes =
         ByteCount(bytes(total_operator_nonzeros, 8, "CSR column indices")?);
     let csr_value_bytes = ByteCount(bytes(total_operator_nonzeros, 8, "CSR values")?);
-    let assembly_contribution_bytes = input.assembly.contribution_bytes_upper_bound;
+    let assembly_contribution_bytes = demand.assembly.contribution_bytes_upper_bound;
     let assembly_scratch_bytes = ByteCount(add(
-        input.assembly.fixed_scratch_bytes_per_worker.0,
+        demand.assembly.fixed_scratch_bytes_per_worker.0,
         mul(
-            input.topology.elements.0,
-            input.assembly.scratch_bytes_per_element.0,
+            demand.topology.elements.0,
+            demand.assembly.scratch_bytes_per_element.0,
             "assembly element scratch",
         )?,
         "assembly scratch",
     )?);
-    let solve_workspace_bytes = match input.solve.explicit_workspace_bytes() {
+    let workspace_bytes = match demand.solve.explicit_workspace_bytes() {
         Some(bytes) => bytes,
         None => ByteCount(bytes(
             mul(
-                input.sparse.rows.0,
-                input.solve.vector_count().ok_or_else(|| {
+                demand.sparse.rows.0,
+                demand.solve.vector_count().ok_or_else(|| {
                     ResourcePlanningError::Invalid(
                         "solve policy omits both vectors and explicit workspace".into(),
                     )
                 })?,
                 "solve vector values",
             )?,
-            input.solve.scalar_bytes(),
+            demand.solve.scalar_bytes(),
             "solve vectors",
         )?),
     };
-    let (preconditioner_bytes, factorization_bytes) = solve_storage(&input)?;
-    let constraint_bytes = input.constraints.estimated_resident_bytes;
-    let recovery_resident_bytes = input.recovery.resident_bytes_upper_bound;
-    let persistent = sum(
+    let (preconditioner_bytes, factorization_bytes) = solve_storage(demand)?;
+    let constraint_bytes = demand.constraints.estimated_resident_bytes;
+    let input_decoded_resident_bytes = inputs.map_or(ByteCount(0), |inputs| {
+        inputs.decoded_resident_bytes_admission_budget
+    });
+    let phase_resident_bytes = demand.phase_resources.resident_bytes_upper_bound;
+    let persistent_numerical = sum(
         &[
             topology_bytes.0,
             csr_row_offset_bytes.0,
@@ -71,7 +159,7 @@ pub fn build_resource_plan(
     )?;
     let solve_phase = sum(
         &[
-            solve_workspace_bytes.0,
+            workspace_bytes.0,
             preconditioner_bytes.0,
             factorization_bytes.0,
         ],
@@ -79,25 +167,30 @@ pub fn build_resource_plan(
     )?;
     let recovery_phase = sum(
         &[
-            recovery_resident_bytes.0,
-            input.observations.peak_resident_bytes.0,
+            phase_resident_bytes.0,
+            demand.observations.peak_resident_bytes.0,
+            output_set_bytes.0,
         ],
         "recovery phase memory",
     )?;
-    let numerical_memory = add(
-        persistent,
-        assembly_contribution_bytes
-            .0
-            .max(solve_phase)
-            .max(recovery_phase),
-        "numerical peak memory",
+    let numerical_memory = operator_peak_resident_bytes(
+        persistent_numerical,
+        input_decoded_resident_bytes.0,
+        resource_plan_input
+            .decoded_resident_bytes_admission_budget
+            .0,
+        assembly_contribution_bytes.0,
+        solve_phase,
+        recovery_phase,
     )?;
     let total_memory = add(
         input.worker.fixed_memory_bytes.0,
         numerical_memory,
         "worker peak memory",
     )?;
-    let phase_scratch = assembly_scratch_bytes.0.max(input.recovery.scratch_bytes.0);
+    let phase_scratch = assembly_scratch_bytes
+        .0
+        .max(demand.phase_resources.scratch_bytes.0);
     let total_scratch = add(
         input.worker.fixed_scratch_bytes.0,
         phase_scratch,
@@ -105,18 +198,20 @@ pub fn build_resource_plan(
     )?;
     let artifact_bytes = sum(
         &[
-            input.observations.stored_bytes.0,
-            input.publication.result_artifact_bytes.0,
-            input.publication.checkpoint_bytes.0,
-            input.publication.artifact_overhead_bytes.0,
+            demand.observations.stored_bytes.0,
+            demand.publication.result_artifact_bytes.0,
+            demand.publication.checkpoint_bytes.0,
+            demand.publication.artifact_overhead_bytes.0,
+            output_set_bytes.0,
         ],
         "published artifacts",
     )?;
     let total_egress = sum(
         &[
-            input.observations.transfer_bytes.0,
-            input.publication.result_egress_bytes.0,
-            input.publication.checkpoint_egress_bytes.0,
+            demand.observations.transfer_bytes.0,
+            demand.publication.result_egress_bytes.0,
+            demand.publication.checkpoint_egress_bytes.0,
+            output_set_bytes.0,
         ],
         "result and checkpoint egress",
     )?;
@@ -126,9 +221,10 @@ pub fn build_resource_plan(
     {
         return Err(ResourcePlanningError::AccuracyCeiling("wall time"));
     }
-    validate_accuracy_demand(&input)?;
+    validate_accuracy_demand(&input, &demand.accuracy_demand, &demand.observations)?;
     let partition = partition_facts(
         &input,
+        &demand.partitioning,
         numerical_memory,
         total_memory,
         phase_scratch,
@@ -141,7 +237,15 @@ pub fn build_resource_plan(
         max_wall_millis: input.worker.maximum_wall_milliseconds,
         max_artifact_bytes: artifact_bytes,
         max_egress_bytes: total_egress,
-        max_relay_bytes: input.publication.relay_bytes.0,
+        max_relay_bytes: add(
+            add(
+                demand.publication.relay_bytes.0,
+                inputs.map_or(0, |inputs| inputs.transport_closure_bytes.0),
+                "operator input and publication relay bytes",
+            )?,
+            resource_plan_input.transport_closure_bytes.0,
+            "operator resource-plan relay bytes",
+        )?,
         accelerators: input.worker.accelerators.iter().map(Into::into).collect(),
         required_capabilities: input.worker.required_capabilities.clone(),
     };
@@ -149,35 +253,44 @@ pub fn build_resource_plan(
         .validate()
         .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
     let breakdown = ResourceBreakdown {
+        input_encoded_payload_bytes: inputs
+            .map_or(ByteCount(0), |value| value.encoded_payload_bytes),
+        input_transport_closure_bytes: inputs
+            .map_or(ByteCount(0), |value| value.transport_closure_bytes),
+        input_decoded_resident_bytes,
+        resource_plan_transport_closure_bytes: resource_plan_input.transport_closure_bytes,
+        resource_plan_decoded_resident_bytes: resource_plan_input
+            .decoded_resident_bytes_admission_budget,
+        output_set_bytes,
         topology_bytes,
         csr_row_offset_bytes,
         csr_column_index_bytes,
         csr_value_bytes,
         assembly_contribution_bytes,
         assembly_scratch_bytes,
-        solve_workspace_bytes,
+        workspace_bytes,
         preconditioner_bytes,
         factorization_bytes,
         constraint_bytes,
-        recovery_resident_bytes,
-        recovery_scratch_bytes: input.recovery.scratch_bytes,
-        recovery_retained_bytes: input.recovery.retained_bytes,
-        result_artifact_bytes: input.publication.result_artifact_bytes,
-        observation_maximum_samples_per_observation: input
+        phase_resident_bytes,
+        phase_scratch_bytes: demand.phase_resources.scratch_bytes,
+        phase_retained_bytes: demand.phase_resources.retained_bytes,
+        result_artifact_bytes: demand.publication.result_artifact_bytes,
+        observation_maximum_samples_per_observation: demand
             .observations
             .maximum_samples_per_observation,
-        observation_produced_sample_count: input.observations.produced_sample_count,
-        observation_retained_sample_count: input.observations.retained_sample_count,
-        observation_operation_count: input.observations.operation_count,
-        observation_peak_bytes: input.observations.peak_resident_bytes,
-        observation_stored_bytes: input.observations.stored_bytes,
-        observation_transfer_bytes: input.observations.transfer_bytes,
-        result_egress_bytes: input.publication.result_egress_bytes,
-        checkpoint_egress_bytes: input.publication.checkpoint_egress_bytes,
+        observation_produced_sample_count: demand.observations.produced_sample_count,
+        observation_retained_sample_count: demand.observations.retained_sample_count,
+        observation_operation_count: demand.observations.operation_count,
+        observation_peak_bytes: demand.observations.peak_resident_bytes,
+        observation_stored_bytes: demand.observations.stored_bytes,
+        observation_transfer_bytes: demand.observations.transfer_bytes,
+        result_egress_bytes: demand.publication.result_egress_bytes,
+        checkpoint_egress_bytes: demand.publication.checkpoint_egress_bytes,
         total_egress_bytes: ByteCount(total_egress),
-        observation_collectives: input.observations.collective_count,
-        checkpoint_bytes: input.publication.checkpoint_bytes,
-        artifact_overhead_bytes: input.publication.artifact_overhead_bytes,
+        observation_collectives: demand.observations.collective_count,
+        checkpoint_bytes: demand.publication.checkpoint_bytes,
+        artifact_overhead_bytes: demand.publication.artifact_overhead_bytes,
         worker_overhead_bytes: input.worker.fixed_memory_bytes,
         partition_replicated_memory_bytes: ByteCount(partition.replicated_memory),
         partition_halo_memory_bytes: ByteCount(partition.halo_memory),
@@ -200,6 +313,24 @@ pub fn build_resource_plan(
     Ok(plan)
 }
 
+fn operator_peak_resident_bytes(
+    persistent_numerical: u64,
+    decoded_inputs: u64,
+    decoded_resource_plan: u64,
+    assembly_phase: u64,
+    solve_phase: u64,
+    recovery_phase: u64,
+) -> Result<u64, ResourcePlanningError> {
+    add(
+        sum(
+            &[persistent_numerical, decoded_inputs, decoded_resource_plan],
+            "persistent input and numerical memory",
+        )?,
+        assembly_phase.max(solve_phase).max(recovery_phase),
+        "numerical peak memory",
+    )
+}
+
 struct PartitionFacts {
     partitionable_memory: u64,
     fixed_memory: u64,
@@ -213,12 +344,13 @@ struct PartitionFacts {
 
 fn partition_facts(
     input: &FeaResourcePlanningInput,
+    partitioning: &PartitioningPolicy,
     numerical_memory: u64,
     total_memory: u64,
     phase_scratch: u64,
     total_scratch: u64,
 ) -> Result<PartitionFacts, ResourcePlanningError> {
-    match input.partitioning {
+    match partitioning {
         PartitioningPolicy::Monolithic => {
             if total_memory > input.accuracy_ceiling.maximum_resident_bytes {
                 return Err(ResourcePlanningError::AccuracyCeiling("resident memory"));
@@ -267,49 +399,95 @@ fn partition_facts(
     }
 }
 
-fn validate_input(input: &FeaResourcePlanningInput) -> Result<(), ResourcePlanningError> {
+fn validate_common(input: &FeaResourcePlanningInput) -> Result<(), ResourcePlanningError> {
     if input.estimation_model_revision != RESOURCE_ESTIMATION_MODEL_REVISION {
         return Err(ResourcePlanningError::Invalid(
             "unsupported resource estimation model revision".into(),
         ));
     }
-    if input.topology_digest == Digest::sha256([])
-        || input.operator_pattern_digest == Digest::sha256([])
-        || input.topology.nodes.0 == 0
-        || input.topology.elements.0 == 0
-        || input.topology.estimated_resident_bytes.0 == 0
-        || input.constraints.estimated_resident_bytes.0 == 0
-        || input.sparse.rows.0 == 0
-        || input.sparse.columns.0 == 0
-        || input.sparse.rows != input.sparse.columns
-        || input.worker.cpu_millicores == 0
-        || input.worker.maximum_wall_milliseconds == 0
-    {
-        return Err(ResourcePlanningError::Invalid("topology, resident bounds, square operator, CPU, wall time, and identities must be nonzero".into()));
+    if input.worker.cpu_millicores == 0 || input.worker.maximum_wall_milliseconds == 0 {
+        return Err(ResourcePlanningError::Invalid(
+            "worker CPU and wall-time bounds must be nonzero".into(),
+        ));
     }
-    validate_sparse(&input.sparse)?;
+    if input.demand.governs_prepared_outputs()
+        != input
+            .output_set
+            .as_ref()
+            .is_some_and(|facts| facts.encoded_bytes_upper_bound.0 > 0)
+    {
+        return Err(ResourcePlanningError::Invalid(
+            "independently prepared outputs require one bounded output set".into(),
+        ));
+    }
+    if input.worker.maximum_wall_milliseconds
+        > input.accuracy_ceiling.maximum_wall_time_milliseconds
+    {
+        return Err(ResourcePlanningError::AccuracyCeiling("wall time"));
+    }
+    let mut accelerator_classes = std::collections::BTreeSet::new();
+    for accelerator in &input.worker.accelerators {
+        if accelerator.class.trim().is_empty()
+            || accelerator.count == 0
+            || accelerator.memory_bytes_each.0 == 0
+            || !accelerator_classes.insert(accelerator.class.as_str())
+        {
+            return Err(ResourcePlanningError::Invalid(
+                "accelerator class, count, and memory must be nonzero and classes must be unique"
+                    .into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_operator_demand(
+    input: &FeaResourcePlanningInput,
+    demand: &StructuralOperatorResourceDemand,
+) -> Result<(), ResourcePlanningError> {
+    if demand.topology_digest == Digest::sha256([])
+        || demand.numerical_scope_digest == Digest::sha256([])
+    {
+        return Err(ResourcePlanningError::Invalid(
+            "operator resource scope and identities must be nonzero".into(),
+        ));
+    }
+    if demand.topology.nodes.0 == 0
+        || demand.topology.elements.0 == 0
+        || demand.topology.estimated_resident_bytes.0 == 0
+        || demand.constraints.estimated_resident_bytes.0 == 0
+        || demand.sparse.rows.0 == 0
+        || demand.sparse.columns.0 == 0
+        || demand.sparse.rows != demand.sparse.columns
+    {
+        return Err(ResourcePlanningError::Invalid(
+            "operator phases require topology, resident bounds, constraints, and a square sparse structure"
+                .into(),
+        ));
+    }
+    validate_sparse(&demand.sparse)?;
     let topology_payload_lower_bound = sum(
         &[
-            bytes(input.topology.nodes.0, 24, "topology coordinate payload")?,
+            bytes(demand.topology.nodes.0, 24, "topology coordinate payload")?,
             bytes(
-                input.topology.element_node_references.0,
+                demand.topology.element_node_references.0,
                 8,
                 "element index payload",
             )?,
             bytes(
-                input.topology.boundary_node_references.0,
+                demand.topology.boundary_node_references.0,
                 8,
                 "boundary index payload",
             )?,
             bytes(
-                input.topology.node_neighbor_references.0,
+                demand.topology.node_neighbor_references.0,
                 8,
                 "neighbor index payload",
             )?,
         ],
         "topology structural lower bound",
     )?;
-    if input.topology.estimated_resident_bytes.0 < topology_payload_lower_bound {
+    if demand.topology.estimated_resident_bytes.0 < topology_payload_lower_bound {
         return Err(ResourcePlanningError::Invalid(
             "topology resident bound is below its coordinate/index payload".into(),
         ));
@@ -317,52 +495,53 @@ fn validate_input(input: &FeaResourcePlanningInput) -> Result<(), ResourcePlanni
     let constraint_payload_lower_bound = sum(
         &[
             bytes(
-                input.constraints.rows.0,
+                demand.constraints.rows.0,
                 8,
                 "constraint right-hand-side payload",
             )?,
             bytes(
-                input.constraints.coefficients.0,
+                demand.constraints.coefficients.0,
                 8,
                 "constraint coefficient payload",
             )?,
             bytes(
-                input.constraints.reference_points.0,
+                demand.constraints.reference_points.0,
                 24,
                 "constraint point payload",
             )?,
         ],
         "constraint structural lower bound",
     )?;
-    if input.constraints.estimated_resident_bytes.0 < constraint_payload_lower_bound {
+    if demand.constraints.estimated_resident_bytes.0 < constraint_payload_lower_bound {
         return Err(ResourcePlanningError::Invalid(
             "constraint resident bound is below its numerical payload".into(),
         ));
     }
     let contribution_payload_lower_bound = bytes(
-        input.assembly.contribution_nonzero_upper_bound.0,
+        demand.assembly.contribution_nonzero_upper_bound.0,
         24,
         "assembly row, column, and real-f64 contribution payload",
     )?;
-    let recovery_payload_lower_bound = bytes(
-        input.recovery.resident_value_count.0,
+    let phase_payload_lower_bound = bytes(
+        demand.phase_resources.resident_value_count.0,
         8,
-        "recovery value payload",
+        "phase value payload",
     )?;
-    if input.recovery.resident_bytes_upper_bound.0 < recovery_payload_lower_bound {
+    if demand.phase_resources.resident_bytes_upper_bound.0 < phase_payload_lower_bound {
         return Err(ResourcePlanningError::Invalid(
-            "recovery resident bound is below its scalar payload".into(),
+            "phase resident bound is below its scalar payload".into(),
         ));
     }
-    if input.assembly.contribution_nonzero_upper_bound.0 < input.sparse.maximum_nonzeros()
-        || input.assembly.contribution_bytes_upper_bound.0 == 0
-        || input.assembly.contribution_bytes_upper_bound.0 < contribution_payload_lower_bound
+    if demand.assembly.contribution_nonzero_upper_bound.0 < demand.sparse.maximum_nonzeros()
+        || demand.assembly.contribution_bytes_upper_bound.0 == 0
+        || demand.assembly.contribution_bytes_upper_bound.0 < contribution_payload_lower_bound
     {
         return Err(ResourcePlanningError::Invalid(
             "assembly contribution count and byte bounds must cover canonical nonzeros".into(),
         ));
     }
-    match input.solve {
+    match demand.solve {
+        SolveResourcePolicy::NoSolve { .. } => {}
         SolveResourcePolicy::Iterative { vector_count, .. }
         | SolveResourcePolicy::DirectFactorization { vector_count, .. }
             if vector_count.0 == 0 =>
@@ -402,7 +581,16 @@ fn validate_input(input: &FeaResourcePlanningInput) -> Result<(), ResourcePlanni
         }
         _ => {}
     }
-    match (&input.partitioning, &input.solve) {
+    let recovery_phase = matches!(
+        input.phase,
+        FeaResourcePhase::StructuralFrequencyFieldRecovery(_)
+    );
+    if recovery_phase != matches!(demand.solve, SolveResourcePolicy::NoSolve { .. }) {
+        return Err(ResourcePlanningError::Invalid(
+            "solve and post-processing phases require their matching solve policy".into(),
+        ));
+    }
+    match (&demand.partitioning, &demand.solve) {
         (
             PartitioningPolicy::OperatorDomain {
                 maximum_partitions, ..
@@ -422,16 +610,6 @@ fn validate_input(input: &FeaResourcePlanningInput) -> Result<(), ResourcePlanni
             ))
         }
         _ => {}
-    }
-    for accelerator in &input.worker.accelerators {
-        if accelerator.class.trim().is_empty()
-            || accelerator.count == 0
-            || accelerator.memory_bytes_each.0 == 0
-        {
-            return Err(ResourcePlanningError::Invalid(
-                "accelerator class, count, and memory must be nonzero".into(),
-            ));
-        }
     }
     Ok(())
 }
@@ -455,31 +633,33 @@ fn validate_sparse(facts: &SparseResourceFacts) -> Result<(), ResourcePlanningEr
     Ok(())
 }
 
-fn validate_accuracy_demand(input: &FeaResourcePlanningInput) -> Result<(), ResourcePlanningError> {
+fn validate_accuracy_demand(
+    input: &FeaResourcePlanningInput,
+    demand: &super::contract::AccuracyResourceDemand,
+    observations: &super::contract::ObservationResourceFacts,
+) -> Result<(), ResourcePlanningError> {
     let refinements = u64::try_from(input.accuracy_ceiling.maximum_refinement_cycles)
         .map_err(|_| ResourcePlanningError::Overflow("accuracy refinement ceiling"))?;
     let tightenings = u64::try_from(input.accuracy_ceiling.maximum_solver_tightenings)
         .map_err(|_| ResourcePlanningError::Overflow("accuracy tightening ceiling"))?;
     let samples = u64::try_from(input.accuracy_ceiling.maximum_samples)
         .map_err(|_| ResourcePlanningError::Overflow("accuracy sample ceiling"))?;
-    if input.accuracy_demand.refinement_cycles.0 > refinements {
+    if demand.refinement_cycles.0 > refinements {
         return Err(ResourcePlanningError::AccuracyCeiling("refinement cycles"));
     }
-    if input.accuracy_demand.solver_tightenings.0 > tightenings {
+    if demand.solver_tightenings.0 > tightenings {
         return Err(ResourcePlanningError::AccuracyCeiling("solver tightenings"));
     }
-    if input.accuracy_demand.samples.0 > samples
-        || input.observations.maximum_samples_per_observation.0 > samples
-    {
+    if demand.samples.0 > samples || observations.maximum_samples_per_observation.0 > samples {
         return Err(ResourcePlanningError::AccuracyCeiling("samples"));
     }
     Ok(())
 }
 
 fn solve_storage(
-    input: &FeaResourcePlanningInput,
+    demand: &StructuralOperatorResourceDemand,
 ) -> Result<(ByteCount, ByteCount), ResourcePlanningError> {
-    match input.solve {
+    match demand.solve {
         SolveResourcePolicy::Iterative {
             ref preconditioner,
             ref admission,
@@ -488,8 +668,8 @@ fn solve_storage(
             let value = match preconditioner {
                 PreconditionerStorage::None => 0,
                 PreconditionerStorage::Diagonal => bytes(
-                    input.sparse.rows.0,
-                    input.solve.scalar_bytes(),
+                    demand.sparse.rows.0,
+                    demand.solve.scalar_bytes(),
                     "diagonal preconditioner",
                 )?,
                 PreconditionerStorage::SparseCsr {
@@ -499,14 +679,14 @@ fn solve_storage(
                     let payload_lower_bound = sum(
                         &[
                             bytes(
-                                add(input.sparse.rows.0, 1, "preconditioner row offsets")?,
+                                add(demand.sparse.rows.0, 1, "preconditioner row offsets")?,
                                 8,
                                 "preconditioner row offsets",
                             )?,
                             bytes(nonzero_upper_bound.0, 8, "preconditioner column indices")?,
                             bytes(
                                 nonzero_upper_bound.0,
-                                input.solve.scalar_bytes(),
+                                demand.solve.scalar_bytes(),
                                 "preconditioner values",
                             )?,
                         ],
@@ -526,7 +706,7 @@ fn solve_storage(
                 &[
                     bytes(
                         admission.factor_nonzero_upper_bound.0,
-                        input.solve.scalar_bytes(),
+                        demand.solve.scalar_bytes(),
                         "solver-admission factor values",
                     )?,
                     bytes(
@@ -543,7 +723,7 @@ fn solve_storage(
                 "solver-admission factor payload",
             )?;
             if admission.dimension.0 == 0
-                || admission.dimension.0 > input.sparse.rows.0
+                || admission.dimension.0 > demand.sparse.rows.0
                 || admission.factor_nonzero_upper_bound.0 < admission.dimension.0
                 || admission.resident_bytes_upper_bound.0 < factor_payload_lower_bound
             {
@@ -562,14 +742,14 @@ fn solve_storage(
             let payload_lower_bound = sum(
                 &[
                     bytes(
-                        add(input.sparse.rows.0, 1, "factor row offsets")?,
+                        add(demand.sparse.rows.0, 1, "factor row offsets")?,
                         8,
                         "factor row offsets",
                     )?,
                     bytes(factor_nonzero_upper_bound.0, 8, "factor column indices")?,
                     bytes(
                         factor_nonzero_upper_bound.0,
-                        input.solve.scalar_bytes(),
+                        demand.solve.scalar_bytes(),
                         "factor values",
                     )?,
                 ],
@@ -583,7 +763,8 @@ fn solve_storage(
             }
             Ok((ByteCount(0), factor_bytes_upper_bound))
         }
-        SolveResourcePolicy::RestartedGmres { .. }
+        SolveResourcePolicy::NoSolve { .. }
+        | SolveResourcePolicy::RestartedGmres { .. }
         | SolveResourcePolicy::ModalDenseHarmonic { .. } => Ok((ByteCount(0), ByteCount(0))),
     }
 }
@@ -603,4 +784,17 @@ fn sum(values: &[u64], label: &'static str) -> Result<u64, ResourcePlanningError
     values
         .iter()
         .try_fold(0, |total, value| add(total, *value, label))
+}
+
+#[cfg(test)]
+mod lifetime_tests {
+    use super::*;
+
+    #[test]
+    fn decoded_inputs_are_additive_when_the_solve_phase_dominates() {
+        let baseline = operator_peak_resident_bytes(100, 20, 5, 10, 1_000, 30).unwrap();
+        let larger = operator_peak_resident_bytes(100, 21, 5, 10, 1_000, 30).unwrap();
+        assert_eq!(baseline, 1_125);
+        assert_eq!(larger, baseline + 1);
+    }
 }

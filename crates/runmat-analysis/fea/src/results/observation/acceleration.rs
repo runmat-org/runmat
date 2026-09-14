@@ -15,7 +15,10 @@ use runmat_execution::{
 use runmat_meshing_core::SolverMeshArtifact;
 use serde::{Deserialize, Serialize};
 
-use crate::{progress, results::field::RecoveredFieldPartitionSet};
+use crate::{
+    planning::resource::FeaResourcePlanIdentity, progress,
+    results::field::RecoveredFieldPartitionSet,
+};
 
 use super::{
     acceleration_evidence::ObservationAccelerationEvidence,
@@ -42,12 +45,14 @@ pub struct StructuralObservationAccelerationInput<'a> {
     pub field: &'a RecoveredFieldPartitionSet,
     pub event_attribution: Option<ObservationEventAttribution>,
     pub allocation: &'a AcceleratorRequest,
+    pub resource_plan: FeaResourcePlanIdentity,
 }
 
 pub(super) struct ObservationProviderAccelerationInput<'a> {
     pub field: &'a RecoveredFieldPartitionSet,
     pub event_attribution: Option<ObservationEventAttribution>,
     pub allocation: &'a AcceleratorRequest,
+    pub resource_plan: FeaResourcePlanIdentity,
     pub provider: &'a dyn AccelProvider,
 }
 
@@ -81,6 +86,7 @@ pub fn evaluate_structural_observation_partition_accelerated(
             field: input.field,
             event_attribution: input.event_attribution,
             allocation: input.allocation,
+            resource_plan: input.resource_plan,
             provider,
         },
     )
@@ -140,6 +146,12 @@ pub(crate) fn evaluate_observation_partition_with_provider(
     let shape = [1, selected.len()];
     let input_bytes = checked_bytes(selected.len())?;
     let result_download_bytes = 16_u64;
+    let required_device_bytes = governed_extrema_device_resident_bytes(selected.len())?;
+    if execution.allocation.memory_bytes_each < required_device_bytes {
+        return Err(ObservationError::Limit(
+            "governed observation accelerator memory",
+        ));
+    }
     let feasibility = dense_reduction_feasibility(&shape)?;
     let capability = execution.provider.capability_snapshot();
     if !execution
@@ -221,6 +233,7 @@ pub(crate) fn evaluate_observation_partition_with_provider(
         ));
     }
     let evidence = ObservationAccelerationEvidence::new(
+        execution.resource_plan,
         selected_values_identity,
         execution.allocation.clone(),
         result.evidence,
@@ -396,6 +409,16 @@ fn checked_bytes(length: usize) -> Result<u64, ObservationError> {
         .ok()
         .and_then(|length| length.checked_mul(8))
         .ok_or(ObservationError::Limit("accelerated observation bytes"))
+}
+
+pub(crate) fn governed_extrema_device_resident_bytes(
+    selected_entity_count: usize,
+) -> Result<u64, ObservationError> {
+    checked_bytes(selected_entity_count)?
+        .checked_add(16)
+        .ok_or(ObservationError::Limit(
+            "governed observation accelerator memory",
+        ))
 }
 
 fn observation_attempt_id(partition: Digest) -> AttemptId {

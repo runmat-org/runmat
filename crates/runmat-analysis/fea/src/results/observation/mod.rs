@@ -17,6 +17,8 @@ mod publish;
 mod resolve;
 mod topology;
 
+pub(crate) use acceleration::governed_extrema_device_resident_bytes;
+
 pub use contract::{
     ObservationArtifact, ObservationArtifactEntry, ObservationArtifactIdentity,
     ObservationArtifactInput, ObservationArtifactManifest, ObservationEntity, ObservationError,
@@ -71,5 +73,6 @@ pub use acceleration::{
 };
 pub use acceleration_evidence::{
     ObservationAccelerationEvidence, ObservationAccelerationEvidenceIdentity,
-    ObservationAccelerationSummary, ObservationAccelerationSummaryIdentity,
+    ObservationAccelerationOperationSummary, ObservationAccelerationSummary,
+    ObservationAccelerationSummaryIdentity, OBSERVATION_ACCELERATION_EVIDENCE_MAX_ENCODED_BYTES,
 };

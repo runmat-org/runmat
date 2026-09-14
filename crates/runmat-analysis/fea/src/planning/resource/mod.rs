@@ -5,30 +5,57 @@ mod contract;
 mod estimate;
 mod facts;
 mod frequency;
+mod post_process;
 mod preflight;
+mod reconciliation;
 mod structural_facts;
 mod symbolic;
+mod usage;
 
 pub use admission::{
-    admit_resource_plan, allocation_matches_plan, reconcile_resource_usage, record_resource_usage,
-    validate_resource_usage_evidence,
+    admit_resource_plan, allocation_matches_plan, reconcile_resource_usage,
+    record_resource_graph_usage, record_resource_usage, validate_resource_usage_evidence,
 };
 pub use contract::{
-    AcceleratorRequirement, AccuracyResourceDemand, AnalysisResourceUsage, AssemblyResourcePolicy,
-    ByteCount, CheckpointArtifactPolicy, ConstraintResourceFacts, Count, FeaResourcePhase,
+    AcceleratorRequirement, AccuracyResourceDemand, AssemblyResourcePolicy, ByteCount,
+    CheckpointArtifactPolicy, ConstraintResourceFacts, Count, FeaResourceDemand, FeaResourcePhase,
     FeaResourcePlan, FeaResourcePlanIdentity, FeaResourcePlanningInput, NumericalScalar,
-    ObservationResourceFacts, PartitioningPolicy, PreconditionerStorage, RecoveryResourcePolicy,
-    ResourceAdmission, ResourceBreakdown, ResourceOverrun, ResourcePlanningError,
-    ResourceUsageAttempt, ResourceUsageEvidence, ResourceUsageEvidenceIdentity,
-    SolveResourcePolicy, SolverAdmissionResourcePolicy, SparseResourceFacts, TopologyResourceFacts,
-    WorkerResourcePolicy, RESOURCE_ESTIMATION_MODEL_REVISION,
+    ObservationAssemblyResourceDemand, ObservationHistoryCheckpointResourceDemand,
+    ObservationPartitionPayloadLayout, ObservationPartitionResourceDemand,
+    ObservationReductionResourceDemand, ObservationResourceFacts, PartitioningPolicy,
+    PhaseResourcePolicy, PreconditionerStorage, PreparedInputResourceFacts,
+    PreparedOutputResourceFacts, PreparedOutputSetResourceFacts, PreparedPhaseResourceFacts,
+    ResourceAdmission, ResourceBreakdown, ResourcePlanningError, SolveResourcePolicy,
+    SolverAdmissionResourcePolicy, SparseResourceFacts, StructuralFrequencyOperatorResourceDemand,
+    StructuralFrequencyResultAssemblyResourceDemand, StructuralOperatorResourceDemand,
+    TopologyResourceFacts, WorkerResourcePolicy, RESOURCE_ESTIMATION_MODEL_REVISION,
+    RESOURCE_PLAN_MAX_ENCODED_BYTES,
 };
 pub use estimate::build_resource_plan;
 pub use frequency::{
-    build_structural_frequency_entry_resource_plan, StructuralFrequencyEntryResourceProjection,
+    build_structural_frequency_entry_resource_plan,
+    build_structural_frequency_recovery_resource_plan,
+    structural_frequency_entry_payload_bytes_upper_bound,
+    structural_frequency_recovery_payload_bytes_upper_bound,
+    StructuralFrequencyEntryResourceProjection,
+};
+pub use post_process::{
+    build_observation_assembly_resource_plan, build_observation_history_checkpoint_resource_plan,
+    build_observation_partition_resource_plan, build_observation_reduction_resource_plan,
+    build_structural_frequency_result_assembly_resource_plan,
+    observation_artifact_payload_bytes_upper_bound,
+    observation_history_checkpoint_payload_bytes_upper_bound,
+    observation_partition_payload_bytes_upper_bound,
+    observation_reduction_payload_bytes_upper_bound,
+    structural_frequency_receipt_payload_bytes_upper_bound,
+    structural_frequency_result_payload_bytes_upper_bound, ObservationPartitionResourcePlanning,
 };
 pub use preflight::build_structural_resource_plan;
 pub use symbolic::StructuralSymbolicOperators;
+pub use usage::{
+    AnalysisResourceUsage, ResourceOverrun, ResourceUsageAttempt, ResourceUsageAttemptOverrun,
+    ResourceUsageEvidence, ResourceUsageEvidenceIdentity,
+};
 
 #[cfg(test)]
 mod frequency_tests;

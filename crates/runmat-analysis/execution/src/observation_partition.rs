@@ -3,9 +3,14 @@ use std::collections::BTreeSet;
 use runmat_analysis_fea::execution::{
     AnalysisNumericalObjectKind, AnalysisWorkKind, AnalysisWorkloadIdentity,
     ObservationEvaluationRequest, ObservationPartitionEvaluationRequest,
-    ObservationPartitionExecutionTarget, ObservationPartitionReductionRequest,
+    ObservationPartitionReductionRequest,
 };
-use runmat_analysis_fea::planning::resource::FeaResourcePlan;
+use runmat_analysis_fea::planning::resource::{
+    build_observation_partition_resource_plan, build_observation_reduction_resource_plan,
+    observation_partition_payload_bytes_upper_bound,
+    observation_reduction_payload_bytes_upper_bound, FeaResourcePlan,
+    ObservationPartitionResourcePlanning,
+};
 use runmat_analysis_fea::results::field::{RecoveredFieldPartitionSet, RecoveredFieldSample};
 use runmat_analysis_fea::results::observation::{
     classify_observation_partition_acceleration, resolved_observation_accepts_sample,
@@ -23,10 +28,10 @@ use runmat_execution_artifact::{ObjectNamespace, ProgramExecutionResponse};
 
 use crate::{
     import_analysis_objects, import_analysis_output_set, prepare_analysis_objects,
-    prepare_analysis_program, AnalysisBridgeError, AnalysisBridgeResult,
-    AnalysisCapabilityRequirement, AnalysisHostWorkload, AnalysisOutputRoot, AnalysisWorkloadInput,
-    AnalysisWorkloadRequest, PreparedAnalysisObjects, PreparedAnalysisProgram,
-    StructuralObservationPreparation, ANALYSIS_HOST_ABI,
+    prepare_analysis_program, prepared_input_resource_facts, projected_output_resource_facts,
+    AnalysisBridgeError, AnalysisBridgeResult, AnalysisCapabilityRequirement, AnalysisHostWorkload,
+    AnalysisOutputRoot, AnalysisWorkloadInput, AnalysisWorkloadRequest, PreparedAnalysisObjects,
+    PreparedAnalysisProgram, StructuralObservationPreparation, ANALYSIS_HOST_ABI,
 };
 
 use super::observation_evaluation::{admit_structural_observation, AdmittedStructuralObservation};
@@ -40,15 +45,22 @@ pub struct PreparedStructuralObservationPartition {
     pub partition_plan: ObservationPartitionPlan,
     pub partition: ObservationPartition,
     pub source_fields: RecoveredFieldPartitionSet,
+    execution_target: ObservationExecutionTarget,
+    pub resource_plan: FeaResourcePlan,
+    pub resource_plan_objects: PreparedAnalysisObjects,
     pub host: AnalysisHostWorkload,
     pub program: PreparedAnalysisProgram,
     pub inputs: Vec<PreparedAnalysisObjects>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum ObservationExecutionTarget {
+    Host,
+    GovernedAccelerator { class: String },
+}
+
 pub struct PreparedStructuralObservationFanout {
     pub source_request: ObservationEvaluationRequest,
-    pub resource_plan: FeaResourcePlan,
-    pub resource_plan_objects: PreparedAnalysisObjects,
     pub partitions: Vec<PreparedStructuralObservationPartition>,
 }
 
@@ -64,8 +76,6 @@ pub struct StructuralObservationReductionPreparation {
     pub source_request: ObservationEvaluationRequest,
     pub partition_plan: ObservationPartitionPlan,
     pub contributions: Vec<ImportedObservationPartitionContribution>,
-    pub expected_resource_plan: FeaResourcePlan,
-    pub resource_plan: PreparedAnalysisObjects,
     pub program_revision: ProgramRevision,
     pub chunk_bytes: usize,
     pub inventory_limits: ObjectInventoryLimits,
@@ -181,8 +191,6 @@ pub fn prepare_structural_observation_fanout(
     }
     Ok(PreparedStructuralObservationFanout {
         source_request: admitted.request,
-        resource_plan: admitted.resource_plan,
-        resource_plan_objects: preparation.resource_plan,
         partitions: prepared,
     })
 }
@@ -229,11 +237,57 @@ pub fn import_observation_partition_contribution(
             "observation contribution differs from its admitted partition",
         ));
     }
+    match (
+        &prepared.execution_target,
+        contribution.acceleration.as_ref(),
+    ) {
+        (ObservationExecutionTarget::Host, None) => {}
+        (ObservationExecutionTarget::GovernedAccelerator { class }, Some(evidence)) => {
+            let [allocation] = prepared.resource_plan.request.accelerators.as_slice() else {
+                return Err(AnalysisBridgeError::Identity(
+                    "accelerated observation contribution lacks one exact allocation",
+                ));
+            };
+            validate_acceleration_binding(
+                class,
+                prepared.resource_plan.identity,
+                allocation,
+                evidence.resource_plan,
+                &evidence.allocation,
+            )?;
+            evidence
+                .validate_for_allocation(allocation)
+                .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+        }
+        _ => {
+            return Err(AnalysisBridgeError::Identity(
+                "observation acceleration evidence differs from prepared placement",
+            ))
+        }
+    }
     Ok(ImportedObservationPartitionContribution {
         contribution,
         objects,
         output: output.clone(),
     })
+}
+
+fn validate_acceleration_binding(
+    prepared_class: &str,
+    prepared_plan: runmat_analysis_fea::planning::resource::FeaResourcePlanIdentity,
+    prepared_allocation: &AcceleratorRequest,
+    evidence_plan: runmat_analysis_fea::planning::resource::FeaResourcePlanIdentity,
+    evidence_allocation: &AcceleratorRequest,
+) -> AnalysisBridgeResult<()> {
+    if prepared_allocation.class != prepared_class
+        || prepared_plan != evidence_plan
+        || prepared_allocation != evidence_allocation
+    {
+        return Err(AnalysisBridgeError::Identity(
+            "observation contribution plan or allocation differs from prepared placement",
+        ));
+    }
+    Ok(())
 }
 
 pub fn prepare_structural_observation_reduction(
@@ -260,7 +314,6 @@ pub fn prepare_structural_observation_reduction(
         &preparation.source_request,
         &preparation.partition_plan,
         &contributions,
-        &preparation.expected_resource_plan,
     )?;
     let request_objects = prepare_analysis_objects(
         AnalysisNumericalObjectKind::ObservationPartitionReductionRequest,
@@ -296,14 +349,31 @@ pub fn prepare_structural_observation_reduction(
             .into_iter()
             .map(|imported| imported.objects),
     );
-    inputs.push(preparation.resource_plan.clone());
-    let resource_plan = FeaResourcePlan::from_canonical_bytes(&preparation.resource_plan.payload())
-        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    if resource_plan != preparation.expected_resource_plan {
-        return Err(AnalysisBridgeError::Identity(
-            "observation reduction received a substituted resource plan",
-        ));
-    }
+    let input_facts = prepared_input_resource_facts(&inputs)?;
+    let output_payload_upper_bound =
+        observation_reduction_payload_bytes_upper_bound(&input_facts, &contributions)
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let resource_plan = build_observation_reduction_resource_plan(
+        &preparation.source_request,
+        &request,
+        &preparation.partition_plan,
+        &contributions,
+        input_facts,
+        projected_output_resource_facts(output_payload_upper_bound)?,
+        crate::projected_output_set_resource_facts(),
+    )
+    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let resource_plan_objects = prepare_analysis_objects(
+        AnalysisNumericalObjectKind::ResourcePlan,
+        resource_plan.identity.digest(),
+        &resource_plan
+            .canonical_bytes()
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
+        preparation.chunk_bytes,
+        ObjectNamespace::InputValue,
+        preparation.inventory_limits,
+    )?;
+    inputs.push(resource_plan_objects.clone());
     let host = prepare_host_workload(
         &preparation.source_host,
         AnalysisWorkKind::ReduceObservationPartitions,
@@ -317,7 +387,7 @@ pub fn prepare_structural_observation_reduction(
         request,
         partition_plan: preparation.partition_plan,
         resource_plan,
-        resource_plan_objects: preparation.resource_plan,
+        resource_plan_objects,
         event_attribution,
         host,
         program,
@@ -349,11 +419,29 @@ pub fn import_reduced_observation(
     )?;
     let result = ObservationResult::from_canonical_bytes(&objects.payload())
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let contributions = prepared
+        .inputs
+        .iter()
+        .filter(|input| {
+            input.manifest.kind == AnalysisNumericalObjectKind::ObservationPartitionContribution
+        })
+        .map(|input| {
+            ObservationPartitionContribution::from_canonical_bytes(&input.payload())
+                .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))
+        })
+        .collect::<AnalysisBridgeResult<Vec<_>>>()?;
+    let expected = runmat_analysis_fea::results::observation::reduce_observation_partitions(
+        &prepared.source_request.plan,
+        &prepared.partition_plan,
+        contributions,
+    )
+    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     if result.logical_identity.digest() != output.logical_identity
         || result.plan_identity != prepared.source_request.plan.identity
         || result.topology_digest != prepared.source_request.plan.topology_digest
         || result.partition_evidence.partition_plan != prepared.partition_plan.identity
         || result.partition_evidence.event_attribution != prepared.event_attribution
+        || result != expected
     {
         return Err(AnalysisBridgeError::Identity(
             "reduced observation differs from its admitted request",
@@ -388,8 +476,6 @@ fn prepare_partition_workload(
         &partition,
         &source_fields,
         event_attribution,
-        &admitted.resource_plan,
-        execution_target.clone(),
     )?;
     let source_request_objects = prepare_analysis_objects(
         AnalysisNumericalObjectKind::ObservationEvaluationRequest,
@@ -433,19 +519,63 @@ fn prepare_partition_workload(
         plan_objects,
         field_objects,
         preparation.source_workload.objects().clone(),
-        preparation.resource_plan.clone(),
     ];
     if let Some(mesh) = &preparation.mesh {
         inputs.push(mesh.clone());
     }
+    let accelerator = match &execution_target {
+        ObservationExecutionTarget::Host => None,
+        ObservationExecutionTarget::GovernedAccelerator { class } => Some(
+            admitted
+                .resource_plan
+                .request
+                .accelerators
+                .iter()
+                .find(|allocation| &allocation.class == class)
+                .ok_or(AnalysisBridgeError::Identity(
+                    "observation placement lacks its admitted accelerator allocation",
+                ))?,
+        ),
+    };
+    let input_facts = prepared_input_resource_facts(&inputs)?;
+    let output_payload_upper_bound = observation_partition_payload_bytes_upper_bound(
+        &input_facts,
+        &source_fields,
+        accelerator.is_some(),
+    )
+    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let resource_plan =
+        build_observation_partition_resource_plan(ObservationPartitionResourcePlanning {
+            source: &admitted.request,
+            request: &request,
+            partition_plan: &partition_plan,
+            partition: &partition,
+            source_fields: &source_fields,
+            inputs: input_facts,
+            output: projected_output_resource_facts(output_payload_upper_bound)?,
+            output_set: crate::projected_output_set_resource_facts(),
+            accelerator,
+        })
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let resource_plan_objects = prepare_analysis_objects(
+        AnalysisNumericalObjectKind::ResourcePlan,
+        resource_plan.identity.digest(),
+        &resource_plan
+            .canonical_bytes()
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
+        preparation.chunk_bytes,
+        ObjectNamespace::InputValue,
+        preparation.inventory_limits,
+    )?;
+    inputs.push(resource_plan_objects.clone());
     let host = prepare_host_workload(
         &preparation.source_host,
         AnalysisWorkKind::EvaluateObservationPartition,
         &inputs,
         vec![AnalysisNumericalObjectKind::ObservationPartitionContribution],
         match &execution_target {
-            ObservationPartitionExecutionTarget::Host => BTreeSet::new(),
-            ObservationPartitionExecutionTarget::GovernedAccelerator { class } => {
+            ObservationExecutionTarget::Host => BTreeSet::new(),
+            ObservationExecutionTarget::GovernedAccelerator { class } => {
                 BTreeSet::from([AnalysisCapabilityRequirement::Accelerator {
                     class: class.clone(),
                 }])
@@ -459,6 +589,9 @@ fn prepare_partition_workload(
         partition_plan,
         partition,
         source_fields,
+        execution_target,
+        resource_plan,
+        resource_plan_objects,
         host,
         program,
         inputs,
@@ -472,7 +605,7 @@ fn observation_execution_target(
     partition: &ObservationPartition,
     source_fields: &RecoveredFieldPartitionSet,
     event_attribution: Option<ObservationEventAttribution>,
-) -> AnalysisBridgeResult<ObservationPartitionExecutionTarget> {
+) -> AnalysisBridgeResult<ObservationExecutionTarget> {
     let eligibility = classify_observation_partition_acceleration(
         &admitted.request.plan,
         partition_plan,
@@ -494,11 +627,11 @@ fn select_observation_execution_target(
     eligibility: ObservationAccelerationEligibility,
     accelerators: &[AcceleratorRequest],
     capabilities: &BTreeSet<AnalysisCapabilityRequirement>,
-) -> AnalysisBridgeResult<ObservationPartitionExecutionTarget> {
+) -> AnalysisBridgeResult<ObservationExecutionTarget> {
     if backend != ComputeBackend::Gpu
         || eligibility != ObservationAccelerationEligibility::GovernedExactF64Extrema
     {
-        return Ok(ObservationPartitionExecutionTarget::Host);
+        return Ok(ObservationExecutionTarget::Host);
     }
     let candidates = accelerators
         .iter()
@@ -510,8 +643,8 @@ fn select_observation_execution_target(
         .map(|accelerator| accelerator.class.clone())
         .collect::<BTreeSet<_>>();
     match candidates.len() {
-        0 => Ok(ObservationPartitionExecutionTarget::Host),
-        1 => Ok(ObservationPartitionExecutionTarget::GovernedAccelerator {
+        0 => Ok(ObservationExecutionTarget::Host),
+        1 => Ok(ObservationExecutionTarget::GovernedAccelerator {
             class: candidates.into_iter().next().expect("one candidate"),
         }),
         _ => Err(AnalysisBridgeError::Invalid(
@@ -558,14 +691,13 @@ pub(crate) fn prepare_host_workload(
 mod placement_tests {
     use std::collections::BTreeSet;
 
-    use runmat_analysis_fea::execution::ObservationPartitionExecutionTarget;
     use runmat_analysis_fea::results::observation::ObservationAccelerationEligibility;
     use runmat_analysis_fea::ComputeBackend;
-    use runmat_execution::resource::AcceleratorRequest;
+    use runmat_execution::{resource::AcceleratorRequest, Digest};
 
     use crate::AnalysisCapabilityRequirement;
 
-    use super::select_observation_execution_target;
+    use super::{select_observation_execution_target, validate_acceleration_binding};
 
     fn accelerator(class: &str) -> AcceleratorRequest {
         AcceleratorRequest {
@@ -594,7 +726,7 @@ mod placement_tests {
                 &capabilities,
             )
             .unwrap(),
-            ObservationPartitionExecutionTarget::GovernedAccelerator {
+            super::ObservationExecutionTarget::GovernedAccelerator {
                 class: "gpu-a".into(),
             }
         );
@@ -625,7 +757,7 @@ mod placement_tests {
                     &capabilities,
                 )
                 .unwrap(),
-                ObservationPartitionExecutionTarget::Host
+                super::ObservationExecutionTarget::Host
             );
         }
     }
@@ -639,5 +771,20 @@ mod placement_tests {
             &BTreeSet::from([capability("gpu-a"), capability("gpu-b")]),
         )
         .is_err());
+    }
+
+    #[test]
+    fn homogeneous_acceleration_allocations_cannot_swap_phase_plans() {
+        let allocation = accelerator("gpu-a");
+        let first =
+            serde_json::from_value(serde_json::to_value(Digest::sha256("first")).unwrap()).unwrap();
+        let second =
+            serde_json::from_value(serde_json::to_value(Digest::sha256("second")).unwrap())
+                .unwrap();
+        validate_acceleration_binding("gpu-a", first, &allocation, first, &allocation).unwrap();
+        assert!(
+            validate_acceleration_binding("gpu-a", first, &allocation, second, &allocation,)
+                .is_err()
+        );
     }
 }

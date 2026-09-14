@@ -87,15 +87,14 @@ pub use object::{
     chunk_numerical_payload, chunk_partitioned_numerical_payload, AnalysisChunkDescriptor,
     AnalysisNumericalObjectKind, AnalysisObjectManifest, AnalysisPayloadPartition,
     AnalysisPayloadPartitionDescriptor, ChunkedAnalysisPayload, ANALYSIS_CHUNK_MEDIA_TYPE,
-    ANALYSIS_CHUNK_VALUE_SCHEMA, ANALYSIS_MANIFEST_MEDIA_TYPE, ANALYSIS_MANIFEST_VALUE_SCHEMA,
-    DEFAULT_ANALYSIS_CHUNK_BYTES,
+    ANALYSIS_CHUNK_VALUE_SCHEMA, ANALYSIS_MANIFEST_MAX_ENCODED_BYTES, ANALYSIS_MANIFEST_MEDIA_TYPE,
+    ANALYSIS_MANIFEST_VALUE_SCHEMA, DEFAULT_ANALYSIS_CHUNK_BYTES,
 };
 pub use observation::ObservationEvaluationRequest;
 pub use observation_assembly::ObservationAssemblyRequest;
 pub use observation_history_checkpoint::ObservationHistoryCheckpointRequest;
 pub use observation_partition::{
-    ObservationPartitionEvaluationRequest, ObservationPartitionExecutionTarget,
-    ObservationPartitionReductionRequest,
+    ObservationPartitionEvaluationRequest, ObservationPartitionReductionRequest,
 };
 pub use publication::ResultPublicationRequest;
 pub use signal::{

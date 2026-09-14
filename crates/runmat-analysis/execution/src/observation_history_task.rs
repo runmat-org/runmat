@@ -4,6 +4,10 @@ use runmat_analysis_core::ObservationId;
 use runmat_analysis_fea::execution::{
     AnalysisNumericalObjectKind, AnalysisWorkKind, ObservationHistoryCheckpointRequest,
 };
+use runmat_analysis_fea::planning::resource::{
+    build_observation_history_checkpoint_resource_plan,
+    observation_history_checkpoint_payload_bytes_upper_bound, FeaResourcePlan,
+};
 use runmat_analysis_fea::results::observation::{
     ObservationHistoryCheckpoint, ResolvedObservationPlan,
 };
@@ -16,9 +20,10 @@ use runmat_execution_artifact::{ObjectNamespace, ProgramExecutionResponse};
 use crate::{
     decode_prepared_observation_history_checkpoint, import_analysis_objects,
     import_analysis_output_set, prepare_analysis_objects, prepare_analysis_program,
-    AnalysisBridgeError, AnalysisBridgeResult, AnalysisCapabilityRequirement, AnalysisHostWorkload,
-    AnalysisWorkloadInput, AnalysisWorkloadRequest, ImportedReducedObservation,
-    PreparedAnalysisObjects, PreparedAnalysisProgram, ANALYSIS_HOST_ABI,
+    prepared_input_resource_facts, AnalysisBridgeError, AnalysisBridgeResult,
+    AnalysisCapabilityRequirement, AnalysisHostWorkload, AnalysisWorkloadInput,
+    AnalysisWorkloadRequest, ImportedReducedObservation, PreparedAnalysisObjects,
+    PreparedAnalysisProgram, ANALYSIS_HOST_ABI,
 };
 
 pub struct ObservationHistoryCheckpointPreparation {
@@ -34,7 +39,8 @@ pub struct ObservationHistoryCheckpointPreparation {
 
 pub struct PreparedObservationHistoryCheckpointTask {
     pub request: ObservationHistoryCheckpointRequest,
-    pub expected: ObservationHistoryCheckpoint,
+    pub resource_plan: FeaResourcePlan,
+    pub resource_plan_objects: PreparedAnalysisObjects,
     pub host: AnalysisHostWorkload,
     pub program: PreparedAnalysisProgram,
     pub inputs: Vec<PreparedAnalysisObjects>,
@@ -86,7 +92,7 @@ pub fn prepare_observation_history_checkpoint_task(
         sample.sample,
         sample.logical_identity,
     )?;
-    let expected = request.advance(previous, sample)?;
+    request.validate_advance_inputs(previous.as_ref(), &sample)?;
     let request_bytes = request.canonical_bytes()?;
     let request_objects = prepare_analysis_objects(
         AnalysisNumericalObjectKind::ObservationHistoryCheckpointRequest,
@@ -101,6 +107,37 @@ pub fn prepare_observation_history_checkpoint_task(
     if let Some(previous) = preparation.previous {
         typed_inputs.push((previous, ValueRefKind::ResultObject));
     }
+    let numerical_inputs = typed_inputs
+        .iter()
+        .map(|(input, _)| input.clone())
+        .collect::<Vec<_>>();
+    let input_facts = prepared_input_resource_facts(&numerical_inputs)?;
+    let output_payload_upper_bound = observation_history_checkpoint_payload_bytes_upper_bound(
+        &request,
+        previous.as_ref(),
+        &input_facts,
+    )
+    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let resource_plan = build_observation_history_checkpoint_resource_plan(
+        &request,
+        previous.as_ref(),
+        &sample,
+        input_facts,
+        crate::projected_output_resource_facts(output_payload_upper_bound)?,
+        crate::projected_output_set_resource_facts(),
+    )
+    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let resource_plan_objects = prepare_analysis_objects(
+        AnalysisNumericalObjectKind::ResourcePlan,
+        resource_plan.identity.digest(),
+        &resource_plan
+            .canonical_bytes()
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
+        preparation.chunk_bytes,
+        ObjectNamespace::InputValue,
+        preparation.inventory_limits,
+    )?;
+    typed_inputs.push((resource_plan_objects.clone(), ValueRefKind::DriverObject));
     let workload_inputs = typed_inputs
         .iter()
         .map(|(input, reference_kind)| AnalysisWorkloadInput {
@@ -131,7 +168,8 @@ pub fn prepare_observation_history_checkpoint_task(
     let program = prepare_analysis_program(&host, preparation.program_revision, &inputs)?;
     Ok(PreparedObservationHistoryCheckpointTask {
         request,
-        expected,
+        resource_plan,
+        resource_plan_objects,
         host,
         program,
         inputs,
@@ -155,13 +193,34 @@ pub fn import_observation_history_checkpoint_task(
         source,
         &output.root,
         AnalysisNumericalObjectKind::ObservationHistoryCheckpoint,
-        prepared.expected.manifest().identity.digest(),
+        output.logical_identity,
         output.payload_digest,
         &prepared.host.artifact_access,
         limits,
     )?;
     let checkpoint = decode_prepared_observation_history_checkpoint(&objects)?;
-    if checkpoint != prepared.expected {
+    let sample = prepared
+        .inputs
+        .iter()
+        .find(|input| input.manifest.kind == AnalysisNumericalObjectKind::ObservationResult)
+        .ok_or_else(|| {
+            AnalysisBridgeError::Invalid("history checkpoint lost its sample input".into())
+        })?;
+    let sample =
+        runmat_analysis_fea::results::observation::ObservationResult::from_canonical_bytes(
+            &sample.payload(),
+        )
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let previous = prepared
+        .inputs
+        .iter()
+        .find(|input| {
+            input.manifest.kind == AnalysisNumericalObjectKind::ObservationHistoryCheckpoint
+        })
+        .map(decode_prepared_observation_history_checkpoint)
+        .transpose()?;
+    let expected = prepared.request.advance(previous, sample)?;
+    if checkpoint != expected || output.logical_identity != expected.manifest().identity.digest() {
         return Err(AnalysisBridgeError::Identity(
             "published history checkpoint differs from its prepared transition",
         ));

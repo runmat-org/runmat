@@ -27,6 +27,10 @@ pub(super) struct StructuralResourceFacts {
     pub topology: TopologyResourceFacts,
     pub recovery_node_count: usize,
     pub recovery_element_count: usize,
+    pub recovery_solid_element_count: usize,
+    pub recovery_beam_element_count: usize,
+    pub recovery_shell_element_count: usize,
+    pub recovery_has_rotational_dofs: bool,
 }
 
 pub(super) fn derive_structural_resource_facts(
@@ -110,6 +114,27 @@ pub(super) fn derive_structural_resource_facts(
         .ok_or(ResourcePlanningError::Overflow(
             "structural recovery element count",
         ))?;
+    let recovery_solid_element_count = projection
+        .as_ref()
+        .map(|projection| projection.elements.len())
+        .unwrap_or(0);
+    let (recovery_beam_element_count, recovery_shell_element_count) = model
+        .structural
+        .as_ref()
+        .map(|structural| {
+            structural
+                .elements
+                .iter()
+                .fold((0_usize, 0_usize), |counts, element| match element.kind {
+                    runmat_analysis_core::StructuralElementKind::Beam(_) => {
+                        (counts.0 + 1, counts.1)
+                    }
+                    runmat_analysis_core::StructuralElementKind::Shell(_) => {
+                        (counts.0, counts.1 + 1)
+                    }
+                })
+        })
+        .unwrap_or_default();
     let topology = if let Some((structural, topology)) = mixed_topology.as_ref() {
         TopologyResourceFacts::from_mixed_projection(
             projection.as_ref().ok_or_else(|| {
@@ -144,6 +169,11 @@ pub(super) fn derive_structural_resource_facts(
         topology,
         recovery_node_count,
         recovery_element_count,
+        recovery_solid_element_count,
+        recovery_beam_element_count,
+        recovery_shell_element_count,
+        recovery_has_rotational_dofs: recovery_beam_element_count > 0
+            || recovery_shell_element_count > 0,
     })
 }
 

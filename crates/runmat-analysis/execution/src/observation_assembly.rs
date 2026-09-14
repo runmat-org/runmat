@@ -4,8 +4,13 @@ use runmat_analysis_fea::execution::{
     AnalysisNumericalObjectKind, AnalysisWorkKind, ObservationAssemblyRequest,
     ObservationEvaluationRequest,
 };
-use runmat_analysis_fea::planning::resource::FeaResourcePlan;
-use runmat_analysis_fea::results::observation::ObservationArtifactManifest;
+use runmat_analysis_fea::planning::resource::{
+    build_observation_assembly_resource_plan, observation_artifact_payload_bytes_upper_bound,
+    FeaResourcePlan,
+};
+use runmat_analysis_fea::results::observation::{
+    ObservationArtifact, ObservationArtifactInput, ObservationArtifactManifest, ObservationResult,
+};
 use runmat_execution::value::ValueRefKind;
 use runmat_execution::ProgramRevision;
 use runmat_execution_artifact::cache::CacheImport;
@@ -26,8 +31,6 @@ pub struct StructuralObservationAssemblyPreparation {
     pub source_host: AnalysisHostWorkload,
     pub source_request: ObservationEvaluationRequest,
     pub results: Vec<ImportedReducedObservation>,
-    pub expected_resource_plan: FeaResourcePlan,
-    pub resource_plan: PreparedAnalysisObjects,
     pub program_revision: ProgramRevision,
     pub chunk_bytes: usize,
     pub inventory_limits: ObjectInventoryLimits,
@@ -53,13 +56,6 @@ pub fn prepare_structural_observation_assembly(
             "observation assembly requires reduced results and bounded chunks".into(),
         ));
     }
-    let resource_plan = FeaResourcePlan::from_canonical_bytes(&preparation.resource_plan.payload())
-        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    if resource_plan != preparation.expected_resource_plan {
-        return Err(AnalysisBridgeError::Identity(
-            "observation assembly received a substituted resource plan",
-        ));
-    }
     let mut by_observation = preparation
         .results
         .into_iter()
@@ -83,14 +79,11 @@ pub fn prepare_structural_observation_assembly(
             "observation assembly contains an unrelated or duplicate result",
         ));
     }
-    let request = ObservationAssemblyRequest::new(
-        &preparation.source_request,
-        &results
-            .iter()
-            .map(|imported| imported.result.clone())
-            .collect::<Vec<_>>(),
-        &resource_plan,
-    )?;
+    let result_values = results
+        .iter()
+        .map(|imported| imported.result.clone())
+        .collect::<Vec<_>>();
+    let request = ObservationAssemblyRequest::new(&preparation.source_request, &result_values)?;
     let request_objects = prepare_analysis_objects(
         AnalysisNumericalObjectKind::ObservationAssemblyRequest,
         request.identity().digest(),
@@ -109,7 +102,30 @@ pub fn prepare_structural_observation_assembly(
     )?;
     let mut inputs = vec![request_objects, source_request_objects];
     inputs.extend(results.into_iter().map(|imported| imported.objects));
-    inputs.push(preparation.resource_plan.clone());
+    let input_facts = crate::prepared_input_resource_facts(&inputs)?;
+    let output_payload_upper_bound =
+        observation_artifact_payload_bytes_upper_bound(&input_facts, result_values.len())
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let resource_plan = build_observation_assembly_resource_plan(
+        &preparation.source_request,
+        &request,
+        &result_values,
+        input_facts,
+        crate::projected_output_resource_facts(output_payload_upper_bound)?,
+        crate::projected_output_set_resource_facts(),
+    )
+    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let resource_plan_objects = prepare_analysis_objects(
+        AnalysisNumericalObjectKind::ResourcePlan,
+        resource_plan.identity.digest(),
+        &resource_plan
+            .canonical_bytes()
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
+        preparation.chunk_bytes,
+        ObjectNamespace::InputValue,
+        preparation.inventory_limits,
+    )?;
+    inputs.push(resource_plan_objects.clone());
     let host = prepare_host_workload(
         &preparation.source_host,
         AnalysisWorkKind::AssembleObservations,
@@ -122,7 +138,7 @@ pub fn prepare_structural_observation_assembly(
         source_request: preparation.source_request,
         request,
         resource_plan,
-        resource_plan_objects: preparation.resource_plan,
+        resource_plan_objects,
         host,
         program,
         inputs,
@@ -168,6 +184,29 @@ pub fn import_structural_observation_assembly(
     }
     let manifest = ObservationArtifactManifest::from_canonical_bytes(&imported.payload())
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let results = prepared
+        .inputs
+        .iter()
+        .filter(|input| input.manifest.kind == AnalysisNumericalObjectKind::ObservationResult)
+        .map(|input| {
+            ObservationResult::from_canonical_bytes(&input.payload())
+                .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))
+        })
+        .collect::<AnalysisBridgeResult<Vec<_>>>()?;
+    let expected_artifact = ObservationArtifact::new(ObservationArtifactInput {
+        evaluation_request: prepared.source_request.identity(),
+        producer: prepared.source_request.producer,
+        field_recovery_request: prepared.source_request.field_recovery_request,
+        source_fields: prepared.source_request.source_fields,
+        source: prepared.source_request.source,
+        topology_digest: prepared.source_request.plan.topology_digest,
+        plan_identity: prepared.source_request.plan.identity,
+        results,
+    })
+    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let expected_manifest = expected_artifact
+        .manifest()
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     if manifest.identity.digest() != output.logical_identity
         || manifest.evaluation_request != prepared.source_request.identity()
         || manifest.producer != prepared.source_request.producer
@@ -176,6 +215,7 @@ pub fn import_structural_observation_assembly(
         || manifest.source != prepared.source_request.source
         || manifest.topology_digest != prepared.source_request.plan.topology_digest
         || manifest.plan_identity != prepared.source_request.plan.identity
+        || manifest != expected_manifest
     {
         return Err(AnalysisBridgeError::Identity(
             "assembled observations differ from their admitted evaluation request",

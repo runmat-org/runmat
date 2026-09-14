@@ -26,8 +26,9 @@ use crate::{
         StructuralFrequencyWorkload, StructuralPhasorConvention, StudyIdentity,
     },
     post::{
-        recover_complex_constraint_group_observable_fields,
-        recover_complex_structural_result_fields, ComplexStructuralFieldState,
+        complex_structural_field_layout, recover_complex_constraint_group_observable_fields,
+        recover_complex_structural_result_fields, ComplexStructuralFieldCardinality,
+        ComplexStructuralFieldState,
     },
     results::field::{RecoveredFieldArtifact, StructuralRecoveredFieldTopology},
     solve::{
@@ -372,13 +373,38 @@ pub fn recover_structural_frequency_entry_fields(
         )
         .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?,
     );
-    let mut entity_counts = topology.entity_counts;
-    entity_counts.constraint_groups = constraint_plan.groups.len();
+    let layout = complex_structural_field_layout(ComplexStructuralFieldCardinality {
+        structural_nodes: assembly.real.structural_dof_layout.node_count(),
+        solid_elements: assembly.real.structural_solid_recovery.len(),
+        beam_elements: assembly.real.structural_beam_recovery.len(),
+        shell_elements: assembly.real.structural_shell_recovery.len(),
+        constraint_groups: constraint_plan.groups.len(),
+        has_rotational_dofs: assembly.real.structural_rotational_dof_count > 0,
+    })
+    .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+    let actual_storage_values = fields.iter().try_fold(0_usize, |total, field| {
+        total.checked_add(
+            field
+                .storage()
+                .as_host_f64()
+                .map_or(0, |values| values.len()),
+        )
+    });
+    if fields
+        .iter()
+        .map(|field| field.definition())
+        .ne(layout.definitions.iter())
+        || actual_storage_values != Some(layout.storage_value_count)
+    {
+        return Err(AnalysisExecutionError::Identity(
+            "structural frequency recovery differs from its canonical field layout",
+        ));
+    }
     RecoveredFieldArtifact::new(
         request.identity(),
         request.source,
         topology.identity.discretization_digest(),
-        entity_counts,
+        layout.entity_counts,
         fields,
     )
     .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))

@@ -13,6 +13,7 @@ pub const ANALYSIS_CHUNK_VALUE_SCHEMA: &str = "runmat.analysis.object-chunk.v1";
 const MANIFEST_PREFIX: &[u8] = b"runmat-analysis-object-manifest/v1\0";
 const MANIFEST_DOMAIN: &str = "numerical-object-manifest";
 const MANIFEST_LIMITS: CanonicalLimits = CanonicalLimits::new(8 * 1024 * 1024, 1_000_000, 4096, 32);
+pub const ANALYSIS_MANIFEST_MAX_ENCODED_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_CHUNKS: usize = 1_000_000;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]

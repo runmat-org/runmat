@@ -229,7 +229,7 @@ fn high_rate_history_checkpoints_write_only_new_chunks_and_resume_exactly() {
     )
     .unwrap();
     let imported_result = ImportedReducedObservation {
-        result: next_result,
+        result: next_result.clone(),
         objects: next_result_objects,
         producer: source_host.workload.identity,
     };
@@ -267,10 +267,14 @@ fn high_rate_history_checkpoints_write_only_new_chunks_and_resume_exactly() {
     wrong_ordinal.sample_ordinal += 1;
     assert!(wrong_ordinal.validate().is_err());
     scheduled.program.write_to(&mut store).unwrap();
+    let expected = scheduled
+        .request
+        .advance(Some(midpoint.checkpoint.clone()), next_result)
+        .unwrap();
     let scheduled_completion = execute_serial_analysis(
         &scheduled.program.request,
         &mut store,
-        &HistoryCheckpointKernel(scheduled.expected.clone()),
+        &HistoryCheckpointKernel(expected),
         256,
         limits,
     )

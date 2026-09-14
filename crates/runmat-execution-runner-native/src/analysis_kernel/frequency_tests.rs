@@ -11,7 +11,8 @@ use runmat_analysis_execution::{
     prepare_structural_frequency_fanout, prepare_structural_frequency_field_recovery,
     prepare_structural_frequency_result_assembly_request_objects,
     prepare_structural_frequency_result_task, prepare_structural_frequency_workload_objects,
-    AnalysisHostResponse, ImportedRecoveredFields, ImportedStructuralFrequencyResult,
+    AnalysisBridgeResult, AnalysisHostResponse, AnalysisKernel, AnalysisKernelInvocation,
+    AnalysisKernelOutput, ImportedRecoveredFields, ImportedStructuralFrequencyResult,
     PreparedAnalysisObjects, StructuralFrequencyEntryPreparation,
     StructuralFrequencyFanoutPreparation, StructuralFrequencyFieldRecoveryPreparation,
     StructuralFrequencyResultPreparation,
@@ -25,16 +26,41 @@ use runmat_analysis_fea::{
     },
     fixtures::{fixture_model, FixtureId},
     frequency::FrequencyResponsePlan,
-    planning::resource::{build_resource_plan, ByteCount},
+    planning::resource::{build_resource_plan, ByteCount, FeaResourceDemand},
     solve::dynamics::DirectHarmonicPolicy,
     ComputeBackend, ModalSolveOptions, ModalTruncationPolicy,
 };
 use runmat_execution::{Digest, ProgramEnvironment, ProgramRevision};
+use runmat_execution_artifact::cache::CacheImport;
 use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_artifact::{ArtifactAccess, ObjectNamespace};
 use runmat_meshing_core::{CanonicalMeshingContract, ElementOrder};
 
 use super::NativeAnalysisKernel;
+
+struct OversizedSecondOutputKernel {
+    second_payload_bytes: usize,
+}
+
+impl AnalysisKernel for OversizedSecondOutputKernel {
+    fn execute(
+        &self,
+        _invocation: AnalysisKernelInvocation<'_>,
+    ) -> AnalysisBridgeResult<Vec<AnalysisKernelOutput>> {
+        Ok(vec![
+            AnalysisKernelOutput::whole(
+                AnalysisNumericalObjectKind::SolverResult,
+                digest("bounded-first-output"),
+                vec![1],
+            ),
+            AnalysisKernelOutput::whole(
+                AnalysisNumericalObjectKind::NumericalReceipt,
+                digest("oversized-second-output"),
+                vec![2; self.second_payload_bytes],
+            ),
+        ])
+    }
+}
 
 fn digest(label: &str) -> Digest {
     Digest::sha256(label)
@@ -210,6 +236,22 @@ fn execute_frequency(
                     .count(),
                 1
             );
+            assert_eq!(
+                recovery
+                    .host
+                    .workload
+                    .inputs
+                    .iter()
+                    .filter(|input| input.kind == AnalysisNumericalObjectKind::ResourcePlan)
+                    .count(),
+                1
+            );
+            assert_eq!(
+                recovery.resource_plan.input.phase,
+                runmat_analysis_fea::planning::resource::FeaResourcePhase::StructuralFrequencyFieldRecovery(
+                    recovery.request.identity()
+                )
+            );
             recovery.program.write_to(&mut store).unwrap();
             let completed = execute_serial_analysis(
                 &recovery.program.request,
@@ -259,9 +301,65 @@ fn execute_frequency(
         entries: imported.into_iter().map(|entry| entry.objects).collect(),
         artifact_access: access(),
         program_revision: revision(),
+        chunk_bytes: 256,
+        inventory_limits: limits,
     })
     .unwrap();
     task.program.write_to(&mut store).unwrap();
+    let FeaResourceDemand::StructuralFrequencyResultAssembly(demand) =
+        &task.resource_plan.input.demand
+    else {
+        panic!("frequency fan-in must carry its exact resource demand")
+    };
+    let output_set_bytes = task
+        .resource_plan
+        .input
+        .output_set
+        .as_ref()
+        .unwrap()
+        .encoded_bytes_upper_bound
+        .0;
+    assert_eq!(
+        task.resource_plan.request.max_artifact_bytes,
+        demand.result_output.transport_closure_bytes_upper_bound.0
+            + demand.receipt_output.transport_closure_bytes_upper_bound.0
+            + output_set_bytes
+    );
+    assert_eq!(
+        task.resource_plan.breakdown.output_set_bytes.0,
+        output_set_bytes
+    );
+
+    let first = prepare_analysis_objects(
+        AnalysisNumericalObjectKind::SolverResult,
+        digest("bounded-first-output"),
+        &[1],
+        256,
+        ObjectNamespace::ResultValue,
+        limits,
+    )
+    .unwrap();
+    assert!(first.objects.iter().all(|object| store
+        .read_verified(object.descriptor.digest)
+        .unwrap()
+        .is_none()));
+    let second_payload_bytes =
+        usize::try_from(demand.receipt_output.encoded_payload_bytes_upper_bound.0 + 1).unwrap();
+    assert!(execute_serial_analysis(
+        &task.program.request,
+        &mut store,
+        &OversizedSecondOutputKernel {
+            second_payload_bytes,
+        },
+        256,
+        limits,
+    )
+    .is_err());
+    assert!(first.objects.iter().all(|object| store
+        .read_verified(object.descriptor.digest)
+        .unwrap()
+        .is_none()));
+
     let completed = execute_serial_analysis(
         &task.program.request,
         &mut store,
@@ -362,11 +460,40 @@ fn standalone_frequency_preparation_rederives_its_resource_envelope() {
 
     assert!(
         prepare_structural_frequency_entry_task(StructuralFrequencyEntryPreparation {
+            workload: workload_objects.clone(),
+            mesh: mesh_objects.clone(),
+            request: prepared.inputs[2].clone(),
+            modal_state: None,
+            resource_plan: understated_objects,
+            artifact_access: access(),
+            program_revision: revision(),
+        })
+        .is_err()
+    );
+
+    let mut understated_output_input = prepared.resource_plan.input.clone();
+    let FeaResourceDemand::StructuralFrequencyEntry(demand) = &mut understated_output_input.demand
+    else {
+        unreachable!()
+    };
+    demand.operator.phase_resources.resident_bytes_upper_bound.0 -= 1;
+    let understated_output = build_resource_plan(understated_output_input).unwrap();
+    let understated_output_objects = prepare_analysis_objects(
+        AnalysisNumericalObjectKind::ResourcePlan,
+        understated_output.identity.digest(),
+        &understated_output.canonical_bytes().unwrap(),
+        256,
+        ObjectNamespace::InputValue,
+        limits,
+    )
+    .unwrap();
+    assert!(
+        prepare_structural_frequency_entry_task(StructuralFrequencyEntryPreparation {
             workload: workload_objects,
             mesh: mesh_objects,
             request: prepared.inputs[2].clone(),
             modal_state: None,
-            resource_plan: understated_objects,
+            resource_plan: understated_output_objects,
             artifact_access: access(),
             program_revision: revision(),
         })

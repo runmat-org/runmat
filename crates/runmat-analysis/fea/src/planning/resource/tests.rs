@@ -23,69 +23,78 @@ fn input(partitioning: PartitioningPolicy) -> FeaResourcePlanningInput {
     FeaResourcePlanningInput {
         estimation_model_revision: RESOURCE_ESTIMATION_MODEL_REVISION,
         phase: FeaResourcePhase::StructuralLinearPipeline,
-        topology_digest: Digest::sha256("topology"),
-        operator_pattern_digest: Digest::sha256("pattern"),
-        topology: TopologyResourceFacts {
-            nodes: Count(4),
-            elements: Count(1),
-            boundary_faces: Count(4),
-            element_node_references: Count(4),
-            boundary_node_references: Count(12),
-            node_neighbor_references: Count(12),
-            estimated_resident_bytes: ByteCount(1_088),
-        },
-        sparse: SparseResourceFacts {
-            rows: Count(4),
-            columns: Count(4),
-            operator_nonzeros: vec![Count(10), Count(4), Count(4)],
-        },
-        constraints: ConstraintResourceFacts {
-            rows: Count(1),
-            coefficients: Count(1),
-            reference_points: Count(0),
-            estimated_resident_bytes: ByteCount(120),
-        },
-        assembly: AssemblyResourcePolicy {
-            contribution_nonzero_upper_bound: Count(10),
-            contribution_bytes_upper_bound: ByteCount(240),
-            scratch_bytes_per_element: ByteCount(10),
-            fixed_scratch_bytes_per_worker: ByteCount(20),
-        },
-        solve: SolveResourcePolicy::Iterative {
-            vector_count: Count(5),
-            scalar: NumericalScalar::RealF64,
-            preconditioner: PreconditionerStorage::Diagonal,
-            admission: SolverAdmissionResourcePolicy {
-                dimension: Count(4),
-                factor_nonzero_upper_bound: Count(10),
-                update_count_upper_bound: Count(12),
-                resident_bytes_upper_bound: ByteCount(200),
+        demand: FeaResourceDemand::StructuralLinearPipeline(StructuralOperatorResourceDemand {
+            topology_digest: Digest::sha256("topology"),
+            numerical_scope_digest: Digest::sha256("pattern"),
+            topology: TopologyResourceFacts {
+                nodes: Count(4),
+                elements: Count(1),
+                boundary_faces: Count(4),
+                element_node_references: Count(4),
+                boundary_node_references: Count(12),
+                node_neighbor_references: Count(12),
+                estimated_resident_bytes: ByteCount(1_088),
             },
-        },
-        recovery: RecoveryResourcePolicy {
-            resident_value_count: Count(4),
-            resident_bytes_upper_bound: ByteCount(32),
-            scratch_bytes: ByteCount(40),
-            retained_bytes: ByteCount(32),
-        },
-        observations: ObservationResourceFacts {
-            maximum_samples_per_observation: Count(1),
-            produced_sample_count: Count(1),
-            retained_sample_count: Count(1),
-            operation_count: Count(100),
-            peak_resident_bytes: ByteCount(64),
-            stored_bytes: ByteCount(200),
-            transfer_bytes: ByteCount(150),
-            collective_count: Count(0),
-        },
-        publication: CheckpointArtifactPolicy {
-            result_artifact_bytes: ByteCount(33),
-            checkpoint_bytes: ByteCount(50),
-            artifact_overhead_bytes: ByteCount(20),
-            relay_bytes: ByteCount(12),
-            result_egress_bytes: ByteCount(30),
-            checkpoint_egress_bytes: ByteCount(40),
-        },
+            sparse: SparseResourceFacts {
+                rows: Count(4),
+                columns: Count(4),
+                operator_nonzeros: vec![Count(10), Count(4), Count(4)],
+            },
+            constraints: ConstraintResourceFacts {
+                rows: Count(1),
+                coefficients: Count(1),
+                reference_points: Count(0),
+                estimated_resident_bytes: ByteCount(120),
+            },
+            assembly: AssemblyResourcePolicy {
+                contribution_nonzero_upper_bound: Count(10),
+                contribution_bytes_upper_bound: ByteCount(240),
+                scratch_bytes_per_element: ByteCount(10),
+                fixed_scratch_bytes_per_worker: ByteCount(20),
+            },
+            solve: SolveResourcePolicy::Iterative {
+                vector_count: Count(5),
+                scalar: NumericalScalar::RealF64,
+                preconditioner: PreconditionerStorage::Diagonal,
+                admission: SolverAdmissionResourcePolicy {
+                    dimension: Count(4),
+                    factor_nonzero_upper_bound: Count(10),
+                    update_count_upper_bound: Count(12),
+                    resident_bytes_upper_bound: ByteCount(200),
+                },
+            },
+            phase_resources: PhaseResourcePolicy {
+                resident_value_count: Count(4),
+                resident_bytes_upper_bound: ByteCount(32),
+                scratch_bytes: ByteCount(40),
+                retained_bytes: ByteCount(32),
+            },
+            observations: ObservationResourceFacts {
+                maximum_samples_per_observation: Count(1),
+                produced_sample_count: Count(1),
+                retained_sample_count: Count(1),
+                operation_count: Count(100),
+                peak_resident_bytes: ByteCount(64),
+                stored_bytes: ByteCount(200),
+                transfer_bytes: ByteCount(150),
+                collective_count: Count(0),
+            },
+            publication: CheckpointArtifactPolicy {
+                result_artifact_bytes: ByteCount(33),
+                checkpoint_bytes: ByteCount(50),
+                artifact_overhead_bytes: ByteCount(20),
+                relay_bytes: ByteCount(12),
+                result_egress_bytes: ByteCount(30),
+                checkpoint_egress_bytes: ByteCount(40),
+            },
+            partitioning,
+            accuracy_demand: AccuracyResourceDemand {
+                refinement_cycles: Count(0),
+                solver_tightenings: Count(0),
+                samples: Count(1),
+            },
+        }),
+        output_set: None,
         worker: WorkerResourcePolicy {
             cpu_millicores: 1_000,
             maximum_wall_milliseconds: 1_000,
@@ -94,20 +103,20 @@ fn input(partitioning: PartitioningPolicy) -> FeaResourcePlanningInput {
             required_capabilities: BTreeSet::from([Capability::NetworkDenied]),
             accelerators: Vec::new(),
         },
-        partitioning,
-        accuracy_demand: AccuracyResourceDemand {
-            refinement_cycles: Count(0),
-            solver_tightenings: Count(0),
-            samples: Count(1),
-        },
         accuracy_ceiling: AccuracyResourceCeiling {
             maximum_refinement_cycles: 1,
             maximum_solver_tightenings: 1,
             maximum_samples: 4,
             maximum_wall_time_milliseconds: 10_000,
-            maximum_resident_bytes: 10_000,
+            maximum_resident_bytes: 64 * 1024 * 1024,
         },
     }
+}
+
+fn operator_mut(input: &mut FeaResourcePlanningInput) -> &mut StructuralOperatorResourceDemand {
+    input
+        .structural_operator_mut()
+        .expect("test input is an operator demand")
 }
 
 fn inventory(memory_bytes: u64, scratch_bytes: u64) -> ResourceInventory {
@@ -288,30 +297,42 @@ fn structural_preflight_derives_numerical_facts_before_assembly() {
     .unwrap();
 
     assert_eq!(
-        plan.input.topology_digest,
+        plan.input.topology_digest(),
         constraints.topology.discretization_digest()
     );
-    assert_eq!(plan.input.sparse.rows, Count(12));
     assert_eq!(
-        plan.input.sparse.operator_nonzeros,
+        plan.input.structural_operator().unwrap().sparse.rows,
+        Count(12)
+    );
+    assert_eq!(
+        plan.input
+            .structural_operator()
+            .unwrap()
+            .sparse
+            .operator_nonzeros,
         vec![Count(144), Count(12), Count(12)]
     );
     assert_eq!(
-        plan.input.topology,
+        plan.input.structural_operator().unwrap().topology,
         TopologyResourceFacts::from_projection(&projection).unwrap()
     );
     assert_eq!(
-        plan.input.constraints,
+        plan.input.structural_operator().unwrap().constraints,
         ConstraintResourceFacts::from_plan(&constraints).unwrap()
     );
-    assert!(plan.input.observations.transfer_bytes > serial_plan.input.observations.transfer_bytes);
+    assert!(
+        plan.input.observations().unwrap().transfer_bytes
+            > serial_plan.input.observations().unwrap().transfer_bytes
+    );
     assert_ne!(plan.identity, serial_plan.identity);
     let operators =
         StructuralSymbolicOperators::derive(&projection, &constraints, &workload.model, &mesh)
             .unwrap();
     let expected_admission =
         crate::algebra::CoercivitySymbolicPlan::derive(operators.stiffness_upper_bound()).unwrap();
-    let SolveResourcePolicy::Iterative { admission, .. } = &plan.input.solve else {
+    let SolveResourcePolicy::Iterative { admission, .. } =
+        &plan.input.structural_operator().unwrap().solve
+    else {
         panic!("structural preflight must authorize iterative solver admission");
     };
     assert_eq!(admission.dimension, Count(expected_admission.dimension()));
@@ -389,11 +410,20 @@ fn mixed_preflight_binds_complete_topology_and_connector_sparsity() {
         build_structural_resource_plan(Some(&mesh), &constraints, &observations, &workload, &[])
             .unwrap();
 
-    assert_eq!(plan.input.topology.nodes, Count(5));
-    assert_eq!(plan.input.topology.elements, Count(2));
-    assert_eq!(plan.input.sparse.rows, Count(21));
     assert_eq!(
-        plan.input.topology_digest,
+        plan.input.structural_operator().unwrap().topology.nodes,
+        Count(5)
+    );
+    assert_eq!(
+        plan.input.structural_operator().unwrap().topology.elements,
+        Count(2)
+    );
+    assert_eq!(
+        plan.input.structural_operator().unwrap().sparse.rows,
+        Count(21)
+    );
+    assert_eq!(
+        plan.input.topology_digest(),
         constraints.topology.discretization_digest()
     );
     assert_eq!(
@@ -457,20 +487,27 @@ fn explicit_preflight_derives_complete_bounds_without_a_solver_mesh() {
     let structural = model.structural.as_ref().unwrap();
 
     assert_eq!(
-        plan.input.topology_digest,
+        plan.input.topology_digest(),
         constraints.topology.discretization_digest()
     );
     assert_eq!(
-        plan.input.topology.nodes,
+        plan.input.structural_operator().unwrap().topology.nodes,
         Count(structural.nodes.len() as u64)
     );
     assert_eq!(
-        plan.input.topology.elements,
+        plan.input.structural_operator().unwrap().topology.elements,
         Count(structural.elements.len() as u64)
     );
-    assert_eq!(plan.input.topology.boundary_faces, Count(0));
     assert_eq!(
-        plan.input.sparse.rows,
+        plan.input
+            .structural_operator()
+            .unwrap()
+            .topology
+            .boundary_faces,
+        Count(0)
+    );
+    assert_eq!(
+        plan.input.structural_operator().unwrap().sparse.rows,
         Count((structural.nodes.len() * 6) as u64)
     );
     assert_eq!(
@@ -490,7 +527,7 @@ fn exact_small_estimate_separates_all_resource_classes() {
     assert_eq!(plan.breakdown.csr_column_index_bytes, ByteCount(144));
     assert_eq!(plan.breakdown.csr_value_bytes, ByteCount(144));
     assert_eq!(plan.breakdown.assembly_contribution_bytes, ByteCount(240));
-    assert_eq!(plan.breakdown.solve_workspace_bytes, ByteCount(160));
+    assert_eq!(plan.breakdown.workspace_bytes, ByteCount(160));
     assert_eq!(plan.breakdown.preconditioner_bytes, ByteCount(32));
     assert_eq!(plan.breakdown.factorization_bytes, ByteCount(200));
     assert_eq!(plan.breakdown.constraint_bytes, ByteCount(120));
@@ -501,28 +538,51 @@ fn exact_small_estimate_separates_all_resource_classes() {
     );
     assert_eq!(plan.breakdown.observation_produced_sample_count, Count(1));
     assert_eq!(plan.breakdown.observation_retained_sample_count, Count(1));
-    assert_eq!(plan.request.memory_bytes, 2_108);
+    assert_eq!(
+        plan.request.memory_bytes,
+        plan.breakdown.worker_overhead_bytes.0
+            + plan.breakdown.input_decoded_resident_bytes.0
+            + plan.breakdown.resource_plan_decoded_resident_bytes.0
+            + plan.breakdown.topology_bytes.0
+            + plan.breakdown.csr_row_offset_bytes.0
+            + plan.breakdown.csr_column_index_bytes.0
+            + plan.breakdown.csr_value_bytes.0
+            + plan.breakdown.constraint_bytes.0
+            + plan.breakdown.assembly_contribution_bytes.0.max(
+                (plan.breakdown.workspace_bytes.0
+                    + plan.breakdown.preconditioner_bytes.0
+                    + plan.breakdown.factorization_bytes.0)
+                    .max(
+                        plan.breakdown.phase_resident_bytes.0
+                            + plan.breakdown.observation_peak_bytes.0
+                            + plan.breakdown.output_set_bytes.0,
+                    ),
+            )
+    );
     assert_eq!(plan.request.scratch_bytes, 45);
     assert_eq!(plan.breakdown.result_artifact_bytes, ByteCount(33));
-    assert_eq!(plan.breakdown.recovery_retained_bytes, ByteCount(32));
+    assert_eq!(plan.breakdown.phase_retained_bytes, ByteCount(32));
     assert_eq!(plan.request.max_artifact_bytes, 303);
     assert_eq!(plan.request.max_egress_bytes, 220);
-    assert_eq!(plan.request.max_relay_bytes, 12);
+    assert_eq!(
+        plan.request.max_relay_bytes,
+        12 + plan.breakdown.resource_plan_transport_closure_bytes.0
+    );
     plan.validate_identity().unwrap();
 }
 
 #[test]
 fn overflow_and_impossible_sparse_facts_are_rejected() {
     let mut overflow = input(PartitioningPolicy::Monolithic);
-    overflow.sparse.rows = Count(u64::MAX);
-    overflow.sparse.columns = Count(u64::MAX);
+    operator_mut(&mut overflow).sparse.rows = Count(u64::MAX);
+    operator_mut(&mut overflow).sparse.columns = Count(u64::MAX);
     assert!(matches!(
         build_resource_plan(overflow),
         Err(ResourcePlanningError::Overflow("sparse dense bound"))
     ));
 
     let mut impossible = input(PartitioningPolicy::Monolithic);
-    impossible.sparse.operator_nonzeros[0] = Count(17);
+    operator_mut(&mut impossible).sparse.operator_nonzeros[0] = Count(17);
     assert!(matches!(
         build_resource_plan(impossible),
         Err(ResourcePlanningError::Invalid(_))
@@ -532,35 +592,43 @@ fn overflow_and_impossible_sparse_facts_are_rejected() {
 #[test]
 fn understated_resident_bounds_are_rejected() {
     let mut topology = input(PartitioningPolicy::Monolithic);
-    topology.topology.estimated_resident_bytes = ByteCount(1);
+    operator_mut(&mut topology)
+        .topology
+        .estimated_resident_bytes = ByteCount(1);
     assert!(matches!(
         build_resource_plan(topology),
         Err(ResourcePlanningError::Invalid(_))
     ));
 
     let mut constraints = input(PartitioningPolicy::Monolithic);
-    constraints.constraints.estimated_resident_bytes = ByteCount(1);
+    operator_mut(&mut constraints)
+        .constraints
+        .estimated_resident_bytes = ByteCount(1);
     assert!(matches!(
         build_resource_plan(constraints),
         Err(ResourcePlanningError::Invalid(_))
     ));
 
     let mut contributions = input(PartitioningPolicy::Monolithic);
-    contributions.assembly.contribution_bytes_upper_bound = ByteCount(1);
+    operator_mut(&mut contributions)
+        .assembly
+        .contribution_bytes_upper_bound = ByteCount(1);
     assert!(matches!(
         build_resource_plan(contributions),
         Err(ResourcePlanningError::Invalid(_))
     ));
 
     let mut recovery = input(PartitioningPolicy::Monolithic);
-    recovery.recovery.resident_bytes_upper_bound = ByteCount(1);
+    operator_mut(&mut recovery)
+        .phase_resources
+        .resident_bytes_upper_bound = ByteCount(1);
     assert!(matches!(
         build_resource_plan(recovery),
         Err(ResourcePlanningError::Invalid(_))
     ));
 
     let mut preconditioner = input(PartitioningPolicy::Monolithic);
-    preconditioner.solve = SolveResourcePolicy::Iterative {
+    operator_mut(&mut preconditioner).solve = SolveResourcePolicy::Iterative {
         vector_count: Count(2),
         scalar: NumericalScalar::RealF64,
         preconditioner: PreconditionerStorage::SparseCsr {
@@ -580,7 +648,7 @@ fn understated_resident_bounds_are_rejected() {
     ));
 
     let mut factor = input(PartitioningPolicy::Monolithic);
-    factor.solve = SolveResourcePolicy::DirectFactorization {
+    operator_mut(&mut factor).solve = SolveResourcePolicy::DirectFactorization {
         vector_count: Count(2),
         scalar: NumericalScalar::RealF64,
         factor_nonzero_upper_bound: Count(10),
@@ -594,7 +662,7 @@ fn understated_resident_bounds_are_rejected() {
     let mut admission = input(PartitioningPolicy::Monolithic);
     let SolveResourcePolicy::Iterative {
         admission: policy, ..
-    } = &mut admission.solve
+    } = &mut operator_mut(&mut admission).solve
     else {
         unreachable!()
     };
@@ -609,7 +677,7 @@ fn understated_resident_bounds_are_rejected() {
 fn complex_solve_vectors_and_diagonal_storage_use_complex_width() {
     let real = build_resource_plan(input(PartitioningPolicy::Monolithic)).unwrap();
     let mut complex_input = input(PartitioningPolicy::Monolithic);
-    complex_input.solve = SolveResourcePolicy::Iterative {
+    operator_mut(&mut complex_input).solve = SolveResourcePolicy::Iterative {
         vector_count: Count(5),
         scalar: NumericalScalar::ComplexF64,
         preconditioner: PreconditionerStorage::Diagonal,
@@ -622,15 +690,18 @@ fn complex_solve_vectors_and_diagonal_storage_use_complex_width() {
     };
     let complex = build_resource_plan(complex_input).unwrap();
 
-    assert_eq!(complex.breakdown.solve_workspace_bytes, ByteCount(320));
+    assert_eq!(complex.breakdown.workspace_bytes, ByteCount(320));
     assert_eq!(complex.breakdown.preconditioner_bytes, ByteCount(64));
-    assert!(complex.request.memory_bytes > real.request.memory_bytes);
+    assert_eq!(
+        complex.request.memory_bytes - real.request.memory_bytes,
+        (320 + 64 + 280) - (160 + 32 + 200)
+    );
 }
 
 #[test]
 fn explicit_frequency_workspaces_require_valid_dimensions_and_bounds() {
     let mut gmres = input(PartitioningPolicy::Monolithic);
-    gmres.solve = SolveResourcePolicy::RestartedGmres {
+    operator_mut(&mut gmres).solve = SolveResourcePolicy::RestartedGmres {
         block_dimension: Count(8),
         restart: Count(9),
         maximum_iterations: Count(16),
@@ -642,7 +713,7 @@ fn explicit_frequency_workspaces_require_valid_dimensions_and_bounds() {
     ));
 
     let mut modal = input(PartitioningPolicy::Monolithic);
-    modal.solve = SolveResourcePolicy::ModalDenseHarmonic {
+    operator_mut(&mut modal).solve = SolveResourcePolicy::ModalDenseHarmonic {
         full_dimension: Count(4),
         mode_count: Count(5),
         workspace_bytes_upper_bound: ByteCount(1_024),
@@ -653,21 +724,21 @@ fn explicit_frequency_workspaces_require_valid_dimensions_and_bounds() {
     ));
 
     let mut valid = input(PartitioningPolicy::Monolithic);
-    valid.solve = SolveResourcePolicy::RestartedGmres {
+    operator_mut(&mut valid).solve = SolveResourcePolicy::RestartedGmres {
         block_dimension: Count(8),
         restart: Count(4),
         maximum_iterations: Count(16),
         workspace_bytes_upper_bound: ByteCount(1_024),
     };
     let plan = build_resource_plan(valid).unwrap();
-    assert_eq!(plan.breakdown.solve_workspace_bytes, ByteCount(1_024));
+    assert_eq!(plan.breakdown.workspace_bytes, ByteCount(1_024));
 }
 
 #[test]
 fn result_artifacts_are_accounted_independently_from_recovery_retention() {
     let baseline = build_resource_plan(input(PartitioningPolicy::Monolithic)).unwrap();
     let mut retained = input(PartitioningPolicy::Monolithic);
-    retained.recovery.retained_bytes = ByteCount(99);
+    operator_mut(&mut retained).phase_resources.retained_bytes = ByteCount(99);
     let retained = build_resource_plan(retained).unwrap();
     assert_eq!(
         retained.request.max_artifact_bytes,
@@ -675,7 +746,7 @@ fn result_artifacts_are_accounted_independently_from_recovery_retention() {
     );
 
     let mut result = input(PartitioningPolicy::Monolithic);
-    result.publication.result_artifact_bytes = ByteCount(100);
+    operator_mut(&mut result).publication.result_artifact_bytes = ByteCount(100);
     let result = build_resource_plan(result).unwrap();
     assert!(result.request.max_artifact_bytes > baseline.request.max_artifact_bytes);
 }
@@ -692,7 +763,7 @@ fn accuracy_ceiling_is_enforced_before_inventory_admission() {
     ));
 
     let mut samples = input(PartitioningPolicy::Monolithic);
-    samples.accuracy_demand.samples = Count(5);
+    operator_mut(&mut samples).accuracy_demand.samples = Count(5);
     assert!(matches!(
         build_resource_plan(samples),
         Err(ResourcePlanningError::AccuracyCeiling("samples"))
@@ -701,17 +772,18 @@ fn accuracy_ceiling_is_enforced_before_inventory_admission() {
 
 #[test]
 fn inventory_admits_or_rejects_a_monolithic_plan() {
+    let plan = build_resource_plan(input(PartitioningPolicy::Monolithic)).unwrap();
     assert!(matches!(
         admit_resource_plan(
             input(PartitioningPolicy::Monolithic),
-            &inventory(2_200, 100)
+            &inventory(plan.request.memory_bytes, 100)
         ),
         ResourceAdmission::Admit { .. }
     ));
     assert!(matches!(
         admit_resource_plan(
             input(PartitioningPolicy::Monolithic),
-            &inventory(1_000, 100)
+            &inventory(plan.request.memory_bytes - 1, 100)
         ),
         ResourceAdmission::Reject {
             reason: ResourcePlanningError::Inventory("memory or scratch")
@@ -721,16 +793,18 @@ fn inventory_admits_or_rejects_a_monolithic_plan() {
 
 #[test]
 fn operator_domain_work_gets_a_conservative_partition_recommendation() {
-    let decision = admit_resource_plan(
-        input(PartitioningPolicy::OperatorDomain {
-            maximum_partitions: 4,
-            replicated_memory_bytes_per_partition: ByteCount(20),
-            halo_memory_bytes_per_partition: ByteCount(10),
-            replicated_scratch_bytes_per_partition: ByteCount(2),
-            halo_scratch_bytes_per_partition: ByteCount(3),
-        }),
-        &inventory(1_040, 100),
-    );
+    let partitioning = PartitioningPolicy::OperatorDomain {
+        maximum_partitions: 4,
+        replicated_memory_bytes_per_partition: ByteCount(20),
+        halo_memory_bytes_per_partition: ByteCount(10),
+        replicated_scratch_bytes_per_partition: ByteCount(2),
+        halo_scratch_bytes_per_partition: ByteCount(3),
+    };
+    let full = build_resource_plan(input(partitioning)).unwrap();
+    let available_memory = full.breakdown.fixed_memory_bytes.0
+        + full.breakdown.partitionable_memory_bytes.0.div_ceil(3)
+        + 30;
+    let decision = admit_resource_plan(input(partitioning), &inventory(available_memory, 100));
     let ResourceAdmission::RequiresPartitioning {
         minimum_partition_count,
         per_partition_request,
@@ -740,7 +814,7 @@ fn operator_domain_work_gets_a_conservative_partition_recommendation() {
         panic!("operator/domain work should receive a partition recommendation");
     };
     assert_eq!(minimum_partition_count, 3);
-    assert_eq!(per_partition_request.memory_bytes, 800);
+    assert!(per_partition_request.memory_bytes <= available_memory);
     assert_eq!(per_partition_request.scratch_bytes, 24);
 }
 
@@ -748,7 +822,7 @@ fn operator_domain_work_gets_a_conservative_partition_recommendation() {
 fn missing_capability_or_accelerator_rejects_before_memory_admission() {
     let no_capability = ResourceInventory {
         capabilities: BTreeSet::new(),
-        ..inventory(10_000, 10_000)
+        ..inventory(64 * 1024 * 1024, 10_000)
     };
     assert!(matches!(
         admit_resource_plan(input(PartitioningPolicy::Monolithic), &no_capability),
@@ -769,7 +843,7 @@ fn missing_capability_or_accelerator_rejects_before_memory_admission() {
             count: 1,
             memory_bytes_each: 2_048,
         }],
-        ..inventory(10_000, 10_000)
+        ..inventory(64 * 1024 * 1024, 10_000)
     };
     assert!(matches!(
         admit_resource_plan(accelerated, &inadequate),
@@ -783,9 +857,11 @@ fn missing_capability_or_accelerator_rejects_before_memory_admission() {
 fn observation_cost_changes_memory_artifacts_transfer_and_identity() {
     let baseline = build_resource_plan(input(PartitioningPolicy::Monolithic)).unwrap();
     let mut changed_input = input(PartitioningPolicy::Monolithic);
-    changed_input.observations.peak_resident_bytes = ByteCount(400);
-    changed_input.observations.stored_bytes = ByteCount(500);
-    changed_input.observations.transfer_bytes = ByteCount(450);
+    operator_mut(&mut changed_input)
+        .observations
+        .peak_resident_bytes = ByteCount(400);
+    operator_mut(&mut changed_input).observations.stored_bytes = ByteCount(500);
+    operator_mut(&mut changed_input).observations.transfer_bytes = ByteCount(450);
     let changed = build_resource_plan(changed_input).unwrap();
 
     assert!(changed.request.memory_bytes > baseline.request.memory_bytes);
@@ -810,7 +886,7 @@ fn reconciliation_reports_every_overrun_without_mutating_the_plan() {
             memory_byte_millis: u128::from(plan.request.memory_bytes) * 1_000 + 1,
             wall_millis: 1_001,
             egress_bytes: 221,
-            relay_bytes: 13,
+            relay_bytes: plan.request.max_relay_bytes + 1,
             retained_byte_millis: 303_001,
             ..ResourceUsage::default()
         },
@@ -856,6 +932,65 @@ fn reconciliation_checks_accelerator_device_time() {
 }
 
 #[test]
+fn resource_usage_requires_the_exact_planned_accelerator_reservation() {
+    let mut accelerated = input(PartitioningPolicy::Monolithic);
+    accelerated.worker.accelerators = vec![AcceleratorRequirement {
+        class: "gpu".into(),
+        count: 1,
+        memory_bytes_each: ByteCount(4_096),
+    }];
+    let plan = build_resource_plan(accelerated).unwrap();
+    let attempt_id = runmat_execution::identity::AttemptId::derive(&[b"accelerated-attempt"]);
+    let worker_id = runmat_execution::identity::WorkerId::derive(&[b"accelerated-worker"]);
+    let record = |allocation| ResourceUsageAttempt {
+        attempt_id,
+        worker_id,
+        plan: plan.identity,
+        resources: runmat_execution::resource::ResourceAccounting::for_reserved_interval(
+            allocation, 1, 0, 0, 0,
+        )
+        .unwrap(),
+    };
+    let record_usage = |allocation| {
+        record_resource_usage(
+            &plan,
+            Digest::sha256("accelerated-workload"),
+            Digest::sha256("accelerated-result"),
+            vec![record(allocation)],
+            1,
+        )
+    };
+
+    assert!(record_usage(plan.request.clone()).is_ok());
+
+    let mut missing = plan.request.clone();
+    missing.accelerators.clear();
+    assert!(matches!(
+        record_usage(missing),
+        Err(ResourcePlanningError::Invalid(message))
+            if message == "resource usage attempt allocation differs from its plan"
+    ));
+
+    let mut understated = plan.request.clone();
+    understated.accelerators[0].memory_bytes_each -= 1;
+    assert!(matches!(
+        record_usage(understated),
+        Err(ResourcePlanningError::Invalid(message))
+            if message == "resource usage attempt allocation differs from its plan"
+    ));
+
+    let mut duplicated = plan.request.clone();
+    duplicated
+        .accelerators
+        .push(duplicated.accelerators[0].clone());
+    assert!(matches!(
+        record_usage(duplicated),
+        Err(ResourcePlanningError::Invalid(message))
+            if message == "resource usage attempt allocation differs from its plan"
+    ));
+}
+
+#[test]
 fn resource_usage_evidence_binds_plan_workload_result_attempt_and_worker() {
     let plan = build_resource_plan(input(PartitioningPolicy::Monolithic)).unwrap();
     let allocation = plan.request.clone();
@@ -864,6 +999,7 @@ fn resource_usage_evidence_binds_plan_workload_result_attempt_and_worker() {
     let attempt = ResourceUsageAttempt {
         attempt_id,
         worker_id,
+        plan: plan.identity,
         resources: runmat_execution::resource::ResourceAccounting::for_reserved_interval(
             allocation.clone(),
             1,
@@ -884,6 +1020,7 @@ fn resource_usage_evidence_binds_plan_workload_result_attempt_and_worker() {
     let partition_attempt = ResourceUsageAttempt {
         attempt_id: runmat_execution::identity::AttemptId::derive(&[b"partition-attempt"]),
         worker_id: runmat_execution::identity::WorkerId::derive(&[b"partition-worker"]),
+        plan: plan.identity,
         resources: runmat_execution::resource::ResourceAccounting::for_reserved_interval(
             partition_allocation,
             1,
@@ -921,6 +1058,7 @@ fn resource_usage_evidence_binds_plan_workload_result_attempt_and_worker() {
     let substituted_attempt = ResourceUsageAttempt {
         attempt_id,
         worker_id,
+        plan: plan.identity,
         resources: runmat_execution::resource::ResourceAccounting::for_reserved_interval(
             substituted,
             1,
@@ -938,7 +1076,127 @@ fn resource_usage_evidence_binds_plan_workload_result_attempt_and_worker() {
             vec![substituted_attempt],
             1,
         ),
-        Err(ResourcePlanningError::Identity)
+        Err(ResourcePlanningError::Invalid(message))
+            if message == "resource usage attempt allocation differs from its plan"
+    ));
+}
+
+#[test]
+fn resource_usage_evidence_reconciles_each_attempt_against_its_authenticated_plan() {
+    let primary = build_resource_plan(input(PartitioningPolicy::Monolithic)).unwrap();
+    let mut phase_input = input(PartitioningPolicy::Monolithic);
+    phase_input.worker.cpu_millicores = 500;
+    phase_input.worker.maximum_wall_milliseconds = 10;
+    let phase = build_resource_plan(phase_input).unwrap();
+    let phase_attempt_id = runmat_execution::identity::AttemptId::derive(&[b"phase-attempt"]);
+    let phase_attempt = ResourceUsageAttempt {
+        attempt_id: phase_attempt_id,
+        worker_id: runmat_execution::identity::WorkerId::derive(&[b"phase-worker"]),
+        plan: phase.identity,
+        resources: runmat_execution::resource::ResourceAccounting::for_reserved_interval(
+            phase.request.clone(),
+            11,
+            0,
+            0,
+            0,
+        )
+        .unwrap(),
+    };
+    let primary_attempt = ResourceUsageAttempt {
+        attempt_id: runmat_execution::identity::AttemptId::derive(&[b"primary-attempt"]),
+        worker_id: runmat_execution::identity::WorkerId::derive(&[b"primary-worker"]),
+        plan: primary.identity,
+        resources: runmat_execution::resource::ResourceAccounting::for_reserved_interval(
+            primary.request.clone(),
+            1,
+            0,
+            0,
+            0,
+        )
+        .unwrap(),
+    };
+
+    let evidence = record_resource_graph_usage(
+        &primary,
+        vec![phase.clone()],
+        Digest::sha256("workload"),
+        Digest::sha256("result"),
+        vec![phase_attempt.clone(), primary_attempt.clone()],
+        11,
+    )
+    .unwrap();
+    assert_eq!(evidence.primary_plan, primary.identity);
+    assert_eq!(evidence.plans.len(), 2);
+    assert!(evidence.plans.contains(&phase));
+    assert!(evidence.plans.contains(&primary));
+    assert!(matches!(
+        evidence.overruns.as_slice(),
+        [ResourceUsageAttemptOverrun {
+            attempt_id,
+            overrun: ResourceOverrun::CpuTime { .. }
+        }, ResourceUsageAttemptOverrun {
+            attempt_id: memory_attempt_id,
+            overrun: ResourceOverrun::MemoryTime { .. }
+        }, ResourceUsageAttemptOverrun {
+            attempt_id: final_attempt_id,
+            overrun: ResourceOverrun::WallTime { .. }
+        }]
+            if *attempt_id == phase_attempt_id
+                && *memory_attempt_id == phase_attempt_id
+                && *final_attempt_id == phase_attempt_id
+    ));
+    assert_eq!(
+        ResourceUsageEvidence::from_canonical_bytes(&evidence.canonical_bytes().unwrap()).unwrap(),
+        evidence
+    );
+    let mut substituted_plan_binding = evidence.clone();
+    substituted_plan_binding
+        .attempts
+        .iter_mut()
+        .find(|attempt| attempt.plan == phase.identity)
+        .unwrap()
+        .plan = primary.identity;
+    assert!(substituted_plan_binding.validate_identity().is_err());
+    let mut altered_catalog = evidence.clone();
+    altered_catalog.plans[0].request.memory_bytes = 1;
+    assert!(altered_catalog.validate_identity().is_err());
+
+    assert!(matches!(
+        record_resource_usage(
+            &primary,
+            Digest::sha256("workload"),
+            Digest::sha256("result"),
+            vec![phase_attempt],
+            11,
+        ),
+        Err(ResourcePlanningError::Invalid(message))
+            if message == "resource usage attempt refers to an absent resource plan"
+    ));
+
+    let substituted = ResourceUsageAttempt {
+        attempt_id: phase_attempt_id,
+        worker_id: runmat_execution::identity::WorkerId::derive(&[b"phase-worker"]),
+        plan: phase.identity,
+        resources: runmat_execution::resource::ResourceAccounting::for_reserved_interval(
+            primary.request.clone(),
+            1,
+            0,
+            0,
+            0,
+        )
+        .unwrap(),
+    };
+    assert!(matches!(
+        record_resource_graph_usage(
+            &primary,
+            vec![phase],
+            Digest::sha256("workload"),
+            Digest::sha256("result"),
+            vec![substituted, primary_attempt],
+            1,
+        ),
+        Err(ResourcePlanningError::Invalid(message))
+            if message == "resource usage attempt allocation differs from its plan"
     ));
 }
 

@@ -3,27 +3,22 @@ use std::collections::BTreeSet;
 use runmat_analysis_core::AccuracyResourceCeiling;
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use runmat_execution::{
-    identity::{AttemptId, WorkerId},
-    resource::{
-        AcceleratorRequest, Capability, ResourceAccounting, ResourceAccountingSummary,
-        ResourceRequest, ResourceUsage,
-    },
+    resource::{AcceleratorRequest, Capability, ResourceRequest},
     Digest,
 };
 use serde::{Deserialize, Serialize};
 
 use crate::execution::{
-    FieldRecoveryRequestIdentity, ObservationAssemblyRequestIdentity,
+    AnalysisNumericalObjectKind, FieldRecoveryRequestIdentity, ObservationAssemblyRequestIdentity,
     ObservationHistoryCheckpointRequestIdentity, ObservationPartitionEvaluationRequestIdentity,
     ObservationPartitionReductionRequestIdentity, StructuralFrequencyEntryRequestIdentity,
     StructuralFrequencyResultAssemblyRequestIdentity,
 };
 
 const RESOURCE_PREFIX: &[u8] = b"runmat-fea-resource-plan/v1\0";
-const RESOURCE_USAGE_PREFIX: &[u8] = b"runmat-fea-resource-usage/v1\0";
-const RESOURCE_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64);
-pub const RESOURCE_ESTIMATION_MODEL_REVISION: u16 = 1;
+pub const RESOURCE_PLAN_MAX_ENCODED_BYTES: u64 = 64 * 1024;
+const RESOURCE_LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024, 8_192, 65_536, 64);
+pub const RESOURCE_ESTIMATION_MODEL_REVISION: u16 = 2;
 
 #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -142,6 +137,9 @@ pub struct SolverAdmissionResourcePolicy {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SolveResourcePolicy {
+    NoSolve {
+        workspace_bytes_upper_bound: ByteCount,
+    },
     Iterative {
         vector_count: Count,
         scalar: NumericalScalar,
@@ -172,14 +170,18 @@ impl SolveResourcePolicy {
         match self {
             Self::Iterative { vector_count, .. }
             | Self::DirectFactorization { vector_count, .. } => Some(vector_count.0),
-            Self::RestartedGmres { .. } | Self::ModalDenseHarmonic { .. } => None,
+            Self::NoSolve { .. }
+            | Self::RestartedGmres { .. }
+            | Self::ModalDenseHarmonic { .. } => None,
         }
     }
 
     pub(crate) fn scalar_bytes(&self) -> u64 {
         let scalar = match self {
             Self::Iterative { scalar, .. } | Self::DirectFactorization { scalar, .. } => scalar,
-            Self::RestartedGmres { .. } | Self::ModalDenseHarmonic { .. } => {
+            Self::NoSolve { .. }
+            | Self::RestartedGmres { .. }
+            | Self::ModalDenseHarmonic { .. } => {
                 return 8;
             }
         };
@@ -191,7 +193,10 @@ impl SolveResourcePolicy {
 
     pub(crate) const fn explicit_workspace_bytes(&self) -> Option<ByteCount> {
         match self {
-            Self::RestartedGmres {
+            Self::NoSolve {
+                workspace_bytes_upper_bound,
+            }
+            | Self::RestartedGmres {
                 workspace_bytes_upper_bound,
                 ..
             }
@@ -206,7 +211,7 @@ impl SolveResourcePolicy {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct RecoveryResourcePolicy {
+pub struct PhaseResourcePolicy {
     pub resident_value_count: Count,
     pub resident_bytes_upper_bound: ByteCount,
     pub scratch_bytes: ByteCount,
@@ -288,42 +293,336 @@ pub enum FeaResourcePhase {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct FeaResourcePlanningInput {
-    /// Version of the deterministic projection and numerical accounting model.
-    pub estimation_model_revision: u16,
-    pub phase: FeaResourcePhase,
+pub struct StructuralOperatorResourceDemand {
     pub topology_digest: Digest,
-    pub operator_pattern_digest: Digest,
+    /// Identity of the complete numerical structure governing this task. For an operator task this
+    /// is its symbolic pattern; for post-processing it is the exact ordered input structure.
+    pub numerical_scope_digest: Digest,
     pub topology: TopologyResourceFacts,
     pub sparse: SparseResourceFacts,
     pub constraints: ConstraintResourceFacts,
     pub assembly: AssemblyResourcePolicy,
     pub solve: SolveResourcePolicy,
-    pub recovery: RecoveryResourcePolicy,
+    pub phase_resources: PhaseResourcePolicy,
     pub observations: ObservationResourceFacts,
     pub publication: CheckpointArtifactPolicy,
-    pub worker: WorkerResourcePolicy,
     pub partitioning: PartitioningPolicy,
     pub accuracy_demand: AccuracyResourceDemand,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PreparedInputResourceFacts {
+    /// Canonical numerical payload bytes before object chunking.
+    pub encoded_payload_bytes: ByteCount,
+    /// Unique content-addressed object bytes imported by the worker.
+    pub transport_closure_bytes: ByteCount,
+    /// Conservative admission budget for decoded numerical objects that coexist at phase
+    /// execution. Actual scheduler accounting remains authoritative.
+    pub decoded_resident_bytes_admission_budget: ByteCount,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PreparedOutputResourceFacts {
+    /// Canonical numerical payload bytes emitted before object chunking.
+    pub encoded_payload_bytes_upper_bound: ByteCount,
+    /// Content-addressed chunks and manifest for this numerical output. The single shared
+    /// output-set root is accounted separately at the workload level.
+    pub transport_closure_bytes_upper_bound: ByteCount,
+    /// Conservative admission budget for output values and encoding buffers that coexist during
+    /// construction. Actual scheduler accounting remains authoritative.
+    pub construction_resident_bytes_admission_budget: ByteCount,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PreparedOutputSetResourceFacts {
+    /// The one output-set root shared by every numerical output of a workload.
+    pub encoded_bytes_upper_bound: ByteCount,
+}
+
+/// Prepared transport and materialization facts shared by one independently admitted phase.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PreparedPhaseResourceFacts {
+    pub inputs: PreparedInputResourceFacts,
+    pub output: PreparedOutputResourceFacts,
+    pub output_set: PreparedOutputSetResourceFacts,
+}
+
+/// Exact prepared-object inputs imported by an independently scheduled structural-frequency
+/// operator phase. Keeping these facts beside, rather than inside, the reusable numerical
+/// operator demand prevents the legacy whole-pipeline plan from pretending it has an object
+/// transport boundary that it does not yet expose.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StructuralFrequencyOperatorResourceDemand {
+    pub operator: StructuralOperatorResourceDemand,
+    pub inputs: PreparedInputResourceFacts,
+    pub output: PreparedOutputResourceFacts,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum ObservationPartitionPayloadLayout {
+    SelectedValues {
+        entity_count: Count,
+        component_count: Count,
+    },
+    WeightedAccumulator {
+        component_count: Count,
+    },
+    ExtremaCandidates {
+        candidate_count_upper_bound: Count,
+        component_count: Count,
+    },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ObservationPartitionResourceDemand {
+    pub topology_digest: Digest,
+    pub partition_entity_count: Count,
+    pub source_entity_count: Count,
+    pub source_partition_count: Count,
+    pub source_value_count: Count,
+    pub output_payload: ObservationPartitionPayloadLayout,
+    pub operation_count_upper_bound: Count,
+    pub inputs: PreparedInputResourceFacts,
+    pub evaluator_workspace_bytes_upper_bound: ByteCount,
+    pub output: PreparedOutputResourceFacts,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ObservationReductionResourceDemand {
+    pub topology_digest: Digest,
+    pub contribution_count: Count,
+    pub contribution_encoded_bytes: ByteCount,
+    pub contribution_value_count: Count,
+    pub output_entity_count: Count,
+    pub output_value_count: Count,
+    pub accumulator_value_count: Count,
+    pub inputs: PreparedInputResourceFacts,
+    pub workspace_bytes_upper_bound: ByteCount,
+    pub output: PreparedOutputResourceFacts,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ObservationHistoryCheckpointResourceDemand {
+    pub topology_digest: Digest,
+    pub predecessor_present: bool,
+    pub predecessor_sample_count: Count,
+    pub retained_sample_count: Count,
+    pub inputs: PreparedInputResourceFacts,
+    pub transition_workspace_bytes_upper_bound: ByteCount,
+    pub output: PreparedOutputResourceFacts,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ObservationAssemblyResourceDemand {
+    pub topology_digest: Digest,
+    pub result_count: Count,
+    pub result_encoded_bytes: ByteCount,
+    pub evidence_count: Count,
+    pub inputs: PreparedInputResourceFacts,
+    pub ordering_workspace_bytes_upper_bound: ByteCount,
+    pub output: PreparedOutputResourceFacts,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StructuralFrequencyResultAssemblyResourceDemand {
+    pub scope_digest: Digest,
+    pub entry_count: Count,
+    pub entry_encoded_bytes: ByteCount,
+    pub physical_dof_count: Count,
+    pub inputs: PreparedInputResourceFacts,
+    pub ordering_workspace_bytes_upper_bound: ByteCount,
+    pub result_output: PreparedOutputResourceFacts,
+    pub receipt_output: PreparedOutputResourceFacts,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind", content = "demand")]
+pub enum FeaResourceDemand {
+    StructuralLinearPipeline(StructuralOperatorResourceDemand),
+    StructuralFrequencyEntry(StructuralFrequencyOperatorResourceDemand),
+    StructuralFrequencyFieldRecovery(StructuralFrequencyOperatorResourceDemand),
+    StructuralObservationPartition(ObservationPartitionResourceDemand),
+    StructuralObservationReduction(ObservationReductionResourceDemand),
+    StructuralObservationHistoryCheckpoint(ObservationHistoryCheckpointResourceDemand),
+    StructuralObservationAssembly(ObservationAssemblyResourceDemand),
+    StructuralFrequencyResultAssembly(StructuralFrequencyResultAssemblyResourceDemand),
+}
+
+impl FeaResourceDemand {
+    /// Returns the admitted semantic envelope for one output kind governed by this phase.
+    /// Legacy whole-pipeline plans predate independently prepared output envelopes.
+    pub const fn output_facts(
+        &self,
+        kind: AnalysisNumericalObjectKind,
+    ) -> Option<&PreparedOutputResourceFacts> {
+        match (self, kind) {
+            (
+                Self::StructuralFrequencyEntry(demand),
+                AnalysisNumericalObjectKind::StructuralFrequencyEntryResult,
+            )
+            | (
+                Self::StructuralFrequencyFieldRecovery(demand),
+                AnalysisNumericalObjectKind::Field,
+            ) => Some(&demand.output),
+            (
+                Self::StructuralObservationPartition(demand),
+                AnalysisNumericalObjectKind::ObservationPartitionContribution,
+            ) => Some(&demand.output),
+            (
+                Self::StructuralObservationReduction(demand),
+                AnalysisNumericalObjectKind::ObservationResult,
+            ) => Some(&demand.output),
+            (
+                Self::StructuralObservationHistoryCheckpoint(demand),
+                AnalysisNumericalObjectKind::ObservationHistoryCheckpoint,
+            ) => Some(&demand.output),
+            (
+                Self::StructuralObservationAssembly(demand),
+                AnalysisNumericalObjectKind::Observation,
+            ) => Some(&demand.output),
+            (
+                Self::StructuralFrequencyResultAssembly(demand),
+                AnalysisNumericalObjectKind::SolverResult,
+            ) => Some(&demand.result_output),
+            (
+                Self::StructuralFrequencyResultAssembly(demand),
+                AnalysisNumericalObjectKind::NumericalReceipt,
+            ) => Some(&demand.receipt_output),
+            _ => None,
+        }
+    }
+
+    pub const fn governs_prepared_outputs(&self) -> bool {
+        !matches!(self, Self::StructuralLinearPipeline(_))
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FeaResourcePlanningInput {
+    /// Version of the deterministic projection and numerical accounting model.
+    pub estimation_model_revision: u16,
+    pub phase: FeaResourcePhase,
+    pub demand: FeaResourceDemand,
+    pub output_set: Option<PreparedOutputSetResourceFacts>,
+    pub worker: WorkerResourcePolicy,
     pub accuracy_ceiling: AccuracyResourceCeiling,
+}
+
+impl FeaResourcePlanningInput {
+    pub const fn topology_digest(&self) -> Digest {
+        match &self.demand {
+            FeaResourceDemand::StructuralLinearPipeline(demand) => demand.topology_digest,
+            FeaResourceDemand::StructuralFrequencyEntry(demand)
+            | FeaResourceDemand::StructuralFrequencyFieldRecovery(demand) => {
+                demand.operator.topology_digest
+            }
+            FeaResourceDemand::StructuralObservationPartition(demand) => demand.topology_digest,
+            FeaResourceDemand::StructuralObservationReduction(demand) => demand.topology_digest,
+            FeaResourceDemand::StructuralObservationHistoryCheckpoint(demand) => {
+                demand.topology_digest
+            }
+            FeaResourceDemand::StructuralObservationAssembly(demand) => demand.topology_digest,
+            FeaResourceDemand::StructuralFrequencyResultAssembly(demand) => demand.scope_digest,
+        }
+    }
+
+    pub const fn observations(&self) -> Option<&ObservationResourceFacts> {
+        match &self.demand {
+            FeaResourceDemand::StructuralLinearPipeline(demand) => Some(&demand.observations),
+            FeaResourceDemand::StructuralFrequencyEntry(demand)
+            | FeaResourceDemand::StructuralFrequencyFieldRecovery(demand) => {
+                Some(&demand.operator.observations)
+            }
+            FeaResourceDemand::StructuralObservationPartition(_)
+            | FeaResourceDemand::StructuralObservationReduction(_)
+            | FeaResourceDemand::StructuralObservationHistoryCheckpoint(_)
+            | FeaResourceDemand::StructuralObservationAssembly(_)
+            | FeaResourceDemand::StructuralFrequencyResultAssembly(_) => None,
+        }
+    }
+
+    pub const fn partitioning(&self) -> &PartitioningPolicy {
+        match &self.demand {
+            FeaResourceDemand::StructuralLinearPipeline(demand) => &demand.partitioning,
+            FeaResourceDemand::StructuralFrequencyEntry(demand)
+            | FeaResourceDemand::StructuralFrequencyFieldRecovery(demand) => {
+                &demand.operator.partitioning
+            }
+            FeaResourceDemand::StructuralObservationPartition(_)
+            | FeaResourceDemand::StructuralObservationReduction(_)
+            | FeaResourceDemand::StructuralObservationHistoryCheckpoint(_)
+            | FeaResourceDemand::StructuralObservationAssembly(_)
+            | FeaResourceDemand::StructuralFrequencyResultAssembly(_) => {
+                static MONOLITHIC: PartitioningPolicy = PartitioningPolicy::Monolithic;
+                &MONOLITHIC
+            }
+        }
+    }
+
+    pub const fn structural_operator(&self) -> Option<&StructuralOperatorResourceDemand> {
+        match &self.demand {
+            FeaResourceDemand::StructuralLinearPipeline(demand) => Some(demand),
+            FeaResourceDemand::StructuralFrequencyEntry(demand)
+            | FeaResourceDemand::StructuralFrequencyFieldRecovery(demand) => Some(&demand.operator),
+            FeaResourceDemand::StructuralObservationPartition(_)
+            | FeaResourceDemand::StructuralObservationReduction(_)
+            | FeaResourceDemand::StructuralObservationHistoryCheckpoint(_)
+            | FeaResourceDemand::StructuralObservationAssembly(_)
+            | FeaResourceDemand::StructuralFrequencyResultAssembly(_) => None,
+        }
+    }
+
+    pub fn structural_operator_mut(&mut self) -> Option<&mut StructuralOperatorResourceDemand> {
+        match &mut self.demand {
+            FeaResourceDemand::StructuralLinearPipeline(demand) => Some(demand),
+            FeaResourceDemand::StructuralFrequencyEntry(demand)
+            | FeaResourceDemand::StructuralFrequencyFieldRecovery(demand) => {
+                Some(&mut demand.operator)
+            }
+            FeaResourceDemand::StructuralObservationPartition(_)
+            | FeaResourceDemand::StructuralObservationReduction(_)
+            | FeaResourceDemand::StructuralObservationHistoryCheckpoint(_)
+            | FeaResourceDemand::StructuralObservationAssembly(_)
+            | FeaResourceDemand::StructuralFrequencyResultAssembly(_) => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ResourceBreakdown {
+    /// Prepared numerical inputs, excluding the resource-plan object authorizing this phase.
+    pub input_encoded_payload_bytes: ByteCount,
+    pub input_transport_closure_bytes: ByteCount,
+    pub input_decoded_resident_bytes: ByteCount,
+    /// Nonrecursive fixed envelope for the authorizing resource-plan object itself.
+    pub resource_plan_transport_closure_bytes: ByteCount,
+    pub resource_plan_decoded_resident_bytes: ByteCount,
+    pub output_set_bytes: ByteCount,
     pub topology_bytes: ByteCount,
     pub csr_row_offset_bytes: ByteCount,
     pub csr_column_index_bytes: ByteCount,
     pub csr_value_bytes: ByteCount,
     pub assembly_contribution_bytes: ByteCount,
     pub assembly_scratch_bytes: ByteCount,
-    pub solve_workspace_bytes: ByteCount,
+    pub workspace_bytes: ByteCount,
     pub preconditioner_bytes: ByteCount,
     pub factorization_bytes: ByteCount,
     pub constraint_bytes: ByteCount,
-    pub recovery_resident_bytes: ByteCount,
-    pub recovery_scratch_bytes: ByteCount,
-    pub recovery_retained_bytes: ByteCount,
+    pub phase_resident_bytes: ByteCount,
+    pub phase_scratch_bytes: ByteCount,
+    pub phase_retained_bytes: ByteCount,
     pub result_artifact_bytes: ByteCount,
     pub observation_maximum_samples_per_observation: Count,
     pub observation_produced_sample_count: Count,
@@ -468,262 +767,6 @@ pub enum ResourceAdmission {
     Reject {
         reason: ResourcePlanningError,
     },
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct AnalysisResourceUsage {
-    pub scheduler: ResourceUsage,
-    pub peak_cpu_millicores: u32,
-    pub peak_memory_bytes: ByteCount,
-    pub peak_scratch_bytes: ByteCount,
-    pub artifact_bytes: ByteCount,
-}
-
-impl From<ResourceAccountingSummary> for AnalysisResourceUsage {
-    fn from(summary: ResourceAccountingSummary) -> Self {
-        Self {
-            scheduler: summary.usage,
-            peak_cpu_millicores: summary.peak_cpu_millicores,
-            peak_memory_bytes: ByteCount(summary.peak_memory_bytes),
-            peak_scratch_bytes: ByteCount(summary.peak_scratch_bytes),
-            artifact_bytes: ByteCount(summary.artifact_bytes),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ResourceOverrun {
-    CpuPeak {
-        planned: u32,
-        actual: u32,
-    },
-    CpuTime {
-        planned_core_millis: u64,
-        actual_core_millis: u64,
-    },
-    Memory {
-        planned: u64,
-        actual: u64,
-    },
-    MemoryTime {
-        planned_byte_millis: u128,
-        actual_byte_millis: u128,
-    },
-    Scratch {
-        planned: u64,
-        actual: u64,
-    },
-    Artifact {
-        planned: u64,
-        actual: u64,
-    },
-    Egress {
-        planned: u64,
-        actual: u64,
-    },
-    Relay {
-        planned: u64,
-        actual: u64,
-    },
-    WallTime {
-        planned: u64,
-        actual: u64,
-    },
-    RetainedTime {
-        planned_byte_millis: u128,
-        actual_byte_millis: u128,
-    },
-    AcceleratorTime {
-        class: String,
-        planned_device_millis: u64,
-        actual_device_millis: u64,
-    },
-}
-
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct ResourceUsageEvidenceIdentity(Digest);
-
-impl ResourceUsageEvidenceIdentity {
-    pub const fn digest(self) -> Digest {
-        self.0
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ResourceUsageAttempt {
-    pub attempt_id: AttemptId,
-    pub worker_id: WorkerId,
-    pub resources: ResourceAccounting,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields, try_from = "ResourceUsageEvidenceWire")]
-pub struct ResourceUsageEvidence {
-    pub schema_version: u16,
-    identity: ResourceUsageEvidenceIdentity,
-    pub plan: FeaResourcePlanIdentity,
-    pub workload_digest: Digest,
-    pub result_digest: Digest,
-    pub budget: ResourceRequest,
-    pub attempts: Vec<ResourceUsageAttempt>,
-    pub actual: AnalysisResourceUsage,
-    pub overruns: Vec<ResourceOverrun>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ResourceUsageEvidenceWire {
-    schema_version: u16,
-    identity: ResourceUsageEvidenceIdentity,
-    plan: FeaResourcePlanIdentity,
-    workload_digest: Digest,
-    result_digest: Digest,
-    budget: ResourceRequest,
-    attempts: Vec<ResourceUsageAttempt>,
-    actual: AnalysisResourceUsage,
-    overruns: Vec<ResourceOverrun>,
-}
-
-impl TryFrom<ResourceUsageEvidenceWire> for ResourceUsageEvidence {
-    type Error = ResourcePlanningError;
-
-    fn try_from(wire: ResourceUsageEvidenceWire) -> Result<Self, Self::Error> {
-        let actual = wire.actual;
-        let expected = Self::build(
-            wire.plan,
-            wire.workload_digest,
-            wire.result_digest,
-            wire.budget,
-            wire.attempts,
-            actual.scheduler.wall_millis,
-        )?;
-        if wire.schema_version != expected.schema_version
-            || wire.identity != expected.identity
-            || actual != expected.actual
-            || wire.overruns != expected.overruns
-        {
-            return Err(ResourcePlanningError::Identity);
-        }
-        Ok(expected)
-    }
-}
-
-impl ResourceUsageEvidence {
-    pub(crate) fn build(
-        plan: FeaResourcePlanIdentity,
-        workload_digest: Digest,
-        result_digest: Digest,
-        budget: ResourceRequest,
-        mut attempts: Vec<ResourceUsageAttempt>,
-        graph_wall_millis: u64,
-    ) -> Result<Self, ResourcePlanningError> {
-        if workload_digest == Digest::sha256([]) || result_digest == Digest::sha256([]) {
-            return Err(ResourcePlanningError::Invalid(
-                "resource usage must bind nonempty sources".into(),
-            ));
-        }
-        attempts.sort_by_key(|attempt| attempt.attempt_id);
-        if attempts.is_empty()
-            || attempts
-                .windows(2)
-                .any(|pair| pair[0].attempt_id == pair[1].attempt_id)
-        {
-            return Err(ResourcePlanningError::Invalid(
-                "resource usage requires distinct measured attempts".into(),
-            ));
-        }
-        for attempt in &attempts {
-            attempt
-                .resources
-                .validate()
-                .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
-        }
-        budget
-            .validate()
-            .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
-        if attempts.iter().any(|attempt| {
-            !super::admission::allocation_fits_budget(&attempt.resources.allocation, &budget)
-        }) {
-            return Err(ResourcePlanningError::Invalid(
-                "resource usage attempt allocation exceeds its budget".into(),
-            ));
-        }
-        let intervals = attempts
-            .iter()
-            .map(|attempt| attempt.resources.clone())
-            .collect::<Vec<_>>();
-        let summary = ResourceAccountingSummary::aggregate(&intervals, graph_wall_millis)
-            .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
-        let actual = AnalysisResourceUsage::from(summary);
-        let overruns = super::admission::reconcile_resource_request(&budget, &actual)?;
-        let identity = ResourceUsageEvidenceIdentity(Digest::sha256(encode_contract(
-            RESOURCE_USAGE_PREFIX,
-            "resource-usage-identity",
-            &(
-                plan,
-                workload_digest,
-                result_digest,
-                &budget,
-                &attempts,
-                &actual,
-                &overruns,
-            ),
-            RESOURCE_LIMITS,
-        )?));
-        Ok(Self {
-            schema_version: 1,
-            identity,
-            plan,
-            workload_digest,
-            result_digest,
-            budget,
-            attempts,
-            actual,
-            overruns,
-        })
-    }
-
-    pub const fn identity(&self) -> ResourceUsageEvidenceIdentity {
-        self.identity
-    }
-
-    pub fn validate_identity(&self) -> Result<(), ResourcePlanningError> {
-        let expected = Self::build(
-            self.plan,
-            self.workload_digest,
-            self.result_digest,
-            self.budget.clone(),
-            self.attempts.clone(),
-            self.actual.scheduler.wall_millis,
-        )?;
-        if self != &expected {
-            return Err(ResourcePlanningError::Identity);
-        }
-        Ok(())
-    }
-
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, ResourcePlanningError> {
-        self.validate_identity()?;
-        Ok(encode_contract(
-            RESOURCE_USAGE_PREFIX,
-            "resource-usage-evidence",
-            self,
-            RESOURCE_LIMITS,
-        )?)
-    }
-
-    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, ResourcePlanningError> {
-        Ok(decode_contract(
-            RESOURCE_USAGE_PREFIX,
-            "resource-usage-evidence",
-            bytes,
-            RESOURCE_LIMITS,
-        )?)
-    }
 }
 
 #[derive(Clone, Debug, thiserror::Error, Eq, PartialEq)]

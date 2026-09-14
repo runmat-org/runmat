@@ -7,6 +7,135 @@ use crate::{
     CanonicalLimits,
 };
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct MaterializationProfile {
+    pub value_nodes: u64,
+    pub map_entries: u64,
+    pub string_bytes: u64,
+}
+
+pub(crate) fn materialization_profile(
+    encoded: &[u8],
+) -> Result<MaterializationProfile, CanonicalCodecError> {
+    let envelope_start = encoded
+        .iter()
+        .position(|byte| *byte == 0)
+        .and_then(|position| position.checked_add(1))
+        .ok_or_else(|| {
+            CanonicalCodecError::invalid(
+                "canonical materialization profile",
+                "domain prefix terminator is missing",
+            )
+        })?;
+    let mut decoder = Decoder::new(&encoded[envelope_start..]);
+    let envelope_length = decoder.array().map_err(decoding_error)?;
+    if envelope_length != Some(2) {
+        return Err(CanonicalCodecError::invalid(
+            "canonical materialization profile",
+            "canonical envelope must contain a domain and value",
+        ));
+    }
+    decoder.str().map_err(decoding_error)?;
+    let mut profile = MaterializationProfile::default();
+    scan_value(&mut decoder, 0, &mut profile)?;
+    if decoder.position() != encoded.len() - envelope_start {
+        return Err(CanonicalCodecError::invalid(
+            "canonical materialization profile",
+            format!(
+                "trailing data is forbidden (consumed {} of {} envelope bytes)",
+                decoder.position(),
+                encoded.len() - envelope_start
+            ),
+        ));
+    }
+    Ok(profile)
+}
+
+fn scan_value(
+    decoder: &mut Decoder<'_>,
+    depth: usize,
+    profile: &mut MaterializationProfile,
+) -> Result<(), CanonicalCodecError> {
+    const MAXIMUM_PROFILE_DEPTH: usize = 128;
+    if depth > MAXIMUM_PROFILE_DEPTH {
+        return Err(CanonicalCodecError::invalid(
+            "canonical materialization profile",
+            "nesting depth exceeds the profiling limit",
+        ));
+    }
+    profile.value_nodes = profile.value_nodes.checked_add(1).ok_or_else(|| {
+        CanonicalCodecError::invalid("canonical materialization profile", "value count overflows")
+    })?;
+    match decoder.datatype().map_err(decoding_error)? {
+        Type::Null => decoder.null().map(|_| ()).map_err(decoding_error),
+        Type::Bool => decoder.bool().map(|_| ()).map_err(decoding_error),
+        Type::U8 | Type::U16 | Type::U32 | Type::U64 => {
+            decoder.u64().map(|_| ()).map_err(decoding_error)
+        }
+        Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::Int => {
+            decoder.i64().map(|_| ()).map_err(decoding_error)
+        }
+        Type::F16 | Type::F32 | Type::F64 => decoder.f64().map(|_| ()).map_err(decoding_error),
+        Type::String => {
+            let value = decoder.str().map_err(decoding_error)?;
+            profile.string_bytes = profile
+                .string_bytes
+                .checked_add(value.len() as u64)
+                .ok_or_else(|| {
+                    CanonicalCodecError::invalid(
+                        "canonical materialization profile",
+                        "string bytes overflow",
+                    )
+                })?;
+            Ok(())
+        }
+        Type::Array => {
+            let length = decoder.array().map_err(decoding_error)?.ok_or_else(|| {
+                CanonicalCodecError::invalid(
+                    "canonical materialization profile",
+                    "indefinite arrays are forbidden",
+                )
+            })?;
+            for _ in 0..length {
+                scan_value(decoder, depth + 1, profile)?;
+            }
+            Ok(())
+        }
+        Type::Map => {
+            let length = decoder.map().map_err(decoding_error)?.ok_or_else(|| {
+                CanonicalCodecError::invalid(
+                    "canonical materialization profile",
+                    "indefinite maps are forbidden",
+                )
+            })?;
+            profile.map_entries = profile.map_entries.checked_add(length).ok_or_else(|| {
+                CanonicalCodecError::invalid(
+                    "canonical materialization profile",
+                    "map entry count overflows",
+                )
+            })?;
+            for _ in 0..length {
+                let key = decoder.str().map_err(decoding_error)?;
+                profile.string_bytes = profile
+                    .string_bytes
+                    .checked_add(key.len() as u64)
+                    .ok_or_else(|| {
+                        CanonicalCodecError::invalid(
+                            "canonical materialization profile",
+                            "string bytes overflow",
+                        )
+                    })?;
+                scan_value(decoder, depth + 1, profile)?;
+            }
+            Ok(())
+        }
+        other => Err(CanonicalCodecError::invalid(
+            "canonical materialization profile",
+            format!("unsupported CBOR type {other}"),
+        )),
+    }
+}
+
 pub(crate) fn encode_value(
     encoder: &mut Encoder<&mut Vec<u8>>,
     value: &Value,

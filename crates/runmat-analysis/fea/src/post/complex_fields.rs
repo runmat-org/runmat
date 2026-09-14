@@ -7,7 +7,7 @@ use crate::{
     assembly::{dofs::StructuralDofKind, AssemblySummary},
     contracts::{FEA_FIELD_STRUCTURAL_REACTION_FORCE, FEA_FIELD_STRUCTURAL_REACTION_MOMENT},
     results::field::{
-        RecoveredField, RecoveredFieldDefinition, RecoveredFieldError,
+        RecoveredField, RecoveredFieldDefinition, RecoveredFieldEntityCounts, RecoveredFieldError,
         RecoveredFieldNumericRepresentation, RecoveredFieldSample,
     },
 };
@@ -44,6 +44,105 @@ pub struct ComplexStructuralFieldState<'a> {
     pub reaction_imaginary: &'a [f64],
 }
 
+/// Exact formulation-owned inventory for one complex structural recovery task.
+///
+/// Resource projection and physical recovery consume this same layout so field selection,
+/// entity cardinality, and complex storage width cannot drift independently.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ComplexStructuralFieldLayout {
+    pub entity_counts: RecoveredFieldEntityCounts,
+    pub definitions: Vec<RecoveredFieldDefinition>,
+    pub storage_value_count: usize,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ComplexStructuralFieldCardinality {
+    pub structural_nodes: usize,
+    pub solid_elements: usize,
+    pub beam_elements: usize,
+    pub shell_elements: usize,
+    pub constraint_groups: usize,
+    pub has_rotational_dofs: bool,
+}
+
+pub fn complex_structural_field_layout(
+    cardinality: ComplexStructuralFieldCardinality,
+) -> Result<ComplexStructuralFieldLayout, ComplexStructuralFieldRecoveryError> {
+    let entity_counts = RecoveredFieldEntityCounts {
+        structural_nodes: cardinality.structural_nodes,
+        solid_elements: cardinality.solid_elements,
+        beam_elements: cardinality.beam_elements,
+        shell_elements: cardinality.shell_elements,
+        constraint_groups: cardinality.constraint_groups,
+    };
+    let mut definitions = structural_observable_field_definitions()?
+        .into_iter()
+        .filter(|definition| is_deformation_phasor_quantity(definition.quantity()))
+        .filter(|definition| {
+            entity_counts.entity_count(definition.entity_domain()) > 0
+                && (definition.quantity() != ObservationQuantity::Rotation
+                    || cardinality.has_rotational_dofs)
+        })
+        .map(|definition| complex_definition(&definition))
+        .collect::<Result<Vec<_>, _>>()?;
+    let declarations = structural_observable_field_definitions()?
+        .into_iter()
+        .map(|definition| (definition.field_id().to_owned(), definition))
+        .collect::<BTreeMap<_, _>>();
+    for field_id in [
+        FEA_FIELD_STRUCTURAL_REACTION_FORCE,
+        FEA_FIELD_STRUCTURAL_REACTION_MOMENT,
+    ] {
+        if field_id == FEA_FIELD_STRUCTURAL_REACTION_MOMENT && !cardinality.has_rotational_dofs {
+            continue;
+        }
+        definitions.push(complex_definition(declarations.get(field_id).ok_or_else(
+            || ComplexStructuralFieldRecoveryError::MissingDefinition {
+                field_id: field_id.to_owned(),
+            },
+        )?)?);
+    }
+    if cardinality.constraint_groups > 0 {
+        for field_id in [
+            crate::contracts::FEA_FIELD_STRUCTURAL_CONSTRAINT_REACTION_FORCE,
+            crate::contracts::FEA_FIELD_STRUCTURAL_CONSTRAINT_REACTION_MOMENT_ABOUT_GLOBAL_ORIGIN,
+        ] {
+            definitions.push(complex_definition(declarations.get(field_id).ok_or_else(
+                || ComplexStructuralFieldRecoveryError::MissingDefinition {
+                    field_id: field_id.to_owned(),
+                },
+            )?)?);
+        }
+    }
+    let storage_value_count = definitions.iter().try_fold(0_usize, |total, definition| {
+        let values = entity_counts
+            .entity_count(definition.entity_domain())
+            .checked_mul(definition.storage_component_count()?)
+            .ok_or(RecoveredFieldError::StorageShapeMismatch)?;
+        total
+            .checked_add(values)
+            .ok_or(RecoveredFieldError::StorageShapeMismatch)
+    })?;
+    Ok(ComplexStructuralFieldLayout {
+        entity_counts,
+        definitions,
+        storage_value_count,
+    })
+}
+
+fn complex_definition(
+    definition: &RecoveredFieldDefinition,
+) -> Result<RecoveredFieldDefinition, RecoveredFieldError> {
+    RecoveredFieldDefinition::new(
+        definition.field_id(),
+        definition.quantity(),
+        definition.location(),
+        definition.entity_domain(),
+        definition.value_shape().clone(),
+        RecoveredFieldNumericRepresentation::ComplexInterleaved,
+    )
+}
+
 /// Recovers one physical complex structural response from its real and imaginary DOF vectors.
 ///
 /// Formulation-owned real recovery remains the single authority for the physical quantities. This
@@ -55,9 +154,18 @@ pub fn recover_complex_structural_result_fields(
     frequency_hz: f64,
     state: ComplexStructuralFieldState<'_>,
 ) -> Result<Vec<RecoveredField>, ComplexStructuralFieldRecoveryError> {
+    let layout = complex_structural_field_layout(ComplexStructuralFieldCardinality {
+        structural_nodes: summary.structural_dof_layout.node_count(),
+        solid_elements: summary.structural_solid_recovery.len(),
+        beam_elements: summary.structural_beam_recovery.len(),
+        shell_elements: summary.structural_shell_recovery.len(),
+        constraint_groups: 0,
+        has_rotational_dofs: summary.structural_rotational_dof_count > 0,
+    })?;
     let real = recover_deformation_result_fields(summary, state.displacement_real)?;
     let imaginary = recover_deformation_result_fields(summary, state.displacement_imaginary)?;
-    let definitions = structural_observable_field_definitions()?
+    let definitions = layout
+        .definitions
         .into_iter()
         .map(|definition| (definition.field_id().to_string(), definition))
         .collect::<BTreeMap<_, _>>();

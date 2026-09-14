@@ -4,6 +4,9 @@ use runmat_analysis_fea::execution::{
     ChunkedAnalysisPayload, ANALYSIS_CHUNK_MEDIA_TYPE, ANALYSIS_CHUNK_VALUE_SCHEMA,
     ANALYSIS_MANIFEST_MEDIA_TYPE, ANALYSIS_MANIFEST_VALUE_SCHEMA,
 };
+use runmat_analysis_fea::planning::resource::{
+    ByteCount, PreparedInputResourceFacts, PreparedOutputResourceFacts,
+};
 use runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1;
 use runmat_execution::value::{ValueRef, ValueRefKind};
 use runmat_execution::Digest;
@@ -136,6 +139,124 @@ impl PreparedAnalysisObjects {
             ANALYSIS_MANIFEST_VALUE_SCHEMA,
         )?)
     }
+}
+
+/// Measures the unique content-addressed input closure and structurally profiles canonical value
+/// nodes, maps, and strings for the decoded-residency admission estimate. Numerical domains add
+/// their own typed workspaces, and scheduler accounting remains authoritative for actual usage.
+pub fn prepared_input_resource_facts(
+    inputs: &[PreparedAnalysisObjects],
+) -> AnalysisBridgeResult<PreparedInputResourceFacts> {
+    let encoded_payload_bytes = inputs.iter().try_fold(0_u64, |total, input| {
+        total
+            .checked_add(input.manifest.encoded_length)
+            .ok_or_else(|| AnalysisBridgeError::Invalid("input payload bytes overflow".into()))
+    })?;
+    let mut unique = std::collections::BTreeMap::new();
+    for input in inputs {
+        for object in &input.objects {
+            unique
+                .entry(object.descriptor.digest)
+                .or_insert_with(|| object.bytes.len());
+        }
+    }
+    let transport_closure_bytes = unique.values().try_fold(0_u64, |total, bytes| {
+        total
+            .checked_add(u64::try_from(*bytes).map_err(|_| {
+                AnalysisBridgeError::Invalid("input object bytes are not representable".into())
+            })?)
+            .ok_or_else(|| AnalysisBridgeError::Invalid("input closure bytes overflow".into()))
+    })?;
+    let decoded_resident_bytes_admission_budget =
+        inputs.iter().try_fold(0_u64, |total, input| {
+            input
+                .manifest
+                .partitions
+                .iter()
+                .try_fold(total, |partition_total, partition| {
+                    let payload = input.partition_payload(partition.logical_identity)?;
+                    let estimate = runmat_canonical_codec::canonical_payload_materialization_resident_bytes_estimate(
+                        &payload,
+                    )
+                    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+                    partition_total.checked_add(estimate).ok_or_else(|| {
+                        AnalysisBridgeError::Invalid("decoded input residency overflows".into())
+                    })
+                })
+        })?;
+    Ok(PreparedInputResourceFacts {
+        encoded_payload_bytes: ByteCount(encoded_payload_bytes),
+        transport_closure_bytes: ByteCount(transport_closure_bytes),
+        decoded_resident_bytes_admission_budget: ByteCount(decoded_resident_bytes_admission_budget),
+    })
+}
+
+/// Projects a chunk-policy-independent output envelope before runtime-varying provenance exists.
+/// Both manifest allowances come from canonical contract byte limits, so the bound remains valid
+/// for every admitted chunk count and output-set reference inventory.
+pub fn projected_output_resource_facts(
+    encoded_payload_bytes_upper_bound: u64,
+) -> AnalysisBridgeResult<PreparedOutputResourceFacts> {
+    if encoded_payload_bytes_upper_bound == 0 {
+        return Err(AnalysisBridgeError::Invalid(
+            "projected output payload must be nonzero".into(),
+        ));
+    }
+    let transport_closure_bytes_upper_bound = encoded_payload_bytes_upper_bound
+        .checked_add(runmat_analysis_fea::execution::ANALYSIS_MANIFEST_MAX_ENCODED_BYTES)
+        .ok_or_else(|| AnalysisBridgeError::Invalid("projected output closure overflows".into()))?;
+    let construction_resident_bytes_admission_budget =
+        runmat_canonical_codec::projected_canonical_materialization_resident_bytes_estimate(
+            encoded_payload_bytes_upper_bound,
+            1,
+        )
+        .and_then(|bytes| bytes.checked_add(transport_closure_bytes_upper_bound))
+        .ok_or_else(|| {
+            AnalysisBridgeError::Invalid("projected output construction overflows".into())
+        })?;
+    Ok(PreparedOutputResourceFacts {
+        encoded_payload_bytes_upper_bound: ByteCount(encoded_payload_bytes_upper_bound),
+        transport_closure_bytes_upper_bound: ByteCount(transport_closure_bytes_upper_bound),
+        construction_resident_bytes_admission_budget: ByteCount(
+            construction_resident_bytes_admission_budget,
+        ),
+    })
+}
+
+pub fn projected_output_set_resource_facts(
+) -> runmat_analysis_fea::planning::resource::PreparedOutputSetResourceFacts {
+    runmat_analysis_fea::planning::resource::PreparedOutputSetResourceFacts {
+        encoded_bytes_upper_bound: ByteCount(
+            crate::response::ANALYSIS_OUTPUT_SET_MAX_ENCODED_BYTES,
+        ),
+    }
+}
+
+pub(crate) fn validate_prepared_output_resource_facts(
+    output: &PreparedAnalysisObjects,
+    admitted: &PreparedOutputResourceFacts,
+) -> AnalysisBridgeResult<()> {
+    let mut unique = std::collections::BTreeMap::new();
+    for object in &output.objects {
+        unique
+            .entry(object.descriptor.digest)
+            .or_insert_with(|| object.bytes.len());
+    }
+    let actual_closure = unique.values().try_fold(0_u64, |total, bytes| {
+        total
+            .checked_add(u64::try_from(*bytes).map_err(|_| {
+                AnalysisBridgeError::Invalid("output object bytes are not representable".into())
+            })?)
+            .ok_or_else(|| AnalysisBridgeError::Invalid("output closure bytes overflow".into()))
+    })?;
+    if output.manifest.encoded_length > admitted.encoded_payload_bytes_upper_bound.0
+        || actual_closure > admitted.transport_closure_bytes_upper_bound.0
+    {
+        return Err(AnalysisBridgeError::Invalid(
+            "prepared output exceeds its admitted semantic or transport envelope".into(),
+        ));
+    }
+    Ok(())
 }
 
 pub fn import_analysis_objects(
@@ -531,4 +652,45 @@ fn validate_partition_payloads(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod resource_tests {
+    use super::*;
+
+    #[test]
+    fn prepared_output_must_fit_semantic_and_transport_envelopes_independently() {
+        let prepared = prepare_analysis_objects(
+            AnalysisNumericalObjectKind::ObservationResult,
+            Digest::sha256("output"),
+            &[7_u8; 128],
+            32,
+            ObjectNamespace::ResultValue,
+            ObjectInventoryLimits::default(),
+        )
+        .unwrap();
+        let actual_closure = prepared
+            .objects
+            .iter()
+            .map(|object| (object.descriptor.digest, object.bytes.len() as u64))
+            .collect::<std::collections::BTreeMap<_, _>>()
+            .into_values()
+            .sum::<u64>();
+        let admitted = PreparedOutputResourceFacts {
+            encoded_payload_bytes_upper_bound: ByteCount(128),
+            transport_closure_bytes_upper_bound: ByteCount(actual_closure),
+            construction_resident_bytes_admission_budget: ByteCount(128),
+        };
+        validate_prepared_output_resource_facts(&prepared, &admitted).unwrap();
+
+        let mut understated_payload = admitted.clone();
+        understated_payload.encoded_payload_bytes_upper_bound.0 -= 1;
+        assert!(validate_prepared_output_resource_facts(&prepared, &understated_payload).is_err());
+
+        let mut understated_transport = admitted;
+        understated_transport.transport_closure_bytes_upper_bound.0 -= 1;
+        assert!(
+            validate_prepared_output_resource_facts(&prepared, &understated_transport).is_err()
+        );
+    }
 }

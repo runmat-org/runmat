@@ -94,7 +94,8 @@ pub use materialized_signal::{
 };
 pub use object::{
     analysis_object_references, import_analysis_objects, import_analysis_partition,
-    prepare_analysis_objects, prepare_partitioned_analysis_objects, AnalysisPartitionImport,
+    prepare_analysis_objects, prepare_partitioned_analysis_objects, prepared_input_resource_facts,
+    projected_output_resource_facts, projected_output_set_resource_facts, AnalysisPartitionImport,
     ImportedAnalysisPartition, PreparedAnalysisObjects,
 };
 pub use observation_assembly::{
@@ -131,7 +132,8 @@ pub use observation_partition::{
 pub use observation_source::StructuralObservationWorkloadSource;
 pub use resource_usage::{
     extend_structural_resource_usage, prepare_structural_resource_usage,
-    validate_structural_resource_usage, PreparedStructuralResourceUsage,
+    validate_observation_resource_usage, validate_structural_resource_usage,
+    PlannedResourceUsageAttempt, PlannedResourceUsageGraph, PreparedStructuralResourceUsage,
 };
 pub use response::{
     import_analysis_output_set, AnalysisHostResponse, AnalysisOutputRoot, AnalysisOutputSet,

@@ -9,10 +9,11 @@ use runmat_meshing_core::SolverMeshArtifact;
 use super::{
     build_resource_plan, structural_facts::derive_structural_resource_facts,
     AccuracyResourceDemand, AssemblyResourcePolicy, ByteCount, CheckpointArtifactPolicy, Count,
-    FeaResourcePhase, FeaResourcePlan, FeaResourcePlanningInput, NumericalScalar,
-    ObservationResourceFacts, PartitioningPolicy, PreconditionerStorage, RecoveryResourcePolicy,
-    ResourcePlanningError, SolveResourcePolicy, SolverAdmissionResourcePolicy,
-    WorkerResourcePolicy, RESOURCE_ESTIMATION_MODEL_REVISION,
+    FeaResourceDemand, FeaResourcePhase, FeaResourcePlan, FeaResourcePlanningInput,
+    NumericalScalar, ObservationResourceFacts, PartitioningPolicy, PhaseResourcePolicy,
+    PreconditionerStorage, ResourcePlanningError, SolveResourcePolicy,
+    SolverAdmissionResourcePolicy, StructuralOperatorResourceDemand, WorkerResourcePolicy,
+    RESOURCE_ESTIMATION_MODEL_REVISION,
 };
 
 const STRUCTURAL_ASSEMBLY_SCRATCH_BYTES_PER_ELEMENT: u64 = 8 * 1024;
@@ -112,33 +113,44 @@ pub fn build_structural_resource_plan(
     build_resource_plan(FeaResourcePlanningInput {
         estimation_model_revision: RESOURCE_ESTIMATION_MODEL_REVISION,
         phase: FeaResourcePhase::StructuralLinearPipeline,
-        topology_digest: facts.topology_digest,
-        operator_pattern_digest: facts.symbolic.identity(),
-        topology: facts.topology,
-        sparse: facts.sparse,
-        constraints: facts.constraints,
-        assembly: AssemblyResourcePolicy {
-            contribution_nonzero_upper_bound: Count(contribution_nonzeros),
-            contribution_bytes_upper_bound: ByteCount(contribution_bytes),
-            scratch_bytes_per_element: ByteCount(STRUCTURAL_ASSEMBLY_SCRATCH_BYTES_PER_ELEMENT),
-            fixed_scratch_bytes_per_worker: ByteCount(STRUCTURAL_FIXED_ASSEMBLY_SCRATCH_BYTES),
-        },
-        solve,
-        recovery: RecoveryResourcePolicy {
-            resident_value_count: Count(recovery_values),
-            resident_bytes_upper_bound: ByteCount(recovery_resident),
-            scratch_bytes: ByteCount(recovery_resident),
-            retained_bytes: ByteCount(recovery_bytes),
-        },
-        observations: observations.clone(),
-        publication: CheckpointArtifactPolicy {
-            result_artifact_bytes: ByteCount(recovery_bytes),
-            checkpoint_bytes: ByteCount(checkpoint_bytes),
-            artifact_overhead_bytes: ByteCount(STRUCTURAL_ARTIFACT_OVERHEAD_BYTES),
-            relay_bytes: ByteCount(0),
-            result_egress_bytes: ByteCount(recovery_bytes),
-            checkpoint_egress_bytes: ByteCount(checkpoint_bytes),
-        },
+        demand: FeaResourceDemand::StructuralLinearPipeline(StructuralOperatorResourceDemand {
+            topology_digest: facts.topology_digest,
+            numerical_scope_digest: facts.symbolic.identity(),
+            topology: facts.topology,
+            sparse: facts.sparse,
+            constraints: facts.constraints,
+            assembly: AssemblyResourcePolicy {
+                contribution_nonzero_upper_bound: Count(contribution_nonzeros),
+                contribution_bytes_upper_bound: ByteCount(contribution_bytes),
+                scratch_bytes_per_element: ByteCount(STRUCTURAL_ASSEMBLY_SCRATCH_BYTES_PER_ELEMENT),
+                fixed_scratch_bytes_per_worker: ByteCount(STRUCTURAL_FIXED_ASSEMBLY_SCRATCH_BYTES),
+            },
+            solve,
+            phase_resources: PhaseResourcePolicy {
+                resident_value_count: Count(recovery_values),
+                resident_bytes_upper_bound: ByteCount(recovery_resident),
+                scratch_bytes: ByteCount(recovery_resident),
+                retained_bytes: ByteCount(recovery_bytes),
+            },
+            observations: observations.clone(),
+            publication: CheckpointArtifactPolicy {
+                result_artifact_bytes: ByteCount(recovery_bytes),
+                checkpoint_bytes: ByteCount(checkpoint_bytes),
+                artifact_overhead_bytes: ByteCount(STRUCTURAL_ARTIFACT_OVERHEAD_BYTES),
+                relay_bytes: ByteCount(0),
+                result_egress_bytes: ByteCount(recovery_bytes),
+                checkpoint_egress_bytes: ByteCount(checkpoint_bytes),
+            },
+            // The current structural kernel is monolithic. A recommendation would be dishonest
+            // until the operator-domain execution path can consume it.
+            partitioning: PartitioningPolicy::Monolithic,
+            accuracy_demand: AccuracyResourceDemand {
+                refinement_cycles: Count(0),
+                solver_tightenings: Count(0),
+                samples: observations.maximum_samples_per_observation,
+            },
+        }),
+        output_set: None,
         worker: WorkerResourcePolicy {
             cpu_millicores: 1_000,
             maximum_wall_milliseconds: step.accuracy.resources.maximum_wall_time_milliseconds,
@@ -146,14 +158,6 @@ pub fn build_structural_resource_plan(
             fixed_scratch_bytes: ByteCount(STRUCTURAL_FIXED_WORKER_SCRATCH_BYTES),
             required_capabilities,
             accelerators,
-        },
-        // The current structural kernel is monolithic. A recommendation would be dishonest until
-        // the operator-domain execution path can consume it.
-        partitioning: PartitioningPolicy::Monolithic,
-        accuracy_demand: AccuracyResourceDemand {
-            refinement_cycles: Count(0),
-            solver_tightenings: Count(0),
-            samples: observations.maximum_samples_per_observation,
         },
         accuracy_ceiling: step.accuracy.resources,
     })

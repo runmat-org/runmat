@@ -3,13 +3,15 @@ use runmat_accelerate_api::{
     DENSE_REDUCTION_EVIDENCE_SCHEMA_VERSION,
 };
 use runmat_canonical_codec::encode_contract;
-use runmat_execution::{
-    resource::{AcceleratorRequest, ResourceRequest, ResourceUsage},
-    Digest,
-};
+use runmat_execution::{resource::AcceleratorRequest, Digest};
 use serde::{Deserialize, Serialize};
 
 use super::{contract::OBSERVATION_LIMITS, ObservationError};
+use crate::planning::resource::FeaResourcePlanIdentity;
+
+/// Canonical encoded-size ceiling for one governed dense-reduction evidence record. The record
+/// contains only fixed-width fields plus one accelerator class bounded by `AcceleratorRequest`.
+pub const OBSERVATION_ACCELERATION_EVIDENCE_MAX_ENCODED_BYTES: u64 = 64 * 1024;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -36,6 +38,7 @@ impl ObservationAccelerationSummaryIdentity {
 pub struct ObservationAccelerationEvidence {
     pub schema_version: u16,
     pub identity: ObservationAccelerationEvidenceIdentity,
+    pub resource_plan: FeaResourcePlanIdentity,
     pub selected_values_identity: Digest,
     pub allocation: AcceleratorRequest,
     pub provider: DenseReductionExecutionEvidence,
@@ -49,6 +52,7 @@ pub struct ObservationAccelerationEvidence {
 struct ObservationAccelerationEvidenceWire {
     schema_version: u16,
     identity: ObservationAccelerationEvidenceIdentity,
+    resource_plan: FeaResourcePlanIdentity,
     selected_values_identity: Digest,
     allocation: AcceleratorRequest,
     provider: DenseReductionExecutionEvidence,
@@ -64,6 +68,7 @@ impl TryFrom<ObservationAccelerationEvidenceWire> for ObservationAccelerationEvi
         let evidence = Self {
             schema_version: wire.schema_version,
             identity: wire.identity,
+            resource_plan: wire.resource_plan,
             selected_values_identity: wire.selected_values_identity,
             allocation: wire.allocation,
             provider: wire.provider,
@@ -78,6 +83,7 @@ impl TryFrom<ObservationAccelerationEvidenceWire> for ObservationAccelerationEvi
 
 impl ObservationAccelerationEvidence {
     pub(super) fn new(
+        resource_plan: FeaResourcePlanIdentity,
         selected_values_identity: Digest,
         allocation: AcceleratorRequest,
         provider: DenseReductionExecutionEvidence,
@@ -88,6 +94,7 @@ impl ObservationAccelerationEvidence {
         let mut evidence = Self {
             schema_version: 1,
             identity: ObservationAccelerationEvidenceIdentity(Digest::sha256([])),
+            resource_plan,
             selected_values_identity,
             allocation,
             provider,
@@ -162,6 +169,7 @@ impl ObservationAccelerationEvidence {
             "observation-acceleration-evidence-identity",
             &(
                 self.schema_version,
+                self.resource_plan,
                 self.selected_values_identity,
                 &self.allocation,
                 &self.provider,
@@ -177,18 +185,26 @@ impl ObservationAccelerationEvidence {
     }
 }
 
+/// Compact publication record for one completed provider operation and its exact admitted plan.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ObservationAccelerationOperationSummary {
+    pub evidence: ObservationAccelerationEvidenceIdentity,
+    pub resource_plan: FeaResourcePlanIdentity,
+    pub input_upload_bytes: u64,
+    pub result_download_bytes: u64,
+    pub dispatches: u64,
+    pub execution_ns: u64,
+    pub terminal_synchronizations: u64,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, try_from = "ObservationAccelerationSummaryWire")]
 pub struct ObservationAccelerationSummary {
     pub schema_version: u16,
     pub identity: ObservationAccelerationSummaryIdentity,
     pub allocation: AcceleratorRequest,
-    pub evidence: Vec<ObservationAccelerationEvidenceIdentity>,
-    pub input_upload_bytes: u64,
-    pub result_download_bytes: u64,
-    pub dispatches: u64,
-    pub execution_ns: u64,
-    pub terminal_synchronizations: u64,
+    pub operations: Vec<ObservationAccelerationOperationSummary>,
 }
 
 #[derive(Deserialize)]
@@ -197,12 +213,7 @@ struct ObservationAccelerationSummaryWire {
     schema_version: u16,
     identity: ObservationAccelerationSummaryIdentity,
     allocation: AcceleratorRequest,
-    evidence: Vec<ObservationAccelerationEvidenceIdentity>,
-    input_upload_bytes: u64,
-    result_download_bytes: u64,
-    dispatches: u64,
-    execution_ns: u64,
-    terminal_synchronizations: u64,
+    operations: Vec<ObservationAccelerationOperationSummary>,
 }
 
 impl TryFrom<ObservationAccelerationSummaryWire> for ObservationAccelerationSummary {
@@ -213,12 +224,7 @@ impl TryFrom<ObservationAccelerationSummaryWire> for ObservationAccelerationSumm
             schema_version: wire.schema_version,
             identity: wire.identity,
             allocation: wire.allocation,
-            evidence: wire.evidence,
-            input_upload_bytes: wire.input_upload_bytes,
-            result_download_bytes: wire.result_download_bytes,
-            dispatches: wire.dispatches,
-            execution_ns: wire.execution_ns,
-            terminal_synchronizations: wire.terminal_synchronizations,
+            operations: wire.operations,
         };
         summary.validate()?;
         Ok(summary)
@@ -239,31 +245,18 @@ impl ObservationAccelerationSummary {
             schema_version: 1,
             identity: ObservationAccelerationSummaryIdentity(Digest::sha256([])),
             allocation: first.allocation.clone(),
-            evidence: evidence.iter().map(|item| item.identity).collect(),
-            input_upload_bytes: checked_sum(
-                evidence.iter().map(|item| item.input_upload_bytes),
-                "observation acceleration upload bytes",
-            )?,
-            result_download_bytes: checked_sum(
-                evidence.iter().map(|item| item.result_download_bytes),
-                "observation acceleration download bytes",
-            )?,
-            dispatches: checked_sum(
-                evidence
-                    .iter()
-                    .map(|item| u64::from(item.provider.dispatches)),
-                "observation acceleration dispatches",
-            )?,
-            execution_ns: checked_sum(
-                evidence.iter().map(|item| item.provider.execution_ns),
-                "observation acceleration execution time",
-            )?,
-            terminal_synchronizations: checked_sum(
-                evidence
-                    .iter()
-                    .map(|item| u64::from(item.terminal_synchronizations)),
-                "observation acceleration synchronizations",
-            )?,
+            operations: evidence
+                .iter()
+                .map(|item| ObservationAccelerationOperationSummary {
+                    evidence: item.identity,
+                    resource_plan: item.resource_plan,
+                    input_upload_bytes: item.input_upload_bytes,
+                    result_download_bytes: item.result_download_bytes,
+                    dispatches: u64::from(item.provider.dispatches),
+                    execution_ns: item.provider.execution_ns,
+                    terminal_synchronizations: u64::from(item.terminal_synchronizations),
+                })
+                .collect(),
         };
         summary.identity = summary.derive_identity()?;
         summary.validate()?;
@@ -275,22 +268,41 @@ impl ObservationAccelerationSummary {
             .validate()
             .map_err(|error| ObservationError::Invalid(error.to_string()))?;
         let evidence_is_unique = self
-            .evidence
+            .operations
             .iter()
-            .copied()
+            .map(|operation| operation.evidence)
             .collect::<std::collections::BTreeSet<_>>()
             .len()
-            == self.evidence.len();
+            == self.operations.len();
+        let plans_are_unique = self
+            .operations
+            .iter()
+            .map(|operation| operation.resource_plan)
+            .collect::<std::collections::BTreeSet<_>>()
+            .len()
+            == self.operations.len();
+        let operations_are_valid = self.operations.iter().all(|operation| {
+            operation.input_upload_bytes > 0
+                && operation.result_download_bytes > 0
+                && operation.dispatches > 0
+                && operation.execution_ns > 0
+                && operation.terminal_synchronizations > 0
+        });
+        let totals_fit = checked_sum(
+            self.operations
+                .iter()
+                .map(|operation| operation.execution_ns),
+            "observation acceleration execution time",
+        )
+        .is_ok();
         if self.schema_version != 1
             || self.allocation.count != 1
             || self.allocation.memory_bytes_each == 0
-            || self.evidence.is_empty()
+            || self.operations.is_empty()
             || !evidence_is_unique
-            || self.input_upload_bytes == 0
-            || self.result_download_bytes == 0
-            || self.dispatches == 0
-            || self.execution_ns == 0
-            || self.terminal_synchronizations == 0
+            || !plans_are_unique
+            || !operations_are_valid
+            || !totals_fit
             || self.identity != self.derive_identity()?
         {
             return Err(ObservationError::Invalid(
@@ -304,16 +316,7 @@ impl ObservationAccelerationSummary {
         let bytes = encode_contract(
             super::contract::OBSERVATION_PREFIX,
             "observation-acceleration-summary-identity",
-            &(
-                self.schema_version,
-                &self.allocation,
-                &self.evidence,
-                self.input_upload_bytes,
-                self.result_download_bytes,
-                self.dispatches,
-                self.execution_ns,
-                self.terminal_synchronizations,
-            ),
+            &(self.schema_version, &self.allocation, &self.operations),
             OBSERVATION_LIMITS,
         )?;
         Ok(ObservationAccelerationSummaryIdentity(Digest::sha256(
@@ -331,57 +334,4 @@ fn checked_sum(
             .checked_add(value)
             .ok_or(ObservationError::Limit(field))
     })
-}
-
-pub(super) fn validate_acceleration_publication(
-    summaries: &[&ObservationAccelerationSummary],
-    resource_plan: &ResourceRequest,
-    resource_usage: &ResourceUsage,
-) -> Result<(), ObservationError> {
-    resource_plan
-        .validate()
-        .map_err(|error| ObservationError::Invalid(error.to_string()))?;
-    if summaries.is_empty() {
-        return Ok(());
-    }
-    let [allocation] = resource_plan.accelerators.as_slice() else {
-        return Err(ObservationError::Identity(
-            "observation acceleration has no unique resource-plan allocation",
-        ));
-    };
-    if summaries
-        .iter()
-        .any(|summary| summary.allocation != *allocation)
-    {
-        return Err(ObservationError::Identity(
-            "observation acceleration differs from its resource-plan allocation",
-        ));
-    }
-    let matching_usage = resource_usage
-        .accelerator_millis
-        .iter()
-        .filter(|usage| usage.class == allocation.class)
-        .collect::<Vec<_>>();
-    let [matching_usage] = matching_usage.as_slice() else {
-        return Err(ObservationError::Identity(
-            "observation acceleration has no unique scheduler usage record",
-        ));
-    };
-    let measured_execution_ns = checked_sum(
-        summaries.iter().map(|summary| summary.execution_ns),
-        "observation acceleration execution time",
-    )?;
-    let reserved_execution_ns =
-        matching_usage
-            .device_millis
-            .checked_mul(1_000_000)
-            .ok_or(ObservationError::Limit(
-                "observation accelerator reserved execution time",
-            ))?;
-    if measured_execution_ns > reserved_execution_ns {
-        return Err(ObservationError::Invalid(
-            "observation accelerator execution exceeds scheduler accounting".into(),
-        ));
-    }
-    Ok(())
 }

@@ -4,10 +4,11 @@ use runmat_analysis_fea::execution::{
     AnalysisNumericalObjectKind, AnalysisResultIdentity, AnalysisWorkloadIdentity,
     ANALYSIS_MANIFEST_MEDIA_TYPE, ANALYSIS_MANIFEST_VALUE_SCHEMA,
 };
+use runmat_analysis_fea::planning::resource::PreparedOutputSetResourceFacts;
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use runmat_execution::value::{ValuePayload, ValueRef, ValueRefKind};
 use runmat_execution::Digest;
-use runmat_execution_artifact::cache::{CacheExport, CacheImport};
+use runmat_execution_artifact::cache::CacheImport;
 use runmat_execution_artifact::{LogicalObject, ObjectNamespace, ProgramExecutionResponse};
 use serde::{Deserialize, Serialize};
 
@@ -21,6 +22,7 @@ pub const ANALYSIS_OUTPUT_SET_VALUE_SCHEMA: &str = "runmat.analysis.output-set.v
 const OUTPUT_SET_PREFIX: &[u8] = b"runmat-analysis-output-set/v1\0";
 const OUTPUT_SET_LIMITS: CanonicalLimits =
     CanonicalLimits::new(8 * 1024 * 1024, 1_000_000, 65_536, 32);
+pub(crate) const ANALYSIS_OUTPUT_SET_MAX_ENCODED_BYTES: u64 = 8 * 1024 * 1024;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -245,13 +247,32 @@ impl AnalysisHostResponse {
     }
 }
 
-pub(crate) fn publish_analysis_output_set(
-    store: &mut impl CacheExport,
+pub(crate) struct PreparedAnalysisOutputSet {
+    pub output_set: AnalysisOutputSet,
+    pub object: LogicalObject,
+    pub root: ValueRef,
+}
+
+impl PreparedAnalysisOutputSet {
+    pub fn validate_resource_facts(
+        &self,
+        admitted: &PreparedOutputSetResourceFacts,
+    ) -> AnalysisBridgeResult<()> {
+        if self.object.bytes.len() as u64 > admitted.encoded_bytes_upper_bound.0 {
+            return Err(AnalysisBridgeError::Invalid(
+                "analysis output set exceeds its resource-plan envelope".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+pub(crate) fn prepare_analysis_output_set(
     host: &AnalysisHostWorkload,
     result: AnalysisResultIdentity,
     outputs: &[PreparedAnalysisObjects],
     roots: &[ValueRef],
-) -> AnalysisBridgeResult<(AnalysisOutputSet, ValueRef)> {
+) -> AnalysisBridgeResult<PreparedAnalysisOutputSet> {
     let output_set = AnalysisOutputSet::new(host, result, outputs, roots)?;
     let object = LogicalObject::new(
         ObjectNamespace::ResultValue,
@@ -264,6 +285,9 @@ pub(crate) fn publish_analysis_output_set(
         ValueRefKind::ResultObject,
         ANALYSIS_OUTPUT_SET_VALUE_SCHEMA,
     )?;
-    store.write_verified(&object)?;
-    Ok((output_set, root))
+    Ok(PreparedAnalysisOutputSet {
+        output_set,
+        object,
+        root,
+    })
 }

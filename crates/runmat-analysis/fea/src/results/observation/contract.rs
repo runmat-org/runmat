@@ -5,7 +5,6 @@ use runmat_analysis_core::{
     SpatialReduction,
 };
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
-use runmat_execution::resource::{ResourceRequest, ResourceUsage};
 use runmat_execution::Digest;
 use runmat_meshing_core::StableDigest;
 use serde::{Deserialize, Serialize};
@@ -14,9 +13,7 @@ use super::distributed::{
     ObservationPartitionCombination, ObservationPartitionEvidence,
     ObservationPartitionEvidenceIdentity,
 };
-use super::{
-    acceleration_evidence::validate_acceleration_publication, ObservationAccelerationSummary,
-};
+use super::ObservationAccelerationSummary;
 use crate::execution::{AnalysisExecutionError, AnalysisExecutionResult};
 use crate::execution::{
     FieldRecoveryRequestIdentity, FieldRecoverySource, ObservationEvaluationRequestIdentity,
@@ -575,9 +572,9 @@ impl ObservationArtifactManifest {
             if let Some(summary) = &entry.acceleration {
                 summary.validate()?;
                 if summary
-                    .evidence
+                    .operations
                     .iter()
-                    .any(|identity| !acceleration_evidence.insert(*identity))
+                    .any(|operation| !acceleration_evidence.insert(operation.evidence))
                 {
                     return Err(ObservationError::Identity(
                         "observation manifest reuses acceleration evidence",
@@ -591,20 +588,6 @@ impl ObservationArtifactManifest {
             ));
         }
         Ok(())
-    }
-
-    pub fn validate_acceleration_publication(
-        &self,
-        resource_plan: &ResourceRequest,
-        resource_usage: &ResourceUsage,
-    ) -> Result<(), ObservationError> {
-        self.validate()?;
-        let summaries = self
-            .results
-            .iter()
-            .filter_map(|entry| entry.acceleration.as_ref())
-            .collect::<Vec<_>>();
-        validate_acceleration_publication(&summaries, resource_plan, resource_usage)
     }
 
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, ObservationError> {

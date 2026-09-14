@@ -10,7 +10,7 @@ use runmat_execution_artifact::{ObjectNamespace, ProgramExecutionRequest};
 
 use crate::{
     import_analysis_objects, prepare_analysis_objects, prepare_partitioned_analysis_objects,
-    response::{publish_analysis_output_set, AnalysisOutputSet},
+    response::{prepare_analysis_output_set, AnalysisOutputSet},
     AnalysisBridgeError, AnalysisBridgeResult, AnalysisHostWorkload, PreparedAnalysisObjects,
 };
 
@@ -156,10 +156,39 @@ where
         ));
     }
 
+    let resource_plan_inputs = inputs
+        .iter()
+        .filter(|input| input.manifest.kind == AnalysisNumericalObjectKind::ResourcePlan)
+        .collect::<Vec<_>>();
+    if resource_plan_inputs.len() > 1 {
+        return Err(AnalysisBridgeError::Invalid(
+            "analysis execution has more than one resource plan".into(),
+        ));
+    }
+    let resource_plan = resource_plan_inputs
+        .first()
+        .map(|input| {
+            runmat_analysis_fea::planning::resource::FeaResourcePlan::from_canonical_bytes(
+                &input.payload(),
+            )
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))
+        })
+        .transpose()?;
+
     let mut outputs = Vec::with_capacity(kernel_outputs.len());
     let mut roots = Vec::with_capacity(kernel_outputs.len());
     let mut result_objects = Vec::new();
     for output in kernel_outputs {
+        let admitted_output = resource_plan
+            .as_ref()
+            .and_then(|plan| plan.input.demand.output_facts(output.kind));
+        if resource_plan.as_ref().is_some_and(|plan| {
+            plan.input.demand.governs_prepared_outputs() && admitted_output.is_none()
+        }) {
+            return Err(AnalysisBridgeError::Invalid(
+                "analysis output has no envelope in its resource plan".into(),
+            ));
+        }
         let bounded_chunk_bytes = chunk_bytes.min(DEFAULT_ANALYSIS_CHUNK_BYTES);
         let prepared = if output.partitions.is_empty() {
             prepare_analysis_objects(
@@ -188,6 +217,9 @@ where
                 limits,
             )?
         };
+        if let Some(admitted) = admitted_output {
+            crate::object::validate_prepared_output_resource_facts(&prepared, admitted)?;
+        }
         let references =
             prepared.unique_references(&host.artifact_access, ValueRefKind::ResultObject)?;
         let root = references
@@ -196,9 +228,6 @@ where
             .ok_or(AnalysisBridgeError::Identity(
                 "analysis output closure has no manifest root",
             ))?;
-        for object in &prepared.objects {
-            store.write_verified(object)?;
-        }
         roots.push(root);
         result_objects.extend(references);
         outputs.push(prepared);
@@ -210,8 +239,25 @@ where
             .map(|output| output.manifest.payload_digest)
             .collect(),
     )?;
-    let (output_set, output_set_root) =
-        publish_analysis_output_set(store, &host, identity, &outputs, &roots)?;
+    let prepared_output_set = prepare_analysis_output_set(&host, identity, &outputs, &roots)?;
+    if let Some(plan) = &resource_plan {
+        if plan.input.demand.governs_prepared_outputs() {
+            let admitted = plan.input.output_set.as_ref().ok_or_else(|| {
+                AnalysisBridgeError::Invalid(
+                    "analysis output set has no envelope in its resource plan".into(),
+                )
+            })?;
+            prepared_output_set.validate_resource_facts(admitted)?;
+        }
+    }
+    for output in &outputs {
+        for object in &output.objects {
+            store.write_verified(object)?;
+        }
+    }
+    store.write_verified(&prepared_output_set.object)?;
+    let output_set = prepared_output_set.output_set;
+    let output_set_root = prepared_output_set.root;
     crate::object::retain_unique_references(&mut result_objects);
     result_objects.push(output_set_root.clone());
     Ok(CompletedAnalysisWorkload {

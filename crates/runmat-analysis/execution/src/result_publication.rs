@@ -16,9 +16,9 @@ use runmat_execution_artifact::{ObjectNamespace, ProgramExecutionResponse};
 
 use crate::{
     import_analysis_objects, import_analysis_output_set, prepare_analysis_objects,
-    prepare_analysis_program, AnalysisBridgeError, AnalysisBridgeResult,
-    AnalysisCapabilityRequirement, AnalysisHostWorkload, AnalysisWorkloadInput,
-    AnalysisWorkloadRequest, ImportedObservations, PreparedAnalysisObjects,
+    prepare_analysis_program, validate_observation_resource_usage, AnalysisBridgeError,
+    AnalysisBridgeResult, AnalysisCapabilityRequirement, AnalysisHostWorkload,
+    AnalysisWorkloadInput, AnalysisWorkloadRequest, ImportedObservations, PreparedAnalysisObjects,
     PreparedAnalysisProgram, ANALYSIS_HOST_ABI,
 };
 
@@ -115,13 +115,7 @@ pub fn prepare_result_publication(
                 .manifest
                 .validate()
                 .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-            observations
-                .manifest
-                .validate_acceleration_publication(
-                    &resource_plan.request,
-                    &resource_usage.actual.scheduler,
-                )
-                .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+            validate_observation_resource_usage(&observations.manifest, &resource_usage)?;
             if observations.manifest.identity.digest() != observations.output.logical_identity {
                 return Err(AnalysisBridgeError::Identity(
                     "publication observation manifest differs from its content",

@@ -211,8 +211,8 @@ pub(crate) fn admit_structural_observation(
     let expected_observation_resources =
         ObservationResourceFacts::from_plan(&request.plan, workload.observation_execution())
             .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    if resource_plan.input.topology_digest != request.plan.topology_digest
-        || resource_plan.input.observations != expected_observation_resources
+    if resource_plan.input.topology_digest() != request.plan.topology_digest
+        || resource_plan.input.observations() != Some(&expected_observation_resources)
     {
         return Err(AnalysisBridgeError::Identity(
             "observation execution policy differs from its canonical resource plan",

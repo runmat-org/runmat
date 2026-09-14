@@ -1,6 +1,12 @@
 use std::collections::BTreeSet;
 
+use runmat_analysis_fea::planning::resource::{
+    build_structural_frequency_recovery_resource_plan,
+    structural_frequency_recovery_payload_bytes_upper_bound, FeaResourcePlan,
+    PreparedPhaseResourceFacts,
+};
 use runmat_analysis_fea::{
+    constraints::CanonicalStructuralConstraintPlan,
     execution::{
         AnalysisNumericalObjectKind, AnalysisWorkKind, FieldRecoveryRequest, FieldRecoverySource,
     },
@@ -50,6 +56,8 @@ pub fn import_structural_frequency_recovered_fields(
 
 pub struct PreparedStructuralFrequencyFieldRecovery {
     pub request: FieldRecoveryRequest,
+    pub resource_plan: FeaResourcePlan,
+    pub resource_plan_objects: PreparedAnalysisObjects,
     pub host: AnalysisHostWorkload,
     pub program: PreparedAnalysisProgram,
     pub inputs: Vec<PreparedAnalysisObjects>,
@@ -137,11 +145,52 @@ pub fn prepare_structural_frequency_field_recovery(
         ObjectNamespace::InputValue,
         preparation.inventory_limits,
     )?;
+    let constraints =
+        CanonicalStructuralConstraintPlan::compile_for_model(workload.model(), Some(&mesh))
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let phase_inputs = vec![
+        request_objects.clone(),
+        preparation.workload.clone(),
+        preparation.mesh.clone(),
+        preparation.source_entry.clone(),
+    ];
+    let resource_plan = build_structural_frequency_recovery_resource_plan(
+        &mesh,
+        &constraints,
+        &workload,
+        &request,
+        &result,
+        &[],
+        PreparedPhaseResourceFacts {
+            inputs: crate::prepared_input_resource_facts(&phase_inputs)?,
+            output: crate::projected_output_resource_facts(
+                structural_frequency_recovery_payload_bytes_upper_bound(
+                    &mesh,
+                    &constraints,
+                    &workload,
+                )
+                .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
+            )?,
+            output_set: crate::projected_output_set_resource_facts(),
+        },
+    )
+    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let resource_plan_objects = prepare_analysis_objects(
+        AnalysisNumericalObjectKind::ResourcePlan,
+        resource_plan.identity.digest(),
+        &resource_plan
+            .canonical_bytes()
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
+        preparation.chunk_bytes,
+        ObjectNamespace::InputValue,
+        preparation.inventory_limits,
+    )?;
     let typed_inputs = vec![
         (request_objects, ValueRefKind::DriverObject),
         (preparation.workload, ValueRefKind::DriverObject),
         (preparation.mesh, ValueRefKind::DriverObject),
         (preparation.source_entry, ValueRefKind::ResultObject),
+        (resource_plan_objects.clone(), ValueRefKind::DriverObject),
     ];
     let workload_inputs = typed_inputs
         .iter()
@@ -173,6 +222,8 @@ pub fn prepare_structural_frequency_field_recovery(
     let program = prepare_analysis_program(&host, preparation.program_revision, &inputs)?;
     Ok(PreparedStructuralFrequencyFieldRecovery {
         request,
+        resource_plan,
+        resource_plan_objects,
         host,
         program,
         inputs,

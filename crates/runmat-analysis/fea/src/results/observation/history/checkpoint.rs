@@ -106,7 +106,7 @@ impl TryFrom<ObservationHistoryStreamWire> for ObservationHistoryStream {
 }
 
 impl ObservationHistoryStream {
-    pub(super) fn new(
+    pub(crate) fn new(
         plan_identity: ResolvedObservationPlanIdentity,
         topology_digest: Digest,
         independent_domain: IndependentDomain,

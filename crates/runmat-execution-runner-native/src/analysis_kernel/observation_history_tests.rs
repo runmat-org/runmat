@@ -2,13 +2,19 @@ use std::collections::BTreeSet;
 
 use runmat_analysis_execution::{
     decode_prepared_observation_history_checkpoint, prepare_analysis_objects,
-    AnalysisCapabilityRequirement, AnalysisHostWorkload, AnalysisKernel, AnalysisKernelInvocation,
-    AnalysisWorkloadInput, AnalysisWorkloadRequest, PreparedAnalysisObjects,
+    prepared_input_resource_facts, projected_output_resource_facts,
+    projected_output_set_resource_facts, AnalysisCapabilityRequirement, AnalysisHostWorkload,
+    AnalysisKernel, AnalysisKernelInvocation, AnalysisWorkloadInput, AnalysisWorkloadRequest,
+    PreparedAnalysisObjects,
 };
 use runmat_analysis_fea::execution::{
     AnalysisNumericalObjectKind, AnalysisWorkKind, ConstraintPlanIdentity, DiscretizationIdentity,
     ExecutionPlanIdentity, NumericalPlanIdentity, ObservationHistoryCheckpointRequest,
     OperatorIdentity, ProblemIdentity, SequenceIdentity, StepIdentity, StudyIdentity,
+};
+use runmat_analysis_fea::planning::resource::{
+    build_observation_history_checkpoint_resource_plan, build_resource_plan,
+    observation_history_checkpoint_payload_bytes_upper_bound, FeaResourceDemand, FeaResourcePlan,
 };
 use runmat_analysis_fea::results::field::{
     RecoveredField, RecoveredFieldCatalog, RecoveredFieldDefinition, RecoveredFieldEntityDomain,
@@ -212,6 +218,42 @@ fn native_kernel_advances_exact_history_checkpoint_lineage() {
         )
         .unwrap()
     };
+    let with_resource_plan =
+        |request: &ObservationHistoryCheckpointRequest,
+         previous: Option<
+            &runmat_analysis_fea::results::observation::ObservationHistoryCheckpoint,
+        >,
+         sample: &ObservationResult,
+         mut inputs: Vec<PreparedAnalysisObjects>| {
+            let input_facts = prepared_input_resource_facts(&inputs).unwrap();
+            let payload_ceiling = observation_history_checkpoint_payload_bytes_upper_bound(
+                request,
+                previous,
+                &input_facts,
+            )
+            .unwrap();
+            let plan = build_observation_history_checkpoint_resource_plan(
+                request,
+                previous,
+                sample,
+                input_facts,
+                projected_output_resource_facts(payload_ceiling).unwrap(),
+                projected_output_set_resource_facts(),
+            )
+            .unwrap();
+            inputs.push(
+                prepare_analysis_objects(
+                    AnalysisNumericalObjectKind::ResourcePlan,
+                    plan.identity.digest(),
+                    &plan.canonical_bytes().unwrap(),
+                    256,
+                    ObjectNamespace::InputValue,
+                    limits,
+                )
+                .unwrap(),
+            );
+            inputs
+        };
 
     let first_sample = result_at(0.0);
     let first_request = ObservationHistoryCheckpointRequest::new(
@@ -224,10 +266,15 @@ fn native_kernel_advances_exact_history_checkpoint_lineage() {
         first_sample.logical_identity,
     )
     .unwrap();
-    let first_inputs = vec![
-        prepare_request(&first_request),
-        prepare_sample(&first_sample),
-    ];
+    let first_inputs = with_resource_plan(
+        &first_request,
+        None,
+        &first_sample,
+        vec![
+            prepare_request(&first_request),
+            prepare_sample(&first_sample),
+        ],
+    );
     let first_host = checkpoint_host(&first_inputs);
     let first_output = NativeAnalysisKernel
         .execute(AnalysisKernelInvocation {
@@ -252,11 +299,16 @@ fn native_kernel_advances_exact_history_checkpoint_lineage() {
         second_sample.logical_identity,
     )
     .unwrap();
-    let second_inputs = vec![
-        prepare_request(&second_request),
-        prepare_sample(&second_sample),
-        first_objects,
-    ];
+    let second_inputs = with_resource_plan(
+        &second_request,
+        Some(&first_checkpoint),
+        &second_sample,
+        vec![
+            prepare_request(&second_request),
+            prepare_sample(&second_sample),
+            first_objects,
+        ],
+    );
     let second_host = checkpoint_host(&second_inputs);
     let second_output = NativeAnalysisKernel
         .execute(AnalysisKernelInvocation {
@@ -274,6 +326,40 @@ fn native_kernel_advances_exact_history_checkpoint_lineage() {
     );
     assert_eq!(second_checkpoint.manifest().observed_sample_count, 2);
     assert_eq!(second_checkpoint.samples().len(), 1);
+
+    let mut understated_inputs = second_inputs.clone();
+    let resource_index = understated_inputs
+        .iter()
+        .position(|input| input.manifest.kind == AnalysisNumericalObjectKind::ResourcePlan)
+        .unwrap();
+    let resource_plan =
+        FeaResourcePlan::from_canonical_bytes(&understated_inputs[resource_index].payload())
+            .unwrap();
+    let mut understated_input = resource_plan.input;
+    let FeaResourceDemand::StructuralObservationHistoryCheckpoint(demand) =
+        &mut understated_input.demand
+    else {
+        unreachable!()
+    };
+    demand.output.construction_resident_bytes_admission_budget.0 -= 1;
+    let understated_plan = build_resource_plan(understated_input).unwrap();
+    understated_inputs[resource_index] = prepare_analysis_objects(
+        AnalysisNumericalObjectKind::ResourcePlan,
+        understated_plan.identity.digest(),
+        &understated_plan.canonical_bytes().unwrap(),
+        256,
+        ObjectNamespace::InputValue,
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    let understated_host = checkpoint_host(&understated_inputs);
+    assert!(NativeAnalysisKernel
+        .execute(AnalysisKernelInvocation {
+            kind: AnalysisWorkKind::CheckpointObservationHistory,
+            host: &understated_host,
+            inputs: &understated_inputs,
+        })
+        .is_err());
 
     let mut substituted_inputs = second_inputs;
     substituted_inputs[1] = prepare_sample(&first_sample);

@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 use crate::results::field::RecoveredFieldSample;
 use crate::results::observation::{
     BoundedObservationHistory, ObservationHistoryCheckpoint, ObservationHistoryCheckpointIdentity,
-    ObservationResult, ObservationResultIdentity, ResolvedObservationPlan,
-    ResolvedObservationPlanIdentity,
+    ObservationHistoryStream, ObservationResult, ObservationResultIdentity,
+    ResolvedObservationPlan, ResolvedObservationPlanIdentity,
 };
 
 use super::{
@@ -144,23 +144,7 @@ impl ObservationHistoryCheckpointRequest {
         previous: Option<ObservationHistoryCheckpoint>,
         result: ObservationResult,
     ) -> AnalysisExecutionResult<ObservationHistoryCheckpoint> {
-        self.validate()?;
-        result
-            .validate()
-            .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
-        if result.logical_identity != self.sample || result.sample != self.sample_coordinate {
-            return Err(AnalysisExecutionError::Identity(
-                "history checkpoint sample identity or coordinate differs from its request",
-            ));
-        }
-        let expected_ordinal = previous
-            .as_ref()
-            .map_or(0, |checkpoint| checkpoint.manifest().observed_sample_count);
-        if self.sample_ordinal != expected_ordinal {
-            return Err(AnalysisExecutionError::Identity(
-                "history checkpoint sample ordinal does not follow its predecessor",
-            ));
-        }
+        self.validate_advance_inputs(previous.as_ref(), &result)?;
         let mut history = match (self.predecessor, previous) {
             (None, None) => BoundedObservationHistory::new(&self.plan, &self.observation_id),
             (Some(expected), Some(previous)) if previous.manifest().identity == expected => {
@@ -179,6 +163,70 @@ impl ObservationHistoryCheckpointRequest {
         history
             .checkpoint(self.predecessor)
             .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))
+    }
+
+    /// Validates one history transition without cloning or constructing its retained output.
+    pub fn validate_advance_inputs(
+        &self,
+        previous: Option<&ObservationHistoryCheckpoint>,
+        result: &ObservationResult,
+    ) -> AnalysisExecutionResult<()> {
+        self.validate()?;
+        result
+            .validate()
+            .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+        if result.logical_identity != self.sample || result.sample != self.sample_coordinate {
+            return Err(AnalysisExecutionError::Identity(
+                "history checkpoint sample identity or coordinate differs from its request",
+            ));
+        }
+        let observation = self
+            .plan
+            .observations
+            .iter()
+            .find(|observation| observation.spec.observation_id == self.observation_id)
+            .ok_or_else(|| {
+                AnalysisExecutionError::Invalid(
+                    "history checkpoint request names an unresolved observation".into(),
+                )
+            })?;
+        let expected_stream = ObservationHistoryStream::new(
+            self.plan.identity,
+            self.plan.topology_digest,
+            self.plan.independent_domain.clone(),
+            observation,
+            observation.sample_bounds.maximum_produced_samples,
+            observation.sample_bounds.maximum_retained_samples,
+        )
+        .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+        let expected_ordinal =
+            previous.map_or(0, |checkpoint| checkpoint.manifest().observed_sample_count);
+        match (self.predecessor, previous) {
+            (None, None) => {}
+            (Some(expected), Some(previous)) => {
+                previous
+                    .validate()
+                    .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+                if previous.manifest().identity != expected
+                    || previous.manifest().stream != expected_stream
+                {
+                    return Err(AnalysisExecutionError::Identity(
+                        "history checkpoint predecessor differs from its resolved stream",
+                    ));
+                }
+            }
+            _ => {
+                return Err(AnalysisExecutionError::Identity(
+                    "history checkpoint predecessor differs from its request",
+                ))
+            }
+        }
+        if self.sample_ordinal != expected_ordinal {
+            return Err(AnalysisExecutionError::Identity(
+                "history checkpoint sample ordinal does not follow its predecessor",
+            ));
+        }
+        Ok(())
     }
 
     pub fn canonical_bytes(&self) -> AnalysisExecutionResult<Vec<u8>> {
