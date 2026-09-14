@@ -6,11 +6,13 @@ import { contentDigest, evidenceDigest } from "../evidence.mjs";
 import { loadControlReviewSet } from "../control-authoring/review-set.mjs";
 import {
   fixtureCatalogCompositionChild, fixtureCompositionChild,
+  fixtureCatalogIdentityCompositionChildren, fixtureRootCompositionChild,
+  fixtureRuntimeIdentityCompositionChildren,
   fixtureIntegrationProducts, fixtureModuleCompositionBaseline,
   fixtureReviewedModuleCompositionBaseline, fixtureTargetPolicy,
 } from "./helpers.mjs";
 import {
-  SEQUENTIAL_BUNDLES, SEQUENTIAL_IDENTITIES,
+  SEQUENTIAL_BUNDLES, SEQUENTIAL_FAMILY, SEQUENTIAL_IDENTITIES,
 } from "./sequential-shared-parent-definition-fixture.mjs";
 import { reviewedPilotPolicy } from "./pilot-policy-fixture.mjs";
 
@@ -23,10 +25,21 @@ export function sequentialReviewedControlSet({
   const baseline = fixtureReviewedModuleCompositionBaseline(
     fixtureModuleCompositionBaseline(
       new Map([
-        ["catalog-math", [fixtureCatalogCompositionChild()]],
-        ["runtime-math", [fixtureCompositionChild()]],
+        ["catalog-root", [fixtureRootCompositionChild("catalog")]],
+        ["catalog-math", [fixtureCatalogCompositionChild(SEQUENTIAL_FAMILY, "groups")]],
+        ["catalog-math-reduction", fixtureCatalogIdentityCompositionChildren(
+          SEQUENTIAL_IDENTITIES, SEQUENTIAL_FAMILY,
+        )],
+        ["runtime-root", [fixtureRootCompositionChild("runtime")]],
+        ["runtime-math", [fixtureCompositionChild(SEQUENTIAL_FAMILY)]],
+        ["runtime-math-reduction", fixtureRuntimeIdentityCompositionChildren(
+          SEQUENTIAL_IDENTITIES, SEQUENTIAL_FAMILY,
+        )],
       ]),
-      new Set(["catalog-math", "runtime-math"]),
+      new Set([
+        "catalog-math", "catalog-math-reduction", "catalog-root",
+        "runtime-math", "runtime-math-reduction", "runtime-root",
+      ]),
     ),
   );
   const global = globalReview({
@@ -100,7 +113,7 @@ function globalReview({
       module_composition_reviewed_baseline_digest: baseline.digest,
     },
     program_profiles: programProfiles,
-    integration_products: fixtureIntegrationProducts(inventory, true),
+    integration_products: fixtureIntegrationProducts(inventory, true, "runtime-math-reduction"),
     module_composition_baseline: baseline,
     migration_findings: {
       schema_version: 1,

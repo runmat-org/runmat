@@ -28,8 +28,8 @@ test("a second sealed-plus-active integration retains the first shared-parent ch
   assert.match(parent, /pub mod beta_support;/);
   assert.ok(parent.indexOf("alpha_support") < parent.indexOf("beta_support"));
   assert.deepEqual(second.projection.products
-    .find((product) => product.product_id === "runtime-math")
-    .children.map((child) => child.module), ["alpha_support", "basic", "beta_support"]);
+    .find((product) => product.product_id === "runtime-math-reduction")
+    .children.map((child) => child.module), ["alpha", "alpha_support", "beta", "beta_support"]);
   assert.deepEqual(second.nativeManifest.entries
     .filter((entry) => entry.kind === "builtin")
     .map((entry) => entry.declaration), ["alpha", "beta"]);
@@ -186,5 +186,8 @@ function authorSecondChild(fixture) {
 }
 
 function parentPath(fixture) {
-  return path.join(fixture.repository, "crates/runmat-runtime/src/builtins/math/mod.rs");
+  return path.join(
+    fixture.repository,
+    "crates/runmat-runtime/src/builtins/math/reduction/mod.rs",
+  );
 }

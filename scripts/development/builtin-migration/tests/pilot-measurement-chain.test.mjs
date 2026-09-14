@@ -18,7 +18,8 @@ test("derives overlapping timing and queue order from two independent pilot sess
   const result = fixture.measurement.value;
   const canonicalPaths = fixture.canonicalReferences.map((entry) => entry.path);
   const historyPaths = result.completed_sessions.map((entry) => entry.path);
-  assert.notDeepEqual(canonicalPaths, historyPaths);
+  assert.deepEqual(canonicalPaths, [...canonicalPaths].sort(compareCodePoint));
+  assert.deepEqual(historyPaths, fixture.history.map((entry) => entry.reference.path));
   assert.deepEqual(result.bundle_ids, [fixture.chain.fixture.bundleIds[1], fixture.chain.fixture.bundleIds[0]]);
 
   const expectedTiming = timingFrom(fixture.history);

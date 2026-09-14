@@ -558,11 +558,11 @@ fn compatibility_checked_builtin_result(
     mut result: Value,
 ) -> Result<Value, RuntimeError> {
     crate::compatibility::ensure_value_compatible(&result, name)?;
-    propagate_gpu_provenance(name, args, &mut result);
+    propagate_gpu_provenance(args, &mut result);
     Ok(result)
 }
 
-fn propagate_gpu_provenance(name: &str, args: &[Value], result: &mut Value) {
+fn propagate_gpu_provenance(args: &[Value], result: &mut Value) {
     let mut saw_gpu = false;
     let mut explicit = false;
     for arg in args {
@@ -572,40 +572,21 @@ fn propagate_gpu_provenance(name: &str, args: &[Value], result: &mut Value) {
         });
     }
     if !saw_gpu {
-        let explicit_constructor = matches!(
-            name,
-            "zeros"
-                | "ones"
-                | "inf"
-                | "nan"
-                | "rand"
-                | "randn"
-                | "randi"
-                | "eye"
-                | "true"
-                | "false"
-        ) && args.iter().any(|arg| {
-            crate::builtins::common::tensor::value_to_string(arg)
-                .is_some_and(|text| text.eq_ignore_ascii_case("gpuarray"))
-        });
         visit_gpu_handles_mut(result, &mut |handle| {
-            if explicit_constructor {
-                handle.descriptor.provenance =
-                    Some(runmat_accelerate_api::GpuHandleProvenance::Explicit);
-            } else if runmat_accelerate_api::handle_provenance(handle).is_none() {
+            if runmat_accelerate_api::handle_provenance(handle).is_none() {
                 handle.descriptor.provenance =
                     Some(runmat_accelerate_api::GpuHandleProvenance::Automatic);
             }
         });
         return;
     }
-    let provenance = if explicit {
-        runmat_accelerate_api::GpuHandleProvenance::Explicit
-    } else {
-        runmat_accelerate_api::GpuHandleProvenance::Automatic
-    };
     visit_gpu_handles_mut(result, &mut |handle| {
-        handle.descriptor.provenance = Some(provenance);
+        let result_is_explicit = runmat_accelerate_api::handle_is_explicit(handle);
+        handle.descriptor.provenance = Some(if explicit || result_is_explicit {
+            runmat_accelerate_api::GpuHandleProvenance::Explicit
+        } else {
+            runmat_accelerate_api::GpuHandleProvenance::Automatic
+        });
     });
 }
 
@@ -1314,14 +1295,9 @@ mod tests {
             automatic.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
 
         let mut explicit_value = Value::GpuTensor(explicit_result.clone());
-        super::propagate_gpu_provenance(
-            "plus",
-            &[Value::GpuTensor(explicit.clone())],
-            &mut explicit_value,
-        );
+        super::propagate_gpu_provenance(&[Value::GpuTensor(explicit.clone())], &mut explicit_value);
         let mut automatic_value = Value::GpuTensor(automatic_result.clone());
         super::propagate_gpu_provenance(
-            "plus",
             &[Value::GpuTensor(automatic.clone())],
             &mut automatic_value,
         );
@@ -1351,6 +1327,131 @@ mod tests {
         for handle in [&explicit, &automatic, &explicit_result, &automatic_result] {
             runmat_accelerate_api::clear_handle_metadata(handle);
         }
+    }
+
+    #[test]
+    fn builtin_result_provenance_preserves_producer_intent_without_gpu_inputs() {
+        let explicitly_created = GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: 0,
+            buffer_id: 95,
+            descriptor: Default::default(),
+        }
+        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let automatically_created = GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: 0,
+            buffer_id: 96,
+            descriptor: Default::default(),
+        };
+
+        let mut explicit_value = Value::GpuTensor(explicitly_created.clone());
+        super::propagate_gpu_provenance(&[], &mut explicit_value);
+        let mut automatic_value = Value::GpuTensor(automatically_created.clone());
+        super::propagate_gpu_provenance(&[], &mut automatic_value);
+
+        let Value::GpuTensor(explicit_value) = explicit_value else {
+            unreachable!()
+        };
+        assert_eq!(
+            explicit_value.descriptor.provenance,
+            Some(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+        );
+        let Value::GpuTensor(automatic_value) = automatic_value else {
+            unreachable!()
+        };
+        assert_eq!(
+            automatic_value.descriptor.provenance,
+            Some(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+        );
+        for handle in [&explicitly_created, &automatically_created] {
+            runmat_accelerate_api::clear_handle_metadata(handle);
+        }
+    }
+
+    #[test]
+    fn builtin_result_provenance_does_not_downgrade_explicit_producer_intent() {
+        let automatic_input = GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: 0,
+            buffer_id: 97,
+            descriptor: Default::default(),
+        }
+        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+        let explicit_result = GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: 0,
+            buffer_id: 98,
+            descriptor: Default::default(),
+        }
+        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+
+        let mut result = Value::GpuTensor(explicit_result.clone());
+        super::propagate_gpu_provenance(&[Value::GpuTensor(automatic_input.clone())], &mut result);
+
+        let Value::GpuTensor(result) = result else {
+            unreachable!()
+        };
+        assert_eq!(
+            result.descriptor.provenance,
+            Some(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+        );
+        for handle in [&automatic_input, &explicit_result] {
+            runmat_accelerate_api::clear_handle_metadata(handle);
+        }
+    }
+
+    #[test]
+    fn array_constructor_forms_preserve_explicit_gpu_intent_without_dispatcher_name_policy() {
+        let _random_guard = crate::builtins::common::random::test_guard();
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let prototype_tensor = Tensor::new(vec![0.0; 4], vec![2, 2]).expect("prototype");
+            let mut prototype =
+                crate::builtins::common::gpu_helpers::upload_tensor(provider, &prototype_tensor)
+                    .expect("upload prototype");
+            runmat_accelerate_api::mark_handle_explicit(&mut prototype);
+
+            let dimension_args = || vec![Value::Num(2.0), Value::Num(2.0)];
+            let class_selected = |name: &'static str| {
+                let mut arguments = dimension_args();
+                arguments.push(Value::from("gpuArray"));
+                (name, arguments)
+            };
+            let like_selected = |name: &'static str, mut arguments: Vec<Value>| {
+                arguments.push(Value::from("like"));
+                arguments.push(Value::GpuTensor(prototype.clone()));
+                (name, arguments)
+            };
+            let cases = [
+                class_selected("zeros"),
+                class_selected("ones"),
+                class_selected("inf"),
+                class_selected("nan"),
+                class_selected("rand"),
+                class_selected("randn"),
+                like_selected("randi", vec![Value::Num(9.0), Value::Num(2.0)]),
+                like_selected("eye", vec![Value::Num(2.0)]),
+                like_selected("true", dimension_args()),
+                like_selected("false", dimension_args()),
+            ];
+
+            for (name, arguments) in cases {
+                let output = call_builtin(name, &arguments)
+                    .unwrap_or_else(|error| panic!("{name} explicit constructor failed: {error}"));
+                let Value::GpuTensor(handle) = output else {
+                    panic!("{name} explicit constructor returned a host value")
+                };
+                assert!(
+                    runmat_accelerate_api::handle_is_explicit(&handle),
+                    "{name} lost explicit gpuArray intent"
+                );
+                provider.free(&handle).expect("free constructor output");
+                runmat_accelerate_api::clear_handle_metadata(&handle);
+            }
+
+            provider.free(&prototype).expect("free prototype");
+            runmat_accelerate_api::clear_handle_metadata(&prototype);
+        });
     }
 
     fn unique_class_name(prefix: &str) -> String {

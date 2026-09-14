@@ -9,27 +9,41 @@ import {
 } from "../index.mjs";
 
 const EXPECTED_SUFFIXES = [
-  "acceleration", "argument_validation", "array", "array/creation", "cells", "common",
-  "comms", "constants", "containers", "control", "datetime", "deep_learning", "diagnostics",
+  "acceleration", "argument_validation", "array", "array/creation", "array/shape", "cells", "common",
+  "comms", "constants", "containers", "control", "datetime", "datetime/arithmetic",
+  "datetime/calendar_duration", "datetime/components", "datetime/core", "deep_learning", "diagnostics",
   "fea", "finance", "function_handles", "geometry", "graph", "image", "interop",
-  "introspection", "io", "io/repl_fs", "logical", "math", "math/elementwise", "math/linalg",
-  "math/reduction", "math/signal", "math/trigonometry", "objects", "objects/test_support",
-  "parallel", "plotting", "stats", "stats/ml", "stats/summary", "strings", "strings/queries",
+  "introspection", "io", "io/archive", "io/filetext", "io/repl_fs", "logical",
+  "logical/relational", "math", "math/elementwise", "math/linalg", "math/linalg/factor",
+  "math/reduction", "math/signal", "math/symbolic", "math/trigonometry", "objects", "objects/test_support",
+  "parallel", "plotting", "plotting/animation", "plotting/axes", "plotting/figure_lifecycle",
+  "stats", "stats/hist", "stats/ml", "stats/random", "stats/summary", "strings", "strings/core", "strings/queries",
   "strings/search", "strings/text_analytics", "strings/transform", "structs", "table", "testing",
   "testing/plugins", "testing/runner", "timing",
 ];
 
-test("registry declares the exact canonical 99-product census", () => {
+const REVIEWED_SHARED_TARGET_PACKAGES = [
+  "array/creation", "array/shape", "datetime/arithmetic", "datetime/calendar_duration",
+  "datetime/components", "datetime/core", "io/archive", "io/filetext", "io/repl_fs",
+  "logical/relational", "math/linalg/factor", "math/reduction", "math/signal",
+  "math/symbolic", "objects/test_support", "plotting/animation", "plotting/axes",
+  "plotting/figure_lifecycle", "stats/hist", "stats/ml", "stats/random", "stats/summary",
+  "strings/core", "strings/queries", "strings/search", "strings/text_analytics",
+  "strings/transform", "testing/plugins", "testing/runner",
+];
+
+test("registry declares the exact canonical 132-product census", () => {
   assert.deepEqual(MODULE_COMPOSITION_SUFFIXES, EXPECTED_SUFFIXES);
   const products = moduleCompositionProductRegistry();
-  assert.equal(products.length, 99);
-  assert.equal(products.filter((entry) => entry.crate_role === "catalog").length, 50);
-  assert.equal(products.filter((entry) => entry.crate_role === "runtime").length, 49);
+  assert.equal(products.length, 132);
+  assert.equal(products.filter((entry) => entry.crate_role === "catalog").length, 66);
+  assert.equal(products.filter((entry) => entry.crate_role === "runtime").length, 66);
 
   const ids = new Set(products.map((entry) => entry.product_id));
   assert.ok(ids.has("catalog-aliases"));
   assert.ok(ids.has("catalog-root"));
   assert.ok(ids.has("runtime-root"));
+  assert.ok(ids.has("runtime-logical-rel"));
   for (const suffix of EXPECTED_SUFFIXES) {
     const slug = suffix.replaceAll("/", "-").replaceAll("_", "-");
     assert.ok(ids.has(`catalog-${slug}`));
@@ -54,12 +68,54 @@ test("registry preserves each catalog domain's exact aggregation roles", () => {
     .every((entry) => entry.aggregation_exports.length === 0));
 });
 
+test("logical transition boundaries retain their exact catalog and runtime identities", () => {
+  const products = new Map(moduleCompositionProductRegistry()
+    .map((entry) => [entry.product_id, entry]));
+  assert.deepEqual(products.get("catalog-logical-relational"), {
+    product_id: "catalog-logical-relational",
+    crate_role: "catalog",
+    path: "crates/runmat-builtins/src/catalog/entries/logical/relational/mod.rs",
+    module_path: "crate::catalog::entries::logical::relational",
+    aggregations: ["entries"],
+    aggregation_exports: [],
+  });
+  assert.deepEqual(products.get("runtime-logical-rel"), {
+    product_id: "runtime-logical-rel",
+    crate_role: "runtime",
+    path: "crates/runmat-runtime/src/builtins/logical/rel/mod.rs",
+    module_path: "crate::builtins::logical::rel",
+    aggregations: [],
+    aggregation_exports: [],
+  });
+  assert.deepEqual(products.get("runtime-logical-relational"), {
+    product_id: "runtime-logical-relational",
+    crate_role: "runtime",
+    path: "crates/runmat-runtime/src/builtins/logical/relational/mod.rs",
+    module_path: "crate::builtins::logical::relational",
+    aggregations: [],
+    aggregation_exports: [],
+  });
+});
+
+test("registry covers every family parent shared by the reviewed pilot and residual topology", () => {
+  const paths = new Set(moduleCompositionProductRegistry().map((entry) => entry.path));
+  for (const targetPackage of REVIEWED_SHARED_TARGET_PACKAGES) {
+    assert.ok(paths.has(
+      `crates/runmat-builtins/src/catalog/entries/${targetPackage}/mod.rs`,
+    ), `${targetPackage} catalog parent`);
+    assert.ok(paths.has(
+      `crates/runmat-runtime/src/builtins/${targetPackage}/mod.rs`,
+    ), `${targetPackage} runtime parent`);
+  }
+  assert.ok(paths.has("crates/runmat-runtime/src/builtins/logical/rel/mod.rs"));
+});
+
 test("registry identifiers and paths are globally unique", () => {
   const products = moduleCompositionProductRegistry();
   for (const field of ["product_id", "path", "module_path"]) {
     const values = products.map((entry) => entry[field]);
-    assert.equal(new Set(values).size, 99, `${field} must be unique`);
-    assert.equal(new Set(values.map((entry) => entry.toLowerCase())).size, 99,
+    assert.equal(new Set(values).size, 132, `${field} must be unique`);
+    assert.equal(new Set(values.map((entry) => entry.toLowerCase())).size, 132,
       `${field} must be case-fold unique`);
   }
   assert.deepEqual(products.map((entry) => entry.product_id),

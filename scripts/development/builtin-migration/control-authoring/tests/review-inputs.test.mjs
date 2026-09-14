@@ -12,7 +12,8 @@ import { buildInventory } from "../../inventory.mjs";
 import {
   REVISION, cleanupRepositoryFixtures, compiledInventoryFixture, fixtureIntegrationProducts,
   fixtureCatalogCompositionChild, fixtureCompositionChild, fixtureGatePlans, fixtureModuleCompositionBaseline,
-  fixtureTargetPolicy, repositoryFixture, fixtureReviewedModuleCompositionBaseline,
+  fixtureRootCompositionChild, fixtureTargetPolicy, repositoryFixture,
+  fixtureReviewedModuleCompositionBaseline,
   topologyFixture,
 } from "../../tests/helpers.mjs";
 import { reviewedPilotPolicy } from "../../tests/pilot-policy-fixture.mjs";
@@ -576,10 +577,12 @@ function reviewFixture() {
   const moduleCompositionBaseline = fixtureReviewedModuleCompositionBaseline(
     fixtureModuleCompositionBaseline(
       new Map([
+        ["catalog-root", [fixtureRootCompositionChild("catalog")]],
         ["catalog-math", [fixtureCatalogCompositionChild()]],
+        ["runtime-root", [fixtureRootCompositionChild("runtime")]],
         ["runtime-math", [fixtureCompositionChild()]],
       ]),
-      new Set(["catalog-math", "runtime-math"]),
+      new Set(["catalog-math", "catalog-root", "runtime-math", "runtime-root"]),
     ),
   );
   const globalPayload = {

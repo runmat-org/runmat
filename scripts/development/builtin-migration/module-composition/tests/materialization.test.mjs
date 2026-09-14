@@ -372,12 +372,76 @@ test("operational materialization derives authority and writes active plus basel
     lease: fixture.lease,
   });
   assert.deepEqual(result.product_ids, moduleCompositionProductRegistry().map((entry) => entry.product_id));
-  assert.deepEqual(result.installed.map((entry) => entry.product_id), ["catalog-math", "runtime-math"]);
+  assert.deepEqual(result.installed.map((entry) => entry.product_id), [
+    "catalog-math", "catalog-root", "runtime-math", "runtime-root",
+  ]);
   const effective = fixture.control.moduleComposition.transitions.get(fixture.bundleId).changes[0].after;
   assert.match(fs.readFileSync(path.join(fixture.repository, "crates/runmat-runtime/src/builtins/math/mod.rs"), "utf8"), new RegExp(`mod ${effective.module};`));
 });
 
-test("operational materialization activates an absent reviewed parent", () => {
+test("operational materialization activates absent catalog and runtime parents with their ancestor declarations", () => {
+  const fixture = controlledFixture({
+    composition: true, compositionTransition: "activate-coordinated",
+  });
+  const productIds = ["catalog-math", "catalog-root", "runtime-math", "runtime-root"];
+  const effectiveById = new Map(fixture.control.moduleComposition.effective.products
+    .map((product) => [product.product_id, product]));
+  for (const productId of ["catalog-math", "runtime-math"]) {
+    assert.equal(
+      fs.existsSync(path.join(fixture.repository, effectiveById.get(productId).path)),
+      false,
+      `${productId} begins absent`,
+    );
+  }
+
+  const result = materializeEffectiveModuleComposition({
+    repository: fixture.repository, control: fixture.control,
+    queueState: fixture.queueState, queueCheckpoint: fixture.queueCheckpoint,
+    lease: fixture.lease,
+  });
+
+  assert.deepEqual(result.installed.map((entry) => entry.product_id), productIds);
+  for (const productId of productIds) {
+    const product = effectiveById.get(productId);
+    assert.equal(product.state, "present", `${productId} is present in effective authority`);
+    assert.equal(
+      fs.readFileSync(path.join(fixture.repository, product.path), "utf8"),
+      renderModuleCompositionProduct(product),
+      `${productId} contains the exact authorized bytes`,
+    );
+    assert.deepEqual(
+      result.installed.find((entry) => entry.product_id === productId),
+      { product_id: productId, path: product.path, state: "present" },
+    );
+  }
+});
+
+test("operational activation rejects a pending child product that appears after audit", () => {
+  const fixture = controlledFixture({
+    composition: true, compositionTransition: "activate-coordinated",
+  });
+  const catalogMath = fixture.control.moduleComposition.effective.products
+    .find((product) => product.product_id === "catalog-math");
+  const target = path.join(fixture.repository, catalogMath.path);
+  assert.throws(() => materializeEffectiveModuleComposition({
+    repository: fixture.repository, control: fixture.control,
+    queueState: fixture.queueState, queueCheckpoint: fixture.queueCheckpoint,
+    lease: fixture.lease,
+  }, {
+    afterAudit() { write(fixture.repository, catalogMath.path, "// raced product\n"); },
+  }), /catalog-math: audited composition before-state changed/);
+  assert.equal(fs.readFileSync(target, "utf8"), "// raced product\n");
+  assert.equal(
+    fs.existsSync(path.join(
+      fixture.repository,
+      fixture.control.moduleComposition.effective.products
+        .find((product) => product.product_id === "runtime-math").path,
+    )),
+    false,
+  );
+});
+
+test("operational activation rejects a declared ancestor child that is still absent", () => {
   const fixture = controlledFixture({
     composition: true, compositionTransition: "activate",
   });
@@ -385,64 +449,24 @@ test("operational materialization activates an absent reviewed parent", () => {
     fixture.repository, "crates/runmat-runtime/src/builtins/math/mod.rs",
   );
   assert.equal(fs.existsSync(target), false);
-  const result = materializeEffectiveModuleComposition({
+  assert.throws(() => materializeEffectiveModuleComposition({
     repository: fixture.repository, control: fixture.control,
     queueState: fixture.queueState, queueCheckpoint: fixture.queueCheckpoint,
     lease: fixture.lease,
-  });
-  assert.equal(fs.existsSync(target), true);
-  assert.deepEqual(
-    result.installed.find((entry) => entry.product_id === "runtime-math"),
-    {
-      product_id: "runtime-math",
-      path: "crates/runmat-runtime/src/builtins/math/mod.rs",
-      state: "present",
-    },
-  );
+  }), /runtime-root\/math: reviewed directory source is not a canonical regular file/);
+  assert.equal(fs.existsSync(target), false);
 });
 
-test("operational materialization deactivates a present parent while retaining reviewed children", () => {
-  const fixture = controlledFixture({
+test("control rejects deactivating a parent that still owns identity authority", () => {
+  assert.throws(() => controlledFixture({
     composition: true, compositionTransition: "deactivate",
-  });
-  const target = path.join(
-    fixture.repository, "crates/runmat-runtime/src/builtins/math/mod.rs",
-  );
-  assert.equal(fs.existsSync(target), true);
-  const result = materializeEffectiveModuleComposition({
-    repository: fixture.repository, control: fixture.control,
-    queueState: fixture.queueState, queueCheckpoint: fixture.queueCheckpoint,
-    lease: fixture.lease,
-  });
-  assert.equal(fs.existsSync(target), false);
-  assert.deepEqual(
-    result.installed.find((entry) => entry.product_id === "runtime-math"),
-    {
-      product_id: "runtime-math",
-      path: "crates/runmat-runtime/src/builtins/math/mod.rs",
-      state: "absent",
-    },
-  );
+  }), /authority .* is unreachable because runtime-math is absent/);
 });
 
-test("operational child composition while absent does not create its parent", () => {
-  const fixture = controlledFixture({
+test("control rejects staged children whose identity parent remains absent", () => {
+  assert.throws(() => controlledFixture({
     composition: true, compositionTransition: "stage-while-absent",
-  });
-  const target = path.join(
-    fixture.repository, "crates/runmat-runtime/src/builtins/math/mod.rs",
-  );
-  assert.equal(fs.existsSync(target), false);
-  const result = materializeEffectiveModuleComposition({
-    repository: fixture.repository, control: fixture.control,
-    queueState: fixture.queueState, queueCheckpoint: fixture.queueCheckpoint,
-    lease: fixture.lease,
-  });
-  assert.equal(fs.existsSync(target), false);
-  assert.equal(
-    result.installed.some((entry) => entry.product_id === "runtime-math"),
-    false,
-  );
+  }), /authority .* is unreachable because runtime-math is absent/);
 });
 
 test("operational materialization rejects stale or unvalidated queue authority before writing", () => {
