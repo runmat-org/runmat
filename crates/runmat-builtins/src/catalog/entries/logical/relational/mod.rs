@@ -14,11 +14,11 @@ pub use le::*;
 pub use lt::*;
 pub use ne::*;
 
-pub(super) const ENTRY_GROUPS: &[&[&crate::BuiltinCatalogEntry]] = &[
-    eq::ENTRIES,
-    ne::ENTRIES,
-    lt::ENTRIES,
-    le::ENTRIES,
-    gt::ENTRIES,
-    ge::ENTRIES,
-];
+pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
+    values.extend(eq::ENTRIES.iter().copied());
+    values.extend(ne::ENTRIES.iter().copied());
+    values.extend(lt::ENTRIES.iter().copied());
+    values.extend(le::ENTRIES.iter().copied());
+    values.extend(gt::ENTRIES.iter().copied());
+    values.extend(ge::ENTRIES.iter().copied());
+}
