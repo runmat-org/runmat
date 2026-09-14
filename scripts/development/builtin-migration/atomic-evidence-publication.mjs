@@ -101,9 +101,17 @@ function ensureDirectory(directory, create, filesystem, platform) {
     let state = lstatOrNull(current, filesystem);
     if (state === null) {
       if (!create) throw new Error(`evidence parent directory does not exist: ${current}`);
-      filesystem.mkdirSync(current, { mode: 0o755 });
+      try {
+        filesystem.mkdirSync(current, { mode: 0o755 });
+      } catch (error) {
+        if (error?.code !== "EEXIST") throw error;
+      }
+      state = lstatOrNull(current, filesystem);
+      if (state === null) throw new Error(`evidence parent directory disappeared during creation: ${current}`);
+      if (state.isSymbolicLink() || !state.isDirectory()) {
+        throw new Error(`evidence parent component is not a real directory: ${current}`);
+      }
       syncDirectory(parent, { filesystem, platform });
-      state = filesystem.lstatSync(current);
     }
     if (state.isSymbolicLink() || !state.isDirectory()) {
       throw new Error(`evidence parent component is not a real directory: ${current}`);

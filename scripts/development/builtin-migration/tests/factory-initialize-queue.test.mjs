@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
-import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import test, { after } from "node:test";
 
-import { contentDigest, evidenceDigest } from "../evidence.mjs";
+import { evidenceDigest } from "../evidence.mjs";
 import {
-  cleanFactoryCliRepository, writeFullControlWorkflow,
+  cleanFactoryCliRepository, writeRepositoryControlWorkflow,
 } from "./factory-workflow-fixture.mjs";
 import {
   cleanupTemporaryDirectories, createTemporaryDirectory,
@@ -17,14 +17,7 @@ after(cleanupTemporaryDirectories);
 test("initialize-queue CLI publishes authority accepted by lease issuance", () => {
   const directory = createTemporaryDirectory("runmat-initialize-queue-cli-");
   const repository = cleanFactoryCliRepository();
-  const source = path.join(repository, "scripts/development/check-architecture-boundaries.mjs");
-  const revision = `git:${execFileSync("git", ["rev-parse", "HEAD"], {
-    cwd: repository, encoding: "utf8",
-  }).trim()}`;
-  const workflow = writeFullControlWorkflow(
-    directory, revision, contentDigest(fs.readFileSync(source)),
-    fs.statSync(source).mode & 0o777,
-  );
+  const workflow = writeRepositoryControlWorkflow(directory, repository);
   const reviewPayload = {
     schema_version: 1,
     kind: "runmat-builtin-migration-initial-queue-review",
@@ -83,14 +76,7 @@ test("initialize-queue CLI publishes authority accepted by lease issuance", () =
 test("concurrent conflicting reviews publish exactly one initial checkpoint", async () => {
   const directory = createTemporaryDirectory("runmat-initialize-queue-race-");
   const repository = cleanFactoryCliRepository();
-  const source = path.join(repository, "scripts/development/check-architecture-boundaries.mjs");
-  const revision = `git:${execFileSync("git", ["rev-parse", "HEAD"], {
-    cwd: repository, encoding: "utf8",
-  }).trim()}`;
-  const workflow = writeFullControlWorkflow(
-    directory, revision, contentDigest(fs.readFileSync(source)),
-    fs.statSync(source).mode & 0o777,
-  );
+  const workflow = writeRepositoryControlWorkflow(directory, repository);
   const reviews = ["first independent review", "second independent review"].map((evidence, index) => {
     const payload = {
       schema_version: 1,
@@ -119,7 +105,7 @@ test("concurrent conflicting reviews publish exactly one initial checkpoint", as
   const result = JSON.parse(fs.readFileSync(winner.result, "utf8"));
   const checkpoint = JSON.parse(fs.readFileSync(path.join(directory, result.checkpoint.path), "utf8"));
   assert.deepEqual(checkpoint.review, winner.value.review);
-  assert.equal(runs.find((run) => run.status === 2).stderr.includes("differs from expected bytes"), true);
+  assert.match(runs.find((run) => run.status === 2).stderr, /differs from expected bytes/);
   assert.deepEqual(publicationResidue(directory), []);
 });
 
