@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { auditMigration } from "../audit.mjs";
@@ -10,7 +11,7 @@ import { dispositionInputFromControl, validateDispositionInput } from "../dispos
 import { compileDispositionReview, parseDispositionReview } from "../disposition-review.mjs";
 import { contentDigest, evidenceDigest } from "../evidence.mjs";
 import { runGateProducer } from "../gate-adapter.mjs";
-import { buildInventory } from "../inventory.mjs";
+import { buildInventory, parseInventoryEvidence } from "../inventory.mjs";
 import { buildInventoryDeltaProof, finalIdentityAuthorityFailures } from "../inventory-delta.mjs";
 import { parseIdentityControlPolicy } from "../control-authoring/policy-schema.mjs";
 import { identityControlAuthorityTemplate } from "../control-authoring/identity-template.mjs";
@@ -83,6 +84,110 @@ test("source dirty evidence is scoped to the frozen inventory roots", () => {
   assert.equal(sourceSnapshot(repository, ["Cargo.toml"]).dirty, false);
   fs.appendFileSync(path.join(repository, "Cargo.toml"), "# scoped change\n");
   assert.equal(sourceSnapshot(repository, ["Cargo.toml"]).dirty, true);
+});
+
+test("source snapshots use portable Git regular-file modes across host umasks", () => {
+  const repository = repositoryFixture();
+  const source = path.join(repository, "Cargo.toml");
+  if (process.platform !== "win32") fs.chmodSync(source, 0o600);
+  const scriptPath = "tool.sh";
+  const script = path.join(repository, scriptPath);
+  fs.writeFileSync(script, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  execFileSync("git", ["add", scriptPath], { cwd: repository });
+  execFileSync("git", ["update-index", "--chmod=+x", scriptPath], { cwd: repository });
+  execFileSync("git", [
+    "-c", "user.name=RunMat Test", "-c", "user.email=test@runmat.invalid",
+    "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "add executable",
+  ], { cwd: repository });
+  if (process.platform !== "win32") fs.chmodSync(script, 0o700);
+  const snapshot = sourceSnapshot(repository, ["Cargo.toml", scriptPath]);
+  assert.equal(snapshot.dirty, false);
+  assert.deepEqual(snapshot.files.map(({ path: sourcePath, mode }) => ({ path: sourcePath, mode })), [
+    { path: "Cargo.toml", mode: 0o644 },
+    { path: scriptPath, mode: 0o755 },
+  ]);
+
+  const cloneParent = fs.mkdtempSync(path.join(os.tmpdir(), "runmat-source-mode-clone-"));
+  const clone = path.join(cloneParent, "checkout");
+  try {
+    const child = spawnSync(process.execPath, ["-e", `
+      const { execFileSync } = require("node:child_process");
+      process.umask(0o077);
+      execFileSync("git", ["clone", "--quiet", process.argv[1], process.argv[2]]);
+    `, repository, clone], { encoding: "utf8" });
+    assert.equal(child.status, 0, child.stderr);
+    if (process.platform !== "win32") {
+      assert.equal(fs.statSync(path.join(clone, "Cargo.toml")).mode & 0o777, 0o600);
+      assert.equal(fs.statSync(path.join(clone, scriptPath)).mode & 0o777, 0o700);
+    }
+    assert.deepEqual(
+      sourceSnapshot(clone, ["Cargo.toml", scriptPath]).files
+        .map(({ path: sourcePath, mode }) => ({ path: sourcePath, mode })),
+      [{ path: "Cargo.toml", mode: 0o644 }, { path: scriptPath, mode: 0o755 }],
+    );
+  } finally {
+    fs.rmSync(cloneParent, { recursive: true, force: true });
+  }
+});
+
+test("Git-backed snapshots reject unindexed source and index observation failure", () => {
+  const repository = repositoryFixture();
+  fs.writeFileSync(path.join(repository, ".gitignore"), "ignored-source.txt\n");
+  execFileSync("git", ["add", ".gitignore"], { cwd: repository });
+  execFileSync("git", [
+    "-c", "user.name=RunMat Test", "-c", "user.email=test@runmat.invalid",
+    "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "ignore fixture source",
+  ], { cwd: repository });
+  fs.writeFileSync(path.join(repository, "ignored-source.txt"), "not signed\n");
+  assert.throws(
+    () => sourceSnapshot(repository, ["ignored-source.txt"]),
+    /absent from the Git index/,
+  );
+
+  const index = path.join(repository, ".git", "index");
+  const saved = `${index}.saved`;
+  fs.renameSync(index, saved);
+  fs.mkdirSync(index);
+  try {
+    assert.throws(() => sourceSnapshot(repository, ["Cargo.toml"]), /could not read the Git index/);
+  } finally {
+    fs.rmdirSync(index);
+    fs.renameSync(saved, index);
+  }
+});
+
+test("Git-backed snapshots reject tracked non-regular entries beneath a source root", {
+  skip: process.platform === "win32" ? "creating symlinks requires elevated privileges on Windows" : false,
+}, () => {
+  const repository = repositoryFixture();
+  const sourceDirectory = path.join(repository, "source");
+  fs.mkdirSync(sourceDirectory);
+  fs.symlinkSync("../Cargo.toml", path.join(sourceDirectory, "linked.toml"));
+  execFileSync("git", ["add", "source/linked.toml"], { cwd: repository });
+  assert.throws(
+    () => sourceSnapshot(repository, ["source"]),
+    /only accepts regular Git blobs, observed mode 120000 for source\/linked\.toml/,
+  );
+});
+
+test("inventory parsing rejects noncanonical source permission modes", () => {
+  const inventory = buildInventory(repositoryFixture(), undefined, {
+    revision: REVISION,
+    compiledInventory: compiledInventoryFixture(),
+  });
+  inventory.source.files[0].mode = 0o600;
+  assert.throws(() => parseInventoryEvidence(inventory), /canonical 0644 or 0755/);
+
+  const outsideRoot = buildInventory(repositoryFixture(), undefined, {
+    revision: REVISION,
+    compiledInventory: compiledInventoryFixture(),
+  });
+  outsideRoot.source.roots = ["Cargo.toml"];
+  outsideRoot.source.digest = evidenceDigest({
+    roots: outsideRoot.source.roots,
+    files: outsideRoot.source.files,
+  });
+  assert.throws(() => parseInventoryEvidence(outsideRoot), /outside its declared roots/);
 });
 
 test("migration inventory snapshots generated catalog alias composition", () => {
