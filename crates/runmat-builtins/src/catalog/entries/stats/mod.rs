@@ -6,9 +6,5 @@ mod random;
 pub use random::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
-    values.extend(
-        random::ENTRY_GROUPS
-            .iter()
-            .flat_map(|group| group.iter().copied()),
-    );
+    random::extend_entries(values);
 }

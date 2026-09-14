@@ -7,6 +7,13 @@ import { fileURLToPath } from "node:url";
 import {
   MODULE_COMPOSITION_SUFFIXES, moduleCompositionProductRegistry,
 } from "../index.mjs";
+import {
+  observeWorkingTreeModuleCompositionProducts,
+} from "../baseline-observation.mjs";
+
+const REPOSITORY = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)), "../../../../..",
+);
 
 const EXPECTED_SUFFIXES = [
   "acceleration", "argument_validation", "array", "array/creation", "array/shape", "cells", "common",
@@ -136,4 +143,20 @@ test("registry values are deeply immutable and never discover the filesystem", (
   const source = fs.readFileSync(path.join(root, "registry.mjs"), "utf8");
   assert.doesNotMatch(source,
     /node:fs|node:child_process|\breaddir(?:Sync)?\s*\(|\bglob(?:Sync)?\s*\(|\bwalk(?:Dir|Sync)?\s*\(/);
+});
+
+test("every present registered parent is composition-only and fully representable", () => {
+  const observed = observeWorkingTreeModuleCompositionProducts(REPOSITORY);
+  const registry = moduleCompositionProductRegistry();
+  assert.equal(observed.length, registry.length);
+  assert.deepEqual(
+    observed.map((product) => product.product_id),
+    registry.map((product) => product.product_id),
+  );
+  assert.ok(observed.some((product) => product.state === "present"));
+  for (const product of observed) {
+    assert.ok(product.state === "present" || product.state === "absent");
+    if (product.state === "present") assert.ok(product.parent_evidence !== null);
+    else assert.deepEqual(product.children, []);
+  }
 });

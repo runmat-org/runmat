@@ -20,9 +20,5 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
             .iter()
             .flat_map(|group| group.iter().copied()),
     );
-    values.extend(
-        relational::ENTRY_GROUPS
-            .iter()
-            .flat_map(|group| group.iter().copied()),
-    );
+    relational::extend_entries(values);
 }

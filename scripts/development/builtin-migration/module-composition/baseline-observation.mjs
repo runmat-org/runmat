@@ -12,8 +12,7 @@ import { conditionKey } from "./condition.mjs";
 export function observeModuleCompositionBaseline(repository, trustedSignerFingerprint, options = {}) {
   const root = canonicalGitRepository(repository, options.git);
   const source = observeSignedCleanHead(root, trustedSignerFingerprint, options);
-  const observedProducts = moduleCompositionProductRegistry().map((definition) =>
-    observeProduct(root, definition));
+  const observedProducts = observeWorkingTreeModuleCompositionProducts(root);
   const workingFiles = uniqueEvidence(observedProducts.flatMap((product) => [
     product.parent_evidence, ...product.children.map((child) => child.source_evidence),
   ].filter(Boolean)));
@@ -40,6 +39,11 @@ export function observeModuleCompositionBaseline(repository, trustedSignerFinger
     source: { ...source, files_digest: evidenceDigest(files) },
     products,
   };
+}
+
+export function observeWorkingTreeModuleCompositionProducts(repository) {
+  const root = fs.realpathSync(repository);
+  return moduleCompositionProductRegistry().map((definition) => observeProduct(root, definition));
 }
 
 function observeProduct(root, definition) {
@@ -183,6 +187,5 @@ function uniqueEvidence(values) {
   }
   return [...byPath.values()].sort((left, right) => compareCodePoint(left.path, right.path));
 }
-
 function lstat(target) { try { return fs.lstatSync(target); } catch (error) { if (["ENOENT", "ENOTDIR"].includes(error?.code)) return null; throw error; } }
 function nearestExisting(target) { let current = target; while (!fs.existsSync(current)) { const parent = path.dirname(current); if (parent === current) throw new Error(`no existing ancestor for ${target}`); current = parent; } return current; }
