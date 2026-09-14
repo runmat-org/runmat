@@ -18,6 +18,7 @@ import { materializeTopologyControl } from "./topology/control-projection.mjs";
 import { assertValidatedTopologyView } from "./topology/freeze.mjs";
 import { parseTargetPolicy } from "./target-policy.mjs";
 import { parsePilotPolicy } from "./pilot-policy.mjs";
+import { validateSourceMigrationControl } from "./source-migrations.mjs";
 import {
   parseExceptionManifestPolicy, parseIdentityControlPolicy,
   parseOperationalBundleControlPolicy, validateStorageTargetCoverage,
@@ -56,6 +57,9 @@ export function validateControlProjection({
   );
   validateReviewedModuleCompositionAuthority(
     integrationProducts, moduleComposition.baseline,
+  );
+  validateSourceMigrationControl(
+    bundles, materialized.identities, integrationProducts, moduleComposition,
   );
   validateBundleGraph(bundles, materialized.identities, integrationProducts);
   validateGeneratedRegistryCoverage(

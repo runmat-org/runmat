@@ -43,7 +43,7 @@ export function composeControlCandidate({ inventory: inventoryValue, topology, s
 
   const inputs = inputDigests(inventory, topology, scaffold, reviewSet);
   const payload = {
-    schema_version: 6,
+    schema_version: 7,
     kind: "runmat-builtin-migration-control-candidate",
     authority: "deterministically-composed-unreviewed-candidate",
     program: PROGRAM,
@@ -91,7 +91,7 @@ export function composeControlCandidate({ inventory: inventoryValue, topology, s
 
 export function parseControlCandidate(value, expected) {
   assertValidatedControlCandidate(expected);
-  kind(value, 6, "runmat-builtin-migration-control-candidate", "control candidate");
+  kind(value, 7, "runmat-builtin-migration-control-candidate", "control candidate");
   exact(value, ["schema_version", "kind", "authority", "program", "inputs", "baseline_context", "cohorts", "bundle_controls", "identity_controls", "integration_products", "module_composition_baseline", "migration_findings", "exception_manifest", "target_policy", "storage_policy", "pilot_policy", "digest"], "control candidate");
   if (value.authority !== "deterministically-composed-unreviewed-candidate" || value.program !== PROGRAM) {
     throw new Error("control candidate has invalid authority or program");
@@ -127,6 +127,7 @@ function expandBundleControl(control, globalReview) {
     additional_authored_write_set: structuredClone(control.additional_authored_write_set),
     integration_product_refs: structuredClone(control.integration_product_refs),
     module_composition_transition: structuredClone(control.module_composition_transition),
+    source_migrations: structuredClone(control.source_migrations),
     expected_removals: structuredClone(control.expected_removals),
     baseline_evidence: structuredClone(control.baseline_evidence),
     gate_plans: gatePlans,

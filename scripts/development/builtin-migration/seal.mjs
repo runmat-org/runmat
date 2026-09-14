@@ -97,7 +97,7 @@ export function sealBundle(
     } catch (error) { failures.push(issue("barrier-seal-invalid", error.message)); }
   }
   return {
-    schema_version: 6, kind: "runmat-builtin-migration-seal-result", authority: "development-integration-evidence-only",
+    schema_version: 7, kind: "runmat-builtin-migration-seal-result", authority: "development-integration-evidence-only",
     seal_id: parsed.seal_id, bundle_id: parsed.bundle_id, identities: parsed.identities,
     lease_id: parsed.lease_id, lease_digest: parsed.lease_digest, phases,
     queue_phase: parsed.queue_phase,
@@ -124,7 +124,7 @@ export function sealBundle(
 }
 
 export function parseSealManifest(value) {
-  kind(value, 6, "runmat-builtin-migration-seal-manifest", "seal manifest");
+  kind(value, 7, "runmat-builtin-migration-seal-manifest", "seal manifest");
   exact(value, ["schema_version", "kind", "authority", "seal_id", "bundle_id", "lease_id", "lease_digest", "queue_phase", "identities", "source_revision", "source_digest", "control_baseline_inventory_digest", "lease_base_inventory_digest", "subject_inventory_digest", "control_manifest_digest", "accepted_seals", "accepted_seal_set_digest", "barrier_seals", "barrier_seal_set_digest", "phases", "verification", "integration_gates", "review"], "seal manifest");
   if (value.authority !== "reviewed-integration-request") throw new Error("seal manifest has invalid authority");
   const result = {

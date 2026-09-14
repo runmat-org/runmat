@@ -49,6 +49,13 @@ export function validateAuthorityDependencyPolicy(bundles, identities, integrati
         throw new Error(`${bundle.id}: removal ${removal.path} is outside its authored scopes`);
       }
     }
+    for (const migration of bundle.source_migrations) {
+      for (const endpoint of [migration.source_path, ...migration.destination_paths]) {
+        if (!pathAllowed(bundle.authored_write_set, endpoint)) {
+          throw new Error(`${bundle.id}: source migration endpoint ${endpoint} is outside its authored scopes`);
+        }
+      }
+    }
   }
 }
 
@@ -61,6 +68,16 @@ export function subjectAuthorityPathFailures(control, inventory, bundleIds) {
     const bundle = control.bundles.get(bundleId);
     for (const removal of bundle.expected_removals) {
       if (sourcePaths.has(removal.path)) failures.push(`${bundle.id}: expected removal remains at ${removal.path}`);
+    }
+    for (const migration of bundle.source_migrations) {
+      if (sourcePaths.has(migration.source_path)) {
+        failures.push(`${bundle.id}: source migration source remains at ${migration.source_path}`);
+      }
+      for (const destination of migration.destination_paths) {
+        if (!sourcePaths.has(destination)) {
+          failures.push(`${bundle.id}: source migration destination is absent at ${destination}`);
+        }
+      }
     }
     for (const product of bundle.integration_outputs) {
       if (!sourcePaths.has(product.path)) failures.push(`${bundle.id}: integration product is absent at ${product.path}`);

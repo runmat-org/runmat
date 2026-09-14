@@ -75,8 +75,10 @@ export function sealedLeaseAuthorityFixture() {
     authored_changed_paths: [],
     integration_changed_paths: [],
     reviewed_authored_write_set: structuredClone(bundle.authored_write_set),
+    reviewed_source_migrations: structuredClone(bundle.source_migrations),
     reviewed_integration_outputs: outputs,
     authored_write_set_digest: evidenceDigest(bundle.authored_write_set),
+    source_migrations_digest: evidenceDigest(bundle.source_migrations),
     integration_outputs_digest: evidenceDigest(outputs),
   };
   const accepted = acceptFirstBundle({

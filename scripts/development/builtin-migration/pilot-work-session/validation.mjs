@@ -146,6 +146,11 @@ function assertSealLeaseProjection(seal, lease) {
       "authored write-set digest",
     ],
     [
+      seal.phases.source_migrations_digest,
+      evidenceDigest(lease.source_migrations),
+      "source-migrations digest",
+    ],
+    [
       seal.phases.integration_outputs_digest,
       evidenceDigest(expectedIntegrationOutputs),
       "integration-output digest",
@@ -158,6 +163,11 @@ function assertSealLeaseProjection(seal, lease) {
       JSON.stringify(seal.phases.reviewed_authored_write_set),
       JSON.stringify(lease.authored_write_set),
       "reviewed authored write set",
+    ],
+    [
+      JSON.stringify(seal.phases.reviewed_source_migrations),
+      JSON.stringify(lease.source_migrations),
+      "reviewed source migrations",
     ],
     [
       JSON.stringify(seal.phases.reviewed_integration_outputs),

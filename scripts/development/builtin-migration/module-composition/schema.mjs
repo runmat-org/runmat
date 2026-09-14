@@ -66,8 +66,9 @@ export function parseCompositionChild(value, parent) {
   const declarationCondition = parseCompositionCondition(value.declaration_condition, `${module} declaration condition`);
   if (!Number.isSafeInteger(value.declaration_order) || value.declaration_order < 0) throw new Error(`${module} declaration order must be a nonnegative integer`);
   const macroUse = boolean(value.macro_use, `${module} macro use`);
-  const reexports = array(value.reexports, `${module} reexports`, { empty: true }).map((entry) => parseReexport(entry, parent.crateRole, module));
-  canonicalUnique(reexports, reexportKey, `${module} reexports`);
+  const reexports = array(value.reexports, `${module} reexports`, { empty: true })
+    .map((entry) => parseCompositionReexport(entry, parent.crateRole, module));
+  canonicalUnique(reexports, compositionReexportKey, `${module} reexports`);
   const aggregationSources = array(value.aggregation_sources, `${module} aggregation sources`, { empty: true }).map((entry) => parseAggregationSource(entry, module, parent.aggregations));
   aggregationRoleOrder(aggregationSources.map((entry) => entry.role), `${module} aggregation sources`);
   validateChildPath(sourcePath, sourceKind, module, parent.productPath);
@@ -112,7 +113,7 @@ function parseVisibility(value, crateRole, label) {
   return visibility;
 }
 
-function parseReexport(value, crateRole, module) {
+export function parseCompositionReexport(value, crateRole, module) {
   const fields = value?.kind === "glob" ? ["kind", "visibility", "condition", "doc_hidden"] : ["kind", "visibility", "condition", "doc_hidden", "items"];
   exact(value, fields, `${module} reexport`);
   if (!["glob", "named"].includes(value.kind)) throw new Error(`${module} reexport has an unsupported kind`);
@@ -135,7 +136,7 @@ function parseReexportItem(value, module) {
 }
 
 function reexportItemKey(value) { return `${value.name}\0${value.alias ?? ""}`; }
-function reexportKey(value) {
+export function compositionReexportKey(value) {
   const items = value.kind === "named" ? value.items.map(reexportItemKey).join("\0") : "";
   return `${conditionKey(value.condition)}\0${value.visibility}\0${value.doc_hidden ? 1 : 0}\0${value.kind}\0${items}`;
 }

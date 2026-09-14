@@ -144,6 +144,35 @@ test("completion rejects clock reversal and integration outputs outside the fina
   assert.throws(() => recordCompletion(
     drift, start, drift.lease, drift.queue, successor,
   ), /seal integration-output digest differs from its exact final lease/);
+
+  const migrationDrift = workSessionFixture();
+  const migrationStart = recordStart(migrationDrift);
+  const migrationAccepted = acceptedAuthority(migrationDrift);
+  migrationAccepted.seal.phases.reviewed_source_migrations = [{
+    strategy: "module-support-reparent",
+    source_path: "crates/runtime/shared.rs",
+    source_baseline_digest: fakeDigest("1"),
+    promoted_target: { kind: "authored", path: "crates/runtime/shared/mod.rs" },
+    destination_paths: ["crates/runtime/shared/mod.rs", "crates/runtime/shared/support.rs"],
+    support_destinations: [{
+      destination_path: "crates/runtime/shared/support.rs", reexports: [],
+    }],
+    identity_destinations: [],
+    reason: "Fixture source-migration drift",
+    review: { status: "reviewed", evidence: ["fixture:source-migration-drift"] },
+  }];
+  migrationAccepted.seal.phases.source_migrations_digest = evidenceDigest(
+    migrationAccepted.seal.phases.reviewed_source_migrations,
+  );
+  resealSealAndSuccessor(migrationAccepted);
+  installAcceptedFiles(migrationDrift.root, migrationAccepted);
+  const migrationSuccessor = loadQueue(
+    migrationDrift, 1, migrationAccepted.checkpointValue.digest,
+  );
+  assert.throws(() => recordCompletion(
+    migrationDrift, migrationStart, migrationDrift.lease, migrationDrift.queue,
+    migrationSuccessor,
+  ), /seal source-migrations digest differs from its exact final lease/);
 });
 
 test("persisted completion rejects schema and exact-start observation drift", async (context) => {

@@ -15,15 +15,19 @@ const PAIRED_PRODUCT_CONFIGURATIONS = deepImmutable(validatePairedConfigurations
   paired("control"),
   paired("datetime"),
   paired("datetime/arithmetic"),
+  paired("datetime/business_calendar"),
   paired("datetime/calendar_duration"),
   paired("datetime/components"),
+  paired("datetime/conversion"),
   paired("datetime/core"),
   paired("deep_learning"),
+  paired("deep_learning/autodiff"),
   paired("diagnostics"),
   paired("fea"),
   paired("finance"),
   paired("function_handles"),
   paired("geometry"),
+  paired("geometry/triangulation"),
   paired("graph"),
   paired("image"),
   paired("interop"),
@@ -66,6 +70,7 @@ const PAIRED_PRODUCT_CONFIGURATIONS = deepImmutable(validatePairedConfigurations
   paired("testing/plugins"),
   paired("testing/runner"),
   paired("timing"),
+  paired("timing/timer"),
 ]));
 
 export const MODULE_COMPOSITION_SUFFIXES = Object.freeze(

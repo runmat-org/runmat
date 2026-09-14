@@ -23,7 +23,7 @@ export function parseBundleControlReview(
   const globalReview = assertValidatedGlobalControlReview(globalReviewValue);
   assertValidatedTopologyView(topology);
   assertScaffoldTopologyBinding(scaffold, topology);
-  kind(value, 5, BUNDLE_CONTROL_REVIEW_KIND, "bundle control review");
+  kind(value, 6, BUNDLE_CONTROL_REVIEW_KIND, "bundle control review");
   exact(value, ["schema_version", "kind", "authority", "program", "bindings", "bundle_control", "identity_controls", "review", "digest"], "bundle control review");
   if (value.authority !== "reviewer-authored-development-input" || value.program !== PROGRAM) throw new Error("bundle control review has invalid authority or program");
   const bundle = parseBindings(value.bindings, scaffold, topology);

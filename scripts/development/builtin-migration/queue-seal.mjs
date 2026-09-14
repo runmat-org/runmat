@@ -30,7 +30,7 @@ export function validateQueueSeal(value, reference, control) {
     "result", "failures",
   ], `queue seal ${reference.artifact_id}`);
   if (evidenceDigest(value) !== reference.digest) throw new Error(`queue seal ${reference.artifact_id} digest mismatch`);
-  if (value.schema_version !== 6 || value.kind !== "runmat-builtin-migration-seal-result"
+  if (value.schema_version !== 7 || value.kind !== "runmat-builtin-migration-seal-result"
     || value.authority !== "development-integration-evidence-only" || value.result !== "pass") {
     throw new Error(`queue seal ${reference.artifact_id} is not a passing seal result`);
   }

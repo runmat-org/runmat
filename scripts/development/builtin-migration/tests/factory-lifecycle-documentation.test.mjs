@@ -104,7 +104,7 @@ test("completed field dispositions require exact prepared leaves and review evid
   assert.throws(() => parseCompletedSourceDisposition(checklist, "foo", result.checklist_baseline_digest), /prepared baseline/);
 });
 
-test("audit v8 cannot pass on file presence or example tokens without exact gate evidence", () => {
+test("audit v9 cannot pass on file presence or example tokens without exact gate evidence", () => {
   const fixture = controlledFixture();
   const output = createTemporaryDirectory("runmat-review-");
   const prepared = prepareIdentity(fixture.repository, fixture.inventory, fixture.control, fixture.lease, "foo", output);

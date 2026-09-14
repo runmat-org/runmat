@@ -78,6 +78,7 @@ function phaseValueFromRepository(repository, options) {
   const reviewedIntegrationOutputs = options.bundle.integration_outputs.map(
     ({ product_id, path: outputPath, producer }) => ({ product_id, path: outputPath, producer }),
   );
+  const reviewedSourceMigrations = structuredClone(options.bundle.source_migrations);
   return {
     lease_base_revision: leaseBaseRevision,
     authored_revision: authoredRevision,
@@ -85,8 +86,10 @@ function phaseValueFromRepository(repository, options) {
     authored_changed_paths: authoredChangedPaths,
     integration_changed_paths: integrationChangedPaths,
     reviewed_authored_write_set: reviewedAuthoredWriteSet,
+    reviewed_source_migrations: reviewedSourceMigrations,
     reviewed_integration_outputs: reviewedIntegrationOutputs,
     authored_write_set_digest: evidenceDigest(reviewedAuthoredWriteSet),
+    source_migrations_digest: evidenceDigest(reviewedSourceMigrations),
     integration_outputs_digest: evidenceDigest(reviewedIntegrationOutputs),
   };
 }
@@ -97,6 +100,12 @@ export function validateMigrationPhasePaths(bundle, authoredChangedPaths, integr
     integrationPaths.has(sourcePath) || !pathAllowed(bundle.authored_write_set, sourcePath));
   if (authoredViolations.length) {
     throw new Error(`authored phase changed paths outside its lease: ${authoredViolations.join(", ")}`);
+  }
+  const missingMigrationEndpoints = bundle.source_migrations
+    .flatMap((migration) => [migration.source_path, ...migration.destination_paths])
+    .filter((sourcePath) => !authoredChangedPaths.includes(sourcePath));
+  if (missingMigrationEndpoints.length) {
+    throw new Error(`authored phase did not change reviewed source migration endpoints: ${missingMigrationEndpoints.join(", ")}`);
   }
   const integrationViolations = integrationChangedPaths.filter((sourcePath) => !integrationPaths.has(sourcePath));
   if (integrationViolations.length) {

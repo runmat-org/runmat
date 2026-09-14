@@ -129,7 +129,7 @@ function passingSeal({ fixture, subjectInventory, phases, lease, bundleId, sealI
     fixture.control, bundleId, "pilot", gates,
   );
   return {
-    schema_version: 6,
+    schema_version: 7,
     kind: "runmat-builtin-migration-seal-result",
     authority: "development-integration-evidence-only",
     seal_id: sealId,

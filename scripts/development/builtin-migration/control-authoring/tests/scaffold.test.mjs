@@ -38,7 +38,7 @@ test("builds a deterministic topology-bound scaffold with no reviewed decisions"
   const second = buildControlOverlayScaffold(fixture.inventory, fixture.draft, fixture.topology);
 
   assert.deepEqual(first, second);
-  assert.equal(first.schema_version, 5);
+  assert.equal(first.schema_version, 6);
   assert.equal(first.bindings.inventory_digest, fixture.inventory.digest);
   assert.equal(first.bindings.control_draft_digest, fixture.draft.digest);
   assert.equal(first.bindings.reviewed_topology_digest, fixture.topology.digest);
@@ -93,14 +93,14 @@ test("builds a deterministic topology-bound scaffold with no reviewed decisions"
   assert.equal(first.decisions.pilot_policy.status, "unresolved");
   assert.ok(Object.isFrozen(first));
   assert.deepEqual(parseControlOverlayScaffold(first, fixture.inventory, fixture.draft, fixture.topology), first);
-  for (const version of [4, 6]) {
+  for (const version of [5, 7]) {
     const wrongVersion = structuredClone(first);
     wrongVersion.schema_version = version;
     assert.throws(
       () => parseControlOverlayScaffold(
         wrongVersion, fixture.inventory, fixture.draft, fixture.topology,
       ),
-      /schema_version 5/,
+      /schema_version 6/,
     );
   }
 });

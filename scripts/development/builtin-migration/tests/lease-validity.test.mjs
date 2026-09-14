@@ -67,12 +67,12 @@ test("historical lease parsing remains deterministic after expiration", () => {
 
 test("lease parsing rejects legacy and future wire schemas", () => {
   const fixture = controlledFixture();
-  for (const version of [4, 6]) {
+  for (const version of [5, 7]) {
     const lease = structuredClone(fixture.leaseValue);
     lease.schema_version = version;
     assert.throws(
       () => parseLease(lease, fixture.control, fixture.repository),
-      /schema_version 5/,
+      /schema_version 6/,
     );
   }
 });
@@ -164,7 +164,7 @@ function historicalLease(fixture) {
 
 function sealManifest(fixture, lease, phases) {
   return {
-    schema_version: 6,
+    schema_version: 7,
     kind: "runmat-builtin-migration-seal-manifest",
     authority: "reviewed-integration-request",
     seal_id: "expired-seal",

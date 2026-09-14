@@ -85,7 +85,7 @@ test("production schema and inner self-digest remain mandatory", () => {
     const fixture = authorityFixture({ mutate });
     assert.throws(
       () => load(fixture),
-      /schema_version 5|unknown bundle|authored lease digest mismatch|differs from the reviewed request/,
+      /schema_version 6|unknown bundle|authored lease digest mismatch|differs from the reviewed request/,
     );
   }
 });

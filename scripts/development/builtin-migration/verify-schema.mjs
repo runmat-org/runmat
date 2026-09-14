@@ -10,7 +10,7 @@ import { array, digest, enumValue, exact, integer, kind, nonempty, repositoryPat
 
 export function parseVerificationManifest(value, control) {
   assertValidatedControl(control);
-  kind(value, 7, "runmat-builtin-migration-verification-manifest", "verification manifest");
+  kind(value, 8, "runmat-builtin-migration-verification-manifest", "verification manifest");
   exact(value, ["schema_version", "kind", "authority", "batch", "audit", "gate_results", "expectations"], "verification manifest");
   if (value.authority !== "reviewed-verification-request") throw new Error("verification manifest has invalid authority");
   exact(value.batch, ["artifact_id", "source_revision", "source_digest", "control_baseline_inventory_digest", "lease_base_inventory_digest", "subject_inventory_digest", "control_manifest_digest", "bundle_id", "lease_id", "lease_digest", "queue_phase", "accepted_seals", "accepted_seal_set_digest", "barrier_seals", "barrier_seal_set_digest", "identities", "phases"], "verification batch");
@@ -76,7 +76,7 @@ export function parseVerificationManifest(value, control) {
 }
 
 export function validateAudit(value, batch) {
-  kind(value, 8, "runmat-builtin-migration-audit", "migration audit");
+  kind(value, 9, "runmat-builtin-migration-audit", "migration audit");
   exact(value, ["schema_version", "kind", "authority", "artifact_id", "source", "control_baseline_inventory_digest", "lease_base_inventory_digest", "subject_inventory_digest", "control_manifest_digest", "bundle_id", "lease_id", "lease_digest", "queue_phase", "accepted_seals", "accepted_seal_set_digest", "barrier_seals", "barrier_seal_set_digest", "phases", "requested_identities", "evidence", "summary", "result", "global_failures", "identities"], "migration audit");
   if (value.authority !== "development-verification-evidence-only") throw new Error("migration audit has invalid authority");
   stableId(value.artifact_id, "migration audit artifact id");

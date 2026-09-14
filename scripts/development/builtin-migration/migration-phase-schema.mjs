@@ -1,6 +1,7 @@
 import { compareCodePoint } from "./constants.mjs";
 import { parseEffectivePathScope } from "./path-scope.mjs";
 import { evidenceDigest } from "./evidence.mjs";
+import { parseSourceMigrationEvidence } from "./source-migrations.mjs";
 import {
   array, digest, exact, repositoryPath, sourceRevision, stableId,
 } from "./schema.mjs";
@@ -9,8 +10,8 @@ export function parseMigrationPhases(value) {
   exact(value, [
     "lease_base_revision", "authored_revision", "integrated_revision",
     "authored_changed_paths", "integration_changed_paths",
-    "reviewed_authored_write_set", "reviewed_integration_outputs",
-    "authored_write_set_digest", "integration_outputs_digest",
+    "reviewed_authored_write_set", "reviewed_source_migrations", "reviewed_integration_outputs",
+    "authored_write_set_digest", "source_migrations_digest", "integration_outputs_digest",
   ], "migration phases");
   const parsed = {
     lease_base_revision: sourceRevision(value.lease_base_revision, "phase lease base revision"),
@@ -19,8 +20,12 @@ export function parseMigrationPhases(value) {
     authored_changed_paths: canonicalPaths(value.authored_changed_paths, "authored changed paths"),
     integration_changed_paths: canonicalPaths(value.integration_changed_paths, "integration changed paths"),
     reviewed_authored_write_set: parseScopes(value.reviewed_authored_write_set),
+    reviewed_source_migrations: parseSourceMigrationEvidence(
+      value.reviewed_source_migrations, "reviewed source migrations",
+    ),
     reviewed_integration_outputs: parseOutputs(value.reviewed_integration_outputs),
     authored_write_set_digest: digest(value.authored_write_set_digest, "authored write-set digest"),
+    source_migrations_digest: digest(value.source_migrations_digest, "source migrations digest"),
     integration_outputs_digest: digest(value.integration_outputs_digest, "integration outputs digest"),
   };
   if (evidenceDigest(parsed.reviewed_authored_write_set) !== parsed.authored_write_set_digest) {
@@ -28,6 +33,9 @@ export function parseMigrationPhases(value) {
   }
   if (evidenceDigest(parsed.reviewed_integration_outputs) !== parsed.integration_outputs_digest) {
     throw new Error("integration outputs digest mismatch");
+  }
+  if (evidenceDigest(parsed.reviewed_source_migrations) !== parsed.source_migrations_digest) {
+    throw new Error("source migrations digest mismatch");
   }
   return parsed;
 }

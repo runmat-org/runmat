@@ -9,6 +9,7 @@ import { parseGatePlans } from "../gate-plan.mjs";
 import { parseInventoryEvidence } from "../inventory.mjs";
 import { validateModuleCompositionControl } from "../module-composition/control.mjs";
 import { parsePilotPolicy } from "../pilot-policy.mjs";
+import { validateSourceMigrationControl } from "../source-migrations.mjs";
 import { array, digest, exact, kind, repositoryPath, stableId } from "../schema.mjs";
 import { assertValidatedTopologyView } from "../topology/freeze.mjs";
 import {
@@ -67,6 +68,12 @@ export function loadControlReviewSet(manifestPath, { scaffold, topology, invento
     globalReview.integrationProducts,
     reviewedCompositionBundles(bundleReviews, topology),
   );
+  validateSourceMigrationControl(
+    reviewedExecutionBundles(bundleReviews, topology),
+    reviewedIdentityControls(bundleReviews, topology),
+    globalReview.integrationProducts,
+    moduleComposition,
+  );
   const parsed = deepImmutable({
     value, digest: value.digest, bundleReviews, globalReview, moduleComposition, pilotPolicy,
   });
@@ -87,6 +94,32 @@ function reviewedCompositionBundles(bundleReviews, topology) {
       ],
     }];
   }));
+}
+
+function reviewedExecutionBundles(bundleReviews, topology) {
+  return new Map([...bundleReviews].map(([bundleId, review]) => {
+    const control = review.bundleControl;
+    return [bundleId, {
+      id: bundleId,
+      integration_product_refs: control.integration_product_refs,
+      module_composition_transition: control.module_composition_transition,
+      source_migrations: control.source_migrations,
+      expected_removals: control.expected_removals,
+      authored_write_set: [
+        ...topology.bundles.get(bundleId).composition.authored_write_set,
+        ...control.additional_authored_write_set,
+      ],
+    }];
+  }));
+}
+
+function reviewedIdentityControls(bundleReviews, topology) {
+  return new Map([...bundleReviews].flatMap(([bundleId, review]) =>
+    [...review.identityControls].map(([identity, control]) => [identity, {
+      ...control,
+      bundle_id: bundleId,
+      cohort: topology.identities.get(identity).cohort,
+    }])));
 }
 
 export function assertValidatedControlReviewSet(value) {
