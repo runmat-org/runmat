@@ -9,10 +9,9 @@ use runmat_analysis_execution::{
 use runmat_analysis_fea::execution::AnalysisTaskIdentity;
 use runmat_execution::TaskId;
 
-use crate::analysis_sequence::{
-    RemoteSequencePool, SequencePool, StructuralSequenceExecutionPolicy,
-};
+use crate::analysis_sequence::StructuralSequenceExecutionPolicy;
 use crate::analysis_task::{prepare_analysis_task, AnalysisTaskPolicy};
+use crate::analysis_task_pool::{AnalysisTaskPool, RemoteAnalysisTaskPool};
 use crate::{NativeExecutionError, NativeExecutionResult, RemotePoolDriver};
 
 #[async_trait]
@@ -36,7 +35,7 @@ pub async fn execute_structural_transient_remotely(
     publisher: &mut (impl StructuralTransientRecoveryPublisher + ?Sized),
 ) -> NativeExecutionResult<CompletedStructuralTransientSequence> {
     policy.validate()?;
-    let mut pool = RemoteSequencePool::new(pool);
+    let mut pool = RemoteAnalysisTaskPool::new(pool);
     let mut coordinator = match recovery {
         Some(recovery) => {
             for object in &recovery.objects {
@@ -102,7 +101,7 @@ pub async fn execute_structural_transient_remotely(
 }
 
 async fn execute_task(
-    pool: &mut RemoteSequencePool,
+    pool: &mut RemoteAnalysisTaskPool,
     host: &runmat_analysis_execution::AnalysisHostWorkload,
     program: &PreparedAnalysisProgram,
     dependency_identities: Vec<AnalysisTaskIdentity>,

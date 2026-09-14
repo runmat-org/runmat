@@ -207,23 +207,138 @@ impl StructuralFrequencyEntryRequest {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, try_from = "StructuralFrequencyEntryResultWire")]
 pub struct StructuralFrequencyEntryResult {
-    schema_version: u16,
-    identity: StructuralFrequencyEntryResultIdentity,
+    manifest: StructuralFrequencyEntryResultManifest,
     request: StructuralFrequencyEntryRequest,
     sample: StructuralFrequencyPhysicalSample,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StructuralFrequencyEntryResultWire {
+    manifest: StructuralFrequencyEntryResultManifest,
+    request: StructuralFrequencyEntryRequest,
+    sample: StructuralFrequencyPhysicalSample,
+}
+
+/// Bounded, self-validating lineage for one independently executed frequency result.
+///
+/// The full request and physical vectors remain in the entry object. Publication and query paths
+/// can authenticate downstream field provenance from this manifest alone.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(
+    deny_unknown_fields,
+    try_from = "StructuralFrequencyEntryResultManifestWire"
+)]
+pub struct StructuralFrequencyEntryResultManifest {
+    schema_version: u16,
+    identity: StructuralFrequencyEntryResultIdentity,
+    request: StructuralFrequencyEntryRequestIdentity,
+    workload: StructuralFrequencyWorkloadIdentity,
+    scope: super::StructuralFrequencyScopeIdentity,
+    entry: FrequencyResponsePlanEntry,
+    sample: super::StructuralFrequencyPhysicalSampleIdentity,
     solution_space: StructuralFrequencySolutionSpace,
     evidence: StructuralFrequencyEntrySolverEvidence,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct StructuralFrequencyEntryResultWire {
+struct StructuralFrequencyEntryResultManifestWire {
     schema_version: u16,
     identity: StructuralFrequencyEntryResultIdentity,
-    request: StructuralFrequencyEntryRequest,
-    sample: StructuralFrequencyPhysicalSample,
+    request: StructuralFrequencyEntryRequestIdentity,
+    workload: StructuralFrequencyWorkloadIdentity,
+    scope: super::StructuralFrequencyScopeIdentity,
+    entry: FrequencyResponsePlanEntry,
+    sample: super::StructuralFrequencyPhysicalSampleIdentity,
     solution_space: StructuralFrequencySolutionSpace,
     evidence: StructuralFrequencyEntrySolverEvidence,
+}
+
+impl TryFrom<StructuralFrequencyEntryResultManifestWire>
+    for StructuralFrequencyEntryResultManifest
+{
+    type Error = AnalysisExecutionError;
+
+    fn try_from(wire: StructuralFrequencyEntryResultManifestWire) -> Result<Self, Self::Error> {
+        let manifest = Self {
+            schema_version: wire.schema_version,
+            identity: wire.identity,
+            request: wire.request,
+            workload: wire.workload,
+            scope: wire.scope,
+            entry: wire.entry,
+            sample: wire.sample,
+            solution_space: wire.solution_space,
+            evidence: wire.evidence,
+        };
+        manifest.validate()?;
+        Ok(manifest)
+    }
+}
+
+impl StructuralFrequencyEntryResultManifest {
+    pub const fn identity(&self) -> StructuralFrequencyEntryResultIdentity {
+        self.identity
+    }
+
+    pub const fn request(&self) -> StructuralFrequencyEntryRequestIdentity {
+        self.request
+    }
+
+    pub const fn workload(&self) -> StructuralFrequencyWorkloadIdentity {
+        self.workload
+    }
+
+    pub const fn scope(&self) -> super::StructuralFrequencyScopeIdentity {
+        self.scope
+    }
+
+    pub const fn entry(&self) -> FrequencyResponsePlanEntry {
+        self.entry
+    }
+
+    pub const fn sample(&self) -> super::StructuralFrequencyPhysicalSampleIdentity {
+        self.sample
+    }
+
+    pub fn solution_space(&self) -> &StructuralFrequencySolutionSpace {
+        &self.solution_space
+    }
+
+    pub fn evidence(&self) -> &StructuralFrequencyEntrySolverEvidence {
+        &self.evidence
+    }
+
+    pub fn validate(&self) -> AnalysisExecutionResult<()> {
+        self.evidence.validate_for_manifest(
+            self.entry.identity(),
+            self.sample,
+            &self.solution_space,
+        )?;
+        if self.schema_version != 1 || self.identity != self.derive_identity()? {
+            return Err(AnalysisExecutionError::Identity(
+                "structural frequency entry result manifest identity does not converge",
+            ));
+        }
+        Ok(())
+    }
+
+    fn derive_identity(&self) -> AnalysisExecutionResult<StructuralFrequencyEntryResultIdentity> {
+        StructuralFrequencyEntryResultIdentity::derive(
+            "structural-frequency-entry-result",
+            &(
+                self.schema_version,
+                self.request,
+                self.workload,
+                self.scope,
+                self.entry,
+                self.sample,
+                &self.solution_space,
+                &self.evidence,
+            ),
+        )
+    }
 }
 
 impl TryFrom<StructuralFrequencyEntryResultWire> for StructuralFrequencyEntryResult {
@@ -231,12 +346,9 @@ impl TryFrom<StructuralFrequencyEntryResultWire> for StructuralFrequencyEntryRes
 
     fn try_from(wire: StructuralFrequencyEntryResultWire) -> Result<Self, Self::Error> {
         let result = Self {
-            schema_version: wire.schema_version,
-            identity: wire.identity,
+            manifest: wire.manifest,
             request: wire.request,
             sample: wire.sample,
-            solution_space: wire.solution_space,
-            evidence: wire.evidence,
         };
         result.validate()?;
         Ok(result)
@@ -250,24 +362,36 @@ impl StructuralFrequencyEntryResult {
         solution_space: StructuralFrequencySolutionSpace,
         evidence: StructuralFrequencyEntrySolverEvidence,
     ) -> AnalysisExecutionResult<Self> {
-        let mut result = Self {
+        let mut manifest = StructuralFrequencyEntryResultManifest {
             schema_version: 1,
             identity: StructuralFrequencyEntryResultIdentity::derive(
                 "structural-frequency-entry-result-placeholder",
                 &1_u8,
             )?,
-            request,
-            sample,
+            request: request.identity(),
+            workload: request.workload(),
+            scope: request.scope().identity(),
+            entry: request.entry(),
+            sample: sample.identity(),
             solution_space,
             evidence,
         };
-        result.identity = result.derive_identity()?;
+        manifest.identity = manifest.derive_identity()?;
+        let result = Self {
+            manifest,
+            request,
+            sample,
+        };
         result.validate()?;
         Ok(result)
     }
 
     pub const fn identity(&self) -> StructuralFrequencyEntryResultIdentity {
-        self.identity
+        self.manifest.identity
+    }
+
+    pub fn manifest(&self) -> &StructuralFrequencyEntryResultManifest {
+        &self.manifest
     }
 
     pub fn request(&self) -> &StructuralFrequencyEntryRequest {
@@ -279,20 +403,24 @@ impl StructuralFrequencyEntryResult {
     }
 
     pub fn solution_space(&self) -> &StructuralFrequencySolutionSpace {
-        &self.solution_space
+        &self.manifest.solution_space
     }
 
     pub fn evidence(&self) -> &StructuralFrequencyEntrySolverEvidence {
-        &self.evidence
+        &self.manifest.evidence
     }
 
     pub fn validate(&self) -> AnalysisExecutionResult<()> {
         self.request.validate_identity()?;
         self.sample.validate_against(self.request.scope())?;
-        self.solution_space.validate(self.request.scope())?;
-        self.evidence
-            .validate_for_sample(&self.sample, &self.solution_space)?;
-        let method_matches = match (&self.request.solver, &self.solution_space) {
+        self.manifest.validate()?;
+        self.manifest
+            .solution_space
+            .validate(self.request.scope())?;
+        self.manifest
+            .evidence
+            .validate_for_sample(&self.sample, &self.manifest.solution_space)?;
+        let method_matches = match (&self.request.solver, &self.manifest.solution_space) {
             (
                 StructuralFrequencySolverPlan::Direct { .. },
                 StructuralFrequencySolutionSpace::Direct,
@@ -305,10 +433,13 @@ impl StructuralFrequencyEntryResult {
             ) => expected == basis_state,
             _ => false,
         };
-        if self.schema_version != 1
-            || !method_matches
+        if !method_matches
+            || self.manifest.request != self.request.identity()
+            || self.manifest.workload != self.request.workload()
+            || self.manifest.scope != self.request.scope().identity()
+            || self.manifest.entry != self.request.entry()
+            || self.manifest.sample != self.sample.identity()
             || self.request.entry != self.sample.entry()
-            || self.identity != self.derive_identity()?
         {
             return Err(AnalysisExecutionError::Identity(
                 "structural frequency entry result differs from its request or physical sample",
@@ -334,18 +465,5 @@ impl StructuralFrequencyEntryResult {
             bytes,
             FREQUENCY_ENTRY_LIMITS,
         )?)
-    }
-
-    fn derive_identity(&self) -> AnalysisExecutionResult<StructuralFrequencyEntryResultIdentity> {
-        StructuralFrequencyEntryResultIdentity::derive(
-            "structural-frequency-entry-result",
-            &(
-                self.schema_version,
-                &self.request,
-                &self.sample,
-                &self.solution_space,
-                &self.evidence,
-            ),
-        )
     }
 }

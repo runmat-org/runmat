@@ -67,6 +67,61 @@ impl PlannedResourceUsageGraph {
     }
 }
 
+/// Publishes one scheduler-measured task graph against its terminal scientific result.
+///
+/// The caller supplies the terminal task's plan as the primary plan; every distinct phase plan is
+/// recovered from the measured attempts, so publication cannot omit an executed phase or invent
+/// a plan that has no scheduler accounting.
+pub fn prepare_planned_resource_graph_usage(
+    primary_plan: &FeaResourcePlan,
+    workload_digest: runmat_execution::Digest,
+    result_digest: runmat_execution::Digest,
+    graph: &PlannedResourceUsageGraph,
+    access: &ArtifactAccess,
+    chunk_bytes: usize,
+    limits: ObjectInventoryLimits,
+) -> AnalysisBridgeResult<PreparedStructuralResourceUsage> {
+    let mut plans = BTreeMap::new();
+    let mut attempts = Vec::with_capacity(graph.attempts.len());
+    for attempt in &graph.attempts {
+        if let Some(existing) = plans.insert(attempt.plan.identity, attempt.plan.clone()) {
+            if existing != attempt.plan {
+                return Err(AnalysisBridgeError::Identity(
+                    "one resource-plan identity names distinct phase plans",
+                ));
+            }
+        }
+        attempts.push(usage_attempt(attempt.plan.identity, &attempt.accounting));
+    }
+    if !plans.contains_key(&primary_plan.identity) {
+        return Err(AnalysisBridgeError::Identity(
+            "resource graph omits its terminal primary plan",
+        ));
+    }
+    plans.remove(&primary_plan.identity);
+    let evidence = record_resource_graph_usage(
+        primary_plan,
+        plans.into_values().collect(),
+        workload_digest,
+        result_digest,
+        attempts,
+        graph.wall_millis,
+    )
+    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let objects = prepare_analysis_objects(
+        AnalysisNumericalObjectKind::ResourceUsage,
+        evidence.identity().digest(),
+        &evidence
+            .canonical_bytes()
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
+        chunk_bytes,
+        ObjectNamespace::ResultValue,
+        limits,
+    )?;
+    objects.references(access, ValueRefKind::ResultObject)?;
+    Ok(PreparedStructuralResourceUsage { evidence, objects })
+}
+
 /// Adapts scheduler-owned accounting into source-bound FEA evidence without giving FEA a second
 /// worker-metering implementation.
 pub fn prepare_structural_resource_usage(

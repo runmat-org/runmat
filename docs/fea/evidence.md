@@ -126,7 +126,7 @@ results = fea.results(stepRun);
 
 % Later, or in another process that can see the same artifact root:
 results = fea.results(stepRun.run_id);
-stress = fea.field(results, "von_mises");
+stress = fea.field(results, fea.StructuralField.vonMises());
 ```
 
 `fea.results(...)` can include or omit fields, diagnostics, modal results, transient snapshots, nonlinear results, and electromagnetic payloads through Name/Value options. `fea.compare(baselineRunId, candidateRunId)` compares two persisted runs. `fea.trends("WindowSize", 16)` summarizes recent persisted runs from the artifact store.

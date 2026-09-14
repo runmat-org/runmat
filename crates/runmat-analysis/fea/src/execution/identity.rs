@@ -88,6 +88,7 @@ identity_type!(StructuralFrequencyPhysicalSampleIdentity);
 identity_type!(StructuralFrequencyEntryRequestIdentity);
 identity_type!(StructuralFrequencyEntryResultIdentity);
 identity_type!(StructuralFrequencyResultAssemblyRequestIdentity);
+identity_type!(StructuralFrequencyPublicationIdentity);
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

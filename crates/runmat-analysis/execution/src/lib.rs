@@ -131,9 +131,10 @@ pub use observation_partition::{
 };
 pub use observation_source::StructuralObservationWorkloadSource;
 pub use resource_usage::{
-    extend_structural_resource_usage, prepare_structural_resource_usage,
-    validate_observation_resource_usage, validate_structural_resource_usage,
-    PlannedResourceUsageAttempt, PlannedResourceUsageGraph, PreparedStructuralResourceUsage,
+    extend_structural_resource_usage, prepare_planned_resource_graph_usage,
+    prepare_structural_resource_usage, validate_observation_resource_usage,
+    validate_structural_resource_usage, PlannedResourceUsageAttempt, PlannedResourceUsageGraph,
+    PreparedStructuralResourceUsage,
 };
 pub use response::{
     import_analysis_output_set, AnalysisHostResponse, AnalysisOutputRoot, AnalysisOutputSet,

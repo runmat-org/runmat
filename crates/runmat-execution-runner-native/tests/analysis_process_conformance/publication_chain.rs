@@ -100,6 +100,15 @@ pub(super) async fn execute_publication_chain<D: PublicationChainDriver>(
         })
         .unwrap()
         .clone();
+    let accelerator_requests = resource_usage
+        .evidence
+        .plans
+        .iter()
+        .find(|plan| plan.identity == resource_usage.evidence.primary_plan)
+        .expect("resource evidence must contain its primary plan")
+        .request
+        .accelerators
+        .clone();
     let workload =
         StructuralLinearWorkload::from_canonical_bytes(&source_invocation.payload()).unwrap();
     let sequence = SequenceIdentity::from_solver_contract(&workload.model.sequence).unwrap();
@@ -132,7 +141,7 @@ pub(super) async fn execute_publication_chain<D: PublicationChainDriver>(
             source_fields: imported_fields,
             source_workload: StructuralObservationWorkloadSource::Linear(source_invocation.clone()),
             mesh: mesh.clone(),
-            resource_plan: resource_plan_objects.clone(),
+            accelerator_requests,
             sequence,
             step: step.clone(),
             limits: runmat_analysis_fea::results::observation::ObservationLimits::default(),

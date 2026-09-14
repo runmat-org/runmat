@@ -14,7 +14,9 @@ pub use bundle::{
     SourceReader, EXECUTION_BUNDLE_SCHEMA_VERSION,
 };
 pub use error::{ArtifactError, ArtifactResult};
-pub use object::{ArtifactAccess, LogicalObject, ObjectDescriptor, ObjectNamespace};
+pub use object::{
+    ArtifactAccess, ArtifactPublishedObjectSource, LogicalObject, ObjectDescriptor, ObjectNamespace,
+};
 pub use program::{
     ExecutableForm, NativeObjectPayload, NativeTargetIdentity, ProgramArtifact, ProgramArtifactId,
     ProgramBuildRecipe, ProgramExecutionDescriptor, ProgramExecutionInputs, ProgramExecutionObject,
@@ -28,3 +30,4 @@ pub use program::{
     PROGRAM_EXECUTION_OBJECT_CLOSURE_SCHEMA_VERSION, PROGRAM_EXECUTION_OBJECT_CLOSURE_VALUE_SCHEMA,
     PROGRAM_EXECUTION_REQUEST_SCHEMA_V1, PROGRAM_TARGET_SCHEMA_VERSION,
 };
+pub use runmat_execution::value::PublishedObjectCatalog;

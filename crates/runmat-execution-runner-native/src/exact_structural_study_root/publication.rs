@@ -5,8 +5,10 @@ use runmat_analysis_execution::{
     StructuralStudyWorkloads,
 };
 use runmat_analysis_fea::execution::{
-    AnalysisNumericalObjectKind, StructuralLinearWorkload, StructuralTransientNumericalReceipt,
-    StructuralTransientSolverResult, StructuralTransientWorkload, StudyIdentity,
+    AnalysisNumericalObjectKind, StructuralFrequencyNumericalReceipt,
+    StructuralFrequencySolverResult, StructuralFrequencyWorkload, StructuralLinearWorkload,
+    StructuralTransientNumericalReceipt, StructuralTransientSolverResult,
+    StructuralTransientWorkload, StudyIdentity,
 };
 use runmat_canonical_codec::{decode_contract, encode_contract};
 use runmat_execution::value::{ValuePayload, ValueRef, ValueRefKind};
@@ -15,7 +17,7 @@ use runmat_execution_artifact::cache::CacheImport;
 use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_artifact::{
     ArtifactAccess, LogicalObject, ObjectNamespace, ProgramExecutionObject,
-    ProgramExecutionRequest, ProgramExecutionResponse,
+    ProgramExecutionRequest, ProgramExecutionResponse, PublishedObjectCatalog,
 };
 use runmat_meshing_core::{CanonicalMeshingContract, MeshingRequest};
 use runmat_meshing_execution::ExactMeshingDagRunResult;
@@ -32,6 +34,7 @@ use super::{
 };
 use crate::{CompletedStructuralTransientSequence, NativeExecutionResult};
 
+mod frequency_import;
 mod inventory;
 mod packaging;
 mod result_import;
@@ -69,12 +72,41 @@ enum ExactStructuralStudyAnalysisClosure {
         receipt_root: Box<ValueRef>,
         objects: Vec<ValueRef>,
     },
+    StructuralFrequency {
+        result_root: Box<ValueRef>,
+        receipt_root: Box<ValueRef>,
+        publication: Box<runmat_analysis_fea::execution::StructuralFrequencyPublicationManifest>,
+        entries: Vec<ExactStructuralFrequencyEntryClosure>,
+        histories: Vec<ExactStructuralFrequencyHistoryClosure>,
+        resource_usage_root: Box<ValueRef>,
+        objects: Vec<ValueRef>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ExactStructuralFrequencyEntryClosure {
+    entry: runmat_analysis_fea::frequency::FrequencyResponsePlanEntry,
+    source_entry: runmat_analysis_fea::execution::StructuralFrequencyEntryResultManifest,
+    physical_sample: runmat_analysis_fea::execution::StructuralFrequencyPhysicalSampleIdentity,
+    sample: runmat_analysis_fea::results::field::RecoveredFieldSample,
+    fields_root: ValueRef,
+    observations_root: Option<ValueRef>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ExactStructuralFrequencyHistoryClosure {
+    observation_id: runmat_analysis_core::ObservationId,
+    checkpoint_root: ValueRef,
 }
 
 impl ExactStructuralStudyAnalysisClosure {
     fn objects(&self) -> &[ValueRef] {
         match self {
-            Self::LinearSequence { objects, .. } | Self::DirectTransient { objects, .. } => objects,
+            Self::LinearSequence { objects, .. }
+            | Self::DirectTransient { objects, .. }
+            | Self::StructuralFrequency { objects, .. } => objects,
         }
     }
 
@@ -107,14 +139,54 @@ impl ExactStructuralStudyAnalysisClosure {
                 result_root,
                 receipt_root,
                 objects,
-                ..
             } => {
                 if result_root == receipt_root
                     || !objects.contains(result_root)
                     || !objects.contains(receipt_root)
                 {
                     return Err(protocol(
-                        "transient result closure omits or aliases a declared root",
+                        "structural numerical closure omits or aliases a declared root",
+                    ));
+                }
+                reference_inventory(objects)?;
+            }
+            Self::StructuralFrequency {
+                result_root,
+                receipt_root,
+                publication,
+                entries,
+                histories,
+                resource_usage_root,
+                objects,
+            } => {
+                publication.validate().map_err(protocol)?;
+                if result_root == receipt_root
+                    || entries.is_empty()
+                    || !objects.contains(result_root)
+                    || !objects.contains(receipt_root)
+                    || !objects.contains(resource_usage_root)
+                    || entries.iter().any(|entry| {
+                        !objects.contains(&entry.fields_root)
+                            || entry
+                                .observations_root
+                                .as_ref()
+                                .is_some_and(|root| !objects.contains(root))
+                    })
+                    || histories
+                        .iter()
+                        .any(|history| !objects.contains(&history.checkpoint_root))
+                {
+                    return Err(protocol(
+                        "structural frequency closure omits a declared artifact root",
+                    ));
+                }
+                let history_ids = histories
+                    .iter()
+                    .map(|history| &history.observation_id)
+                    .collect::<BTreeSet<_>>();
+                if history_ids.len() != histories.len() {
+                    return Err(protocol(
+                        "structural frequency closure contains duplicate histories",
                     ));
                 }
                 reference_inventory(objects)?;
@@ -217,6 +289,33 @@ pub enum ExactStructuralStudyAnalysisResult {
         result: Box<StructuralTransientSolverResult>,
         numerical_receipt: StructuralTransientNumericalReceipt,
     },
+    StructuralFrequency(Box<ExactStructuralFrequencyAnalysisResult>),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExactStructuralFrequencyAnalysisResult {
+    pub resolved_workload: Box<StructuralFrequencyWorkload>,
+    pub result: Box<StructuralFrequencySolverResult>,
+    pub numerical_receipt: StructuralFrequencyNumericalReceipt,
+    pub entries: Vec<ExactStructuralFrequencyEntryResult>,
+    pub histories: Vec<ExactStructuralFrequencyHistoryResult>,
+    pub resource_usage: runmat_analysis_execution::PreparedStructuralResourceUsage,
+    pub publication: Box<runmat_analysis_fea::execution::StructuralFrequencyPublicationManifest>,
+    pub object_catalog: PublishedObjectCatalog,
+    pub artifact_roots: runmat_runtime::analysis::StructuralFrequencyArtifactRootIndex,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExactStructuralFrequencyEntryResult {
+    pub sample: runmat_analysis_fea::results::field::RecoveredFieldSample,
+    pub recovered_fields: runmat_analysis_execution::ImportedRecoveredFields,
+    pub observations: Option<runmat_analysis_execution::ImportedObservations>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExactStructuralFrequencyHistoryResult {
+    pub observation_id: runmat_analysis_core::ObservationId,
+    pub checkpoint: runmat_analysis_execution::ImportedObservationHistoryCheckpointTask,
 }
 
 pub(crate) enum ExactStructuralAnalysisPublication<'a> {
@@ -232,6 +331,12 @@ pub(crate) enum ExactStructuralAnalysisPublication<'a> {
         completion: &'a CompletedStructuralTransientSequence,
         unresolved_workloads_digest: Digest,
     },
+    StructuralFrequency {
+        signals:
+            &'a [crate::remote::signal_materialization::CompletedRemoteSignalMaterialization],
+        completion: &'a crate::CompletedStructuralFrequencyStudy,
+        unresolved_workloads_digest: Digest,
+    },
 }
 
 impl ExactStructuralAnalysisPublication<'_> {
@@ -239,7 +344,9 @@ impl ExactStructuralAnalysisPublication<'_> {
         &self,
     ) -> &[crate::remote::signal_materialization::CompletedRemoteSignalMaterialization] {
         match self {
-            Self::LinearSequence { signals, .. } | Self::DirectTransient { signals, .. } => signals,
+            Self::LinearSequence { signals, .. }
+            | Self::DirectTransient { signals, .. }
+            | Self::StructuralFrequency { signals, .. } => signals,
         }
     }
 
@@ -250,6 +357,10 @@ impl ExactStructuralAnalysisPublication<'_> {
                 ..
             }
             | Self::DirectTransient {
+                unresolved_workloads_digest,
+                ..
+            }
+            | Self::StructuralFrequency {
                 unresolved_workloads_digest,
                 ..
             } => *unresolved_workloads_digest,

@@ -1,11 +1,14 @@
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use base64::Engine as _;
 use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::cache::CacheImport;
 use runmat_execution_artifact::object::ObjectInventoryLimits;
-use runmat_execution_artifact::{ProgramExecutionObject, ProgramExecutionResponse};
+use runmat_execution_artifact::{
+    ArtifactPublishedObjectSource, ProgramExecutionObject, ProgramExecutionResponse,
+};
 use runmat_execution_runner_native::{
     import_exact_structural_study_result, import_exact_structural_sweep_result,
     ExactStructuralStudyResultExpectation, ExactStructuralSweepResultExpectation,
@@ -14,7 +17,8 @@ use runmat_execution_runner_native::{
 use runmat_runtime::analysis::{
     analysis_complete_study_sweep_op, structural_study_execution_failure, AnalysisStudyRunData,
     AnalysisStudySweepData, AnalysisStudySweepRunOutcome, AnalysisStudySweepSpec,
-    PreparedStructuralStudyIntent, StructuralStudyExecutionFailure, StructuralStudyNumericalResult,
+    PreparedStructuralStudyIntent, StructuralStudyExecutionFailure,
+    StructuralStudyFrequencyNumericalResult, StructuralStudyNumericalResult,
     StructuralStudySequenceNumericalResult, StructuralStudyStepNumericalResult,
     StructuralStudyTransientNumericalResult,
 };
@@ -43,7 +47,7 @@ pub(crate) fn materialize_remote_outputs(
         &expectation,
         ObjectInventoryLimits::default(),
     )?;
-    let numerical = study_result(&result)?;
+    let numerical = study_result(&result, cache)?;
     runmat_runtime::analysis::analysis_complete_structural_study_intent_op(
         study,
         runmat_runtime::meshing::MeshingExecutionOutput {
@@ -114,7 +118,7 @@ pub(crate) fn materialize_remote_sweep_outputs(
                     format!("{run_id}_study_{}", entry.study_index),
                 )
                 .map_err(anyhow::Error::msg)?;
-                let numerical = study_result(&result)?;
+                let numerical = study_result(&result, cache.clone())?;
                 let envelope =
                     runmat_runtime::analysis::analysis_complete_structural_study_intent_op(
                         intent,
@@ -194,6 +198,7 @@ fn result_expectation(
 
 fn study_result(
     result: &runmat_execution_runner_native::ExactStructuralStudyResult,
+    source: DownloadedResultCache,
 ) -> Result<StructuralStudyNumericalResult> {
     Ok(match &result.analysis {
         runmat_execution_runner_native::ExactStructuralStudyAnalysisResult::LinearSequence {
@@ -230,19 +235,34 @@ fn study_result(
                 numerical_receipt: numerical_receipt.clone(),
             },
         )),
+        runmat_execution_runner_native::ExactStructuralStudyAnalysisResult::StructuralFrequency(
+            frequency,
+        ) => StructuralStudyNumericalResult::StructuralFrequency(Box::new(
+            StructuralStudyFrequencyNumericalResult::new(
+                result.frozen_project_digest,
+                (*frequency.resolved_workload).clone(),
+                (*frequency.result).clone(),
+                (*frequency.publication).clone(),
+                frequency.object_catalog.clone(),
+                frequency.artifact_roots.clone(),
+                ArtifactPublishedObjectSource::new(source),
+            )
+            .map_err(anyhow::Error::msg)?,
+        )),
     })
 }
 
-struct DownloadedResultCache(BTreeMap<Digest, Vec<u8>>);
+#[derive(Clone)]
+struct DownloadedResultCache(Arc<BTreeMap<Digest, Vec<u8>>>);
 
 impl DownloadedResultCache {
     fn from_objects(objects: Vec<ProgramExecutionObject>) -> Self {
-        Self(
+        Self(Arc::new(
             objects
                 .into_iter()
                 .map(|object| (object.reference.logical_digest, object.bytes))
                 .collect(),
-        )
+        ))
     }
 }
 

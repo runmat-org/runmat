@@ -116,7 +116,8 @@ Error codes use `RM.<DOMAIN>.<OPERATION>.<REASON>`, for example `RM.FEA.RUN_STUD
 | `fea.run(study)` | Run a `.fea` path, `fea.Study`, or `fea.Sweep`. |
 | `fea.stepResult(run, stepId)` or `run.step(stepId)` | Select one typed persisted procedure-step result from an aggregate study run. |
 | `fea.results(runOrId, Name, Value, ...)` | Load result data from a run result object or persisted run id. |
-| `fea.field(resultsOrRun, fieldId)` | Extract one field from a result query. |
+| `fea.field(resultsOrRun, fieldSelector, sample)` | Select one field with a typed family selector and optional typed independent-domain sample. |
+| `fea.fieldPage(field, start, count)` or `field.page(start, count)` | Read a bounded logical-value page without materializing the complete artifact; values retain native real or complex tensor semantics. |
 | `plot(field, Name, Value, ...)` | Plot an `fea.Field` using its retained study geometry and solver topology context. Field selection remains in `fea.field`. |
 | `mesh(runOrResultsOrField, Name, Value, ...)` | Display the solver mesh by default; `Source` accepts `solver`, `cad`, `cad_reference`, or `auto`, and `Edges` controls the solver-edge overlay. |
 | `fea.compare(baselineRunId, candidateRunId)` | Compare two persisted runs; no Name, Value options are accepted. |
@@ -150,7 +151,7 @@ Each interface joins two distinct `geometry.Region` values from one geometry rev
 
 `fea.material`, the quantity-specific signal constructors, and the dimensioned quantity constructors are RunMat-native host constructors. Finite real quantity inputs accept all eight built-in integer classes, preserve exact input through shape validation, and then cross one binary64 model-storage boundary; sufficiently wide integers can round, and resident numeric fields are rejected without provider dispatch. Physics domains accept only the corresponding typed quantities and cannot contain loads, signals, solver choices, or enable flags. Interface constructors accept only typed `geometry.Region` selections and, where required, a semantic physical parameter. CHT selects exactly one of perfect transfer, conductance, or resistance, so redundant or contradictory transfer laws cannot be authored. Contact penalty, stabilization, damping, and relaxation are numerical policy owned by the step and solver rather than interface physics.
 
-`fea.materialAssignment`, `fea.model`, `fea.plan`, `fea.field`, and `fea.compare` accept structural objects and text rather than integer arrays. FEA objects overload the ordinary `plot` and `mesh` functions through the runtime object protocol; numeric calls keep their MATLAB-compatible behavior. Discrete output metadata remains integer typed: model and geometry revisions, plan counts and indexes, field shape/component/element/size metadata, and comparison count deltas do not pass through a physical-value binary64 boundary. The conventional figure handle remains a double at the scripting boundary. Input arity and structural identity are validated before artifact lookup, planning, field projection, comparison, or figure creation.
+`fea.materialAssignment`, `fea.model`, `fea.plan`, `fea.field`, and `fea.compare` accept structural objects and text rather than integer arrays. `fea.fieldPage` accepts positive exact host integers (or exactly integral scalar doubles) for its one-based start and bounded count. FEA objects overload the ordinary `plot` and `mesh` functions through the runtime object protocol; numeric calls keep their MATLAB-compatible behavior. Discrete output metadata remains integer typed: model and geometry revisions, plan counts and indexes, field shape/component/element/size metadata, page positions and counts, and comparison count deltas do not pass through a physical-value binary64 boundary. The conventional figure handle remains a double at the scripting boundary. Input arity and structural identity are validated before artifact lookup, planning, field projection, comparison, or figure creation.
 
 These constructors, planning operations, field projections, comparisons, and plots do not intrinsically require native OCCT. Existing geometry assets, STL or synthetic geometry, and persisted mesh/result artifacts use their normal paths without OCCT; only document resolution that must import topology-bearing CAD may require an OCCT-enabled geometry backend.
 
@@ -158,7 +159,7 @@ These constructors, planning operations, field projections, comparisons, and plo
 
 | Builtin | Exact signature | Validation boundary |
 | --- | --- | --- |
-| `fea.StructuralStep.static/modal/transient/nonlinear` | `step = fea.StructuralStep.<procedure>(id)` | The id is a non-empty text scalar; family, procedure, direct solution space, independent domain, and state outputs come from the concrete method. |
+| `fea.StructuralStep.static/modal/harmonic/transient/nonlinear` | `step = fea.StructuralStep.<procedure>(id)` | The id is a non-empty text scalar; family, procedure, direct solution space, independent domain, and state outputs come from the concrete method. |
 | `fea.ProcedureStep.configure` | `step = fea.ProcedureStep.configure(step, independentDomain, activations, stateInputs, stateOutputs, observations, accuracy, restart)` | Every supplied value has a closed typed class; the concrete family/procedure identity cannot be changed. |
 | `fea.AnalysisSequence.new` | `sequence = fea.AnalysisSequence.new(id, steps, dependencies, transitions, branches)` | Step identity, dependency graph, transition compatibility, activation ancestry, observation semantics, and accuracy dimensions are validated with the model. |
 | `fea.ThermalStep.transient`, `fea.ElectromagneticStep.harmonic`, `fea.AcousticStep.harmonic` | `step = fea.<Family>Step.<procedure>(id)` | Only currently supported family/procedure combinations are constructible. |
@@ -169,6 +170,8 @@ These constructors, planning operations, field projections, comparisons, and plo
 | `fea.validate` | `result = fea.validate(studyOrSweepOrPath)` | Object/path identity is checked before document validation; no solver executes. |
 | `fea.run` | `run = fea.run(studyOrSweepOrPath)` | Object/path identity and document validity are checked before the selected solver executes. |
 | `fea.results` | `results = fea.results(runOrRunId, Name, Value, ...)` | Run identity, option pairing, option values, and selector shape/range are checked before artifact lookup. An existing `fea.Results` object is accepted without options. |
+| `fea.field` | `field = fea.field(resultsOrRun, fieldSelector, sample)` | The field selector is a typed family value. The optional independent-domain sample is typed and must identify exactly one published field. |
+| `fea.fieldPage` | `page = fea.fieldPage(field, start, count)` | The field must retain a persisted run identity. Start and count are positive exact host integers; count defaults to 256 and is capped at 4096. Every selected object and chunk is verified before values are returned. |
 | `fea.trends` | `trends = fea.trends(Name, Value, ...)` | `WindowSize` is checked before artifact-store access. |
 
 `fea.study` requires `Template`, defaults to a CPU/production execution entry for every sequence
@@ -215,7 +218,7 @@ Mode and transient snapshot selectors use the normal one-based RunMat scripting 
 
 The `fea.results` and `fea.trends` query paths read canonical host `double` result fields and never trigger device execution or an implicit transfer. `fea.run` may execute through the study's configured GPU solver; its backend, device-operator ratio, synchronization count, and fallback provenance remain separate from published field storage. None of these operations intrinsically requires native OCCT when consuming existing typed objects, STL/synthetic geometry, or persisted artifacts; only path-time import of topology-bearing CAD may require the configured OCCT backend.
 
-`fea.Study` and `fea.Sweep` objects expose `validate`, `plan`, and `run` methods through the class system. A study produces `fea.Validation`, `fea.Plan`, and an aggregate `fea.RunResult`; a sweep produces the distinct aggregate classes `fea.SweepValidation`, `fea.SweepPlan`, and `fea.SweepRunResult`. `fea.RunResult.step(stepId)` returns one typed `fea.StepRunResult`, which owns the persisted `run_id` and exposes `results`, `field`, and `mesh`. The aggregate exposes the same convenience methods only when it contains exactly one step. `fea.Results` exposes `field` and `mesh`; `fea.Field` exposes `plot` and `mesh`.
+`fea.Study` and `fea.Sweep` objects expose `validate`, `plan`, and `run` methods through the class system. A study produces `fea.Validation`, `fea.Plan`, and an aggregate `fea.RunResult`; a sweep produces the distinct aggregate classes `fea.SweepValidation`, `fea.SweepPlan`, and `fea.SweepRunResult`. `fea.RunResult.step(stepId)` returns one typed `fea.StepRunResult`, which owns the persisted `run_id` and exposes `results`, `field`, and `mesh`. The aggregate exposes the same convenience methods only when it contains exactly one step. `fea.Results` exposes `field` and `mesh`; `fea.Field` exposes `page`, `plot`, and `mesh`.
 
 ## `.fea` Document Fields
 

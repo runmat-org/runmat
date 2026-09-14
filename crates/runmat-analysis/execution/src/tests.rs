@@ -1733,12 +1733,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
     );
 
     let sequence = SequenceIdentity::from_solver_contract(&solve.model.sequence).unwrap();
-    let observation_resource_plan_objects = prepared
-        .inputs
-        .iter()
-        .find(|input| input.manifest.kind == AnalysisNumericalObjectKind::ResourcePlan)
-        .unwrap()
-        .clone();
+    let observation_accelerators = prepared.resource_plan.request.accelerators.clone();
     assert!(prepare_structural_observation_fanout(
         &store,
         StructuralObservationPreparation {
@@ -1749,7 +1744,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
                 prepared.inputs[0].clone(),
             ),
             mesh: Some(prepared.inputs[1].clone()),
-            resource_plan: observation_resource_plan_objects.clone(),
+            accelerator_requests: observation_accelerators.clone(),
             sequence,
             step: producer_step.clone(),
             limits: runmat_analysis_fea::results::observation::ObservationLimits::default(),
@@ -1771,7 +1766,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
                 prepared.inputs[0].clone(),
             ),
             mesh: Some(prepared.inputs[1].clone()),
-            resource_plan: observation_resource_plan_objects.clone(),
+            accelerator_requests: observation_accelerators.clone(),
             sequence,
             step: producer_step.clone(),
             limits: runmat_analysis_fea::results::observation::ObservationLimits::default(),
@@ -1794,7 +1789,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
                 prepared.inputs[0].clone(),
             ),
             mesh: Some(prepared.inputs[1].clone()),
-            resource_plan: observation_resource_plan_objects.clone(),
+            accelerator_requests: observation_accelerators.clone(),
             sequence,
             step: producer_step.clone(),
             limits: runmat_analysis_fea::results::observation::ObservationLimits::default(),

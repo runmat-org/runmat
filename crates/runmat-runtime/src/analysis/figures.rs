@@ -13,6 +13,7 @@ use runmat_plot::plots::{
     BarChart, Figure, LinePlot, MeshDeformation, MeshEdgeMode, MeshFieldLocation, MeshPlot,
     MeshRegion, MeshScalarField, MeshTriangleRange, MeshVectorField, PlotElement,
 };
+use std::path::Path;
 
 use super::contracts::{
     AnalysisFieldDescriptor, AnalysisFieldKind, AnalysisFieldLocation, AnalysisRenderTopology,
@@ -23,6 +24,8 @@ use super::storage;
 use super::{analysis_results_compare_op, analysis_trends_op, collect_analysis_result_fields};
 use crate::geometry::{geometry_preview_figure, GeometryPreviewFigureOptions};
 use crate::operations::OperationContext;
+
+mod field_artifact;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AnalysisGeneratedFigureKind {
@@ -156,16 +159,38 @@ pub fn analysis_generate_study_run_figures(
     Ok(figures)
 }
 
+/// Generates figures for one explicitly selected persisted field without materializing that
+/// field into the language driver. Page-bounded numerical reads are verified and assembled only
+/// inside the plotting boundary, where rendering necessarily needs the selected field.
+pub fn analysis_generate_study_field_figures(
+    study: &AnalysisStudySpec,
+    run_id: &str,
+    selection: &super::AnalysisFieldSelection,
+    options: AnalysisFigureGenerationOptions,
+) -> Result<Vec<AnalysisGeneratedFigure>, String> {
+    field_artifact::generate(study, run_id, selection, options)
+}
+
 pub fn analysis_generate_study_run_mesh_figure(
     study: &AnalysisStudySpec,
     run_id: &str,
     options: AnalysisFigureGenerationOptions,
 ) -> Result<AnalysisGeneratedFigure, String> {
-    let run = storage::load_run_result(run_id)?
-        .ok_or_else(|| format!("FEA run_id '{run_id}' was not found"))?;
-    let render_topology = run
-        .render_topology
+    let run = storage::load_run_result(run_id)?;
+    if run.is_none() && storage::load_structural_frequency_result(run_id)?.is_none() {
+        return Err(format!("FEA run_id '{run_id}' was not found"));
+    }
+    let stored_topology = run
         .as_ref()
+        .and_then(|run| run.render_topology.as_ref())
+        .filter(|topology| render_topology_has_meshes(topology));
+    let study_topology = if stored_topology.is_none() {
+        render_topology_from_study_mesh(study)?
+    } else {
+        None
+    };
+    let render_topology = stored_topology
+        .or(study_topology.as_ref())
         .filter(|topology| render_topology_has_meshes(topology));
     let title = match options.mesh_source {
         AnalysisFigureMeshSource::Solver => "FEA solver mesh",
@@ -183,6 +208,34 @@ pub fn analysis_generate_study_run_mesh_figure(
         warnings: Vec::new(),
         figure,
     })
+}
+
+pub(super) fn render_topology_from_study_mesh(
+    study: &AnalysisStudySpec,
+) -> Result<Option<AnalysisRenderTopology>, String> {
+    let solver_mesh = study
+        .solver_mesh_artifact_path
+        .as_deref()
+        .map(Path::new)
+        .map(super::solver_mesh_artifact::load_solver_mesh_artifact)
+        .transpose()
+        .map_err(|error| error.to_string())?;
+    Ok(super::render_topology_from_solver_mesh(
+        solver_mesh.as_ref(),
+    ))
+}
+
+pub(super) fn render_topology_for_persisted_run(
+    study: &AnalysisStudySpec,
+    run_id: &str,
+) -> Result<Option<AnalysisRenderTopology>, String> {
+    if let Some(topology) = storage::load_run_metadata(run_id)?
+        .and_then(|run| run.render_topology)
+        .filter(render_topology_has_meshes)
+    {
+        return Ok(Some(topology));
+    }
+    render_topology_from_study_mesh(study)
 }
 
 fn generate_run_figures(
@@ -208,6 +261,25 @@ fn mesh_result_figures(
         .render_topology
         .as_ref()
         .filter(|topology| render_topology_has_meshes(topology));
+    let fields = collect_analysis_result_fields(run);
+    mesh_result_figures_from_fields(
+        geometry,
+        model,
+        render_topology,
+        &fields,
+        &run.run_id,
+        options,
+    )
+}
+
+pub(super) fn mesh_result_figures_from_fields(
+    geometry: &runmat_geometry_core::GeometryAsset,
+    model: Option<&AnalysisModel>,
+    render_topology: Option<&AnalysisRenderTopology>,
+    fields: &[AnalysisField],
+    run_label: &str,
+    options: AnalysisFigureGenerationOptions,
+) -> Vec<AnalysisGeneratedFigure> {
     if (render_topology.is_none() && geometry.surface_meshes.is_empty())
         || options.max_mesh_result_figures == 0
     {
@@ -227,7 +299,6 @@ fn mesh_result_figures(
         ));
     }
 
-    let fields = collect_analysis_result_fields(run);
     let probe =
         match base_mesh_figure_for_run_source(geometry, render_topology, "FEA result", options) {
             Some(figure) => figure,
@@ -277,7 +348,7 @@ fn mesh_result_figures(
     }
 
     let mut topology_warnings = Vec::new();
-    for field in &fields {
+    for field in fields {
         if figures.len() >= per_run_mesh_figure_limit {
             break;
         }
@@ -313,7 +384,7 @@ fn mesh_result_figures(
         });
     }
 
-    for field in &fields {
+    for field in fields {
         if figures.len() >= per_run_mesh_figure_limit {
             break;
         }
@@ -372,12 +443,12 @@ fn mesh_result_figures(
         if let Some(figure) = base_mesh_figure(
             geometry,
             render_topology,
-            format!("FEA geometry result: {}", run.run_id),
+            format!("FEA geometry result: {run_label}"),
             options,
         ) {
             figures.push(AnalysisGeneratedFigure {
                 kind: AnalysisGeneratedFigureKind::MeshResult,
-                title: format!("FEA geometry result: {}", run.run_id),
+                title: format!("FEA geometry result: {run_label}"),
                 field_ids: Vec::new(),
                 topology_ids: Vec::new(),
                 warnings: shared_warnings,

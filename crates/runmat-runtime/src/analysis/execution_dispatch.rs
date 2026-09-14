@@ -8,6 +8,7 @@ use super::contracts::AnalysisExecutionStep;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) enum AnalysisOperation {
     LinearStatic,
+    StructuralFrequency,
     Modal,
     Acoustic,
     Transient,
@@ -31,8 +32,9 @@ struct AnalysisOperationDescriptor {
 
 impl AnalysisOperation {
     #[cfg(test)]
-    const ALL: [Self; 10] = [
+    const ALL: [Self; 11] = [
         Self::LinearStatic,
+        Self::StructuralFrequency,
         Self::Modal,
         Self::Acoustic,
         Self::Transient,
@@ -54,6 +56,15 @@ impl AnalysisOperation {
                 assembly_error_code: "RM.FEA.RUN_LINEAR_STATIC.ASSEMBLY_FAILED",
                 formulation_admission_error_code:
                     "RM.FEA.RUN_LINEAR_STATIC.FORMULATION_NOT_ADMITTED",
+            },
+            Self::StructuralFrequency => AnalysisOperationDescriptor {
+                name: "fea.run_structural_frequency",
+                version: "fea.run_structural_frequency/v1",
+                invalid_model_error_code: "RM.FEA.RUN_STRUCTURAL_FREQUENCY.SOLVER_MODEL_INVALID",
+                cancelled_error_code: "RM.FEA.RUN_STRUCTURAL_FREQUENCY.CANCELLED",
+                assembly_error_code: "RM.FEA.RUN_STRUCTURAL_FREQUENCY.ASSEMBLY_FAILED",
+                formulation_admission_error_code:
+                    "RM.FEA.RUN_STRUCTURAL_FREQUENCY.FORMULATION_NOT_ADMITTED",
             },
             Self::Modal => AnalysisOperationDescriptor {
                 name: "fea.run_modal",
@@ -185,33 +196,45 @@ fn run_operation_for_procedure(
     procedure: AnalysisProcedure,
     solution_space: SolutionSpace,
 ) -> Option<AnalysisOperation> {
-    if solution_space != SolutionSpace::Direct {
-        return None;
-    }
     use AnalysisProcedure::{
         HarmonicResponse, ModalExtraction, Nonlinear, Static, TransientResponse,
     };
     use PhysicsFamily::{Acoustic, Coupled, Electromagnetic, Fluid, Structural, Thermal};
 
-    match (family, procedure) {
-        (Structural, Static) | (Coupled(CoupledPhysicsFamily::Thermomechanical), Static) => {
+    match (family, procedure, solution_space) {
+        (Structural, Static, SolutionSpace::Direct)
+        | (Coupled(CoupledPhysicsFamily::Thermomechanical), Static, SolutionSpace::Direct) => {
             Some(AnalysisOperation::LinearStatic)
         }
-        (Structural, ModalExtraction) => Some(AnalysisOperation::Modal),
-        (Acoustic, HarmonicResponse) => Some(AnalysisOperation::Acoustic),
-        (Thermal, Static | TransientResponse) => Some(AnalysisOperation::Thermal),
-        (Structural, TransientResponse) => Some(AnalysisOperation::Transient),
-        (Fluid, Static | TransientResponse) => Some(AnalysisOperation::Cfd),
-        (Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer), Static | TransientResponse) => {
-            Some(AnalysisOperation::Cht)
+        (Structural, ModalExtraction, SolutionSpace::Direct) => Some(AnalysisOperation::Modal),
+        (Structural, HarmonicResponse, SolutionSpace::Direct | SolutionSpace::ModalReduced) => {
+            Some(AnalysisOperation::StructuralFrequency)
         }
-        (Coupled(CoupledPhysicsFamily::FluidStructureInteraction), TransientResponse) => {
-            Some(AnalysisOperation::Fsi)
+        (Acoustic, HarmonicResponse, SolutionSpace::Direct) => Some(AnalysisOperation::Acoustic),
+        (Thermal, Static | TransientResponse, SolutionSpace::Direct) => {
+            Some(AnalysisOperation::Thermal)
         }
-        (Structural, Nonlinear) | (Coupled(CoupledPhysicsFamily::Thermomechanical), Nonlinear) => {
+        (Structural, TransientResponse, SolutionSpace::Direct) => {
+            Some(AnalysisOperation::Transient)
+        }
+        (Fluid, Static | TransientResponse, SolutionSpace::Direct) => Some(AnalysisOperation::Cfd),
+        (
+            Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer),
+            Static | TransientResponse,
+            SolutionSpace::Direct,
+        ) => Some(AnalysisOperation::Cht),
+        (
+            Coupled(CoupledPhysicsFamily::FluidStructureInteraction),
+            TransientResponse,
+            SolutionSpace::Direct,
+        ) => Some(AnalysisOperation::Fsi),
+        (Structural, Nonlinear, SolutionSpace::Direct)
+        | (Coupled(CoupledPhysicsFamily::Thermomechanical), Nonlinear, SolutionSpace::Direct) => {
             Some(AnalysisOperation::Nonlinear)
         }
-        (Electromagnetic, HarmonicResponse) => Some(AnalysisOperation::Electromagnetic),
+        (Electromagnetic, HarmonicResponse, SolutionSpace::Direct) => {
+            Some(AnalysisOperation::Electromagnetic)
+        }
         _ => None,
     }
 }
@@ -286,6 +309,11 @@ mod tests {
                 AnalysisOperation::Modal,
             ),
             (
+                PhysicsFamily::Structural,
+                AnalysisProcedure::HarmonicResponse,
+                AnalysisOperation::StructuralFrequency,
+            ),
+            (
                 PhysicsFamily::Acoustic,
                 AnalysisProcedure::HarmonicResponse,
                 AnalysisOperation::Acoustic,
@@ -347,6 +375,14 @@ mod tests {
                 Some(operation)
             );
         }
+        assert_eq!(
+            run_operation_for_procedure(
+                PhysicsFamily::Structural,
+                AnalysisProcedure::HarmonicResponse,
+                SolutionSpace::ModalReduced,
+            ),
+            Some(AnalysisOperation::StructuralFrequency)
+        );
     }
 
     #[test]

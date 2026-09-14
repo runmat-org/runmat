@@ -1,6 +1,8 @@
 use runmat_execution::identity::ValueId;
 use runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1;
-use runmat_execution::value::{ValueLimits, ValuePayload, ValueRef, ValueRefKind};
+use runmat_execution::value::{
+    artifact_object_value_id, ValueLimits, ValuePayload, ValueRef, ValueRefKind,
+};
 use runmat_execution::Digest;
 use serde::{Deserialize, Serialize};
 
@@ -34,12 +36,11 @@ impl ArtifactAccess {
     }
 
     pub fn value_id(&self, logical_digest: Digest) -> ValueId {
-        ValueId::derive(&[
-            b"runmat-artifact-object/v1",
-            logical_digest.bytes(),
-            self.encryption_context.bytes(),
-            self.authorization_scope.as_bytes(),
-        ])
+        artifact_object_value_id(
+            logical_digest,
+            self.encryption_context,
+            &self.authorization_scope,
+        )
     }
 
     pub fn reference(

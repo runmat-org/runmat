@@ -527,9 +527,7 @@ fn prepare_partition_workload(
         ObservationExecutionTarget::Host => None,
         ObservationExecutionTarget::GovernedAccelerator { class } => Some(
             admitted
-                .resource_plan
-                .request
-                .accelerators
+                .accelerator_requests
                 .iter()
                 .find(|allocation| &allocation.class == class)
                 .ok_or(AnalysisBridgeError::Identity(
@@ -617,7 +615,7 @@ fn observation_execution_target(
     select_observation_execution_target(
         admitted.workload.backend(),
         eligibility,
-        &admitted.resource_plan.request.accelerators,
+        &admitted.accelerator_requests,
         &source_host.workload.required_capabilities,
     )
 }

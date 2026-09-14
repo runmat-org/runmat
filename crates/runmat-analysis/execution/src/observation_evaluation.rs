@@ -5,7 +5,6 @@ use runmat_analysis_fea::execution::{
     AnalysisNumericalObjectKind, AnalysisWorkKind, FieldRecoveryRequest, FieldRecoverySource,
     ObservationEvaluationRequest, SequenceIdentity, StepIdentity,
 };
-use runmat_analysis_fea::planning::resource::{FeaResourcePlan, ObservationResourceFacts};
 use runmat_analysis_fea::results::field::{
     RecoveredFieldSelection, StructuralRecoveredFieldTopology,
 };
@@ -13,6 +12,7 @@ use runmat_analysis_fea::results::observation::{
     resolve_structural_observation_plan, ObservationArtifactManifest, ObservationLimits,
     ObservationResult,
 };
+use runmat_execution::resource::AcceleratorRequest;
 use runmat_execution::ProgramRevision;
 use runmat_execution_artifact::cache::CacheImport;
 use runmat_execution_artifact::object::ObjectInventoryLimits;
@@ -35,7 +35,7 @@ pub struct StructuralObservationPreparation {
     pub source_fields: ImportedRecoveredFields,
     pub source_workload: StructuralObservationWorkloadSource,
     pub mesh: Option<PreparedAnalysisObjects>,
-    pub resource_plan: PreparedAnalysisObjects,
+    pub accelerator_requests: Vec<AcceleratorRequest>,
     pub sequence: SequenceIdentity,
     pub step: ProcedureStep,
     pub limits: ObservationLimits,
@@ -49,7 +49,7 @@ pub(crate) struct AdmittedStructuralObservation {
     pub selection: RecoveredFieldSelection,
     pub workload: AdmittedStructuralObservationWorkload,
     pub mesh: Option<SolverMeshArtifact>,
-    pub resource_plan: FeaResourcePlan,
+    pub accelerator_requests: Vec<AcceleratorRequest>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -68,7 +68,6 @@ pub(crate) fn admit_structural_observation(
     if preparation.source_host.workload.kind != AnalysisWorkKind::RecoverField
         || preparation.source_host.workload.outputs != vec![AnalysisNumericalObjectKind::Field]
         || preparation.source_fields.output.kind != AnalysisNumericalObjectKind::Field
-        || preparation.resource_plan.manifest.kind != AnalysisNumericalObjectKind::ResourcePlan
         || preparation
             .mesh
             .as_ref()
@@ -143,8 +142,6 @@ pub(crate) fn admit_structural_observation(
             ))
         }
     }
-    let resource_plan = FeaResourcePlan::from_canonical_bytes(&preparation.resource_plan.payload())
-        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let mesh = preparation
         .mesh
         .as_ref()
@@ -208,22 +205,17 @@ pub(crate) fn admit_structural_observation(
         topology.identity,
         plan,
     )?;
-    let expected_observation_resources =
-        ObservationResourceFacts::from_plan(&request.plan, workload.observation_execution())
+    for accelerator in &preparation.accelerator_requests {
+        accelerator
+            .validate()
             .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    if resource_plan.input.topology_digest() != request.plan.topology_digest
-        || resource_plan.input.observations() != Some(&expected_observation_resources)
-    {
-        return Err(AnalysisBridgeError::Identity(
-            "observation execution policy differs from its canonical resource plan",
-        ));
     }
     Ok(AdmittedStructuralObservation {
         request,
         selection,
         workload,
         mesh,
-        resource_plan,
+        accelerator_requests: preparation.accelerator_requests.clone(),
     })
 }
 

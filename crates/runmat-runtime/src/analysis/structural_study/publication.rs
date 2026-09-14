@@ -12,6 +12,7 @@ use crate::operations::{
 };
 
 use super::{PreparedStudySequence, PreparedStudyStep};
+use crate::analysis::frequency_result::CompletedStructuralFrequencyStep;
 use crate::analysis::{
     current_fea_runtime_config, default_fea_artifact_root, persist_linear_static_run,
     run_operation_for_identity, storage, AnalysisExecutionStep, AnalysisModelTemplate,
@@ -218,8 +219,80 @@ pub(in crate::analysis) fn study_completion_from_prepared(
 pub(in crate::analysis) struct CompletedStudyStep {
     pub(in crate::analysis) step_id: ProcedureStepId,
     pub(in crate::analysis) solver_result_identity: SolverResultIdentity,
-    pub(in crate::analysis) run: OperationEnvelope<AnalysisRunResult>,
+    pub(in crate::analysis) run: CompletedStudyStepRun,
     pub(in crate::analysis) resolved_solver_options: AnalysisSolverOptions,
+}
+
+pub(in crate::analysis) enum CompletedStudyStepRun {
+    Standard(Box<OperationEnvelope<AnalysisRunResult>>),
+    StructuralFrequency(Box<CompletedStructuralFrequencyStep>),
+}
+
+struct CompletedRunFacts {
+    identity: runmat_analysis_fea::AnalysisRunIdentity,
+    operation: String,
+    op_version: String,
+    run_id: String,
+    run_status: RunStatus,
+    numerically_acceptable: bool,
+    production_publishable: bool,
+    solver_convergence: QualityGate,
+    result_quality: QualityGate,
+    quality_reasons: Vec<crate::analysis::QualityReason>,
+    production_publication_reasons: Vec<crate::analysis::ProductionPublicationReason>,
+    provenance: crate::analysis::RunProvenance,
+    numerical_result: crate::analysis::AnalysisStudyStepNumericalResultData,
+    standard_persistence: Option<AnalysisRunResult>,
+    frequency_persistence:
+        Option<crate::analysis::frequency_result::StructuralFrequencyPersistence>,
+}
+
+fn completed_run_facts(run: CompletedStudyStepRun) -> CompletedRunFacts {
+    match run {
+        CompletedStudyStepRun::Standard(run) => {
+            let run = *run;
+            let data = run.data;
+            CompletedRunFacts {
+                identity: data.run.identity.clone(),
+                operation: run.operation,
+                op_version: run.op_version,
+                run_id: data.run_id.clone(),
+                run_status: data.run_status,
+                numerically_acceptable: data.numerically_acceptable,
+                production_publishable: data.production_publishable,
+                solver_convergence: data.solver_convergence,
+                result_quality: data.result_quality,
+                quality_reasons: data.quality_reasons.clone(),
+                production_publication_reasons: data.production_publication_reasons.clone(),
+                provenance: data.provenance.clone(),
+                numerical_result: crate::analysis::AnalysisStudyStepNumericalResultData::Standard,
+                standard_persistence: Some(data),
+                frequency_persistence: None,
+            }
+        }
+        CompletedStudyStepRun::StructuralFrequency(run) => {
+            let run = *run;
+            let operation = run_operation_for_identity(&run.identity)
+                .expect("admitted structural-frequency identity has a runtime operation");
+            CompletedRunFacts {
+                identity: run.identity,
+                operation: operation.name().to_string(),
+                op_version: operation.version().to_string(),
+                run_id: run.run_id,
+                run_status: run.run_status,
+                numerically_acceptable: run.numerically_acceptable,
+                production_publishable: run.production_publishable,
+                solver_convergence: run.solver_convergence,
+                result_quality: run.result_quality,
+                quality_reasons: run.quality_reasons,
+                production_publication_reasons: run.production_publication_reasons,
+                provenance: run.provenance,
+                numerical_result: run.numerical_result,
+                standard_persistence: None,
+                frequency_persistence: Some(run.persistence),
+            }
+        }
+    }
 }
 
 pub(in crate::analysis) fn complete_study_run(
@@ -268,6 +341,7 @@ pub(in crate::analysis) fn complete_study_run(
         .map_err(|error| completion_error(&context, "RM.FEA.RUN_STUDY.IDENTITY_INVALID", error))?;
     let mut step_results = Vec::with_capacity(authored_steps.len());
     let mut runs_to_persist = Vec::with_capacity(authored_steps.len());
+    let mut frequency_runs_to_persist = Vec::new();
     let mut solver_results = BTreeMap::new();
     for (ordinal, authored) in authored_steps.into_iter().enumerate() {
         let completed = completed_by_id
@@ -279,9 +353,11 @@ pub(in crate::analysis) fn complete_study_run(
                     "completed solver results are missing an authored procedure step",
                 )
             })?;
-        let run = completed.run;
-        runs_to_persist.push(run.data.clone());
-        let actual_identity = &run.data.run.identity;
+        let run = completed_run_facts(completed.run);
+        if let Some(standard) = run.standard_persistence.clone() {
+            runs_to_persist.push(standard);
+        }
+        let actual_identity = &run.identity;
         if actual_identity.family() != authored.procedure_step.family
             || actual_identity.procedure() != authored.procedure_step.procedure
             || actual_identity.solution_space() != authored.procedure_step.solution_space
@@ -316,7 +392,7 @@ pub(in crate::analysis) fn complete_study_run(
         };
         let evidence_artifact_path = persist_immutable_study_evidence(
             &study_fingerprint,
-            &run_evidence_stage(&run.data.run_id),
+            &run_evidence_stage(&run.run_id),
             serde_json::json!({
                 "schema_version": "fea_study_sequence_step_artifact/v1",
                 "study_id": study_id.clone(),
@@ -325,18 +401,19 @@ pub(in crate::analysis) fn complete_study_run(
                 "procedure_step": authored.procedure_step,
                 "execution": resolved_execution,
                 "solver_result_identity": completed.solver_result_identity,
-                "identity": run.data.run.identity,
+                "identity": run.identity,
                 "run_operation": run.operation,
                 "run_op_version": run.op_version,
-                "run_id": run.data.run_id,
-                "run_status": run.data.run_status,
-                "numerically_acceptable": run.data.numerically_acceptable,
-                "production_publishable": run.data.production_publishable,
-                "solver_convergence": run.data.solver_convergence,
-                "result_quality": run.data.result_quality,
-                "quality_reasons": run.data.quality_reasons,
-                "production_publication_reasons": run.data.production_publication_reasons,
-                "provenance": run.data.provenance,
+                "run_id": run.run_id,
+                "run_status": run.run_status,
+                "numerically_acceptable": run.numerically_acceptable,
+                "production_publishable": run.production_publishable,
+                "solver_convergence": run.solver_convergence,
+                "result_quality": run.result_quality,
+                "quality_reasons": run.quality_reasons,
+                "production_publication_reasons": run.production_publication_reasons,
+                "provenance": run.provenance,
+                "numerical_result": run.numerical_result,
             }),
         )
         .map_err(|error| {
@@ -346,24 +423,29 @@ pub(in crate::analysis) fn complete_study_run(
             authored.procedure_step.step_id.clone(),
             completed.solver_result_identity,
         );
-        step_results.push(AnalysisStudyStepRunData {
+        let step_result = AnalysisStudyStepRunData {
             ordinal,
             procedure_step: authored.procedure_step,
             execution: resolved_execution,
-            identity: run.data.run.identity,
+            identity: run.identity,
             run_operation: run.operation,
             run_op_version: run.op_version,
-            run_id: run.data.run_id,
-            run_status: run.data.run_status,
-            numerically_acceptable: run.data.numerically_acceptable,
-            production_publishable: run.data.production_publishable,
-            solver_convergence: run.data.solver_convergence,
-            result_quality: run.data.result_quality,
-            quality_reasons: run.data.quality_reasons,
-            production_publication_reasons: run.data.production_publication_reasons,
-            provenance: run.data.provenance,
+            run_id: run.run_id,
+            run_status: run.run_status,
+            numerically_acceptable: run.numerically_acceptable,
+            production_publishable: run.production_publishable,
+            solver_convergence: run.solver_convergence,
+            result_quality: run.result_quality,
+            quality_reasons: run.quality_reasons,
+            production_publication_reasons: run.production_publication_reasons,
+            provenance: run.provenance,
+            numerical_result: run.numerical_result,
             evidence_artifact_path,
-        });
+        };
+        if let Some(persistence) = run.frequency_persistence {
+            frequency_runs_to_persist.push((step_result.clone(), persistence));
+        }
+        step_results.push(step_result);
     }
     if !completed_by_id.is_empty() {
         return Err(completion_error(
@@ -382,6 +464,11 @@ pub(in crate::analysis) fn complete_study_run(
     )?;
     for run in &runs_to_persist {
         persist_linear_static_run(&context, run)?;
+    }
+    for (step, persistence) in &frequency_runs_to_persist {
+        storage::persist_structural_frequency_result(step, persistence).map_err(|error| {
+            completion_storage_error(&context, "RM.FEA.RUN_STUDY.ARTIFACT_STORE_FAILED", error)
+        })?;
     }
     let run_status = step_results
         .iter()

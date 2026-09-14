@@ -56,24 +56,24 @@ pub fn prepare_structural_observation_assembly(
             "observation assembly requires reduced results and bounded chunks".into(),
         ));
     }
-    let mut by_observation = preparation
-        .results
-        .into_iter()
-        .map(|imported| (imported.result.observation_id.clone(), imported))
-        .collect::<BTreeMap<_, _>>();
+    let mut by_observation = BTreeMap::new();
+    for imported in preparation.results {
+        if by_observation
+            .insert(imported.result.observation_id.clone(), imported)
+            .is_some()
+        {
+            return Err(AnalysisBridgeError::Identity(
+                "observation assembly contains a duplicate result",
+            ));
+        }
+    }
     let results = preparation
         .source_request
         .plan
         .observations
         .iter()
-        .map(|observation| {
-            by_observation
-                .remove(&observation.spec.observation_id)
-                .ok_or(AnalysisBridgeError::Identity(
-                    "observation assembly is missing a resolved result",
-                ))
-        })
-        .collect::<AnalysisBridgeResult<Vec<_>>>()?;
+        .filter_map(|observation| by_observation.remove(&observation.spec.observation_id))
+        .collect::<Vec<_>>();
     if !by_observation.is_empty() {
         return Err(AnalysisBridgeError::Identity(
             "observation assembly contains an unrelated or duplicate result",

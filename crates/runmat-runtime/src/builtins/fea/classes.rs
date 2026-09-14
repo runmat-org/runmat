@@ -41,6 +41,7 @@ pub(super) const FEA_CONJUGATE_HEAT_TRANSFER_INTERFACE_CLASS: &str =
     "fea.ConjugateHeatTransferInterface";
 pub(super) const FEA_RESULTS_CLASS: &str = "fea.Results";
 pub(super) const FEA_FIELD_CLASS: &str = "fea.Field";
+pub(super) const FEA_FIELD_PAGE_CLASS: &str = "fea.FieldPage";
 pub(super) const FEA_COMPARE_CLASS: &str = "fea.Compare";
 pub(super) const FEA_TRENDS_CLASS: &str = "fea.Trends";
 pub(super) const FEA_STUDY_CONTEXT_PROPERTY: &str = "study";
@@ -213,6 +214,7 @@ pub(super) const RESULTS_FIELDS: &[&str] = &[
     "transient_results",
     "nonlinear_results",
     "electromagnetic_results",
+    "structural_frequency_results",
     "diagnostics",
     "run_status",
     "numerically_acceptable",
@@ -228,6 +230,7 @@ pub(super) const FIELD_FIELDS: &[&str] = &[
     "field_id",
     "shape",
     "values",
+    "materialized",
     "unit",
     "location",
     "kind",
@@ -240,8 +243,22 @@ pub(super) const FIELD_FIELDS: &[&str] = &[
     "entity_count",
     "value_count",
     "storage",
+    "sample",
+    "numeric_representation",
     "run_id",
     FEA_STUDY_CONTEXT_PROPERTY,
+];
+pub(super) const FIELD_PAGE_FIELDS: &[&str] = &[
+    "run_id",
+    "field_id",
+    "sample",
+    "values",
+    "start",
+    "count",
+    "total_count",
+    "next_start",
+    "has_more",
+    "numeric_representation",
 ];
 pub(super) const COMPARE_FIELDS: &[&str] = &[
     "baseline_run_id",
@@ -323,6 +340,7 @@ pub(crate) fn ensure_fea_classes_registered() {
                 FEA_STEP_RUN_RESULT_CLASS => step_run_result_methods(),
                 FEA_RESULTS_CLASS => results_methods(),
                 FEA_FIELD_CLASS => field_methods(),
+                super::field_selectors::STRUCTURAL_FIELD_CLASS => structural_field_methods(),
                 _ => HashMap::new(),
             };
             crate::class_registry::register_class(crate::class_registry::RuntimeClass {
@@ -642,6 +660,7 @@ fn structural_step_methods() -> HashMap<String, crate::class_registry::RuntimeMe
     static_methods(&[
         ("static", "fea.StructuralStep.static"),
         ("modal", "fea.StructuralStep.modal"),
+        ("harmonic", "fea.StructuralStep.harmonic"),
         ("transient", "fea.StructuralStep.transient"),
         ("nonlinear", "fea.StructuralStep.nonlinear"),
     ])
@@ -717,6 +736,53 @@ fn fluid_domain_methods() -> HashMap<String, crate::class_registry::RuntimeMetho
     static_methods(&[("newtonian", "fea.FluidDomain.newtonian")])
 }
 
+fn structural_field_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
+    static_methods(&[
+        ("displacement", "fea.StructuralField.displacement"),
+        ("rotation", "fea.StructuralField.rotation"),
+        ("vonMises", "fea.StructuralField.vonMises"),
+        ("nodalVonMises", "fea.StructuralField.nodalVonMises"),
+        ("strain", "fea.StructuralField.strain"),
+        ("stress", "fea.StructuralField.stress"),
+        ("reactionForce", "fea.StructuralField.reactionForce"),
+        ("reactionMoment", "fea.StructuralField.reactionMoment"),
+        (
+            "constraintReactionForce",
+            "fea.StructuralField.constraintReactionForce",
+        ),
+        (
+            "constraintReactionMomentAboutGlobalOrigin",
+            "fea.StructuralField.constraintReactionMomentAboutGlobalOrigin",
+        ),
+        (
+            "strainEnergyDensity",
+            "fea.StructuralField.strainEnergyDensity",
+        ),
+        ("totalStrainEnergy", "fea.StructuralField.totalStrainEnergy"),
+        ("residualNorm", "fea.StructuralField.residualNorm"),
+        ("equationScale", "fea.StructuralField.equationScale"),
+        ("beamAxialForce", "fea.StructuralField.beamAxialForce"),
+        ("beamShearForce", "fea.StructuralField.beamShearForce"),
+        ("beamTorsionMoment", "fea.StructuralField.beamTorsionMoment"),
+        ("beamBendingMoment", "fea.StructuralField.beamBendingMoment"),
+        ("beamBendingStress", "fea.StructuralField.beamBendingStress"),
+        ("beamTorsionStress", "fea.StructuralField.beamTorsionStress"),
+        (
+            "shellMembraneForce",
+            "fea.StructuralField.shellMembraneForce",
+        ),
+        (
+            "shellBendingMoment",
+            "fea.StructuralField.shellBendingMoment",
+        ),
+        (
+            "shellTransverseShear",
+            "fea.StructuralField.shellTransverseShear",
+        ),
+        ("shellVonMises", "fea.StructuralField.shellVonMises"),
+    ])
+}
+
 fn static_methods(names: &[(&str, &str)]) -> HashMap<String, crate::class_registry::RuntimeMethod> {
     names
         .iter()
@@ -737,7 +803,7 @@ fn static_methods(names: &[(&str, &str)]) -> HashMap<String, crate::class_regist
         .collect()
 }
 
-fn fea_class_schemas() -> [FeaClassSchema; 44] {
+fn fea_class_schemas() -> [FeaClassSchema; 46] {
     [
         (
             FEA_STUDY_CLASS,
@@ -1063,7 +1129,7 @@ fn fea_class_schemas() -> [FeaClassSchema; 44] {
             &[
                 "field_id",
                 "shape",
-                "values",
+                "materialized",
                 "unit",
                 "location",
                 "kind",
@@ -1077,6 +1143,20 @@ fn fea_class_schemas() -> [FeaClassSchema; 44] {
                 "value_count",
                 "storage",
             ],
+            validate_fea_object,
+        ),
+        (
+            FEA_FIELD_PAGE_CLASS,
+            "runmat.fea.field-page",
+            FIELD_PAGE_FIELDS,
+            FIELD_PAGE_FIELDS,
+            validate_fea_object,
+        ),
+        (
+            super::field_selectors::STRUCTURAL_FIELD_CLASS,
+            "runmat.fea.structural-field",
+            super::study_values::VALUE_FIELD,
+            super::study_values::VALUE_FIELD,
             validate_fea_object,
         ),
         (

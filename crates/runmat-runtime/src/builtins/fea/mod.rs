@@ -40,12 +40,13 @@ use std::path::PathBuf;
 #[cfg(test)]
 use crate::analysis::AnalysisStudySweepValidateData;
 use crate::analysis::{
-    analysis_create_model_op, analysis_plan_study_op, analysis_plan_study_sweep_op,
-    analysis_results_by_run_id_op, analysis_results_compare_op, analysis_run_study_op,
-    analysis_run_study_sweep_op, analysis_trends_op, analysis_validate_study_op,
-    analysis_validate_study_sweep_op, load_fea_document_from_path_async,
-    AnalysisCreateModelIntentSpec, AnalysisExecutionPlan, AnalysisExecutionStep,
-    AnalysisFieldDescriptor, AnalysisModelTemplate, AnalysisResultsCompareQuery,
+    analysis_create_model_op, analysis_field_page_by_run_id_op, analysis_plan_study_op,
+    analysis_plan_study_sweep_op, analysis_results_by_run_id_op, analysis_results_compare_op,
+    analysis_run_study_op, analysis_run_study_sweep_op, analysis_trends_op,
+    analysis_validate_study_op, analysis_validate_study_sweep_op,
+    load_fea_document_from_path_async, AnalysisCreateModelIntentSpec, AnalysisExecutionPlan,
+    AnalysisExecutionStep, AnalysisFieldDescriptor, AnalysisFieldRequestOptions,
+    AnalysisFieldSelection, AnalysisModelTemplate, AnalysisResultsCompareQuery,
     AnalysisResultsQuery, AnalysisSolverOptions, AnalysisStudySpec, AnalysisStudySweepData,
     AnalysisStudySweepFailureEntry, AnalysisStudySweepPlanData, AnalysisStudySweepSpec,
     AnalysisTrendsQuery, FeaResolvedDocument,
@@ -65,6 +66,8 @@ pub(crate) mod damping;
 pub(crate) mod domains;
 pub(crate) mod excitations;
 pub(crate) mod execution;
+mod field_access;
+pub(crate) mod field_selectors;
 pub(crate) mod generator_policies;
 pub(crate) mod initial_conditions;
 pub(crate) mod interfaces;
@@ -103,6 +106,7 @@ const PLAN_NAME: &str = "fea.plan";
 const RUN_NAME: &str = "fea.run";
 const RESULTS_NAME: &str = "fea.results";
 const FIELD_NAME: &str = "fea.field";
+const FIELD_PAGE_NAME: &str = "fea.fieldPage";
 const PLOT_NAME: &str = "plot";
 const PLOT_METHOD_BUILTIN_NAME: &str = "__runmat_fea_plot";
 const MESH_NAME: &str = "mesh";
@@ -291,7 +295,7 @@ const TRENDS_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     default: None,
     description: "Optional positive integer WindowSize.",
 }];
-const FIELD_INPUTS: [BuiltinParamDescriptor; 2] = [
+const FIELD_INPUTS: [BuiltinParamDescriptor; 3] = [
     BuiltinParamDescriptor {
         name: "resultsOrRun",
         ty: BuiltinParamType::Any,
@@ -300,11 +304,41 @@ const FIELD_INPUTS: [BuiltinParamDescriptor; 2] = [
         description: "fea.Results, fea.RunResult, or persisted run id.",
     },
     BuiltinParamDescriptor {
-        name: "fieldId",
-        ty: BuiltinParamType::StringScalar,
+        name: "field",
+        ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Exact field id or unique dotted suffix.",
+        description: "Typed FEA field selector, such as fea.StructuralField.stress().",
+    },
+    BuiltinParamDescriptor {
+        name: "sample",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Typed independent-domain sample, such as fea.Frequency.hertz(120).",
+    },
+];
+const FIELD_PAGE_INPUTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "field",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Artifact-backed fea.Field returned by fea.field.",
+    },
+    BuiltinParamDescriptor {
+        name: "start",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: Some("1"),
+        description: "One-based logical value index.",
+    },
+    BuiltinParamDescriptor {
+        name: "count",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: Some("256"),
+        description: "Positive maximum logical value count, capped at 4096.",
     },
 ];
 const PLOT_CONTEXT_INPUTS: [BuiltinParamDescriptor; 2] = [
@@ -420,8 +454,13 @@ const RESULTS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDes
     outputs: &OUT_ANY,
 }];
 const FIELD_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "field = fea.field(resultsOrRun, fieldId)",
+    label: "field = fea.field(resultsOrRun, fieldSelector, sample)",
     inputs: &FIELD_INPUTS,
+    outputs: &OUT_ANY,
+}];
+const FIELD_PAGE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "page = fea.fieldPage(field, start, count)",
+    inputs: &FIELD_PAGE_INPUTS,
     outputs: &OUT_ANY,
 }];
 const PLOT_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
@@ -671,6 +710,39 @@ pub const FEA_FIELD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ERRORS,
 };
+const FIELD_PAGE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "start",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "A positive one-based host integer or integral scalar double; provider-resident values are rejected.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "count",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "A positive host integer or integral scalar double, capped by the field-page contract; provider-resident values are rejected.",
+    },
+];
+pub const FEA_FIELD_PAGE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "field page bounds",
+        inputs: &FIELD_PAGE_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Paging indexes and counts remain exact native integers; numerical field values retain their real or complex floating representation.",
+    }];
+pub const FEA_FIELD_PAGE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &FIELD_PAGE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ERRORS,
+};
 pub const FEA_PLOT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &PLOT_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
@@ -889,6 +961,19 @@ pub async fn fea_field_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 }
 
 #[runtime_builtin(
+    name = "fea.fieldPage",
+    category = "fea",
+    summary = "Read a bounded page of real or complex values from an artifact-backed FEA field.",
+    keywords = "fea,field,page,values,complex,artifact",
+    descriptor(crate::builtins::fea::FEA_FIELD_PAGE_DESCRIPTOR),
+    integer_capabilities(crate::builtins::fea::FEA_FIELD_PAGE_INTEGER_CAPABILITIES),
+    builtin_path = "crate::builtins::fea"
+)]
+pub async fn fea_field_page_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    field_access::create_page_from_args(args)
+}
+
+#[runtime_builtin(
     name = "__runmat_fea_plot",
     category = "fea",
     summary = "Implement plot overloads for FEA result objects.",
@@ -1071,6 +1156,7 @@ fn create_results_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
             "total_elements",
             "mode_count",
             "available_mode_indices",
+            "frequency_sample_count",
             "snapshot_count",
             "increment_count",
             "failed_increment_count",
@@ -1104,26 +1190,62 @@ fn create_results_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
 }
 
 fn create_field_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
-    if args.len() != 2 {
+    if !(2..=3).contains(&args.len()) {
         return Err(builtin_error(
             FIELD_NAME,
             &ERROR_INPUT,
-            "fea.field requires results/run input and field id",
+            "fea.field requires results/run input, a typed field selector, and an optional typed sample",
         ));
     }
-    let field_id = scalar_string(&args[1], FIELD_NAME, &ERROR_INPUT)?;
+    let field_id = field_selectors::from_value(FIELD_NAME, &args[1])?
+        .field_id()
+        .to_string();
+    let sample = args
+        .get(2)
+        .map(|value| {
+            let hertz =
+                values::quantity_scalar(FIELD_NAME, value, values::FREQUENCY_CLASS, "hertz")?;
+            if !hertz.is_finite() || hertz <= 0.0 {
+                return Err(builtin_error(
+                    FIELD_NAME,
+                    &ERROR_INPUT,
+                    "frequency sample must be finite and positive",
+                ));
+            }
+            Ok(runmat_analysis_fea::results::field::RecoveredFieldSample::FrequencyHertz(hertz))
+        })
+        .transpose()?;
     let results = results_data_from_value(FIELD_NAME, &args[0])?;
-    let field = find_field(results.fields.into_iter(), &field_id).ok_or_else(|| {
-        builtin_error(
-            FIELD_NAME,
-            &ERROR_INPUT,
-            format!("FEA field `{field_id}` was not found in results"),
+    let inline_field = sample
+        .is_none()
+        .then(|| find_field(results.fields.into_iter(), &field_id))
+        .flatten();
+    let mut object = if let Some(field) = inline_field {
+        let descriptor = find_descriptor(results.field_descriptors.iter(), &field_id)
+            .cloned()
+            .unwrap_or_else(|| AnalysisFieldDescriptor::from_field(&field));
+        field_to_object(&field, &descriptor)?
+    } else {
+        let run_id = run_id_context_from_value(&args[0]).ok_or_else(|| {
+            builtin_error(
+                FIELD_NAME,
+                &ERROR_INPUT,
+                "artifact-backed FEA field selection requires a persisted run identity",
+            )
+        })?;
+        let page = analysis_field_page_by_run_id_op(
+            &run_id,
+            AnalysisFieldSelection::new(&field_id, sample),
+            AnalysisFieldRequestOptions {
+                offset: Some(0),
+                limit: Some(0),
+            },
+            OperationContext::new(None, None),
         )
-    })?;
-    let descriptor = find_descriptor(results.field_descriptors.iter(), &field_id)
-        .cloned()
-        .unwrap_or_else(|| AnalysisFieldDescriptor::from_field(&field));
-    let mut object = field_to_object(&field, &descriptor)?;
+        .map_err(|error| operation_error(FIELD_NAME, &ERROR_OPERATION, error))?
+        .data;
+        field_object(&page.descriptor, None)?
+    };
     copy_study_context_property(&args[0], &mut object);
     copy_run_id_context_property(&args[0], &mut object);
     Ok(Value::Object(object))
@@ -1453,19 +1575,30 @@ fn field_to_object(
     field: &AnalysisField,
     descriptor: &AnalysisFieldDescriptor,
 ) -> BuiltinResult<ObjectInstance> {
+    field_object(descriptor, Some(field_values_value(field)?))
+}
+
+fn field_object(
+    descriptor: &AnalysisFieldDescriptor,
+    values: Option<Value>,
+) -> BuiltinResult<ObjectInstance> {
     ensure_fea_classes_registered();
+    let materialized = values.is_some();
     let mut object = ObjectInstance::new(FEA_FIELD_CLASS.to_string());
     object.properties.insert(
         "field_id".to_string(),
-        Value::String(field.field_id.clone()),
+        Value::String(descriptor.field_id.clone()),
     );
     object.properties.insert(
         "shape".to_string(),
-        usize_slice_tensor(&field.shape, 1, field.shape.len())?,
+        usize_slice_tensor(&descriptor.shape, 1, descriptor.shape.len())?,
     );
+    if let Some(values) = values {
+        object.properties.insert("values".to_string(), values);
+    }
     object
         .properties
-        .insert("values".to_string(), field_values_value(field)?);
+        .insert("materialized".to_string(), Value::Bool(materialized));
     object.properties.insert(
         "unit".to_string(),
         Value::String(descriptor.unit.clone().unwrap_or_default()),
@@ -1524,6 +1657,28 @@ fn field_to_object(
     object.properties.insert(
         "storage".to_string(),
         Value::String(format!("{:?}", descriptor.storage).to_ascii_lowercase()),
+    );
+    let sample = match descriptor.sample {
+        Some(runmat_analysis_fea::results::field::RecoveredFieldSample::FrequencyHertz(value)) => {
+            values::quantity_to_value(FIELD_NAME, values::FREQUENCY_CLASS, "hertz", value)?
+        }
+        Some(sample) => serializable_to_value_preserving_integers(
+            FIELD_NAME,
+            &ERROR_INTERNAL,
+            &sample,
+            &[],
+            &["coordinate"],
+        )?,
+        None => empty_double_value(),
+    };
+    object.properties.insert("sample".to_string(), sample);
+    object.properties.insert(
+        "numeric_representation".to_string(),
+        field_access::numeric_representation_value(descriptor.numeric_representation.or(
+            materialized.then_some(
+                runmat_analysis_fea::results::field::RecoveredFieldNumericRepresentation::Real,
+            ),
+        )),
     );
     Ok(object)
 }
@@ -1585,7 +1740,7 @@ where
         if field.field_id == requested {
             return Some(field);
         }
-        if field_id_matches(&field.field_id, requested) {
+        if crate::analysis::field_selection::field_id_matches(&field.field_id, requested) {
             suffix_matches.push(field);
         }
     }
@@ -1605,7 +1760,7 @@ where
         if descriptor.field_id == requested {
             return Some(descriptor);
         }
-        if field_id_matches(&descriptor.field_id, requested) {
+        if crate::analysis::field_selection::field_id_matches(&descriptor.field_id, requested) {
             suffix_matches.push(descriptor);
         }
     }
@@ -1614,16 +1769,6 @@ where
     } else {
         None
     }
-}
-
-fn field_id_matches(candidate: &str, requested: &str) -> bool {
-    candidate == requested
-        || candidate
-            .strip_suffix(requested)
-            .is_some_and(|prefix| prefix.ends_with('.'))
-        || candidate
-            .rsplit_once('.')
-            .is_some_and(|(_, tail)| tail == requested)
 }
 
 struct NameValuePair<'a> {
@@ -2794,6 +2939,7 @@ fn results_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
 
 fn field_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
     [
+        ("page", FIELD_PAGE_NAME),
         ("plot", PLOT_METHOD_BUILTIN_NAME),
         ("mesh", MESH_METHOD_BUILTIN_NAME),
     ]
@@ -3529,6 +3675,12 @@ mod tests {
             object.properties.get("element_count"),
             Some(&Value::Int(IntValue::U64(0)))
         );
+        let reference = field_object(&descriptor, None).expect("artifact field reference");
+        assert_eq!(
+            reference.properties.get("materialized"),
+            Some(&Value::Bool(false))
+        );
+        assert!(!reference.properties.contains_key("values"));
 
         let device_field = AnalysisField {
             field_id: "device".into(),
@@ -3547,6 +3699,26 @@ mod tests {
             device.fields.get("element_count"),
             Some(&Value::Int(IntValue::U64(u64::from(u32::MAX))))
         );
+    }
+
+    #[test]
+    fn structural_field_selectors_are_typed_and_portable() {
+        ensure_value_classes_registered();
+        let selector = block_on(field_selectors::stress()).expect("typed structural field");
+        let Value::Object(object) = &selector else {
+            panic!("expected structural field selector object");
+        };
+        assert_eq!(object.class_name, field_selectors::STRUCTURAL_FIELD_CLASS);
+        assert_eq!(
+            field_selectors::from_value("test", &selector).unwrap(),
+            runmat_analysis_fea::contracts::StructuralFieldSelector::Stress
+        );
+        let encoded = crate::execution::value_codec::encode_inline_value(&selector)
+            .expect("structural field selector should be portable");
+        let decoded = crate::execution::value_codec::decode_inline_value(&encoded)
+            .expect("portable structural field selector should decode");
+        assert_eq!(selector, decoded);
+        assert!(field_selectors::from_value("test", &Value::String("stress".into())).is_err());
     }
 
     #[test]
@@ -3645,7 +3817,8 @@ mod tests {
 
         let field_error = create_field_object_from_args(vec![
             Value::Num(1.0),
-            Value::String("stress".into()),
+            Value::Num(1.0),
+            Value::Num(2.0),
             Value::Num(2.0),
         ])
         .expect_err("surplus fea.field argument");
@@ -4105,10 +4278,10 @@ execution:
 
         let field = block_on(fea_field_builtin(vec![
             results,
-            Value::String("von_mises".to_string()),
+            block_on(field_selectors::von_mises()).expect("typed field selector"),
         ]))
         .expect("field should resolve by unique suffix");
-        let Value::Object(field_object) = field else {
+        let Value::Object(field_object) = &field else {
             panic!("expected field object");
         };
         assert_eq!(field_object.class_name, FEA_FIELD_CLASS);
@@ -4147,6 +4320,10 @@ execution:
         let Some(Value::Tensor(values)) = field_object.properties.get("values") else {
             panic!("expected values tensor");
         };
+        assert_eq!(
+            field_object.properties.get("materialized"),
+            Some(&Value::Bool(true))
+        );
         assert_eq!(values.shape, vec![1]);
         assert_eq!(values.materialize_f64(), vec![42.0]);
         assert!(field_object
@@ -4154,7 +4331,51 @@ execution:
             .contains_key(FEA_STUDY_CONTEXT_PROPERTY));
         assert_eq!(
             field_object.properties.get("run_id"),
-            Some(&Value::String(run_id))
+            Some(&Value::String(run_id.clone()))
+        );
+
+        let page = block_on(fea_field_page_builtin(vec![
+            field,
+            Value::Int(IntValue::U8(1)),
+            Value::Int(IntValue::U16(1)),
+        ]))
+        .expect("persisted field page should load");
+        let Value::Object(page) = page else {
+            panic!("expected field page object")
+        };
+        assert_eq!(page.class_name, FEA_FIELD_PAGE_CLASS);
+        assert_eq!(
+            crate::class_registry::lookup_method(FEA_FIELD_CLASS, "page")
+                .expect("fea.Field.page method")
+                .0
+                .function_name,
+            FIELD_PAGE_NAME
+        );
+        assert_eq!(
+            page.properties.get("start"),
+            Some(&Value::Int(IntValue::U64(1)))
+        );
+        assert_eq!(
+            page.properties.get("count"),
+            Some(&Value::Int(IntValue::U64(1)))
+        );
+        assert_eq!(page.properties.get("has_more"), Some(&Value::Bool(false)));
+        assert!(matches!(
+            page.properties.get("next_start"),
+            Some(Value::Tensor(tensor)) if tensor.is_empty()
+        ));
+        let Some(Value::Tensor(values)) = page.properties.get("values") else {
+            panic!("expected real field page values")
+        };
+        assert_eq!(values.shape, vec![1, 1]);
+        assert_eq!(values.materialize_f64(), vec![42.0]);
+        let page = Value::Object(page);
+        let encoded = crate::execution::value_codec::encode_inline_value(&page)
+            .expect("field page should be portable");
+        assert_eq!(
+            crate::execution::value_codec::decode_inline_value(&encoded)
+                .expect("portable field page should decode"),
+            page
         );
     }
 
@@ -4180,7 +4401,7 @@ execution:
         let results = block_on(fea_results_builtin(vec![run_value])).expect("results should load");
         let field = block_on(fea_field_builtin(vec![
             results,
-            Value::String("structural.von_mises".to_string()),
+            block_on(field_selectors::von_mises()).expect("typed field selector"),
         ]))
         .expect("field should resolve");
         let field_handle = block_on(crate::call_builtin_async("plot", &[field]))
@@ -4222,7 +4443,7 @@ execution:
         let results = block_on(fea_results_builtin(vec![run_value])).expect("results should load");
         let field = block_on(fea_field_builtin(vec![
             results,
-            Value::String("structural.von_mises".to_string()),
+            block_on(field_selectors::von_mises()).expect("typed field selector"),
         ]))
         .expect("field should resolve");
 
@@ -4238,6 +4459,7 @@ execution:
         .expect("plot request should parse mesh, deformation, and overlay options");
 
         assert_eq!(request.field_id, "structural.von_mises");
+        assert_eq!(request.sample, None);
         assert!(request.options.show_solver_mesh_edges);
         assert!(!request.options.apply_deformation_overlay);
         assert_eq!(

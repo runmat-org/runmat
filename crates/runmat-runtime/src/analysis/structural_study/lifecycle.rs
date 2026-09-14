@@ -5,11 +5,14 @@ use crate::operations::{
     OperationErrorSeverity, OperationErrorSpec, OperationErrorType,
 };
 
-use super::publication::{complete_study_run, CompletedStudyStep, PreparedStudyCompletion};
+use super::publication::{
+    complete_study_run, CompletedStudyStep, CompletedStudyStepRun, PreparedStudyCompletion,
+};
 use super::{
     PreparedStructuralStudyIntent, PreparedStructuralStudyIntentStep,
     StructuralStudyCompletionIdentity,
 };
+use crate::analysis::frequency_result::admit_structural_frequency_result;
 use crate::analysis::{
     analysis_admit_linear_static_run_with_id, analysis_admit_transient_run_with_id,
     analysis_study_content_digest, meshing, prepare_linear_static_workload_template,
@@ -23,6 +26,7 @@ use crate::analysis::{
 mod preparation;
 
 pub use preparation::analysis_prepare_structural_study_intent_op;
+pub(in crate::analysis) use preparation::prepare_structural_frequency_workload;
 
 /// Admits the remotely meshed and solved result of a path-free structural study intent.
 ///
@@ -142,6 +146,20 @@ pub fn analysis_complete_structural_study_intent_op(
             *result,
             completion_identity,
         ),
+        (
+            runmat_analysis_fea::execution::StructuralStudyWorkloads::StructuralFrequency {
+                workload,
+            },
+            StructuralStudyNumericalResult::StructuralFrequency(result),
+        ) => complete_structural_frequency(
+            intent,
+            resolved_model,
+            persisted_mesh,
+            meshing_output.artifact,
+            *workload,
+            *result,
+            completion_identity,
+        ),
         _ => Err(intent_completion_error(
             &intent,
             "RM.FEA.RUN_STUDY.RESULT_KIND_MISMATCH",
@@ -150,6 +168,194 @@ pub fn analysis_complete_structural_study_intent_op(
             "remote structural-study result kind differs from its prepared workload kind",
         )),
     }
+}
+
+fn complete_structural_frequency(
+    intent: PreparedStructuralStudyIntent,
+    resolved_model: runmat_analysis_core::AnalysisModel,
+    persisted_mesh: super::super::meshing::ResolvedStudyMesh,
+    solver_mesh: runmat_meshing_core::SolverMeshArtifact,
+    authored_workload: runmat_analysis_fea::execution::StructuralFrequencyWorkload,
+    numerical: crate::analysis::StructuralStudyFrequencyNumericalResult,
+    completion_identity: StructuralStudyCompletionIdentity,
+) -> Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope> {
+    let [step] = intent.steps.as_slice() else {
+        return Err(intent_completion_error(
+            &intent,
+            "RM.FEA.RUN_STUDY.STEP_INVENTORY_MISMATCH",
+            OperationErrorType::Contract,
+            OperationErrorSeverity::Fatal,
+            "structural-frequency completion requires exactly one authored procedure step",
+        ));
+    };
+    let step = step.clone();
+    let assigned_run_id = completion_identity
+        .local_run_id(intent.authored_study_digest, &step.procedure_step.step_id);
+    complete_frequency_study(
+        PreparedStudyCompletion {
+            context: intent.context,
+            study_id: intent.study_id,
+            model_template: intent.model_template,
+            study_fingerprint: study_fingerprint_from_digest(intent.authored_study_digest),
+            authored_study_digest: intent.authored_study_digest,
+            model: resolved_model,
+            steps: vec![super::PreparedStudyStep {
+                authored_execution: step.authored_execution,
+                procedure_step: step.procedure_step,
+            }],
+            operation_sequence: intent.operation_sequence,
+            solver_mesh_artifact_path: persisted_mesh.artifact_path,
+            meshing_evidence_artifact_path: persisted_mesh.evidence_path,
+        },
+        solver_mesh,
+        authored_workload,
+        numerical,
+        assigned_run_id,
+    )
+}
+
+pub(in crate::analysis) fn complete_frequency_study(
+    mut prepared: PreparedStudyCompletion,
+    solver_mesh: runmat_meshing_core::SolverMeshArtifact,
+    mut authored_workload: runmat_analysis_fea::execution::StructuralFrequencyWorkload,
+    numerical: crate::analysis::StructuralStudyFrequencyNumericalResult,
+    assigned_run_id: String,
+) -> Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope> {
+    let [step] = prepared.steps.as_slice() else {
+        return Err(frequency_completion_error(
+            &prepared,
+            "RM.FEA.RUN_STUDY.STEP_INVENTORY_MISMATCH",
+            "structural-frequency completion requires exactly one authored procedure step",
+        ));
+    };
+    if numerical.step_id != step.procedure_step.step_id
+        || numerical.step_id != *authored_workload.step_id()
+    {
+        return Err(frequency_completion_error(
+            &prepared,
+            "RM.FEA.RUN_STUDY.STEP_INVENTORY_MISMATCH",
+            "structural-frequency result names another procedure step",
+        ));
+    }
+    authored_workload
+        .replace_model(prepared.model.clone())
+        .map_err(|error| {
+            frequency_completion_error(
+                &prepared,
+                "RM.FEA.RUN_STUDY.FREQUENCY_WORKLOAD_INVALID",
+                error.to_string(),
+            )
+        })?;
+    if numerical.workload != authored_workload {
+        return Err(frequency_completion_error(
+            &prepared,
+            "RM.FEA.RUN_STUDY.FREQUENCY_WORKLOAD_MISMATCH",
+            "structural-frequency result differs from the resolved authored workload",
+        ));
+    }
+    let AnalysisSolverOptions::StructuralFrequency(mut options) =
+        step.authored_execution.solver_options.clone()
+    else {
+        return Err(frequency_completion_error(
+            &prepared,
+            "RM.FEA.RUN_STUDY.RESULT_KIND_MISMATCH",
+            "structural-frequency workload has non-frequency solver options",
+        ));
+    };
+    options.solver_mesh_artifact_path = prepared.solver_mesh_artifact_path.clone();
+    let step_id = step.procedure_step.step_id.clone();
+    prepared.steps[0].authored_execution.solver_options =
+        AnalysisSolverOptions::StructuralFrequency(options.clone());
+    let solver_result_identity = numerical.result.manifest().identity();
+    let frozen_project_digest = numerical.frozen_project_digest;
+    let sequence_identity = runmat_analysis_fea::execution::SequenceIdentity::from_solver_contract(
+        &prepared.model.sequence,
+    )
+    .map_err(|error| {
+        frequency_completion_error(
+            &prepared,
+            "RM.FEA.RUN_STUDY.STATE_INVALID",
+            error.to_string(),
+        )
+    })?;
+    let producer = runmat_analysis_fea::execution::StepIdentity::from_solver_contract(
+        sequence_identity,
+        &prepared.steps[0].procedure_step,
+    )
+    .map_err(|error| {
+        frequency_completion_error(
+            &prepared,
+            "RM.FEA.RUN_STUDY.STATE_INVALID",
+            error.to_string(),
+        )
+    })?;
+    let topology_digest =
+        runmat_execution::Digest::from_bytes(*solver_mesh.canonical_digest.bytes());
+    let states = prepared.steps[0]
+        .procedure_step
+        .state_outputs
+        .iter()
+        .map(|declaration| {
+            runmat_analysis_fea::execution::CanonicalSemanticState::new(
+                runmat_analysis_fea::execution::CanonicalSemanticStateInput {
+                    producer,
+                    declaration: declaration.clone(),
+                    topology_digest,
+                    source_result: solver_result_identity,
+                    payload: runmat_analysis_fea::execution::CanonicalSemanticStatePayload::StructuralFrequency {
+                        publication: Box::new(numerical.publication.clone()),
+                    },
+                },
+            )
+            .map_err(|error| {
+                frequency_completion_error(
+                    &prepared,
+                    "RM.FEA.RUN_STUDY.STATE_INVALID",
+                    error.to_string(),
+                )
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let run =
+        admit_structural_frequency_result(&numerical, &solver_mesh, &options, assigned_run_id)
+            .map_err(|error| {
+                frequency_completion_error(
+                    &prepared,
+                    "RM.FEA.RUN_STUDY.FREQUENCY_RESULT_ADMISSION_FAILED",
+                    error,
+                )
+            })?;
+    complete_study_run(
+        prepared,
+        vec![CompletedStudyStep {
+            step_id,
+            solver_result_identity,
+            run: CompletedStudyStepRun::StructuralFrequency(Box::new(run)),
+            resolved_solver_options: AnalysisSolverOptions::StructuralFrequency(options),
+        }],
+        states,
+        frozen_project_digest,
+    )
+}
+
+fn frequency_completion_error(
+    prepared: &PreparedStudyCompletion,
+    error_code: &'static str,
+    message: impl Into<String>,
+) -> OperationErrorEnvelope {
+    operation_error(
+        ANALYSIS_RUN_STUDY_OPERATION,
+        ANALYSIS_RUN_STUDY_OP_VERSION,
+        &prepared.context,
+        OperationErrorSpec {
+            error_code,
+            error_type: OperationErrorType::Contract,
+            retryable: false,
+            severity: OperationErrorSeverity::Fatal,
+        },
+        message,
+        BTreeMap::from([("study_id".to_string(), prepared.study_id.clone())]),
+    )
 }
 
 fn complete_linear_sequence(
@@ -240,7 +446,7 @@ fn complete_linear_sequence(
         completion_steps.push(CompletedStudyStep {
             step_id: step.procedure_step.step_id,
             solver_result_identity: numerical.solver_result_identity,
-            run,
+            run: CompletedStudyStepRun::Standard(Box::new(run)),
             resolved_solver_options: AnalysisSolverOptions::StructuralLinear(options),
         });
     }
@@ -429,7 +635,7 @@ fn complete_direct_transient(
         vec![CompletedStudyStep {
             step_id: result.step_id,
             solver_result_identity,
-            run,
+            run: CompletedStudyStepRun::Standard(Box::new(run)),
             resolved_solver_options: AnalysisSolverOptions::StructuralTransient(options),
         }],
         states,

@@ -65,9 +65,11 @@ mod execution_dispatch;
 mod execution_error;
 mod fea_document;
 mod fea_document_authoring;
+pub(crate) mod field_selection;
 #[cfg(feature = "plot-core")]
 mod figures;
 mod formulation_admission;
+mod frequency_result;
 mod linear_static_result;
 pub(crate) mod meshing;
 mod operations;
@@ -98,7 +100,8 @@ pub use structural_study::{
 };
 use structural_study::{
     complete_study_run, persist_content_addressed_study_evidence, study_completion_from_prepared,
-    study_evidence_root, CompletedStudyStep, PreparedStudySequence, PreparedStudyStep,
+    study_evidence_root, CompletedStudyStep, CompletedStudyStepRun, PreparedStudySequence,
+    PreparedStudyStep,
 };
 use study_execution::execute_study_step;
 pub use study_placement::{
@@ -166,7 +169,14 @@ pub struct StructuralStudyTransientNumericalResult {
 pub enum StructuralStudyNumericalResult {
     LinearSequence(StructuralStudySequenceNumericalResult),
     DirectTransient(Box<StructuralStudyTransientNumericalResult>),
+    StructuralFrequency(Box<StructuralStudyFrequencyNumericalResult>),
 }
+
+pub use frequency_result::{
+    StructuralFrequencyArtifactRoot, StructuralFrequencyArtifactRootIndex,
+    StructuralFrequencyHistoryArtifactRoot, StructuralFrequencySampleArtifactRoots,
+    StructuralStudyFrequencyNumericalResult,
+};
 
 impl PreparedStructuralLinearRun {
     pub fn workload(&self) -> &StructuralLinearWorkload {
@@ -257,31 +267,32 @@ pub use contracts::{
     AnalysisDocumentCheckResult, AnalysisDocumentKind, AnalysisDocumentRunResult,
     AnalysisElectromagneticRunOptions, AnalysisExecutionPlan, AnalysisExecutionStep,
     AnalysisFieldBinding, AnalysisFieldBindingsArtifactPayload, AnalysisFieldDescriptor,
-    AnalysisFieldKind, AnalysisFieldLocation, AnalysisFieldPageResult,
-    AnalysisFieldPagingDescriptor, AnalysisFieldRequestOptions, AnalysisFieldStorage,
-    AnalysisFieldStorageRef, AnalysisFsiRunOptions, AnalysisImmutableValueSpec,
-    AnalysisModalRunOptions, AnalysisModelTemplate, AnalysisNonlinearRunOptions,
-    AnalysisObjectArtifactMetadata, AnalysisRenderMesh, AnalysisRenderRegion,
-    AnalysisRenderTopology, AnalysisRenderTopologySource, AnalysisRenderTriangleRange,
-    AnalysisResultsCompareData, AnalysisResultsCompareQuery, AnalysisResultsData,
-    AnalysisResultsQuery, AnalysisResultsSummary, AnalysisRunDatasetFieldPagingPolicy,
-    AnalysisRunDatasetPayload, AnalysisRunDatasetStudyRef, AnalysisRunOptions, AnalysisRunResult,
-    AnalysisRuntimeCapabilities, AnalysisRuntimeModelTemplateCatalogEntry,
-    AnalysisRuntimeModelTemplateDefaultObservation, AnalysisSolverOptions,
-    AnalysisStructuralTimeStepPolicy, AnalysisStudyIssue, AnalysisStudyPlanData,
-    AnalysisStudyPlanStepData, AnalysisStudyRunData, AnalysisStudySpec,
-    AnalysisStudyStatePublicationData, AnalysisStudyStepRunData, AnalysisStudySweepData,
-    AnalysisStudySweepFailureEntry, AnalysisStudySweepFailureKind, AnalysisStudySweepPlanData,
-    AnalysisStudySweepPlanEntry, AnalysisStudySweepRunEntry, AnalysisStudySweepSpec,
-    AnalysisStudySweepValidateData, AnalysisStudySweepValidateEntry, AnalysisStudyValidateResult,
-    AnalysisThermalRunOptions, AnalysisTransientRunOptions, AnalysisTrendKindSummary,
-    AnalysisTrendsData, AnalysisTrendsQuery, AnalysisValidateResult, ContactEnforcementOptions,
-    ElectromagneticResultsData, FallbackEvent, FallbackReason, FallbackStage, ModalFrequencyBasis,
-    ModalFrequencyUnits, ModalResultsData, NonlinearMethod, NonlinearResultsData,
-    PlasticityConstitutiveOptions, PrecisionMode, PreconditionerMode, ProductionPublicationReason,
-    ProductionPublicationReasonCode, QualityGate, QualityPolicy, QualityReason, QualityReasonCode,
-    RunProvenance, RunStatus, ThermalResultsData, TransientIntegrationMethod, TransientResultsData,
-    ANALYSIS_ARTIFACT_MANIFEST_KIND, ANALYSIS_DATASET_ARTIFACT_KIND,
+    AnalysisFieldKind, AnalysisFieldLocation, AnalysisFieldPageResult, AnalysisFieldPageValues,
+    AnalysisFieldPagingDescriptor, AnalysisFieldRequestOptions, AnalysisFieldSelection,
+    AnalysisFieldStorage, AnalysisFieldStorageRef, AnalysisFsiRunOptions,
+    AnalysisImmutableValueSpec, AnalysisModalRunOptions, AnalysisModelTemplate,
+    AnalysisNonlinearRunOptions, AnalysisObjectArtifactMetadata, AnalysisRenderMesh,
+    AnalysisRenderRegion, AnalysisRenderTopology, AnalysisRenderTopologySource,
+    AnalysisRenderTriangleRange, AnalysisResultsCompareData, AnalysisResultsCompareQuery,
+    AnalysisResultsData, AnalysisResultsQuery, AnalysisResultsSummary,
+    AnalysisRunDatasetFieldPagingPolicy, AnalysisRunDatasetPayload, AnalysisRunDatasetStudyRef,
+    AnalysisRunOptions, AnalysisRunResult, AnalysisRuntimeCapabilities,
+    AnalysisRuntimeModelTemplateCatalogEntry, AnalysisRuntimeModelTemplateDefaultObservation,
+    AnalysisSolverOptions, AnalysisStructuralFrequencyRunOptions, AnalysisStructuralTimeStepPolicy,
+    AnalysisStudyIssue, AnalysisStudyPlanData, AnalysisStudyPlanStepData, AnalysisStudyRunData,
+    AnalysisStudySpec, AnalysisStudyStatePublicationData, AnalysisStudyStepNumericalResultData,
+    AnalysisStudyStepRunData, AnalysisStudySweepData, AnalysisStudySweepFailureEntry,
+    AnalysisStudySweepFailureKind, AnalysisStudySweepPlanData, AnalysisStudySweepPlanEntry,
+    AnalysisStudySweepRunEntry, AnalysisStudySweepSpec, AnalysisStudySweepValidateData,
+    AnalysisStudySweepValidateEntry, AnalysisStudyValidateResult, AnalysisThermalRunOptions,
+    AnalysisTransientRunOptions, AnalysisTrendKindSummary, AnalysisTrendsData, AnalysisTrendsQuery,
+    AnalysisValidateResult, ContactEnforcementOptions, ElectromagneticResultsData, FallbackEvent,
+    FallbackReason, FallbackStage, ModalFrequencyBasis, ModalFrequencyUnits, ModalResultsData,
+    NonlinearMethod, NonlinearResultsData, PlasticityConstitutiveOptions, PrecisionMode,
+    PreconditionerMode, ProductionPublicationReason, ProductionPublicationReasonCode, QualityGate,
+    QualityPolicy, QualityReason, QualityReasonCode, RunProvenance, RunStatus,
+    StructuralFrequencyResultsData, ThermalResultsData, TransientIntegrationMethod,
+    TransientResultsData, ANALYSIS_ARTIFACT_MANIFEST_KIND, ANALYSIS_DATASET_ARTIFACT_KIND,
     ANALYSIS_DIAGNOSTICS_ARTIFACT_KIND, ANALYSIS_DIAGNOSTICS_SCHEMA_VERSION,
     ANALYSIS_FIELD_BINDINGS_ARTIFACT_KIND, ANALYSIS_FIELD_BINDINGS_SCHEMA_VERSION,
     ANALYSIS_FIELD_DEFAULT_MATERIALIZE_LIMIT, ANALYSIS_FIELD_DEFAULT_PAGE_SIZE,
@@ -299,9 +310,9 @@ pub use fea_document_authoring::{
 };
 #[cfg(feature = "plot-core")]
 pub use figures::{
-    analysis_generate_study_run_figures, analysis_generate_study_run_mesh_figure,
-    AnalysisFigureGenerationOptions, AnalysisFigureMeshSource, AnalysisGeneratedFigure,
-    AnalysisGeneratedFigureKind,
+    analysis_generate_study_field_figures, analysis_generate_study_run_figures,
+    analysis_generate_study_run_mesh_figure, AnalysisFigureGenerationOptions,
+    AnalysisFigureMeshSource, AnalysisGeneratedFigure, AnalysisGeneratedFigureKind,
 };
 pub use operations::{
     analysis_field_page_by_run_id_op, analysis_results_by_run_id_op, analysis_results_compare_op,
@@ -576,6 +587,19 @@ pub fn analysis_create_model_op(
                 "step_default_static".to_string(),
             )],
         ),
+        AnalysisModelTemplate::StructuralHarmonic => {
+            let mut step = ProcedureStep::structural_harmonic("step_default_harmonic");
+            step.independent_domain =
+                runmat_analysis_core::IndependentDomain::FrequencyHertz(vec![10.0, 100.0, 1_000.0]);
+            (
+                fixed_condition("bc_default_fixed", fixed_region_id),
+                Some((
+                    "excitation_default_harmonic_force",
+                    ConstantExcitation::Force([0.0, -1_000.0, 0.0]),
+                )),
+                vec![step],
+            )
+        }
         AnalysisModelTemplate::ThermoMechanicalCoupled => (
             fixed_condition("bc_default_fixed", fixed_region_id),
             Some((
@@ -1077,6 +1101,48 @@ pub fn analysis_prepare_structural_study_op(
     context: OperationContext,
 ) -> Result<PreparedStructuralStudy, OperationErrorEnvelope> {
     let study = prepare_study_run(spec, context)?;
+    let solver_mesh = resolve_solver_mesh_artifact(
+        &study.model,
+        study.solver_mesh_artifact_path.as_deref(),
+        ANALYSIS_RUN_STUDY_OPERATION,
+        ANALYSIS_RUN_STUDY_OP_VERSION,
+        "RM.FEA.RUN_STUDY.PORTABLE_MESH_REQUIRED",
+        &study.context,
+    )?
+    .ok_or_else(|| {
+        operation_error(
+            ANALYSIS_RUN_STUDY_OPERATION,
+            ANALYSIS_RUN_STUDY_OP_VERSION,
+            &study.context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_STUDY.PORTABLE_MESH_REQUIRED",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "portable structural study execution requires a canonical solver mesh",
+            BTreeMap::from([("study_id".to_string(), study.spec.study_id.clone())]),
+        )
+    })?;
+
+    if let [step] = study.steps.as_slice() {
+        if let AnalysisSolverOptions::StructuralFrequency(mut options) =
+            step.authored_execution.solver_options.clone()
+        {
+            options.solver_mesh_artifact_path = None;
+            let workload =
+                structural_study::prepare_structural_frequency_workload(&study, step, &options)?;
+            return Ok(PreparedStructuralStudy {
+                study,
+                execution:
+                    structural_study::PreparedStructuralStudyExecution::StructuralFrequency {
+                        workload: Box::new(workload),
+                    },
+                solver_mesh,
+            });
+        }
+    }
+
     let mut linears = BTreeMap::new();
     for step in &study.steps {
         let AnalysisSolverOptions::StructuralLinear(mut options) =
@@ -1147,7 +1213,11 @@ pub fn analysis_prepare_structural_study_op(
             ));
         }
     }
-    Ok(PreparedStructuralStudy { study, linears })
+    Ok(PreparedStructuralStudy {
+        study,
+        execution: structural_study::PreparedStructuralStudyExecution::LinearSequence { linears },
+        solver_mesh,
+    })
 }
 
 pub fn analysis_complete_structural_study_op(
@@ -1164,6 +1234,29 @@ pub fn analysis_complete_structural_study_op(
                 OperationErrorSeverity::Fatal,
                 "linear structural-study completion received a direct-transient result",
             ))
+        }
+        Ok(StructuralStudyNumericalResult::StructuralFrequency(result)) => {
+            let workload = match &prepared.execution {
+                structural_study::PreparedStructuralStudyExecution::StructuralFrequency {
+                    workload,
+                } => workload.as_ref().clone(),
+                structural_study::PreparedStructuralStudyExecution::LinearSequence { .. } => {
+                    return Err(structural_study_completion_failure(
+                        &prepared,
+                        "RM.FEA.RUN_STUDY.RESULT_KIND_MISMATCH",
+                        OperationErrorType::Contract,
+                        OperationErrorSeverity::Fatal,
+                        "linear structural-study completion received a structural-frequency result",
+                    ));
+                }
+            };
+            return structural_study::complete_frequency_study(
+                study_completion_from_prepared(prepared.study),
+                prepared.solver_mesh,
+                workload,
+                *result,
+                storage::next_run_id(),
+            );
         }
         Err(StructuralStudyExecutionFailure::Failed(message)) => {
             return Err(structural_study_completion_failure(
@@ -1193,9 +1286,20 @@ pub fn analysis_complete_structural_study_op(
             ));
         }
     };
+    let structural_study::PreparedStructuralStudyExecution::LinearSequence { linears } =
+        &mut prepared.execution
+    else {
+        return Err(structural_study_completion_failure(
+            &prepared,
+            "RM.FEA.RUN_STUDY.RESULT_KIND_MISMATCH",
+            OperationErrorType::Contract,
+            OperationErrorSeverity::Fatal,
+            "structural-frequency study completion received a linear sequence result",
+        ));
+    };
     let mut completed = Vec::with_capacity(result.steps.len());
     for step in result.steps {
-        let linear = prepared.linears.remove(&step.step_id).ok_or_else(|| {
+        let linear = linears.remove(&step.step_id).ok_or_else(|| {
             operation_error(
                 ANALYSIS_RUN_STUDY_OPERATION,
                 ANALYSIS_RUN_STUDY_OP_VERSION,
@@ -1216,11 +1320,11 @@ pub fn analysis_complete_structural_study_op(
         completed.push(CompletedStudyStep {
             step_id: step.step_id,
             solver_result_identity: step.solver_result_identity,
-            run,
+            run: CompletedStudyStepRun::Standard(Box::new(run)),
             resolved_solver_options,
         });
     }
-    if !prepared.linears.is_empty() {
+    if !linears.is_empty() {
         return Err(operation_error(
             ANALYSIS_RUN_STUDY_OPERATION,
             ANALYSIS_RUN_STUDY_OP_VERSION,
@@ -1336,7 +1440,7 @@ fn analysis_run_study_with_structural_executor(
         completed.push(CompletedStudyStep {
             step_id: step.procedure_step.step_id.clone(),
             solver_result_identity,
-            run,
+            run: CompletedStudyStepRun::Standard(Box::new(run)),
             resolved_solver_options,
         });
     }

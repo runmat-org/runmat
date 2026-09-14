@@ -4,6 +4,7 @@ use crate::identity::{Digest, NodeLeaseId, ValueId, WorkerId};
 use crate::ContractError;
 
 mod admission;
+mod catalog;
 mod identity;
 mod validation;
 
@@ -12,6 +13,7 @@ pub use admission::{
     ValueConversionFidelity, ValueCopyAccounting, ValueNumericConversion,
     VALUE_ADMISSION_RECEIPT_SCHEMA_VERSION,
 };
+pub use catalog::{artifact_object_value_id, PublishedObjectCatalog, PublishedObjectSource};
 
 pub const EXTERNALIZED_VALUE_MEDIA_TYPE: &str = "application/vnd.runmat.value+json";
 pub const EXTERNALIZED_VALUE_SCHEMA: &str = "runmat-value-payload-v1";

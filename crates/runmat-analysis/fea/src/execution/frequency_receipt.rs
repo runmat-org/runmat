@@ -152,6 +152,26 @@ impl StructuralFrequencyEntrySolverEvidence {
         self.sample
     }
 
+    pub const fn solver_method(&self) -> SolverMethod {
+        self.solver_method
+    }
+
+    pub const fn solver_backend(&self) -> LinearAlgebraBackendKind {
+        self.solver_backend
+    }
+
+    pub const fn preconditioner(&self) -> SolverPreconditioner {
+        self.preconditioner
+    }
+
+    pub const fn solver_relative_residual(&self) -> f64 {
+        self.solver_relative_residual
+    }
+
+    pub const fn physical_relative_balance_error(&self) -> f64 {
+        self.physical_relative_balance_error
+    }
+
     pub(super) fn validate_for_sample(
         &self,
         sample: &StructuralFrequencyPhysicalSample,
@@ -167,6 +187,21 @@ impl StructuralFrequencyEntrySolverEvidence {
         {
             return Err(AnalysisExecutionError::Identity(
                 "structural frequency solver evidence differs from its physical sample or solution space",
+            ));
+        }
+        self.validate_solution_semantics(solution_space)
+    }
+
+    pub(super) fn validate_for_manifest(
+        &self,
+        entry: FrequencyResponsePlanEntryIdentity,
+        sample: StructuralFrequencyPhysicalSampleIdentity,
+        solution_space: &StructuralFrequencySolutionSpace,
+    ) -> AnalysisExecutionResult<()> {
+        self.validate_intrinsic()?;
+        if self.entry != entry || self.sample != sample {
+            return Err(AnalysisExecutionError::Identity(
+                "structural frequency solver evidence differs from its entry manifest",
             ));
         }
         self.validate_solution_semantics(solution_space)
@@ -337,6 +372,37 @@ impl StructuralFrequencyNumericalReceipt {
             ));
         }
         self.validate_against_samples(result)
+    }
+
+    /// Validates receipt lineage without loading physical displacement and reaction vectors.
+    ///
+    /// Publication and query paths use the result manifest as their bounded semantic authority;
+    /// worker-side solve admission continues to use [`Self::validate_for_result`].
+    pub fn validate_for_manifest(
+        &self,
+        manifest: &super::StructuralFrequencySolverResultManifest,
+    ) -> AnalysisExecutionResult<()> {
+        self.validate_identity()?;
+        manifest.validate()?;
+        if self.source_result != manifest.identity() || self.scope != *manifest.scope() {
+            return Err(AnalysisExecutionError::Identity(
+                "structural frequency numerical receipt names another result manifest or scope",
+            ));
+        }
+        if self.samples.len() != manifest.samples().len() {
+            return Err(AnalysisExecutionError::Identity(
+                "structural frequency numerical receipt does not cover every manifest sample",
+            ));
+        }
+        for (evidence, entry) in self.samples.iter().zip(manifest.samples()) {
+            if evidence.entry != entry.plan_entry().identity() || evidence.sample != entry.sample()
+            {
+                return Err(AnalysisExecutionError::Identity(
+                    "structural frequency numerical receipt sample order differs from its manifest",
+                ));
+            }
+        }
+        Ok(())
     }
 
     pub fn canonical_bytes(&self) -> AnalysisExecutionResult<Vec<u8>> {

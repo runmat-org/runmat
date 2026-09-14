@@ -16,8 +16,9 @@ pub use contract::{
     PreparedExactStructuralStudyRoot, RequiredStudyProgram,
 };
 pub use publication::{
-    import_exact_structural_study_result, ExactStructuralStudyAnalysisResult,
-    ExactStructuralStudyResult, ExactStructuralStudyResultExpectation,
+    import_exact_structural_study_result, ExactStructuralFrequencyAnalysisResult,
+    ExactStructuralStudyAnalysisResult, ExactStructuralStudyResult,
+    ExactStructuralStudyResultExpectation,
 };
 pub(crate) use publication::{
     package_exact_structural_study_result, ExactStructuralAnalysisPublication,

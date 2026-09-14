@@ -19,15 +19,16 @@ use crate::{
     execution::{
         AccuracyIdentity, AnalysisResultIdentity, AnalysisWorkKind, AnalysisWorkloadIdentity,
         ConstraintPlanIdentity, DiscretizationIdentity, ExecutionPlanIdentity,
-        NumericalPlanIdentity, OperatorIdentity, ProblemIdentity, SequenceIdentity,
+        FieldRecoveryRequest, FieldRecoverySource, NumericalPlanIdentity,
+        ObservationAssemblyRequest, OperatorIdentity, ProblemIdentity, SequenceIdentity,
         SolverResultIdentity, StepIdentity, StudyIdentity,
     },
     fixtures::{fixture_model, FixtureId},
     planning::resource::{Count, ObservationResourceFacts},
     results::field::{
-        RecoveredField, RecoveredFieldCatalog, RecoveredFieldDefinition,
+        RecoveredField, RecoveredFieldArtifact, RecoveredFieldCatalog, RecoveredFieldDefinition,
         RecoveredFieldEntityCounts, RecoveredFieldEntityDomain,
-        RecoveredFieldNumericRepresentation, RecoveredFieldSample,
+        RecoveredFieldNumericRepresentation, RecoveredFieldSample, RecoveredFieldSelection,
     },
     topology::AnalysisProjection,
 };
@@ -1375,6 +1376,101 @@ fn resolved_frequency_schedule_is_the_single_sample_admission_boundary() {
         None,
     )
     .is_err());
+}
+
+#[test]
+fn observation_assembly_requires_the_exact_subset_scheduled_at_one_frequency() {
+    let projection = projection(ElementOrder::Tet4);
+    let definition = complex_pressure_definition();
+    let mut first =
+        complex_pressure_history_spec("first_frequency_set", ComplexRepresentation::Complex);
+    first.sampling = SamplingPolicy::FrequencyHertz(vec![100.0, 200.0]);
+    let mut second =
+        complex_pressure_history_spec("second_frequency_set", ComplexRepresentation::Complex);
+    second.sampling = SamplingPolicy::FrequencyHertz(vec![150.0]);
+    let mut step = ProcedureStep::acoustic_harmonic("frequency-assembly-admission");
+    step.independent_domain =
+        runmat_analysis_core::IndependentDomain::FrequencyHertz(vec![100.0, 150.0, 200.0]);
+    step.observations = vec![
+        ObservationRequest::History(first),
+        ObservationRequest::History(second),
+    ];
+    let plan = resolve_observation_plan(
+        &step,
+        &projection,
+        std::slice::from_ref(&definition),
+        ObservationLimits::default(),
+    )
+    .unwrap();
+    let fields_at = |frequency| {
+        catalog_at_sample(
+            &projection,
+            &definition,
+            RecoveredFieldSample::FrequencyHertz(frequency),
+            vec![4, 2],
+            vec![1.0, 0.0, 2.0, 0.0, 3.0, 0.0, 4.0, 0.0],
+        )
+    };
+    let sequence = SequenceIdentity::new(Digest::sha256("frequency-assembly-sequence")).unwrap();
+    let producer = StepIdentity::new(sequence, Digest::sha256("frequency-assembly-step")).unwrap();
+    let source_result =
+        SolverResultIdentity::from_step_result(producer, Digest::sha256("frequency-result"))
+            .unwrap();
+    let topology =
+        crate::physics::structural::topology::CanonicalStructuralTopologyIdentity::Explicit {
+            structural_topology_digest: projection.projection_digest,
+        };
+    let recovery = FieldRecoveryRequest::new(
+        producer,
+        FieldRecoverySource::SolverResult(source_result),
+        topology,
+    )
+    .unwrap();
+    let source_catalog = fields_at(100.0);
+    let source_field = source_catalog.fields()[0].clone();
+    let artifact = RecoveredFieldArtifact::new(
+        recovery.identity(),
+        FieldRecoverySource::SolverResult(source_result),
+        projection.projection_digest,
+        RecoveredFieldEntityCounts {
+            structural_nodes: projection.nodes.len(),
+            solid_elements: projection.elements.len(),
+            beam_elements: 0,
+            shell_elements: 0,
+            constraint_groups: 0,
+        },
+        vec![source_field.clone()],
+    )
+    .unwrap();
+    let selection =
+        RecoveredFieldSelection::new(artifact.manifest().unwrap(), vec![source_field.identity()])
+            .unwrap();
+    let source = crate::execution::ObservationEvaluationRequest::new(
+        producer,
+        &selection,
+        topology,
+        plan.clone(),
+    )
+    .unwrap();
+    let first_result = evaluate_observation_sample(
+        &plan,
+        &ObservationId("first_frequency_set".into()),
+        &projection,
+        &fields_at(100.0),
+        RecoveredFieldSample::FrequencyHertz(100.0),
+    )
+    .unwrap();
+    let second_result = evaluate_observation_sample(
+        &plan,
+        &ObservationId("second_frequency_set".into()),
+        &projection,
+        &fields_at(150.0),
+        RecoveredFieldSample::FrequencyHertz(150.0),
+    )
+    .unwrap();
+    assert!(ObservationAssemblyRequest::new(&source, std::slice::from_ref(&first_result)).is_ok());
+    assert!(ObservationAssemblyRequest::new(&source, &[]).is_err());
+    assert!(ObservationAssemblyRequest::new(&source, &[first_result, second_result]).is_err());
 }
 
 #[test]

@@ -183,8 +183,9 @@ From RunMat code:
 ```matlab
 run = fea.run(study);
 results = fea.results(run);
-stress = fea.field(results, "structural.von_mises");
-stress = fea.field(fea.results(run), "structural.von_mises");
+stress = fea.field(results, fea.StructuralField.vonMises());
+stress = fea.field(fea.results(run), fea.StructuralField.vonMises());
+stressPage = stress.page(1, 1024);
 figureHandle = plot(stress);
 print(figureHandle, "von_mises.png", "-dpng");
 

@@ -9,6 +9,7 @@ mod field;
 mod frequency_assembly;
 mod frequency_balance;
 mod frequency_entry;
+mod frequency_publication;
 mod frequency_receipt;
 mod frequency_result;
 mod frequency_sample;
@@ -42,7 +43,14 @@ pub use frequency_assembly::{
     StructuralFrequencyResultAssemblyRequest,
 };
 pub use frequency_balance::{ComplexStructuralBalance, StructuralComplexVector};
-pub use frequency_entry::{StructuralFrequencyEntryRequest, StructuralFrequencyEntryResult};
+pub use frequency_entry::{
+    StructuralFrequencyEntryRequest, StructuralFrequencyEntryResult,
+    StructuralFrequencyEntryResultManifest,
+};
+pub use frequency_publication::{
+    StructuralFrequencyPublicationHistory, StructuralFrequencyPublicationInput,
+    StructuralFrequencyPublicationManifest, StructuralFrequencyPublicationSample,
+};
 pub use frequency_receipt::{
     StructuralFrequencyEntrySolverEvidence, StructuralFrequencyNumericalReceipt,
     StructuralFrequencySolutionSpace, StructuralFrequencySolverEvidenceInput,
@@ -74,14 +82,15 @@ pub use identity::{
     StructuralExcitationSetIdentity, StructuralFormulationIdentity,
     StructuralFrequencyEntryRequestIdentity, StructuralFrequencyEntryResultIdentity,
     StructuralFrequencyPhysicalSampleIdentity, StructuralFrequencyProblemIdentity,
-    StructuralFrequencyResultAssemblyRequestIdentity, StructuralFrequencyScopeIdentity,
-    StructuralFrequencyWorkloadIdentity, StructuralKinematicsIdentity,
-    StructuralMassOperatorIdentity, StructuralStiffnessOperatorIdentity,
-    StructuralTransientBlockRequestIdentity, StructuralTransientCheckpointIdentity,
-    StructuralTransientCheckpointScopeIdentity, StructuralTransientPhysicalSampleIdentity,
-    StructuralTransientResultAssemblyRequestIdentity, StructuralTransientScheduleIdentity,
-    StructuralTransientSegmentIdentity, StructuralTransientSegmentSampleIdentity,
-    StructuralTransientSolverOptionsIdentity, StudyIdentity, SweepIdentity, SweepResultIdentity,
+    StructuralFrequencyPublicationIdentity, StructuralFrequencyResultAssemblyRequestIdentity,
+    StructuralFrequencyScopeIdentity, StructuralFrequencyWorkloadIdentity,
+    StructuralKinematicsIdentity, StructuralMassOperatorIdentity,
+    StructuralStiffnessOperatorIdentity, StructuralTransientBlockRequestIdentity,
+    StructuralTransientCheckpointIdentity, StructuralTransientCheckpointScopeIdentity,
+    StructuralTransientPhysicalSampleIdentity, StructuralTransientResultAssemblyRequestIdentity,
+    StructuralTransientScheduleIdentity, StructuralTransientSegmentIdentity,
+    StructuralTransientSegmentSampleIdentity, StructuralTransientSolverOptionsIdentity,
+    StudyIdentity, SweepIdentity, SweepResultIdentity,
 };
 pub use object::{
     chunk_numerical_payload, chunk_partitioned_numerical_payload, AnalysisChunkDescriptor,

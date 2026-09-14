@@ -29,6 +29,7 @@ pub struct AnalysisCreateModelIntentSpec {
 #[serde(rename_all = "snake_case")]
 pub enum AnalysisModelTemplate {
     LinearStaticStructural,
+    StructuralHarmonic,
     ThermoMechanicalCoupled,
     ThermalSteady,
     ThermalTransient,
@@ -94,6 +95,17 @@ pub const ANALYSIS_MODEL_TEMPLATE_CATALOG: &[AnalysisModelTemplateCatalogEntry] 
                 location: "elements",
             },
         ],
+    },
+    AnalysisModelTemplateCatalogEntry {
+        template: AnalysisModelTemplate::StructuralHarmonic,
+        label: "Structural harmonic",
+        family: "structural",
+        target: "solid mechanics",
+        value: "complex frequency response",
+        default_observations: &[AnalysisModelTemplateDefaultObservation {
+            field: "structural.displacement",
+            location: "nodes",
+        }],
     },
     AnalysisModelTemplateCatalogEntry {
         template: AnalysisModelTemplate::ThermoMechanicalCoupled,
@@ -380,6 +392,8 @@ pub struct ContactEnforcementOptions {
 pub enum QualityReasonCode {
     MaterialAssignmentConflict,
     SolverNotConverged,
+    StructuralFrequencyResidualExceeded,
+    StructuralFrequencyBalanceExceeded,
     SolverBackendFallback,
     FieldTopologyMismatch,
     SolidMeshNoVolumeElements,
@@ -509,6 +523,33 @@ impl Default for AnalysisRunOptions {
             precision_mode: PrecisionMode::Fp64,
             preconditioner_mode: PreconditionerMode::Auto,
             quality_policy: QualityPolicy::Balanced,
+            solver_mesh_artifact_path: None,
+        }
+    }
+}
+
+/// Numerical policy for a standalone direct structural harmonic-response study.
+///
+/// Frequencies are owned by the procedure step's typed independent domain. Keeping them out of
+/// solver options prevents two competing sweep authorities from reaching execution.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AnalysisStructuralFrequencyRunOptions {
+    pub deterministic_mode: bool,
+    pub precision_mode: PrecisionMode,
+    pub quality_policy: QualityPolicy,
+    pub direct_solver: runmat_analysis_fea::solve::dynamics::DirectHarmonicPolicy,
+    #[serde(default)]
+    pub solver_mesh_artifact_path: Option<String>,
+}
+
+impl Default for AnalysisStructuralFrequencyRunOptions {
+    fn default() -> Self {
+        Self {
+            deterministic_mode: false,
+            precision_mode: PrecisionMode::Fp64,
+            quality_policy: QualityPolicy::Balanced,
+            direct_solver: runmat_analysis_fea::solve::dynamics::DirectHarmonicPolicy::default(),
             solver_mesh_artifact_path: None,
         }
     }
@@ -1206,13 +1247,48 @@ pub struct AnalysisFieldRequestOptions {
     pub limit: Option<usize>,
 }
 
+/// Strongly typed scientific selection of one field sample.
+///
+/// `field_id` names the produced quantity. `sample` selects its independent-domain coordinate;
+/// omitting it is valid only when the field has one unambiguous published sample.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AnalysisFieldSelection {
+    pub field_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sample: Option<runmat_analysis_fea::results::field::RecoveredFieldSample>,
+}
+
+impl AnalysisFieldSelection {
+    pub fn new(
+        field_id: impl Into<String>,
+        sample: Option<runmat_analysis_fea::results::field::RecoveredFieldSample>,
+    ) -> Self {
+        Self {
+            field_id: field_id.into(),
+            sample,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(
+    rename_all = "snake_case",
+    tag = "numeric_representation",
+    content = "values"
+)]
+pub enum AnalysisFieldPageValues {
+    Real(Vec<f64>),
+    ComplexInterleaved(Vec<f64>),
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AnalysisFieldPageResult {
     pub run_id: String,
     pub field_id: String,
     pub descriptor: AnalysisFieldDescriptor,
-    pub values: Vec<f64>,
+    pub values: AnalysisFieldPageValues,
     pub offset: usize,
     pub count: usize,
     pub total_count: usize,
@@ -1324,9 +1400,14 @@ pub struct AnalysisFieldStorageRef {
     pub size_bytes: Option<u64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AnalysisFieldDescriptor {
     pub field_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sample: Option<runmat_analysis_fea::results::field::RecoveredFieldSample>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub numeric_representation:
+        Option<runmat_analysis_fea::results::field::RecoveredFieldNumericRepresentation>,
     #[serde(default)]
     pub family: String,
     #[serde(default)]
@@ -1382,6 +1463,8 @@ impl AnalysisFieldDescriptor {
             .map(|bytes| bytes as u64);
         Self {
             field_id: field.field_id.clone(),
+            sample: None,
+            numeric_representation: None,
             family: infer_field_family(&field.field_id).to_string(),
             quantity: infer_field_quantity(&field.field_id).to_string(),
             topology_id: infer_field_topology_id(&field.field_id, location).map(str::to_string),
@@ -1407,6 +1490,100 @@ impl AnalysisFieldDescriptor {
                 size_bytes,
             },
         }
+    }
+
+    pub fn from_recovered_entry(
+        entry: &runmat_analysis_fea::results::field::RecoveredFieldArtifactEntry,
+    ) -> Result<Self, String> {
+        use runmat_analysis_core::FieldLocation;
+        use runmat_analysis_fea::results::field::RecoveredFieldNumericRepresentation;
+
+        let component_count = entry
+            .definition
+            .value_shape()
+            .component_count()
+            .ok_or_else(|| "recovered field has an invalid value shape".to_string())?;
+        let entity_count = entry
+            .partitions
+            .iter()
+            .try_fold(0_usize, |count, partition| {
+                count
+                    .checked_add(partition.entity_count)
+                    .ok_or_else(|| "recovered field entity count overflow".to_string())
+            })?;
+        let shape = if component_count == 1 {
+            vec![entity_count]
+        } else {
+            vec![entity_count, component_count]
+        };
+        let value_count = entity_count
+            .checked_mul(component_count)
+            .ok_or_else(|| "recovered field value count overflow".to_string())?;
+        let storage_width = match entry.definition.numeric_representation() {
+            RecoveredFieldNumericRepresentation::Real => 1,
+            RecoveredFieldNumericRepresentation::ComplexInterleaved => 2,
+        };
+        let location = match entry.definition.location() {
+            FieldLocation::Node => AnalysisFieldLocation::Node,
+            FieldLocation::Cell | FieldLocation::Element | FieldLocation::IntegrationPoint => {
+                AnalysisFieldLocation::Element
+            }
+            FieldLocation::Face => AnalysisFieldLocation::BoundaryFace,
+            FieldLocation::Edge => AnalysisFieldLocation::Edge,
+            FieldLocation::Interface => AnalysisFieldLocation::InterfaceFace,
+            FieldLocation::Mode => AnalysisFieldLocation::Mode,
+            FieldLocation::Global | FieldLocation::Constraint | FieldLocation::ReferencePoint => {
+                AnalysisFieldLocation::Global
+            }
+            FieldLocation::Point | FieldLocation::Connector => AnalysisFieldLocation::Unknown,
+        };
+        let kind = match component_count {
+            1 => AnalysisFieldKind::Scalar,
+            2 | 3 => AnalysisFieldKind::Vector,
+            _ => AnalysisFieldKind::Tensor,
+        };
+        let quantity = serde_json::to_value(entry.definition.quantity())
+            .ok()
+            .and_then(|value| value.as_str().map(str::to_string))
+            .unwrap_or_default();
+        let size_bytes = value_count
+            .checked_mul(storage_width)
+            .and_then(|count| count.checked_mul(std::mem::size_of::<f64>()))
+            .and_then(|bytes| u64::try_from(bytes).ok());
+        Ok(Self {
+            field_id: entry.definition.field_id().to_string(),
+            sample: Some(entry.sample),
+            numeric_representation: Some(entry.definition.numeric_representation()),
+            family: "structural".to_string(),
+            quantity,
+            topology_id: None,
+            element_kind: None,
+            class_name: "fea.Field".to_string(),
+            kind,
+            dtype: if storage_width == 2 {
+                "complex"
+            } else {
+                "double"
+            }
+            .to_string(),
+            unit: None,
+            location,
+            shape,
+            element_count: value_count,
+            entity_count,
+            value_count,
+            component_count: Some(component_count),
+            residency: "artifact".to_string(),
+            storage: AnalysisFieldStorage::HostF64,
+            size_bytes,
+            paging: AnalysisFieldPagingDescriptor::for_value_count(value_count),
+            storage_ref: AnalysisFieldStorageRef {
+                kind: "published_recovered_field".to_string(),
+                field_id: entry.definition.field_id().to_string(),
+                storage: AnalysisFieldStorage::HostF64,
+                size_bytes,
+            },
+        })
     }
 }
 
@@ -1871,7 +2048,7 @@ fn infer_component_count(field_id: &str, shape: &[usize]) -> Option<usize> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct AnalysisResultsSummary {
     pub field_count: usize,
     pub total_elements: usize,
@@ -1881,6 +2058,10 @@ pub struct AnalysisResultsSummary {
     pub max_frequency_hz: Option<f64>,
     pub max_modal_residual_norm: Option<f64>,
     pub first_mode_converged: Option<bool>,
+    pub frequency_sample_count: usize,
+    pub available_frequencies_hz: Vec<f64>,
+    pub max_frequency_solver_residual: Option<f64>,
+    pub max_frequency_balance_error: Option<f64>,
     pub snapshot_count: usize,
     pub time_start_s: Option<f64>,
     pub time_end_s: Option<f64>,
@@ -1982,6 +2163,8 @@ pub struct AnalysisResultsData {
     pub nonlinear_results: Option<NonlinearResultsData>,
     #[serde(default)]
     pub electromagnetic_results: Option<ElectromagneticResultsData>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub structural_frequency_results: Option<StructuralFrequencyResultsData>,
     pub diagnostics: Option<Vec<FeaDiagnostic>>,
     pub run_status: RunStatus,
     pub numerically_acceptable: bool,
@@ -2028,6 +2211,7 @@ impl Default for AnalysisTrendsQuery {
 #[serde(tag = "solver", content = "options", rename_all = "snake_case")]
 pub enum AnalysisSolverOptions {
     StructuralLinear(AnalysisRunOptions),
+    StructuralFrequency(AnalysisStructuralFrequencyRunOptions),
     StructuralModes(AnalysisModalRunOptions),
     AcousticHelmholtz(AnalysisAcousticRunOptions),
     ThermalDiffusion(AnalysisThermalRunOptions),
@@ -2043,6 +2227,7 @@ impl AnalysisSolverOptions {
     pub(super) fn clear_solver_mesh_artifact_path(&mut self) {
         match self {
             Self::StructuralLinear(options) => options.solver_mesh_artifact_path = None,
+            Self::StructuralFrequency(options) => options.solver_mesh_artifact_path = None,
             Self::StructuralModes(options) => options.solver_mesh_artifact_path = None,
             Self::AcousticHelmholtz(_) => {}
             Self::ThermalDiffusion(options) => options.solver_mesh_artifact_path = None,
@@ -2080,6 +2265,9 @@ impl AnalysisSolverOptions {
             (Structural, ModalExtraction) => {
                 Ok(Self::StructuralModes(AnalysisModalRunOptions::default()))
             }
+            (Structural, HarmonicResponse) => Ok(Self::StructuralFrequency(
+                AnalysisStructuralFrequencyRunOptions::default(),
+            )),
             (Acoustic, HarmonicResponse) => Ok(Self::AcousticHelmholtz(
                 AnalysisAcousticRunOptions::default(),
             )),
@@ -2418,7 +2606,21 @@ pub struct AnalysisStudyStepRunData {
     pub quality_reasons: Vec<QualityReason>,
     pub production_publication_reasons: Vec<ProductionPublicationReason>,
     pub provenance: RunProvenance,
+    pub numerical_result: AnalysisStudyStepNumericalResultData,
     pub evidence_artifact_path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "data", rename_all = "snake_case")]
+pub enum AnalysisStudyStepNumericalResultData {
+    Standard,
+    StructuralFrequency(Box<StructuralFrequencyResultsData>),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StructuralFrequencyResultsData {
+    pub publication: runmat_analysis_fea::execution::StructuralFrequencyPublicationManifest,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -2567,6 +2769,7 @@ impl AnalysisModelTemplate {
     pub fn as_snake_case(self) -> &'static str {
         match self {
             AnalysisModelTemplate::LinearStaticStructural => "linear_static_structural",
+            AnalysisModelTemplate::StructuralHarmonic => "structural_harmonic",
             AnalysisModelTemplate::ThermoMechanicalCoupled => "thermo_mechanical_coupled",
             AnalysisModelTemplate::ThermalSteady => "thermal_steady",
             AnalysisModelTemplate::ThermalTransient => "thermal_transient",
@@ -2971,6 +3174,7 @@ mod tests {
     fn model_template_catalog_covers_every_supported_profile_once() {
         let expected_profiles = [
             AnalysisModelTemplate::LinearStaticStructural,
+            AnalysisModelTemplate::StructuralHarmonic,
             AnalysisModelTemplate::ThermoMechanicalCoupled,
             AnalysisModelTemplate::ThermalSteady,
             AnalysisModelTemplate::ThermalTransient,

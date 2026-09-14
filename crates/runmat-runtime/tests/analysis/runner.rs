@@ -670,6 +670,7 @@ fn primary_result_field_id(procedure_step: &ProcedureStep) -> String {
         AnalysisSolverOptions::FluidStructureInteraction(_) => fea_fsi_fluid_velocity_field_id(0),
         AnalysisSolverOptions::StructuralLinear(_)
         | AnalysisSolverOptions::StructuralModes(_)
+        | AnalysisSolverOptions::StructuralFrequency(_)
         | AnalysisSolverOptions::StructuralTransient(_)
         | AnalysisSolverOptions::StructuralNonlinear(_) => {
             FEA_FIELD_STRUCTURAL_DISPLACEMENT.to_string()
@@ -2713,6 +2714,9 @@ fn run_fixture_cpu(
             },
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
+        AnalysisSolverOptions::StructuralFrequency(_) => panic!(
+            "structural-frequency fixtures must execute through the study runner, not the legacy single-run CPU fixture harness"
+        ),
         AnalysisSolverOptions::AcousticHelmholtz(_) => analysis_run_acoustic_with_options_op(
             model,
             ComputeBackend::Cpu,
@@ -2819,7 +2823,8 @@ fn run_fixture_gpu(
     solver_mesh_artifact_path: Option<&str>,
 ) -> FixtureRunResult {
     let solver_mesh_artifact_path = solver_mesh_artifact_path.map(str::to_owned);
-    let run = || match AnalysisSolverOptions::defaults_for(fixture_procedure_step(model))
+    let run = || {
+        match AnalysisSolverOptions::defaults_for(fixture_procedure_step(model))
         .expect("fixture procedure step must select a supported solver")
     {
         AnalysisSolverOptions::StructuralLinear(_) => analysis_run_linear_static_with_options(
@@ -2845,6 +2850,9 @@ fn run_fixture_gpu(
                 ..AnalysisModalRunOptions::balanced()
             },
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
+        ),
+        AnalysisSolverOptions::StructuralFrequency(_) => panic!(
+            "structural-frequency fixtures must execute through the study runner, not the legacy single-run GPU fixture harness"
         ),
         AnalysisSolverOptions::AcousticHelmholtz(_) => analysis_run_acoustic_with_options_op(
             model,
@@ -2942,6 +2950,7 @@ fn run_fixture_gpu(
                 OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
             )
         }
+    }
     };
     boxed_fixture_run_result(match mode {
         GpuMode::WithProvider => with_harness_provider(run),

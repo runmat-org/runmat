@@ -1,6 +1,9 @@
 use runmat_analysis_core::{AnalysisModel, AnalysisSequence, ProcedureStep, RestartPolicy};
 
-use crate::operations::{OperationContext, OperationEnvelope, OperationErrorEnvelope};
+use crate::operations::{
+    operation_error, OperationContext, OperationEnvelope, OperationErrorEnvelope,
+    OperationErrorSeverity, OperationErrorSpec, OperationErrorType,
+};
 
 use super::contracts::{AnalysisExecutionStep, AnalysisRunResult, AnalysisSolverOptions};
 use super::{
@@ -9,7 +12,7 @@ use super::{
     analysis_run_fsi_with_options_op, analysis_run_linear_static_with_executor,
     analysis_run_modal_with_options_op, analysis_run_nonlinear_with_options_op,
     analysis_run_thermal_with_options_op, analysis_run_transient_with_options_op,
-    StructuralLinearExecutor,
+    StructuralLinearExecutor, ANALYSIS_RUN_STUDY_OPERATION, ANALYSIS_RUN_STUDY_OP_VERSION,
 };
 
 pub(super) fn execute_study_step(
@@ -38,6 +41,22 @@ pub(super) fn execute_study_step(
             )?;
             Ok((run, AnalysisSolverOptions::StructuralLinear(options)))
         }
+        AnalysisSolverOptions::StructuralFrequency(_) => Err(operation_error(
+            ANALYSIS_RUN_STUDY_OPERATION,
+            ANALYSIS_RUN_STUDY_OP_VERSION,
+            context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_STUDY.FREQUENCY_REQUIRES_PLACEMENT",
+                error_type: OperationErrorType::Contract,
+                retryable: false,
+                severity: OperationErrorSeverity::Fatal,
+            },
+            "structural frequency studies execute through the portable placement boundary",
+            std::collections::BTreeMap::from([(
+                "step_id".to_string(),
+                procedure_step.step_id.as_str().to_string(),
+            )]),
+        )),
         AnalysisSolverOptions::StructuralModes(authored_options) => {
             let mut options = authored_options.clone();
             attach_solver_mesh_artifact_path(

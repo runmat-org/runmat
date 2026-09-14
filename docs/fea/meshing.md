@@ -136,7 +136,7 @@ study = fea.study("bracket_static", part, ...
     "ExcitationCases", excitationCases);
 
 run = fea.run(study);
-stress = fea.field(fea.results(run), "structural.von_mises");
+stress = fea.field(fea.results(run), fea.StructuralField.vonMises());
 plot(stress);
 ```
 

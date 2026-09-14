@@ -866,7 +866,7 @@ fn validate_quantity_range(class_name: &str, value: f64) -> Result<(), String> {
     }
 }
 
-fn quantity_to_value(
+pub(super) fn quantity_to_value(
     builtin: &'static str,
     class_name: &'static str,
     field: &'static str,

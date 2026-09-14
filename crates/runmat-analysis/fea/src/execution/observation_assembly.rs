@@ -2,7 +2,8 @@ use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use serde::{Deserialize, Serialize};
 
 use crate::results::observation::{
-    ObservationPartitionEvidenceIdentity, ObservationResult, ObservationResultIdentity,
+    resolved_observation_accepts_sample, ObservationPartitionEvidenceIdentity, ObservationResult,
+    ObservationResultIdentity,
 };
 
 use super::{
@@ -165,12 +166,32 @@ fn validate_results(
     results: &[ObservationResult],
 ) -> AnalysisExecutionResult<()> {
     source.validate()?;
-    if results.len() != source.plan.observations.len() {
+    let first = results.first().ok_or(AnalysisExecutionError::Invalid(
+        "observation assembly requires at least one scheduled result".into(),
+    ))?;
+    let sample = first.sample;
+    let event_attribution = first.partition_evidence.event_attribution;
+    if results.iter().any(|result| {
+        result.sample != sample || result.partition_evidence.event_attribution != event_attribution
+    }) {
         return Err(AnalysisExecutionError::Identity(
-            "observation assembly does not contain every resolved observation",
+            "observation assembly mixes sample coordinates or event attribution",
         ));
     }
-    for (observation, result) in source.plan.observations.iter().zip(results) {
+    let mut expected = Vec::new();
+    for observation in &source.plan.observations {
+        if resolved_observation_accepts_sample(&source.plan, observation, sample, event_attribution)
+            .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?
+        {
+            expected.push(observation);
+        }
+    }
+    if expected.len() != results.len() {
+        return Err(AnalysisExecutionError::Identity(
+            "observation assembly does not exactly cover the scheduled sample",
+        ));
+    }
+    for (observation, result) in expected.into_iter().zip(results) {
         result
             .validate()
             .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;

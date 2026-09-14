@@ -2480,9 +2480,13 @@ impl StructuralStudyPlacementExecutor for CanonicalStudyPlacement {
             };
             let mut results = Vec::with_capacity(entries.len());
             for entry in entries {
-                let workload = entry
-                    .prepared
-                    .workloads()
+                let runmat_analysis_fea::execution::StructuralStudyWorkloads::LinearSequence {
+                    workloads,
+                } = entry.prepared.workloads()
+                else {
+                    return Err("prepared placement study is not a linear sequence".to_string());
+                };
+                let workload = workloads
                     .into_values()
                     .next()
                     .ok_or_else(|| "prepared placement study has no workload".to_string())?;
@@ -2775,7 +2779,12 @@ fn prepared_structural_study_completes_without_reinterpreting_the_study() {
         calls: AtomicU64::new(0),
     };
 
-    let workload = prepared.workloads().into_values().next().unwrap();
+    let runmat_analysis_fea::execution::StructuralStudyWorkloads::LinearSequence { workloads } =
+        prepared.workloads()
+    else {
+        panic!("prepared static study is not a linear sequence");
+    };
+    let workload = workloads.into_values().next().unwrap();
     let numerical_result = executor
         .execute(&workload, prepared.solver_mesh())
         .expect("prepared numerical solve should succeed");

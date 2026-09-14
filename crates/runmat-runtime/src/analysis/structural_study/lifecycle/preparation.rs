@@ -12,11 +12,12 @@ pub fn analysis_prepare_structural_study_intent_op(
     let mut linear_workloads = BTreeMap::new();
     let mut transient_workload = None;
     let mut transient_block_plan = None;
+    let mut frequency_workload = None;
     for step in &study.steps {
         let mut authored_execution = step.authored_execution.clone();
         match step.authored_execution.solver_options.clone() {
             AnalysisSolverOptions::StructuralLinear(mut options) => {
-                if transient_workload.is_some() {
+                if transient_workload.is_some() || frequency_workload.is_some() {
                     return Err(portable_study_kind_error(&study, step));
                 }
                 options.solver_mesh_artifact_path = None;
@@ -32,7 +33,9 @@ pub fn analysis_prepare_structural_study_intent_op(
                 linear_workloads.insert(step.procedure_step.step_id.clone(), workload);
             }
             AnalysisSolverOptions::StructuralTransient(mut options)
-                if study.steps.len() == 1 && linear_workloads.is_empty() =>
+                if study.steps.len() == 1
+                    && linear_workloads.is_empty()
+                    && frequency_workload.is_none() =>
             {
                 options.solver_mesh_artifact_path = None;
                 let interval_count = options.time_step_policy.interval_count();
@@ -59,6 +62,18 @@ pub fn analysis_prepare_structural_study_intent_op(
                 authored_execution.solver_options =
                     AnalysisSolverOptions::StructuralTransient(options);
             }
+            AnalysisSolverOptions::StructuralFrequency(mut options)
+                if study.steps.len() == 1
+                    && linear_workloads.is_empty()
+                    && transient_workload.is_none() =>
+            {
+                options.solver_mesh_artifact_path = None;
+                frequency_workload = Some(prepare_structural_frequency_workload(
+                    &study, step, &options,
+                )?);
+                authored_execution.solver_options =
+                    AnalysisSolverOptions::StructuralFrequency(options);
+            }
             _ => return Err(portable_study_kind_error(&study, step)),
         }
         steps.push(PreparedStructuralStudyIntentStep {
@@ -66,20 +81,27 @@ pub fn analysis_prepare_structural_study_intent_op(
             procedure_step: step.procedure_step.clone(),
         });
     }
-    let workloads = match (transient_workload, transient_block_plan) {
-        (Some(workload), Some(block_plan)) => {
+    let workloads = match (transient_workload, transient_block_plan, frequency_workload) {
+        (Some(workload), Some(block_plan), None) => {
             runmat_analysis_fea::execution::StructuralStudyWorkloads::DirectTransient {
                 workload: Box::new(workload),
                 block_plan,
             }
         }
-        (None, None) => runmat_analysis_fea::execution::StructuralStudyWorkloads::LinearSequence {
-            workloads: linear_workloads,
-        },
+        (None, None, Some(workload)) => {
+            runmat_analysis_fea::execution::StructuralStudyWorkloads::StructuralFrequency {
+                workload: Box::new(workload),
+            }
+        }
+        (None, None, None) => {
+            runmat_analysis_fea::execution::StructuralStudyWorkloads::LinearSequence {
+                workloads: linear_workloads,
+            }
+        }
         _ => {
             return Err(portable_study_contract_error(
                 &study,
-                "structural transient workload and block plan are inconsistent".into(),
+                "structural study workload kind is internally inconsistent".into(),
             ))
         }
     };
@@ -168,6 +190,53 @@ pub fn analysis_prepare_structural_study_intent_op(
     Ok(intent)
 }
 
+pub(in crate::analysis) fn prepare_structural_frequency_workload(
+    study: &super::super::PreparedStudySequence,
+    step: &super::super::PreparedStudyStep,
+    options: &crate::analysis::AnalysisStructuralFrequencyRunOptions,
+) -> Result<runmat_analysis_fea::execution::StructuralFrequencyWorkload, OperationErrorEnvelope> {
+    options
+        .direct_solver
+        .validate()
+        .map_err(|error| portable_study_contract_error(study, error.to_string()))?;
+    let runmat_analysis_core::IndependentDomain::FrequencyHertz(frequencies) =
+        &step.procedure_step.independent_domain
+    else {
+        return Err(portable_study_contract_error(
+            study,
+            "structural harmonic execution requires a typed frequency domain".into(),
+        ));
+    };
+    let (&reference_frequency_hz, requested_frequencies_hz) =
+        frequencies.split_first().ok_or_else(|| {
+            portable_study_contract_error(
+                study,
+                "structural harmonic execution requires at least one frequency".into(),
+            )
+        })?;
+    let plan = runmat_analysis_fea::frequency::FrequencyResponsePlan::new(
+        reference_frequency_hz,
+        requested_frequencies_hz,
+        &[],
+    )
+    .map_err(|error| portable_study_contract_error(study, error.to_string()))?;
+    runmat_analysis_fea::execution::StructuralFrequencyWorkload::new(
+        runmat_analysis_fea::execution::StructuralFrequencyWorkloadInput {
+            model: study.model.clone(),
+            step_id: step.procedure_step.step_id.clone(),
+            backend: step.authored_execution.backend,
+            formulation_requirement: step.authored_execution.requirement,
+            observation_execution:
+                runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
+            plan,
+            solver: runmat_analysis_fea::execution::StructuralFrequencySolverPlan::Direct {
+                policy: options.direct_solver,
+            },
+        },
+    )
+    .map_err(|error| portable_study_contract_error(study, error.to_string()))
+}
+
 fn portable_study_kind_error(
     study: &super::super::PreparedStudySequence,
     step: &super::super::PreparedStudyStep,
@@ -182,7 +251,7 @@ fn portable_study_kind_error(
             retryable: false,
             severity: OperationErrorSeverity::Error,
         },
-        "portable structural studies require either a structural-linear sequence or one direct structural-transient step",
+        "portable structural studies require a structural-linear sequence, one direct structural-transient step, or one direct structural-harmonic step",
         BTreeMap::from([
             ("study_id".to_string(), study.spec.study_id.clone()),
             (

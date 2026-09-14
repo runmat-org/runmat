@@ -703,6 +703,10 @@ pub fn analysis_results_op(
         max_frequency_hz,
         max_modal_residual_norm,
         first_mode_converged,
+        frequency_sample_count: 0,
+        available_frequencies_hz: Vec::new(),
+        max_frequency_solver_residual: None,
+        max_frequency_balance_error: None,
         snapshot_count,
         time_start_s,
         time_end_s,
@@ -1237,6 +1241,7 @@ pub fn analysis_results_op(
         transient_results,
         nonlinear_results,
         electromagnetic_results,
+        structural_frequency_results: None,
         diagnostics: if query.include_diagnostics {
             if query.diagnostic_codes.is_empty() {
                 Some(run_result.run.diagnostics.clone())
@@ -1298,6 +1303,24 @@ pub fn analysis_results_by_run_id_op(
     })?;
 
     let Some(run_result) = run_result else {
+        let frequency = storage::load_structural_frequency_result(run_id).map_err(|err| {
+            operation_error(
+                ANALYSIS_RESULTS_OPERATION,
+                ANALYSIS_RESULTS_OP_VERSION,
+                &context,
+                OperationErrorSpec {
+                    error_code: "RM.FEA.RESULTS.ARTIFACT_STORE_FAILED",
+                    error_type: OperationErrorType::Internal,
+                    retryable: true,
+                    severity: OperationErrorSeverity::Error,
+                },
+                format!("failed to load structural frequency artifact: {err}"),
+                BTreeMap::from([("run_id".to_string(), run_id.to_string())]),
+            )
+        })?;
+        if let Some(frequency) = frequency {
+            return analysis_structural_frequency_results_op(&frequency, query, context);
+        }
         return Err(operation_error(
             ANALYSIS_RESULTS_OPERATION,
             ANALYSIS_RESULTS_OP_VERSION,
@@ -1322,13 +1345,141 @@ pub fn analysis_results_by_run_id_op(
     Ok(envelope)
 }
 
+fn analysis_structural_frequency_results_op(
+    step: &AnalysisStudyStepRunData,
+    query: AnalysisResultsQuery,
+    context: OperationContext,
+) -> Result<OperationEnvelope<AnalysisResultsData>, OperationErrorEnvelope> {
+    let AnalysisStudyStepNumericalResultData::StructuralFrequency(result) = &step.numerical_result
+    else {
+        return Err(operation_error(
+            ANALYSIS_RESULTS_OPERATION,
+            ANALYSIS_RESULTS_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RESULTS.ARTIFACT_INVALID",
+                error_type: OperationErrorType::Contract,
+                retryable: false,
+                severity: OperationErrorSeverity::Fatal,
+            },
+            "structural frequency store returned another numerical result kind",
+            BTreeMap::from([("run_id".to_string(), step.run_id.clone())]),
+        ));
+    };
+    let publication = &result.publication;
+    let mut descriptors = publication
+        .samples()
+        .iter()
+        .flat_map(|sample| sample.fields.fields.iter().map(frequency_field_descriptor))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| {
+            operation_error(
+                ANALYSIS_RESULTS_OPERATION,
+                ANALYSIS_RESULTS_OP_VERSION,
+                &context,
+                OperationErrorSpec {
+                    error_code: "RM.FEA.RESULTS.ARTIFACT_INVALID",
+                    error_type: OperationErrorType::Contract,
+                    retryable: false,
+                    severity: OperationErrorSeverity::Fatal,
+                },
+                format!("structural frequency field catalog is invalid: {error}"),
+                BTreeMap::from([("run_id".to_string(), step.run_id.clone())]),
+            )
+        })?;
+    if !query.include_fields.is_empty() {
+        for requested in &query.include_fields {
+            if !descriptors.iter().any(|descriptor| {
+                super::super::field_selection::field_id_matches(&descriptor.field_id, requested)
+            }) {
+                return Err(operation_error(
+                    ANALYSIS_RESULTS_OPERATION,
+                    ANALYSIS_RESULTS_OP_VERSION,
+                    &context,
+                    OperationErrorSpec {
+                        error_code: "RM.FEA.RESULTS.FIELD_NOT_FOUND",
+                        error_type: OperationErrorType::Input,
+                        retryable: false,
+                        severity: OperationErrorSeverity::Error,
+                    },
+                    format!("requested FEA field '{requested}' was not produced by run"),
+                    BTreeMap::from([("requested_field".to_string(), requested.clone())]),
+                ));
+            }
+        }
+        descriptors.retain(|descriptor| {
+            query.include_fields.iter().any(|requested| {
+                super::super::field_selection::field_id_matches(&descriptor.field_id, requested)
+            })
+        });
+    }
+    let frequencies = publication
+        .result()
+        .samples()
+        .iter()
+        .map(|sample| sample.plan_entry().frequency_hz())
+        .collect::<Vec<_>>();
+    let receipt = publication.receipt();
+    let summary = AnalysisResultsSummary {
+        field_count: descriptors.len(),
+        total_elements: descriptors
+            .iter()
+            .map(|descriptor| descriptor.element_count)
+            .sum(),
+        frequency_sample_count: frequencies.len(),
+        available_frequencies_hz: frequencies,
+        max_frequency_solver_residual: receipt
+            .samples()
+            .iter()
+            .map(|sample| sample.solver_relative_residual())
+            .reduce(f64::max),
+        max_frequency_balance_error: receipt
+            .samples()
+            .iter()
+            .map(|sample| sample.physical_relative_balance_error())
+            .reduce(f64::max),
+        ..AnalysisResultsSummary::default()
+    };
+    Ok(OperationEnvelope::new(
+        ANALYSIS_RESULTS_OPERATION,
+        ANALYSIS_RESULTS_OP_VERSION,
+        &context,
+        AnalysisResultsData {
+            identity: step.identity.clone(),
+            field_descriptors: descriptors,
+            fields: Vec::new(),
+            modal_results: None,
+            thermal_results: None,
+            transient_results: None,
+            nonlinear_results: None,
+            electromagnetic_results: None,
+            structural_frequency_results: Some(result.as_ref().clone()),
+            diagnostics: query.include_diagnostics.then(Vec::new),
+            run_status: step.run_status,
+            numerically_acceptable: step.numerically_acceptable,
+            production_publishable: step.production_publishable,
+            quality_reasons: step.quality_reasons.clone(),
+            production_publication_reasons: step.production_publication_reasons.clone(),
+            provenance: step.provenance.clone(),
+            summary,
+        },
+    ))
+}
+
+fn frequency_field_descriptor(
+    entry: &runmat_analysis_fea::results::field::RecoveredFieldArtifactEntry,
+) -> Result<AnalysisFieldDescriptor, String> {
+    AnalysisFieldDescriptor::from_recovered_entry(entry)
+}
+
 pub fn analysis_field_page_by_run_id_op(
     run_id: &str,
-    field_id: &str,
+    selection: AnalysisFieldSelection,
     options: AnalysisFieldRequestOptions,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisFieldPageResult>, OperationErrorEnvelope> {
-    let lookup = storage::load_field_page(run_id, field_id, options).map_err(|err| {
+    let field_id = selection.field_id.clone();
+    let lookup = storage::load_field_page(run_id, &selection, options).map_err(|err| {
         operation_error(
             ANALYSIS_RESULTS_OPERATION,
             ANALYSIS_RESULTS_OP_VERSION,
@@ -1378,6 +1529,65 @@ pub fn analysis_field_page_by_run_id_op(
                 BTreeMap::from([
                     ("run_id".to_string(), run_id.to_string()),
                     ("requested_field".to_string(), field_id.to_string()),
+                ]),
+            ));
+        }
+        storage::AnalysisFieldPageLookup::FieldSelectionAmbiguous(available_fields) => {
+            return Err(operation_error(
+                ANALYSIS_RESULTS_OPERATION,
+                ANALYSIS_RESULTS_OP_VERSION,
+                &context,
+                OperationErrorSpec {
+                    error_code: "RM.FEA.RESULTS.FIELD_AMBIGUOUS",
+                    error_type: OperationErrorType::Input,
+                    retryable: false,
+                    severity: OperationErrorSeverity::Error,
+                },
+                format!("requested FEA field '{field_id}' matches more than one produced field"),
+                BTreeMap::from([
+                    ("run_id".to_string(), run_id.to_string()),
+                    ("requested_field".to_string(), field_id.clone()),
+                    ("available_fields".to_string(), available_fields.join(",")),
+                ]),
+            ));
+        }
+        storage::AnalysisFieldPageLookup::SampleSelectionRequired(samples) => {
+            return Err(operation_error(
+                ANALYSIS_RESULTS_OPERATION,
+                ANALYSIS_RESULTS_OP_VERSION,
+                &context,
+                OperationErrorSpec {
+                    error_code: "RM.FEA.RESULTS.SAMPLE_REQUIRED",
+                    error_type: OperationErrorType::Input,
+                    retryable: false,
+                    severity: OperationErrorSeverity::Error,
+                },
+                format!("requested FEA field '{field_id}' has more than one published sample"),
+                BTreeMap::from([
+                    ("run_id".to_string(), run_id.to_string()),
+                    ("requested_field".to_string(), field_id.clone()),
+                    (
+                        "available_samples".to_string(),
+                        serde_json::to_string(&samples).unwrap_or_default(),
+                    ),
+                ]),
+            ));
+        }
+        storage::AnalysisFieldPageLookup::SampleNotFound => {
+            return Err(operation_error(
+                ANALYSIS_RESULTS_OPERATION,
+                ANALYSIS_RESULTS_OP_VERSION,
+                &context,
+                OperationErrorSpec {
+                    error_code: "RM.FEA.RESULTS.SAMPLE_NOT_FOUND",
+                    error_type: OperationErrorType::Input,
+                    retryable: false,
+                    severity: OperationErrorSeverity::Error,
+                },
+                format!("requested sample was not produced for FEA field '{field_id}'"),
+                BTreeMap::from([
+                    ("run_id".to_string(), run_id.to_string()),
+                    ("requested_field".to_string(), field_id),
                 ]),
             ));
         }

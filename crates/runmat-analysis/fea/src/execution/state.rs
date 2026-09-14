@@ -105,6 +105,9 @@ pub enum CanonicalSemanticStatePayload {
     Fields {
         fields: Vec<AnalysisField>,
     },
+    StructuralFrequency {
+        publication: Box<super::StructuralFrequencyPublicationManifest>,
+    },
     ModalBasis {
         basis: Box<crate::pipeline::modal_basis::ModalBasisArtifact>,
     },
@@ -196,13 +199,31 @@ impl CanonicalSemanticState {
         }
         match &self.payload {
             CanonicalSemanticStatePayload::Fields { fields } => {
-                if self.kind == StateKind::ModalBasis || fields.is_empty() {
+                if matches!(
+                    self.kind,
+                    StateKind::ModalBasis | StateKind::StructuralComplex
+                ) || fields.is_empty()
+                {
                     return Err(AnalysisExecutionError::Invalid(
                         "field semantic-state payload does not match its declared state kind"
                             .into(),
                     ));
                 }
                 validate_portable_fields(fields)?;
+            }
+            CanonicalSemanticStatePayload::StructuralFrequency { publication } => {
+                if self.kind != StateKind::StructuralComplex {
+                    return Err(AnalysisExecutionError::Invalid(
+                        "structural-frequency semantic-state payload does not match its declared state kind"
+                            .into(),
+                    ));
+                }
+                publication.validate()?;
+                if publication.result().identity() != self.source_result {
+                    return Err(AnalysisExecutionError::Identity(
+                        "structural-frequency semantic state names another solver result",
+                    ));
+                }
             }
             CanonicalSemanticStatePayload::ModalBasis { basis } => {
                 if self.kind != StateKind::ModalBasis || basis.modes().is_empty() {
@@ -273,13 +294,20 @@ impl CanonicalSemanticStatePayload {
     pub fn fields(&self) -> Option<&[AnalysisField]> {
         match self {
             Self::Fields { fields } => Some(fields),
-            Self::ModalBasis { .. } => None,
+            Self::StructuralFrequency { .. } | Self::ModalBasis { .. } => None,
+        }
+    }
+
+    pub fn structural_frequency(&self) -> Option<&super::StructuralFrequencyPublicationManifest> {
+        match self {
+            Self::StructuralFrequency { publication } => Some(publication.as_ref()),
+            Self::Fields { .. } | Self::ModalBasis { .. } => None,
         }
     }
 
     pub fn modal_basis(&self) -> Option<&crate::pipeline::modal_basis::ModalBasisArtifact> {
         match self {
-            Self::Fields { .. } => None,
+            Self::Fields { .. } | Self::StructuralFrequency { .. } => None,
             Self::ModalBasis { basis } => Some(basis.as_ref()),
         }
     }

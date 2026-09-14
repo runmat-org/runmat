@@ -158,6 +158,17 @@ impl StructuralFrequencyWorkload {
         &self.solver
     }
 
+    /// Rebinds the workload to a semantically equivalent resolved model.
+    ///
+    /// Boundary-region resolution happens after portable study preparation. The workload remains
+    /// the single numerical authority, so replacing its authored model must also regenerate its
+    /// content identity and revalidate every step, plan, and state-input relationship.
+    pub fn replace_model(&mut self, model: AnalysisModel) -> AnalysisExecutionResult<()> {
+        self.model = model;
+        self.identity = self.derive_identity()?;
+        self.validate()
+    }
+
     pub fn procedure_step(&self) -> AnalysisExecutionResult<&ProcedureStep> {
         let mut matches = self
             .model

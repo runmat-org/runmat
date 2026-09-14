@@ -7,7 +7,7 @@ use runmat_analysis_execution::{
     StructuralSequencePreparation, StructuralStudyWorkloads, StructuralTransientRecoveryClosure,
     StructuralTransientSequencePreparationInput,
 };
-use runmat_analysis_fea::execution::DEFAULT_ANALYSIS_CHUNK_BYTES;
+use runmat_analysis_fea::execution::{StructuralFrequencySolverPlan, DEFAULT_ANALYSIS_CHUNK_BYTES};
 use runmat_execution::state::TaskState;
 use runmat_execution::task::RetryPolicy;
 use runmat_execution::Digest;
@@ -323,6 +323,59 @@ pub(super) async fn execute_with_completed_meshing(
                 &completed.result,
                 &boundary_objects,
                 crate::exact_structural_study_root::ExactStructuralAnalysisPublication::DirectTransient {
+                    signals: &completed_signals,
+                    completion: &completion,
+                    unresolved_workloads_digest,
+                },
+            )?
+        }
+        StructuralStudyWorkloads::StructuralFrequency { workload } => {
+            if matches!(
+                &recovery,
+                StructuralTransientRecoveryAdmission::Available {
+                    restored: Some(_),
+                    ..
+                }
+            ) {
+                return Ok(RemoteExactStructuralStudyComposition::Failed(
+                    "structural frequency study cannot consume a transient recovery closure".into(),
+                ));
+            }
+            if !matches!(
+                workload.solver(),
+                StructuralFrequencySolverPlan::Direct { .. }
+            ) {
+                return Ok(RemoteExactStructuralStudyComposition::Failed(
+                    "standalone structural frequency execution requires a direct solver plan"
+                        .into(),
+                ));
+            }
+            let completion = match crate::execute_structural_frequency_remotely(
+                Arc::clone(&pool),
+                crate::StructuralFrequencyExecutionPreparation {
+                    workload: *workload,
+                    mesh: completed.result.artifact.clone(),
+                    modal_state: None,
+                    program_revision: request.recipe.program_revision.clone(),
+                    artifact_access: decoded.artifact_access.clone(),
+                    chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
+                    inventory_limits: ObjectInventoryLimits::default(),
+                    observation_limits:
+                        runmat_analysis_fea::results::observation::ObservationLimits::default(),
+                },
+                policy,
+            )
+            .await
+            {
+                Ok(completion) => completion,
+                Err(error) => return Ok(sequence_error_composition(&pool, error.to_string())),
+            };
+            crate::exact_structural_study_root::package_exact_structural_study_result(
+                request,
+                &decoded,
+                &completed.result,
+                &boundary_objects,
+                crate::exact_structural_study_root::ExactStructuralAnalysisPublication::StructuralFrequency {
                     signals: &completed_signals,
                     completion: &completion,
                     unresolved_workloads_digest,

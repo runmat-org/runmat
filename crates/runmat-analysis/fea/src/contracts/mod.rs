@@ -37,6 +37,72 @@ pub const FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE: &str = "structural.shell_me
 pub const FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT: &str = "structural.shell_bending_moment";
 pub const FEA_FIELD_STRUCTURAL_SHELL_TRANSVERSE_SHEAR: &str = "structural.shell_transverse_shear";
 pub const FEA_FIELD_STRUCTURAL_SHELL_VON_MISES: &str = "structural.shell_von_mises";
+
+/// Closed structural field selector used by language and storage boundaries.
+///
+/// Field identifiers remain stable data names, while callers select supported structural
+/// quantities through this enum rather than dispatching scientific behavior from strings.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StructuralFieldSelector {
+    Displacement,
+    Rotation,
+    VonMises,
+    NodalVonMises,
+    Strain,
+    Stress,
+    ReactionForce,
+    ReactionMoment,
+    ConstraintReactionForce,
+    ConstraintReactionMomentAboutGlobalOrigin,
+    StrainEnergyDensity,
+    TotalStrainEnergy,
+    ResidualNorm,
+    EquationScale,
+    BeamAxialForce,
+    BeamShearForce,
+    BeamTorsionMoment,
+    BeamBendingMoment,
+    BeamBendingStress,
+    BeamTorsionStress,
+    ShellMembraneForce,
+    ShellBendingMoment,
+    ShellTransverseShear,
+    ShellVonMises,
+}
+
+impl StructuralFieldSelector {
+    pub const fn field_id(self) -> &'static str {
+        match self {
+            Self::Displacement => FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+            Self::Rotation => FEA_FIELD_STRUCTURAL_ROTATION,
+            Self::VonMises => FEA_FIELD_STRUCTURAL_VON_MISES,
+            Self::NodalVonMises => FEA_FIELD_STRUCTURAL_NODAL_VON_MISES,
+            Self::Strain => FEA_FIELD_STRUCTURAL_STRAIN,
+            Self::Stress => FEA_FIELD_STRUCTURAL_STRESS,
+            Self::ReactionForce => FEA_FIELD_STRUCTURAL_REACTION_FORCE,
+            Self::ReactionMoment => FEA_FIELD_STRUCTURAL_REACTION_MOMENT,
+            Self::ConstraintReactionForce => FEA_FIELD_STRUCTURAL_CONSTRAINT_REACTION_FORCE,
+            Self::ConstraintReactionMomentAboutGlobalOrigin => {
+                FEA_FIELD_STRUCTURAL_CONSTRAINT_REACTION_MOMENT_ABOUT_GLOBAL_ORIGIN
+            }
+            Self::StrainEnergyDensity => FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY,
+            Self::TotalStrainEnergy => FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY,
+            Self::ResidualNorm => FEA_FIELD_STRUCTURAL_RESIDUAL_NORM,
+            Self::EquationScale => FEA_FIELD_STRUCTURAL_EQUATION_SCALE,
+            Self::BeamAxialForce => FEA_FIELD_STRUCTURAL_BEAM_AXIAL_FORCE,
+            Self::BeamShearForce => FEA_FIELD_STRUCTURAL_BEAM_SHEAR_FORCE,
+            Self::BeamTorsionMoment => FEA_FIELD_STRUCTURAL_BEAM_TORSION_MOMENT,
+            Self::BeamBendingMoment => FEA_FIELD_STRUCTURAL_BEAM_BENDING_MOMENT,
+            Self::BeamBendingStress => FEA_FIELD_STRUCTURAL_BEAM_BENDING_STRESS,
+            Self::BeamTorsionStress => FEA_FIELD_STRUCTURAL_BEAM_TORSION_STRESS,
+            Self::ShellMembraneForce => FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE,
+            Self::ShellBendingMoment => FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT,
+            Self::ShellTransverseShear => FEA_FIELD_STRUCTURAL_SHELL_TRANSVERSE_SHEAR,
+            Self::ShellVonMises => FEA_FIELD_STRUCTURAL_SHELL_VON_MISES,
+        }
+    }
+}
 pub const FEA_FIELD_EM_VECTOR_POTENTIAL_REAL: &str = "em.vector_potential_real";
 pub const FEA_FIELD_EM_VECTOR_POTENTIAL_IMAG: &str = "em.vector_potential_imag";
 pub const FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_REAL: &str = "em.magnetic_flux_density_real";

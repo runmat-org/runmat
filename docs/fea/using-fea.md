@@ -179,7 +179,7 @@ validation = fea.validate(study);
 plan = fea.plan(study);
 result = fea.run(study);
 results = fea.results(result);
-stress = fea.field(results, "structural.von_mises");
+stress = fea.field(results, fea.StructuralField.vonMises());
 mesh(results);
 plot(stress);
 print("bracket_von_mises.png", "-dpng");
@@ -264,11 +264,27 @@ study = fea.load("studies/bracket_static.fea");
 validation = fea.validate(study);
 result = fea.run(study);
 results = result.results();
-stress = result.field("structural.von_mises");
-peakStressPa = max(stress.values);
+stress = result.field(fea.StructuralField.vonMises());
+stressPage = stress.page();
+peakStressPa = max(stressPage.values);
 ```
 
-`fea.load(...)` returns either a `fea.Study` or `fea.Sweep` object. `geometry.load(...)` returns a `geometry.Asset` object, and `meshing.generate(...)` returns a validated `meshing.Mesh`. The workflow builtins accept `.fea` paths, `fea.Study` objects, or `fea.Sweep` objects. Study operations return `fea.Validation`, `fea.Plan`, and an aggregate `fea.RunResult`; sweep operations return the distinct aggregate classes `fea.SweepValidation`, `fea.SweepPlan`, and `fea.SweepRunResult`. Select one persisted procedure-step run with `stepRun = result.step("step_id")`; the resulting `fea.StepRunResult` owns the step's `run_id` and exposes `results()`, `field(fieldId)`, and `mesh()`. Those methods also work directly on a `fea.RunResult` when the study has exactly one step. A multi-step aggregate requires explicit step selection. `fea.Field` objects expose script-friendly `values`, `shape`, `unit`, `location`, `kind`, `family`, and `quantity` properties plus `plot()` and `mesh()` visualization methods. Field selection belongs to `fea.field`; it is not a plotting option.
+`fea.load(...)` returns either a `fea.Study` or `fea.Sweep` object. `geometry.load(...)` returns a `geometry.Asset` object, and `meshing.generate(...)` returns a validated `meshing.Mesh`. The workflow builtins accept `.fea` paths, `fea.Study` objects, or `fea.Sweep` objects. Study operations return `fea.Validation`, `fea.Plan`, and an aggregate `fea.RunResult`; sweep operations return the distinct aggregate classes `fea.SweepValidation`, `fea.SweepPlan`, and `fea.SweepRunResult`. Select one persisted procedure-step run with `stepRun = result.step("step_id")`; the resulting `fea.StepRunResult` owns the step's `run_id` and exposes `results()`, `field(selector, sample)`, and `mesh()`. Those methods also work directly on a `fea.RunResult` when the study has exactly one step. A multi-step aggregate requires explicit step selection.
+
+`fea.Field` is a typed field handle. Its `shape`, unit, location, kind, family, quantity, sample coordinate, numerical representation, and run identity are available without loading the numerical payload. Small conventional results may also carry an already-materialized `values` property; code that must work for large or distributed results should use `page = field.page(start, count)`. `start` is a positive one-based logical-value index, `count` defaults to 256, and each request is capped at 4096 values. `page.values` is a real tensor for real fields and a native complex tensor for harmonic fields. `page.next_start` is empty at the end; otherwise pass it to the next call. `page.count`, `page.total_count`, and `page.start` remain exact integers.
+
+Frequency selection is typed and remains separate from rendering:
+
+```matlab
+sample = fea.Frequency.hertz(120);
+displacement = fea.field( ...
+    harmonicResults, fea.StructuralField.displacement(), sample);
+page = displacement.page(1, 1024);
+amplitude = abs(page.values);
+plot(displacement);
+```
+
+`plot(field)` streams the selected artifact through the visualization boundary and does not require a full driver-side tensor. It renders complex harmonic values by magnitude. Field selection belongs to `fea.field`; it is not a plotting option.
 
 The typed constructors and post-processing helpers do not intrinsically require native OCCT. They can consume an existing `geometry.Asset`, STL-backed or synthetic geometry, and persisted mesh/result artifacts without OCCT; only an earlier import of topology-bearing CAD such as STEP, IGES, or BREP may require the configured OCCT geometry backend.
 

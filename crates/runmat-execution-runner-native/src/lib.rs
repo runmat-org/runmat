@@ -1,11 +1,14 @@
 //! Native process composition for the portable RunMat execution driver.
 
 mod accelerator_placement;
+mod analysis_frequency;
+mod analysis_frequency_observations;
 mod analysis_host;
 mod analysis_kernel;
 mod analysis_placement;
 mod analysis_sequence;
 mod analysis_task;
+mod analysis_task_pool;
 mod analysis_transient;
 mod config;
 mod driver;
@@ -32,6 +35,14 @@ pub mod supervisor;
 mod test_workload;
 mod worker;
 
+pub use analysis_frequency::{
+    execute_structural_frequency_locally, execute_structural_frequency_locally_with_source,
+    execute_structural_frequency_remotely, CompletedStructuralFrequencyEntry,
+    CompletedStructuralFrequencyStudy, StructuralFrequencyExecutionPreparation,
+};
+pub use analysis_frequency_observations::{
+    CompletedStructuralFrequencyHistory, CompletedStructuralFrequencyObservationSample,
+};
 pub use analysis_host::{execute_analysis_program_request, NativeAnalysisHostLimits};
 pub use analysis_kernel::NativeAnalysisKernel;
 pub use analysis_placement::NativeStructuralStudyPlacement;
@@ -65,9 +76,9 @@ pub use exact_meshing_root::{
 pub use exact_structural_study_root::{
     decode_exact_structural_study_root, import_exact_structural_study_result,
     prepare_exact_structural_study_root, BoundaryRegionResolution, DecodedExactStructuralStudyRoot,
-    ExactStructuralStudyAnalysisResult, ExactStructuralStudyResult,
-    ExactStructuralStudyResultExpectation, ExactStructuralStudyRootPreparation,
-    PreparedExactStructuralStudyRoot, RequiredStudyProgram,
+    ExactStructuralFrequencyAnalysisResult, ExactStructuralStudyAnalysisResult,
+    ExactStructuralStudyResult, ExactStructuralStudyResultExpectation,
+    ExactStructuralStudyRootPreparation, PreparedExactStructuralStudyRoot, RequiredStudyProgram,
     EXACT_STRUCTURAL_STUDY_ROOT_EXECUTION_MODE, EXACT_STRUCTURAL_STUDY_ROOT_TARGET_PROFILE,
 };
 pub use exact_structural_sweep_root::{

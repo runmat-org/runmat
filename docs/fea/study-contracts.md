@@ -428,7 +428,7 @@ one published field. Ordinary plotting functions render the resulting object:
 
 ```matlab
 results = fea.results(runResult);
-stress = fea.field(results, "structural.von_mises");
+stress = fea.field(results, fea.StructuralField.vonMises());
 plot(stress);
 mesh(results);
 ```

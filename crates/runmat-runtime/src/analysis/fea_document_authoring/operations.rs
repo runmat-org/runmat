@@ -369,6 +369,12 @@ fn validate_execution(
 fn default_sequence(template: AnalysisModelTemplate, id: &str) -> AnalysisSequence {
     let step = match template {
         AnalysisModelTemplate::LinearStaticStructural => ProcedureStep::structural_static("solve"),
+        AnalysisModelTemplate::StructuralHarmonic => {
+            let mut step = ProcedureStep::structural_harmonic("solve");
+            step.independent_domain =
+                runmat_analysis_core::IndependentDomain::FrequencyHertz(vec![10.0, 100.0, 1_000.0]);
+            step
+        }
         AnalysisModelTemplate::ThermoMechanicalCoupled => ProcedureStep::coupled(
             "solve",
             CoupledPhysicsFamily::Thermomechanical,

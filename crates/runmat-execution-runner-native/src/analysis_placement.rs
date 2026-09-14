@@ -2,22 +2,25 @@ use std::collections::BTreeSet;
 
 use futures::stream::{FuturesUnordered, StreamExt};
 use runmat_analysis_execution::StructuralSequencePreparation;
-use runmat_analysis_fea::execution::DEFAULT_ANALYSIS_CHUNK_BYTES;
+use runmat_analysis_fea::execution::{StructuralStudyWorkloads, DEFAULT_ANALYSIS_CHUNK_BYTES};
 use runmat_execution::resource::{AcceleratorRequest, Capability, ResourceRequest};
 use runmat_execution::task::RetryPolicy;
 use runmat_execution::{Digest, ProgramEnvironment, ProgramRevision};
 use runmat_execution_artifact::object::ObjectInventoryLimits;
-use runmat_execution_artifact::ArtifactAccess;
+use runmat_execution_artifact::{ArtifactAccess, ArtifactPublishedObjectSource};
 use runmat_runtime::analysis::{
     analysis_study_content_digest, AnalysisStudySpec, PreparedStructuralStudy,
-    StructuralStudyExecutionFailure, StructuralStudyNumericalResult, StructuralStudyPlacementEntry,
+    StructuralStudyExecutionFailure, StructuralStudyFrequencyNumericalResult,
+    StructuralStudyNumericalResult, StructuralStudyPlacementEntry,
     StructuralStudyPlacementExecutor, StructuralStudyPlacementFuture,
     StructuralStudyPlacementResult, StructuralStudySequenceNumericalResult,
     StructuralStudyStepNumericalResult,
 };
 
 use crate::{
-    execute_structural_sequence_locally, NativeExecutionConfig, StructuralSequenceExecutionPolicy,
+    execute_structural_frequency_locally_with_source, execute_structural_sequence_locally,
+    NativeExecutionConfig, StructuralFrequencyExecutionPreparation,
+    StructuralSequenceExecutionPolicy,
 };
 
 /// Native-process placement for runtime-prepared structural studies.
@@ -111,15 +114,12 @@ async fn execute_one(
     let workloads = prepared.workloads();
     let accelerator_requests = local_accelerator_requests(&workloads)?;
     let maximum_wall_millis = workloads
-        .values()
-        .map(|workload| {
-            workload
-                .procedure_step()
-                .map(|step| step.accuracy.resources.maximum_wall_time_milliseconds)
-        })
-        .collect::<Result<Vec<_>, _>>()
+        .authored_model()
         .map_err(|error| crate::NativeExecutionError::Configuration(error.to_string()))?
-        .into_iter()
+        .sequence
+        .steps
+        .iter()
+        .map(|step| step.accuracy.resources.maximum_wall_time_milliseconds)
         .max()
         .ok_or_else(|| {
             crate::NativeExecutionError::Configuration(
@@ -130,68 +130,113 @@ async fn execute_one(
     required_capabilities.insert(Capability::ProcessIsolation);
     let mut execution_config = placement.config.clone();
     execution_config.max_workers = workers_per_study.max(1);
-    let completed = execute_structural_sequence_locally(
-        execution_config,
-        StructuralSequencePreparation {
-            authored_study_digest: study_digest,
-            frozen_project_digest: None,
-            program_revision: revision,
-            artifact_access: artifact_access(study_digest),
-            workloads,
-            mesh: Some(prepared.solver_mesh().clone()),
-            chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
-            inventory_limits: ObjectInventoryLimits::default(),
-            required_capabilities: BTreeSet::new(),
-            accelerator_requests: accelerator_requests.clone(),
+    let policy = StructuralSequenceExecutionPolicy {
+        resources: ResourceRequest {
+            cpu_millicores: 1_000,
+            memory_bytes: 1024 * 1024 * 1024,
+            scratch_bytes: 1024 * 1024 * 1024,
+            max_wall_millis: maximum_wall_millis,
+            max_artifact_bytes: ObjectInventoryLimits::default().max_total_bytes,
+            max_egress_bytes: 0,
+            max_relay_bytes: 0,
+            accelerators: accelerator_requests.clone(),
+            required_capabilities,
         },
-        StructuralSequenceExecutionPolicy {
-            resources: ResourceRequest {
-                cpu_millicores: 1_000,
-                memory_bytes: 1024 * 1024 * 1024,
-                scratch_bytes: 1024 * 1024 * 1024,
-                max_wall_millis: maximum_wall_millis,
-                max_artifact_bytes: ObjectInventoryLimits::default().max_total_bytes,
-                max_egress_bytes: 0,
-                max_relay_bytes: 0,
-                accelerators: accelerator_requests,
-                required_capabilities,
-            },
-            retry: RetryPolicy::IdempotentInfrastructure,
-            deadline_unix_millis: None,
-            priority: 0,
-        },
-    )
-    .await?;
-    Ok(StructuralStudyNumericalResult::LinearSequence(
-        StructuralStudySequenceNumericalResult {
-            frozen_project_digest: None,
-            steps: completed
-                .steps
-                .into_iter()
-                .map(|step| StructuralStudyStepNumericalResult {
-                    step_id: step.step_id,
-                    solver_result_identity: step.result_identity,
-                    result: step.result.run,
-                })
-                .collect(),
-            states: completed
-                .states
-                .into_iter()
-                .map(|state| state.state)
-                .collect(),
-        },
-    ))
+        retry: RetryPolicy::IdempotentInfrastructure,
+        deadline_unix_millis: None,
+        priority: 0,
+    };
+    let access = artifact_access(study_digest);
+    match workloads {
+        StructuralStudyWorkloads::LinearSequence { workloads } => {
+            let completed = execute_structural_sequence_locally(
+                execution_config,
+                StructuralSequencePreparation {
+                    authored_study_digest: study_digest,
+                    frozen_project_digest: None,
+                    program_revision: revision,
+                    artifact_access: access,
+                    workloads,
+                    mesh: Some(prepared.solver_mesh().clone()),
+                    chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
+                    inventory_limits: ObjectInventoryLimits::default(),
+                    required_capabilities: BTreeSet::new(),
+                    accelerator_requests,
+                },
+                policy,
+            )
+            .await?;
+            Ok(StructuralStudyNumericalResult::LinearSequence(
+                StructuralStudySequenceNumericalResult {
+                    frozen_project_digest: None,
+                    steps: completed
+                        .steps
+                        .into_iter()
+                        .map(|step| StructuralStudyStepNumericalResult {
+                            step_id: step.step_id,
+                            solver_result_identity: step.result_identity,
+                            result: step.result.run,
+                        })
+                        .collect(),
+                    states: completed
+                        .states
+                        .into_iter()
+                        .map(|state| state.state)
+                        .collect(),
+                },
+            ))
+        }
+        StructuralStudyWorkloads::StructuralFrequency { workload } => {
+            let resolved_workload = *workload;
+            let (completion, source) = execute_structural_frequency_locally_with_source(
+                execution_config,
+                StructuralFrequencyExecutionPreparation {
+                    workload: resolved_workload.clone(),
+                    mesh: prepared.solver_mesh().clone(),
+                    modal_state: None,
+                    program_revision: revision,
+                    artifact_access: access.clone(),
+                    chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
+                    inventory_limits: ObjectInventoryLimits::default(),
+                    observation_limits:
+                        runmat_analysis_fea::results::observation::ObservationLimits::default(),
+                },
+                policy,
+            )
+            .await?;
+            let (catalog, artifact_roots) = completion.published_artifacts(&access)?;
+            Ok(StructuralStudyNumericalResult::StructuralFrequency(
+                Box::new(
+                    StructuralStudyFrequencyNumericalResult::new(
+                        None,
+                        resolved_workload,
+                        completion.result.result,
+                        completion.publication,
+                        catalog,
+                        artifact_roots,
+                        ArtifactPublishedObjectSource::new(source),
+                    )
+                    .map_err(crate::NativeExecutionError::Configuration)?,
+                ),
+            ))
+        }
+        StructuralStudyWorkloads::DirectTransient { .. } => {
+            Err(crate::NativeExecutionError::Configuration(
+                "local placement does not execute direct transient studies through this boundary"
+                    .into(),
+            ))
+        }
+    }
 }
 
 fn local_accelerator_requests(
-    workloads: &std::collections::BTreeMap<
-        runmat_analysis_core::ProcedureStepId,
-        runmat_analysis_fea::execution::StructuralLinearWorkload,
-    >,
+    workloads: &StructuralStudyWorkloads,
 ) -> crate::NativeExecutionResult<Vec<AcceleratorRequest>> {
     if workloads
-        .values()
-        .all(|workload| workload.backend != runmat_analysis_fea::ComputeBackend::Gpu)
+        .backends()
+        .map_err(|error| crate::NativeExecutionError::Configuration(error.to_string()))?
+        .into_iter()
+        .all(|backend| backend != runmat_analysis_fea::ComputeBackend::Gpu)
     {
         return Ok(Vec::new());
     }

@@ -532,6 +532,7 @@ fn resolve_meshing_settings(
         matches!(
             entry.solver_options,
             AnalysisSolverOptions::StructuralLinear(_)
+                | AnalysisSolverOptions::StructuralFrequency(_)
         )
     });
     let Some(mesh) = mesh else {

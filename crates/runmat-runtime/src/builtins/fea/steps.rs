@@ -42,6 +42,11 @@ step_descriptor!(
     "step = fea.StructuralStep.modal(id)"
 );
 step_descriptor!(
+    STRUCTURAL_HARMONIC_DESCRIPTOR,
+    STRUCTURAL_HARMONIC_SIGNATURES,
+    "step = fea.StructuralStep.harmonic(id)"
+);
+step_descriptor!(
     STRUCTURAL_TRANSIENT_DESCRIPTOR,
     STRUCTURAL_TRANSIENT_SIGNATURES,
     "step = fea.StructuralStep.transient(id)"
@@ -137,6 +142,7 @@ pub(super) fn require_step_class(
             PhysicsFamily::Structural,
             AnalysisProcedure::Static
             | AnalysisProcedure::ModalExtraction
+            | AnalysisProcedure::HarmonicResponse
             | AnalysisProcedure::TransientResponse
             | AnalysisProcedure::Nonlinear,
             SolutionSpace::Direct,
@@ -229,6 +235,14 @@ step_builtin!(
     FEA_STRUCTURAL_STEP_CLASS,
     "Create a direct structural modal-extraction step.",
     ProcedureStep::structural_modal
+);
+step_builtin!(
+    structural_harmonic_builtin,
+    STRUCTURAL_HARMONIC_DESCRIPTOR,
+    "fea.StructuralStep.harmonic",
+    FEA_STRUCTURAL_STEP_CLASS,
+    "Create a direct structural harmonic-response step.",
+    ProcedureStep::structural_harmonic
 );
 step_builtin!(
     structural_transient_builtin,
@@ -382,6 +396,11 @@ mod tests {
                 AnalysisProcedure::ModalExtraction,
             ),
             (
+                block_on(structural_harmonic_builtin(step_id("structural_harmonic"))).unwrap(),
+                FEA_STRUCTURAL_STEP_CLASS,
+                AnalysisProcedure::HarmonicResponse,
+            ),
+            (
                 block_on(structural_transient_builtin(step_id(
                     "structural_transient",
                 )))
@@ -528,6 +547,7 @@ mod tests {
         for (class_name, method) in [
             (FEA_STRUCTURAL_STEP_CLASS, "static"),
             (FEA_STRUCTURAL_STEP_CLASS, "modal"),
+            (FEA_STRUCTURAL_STEP_CLASS, "harmonic"),
             (FEA_THERMAL_STEP_CLASS, "transient"),
             (FEA_ELECTROMAGNETIC_STEP_CLASS, "harmonic"),
             (FEA_ACOUSTIC_STEP_CLASS, "harmonic"),

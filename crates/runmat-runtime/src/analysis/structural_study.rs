@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use runmat_analysis_core::{AnalysisModel, ProcedureStep, ProcedureStepId};
-use runmat_analysis_fea::execution::{StructuralLinearWorkload, StructuralStudyWorkloads};
+use runmat_analysis_fea::execution::StructuralStudyWorkloads;
 use runmat_analysis_fea::results::observation::ObservationExecutionPolicy;
 use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
 use runmat_analysis_fea::solve::preconditioner::SpdPreconditionerKind;
@@ -21,9 +21,10 @@ pub use lifecycle::{
     analysis_complete_structural_study_intent_op, analysis_prepare_structural_study_intent_op,
     structural_study_execution_failure,
 };
+pub(super) use lifecycle::{complete_frequency_study, prepare_structural_frequency_workload};
 pub(super) use publication::{
     complete_study_run, persist_content_addressed_study_evidence, study_completion_from_prepared,
-    study_evidence_root, CompletedStudyStep,
+    study_evidence_root, CompletedStudyStep, CompletedStudyStepRun,
 };
 #[cfg(test)]
 pub(super) use publication::{persist_immutable_study_evidence, run_evidence_stage};
@@ -95,7 +96,18 @@ pub(super) struct PreparedStudyStep {
 #[derive(Debug, Clone)]
 pub struct PreparedStructuralStudy {
     pub(super) study: PreparedStudySequence,
-    pub(super) linears: BTreeMap<ProcedureStepId, PreparedStructuralLinearRun>,
+    pub(super) execution: PreparedStructuralStudyExecution,
+    pub(super) solver_mesh: SolverMeshArtifact,
+}
+
+#[derive(Debug, Clone)]
+pub(super) enum PreparedStructuralStudyExecution {
+    LinearSequence {
+        linears: BTreeMap<ProcedureStepId, PreparedStructuralLinearRun>,
+    },
+    StructuralFrequency {
+        workload: Box<runmat_analysis_fea::execution::StructuralFrequencyWorkload>,
+    },
 }
 
 /// Validated structural study semantics before geometry is meshed.
@@ -404,6 +416,40 @@ impl PreparedStructuralStudyIntent {
                     );
                 }
             }
+            StructuralStudyWorkloads::StructuralFrequency { workload } => {
+                let [step] = self.steps.as_slice() else {
+                    return Err(
+                        "direct structural frequency execution requires exactly one prepared step"
+                            .into(),
+                    );
+                };
+                let super::AnalysisSolverOptions::StructuralFrequency(options) =
+                    &step.authored_execution.solver_options
+                else {
+                    return Err(
+                        "structural frequency workload has non-frequency authored options".into(),
+                    );
+                };
+                let runmat_analysis_fea::execution::StructuralFrequencySolverPlan::Direct {
+                    policy,
+                } = workload.solver()
+                else {
+                    return Err(
+                        "standalone structural frequency execution requires a direct solver".into(),
+                    );
+                };
+                if workload.step_id() != &step.procedure_step.step_id
+                    || workload.backend() != step.authored_execution.backend
+                    || workload.formulation_requirement() != step.authored_execution.requirement
+                    || workload.observation_execution() != ObservationExecutionPolicy::scalable()
+                    || *policy != options.direct_solver
+                    || options.solver_mesh_artifact_path.is_some()
+                {
+                    return Err(
+                        "structural frequency workload differs from its prepared execution".into(),
+                    );
+                }
+            }
         }
         Ok(())
     }
@@ -454,19 +500,25 @@ pub(super) fn resolve_intent_meshing_request(
 }
 
 impl PreparedStructuralStudy {
-    pub fn workloads(&self) -> BTreeMap<ProcedureStepId, StructuralLinearWorkload> {
-        self.linears
-            .iter()
-            .map(|(step_id, linear)| (step_id.clone(), linear.workload.clone()))
-            .collect()
+    pub fn workloads(&self) -> StructuralStudyWorkloads {
+        match &self.execution {
+            PreparedStructuralStudyExecution::LinearSequence { linears } => {
+                StructuralStudyWorkloads::LinearSequence {
+                    workloads: linears
+                        .iter()
+                        .map(|(step_id, linear)| (step_id.clone(), linear.workload.clone()))
+                        .collect(),
+                }
+            }
+            PreparedStructuralStudyExecution::StructuralFrequency { workload } => {
+                StructuralStudyWorkloads::StructuralFrequency {
+                    workload: workload.clone(),
+                }
+            }
+        }
     }
 
     pub fn solver_mesh(&self) -> &SolverMeshArtifact {
-        self.linears
-            .values()
-            .next()
-            .expect("prepared structural studies contain at least one sequence step")
-            .solver_mesh()
-            .expect("prepared structural studies always contain a canonical solver mesh")
+        &self.solver_mesh
     }
 }

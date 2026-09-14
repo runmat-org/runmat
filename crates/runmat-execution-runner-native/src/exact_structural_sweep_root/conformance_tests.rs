@@ -13,10 +13,12 @@ use runmat_analysis_execution::{
     prepare_signal_materialization, PreparedSignalMaterialization, ResolvedSignalArtifact,
 };
 use runmat_analysis_fea::execution::{
-    SignalMaterializationIdentity, StructuralLinearWorkload, StructuralTransientBlockPlan,
+    SignalMaterializationIdentity, StructuralFrequencySolverPlan, StructuralFrequencyWorkload,
+    StructuralFrequencyWorkloadInput, StructuralLinearWorkload, StructuralTransientBlockPlan,
     StructuralTransientWorkload, StudyIdentity, SweepCompositionPolicy, SweepDefinition,
 };
 use runmat_analysis_fea::fixtures::{fixture_model, FixtureId};
+use runmat_analysis_fea::frequency::FrequencyResponsePlan;
 use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
 use runmat_analysis_fea::solve::preconditioner::SpdPreconditionerKind;
 use runmat_analysis_fea::solve::transient::StructuralTimeStepPolicy;
@@ -169,6 +171,22 @@ async fn exact_structural_sweep_reaches_ordered_admitted_results_over_encrypted_
     })
     .unwrap();
     let direct_expectation = direct.result_expectation();
+    let frequency_study_digest = Digest::sha256(b"box structural frequency study");
+    let frequency = prepare_exact_structural_study_root(ExactStructuralStudyRootPreparation {
+        program_revision: revision.clone(),
+        artifact_access: access.clone(),
+        authored_study_digest: frequency_study_digest,
+        frozen_project_digest: Some(Digest::from_bytes(*project_identity.graph_digest.bytes())),
+        geometry_source_digest: source_digest,
+        workloads: runmat_analysis_execution::StructuralStudyWorkloads::StructuralFrequency {
+            workload: Box::new(box_structural_frequency_workload()),
+        },
+        analysis_accelerator_requests: Vec::new(),
+        signal_materializations: Vec::new(),
+        exact_meshing: exact_meshing.clone(),
+    })
+    .unwrap();
+    let frequency_expectation = frequency.result_expectation();
     let mut invalid_workload = workload;
     invalid_workload.model.constraints[0].visit_targets_mut(|target| {
         *target = runmat_analysis_core::RegionTarget::boundary("face_999999");
@@ -564,6 +582,8 @@ async fn exact_structural_sweep_reaches_ordered_admitted_results_over_encrypted_
     run_direct_exact_study_conformance(
         direct,
         direct_expectation,
+        frequency,
+        frequency_expectation,
         bundle,
         inventory,
         resources,
@@ -575,6 +595,8 @@ async fn exact_structural_sweep_reaches_ordered_admitted_results_over_encrypted_
 async fn run_direct_exact_study_conformance(
     direct: crate::PreparedExactStructuralStudyRoot,
     expectation: crate::ExactStructuralStudyResultExpectation,
+    frequency: crate::PreparedExactStructuralStudyRoot,
+    frequency_expectation: crate::ExactStructuralStudyResultExpectation,
     bundle: Vec<u8>,
     inventory: ResourceInventory,
     resources: ResourceRequest,
@@ -656,6 +678,15 @@ async fn run_direct_exact_study_conformance(
                     .unwrap();
             }
         }
+        for object in frequency.transport_objects().unwrap() {
+            if object.is_externalized_value() {
+                pool.register_value_object(object.reference, object.bytes)
+                    .unwrap();
+            } else {
+                pool.register_execution_object(object.reference, object.bytes)
+                    .unwrap();
+            }
+        }
         let mut recovery = RecordingRecoveryPublisher::default();
         let response = tokio::time::timeout(
             Duration::from_secs(180),
@@ -691,6 +722,57 @@ async fn run_direct_exact_study_conformance(
         assert_eq!(numerical_receipt.blocks.len(), 2);
         numerical_receipt.validate_for_result(&result).unwrap();
         assert_eq!(recovery.closures.len(), 2);
+
+        let response = tokio::time::timeout(
+            Duration::from_secs(180),
+            crate::remote::exact_structural_study::execute_for_test(
+                Arc::clone(&pool),
+                frequency.request(),
+                &access.authorization_scope,
+                &resources,
+                &mut RecordingRecoveryPublisher::default(),
+            ),
+        )
+        .await
+        .expect("remote structural-frequency exact study timed out")
+        .unwrap()
+        .unwrap_or_else(|message| {
+            panic!("remote structural-frequency exact study failed: {message}")
+        });
+        let imported = import_exact_structural_study_result(
+            pool.as_ref(),
+            response,
+            &frequency_expectation,
+            ObjectInventoryLimits::default(),
+        )
+        .unwrap();
+        let crate::ExactStructuralStudyAnalysisResult::StructuralFrequency(frequency) =
+            imported.analysis
+        else {
+            panic!("structural-frequency exact study returned another result kind")
+        };
+        let crate::ExactStructuralFrequencyAnalysisResult {
+            resolved_workload,
+            result,
+            numerical_receipt,
+            entries,
+            histories,
+            resource_usage,
+            ..
+        } = *frequency;
+        assert_eq!(resolved_workload.step_id().as_str(), "frequency");
+        assert_eq!(result.samples().len(), 2);
+        assert_eq!(entries.len(), 2);
+        assert!(histories.is_empty());
+        numerical_receipt.validate_for_result(&result).unwrap();
+        assert!(entries.iter().all(|entry| {
+            !entry.recovered_fields.manifest.fields.is_empty() && entry.observations.is_none()
+        }));
+        assert_eq!(
+            resource_usage.evidence.result_digest,
+            result.manifest().identity().digest()
+        );
+        assert!(resource_usage.evidence.overruns.is_empty());
         pool.remove_worker(worker.id, false).await.unwrap();
     };
     let (server_result, ()) = tokio::join!(server, client);
@@ -906,6 +988,30 @@ fn box_direct_transient_workload() -> StructuralTransientWorkload {
         time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 2 },
         residual_target: 1.0e-8,
     }
+}
+
+fn box_structural_frequency_workload() -> StructuralFrequencyWorkload {
+    let mut model = box_structural_workload().model;
+    let mut step = runmat_analysis_core::ProcedureStep::structural_harmonic("frequency");
+    step.independent_domain =
+        runmat_analysis_core::IndependentDomain::FrequencyHertz(vec![20.0, 40.0]);
+    model.sequence = runmat_analysis_core::AnalysisSequence::from_steps(
+        "box-structural-frequency-sequence",
+        vec![step.clone()],
+    );
+    StructuralFrequencyWorkload::new(StructuralFrequencyWorkloadInput {
+        model,
+        step_id: step.step_id,
+        backend: ComputeBackend::Cpu,
+        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+        observation_execution:
+            runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
+        plan: FrequencyResponsePlan::new(20.0, &[40.0], &[]).unwrap(),
+        solver: StructuralFrequencySolverPlan::Direct {
+            policy: runmat_analysis_fea::solve::dynamics::DirectHarmonicPolicy::default(),
+        },
+    })
+    .unwrap()
 }
 
 fn coarse_box_request() -> MeshingRequest {

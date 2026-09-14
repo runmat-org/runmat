@@ -1,8 +1,8 @@
 use runmat_value::Value;
 
 use super::{
-    analysis_results_by_run_id_op, bool_from_value, builtin_error, field_id_matches, find_field,
-    normalize_token, operation_error, run_id_context_from_value, run_id_from_value, scalar_string,
+    analysis_results_by_run_id_op, bool_from_value, builtin_error, find_field, normalize_token,
+    operation_error, run_id_context_from_value, run_id_from_value, scalar_string,
     study_context_from_value, AnalysisFieldValues, AnalysisResultsQuery, AnalysisStudySpec,
     BuiltinResult, OperationContext, ERROR_INPUT, ERROR_OPERATION, FEA_FIELD_CLASS, MESH_NAME,
     PLOT_NAME,
@@ -13,7 +13,7 @@ pub(super) fn create_plot_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
     {
         let request = plot_request_from_args(&args)?;
         reject_requested_device_field(&request)?;
-        let mut figures = generate_plot_figures(&request.study, &request.run_id, &request.options)?;
+        let mut figures = generate_plot_figures(&request)?;
         let figure = select_generated_figure(&mut figures, &request.field_id)?;
         let handle = import_generated_figure(figure);
         Ok(Value::Num(f64::from(handle)))
@@ -64,6 +64,7 @@ pub(super) struct FeaPlotRequest {
     pub(super) study: AnalysisStudySpec,
     pub(super) run_id: String,
     pub(super) field_id: String,
+    pub(super) sample: Option<runmat_analysis_fea::results::field::RecoveredFieldSample>,
     pub(super) options: FeaPlotOptions,
 }
 
@@ -244,6 +245,7 @@ pub(super) fn plot_request_from_args(args: &[Value]) -> BuiltinResult<FeaPlotReq
             builtin_error(PLOT_NAME, &ERROR_INPUT, "fea.Field is missing run context")
         })?,
         field_id,
+        sample: super::field_access::selection_from_field_object(PLOT_NAME, object)?.sample,
         options,
     })
 }
@@ -299,20 +301,19 @@ fn plot_overlay_option_mesh_source(
 
 #[cfg(feature = "plot-core")]
 fn generate_plot_figures(
-    study: &AnalysisStudySpec,
-    run_id: &str,
-    options: &FeaPlotOptions,
+    request: &FeaPlotRequest,
 ) -> BuiltinResult<Vec<crate::analysis::AnalysisGeneratedFigure>> {
-    crate::analysis::analysis_generate_study_run_figures(
-        study,
-        run_id,
+    crate::analysis::analysis_generate_study_field_figures(
+        &request.study,
+        &request.run_id,
+        &crate::analysis::AnalysisFieldSelection::new(&request.field_id, request.sample),
         crate::analysis::AnalysisFigureGenerationOptions {
             include_comparison: false,
             include_trends: false,
             max_mesh_result_figures: 8,
-            mesh_source: options.mesh_source,
-            show_solver_mesh_edges: options.show_solver_mesh_edges,
-            apply_deformation_overlay: options.apply_deformation_overlay,
+            mesh_source: request.options.mesh_source,
+            show_solver_mesh_edges: request.options.show_solver_mesh_edges,
+            apply_deformation_overlay: request.options.apply_deformation_overlay,
             ..crate::analysis::AnalysisFigureGenerationOptions::default()
         },
     )
@@ -332,10 +333,9 @@ fn select_generated_figure(
         ));
     }
     if let Some(index) = figures.iter().position(|figure| {
-        figure
-            .field_ids
-            .iter()
-            .any(|candidate| field_id_matches(candidate, field_id))
+        figure.field_ids.iter().any(|candidate| {
+            crate::analysis::field_selection::field_id_matches(candidate, field_id)
+        })
     }) {
         return Ok(figures.remove(index));
     }

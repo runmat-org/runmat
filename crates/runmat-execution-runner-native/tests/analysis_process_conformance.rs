@@ -19,10 +19,12 @@ use runmat_analysis_fea::constraints::{
     CanonicalStructuralConstraintPlan, CanonicalStructuralTopologyIdentity, ConstraintEnforcement,
 };
 use runmat_analysis_fea::execution::{
-    AnalysisNumericalObjectKind, StructuralLinearWorkload, StructuralLinearWorkloadResult,
+    AnalysisNumericalObjectKind, StructuralFrequencySolverPlan, StructuralFrequencyWorkload,
+    StructuralFrequencyWorkloadInput, StructuralLinearWorkload, StructuralLinearWorkloadResult,
     DEFAULT_ANALYSIS_CHUNK_BYTES,
 };
 use runmat_analysis_fea::fixtures::{fixture_model, mixed_solid_beam_model, FixtureId};
+use runmat_analysis_fea::frequency::FrequencyResponsePlan;
 use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
 use runmat_analysis_fea::solve::preconditioner::SpdPreconditionerKind;
 use runmat_analysis_fea::ComputeBackend;
@@ -39,12 +41,13 @@ use runmat_execution_artifact::{
 };
 use runmat_execution_runner::{PoolSpec, WorkerSpec};
 use runmat_execution_runner_native::{
-    execute_analysis_program_request, execute_structural_sequence_locally,
+    execute_analysis_program_request, execute_structural_frequency_locally,
+    execute_structural_frequency_remotely, execute_structural_sequence_locally,
     execute_structural_sequence_remotely, execute_structural_transient_remotely,
     run_remote_worker_quic, NativeAnalysisHostLimits, NativeAnalysisKernel, NativeExecutionConfig,
     NativeExecutionError, NativeProgramSession, NativeProgramTask, QuicRemoteWorkerChannel,
     RemotePoolDriver, RemoteWorkerChannel, RemoteWorkerChannelConfig, RemoteWorkerQuicRequest,
-    StructuralSequenceExecutionPolicy,
+    StructuralFrequencyExecutionPreparation, StructuralSequenceExecutionPolicy,
 };
 use runmat_execution_transport_native::frame::FrameLimits;
 use runmat_execution_transport_native::overlay::{PinnedQuicEndpoint, QuicOverlayListener};
@@ -293,6 +296,22 @@ async fn parent() {
     .unwrap();
     assert_sequence(&sequence);
 
+    let mut frequency_config = NativeExecutionConfig::for_current_executable().unwrap();
+    frequency_config.executable = std::env::current_exe().unwrap();
+    frequency_config.worker_arguments = vec!["--child".into()];
+    frequency_config.max_workers = 2;
+    frequency_config.store_root = directory.path().join("native-analysis-frequency");
+    let frequency = execute_structural_frequency_locally(
+        frequency_config,
+        frequency_preparation(revision(), "local-analysis-frequency"),
+        sequence_policy(),
+    )
+    .await
+    .unwrap();
+    assert_frequency(&frequency, "local-analysis-frequency");
+    let expected_frequency_publication = frequency.publication.clone();
+    let expected_frequency_result = frequency.result.result.clone();
+
     let mut cancelled_sequence_config = NativeExecutionConfig::for_current_executable().unwrap();
     cancelled_sequence_config.executable = std::env::current_exe().unwrap();
     cancelled_sequence_config.worker_arguments = vec!["--child".into()];
@@ -340,6 +359,8 @@ async fn parent() {
         explicit_payload.clone(),
         published.clone(),
         explicit_published.clone(),
+        expected_frequency_publication,
+        expected_frequency_result,
     )
     .await;
     durable_conformance(
@@ -528,6 +549,8 @@ async fn remote_conformance(
     expected_explicit_payload: Vec<u8>,
     expected_publication: runmat_analysis_fea::results::publication::PublishedAnalysisResult,
     expected_explicit_publication: runmat_analysis_fea::results::publication::PublishedAnalysisResult,
+    expected_frequency_publication: runmat_analysis_fea::execution::StructuralFrequencyPublicationManifest,
+    expected_frequency_result: runmat_analysis_fea::execution::StructuralFrequencySolverResult,
 ) {
     let project_root = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(project_root.path().join("src")).unwrap();
@@ -851,6 +874,40 @@ async fn remote_conformance(
         .await
         .unwrap();
         assert_sequence(&sequence);
+        let frequency = execute_structural_frequency_remotely(
+            Arc::clone(&pool),
+            frequency_preparation(revision.clone(), "remote-analysis"),
+            sequence_policy(),
+        )
+        .await
+        .unwrap();
+        assert_frequency(&frequency, "remote-analysis");
+        assert_eq!(
+            frequency.publication.workload(),
+            expected_frequency_publication.workload()
+        );
+        assert_eq!(
+            frequency.publication.result(),
+            expected_frequency_publication.result()
+        );
+        assert_eq!(
+            frequency.publication.receipt(),
+            expected_frequency_publication.receipt()
+        );
+        assert_eq!(
+            frequency.publication.samples(),
+            expected_frequency_publication.samples()
+        );
+        assert_eq!(
+            frequency.publication.histories(),
+            expected_frequency_publication.histories()
+        );
+        assert_ne!(
+            frequency.publication.resource_usage(),
+            expected_frequency_publication.resource_usage(),
+            "local and remote publications must retain their own measured execution evidence"
+        );
+        assert_eq!(frequency.result.result, expected_frequency_result);
         let mut transient_publisher = transient::RecordingPublisher {
             closures: Vec::new(),
         };
@@ -1050,7 +1107,7 @@ fn fixture_for_study(
         require_solver_mesh_for_solid: true,
         initial_guess_transition: None,
     };
-    let mesh = solver_mesh(&solve);
+    let mesh = solver_mesh(&solve.model);
     let access = ArtifactAccess {
         authorization_scope: authorization_scope.into(),
         encryption_context: digest("encryption"),
@@ -1364,7 +1421,7 @@ fn sequence_preparation(
         require_solver_mesh_for_solid: true,
         initial_guess_transition: None,
     };
-    let mesh = solver_mesh(&workload);
+    let mesh = solver_mesh(&workload.model);
     let workloads = workload
         .model
         .sequence
@@ -1410,6 +1467,104 @@ fn sequence_policy() -> StructuralSequenceExecutionPolicy {
         deadline_unix_millis: None,
         priority: 0,
     }
+}
+
+fn frequency_preparation(
+    revision: ProgramRevision,
+    authorization_scope: &str,
+) -> StructuralFrequencyExecutionPreparation {
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    let mut step = runmat_analysis_core::ProcedureStep::structural_harmonic("frequency");
+    step.independent_domain =
+        runmat_analysis_core::IndependentDomain::FrequencyHertz(vec![20.0, 40.0]);
+    let runmat_analysis_core::ObservationRequest::Field(mut field) =
+        structural_displacement_observation()
+    else {
+        unreachable!("the structural observation fixture is a field request")
+    };
+    field.sampling = runmat_analysis_core::SamplingPolicy::FrequencyHertz(vec![20.0, 40.0]);
+    field.complex_representation = runmat_analysis_core::ComplexRepresentation::Real;
+    let mut history = field.clone();
+    history.observation_id = runmat_analysis_core::ObservationId("displacement_history".into());
+    step.observations = vec![runmat_analysis_core::ObservationRequest::History(history)];
+    model.sequence = runmat_analysis_core::AnalysisSequence::from_steps(
+        "process-structural-frequency",
+        vec![step.clone()],
+    );
+    let mesh = solver_mesh(&model);
+    let workload = StructuralFrequencyWorkload::new(StructuralFrequencyWorkloadInput {
+        model,
+        step_id: step.step_id,
+        backend: ComputeBackend::Cpu,
+        formulation_requirement: runmat_runtime::analysis::FormulationRequirement::Experimental,
+        observation_execution:
+            runmat_analysis_fea::results::observation::ObservationExecutionPolicy::canonical(
+                std::num::NonZeroU32::new(2).unwrap(),
+            ),
+        plan: FrequencyResponsePlan::new(20.0, &[40.0], &[]).unwrap(),
+        solver: StructuralFrequencySolverPlan::Direct {
+            policy: runmat_analysis_fea::solve::dynamics::DirectHarmonicPolicy::default(),
+        },
+    })
+    .unwrap();
+    StructuralFrequencyExecutionPreparation {
+        workload,
+        mesh,
+        modal_state: None,
+        program_revision: revision,
+        artifact_access: ArtifactAccess {
+            authorization_scope: authorization_scope.into(),
+            encryption_context: digest("process-frequency-encryption"),
+        },
+        chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
+        inventory_limits: ObjectInventoryLimits::default(),
+        observation_limits: runmat_analysis_fea::results::observation::ObservationLimits::default(),
+    }
+}
+
+fn assert_frequency(
+    frequency: &runmat_execution_runner_native::CompletedStructuralFrequencyStudy,
+    authorization_scope: &str,
+) {
+    assert_eq!(frequency.result.result.samples().len(), 2);
+    assert_eq!(frequency.entries.len(), 2);
+    assert_eq!(frequency.observation_samples.len(), 2);
+    assert!(frequency.observation_samples.iter().all(|sample| sample
+        .observations
+        .as_ref()
+        .is_some_and(|observations| observations.manifest.results.len() == 1)));
+    assert_eq!(frequency.histories.len(), 1);
+    assert_eq!(
+        frequency.histories[0]
+            .checkpoint
+            .checkpoint
+            .manifest()
+            .observed_sample_count,
+        2
+    );
+    assert_eq!(
+        frequency.resource_usage.evidence.result_digest,
+        frequency.result.result.manifest().identity().digest()
+    );
+    assert!(frequency.resource_usage.evidence.overruns.is_empty());
+    let access = ArtifactAccess {
+        authorization_scope: authorization_scope.into(),
+        encryption_context: digest("process-frequency-encryption"),
+    };
+    let (catalog, roots) = frequency
+        .published_artifacts(&access)
+        .expect("frequency publication must expose its exact typed object closure");
+    catalog
+        .validate()
+        .expect("frequency object catalog must be canonical");
+    roots
+        .validate(&frequency.publication, &catalog)
+        .expect("frequency root roles must match the semantic publication");
+    assert_eq!(
+        roots.samples().len(),
+        frequency.result.result.samples().len()
+    );
+    assert_eq!(roots.histories().len(), frequency.histories.len());
 }
 
 fn assert_sequence(sequence: &runmat_analysis_execution::CompletedStructuralSequence) {
@@ -1461,7 +1616,9 @@ fn assert_sequence(sequence: &runmat_analysis_execution::CompletedStructuralSequ
     }
 }
 
-fn solver_mesh(solve: &StructuralLinearWorkload) -> runmat_meshing_core::SolverMeshArtifact {
+fn solver_mesh(
+    model: &runmat_analysis_core::AnalysisModel,
+) -> runmat_meshing_core::SolverMeshArtifact {
     let mut mesh =
         runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
     for (index, face) in mesh.topology.boundary_faces.iter_mut().enumerate() {
@@ -1472,7 +1629,7 @@ fn solver_mesh(solve: &StructuralLinearWorkload) -> runmat_meshing_core::SolverM
         });
         face.provenance.sort();
     }
-    let assignment = solve.model.material_assignments.first().unwrap();
+    let assignment = model.material_assignments.first().unwrap();
     let region = PersistentEntityId {
         kind: PersistentEntityKind::Region,
         source_topology_id: assignment.region_id.clone(),

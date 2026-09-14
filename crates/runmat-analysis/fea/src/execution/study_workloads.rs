@@ -6,8 +6,8 @@ use runmat_execution::Digest;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    AnalysisExecutionError, AnalysisExecutionResult, StructuralLinearWorkload,
-    StructuralTransientWorkload,
+    AnalysisExecutionError, AnalysisExecutionResult, StructuralFrequencyWorkload,
+    StructuralLinearWorkload, StructuralTransientWorkload,
 };
 
 const STUDY_WORKLOADS_PREFIX: &[u8] = b"runmat-structural-study-workloads\0";
@@ -84,6 +84,9 @@ pub enum StructuralStudyWorkloads {
         workload: Box<StructuralTransientWorkload>,
         block_plan: StructuralTransientBlockPlan,
     },
+    StructuralFrequency {
+        workload: Box<StructuralFrequencyWorkload>,
+    },
 }
 
 impl StructuralStudyWorkloads {
@@ -111,6 +114,17 @@ impl StructuralStudyWorkloads {
                 }
                 Ok(())
             }
+            Self::StructuralFrequency { workload } => {
+                workload.validate()?;
+                if workload.model().sequence.steps.len() != 1
+                    || workload.model().sequence.steps[0].step_id != *workload.step_id()
+                {
+                    return Err(invalid(
+                        "standalone structural frequency execution requires exactly one authored step",
+                    ));
+                }
+                Ok(())
+            }
         }
     }
 
@@ -123,6 +137,7 @@ impl StructuralStudyWorkloads {
                 .map(|workload| &workload.model)
                 .ok_or_else(|| invalid("structural linear sequence has no workload")),
             Self::DirectTransient { workload, .. } => Ok(&workload.model),
+            Self::StructuralFrequency { workload } => Ok(workload.model()),
         }
     }
 
@@ -134,6 +149,7 @@ impl StructuralStudyWorkloads {
                 }
             }
             Self::DirectTransient { workload, .. } => workload.model = model,
+            Self::StructuralFrequency { workload } => workload.replace_model(model)?,
         }
         self.validate()
     }
@@ -143,6 +159,7 @@ impl StructuralStudyWorkloads {
         Ok(match self {
             Self::LinearSequence { workloads } => workloads.keys().cloned().collect(),
             Self::DirectTransient { workload, .. } => vec![workload.step_id.clone()],
+            Self::StructuralFrequency { workload } => vec![workload.step_id().clone()],
         })
     }
 
@@ -154,6 +171,7 @@ impl StructuralStudyWorkloads {
                 .map(|workload| workload.backend)
                 .collect(),
             Self::DirectTransient { workload, .. } => vec![workload.backend],
+            Self::StructuralFrequency { workload } => vec![workload.backend()],
         })
     }
 
@@ -213,8 +231,16 @@ fn invalid(message: impl Into<String>) -> AnalysisExecutionError {
 
 #[cfg(test)]
 mod tests {
-    use crate::execution::StructuralTransientWorkload;
+    use runmat_analysis_core::{IndependentDomain, ProcedureStep};
+
+    use crate::execution::{
+        StructuralFrequencySolverPlan, StructuralFrequencyWorkload,
+        StructuralFrequencyWorkloadInput, StructuralTransientWorkload,
+    };
     use crate::fixtures::{fixture_model, FixtureId};
+    use crate::frequency::FrequencyResponsePlan;
+    use crate::results::observation::ObservationExecutionPolicy;
+    use crate::solve::dynamics::DirectHarmonicPolicy;
     use crate::solve::transient::StructuralTimeStepPolicy;
     use crate::ComputeBackend;
 
@@ -251,5 +277,65 @@ mod tests {
         workloads.replace_model(replacement.clone()).unwrap();
         assert_eq!(workloads.authored_model().unwrap(), &replacement);
         assert_ne!(workloads.canonical_digest().unwrap(), digest);
+    }
+
+    #[test]
+    fn structural_frequency_workload_is_canonical_and_model_replaceable() {
+        let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+        let mut step = ProcedureStep::structural_harmonic("frequency");
+        step.independent_domain = IndependentDomain::FrequencyHertz(vec![20.0, 40.0]);
+        model.sequence.steps = vec![step];
+        let workload = StructuralFrequencyWorkload::new(StructuralFrequencyWorkloadInput {
+            model,
+            step_id: ProcedureStepId("frequency".into()),
+            backend: ComputeBackend::Cpu,
+            formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+            observation_execution: ObservationExecutionPolicy::scalable(),
+            plan: FrequencyResponsePlan::new(20.0, &[40.0], &[]).unwrap(),
+            solver: StructuralFrequencySolverPlan::Direct {
+                policy: DirectHarmonicPolicy::default(),
+            },
+        })
+        .unwrap();
+        let mut workloads = StructuralStudyWorkloads::StructuralFrequency {
+            workload: Box::new(workload),
+        };
+        let canonical = workloads.canonical_digest().unwrap();
+        assert_eq!(
+            workloads.step_ids().unwrap(),
+            [ProcedureStepId("frequency".into())]
+        );
+        assert_eq!(workloads.backends().unwrap(), [ComputeBackend::Cpu]);
+
+        let mut replacement = workloads.authored_model().unwrap().clone();
+        replacement.model_id.0 = "resolved-frequency-model".into();
+        workloads.replace_model(replacement.clone()).unwrap();
+        assert_eq!(workloads.authored_model().unwrap(), &replacement);
+        assert_ne!(workloads.canonical_digest().unwrap(), canonical);
+    }
+
+    #[test]
+    fn standalone_structural_frequency_rejects_a_mixed_sequence() {
+        let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+        let mut frequency = ProcedureStep::structural_harmonic("frequency");
+        frequency.independent_domain = IndependentDomain::FrequencyHertz(vec![20.0]);
+        model.sequence.steps.push(frequency.clone());
+        let workload = StructuralFrequencyWorkload::new(StructuralFrequencyWorkloadInput {
+            model,
+            step_id: frequency.step_id,
+            backend: ComputeBackend::Cpu,
+            formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+            observation_execution: ObservationExecutionPolicy::scalable(),
+            plan: FrequencyResponsePlan::new(20.0, &[], &[]).unwrap(),
+            solver: StructuralFrequencySolverPlan::Direct {
+                policy: DirectHarmonicPolicy::default(),
+            },
+        })
+        .unwrap();
+        assert!(StructuralStudyWorkloads::StructuralFrequency {
+            workload: Box::new(workload),
+        }
+        .validate()
+        .is_err());
     }
 }

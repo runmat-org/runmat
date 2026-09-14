@@ -20,8 +20,14 @@ use runmat_analysis_fea::AnalysisRunIdentity;
 
 use super::contracts::{
     AnalysisArtifactRecord, AnalysisFieldDescriptor, AnalysisFieldPageResult,
-    AnalysisFieldRequestOptions, AnalysisRunResult,
+    AnalysisFieldPageValues, AnalysisFieldRequestOptions, AnalysisFieldSelection,
+    AnalysisRunResult, AnalysisStudyStepRunData,
 };
+
+mod frequency;
+mod frequency_page;
+
+use frequency::PersistedStructuralFrequencyArtifact;
 
 const ARTIFACT_SCHEMA_VERSION: &str = "analysis_run_artifact/2026-09-chunked-fields";
 const FIELD_IDENTITY_PREFIX: &[u8] = b"runmat-analysis-field/v1\0";
@@ -49,9 +55,18 @@ struct PreparedRunArtifact {
     chunks: HashMap<Digest, Vec<u8>>,
 }
 
+#[derive(Clone)]
+enum PersistedAnalysisArtifact {
+    Standard(Box<PersistedRunArtifact>),
+    StructuralFrequency(Box<PersistedStructuralFrequencyArtifact>),
+}
+
 pub enum AnalysisFieldPageLookup {
     RunNotFound,
     FieldNotFound,
+    FieldSelectionAmbiguous(Vec<String>),
+    SampleSelectionRequired(Vec<runmat_analysis_fea::results::field::RecoveredFieldSample>),
+    SampleNotFound,
     Page(Box<AnalysisFieldPageResult>),
 }
 
@@ -62,11 +77,22 @@ pub trait AnalysisArtifactStore: Send + Sync {
     fn load_field_page(
         &self,
         run_id: &str,
-        field_id: &str,
+        selection: &AnalysisFieldSelection,
         options: AnalysisFieldRequestOptions,
     ) -> Result<AnalysisFieldPageLookup, String>;
     fn list_run_metadata(&self) -> Result<Vec<AnalysisRunResult>, String>;
     fn list_runs(&self) -> Result<Vec<AnalysisRunResult>, String>;
+    fn persist_structural_frequency(
+        &self,
+        step: &AnalysisStudyStepRunData,
+        object_catalog: &runmat_execution::value::PublishedObjectCatalog,
+        artifact_roots: &crate::analysis::StructuralFrequencyArtifactRootIndex,
+        source: &dyn runmat_execution::value::PublishedObjectSource,
+    ) -> Result<AnalysisArtifactRecord, String>;
+    fn load_structural_frequency(
+        &self,
+        run_id: &str,
+    ) -> Result<Option<AnalysisStudyStepRunData>, String>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -82,7 +108,7 @@ pub struct AnalysisArtifactRetentionConfig {
 }
 
 pub struct InMemoryAnalysisArtifactStore {
-    runs: RwLock<HashMap<String, PersistedRunArtifact>>,
+    runs: RwLock<HashMap<String, PersistedAnalysisArtifact>>,
     chunks: RwLock<HashMap<Digest, Arc<[u8]>>>,
 }
 
@@ -110,6 +136,9 @@ impl AnalysisArtifactStore for InMemoryAnalysisArtifactStore {
             .write()
             .map_err(|_| "analysis artifact store lock poisoned".to_string())?;
         if let Some(existing) = guard.get(&run.run_id) {
+            let PersistedAnalysisArtifact::Standard(existing) = existing else {
+                return Err("analysis run identity already contains another result kind".into());
+            };
             validate_persisted_run(existing, &run.run_id)?;
             if !same_persisted_content(existing, &prepared.persisted) {
                 return Err("analysis run identity already contains different content".into());
@@ -132,7 +161,10 @@ impl AnalysisArtifactStore for InMemoryAnalysisArtifactStore {
                 }
             }
         }
-        guard.insert(run.run_id.clone(), prepared.persisted);
+        guard.insert(
+            run.run_id.clone(),
+            PersistedAnalysisArtifact::Standard(Box::new(prepared.persisted)),
+        );
         artifact_record(run, created_at)
     }
 
@@ -142,7 +174,7 @@ impl AnalysisArtifactStore for InMemoryAnalysisArtifactStore {
             .runs
             .read()
             .map_err(|_| "analysis artifact store lock poisoned".to_string())?;
-        let Some(persisted) = guard.get(run_id) else {
+        let Some(PersistedAnalysisArtifact::Standard(persisted)) = guard.get(run_id) else {
             return Ok(None);
         };
         validate_persisted_run(persisted, run_id)?;
@@ -161,7 +193,7 @@ impl AnalysisArtifactStore for InMemoryAnalysisArtifactStore {
             .runs
             .read()
             .map_err(|_| "analysis artifact store lock poisoned".to_string())?;
-        let Some(persisted) = guard.get(run_id) else {
+        let Some(PersistedAnalysisArtifact::Standard(persisted)) = guard.get(run_id) else {
             return Ok(None);
         };
         validate_persisted_run(persisted, run_id)?;
@@ -171,7 +203,7 @@ impl AnalysisArtifactStore for InMemoryAnalysisArtifactStore {
     fn load_field_page(
         &self,
         run_id: &str,
-        field_id: &str,
+        selection: &AnalysisFieldSelection,
         options: AnalysisFieldRequestOptions,
     ) -> Result<AnalysisFieldPageLookup, String> {
         validate_run_id_token(run_id)?;
@@ -182,14 +214,23 @@ impl AnalysisArtifactStore for InMemoryAnalysisArtifactStore {
         let Some(persisted) = runs.get(run_id) else {
             return Ok(AnalysisFieldPageLookup::RunNotFound);
         };
-        validate_persisted_run(persisted, run_id)?;
         let chunks = self
             .chunks
             .read()
             .map_err(|_| "analysis field chunk store lock poisoned".to_string())?;
-        field_page_from_artifact(persisted, field_id, options, |digest| {
-            Ok(chunks.get(&digest).map(|bytes| bytes.to_vec()))
-        })
+        match persisted {
+            PersistedAnalysisArtifact::Standard(persisted) => {
+                validate_persisted_run(persisted, run_id)?;
+                field_page_from_artifact(persisted, selection, options, |digest| {
+                    Ok(chunks.get(&digest).map(|bytes| bytes.to_vec()))
+                })
+            }
+            PersistedAnalysisArtifact::StructuralFrequency(artifact) => {
+                frequency::field_page(artifact, selection, options, |digest| {
+                    Ok(chunks.get(&digest).map(|bytes| bytes.to_vec()))
+                })
+            }
+        }
     }
 
     fn list_runs(&self) -> Result<Vec<AnalysisRunResult>, String> {
@@ -199,6 +240,10 @@ impl AnalysisArtifactStore for InMemoryAnalysisArtifactStore {
             .map_err(|_| "analysis artifact store lock poisoned".to_string())?;
         guard
             .iter()
+            .filter_map(|(run_id, stored)| match stored {
+                PersistedAnalysisArtifact::Standard(persisted) => Some((run_id, persisted)),
+                PersistedAnalysisArtifact::StructuralFrequency(_) => None,
+            })
             .map(|(run_id, persisted)| {
                 validate_persisted_run(persisted, run_id)?;
                 let chunks = self
@@ -219,11 +264,83 @@ impl AnalysisArtifactStore for InMemoryAnalysisArtifactStore {
             .map_err(|_| "analysis artifact store lock poisoned".to_string())?;
         guard
             .iter()
+            .filter_map(|(run_id, stored)| match stored {
+                PersistedAnalysisArtifact::Standard(persisted) => Some((run_id, persisted)),
+                PersistedAnalysisArtifact::StructuralFrequency(_) => None,
+            })
             .map(|(run_id, persisted)| {
                 validate_persisted_run(persisted, run_id)?;
                 Ok(persisted.run.clone())
             })
             .collect()
+    }
+
+    fn persist_structural_frequency(
+        &self,
+        step: &AnalysisStudyStepRunData,
+        object_catalog: &runmat_execution::value::PublishedObjectCatalog,
+        artifact_roots: &crate::analysis::StructuralFrequencyArtifactRootIndex,
+        source: &dyn runmat_execution::value::PublishedObjectSource,
+    ) -> Result<AnalysisArtifactRecord, String> {
+        let prepared = frequency::prepare_artifact(
+            step,
+            object_catalog,
+            artifact_roots,
+            Utc::now().to_rfc3339(),
+        )?;
+        let objects = frequency::ingest_objects(&prepared, source)?;
+        let mut runs = self
+            .runs
+            .write()
+            .map_err(|_| "analysis artifact store lock poisoned".to_string())?;
+        if let Some(existing) = runs.get(&step.run_id) {
+            let PersistedAnalysisArtifact::StructuralFrequency(existing) = existing else {
+                return Err("analysis run identity already contains another result kind".into());
+            };
+            frequency::validate_artifact(existing, &step.run_id)?;
+            if !frequency::same_content(existing, &prepared) {
+                return Err("analysis run identity already contains different content".into());
+            }
+            return Ok(frequency::artifact_record(existing));
+        }
+        let mut stored_objects = self
+            .chunks
+            .write()
+            .map_err(|_| "analysis object store lock poisoned".to_string())?;
+        for (digest, bytes) in objects {
+            match stored_objects.get(&digest) {
+                Some(existing) if existing.as_ref() != bytes.as_slice() => {
+                    return Err("analysis object digest collision".into());
+                }
+                Some(_) => {}
+                None => {
+                    stored_objects.insert(digest, Arc::from(bytes));
+                }
+            }
+        }
+        let record = frequency::artifact_record(&prepared);
+        runs.insert(
+            step.run_id.clone(),
+            PersistedAnalysisArtifact::StructuralFrequency(Box::new(prepared)),
+        );
+        Ok(record)
+    }
+
+    fn load_structural_frequency(
+        &self,
+        run_id: &str,
+    ) -> Result<Option<AnalysisStudyStepRunData>, String> {
+        validate_run_id_token(run_id)?;
+        let runs = self
+            .runs
+            .read()
+            .map_err(|_| "analysis artifact store lock poisoned".to_string())?;
+        let Some(PersistedAnalysisArtifact::StructuralFrequency(artifact)) = runs.get(run_id)
+        else {
+            return Ok(None);
+        };
+        frequency::validate_artifact(artifact, run_id)?;
+        Ok(Some(artifact.step.clone()))
     }
 }
 
@@ -284,7 +401,7 @@ impl FilesystemAnalysisArtifactStore {
         Ok(Some(bytes))
     }
 
-    fn list_persisted_runs(&self) -> Result<Vec<PersistedRunArtifact>, String> {
+    fn list_persisted_runs(&self) -> Result<Vec<PersistedAnalysisArtifact>, String> {
         let runs_dir = self.root.join("runs");
         if !owned_directory_exists(&self.root, "analysis artifact root")?
             || !owned_directory_exists(&runs_dir, "analysis artifact runs directory")?
@@ -317,7 +434,7 @@ impl FilesystemAnalysisArtifactStore {
             validate_run_id_token(run_id)?;
             let bytes =
                 fs_read(&path).map_err(|error| format!("failed to read run artifact: {error}"))?;
-            runs.push(decode_persisted_run(&bytes, run_id)?);
+            runs.push(decode_persisted_artifact(&bytes, run_id)?);
         }
         Ok(runs)
     }
@@ -348,7 +465,11 @@ impl AnalysisArtifactStore for FilesystemAnalysisArtifactStore {
         {
             AtomicCreateResult::Published { .. } => {}
             AtomicCreateResult::Existing(existing_bytes) => {
-                let existing = decode_persisted_run(&existing_bytes, &run.run_id)?;
+                let PersistedAnalysisArtifact::Standard(existing) =
+                    decode_persisted_artifact(&existing_bytes, &run.run_id)?
+                else {
+                    return Err("analysis run identity already contains another result kind".into());
+                };
                 if !same_persisted_content(&existing, &prepared.persisted) {
                     return Err("analysis run identity already contains different content".into());
                 }
@@ -379,7 +500,11 @@ impl AnalysisArtifactStore for FilesystemAnalysisArtifactStore {
             Err(error) => return Err(format!("failed to inspect run artifact: {error}")),
         }
         let bytes = fs_read(&path).map_err(|err| format!("failed to read run artifact: {err}"))?;
-        let persisted = decode_persisted_run(&bytes, run_id)?;
+        let PersistedAnalysisArtifact::Standard(persisted) =
+            decode_persisted_artifact(&bytes, run_id)?
+        else {
+            return Ok(None);
+        };
         Ok(Some(materialize_run(&persisted, |digest| {
             self.read_chunk(digest)
         })?))
@@ -404,13 +529,18 @@ impl AnalysisArtifactStore for FilesystemAnalysisArtifactStore {
             Err(error) => return Err(format!("failed to inspect run artifact: {error}")),
         }
         let bytes = fs_read(&path).map_err(|err| format!("failed to read run artifact: {err}"))?;
-        Ok(Some(decode_persisted_run(&bytes, run_id)?.run))
+        let PersistedAnalysisArtifact::Standard(persisted) =
+            decode_persisted_artifact(&bytes, run_id)?
+        else {
+            return Ok(None);
+        };
+        Ok(Some(persisted.run))
     }
 
     fn load_field_page(
         &self,
         run_id: &str,
-        field_id: &str,
+        selection: &AnalysisFieldSelection,
         options: AnalysisFieldRequestOptions,
     ) -> Result<AnalysisFieldPageLookup, String> {
         let path = self.run_path(run_id)?;
@@ -434,15 +564,27 @@ impl AnalysisArtifactStore for FilesystemAnalysisArtifactStore {
             }
             Err(error) => return Err(format!("failed to inspect run artifact: {error}")),
         };
-        let persisted = decode_persisted_run(&bytes, run_id)?;
-        field_page_from_artifact(&persisted, field_id, options, |digest| {
-            self.read_chunk(digest)
-        })
+        match decode_persisted_artifact(&bytes, run_id)? {
+            PersistedAnalysisArtifact::Standard(persisted) => {
+                field_page_from_artifact(&persisted, selection, options, |digest| {
+                    self.read_chunk(digest)
+                })
+            }
+            PersistedAnalysisArtifact::StructuralFrequency(artifact) => {
+                frequency::field_page(&artifact, selection, options, |digest| {
+                    self.read_chunk(digest)
+                })
+            }
+        }
     }
 
     fn list_runs(&self) -> Result<Vec<AnalysisRunResult>, String> {
         self.list_persisted_runs()?
             .into_iter()
+            .filter_map(|artifact| match artifact {
+                PersistedAnalysisArtifact::Standard(persisted) => Some(persisted),
+                PersistedAnalysisArtifact::StructuralFrequency(_) => None,
+            })
             .map(|persisted| materialize_run(&persisted, |digest| self.read_chunk(digest)))
             .collect()
     }
@@ -451,8 +593,94 @@ impl AnalysisArtifactStore for FilesystemAnalysisArtifactStore {
         Ok(self
             .list_persisted_runs()?
             .into_iter()
-            .map(|persisted| persisted.run)
+            .filter_map(|artifact| match artifact {
+                PersistedAnalysisArtifact::Standard(persisted) => Some(persisted.run),
+                PersistedAnalysisArtifact::StructuralFrequency(_) => None,
+            })
             .collect())
+    }
+
+    fn persist_structural_frequency(
+        &self,
+        step: &AnalysisStudyStepRunData,
+        object_catalog: &runmat_execution::value::PublishedObjectCatalog,
+        artifact_roots: &crate::analysis::StructuralFrequencyArtifactRootIndex,
+        source: &dyn runmat_execution::value::PublishedObjectSource,
+    ) -> Result<AnalysisArtifactRecord, String> {
+        let path = self.run_path(&step.run_id)?;
+        self.ensure_runs_directory()?;
+        self.ensure_objects_directory()?;
+        let prepared = frequency::prepare_artifact(
+            step,
+            object_catalog,
+            artifact_roots,
+            Utc::now().to_rfc3339(),
+        )?;
+        let objects = frequency::ingest_objects(&prepared, source)?;
+        for (digest, bytes) in objects {
+            match runmat_filesystem::atomic_create_new(self.object_path(digest), &bytes)
+                .map_err(|error| format!("failed to publish immutable analysis object: {error}"))?
+            {
+                AtomicCreateResult::Published { .. } => {}
+                AtomicCreateResult::Existing(existing) if existing == bytes => {}
+                AtomicCreateResult::Existing(_) => {
+                    return Err("analysis object digest collision".into());
+                }
+            }
+        }
+        let bytes = serde_json::to_vec_pretty(&prepared)
+            .map_err(|error| format!("failed to encode structural frequency artifact: {error}"))?;
+        match runmat_filesystem::atomic_create_new(&path, &bytes)
+            .map_err(|error| format!("failed to publish immutable run artifact: {error}"))?
+        {
+            AtomicCreateResult::Published { .. } => {}
+            AtomicCreateResult::Existing(existing_bytes) => {
+                let PersistedAnalysisArtifact::StructuralFrequency(existing) =
+                    decode_persisted_artifact(&existing_bytes, &step.run_id)?
+                else {
+                    return Err("analysis run identity already contains another result kind".into());
+                };
+                if !frequency::same_content(&existing, &prepared) {
+                    return Err("analysis run identity already contains different content".into());
+                }
+                return Ok(frequency::artifact_record(&existing));
+            }
+        }
+        prune_filesystem_runs(&self.root)?;
+        Ok(frequency::artifact_record(&prepared))
+    }
+
+    fn load_structural_frequency(
+        &self,
+        run_id: &str,
+    ) -> Result<Option<AnalysisStudyStepRunData>, String> {
+        let path = self.run_path(run_id)?;
+        if !owned_directory_exists(&self.root, "analysis artifact root")?
+            || !owned_directory_exists(&self.root.join("runs"), "analysis artifact runs directory")?
+        {
+            return Ok(None);
+        }
+        let bytes = match fs_symlink_metadata(&path) {
+            Ok(metadata) if metadata.file_type() == FsFileType::File => {
+                fs_read(&path).map_err(|error| {
+                    format!("failed to read structural frequency artifact: {error}")
+                })?
+            }
+            Ok(metadata) => {
+                return Err(format!(
+                    "analysis run artifact must be a regular file, found {:?}",
+                    metadata.file_type()
+                ));
+            }
+            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(format!("failed to inspect run artifact: {error}")),
+        };
+        let PersistedAnalysisArtifact::StructuralFrequency(artifact) =
+            decode_persisted_artifact(&bytes, run_id)?
+        else {
+            return Ok(None);
+        };
+        Ok(Some(artifact.step))
     }
 }
 
@@ -465,6 +693,31 @@ fn decode_persisted_run(
         .map_err(|error| format!("failed to parse run artifact: {error}"))?;
     validate_persisted_run(&persisted, expected_run_id)?;
     Ok(persisted)
+}
+
+fn decode_persisted_artifact(
+    bytes: &[u8],
+    expected_run_id: &str,
+) -> Result<PersistedAnalysisArtifact, String> {
+    let value = serde_json::from_slice::<serde_json::Value>(bytes)
+        .map_err(|error| format!("failed to parse analysis run artifact: {error}"))?;
+    let schema = value
+        .get("schema_version")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "analysis run artifact omits its schema version".to_string())?;
+    match schema {
+        ARTIFACT_SCHEMA_VERSION => decode_persisted_run(bytes, expected_run_id)
+            .map(Box::new)
+            .map(PersistedAnalysisArtifact::Standard),
+        frequency::FREQUENCY_ARTIFACT_SCHEMA_VERSION => {
+            frequency::decode_artifact(bytes, expected_run_id)
+                .map(Box::new)
+                .map(PersistedAnalysisArtifact::StructuralFrequency)
+        }
+        other => Err(format!(
+            "unsupported analysis run artifact schema `{other}`"
+        )),
+    }
 }
 
 fn prepare_run_artifact(
@@ -659,14 +912,21 @@ fn read_field_payload(
 
 fn field_page_from_artifact(
     persisted: &PersistedRunArtifact,
-    field_id: &str,
+    selection: &AnalysisFieldSelection,
     options: AnalysisFieldRequestOptions,
     mut read_chunk: impl FnMut(Digest) -> Result<Option<Vec<u8>>, String>,
 ) -> Result<AnalysisFieldPageLookup, String> {
+    let field_id = &selection.field_id;
     validate_field_id(field_id)?;
-    let Some(template) = find_result_field(&persisted.run, field_id) else {
-        return Ok(AnalysisFieldPageLookup::FieldNotFound);
+    if selection.sample.is_some() {
+        return Ok(AnalysisFieldPageLookup::SampleNotFound);
+    }
+    let template = match select_result_field(&persisted.run, field_id) {
+        Ok(Some(template)) => template,
+        Ok(None) => return Ok(AnalysisFieldPageLookup::FieldNotFound),
+        Err(available) => return Ok(AnalysisFieldPageLookup::FieldSelectionAmbiguous(available)),
     };
+    let selected_field_id = template.field_id.clone();
     let mut descriptor = AnalysisFieldDescriptor::from_field(&template);
     if descriptor.storage == super::contracts::AnalysisFieldStorage::HostF64 {
         descriptor.storage_ref.kind = "chunked_field".to_string();
@@ -682,9 +942,9 @@ fn field_page_from_artifact(
         return Ok(AnalysisFieldPageLookup::Page(Box::new(
             AnalysisFieldPageResult {
                 run_id: persisted.run.run_id.clone(),
-                field_id: field_id.to_string(),
+                field_id: selected_field_id,
                 descriptor,
-                values: Vec::new(),
+                values: AnalysisFieldPageValues::Real(Vec::new()),
                 offset,
                 count: 0,
                 total_count,
@@ -695,7 +955,7 @@ fn field_page_from_artifact(
     let Some(stored) = persisted
         .fields
         .iter()
-        .find(|field| field.field_id == field_id)
+        .find(|field| field.field_id == selected_field_id)
     else {
         return Err(format!(
             "analysis field `{field_id}` is device-resident and has no materialized host artifact"
@@ -743,9 +1003,9 @@ fn field_page_from_artifact(
     Ok(AnalysisFieldPageLookup::Page(Box::new(
         AnalysisFieldPageResult {
             run_id: persisted.run.run_id.clone(),
-            field_id: field_id.to_string(),
+            field_id: selected_field_id,
             descriptor,
-            values,
+            values: AnalysisFieldPageValues::Real(values),
             offset,
             count,
             total_count,
@@ -768,14 +1028,30 @@ fn validate_chunk(
     Ok(())
 }
 
-fn find_result_field(run: &AnalysisRunResult, field_id: &str) -> Option<AnalysisField> {
-    let mut found = None;
+fn select_result_field(
+    run: &AnalysisRunResult,
+    requested: &str,
+) -> Result<Option<AnalysisField>, Vec<String>> {
+    let mut exact = None;
+    let mut suffix_matches = Vec::new();
     super::operations::visit_analysis_result_fields(run, |field| {
-        if found.is_none() && field.field_id == field_id {
-            found = Some(field.clone());
+        if field.field_id == requested {
+            exact = Some(field.clone());
+        } else if super::field_selection::field_id_matches(&field.field_id, requested) {
+            suffix_matches.push(field.clone());
         }
     });
-    found
+    if exact.is_some() {
+        return Ok(exact);
+    }
+    match suffix_matches.len() {
+        0 => Ok(None),
+        1 => Ok(suffix_matches.pop()),
+        _ => Err(suffix_matches
+            .into_iter()
+            .map(|field| field.field_id)
+            .collect()),
+    }
 }
 
 fn encode_field_values(values: &[f64]) -> Vec<u8> {
@@ -1092,10 +1368,13 @@ fn prune_filesystem_runs(root: &Path) -> Result<(), String> {
                 )
             })?;
         let bytes = fs_read(&path).map_err(|err| format!("failed to read artifact file: {err}"))?;
-        let Ok(persisted) = decode_persisted_run(&bytes, run_id) else {
+        let Ok(persisted) = decode_persisted_artifact(&bytes, run_id) else {
             continue;
         };
-        let identity = persisted.run.run.identity;
+        let identity = match persisted {
+            PersistedAnalysisArtifact::Standard(persisted) => persisted.run.run.identity,
+            PersistedAnalysisArtifact::StructuralFrequency(persisted) => persisted.step.identity,
+        };
         let modified = fs_modified(&path).ok().flatten();
         artifacts.push((path, identity, modified));
     }
@@ -1161,11 +1440,35 @@ pub fn persist_run_result(run: &AnalysisRunResult) -> Result<AnalysisArtifactRec
     guard.persist_run(run)
 }
 
+pub(in crate::analysis) fn persist_structural_frequency_result(
+    step: &AnalysisStudyStepRunData,
+    persistence: &crate::analysis::frequency_result::StructuralFrequencyPersistence,
+) -> Result<AnalysisArtifactRecord, String> {
+    let guard = global_store()
+        .read()
+        .map_err(|_| "analysis artifact store lock poisoned".to_string())?;
+    guard.persist_structural_frequency(
+        step,
+        &persistence.object_catalog,
+        &persistence.artifact_roots,
+        persistence.source.as_ref(),
+    )
+}
+
 pub fn load_run_result(run_id: &str) -> Result<Option<AnalysisRunResult>, String> {
     let guard = global_store()
         .read()
         .map_err(|_| "analysis artifact store lock poisoned".to_string())?;
     guard.load_run(run_id)
+}
+
+pub fn load_structural_frequency_result(
+    run_id: &str,
+) -> Result<Option<AnalysisStudyStepRunData>, String> {
+    let guard = global_store()
+        .read()
+        .map_err(|_| "analysis artifact store lock poisoned".to_string())?;
+    guard.load_structural_frequency(run_id)
 }
 
 pub fn load_run_metadata(run_id: &str) -> Result<Option<AnalysisRunResult>, String> {
@@ -1177,13 +1480,13 @@ pub fn load_run_metadata(run_id: &str) -> Result<Option<AnalysisRunResult>, Stri
 
 pub fn load_field_page(
     run_id: &str,
-    field_id: &str,
+    selection: &AnalysisFieldSelection,
     options: AnalysisFieldRequestOptions,
 ) -> Result<AnalysisFieldPageLookup, String> {
     let guard = global_store()
         .read()
         .map_err(|_| "analysis artifact store lock poisoned".to_string())?;
-    guard.load_field_page(run_id, field_id, options)
+    guard.load_field_page(run_id, selection, options)
 }
 
 pub fn list_run_results() -> Result<Vec<AnalysisRunResult>, String> {

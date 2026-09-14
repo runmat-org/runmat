@@ -252,7 +252,7 @@ pub fn import_exact_structural_study_result(
                 objects,
             },
         ) => {
-            let result_objects = import_transient_analysis_objects(
+            let result_objects = import_numerical_analysis_objects(
                 source,
                 &result_root,
                 &objects,
@@ -260,7 +260,7 @@ pub fn import_exact_structural_study_result(
                 &expected.artifact_access,
                 limits,
             )?;
-            let receipt_objects = import_transient_analysis_objects(
+            let receipt_objects = import_numerical_analysis_objects(
                 source,
                 &receipt_root,
                 &objects,
@@ -268,25 +268,12 @@ pub fn import_exact_structural_study_result(
                 &expected.artifact_access,
                 limits,
             )?;
-            let admitted_objects = unique_references(
-                result_objects
-                    .unique_references(&expected.artifact_access, ValueRefKind::ResultObject)
-                    .map_err(protocol)?
-                    .into_iter()
-                    .chain(
-                        receipt_objects
-                            .unique_references(
-                                &expected.artifact_access,
-                                ValueRefKind::ResultObject,
-                            )
-                            .map_err(protocol)?,
-                    ),
+            validate_numerical_closure_inventory(
+                &result_objects,
+                &receipt_objects,
+                &objects,
+                &expected.artifact_access,
             )?;
-            if reference_inventory(&admitted_objects)? != reference_inventory(&objects)? {
-                return Err(protocol(
-                    "transient result closure contains missing or unreferenced objects",
-                ));
-            }
             let result =
                 runmat_analysis_execution::decode_prepared_structural_transient_solver_result(
                     &result_objects,
@@ -317,6 +304,163 @@ pub fn import_exact_structural_study_result(
                 numerical_receipt,
             }
         }
+        (
+            StructuralStudyWorkloads::StructuralFrequency { workload },
+            ExactStructuralStudyAnalysisClosure::StructuralFrequency {
+                result_root,
+                receipt_root,
+                publication: declared_publication,
+                entries,
+                histories,
+                resource_usage_root,
+                objects,
+            },
+        ) => {
+            let result_objects = import_numerical_analysis_objects(
+                source,
+                &result_root,
+                &objects,
+                AnalysisNumericalObjectKind::SolverResult,
+                &expected.artifact_access,
+                limits,
+            )?;
+            let receipt_objects = import_numerical_analysis_objects(
+                source,
+                &receipt_root,
+                &objects,
+                AnalysisNumericalObjectKind::NumericalReceipt,
+                &expected.artifact_access,
+                limits,
+            )?;
+            let result =
+                runmat_analysis_execution::decode_prepared_structural_frequency_solver_result(
+                    &result_objects,
+                )
+                .map_err(protocol)?;
+            let numerical_receipt =
+                runmat_analysis_execution::decode_prepared_structural_frequency_numerical_receipt(
+                    &receipt_objects,
+                )
+                .map_err(protocol)?;
+            numerical_receipt
+                .validate_for_result(&result)
+                .map_err(protocol)?;
+            let prepared =
+                runmat_analysis_fea::pipeline::structural_frequency::prepare_structural_frequency(
+                    &workload,
+                    &mesh.artifact,
+                )
+                .map_err(protocol)?;
+            if result.manifest().scope() != &prepared.scope {
+                return Err(protocol(
+                    "structural frequency result names a different resolved workload",
+                ));
+            }
+            let mut semantic_roots = vec![
+                (*result_root).clone(),
+                (*receipt_root).clone(),
+                (*resource_usage_root).clone(),
+            ];
+            semantic_roots.extend(entries.iter().flat_map(|entry| {
+                std::iter::once(entry.fields_root.clone())
+                    .chain(entry.observations_root.iter().cloned())
+            }));
+            semantic_roots.extend(
+                histories
+                    .iter()
+                    .map(|history| history.checkpoint_root.clone()),
+            );
+            let object_catalog =
+                PublishedObjectCatalog::new(semantic_roots, objects.clone()).map_err(protocol)?;
+            let (entries, histories, resource_usage, publication) =
+                super::frequency_import::import_frequency_artifacts(
+                    super::frequency_import::FrequencyArtifactImport {
+                        source,
+                        workload: &workload,
+                        result: &result,
+                        receipt: &numerical_receipt,
+                        declared_entries: &entries,
+                        declared_histories: &histories,
+                        resource_usage_root: &resource_usage_root,
+                        result_objects: &result_objects,
+                        receipt_objects: &receipt_objects,
+                        declared_objects: &objects,
+                        access: &expected.artifact_access,
+                        limits,
+                        declared_publication: &declared_publication,
+                    },
+                )?;
+            let sample_roots = entries
+                .iter()
+                .map(|entry| {
+                    let fields = runmat_runtime::analysis::StructuralFrequencyArtifactRoot::new(
+                        entry.recovered_fields.output.root.clone(),
+                        entry.recovered_fields.output.kind,
+                        entry.recovered_fields.output.logical_identity,
+                        entry.recovered_fields.output.payload_digest,
+                    )
+                    .map_err(protocol)?;
+                    let observations = entry
+                        .observations
+                        .as_ref()
+                        .map(|observations| {
+                            runmat_runtime::analysis::StructuralFrequencyArtifactRoot::new(
+                                observations.output.root.clone(),
+                                observations.output.kind,
+                                observations.output.logical_identity,
+                                observations.output.payload_digest,
+                            )
+                            .map_err(protocol)
+                        })
+                        .transpose()?;
+                    Ok(
+                        runmat_runtime::analysis::StructuralFrequencySampleArtifactRoots::new(
+                            fields,
+                            observations,
+                        ),
+                    )
+                })
+                .collect::<NativeExecutionResult<Vec<_>>>()?;
+            let history_roots = histories
+                .iter()
+                .map(|history| {
+                    let reference = history
+                        .checkpoint
+                        .objects
+                        .root_reference(&expected.artifact_access, ValueRefKind::ResultObject)
+                        .map_err(protocol)?;
+                    Ok(
+                        runmat_runtime::analysis::StructuralFrequencyHistoryArtifactRoot::new(
+                            runtime_artifact_root(&history.checkpoint.objects, reference)?,
+                        ),
+                    )
+                })
+                .collect::<NativeExecutionResult<Vec<_>>>()?;
+            let artifact_roots =
+                runmat_runtime::analysis::StructuralFrequencyArtifactRootIndex::new(
+                    runtime_artifact_root(&result_objects, (*result_root).clone())?,
+                    runtime_artifact_root(&receipt_objects, (*receipt_root).clone())?,
+                    runtime_artifact_root(&resource_usage.objects, (*resource_usage_root).clone())?,
+                    sample_roots,
+                    history_roots,
+                    &publication,
+                    &object_catalog,
+                )
+                .map_err(protocol)?;
+            ExactStructuralStudyAnalysisResult::StructuralFrequency(Box::new(
+                super::ExactStructuralFrequencyAnalysisResult {
+                    resolved_workload: workload,
+                    result: Box::new(result),
+                    numerical_receipt,
+                    entries,
+                    histories,
+                    resource_usage,
+                    publication: Box::new(publication),
+                    object_catalog,
+                    artifact_roots,
+                },
+            ))
+        }
         _ => {
             return Err(protocol(
                 "whole-study analysis result kind differs from its authored workload kind",
@@ -331,7 +475,20 @@ pub fn import_exact_structural_study_result(
     })
 }
 
-fn import_transient_analysis_objects(
+fn runtime_artifact_root(
+    objects: &runmat_analysis_execution::PreparedAnalysisObjects,
+    reference: ValueRef,
+) -> NativeExecutionResult<runmat_runtime::analysis::StructuralFrequencyArtifactRoot> {
+    runmat_runtime::analysis::StructuralFrequencyArtifactRoot::new(
+        reference,
+        objects.manifest.kind,
+        objects.manifest.logical_identity,
+        objects.manifest.payload_digest,
+    )
+    .map_err(protocol)
+}
+
+fn import_numerical_analysis_objects(
     source: &impl CacheImport,
     root: &ValueRef,
     declared_objects: &[ValueRef],
@@ -341,7 +498,7 @@ fn import_transient_analysis_objects(
 ) -> NativeExecutionResult<runmat_analysis_execution::PreparedAnalysisObjects> {
     if !declared_objects.contains(root) {
         return Err(protocol(
-            "transient numerical object root is absent from its declared closure",
+            "structural numerical object root is absent from its declared closure",
         ));
     }
     let manifest = runmat_analysis_fea::execution::AnalysisObjectManifest::from_canonical_bytes(
@@ -350,7 +507,7 @@ fn import_transient_analysis_objects(
     .map_err(protocol)?;
     if manifest.kind != kind {
         return Err(protocol(
-            "transient numerical object kind differs from its declared role",
+            "structural numerical object kind differs from its declared role",
         ));
     }
     let imported = runmat_analysis_execution::import_analysis_objects(
@@ -369,9 +526,34 @@ fn import_transient_analysis_objects(
     {
         if !declared_objects.contains(&reference) {
             return Err(protocol(
-                "transient numerical object references an undeclared closure member",
+                "structural numerical object references an undeclared closure member",
             ));
         }
     }
     Ok(imported)
+}
+
+fn validate_numerical_closure_inventory(
+    result_objects: &runmat_analysis_execution::PreparedAnalysisObjects,
+    receipt_objects: &runmat_analysis_execution::PreparedAnalysisObjects,
+    declared_objects: &[ValueRef],
+    access: &ArtifactAccess,
+) -> NativeExecutionResult<()> {
+    let admitted_objects = unique_references(
+        result_objects
+            .unique_references(access, ValueRefKind::ResultObject)
+            .map_err(protocol)?
+            .into_iter()
+            .chain(
+                receipt_objects
+                    .unique_references(access, ValueRefKind::ResultObject)
+                    .map_err(protocol)?,
+            ),
+    )?;
+    if reference_inventory(&admitted_objects)? != reference_inventory(declared_objects)? {
+        return Err(protocol(
+            "structural numerical closure contains missing or unreferenced objects",
+        ));
+    }
+    Ok(())
 }

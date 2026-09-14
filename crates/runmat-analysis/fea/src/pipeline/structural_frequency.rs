@@ -38,7 +38,47 @@ use crate::{
             ModalHarmonicLoad, ModalReducedSystem,
         },
     },
+    AnalysisRunIdentity,
 };
+
+/// Re-derives the physical formulation and admits a published frequency study directly from its
+/// typed multi-sample result.
+pub fn admit_structural_frequency_publication(
+    workload: &StructuralFrequencyWorkload,
+    solver_mesh: &SolverMeshArtifact,
+    result: &crate::execution::StructuralFrequencySolverResult,
+    publication: &crate::execution::StructuralFrequencyPublicationManifest,
+) -> AnalysisExecutionResult<AnalysisRunIdentity> {
+    workload.validate()?;
+    solver_mesh
+        .validate_canonical()
+        .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+    result.validate()?;
+    publication.validate_for_workload(workload)?;
+    publication.receipt().validate_for_result(result)?;
+    if publication.result() != result.manifest() {
+        return Err(AnalysisExecutionError::Identity(
+            "structural frequency publication differs from its physical result",
+        ));
+    }
+    let assembly = assemble_entry(
+        workload,
+        solver_mesh,
+        workload.plan().reference_frequency_hz(),
+    )?;
+    let identity = super::admission::admit_structural(
+        &assembly.real,
+        workload.procedure_step()?,
+        workload.formulation_requirement(),
+    )
+    .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+    if identity.solution_space() != workload.solver().solution_space() {
+        return Err(AnalysisExecutionError::Identity(
+            "admitted structural frequency formulation has another solution space",
+        ));
+    }
+    Ok(identity)
+}
 
 /// Canonical physical scope plus standard execution identities for frequency fan-out.
 pub struct PreparedStructuralFrequency {

@@ -181,7 +181,7 @@ fn filesystem_run_fields_are_chunked_and_pages_read_only_intersecting_chunks() {
     let default_page = match storage::AnalysisArtifactStore::load_field_page(
         &store,
         &run.run_id,
-        &field_id,
+        &AnalysisFieldSelection::new(&field_id, None),
         AnalysisFieldRequestOptions::default(),
     )
     .unwrap()
@@ -195,13 +195,34 @@ fn filesystem_run_fields_are_chunked_and_pages_read_only_intersecting_chunks() {
     );
     assert_eq!(
         default_page.values,
-        expected_values[..super::ANALYSIS_FIELD_DEFAULT_MATERIALIZE_LIMIT]
+        AnalysisFieldPageValues::Real(
+            expected_values[..super::ANALYSIS_FIELD_DEFAULT_MATERIALIZE_LIMIT].to_vec()
+        )
     );
+    let suffix = field_id
+        .rsplit('.')
+        .next()
+        .expect("field ID has a terminal component");
+    let suffix_page = match storage::AnalysisArtifactStore::load_field_page(
+        &store,
+        &run.run_id,
+        &AnalysisFieldSelection::new(suffix, None),
+        AnalysisFieldRequestOptions {
+            offset: Some(0),
+            limit: Some(1),
+        },
+    )
+    .unwrap()
+    {
+        storage::AnalysisFieldPageLookup::Page(page) => *page,
+        _ => panic!("unambiguous field suffix must resolve"),
+    };
+    assert_eq!(suffix_page.field_id, field_id);
 
     let capped_page = match storage::AnalysisArtifactStore::load_field_page(
         &store,
         &run.run_id,
-        &field_id,
+        &AnalysisFieldSelection::new(&field_id, None),
         AnalysisFieldRequestOptions {
             offset: Some(32),
             limit: Some(usize::MAX),
@@ -248,7 +269,7 @@ fn filesystem_run_fields_are_chunked_and_pages_read_only_intersecting_chunks() {
     let later_page = match storage::AnalysisArtifactStore::load_field_page(
         &store,
         &run.run_id,
-        &field_id,
+        &AnalysisFieldSelection::new(&field_id, None),
         AnalysisFieldRequestOptions {
             offset: Some(second_chunk_offset),
             limit: Some(16),
@@ -261,11 +282,13 @@ fn filesystem_run_fields_are_chunked_and_pages_read_only_intersecting_chunks() {
     };
     assert_eq!(
         later_page.values,
-        expected_values[second_chunk_offset..second_chunk_offset + 16]
+        AnalysisFieldPageValues::Real(
+            expected_values[second_chunk_offset..second_chunk_offset + 16].to_vec()
+        )
     );
     let public_page = analysis_field_page_by_run_id_op(
         &run.run_id,
-        &field_id,
+        AnalysisFieldSelection::new(&field_id, None),
         AnalysisFieldRequestOptions {
             offset: Some(second_chunk_offset),
             limit: Some(16),
@@ -278,7 +301,7 @@ fn filesystem_run_fields_are_chunked_and_pages_read_only_intersecting_chunks() {
     assert_eq!(
         analysis_field_page_by_run_id_op(
             &run.run_id,
-            "missing.field",
+            AnalysisFieldSelection::new("missing.field", None),
             AnalysisFieldRequestOptions::default(),
             OperationContext::new(None, None),
         )
@@ -289,7 +312,7 @@ fn filesystem_run_fields_are_chunked_and_pages_read_only_intersecting_chunks() {
     assert!(storage::AnalysisArtifactStore::load_field_page(
         &store,
         &run.run_id,
-        &field_id,
+        &AnalysisFieldSelection::new(&field_id, None),
         AnalysisFieldRequestOptions {
             offset: Some(0),
             limit: Some(1),
@@ -324,6 +347,40 @@ fn run_storage_rejects_ambiguous_duplicate_field_ids() {
     )
     .unwrap_err();
     assert!(error.contains("appears more than once"));
+}
+
+#[test]
+fn conventional_field_paging_rejects_an_ambiguous_complete_suffix() {
+    let _guard = analysis_test_guard();
+    let generated = analysis_run_linear_static_with_options(
+        &sample_model(),
+        ComputeBackend::Cpu,
+        FormulationRequirement::Experimental,
+        AnalysisRunOptions::default(),
+        OperationContext::new(None, None),
+    )
+    .unwrap();
+    let mut run = generated.data;
+    run.run_id = "run_ambiguous_field_suffix".to_string();
+    let [first, second, ..] = run.run.fields.as_mut_slice() else {
+        panic!("linear result must contain at least two fields")
+    };
+    first.field_id = "first.shared".to_string();
+    second.field_id = "second.shared".to_string();
+    let store = storage::InMemoryAnalysisArtifactStore::new();
+    storage::AnalysisArtifactStore::persist_run(&store, &run).unwrap();
+
+    let lookup = storage::AnalysisArtifactStore::load_field_page(
+        &store,
+        &run.run_id,
+        &AnalysisFieldSelection::new("shared", None),
+        AnalysisFieldRequestOptions::default(),
+    )
+    .unwrap();
+    let storage::AnalysisFieldPageLookup::FieldSelectionAmbiguous(fields) = lookup else {
+        panic!("ambiguous field suffix must fail closed")
+    };
+    assert_eq!(fields, ["first.shared", "second.shared"]);
 }
 
 #[test]

@@ -1,8 +1,6 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 
-use async_trait::async_trait;
 use runmat_analysis_execution::{
     AnalysisHostWorkload, CompletedStructuralSequence, PreparedAnalysisProgram,
     PreparedStructuralLinearProgram, PreparedStructuralSolveWave, PreparedStructuralStateWave,
@@ -11,15 +9,15 @@ use runmat_analysis_execution::{
 use runmat_analysis_fea::execution::AnalysisTaskIdentity;
 use runmat_execution::resource::{Capability, ResourceRequest};
 use runmat_execution::task::RetryPolicy;
-use runmat_execution::{CancellationReason, Digest, ExecutionScopeId, PoolId, TaskId};
-use runmat_execution_artifact::cache::{CacheImport, FilesystemObjectStore};
-use runmat_execution_artifact::{
-    ArtifactResult, ProgramExecutionRequest, ProgramExecutionResponse,
-};
-use runmat_execution_runner::{AttemptSuccess, TaskSubmission};
+use runmat_execution::TaskId;
+use runmat_execution_artifact::ProgramExecutionResponse;
+use runmat_execution_runner::AttemptSuccess;
 
 use crate::{
-    analysis_task::{prepare_analysis_task, AnalysisTaskPolicy},
+    analysis_task_pool::{
+        execute_analysis_task_batch, protocol, AnalysisTaskBatchPolicy, AnalysisTaskDependency,
+        AnalysisTaskPool, LocalAnalysisTaskPool, PreparedAnalysisTask, RemoteAnalysisTaskPool,
+    },
     NativeExecutionConfig, NativeExecutionError, NativeExecutionResult, NativeProgramSession,
     RemotePoolDriver,
 };
@@ -68,10 +66,7 @@ pub async fn execute_structural_sequence_locally(
         )));
     let session = NativeProgramSession::new(config)?;
     execute_with_pool(
-        &mut LocalSequencePool {
-            store: session.object_store(),
-            session,
-        },
+        &mut LocalAnalysisTaskPool::new(session),
         preparation,
         policy,
     )
@@ -84,11 +79,11 @@ pub async fn execute_structural_sequence_remotely(
     policy: StructuralSequenceExecutionPolicy,
 ) -> NativeExecutionResult<CompletedStructuralSequence> {
     policy.validate()?;
-    execute_with_pool(&mut RemoteSequencePool { pool }, preparation, policy).await
+    execute_with_pool(&mut RemoteAnalysisTaskPool::new(pool), preparation, policy).await
 }
 
 async fn execute_with_pool(
-    pool: &mut (impl SequencePool + CacheImport),
+    pool: &mut impl AnalysisTaskPool,
     preparation: StructuralSequencePreparation,
     policy: StructuralSequenceExecutionPolicy,
 ) -> NativeExecutionResult<CompletedStructuralSequence> {
@@ -133,7 +128,7 @@ fn validate_accelerator_allocation(
 }
 
 async fn execute_solve_wave(
-    pool: &mut (impl SequencePool + CacheImport),
+    pool: &mut impl AnalysisTaskPool,
     wave: &PreparedStructuralSolveWave,
     policy: &StructuralSequenceExecutionPolicy,
     completed_nodes: &mut BTreeMap<StructuralSequenceNode, (AnalysisTaskIdentity, TaskId)>,
@@ -149,7 +144,7 @@ async fn execute_solve_wave(
 }
 
 async fn execute_state_wave(
-    pool: &mut (impl SequencePool + CacheImport),
+    pool: &mut impl AnalysisTaskPool,
     wave: &PreparedStructuralStateWave,
     policy: &StructuralSequenceExecutionPolicy,
     completed_nodes: &mut BTreeMap<StructuralSequenceNode, (AnalysisTaskIdentity, TaskId)>,
@@ -167,15 +162,14 @@ async fn execute_state_wave(
 }
 
 async fn execute_wave<'a>(
-    pool: &mut (impl SequencePool + CacheImport),
+    pool: &mut impl AnalysisTaskPool,
     tasks: impl IntoIterator<Item = TaskView<'a>>,
     policy: &StructuralSequenceExecutionPolicy,
     completed_nodes: &mut BTreeMap<StructuralSequenceNode, (AnalysisTaskIdentity, TaskId)>,
 ) -> NativeExecutionResult<ExecutedWave> {
-    let mut submissions = Vec::new();
-    let mut admitted = Vec::new();
+    let mut prepared_tasks = Vec::new();
+    let mut admitted_nodes = Vec::new();
     for task in tasks {
-        pool.register_program(task.program)?;
         let dependency_records = task
             .dependencies
             .iter()
@@ -187,68 +181,53 @@ async fn execute_wave<'a>(
                 })
             })
             .collect::<NativeExecutionResult<Vec<_>>>()?;
-        let dependency_identities = dependency_records
+        let dependencies = dependency_records
             .iter()
-            .map(|(identity, _)| *identity)
-            .collect::<Vec<_>>();
-        let dependency_tasks = dependency_records
-            .iter()
-            .map(|(_, task_id)| *task_id)
-            .collect::<BTreeSet<_>>();
-        let resources = task.structural.map_or_else(
-            || policy.resources.clone(),
-            |prepared| prepared.resource_plan.request.clone(),
-        );
-        let (submission, identity) = prepare_analysis_task(
-            pool.scope_id(),
-            pool.pool_id(),
-            task.host,
-            task.program,
-            dependency_identities,
-            dependency_tasks,
-            AnalysisTaskPolicy {
-                resources,
-                resource_plan: task.structural.map(|prepared| &prepared.resource_plan),
-                retry: policy.retry,
-                deadline_unix_millis: policy.deadline_unix_millis,
-                priority: policy.priority,
-            },
-        )?;
+            .map(|(identity, task_id)| AnalysisTaskDependency {
+                identity: *identity,
+                task_id: *task_id,
+            })
+            .collect();
         if completed_nodes.contains_key(task.node)
-            || admitted
+            || admitted_nodes
                 .iter()
-                .any(|(node, _, _): &(StructuralSequenceNode, _, _)| node == task.node)
+                .any(|node: &StructuralSequenceNode| node == task.node)
         {
             return Err(NativeExecutionError::Protocol(
                 "sequence node was submitted more than once".into(),
             ));
         }
-        admitted.push((task.node.clone(), identity, submission.request.id));
-        submissions.push((task.program.request.clone(), submission));
+        admitted_nodes.push(task.node.clone());
+        prepared_tasks.push(PreparedAnalysisTask {
+            host: task.host,
+            program: task.program,
+            resource_plan: task.structural.map(|prepared| &prepared.resource_plan),
+            fallback_resources: policy.resources.clone(),
+            dependencies,
+        });
     }
-    let maximum_wall_millis = submissions
-        .iter()
-        .map(|(_, submission)| submission.request.resources.max_wall_millis)
-        .max()
-        .unwrap_or(policy.resources.max_wall_millis);
-    let responses = pool.execute_batch(submissions, maximum_wall_millis).await?;
-    if responses.len() != admitted.len() {
-        return Err(NativeExecutionError::Protocol(
-            "sequence task responses differ from the submitted wave".into(),
-        ));
-    }
+    let responses = execute_analysis_task_batch(
+        pool,
+        prepared_tasks,
+        AnalysisTaskBatchPolicy {
+            retry: policy.retry,
+            deadline_unix_millis: policy.deadline_unix_millis,
+            priority: policy.priority,
+        },
+    )
+    .await?;
     let mut by_node = BTreeMap::new();
     let mut attempts = BTreeMap::new();
-    for ((node, identity, task_id), (response, attempt)) in admitted.into_iter().zip(responses) {
-        if by_node.insert(node.clone(), response).is_some() {
+    for (node, response) in admitted_nodes.into_iter().zip(responses) {
+        if by_node.insert(node.clone(), response.response).is_some() {
             return Err(NativeExecutionError::Protocol(
                 "sequence wave returned a duplicate node".into(),
             ));
         }
-        if let Some(attempt) = attempt {
+        if let Some(attempt) = response.attempt {
             attempts.insert(node.clone(), attempt);
         }
-        completed_nodes.insert(node, (identity, task_id));
+        completed_nodes.insert(node, (response.identity, response.task_id));
     }
     Ok(ExecutedWave {
         responses: by_node,
@@ -267,271 +246,6 @@ struct TaskView<'a> {
     host: &'a AnalysisHostWorkload,
     program: &'a PreparedAnalysisProgram,
     structural: Option<&'a PreparedStructuralLinearProgram>,
-}
-
-#[async_trait]
-pub(crate) trait SequencePool {
-    fn scope_id(&self) -> ExecutionScopeId;
-    fn pool_id(&self) -> PoolId;
-    fn register_program(&mut self, program: &PreparedAnalysisProgram) -> NativeExecutionResult<()>;
-    async fn execute_batch(
-        &mut self,
-        tasks: Vec<(ProgramExecutionRequest, TaskSubmission)>,
-        maximum_wall_millis: u64,
-    ) -> NativeExecutionResult<Vec<(ProgramExecutionResponse, Option<AttemptSuccess>)>>;
-}
-
-struct LocalSequencePool {
-    session: NativeProgramSession,
-    store: FilesystemObjectStore,
-}
-
-impl CacheImport for LocalSequencePool {
-    fn read_verified(&self, digest: Digest) -> ArtifactResult<Option<Vec<u8>>> {
-        self.store.read_verified(digest)
-    }
-}
-
-#[async_trait]
-impl SequencePool for LocalSequencePool {
-    fn scope_id(&self) -> ExecutionScopeId {
-        self.session.scope_id()
-    }
-
-    fn pool_id(&self) -> PoolId {
-        self.session.pool_id()
-    }
-
-    fn register_program(&mut self, program: &PreparedAnalysisProgram) -> NativeExecutionResult<()> {
-        program.write_to(&mut self.store).map_err(protocol)
-    }
-
-    async fn execute_batch(
-        &mut self,
-        tasks: Vec<(ProgramExecutionRequest, TaskSubmission)>,
-        maximum_wall_millis: u64,
-    ) -> NativeExecutionResult<Vec<(ProgramExecutionResponse, Option<AttemptSuccess>)>> {
-        let tasks = self.session.submit_graph(tasks)?;
-        let started = Instant::now();
-        let maximum_wall = Duration::from_millis(maximum_wall_millis);
-        let mut responses = (0..tasks.len()).map(|_| None).collect::<Vec<_>>();
-        let mut failure = None;
-        let mut deadline_exceeded = false;
-        let mut user_cancelled = runmat_runtime::interrupt::is_cancelled();
-        let mut cancellation_started = user_cancelled.then(Instant::now);
-        if user_cancelled {
-            self.session.cancel(CancellationReason::User);
-        }
-        while responses.iter().any(Option::is_none) {
-            for (index, task) in tasks.iter().enumerate() {
-                if responses[index].is_some() {
-                    continue;
-                }
-                if let Some(result) = task.try_result() {
-                    match result {
-                        Ok(success) => {
-                            responses[index] =
-                                Some((success_response(success.clone()), Some(success)))
-                        }
-                        Err(message) => {
-                            if !deadline_exceeded && !user_cancelled {
-                                if failure.is_none() {
-                                    self.session.cancel(CancellationReason::ParentScope);
-                                    cancellation_started = Some(Instant::now());
-                                }
-                                failure.get_or_insert(message);
-                            }
-                            responses[index] = Some((
-                                ProgramExecutionResponse::Failure {
-                                    message: "sequence peer failed".into(),
-                                },
-                                None,
-                            ));
-                        }
-                    }
-                }
-            }
-            if responses.iter().any(Option::is_none) {
-                if !deadline_exceeded
-                    && failure.is_none()
-                    && !user_cancelled
-                    && runmat_runtime::interrupt::is_cancelled()
-                {
-                    self.session.cancel(CancellationReason::User);
-                    user_cancelled = true;
-                    cancellation_started = Some(Instant::now());
-                }
-                if !deadline_exceeded
-                    && !user_cancelled
-                    && failure.is_none()
-                    && started.elapsed() >= maximum_wall
-                {
-                    self.session.cancel(CancellationReason::Deadline);
-                    deadline_exceeded = true;
-                    cancellation_started = Some(Instant::now());
-                }
-                if cancellation_started
-                    .is_some_and(|cancelled| cancelled.elapsed() >= Duration::from_secs(5))
-                {
-                    return Err(NativeExecutionError::Protocol(
-                        "local structural sequence cancellation did not reach quiescence".into(),
-                    ));
-                }
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        }
-        if user_cancelled {
-            return Err(NativeExecutionError::Cancelled);
-        }
-        if let Some(message) = failure {
-            return Err(NativeExecutionError::Protocol(format!(
-                "local structural sequence task failed: {message}"
-            )));
-        }
-        if deadline_exceeded {
-            return Err(NativeExecutionError::Protocol(
-                "local structural sequence wave exceeded its wall-time limit after reaching quiescence"
-                    .into(),
-            ));
-        }
-        responses
-            .into_iter()
-            .map(|response| {
-                response.ok_or_else(|| {
-                    NativeExecutionError::Protocol(
-                        "local sequence task has no terminal response".into(),
-                    )
-                })
-            })
-            .collect()
-    }
-}
-
-pub(crate) struct RemoteSequencePool {
-    pool: Arc<RemotePoolDriver>,
-}
-
-impl RemoteSequencePool {
-    pub(crate) fn new(pool: Arc<RemotePoolDriver>) -> Self {
-        Self { pool }
-    }
-
-    pub(crate) fn register_execution_object(
-        &self,
-        reference: runmat_execution::value::ValueRef,
-        bytes: impl Into<std::sync::Arc<[u8]>>,
-    ) -> NativeExecutionResult<()> {
-        self.pool.register_execution_object(reference, bytes)
-    }
-}
-
-impl CacheImport for RemoteSequencePool {
-    fn read_verified(&self, digest: Digest) -> ArtifactResult<Option<Vec<u8>>> {
-        self.pool.read_verified(digest)
-    }
-}
-
-#[async_trait]
-impl SequencePool for RemoteSequencePool {
-    fn scope_id(&self) -> ExecutionScopeId {
-        self.pool.scope_id()
-    }
-
-    fn pool_id(&self) -> PoolId {
-        self.pool.pool_id()
-    }
-
-    fn register_program(&mut self, program: &PreparedAnalysisProgram) -> NativeExecutionResult<()> {
-        for object in &program.objects {
-            self.pool
-                .register_execution_object(object.reference.clone(), object.bytes.clone())?;
-        }
-        Ok(())
-    }
-
-    async fn execute_batch(
-        &mut self,
-        tasks: Vec<(ProgramExecutionRequest, TaskSubmission)>,
-        maximum_wall_millis: u64,
-    ) -> NativeExecutionResult<Vec<(ProgramExecutionResponse, Option<AttemptSuccess>)>> {
-        let completions = self.pool.submit_graph(tasks)?;
-        let mut responses = Vec::with_capacity(completions.len());
-        let mut failure = None;
-        let started = Instant::now();
-        let maximum_wall = Duration::from_millis(maximum_wall_millis);
-        let mut deadline_exceeded = false;
-        let mut cancellation_started: Option<Instant> = None;
-        for completion in completions {
-            let mut waiting = Box::pin(completion.wait());
-            let terminal = if let Some(cancelled) = cancellation_started {
-                let remaining = Duration::from_secs(5).saturating_sub(cancelled.elapsed());
-                tokio::time::timeout(remaining, &mut waiting)
-                    .await
-                    .map_err(|_| {
-                        NativeExecutionError::Protocol(
-                            "remote structural sequence cancellation did not reach quiescence"
-                                .into(),
-                        )
-                    })?
-            } else {
-                let remaining = maximum_wall.saturating_sub(started.elapsed());
-                match tokio::time::timeout(remaining, &mut waiting).await {
-                    Ok(terminal) => terminal,
-                    Err(_) => {
-                        self.pool.cancel(CancellationReason::Deadline)?;
-                        deadline_exceeded = true;
-                        let cancelled = Instant::now();
-                        cancellation_started = Some(cancelled);
-                        tokio::time::timeout(Duration::from_secs(5), &mut waiting)
-                            .await
-                            .map_err(|_| {
-                                NativeExecutionError::Protocol(
-                                    "remote structural sequence deadline cancellation did not reach quiescence"
-                                        .into(),
-                                )
-                            })?
-                    }
-                }
-            };
-            match terminal {
-                Ok(success) => responses.push((success_response(success.clone()), Some(success))),
-                Err(message) => {
-                    if !deadline_exceeded {
-                        failure.get_or_insert(message);
-                    }
-                    responses.push((
-                        ProgramExecutionResponse::Failure {
-                            message: "sequence peer failed".into(),
-                        },
-                        None,
-                    ));
-                }
-            }
-        }
-        if let Some(message) = failure {
-            return Err(NativeExecutionError::Protocol(format!(
-                "remote structural sequence task failed: {message}"
-            )));
-        }
-        if deadline_exceeded {
-            return Err(NativeExecutionError::Protocol(
-                "remote structural sequence wave exceeded its wall-time limit after reaching quiescence"
-                    .into(),
-            ));
-        }
-        Ok(responses)
-    }
-}
-
-fn success_response(success: AttemptSuccess) -> ProgramExecutionResponse {
-    ProgramExecutionResponse::ExternalizedSuccess {
-        outputs: success.outputs,
-        result_objects: success.result_objects,
-    }
-}
-
-fn protocol(error: impl std::fmt::Display) -> NativeExecutionError {
-    NativeExecutionError::Protocol(error.to_string())
 }
 
 #[cfg(test)]
