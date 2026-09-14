@@ -5,7 +5,8 @@ import { assertControlBaseline } from "./control.mjs";
 import { evidenceDigest } from "./evidence.mjs";
 import { assertActiveLease } from "./lease.mjs";
 import { buildSourceFieldDisposition, sourceFieldBaselineDigest } from "./source-fields.mjs";
-import { array, digest, exact, identity, integer, kind, nonempty, repositoryPath, sourceRevision, stableId } from "./schema.mjs";
+import { array, digest, exact, identity, integer, kind, nonempty, repositoryPath, stableId } from "./schema.mjs";
+import { parseSourceSnapshot } from "./snapshot.mjs";
 
 export function prepareIdentity(
   repository, inventory, control, lease, identity, outputRoot, clock = Date.now,
@@ -67,16 +68,7 @@ export function parsePrepareResult(value, expected) {
   identity(value.identity, "prepare identity");
   stableId(value.bundle_id, "prepare bundle id");
   digest(value.control_manifest_digest, "prepare control digest");
-  exact(value.source, ["revision", "dirty", "roots", "files", "digest"], "prepare source snapshot");
-  sourceRevision(value.source.revision, "prepare source revision");
-  digest(value.source.digest, "prepare source digest");
-  array(value.source.roots, "prepare source roots").forEach((entry) => repositoryPath(entry, "prepare source root"));
-  array(value.source.files, "prepare source files").forEach((entry) => {
-    exact(entry, ["path", "mode", "content_digest"], "prepare source file");
-    repositoryPath(entry.path, "prepare source file path");
-    integer(entry.mode, "prepare source file mode");
-    digest(entry.content_digest, "prepare source file digest");
-  });
+  parseSourceSnapshot(value.source, "prepare source snapshot");
   digest(value.inventory_digest, "prepare inventory digest");
   digest(value.checklist_digest, "prepare checklist digest");
   digest(value.checklist_baseline_digest, "prepare checklist baseline digest");

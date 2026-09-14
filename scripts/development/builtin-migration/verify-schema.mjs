@@ -1,7 +1,7 @@
 import { compareCodePoint } from "./constants.mjs";
 import { assertValidatedControl } from "./control.mjs";
-import { evidenceDigest } from "./evidence.mjs";
 import { parseMigrationPhases } from "./integration-phases.mjs";
+import { parseSourceSnapshot } from "./snapshot.mjs";
 import { requiredGateNames } from "./gate-requirements.mjs";
 import {
   validateAcceptedSealSet, validateBarrierSealSet,
@@ -101,15 +101,7 @@ export function validateAudit(value, batch) {
     label: "migration audit barrier seals",
   });
   const phases = parseMigrationPhases(value.phases);
-  exact(value.source, ["revision", "dirty", "roots", "files", "digest"], "migration audit source");
-  sourceRevision(value.source.revision, "migration audit source revision"); digest(value.source.digest, "migration audit source digest");
-  if (![true, false, null].includes(value.source.dirty)) throw new Error("migration audit source dirty must be boolean or null");
-  const roots = uniqueStrings(value.source.roots, "migration audit source roots").sort(compareCodePoint);
-  if (JSON.stringify(roots) !== JSON.stringify(value.source.roots)) throw new Error("migration audit source roots must use canonical order");
-  array(value.source.files, "migration audit source files", { empty: true }).forEach((entry) => { exact(entry, ["path", "mode", "content_digest"], "migration audit source file"); repositoryPath(entry.path, "migration audit source file path"); integer(entry.mode, "migration audit source file mode"); digest(entry.content_digest, "migration audit source file digest"); });
-  const filePaths = value.source.files.map((entry) => entry.path);
-  if (new Set(filePaths).size !== filePaths.length || JSON.stringify([...filePaths].sort(compareCodePoint)) !== JSON.stringify(filePaths)) throw new Error("migration audit source files must be unique and canonically ordered");
-  if (evidenceDigest({ roots: value.source.roots, files: value.source.files }) !== value.source.digest) throw new Error("migration audit source digest is inconsistent");
+  parseSourceSnapshot(value.source, "migration audit source", { emptyFiles: true });
   exact(value.evidence, ["gate_artifacts", "prepare_digests", "source_disposition_digests"], "migration audit evidence");
   uniqueStrings(value.evidence.gate_artifacts, "migration audit gate artifacts", { empty: true });
   for (const field of ["prepare_digests", "source_disposition_digests"]) array(value.evidence[field], `migration audit ${field}`, { empty: true }).forEach((entry) => digest(entry, `migration audit ${field}`));

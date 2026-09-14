@@ -5,7 +5,7 @@ import { finalizeRecords, inventorySummary } from "./finalize.mjs";
 import { createRecords } from "./records.mjs";
 import { attachWasmEvidence, scanSurfaces } from "./surfaces.mjs";
 import { evidenceDigest } from "./evidence.mjs";
-import { sourceSnapshot } from "./snapshot.mjs";
+import { parseSourceSnapshot, sourceSnapshot } from "./snapshot.mjs";
 import { authorityFor, parseCompiledInventory, publicSpellingsFor } from "./compiled-inventory.mjs";
 import { migrationFinding } from "./compiled-runtime-schema.mjs";
 import { migrationFindingsDigest } from "./migration-findings.mjs";
@@ -71,7 +71,7 @@ export function parseInventoryEvidence(value) {
   kind(value, 2, "runmat-builtin-migration-inventory", "migration inventory");
   exact(value, ["schema_version", "kind", "authority", "generated_from", "source", "compiled_inventory", "migration_findings", "migration_findings_digest", "scanned_source_coverage", "dispositions_digest", "summary", "diagnostics", "identities", "digest"], "migration inventory");
   if (value.authority !== "development-evidence-only") throw new Error("migration inventory has invalid authority");
-  digest(value.digest, "migration inventory digest"); digest(value.source?.digest, "migration inventory source digest"); digest(value.compiled_inventory?.digest, "compiled inventory evidence digest"); digest(value.migration_findings_digest, "migration findings digest"); digest(value.scanned_source_coverage?.digest, "scanned source coverage digest"); digest(value.dispositions_digest, "migration dispositions digest");
+  digest(value.digest, "migration inventory digest"); parseSourceSnapshot(value.source, "migration inventory source"); digest(value.compiled_inventory?.digest, "compiled inventory evidence digest"); digest(value.migration_findings_digest, "migration findings digest"); digest(value.scanned_source_coverage?.digest, "scanned source coverage digest"); digest(value.dispositions_digest, "migration dispositions digest");
   array(value.migration_findings, "migration inventory findings", { empty: true }).forEach(migrationFinding);
   if (migrationFindingsDigest(value.migration_findings) !== value.migration_findings_digest) throw new Error("migration finding digest mismatch");
   array(value.identities, "migration inventory identities", { empty: true }); array(value.diagnostics, "migration inventory diagnostics", { empty: true });
