@@ -1,11 +1,14 @@
 import path from "node:path";
 
-const RUST_KEYWORDS = new Set([
+// Strict and reserved keywords require raw syntax when Rust permits them as an
+// identifier. Weak keywords such as `union` remain ordinary identifiers in
+// module paths and item names, so canonical projections must not prefix them.
+const RAW_REQUIRED_KEYWORDS = new Set([
   "Self", "abstract", "as", "async", "await", "become", "box", "break", "const",
   "continue", "crate", "do", "dyn", "else", "enum", "extern", "false", "final",
   "fn", "for", "gen", "if", "impl", "in", "let", "loop", "macro", "match",
   "mod", "move", "mut", "override", "priv", "pub", "ref", "return", "self",
-  "static", "struct", "super", "trait", "true", "try", "type", "typeof", "union",
+  "static", "struct", "super", "trait", "true", "try", "type", "typeof",
   "unsafe", "unsized", "use", "virtual", "where", "while", "yield",
 ]);
 const UNRAWABLE_IDENTIFIERS = new Set(["Self", "_", "crate", "self", "super"]);
@@ -19,7 +22,7 @@ export function rustModuleIdentifier(value, label) {
   if (UNRAWABLE_IDENTIFIERS.has(bare)) {
     throw new Error(`${label} uses an identifier Rust reserves in module paths`);
   }
-  if (raw !== RUST_KEYWORDS.has(bare)) {
+  if (raw !== RAW_REQUIRED_KEYWORDS.has(bare)) {
     throw new Error(`${label} must use r# exactly for a Rust keyword`);
   }
   return value;
@@ -27,7 +30,7 @@ export function rustModuleIdentifier(value, label) {
 
 export function rustItemIdentifier(value, label) {
   if (typeof value !== "string" || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(value)
-    || RUST_KEYWORDS.has(value)) {
+    || RAW_REQUIRED_KEYWORDS.has(value)) {
     throw new Error(`${label} must be a non-keyword Rust item identifier`);
   }
   return value;
