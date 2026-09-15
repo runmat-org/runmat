@@ -39,6 +39,9 @@ pub enum SpatialOperatorImplementation {
 pub enum TemporalImplementation {
     StructuralStaticLinearSolve,
     StructuralSubspaceIteration,
+    StructuralPrestressedSubspaceIteration,
+    StructuralEigenvalueBuckling,
+    StructuralPrestressedHarmonicSolve,
     StructuralNewmarkAverageAcceleration,
     StructuralScalarResidualIteration,
     ThermalSteadyLinearSolve,

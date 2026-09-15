@@ -1734,6 +1734,121 @@ fn physical_compressive_preload_buckling_has_exact_residual_and_inverse_load_sca
 }
 
 #[test]
+fn portable_buckling_pipeline_consumes_the_exact_published_preload_state() {
+    use runmat_analysis_core::{
+        FormulationRequirement, ReferenceStatePolicy, SequenceDependency, SequenceDependencyReason,
+        StateTransition, StateTransitionMethod, TopologyTransitionPolicy, TransitionId,
+    };
+    use runmat_execution::Digest;
+
+    use crate::execution::{
+        CanonicalSemanticState, CanonicalSemanticStateInput, CanonicalSemanticStatePayload,
+        CanonicalStateTransition, CanonicalStateTransitionInput, SequenceIdentity,
+        SolverResultIdentity, StepIdentity, StructuralBucklingSolverPolicy,
+        StructuralBucklingTemplate,
+    };
+
+    let mut model = fixture_model(FixtureId::StructuralTransientTet4Reference);
+    let preload_step = ProcedureStep::structural_preload("preload");
+    let mut buckling_step =
+        ProcedureStep::structural_buckling("buckling", "preload", "geometric_stiffness");
+    buckling_step.independent_domain =
+        runmat_analysis_core::IndependentDomain::Eigenvalue { requested_count: 1 };
+    model.sequence.steps = vec![preload_step, buckling_step];
+    model.sequence.dependencies = vec![SequenceDependency {
+        predecessor: runmat_analysis_core::ProcedureStepId("preload".into()),
+        successor: runmat_analysis_core::ProcedureStepId("buckling".into()),
+        reason: SequenceDependencyReason::StateTransfer,
+    }];
+    model.sequence.transitions = vec![StateTransition {
+        transition_id: TransitionId("preload-to-buckling".into()),
+        producer_step: runmat_analysis_core::ProcedureStepId("preload".into()),
+        consumer_step: runmat_analysis_core::ProcedureStepId("buckling".into()),
+        state_id: runmat_analysis_core::StateId("geometric_stiffness".into()),
+        method: StateTransitionMethod::Reuse,
+        topology: TopologyTransitionPolicy::RequireIdentical,
+        reference: ReferenceStatePolicy::Preserve,
+    }];
+    model.constraints.truncate(1);
+    replace_fixture_excitations(
+        &mut model,
+        vec![FixtureExcitation {
+            id: "compressive_preload".into(),
+            region_id: "tip".into(),
+            kind: FixtureExcitationKind::Force([0.0, 0.0, -1.0]),
+        }],
+    );
+    let mesh = single_tetrahedron_solver_mesh_for_model(&model);
+    let topology_digest = Digest::from_bytes(*mesh.canonical_digest.bytes());
+    let constraint_plan = crate::constraints::CanonicalStructuralConstraintPlan::compile_for_model(
+        &model,
+        Some(&mesh),
+    )
+    .unwrap();
+    let preload = crate::run_linear_static_with_prepared_constraint_plan_and_linearization(
+        &model,
+        ComputeBackend::Cpu,
+        LinearStaticSolveOptions {
+            formulation_requirement: FormulationRequirement::Experimental,
+            solver_mesh: Some(mesh.clone()),
+            require_solver_mesh_for_solid: true,
+            ..LinearStaticSolveOptions::default()
+        },
+        &constraint_plan,
+        topology_digest,
+    )
+    .unwrap();
+    let sequence = SequenceIdentity::from_solver_contract(&model.sequence).unwrap();
+    let producer = StepIdentity::from_solver_contract(sequence, &model.sequence.steps[0]).unwrap();
+    let consumer = StepIdentity::from_solver_contract(sequence, &model.sequence.steps[1]).unwrap();
+    let source_result =
+        SolverResultIdentity::from_step_result(producer, preload.linearization.identity().digest())
+            .unwrap();
+    let state = CanonicalSemanticState::new(CanonicalSemanticStateInput {
+        producer,
+        declaration: model.sequence.steps[0].state_outputs[1].clone(),
+        topology_digest,
+        source_result,
+        payload: CanonicalSemanticStatePayload::StructuralLinearization {
+            linearization: Box::new(preload.linearization),
+        },
+    })
+    .unwrap();
+    let transition = CanonicalStateTransition::new(CanonicalStateTransitionInput {
+        sequence,
+        producer,
+        consumer,
+        authored: &model.sequence.transitions[0],
+        source: &state,
+        target_topology_digest: topology_digest,
+    })
+    .unwrap();
+    let workload = StructuralBucklingTemplate {
+        schema_version: 1,
+        model,
+        step_id: runmat_analysis_core::ProcedureStepId("buckling".into()),
+        backend: ComputeBackend::Cpu,
+        formulation_requirement: FormulationRequirement::Experimental,
+        solver: StructuralBucklingSolverPolicy::new(1, 1.0e-10, 8).unwrap(),
+    }
+    .bind(transition)
+    .unwrap();
+    let result = crate::execute_structural_buckling_workload(&workload, &mesh, &state).unwrap();
+    assert_eq!(result.modes().len(), 1);
+    assert!(result.modes()[0].load_factor > 0.0);
+    assert!(result.modes()[0].residual_norm <= 1.0e-12);
+    let decoded = crate::execution::StructuralBucklingSolverResult::from_canonical_bytes(
+        &result.canonical_bytes().unwrap(),
+    )
+    .unwrap();
+    decoded.validate_for(&workload).unwrap();
+
+    let mut substituted = state.clone();
+    substituted.topology_digest = Digest::sha256(b"different-topology");
+    assert!(crate::execute_structural_buckling_workload(&workload, &mesh, &substituted).is_err());
+}
+
+#[test]
 fn structural_frequency_entries_execute_independently_and_assemble_in_plan_order() {
     use runmat_analysis_core::{FormulationRequirement, IndependentDomain};
 

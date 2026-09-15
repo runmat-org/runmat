@@ -252,6 +252,7 @@ pub enum StateKind {
     Fluid,
     MovingMesh,
     ModalBasis,
+    BucklingModes,
     CoupledInterface,
     Integrator,
 }
@@ -370,6 +371,13 @@ impl ProcedureStep {
         )
     }
 
+    pub fn structural_preload(step_id: impl Into<String>) -> Self {
+        let mut step = Self::structural_static(step_id);
+        step.state_outputs
+            .push(state("geometric_stiffness", StateKind::GeometricStiffness));
+        step
+    }
+
     pub fn structural_modal(step_id: impl Into<String>) -> Self {
         Self::experimental(
             step_id,
@@ -379,6 +387,36 @@ impl ProcedureStep {
             IndependentDomain::Eigenvalue { requested_count: 6 },
             vec![state("modal_basis", StateKind::ModalBasis)],
         )
+    }
+
+    pub fn structural_buckling(
+        step_id: impl Into<String>,
+        producer_step: impl Into<String>,
+        state_id: impl Into<String>,
+    ) -> Self {
+        let mut step = Self::experimental(
+            step_id,
+            PhysicsFamily::Structural,
+            AnalysisProcedure::EigenvalueBuckling,
+            SolutionSpace::Direct,
+            IndependentDomain::Eigenvalue { requested_count: 6 },
+            vec![state("buckling_modes", StateKind::BucklingModes)],
+        );
+        step.state_inputs
+            .push(prestress_input(producer_step, state_id));
+        step
+    }
+
+    pub fn structural_prestressed_modal(
+        step_id: impl Into<String>,
+        producer_step: impl Into<String>,
+        state_id: impl Into<String>,
+    ) -> Self {
+        let mut step = Self::structural_modal(step_id);
+        step.procedure = AnalysisProcedure::PrestressedModalExtraction;
+        step.state_inputs
+            .push(prestress_input(producer_step, state_id));
+        step
     }
 
     pub fn structural_transient(step_id: impl Into<String>) -> Self {
@@ -409,6 +447,18 @@ impl ProcedureStep {
             IndependentDomain::FrequencyHertz(vec![60.0]),
             vec![state("structural_complex", StateKind::StructuralComplex)],
         )
+    }
+
+    pub fn structural_prestressed_harmonic(
+        step_id: impl Into<String>,
+        producer_step: impl Into<String>,
+        state_id: impl Into<String>,
+    ) -> Self {
+        let mut step = Self::structural_harmonic(step_id);
+        step.procedure = AnalysisProcedure::PrestressedHarmonicResponse;
+        step.state_inputs
+            .push(prestress_input(producer_step, state_id));
+        step
     }
 
     pub fn structural_modal_transient(
@@ -598,6 +648,21 @@ fn modal_basis_input(producer_step: impl Into<String>, state_id: impl Into<Strin
             state_id,
         },
         use_as: StateUse::ModalBasis,
+        conflict: InitialStateConflictPolicy::Reject,
+    }
+}
+
+fn prestress_input(producer_step: impl Into<String>, state_id: impl Into<String>) -> StateInput {
+    let producer_step = ProcedureStepId(producer_step.into());
+    let state_id = StateId(state_id.into());
+    StateInput {
+        input_id: format!("{}_{}_prestress_input", producer_step.as_str(), state_id.0),
+        required_kind: StateKind::GeometricStiffness,
+        source: StateSource::Upstream {
+            producer_step,
+            state_id,
+        },
+        use_as: StateUse::Prestress,
         conflict: InitialStateConflictPolicy::Reject,
     }
 }

@@ -45,6 +45,7 @@ pub use pipeline::modal_governance::{
     ModalConvergencePolicy, ModalEigenspaceEvidence, ModalTruncationEvidence, ModalTruncationPolicy,
 };
 pub use pipeline::nonlinear::{run_nonlinear, run_nonlinear_with_options};
+pub use pipeline::structural_buckling::execute_structural_buckling_workload;
 pub use pipeline::thermal::run_thermal_with_options;
 pub use pipeline::transient::{run_transient, run_transient_with_options};
 pub use progress::{

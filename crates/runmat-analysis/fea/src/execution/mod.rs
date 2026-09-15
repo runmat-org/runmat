@@ -4,6 +4,8 @@
 //! encryption, and object storage remain owned by RunMat's generic execution crates.
 
 mod accuracy;
+mod buckling_result;
+mod buckling_workload;
 mod error;
 mod field;
 mod frequency_assembly;
@@ -40,6 +42,14 @@ mod transient_template;
 mod transient_workload;
 
 pub use accuracy::AccuracyEvaluationRequest;
+pub use buckling_result::{
+    StructuralBucklingMode, StructuralBucklingNumericalReceipt, StructuralBucklingSolverResult,
+    StructuralBucklingSolverResultInput,
+};
+pub use buckling_workload::{
+    StructuralBucklingSolverPolicy, StructuralBucklingTemplate, StructuralBucklingWorkload,
+    StructuralBucklingWorkloadInput,
+};
 pub use error::{AnalysisExecutionError, AnalysisExecutionResult};
 pub use field::{FieldRecoveryRequest, FieldRecoverySource};
 pub use frequency_assembly::{
@@ -82,8 +92,8 @@ pub use identity::{
     PublicationIdentity, PublicationRequestIdentity, SequenceIdentity,
     SignalMaterializationIdentity, SignalRealizationIdentity, SolverExcitationIdentity,
     SolverResultIdentity, StateIdentity, StateTransitionIdentity, StepIdentity,
-    StructuralDampingOperatorIdentity, StructuralDofLayoutIdentity,
-    StructuralExcitationSetIdentity, StructuralFormulationIdentity,
+    StructuralBucklingWorkloadIdentity, StructuralDampingOperatorIdentity,
+    StructuralDofLayoutIdentity, StructuralExcitationSetIdentity, StructuralFormulationIdentity,
     StructuralFrequencyEntryRequestIdentity, StructuralFrequencyEntryResultIdentity,
     StructuralFrequencyPhysicalSampleIdentity, StructuralFrequencyProblemIdentity,
     StructuralFrequencyPublicationIdentity, StructuralFrequencyResultAssemblyRequestIdentity,

@@ -26,9 +26,21 @@ pub fn is_exposed_analysis_identity(
             )
             | (
                 PhysicsFamily::Structural,
+                AnalysisProcedure::PrestressedModalExtraction
+            )
+            | (
+                PhysicsFamily::Structural,
+                AnalysisProcedure::EigenvalueBuckling
+            )
+            | (
+                PhysicsFamily::Structural,
                 AnalysisProcedure::TransientResponse
             )
             | (PhysicsFamily::Structural, AnalysisProcedure::Nonlinear)
+            | (
+                PhysicsFamily::Structural,
+                AnalysisProcedure::PrestressedHarmonicResponse
+            )
             | (PhysicsFamily::Thermal, AnalysisProcedure::Static)
             | (PhysicsFamily::Thermal, AnalysisProcedure::TransientResponse)
             | (
@@ -75,9 +87,21 @@ mod tests {
             ),
             (
                 PhysicsFamily::Structural,
+                AnalysisProcedure::PrestressedModalExtraction,
+            ),
+            (
+                PhysicsFamily::Structural,
+                AnalysisProcedure::EigenvalueBuckling,
+            ),
+            (
+                PhysicsFamily::Structural,
                 AnalysisProcedure::TransientResponse,
             ),
             (PhysicsFamily::Structural, AnalysisProcedure::Nonlinear),
+            (
+                PhysicsFamily::Structural,
+                AnalysisProcedure::PrestressedHarmonicResponse,
+            ),
             (PhysicsFamily::Thermal, AnalysisProcedure::Static),
             (PhysicsFamily::Thermal, AnalysisProcedure::TransientResponse),
             (

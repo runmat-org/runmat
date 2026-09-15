@@ -33,6 +33,7 @@ pub struct BucklingMode {
 pub struct BucklingSolveResult {
     pub converged: bool,
     pub iteration_count: usize,
+    pub preconditioner: SpdPreconditionerKind,
     pub modes: Vec<BucklingMode>,
 }
 
@@ -118,9 +119,15 @@ pub fn solve_eigenvalue_buckling(
     let prepared = system
         .prepare_linear()
         .map_err(|error| BucklingSolveError::NonCoercive(error.to_string()))?;
-    let preconditioner = build_spd_preconditioner(&prepared, SpdPreconditionerKind::Ilu0)
-        .or_else(|_| build_spd_preconditioner(&prepared, SpdPreconditionerKind::Jacobi))
-        .map_err(|error| BucklingSolveError::NonCoercive(error.to_string()))?;
+    let (preconditioner_kind, preconditioner) =
+        match build_spd_preconditioner(&prepared, SpdPreconditionerKind::Ilu0) {
+            Ok(preconditioner) => (SpdPreconditionerKind::Ilu0, preconditioner),
+            Err(_) => (
+                SpdPreconditionerKind::Jacobi,
+                build_spd_preconditioner(&prepared, SpdPreconditionerKind::Jacobi)
+                    .map_err(|error| BucklingSolveError::NonCoercive(error.to_string()))?,
+            ),
+        };
 
     let subspace_dimension = dimension.min(requested_mode_count.saturating_add(4));
     let mut basis = deterministic_basis(dimension, subspace_dimension);
@@ -182,6 +189,7 @@ pub fn solve_eigenvalue_buckling(
             return Ok(BucklingSolveResult {
                 converged: true,
                 iteration_count: iteration,
+                preconditioner: preconditioner_kind,
                 modes,
             });
         }
@@ -190,6 +198,7 @@ pub fn solve_eigenvalue_buckling(
     Ok(BucklingSolveResult {
         converged: false,
         iteration_count: maximum_iterations,
+        preconditioner: preconditioner_kind,
         modes,
     })
 }

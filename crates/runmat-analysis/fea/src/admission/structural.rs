@@ -327,6 +327,15 @@ pub(super) fn structural_temporal(procedure: AnalysisProcedure) -> Option<Tempor
         AnalysisProcedure::ModalExtraction => {
             Some(TemporalImplementation::StructuralSubspaceIteration)
         }
+        AnalysisProcedure::PrestressedModalExtraction => {
+            Some(TemporalImplementation::StructuralPrestressedSubspaceIteration)
+        }
+        AnalysisProcedure::EigenvalueBuckling => {
+            Some(TemporalImplementation::StructuralEigenvalueBuckling)
+        }
+        AnalysisProcedure::PrestressedHarmonicResponse => {
+            Some(TemporalImplementation::StructuralPrestressedHarmonicSolve)
+        }
         AnalysisProcedure::TransientResponse => {
             Some(TemporalImplementation::StructuralNewmarkAverageAcceleration)
         }

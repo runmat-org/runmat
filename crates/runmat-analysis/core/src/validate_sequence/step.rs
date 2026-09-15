@@ -293,14 +293,14 @@ fn validate_required_inputs(step: &ProcedureStep) -> Result<(), AnalysisValidati
             | AnalysisProcedure::PrestressedHarmonicResponse
     );
     if requires_prestress
-        && !step
-            .state_inputs
-            .iter()
-            .any(|input| input.use_as == StateUse::Prestress)
+        && !step.state_inputs.iter().any(|input| {
+            input.use_as == StateUse::Prestress
+                && input.required_kind == StateKind::GeometricStiffness
+        })
     {
         return Err(step_error(
             step,
-            "procedure requires an explicit prestress state input",
+            "procedure requires an explicit geometric-stiffness prestress state input",
         ));
     }
     let requires_basis = step.solution_space == SolutionSpace::ModalReduced;
@@ -344,6 +344,7 @@ fn family_can_publish_state(family: PhysicsFamily, kind: StateKind) -> bool {
                 | StateKind::MaterialHistory
                 | StateKind::ContactHistory
                 | StateKind::ModalBasis
+                | StateKind::BucklingModes
                 | StateKind::Integrator
                 | StateKind::MovingMesh
         ),
