@@ -7,6 +7,7 @@ use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use serde::{Deserialize, Serialize};
 
 use crate::contracts::ComputeBackend;
+use crate::results::observation::ObservationExecutionPolicy;
 
 use super::{
     AnalysisExecutionError, AnalysisExecutionResult, CanonicalStateTransition, SequenceIdentity,
@@ -78,6 +79,7 @@ pub struct StructuralBucklingTemplate {
     pub step_id: ProcedureStepId,
     pub backend: ComputeBackend,
     pub formulation_requirement: FormulationRequirement,
+    pub observation_execution: ObservationExecutionPolicy,
     pub solver: StructuralBucklingSolverPolicy,
 }
 
@@ -103,6 +105,7 @@ impl StructuralBucklingTemplate {
             step_id: self.step_id,
             backend: self.backend,
             formulation_requirement: self.formulation_requirement,
+            observation_execution: self.observation_execution,
             solver: self.solver,
             prestress_transition,
         })
@@ -119,6 +122,7 @@ pub struct StructuralBucklingWorkload {
     step_id: ProcedureStepId,
     backend: ComputeBackend,
     formulation_requirement: FormulationRequirement,
+    observation_execution: ObservationExecutionPolicy,
     solver: StructuralBucklingSolverPolicy,
     prestress_transition: CanonicalStateTransition,
 }
@@ -132,6 +136,7 @@ struct StructuralBucklingWorkloadWire {
     step_id: ProcedureStepId,
     backend: ComputeBackend,
     formulation_requirement: FormulationRequirement,
+    observation_execution: ObservationExecutionPolicy,
     solver: StructuralBucklingSolverPolicy,
     prestress_transition: CanonicalStateTransition,
 }
@@ -141,6 +146,7 @@ pub struct StructuralBucklingWorkloadInput {
     pub step_id: ProcedureStepId,
     pub backend: ComputeBackend,
     pub formulation_requirement: FormulationRequirement,
+    pub observation_execution: ObservationExecutionPolicy,
     pub solver: StructuralBucklingSolverPolicy,
     pub prestress_transition: CanonicalStateTransition,
 }
@@ -156,6 +162,7 @@ impl TryFrom<StructuralBucklingWorkloadWire> for StructuralBucklingWorkload {
             step_id: wire.step_id,
             backend: wire.backend,
             formulation_requirement: wire.formulation_requirement,
+            observation_execution: wire.observation_execution,
             solver: wire.solver,
             prestress_transition: wire.prestress_transition,
         };
@@ -176,6 +183,7 @@ impl StructuralBucklingWorkload {
             step_id: input.step_id,
             backend: input.backend,
             formulation_requirement: input.formulation_requirement,
+            observation_execution: input.observation_execution,
             solver: input.solver,
             prestress_transition: input.prestress_transition,
         };
@@ -202,6 +210,10 @@ impl StructuralBucklingWorkload {
 
     pub const fn formulation_requirement(&self) -> FormulationRequirement {
         self.formulation_requirement
+    }
+
+    pub const fn observation_execution(&self) -> ObservationExecutionPolicy {
+        self.observation_execution
     }
 
     pub const fn solver(&self) -> StructuralBucklingSolverPolicy {
@@ -270,6 +282,7 @@ impl StructuralBucklingWorkload {
                 &self.step_id,
                 self.backend,
                 self.formulation_requirement,
+                self.observation_execution,
                 self.solver,
                 &self.prestress_transition,
             ),

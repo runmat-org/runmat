@@ -8,18 +8,17 @@ use crate::{
         accelerator::prepare_accelerator_linear_system,
         backend::kind::LinearAlgebraBackendKind,
         preconditioner::{build_spd_preconditioner, SpdPreconditionerKind},
+        spd_linear::{solve_spd_system_cg, SpdCgSolveOptions},
     },
     ComputeBackend,
 };
 
 mod diagnostics;
-pub(crate) mod linear_solve;
 mod math;
 pub(crate) mod subspace;
 mod truncation;
 
 use diagnostics::push_modal_quality_diagnostics;
-use linear_solve::{solve_k_system_cg, CgSolveOptions};
 use subspace::solve_lowest_eigenspace;
 use truncation::resolve_truncation_boundary;
 
@@ -314,10 +313,10 @@ pub fn solve_modal_system(
                 if crate::is_fea_cancelled() {
                     return None;
                 }
-                let attempt = solve_k_system_cg(
+                let attempt = solve_spd_system_cg(
                     &solve_summary.operator,
                     rhs,
-                    CgSolveOptions {
+                    SpdCgSolveOptions {
                         max_iters: 64,
                         tol: 1.0e-8,
                         prepared_accelerator_system: prepared_accelerator_system.as_ref(),

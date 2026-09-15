@@ -1829,6 +1829,7 @@ fn portable_buckling_pipeline_consumes_the_exact_published_preload_state() {
         step_id: runmat_analysis_core::ProcedureStepId("buckling".into()),
         backend: ComputeBackend::Cpu,
         formulation_requirement: FormulationRequirement::Experimental,
+        observation_execution: crate::results::observation::ObservationExecutionPolicy::scalable(),
         solver: StructuralBucklingSolverPolicy::new(1, 1.0e-10, 8).unwrap(),
     }
     .bind(transition)

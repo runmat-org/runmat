@@ -119,7 +119,7 @@ fn modal_plan_binds_k_m_probe_and_monolithic_peak() {
     };
     assert_eq!(demand.operator.partitioning, PartitioningPolicy::Monolithic);
     assert!(demand.operator.sparse.operator_nonzeros.len() >= 2);
-    let SolveResourcePolicy::ModalSubspaceIteration {
+    let SolveResourcePolicy::SymmetricSubspaceIteration {
         requested_mode_count,
         initial_subspace_dimension,
         maximum_subspace_dimension,
@@ -200,7 +200,7 @@ fn modal_plan_binds_k_m_probe_and_monolithic_peak() {
         prepared(&large_mesh, &large_constraints, &large_workload),
     )
     .unwrap();
-    let SolveResourcePolicy::ModalSubspaceIteration {
+    let SolveResourcePolicy::SymmetricSubspaceIteration {
         initial_subspace_dimension: large_initial,
         ..
     } = large.input.structural_operator().unwrap().solve
@@ -252,7 +252,7 @@ fn modal_accelerator_admission_rejects_missing_short_and_cpu_claims() {
         )
         .unwrap()
     };
-    let SolveResourcePolicy::ModalSubspaceIteration {
+    let SolveResourcePolicy::SymmetricSubspaceIteration {
         reduced_dimension, ..
     } = cpu_projection.input.structural_operator().unwrap().solve
     else {

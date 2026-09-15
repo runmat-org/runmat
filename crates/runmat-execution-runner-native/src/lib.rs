@@ -1,6 +1,7 @@
 //! Native process composition for the portable RunMat execution driver.
 
 mod accelerator_placement;
+mod analysis_buckling;
 mod analysis_frequency;
 mod analysis_frequency_observations;
 mod analysis_host;
@@ -37,6 +38,10 @@ pub mod supervisor;
 mod test_workload;
 mod worker;
 
+pub use analysis_buckling::{
+    execute_structural_buckling_locally, execute_structural_buckling_remotely,
+    CompletedStructuralBucklingStudy,
+};
 pub use analysis_frequency::{
     execute_structural_frequency_locally, execute_structural_frequency_locally_with_source,
     execute_structural_frequency_remotely, CompletedStructuralFrequencyEntry,

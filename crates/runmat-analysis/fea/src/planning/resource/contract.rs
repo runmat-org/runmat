@@ -11,8 +11,9 @@ use serde::{Deserialize, Serialize};
 use crate::execution::{
     AnalysisNumericalObjectKind, FieldRecoveryRequestIdentity, ObservationAssemblyRequestIdentity,
     ObservationHistoryCheckpointRequestIdentity, ObservationPartitionEvaluationRequestIdentity,
-    ObservationPartitionReductionRequestIdentity, StructuralFrequencyEntryRequestIdentity,
-    StructuralFrequencyResultAssemblyRequestIdentity, StructuralModalWorkloadIdentity,
+    ObservationPartitionReductionRequestIdentity, StructuralBucklingWorkloadIdentity,
+    StructuralFrequencyEntryRequestIdentity, StructuralFrequencyResultAssemblyRequestIdentity,
+    StructuralModalWorkloadIdentity,
 };
 
 const RESOURCE_PREFIX: &[u8] = b"runmat-fea-resource-plan/v1\0";
@@ -163,7 +164,7 @@ pub enum SolveResourcePolicy {
         mode_count: Count,
         workspace_bytes_upper_bound: ByteCount,
     },
-    ModalSubspaceIteration {
+    SymmetricSubspaceIteration {
         full_dimension: Count,
         reduced_dimension: Count,
         requested_mode_count: Count,
@@ -186,7 +187,7 @@ impl SolveResourcePolicy {
             Self::NoSolve { .. }
             | Self::RestartedGmres { .. }
             | Self::ModalDenseHarmonic { .. }
-            | Self::ModalSubspaceIteration { .. } => None,
+            | Self::SymmetricSubspaceIteration { .. } => None,
         }
     }
 
@@ -196,7 +197,7 @@ impl SolveResourcePolicy {
             Self::NoSolve { .. }
             | Self::RestartedGmres { .. }
             | Self::ModalDenseHarmonic { .. }
-            | Self::ModalSubspaceIteration { .. } => {
+            | Self::SymmetricSubspaceIteration { .. } => {
                 return 8;
             }
         };
@@ -219,7 +220,7 @@ impl SolveResourcePolicy {
                 workspace_bytes_upper_bound,
                 ..
             }
-            | Self::ModalSubspaceIteration {
+            | Self::SymmetricSubspaceIteration {
                 workspace_bytes_upper_bound,
                 ..
             } => Some(*workspace_bytes_upper_bound),
@@ -302,6 +303,7 @@ pub enum PartitioningPolicy {
 pub enum FeaResourcePhase {
     StructuralLinearPipeline,
     StructuralModalExtraction(StructuralModalWorkloadIdentity),
+    StructuralBuckling(StructuralBucklingWorkloadIdentity),
     StructuralFrequencyEntry(StructuralFrequencyEntryRequestIdentity),
     StructuralFrequencyFieldRecovery(FieldRecoveryRequestIdentity),
     StructuralObservationPartition(ObservationPartitionEvaluationRequestIdentity),
@@ -343,6 +345,19 @@ pub struct StructuralModalResourceDemand {
     pub retained_mode_count_upper_bound: Count,
     pub modal_phase_value_count_upper_bound: Count,
     pub modal_output_value_count_upper_bound: Count,
+    pub inputs: PreparedInputResourceFacts,
+    pub result_output: PreparedOutputResourceFacts,
+    pub receipt_output: PreparedOutputResourceFacts,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StructuralBucklingResourceDemand {
+    pub workload: StructuralBucklingWorkloadIdentity,
+    pub operator: StructuralOperatorResourceDemand,
+    pub requested_mode_count: Count,
+    pub phase_value_count_upper_bound: Count,
+    pub output_value_count_upper_bound: Count,
     pub inputs: PreparedInputResourceFacts,
     pub result_output: PreparedOutputResourceFacts,
     pub receipt_output: PreparedOutputResourceFacts,
@@ -497,6 +512,7 @@ pub struct StructuralFrequencyResultAssemblyResourceDemand {
 pub enum FeaResourceDemand {
     StructuralLinearPipeline(StructuralOperatorResourceDemand),
     StructuralModalExtraction(StructuralModalResourceDemand),
+    StructuralBuckling(StructuralBucklingResourceDemand),
     StructuralFrequencyEntry(StructuralFrequencyOperatorResourceDemand),
     StructuralFrequencyFieldRecovery(StructuralFrequencyOperatorResourceDemand),
     StructuralObservationPartition(ObservationPartitionResourceDemand),
@@ -522,6 +538,12 @@ impl FeaResourceDemand {
                 Self::StructuralModalExtraction(demand),
                 AnalysisNumericalObjectKind::NumericalReceipt,
             ) => Some(&demand.receipt_output),
+            (Self::StructuralBuckling(demand), AnalysisNumericalObjectKind::SolverResult) => {
+                Some(&demand.result_output)
+            }
+            (Self::StructuralBuckling(demand), AnalysisNumericalObjectKind::NumericalReceipt) => {
+                Some(&demand.receipt_output)
+            }
             (
                 Self::StructuralFrequencyEntry(demand),
                 AnalysisNumericalObjectKind::StructuralFrequencyEntryResult,
@@ -580,6 +602,7 @@ impl FeaResourcePlanningInput {
         match &self.demand {
             FeaResourceDemand::StructuralLinearPipeline(demand) => demand.topology_digest,
             FeaResourceDemand::StructuralModalExtraction(demand) => demand.operator.topology_digest,
+            FeaResourceDemand::StructuralBuckling(demand) => demand.operator.topology_digest,
             FeaResourceDemand::StructuralFrequencyEntry(demand)
             | FeaResourceDemand::StructuralFrequencyFieldRecovery(demand) => {
                 demand.operator.topology_digest
@@ -600,6 +623,7 @@ impl FeaResourcePlanningInput {
             FeaResourceDemand::StructuralModalExtraction(demand) => {
                 Some(&demand.operator.observations)
             }
+            FeaResourceDemand::StructuralBuckling(demand) => Some(&demand.operator.observations),
             FeaResourceDemand::StructuralFrequencyEntry(demand)
             | FeaResourceDemand::StructuralFrequencyFieldRecovery(demand) => {
                 Some(&demand.operator.observations)
@@ -616,6 +640,7 @@ impl FeaResourcePlanningInput {
         match &self.demand {
             FeaResourceDemand::StructuralLinearPipeline(demand) => &demand.partitioning,
             FeaResourceDemand::StructuralModalExtraction(demand) => &demand.operator.partitioning,
+            FeaResourceDemand::StructuralBuckling(demand) => &demand.operator.partitioning,
             FeaResourceDemand::StructuralFrequencyEntry(demand)
             | FeaResourceDemand::StructuralFrequencyFieldRecovery(demand) => {
                 &demand.operator.partitioning
@@ -635,6 +660,7 @@ impl FeaResourcePlanningInput {
         match &self.demand {
             FeaResourceDemand::StructuralLinearPipeline(demand) => Some(demand),
             FeaResourceDemand::StructuralModalExtraction(demand) => Some(&demand.operator),
+            FeaResourceDemand::StructuralBuckling(demand) => Some(&demand.operator),
             FeaResourceDemand::StructuralFrequencyEntry(demand)
             | FeaResourceDemand::StructuralFrequencyFieldRecovery(demand) => Some(&demand.operator),
             FeaResourceDemand::StructuralObservationPartition(_)
@@ -649,6 +675,7 @@ impl FeaResourcePlanningInput {
         match &mut self.demand {
             FeaResourceDemand::StructuralLinearPipeline(demand) => Some(demand),
             FeaResourceDemand::StructuralModalExtraction(demand) => Some(&mut demand.operator),
+            FeaResourceDemand::StructuralBuckling(demand) => Some(&mut demand.operator),
             FeaResourceDemand::StructuralFrequencyEntry(demand)
             | FeaResourceDemand::StructuralFrequencyFieldRecovery(demand) => {
                 Some(&mut demand.operator)

@@ -1,6 +1,7 @@
 //! Checked FEA resource estimation, worker admission, and usage reconciliation.
 
 mod admission;
+mod buckling;
 mod contract;
 mod estimate;
 mod facts;
@@ -17,6 +18,10 @@ pub use admission::{
     admit_resource_plan, allocation_matches_plan, reconcile_resource_usage,
     record_resource_graph_usage, record_resource_usage, validate_resource_usage_evidence,
 };
+pub use buckling::{
+    build_structural_buckling_resource_plan, structural_buckling_receipt_payload_bytes_upper_bound,
+    structural_buckling_result_payload_bytes_upper_bound, PreparedStructuralBucklingResourceFacts,
+};
 pub use contract::{
     AcceleratorRequirement, AccuracyResourceDemand, AssemblyResourcePolicy, ByteCount,
     CheckpointArtifactPolicy, ConstraintResourceFacts, Count, FeaResourceDemand, FeaResourcePhase,
@@ -28,9 +33,10 @@ pub use contract::{
     PreparedOutputResourceFacts, PreparedOutputSetResourceFacts, PreparedPhaseResourceFacts,
     PreparedStructuralModalResourceFacts, ResourceAdmission, ResourceBreakdown,
     ResourcePlanningError, SolveResourcePolicy, SolverAdmissionResourcePolicy, SparseResourceFacts,
-    StructuralFrequencyOperatorResourceDemand, StructuralFrequencyResultAssemblyResourceDemand,
-    StructuralModalResourceDemand, StructuralOperatorResourceDemand, TopologyResourceFacts,
-    WorkerResourcePolicy, RESOURCE_ESTIMATION_MODEL_REVISION, RESOURCE_PLAN_MAX_ENCODED_BYTES,
+    StructuralBucklingResourceDemand, StructuralFrequencyOperatorResourceDemand,
+    StructuralFrequencyResultAssemblyResourceDemand, StructuralModalResourceDemand,
+    StructuralOperatorResourceDemand, TopologyResourceFacts, WorkerResourcePolicy,
+    RESOURCE_ESTIMATION_MODEL_REVISION, RESOURCE_PLAN_MAX_ENCODED_BYTES,
 };
 pub use estimate::build_resource_plan;
 pub use frequency::{

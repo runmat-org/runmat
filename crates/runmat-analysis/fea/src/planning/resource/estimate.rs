@@ -58,6 +58,13 @@ pub fn build_resource_plan(
             build_operator_resource_plan(input.clone(), &demand.operator, Some(&demand.inputs))
         }
         (
+            FeaResourcePhase::StructuralBuckling(workload),
+            FeaResourceDemand::StructuralBuckling(demand),
+        ) if *workload == demand.workload => {
+            validate_buckling_demand(demand)?;
+            build_operator_resource_plan(input.clone(), &demand.operator, Some(&demand.inputs))
+        }
+        (
             FeaResourcePhase::StructuralFrequencyEntry(_),
             FeaResourceDemand::StructuralFrequencyEntry(demand),
         )
@@ -91,10 +98,39 @@ pub fn build_resource_plan(
     }
 }
 
+fn validate_buckling_demand(
+    demand: &super::contract::StructuralBucklingResourceDemand,
+) -> Result<(), ResourcePlanningError> {
+    let SolveResourcePolicy::SymmetricSubspaceIteration {
+        reduced_dimension,
+        requested_mode_count,
+        ..
+    } = demand.operator.solve
+    else {
+        return Err(ResourcePlanningError::Invalid(
+            "structural buckling demand requires a symmetric-subspace solve policy".into(),
+        ));
+    };
+    if demand.requested_mode_count != requested_mode_count
+        || demand.requested_mode_count.0 == 0
+        || demand.requested_mode_count.0 > reduced_dimension.0
+        || demand.phase_value_count_upper_bound.0 < demand.output_value_count_upper_bound.0
+        || demand.output_value_count_upper_bound.0 == 0
+        || demand.operator.partitioning != PartitioningPolicy::Monolithic
+        || !prepared_output_is_valid(&demand.result_output)
+        || !prepared_output_is_valid(&demand.receipt_output)
+    {
+        return Err(ResourcePlanningError::Invalid(
+            "structural buckling output, subspace, or placement bounds are inconsistent".into(),
+        ));
+    }
+    Ok(())
+}
+
 fn validate_modal_demand(
     demand: &super::contract::StructuralModalResourceDemand,
 ) -> Result<(), ResourcePlanningError> {
-    let SolveResourcePolicy::ModalSubspaceIteration {
+    let SolveResourcePolicy::SymmetricSubspaceIteration {
         reduced_dimension,
         maximum_subspace_dimension,
         ..
@@ -623,7 +659,7 @@ fn validate_operator_demand(
                 "modal harmonic dimensions and workspace must be valid".into(),
             ));
         }
-        SolveResourcePolicy::ModalSubspaceIteration {
+        SolveResourcePolicy::SymmetricSubspaceIteration {
             full_dimension,
             reduced_dimension,
             requested_mode_count,
@@ -844,7 +880,9 @@ fn solve_storage(
         SolveResourcePolicy::NoSolve { .. }
         | SolveResourcePolicy::RestartedGmres { .. }
         | SolveResourcePolicy::ModalDenseHarmonic { .. }
-        | SolveResourcePolicy::ModalSubspaceIteration { .. } => Ok((ByteCount(0), ByteCount(0))),
+        | SolveResourcePolicy::SymmetricSubspaceIteration { .. } => {
+            Ok((ByteCount(0), ByteCount(0)))
+        }
     }
 }
 

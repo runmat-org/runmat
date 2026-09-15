@@ -222,7 +222,7 @@ pub fn build_structural_modal_resource_plan(
                     scratch_bytes_per_element: ByteCount(ASSEMBLY_SCRATCH_BYTES_PER_ELEMENT),
                     fixed_scratch_bytes_per_worker: ByteCount(FIXED_ASSEMBLY_SCRATCH_BYTES),
                 },
-                solve: SolveResourcePolicy::ModalSubspaceIteration {
+                solve: SolveResourcePolicy::SymmetricSubspaceIteration {
                     full_dimension: Count(full_dimension),
                     reduced_dimension: Count(reduced_dimension),
                     requested_mode_count: Count(requested_mode_count),

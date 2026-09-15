@@ -1,6 +1,7 @@
 use runmat_analysis_core::{AccuracyTarget, ErrorContributionKind, RequiredAccuracyEvidence};
 use runmat_analysis_execution::{
     decode_prepared_observation_history_checkpoint, decode_prepared_semantic_state,
+    decode_prepared_structural_buckling_workload,
     decode_prepared_structural_frequency_entry_request,
     decode_prepared_structural_frequency_entry_result,
     decode_prepared_structural_frequency_result_assembly_request,
@@ -20,7 +21,7 @@ use runmat_analysis_fea::execution::{
     ObservationAssemblyRequest, ObservationEvaluationRequest, ObservationHistoryCheckpointRequest,
     ObservationPartitionEvaluationRequest, ObservationPartitionReductionRequest,
     ResultPublicationRequest, SemanticStatePublicationRequest, SemanticStatePublicationSource,
-    StructuralFrequencySolverPlan, StructuralFrequencyWorkload,
+    StructuralBucklingNumericalReceipt, StructuralFrequencySolverPlan, StructuralFrequencyWorkload,
     StructuralLinearNumericalReceiptArtifact, StructuralLinearWorkload,
     StructuralLinearWorkloadResult, StructuralModalNumericalReceipt, StructuralModalSolverResult,
     StructuralTransientBlockRequest, StructuralTransientCheckpoint,
@@ -30,13 +31,15 @@ use runmat_analysis_fea::execution::{
 use runmat_analysis_fea::planning::resource::{
     build_observation_assembly_resource_plan, build_observation_history_checkpoint_resource_plan,
     build_observation_partition_resource_plan, build_observation_reduction_resource_plan,
-    build_structural_frequency_entry_resource_plan,
+    build_structural_buckling_resource_plan, build_structural_frequency_entry_resource_plan,
     build_structural_frequency_recovery_resource_plan,
     build_structural_frequency_result_assembly_resource_plan, build_structural_modal_resource_plan,
     build_structural_resource_plan, observation_artifact_payload_bytes_upper_bound,
     observation_history_checkpoint_payload_bytes_upper_bound,
     observation_partition_payload_bytes_upper_bound,
     observation_reduction_payload_bytes_upper_bound,
+    structural_buckling_receipt_payload_bytes_upper_bound,
+    structural_buckling_result_payload_bytes_upper_bound,
     structural_frequency_entry_payload_bytes_upper_bound,
     structural_frequency_receipt_payload_bytes_upper_bound,
     structural_frequency_recovery_payload_bytes_upper_bound,
@@ -44,7 +47,8 @@ use runmat_analysis_fea::planning::resource::{
     structural_modal_receipt_payload_bytes_upper_bound,
     structural_modal_result_payload_bytes_upper_bound, validate_resource_usage_evidence,
     FeaResourceDemand, FeaResourcePhase, FeaResourcePlan, ObservationPartitionResourcePlanning,
-    PreparedPhaseResourceFacts, PreparedStructuralModalResourceFacts, ResourceUsageEvidence,
+    PreparedPhaseResourceFacts, PreparedStructuralBucklingResourceFacts,
+    PreparedStructuralModalResourceFacts, ResourceUsageEvidence,
 };
 use runmat_analysis_fea::post::fields::{
     structural_observable_field_definitions, take_structural_observable_fields,
@@ -71,6 +75,9 @@ use runmat_analysis_fea::{
 };
 use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
 
+mod buckling;
+#[cfg(test)]
+mod buckling_tests;
 mod field_recovery;
 mod frequency;
 mod modal;
@@ -113,6 +120,9 @@ impl AnalysisKernel for NativeAnalysisKernel {
             }
             AnalysisWorkKind::ExtractStructuralModes => {
                 modal::execute_structural_modal_extraction(invocation)
+            }
+            AnalysisWorkKind::SolveStructuralBucklingModes => {
+                buckling::execute_structural_buckling(invocation)
             }
             AnalysisWorkKind::AssembleStructuralFrequencyResult => {
                 frequency::execute_structural_frequency_result_assembly(invocation)

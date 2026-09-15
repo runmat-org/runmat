@@ -1,6 +1,8 @@
 //! Narrow bridge from analysis-owned logical contracts to shared RunMat execution services.
 
 mod accuracy_evaluation;
+mod buckling_object_access;
+mod buckling_task;
 mod callable;
 mod error;
 mod field_recovery;
@@ -47,6 +49,15 @@ mod workload;
 pub use accuracy_evaluation::{
     import_structural_accuracy, prepare_structural_accuracy, ImportedAccuracy,
     PreparedStructuralAccuracy, StructuralAccuracyPreparation,
+};
+pub use buckling_object_access::{
+    decode_prepared_structural_buckling_receipt, decode_prepared_structural_buckling_result,
+    decode_prepared_structural_buckling_workload, prepare_structural_buckling_workload_objects,
+};
+pub use buckling_task::{
+    import_structural_buckling_result, prepare_structural_buckling_task,
+    ImportedStructuralBucklingResult, PreparedStructuralBucklingTask,
+    StructuralBucklingTaskPreparation,
 };
 pub use callable::{
     admit_callable_signal_generator, admit_named_signal_generator, AdmittedSignalGenerator,

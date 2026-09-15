@@ -7,15 +7,13 @@ use crate::{
     },
 };
 
-use super::math::dot;
-
-pub(crate) struct LinearSolveAttempt {
+pub(crate) struct SpdSolveAttempt {
     pub(crate) vector: Vec<f64>,
     pub(crate) converged: bool,
     pub(crate) accelerator: Option<crate::solve::linear::LinearSolveResult>,
 }
 
-pub(crate) struct CgSolveOptions<'a> {
+pub(crate) struct SpdCgSolveOptions<'a> {
     pub(crate) max_iters: usize,
     pub(crate) tol: f64,
     pub(crate) prepared_accelerator_system: Option<&'a AcceleratorPreparedLinearSystem>,
@@ -23,11 +21,11 @@ pub(crate) struct CgSolveOptions<'a> {
     pub(crate) initial_guess: Option<&'a [f64]>,
 }
 
-pub(crate) fn solve_k_system_cg(
+pub(crate) fn solve_spd_system_cg(
     system: &AssembledRealSystem,
     rhs: &[f64],
-    options: CgSolveOptions<'_>,
-) -> LinearSolveAttempt {
+    options: SpdCgSolveOptions<'_>,
+) -> SpdSolveAttempt {
     if let Some(prepared) = options.prepared_accelerator_system {
         let result = match solve_prepared_accelerator_system(
             prepared,
@@ -45,37 +43,37 @@ pub(crate) fn solve_k_system_cg(
                 error,
             ),
         };
-        return LinearSolveAttempt {
+        return SpdSolveAttempt {
             vector: result.solution.clone(),
             converged: result.converged,
             accelerator: Some(result),
         };
     }
 
-    let mut x = match options.initial_guess {
+    let mut solution = match options.initial_guess {
         Some(values) if values.len() == rhs.len() => values.to_vec(),
         _ => vec![0.0; rhs.len()],
     };
-    let mut r = {
-        let kx = apply_k(system, &x);
+    let mut residual = {
+        let applied = apply_k(system, &solution);
         rhs.iter()
-            .zip(kx.iter())
-            .map(|(rhs_i, kx_i)| rhs_i - kx_i)
-            .collect::<Vec<f64>>()
+            .zip(applied)
+            .map(|(rhs_value, applied_value)| rhs_value - applied_value)
+            .collect::<Vec<_>>()
     };
-    let apply_preconditioner = |residual: &[f64]| {
+    let apply_preconditioner = |values: &[f64]| {
         options.cpu_preconditioner.map_or_else(
-            || residual.to_vec(),
-            |preconditioner| preconditioner.apply(residual),
+            || values.to_vec(),
+            |preconditioner| preconditioner.apply(values),
         )
     };
-    let mut z = apply_preconditioner(&r);
-    let mut p = z.clone();
-    let mut rz_old = dot(&r, &z);
+    let mut preconditioned = apply_preconditioner(&residual);
+    let mut direction = preconditioned.clone();
+    let mut residual_preconditioned = dot(&residual, &preconditioned);
     let rhs_norm = dot(rhs, rhs).sqrt().max(1.0);
-    if dot(&r, &r).sqrt() <= options.tol * rhs_norm {
-        return LinearSolveAttempt {
-            vector: x,
+    if dot(&residual, &residual).sqrt() <= options.tol * rhs_norm {
+        return SpdSolveAttempt {
+            vector: solution,
             converged: true,
             accelerator: None,
         };
@@ -83,35 +81,42 @@ pub(crate) fn solve_k_system_cg(
 
     let mut converged = false;
     for _ in 0..options.max_iters {
-        let ap = apply_k(system, &p);
-        let denom = dot(&p, &ap);
-        if !denom.is_finite() || denom <= 1.0e-24 {
+        let applied_direction = apply_k(system, &direction);
+        let denominator = dot(&direction, &applied_direction);
+        if !denominator.is_finite() || denominator <= 1.0e-24 {
             break;
         }
-        let alpha = rz_old / denom;
-        for i in 0..x.len() {
-            x[i] += alpha * p[i];
-            r[i] -= alpha * ap[i];
+        let alpha = residual_preconditioned / denominator;
+        for index in 0..solution.len() {
+            solution[index] += alpha * direction[index];
+            residual[index] -= alpha * applied_direction[index];
         }
-        if dot(&r, &r).sqrt() <= options.tol * rhs_norm {
+        if dot(&residual, &residual).sqrt() <= options.tol * rhs_norm {
             converged = true;
             break;
         }
-        z = apply_preconditioner(&r);
-        let rz_new = dot(&r, &z);
-        if rz_old.abs() <= 1.0e-24 {
+        preconditioned = apply_preconditioner(&residual);
+        let next_residual_preconditioned = dot(&residual, &preconditioned);
+        if residual_preconditioned.abs() <= 1.0e-24 {
             break;
         }
-        let beta = rz_new / rz_old;
-        for i in 0..p.len() {
-            p[i] = z[i] + beta * p[i];
+        let beta = next_residual_preconditioned / residual_preconditioned;
+        for index in 0..direction.len() {
+            direction[index] = preconditioned[index] + beta * direction[index];
         }
-        rz_old = rz_new;
+        residual_preconditioned = next_residual_preconditioned;
     }
 
-    LinearSolveAttempt {
-        vector: x,
+    SpdSolveAttempt {
+        vector: solution,
         converged,
         accelerator: None,
     }
+}
+
+fn dot(left: &[f64], right: &[f64]) -> f64 {
+    left.iter()
+        .zip(right)
+        .map(|(left, right)| left * right)
+        .sum()
 }

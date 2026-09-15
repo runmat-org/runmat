@@ -9,16 +9,14 @@ use crate::{
     assembly::AssemblySummary,
     pipeline::structural_linearization::StructuralLinearizationArtifact,
     solve::{
-        modal::{
-            linear_solve::{solve_k_system_cg, CgSolveOptions},
-            subspace::symmetric_eigendecomposition,
-        },
         preconditioner::{build_spd_preconditioner, SpdPreconditionerKind},
+        spd_linear::{solve_spd_system_cg, SpdCgSolveOptions},
+        symmetric_eigen::symmetric_eigendecomposition,
     },
 };
 
 const POSITIVE_MULTIPLIER_TOLERANCE: f64 = 1.0e-12;
-const ORTHOGONALIZATION_PASSES: usize = 2;
+pub(crate) const BUCKLING_ORTHOGONALIZATION_PASSES: usize = 2;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -145,10 +143,10 @@ pub fn solve_eigenvalue_buckling(
                 .into_iter()
                 .map(|value| -value)
                 .collect::<Vec<_>>();
-            let attempt = solve_k_system_cg(
+            let attempt = solve_spd_system_cg(
                 &system,
                 &rhs,
-                CgSolveOptions {
+                SpdCgSolveOptions {
                     max_iters: dimension.saturating_mul(20).max(200),
                     tol: relative_tolerance.min(1.0e-10) * 0.1,
                     prepared_accelerator_system: None,
@@ -164,11 +162,12 @@ pub fn solve_eigenvalue_buckling(
             filtered.push(attempt.vector);
         }
         orthonormalize_k(&system, &mut filtered);
-        if filtered.len() != subspace_dimension {
+        if filtered.len() < requested_mode_count {
             return Err(BucklingSolveError::DegenerateSubspace("inverse iteration"));
         }
+        let active_dimension = filtered.len();
         let projected = projected_negative_geometric(&geometric, &filtered)?;
-        let (_, rotations) = symmetric_eigendecomposition(projected, subspace_dimension);
+        let (_, rotations) = symmetric_eigendecomposition(projected, active_dimension);
         basis = rotate_basis(&filtered, &rotations);
         orthonormalize_k(&system, &mut basis);
         modes = build_modes(&system, &geometric, &reduction, &basis)?;
@@ -274,7 +273,7 @@ fn projected_negative_geometric(
 fn orthonormalize_k(system: &AssembledRealSystem, vectors: &mut Vec<Vec<f64>>) {
     let mut accepted: Vec<Vec<f64>> = Vec::with_capacity(vectors.len());
     for mut vector in vectors.drain(..) {
-        for _ in 0..ORTHOGONALIZATION_PASSES {
+        for _ in 0..BUCKLING_ORTHOGONALIZATION_PASSES {
             for previous in &accepted {
                 let projection = dot(
                     previous,
