@@ -455,6 +455,7 @@ pub(in crate::analysis) fn prepare_structural_frequency_workload(
             solver: runmat_analysis_fea::execution::StructuralFrequencySolverPlan::Direct {
                 policy: options.direct_solver,
             },
+            prestress_transition: None,
         },
     )
     .map_err(|error| portable_study_contract_error(study, error.to_string()))

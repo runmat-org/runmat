@@ -3,12 +3,13 @@ use std::collections::BTreeSet;
 use runmat_analysis_fea::planning::resource::{
     build_structural_frequency_recovery_resource_plan,
     structural_frequency_recovery_payload_bytes_upper_bound, FeaResourcePlan,
-    PreparedPhaseResourceFacts,
+    PreparedPhaseResourceFacts, StructuralFrequencyRecoveryResourceInput,
 };
 use runmat_analysis_fea::{
     constraints::CanonicalStructuralConstraintPlan,
     execution::{
         AnalysisNumericalObjectKind, AnalysisWorkKind, FieldRecoveryRequest, FieldRecoverySource,
+        StructuralFrequencyStateInputs,
     },
     results::field::StructuralRecoveredFieldTopology,
 };
@@ -31,6 +32,7 @@ pub struct StructuralFrequencyFieldRecoveryPreparation {
     pub source_host: AnalysisHostWorkload,
     pub workload: PreparedAnalysisObjects,
     pub mesh: PreparedAnalysisObjects,
+    pub prestress_state: Option<PreparedAnalysisObjects>,
     pub source_entry: PreparedAnalysisObjects,
     pub artifact_access: ArtifactAccess,
     pub program_revision: ProgramRevision,
@@ -87,12 +89,24 @@ pub fn prepare_structural_frequency_field_recovery(
         runmat_meshing_core::SolverMeshArtifact::canonical_decode(&preparation.mesh.payload())
             .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let result = decode_prepared_structural_frequency_entry_result(&preparation.source_entry)?;
-    let prepared =
-        runmat_analysis_fea::pipeline::structural_frequency::validate_structural_frequency_entry(
+    let prestress_state = preparation
+        .prestress_state
+        .as_ref()
+        .map(crate::decode_prepared_semantic_state)
+        .transpose()?;
+    let prepared = match prestress_state.as_ref() {
+        Some(state) => runmat_analysis_fea::pipeline::structural_frequency::validate_prestressed_structural_frequency_entry(
             &workload,
             &mesh,
             result.request(),
-        )?;
+            state,
+        )?,
+        None => runmat_analysis_fea::pipeline::structural_frequency::validate_structural_frequency_entry(
+            &workload,
+            &mesh,
+            result.request(),
+        )?,
+    };
     let topology = StructuralRecoveredFieldTopology::derive(workload.model(), Some(&mesh))
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     if preparation.workload.manifest.logical_identity != workload.identity().digest()
@@ -148,18 +162,25 @@ pub fn prepare_structural_frequency_field_recovery(
     let constraints =
         CanonicalStructuralConstraintPlan::compile_for_model(workload.model(), Some(&mesh))
             .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    let phase_inputs = vec![
+    let mut phase_inputs = vec![
         request_objects.clone(),
         preparation.workload.clone(),
         preparation.mesh.clone(),
         preparation.source_entry.clone(),
     ];
+    phase_inputs.extend(preparation.prestress_state.iter().cloned());
     let resource_plan = build_structural_frequency_recovery_resource_plan(
         &mesh,
         &constraints,
         &workload,
-        &request,
-        &result,
+        StructuralFrequencyRecoveryResourceInput {
+            request: &request,
+            result: &result,
+        },
+        StructuralFrequencyStateInputs {
+            prestress: prestress_state.as_ref(),
+            modal_basis: None,
+        },
         &[],
         PreparedPhaseResourceFacts {
             inputs: crate::prepared_input_resource_facts(&phase_inputs)?,
@@ -185,13 +206,16 @@ pub fn prepare_structural_frequency_field_recovery(
         ObjectNamespace::InputValue,
         preparation.inventory_limits,
     )?;
-    let typed_inputs = vec![
+    let mut typed_inputs = vec![
         (request_objects, ValueRefKind::DriverObject),
         (preparation.workload, ValueRefKind::DriverObject),
         (preparation.mesh, ValueRefKind::DriverObject),
         (preparation.source_entry, ValueRefKind::ResultObject),
         (resource_plan_objects.clone(), ValueRefKind::DriverObject),
     ];
+    if let Some(state) = preparation.prestress_state {
+        typed_inputs.push((state, ValueRefKind::ResultObject));
+    }
     let workload_inputs = typed_inputs
         .iter()
         .map(|(input, reference_kind)| AnalysisWorkloadInput {

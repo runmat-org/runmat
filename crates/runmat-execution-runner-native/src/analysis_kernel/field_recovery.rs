@@ -142,7 +142,12 @@ fn execute_structural_frequency_field_recovery(
         AnalysisNumericalObjectKind::StructuralFrequencyEntryResult,
     )?;
     let resource_plan = unique_input(&invocation, AnalysisNumericalObjectKind::ResourcePlan)?;
-    if invocation.inputs.len() != 5
+    let states = semantic_state_inputs(&invocation)?;
+    if invocation.inputs.len() != 5 + states.len()
+        || states.len() > 1
+        || states
+            .iter()
+            .any(|state| state.kind != StateKind::GeometricStiffness)
         || invocation.host.workload.outputs != vec![AnalysisNumericalObjectKind::Field]
     {
         return Err(AnalysisBridgeError::Invalid(
@@ -158,6 +163,7 @@ fn execute_structural_frequency_field_recovery(
     let mesh = SolverMeshArtifact::canonical_decode(&mesh.payload())
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let result = decode_prepared_structural_frequency_entry_result(result)?;
+    let prestress_state = states.first();
     let resource_plan_identity = resource_plan.manifest.logical_identity;
     let resource_plan = FeaResourcePlan::from_canonical_bytes(&resource_plan.payload())
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
@@ -166,6 +172,15 @@ fn execute_structural_frequency_field_recovery(
         || request.source != FieldRecoverySource::StructuralFrequencyEntry(result.identity())
         || workload.identity().digest() != workload_identity
         || runmat_execution::Digest::from_bytes(*mesh.canonical_digest.bytes()) != mesh_identity
+        || match (workload.prestress_transition(), prestress_state) {
+            (None, None) => false,
+            (Some(transition), Some(state)) => {
+                transition.source_state != state.identity
+                    || state.topology_digest
+                        != runmat_execution::Digest::from_bytes(*mesh.canonical_digest.bytes())
+            }
+            _ => true,
+        }
     {
         return Err(AnalysisBridgeError::Identity(
             "structural frequency field recovery inputs differ from their object identities",
@@ -178,8 +193,14 @@ fn execute_structural_frequency_field_recovery(
         &mesh,
         &constraints,
         &workload,
-        &request,
-        &result,
+        StructuralFrequencyRecoveryResourceInput {
+            request: &request,
+            result: &result,
+        },
+        StructuralFrequencyStateInputs {
+            prestress: prestress_state,
+            modal_basis: None,
+        },
         &resource_plan.request.accelerators,
         PreparedPhaseResourceFacts {
             inputs: prepared_input_resource_facts(&inputs_except_resource_plan(&invocation))?,
@@ -202,12 +223,20 @@ fn execute_structural_frequency_field_recovery(
             "structural frequency recovery received a substituted resource plan",
         ));
     }
-    let artifact =
-        runmat_analysis_fea::pipeline::structural_frequency::recover_structural_frequency_entry_fields(
+    let artifact = match prestress_state {
+        Some(state) => runmat_analysis_fea::pipeline::structural_frequency::recover_prestressed_structural_frequency_entry_fields(
             &workload,
             &mesh,
             &request,
             &result,
-        )?;
+            state,
+        )?,
+        None => runmat_analysis_fea::pipeline::structural_frequency::recover_structural_frequency_entry_fields(
+            &workload,
+            &mesh,
+            &request,
+            &result,
+        )?,
+    };
     recovered_field_output(&artifact)
 }

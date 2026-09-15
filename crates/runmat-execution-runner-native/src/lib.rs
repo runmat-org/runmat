@@ -9,6 +9,7 @@ mod analysis_kernel;
 mod analysis_modal;
 mod analysis_modal_transient;
 mod analysis_placement;
+mod analysis_prestressed_frequency;
 mod analysis_prestressed_modal;
 mod analysis_sequence;
 mod analysis_task;
@@ -63,6 +64,11 @@ pub use analysis_modal_transient::{
     CompletedStructuralModalTransientStudy,
 };
 pub use analysis_placement::NativeStructuralStudyPlacement;
+pub use analysis_prestressed_frequency::{
+    execute_structural_prestressed_frequency_study_locally,
+    execute_structural_prestressed_frequency_study_remotely,
+    CompletedStructuralPrestressedFrequencyStudy,
+};
 pub use analysis_prestressed_modal::{
     execute_structural_prestressed_modal_study_locally,
     execute_structural_prestressed_modal_study_remotely, CompletedStructuralPrestressedModalStudy,

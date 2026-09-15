@@ -74,6 +74,7 @@ use runmat_meshing_core::{
     ElementOrder, PersistentEntityId, PersistentEntityKind, SolverMeshArtifact,
 };
 
+mod prestressed_frequency;
 mod transient_physical;
 
 fn experimental_linear_static_options() -> LinearStaticSolveOptions {
@@ -2062,6 +2063,7 @@ fn structural_frequency_entries_execute_independently_and_assemble_in_plan_order
         solver: StructuralFrequencySolverPlan::Direct {
             policy: DirectHarmonicPolicy::default(),
         },
+        prestress_transition: None,
     })
     .unwrap();
     assert_eq!(

@@ -13,9 +13,8 @@ pub(super) fn execute_structural_frequency_entry(
         AnalysisNumericalObjectKind::StructuralFrequencyEntryRequest,
     )?;
     let resource_plan_input = unique_input(&invocation, AnalysisNumericalObjectKind::ResourcePlan)?;
-    let modal_input =
-        optional_unique_input(&invocation, AnalysisNumericalObjectKind::SemanticState)?;
-    if invocation.inputs.len() != 4 + usize::from(modal_input.is_some())
+    let states = semantic_state_inputs(&invocation)?;
+    if invocation.inputs.len() != 4 + states.len()
         || invocation.host.workload.outputs
             != vec![AnalysisNumericalObjectKind::StructuralFrequencyEntryResult]
     {
@@ -27,19 +26,39 @@ pub(super) fn execute_structural_frequency_entry(
     let request = decode_prepared_structural_frequency_entry_request(request_input)?;
     let mesh = SolverMeshArtifact::canonical_decode(&mesh_input.payload())
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    let modal_state = modal_input
-        .map(decode_prepared_semantic_state)
-        .transpose()?;
+    let prestress_states = states
+        .iter()
+        .filter(|state| state.kind == StateKind::GeometricStiffness)
+        .collect::<Vec<_>>();
+    let modal_states = states
+        .iter()
+        .filter(|state| state.kind == StateKind::ModalBasis)
+        .collect::<Vec<_>>();
+    if prestress_states.len() > 1
+        || modal_states.len() > 1
+        || prestress_states.len() + modal_states.len() != states.len()
+    {
+        return Err(AnalysisBridgeError::Invalid(
+            "structural frequency entry has an invalid semantic-state inventory".into(),
+        ));
+    }
+    let prestress_state = prestress_states.first().copied();
+    let modal_state = modal_states.first().copied();
     let resource_plan = FeaResourcePlan::from_canonical_bytes(&resource_plan_input.payload())
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    let state_matches = match (workload.solver(), modal_state.as_ref()) {
+    let modal_state_matches = match (workload.solver(), modal_state) {
         (StructuralFrequencySolverPlan::Direct { .. }, None) => true,
         (StructuralFrequencySolverPlan::ModalReduced { basis_state }, Some(state)) => {
             state.identity == *basis_state
         }
         _ => false,
     };
-    let state_topology_matches = modal_state.as_ref().is_none_or(|state| {
+    let prestress_state_matches = match (workload.prestress_transition(), prestress_state) {
+        (None, None) => true,
+        (Some(transition), Some(state)) => transition.source_state == state.identity,
+        _ => false,
+    };
+    let state_topology_matches = states.iter().all(|state| {
         state.topology_digest
             == runmat_execution::Digest::from_bytes(*mesh.canonical_digest.bytes())
     });
@@ -49,7 +68,8 @@ pub(super) fn execute_structural_frequency_entry(
         || invocation.host.workload.study != request.study()
         || invocation.host.workload.step != request.step()
         || invocation.host.workload.execution_plan != request.execution_plan()
-        || !state_matches
+        || !modal_state_matches
+        || !prestress_state_matches
         || !state_topology_matches
         || resource_plan_input.manifest.logical_identity != resource_plan.identity.digest()
     {
@@ -65,7 +85,10 @@ pub(super) fn execute_structural_frequency_entry(
         &constraints,
         &workload,
         &request,
-        modal_state.as_ref(),
+        StructuralFrequencyStateInputs {
+            prestress: prestress_state,
+            modal_basis: modal_state,
+        },
         &resource_plan.request.accelerators,
         PreparedPhaseResourceFacts {
             inputs: prepared_input_resource_facts(&inputs_except_resource_plan(&invocation))?,
@@ -82,13 +105,21 @@ pub(super) fn execute_structural_frequency_entry(
             "frequency entry resource plan does not converge from authoritative inputs",
         ));
     }
-    let result =
-        runmat_analysis_fea::pipeline::structural_frequency::execute_structural_frequency_entry(
+    let result = match prestress_state {
+        Some(state) => runmat_analysis_fea::pipeline::structural_frequency::execute_prestressed_structural_frequency_entry(
             &workload,
             &mesh,
             &request,
-            modal_state.as_ref(),
-        )?;
+            state,
+            modal_state,
+        )?,
+        None => runmat_analysis_fea::pipeline::structural_frequency::execute_structural_frequency_entry(
+            &workload,
+            &mesh,
+            &request,
+            modal_state,
+        )?,
+    };
     Ok(vec![AnalysisKernelOutput::whole(
         AnalysisNumericalObjectKind::StructuralFrequencyEntryResult,
         result.identity().digest(),

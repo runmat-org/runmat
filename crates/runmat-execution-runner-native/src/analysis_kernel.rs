@@ -1,4 +1,6 @@
-use runmat_analysis_core::{AccuracyTarget, ErrorContributionKind, RequiredAccuracyEvidence};
+use runmat_analysis_core::{
+    AccuracyTarget, ErrorContributionKind, RequiredAccuracyEvidence, StateKind,
+};
 use runmat_analysis_execution::{
     decode_prepared_observation_history_checkpoint, decode_prepared_semantic_state,
     decode_prepared_structural_buckling_workload,
@@ -21,7 +23,8 @@ use runmat_analysis_fea::execution::{
     ObservationAssemblyRequest, ObservationEvaluationRequest, ObservationHistoryCheckpointRequest,
     ObservationPartitionEvaluationRequest, ObservationPartitionReductionRequest,
     ResultPublicationRequest, SemanticStatePublicationRequest, SemanticStatePublicationSource,
-    StructuralBucklingNumericalReceipt, StructuralFrequencySolverPlan, StructuralFrequencyWorkload,
+    StructuralBucklingNumericalReceipt, StructuralFrequencySolverPlan,
+    StructuralFrequencyStateInputs, StructuralFrequencyWorkload,
     StructuralLinearNumericalReceiptArtifact, StructuralLinearWorkload,
     StructuralLinearWorkloadResult, StructuralModalNumericalReceipt, StructuralModalSolverResult,
     StructuralTransientBlockRequest, StructuralTransientCheckpoint,
@@ -49,6 +52,7 @@ use runmat_analysis_fea::planning::resource::{
     FeaResourceDemand, FeaResourcePhase, FeaResourcePlan, ObservationPartitionResourcePlanning,
     PreparedPhaseResourceFacts, PreparedStructuralBucklingResourceFacts,
     PreparedStructuralModalResourceFacts, ResourceUsageEvidence,
+    StructuralFrequencyRecoveryResourceInput,
 };
 use runmat_analysis_fea::post::fields::{
     structural_observable_field_definitions, take_structural_observable_fields,
@@ -874,6 +878,25 @@ fn optional_unique_input<'a>(
         )));
     }
     Ok(input)
+}
+
+fn semantic_state_inputs(
+    invocation: &AnalysisKernelInvocation<'_>,
+) -> AnalysisBridgeResult<Vec<CanonicalSemanticState>> {
+    invocation
+        .inputs
+        .iter()
+        .filter(|input| input.manifest.kind == AnalysisNumericalObjectKind::SemanticState)
+        .map(|input| {
+            let state = decode_prepared_semantic_state(input)?;
+            if input.manifest.logical_identity != state.identity.digest() {
+                return Err(AnalysisBridgeError::Identity(
+                    "semantic-state input differs from its object identity",
+                ));
+            }
+            Ok(state)
+        })
+        .collect()
 }
 
 #[cfg(test)]

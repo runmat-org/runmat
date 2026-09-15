@@ -381,6 +381,10 @@ impl StructuralSymbolicOperators {
         &self.mass
     }
 
+    pub fn damping_upper_bound(&self) -> &SparsePattern {
+        &self.damping
+    }
+
     pub fn patterns(&self) -> [&SparsePattern; 3] {
         [&self.stiffness_upper_bound, &self.mass, &self.damping]
     }

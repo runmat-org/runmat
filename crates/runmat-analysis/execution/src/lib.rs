@@ -37,6 +37,7 @@ mod structural;
 mod structural_buckling_study;
 mod structural_modal_transient_study;
 mod structural_prestress_producer;
+mod structural_prestressed_frequency_study;
 mod structural_prestressed_modal_study;
 mod structural_sequence;
 mod structural_transient_recovery;
@@ -208,6 +209,10 @@ pub use structural_buckling_study::{
 };
 pub use structural_modal_transient_study::{
     StructuralModalTransientStudyCoordinator, StructuralModalTransientStudyPreparation,
+};
+pub use structural_prestressed_frequency_study::{
+    PreparedStructuralPrestressedFrequency, StructuralPrestressedFrequencyStudyCoordinator,
+    StructuralPrestressedFrequencyStudyPreparation,
 };
 pub use structural_prestressed_modal_study::{
     StructuralPrestressedModalStudyCoordinator, StructuralPrestressedModalStudyPreparation,

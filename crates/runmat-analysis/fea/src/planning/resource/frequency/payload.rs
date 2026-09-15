@@ -5,9 +5,7 @@ use crate::{
     execution::{StructuralFrequencyEntryRequest, StructuralFrequencyWorkload},
 };
 
-use super::{
-    add, count, multiply, ResourcePlanningError, StructuralFrequencyEntryResourceProjection,
-};
+use super::{add, count, multiply, ResourcePlanningError};
 
 const ARTIFACT_OVERHEAD_BYTES: u64 = 64 * 1024;
 // Canonical CBOR writes every finite f64 as one type byte followed by its eight-byte payload.
@@ -67,9 +65,8 @@ pub fn structural_frequency_recovery_payload_bytes_upper_bound(
     constraints: &CanonicalStructuralConstraintPlan,
     workload: &StructuralFrequencyWorkload,
 ) -> Result<u64, ResourcePlanningError> {
-    let projection =
-        StructuralFrequencyEntryResourceProjection::for_recovery(mesh, constraints, workload, &[])?;
-    recovery_payload_bytes_upper_bound(&projection.recovery_layout)
+    let layout = super::structural_frequency_recovery_layout(mesh, constraints, workload)?;
+    recovery_payload_bytes_upper_bound(&layout)
 }
 
 pub(super) fn recovery_payload_bytes_upper_bound(

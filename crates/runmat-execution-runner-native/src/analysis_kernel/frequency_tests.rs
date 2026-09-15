@@ -20,15 +20,17 @@ use runmat_analysis_execution::{
 use runmat_analysis_fea::{
     execution::{
         AnalysisNumericalObjectKind, CanonicalSemanticState, CanonicalSemanticStateInput,
-        CanonicalSemanticStatePayload, SequenceIdentity, SolverResultIdentity, StepIdentity,
+        CanonicalSemanticStatePayload, CanonicalStateTransition, CanonicalStateTransitionInput,
+        SequenceIdentity, SolverResultIdentity, StepIdentity,
         StructuralFrequencyResultAssemblyRequest, StructuralFrequencySolverPlan,
         StructuralFrequencyWorkload, StructuralFrequencyWorkloadInput,
+        StructuralPrestressedFrequencySolverTemplate, StructuralPrestressedFrequencyTemplate,
     },
     fixtures::{fixture_model, FixtureId},
     frequency::FrequencyResponsePlan,
     planning::resource::{build_resource_plan, ByteCount, FeaResourceDemand},
     solve::dynamics::DirectHarmonicPolicy,
-    ComputeBackend, ModalSolveOptions, ModalTruncationPolicy,
+    ComputeBackend, LinearStaticSolveOptions, ModalSolveOptions, ModalTruncationPolicy,
 };
 use runmat_execution::{Digest, ProgramEnvironment, ProgramRevision};
 use runmat_execution_artifact::cache::CacheImport;
@@ -143,14 +145,110 @@ fn direct_fixture() -> (
         solver: StructuralFrequencySolverPlan::Direct {
             policy: DirectHarmonicPolicy::default(),
         },
+        prestress_transition: None,
     })
     .unwrap();
     (workload, mesh)
 }
 
+fn prestressed_direct_fixture() -> (
+    StructuralFrequencyWorkload,
+    runmat_meshing_core::SolverMeshArtifact,
+    CanonicalSemanticState,
+) {
+    let (mut model, mesh) = fixture_model_and_mesh();
+    let preload = ProcedureStep::structural_preload("preload");
+    let mut frequency = ProcedureStep::structural_prestressed_harmonic(
+        "prestressed_frequency",
+        "preload",
+        "geometric_stiffness",
+    );
+    frequency.independent_domain = IndependentDomain::FrequencyHertz(vec![20.0, 40.0]);
+    model.sequence.steps = vec![preload, frequency];
+    model.sequence.dependencies = vec![SequenceDependency {
+        predecessor: ProcedureStepId("preload".into()),
+        successor: ProcedureStepId("prestressed_frequency".into()),
+        reason: SequenceDependencyReason::StateTransfer,
+    }];
+    model.sequence.transitions = vec![StateTransition {
+        transition_id: TransitionId("preload-to-prestressed-frequency".into()),
+        producer_step: ProcedureStepId("preload".into()),
+        consumer_step: ProcedureStepId("prestressed_frequency".into()),
+        state_id: StateId("geometric_stiffness".into()),
+        method: StateTransitionMethod::Reuse,
+        topology: TopologyTransitionPolicy::RequireIdentical,
+        reference: ReferenceStatePolicy::Preserve,
+    }];
+    let topology_digest = Digest::from_bytes(*mesh.canonical_digest.bytes());
+    let constraints =
+        runmat_analysis_fea::constraints::CanonicalStructuralConstraintPlan::compile_for_model(
+            &model,
+            Some(&mesh),
+        )
+        .unwrap();
+    let preload_result =
+        runmat_analysis_fea::run_linear_static_with_prepared_constraint_plan_and_linearization(
+            &model,
+            ComputeBackend::Cpu,
+            LinearStaticSolveOptions {
+                formulation_requirement: FormulationRequirement::Experimental,
+                solver_mesh: Some(mesh.clone()),
+                require_solver_mesh_for_solid: true,
+                ..LinearStaticSolveOptions::default()
+            },
+            &constraints,
+            topology_digest,
+        )
+        .unwrap();
+    let sequence = SequenceIdentity::from_solver_contract(&model.sequence).unwrap();
+    let producer = StepIdentity::from_solver_contract(sequence, &model.sequence.steps[0]).unwrap();
+    let consumer = StepIdentity::from_solver_contract(sequence, &model.sequence.steps[1]).unwrap();
+    let source_result = SolverResultIdentity::from_step_result(
+        producer,
+        preload_result.linearization.identity().digest(),
+    )
+    .unwrap();
+    let state = CanonicalSemanticState::new(CanonicalSemanticStateInput {
+        producer,
+        declaration: model.sequence.steps[0].state_outputs[1].clone(),
+        topology_digest,
+        source_result,
+        payload: CanonicalSemanticStatePayload::StructuralLinearization {
+            linearization: Box::new(preload_result.linearization),
+        },
+    })
+    .unwrap();
+    let transition = CanonicalStateTransition::new(CanonicalStateTransitionInput {
+        sequence,
+        producer,
+        consumer,
+        authored: &model.sequence.transitions[0],
+        source: &state,
+        target_topology_digest: topology_digest,
+    })
+    .unwrap();
+    let workload = StructuralPrestressedFrequencyTemplate {
+        schema_version: 1,
+        model,
+        step_id: ProcedureStepId("prestressed_frequency".into()),
+        backend: ComputeBackend::Cpu,
+        formulation_requirement: FormulationRequirement::Experimental,
+        observation_execution:
+            runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
+        plan: FrequencyResponsePlan::new(20.0, &[40.0], &[]).unwrap(),
+        solver: StructuralPrestressedFrequencySolverTemplate::Direct {
+            policy: DirectHarmonicPolicy::default(),
+        },
+    }
+    .bind(transition, None)
+    .unwrap();
+    (workload, mesh, state)
+}
+
 fn execute_frequency(
     workload: &StructuralFrequencyWorkload,
     mesh: &runmat_meshing_core::SolverMeshArtifact,
+    prestress_state: Option<PreparedAnalysisObjects>,
     modal_state: Option<PreparedAnalysisObjects>,
     recover_fields: bool,
 ) -> (
@@ -179,6 +277,7 @@ fn execute_frequency(
     let fanout = prepare_structural_frequency_fanout(StructuralFrequencyFanoutPreparation {
         workload: workload_objects.clone(),
         mesh: mesh_objects.clone(),
+        prestress_state: prestress_state.clone(),
         modal_state,
         artifact_access: access(),
         program_revision: revision(),
@@ -210,6 +309,7 @@ fn execute_frequency(
                     source_host: task.host.clone(),
                     workload: workload_objects.clone(),
                     mesh: mesh_objects.clone(),
+                    prestress_state: prestress_state.clone(),
                     source_entry: entry.objects.clone(),
                     artifact_access: access(),
                     program_revision: revision(),
@@ -277,6 +377,7 @@ fn execute_frequency(
                 source_host: recovery_sources[0].0.clone(),
                 workload: workload_objects.clone(),
                 mesh: mesh_objects.clone(),
+                prestress_state: prestress_state.clone(),
                 source_entry: recovery_sources[1].1.clone(),
                 artifact_access: access(),
                 program_revision: revision(),
@@ -378,7 +479,7 @@ fn execute_frequency(
 #[test]
 fn native_frequency_fanout_and_fanin_are_portable_and_order_independent() {
     let (workload, mesh) = direct_fixture();
-    let (result, recovered) = execute_frequency(&workload, &mesh, None, true);
+    let (result, recovered) = execute_frequency(&workload, &mesh, None, None, true);
     assert_eq!(
         result
             .result
@@ -408,6 +509,29 @@ fn native_frequency_fanout_and_fanin_are_portable_and_order_independent() {
 }
 
 #[test]
+fn native_prestressed_frequency_transports_exact_tangent_state_through_solve_and_recovery() {
+    let (workload, mesh, state) = prestressed_direct_fixture();
+    let limits = ObjectInventoryLimits::default();
+    let state_objects = prepare_analysis_objects(
+        AnalysisNumericalObjectKind::SemanticState,
+        state.identity.digest(),
+        &state.canonical_bytes().unwrap(),
+        256,
+        ObjectNamespace::InputValue,
+        limits,
+    )
+    .unwrap();
+    let (result, recovered) = execute_frequency(&workload, &mesh, Some(state_objects), None, true);
+    assert_eq!(result.result.samples().len(), 2);
+    assert_eq!(recovered.len(), 2);
+    assert!(result
+        .numerical_receipt
+        .samples()
+        .iter()
+        .all(|sample| sample.solver_relative_residual() <= 1.0e-9));
+}
+
+#[test]
 fn standalone_frequency_preparation_rederives_its_resource_envelope() {
     let (workload, mesh) = direct_fixture();
     let limits = ObjectInventoryLimits::default();
@@ -430,6 +554,7 @@ fn standalone_frequency_preparation_rederives_its_resource_envelope() {
     let mut fanout = prepare_structural_frequency_fanout(StructuralFrequencyFanoutPreparation {
         workload: workload_objects.clone(),
         mesh: mesh_objects.clone(),
+        prestress_state: None,
         modal_state: None,
         artifact_access: access(),
         program_revision: revision(),
@@ -463,6 +588,7 @@ fn standalone_frequency_preparation_rederives_its_resource_envelope() {
             workload: workload_objects.clone(),
             mesh: mesh_objects.clone(),
             request: prepared.inputs[2].clone(),
+            prestress_state: None,
             modal_state: None,
             resource_plan: understated_objects,
             artifact_access: access(),
@@ -492,6 +618,7 @@ fn standalone_frequency_preparation_rederives_its_resource_envelope() {
             workload: workload_objects,
             mesh: mesh_objects,
             request: prepared.inputs[2].clone(),
+            prestress_state: None,
             modal_state: None,
             resource_plan: understated_output_objects,
             artifact_access: access(),
@@ -569,10 +696,11 @@ fn native_modal_frequency_uses_the_exact_portable_basis_state() {
         solver: StructuralFrequencySolverPlan::ModalReduced {
             basis_state: state.identity,
         },
+        prestress_transition: None,
     })
     .unwrap();
 
-    let (result, _) = execute_frequency(&workload, &mesh, Some(state_objects), false);
+    let (result, _) = execute_frequency(&workload, &mesh, None, Some(state_objects), false);
     assert_eq!(result.result.samples().len(), 2);
     match result.numerical_receipt.solution_space() {
         runmat_analysis_fea::execution::StructuralFrequencySolutionSpace::ModalReduced {

@@ -1638,11 +1638,13 @@ fn frequency_preparation(
         solver: StructuralFrequencySolverPlan::Direct {
             policy: runmat_analysis_fea::solve::dynamics::DirectHarmonicPolicy::default(),
         },
+        prestress_transition: None,
     })
     .unwrap();
     StructuralFrequencyExecutionPreparation {
         workload,
         mesh,
+        prestress_state: None,
         modal_state: None,
         program_revision: revision,
         artifact_access: ArtifactAccess {

@@ -12,7 +12,8 @@ use crate::{
         CanonicalSemanticState, CanonicalSemanticStateInput, CanonicalSemanticStatePayload,
         FieldRecoveryRequest, FieldRecoverySource, SequenceIdentity, SolverResultIdentity,
         StepIdentity, StructuralFrequencyEntryRequest, StructuralFrequencySolverPlan,
-        StructuralFrequencyWorkload, StructuralFrequencyWorkloadInput,
+        StructuralFrequencyStateInputs, StructuralFrequencyWorkload,
+        StructuralFrequencyWorkloadInput,
     },
     fixtures::{fixture_model, FixtureId},
     frequency::FrequencyResponsePlan,
@@ -32,7 +33,7 @@ use super::{
     structural_frequency_entry_payload_bytes_upper_bound,
     structural_frequency_recovery_payload_bytes_upper_bound, ByteCount, FeaResourcePhase,
     PreparedInputResourceFacts, PreparedOutputResourceFacts, PreparedOutputSetResourceFacts,
-    PreparedPhaseResourceFacts, SolveResourcePolicy,
+    PreparedPhaseResourceFacts, SolveResourcePolicy, StructuralFrequencyRecoveryResourceInput,
 };
 
 fn input_facts(encoded_bytes: u64) -> PreparedInputResourceFacts {
@@ -112,6 +113,7 @@ fn direct_case(
                 ..DirectHarmonicPolicy::default()
             },
         },
+        prestress_transition: None,
     })
     .unwrap();
     let prepared = prepare_structural_frequency(&workload, &mesh).unwrap();
@@ -193,6 +195,7 @@ fn modal_case() -> (
         solver: StructuralFrequencySolverPlan::ModalReduced {
             basis_state: state.identity,
         },
+        prestress_transition: None,
     })
     .unwrap();
     let prepared = prepare_structural_frequency(&workload, &mesh).unwrap();
@@ -216,7 +219,7 @@ fn direct_frequency_entry_plan_binds_request_and_concrete_gmres_growth() {
         &constraints,
         &small_workload,
         &small_request,
-        None,
+        StructuralFrequencyStateInputs::default(),
         &[],
         prepared(input_facts(1024), entry_output(&small_request)),
     )
@@ -254,7 +257,7 @@ fn direct_frequency_entry_plan_binds_request_and_concrete_gmres_growth() {
         &constraints,
         &small_workload,
         &small_request,
-        None,
+        StructuralFrequencyStateInputs::default(),
         &[],
         prepared(input_facts(1024), understated_output),
     )
@@ -266,7 +269,7 @@ fn direct_frequency_entry_plan_binds_request_and_concrete_gmres_growth() {
         &large_constraints,
         &large_workload,
         &large_request,
-        None,
+        StructuralFrequencyStateInputs::default(),
         &[],
         prepared(input_facts(1024), entry_output(&large_request)),
     )
@@ -292,7 +295,7 @@ fn decoded_frequency_inputs_remain_resident_during_the_solve_peak() {
         &constraints,
         &workload,
         &request,
-        None,
+        StructuralFrequencyStateInputs::default(),
         &[],
         prepared(inputs.clone(), output.clone()),
     )
@@ -304,7 +307,7 @@ fn decoded_frequency_inputs_remain_resident_during_the_solve_peak() {
         &constraints,
         &workload,
         &request,
-        None,
+        StructuralFrequencyStateInputs::default(),
         &[],
         prepared(larger_inputs, output),
     )
@@ -323,7 +326,7 @@ fn frequency_entry_preflight_rejects_accelerator_and_request_substitution() {
         &constraints,
         &workload,
         &request,
-        None,
+        StructuralFrequencyStateInputs::default(),
         &[AcceleratorRequest {
             class: "gpu".into(),
             count: 1,
@@ -339,7 +342,7 @@ fn frequency_entry_preflight_rejects_accelerator_and_request_substitution() {
         &constraints,
         &other_workload,
         &request,
-        None,
+        StructuralFrequencyStateInputs::default(),
         &[],
         prepared(input_facts(1024), entry_output(&request)),
     )
@@ -355,7 +358,10 @@ fn modal_frequency_entry_plan_accounts_for_the_exact_basis_and_dense_solver() {
         &constraints,
         &workload,
         &request,
-        Some(&state),
+        StructuralFrequencyStateInputs {
+            prestress: None,
+            modal_basis: Some(&state),
+        },
         &[],
         prepared(input_facts(1024), entry_output(&request)),
     )
@@ -380,7 +386,10 @@ fn modal_frequency_entry_plan_accounts_for_the_exact_basis_and_dense_solver() {
         &constraints,
         &workload,
         &request,
-        Some(&state),
+        StructuralFrequencyStateInputs {
+            prestress: None,
+            modal_basis: Some(&state),
+        },
         &[],
         prepared(input_facts(4 * 1024 * 1024), entry_output(&request)),
     )
@@ -393,7 +402,7 @@ fn modal_frequency_entry_plan_accounts_for_the_exact_basis_and_dense_solver() {
         &constraints,
         &workload,
         &request,
-        None,
+        StructuralFrequencyStateInputs::default(),
         &[],
         prepared(input_facts(1024), entry_output(&request)),
     )
@@ -415,8 +424,11 @@ fn frequency_recovery_plan_uses_the_same_exact_complex_field_layout_as_recovery(
         &mesh,
         &constraints,
         &workload,
-        &request,
-        &entry,
+        StructuralFrequencyRecoveryResourceInput {
+            request: &request,
+            result: &entry,
+        },
+        StructuralFrequencyStateInputs::default(),
         &[],
         prepared(
             input_facts(1024),
@@ -481,8 +493,11 @@ fn frequency_recovery_plan_uses_the_same_exact_complex_field_layout_as_recovery(
         &mesh,
         &constraints,
         &workload,
-        &substituted,
-        &entry,
+        StructuralFrequencyRecoveryResourceInput {
+            request: &substituted,
+            result: &entry,
+        },
+        StructuralFrequencyStateInputs::default(),
         &[],
         prepared(
             input_facts(1024),

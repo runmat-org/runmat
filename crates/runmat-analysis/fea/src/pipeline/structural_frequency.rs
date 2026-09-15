@@ -49,6 +49,43 @@ pub fn admit_structural_frequency_publication(
     result: &crate::execution::StructuralFrequencySolverResult,
     publication: &crate::execution::StructuralFrequencyPublicationManifest,
 ) -> AnalysisExecutionResult<AnalysisRunIdentity> {
+    if workload.prestress_transition().is_some() {
+        return Err(AnalysisExecutionError::Invalid(
+            "prestressed structural frequency publication requires its exact base state".into(),
+        ));
+    }
+    admit_structural_frequency_publication_with_state(
+        workload,
+        solver_mesh,
+        result,
+        publication,
+        None,
+    )
+}
+
+pub fn admit_prestressed_structural_frequency_publication(
+    workload: &StructuralFrequencyWorkload,
+    solver_mesh: &SolverMeshArtifact,
+    prestress_state: &CanonicalSemanticState,
+    result: &crate::execution::StructuralFrequencySolverResult,
+    publication: &crate::execution::StructuralFrequencyPublicationManifest,
+) -> AnalysisExecutionResult<AnalysisRunIdentity> {
+    admit_structural_frequency_publication_with_state(
+        workload,
+        solver_mesh,
+        result,
+        publication,
+        Some(prestress_state),
+    )
+}
+
+fn admit_structural_frequency_publication_with_state(
+    workload: &StructuralFrequencyWorkload,
+    solver_mesh: &SolverMeshArtifact,
+    result: &crate::execution::StructuralFrequencySolverResult,
+    publication: &crate::execution::StructuralFrequencyPublicationManifest,
+    prestress_state: Option<&CanonicalSemanticState>,
+) -> AnalysisExecutionResult<AnalysisRunIdentity> {
     workload.validate()?;
     solver_mesh
         .validate_canonical()
@@ -65,6 +102,7 @@ pub fn admit_structural_frequency_publication(
         workload,
         solver_mesh,
         workload.plan().reference_frequency_hz(),
+        prestress_state,
     )?;
     let identity = super::admission::admit_structural(
         &assembly.real,
@@ -92,6 +130,27 @@ pub fn prepare_structural_frequency(
     workload: &StructuralFrequencyWorkload,
     solver_mesh: &SolverMeshArtifact,
 ) -> AnalysisExecutionResult<PreparedStructuralFrequency> {
+    if workload.prestress_transition().is_some() {
+        return Err(AnalysisExecutionError::Invalid(
+            "prestressed structural frequency preparation requires its exact base state".into(),
+        ));
+    }
+    prepare_structural_frequency_with_state(workload, solver_mesh, None)
+}
+
+pub fn prepare_prestressed_structural_frequency(
+    workload: &StructuralFrequencyWorkload,
+    solver_mesh: &SolverMeshArtifact,
+    prestress_state: &CanonicalSemanticState,
+) -> AnalysisExecutionResult<PreparedStructuralFrequency> {
+    prepare_structural_frequency_with_state(workload, solver_mesh, Some(prestress_state))
+}
+
+fn prepare_structural_frequency_with_state(
+    workload: &StructuralFrequencyWorkload,
+    solver_mesh: &SolverMeshArtifact,
+    prestress_state: Option<&CanonicalSemanticState>,
+) -> AnalysisExecutionResult<PreparedStructuralFrequency> {
     workload.validate()?;
     solver_mesh
         .validate_canonical()
@@ -100,6 +159,7 @@ pub fn prepare_structural_frequency(
         workload,
         solver_mesh,
         workload.plan().reference_frequency_hz(),
+        prestress_state,
     )?;
     // The admitted structural formulation owns frequency-invariant K/M/C, constraints, DOF
     // layout, and recovery maps. Frequency changes only the sampled complex excitation and the
@@ -121,7 +181,9 @@ fn derive_prepared_frequency(
         step,
         solver_mesh,
         assembly: &reference.real,
-        input_state: None,
+        input_state: workload
+            .prestress_transition()
+            .map(|transition| transition.identity),
         excitation_contract: &(
             &workload.model().signals,
             &workload.model().excitations,
@@ -153,6 +215,7 @@ fn derive_prepared_frequency(
             &workload.model().excitation_cases,
             &step.activations,
             workload.plan(),
+            workload.prestress_transition(),
         ),
     )?;
     let scope = StructuralFrequencyScope::new(StructuralFrequencyScopeInput {
@@ -185,7 +248,38 @@ pub fn execute_structural_frequency_entry(
     request: &StructuralFrequencyEntryRequest,
     modal_state: Option<&CanonicalSemanticState>,
 ) -> AnalysisExecutionResult<StructuralFrequencyEntryResult> {
-    let (_, assembly) = prepare_entry_execution(workload, solver_mesh, request)?;
+    if workload.prestress_transition().is_some() {
+        return Err(AnalysisExecutionError::Invalid(
+            "prestressed structural frequency execution requires its exact base state".into(),
+        ));
+    }
+    execute_structural_frequency_entry_with_state(workload, solver_mesh, request, None, modal_state)
+}
+
+pub fn execute_prestressed_structural_frequency_entry(
+    workload: &StructuralFrequencyWorkload,
+    solver_mesh: &SolverMeshArtifact,
+    request: &StructuralFrequencyEntryRequest,
+    prestress_state: &CanonicalSemanticState,
+    modal_state: Option<&CanonicalSemanticState>,
+) -> AnalysisExecutionResult<StructuralFrequencyEntryResult> {
+    execute_structural_frequency_entry_with_state(
+        workload,
+        solver_mesh,
+        request,
+        Some(prestress_state),
+        modal_state,
+    )
+}
+
+fn execute_structural_frequency_entry_with_state(
+    workload: &StructuralFrequencyWorkload,
+    solver_mesh: &SolverMeshArtifact,
+    request: &StructuralFrequencyEntryRequest,
+    prestress_state: Option<&CanonicalSemanticState>,
+    modal_state: Option<&CanonicalSemanticState>,
+) -> AnalysisExecutionResult<StructuralFrequencyEntryResult> {
+    let (_, assembly) = prepare_entry_execution(workload, solver_mesh, request, prestress_state)?;
     if modal_state.is_some_and(|state| {
         state.topology_digest
             != runmat_execution::Digest::from_bytes(*solver_mesh.canonical_digest.bytes())
@@ -204,13 +298,25 @@ pub fn validate_structural_frequency_entry(
     solver_mesh: &SolverMeshArtifact,
     request: &StructuralFrequencyEntryRequest,
 ) -> AnalysisExecutionResult<PreparedStructuralFrequency> {
-    prepare_entry_execution(workload, solver_mesh, request).map(|(prepared, _)| prepared)
+    prepare_entry_execution(workload, solver_mesh, request, None).map(|(prepared, _)| prepared)
+}
+
+/// Re-derives one prestressed entry's canonical physical scope from its exact base state.
+pub fn validate_prestressed_structural_frequency_entry(
+    workload: &StructuralFrequencyWorkload,
+    solver_mesh: &SolverMeshArtifact,
+    request: &StructuralFrequencyEntryRequest,
+    prestress_state: &CanonicalSemanticState,
+) -> AnalysisExecutionResult<PreparedStructuralFrequency> {
+    prepare_entry_execution(workload, solver_mesh, request, Some(prestress_state))
+        .map(|(prepared, _)| prepared)
 }
 
 fn prepare_entry_execution(
     workload: &StructuralFrequencyWorkload,
     solver_mesh: &SolverMeshArtifact,
     request: &StructuralFrequencyEntryRequest,
+    prestress_state: Option<&CanonicalSemanticState>,
 ) -> AnalysisExecutionResult<(
     PreparedStructuralFrequency,
     ComplexStructuralAssemblySummary,
@@ -219,7 +325,12 @@ fn prepare_entry_execution(
     solver_mesh
         .validate_canonical()
         .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
-    let assembly = assemble_entry(workload, solver_mesh, request.entry().frequency_hz())?;
+    let assembly = assemble_entry(
+        workload,
+        solver_mesh,
+        request.entry().frequency_hz(),
+        prestress_state,
+    )?;
     let prepared = derive_prepared_frequency(workload, solver_mesh, &assembly)?;
     if request.scope() != &prepared.scope
         || request.study() != prepared.study
@@ -357,9 +468,47 @@ pub fn recover_structural_frequency_entry_fields(
     request: &FieldRecoveryRequest,
     result: &StructuralFrequencyEntryResult,
 ) -> AnalysisExecutionResult<RecoveredFieldArtifact> {
+    if workload.prestress_transition().is_some() {
+        return Err(AnalysisExecutionError::Invalid(
+            "prestressed structural frequency recovery requires its exact base state".into(),
+        ));
+    }
+    recover_structural_frequency_entry_fields_with_state(
+        workload,
+        solver_mesh,
+        request,
+        result,
+        None,
+    )
+}
+
+pub fn recover_prestressed_structural_frequency_entry_fields(
+    workload: &StructuralFrequencyWorkload,
+    solver_mesh: &SolverMeshArtifact,
+    request: &FieldRecoveryRequest,
+    result: &StructuralFrequencyEntryResult,
+    prestress_state: &CanonicalSemanticState,
+) -> AnalysisExecutionResult<RecoveredFieldArtifact> {
+    recover_structural_frequency_entry_fields_with_state(
+        workload,
+        solver_mesh,
+        request,
+        result,
+        Some(prestress_state),
+    )
+}
+
+fn recover_structural_frequency_entry_fields_with_state(
+    workload: &StructuralFrequencyWorkload,
+    solver_mesh: &SolverMeshArtifact,
+    request: &FieldRecoveryRequest,
+    result: &StructuralFrequencyEntryResult,
+    prestress_state: Option<&CanonicalSemanticState>,
+) -> AnalysisExecutionResult<RecoveredFieldArtifact> {
     request.validate()?;
     result.validate()?;
-    let (prepared, assembly) = prepare_entry_execution(workload, solver_mesh, result.request())?;
+    let (prepared, assembly) =
+        prepare_entry_execution(workload, solver_mesh, result.request(), prestress_state)?;
     let topology = StructuralRecoveredFieldTopology::derive(workload.model(), Some(solver_mesh))
         .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
     if request.producer != prepared.step
@@ -454,13 +603,38 @@ fn assemble_entry(
     workload: &StructuralFrequencyWorkload,
     solver_mesh: &SolverMeshArtifact,
     frequency_hz: f64,
+    prestress_state: Option<&CanonicalSemanticState>,
 ) -> AnalysisExecutionResult<ComplexStructuralAssemblySummary> {
-    assemble_complex_structural_system(
+    let mut assembly = assemble_complex_structural_system(
         workload.model(),
         workload.procedure_step()?,
         frequency_hz,
         Some(solver_mesh.clone()),
         StructuralFormulationRequirement::PhysicalDiscretization,
     )
-    .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))
+    .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+    let topology_digest =
+        runmat_execution::Digest::from_bytes(*solver_mesh.canonical_digest.bytes());
+    let linearization = match (workload.prestress_transition(), prestress_state) {
+        (None, None) => None,
+        (Some(transition), Some(state)) => Some(
+            super::prestress::structural_linearization_from_state(
+                transition,
+                state,
+                topology_digest,
+            )
+            .map_err(AnalysisExecutionError::Invalid)?,
+        ),
+        _ => {
+            return Err(AnalysisExecutionError::Invalid(
+                "structural frequency workload and prestress-state presence differ".into(),
+            ));
+        }
+    };
+    if let Some(linearization) = linearization {
+        assembly.real =
+            super::prestress::prestressed_structural_summary(&assembly.real, linearization)
+                .map_err(AnalysisExecutionError::Invalid)?;
+    }
+    Ok(assembly)
 }

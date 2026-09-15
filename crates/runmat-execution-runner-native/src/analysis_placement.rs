@@ -327,6 +327,7 @@ async fn execute_one(
                 StructuralFrequencyExecutionPreparation {
                     workload: resolved_workload.clone(),
                     mesh: prepared.solver_mesh().clone(),
+                    prestress_state: None,
                     modal_state: None,
                     program_revision: revision,
                     artifact_access: access.clone(),

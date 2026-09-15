@@ -576,6 +576,7 @@ pub(super) async fn execute_with_completed_meshing(
                 crate::StructuralFrequencyExecutionPreparation {
                     workload: *workload,
                     mesh: completed.result.artifact.clone(),
+                    prestress_state: None,
                     modal_state: None,
                     program_revision: request.recipe.program_revision.clone(),
                     artifact_access: decoded.artifact_access.clone(),

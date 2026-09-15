@@ -46,6 +46,7 @@ mod publication;
 pub struct StructuralFrequencyExecutionPreparation {
     pub workload: StructuralFrequencyWorkload,
     pub mesh: SolverMeshArtifact,
+    pub prestress_state: Option<CanonicalSemanticState>,
     pub modal_state: Option<CanonicalSemanticState>,
     pub program_revision: ProgramRevision,
     pub artifact_access: ArtifactAccess,
@@ -90,7 +91,7 @@ pub async fn execute_structural_frequency_locally_with_source(
     configure_local_analysis(&mut config, &policy.resources);
     let session = NativeProgramSession::new(config)?;
     let mut pool = LocalAnalysisTaskPool::new(session);
-    let completion = execute_with_pool(&mut pool, preparation, policy).await?;
+    let completion = execute_with_pool(&mut pool, preparation, policy, Vec::new()).await?;
     Ok((completion, pool.object_store()))
 }
 
@@ -100,16 +101,35 @@ pub async fn execute_structural_frequency_remotely(
     policy: StructuralSequenceExecutionPolicy,
 ) -> NativeExecutionResult<CompletedStructuralFrequencyStudy> {
     policy.validate()?;
-    execute_with_pool(&mut RemoteAnalysisTaskPool::new(pool), preparation, policy).await
+    execute_with_pool(
+        &mut RemoteAnalysisTaskPool::new(pool),
+        preparation,
+        policy,
+        Vec::new(),
+    )
+    .await
 }
 
-async fn execute_with_pool(
+pub(crate) async fn execute_with_pool(
     pool: &mut impl AnalysisTaskPool,
     preparation: StructuralFrequencyExecutionPreparation,
     policy: StructuralSequenceExecutionPolicy,
+    initial_dependencies: Vec<AnalysisTaskDependency>,
 ) -> NativeExecutionResult<CompletedStructuralFrequencyStudy> {
     preparation.workload.validate().map_err(protocol)?;
     preparation.mesh.validate_canonical().map_err(protocol)?;
+    match (
+        preparation.workload.prestress_transition(),
+        preparation.prestress_state.as_ref(),
+    ) {
+        (None, None) => {}
+        (Some(transition), Some(state)) if transition.source_state == state.identity => {}
+        _ => {
+            return Err(NativeExecutionError::Protocol(
+                "structural frequency execution has the wrong prestress-state inventory".into(),
+            ))
+        }
+    }
     match (
         preparation.workload.solver(),
         preparation.modal_state.as_ref(),
@@ -155,9 +175,25 @@ async fn execute_with_pool(
         })
         .transpose()
         .map_err(protocol)?;
+    let prestress_state_objects = preparation
+        .prestress_state
+        .as_ref()
+        .map(|state| {
+            prepare_analysis_objects(
+                AnalysisNumericalObjectKind::SemanticState,
+                state.identity.digest(),
+                &state.canonical_bytes()?,
+                preparation.chunk_bytes,
+                ObjectNamespace::InputValue,
+                preparation.inventory_limits,
+            )
+        })
+        .transpose()
+        .map_err(protocol)?;
     let entry_tasks = prepare_structural_frequency_fanout(StructuralFrequencyFanoutPreparation {
         workload: workload_objects.clone(),
         mesh: mesh_objects.clone(),
+        prestress_state: prestress_state_objects.clone(),
         modal_state: modal_state_objects,
         artifact_access: preparation.artifact_access.clone(),
         program_revision: preparation.program_revision.clone(),
@@ -174,7 +210,7 @@ async fn execute_with_pool(
                 program: &task.program,
                 resource_plan: Some(&task.resource_plan),
                 fallback_resources: policy.resources.clone(),
-                dependencies: Vec::new(),
+                dependencies: initial_dependencies.clone(),
             })
             .collect(),
         batch_policy(&policy),
@@ -206,6 +242,7 @@ async fn execute_with_pool(
                     source_host: task.host.clone(),
                     workload: workload_objects.clone(),
                     mesh: mesh_objects.clone(),
+                    prestress_state: prestress_state_objects.clone(),
                     source_entry: imported.objects.clone(),
                     artifact_access: preparation.artifact_access.clone(),
                     program_revision: preparation.program_revision.clone(),

@@ -8,7 +8,9 @@ use serde::{Deserialize, Serialize};
 use super::{
     AnalysisExecutionError, AnalysisExecutionResult, StructuralBucklingTemplate,
     StructuralFrequencyWorkload, StructuralLinearWorkload, StructuralModalTransientTemplate,
-    StructuralModalWorkload, StructuralPrestressedModalTemplate, StructuralTransientWorkload,
+    StructuralModalWorkload, StructuralPrestressedFrequencySolverTemplate,
+    StructuralPrestressedFrequencyTemplate, StructuralPrestressedModalTemplate,
+    StructuralTransientWorkload,
 };
 
 const STUDY_WORKLOADS_PREFIX: &[u8] = b"runmat-structural-study-workloads\0";
@@ -100,6 +102,9 @@ pub enum StructuralStepWorkload {
     Buckling {
         template: Box<StructuralBucklingTemplate>,
     },
+    PrestressedFrequency {
+        template: Box<StructuralPrestressedFrequencyTemplate>,
+    },
 }
 
 impl StructuralStepWorkload {
@@ -116,6 +121,7 @@ impl StructuralStepWorkload {
             }
             Self::PrestressedModal { template } => template.validate(),
             Self::Buckling { template } => template.validate(),
+            Self::PrestressedFrequency { template } => template.validate(),
         }
     }
 
@@ -126,6 +132,7 @@ impl StructuralStepWorkload {
             Self::ModalTransient { template, .. } => &template.model,
             Self::PrestressedModal { template } => &template.model,
             Self::Buckling { template } => &template.model,
+            Self::PrestressedFrequency { template } => &template.model,
         }
     }
 
@@ -136,6 +143,7 @@ impl StructuralStepWorkload {
             Self::ModalTransient { template, .. } => &template.step_id,
             Self::PrestressedModal { template } => &template.step_id,
             Self::Buckling { template } => &template.step_id,
+            Self::PrestressedFrequency { template } => &template.step_id,
         }
     }
 
@@ -146,6 +154,7 @@ impl StructuralStepWorkload {
             Self::ModalTransient { template, .. } => template.backend,
             Self::PrestressedModal { template } => template.backend,
             Self::Buckling { template } => template.backend,
+            Self::PrestressedFrequency { template } => template.backend,
         }
     }
 
@@ -156,6 +165,7 @@ impl StructuralStepWorkload {
             Self::ModalTransient { template, .. } => template.model = model,
             Self::PrestressedModal { template } => template.model = model,
             Self::Buckling { template } => template.model = model,
+            Self::PrestressedFrequency { template } => template.model = model,
         }
         self.validate()
     }
@@ -387,36 +397,41 @@ fn validate_heterogeneous_sequence(
             .map(|(key, workload)| (key, workload.authored_model(), workload.step_id())),
     )?;
     let order = authored_step_order(model)?;
-    let [producer_id, consumer_id] = order.as_slice() else {
-        return Err(invalid(
-            "heterogeneous structural execution requires exactly one producer and one state-dependent consumer",
-        ));
+    let ordered = order
+        .iter()
+        .map(|step_id| {
+            workloads
+                .get(step_id)
+                .ok_or(AnalysisExecutionError::Identity(
+                    "validated heterogeneous step is absent from its workload inventory",
+                ))
+        })
+        .collect::<AnalysisExecutionResult<Vec<_>>>()?;
+    let supported = match ordered.as_slice() {
+        [StructuralStepWorkload::ModalExtraction { .. }, StructuralStepWorkload::ModalTransient { .. }]
+        | [StructuralStepWorkload::Linear { .. }, StructuralStepWorkload::Buckling { .. }]
+        | [StructuralStepWorkload::Linear { .. }, StructuralStepWorkload::PrestressedModal { .. }] => {
+            true
+        }
+        [StructuralStepWorkload::Linear { .. }, StructuralStepWorkload::PrestressedFrequency { template }] =>
+        {
+            matches!(
+                &template.solver,
+                StructuralPrestressedFrequencySolverTemplate::Direct { .. }
+            )
+        }
+        [StructuralStepWorkload::Linear { .. }, StructuralStepWorkload::PrestressedModal { .. }, StructuralStepWorkload::PrestressedFrequency { template }] =>
+        {
+            matches!(
+                &template.solver,
+                StructuralPrestressedFrequencySolverTemplate::ModalReduced
+            )
+        }
+        _ => false,
     };
-    let producer = workloads.get(producer_id).ok_or({
-        AnalysisExecutionError::Identity(
-            "validated heterogeneous producer is absent from its workload inventory",
-        )
-    })?;
-    let consumer = workloads.get(consumer_id).ok_or({
-        AnalysisExecutionError::Identity(
-            "validated heterogeneous consumer is absent from its workload inventory",
-        )
-    })?;
-    if !matches!(
-        (producer, consumer),
-        (
-            StructuralStepWorkload::ModalExtraction { .. },
-            StructuralStepWorkload::ModalTransient { .. }
-        ) | (
-            StructuralStepWorkload::Linear { .. },
-            StructuralStepWorkload::Buckling { .. }
-        ) | (
-            StructuralStepWorkload::Linear { .. },
-            StructuralStepWorkload::PrestressedModal { .. }
-        )
-    ) {
+    if !supported {
         return Err(invalid(
-            "heterogeneous structural execution supports modal extraction followed by modal transient response, or linear preload followed by buckling or prestressed modal extraction",
+            "heterogeneous structural execution does not support this authored procedure chain",
         ));
     }
     Ok(model)
@@ -600,6 +615,7 @@ mod tests {
             solver: StructuralFrequencySolverPlan::Direct {
                 policy: DirectHarmonicPolicy::default(),
             },
+            prestress_transition: None,
         })
         .unwrap();
         let mut workloads = StructuralStudyWorkloads::StructuralFrequency {
@@ -635,6 +651,7 @@ mod tests {
             solver: StructuralFrequencySolverPlan::Direct {
                 policy: DirectHarmonicPolicy::default(),
             },
+            prestress_transition: None,
         })
         .unwrap();
         assert!(StructuralStudyWorkloads::StructuralFrequency {

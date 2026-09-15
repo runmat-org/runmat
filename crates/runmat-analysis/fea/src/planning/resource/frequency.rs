@@ -8,9 +8,9 @@ use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
 use crate::{
     constraints::CanonicalStructuralConstraintPlan,
     execution::{
-        CanonicalSemanticState, FieldRecoveryRequest, FieldRecoverySource,
-        StructuralFrequencyEntryRequest, StructuralFrequencyEntryResult,
-        StructuralFrequencySolverPlan, StructuralFrequencyWorkload,
+        FieldRecoveryRequest, FieldRecoverySource, StructuralFrequencyEntryRequest,
+        StructuralFrequencyEntryResult, StructuralFrequencySolverPlan,
+        StructuralFrequencyStateInputs, StructuralFrequencyWorkload,
     },
     post::{complex_structural_field_layout, ComplexStructuralFieldCardinality},
     ComputeBackend,
@@ -36,10 +36,33 @@ pub use payload::{
     structural_frequency_recovery_payload_bytes_upper_bound,
 };
 
+#[derive(Clone, Copy)]
+pub struct StructuralFrequencyRecoveryResourceInput<'a> {
+    pub request: &'a FieldRecoveryRequest,
+    pub result: &'a StructuralFrequencyEntryResult,
+}
+
 const ASSEMBLY_SCRATCH_BYTES_PER_ELEMENT: u64 = 8 * 1024;
 const FIXED_ASSEMBLY_SCRATCH_BYTES: u64 = 64 * 1024;
 const FIXED_WORKER_MEMORY_BYTES: u64 = 16 * 1024 * 1024;
 const FIXED_WORKER_SCRATCH_BYTES: u64 = 8 * 1024 * 1024;
+
+fn structural_frequency_recovery_layout(
+    mesh: &SolverMeshArtifact,
+    constraints: &CanonicalStructuralConstraintPlan,
+    workload: &StructuralFrequencyWorkload,
+) -> Result<crate::post::ComplexStructuralFieldLayout, ResourcePlanningError> {
+    let facts = derive_structural_resource_facts(workload.model(), Some(mesh), constraints)?;
+    complex_structural_field_layout(ComplexStructuralFieldCardinality {
+        structural_nodes: facts.recovery_node_count,
+        solid_elements: facts.recovery_solid_element_count,
+        beam_elements: facts.recovery_beam_element_count,
+        shell_elements: facts.recovery_shell_element_count,
+        constraint_groups: constraints.groups.len(),
+        has_rotational_dofs: facts.recovery_has_rotational_dofs,
+    })
+    .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))
+}
 
 /// Assembly-free reusable projection for every independently scheduled entry in one frequency
 /// workload. Expensive topology and reduced-pattern derivation occurs once per fan-out.
@@ -66,7 +89,7 @@ impl StructuralFrequencyEntryResourceProjection {
         mesh: &SolverMeshArtifact,
         constraints: &CanonicalStructuralConstraintPlan,
         workload: &StructuralFrequencyWorkload,
-        modal_state: Option<&CanonicalSemanticState>,
+        states: StructuralFrequencyStateInputs<'_>,
         accelerator_requests: &[AcceleratorRequest],
     ) -> Result<Self, ResourcePlanningError> {
         workload
@@ -80,9 +103,50 @@ impl StructuralFrequencyEntryResourceProjection {
                     .into(),
             ));
         }
+        let topology_digest = runmat_execution::Digest::from_bytes(*mesh.canonical_digest.bytes());
+        let linearization = match (workload.prestress_transition(), states.prestress) {
+            (None, None) => None,
+            (Some(transition), Some(state)) => Some(
+                crate::pipeline::prestress::structural_linearization_from_state(
+                    transition,
+                    state,
+                    topology_digest,
+                )
+                .map_err(ResourcePlanningError::Invalid)?,
+            ),
+            _ => {
+                return Err(ResourcePlanningError::Invalid(
+                    "frequency workload and prestress-state presence differ".into(),
+                ))
+            }
+        };
         let facts = derive_structural_resource_facts(workload.model(), Some(mesh), constraints)?;
+        let tangent_pattern = match linearization {
+            Some(linearization) => facts
+                .symbolic
+                .stiffness_upper_bound()
+                .union(linearization.geometric_stiffness().pattern())
+                .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?,
+            None => facts.symbolic.stiffness_upper_bound().clone(),
+        };
+        let sparse = super::SparseResourceFacts::from_patterns([
+            &tangent_pattern,
+            facts.symbolic.mass_upper_bound(),
+            facts.symbolic.damping_upper_bound(),
+        ])?;
+        let numerical_scope_digest = match linearization {
+            Some(linearization) => runmat_execution::Digest::sha256(
+                [
+                    b"runmat-structural-prestressed-frequency-operator/v1\0".as_slice(),
+                    facts.symbolic.identity().bytes().as_slice(),
+                    linearization.identity().digest().bytes().as_slice(),
+                ]
+                .concat(),
+            ),
+            None => facts.symbolic.identity(),
+        };
         let full_dofs = facts.sparse.rows.0;
-        let (solve, modal_operator_digest) = match (workload.solver(), modal_state) {
+        let (solve, modal_operator_digest) = match (workload.solver(), states.modal_basis) {
             (StructuralFrequencySolverPlan::Direct { policy }, None) => {
                 let reduction = facts
                     .constraint_matrix
@@ -102,13 +166,15 @@ impl StructuralFrequencyEntryResourceProjection {
                         policy.maximum_iterations,
                         "GMRES maximum iterations",
                     )?);
-                let reduced_patterns = facts
-                    .symbolic
-                    .patterns()
-                    .into_iter()
-                    .map(|pattern| reduction.reduce_sparse_pattern(pattern))
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+                let reduced_patterns = [
+                    &tangent_pattern,
+                    facts.symbolic.mass_upper_bound(),
+                    facts.symbolic.damping_upper_bound(),
+                ]
+                .into_iter()
+                .map(|pattern| reduction.reduce_sparse_pattern(pattern))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
                 let reduced_nonzeros =
                     reduced_patterns.iter().try_fold(0_u64, |total, pattern| {
                         add(
@@ -183,24 +249,12 @@ impl StructuralFrequencyEntryResourceProjection {
             }
         };
         let contribution_nonzeros = count(
-            facts
-                .symbolic
-                .stiffness_upper_bound()
-                .column_indices()
-                .len(),
+            tangent_pattern.column_indices().len(),
             "frequency assembly contributions",
         )?;
         let contribution_bytes =
             multiply(contribution_nonzeros, 24, "assembly contribution bytes")?;
-        let recovery_layout = complex_structural_field_layout(ComplexStructuralFieldCardinality {
-            structural_nodes: facts.recovery_node_count,
-            solid_elements: facts.recovery_solid_element_count,
-            beam_elements: facts.recovery_beam_element_count,
-            shell_elements: facts.recovery_shell_element_count,
-            constraint_groups: constraints.groups.len(),
-            has_rotational_dofs: facts.recovery_has_rotational_dofs,
-        })
-        .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+        let recovery_layout = structural_frequency_recovery_layout(mesh, constraints, workload)?;
         let step = workload
             .procedure_step()
             .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
@@ -208,9 +262,9 @@ impl StructuralFrequencyEntryResourceProjection {
             workload: workload.clone(),
             topology_digest: facts.topology_digest,
             structural_topology: constraints.topology,
-            numerical_scope_digest: facts.symbolic.identity(),
+            numerical_scope_digest,
             topology: facts.topology,
-            sparse: facts.sparse,
+            sparse,
             constraints: facts.constraints,
             assembly: AssemblyResourcePolicy {
                 contribution_nonzero_upper_bound: Count(contribution_nonzeros),
@@ -238,6 +292,7 @@ impl StructuralFrequencyEntryResourceProjection {
         mesh: &SolverMeshArtifact,
         constraints: &CanonicalStructuralConstraintPlan,
         workload: &StructuralFrequencyWorkload,
+        states: StructuralFrequencyStateInputs<'_>,
         accelerator_requests: &[AcceleratorRequest],
     ) -> Result<Self, ResourcePlanningError> {
         workload
@@ -251,24 +306,58 @@ impl StructuralFrequencyEntryResourceProjection {
                     .into(),
             ));
         }
+        let topology_digest = runmat_execution::Digest::from_bytes(*mesh.canonical_digest.bytes());
+        if states.modal_basis.is_some() {
+            return Err(ResourcePlanningError::Invalid(
+                "frequency recovery does not consume a modal-basis state".into(),
+            ));
+        }
+        let linearization = match (workload.prestress_transition(), states.prestress) {
+            (None, None) => None,
+            (Some(transition), Some(state)) => Some(
+                crate::pipeline::prestress::structural_linearization_from_state(
+                    transition,
+                    state,
+                    topology_digest,
+                )
+                .map_err(ResourcePlanningError::Invalid)?,
+            ),
+            _ => {
+                return Err(ResourcePlanningError::Invalid(
+                    "frequency recovery workload and prestress-state presence differ".into(),
+                ))
+            }
+        };
         let facts = derive_structural_resource_facts(workload.model(), Some(mesh), constraints)?;
-        let contribution_nonzeros = count(
-            facts
+        let tangent_pattern = match linearization {
+            Some(linearization) => facts
                 .symbolic
                 .stiffness_upper_bound()
-                .column_indices()
-                .len(),
+                .union(linearization.geometric_stiffness().pattern())
+                .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?,
+            None => facts.symbolic.stiffness_upper_bound().clone(),
+        };
+        let sparse = super::SparseResourceFacts::from_patterns([
+            &tangent_pattern,
+            facts.symbolic.mass_upper_bound(),
+            facts.symbolic.damping_upper_bound(),
+        ])?;
+        let numerical_scope_digest = match linearization {
+            Some(linearization) => runmat_execution::Digest::sha256(
+                [
+                    b"runmat-structural-prestressed-frequency-recovery/v1\0".as_slice(),
+                    facts.symbolic.identity().bytes().as_slice(),
+                    linearization.identity().digest().bytes().as_slice(),
+                ]
+                .concat(),
+            ),
+            None => facts.symbolic.identity(),
+        };
+        let contribution_nonzeros = count(
+            tangent_pattern.column_indices().len(),
             "frequency recovery assembly contributions",
         )?;
-        let recovery_layout = complex_structural_field_layout(ComplexStructuralFieldCardinality {
-            structural_nodes: facts.recovery_node_count,
-            solid_elements: facts.recovery_solid_element_count,
-            beam_elements: facts.recovery_beam_element_count,
-            shell_elements: facts.recovery_shell_element_count,
-            constraint_groups: constraints.groups.len(),
-            has_rotational_dofs: facts.recovery_has_rotational_dofs,
-        })
-        .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+        let recovery_layout = structural_frequency_recovery_layout(mesh, constraints, workload)?;
         let step = workload
             .procedure_step()
             .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
@@ -277,9 +366,9 @@ impl StructuralFrequencyEntryResourceProjection {
             workload: workload.clone(),
             topology_digest: facts.topology_digest,
             structural_topology: constraints.topology,
-            numerical_scope_digest: facts.symbolic.identity(),
+            numerical_scope_digest,
             topology: facts.topology,
-            sparse: facts.sparse,
+            sparse,
             constraints: facts.constraints,
             assembly: AssemblyResourcePolicy {
                 contribution_nonzero_upper_bound: Count(contribution_nonzeros),
@@ -538,7 +627,7 @@ pub fn build_structural_frequency_entry_resource_plan(
     constraints: &CanonicalStructuralConstraintPlan,
     workload: &StructuralFrequencyWorkload,
     request: &StructuralFrequencyEntryRequest,
-    modal_state: Option<&CanonicalSemanticState>,
+    states: StructuralFrequencyStateInputs<'_>,
     accelerator_requests: &[AcceleratorRequest],
     prepared: PreparedPhaseResourceFacts,
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
@@ -546,7 +635,7 @@ pub fn build_structural_frequency_entry_resource_plan(
         mesh,
         constraints,
         workload,
-        modal_state,
+        states,
         accelerator_requests,
     )?
     .plan_for(
@@ -562,8 +651,8 @@ pub fn build_structural_frequency_recovery_resource_plan(
     mesh: &SolverMeshArtifact,
     constraints: &CanonicalStructuralConstraintPlan,
     workload: &StructuralFrequencyWorkload,
-    request: &FieldRecoveryRequest,
-    result: &StructuralFrequencyEntryResult,
+    recovery: StructuralFrequencyRecoveryResourceInput<'_>,
+    states: StructuralFrequencyStateInputs<'_>,
     accelerator_requests: &[AcceleratorRequest],
     prepared: PreparedPhaseResourceFacts,
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
@@ -571,11 +660,12 @@ pub fn build_structural_frequency_recovery_resource_plan(
         mesh,
         constraints,
         workload,
+        states,
         accelerator_requests,
     )?
     .recovery_plan_for(
-        request,
-        result,
+        recovery.request,
+        recovery.result,
         prepared.inputs,
         prepared.output,
         prepared.output_set,

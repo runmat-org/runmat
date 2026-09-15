@@ -4,7 +4,7 @@ use runmat_analysis_fea::execution::{
     AnalysisNumericalObjectKind, AnalysisWorkKind, CanonicalSemanticState,
     StructuralFrequencyEntryRequest, StructuralFrequencyEntryResult,
     StructuralFrequencyResultAssemblyRequest, StructuralFrequencySolverPlan,
-    StructuralFrequencyWorkload,
+    StructuralFrequencyStateInputs, StructuralFrequencyWorkload,
 };
 use runmat_analysis_fea::planning::resource::{
     build_structural_frequency_result_assembly_resource_plan,
@@ -36,6 +36,7 @@ pub struct StructuralFrequencyEntryPreparation {
     pub workload: PreparedAnalysisObjects,
     pub mesh: PreparedAnalysisObjects,
     pub request: PreparedAnalysisObjects,
+    pub prestress_state: Option<PreparedAnalysisObjects>,
     pub modal_state: Option<PreparedAnalysisObjects>,
     pub resource_plan: PreparedAnalysisObjects,
     pub artifact_access: ArtifactAccess,
@@ -45,6 +46,7 @@ pub struct StructuralFrequencyEntryPreparation {
 pub struct StructuralFrequencyFanoutPreparation {
     pub workload: PreparedAnalysisObjects,
     pub mesh: PreparedAnalysisObjects,
+    pub prestress_state: Option<PreparedAnalysisObjects>,
     pub modal_state: Option<PreparedAnalysisObjects>,
     pub artifact_access: ArtifactAccess,
     pub program_revision: ProgramRevision,
@@ -55,6 +57,7 @@ pub struct StructuralFrequencyFanoutPreparation {
 pub struct PreparedStructuralFrequencyEntryTask {
     pub workload: StructuralFrequencyWorkload,
     pub request: StructuralFrequencyEntryRequest,
+    pub prestress_state: Option<CanonicalSemanticState>,
     pub modal_state: Option<CanonicalSemanticState>,
     pub resource_plan: FeaResourcePlan,
     pub resource_plan_objects: PreparedAnalysisObjects,
@@ -80,10 +83,19 @@ pub fn prepare_structural_frequency_fanout(
     let mesh =
         runmat_meshing_core::SolverMeshArtifact::canonical_decode(&preparation.mesh.payload())
             .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    let prepared =
-        runmat_analysis_fea::pipeline::structural_frequency::prepare_structural_frequency(
+    let prestress_state = preparation
+        .prestress_state
+        .as_ref()
+        .map(decode_prepared_semantic_state)
+        .transpose()?;
+    let prepared = match prestress_state.as_ref() {
+        Some(state) => runmat_analysis_fea::pipeline::structural_frequency::prepare_prestressed_structural_frequency(
+            &workload, &mesh, state,
+        )?,
+        None => runmat_analysis_fea::pipeline::structural_frequency::prepare_structural_frequency(
             &workload, &mesh,
-        )?;
+        )?,
+    };
     let modal_state = preparation
         .modal_state
         .as_ref()
@@ -99,7 +111,10 @@ pub fn prepare_structural_frequency_fanout(
         &mesh,
         &constraints,
         &workload,
-        modal_state.as_ref(),
+        StructuralFrequencyStateInputs {
+            prestress: prestress_state.as_ref(),
+            modal_basis: modal_state.as_ref(),
+        },
         &[],
     )
     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
@@ -132,6 +147,7 @@ pub fn prepare_structural_frequency_fanout(
                 preparation.mesh.clone(),
                 request.clone(),
             ];
+            phase_inputs.extend(preparation.prestress_state.iter().cloned());
             phase_inputs.extend(preparation.modal_state.iter().cloned());
             let resource_plan = resource_projection
                 .plan_for(
@@ -156,6 +172,7 @@ pub fn prepare_structural_frequency_fanout(
                     workload: preparation.workload.clone(),
                     mesh: preparation.mesh.clone(),
                     request,
+                    prestress_state: preparation.prestress_state.clone(),
                     modal_state: preparation.modal_state.clone(),
                     resource_plan: resource_plan_objects,
                     artifact_access: preparation.artifact_access.clone(),
@@ -198,6 +215,11 @@ fn prepare_structural_frequency_entry_task_with_admitted_resource_plan(
         .as_ref()
         .map(decode_prepared_semantic_state)
         .transpose()?;
+    let prestress_state = preparation
+        .prestress_state
+        .as_ref()
+        .map(decode_prepared_semantic_state)
+        .transpose()?;
     if preparation.resource_plan.manifest.kind != AnalysisNumericalObjectKind::ResourcePlan {
         return Err(AnalysisBridgeError::Invalid(
             "structural frequency entry requires one canonical resource plan".into(),
@@ -205,21 +227,31 @@ fn prepare_structural_frequency_entry_task_with_admitted_resource_plan(
     }
     let resource_plan = FeaResourcePlan::from_canonical_bytes(&preparation.resource_plan.payload())
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    let state_matches = match (workload.solver(), modal_state.as_ref()) {
+    let modal_state_matches = match (workload.solver(), modal_state.as_ref()) {
         (StructuralFrequencySolverPlan::Direct { .. }, None) => true,
         (StructuralFrequencySolverPlan::ModalReduced { basis_state }, Some(state)) => {
             state.identity == *basis_state
         }
         _ => false,
     };
-    let state_topology_matches = modal_state.as_ref().is_none_or(|state| {
-        state.topology_digest
-            == runmat_execution::Digest::from_bytes(*mesh.canonical_digest.bytes())
-    });
+    let state_topology_matches = prestress_state
+        .iter()
+        .chain(modal_state.iter())
+        .all(|state| {
+            state.topology_digest
+                == runmat_execution::Digest::from_bytes(*mesh.canonical_digest.bytes())
+        });
+    let prestress_state_matches = match (workload.prestress_transition(), prestress_state.as_ref())
+    {
+        (None, None) => true,
+        (Some(transition), Some(state)) => state.identity == transition.source_state,
+        _ => false,
+    };
     if preparation.workload.manifest.logical_identity != workload.identity().digest()
         || preparation.mesh.manifest.logical_identity
             != runmat_execution::Digest::from_bytes(*mesh.canonical_digest.bytes())
-        || !state_matches
+        || !modal_state_matches
+        || !prestress_state_matches
         || !state_topology_matches
         || preparation.resource_plan.manifest.logical_identity != resource_plan.identity.digest()
     {
@@ -237,9 +269,14 @@ fn prepare_structural_frequency_entry_task_with_admitted_resource_plan(
     let expected_resource_plan = if let Some(admitted_resource_plan) = admitted_resource_plan {
         admitted_resource_plan
     } else {
-        runmat_analysis_fea::pipeline::structural_frequency::validate_structural_frequency_entry(
-            &workload, &mesh, &request,
-        )?;
+        match prestress_state.as_ref() {
+            Some(state) => runmat_analysis_fea::pipeline::structural_frequency::validate_prestressed_structural_frequency_entry(
+                &workload, &mesh, &request, state,
+            )?,
+            None => runmat_analysis_fea::pipeline::structural_frequency::validate_structural_frequency_entry(
+                &workload, &mesh, &request,
+            )?,
+        };
         let constraints =
             runmat_analysis_fea::constraints::CanonicalStructuralConstraintPlan::compile_for_model(
                 workload.model(),
@@ -251,13 +288,17 @@ fn prepare_structural_frequency_entry_task_with_admitted_resource_plan(
             preparation.mesh.clone(),
             preparation.request.clone(),
         ];
+        phase_inputs.extend(preparation.prestress_state.iter().cloned());
         phase_inputs.extend(preparation.modal_state.iter().cloned());
         runmat_analysis_fea::planning::resource::build_structural_frequency_entry_resource_plan(
             &mesh,
             &constraints,
             &workload,
             &request,
-            modal_state.as_ref(),
+            StructuralFrequencyStateInputs {
+                prestress: prestress_state.as_ref(),
+                modal_basis: modal_state.as_ref(),
+            },
             &resource_plan.request.accelerators,
             PreparedPhaseResourceFacts {
                 inputs: crate::prepared_input_resource_facts(&phase_inputs)?,
@@ -282,6 +323,9 @@ fn prepare_structural_frequency_entry_task_with_admitted_resource_plan(
         (preparation.request, ValueRefKind::DriverObject),
         (preparation.resource_plan, ValueRefKind::DriverObject),
     ];
+    if let Some(state) = preparation.prestress_state {
+        typed_inputs.push((state, ValueRefKind::ResultObject));
+    }
     if let Some(state) = preparation.modal_state {
         typed_inputs.push((state, ValueRefKind::ResultObject));
     }
@@ -316,6 +360,7 @@ fn prepare_structural_frequency_entry_task_with_admitted_resource_plan(
     Ok(PreparedStructuralFrequencyEntryTask {
         workload,
         request,
+        prestress_state,
         modal_state,
         resource_plan,
         resource_plan_objects,

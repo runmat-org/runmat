@@ -1251,6 +1251,7 @@ fn box_structural_frequency_workload() -> StructuralFrequencyWorkload {
         solver: StructuralFrequencySolverPlan::Direct {
             policy: runmat_analysis_fea::solve::dynamics::DirectHarmonicPolicy::default(),
         },
+        prestress_transition: None,
     })
     .unwrap()
 }

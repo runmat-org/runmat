@@ -44,7 +44,7 @@ pub use frequency::{
     build_structural_frequency_recovery_resource_plan,
     structural_frequency_entry_payload_bytes_upper_bound,
     structural_frequency_recovery_payload_bytes_upper_bound,
-    StructuralFrequencyEntryResourceProjection,
+    StructuralFrequencyEntryResourceProjection, StructuralFrequencyRecoveryResourceInput,
 };
 pub use modal::{
     build_structural_modal_resource_plan, structural_modal_receipt_payload_bytes_upper_bound,

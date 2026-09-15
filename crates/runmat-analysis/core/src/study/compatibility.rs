@@ -10,7 +10,9 @@ pub fn is_exposed_analysis_identity(
             (family, procedure),
             (
                 PhysicsFamily::Structural,
-                AnalysisProcedure::TransientResponse | AnalysisProcedure::HarmonicResponse
+                AnalysisProcedure::TransientResponse
+                    | AnalysisProcedure::HarmonicResponse
+                    | AnalysisProcedure::PrestressedHarmonicResponse
             )
         );
     }

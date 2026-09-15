@@ -78,7 +78,9 @@ pub use frequency_scope::{
     StructuralFrequencyScope, StructuralFrequencyScopeInput, StructuralPhasorConvention,
 };
 pub use frequency_workload::{
-    StructuralFrequencySolverPlan, StructuralFrequencyWorkload, StructuralFrequencyWorkloadInput,
+    StructuralFrequencySolverPlan, StructuralFrequencyStateInputs, StructuralFrequencyWorkload,
+    StructuralFrequencyWorkloadInput, StructuralPrestressedFrequencySolverTemplate,
+    StructuralPrestressedFrequencyTemplate,
 };
 pub use identity::{
     AccuracyEvaluationRequestIdentity, AccuracyIdentity, AnalysisAttemptIdentity,
