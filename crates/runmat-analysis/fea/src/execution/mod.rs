@@ -107,7 +107,9 @@ pub use identity::{
     StudyIdentity, SweepIdentity, SweepResultIdentity,
 };
 pub use modal_result::{StructuralModalNumericalReceipt, StructuralModalSolverResult};
-pub use modal_workload::{StructuralModalWorkload, StructuralModalWorkloadInput};
+pub use modal_workload::{
+    StructuralModalWorkload, StructuralModalWorkloadInput, StructuralPrestressedModalTemplate,
+};
 pub use object::{
     chunk_numerical_payload, chunk_partitioned_numerical_payload, AnalysisChunkDescriptor,
     AnalysisNumericalObjectKind, AnalysisObjectManifest, AnalysisPayloadPartition,

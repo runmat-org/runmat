@@ -1,4 +1,4 @@
-use runmat_analysis_core::{validate_model, AnalysisField, AnalysisModel, AnalysisProcedure};
+use runmat_analysis_core::{validate_model, AnalysisField, AnalysisModel};
 use runmat_execution::Digest;
 use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
 
@@ -12,7 +12,8 @@ use crate::{
     },
     excitation::{realize_step_excitations, ExcitationSamplePoint},
     execution::{
-        StructuralModalNumericalReceipt, StructuralModalSolverResult, StructuralModalWorkload,
+        CanonicalSemanticState, StructuralModalNumericalReceipt, StructuralModalSolverResult,
+        StructuralModalWorkload,
     },
     pipeline::observation_history::{
         evaluate_field_histories, HistoryFieldSeries, HistoryTopology,
@@ -40,6 +41,43 @@ pub fn recover_completed_structural_modal_run(
     result: &StructuralModalSolverResult,
     numerical_receipt: &StructuralModalNumericalReceipt,
 ) -> Result<FeaModalRunResult, FeaRunError> {
+    if workload.prestress_transition().is_some() {
+        return Err(FeaRunError::InvalidModel(
+            "prestressed modal recovery requires its exact geometric-stiffness state".into(),
+        ));
+    }
+    recover_completed_structural_modal_run_with_state(
+        workload,
+        solver_mesh,
+        None,
+        result,
+        numerical_receipt,
+    )
+}
+
+pub fn recover_completed_structural_prestressed_modal_run(
+    workload: &StructuralModalWorkload,
+    solver_mesh: &SolverMeshArtifact,
+    prestress_state: &CanonicalSemanticState,
+    result: &StructuralModalSolverResult,
+    numerical_receipt: &StructuralModalNumericalReceipt,
+) -> Result<FeaModalRunResult, FeaRunError> {
+    recover_completed_structural_modal_run_with_state(
+        workload,
+        solver_mesh,
+        Some(prestress_state),
+        result,
+        numerical_receipt,
+    )
+}
+
+fn recover_completed_structural_modal_run_with_state(
+    workload: &StructuralModalWorkload,
+    solver_mesh: &SolverMeshArtifact,
+    prestress_state: Option<&CanonicalSemanticState>,
+    result: &StructuralModalSolverResult,
+    numerical_receipt: &StructuralModalNumericalReceipt,
+) -> Result<FeaModalRunResult, FeaRunError> {
     workload
         .validate()
         .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
@@ -60,10 +98,29 @@ pub fn recover_completed_structural_modal_run(
             "portable modal result does not belong to the supplied solver mesh".into(),
         ));
     }
+    let linearization = match (workload.prestress_transition(), prestress_state) {
+        (None, None) => None,
+        (Some(transition), Some(state)) => Some(
+            super::super::prestress::structural_linearization_from_state(
+                transition,
+                state,
+                topology_digest,
+            )
+            .map_err(FeaRunError::InvalidModel)?,
+        ),
+        _ => {
+            return Err(FeaRunError::InvalidModel(
+                "modal workload and prestress-state presence differ during recovery".into(),
+            ))
+        }
+    };
 
     let execution_step = super::super::admission::require_structural(
         workload.model(),
-        AnalysisProcedure::ModalExtraction,
+        workload
+            .procedure_step()
+            .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?
+            .procedure,
         workload.formulation_requirement(),
     )?;
     validate_model(workload.model())
@@ -81,6 +138,12 @@ pub fn recover_completed_structural_modal_run(
         StructuralFormulationRequirement::ExperimentalSyntheticOperator,
     )
     .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+    let summary = if let Some(linearization) = linearization {
+        super::super::prestress::prestressed_structural_summary(&summary, linearization)
+            .map_err(FeaRunError::Assembly)?
+    } else {
+        summary
+    };
     let expected_run = super::super::admission::admit_structural(
         &summary,
         execution_step,

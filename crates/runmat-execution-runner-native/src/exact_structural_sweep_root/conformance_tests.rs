@@ -1268,6 +1268,7 @@ fn box_structural_modal_workload() -> StructuralModalWorkload {
             runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
         truncation: ModalTruncationPolicy::requested(3),
         convergence: ModalConvergencePolicy::exploratory(),
+        prestress_transition: None,
     })
     .unwrap()
 }
@@ -1307,6 +1308,7 @@ fn box_modal_transient_workloads() -> runmat_analysis_execution::StructuralStudy
             runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
         truncation: ModalTruncationPolicy::requested(3),
         convergence: ModalConvergencePolicy::exploratory(),
+        prestress_transition: None,
     })
     .unwrap();
     let transient = StructuralModalTransientTemplate {

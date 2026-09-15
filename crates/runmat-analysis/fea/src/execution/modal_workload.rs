@@ -1,7 +1,7 @@
 use runmat_analysis_core::{
     validate_model_sequence, AnalysisModel, AnalysisProcedure, FormulationRequirement,
     IndependentDomain, PhysicsFamily, ProcedureStep, ProcedureStepId, RestartPolicy, SolutionSpace,
-    StateCompleteness, StateKind, StateOutput, StatePersistence,
+    StateCompleteness, StateKind, StateOutput, StatePersistence, StateSource, StateUse,
 };
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use serde::{Deserialize, Serialize};
@@ -12,11 +12,66 @@ use crate::{
     results::observation::ObservationExecutionPolicy,
 };
 
-use super::{AnalysisExecutionError, AnalysisExecutionResult, StructuralModalWorkloadIdentity};
+use super::{
+    AnalysisExecutionError, AnalysisExecutionResult, CanonicalStateTransition, SequenceIdentity,
+    StepIdentity, StructuralModalWorkloadIdentity,
+};
 
 const MODAL_WORKLOAD_PREFIX: &[u8] = b"runmat-structural-modal-workload/v1\0";
 const MODAL_WORKLOAD_LIMITS: CanonicalLimits =
     CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64);
+
+/// Authored prestressed-modal intent before its exact preload state has been published.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StructuralPrestressedModalTemplate {
+    pub schema_version: u16,
+    pub model: AnalysisModel,
+    pub step_id: ProcedureStepId,
+    pub backend: ComputeBackend,
+    pub formulation_requirement: FormulationRequirement,
+    pub observation_execution: ObservationExecutionPolicy,
+    pub truncation: ModalTruncationPolicy,
+    pub convergence: ModalConvergencePolicy,
+}
+
+impl StructuralPrestressedModalTemplate {
+    pub fn validate(&self) -> AnalysisExecutionResult<()> {
+        let step = validate_modal_step(
+            self.schema_version,
+            &self.model,
+            &self.step_id,
+            self.truncation,
+            self.convergence,
+        )?;
+        if step.procedure != AnalysisProcedure::PrestressedModalExtraction
+            || !is_prestress_input(step)
+        {
+            return Err(AnalysisExecutionError::Invalid(
+                "prestressed modal extraction requires one upstream geometric-stiffness input"
+                    .into(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn bind(
+        self,
+        prestress_transition: CanonicalStateTransition,
+    ) -> AnalysisExecutionResult<StructuralModalWorkload> {
+        self.validate()?;
+        StructuralModalWorkload::new(StructuralModalWorkloadInput {
+            model: self.model,
+            step_id: self.step_id,
+            backend: self.backend,
+            formulation_requirement: self.formulation_requirement,
+            observation_execution: self.observation_execution,
+            truncation: self.truncation,
+            convergence: self.convergence,
+            prestress_transition: Some(prestress_transition),
+        })
+    }
+}
 
 /// Path-free numerical authority for one structural modal-extraction step.
 ///
@@ -35,6 +90,7 @@ pub struct StructuralModalWorkload {
     observation_execution: ObservationExecutionPolicy,
     truncation: ModalTruncationPolicy,
     convergence: ModalConvergencePolicy,
+    prestress_transition: Option<CanonicalStateTransition>,
 }
 
 #[derive(Deserialize)]
@@ -49,6 +105,7 @@ struct StructuralModalWorkloadWire {
     observation_execution: ObservationExecutionPolicy,
     truncation: ModalTruncationPolicy,
     convergence: ModalConvergencePolicy,
+    prestress_transition: Option<CanonicalStateTransition>,
 }
 
 impl TryFrom<StructuralModalWorkloadWire> for StructuralModalWorkload {
@@ -65,6 +122,7 @@ impl TryFrom<StructuralModalWorkloadWire> for StructuralModalWorkload {
             observation_execution: wire.observation_execution,
             truncation: wire.truncation,
             convergence: wire.convergence,
+            prestress_transition: wire.prestress_transition,
         };
         workload.validate()?;
         Ok(workload)
@@ -79,6 +137,7 @@ pub struct StructuralModalWorkloadInput {
     pub observation_execution: ObservationExecutionPolicy,
     pub truncation: ModalTruncationPolicy,
     pub convergence: ModalConvergencePolicy,
+    pub prestress_transition: Option<CanonicalStateTransition>,
 }
 
 impl StructuralModalWorkload {
@@ -96,6 +155,7 @@ impl StructuralModalWorkload {
             observation_execution: input.observation_execution,
             truncation: input.truncation,
             convergence: input.convergence,
+            prestress_transition: input.prestress_transition,
         };
         workload.identity = workload.derive_identity()?;
         workload.validate()?;
@@ -132,6 +192,10 @@ impl StructuralModalWorkload {
 
     pub const fn convergence(&self) -> ModalConvergencePolicy {
         self.convergence
+    }
+
+    pub const fn prestress_transition(&self) -> Option<&CanonicalStateTransition> {
+        self.prestress_transition.as_ref()
     }
 
     pub fn replace_model(&mut self, model: AnalysisModel) -> AnalysisExecutionResult<()> {
@@ -186,34 +250,38 @@ impl StructuralModalWorkload {
     }
 
     pub fn validate(&self) -> AnalysisExecutionResult<()> {
-        if self.schema_version != 1 {
-            return Err(AnalysisExecutionError::Invalid(
-                "unsupported structural modal workload schema".into(),
-            ));
-        }
-        validate_model_sequence(&self.model)
-            .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
-        self.truncation
-            .validate()
-            .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
-        self.convergence
-            .validate()
-            .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
-        let step = self.procedure_step()?;
-        self.modal_basis_output()?;
-        let IndependentDomain::Eigenvalue { requested_count } = &step.independent_domain else {
-            return Err(AnalysisExecutionError::Invalid(
-                "structural modal extraction requires an eigenvalue domain".into(),
-            ));
+        let step = validate_modal_step(
+            self.schema_version,
+            &self.model,
+            &self.step_id,
+            self.truncation,
+            self.convergence,
+        )?;
+        let procedure_is_valid = match step.procedure {
+            AnalysisProcedure::ModalExtraction => {
+                step.state_inputs.is_empty() && self.prestress_transition.is_none()
+            }
+            AnalysisProcedure::PrestressedModalExtraction => {
+                is_prestress_input(step)
+                    && self
+                        .prestress_transition
+                        .as_ref()
+                        .is_some_and(|transition| {
+                            let sequence =
+                                SequenceIdentity::from_solver_contract(&self.model.sequence);
+                            let consumer = sequence.and_then(|sequence| {
+                                StepIdentity::from_solver_contract(sequence, step)
+                            });
+                            transition.validate().is_ok()
+                                && consumer.is_ok_and(|consumer| {
+                                    transition.consumer == consumer
+                                        && transition.consumer_step_id == self.step_id
+                                })
+                        })
+            }
+            _ => false,
         };
-        if step.family != PhysicsFamily::Structural
-            || step.procedure != AnalysisProcedure::ModalExtraction
-            || step.solution_space != SolutionSpace::Direct
-            || !step.state_inputs.is_empty()
-            || !step.activations.is_empty()
-            || step.restart != RestartPolicy::Fresh
-            || *requested_count != self.truncation.requested_mode_count()
-        {
+        if !procedure_is_valid {
             return Err(AnalysisExecutionError::Invalid(
                 "structural modal workload must exactly describe one fresh direct modal-extraction step and its requested eigenspace".into(),
             ));
@@ -257,9 +325,83 @@ impl StructuralModalWorkload {
                 self.observation_execution,
                 self.truncation,
                 self.convergence,
+                &self.prestress_transition,
             ),
         )
     }
+}
+
+fn validate_modal_step<'a>(
+    schema_version: u16,
+    model: &'a AnalysisModel,
+    step_id: &ProcedureStepId,
+    truncation: ModalTruncationPolicy,
+    convergence: ModalConvergencePolicy,
+) -> AnalysisExecutionResult<&'a ProcedureStep> {
+    if schema_version != 1 {
+        return Err(AnalysisExecutionError::Invalid(
+            "unsupported structural modal workload schema".into(),
+        ));
+    }
+    validate_model_sequence(model)
+        .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+    truncation
+        .validate()
+        .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+    convergence
+        .validate()
+        .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+    let mut matches = model
+        .sequence
+        .steps
+        .iter()
+        .filter(|step| step.step_id == *step_id);
+    let step = matches.next().ok_or_else(|| {
+        AnalysisExecutionError::Invalid(format!(
+            "structural modal workload references absent step `{}`",
+            step_id.as_str()
+        ))
+    })?;
+    if matches.next().is_some() {
+        return Err(AnalysisExecutionError::Invalid(format!(
+            "structural modal workload references duplicate step `{}`",
+            step_id.as_str()
+        )));
+    }
+    let IndependentDomain::Eigenvalue { requested_count } = step.independent_domain else {
+        return Err(AnalysisExecutionError::Invalid(
+            "structural modal extraction requires an eigenvalue domain".into(),
+        ));
+    };
+    let [output] = step.state_outputs.as_slice() else {
+        return Err(AnalysisExecutionError::Invalid(
+            "structural modal extraction must declare exactly one modal-basis output".into(),
+        ));
+    };
+    if step.family != PhysicsFamily::Structural
+        || step.solution_space != SolutionSpace::Direct
+        || !step.activations.is_empty()
+        || step.restart != RestartPolicy::Fresh
+        || requested_count != truncation.requested_mode_count()
+        || output.kind != StateKind::ModalBasis
+        || output.completeness != StateCompleteness::Complete
+        || output.persistence == StatePersistence::CheckpointOnly
+    {
+        return Err(AnalysisExecutionError::Invalid(
+            "structural modal workload has an invalid direct eigenspace or output contract".into(),
+        ));
+    }
+    Ok(step)
+}
+
+fn is_prestress_input(step: &ProcedureStep) -> bool {
+    matches!(
+        step.state_inputs.as_slice(),
+        [input]
+            if input.use_as == StateUse::Prestress
+                && input.required_kind == StateKind::GeometricStiffness
+                && matches!(input.source, StateSource::Upstream { .. })
+    )
 }
 
 #[cfg(test)]
@@ -283,6 +425,7 @@ mod tests {
             observation_execution: ObservationExecutionPolicy::scalable(),
             truncation,
             convergence: ModalConvergencePolicy::exploratory(),
+            prestress_transition: None,
         })
         .unwrap()
     }
@@ -342,6 +485,7 @@ mod tests {
                 observation_execution: valid.observation_execution(),
                 truncation: valid.truncation(),
                 convergence: valid.convergence(),
+                prestress_transition: valid.prestress_transition().cloned(),
             })
             .is_err());
         }
@@ -362,6 +506,7 @@ mod tests {
             observation_execution: valid.observation_execution(),
             truncation: valid.truncation(),
             convergence: valid.convergence(),
+            prestress_transition: valid.prestress_transition().cloned(),
         })
         .unwrap();
         assert_eq!(
@@ -384,6 +529,7 @@ mod tests {
             observation_execution: workload.observation_execution(),
             truncation: workload.truncation(),
             convergence: workload.convergence(),
+            prestress_transition: workload.prestress_transition().cloned(),
         })
         .is_err());
     }

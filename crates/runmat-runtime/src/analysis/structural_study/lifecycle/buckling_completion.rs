@@ -170,18 +170,17 @@ pub(in crate::analysis) fn complete_buckling_study(
             error.to_string(),
         )
     })?;
-    let buckling_producer =
-        runmat_analysis_fea::execution::StepIdentity::from_solver_contract(
-            sequence,
-            &buckling_step.procedure_step,
+    let buckling_producer = runmat_analysis_fea::execution::StepIdentity::from_solver_contract(
+        sequence,
+        &buckling_step.procedure_step,
+    )
+    .map_err(|error| {
+        buckling_completion_error(
+            &prepared,
+            "RM.FEA.RUN_STUDY.STATE_INVALID",
+            error.to_string(),
         )
-        .map_err(|error| {
-            buckling_completion_error(
-                &prepared,
-                "RM.FEA.RUN_STUDY.STATE_INVALID",
-                error.to_string(),
-            )
-        })?;
+    })?;
     let buckling_result_identity = numerical.buckling_numerical_receipt.source_result();
     let mut states = Vec::with_capacity(
         preload_step.procedure_step.state_outputs.len()

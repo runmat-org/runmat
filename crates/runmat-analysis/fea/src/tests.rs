@@ -1849,6 +1849,184 @@ fn portable_buckling_pipeline_consumes_the_exact_published_preload_state() {
     assert!(crate::execute_structural_buckling_workload(&workload, &mesh, &substituted).is_err());
 }
 
+fn prepared_prestressed_modal_case(
+    axial_force: f64,
+) -> (
+    crate::execution::StructuralModalWorkload,
+    SolverMeshArtifact,
+    crate::execution::CanonicalSemanticState,
+) {
+    use runmat_analysis_core::{
+        AnalysisSequence, FormulationRequirement, ReferenceStatePolicy, StateTransition,
+        StateTransitionMethod, TopologyTransitionPolicy, TransitionId,
+    };
+    use runmat_execution::Digest;
+
+    use crate::execution::{
+        CanonicalSemanticState, CanonicalSemanticStateInput, CanonicalSemanticStatePayload,
+        CanonicalStateTransition, SequenceIdentity, SolverResultIdentity, StepIdentity,
+        StructuralPrestressedModalTemplate,
+    };
+
+    let mut model = fixture_model(FixtureId::StructuralTransientTet4Reference);
+    let preload = ProcedureStep::structural_preload("preload");
+    let mut modal = ProcedureStep::structural_prestressed_modal(
+        "prestressed_modes",
+        "preload",
+        "geometric_stiffness",
+    );
+    modal.independent_domain =
+        runmat_analysis_core::IndependentDomain::Eigenvalue { requested_count: 1 };
+    let mut sequence =
+        AnalysisSequence::from_steps("prestressed_modal", vec![preload, modal.clone()]);
+    sequence.dependencies[0].reason = runmat_analysis_core::SequenceDependencyReason::StateTransfer;
+    sequence.transitions.push(StateTransition {
+        transition_id: TransitionId("preload-to-prestressed-modal".into()),
+        producer_step: runmat_analysis_core::ProcedureStepId("preload".into()),
+        consumer_step: modal.step_id.clone(),
+        state_id: runmat_analysis_core::StateId("geometric_stiffness".into()),
+        method: StateTransitionMethod::Reuse,
+        topology: TopologyTransitionPolicy::RequireIdentical,
+        reference: ReferenceStatePolicy::Preserve,
+    });
+    model.sequence = sequence;
+    model.constraints.truncate(1);
+    replace_fixture_excitations(
+        &mut model,
+        vec![FixtureExcitation {
+            id: "axial_preload".into(),
+            region_id: "tip".into(),
+            kind: FixtureExcitationKind::Force([0.0, 0.0, axial_force]),
+        }],
+    );
+    let mesh = single_tetrahedron_solver_mesh_for_model(&model);
+    let topology_digest = Digest::from_bytes(*mesh.canonical_digest.bytes());
+    let constraints = crate::constraints::CanonicalStructuralConstraintPlan::compile_for_model(
+        &model,
+        Some(&mesh),
+    )
+    .unwrap();
+    let preload = crate::run_linear_static_with_prepared_constraint_plan_and_linearization(
+        &model,
+        ComputeBackend::Cpu,
+        LinearStaticSolveOptions {
+            formulation_requirement: FormulationRequirement::Experimental,
+            solver_mesh: Some(mesh.clone()),
+            require_solver_mesh_for_solid: true,
+            ..LinearStaticSolveOptions::default()
+        },
+        &constraints,
+        topology_digest,
+    )
+    .unwrap();
+    let sequence = SequenceIdentity::from_solver_contract(&model.sequence).unwrap();
+    let producer = StepIdentity::from_solver_contract(sequence, &model.sequence.steps[0]).unwrap();
+    let source_result =
+        SolverResultIdentity::from_step_result(producer, preload.linearization.identity().digest())
+            .unwrap();
+    let state = CanonicalSemanticState::new(CanonicalSemanticStateInput {
+        producer,
+        declaration: model.sequence.steps[0].state_outputs[1].clone(),
+        topology_digest,
+        source_result,
+        payload: CanonicalSemanticStatePayload::StructuralLinearization {
+            linearization: Box::new(preload.linearization),
+        },
+    })
+    .unwrap();
+    let transition = CanonicalStateTransition::bind_upstream(
+        &model,
+        &modal.step_id,
+        &state,
+        runmat_analysis_core::StateUse::Prestress,
+        topology_digest,
+    )
+    .unwrap();
+    let workload = StructuralPrestressedModalTemplate {
+        schema_version: 1,
+        model,
+        step_id: modal.step_id,
+        backend: ComputeBackend::Cpu,
+        formulation_requirement: FormulationRequirement::Experimental,
+        observation_execution: crate::results::observation::ObservationExecutionPolicy::scalable(),
+        truncation: crate::ModalTruncationPolicy::requested(1),
+        convergence: crate::ModalConvergencePolicy::exploratory(),
+    }
+    .bind(transition)
+    .unwrap();
+    (workload, mesh, state)
+}
+
+#[test]
+fn prestressed_modal_pipeline_proves_tension_stiffening_and_compression_softening() {
+    let (unit_compression, unit_mesh, unit_state) = prepared_prestressed_modal_case(-1.0);
+    let unit_linearization = unit_state.payload.structural_linearization().unwrap();
+    let unit_summary = crate::assembly::assemble_structural_system(
+        unit_compression.model(),
+        &static_excitations(unit_compression.model()),
+        Some(unit_mesh),
+        crate::assembly::StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+    )
+    .unwrap();
+    let critical = crate::solve::buckling::solve_eigenvalue_buckling(
+        &unit_summary,
+        unit_linearization,
+        1,
+        1.0e-10,
+        16,
+    )
+    .unwrap()
+    .modes[0]
+        .load_factor;
+    let qualified_force = 0.1 * critical;
+
+    let solve = |force| {
+        let (workload, mesh, state) = prepared_prestressed_modal_case(force);
+        let result =
+            crate::execute_structural_prestressed_modal_workload(&workload, &mesh, &state).unwrap();
+        (workload, mesh, state, result)
+    };
+    let (_, _, _, unstressed) = solve(0.0);
+    let (_, _, _, tension) = solve(qualified_force);
+    let (compression_workload, compression_mesh, compression_state, compression) =
+        solve(-qualified_force);
+    let unstressed_frequency = unstressed.basis().modes()[0].frequency_hz();
+    let tension_frequency = tension.basis().modes()[0].frequency_hz();
+    let compression_frequency = compression.basis().modes()[0].frequency_hz();
+    assert!(tension_frequency > unstressed_frequency);
+    assert!(compression_frequency < unstressed_frequency);
+
+    let round_trip = crate::execution::StructuralModalSolverResult::from_canonical_bytes(
+        &compression.canonical_bytes().unwrap(),
+    )
+    .unwrap();
+    assert_eq!(round_trip, compression);
+    let source = crate::execution::AnalysisWorkloadIdentity::for_test(
+        "prestressed-modal-physical-reference",
+    )
+    .unwrap();
+    let receipt =
+        crate::execution::StructuralModalNumericalReceipt::new(source, &compression).unwrap();
+    let recovered = crate::recover_completed_structural_prestressed_modal_run(
+        &compression_workload,
+        &compression_mesh,
+        &compression_state,
+        &compression,
+        &receipt,
+    )
+    .unwrap();
+    assert_eq!(recovered.basis, *compression.basis());
+
+    let mut substituted = compression_state;
+    substituted.topology_digest = runmat_execution::Digest::sha256(b"different-topology");
+    assert!(crate::execute_structural_prestressed_modal_workload(
+        &compression_workload,
+        &compression_mesh,
+        &substituted,
+    )
+    .is_err());
+}
+
 #[test]
 fn structural_frequency_entries_execute_independently_and_assemble_in_plan_order() {
     use runmat_analysis_core::{FormulationRequirement, IndependentDomain};

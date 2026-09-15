@@ -510,6 +510,7 @@ mod tests {
             observation_execution: ObservationExecutionPolicy::scalable(),
             truncation: crate::ModalTruncationPolicy::requested(3),
             convergence: crate::ModalConvergencePolicy::exploratory(),
+            prestress_transition: None,
         })
         .unwrap();
         let transient = StructuralModalTransientTemplate {

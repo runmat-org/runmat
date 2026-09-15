@@ -335,6 +335,7 @@ pub(in crate::analysis) fn prepare_structural_modal_workload(
                 runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
             truncation: options.truncation,
             convergence: options.convergence,
+            prestress_transition: None,
         },
     )
     .map_err(|error| portable_study_contract_error(study, error.to_string()))

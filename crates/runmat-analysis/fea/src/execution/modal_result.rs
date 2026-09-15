@@ -105,7 +105,10 @@ impl StructuralModalSolverResult {
             || mode_count == 0
             || self.basis.source_run() != &self.run.identity
             || self.run.identity.family() != PhysicsFamily::Structural
-            || self.run.identity.procedure() != AnalysisProcedure::ModalExtraction
+            || !matches!(
+                self.run.identity.procedure(),
+                AnalysisProcedure::ModalExtraction | AnalysisProcedure::PrestressedModalExtraction
+            )
             || self.run.identity.solution_space() != SolutionSpace::Direct
             || self.run.fields_are_empty()
         {
@@ -410,6 +413,7 @@ mod tests {
                 crate::results::observation::ObservationExecutionPolicy::scalable(),
             truncation,
             convergence: ModalConvergencePolicy::exploratory(),
+            prestress_transition: None,
         })
         .unwrap();
         let modal = crate::run_modal_with_options(

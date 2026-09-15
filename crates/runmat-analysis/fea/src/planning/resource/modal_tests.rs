@@ -93,6 +93,7 @@ fn modal_case(
         observation_execution: ObservationExecutionPolicy::scalable(),
         truncation,
         convergence: ModalConvergencePolicy::exploratory(),
+        prestress_transition: None,
     })
     .unwrap();
     (workload, mesh, constraints, observations)

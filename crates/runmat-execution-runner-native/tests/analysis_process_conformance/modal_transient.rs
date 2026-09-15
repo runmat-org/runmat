@@ -63,6 +63,7 @@ pub(super) fn preparation(
         observation_execution: ObservationExecutionPolicy::scalable(),
         truncation: ModalTruncationPolicy::requested(3),
         convergence: ModalConvergencePolicy::exploratory(),
+        prestress_transition: None,
     })
     .unwrap();
     let transient = StructuralModalTransientTemplate {

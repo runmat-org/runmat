@@ -37,7 +37,11 @@ pub use pipeline::linear_static::{
     run_linear_static_with_prepared_constraint_plan,
     run_linear_static_with_prepared_constraint_plan_and_linearization, LinearStaticExecution,
 };
-pub use pipeline::modal::{execute_structural_modal_workload, run_modal, run_modal_with_options};
+pub use pipeline::modal::{
+    execute_structural_modal_workload, execute_structural_prestressed_modal_workload,
+    recover_completed_structural_modal_run, recover_completed_structural_prestressed_modal_run,
+    run_modal, run_modal_with_options,
+};
 pub use pipeline::modal_basis::{
     ModalBasisArtifact, ModalBasisIdentity, ModalBasisMode, ModalDirectionalMetric,
 };
