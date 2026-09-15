@@ -624,7 +624,7 @@ function fixedProjection() {
     ["runtime-math", [child("alpha", "directory", "crates/runmat-runtime/src/builtins/math/alpha/mod.rs")]],
   ]);
   return {
-    schema_version: 5, kind: "runmat-builtin-module-composition-projection",
+    schema_version: 6, kind: "runmat-builtin-module-composition-projection",
     products: moduleCompositionProductRegistry().map((entry) => {
       const productChildren = children.get(entry.product_id) ?? [];
       return {

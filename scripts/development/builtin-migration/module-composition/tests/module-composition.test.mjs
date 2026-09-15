@@ -96,7 +96,7 @@ test("canonical child storage does not reorder macro-bearing runtime declaration
     }),
   ];
   const parsed = parseModuleCompositionProjection({
-    schema_version: 5, kind: "runmat-builtin-module-composition-projection", products: [product],
+    schema_version: 6, kind: "runmat-builtin-module-composition-projection", products: [product],
   });
   assert.deepEqual(parsed.products[0].children.map((entry) => entry.module), ["acceleration", "common"]);
   const source = renderModuleCompositionProduct(parsed.products[0]);
@@ -158,10 +158,10 @@ test("catalog aggregation implementations may be exact typed child exports", () 
 });
 
 test("projection rejects invalid parents, paths, keywords, enums, and collisions", () => {
-  for (const version of [1, 2, 3, 4, 6]) {
+  for (const version of [1, 2, 3, 4, 5]) {
     const wrongVersion = fixtureProjection();
     wrongVersion.schema_version = version;
-    assert.throws(() => parseModuleCompositionProjection(wrongVersion), /schema_version 5/);
+    assert.throws(() => parseModuleCompositionProjection(wrongVersion), /schema_version 6/);
   }
   const cases = [
     [mutate((value) => { value.products[0].path = "crates/runmat-builtins/src/catalog/entries/other/mod.rs"; }), /does not match its logical parent/],
@@ -219,13 +219,40 @@ test("case-distinct Rust item identities survive named reexport composition", ()
     reexportVisibility: "crate",
   })];
   const parsed = parseModuleCompositionProjection({
-    schema_version: 5,
+    schema_version: 6,
     kind: "runmat-builtin-module-composition-projection",
     products: [product],
   });
   const source = renderModuleCompositionProduct(parsed.products[0]);
   assert.match(source, /definitions::\{Inf, NaN, inf, nan\}/);
   assert.doesNotThrow(() => verifyModuleCompositionProduct(parsed.products[0], source));
+});
+
+test("module reexports retain their reviewed public alias", () => {
+  const always = { kind: "always" };
+  const product = {
+    product_id: "runtime-fft", crate_role: "runtime",
+    path: "crates/runmat-runtime/src/builtins/fft/mod.rs",
+    module_path: "crate::builtins::fft", state: "present",
+    aggregations: [], aggregation_exports: [],
+    children: [{
+      module: "forward", source_kind: "file",
+      source_path: "crates/runmat-runtime/src/builtins/fft/forward.rs",
+      role: "identity", visibility: "private", declaration_condition: always,
+      declaration_order: 0, macro_use: false,
+      reexports: [{
+        kind: "module", visibility: "public", condition: always,
+        doc_hidden: false, alias: "fft",
+      }], aggregation_sources: [],
+    }],
+  };
+  const parsed = parseModuleCompositionProjection({
+    schema_version: 6,
+    kind: "runmat-builtin-module-composition-projection",
+    products: [product],
+  });
+  assert.equal(parsed.products[0].children[0].reexports[0].alias, "fft");
+  assert.match(renderModuleCompositionProduct(parsed.products[0]), /pub use forward as fft;/);
 });
 
 test("conditions, hidden reexports, aliases, and independent reexport conditions round-trip", () => {
@@ -252,7 +279,7 @@ test("conditions, hidden reexports, aliases, and independent reexport conditions
   assert.doesNotThrow(() => verifyModuleCompositionProduct(product, source));
 });
 
-test("the v5 grammar rejects raw cfg, malformed conjunctions, aliases, and aggregation order", () => {
+test("the v6 grammar rejects raw cfg, malformed conjunctions, aliases, and aggregation order", () => {
   const invalid = [
     [mutate((value) => { value.products[1].children[0].declaration_condition = { kind: "any", conditions: [] }; }), /unsupported kind/],
     [mutate((value) => { value.products[1].children[0].declaration_condition = { kind: "target-architecture", architecture: "x86_64" }; }), /unsupported target architecture/],
@@ -684,7 +711,7 @@ test("prerequisite order validates sequential additions after parent activation"
 
 function fixtureProjection() {
   return {
-    schema_version: 5,
+    schema_version: 6,
     kind: "runmat-builtin-module-composition-projection",
     products: [
       {

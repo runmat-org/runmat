@@ -136,6 +136,20 @@ test("handwritten audit accepts reviewed private child reexports and rejects unr
   assert.throws(() => auditHandwrittenComposition("pub mod alpha;\npub(in crate::other) use alpha::*;\n", oneChild()), /visibility is not representable/);
 });
 
+test("handwritten audit preserves direct child module aliases", () => {
+  const product = oneChild();
+  product.children[0].reexports = [{
+    kind: "module", visibility: "public", condition: ALWAYS,
+    doc_hidden: false, alias: "stable_api",
+  }];
+  assert.equal(auditHandwrittenComposition(
+    "pub mod alpha;\npub use alpha as stable_api;\n", product,
+  ).length, 1);
+  assert.throws(() => auditHandwrittenComposition(
+    "pub mod alpha;\npub use alpha as other_api;\n", product,
+  ), /surface differs/);
+});
+
 test("handwritten audit rejects duplicate and context-invalid attributes", () => {
   const values = [
     "#[cfg(test)]\n#[cfg(test)]\npub mod alpha;\n",

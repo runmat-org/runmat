@@ -16,7 +16,9 @@ export function expectedCompositionSurface(product) {
       doc_hidden: reexport.doc_hidden,
       reexport: reexport.kind === "glob"
         ? { kind: "glob" }
-        : { kind: "named", items: reexport.items },
+        : reexport.kind === "module"
+          ? { kind: "module", alias: reexport.alias }
+          : { kind: "named", items: reexport.items },
     }))),
     aggregation_exports: product.aggregation_exports,
     aggregations: product.crate_role === "runtime" ? [] : product.aggregations

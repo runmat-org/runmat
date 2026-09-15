@@ -82,7 +82,7 @@ test("generated product execution proves a reviewed composition parent remains a
     children: [],
   };
   const projection = {
-    schema_version: 5,
+    schema_version: 6,
     kind: "runmat-builtin-module-composition-projection",
     products: [composition],
   };

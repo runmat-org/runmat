@@ -15,7 +15,7 @@ export const AGGREGATION_SOURCES = Object.freeze(["slice", "groups", "function"]
 export const PRODUCT_STATES = Object.freeze(["absent", "present"]);
 
 export function parseModuleCompositionProjection(value) {
-  kind(value, 5, "runmat-builtin-module-composition-projection", "module composition projection");
+  kind(value, 6, "runmat-builtin-module-composition-projection", "module composition projection");
   exact(value, ["schema_version", "kind", "products"], "module composition projection");
   const products = array(value.products, "module composition products").map(parseCompositionProduct);
   canonicalUnique(products, (entry) => entry.product_id, "module composition product ids", true);
@@ -23,7 +23,6 @@ export function parseModuleCompositionProjection(value) {
   caseFoldUnique(products, (entry) => entry.module_path, "module composition parent modules");
   return { ...value, products };
 }
-
 export function parseCompositionProduct(value) {
   exact(value, ["product_id", "crate_role", "path", "module_path", "state", "aggregations", "aggregation_exports", "children"], "module composition product");
   const productId = stableId(value.product_id, "module composition product id");
@@ -55,7 +54,6 @@ export function parseModuleCompositionContract(value, productPath, productId) {
   validateParentPath(crateRole, productPath, modulePath, productId);
   return { kind: value.kind, crate_role: crateRole, module_path: modulePath };
 }
-
 export function parseCompositionChild(value, parent) {
   exact(value, ["module", "source_kind", "source_path", "role", "visibility", "declaration_condition", "declaration_order", "macro_use", "reexports", "aggregation_sources"], `${parent.productId} child`);
   const module = rustModuleIdentifier(value.module, `${parent.productId} child module`);
@@ -82,7 +80,6 @@ export function parseCompositionChild(value, parent) {
   }
   return { ...value, module, source_kind: sourceKind, source_path: sourcePath, role, visibility, declaration_condition: declarationCondition, declaration_order: value.declaration_order, macro_use: macroUse, reexports, aggregation_sources: aggregationSources };
 }
-
 function parseAggregationSource(value, module, parentAggregations) {
   exact(value, ["role", "kind", "order", "condition"], `${module} aggregation source`);
   const role = enumValue(value.role, AGGREGATION_ROLES, `${module} aggregation role`);
@@ -114,13 +111,19 @@ function parseVisibility(value, crateRole, label) {
 }
 
 export function parseCompositionReexport(value, crateRole, module) {
-  const fields = value?.kind === "glob" ? ["kind", "visibility", "condition", "doc_hidden"] : ["kind", "visibility", "condition", "doc_hidden", "items"];
+  const fields = value?.kind === "glob" ? ["kind", "visibility", "condition", "doc_hidden"]
+    : value?.kind === "module" ? ["kind", "visibility", "condition", "doc_hidden", "alias"]
+      : ["kind", "visibility", "condition", "doc_hidden", "items"];
   exact(value, fields, `${module} reexport`);
-  if (!["glob", "named"].includes(value.kind)) throw new Error(`${module} reexport has an unsupported kind`);
+  if (!["glob", "module", "named"].includes(value.kind)) throw new Error(`${module} reexport has an unsupported kind`);
   const visibility = parseVisibility(value.visibility, crateRole, `${module} reexport visibility`);
   const condition = parseCompositionCondition(value.condition, `${module} reexport condition`);
   const docHidden = boolean(value.doc_hidden, `${module} reexport doc-hidden`);
   if (value.kind === "glob") return { kind: "glob", visibility, condition, doc_hidden: docHidden };
+  if (value.kind === "module") {
+    const alias = value.alias === null ? null : rustModuleIdentifier(value.alias, `${module} reexport alias`);
+    return { kind: "module", visibility, condition, doc_hidden: docHidden, alias };
+  }
   const items = array(value.items, `${module} reexport items`).map((entry) => parseReexportItem(entry, module));
   canonicalUnique(items, reexportItemKey, `${module} reexport items`);
   const exportedNames = items.map((entry) => entry.alias ?? entry.name);
@@ -137,8 +140,9 @@ function parseReexportItem(value, module) {
 
 function reexportItemKey(value) { return `${value.name}\0${value.alias ?? ""}`; }
 export function compositionReexportKey(value) {
-  const items = value.kind === "named" ? value.items.map(reexportItemKey).join("\0") : "";
-  return `${conditionKey(value.condition)}\0${value.visibility}\0${value.doc_hidden ? 1 : 0}\0${value.kind}\0${items}`;
+  const payload = value.kind === "named" ? value.items.map(reexportItemKey).join("\0")
+    : value.kind === "module" ? value.alias ?? "" : "";
+  return `${conditionKey(value.condition)}\0${value.visibility}\0${value.doc_hidden ? 1 : 0}\0${value.kind}\0${payload}`;
 }
 
 function validateAggregationOrders(children, roles, productId) {

@@ -128,7 +128,7 @@ test("module composition input and proof bind the exact reviewed parent projecti
     aggregation_sources: [{ role: "entries", kind: "slice", order: 0, condition: { kind: "always" } }],
   };
   const projection = {
-    schema_version: 5,
+    schema_version: 6,
     kind: "runmat-builtin-module-composition-projection",
     products: [{
       product_id: composition.product_id,
@@ -206,7 +206,7 @@ test("empty runtime composition remains a verified baseline product", () => {
     children: [],
   };
   const projection = {
-    schema_version: 5,
+    schema_version: 6,
     kind: "runmat-builtin-module-composition-projection",
     products: [product],
   };
@@ -261,7 +261,7 @@ test("generated-product evidence distinguishes a reviewed absent parent from an 
     children: [],
   };
   const projection = {
-    schema_version: 5,
+    schema_version: 6,
     kind: "runmat-builtin-module-composition-projection",
     products: [product],
   };
