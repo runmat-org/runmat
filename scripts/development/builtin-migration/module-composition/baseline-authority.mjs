@@ -26,7 +26,7 @@ export function freezeReviewedModuleCompositionBaseline(candidateValue, reviewVa
   const definitions = new Map(moduleCompositionProductRegistry()
     .map((entry) => [entry.product_id, entry]));
   const projection = validateFixedModuleCompositionProjection(parseModuleCompositionProjection({
-    schema_version: 5,
+    schema_version: 6,
     kind: "runmat-builtin-module-composition-projection",
     products: candidate.products.map((product) => ({
       product_id: product.product_id,

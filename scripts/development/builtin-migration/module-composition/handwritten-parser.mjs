@@ -27,9 +27,10 @@ export function parseHandwrittenComposition(source, productId) {
 }
 
 function reexportSurfaceKey(value) {
-  const items = value.reexport.kind === "named"
-    ? value.reexport.items.map((item) => `${item.name}\0${item.alias ?? ""}`).join("\0") : "";
-  return `${value.module}\0${conditionKey(value.condition)}\0${value.visibility}\0${value.doc_hidden ? 1 : 0}\0${value.reexport.kind}\0${items}`;
+  const payload = value.reexport.kind === "named"
+    ? value.reexport.items.map((item) => `${item.name}\0${item.alias ?? ""}`).join("\0")
+    : value.reexport.kind === "module" ? value.reexport.alias ?? "" : "";
+  return `${value.module}\0${conditionKey(value.condition)}\0${value.visibility}\0${value.doc_hidden ? 1 : 0}\0${value.reexport.kind}\0${payload}`;
 }
 
 function aggregationExportKey(value) {
@@ -79,6 +80,8 @@ function parseReexport(match, attributes, productId) {
   if (parsed) return reexport(parsed[1], parsedVisibility, condition, docHidden, { kind: "named", items: namedItems(parsed[2], productId) });
   parsed = new RegExp(`^(${IDENTIFIER})::(${IDENTIFIER})(?:\\s+as\\s+(${IDENTIFIER}))?$`).exec(target);
   if (parsed) return reexport(parsed[1], parsedVisibility, condition, docHidden, { kind: "named", items: [{ name: parsed[2], alias: parsed[3] ?? null }] });
+  parsed = new RegExp(`^(${IDENTIFIER})(?:\\s+as\\s+(${IDENTIFIER}))?$`).exec(target);
+  if (parsed) return reexport(parsed[1], parsedVisibility, condition, docHidden, { kind: "module", alias: parsed[2] ?? null });
   throw new Error(`${productId}: module reexport uses an unrepresentable path or item form`);
 }
 

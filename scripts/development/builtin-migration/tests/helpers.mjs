@@ -769,7 +769,7 @@ export function fixtureModuleCompositionBaseline(
   children = new Map(), presentProductIds = new Set(),
 ) {
   return {
-    schema_version: 5,
+    schema_version: 6,
     kind: "runmat-builtin-module-composition-projection",
     products: moduleCompositionProductRegistry().map((definition) => {
       const productChildren = structuredClone(children.get(definition.product_id) ?? []);

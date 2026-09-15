@@ -17,7 +17,7 @@ export function applyModuleCompositionTransitions(baselineValue, transitionValue
     applyTransition(products, transition);
   }
   return parseModuleCompositionProjection({
-    schema_version: 5,
+    schema_version: 6,
     kind: "runmat-builtin-module-composition-projection",
     products: [...products.values()].sort((left, right) => compareCodePoint(left.product_id, right.product_id)),
   });

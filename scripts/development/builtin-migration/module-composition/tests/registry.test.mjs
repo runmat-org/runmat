@@ -16,36 +16,39 @@ const REPOSITORY = path.resolve(
 );
 
 const EXPECTED_SUFFIXES = [
-  "acceleration", "argument_validation", "array", "array/creation", "array/shape", "cells", "common",
-  "comms", "constants", "containers", "control", "datetime", "datetime/arithmetic",
+  "acceleration", "acceleration/gpu", "argument_validation", "array", "array/creation", "array/shape",
+  "array/sorting_sets", "cells", "common", "comms", "constants", "containers", "containers/dictionary",
+  "control", "datetime", "datetime/arithmetic",
   "datetime/business_calendar", "datetime/calendar_duration", "datetime/components",
   "datetime/conversion", "datetime/core", "deep_learning", "deep_learning/autodiff", "diagnostics",
   "fea", "finance", "function_handles", "geometry", "geometry/triangulation", "graph", "image", "interop",
-  "introspection", "io", "io/archive", "io/filetext", "io/repl_fs", "logical",
-  "logical/relational", "math", "math/elementwise", "math/linalg", "math/linalg/factor",
+  "introspection", "io", "io/archive", "io/filetext", "io/repl_fs", "io/tabular_reading", "logical",
+  "logical/relational", "math", "math/elementwise", "math/fft", "math/linalg", "math/linalg/factor",
   "math/reduction", "math/signal", "math/symbolic", "math/trigonometry", "objects", "objects/test_support",
-  "parallel", "plotting", "plotting/animation", "plotting/axes", "plotting/figure_lifecycle",
+  "parallel", "plotting", "plotting/animation", "plotting/axes", "plotting/colormaps",
+  "plotting/figure_lifecycle", "plotting/ui",
   "stats", "stats/hist", "stats/ml", "stats/random", "stats/summary", "strings", "strings/core", "strings/queries",
-  "strings/search", "strings/text_analytics", "strings/transform", "structs", "table", "testing",
+  "strings/search", "strings/text_analytics", "strings/transform", "structs", "table", "table/timetable", "testing",
   "testing/plugins", "testing/runner", "timing", "timing/timer",
 ];
 
 const REVIEWED_SHARED_TARGET_PACKAGES = [
-  "array/creation", "array/shape", "datetime/arithmetic", "datetime/calendar_duration",
+  "acceleration/gpu", "array/creation", "array/shape", "array/sorting_sets", "containers/dictionary",
+  "datetime/arithmetic", "datetime/calendar_duration",
   "datetime/components", "datetime/core", "io/archive", "io/filetext", "io/repl_fs",
-  "logical/relational", "math/linalg/factor", "math/reduction", "math/signal",
-  "math/symbolic", "objects/test_support", "plotting/animation", "plotting/axes",
-  "plotting/figure_lifecycle", "stats/hist", "stats/ml", "stats/random", "stats/summary",
+  "io/tabular_reading", "logical/relational", "math/fft", "math/linalg/factor", "math/reduction", "math/signal",
+  "math/symbolic", "objects/test_support", "plotting/animation", "plotting/axes", "plotting/colormaps",
+  "plotting/figure_lifecycle", "plotting/ui", "stats/hist", "stats/ml", "stats/random", "stats/summary",
   "strings/core", "strings/queries", "strings/search", "strings/text_analytics",
-  "strings/transform", "testing/plugins", "testing/runner",
+  "strings/transform", "table/timetable", "testing/plugins", "testing/runner",
 ];
 
-test("registry declares the exact canonical 142-product census", () => {
+test("registry declares the exact canonical 158-product census", () => {
   assert.deepEqual(MODULE_COMPOSITION_SUFFIXES, EXPECTED_SUFFIXES);
   const products = moduleCompositionProductRegistry();
-  assert.equal(products.length, 142);
-  assert.equal(products.filter((entry) => entry.crate_role === "catalog").length, 71);
-  assert.equal(products.filter((entry) => entry.crate_role === "runtime").length, 71);
+  assert.equal(products.length, 158);
+  assert.equal(products.filter((entry) => entry.crate_role === "catalog").length, 79);
+  assert.equal(products.filter((entry) => entry.crate_role === "runtime").length, 79);
 
   const ids = new Set(products.map((entry) => entry.product_id));
   assert.ok(ids.has("catalog-aliases"));
@@ -122,8 +125,8 @@ test("registry identifiers and paths are globally unique", () => {
   const products = moduleCompositionProductRegistry();
   for (const field of ["product_id", "path", "module_path"]) {
     const values = products.map((entry) => entry[field]);
-    assert.equal(new Set(values).size, 142, `${field} must be unique`);
-    assert.equal(new Set(values.map((entry) => entry.toLowerCase())).size, 142,
+    assert.equal(new Set(values).size, 158, `${field} must be unique`);
+    assert.equal(new Set(values.map((entry) => entry.toLowerCase())).size, 158,
       `${field} must be case-fold unique`);
   }
   assert.deepEqual(products.map((entry) => entry.product_id),
