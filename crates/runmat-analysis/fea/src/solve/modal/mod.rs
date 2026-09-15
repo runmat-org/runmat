@@ -13,9 +13,9 @@ use crate::{
 };
 
 mod diagnostics;
-mod linear_solve;
+pub(crate) mod linear_solve;
 mod math;
-mod subspace;
+pub(crate) mod subspace;
 mod truncation;
 
 use diagnostics::push_modal_quality_diagnostics;

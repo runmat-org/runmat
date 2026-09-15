@@ -9,6 +9,7 @@ pub mod modal_basis;
 pub mod modal_governance;
 pub mod nonlinear;
 pub mod structural_frequency;
+pub mod structural_linearization;
 pub mod thermal;
 pub mod thermo_mechanical;
 pub mod transient;

@@ -44,6 +44,7 @@ pub(super) fn rows_to_sparse(
         contribution_id: ContributionId(
             match role {
                 OperatorRole::Stiffness => "solid_element_stiffness",
+                OperatorRole::GeometricStiffness => "solid_element_geometric_stiffness",
                 OperatorRole::Mass => "solid_element_consistent_mass",
                 OperatorRole::Damping => "solid_element_rayleigh_damping",
                 _ => "solid_element_operator",

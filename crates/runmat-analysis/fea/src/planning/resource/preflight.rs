@@ -80,6 +80,13 @@ pub fn build_structural_resource_plan(
         stiffness_nonzeros,
         &admission,
     )?;
+    let step = workload
+        .procedure_step()
+        .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+    let publishes_linearization = step
+        .state_outputs
+        .iter()
+        .any(|output| output.kind == runmat_analysis_core::StateKind::GeometricStiffness);
     let recovery_values = facts
         .recovery_node_count
         .checked_mul(6)
@@ -87,8 +94,23 @@ pub fn build_structural_resource_plan(
         .ok_or(ResourcePlanningError::Overflow(
             "structural recovery value count",
         ))?;
-    let recovery_values = u64::try_from(recovery_values)
+    let mut recovery_values = u64::try_from(recovery_values)
         .map_err(|_| ResourcePlanningError::Overflow("structural recovery value count"))?;
+    if publishes_linearization {
+        // Two full vectors, worst-case four full stress tensors per element, and a complete
+        // sparse geometric-stiffness CSR. Index storage is charged at the same eight-byte width.
+        let linearization_values = dofs
+            .checked_mul(2)
+            .and_then(|value| value.checked_add(facts.topology.elements.0.checked_mul(36)?))
+            .and_then(|value| value.checked_add(stiffness_nonzeros.checked_mul(2)?))
+            .and_then(|value| value.checked_add(dofs.checked_add(1)?))
+            .ok_or(ResourcePlanningError::Overflow(
+                "structural linearization value count",
+            ))?;
+        recovery_values = recovery_values.checked_add(linearization_values).ok_or(
+            ResourcePlanningError::Overflow("structural result value count"),
+        )?;
+    }
     let recovery_bytes = checked_bytes(recovery_values, 8, "structural recovery bytes")?;
     let recovery_resident = checked_add(
         recovery_bytes,
@@ -100,9 +122,6 @@ pub fn build_structural_resource_plan(
         STRUCTURAL_ARTIFACT_OVERHEAD_BYTES,
         "structural checkpoint bytes",
     )?;
-    let step = workload
-        .procedure_step()
-        .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
     let accelerators = structural_accelerator_requirements(workload, accelerator_requests)?;
     let required_capabilities = accelerators
         .iter()

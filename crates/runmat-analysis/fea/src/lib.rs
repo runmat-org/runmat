@@ -35,6 +35,7 @@ pub use pipeline::electromagnetic_frequency::{
 pub use pipeline::linear_static::{
     run_linear_static, run_linear_static_with_options,
     run_linear_static_with_prepared_constraint_plan,
+    run_linear_static_with_prepared_constraint_plan_and_linearization, LinearStaticExecution,
 };
 pub use pipeline::modal::{execute_structural_modal_workload, run_modal, run_modal_with_options};
 pub use pipeline::modal_basis::{

@@ -184,7 +184,10 @@ fn build_candidates(system: &AssembledRealSystem, basis: &[Vec<f64>]) -> Vec<Rit
     candidates
 }
 
-fn symmetric_eigendecomposition(mut matrix: Vec<f64>, dimension: usize) -> (Vec<f64>, Vec<f64>) {
+pub(crate) fn symmetric_eigendecomposition(
+    mut matrix: Vec<f64>,
+    dimension: usize,
+) -> (Vec<f64>, Vec<f64>) {
     let mut vectors = vec![0.0; dimension * dimension];
     for index in 0..dimension {
         vectors[index * dimension + index] = 1.0;

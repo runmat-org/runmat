@@ -1574,6 +1574,166 @@ pub(crate) fn single_tetrahedron_solver_mesh_for_model(
 }
 
 #[test]
+fn physical_preload_publishes_signed_load_linear_geometric_stiffness() {
+    let mut model = fixture_model(FixtureId::StructuralTransientTet4Reference);
+    model.sequence.steps = vec![ProcedureStep::structural_static("preload")];
+    model.constraints.truncate(1);
+    let mesh = single_tetrahedron_solver_mesh_for_model(&model);
+    let plan = crate::constraints::CanonicalStructuralConstraintPlan::compile_for_model(
+        &model,
+        Some(&mesh),
+    )
+    .unwrap();
+    let topology_digest = plan.topology.discretization_digest();
+    let options = LinearStaticSolveOptions {
+        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+        solver_mesh: Some(mesh.clone()),
+        require_solver_mesh_for_solid: true,
+        ..LinearStaticSolveOptions::default()
+    };
+    let base = crate::run_linear_static_with_prepared_constraint_plan_and_linearization(
+        &model,
+        ComputeBackend::Cpu,
+        options.clone(),
+        &plan,
+        topology_digest,
+    )
+    .unwrap();
+    assert_eq!(base.linearization.topology_digest(), topology_digest);
+    assert_eq!(base.linearization.initial_stress().len(), 1);
+    assert_eq!(
+        base.linearization.evidence().stress_quadrature_point_count,
+        1
+    );
+    assert!(base
+        .linearization
+        .geometric_stiffness()
+        .values()
+        .iter()
+        .any(|value| value.abs() > 0.0));
+
+    replace_fixture_excitations(
+        &mut model,
+        vec![FixtureExcitation {
+            id: "double_preload".into(),
+            region_id: "dynamic_force".into(),
+            kind: FixtureExcitationKind::Force([2.0, 0.0, 0.0]),
+        }],
+    );
+    let doubled = crate::run_linear_static_with_prepared_constraint_plan_and_linearization(
+        &model,
+        ComputeBackend::Cpu,
+        options,
+        &plan,
+        topology_digest,
+    )
+    .unwrap();
+    for row in 0..base.linearization.geometric_stiffness().rows() {
+        for column in 0..base.linearization.geometric_stiffness().columns() {
+            let expected = 2.0 * base.linearization.geometric_stiffness().get(row, column);
+            let actual = doubled.linearization.geometric_stiffness().get(row, column);
+            assert!((actual - expected).abs() <= 1.0e-10 * expected.abs().max(1.0));
+        }
+    }
+
+    let constraint_result =
+        crate::constraints::CanonicalStructuralConstraintResult::recover_for_model(
+            &plan,
+            &model,
+            Some(&mesh),
+            &base.run.fields,
+        )
+        .unwrap();
+    let portable = crate::execution::StructuralLinearWorkloadResult::with_linearization(
+        base.run,
+        constraint_result,
+        base.linearization,
+    )
+    .unwrap();
+    let decoded = crate::execution::StructuralLinearWorkloadResult::from_canonical_bytes(
+        &portable.canonical_bytes().unwrap(),
+    )
+    .unwrap();
+    assert_eq!(decoded, portable);
+}
+
+#[test]
+fn physical_compressive_preload_buckling_has_exact_residual_and_inverse_load_scaling() {
+    let mut model = fixture_model(FixtureId::StructuralTransientTet4Reference);
+    model.sequence.steps = vec![ProcedureStep::structural_static("preload")];
+    model.constraints.truncate(1);
+    let mesh = single_tetrahedron_solver_mesh_for_model(&model);
+    let plan = crate::constraints::CanonicalStructuralConstraintPlan::compile_for_model(
+        &model,
+        Some(&mesh),
+    )
+    .unwrap();
+    let topology_digest = plan.topology.discretization_digest();
+    let options = || LinearStaticSolveOptions {
+        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+        solver_mesh: Some(mesh.clone()),
+        require_solver_mesh_for_solid: true,
+        ..LinearStaticSolveOptions::default()
+    };
+    let solve_at_load = |model: &runmat_analysis_core::AnalysisModel| {
+        let preload = crate::run_linear_static_with_prepared_constraint_plan_and_linearization(
+            model,
+            ComputeBackend::Cpu,
+            options(),
+            &plan,
+            topology_digest,
+        )
+        .unwrap();
+        let excitations = static_excitations(model);
+        let summary = crate::assembly::assemble_structural_system_with_constraint_plan(
+            model,
+            &excitations,
+            Some(mesh.clone()),
+            crate::assembly::StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+            &plan,
+        )
+        .unwrap();
+        crate::solve::buckling::solve_eigenvalue_buckling(
+            &summary,
+            &preload.linearization,
+            1,
+            1.0e-10,
+            8,
+        )
+        .unwrap()
+    };
+
+    replace_fixture_excitations(
+        &mut model,
+        vec![FixtureExcitation {
+            id: "compressive_preload".into(),
+            region_id: "tip".into(),
+            kind: FixtureExcitationKind::Force([0.0, 0.0, -1.0]),
+        }],
+    );
+    let unit = solve_at_load(&model);
+    assert!(unit.converged);
+    assert_eq!(unit.modes.len(), 1);
+    assert!(unit.modes[0].load_factor > 0.0);
+    assert!(unit.modes[0].residual_norm <= 1.0e-12);
+
+    replace_fixture_excitations(
+        &mut model,
+        vec![FixtureExcitation {
+            id: "double_compressive_preload".into(),
+            region_id: "tip".into(),
+            kind: FixtureExcitationKind::Force([0.0, 0.0, -2.0]),
+        }],
+    );
+    let doubled = solve_at_load(&model);
+    assert!(doubled.converged);
+    assert!(
+        (doubled.modes[0].load_factor - 0.5 * unit.modes[0].load_factor).abs()
+            <= 1.0e-10 * unit.modes[0].load_factor
+    );
+}
+
+#[test]
 fn structural_frequency_entries_execute_independently_and_assemble_in_plan_order() {
     use runmat_analysis_core::{FormulationRequirement, IndependentDomain};
 

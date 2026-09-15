@@ -4,6 +4,14 @@ pub(super) fn execute() -> SolvedPipeline {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     let mut producer_step = runmat_analysis_core::ProcedureStep::structural_static("preload");
     producer_step.observations = vec![structural_displacement_observation()];
+    producer_step
+        .state_outputs
+        .push(runmat_analysis_core::StateOutput {
+            state_id: runmat_analysis_core::StateId("preload-linearization".into()),
+            kind: runmat_analysis_core::StateKind::GeometricStiffness,
+            completeness: runmat_analysis_core::StateCompleteness::Complete,
+            persistence: runmat_analysis_core::StatePersistence::UntilDependentsComplete,
+        });
     let state_id = producer_step.state_outputs[0].state_id.clone();
     let mut consumer_step = runmat_analysis_core::ProcedureStep::structural_static("branch");
     consumer_step
@@ -101,6 +109,7 @@ pub(super) fn execute() -> SolvedPipeline {
         .unwrap();
     let result = StructuralLinearWorkloadResult::from_canonical_bytes(&outputs[0].payload).unwrap();
     assert!(!result.run.fields_are_empty());
+    assert!(result.linearization.is_some());
     let constraint_plan =
         CanonicalStructuralConstraintPlan::from_canonical_bytes(&prepared.inputs[2].payload())
             .unwrap();

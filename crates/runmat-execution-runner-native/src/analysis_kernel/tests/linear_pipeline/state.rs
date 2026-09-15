@@ -46,6 +46,54 @@ pub(super) fn execute(solved: &SolvedPipeline) {
         solved.prepared.inputs[1].manifest.logical_identity
     );
 
+    let linearization_declaration = solved.solve.model.sequence.steps[0]
+        .state_outputs
+        .iter()
+        .find(|output| output.kind == runmat_analysis_core::StateKind::GeometricStiffness)
+        .unwrap()
+        .clone();
+    let linearization_request = SemanticStatePublicationRequest::new(
+        SemanticStatePublicationSource::StructuralLinearization,
+        step,
+        linearization_declaration,
+        solved.prepared.inputs[1].manifest.logical_identity,
+        solved.source_result,
+    )
+    .unwrap();
+    let request_bytes = linearization_request.canonical_bytes().unwrap();
+    let request = runmat_analysis_execution::prepare_analysis_objects(
+        AnalysisNumericalObjectKind::StatePublicationRequest,
+        Digest::sha256(&request_bytes),
+        &request_bytes,
+        4096,
+        ObjectNamespace::InputValue,
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    let inputs = vec![request, solved.solver_result.clone()];
+    let publication_host = test_host_for_inputs(
+        host,
+        AnalysisWorkKind::PublishState,
+        &inputs,
+        vec![AnalysisNumericalObjectKind::SemanticState],
+        None,
+    );
+    let outputs = NativeAnalysisKernel
+        .execute(AnalysisKernelInvocation {
+            kind: AnalysisWorkKind::PublishState,
+            host: &publication_host,
+            inputs: &inputs,
+        })
+        .unwrap();
+    let linearization_state =
+        CanonicalSemanticState::from_canonical_bytes(&outputs[0].payload).unwrap();
+    let linearization = linearization_state
+        .payload
+        .structural_linearization()
+        .unwrap();
+    assert_eq!(linearization.topology_digest(), state.topology_digest);
+    assert_eq!(linearization.source_run(), &solved.result.run.identity);
+
     let consumer_step = solved
         .solve
         .model

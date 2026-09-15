@@ -2,6 +2,7 @@ use runmat_analysis_core::{
     validate_model, AnalysisField, AnalysisModel, AnalysisProcedure, StructuralConstraintKind,
     StructuralOperatorImplementation,
 };
+use runmat_execution::Digest;
 
 use crate::{
     algebra::apply_k,
@@ -59,7 +60,12 @@ pub fn run_linear_static_with_options(
     backend: ComputeBackend,
     options: LinearStaticSolveOptions,
 ) -> Result<FeaRunResult, FeaRunError> {
-    run_linear_static_with_constraint_plan(model, backend, options, None)
+    run_linear_static_with_constraint_plan(model, backend, options, None).map(|result| result.run)
+}
+
+pub struct LinearStaticExecution {
+    pub run: FeaRunResult,
+    pub linearization: super::structural_linearization::StructuralLinearizationArtifact,
 }
 
 /// Executes a linear-static solve with a topology-resolved constraint plan supplied by the
@@ -72,6 +78,39 @@ pub fn run_linear_static_with_prepared_constraint_plan(
     constraint_plan: &CanonicalStructuralConstraintPlan,
 ) -> Result<FeaRunResult, FeaRunError> {
     run_linear_static_with_constraint_plan(model, backend, options, Some(constraint_plan))
+        .map(|result| result.run)
+}
+
+/// Executes the preload solve and publishes the exact initial-stress tangent from the same
+/// assembly and solution. This prevents downstream stability procedures from reconstructing or
+/// relabeling a base state.
+pub fn run_linear_static_with_prepared_constraint_plan_and_linearization(
+    model: &AnalysisModel,
+    backend: ComputeBackend,
+    options: LinearStaticSolveOptions,
+    constraint_plan: &CanonicalStructuralConstraintPlan,
+    topology_digest: Digest,
+) -> Result<LinearStaticExecution, FeaRunError> {
+    let computation =
+        run_linear_static_with_constraint_plan(model, backend, options, Some(constraint_plan))?;
+    let linearization =
+        super::structural_linearization::StructuralLinearizationArtifact::from_solution(
+            &computation.summary,
+            computation.run.identity.clone(),
+            topology_digest,
+            &computation.solution,
+        )
+        .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+    Ok(LinearStaticExecution {
+        run: computation.run,
+        linearization,
+    })
+}
+
+struct LinearStaticComputation {
+    run: FeaRunResult,
+    summary: AssemblySummary,
+    solution: Vec<f64>,
 }
 
 fn run_linear_static_with_constraint_plan(
@@ -79,7 +118,7 @@ fn run_linear_static_with_constraint_plan(
     backend: ComputeBackend,
     options: LinearStaticSolveOptions,
     constraint_plan: Option<&CanonicalStructuralConstraintPlan>,
-) -> Result<FeaRunResult, FeaRunError> {
+) -> Result<LinearStaticComputation, FeaRunError> {
     let execution_step = super::admission::require_structural(
         model,
         AnalysisProcedure::Static,
@@ -447,7 +486,7 @@ fn run_linear_static_with_constraint_plan(
         Some(5),
     );
 
-    Ok(FeaRunResult {
+    let run = FeaRunResult {
         identity,
         requested_backend: backend,
         execution_backend: crate::contracts::ExecutionBackend::from_solver_backend(
@@ -465,6 +504,11 @@ fn run_linear_static_with_constraint_plan(
         observation_histories: Vec::new(),
         series_reductions: Vec::new(),
         fields,
+    };
+    Ok(LinearStaticComputation {
+        run,
+        summary,
+        solution: solve_result.solution,
     })
 }
 

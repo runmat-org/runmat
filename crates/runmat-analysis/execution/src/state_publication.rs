@@ -53,6 +53,9 @@ pub fn prepare_semantic_state_publication(
             SemanticStatePublicationSource::StructuralPrimaryFields,
             AnalysisWorkKind::Solve
         ) | (
+            SemanticStatePublicationSource::StructuralLinearization,
+            AnalysisWorkKind::Solve
+        ) | (
             SemanticStatePublicationSource::ModalBasis,
             AnalysisWorkKind::ExtractStructuralModes
         )

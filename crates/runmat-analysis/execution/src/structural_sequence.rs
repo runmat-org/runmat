@@ -440,7 +440,20 @@ impl StructuralSequenceCoordinator {
                     prepare_semantic_state_publication(SemanticStatePublicationPreparation {
                         source_host: task.prepared.host.clone(),
                         source_result: imported.objects.clone(),
-                        source: SemanticStatePublicationSource::StructuralPrimaryFields,
+                        source: match declaration.kind {
+                            runmat_analysis_core::StateKind::StructuralPrimary => {
+                                SemanticStatePublicationSource::StructuralPrimaryFields
+                            }
+                            runmat_analysis_core::StateKind::GeometricStiffness => {
+                                SemanticStatePublicationSource::StructuralLinearization
+                            }
+                            _ => {
+                                return Err(AnalysisBridgeError::Invalid(format!(
+                                    "linear-static state output `{}` has unsupported kind {:?}",
+                                    declaration.state_id.0, declaration.kind
+                                )))
+                            }
+                        },
                         declaration: declaration.clone(),
                         topology_digest: imported
                             .result

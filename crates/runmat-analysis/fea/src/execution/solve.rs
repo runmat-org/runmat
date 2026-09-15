@@ -236,6 +236,8 @@ pub struct StructuralLinearWorkloadResult {
     pub schema_version: u16,
     pub run: FeaRunResult,
     pub constraint_result: crate::constraints::CanonicalStructuralConstraintResult,
+    pub linearization:
+        Option<crate::pipeline::structural_linearization::StructuralLinearizationArtifact>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -302,6 +304,22 @@ impl StructuralLinearWorkloadResult {
             schema_version: 1,
             run,
             constraint_result,
+            linearization: None,
+        };
+        result.validate()?;
+        Ok(result)
+    }
+
+    pub fn with_linearization(
+        run: FeaRunResult,
+        constraint_result: crate::constraints::CanonicalStructuralConstraintResult,
+        linearization: crate::pipeline::structural_linearization::StructuralLinearizationArtifact,
+    ) -> AnalysisExecutionResult<Self> {
+        let result = Self {
+            schema_version: 1,
+            run,
+            constraint_result,
+            linearization: Some(linearization),
         };
         result.validate()?;
         Ok(result)
@@ -321,6 +339,19 @@ impl StructuralLinearWorkloadResult {
         self.constraint_result
             .validate()
             .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+        if let Some(linearization) = &self.linearization {
+            linearization
+                .validate()
+                .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+            if linearization.source_run() != &self.run.identity
+                || linearization.topology_digest()
+                    != self.constraint_result.topology.discretization_digest()
+            {
+                return Err(AnalysisExecutionError::Identity(
+                    "structural linearization does not belong to its solver result",
+                ));
+            }
+        }
         StructuralLinearNumericalReceipt::from_run(&self.run)?;
         let mut field_ids = std::collections::BTreeSet::new();
         for field in &self.run.fields {

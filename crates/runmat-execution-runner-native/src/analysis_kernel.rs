@@ -676,21 +676,43 @@ fn execute_structural_linear(
             "constraint-plan manifest differs from the compiled plan",
         ));
     }
-    let run = run_linear_static_with_prepared_constraint_plan(
-        &solver_model,
-        solve.backend,
-        LinearStaticSolveOptions {
-            formulation_requirement: solve.formulation_requirement,
-            preconditioner_kind: solve.preconditioner,
-            algebra_backend_kind: solve.algebra_backend,
-            solver_mesh_artifact_path: None,
-            solver_mesh: mesh.clone(),
-            require_solver_mesh_for_solid: solve.require_solver_mesh_for_solid,
-            initial_displacement,
-        },
-        &constraint_plan,
-    )
-    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let solve_options = LinearStaticSolveOptions {
+        formulation_requirement: solve.formulation_requirement,
+        preconditioner_kind: solve.preconditioner,
+        algebra_backend_kind: solve.algebra_backend,
+        solver_mesh_artifact_path: None,
+        solver_mesh: mesh.clone(),
+        require_solver_mesh_for_solid: solve.require_solver_mesh_for_solid,
+        initial_displacement,
+    };
+    let publishes_linearization = solve
+        .procedure_step()?
+        .state_outputs
+        .iter()
+        .any(|output| output.kind == runmat_analysis_core::StateKind::GeometricStiffness);
+    let (run, linearization) = if publishes_linearization {
+        let execution =
+            runmat_analysis_fea::run_linear_static_with_prepared_constraint_plan_and_linearization(
+                &solver_model,
+                solve.backend,
+                solve_options,
+                &constraint_plan,
+                topology_digest,
+            )
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+        (execution.run, Some(execution.linearization))
+    } else {
+        (
+            run_linear_static_with_prepared_constraint_plan(
+                &solver_model,
+                solve.backend,
+                solve_options,
+                &constraint_plan,
+            )
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
+            None,
+        )
+    };
     let constraint_result = CanonicalStructuralConstraintResult::recover_for_model(
         &constraint_plan,
         &solver_model,
@@ -698,7 +720,14 @@ fn execute_structural_linear(
         &run.fields,
     )
     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    let result = StructuralLinearWorkloadResult::new(run, constraint_result)?;
+    let result = match linearization {
+        Some(linearization) => StructuralLinearWorkloadResult::with_linearization(
+            run,
+            constraint_result,
+            linearization,
+        )?,
+        None => StructuralLinearWorkloadResult::new(run, constraint_result)?,
+    };
     let payload = result.canonical_bytes()?;
     let numerical_receipt =
         StructuralLinearNumericalReceiptArtifact::new(invocation.host.workload.identity, &result)?;
@@ -757,6 +786,16 @@ fn execute_state_publication(
             let solver_result =
                 StructuralLinearWorkloadResult::from_canonical_bytes(&solver_result.payload())?;
             CanonicalSemanticState::from_publication(&publication, &solver_result.run.fields)?
+        }
+        SemanticStatePublicationSource::StructuralLinearization => {
+            let solver_result =
+                StructuralLinearWorkloadResult::from_canonical_bytes(&solver_result.payload())?;
+            let linearization = solver_result.linearization.ok_or_else(|| {
+                AnalysisBridgeError::Invalid(
+                    "solver result did not publish its declared structural linearization".into(),
+                )
+            })?;
+            CanonicalSemanticState::from_linearization_publication(&publication, linearization)?
         }
         SemanticStatePublicationSource::ModalBasis => {
             let solver_result =

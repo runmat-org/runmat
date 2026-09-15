@@ -29,6 +29,7 @@ pub enum ScalarPrecision {
 #[serde(rename_all = "snake_case")]
 pub enum OperatorRole {
     Stiffness,
+    GeometricStiffness,
     Mass,
     Damping,
     Conductivity,
@@ -79,6 +80,10 @@ impl MatrixProperties {
     pub const SYMMETRIC_POSITIVE_SEMIDEFINITE: Self = Self {
         symmetry: MatrixSymmetry::Symmetric,
         definiteness: MatrixDefiniteness::PositiveSemidefinite,
+    };
+    pub const SYMMETRIC_INDEFINITE: Self = Self {
+        symmetry: MatrixSymmetry::Symmetric,
+        definiteness: MatrixDefiniteness::Indefinite,
     };
     pub const GENERAL: Self = Self {
         symmetry: MatrixSymmetry::General,

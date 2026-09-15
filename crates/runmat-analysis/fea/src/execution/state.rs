@@ -37,6 +37,7 @@ pub struct SemanticStatePublicationRequest {
 #[serde(rename_all = "snake_case")]
 pub enum SemanticStatePublicationSource {
     StructuralPrimaryFields,
+    StructuralLinearization,
     ModalBasis,
 }
 
@@ -70,6 +71,9 @@ impl SemanticStatePublicationRequest {
                 (
                     SemanticStatePublicationSource::StructuralPrimaryFields,
                     StateKind::StructuralPrimary
+                ) | (
+                    SemanticStatePublicationSource::StructuralLinearization,
+                    StateKind::GeometricStiffness
                 ) | (
                     SemanticStatePublicationSource::ModalBasis,
                     StateKind::ModalBasis
@@ -133,6 +137,10 @@ pub enum CanonicalSemanticStatePayload {
     },
     ModalBasis {
         basis: Box<crate::pipeline::modal_basis::ModalBasisArtifact>,
+    },
+    StructuralLinearization {
+        linearization:
+            Box<crate::pipeline::structural_linearization::StructuralLinearizationArtifact>,
     },
 }
 
@@ -206,6 +214,33 @@ impl CanonicalSemanticState {
             source_result: request.source_result,
             payload: CanonicalSemanticStatePayload::ModalBasis {
                 basis: Box::new(basis),
+            },
+        })
+    }
+
+    pub fn from_linearization_publication(
+        request: &SemanticStatePublicationRequest,
+        linearization: crate::pipeline::structural_linearization::StructuralLinearizationArtifact,
+    ) -> AnalysisExecutionResult<Self> {
+        request.validate()?;
+        if request.source != SemanticStatePublicationSource::StructuralLinearization
+            || linearization.topology_digest() != request.topology_digest
+        {
+            return Err(AnalysisExecutionError::Invalid(
+                "geometric-stiffness state publication requires a topology-matched structural linearization"
+                    .into(),
+            ));
+        }
+        linearization
+            .validate()
+            .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+        Self::new(CanonicalSemanticStateInput {
+            producer: request.producer,
+            declaration: request.declaration.clone(),
+            topology_digest: request.topology_digest,
+            source_result: request.source_result,
+            payload: CanonicalSemanticStatePayload::StructuralLinearization {
+                linearization: Box::new(linearization),
             },
         })
     }
@@ -285,6 +320,19 @@ impl CanonicalSemanticState {
                     ));
                 }
             }
+            CanonicalSemanticStatePayload::StructuralLinearization { linearization } => {
+                if self.kind != StateKind::GeometricStiffness
+                    || linearization.topology_digest() != self.topology_digest
+                {
+                    return Err(AnalysisExecutionError::Invalid(
+                        "structural-linearization payload does not match its declared state kind or topology"
+                            .into(),
+                    ));
+                }
+                linearization
+                    .validate()
+                    .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+            }
         }
         let content_digest = self.derive_content_digest()?;
         if self.content_digest != content_digest || self.identity != self.derive_identity()? {
@@ -346,21 +394,38 @@ impl CanonicalSemanticStatePayload {
     pub fn fields(&self) -> Option<&[AnalysisField]> {
         match self {
             Self::Fields { fields } => Some(fields),
-            Self::StructuralFrequency { .. } | Self::ModalBasis { .. } => None,
+            Self::StructuralFrequency { .. }
+            | Self::ModalBasis { .. }
+            | Self::StructuralLinearization { .. } => None,
         }
     }
 
     pub fn structural_frequency(&self) -> Option<&super::StructuralFrequencyPublicationManifest> {
         match self {
             Self::StructuralFrequency { publication } => Some(publication.as_ref()),
-            Self::Fields { .. } | Self::ModalBasis { .. } => None,
+            Self::Fields { .. }
+            | Self::ModalBasis { .. }
+            | Self::StructuralLinearization { .. } => None,
         }
     }
 
     pub fn modal_basis(&self) -> Option<&crate::pipeline::modal_basis::ModalBasisArtifact> {
         match self {
-            Self::Fields { .. } | Self::StructuralFrequency { .. } => None,
+            Self::Fields { .. }
+            | Self::StructuralFrequency { .. }
+            | Self::StructuralLinearization { .. } => None,
             Self::ModalBasis { basis } => Some(basis.as_ref()),
+        }
+    }
+
+    pub fn structural_linearization(
+        &self,
+    ) -> Option<&crate::pipeline::structural_linearization::StructuralLinearizationArtifact> {
+        match self {
+            Self::StructuralLinearization { linearization } => Some(linearization.as_ref()),
+            Self::Fields { .. } | Self::StructuralFrequency { .. } | Self::ModalBasis { .. } => {
+                None
+            }
         }
     }
 }

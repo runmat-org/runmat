@@ -9,21 +9,21 @@ use crate::{
 
 use super::math::dot;
 
-pub(super) struct LinearSolveAttempt {
-    pub(super) vector: Vec<f64>,
-    pub(super) converged: bool,
-    pub(super) accelerator: Option<crate::solve::linear::LinearSolveResult>,
+pub(crate) struct LinearSolveAttempt {
+    pub(crate) vector: Vec<f64>,
+    pub(crate) converged: bool,
+    pub(crate) accelerator: Option<crate::solve::linear::LinearSolveResult>,
 }
 
-pub(super) struct CgSolveOptions<'a> {
-    pub(super) max_iters: usize,
-    pub(super) tol: f64,
-    pub(super) prepared_accelerator_system: Option<&'a AcceleratorPreparedLinearSystem>,
-    pub(super) cpu_preconditioner: Option<&'a dyn SpdPreconditioner>,
-    pub(super) initial_guess: Option<&'a [f64]>,
+pub(crate) struct CgSolveOptions<'a> {
+    pub(crate) max_iters: usize,
+    pub(crate) tol: f64,
+    pub(crate) prepared_accelerator_system: Option<&'a AcceleratorPreparedLinearSystem>,
+    pub(crate) cpu_preconditioner: Option<&'a dyn SpdPreconditioner>,
+    pub(crate) initial_guess: Option<&'a [f64]>,
 }
 
-pub(super) fn solve_k_system_cg(
+pub(crate) fn solve_k_system_cg(
     system: &AssembledRealSystem,
     rhs: &[f64],
     options: CgSolveOptions<'_>,
