@@ -2,8 +2,8 @@ use std::collections::BTreeSet;
 
 use runmat_analysis_core::StateUse;
 use runmat_analysis_fea::execution::{
-    AnalysisTaskIdentity, StructuralPrestressedModalTemplate, StructuralStepWorkload,
-    StructuralStudyWorkloads,
+    AnalysisTaskIdentity, SemanticStatePublicationSource, StructuralModalWorkload,
+    StructuralPrestressedModalTemplate, StructuralStepWorkload, StructuralStudyWorkloads,
 };
 use runmat_execution::{resource::AcceleratorRequest, Digest, ProgramRevision};
 use runmat_execution_artifact::{
@@ -15,11 +15,13 @@ use crate::structural_prestress_producer::{
     StructuralPrestressProducerCoordinator, StructuralPrestressProducerPreparation,
 };
 use crate::{
-    bind_upstream_state_transition, import_structural_modal_result, prepare_structural_modal_task,
-    AnalysisBridgeError, AnalysisBridgeResult, AnalysisCapabilityRequirement,
-    ImportedSemanticState, ImportedStructuralLinearResult, ImportedStructuralModalResult,
-    PreparedSemanticStatePublication, PreparedStructuralLinearProgram, PreparedStructuralModalTask,
-    StructuralModalTaskPreparation,
+    bind_upstream_state_transition, import_semantic_state_completion,
+    import_structural_modal_result, prepare_semantic_state_publication,
+    prepare_structural_modal_task, AnalysisBridgeError, AnalysisBridgeResult,
+    AnalysisCapabilityRequirement, ImportedSemanticState, ImportedStructuralLinearResult,
+    ImportedStructuralModalResult, PreparedSemanticStatePublication,
+    PreparedStructuralLinearProgram, PreparedStructuralModalTask,
+    SemanticStatePublicationPreparation, StructuralModalTaskPreparation,
 };
 
 pub struct StructuralPrestressedModalStudyPreparation {
@@ -40,6 +42,8 @@ enum ConsumerPhase {
     AwaitingPrestress,
     Ready,
     Awaiting(Digest),
+    ReadyForBasis,
+    AwaitingBasis(Digest),
     Complete,
 }
 
@@ -55,8 +59,11 @@ pub struct StructuralPrestressedModalStudyCoordinator {
     accelerator_requests: Vec<AcceleratorRequest>,
     producer: StructuralPrestressProducerCoordinator,
     template: StructuralPrestressedModalTemplate,
+    bound_modal_workload: Option<StructuralModalWorkload>,
     modal: Option<ImportedStructuralModalResult>,
     modal_task: Option<AnalysisTaskIdentity>,
+    basis_state: Option<ImportedSemanticState>,
+    basis_state_task: Option<AnalysisTaskIdentity>,
     phase: ConsumerPhase,
 }
 
@@ -76,10 +83,15 @@ impl StructuralPrestressedModalStudyCoordinator {
             ));
         };
         let ordered = preparation.workloads.step_ids()?;
-        let [preload_step, modal_step] = ordered.as_slice() else {
-            return Err(invalid(
-                "prestressed-modal coordination requires exactly one preload and one modal step",
-            ));
+        let (preload_step, modal_step) = match ordered.as_slice() {
+            [preload_step, modal_step] | [preload_step, modal_step, _] => {
+                (preload_step, modal_step)
+            }
+            _ => {
+                return Err(invalid(
+                    "prestressed-modal coordination requires a preload and modal prefix",
+                ))
+            }
         };
         let StructuralStepWorkload::Linear { workload } = &workloads[preload_step] else {
             return Err(invalid(
@@ -115,8 +127,11 @@ impl StructuralPrestressedModalStudyCoordinator {
             accelerator_requests: preparation.accelerator_requests,
             producer,
             template: (**template).clone(),
+            bound_modal_workload: None,
             modal: None,
             modal_task: None,
+            basis_state: None,
+            basis_state_task: None,
             phase: ConsumerPhase::AwaitingPrestress,
         })
     }
@@ -172,6 +187,7 @@ impl StructuralPrestressedModalStudyCoordinator {
             Digest::from_bytes(*self.mesh.canonical_digest.bytes()),
         )?;
         let workload = self.template.clone().bind(transition)?;
+        self.bound_modal_workload = Some(workload.clone());
         let prepared = prepare_structural_modal_task(StructuralModalTaskPreparation {
             authored_study_digest: self.authored_study_digest,
             frozen_project_digest: self.frozen_project_digest,
@@ -214,6 +230,65 @@ impl StructuralPrestressedModalStudyCoordinator {
             prepared.host.workload.identity,
             vec![state_task],
         )?);
+        self.phase = ConsumerPhase::ReadyForBasis;
+        Ok(())
+    }
+
+    pub fn prepare_basis_state(
+        &mut self,
+    ) -> AnalysisBridgeResult<PreparedSemanticStatePublication> {
+        if self.phase != ConsumerPhase::ReadyForBasis {
+            return Err(invalid(
+                "prestressed-modal study is not ready to publish its modal basis",
+            ));
+        }
+        let modal = self
+            .modal
+            .as_ref()
+            .ok_or_else(|| invalid("completed prestressed-modal result is absent"))?;
+        let prepared = prepare_semantic_state_publication(SemanticStatePublicationPreparation {
+            source_host: modal.host.clone(),
+            source_result: modal.objects.clone(),
+            source: SemanticStatePublicationSource::ModalBasis,
+            declaration: self
+                .bound_modal_workload
+                .as_ref()
+                .ok_or_else(|| invalid("bound prestressed-modal workload is absent"))?
+                .modal_basis_output()?
+                .clone(),
+            topology_digest: Digest::from_bytes(*self.mesh.canonical_digest.bytes()),
+            program_revision: self.program_revision.clone(),
+            chunk_bytes: self.chunk_bytes,
+            inventory_limits: self.producer.inventory_limits(),
+        })?;
+        self.phase = ConsumerPhase::AwaitingBasis(prepared.host.workload.identity.digest());
+        Ok(prepared)
+    }
+
+    pub fn complete_basis_state(
+        &mut self,
+        source: &impl CacheImport,
+        response: ProgramExecutionResponse,
+        prepared: &PreparedSemanticStatePublication,
+    ) -> AnalysisBridgeResult<()> {
+        if self.phase != ConsumerPhase::AwaitingBasis(prepared.host.workload.identity.digest()) {
+            return Err(AnalysisBridgeError::Identity(
+                "modal-basis publication differs from the awaited prestressed-modal result",
+            ));
+        }
+        self.basis_state = Some(import_semantic_state_completion(
+            source,
+            response,
+            prepared,
+            self.producer.inventory_limits(),
+        )?);
+        let modal_task = self
+            .modal_task
+            .ok_or_else(|| invalid("prestressed-modal task identity is absent"))?;
+        self.basis_state_task = Some(AnalysisTaskIdentity::new(
+            prepared.host.workload.identity,
+            vec![modal_task],
+        )?);
         self.phase = ConsumerPhase::Complete;
         Ok(())
     }
@@ -230,6 +305,10 @@ impl StructuralPrestressedModalStudyCoordinator {
         self.modal_task
     }
 
+    pub const fn basis_state_task_identity(&self) -> Option<AnalysisTaskIdentity> {
+        self.basis_state_task
+    }
+
     pub fn preload_result(&self) -> Option<&ImportedStructuralLinearResult> {
         self.producer.preload_result()
     }
@@ -240,6 +319,10 @@ impl StructuralPrestressedModalStudyCoordinator {
 
     pub fn modal_result(&self) -> Option<&ImportedStructuralModalResult> {
         self.modal.as_ref()
+    }
+
+    pub fn basis_state(&self) -> Option<&ImportedSemanticState> {
+        self.basis_state.as_ref()
     }
 }
 

@@ -24,6 +24,7 @@ use crate::{
     execute_structural_buckling_study_locally, execute_structural_frequency_locally_with_source,
     execute_structural_modal_locally, execute_structural_modal_transient_locally,
     execute_structural_prestressed_frequency_study_locally_with_source,
+    execute_structural_prestressed_modal_frequency_study_locally_with_source,
     execute_structural_prestressed_modal_study_locally, execute_structural_sequence_locally,
     NativeExecutionConfig, RetainedStructuralTransientRecovery,
     StructuralFrequencyExecutionPreparation, StructuralSequenceExecutionPolicy,
@@ -159,6 +160,77 @@ async fn execute_one(
             let step_ids = authored.step_ids().map_err(|error| {
                 crate::NativeExecutionError::Configuration(error.to_string())
             })?;
+            if let [preload_step_id, modal_step_id, frequency_step_id] = step_ids.as_slice() {
+                let is_modal_frequency = match &authored {
+                    StructuralStudyWorkloads::HeterogeneousSequence { workloads } => matches!(
+                        (
+                            workloads.get(preload_step_id),
+                            workloads.get(modal_step_id),
+                            workloads.get(frequency_step_id),
+                        ),
+                        (
+                            Some(runmat_analysis_fea::execution::StructuralStepWorkload::Linear { .. }),
+                            Some(runmat_analysis_fea::execution::StructuralStepWorkload::PrestressedModal { .. }),
+                            Some(runmat_analysis_fea::execution::StructuralStepWorkload::PrestressedFrequency { .. }),
+                        )
+                    ),
+                    _ => false,
+                };
+                if !is_modal_frequency {
+                    return Err(crate::NativeExecutionError::Configuration(
+                        "three-step structural study is not a prestressed modal-frequency sequence"
+                            .into(),
+                    ));
+                }
+                let (completed, source) =
+                    execute_structural_prestressed_modal_frequency_study_locally_with_source(
+                        execution_config,
+                        runmat_analysis_execution::StructuralPrestressedFrequencyStudyPreparation {
+                            authored_study_digest: study_digest,
+                            frozen_project_digest: None,
+                            workloads: authored,
+                            mesh: prepared.solver_mesh().clone(),
+                            artifact_access: access.clone(),
+                            program_revision: revision,
+                            chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
+                            inventory_limits: ObjectInventoryLimits::default(),
+                            required_capabilities: BTreeSet::new(),
+                            accelerator_requests,
+                        },
+                        policy,
+                    )
+                    .await?;
+                let (catalog, artifact_roots) = completed.frequency.published_artifacts(&access)?;
+                let frequency = StructuralStudyFrequencyNumericalResult::new(
+                    None,
+                    completed.resolved_workload,
+                    completed.frequency.result.result,
+                    completed.frequency.publication,
+                    catalog,
+                    artifact_roots,
+                    ArtifactPublishedObjectSource::new(source),
+                )
+                .map_err(crate::NativeExecutionError::Configuration)?;
+                return Ok(
+                    StructuralStudyNumericalResult::StructuralPrestressedFrequency(Box::new(
+                        StructuralStudyPrestressedFrequencyNumericalResult {
+                            frozen_project_digest: None,
+                            preload_step_id: preload_step_id.clone(),
+                            frequency_step_id: frequency_step_id.clone(),
+                            preload_result: completed.preload.result.run,
+                            preload_solver_result_identity: completed.preload.identity,
+                            prestress_state: completed.prestress_state.state,
+                            reduction: runmat_runtime::analysis::StructuralStudyPrestressedFrequencyReductionResult::ModalReduced(Box::new(runmat_runtime::analysis::StructuralStudyPrestressedModalFrequencyReductionResult {
+                                modal_step_id: modal_step_id.clone(),
+                                modal_result: completed.modal.result,
+                                modal_numerical_receipt: completed.modal.numerical_receipt,
+                                basis_state: completed.basis_state.state,
+                            })),
+                            frequency,
+                        },
+                    )),
+                );
+            }
             let [producer_step_id, consumer_step_id] = step_ids.as_slice() else {
                 return Err(crate::NativeExecutionError::Configuration(
                     "heterogeneous structural study requires exactly two authored steps".into(),
@@ -238,6 +310,7 @@ async fn execute_one(
                                 preload_result: completed.preload.result.run,
                                 preload_solver_result_identity: completed.preload.identity,
                                 prestress_state: completed.prestress_state.state,
+                                reduction: runmat_runtime::analysis::StructuralStudyPrestressedFrequencyReductionResult::Direct,
                                 frequency,
                             },
                         )),

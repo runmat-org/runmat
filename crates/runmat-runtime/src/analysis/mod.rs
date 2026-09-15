@@ -213,6 +213,20 @@ pub struct StructuralStudyPrestressedModalNumericalResult {
 }
 
 #[derive(Debug, Clone)]
+pub enum StructuralStudyPrestressedFrequencyReductionResult {
+    Direct,
+    ModalReduced(Box<StructuralStudyPrestressedModalFrequencyReductionResult>),
+}
+
+#[derive(Debug, Clone)]
+pub struct StructuralStudyPrestressedModalFrequencyReductionResult {
+    pub modal_step_id: ProcedureStepId,
+    pub modal_result: runmat_analysis_fea::execution::StructuralModalSolverResult,
+    pub modal_numerical_receipt: runmat_analysis_fea::execution::StructuralModalNumericalReceipt,
+    pub basis_state: runmat_analysis_fea::execution::CanonicalSemanticState,
+}
+
+#[derive(Debug, Clone)]
 pub struct StructuralStudyPrestressedFrequencyNumericalResult {
     pub frozen_project_digest: Option<runmat_execution::Digest>,
     pub preload_step_id: ProcedureStepId,
@@ -220,6 +234,7 @@ pub struct StructuralStudyPrestressedFrequencyNumericalResult {
     pub preload_result: FeaRunResult,
     pub preload_solver_result_identity: runmat_analysis_fea::execution::SolverResultIdentity,
     pub prestress_state: runmat_analysis_fea::execution::CanonicalSemanticState,
+    pub reduction: StructuralStudyPrestressedFrequencyReductionResult,
     pub frequency: StructuralStudyFrequencyNumericalResult,
 }
 
@@ -1206,6 +1221,97 @@ pub fn analysis_prepare_structural_study_op(
         }
     }
 
+    if let [preload_step, modal_step, frequency_step] = study.steps.as_slice() {
+        if modal_step.procedure_step.procedure
+            == runmat_analysis_core::AnalysisProcedure::PrestressedModalExtraction
+            && frequency_step.procedure_step.procedure
+                == runmat_analysis_core::AnalysisProcedure::PrestressedHarmonicResponse
+        {
+            if let (
+                AnalysisSolverOptions::StructuralLinear(mut preload_options),
+                AnalysisSolverOptions::StructuralModes(mut modal_options),
+                AnalysisSolverOptions::StructuralFrequency(mut frequency_options),
+            ) = (
+                preload_step.authored_execution.solver_options.clone(),
+                modal_step.authored_execution.solver_options.clone(),
+                frequency_step.authored_execution.solver_options.clone(),
+            ) {
+                if preload_options.solver_mesh_artifact_path.is_none() {
+                    preload_options.solver_mesh_artifact_path =
+                        study.solver_mesh_artifact_path.clone();
+                }
+                let preload = prepare_linear_static_step_run(
+                    &study.model,
+                    &preload_step.procedure_step.step_id,
+                    preload_step.authored_execution.backend,
+                    preload_step.authored_execution.requirement,
+                    preload_options,
+                    study.context.clone(),
+                )?;
+                modal_options.solver_mesh_artifact_path = None;
+                let modal = structural_study::prepare_structural_prestressed_modal_template(
+                    &study,
+                    modal_step,
+                    &modal_options,
+                )?;
+                frequency_options.solver_mesh_artifact_path = None;
+                let frequency =
+                    structural_study::prepare_structural_prestressed_frequency_template(
+                        &study,
+                        frequency_step,
+                        &frequency_options,
+                    )?;
+                let workloads = BTreeMap::from([
+                    (
+                        preload_step.procedure_step.step_id.clone(),
+                        runmat_analysis_fea::execution::StructuralStepWorkload::Linear {
+                            workload: Box::new(preload.workload),
+                        },
+                    ),
+                    (
+                        modal_step.procedure_step.step_id.clone(),
+                        runmat_analysis_fea::execution::StructuralStepWorkload::PrestressedModal {
+                            template: Box::new(modal),
+                        },
+                    ),
+                    (
+                        frequency_step.procedure_step.step_id.clone(),
+                        runmat_analysis_fea::execution::StructuralStepWorkload::PrestressedFrequency {
+                            template: Box::new(frequency),
+                        },
+                    ),
+                ]);
+                runmat_analysis_fea::execution::StructuralStudyWorkloads::HeterogeneousSequence {
+                    workloads: workloads.clone(),
+                }
+                .validate()
+                .map_err(|error| {
+                    operation_error(
+                        ANALYSIS_RUN_STUDY_OPERATION,
+                        ANALYSIS_RUN_STUDY_OP_VERSION,
+                        &study.context,
+                        OperationErrorSpec {
+                            error_code: "RM.FEA.RUN_STUDY.INVALID_PORTABLE_INTENT",
+                            error_type: OperationErrorType::Contract,
+                            retryable: false,
+                            severity: OperationErrorSeverity::Fatal,
+                        },
+                        error.to_string(),
+                        BTreeMap::new(),
+                    )
+                })?;
+                return Ok(PreparedStructuralStudy {
+                    study,
+                    execution:
+                        structural_study::PreparedStructuralStudyExecution::StructuralPrestressedFrequency {
+                            workloads,
+                        },
+                    solver_mesh,
+                });
+            }
+        }
+    }
+
     if let [preload_step, modal_step] = study.steps.as_slice() {
         if modal_step.procedure_step.procedure
             == runmat_analysis_core::AnalysisProcedure::PrestressedModalExtraction
@@ -1696,6 +1802,11 @@ pub fn analysis_complete_structural_study_op(
             );
         }
         Ok(StructuralStudyNumericalResult::StructuralPrestressedFrequency(result)) => {
+            let modal_run_id = matches!(
+                &result.reduction,
+                StructuralStudyPrestressedFrequencyReductionResult::ModalReduced(_)
+            )
+            .then(storage::next_run_id);
             let workloads = match &prepared.execution {
                 structural_study::PreparedStructuralStudyExecution::StructuralPrestressedFrequency {
                     workloads,
@@ -1716,6 +1827,7 @@ pub fn analysis_complete_structural_study_op(
                 workloads,
                 *result,
                 storage::next_run_id(),
+                modal_run_id,
                 storage::next_run_id(),
             );
         }

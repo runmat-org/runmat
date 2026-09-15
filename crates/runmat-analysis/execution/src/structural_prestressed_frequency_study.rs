@@ -38,6 +38,7 @@ pub struct StructuralPrestressedFrequencyStudyPreparation {
 pub struct PreparedStructuralPrestressedFrequency {
     pub workload: StructuralFrequencyWorkload,
     pub prestress_state: CanonicalSemanticState,
+    pub modal_state: Option<CanonicalSemanticState>,
     pub state_task: AnalysisTaskIdentity,
 }
 
@@ -179,6 +180,7 @@ impl StructuralPrestressedFrequencyStudyCoordinator {
         Ok(PreparedStructuralPrestressedFrequency {
             workload,
             prestress_state: state.state.clone(),
+            modal_state: None,
             state_task,
         })
     }

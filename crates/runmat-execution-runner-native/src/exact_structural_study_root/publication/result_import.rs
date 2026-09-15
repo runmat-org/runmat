@@ -371,6 +371,35 @@ pub fn import_exact_structural_study_result(
         )?,
         (
             StructuralStudyWorkloads::HeterogeneousSequence { workloads },
+            ExactStructuralStudyAnalysisClosure::StructuralPrestressedModalFrequency {
+                preload_result_root,
+                preload_receipt_root,
+                prestress_state_root,
+                modal_result_root,
+                modal_receipt_root,
+                basis_state_root,
+                frequency,
+                objects,
+            },
+        ) => super::prestressed_modal_frequency_import::import_prestressed_modal_frequency_result(
+            super::prestressed_modal_frequency_import::PrestressedModalFrequencyResultImport {
+                source,
+                workloads,
+                preload_result_root: *preload_result_root,
+                preload_receipt_root: *preload_receipt_root,
+                prestress_state_root: *prestress_state_root,
+                modal_result_root: *modal_result_root,
+                modal_receipt_root: *modal_receipt_root,
+                basis_state_root: *basis_state_root,
+                frequency: *frequency,
+                objects,
+                mesh: &mesh.artifact,
+                access: &expected.artifact_access,
+                limits,
+            },
+        )?,
+        (
+            StructuralStudyWorkloads::HeterogeneousSequence { workloads },
             ExactStructuralStudyAnalysisClosure::StructuralBuckling {
                 preload_result_root,
                 preload_receipt_root,
@@ -431,6 +460,7 @@ pub fn import_exact_structural_study_result(
                     objects,
                     mesh: &mesh.artifact,
                     prestress_state: None,
+                    modal_state: None,
                     access: &expected.artifact_access,
                     limits,
                 },

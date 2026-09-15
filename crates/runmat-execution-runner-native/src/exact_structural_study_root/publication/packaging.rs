@@ -67,6 +67,10 @@ pub(crate) fn package_exact_structural_study_result(
         ExactStructuralAnalysisPublication::StructuralPrestressedFrequency {
             completion, ..
         } => prestressed_frequency_closure(completion, &decoded.artifact_access)?,
+        ExactStructuralAnalysisPublication::StructuralPrestressedModalFrequency {
+            completion,
+            ..
+        } => prestressed_modal_frequency_closure(completion, &decoded.artifact_access)?,
         ExactStructuralAnalysisPublication::StructuralFrequency { completion, .. } => {
             frequency_closure(completion, &decoded.artifact_access)?
         }
@@ -152,7 +156,7 @@ fn buckling_closure(
     completion: &crate::CompletedStructuralBucklingSequenceStudy,
     access: &ArtifactAccess,
 ) -> NativeExecutionResult<ExactStructuralStudyAnalysisClosure> {
-    let (roots, objects) = prestress_sequence_roots(
+    let (roots, objects) = numerical_closure_roots(
         [
             &completion.preload.objects,
             &completion.preload.numerical_receipt_objects,
@@ -178,7 +182,7 @@ fn prestressed_modal_closure(
     completion: &crate::CompletedStructuralPrestressedModalStudy,
     access: &ArtifactAccess,
 ) -> NativeExecutionResult<ExactStructuralStudyAnalysisClosure> {
-    let (roots, objects) = prestress_sequence_roots(
+    let (roots, objects) = numerical_closure_roots(
         [
             &completion.preload.objects,
             &completion.preload.numerical_receipt_objects,
@@ -256,10 +260,43 @@ fn prestressed_frequency_closure(
     )
 }
 
-fn prestress_sequence_roots(
-    components: [&runmat_analysis_execution::PreparedAnalysisObjects; 5],
+fn prestressed_modal_frequency_closure(
+    completion: &crate::CompletedStructuralPrestressedModalFrequencyStudy,
     access: &ArtifactAccess,
-) -> NativeExecutionResult<([ValueRef; 5], Vec<ValueRef>)> {
+) -> NativeExecutionResult<ExactStructuralStudyAnalysisClosure> {
+    let (roots, prefix_objects) = numerical_closure_roots(
+        [
+            &completion.preload.objects,
+            &completion.preload.numerical_receipt_objects,
+            &completion.prestress_state.objects,
+            &completion.modal.objects,
+            &completion.modal.numerical_receipt_objects,
+            &completion.basis_state.objects,
+        ],
+        access,
+    )?;
+    let [preload_result_root, preload_receipt_root, prestress_state_root, modal_result_root, modal_receipt_root, basis_state_root] =
+        roots;
+    let (frequency, frequency_objects) = frequency_components(&completion.frequency, access)?;
+    let objects = unique_references(prefix_objects.into_iter().chain(frequency_objects))?;
+    Ok(
+        ExactStructuralStudyAnalysisClosure::StructuralPrestressedModalFrequency {
+            preload_result_root: Box::new(preload_result_root),
+            preload_receipt_root: Box::new(preload_receipt_root),
+            prestress_state_root: Box::new(prestress_state_root),
+            modal_result_root: Box::new(modal_result_root),
+            modal_receipt_root: Box::new(modal_receipt_root),
+            basis_state_root: Box::new(basis_state_root),
+            frequency: Box::new(frequency),
+            objects,
+        },
+    )
+}
+
+fn numerical_closure_roots<const N: usize>(
+    components: [&runmat_analysis_execution::PreparedAnalysisObjects; N],
+    access: &ArtifactAccess,
+) -> NativeExecutionResult<([ValueRef; N], Vec<ValueRef>)> {
     let roots = components
         .iter()
         .map(|component| {
@@ -269,7 +306,7 @@ fn prestress_sequence_roots(
         })
         .collect::<NativeExecutionResult<Vec<_>>>()?
         .try_into()
-        .map_err(|_| protocol("prestress sequence closure has an invalid root inventory"))?;
+        .map_err(|_| protocol("numerical closure has an invalid root inventory"))?;
     let objects = unique_references(
         components
             .into_iter()

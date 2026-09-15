@@ -314,6 +314,38 @@ fn study_result(
                     preload_result: frequency.preload_result.run.clone(),
                     preload_solver_result_identity: frequency.preload_result_identity,
                     prestress_state: frequency.prestress_state.clone(),
+                    reduction: runmat_runtime::analysis::StructuralStudyPrestressedFrequencyReductionResult::Direct,
+                    frequency: nested,
+                },
+            ))
+        }
+        runmat_execution_runner_native::ExactStructuralStudyAnalysisResult::StructuralPrestressedModalFrequency(
+            frequency,
+        ) => {
+            let nested = StructuralStudyFrequencyNumericalResult::new(
+                result.frozen_project_digest,
+                (*frequency.frequency.resolved_workload).clone(),
+                (*frequency.frequency.result).clone(),
+                (*frequency.frequency.publication).clone(),
+                frequency.frequency.object_catalog.clone(),
+                frequency.frequency.artifact_roots.clone(),
+                ArtifactPublishedObjectSource::new(source),
+            )
+            .map_err(anyhow::Error::msg)?;
+            StructuralStudyNumericalResult::StructuralPrestressedFrequency(Box::new(
+                StructuralStudyPrestressedFrequencyNumericalResult {
+                    frozen_project_digest: result.frozen_project_digest,
+                    preload_step_id: frequency.preload_workload.step_id.clone(),
+                    frequency_step_id: frequency.frequency.resolved_workload.step_id().clone(),
+                    preload_result: frequency.preload_result.run.clone(),
+                    preload_solver_result_identity: frequency.preload_result_identity,
+                    prestress_state: frequency.prestress_state.clone(),
+                    reduction: runmat_runtime::analysis::StructuralStudyPrestressedFrequencyReductionResult::ModalReduced(Box::new(runmat_runtime::analysis::StructuralStudyPrestressedModalFrequencyReductionResult {
+                        modal_step_id: frequency.modal_workload.step_id().clone(),
+                        modal_result: (*frequency.modal_result).clone(),
+                        modal_numerical_receipt: frequency.modal_numerical_receipt.clone(),
+                        basis_state: frequency.basis_state.clone(),
+                    })),
                     frequency: nested,
                 },
             ))

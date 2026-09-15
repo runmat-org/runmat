@@ -2312,11 +2312,14 @@ impl AnalysisSolverOptions {
             ),
             (
                 Structural,
-                HarmonicResponse | PrestressedHarmonicResponse,
-                SolutionSpace::Direct,
+                PrestressedHarmonicResponse,
+                SolutionSpace::Direct | SolutionSpace::ModalReduced,
             ) => Ok(Self::StructuralFrequency(
                 AnalysisStructuralFrequencyRunOptions::default(),
             )),
+            (Structural, HarmonicResponse, SolutionSpace::Direct) => Ok(
+                Self::StructuralFrequency(AnalysisStructuralFrequencyRunOptions::default()),
+            ),
             (Acoustic, HarmonicResponse, SolutionSpace::Direct) => Ok(Self::AcousticHelmholtz(
                 AnalysisAcousticRunOptions::default(),
             )),

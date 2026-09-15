@@ -9,17 +9,33 @@ pub(in crate::analysis) fn complete_prestressed_frequency_study(
     >,
     numerical: crate::analysis::StructuralStudyPrestressedFrequencyNumericalResult,
     preload_run_id: String,
+    modal_run_id: Option<String>,
     frequency_run_id: String,
 ) -> Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope> {
-    let [preload_step, frequency_step] = prepared.steps.as_slice() else {
-        return Err(completion_error(
-            &prepared,
-            "RM.FEA.RUN_STUDY.STEP_INVENTORY_MISMATCH",
-            "prestressed-frequency completion requires one preload and one frequency step",
-        ));
+    let (preload_step, modal_step, frequency_step) = match (
+        &numerical.reduction,
+        prepared.steps.as_slice(),
+    ) {
+        (
+            crate::analysis::StructuralStudyPrestressedFrequencyReductionResult::Direct,
+            [preload, frequency],
+        ) => (preload.clone(), None, frequency.clone()),
+        (
+            crate::analysis::StructuralStudyPrestressedFrequencyReductionResult::ModalReduced(
+                reduction,
+            ),
+            [preload, modal, frequency],
+        ) if modal.procedure_step.step_id == reduction.modal_step_id => {
+            (preload.clone(), Some(modal.clone()), frequency.clone())
+        }
+        _ => {
+            return Err(completion_error(
+                &prepared,
+                "RM.FEA.RUN_STUDY.STEP_INVENTORY_MISMATCH",
+                "prestressed-frequency completion requires preload→frequency or preload→modal→frequency steps matching its reduction",
+            ))
+        }
     };
-    let preload_step = preload_step.clone();
-    let frequency_step = frequency_step.clone();
     if numerical.preload_step_id != preload_step.procedure_step.step_id
         || numerical.frequency_step_id != frequency_step.procedure_step.step_id
         || numerical.frequency.step_id != numerical.frequency_step_id
@@ -51,6 +67,33 @@ pub(in crate::analysis) fn complete_prestressed_frequency_study(
             "prestressed-frequency workload is missing its unresolved frequency step",
         ));
     };
+    let modal_template = match (&numerical.reduction, &modal_step) {
+        (crate::analysis::StructuralStudyPrestressedFrequencyReductionResult::Direct, None) => None,
+        (
+            crate::analysis::StructuralStudyPrestressedFrequencyReductionResult::ModalReduced(
+                reduction,
+            ),
+            Some(_),
+        ) => match authored_workloads.remove(&reduction.modal_step_id) {
+            Some(runmat_analysis_fea::execution::StructuralStepWorkload::PrestressedModal {
+                template,
+            }) => Some(template),
+            _ => {
+                return Err(completion_error(
+                    &prepared,
+                    "RM.FEA.RUN_STUDY.STEP_INVENTORY_MISMATCH",
+                    "modal-reduced prestressed-frequency workload is missing its modal producer",
+                ))
+            }
+        },
+        _ => {
+            return Err(completion_error(
+                &prepared,
+                "RM.FEA.RUN_STUDY.STEP_INVENTORY_MISMATCH",
+                "prestressed-frequency reduction differs from its authored modal step",
+            ))
+        }
+    };
     if !authored_workloads.is_empty() {
         return Err(completion_error(
             &prepared,
@@ -75,6 +118,21 @@ pub(in crate::analysis) fn complete_prestressed_frequency_study(
             "RM.FEA.RUN_STUDY.RESULT_KIND_MISMATCH",
             "prestressed-frequency consumer has non-frequency solver options",
         ));
+    };
+    let mut modal_options = match modal_step.as_ref() {
+        Some(step) => {
+            let AnalysisSolverOptions::StructuralModes(options) =
+                step.authored_execution.solver_options.clone()
+            else {
+                return Err(completion_error(
+                    &prepared,
+                    "RM.FEA.RUN_STUDY.RESULT_KIND_MISMATCH",
+                    "prestressed-frequency modal producer has non-modal solver options",
+                ));
+            };
+            Some(options)
+        }
+        None => None,
     };
 
     let mut preload_workload = *preload_workload;
@@ -132,13 +190,63 @@ pub(in crate::analysis) fn complete_prestressed_frequency_study(
             error.to_string(),
         )
     })?;
-    let frequency_workload = template.bind(transition, None).map_err(|error| {
-        completion_error(
-            &prepared,
-            "RM.FEA.RUN_STUDY.FREQUENCY_WORKLOAD_INVALID",
-            error.to_string(),
-        )
-    })?;
+    let (modal_run, modal_result_identity, basis_state_identity) = match &numerical.reduction {
+        crate::analysis::StructuralStudyPrestressedFrequencyReductionResult::Direct => {
+            if modal_template.is_some() || modal_options.is_some() || modal_run_id.is_some() {
+                return Err(completion_error(
+                    &prepared,
+                    "RM.FEA.RUN_STUDY.STEP_INVENTORY_MISMATCH",
+                    "direct prestressed-frequency completion received modal inputs",
+                ));
+            }
+            (None, None, None)
+        }
+        crate::analysis::StructuralStudyPrestressedFrequencyReductionResult::ModalReduced(
+            reduction,
+        ) => {
+            let admitted = super::prestressed_frequency_modal_reduction::admit_prestressed_modal_reduction(
+                super::prestressed_frequency_modal_reduction::PrestressedModalReductionAdmission {
+                    prepared: &prepared,
+                    solver_mesh: &solver_mesh,
+                    prestress_state: &numerical.prestress_state,
+                    frequency_template: &template,
+                    modal_template: *modal_template.ok_or_else(|| completion_error(
+                        &prepared,
+                        "RM.FEA.RUN_STUDY.STEP_INVENTORY_MISMATCH",
+                        "modal-reduced prestressed-frequency completion is missing its modal template",
+                    ))?,
+                    modal_result: &reduction.modal_result,
+                    modal_receipt: &reduction.modal_numerical_receipt,
+                    basis_state: &reduction.basis_state,
+                    modal_options: modal_options.as_mut().ok_or_else(|| completion_error(
+                        &prepared,
+                        "RM.FEA.RUN_STUDY.RESULT_KIND_MISMATCH",
+                        "modal-reduced prestressed-frequency completion is missing modal options",
+                    ))?,
+                    run_id: modal_run_id.as_deref().ok_or_else(|| completion_error(
+                        &prepared,
+                        "RM.FEA.RUN_STUDY.STEP_INVENTORY_MISMATCH",
+                        "modal-reduced prestressed-frequency completion is missing its run identity",
+                    ))?,
+                    topology_digest,
+                },
+            )?;
+            (
+                Some(admitted.run),
+                Some(admitted.result_identity),
+                Some(admitted.basis_state_identity),
+            )
+        }
+    };
+    let frequency_workload = template
+        .bind(transition, basis_state_identity)
+        .map_err(|error| {
+            completion_error(
+                &prepared,
+                "RM.FEA.RUN_STUDY.FREQUENCY_WORKLOAD_INVALID",
+                error.to_string(),
+            )
+        })?;
     if numerical.frequency.workload != frequency_workload {
         return Err(completion_error(
             &prepared,
@@ -148,125 +256,91 @@ pub(in crate::analysis) fn complete_prestressed_frequency_study(
     }
     frequency_options.solver_mesh_artifact_path = prepared.solver_mesh_artifact_path.clone();
     let frequency_result_identity = numerical.frequency.result.manifest().identity();
-    let frequency_run =
-        crate::analysis::frequency_result::admit_prestressed_structural_frequency_result(
-            &numerical.frequency,
-            &solver_mesh,
-            &frequency_options,
-            frequency_run_id,
-            &numerical.prestress_state,
-        )
-        .map_err(|error| {
-            completion_error(
-                &prepared,
-                "RM.FEA.RUN_STUDY.FREQUENCY_RESULT_ADMISSION_FAILED",
-                error,
+    let frequency_run = match &numerical.reduction {
+        crate::analysis::StructuralStudyPrestressedFrequencyReductionResult::Direct => {
+            crate::analysis::frequency_result::admit_prestressed_structural_frequency_result(
+                &numerical.frequency,
+                &solver_mesh,
+                &frequency_options,
+                frequency_run_id,
+                &numerical.prestress_state,
             )
-        })?;
-
-    let preload_fields = crate::analysis::collect_semantic_state_fields(&preload_run.data);
-    let mut states = Vec::with_capacity(
-        preload_step.procedure_step.state_outputs.len()
-            + frequency_step.procedure_step.state_outputs.len(),
-    );
-    for declaration in &preload_step.procedure_step.state_outputs {
-        if declaration.state_id == numerical.prestress_state.state_id {
-            states.push(numerical.prestress_state.clone());
-        } else {
-            states.push(
-                runmat_analysis_fea::execution::CanonicalSemanticState::new(
-                    runmat_analysis_fea::execution::CanonicalSemanticStateInput {
-                        producer: numerical.prestress_state.producer,
-                        declaration: declaration.clone(),
-                        topology_digest,
-                        source_result: numerical.preload_solver_result_identity,
-                        payload:
-                            runmat_analysis_fea::execution::CanonicalSemanticStatePayload::Fields {
-                                fields: preload_fields.clone(),
-                            },
-                    },
-                )
-                .map_err(|error| {
-                    completion_error(
-                        &prepared,
-                        "RM.FEA.RUN_STUDY.STATE_INVALID",
-                        error.to_string(),
-                    )
-                })?,
-            );
+        }
+        crate::analysis::StructuralStudyPrestressedFrequencyReductionResult::ModalReduced(
+            reduction,
+        ) => {
+            crate::analysis::frequency_result::admit_prestressed_modal_structural_frequency_result(
+                &numerical.frequency,
+                &solver_mesh,
+                &frequency_options,
+                frequency_run_id,
+                &numerical.prestress_state,
+                &reduction.basis_state,
+            )
         }
     }
-    let sequence_identity = runmat_analysis_fea::execution::SequenceIdentity::from_solver_contract(
-        &prepared.model.sequence,
-    )
     .map_err(|error| {
         completion_error(
             &prepared,
-            "RM.FEA.RUN_STUDY.STATE_INVALID",
-            error.to_string(),
+            "RM.FEA.RUN_STUDY.FREQUENCY_RESULT_ADMISSION_FAILED",
+            error,
         )
     })?;
-    let producer = runmat_analysis_fea::execution::StepIdentity::from_solver_contract(
-        sequence_identity,
-        &frequency_step.procedure_step,
-    )
-    .map_err(|error| {
-        completion_error(
-            &prepared,
-            "RM.FEA.RUN_STUDY.STATE_INVALID",
-            error.to_string(),
-        )
-    })?;
-    states.extend(
-        frequency_step
-            .procedure_step
-            .state_outputs
-            .iter()
-            .map(|declaration| {
-                runmat_analysis_fea::execution::CanonicalSemanticState::new(
-                    runmat_analysis_fea::execution::CanonicalSemanticStateInput {
-                        producer,
-                        declaration: declaration.clone(),
-                        topology_digest,
-                        source_result: frequency_result_identity,
-                        payload: runmat_analysis_fea::execution::CanonicalSemanticStatePayload::StructuralFrequency {
-                            publication: Box::new(numerical.frequency.publication.clone()),
-                        },
-                    },
-                )
-                .map_err(|error| {
-                    completion_error(
-                        &prepared,
-                        "RM.FEA.RUN_STUDY.STATE_INVALID",
-                        error.to_string(),
-                    )
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()?,
-    );
+
+    let preload_fields = crate::analysis::collect_semantic_state_fields(&preload_run.data);
+    let states = super::prestressed_frequency_states::prestressed_frequency_states(
+        super::prestressed_frequency_states::PrestressedFrequencyStatePublication {
+            prepared: &prepared,
+            preload_step: &preload_step,
+            modal_step: modal_step.as_ref(),
+            frequency_step: &frequency_step,
+            prestress_state: &numerical.prestress_state,
+            preload_result_identity: numerical.preload_solver_result_identity,
+            reduction: &numerical.reduction,
+            frequency_publication: &numerical.frequency.publication,
+            preload_fields: &preload_fields,
+            topology_digest,
+            frequency_result_identity,
+        },
+    )?;
 
     prepared.steps[0].authored_execution.solver_options =
         AnalysisSolverOptions::StructuralLinear(preload_options.clone());
-    prepared.steps[1].authored_execution.solver_options =
-        AnalysisSolverOptions::StructuralFrequency(frequency_options.clone());
+    let frequency_index = if let Some(modal_options) = modal_options.as_ref() {
+        prepared.steps[1].authored_execution.solver_options =
+            AnalysisSolverOptions::StructuralModes(modal_options.clone());
+        2
+    } else {
+        1
+    };
+    prepared.steps[frequency_index]
+        .authored_execution
+        .solver_options = AnalysisSolverOptions::StructuralFrequency(frequency_options.clone());
+    let mut completed_steps = vec![CompletedStudyStep {
+        step_id: numerical.preload_step_id,
+        solver_result_identity: numerical.preload_solver_result_identity,
+        run: CompletedStudyStepRun::Standard(Box::new(preload_run)),
+        resolved_solver_options: AnalysisSolverOptions::StructuralLinear(preload_options),
+    }];
+    if let (Some(modal_step), Some(modal_run), Some(modal_result_identity), Some(modal_options)) =
+        (modal_step, modal_run, modal_result_identity, modal_options)
+    {
+        completed_steps.push(CompletedStudyStep {
+            step_id: modal_step.procedure_step.step_id,
+            solver_result_identity: modal_result_identity,
+            run: CompletedStudyStepRun::Standard(Box::new(modal_run)),
+            resolved_solver_options: AnalysisSolverOptions::StructuralModes(modal_options),
+        });
+    }
+    completed_steps.push(CompletedStudyStep {
+        step_id: numerical.frequency_step_id,
+        solver_result_identity: frequency_result_identity,
+        run: CompletedStudyStepRun::StructuralFrequency(Box::new(frequency_run)),
+        resolved_solver_options: AnalysisSolverOptions::StructuralFrequency(frequency_options),
+    });
     complete_study_run(
         prepared,
-        vec![
-            CompletedStudyStep {
-                step_id: numerical.preload_step_id,
-                solver_result_identity: numerical.preload_solver_result_identity,
-                run: CompletedStudyStepRun::Standard(Box::new(preload_run)),
-                resolved_solver_options: AnalysisSolverOptions::StructuralLinear(preload_options),
-            },
-            CompletedStudyStep {
-                step_id: numerical.frequency_step_id,
-                solver_result_identity: frequency_result_identity,
-                run: CompletedStudyStepRun::StructuralFrequency(Box::new(frequency_run)),
-                resolved_solver_options: AnalysisSolverOptions::StructuralFrequency(
-                    frequency_options,
-                ),
-            },
-        ],
+        completed_steps,
         states,
         numerical.frozen_project_digest,
     )
@@ -284,14 +358,31 @@ pub(super) fn complete_structural_prestressed_frequency(
     numerical: crate::analysis::StructuralStudyPrestressedFrequencyNumericalResult,
     completion_identity: StructuralStudyCompletionIdentity,
 ) -> Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope> {
-    let [preload_step, frequency_step] = intent.steps.as_slice() else {
-        return Err(intent_completion_error(
-            &intent,
-            "RM.FEA.RUN_STUDY.STEP_INVENTORY_MISMATCH",
-            OperationErrorType::Contract,
-            OperationErrorSeverity::Fatal,
-            "prestressed-frequency completion requires exactly two authored procedure steps",
-        ));
+    let (preload_step, modal_step, frequency_step) = match (
+        &numerical.reduction,
+        intent.steps.as_slice(),
+    ) {
+        (
+            crate::analysis::StructuralStudyPrestressedFrequencyReductionResult::Direct,
+            [preload, frequency],
+        ) => (preload, None, frequency),
+        (
+            crate::analysis::StructuralStudyPrestressedFrequencyReductionResult::ModalReduced(
+                reduction,
+            ),
+            [preload, modal, frequency],
+        ) if modal.procedure_step.step_id == reduction.modal_step_id => {
+            (preload, Some(modal), frequency)
+        }
+        _ => {
+            return Err(intent_completion_error(
+                &intent,
+                "RM.FEA.RUN_STUDY.STEP_INVENTORY_MISMATCH",
+                OperationErrorType::Contract,
+                OperationErrorSeverity::Fatal,
+                "prestressed-frequency completion requires an authored sequence matching its direct or modal-reduced result",
+            ))
+        }
     };
     let preload_run_id = completion_identity.local_run_id(
         intent.authored_study_digest,
@@ -301,6 +392,9 @@ pub(super) fn complete_structural_prestressed_frequency(
         intent.authored_study_digest,
         &frequency_step.procedure_step.step_id,
     );
+    let modal_run_id = modal_step.map(|step| {
+        completion_identity.local_run_id(intent.authored_study_digest, &step.procedure_step.step_id)
+    });
     let prepared = PreparedStudyCompletion {
         context: intent.context,
         study_id: intent.study_id,
@@ -326,6 +420,7 @@ pub(super) fn complete_structural_prestressed_frequency(
         authored_workloads,
         numerical,
         preload_run_id,
+        modal_run_id,
         frequency_run_id,
     )
 }

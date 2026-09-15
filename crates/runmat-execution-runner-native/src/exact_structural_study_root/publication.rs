@@ -43,6 +43,7 @@ mod inventory;
 mod modal_import;
 mod packaging;
 mod prestressed_frequency_import;
+mod prestressed_modal_frequency_import;
 mod prestressed_modal_import;
 mod result_import;
 
@@ -115,6 +116,16 @@ enum ExactStructuralStudyAnalysisClosure {
         frequency: Box<ExactStructuralFrequencyClosure>,
         objects: Vec<ValueRef>,
     },
+    StructuralPrestressedModalFrequency {
+        preload_result_root: Box<ValueRef>,
+        preload_receipt_root: Box<ValueRef>,
+        prestress_state_root: Box<ValueRef>,
+        modal_result_root: Box<ValueRef>,
+        modal_receipt_root: Box<ValueRef>,
+        basis_state_root: Box<ValueRef>,
+        frequency: Box<ExactStructuralFrequencyClosure>,
+        objects: Vec<ValueRef>,
+    },
     StructuralFrequency {
         frequency: Box<ExactStructuralFrequencyClosure>,
         objects: Vec<ValueRef>,
@@ -161,6 +172,7 @@ impl ExactStructuralStudyAnalysisClosure {
             | Self::StructuralBuckling { objects, .. }
             | Self::StructuralPrestressedModal { objects, .. }
             | Self::StructuralPrestressedFrequency { objects, .. }
+            | Self::StructuralPrestressedModalFrequency { objects, .. }
             | Self::StructuralFrequency { objects, .. } => objects,
         }
     }
@@ -278,6 +290,32 @@ impl ExactStructuralStudyAnalysisClosure {
                         preload_result_root,
                         preload_receipt_root,
                         prestress_state_root,
+                        &frequency.result_root,
+                        &frequency.receipt_root,
+                        &frequency.resource_usage_root,
+                    ],
+                    objects,
+                )?;
+            }
+            Self::StructuralPrestressedModalFrequency {
+                preload_result_root,
+                preload_receipt_root,
+                prestress_state_root,
+                modal_result_root,
+                modal_receipt_root,
+                basis_state_root,
+                frequency,
+                objects,
+            } => {
+                validate_frequency_closure(frequency, objects)?;
+                validate_declared_roots(
+                    &[
+                        preload_result_root,
+                        preload_receipt_root,
+                        prestress_state_root,
+                        modal_result_root,
+                        modal_receipt_root,
+                        basis_state_root,
                         &frequency.result_root,
                         &frequency.receipt_root,
                         &frequency.resource_usage_root,
@@ -445,6 +483,9 @@ pub enum ExactStructuralStudyAnalysisResult {
     StructuralBuckling(Box<ExactStructuralBucklingAnalysisResult>),
     StructuralPrestressedModal(Box<ExactStructuralPrestressedModalAnalysisResult>),
     StructuralPrestressedFrequency(Box<ExactStructuralPrestressedFrequencyAnalysisResult>),
+    StructuralPrestressedModalFrequency(
+        Box<ExactStructuralPrestressedModalFrequencyAnalysisResult>,
+    ),
     StructuralFrequency(Box<ExactStructuralFrequencyAnalysisResult>),
 }
 
@@ -493,6 +534,21 @@ pub struct ExactStructuralPrestressedFrequencyAnalysisResult {
     pub preload_numerical_receipt:
         runmat_analysis_fea::execution::StructuralLinearNumericalReceiptArtifact,
     pub prestress_state: runmat_analysis_fea::execution::CanonicalSemanticState,
+    pub frequency: ExactStructuralFrequencyAnalysisResult,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExactStructuralPrestressedModalFrequencyAnalysisResult {
+    pub preload_workload: Box<StructuralLinearWorkload>,
+    pub modal_workload: Box<StructuralModalWorkload>,
+    pub preload_result: Box<runmat_analysis_fea::execution::StructuralLinearWorkloadResult>,
+    pub preload_result_identity: runmat_analysis_fea::execution::SolverResultIdentity,
+    pub preload_numerical_receipt:
+        runmat_analysis_fea::execution::StructuralLinearNumericalReceiptArtifact,
+    pub prestress_state: runmat_analysis_fea::execution::CanonicalSemanticState,
+    pub modal_result: Box<StructuralModalSolverResult>,
+    pub modal_numerical_receipt: StructuralModalNumericalReceipt,
+    pub basis_state: runmat_analysis_fea::execution::CanonicalSemanticState,
     pub frequency: ExactStructuralFrequencyAnalysisResult,
 }
 
@@ -565,6 +621,12 @@ pub(crate) enum ExactStructuralAnalysisPublication<'a> {
         completion: &'a crate::CompletedStructuralPrestressedFrequencyStudy,
         unresolved_workloads_digest: Digest,
     },
+    StructuralPrestressedModalFrequency {
+        signals:
+            &'a [crate::remote::signal_materialization::CompletedRemoteSignalMaterialization],
+        completion: &'a crate::CompletedStructuralPrestressedModalFrequencyStudy,
+        unresolved_workloads_digest: Digest,
+    },
     StructuralFrequency {
         signals:
             &'a [crate::remote::signal_materialization::CompletedRemoteSignalMaterialization],
@@ -585,6 +647,7 @@ impl ExactStructuralAnalysisPublication<'_> {
             | Self::StructuralBuckling { signals, .. }
             | Self::StructuralPrestressedModal { signals, .. }
             | Self::StructuralPrestressedFrequency { signals, .. }
+            | Self::StructuralPrestressedModalFrequency { signals, .. }
             | Self::StructuralFrequency { signals, .. } => signals,
         }
     }
@@ -616,6 +679,10 @@ impl ExactStructuralAnalysisPublication<'_> {
                 ..
             }
             | Self::StructuralPrestressedFrequency {
+                unresolved_workloads_digest,
+                ..
+            }
+            | Self::StructuralPrestressedModalFrequency {
                 unresolved_workloads_digest,
                 ..
             }

@@ -17,6 +17,7 @@ pub(super) struct FrequencyClosureImport<'a, Source> {
     pub objects: Vec<ValueRef>,
     pub mesh: &'a runmat_meshing_core::SolverMeshArtifact,
     pub prestress_state: Option<&'a CanonicalSemanticState>,
+    pub modal_state: Option<&'a CanonicalSemanticState>,
     pub access: &'a ArtifactAccess,
     pub limits: ObjectInventoryLimits,
 }
@@ -31,6 +32,7 @@ pub(super) fn import_frequency_closure<Source: CacheImport>(
         objects: enclosing_objects,
         mesh,
         prestress_state,
+        modal_state,
         access,
         limits,
     } = input;
@@ -123,7 +125,14 @@ pub(super) fn import_frequency_closure<Source: CacheImport>(
             limits,
             declared_publication: &closure.publication,
         })?;
-    admit_publication(&workload, mesh, prestress_state, &result, &publication)?;
+    admit_publication(
+        &workload,
+        mesh,
+        prestress_state,
+        modal_state,
+        &result,
+        &publication,
+    )?;
     let sample_roots = entries
         .iter()
         .map(|entry| {
@@ -209,23 +218,37 @@ fn admit_publication(
     workload: &StructuralFrequencyWorkload,
     mesh: &runmat_meshing_core::SolverMeshArtifact,
     prestress_state: Option<&CanonicalSemanticState>,
+    modal_state: Option<&CanonicalSemanticState>,
     result: &runmat_analysis_fea::execution::StructuralFrequencySolverResult,
     publication: &runmat_analysis_fea::execution::StructuralFrequencyPublicationManifest,
 ) -> NativeExecutionResult<()> {
-    match prestress_state {
-        Some(state) => runmat_analysis_fea::pipeline::structural_frequency::admit_prestressed_structural_frequency_publication(
+    match (prestress_state, modal_state) {
+        (Some(prestress), Some(modal)) => runmat_analysis_fea::pipeline::structural_frequency::admit_prestressed_modal_structural_frequency_publication(
+            workload,
+            mesh,
+            prestress,
+            modal,
+            result,
+            publication,
+        ),
+        (Some(state), None) => runmat_analysis_fea::pipeline::structural_frequency::admit_prestressed_structural_frequency_publication(
             workload,
             mesh,
             state,
             result,
             publication,
         ),
-        None => runmat_analysis_fea::pipeline::structural_frequency::admit_structural_frequency_publication(
+        (None, None) => runmat_analysis_fea::pipeline::structural_frequency::admit_structural_frequency_publication(
             workload,
             mesh,
             result,
             publication,
         ),
+        (None, Some(_)) => {
+            return Err(protocol(
+                "modal structural frequency publication is missing its prestress state",
+            ))
+        }
     }
     .map(|_| ())
     .map_err(protocol)

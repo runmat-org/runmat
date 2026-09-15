@@ -2,6 +2,15 @@ use super::*;
 
 #[tokio::test(flavor = "current_thread")]
 async fn prestressed_frequency_reaches_an_admitted_result_over_encrypted_quic() {
+    run_prestressed_frequency_conformance(false).await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn prestressed_modal_frequency_reaches_an_admitted_result_over_encrypted_quic() {
+    run_prestressed_frequency_conformance(true).await;
+}
+
+async fn run_prestressed_frequency_conformance(modal_reduced: bool) {
     let project_root = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(project_root.path().join("src")).unwrap();
     std::fs::write(
@@ -46,7 +55,11 @@ async fn prestressed_frequency_reaches_an_admitted_result_over_encrypted_quic() 
             authored_study_digest: Digest::sha256(b"box structural prestressed frequency study"),
             frozen_project_digest: Some(Digest::from_bytes(*project_identity.graph_digest.bytes())),
             geometry_source_digest: Digest::sha256(BOX),
-            workloads: box_prestressed_frequency_workloads(),
+            workloads: if modal_reduced {
+                box_prestressed_modal_frequency_workloads()
+            } else {
+                box_prestressed_frequency_workloads()
+            },
             analysis_accelerator_requests: Vec::new(),
             signal_materializations: Vec::new(),
             exact_meshing,
@@ -108,26 +121,51 @@ async fn prestressed_frequency_reaches_an_admitted_result_over_encrypted_quic() 
     };
     let imported =
         run_exact_study(prepared, expectation, bundle, inventory, resources, access).await;
-    let crate::ExactStructuralStudyAnalysisResult::StructuralPrestressedFrequency(result) =
-        imported.analysis
-    else {
-        panic!("prestressed-frequency exact study returned another result kind")
-    };
-    assert_eq!(result.preload_workload.step_id.as_str(), "preload");
-    assert_eq!(
-        result.frequency.resolved_workload.step_id().as_str(),
-        "prestressed_frequency"
-    );
-    assert_eq!(
-        result.prestress_state.source_result,
-        result.preload_result_identity
-    );
-    assert_eq!(result.frequency.result.samples().len(), 2);
-    assert_eq!(result.frequency.entries.len(), 2);
-    assert_eq!(
-        result.frequency.object_catalog.roots.len(),
-        3 + result.frequency.entries.len()
-    );
+    match imported.analysis {
+        crate::ExactStructuralStudyAnalysisResult::StructuralPrestressedFrequency(result)
+            if !modal_reduced =>
+        {
+            assert_eq!(result.preload_workload.step_id.as_str(), "preload");
+            assert_eq!(
+                result.frequency.resolved_workload.step_id().as_str(),
+                "prestressed_frequency"
+            );
+            assert_eq!(
+                result.prestress_state.source_result,
+                result.preload_result_identity
+            );
+            assert_eq!(result.frequency.result.samples().len(), 2);
+            assert_eq!(result.frequency.entries.len(), 2);
+            assert_eq!(
+                result.frequency.object_catalog.roots.len(),
+                3 + result.frequency.entries.len()
+            );
+        }
+        crate::ExactStructuralStudyAnalysisResult::StructuralPrestressedModalFrequency(result)
+            if modal_reduced =>
+        {
+            assert_eq!(result.preload_workload.step_id.as_str(), "preload");
+            assert_eq!(
+                result.modal_workload.step_id().as_str(),
+                "prestressed_modes"
+            );
+            assert_eq!(
+                result.frequency.resolved_workload.step_id().as_str(),
+                "prestressed_frequency"
+            );
+            assert_eq!(
+                result.prestress_state.source_result,
+                result.preload_result_identity
+            );
+            assert_eq!(
+                result.basis_state.source_result,
+                result.modal_numerical_receipt.source_result()
+            );
+            assert_eq!(result.frequency.result.samples().len(), 2);
+            assert_eq!(result.frequency.entries.len(), 2);
+        }
+        _ => panic!("prestressed-frequency exact study returned another result kind"),
+    }
 }
 
 async fn run_exact_study(
@@ -305,6 +343,140 @@ fn box_prestressed_frequency_workloads() -> runmat_analysis_execution::Structura
                 ProcedureStepId("prestressed_frequency".into()),
                 StructuralStepWorkload::PrestressedFrequency {
                     template: Box::new(template),
+                },
+            ),
+        ]),
+    }
+}
+
+fn box_prestressed_modal_frequency_workloads() -> runmat_analysis_execution::StructuralStudyWorkloads
+{
+    let runmat_analysis_execution::StructuralStudyWorkloads::HeterogeneousSequence {
+        mut workloads,
+    } = box_prestressed_frequency_workloads()
+    else {
+        unreachable!()
+    };
+    let StructuralStepWorkload::Linear {
+        workload: mut preload,
+    } = workloads
+        .remove(&ProcedureStepId("preload".into()))
+        .unwrap()
+    else {
+        unreachable!()
+    };
+    let preload_step = ProcedureStep::structural_preload("preload");
+    let mut modal = ProcedureStep::structural_prestressed_modal(
+        "prestressed_modes",
+        "preload",
+        "geometric_stiffness",
+    );
+    modal.independent_domain = IndependentDomain::Eigenvalue { requested_count: 2 };
+    let mut frequency = ProcedureStep::structural_prestressed_harmonic(
+        "prestressed_frequency",
+        "preload",
+        "geometric_stiffness",
+    );
+    frequency.solution_space = runmat_analysis_core::SolutionSpace::ModalReduced;
+    frequency.independent_domain = IndependentDomain::FrequencyHertz(vec![20.0, 40.0]);
+    frequency
+        .state_inputs
+        .push(runmat_analysis_core::StateInput {
+            input_id: "modal_basis".into(),
+            required_kind: runmat_analysis_core::StateKind::ModalBasis,
+            source: runmat_analysis_core::StateSource::Upstream {
+                producer_step: ProcedureStepId("prestressed_modes".into()),
+                state_id: StateId("modal_basis".into()),
+            },
+            use_as: runmat_analysis_core::StateUse::ModalBasis,
+            conflict: runmat_analysis_core::InitialStateConflictPolicy::Reject,
+        });
+    preload.model.sequence.steps = vec![preload_step, modal, frequency];
+    preload.model.sequence.dependencies = vec![
+        SequenceDependency {
+            predecessor: ProcedureStepId("preload".into()),
+            successor: ProcedureStepId("prestressed_modes".into()),
+            reason: SequenceDependencyReason::StateTransfer,
+        },
+        SequenceDependency {
+            predecessor: ProcedureStepId("preload".into()),
+            successor: ProcedureStepId("prestressed_frequency".into()),
+            reason: SequenceDependencyReason::StateTransfer,
+        },
+        SequenceDependency {
+            predecessor: ProcedureStepId("prestressed_modes".into()),
+            successor: ProcedureStepId("prestressed_frequency".into()),
+            reason: SequenceDependencyReason::StateTransfer,
+        },
+    ];
+    preload.model.sequence.transitions = vec![
+        StateTransition {
+            transition_id: TransitionId("preload-to-prestressed-modal".into()),
+            producer_step: ProcedureStepId("preload".into()),
+            consumer_step: ProcedureStepId("prestressed_modes".into()),
+            state_id: StateId("geometric_stiffness".into()),
+            method: StateTransitionMethod::Reuse,
+            topology: TopologyTransitionPolicy::RequireIdentical,
+            reference: runmat_analysis_core::ReferenceStatePolicy::Preserve,
+        },
+        StateTransition {
+            transition_id: TransitionId("preload-to-prestressed-frequency".into()),
+            producer_step: ProcedureStepId("preload".into()),
+            consumer_step: ProcedureStepId("prestressed_frequency".into()),
+            state_id: StateId("geometric_stiffness".into()),
+            method: StateTransitionMethod::Reuse,
+            topology: TopologyTransitionPolicy::RequireIdentical,
+            reference: runmat_analysis_core::ReferenceStatePolicy::Preserve,
+        },
+        StateTransition {
+            transition_id: TransitionId("prestressed-modal-to-frequency".into()),
+            producer_step: ProcedureStepId("prestressed_modes".into()),
+            consumer_step: ProcedureStepId("prestressed_frequency".into()),
+            state_id: StateId("modal_basis".into()),
+            method: StateTransitionMethod::Reuse,
+            topology: TopologyTransitionPolicy::RequireIdentical,
+            reference: runmat_analysis_core::ReferenceStatePolicy::Preserve,
+        },
+    ];
+    preload.step_id = ProcedureStepId("preload".into());
+    let modal_template = StructuralPrestressedModalTemplate {
+        schema_version: 1,
+        model: preload.model.clone(),
+        step_id: ProcedureStepId("prestressed_modes".into()),
+        backend: ComputeBackend::Cpu,
+        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+        observation_execution:
+            runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
+        truncation: ModalTruncationPolicy::requested(2),
+        convergence: ModalConvergencePolicy::exploratory(),
+    };
+    let frequency_template = StructuralPrestressedFrequencyTemplate {
+        schema_version: 1,
+        model: preload.model.clone(),
+        step_id: ProcedureStepId("prestressed_frequency".into()),
+        backend: ComputeBackend::Cpu,
+        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+        observation_execution:
+            runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
+        plan: FrequencyResponsePlan::new(20.0, &[40.0], &[]).unwrap(),
+        solver: StructuralPrestressedFrequencySolverTemplate::ModalReduced,
+    };
+    runmat_analysis_execution::StructuralStudyWorkloads::HeterogeneousSequence {
+        workloads: std::collections::BTreeMap::from([
+            (
+                ProcedureStepId("preload".into()),
+                StructuralStepWorkload::Linear { workload: preload },
+            ),
+            (
+                ProcedureStepId("prestressed_modes".into()),
+                StructuralStepWorkload::PrestressedModal {
+                    template: Box::new(modal_template),
+                },
+            ),
+            (
+                ProcedureStepId("prestressed_frequency".into()),
+                StructuralStepWorkload::PrestressedFrequency {
+                    template: Box::new(frequency_template),
                 },
             ),
         ]),

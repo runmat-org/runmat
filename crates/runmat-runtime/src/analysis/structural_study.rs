@@ -416,11 +416,17 @@ impl PreparedStructuralStudyIntent {
                                 == step.authored_execution.requirement
                             && template.observation_execution
                                 == ObservationExecutionPolicy::scalable()
-                            && matches!(
-                                template.solver,
-                                runmat_analysis_fea::execution::StructuralPrestressedFrequencySolverTemplate::Direct { policy }
-                                    if policy == options.direct_solver
-                            )
+                            && match template.solver {
+                                runmat_analysis_fea::execution::StructuralPrestressedFrequencySolverTemplate::Direct { policy } => {
+                                    step.procedure_step.solution_space
+                                        == runmat_analysis_core::SolutionSpace::Direct
+                                        && policy == options.direct_solver
+                                }
+                                runmat_analysis_fea::execution::StructuralPrestressedFrequencySolverTemplate::ModalReduced => {
+                                    step.procedure_step.solution_space
+                                        == runmat_analysis_core::SolutionSpace::ModalReduced
+                                }
+                            }
                             && options.solver_mesh_artifact_path.is_none() => {}
                         (
                             runmat_analysis_fea::execution::StructuralStepWorkload::Buckling {

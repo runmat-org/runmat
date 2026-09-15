@@ -60,6 +60,7 @@ pub fn admit_structural_frequency_publication(
         result,
         publication,
         None,
+        None,
     )
 }
 
@@ -76,6 +77,25 @@ pub fn admit_prestressed_structural_frequency_publication(
         result,
         publication,
         Some(prestress_state),
+        None,
+    )
+}
+
+pub fn admit_prestressed_modal_structural_frequency_publication(
+    workload: &StructuralFrequencyWorkload,
+    solver_mesh: &SolverMeshArtifact,
+    prestress_state: &CanonicalSemanticState,
+    modal_state: &CanonicalSemanticState,
+    result: &crate::execution::StructuralFrequencySolverResult,
+    publication: &crate::execution::StructuralFrequencyPublicationManifest,
+) -> AnalysisExecutionResult<AnalysisRunIdentity> {
+    admit_structural_frequency_publication_with_state(
+        workload,
+        solver_mesh,
+        result,
+        publication,
+        Some(prestress_state),
+        Some(modal_state),
     )
 }
 
@@ -85,6 +105,7 @@ fn admit_structural_frequency_publication_with_state(
     result: &crate::execution::StructuralFrequencySolverResult,
     publication: &crate::execution::StructuralFrequencyPublicationManifest,
     prestress_state: Option<&CanonicalSemanticState>,
+    modal_state: Option<&CanonicalSemanticState>,
 ) -> AnalysisExecutionResult<AnalysisRunIdentity> {
     workload.validate()?;
     solver_mesh
@@ -104,6 +125,31 @@ fn admit_structural_frequency_publication_with_state(
         workload.plan().reference_frequency_hz(),
         prestress_state,
     )?;
+    match (workload.solver(), modal_state) {
+        (StructuralFrequencySolverPlan::Direct { .. }, None) => {}
+        (StructuralFrequencySolverPlan::ModalReduced { basis_state }, Some(state)) => {
+            state.validate()?;
+            let topology_digest =
+                runmat_execution::Digest::from_bytes(*solver_mesh.canonical_digest.bytes());
+            let basis = state.payload.modal_basis().ok_or_else(|| {
+                AnalysisExecutionError::Invalid(
+                    "modal structural frequency publication requires a modal-basis state".into(),
+                )
+            })?;
+            if state.identity != *basis_state || state.topology_digest != topology_digest {
+                return Err(AnalysisExecutionError::Identity(
+                    "modal structural frequency publication names another basis or topology",
+                ));
+            }
+            ModalReducedSystem::project(&assembly.real, basis)
+                .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+        }
+        _ => {
+            return Err(AnalysisExecutionError::Invalid(
+                "structural frequency solver and modal-state presence differ".into(),
+            ))
+        }
+    }
     let identity = super::admission::admit_structural(
         &assembly.real,
         workload.procedure_step()?,

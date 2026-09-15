@@ -29,6 +29,8 @@ mod buckling_completion;
 mod modal_completion;
 mod preparation;
 mod prestressed_frequency_completion;
+mod prestressed_frequency_modal_reduction;
+mod prestressed_frequency_states;
 mod prestressed_modal_completion;
 
 pub(in crate::analysis) use buckling_completion::complete_buckling_study;

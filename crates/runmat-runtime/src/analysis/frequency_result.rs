@@ -407,6 +407,7 @@ pub(in crate::analysis) fn admit_structural_frequency_result(
         options,
         assigned_run_id,
         None,
+        None,
     )
 }
 
@@ -423,6 +424,25 @@ pub(in crate::analysis) fn admit_prestressed_structural_frequency_result(
         options,
         assigned_run_id,
         Some(prestress_state),
+        None,
+    )
+}
+
+pub(in crate::analysis) fn admit_prestressed_modal_structural_frequency_result(
+    numerical: &StructuralStudyFrequencyNumericalResult,
+    solver_mesh: &runmat_meshing_core::SolverMeshArtifact,
+    options: &AnalysisStructuralFrequencyRunOptions,
+    assigned_run_id: String,
+    prestress_state: &runmat_analysis_fea::execution::CanonicalSemanticState,
+    modal_state: &runmat_analysis_fea::execution::CanonicalSemanticState,
+) -> Result<CompletedStructuralFrequencyStep, String> {
+    admit_structural_frequency_result_with_state(
+        numerical,
+        solver_mesh,
+        options,
+        assigned_run_id,
+        Some(prestress_state),
+        Some(modal_state),
     )
 }
 
@@ -432,20 +452,32 @@ fn admit_structural_frequency_result_with_state(
     options: &AnalysisStructuralFrequencyRunOptions,
     assigned_run_id: String,
     prestress_state: Option<&runmat_analysis_fea::execution::CanonicalSemanticState>,
+    modal_state: Option<&runmat_analysis_fea::execution::CanonicalSemanticState>,
 ) -> Result<CompletedStructuralFrequencyStep, String> {
-    let identity = match prestress_state {
-        Some(state) => runmat_analysis_fea::pipeline::structural_frequency::admit_prestressed_structural_frequency_publication(
+    let identity = match (prestress_state, modal_state) {
+        (Some(prestress), Some(modal)) => runmat_analysis_fea::pipeline::structural_frequency::admit_prestressed_modal_structural_frequency_publication(
+            &numerical.workload,
+            solver_mesh,
+            prestress,
+            modal,
+            &numerical.result,
+            &numerical.publication,
+        ),
+        (Some(state), None) => runmat_analysis_fea::pipeline::structural_frequency::admit_prestressed_structural_frequency_publication(
             &numerical.workload,
             solver_mesh,
             state,
             &numerical.result,
             &numerical.publication,
         ),
-        None => runmat_analysis_fea::pipeline::structural_frequency::admit_structural_frequency_publication(
+        (None, None) => runmat_analysis_fea::pipeline::structural_frequency::admit_structural_frequency_publication(
             &numerical.workload,
             solver_mesh,
             &numerical.result,
             &numerical.publication,
+        ),
+        (None, Some(_)) => return Err(
+            "structural modal-frequency admission requires its prestress state".into(),
         ),
     }
     .map_err(|error| error.to_string())?;

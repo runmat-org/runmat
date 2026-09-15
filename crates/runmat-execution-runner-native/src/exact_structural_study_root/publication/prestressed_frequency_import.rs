@@ -133,6 +133,7 @@ pub(super) fn import_prestressed_frequency_result<Source: CacheImport>(
             objects: input.objects.clone(),
             mesh: input.mesh,
             prestress_state: Some(&prestress_state),
+            modal_state: None,
             access: input.access,
             limits: input.limits,
         },

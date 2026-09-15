@@ -1,6 +1,8 @@
 use runmat_analysis_core::{
-    ActivationLifecycle, FormulationRequirement, IndependentDomain, ProcedureStep, StateUse,
-    StepObjectActivation, StepObjectRef,
+    ActivationLifecycle, FormulationRequirement, IndependentDomain, ProcedureStep, ProcedureStepId,
+    ReferenceStatePolicy, SequenceDependency, SequenceDependencyReason, StateId, StateInput,
+    StateSource, StateTransition, StateTransitionMethod, StateUse, StepObjectActivation,
+    StepObjectRef, TopologyTransitionPolicy, TransitionId,
 };
 use runmat_execution::Digest;
 
@@ -9,14 +11,14 @@ use crate::{
         CanonicalSemanticState, CanonicalSemanticStateInput, CanonicalSemanticStatePayload,
         CanonicalStateTransition, SequenceIdentity, SolverResultIdentity, StepIdentity,
         StructuralFrequencyEntryRequest, StructuralPrestressedFrequencySolverTemplate,
-        StructuralPrestressedFrequencyTemplate,
+        StructuralPrestressedFrequencyTemplate, StructuralPrestressedModalTemplate,
     },
     fixtures::{replace_fixture_excitations, FixtureExcitation, FixtureExcitationKind},
     frequency::FrequencyResponsePlan,
     pipeline::structural_frequency::{
         execute_prestressed_structural_frequency_entry, prepare_prestressed_structural_frequency,
     },
-    ComputeBackend,
+    ComputeBackend, ModalConvergencePolicy, ModalTruncationPolicy,
 };
 
 fn direct_case(
@@ -185,4 +187,219 @@ fn prestressed_direct_harmonic_uses_the_exact_tangent_and_rejects_state_substitu
         None,
     )
     .is_err());
+}
+
+#[test]
+fn complete_prestressed_modal_basis_matches_the_direct_harmonic_solution() {
+    let (direct_workload, mesh, prestress_state, direct_request) = direct_case(1.0e4);
+    let direct = execute_prestressed_structural_frequency_entry(
+        &direct_workload,
+        &mesh,
+        &direct_request,
+        &prestress_state,
+        None,
+    )
+    .unwrap();
+
+    let mut model = direct_workload.model().clone();
+    let frequency_step = model.sequence.steps.pop().unwrap();
+    let mut modal_step = ProcedureStep::structural_prestressed_modal(
+        "prestressed_modes",
+        "preload",
+        "geometric_stiffness",
+    );
+    modal_step.independent_domain = IndependentDomain::Eigenvalue { requested_count: 3 };
+    let mut modal_frequency_step = frequency_step;
+    modal_frequency_step.step_id = ProcedureStepId("prestressed_frequency".into());
+    modal_frequency_step.solution_space = runmat_analysis_core::SolutionSpace::ModalReduced;
+    modal_frequency_step.state_inputs.push(StateInput {
+        input_id: "modal_basis".into(),
+        required_kind: runmat_analysis_core::StateKind::ModalBasis,
+        source: StateSource::Upstream {
+            producer_step: ProcedureStepId("prestressed_modes".into()),
+            state_id: StateId("modal_basis".into()),
+        },
+        use_as: StateUse::ModalBasis,
+        conflict: runmat_analysis_core::InitialStateConflictPolicy::Reject,
+    });
+    model.sequence.steps.push(modal_step.clone());
+    model.sequence.steps.push(modal_frequency_step.clone());
+    model.sequence.dependencies = vec![
+        SequenceDependency {
+            predecessor: ProcedureStepId("preload".into()),
+            successor: modal_step.step_id.clone(),
+            reason: SequenceDependencyReason::StateTransfer,
+        },
+        SequenceDependency {
+            predecessor: ProcedureStepId("preload".into()),
+            successor: modal_frequency_step.step_id.clone(),
+            reason: SequenceDependencyReason::StateTransfer,
+        },
+        SequenceDependency {
+            predecessor: modal_step.step_id.clone(),
+            successor: modal_frequency_step.step_id.clone(),
+            reason: SequenceDependencyReason::StateTransfer,
+        },
+    ];
+    model.sequence.transitions.push(StateTransition {
+        transition_id: TransitionId("preload-to-prestressed-modal".into()),
+        producer_step: ProcedureStepId("preload".into()),
+        consumer_step: modal_step.step_id.clone(),
+        state_id: StateId("geometric_stiffness".into()),
+        method: StateTransitionMethod::Reuse,
+        topology: TopologyTransitionPolicy::RequireIdentical,
+        reference: ReferenceStatePolicy::Preserve,
+    });
+    model.sequence.transitions[0].consumer_step = modal_frequency_step.step_id.clone();
+    model.sequence.transitions[0].transition_id =
+        TransitionId("preload-to-prestressed-frequency".into());
+    model.sequence.transitions.push(StateTransition {
+        transition_id: TransitionId("prestressed-modal-to-frequency".into()),
+        producer_step: modal_step.step_id.clone(),
+        consumer_step: modal_frequency_step.step_id.clone(),
+        state_id: StateId("modal_basis".into()),
+        method: StateTransitionMethod::Reuse,
+        topology: TopologyTransitionPolicy::RequireIdentical,
+        reference: ReferenceStatePolicy::Preserve,
+    });
+
+    let topology_digest = Digest::from_bytes(*mesh.canonical_digest.bytes());
+    let sequence = SequenceIdentity::from_solver_contract(&model.sequence).unwrap();
+    let preload_producer =
+        StepIdentity::from_solver_contract(sequence, &model.sequence.steps[0]).unwrap();
+    let preload_source = SolverResultIdentity::from_step_result(
+        preload_producer,
+        prestress_state
+            .payload
+            .structural_linearization()
+            .unwrap()
+            .identity()
+            .digest(),
+    )
+    .unwrap();
+    let prestress_state = CanonicalSemanticState::new(CanonicalSemanticStateInput {
+        producer: preload_producer,
+        declaration: model.sequence.steps[0].state_outputs[1].clone(),
+        topology_digest,
+        source_result: preload_source,
+        payload: CanonicalSemanticStatePayload::StructuralLinearization {
+            linearization: Box::new(
+                prestress_state
+                    .payload
+                    .structural_linearization()
+                    .unwrap()
+                    .clone(),
+            ),
+        },
+    })
+    .unwrap();
+    let modal_transition = CanonicalStateTransition::bind_upstream(
+        &model,
+        &modal_step.step_id,
+        &prestress_state,
+        StateUse::Prestress,
+        topology_digest,
+    )
+    .unwrap();
+    let modal_workload = StructuralPrestressedModalTemplate {
+        schema_version: 1,
+        model: model.clone(),
+        step_id: modal_step.step_id.clone(),
+        backend: ComputeBackend::Cpu,
+        formulation_requirement: FormulationRequirement::Experimental,
+        observation_execution: crate::results::observation::ObservationExecutionPolicy::scalable(),
+        truncation: ModalTruncationPolicy::requested(3),
+        convergence: ModalConvergencePolicy::exploratory(),
+    }
+    .bind(modal_transition)
+    .unwrap();
+    let modal_result = crate::execute_structural_prestressed_modal_workload(
+        &modal_workload,
+        &mesh,
+        &prestress_state,
+    )
+    .unwrap();
+    assert_eq!(modal_result.basis().modes().len(), 3);
+    let modal_producer = StepIdentity::from_solver_contract(sequence, &modal_step).unwrap();
+    let modal_source = SolverResultIdentity::from_step_result(
+        modal_producer,
+        modal_result.basis_identity().digest(),
+    )
+    .unwrap();
+    let basis_state = CanonicalSemanticState::new(CanonicalSemanticStateInput {
+        producer: modal_producer,
+        declaration: modal_step.state_outputs[0].clone(),
+        topology_digest,
+        source_result: modal_source,
+        payload: CanonicalSemanticStatePayload::ModalBasis {
+            basis: Box::new(modal_result.basis().clone()),
+        },
+    })
+    .unwrap();
+    let frequency_transition = CanonicalStateTransition::bind_upstream(
+        &model,
+        &modal_frequency_step.step_id,
+        &prestress_state,
+        StateUse::Prestress,
+        topology_digest,
+    )
+    .unwrap();
+    CanonicalStateTransition::bind_upstream(
+        &model,
+        &modal_frequency_step.step_id,
+        &basis_state,
+        StateUse::ModalBasis,
+        topology_digest,
+    )
+    .unwrap();
+    let modal_workload = StructuralPrestressedFrequencyTemplate {
+        schema_version: 1,
+        model,
+        step_id: modal_frequency_step.step_id,
+        backend: ComputeBackend::Cpu,
+        formulation_requirement: FormulationRequirement::Experimental,
+        observation_execution: crate::results::observation::ObservationExecutionPolicy::scalable(),
+        plan: FrequencyResponsePlan::new(60.0, &[], &[]).unwrap(),
+        solver: StructuralPrestressedFrequencySolverTemplate::ModalReduced,
+    }
+    .bind(frequency_transition, Some(basis_state.identity))
+    .unwrap();
+    let prepared =
+        prepare_prestressed_structural_frequency(&modal_workload, &mesh, &prestress_state).unwrap();
+    let modal_request = StructuralFrequencyEntryRequest::new(
+        &modal_workload,
+        prepared.study,
+        prepared.step,
+        prepared.execution_plan,
+        prepared.scope,
+        modal_workload.plan().entries().unwrap()[0],
+    )
+    .unwrap();
+    let modal = execute_prestressed_structural_frequency_entry(
+        &modal_workload,
+        &mesh,
+        &modal_request,
+        &prestress_state,
+        Some(&basis_state),
+    )
+    .unwrap();
+
+    for (direct, modal) in direct
+        .sample()
+        .displacement()
+        .real()
+        .iter()
+        .chain(direct.sample().displacement().imaginary())
+        .zip(
+            modal
+                .sample()
+                .displacement()
+                .real()
+                .iter()
+                .chain(modal.sample().displacement().imaginary()),
+        )
+    {
+        let scale = direct.abs().max(modal.abs()).max(1.0);
+        assert!((direct - modal).abs() <= 1.0e-8 * scale);
+    }
 }
