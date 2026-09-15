@@ -34,6 +34,7 @@ mod signal_program;
 mod state_publication;
 mod state_transition;
 mod structural;
+mod structural_buckling_study;
 mod structural_modal_transient_study;
 mod structural_sequence;
 mod structural_transient_recovery;
@@ -199,6 +200,9 @@ pub use structural::{
     prepare_structural_linear_program, prepare_structural_sequence_step,
     ImportedStructuralLinearResult, PreparedStructuralLinearProgram,
     StructuralLinearProgramPreparation,
+};
+pub use structural_buckling_study::{
+    StructuralBucklingStudyCoordinator, StructuralBucklingStudyPreparation,
 };
 pub use structural_modal_transient_study::{
     StructuralModalTransientStudyCoordinator, StructuralModalTransientStudyPreparation,

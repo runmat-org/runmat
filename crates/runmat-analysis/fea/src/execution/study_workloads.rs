@@ -6,9 +6,9 @@ use runmat_execution::Digest;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    AnalysisExecutionError, AnalysisExecutionResult, StructuralFrequencyWorkload,
-    StructuralLinearWorkload, StructuralModalTransientTemplate, StructuralModalWorkload,
-    StructuralTransientWorkload,
+    AnalysisExecutionError, AnalysisExecutionResult, StructuralBucklingTemplate,
+    StructuralFrequencyWorkload, StructuralLinearWorkload, StructuralModalTransientTemplate,
+    StructuralModalWorkload, StructuralTransientWorkload,
 };
 
 const STUDY_WORKLOADS_PREFIX: &[u8] = b"runmat-structural-study-workloads\0";
@@ -77,9 +77,10 @@ impl StructuralTransientBlockPlan {
 
 /// One unresolved authored structural procedure in a heterogeneous sequence.
 ///
-/// Producer results and state identities are deliberately absent. In particular, modal transient
-/// work remains a template until the sequence coordinator publishes and binds the upstream modal
-/// basis. This inventory is numerical intent, not an execution or placement plan.
+/// Producer results and state identities are deliberately absent. Modal transient and buckling
+/// consumers remain templates until the sequence coordinator publishes and binds the upstream
+/// modal basis or geometric-stiffness state. This inventory is numerical intent, not an execution
+/// or placement plan.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum StructuralStepWorkload {
@@ -92,6 +93,9 @@ pub enum StructuralStepWorkload {
     ModalTransient {
         template: Box<StructuralModalTransientTemplate>,
         block_plan: StructuralTransientBlockPlan,
+    },
+    Buckling {
+        template: Box<StructuralBucklingTemplate>,
     },
 }
 
@@ -107,6 +111,7 @@ impl StructuralStepWorkload {
                 template.validate()?;
                 block_plan.validate()
             }
+            Self::Buckling { template } => template.validate(),
         }
     }
 
@@ -115,6 +120,7 @@ impl StructuralStepWorkload {
             Self::Linear { workload } => &workload.model,
             Self::ModalExtraction { workload } => workload.model(),
             Self::ModalTransient { template, .. } => &template.model,
+            Self::Buckling { template } => &template.model,
         }
     }
 
@@ -123,6 +129,7 @@ impl StructuralStepWorkload {
             Self::Linear { workload } => &workload.step_id,
             Self::ModalExtraction { workload } => workload.step_id(),
             Self::ModalTransient { template, .. } => &template.step_id,
+            Self::Buckling { template } => &template.step_id,
         }
     }
 
@@ -131,6 +138,7 @@ impl StructuralStepWorkload {
             Self::Linear { workload } => workload.backend,
             Self::ModalExtraction { workload } => workload.backend(),
             Self::ModalTransient { template, .. } => template.backend,
+            Self::Buckling { template } => template.backend,
         }
     }
 
@@ -139,6 +147,7 @@ impl StructuralStepWorkload {
             Self::Linear { workload } => workload.model = model,
             Self::ModalExtraction { workload } => workload.replace_model(model)?,
             Self::ModalTransient { template, .. } => template.model = model,
+            Self::Buckling { template } => template.model = model,
         }
         self.validate()
     }
@@ -364,11 +373,42 @@ fn validate_heterogeneous_sequence(
     for workload in workloads.values() {
         workload.validate()?;
     }
-    validate_exact_sequence_coverage(
+    let model = validate_exact_sequence_coverage(
         workloads
             .iter()
             .map(|(key, workload)| (key, workload.authored_model(), workload.step_id())),
-    )
+    )?;
+    let order = authored_step_order(model)?;
+    let [producer_id, consumer_id] = order.as_slice() else {
+        return Err(invalid(
+            "heterogeneous structural execution requires exactly one producer and one state-dependent consumer",
+        ));
+    };
+    let producer = workloads.get(producer_id).ok_or({
+        AnalysisExecutionError::Identity(
+            "validated heterogeneous producer is absent from its workload inventory",
+        )
+    })?;
+    let consumer = workloads.get(consumer_id).ok_or({
+        AnalysisExecutionError::Identity(
+            "validated heterogeneous consumer is absent from its workload inventory",
+        )
+    })?;
+    if !matches!(
+        (producer, consumer),
+        (
+            StructuralStepWorkload::ModalExtraction { .. },
+            StructuralStepWorkload::ModalTransient { .. }
+        ) | (
+            StructuralStepWorkload::Linear { .. },
+            StructuralStepWorkload::Buckling { .. }
+        )
+    ) {
+        return Err(invalid(
+            "heterogeneous structural execution supports modal extraction followed by modal transient response, or linear preload followed by buckling",
+        ));
+    }
+    Ok(model)
 }
 
 fn validate_exact_sequence_coverage<'a>(

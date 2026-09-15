@@ -97,6 +97,226 @@ fn structural_study_intent_identity_is_independent_of_local_paths() {
 }
 
 #[test]
+fn structural_buckling_uses_one_typed_workload_contract_for_local_and_remote_placement() {
+    let _guard = analysis_test_guard();
+    let mut spec = sample_buckling_study_spec("11".repeat(32));
+    let intent = analysis_prepare_structural_study_intent_op(
+        &spec,
+        OperationContext::new(Some("trace-buckling-intent".into()), None),
+    )
+    .expect("buckling intent should prepare without a local mesh");
+    let runmat_analysis_fea::execution::StructuralStudyWorkloads::HeterogeneousSequence {
+        workloads,
+    } = intent.workloads()
+    else {
+        panic!("buckling intent must retain its heterogeneous sequence")
+    };
+    let step_ids = intent.workloads().step_ids().unwrap();
+    assert!(matches!(
+        workloads.get(&step_ids[0]),
+        Some(runmat_analysis_fea::execution::StructuralStepWorkload::Linear { .. })
+    ));
+    assert!(matches!(
+        workloads.get(&step_ids[1]),
+        Some(runmat_analysis_fea::execution::StructuralStepWorkload::Buckling { .. })
+    ));
+    let restored = PreparedStructuralStudyIntent::from_continuation_bytes(
+        &intent.continuation_bytes().unwrap(),
+    )
+    .expect("buckling continuation should restore");
+    assert_eq!(restored.workloads(), intent.workloads());
+
+    let mut substituted = intent.clone();
+    let AnalysisSolverOptions::StructuralLinear(options) =
+        &mut substituted.steps[0].authored_execution.solver_options
+    else {
+        panic!("buckling producer must retain structural-linear options")
+    };
+    options.preconditioner_mode = PreconditionerMode::Ilu;
+    substituted.intent_digest = substituted.semantic_digest().unwrap();
+    assert!(substituted.continuation_bytes().is_err());
+
+    let (mesh_root, mesh_path) =
+        write_ready_minimal_analysis_mesh_artifact("local-buckling-preparation-mesh");
+    spec.solver_mesh_artifact_path = Some(mesh_path.display().to_string());
+    let prepared = analysis_prepare_structural_study_op(
+        &spec,
+        OperationContext::new(Some("trace-local-buckling-preparation".into()), None),
+    )
+    .expect("local buckling study should use the same workload contract");
+    assert_eq!(prepared.workloads(), intent.workloads());
+    let _ = fs::remove_dir_all(mesh_root);
+}
+
+#[test]
+fn structural_buckling_completion_publishes_ordinary_runtime_results() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let root = temp_artifact_root("buckling-runtime-completion");
+    let _ = fs::remove_dir_all(&root);
+    let _runtime_guard = scoped_fea_artifact_roots(&root);
+    let meshing_output = ready_buckling_meshing_output();
+    let spec =
+        sample_buckling_study_spec(digest_hex(meshing_output.artifact.geometry.source_digest));
+    let intent = analysis_prepare_structural_study_intent_op(
+        &spec,
+        OperationContext::new(Some("trace-buckling-completion".into()), None),
+    )
+    .expect("buckling intent should prepare");
+    let runmat_analysis_fea::execution::StructuralStudyWorkloads::HeterogeneousSequence {
+        mut workloads,
+    } = intent.workloads()
+    else {
+        panic!("buckling completion requires a heterogeneous sequence")
+    };
+    let [preload_step_id, buckling_step_id] = intent
+        .model()
+        .sequence
+        .steps
+        .iter()
+        .map(|step| step.step_id.clone())
+        .collect::<Vec<_>>()
+        .try_into()
+        .unwrap();
+    let runmat_analysis_fea::execution::StructuralStepWorkload::Linear {
+        workload: preload_workload,
+    } = workloads.remove(&preload_step_id).unwrap()
+    else {
+        panic!("first buckling workload must be the preload")
+    };
+    let runmat_analysis_fea::execution::StructuralStepWorkload::Buckling { template } =
+        workloads.remove(&buckling_step_id).unwrap()
+    else {
+        panic!("second buckling workload must be the stability solve")
+    };
+    let model = preload_workload.model.clone();
+    let constraints =
+        runmat_analysis_fea::constraints::CanonicalStructuralConstraintPlan::compile_for_model(
+            &model,
+            Some(&meshing_output.artifact),
+        )
+        .unwrap();
+    let topology_digest =
+        runmat_execution::Digest::from_bytes(*meshing_output.artifact.canonical_digest.bytes());
+    let preload =
+        runmat_analysis_fea::run_linear_static_with_prepared_constraint_plan_and_linearization(
+            &model,
+            ComputeBackend::Cpu,
+            runmat_analysis_fea::LinearStaticSolveOptions {
+                formulation_requirement: FormulationRequirement::Experimental,
+                solver_mesh: Some(meshing_output.artifact.clone()),
+                require_solver_mesh_for_solid: true,
+                ..runmat_analysis_fea::LinearStaticSolveOptions::default()
+            },
+            &constraints,
+            topology_digest,
+        )
+        .unwrap();
+    let sequence =
+        runmat_analysis_fea::execution::SequenceIdentity::from_solver_contract(&model.sequence)
+            .unwrap();
+    let producer = runmat_analysis_fea::execution::StepIdentity::from_solver_contract(
+        sequence,
+        &model.sequence.steps[0],
+    )
+    .unwrap();
+    let source_result = runmat_analysis_fea::execution::SolverResultIdentity::from_step_result(
+        producer,
+        preload.linearization.identity().digest(),
+    )
+    .unwrap();
+    let declaration = model.sequence.steps[0]
+        .state_outputs
+        .iter()
+        .find(|output| output.kind == runmat_analysis_core::StateKind::GeometricStiffness)
+        .unwrap()
+        .clone();
+    let state = runmat_analysis_fea::execution::CanonicalSemanticState::new(
+        runmat_analysis_fea::execution::CanonicalSemanticStateInput {
+            producer,
+            declaration,
+            topology_digest,
+            source_result,
+            payload:
+                runmat_analysis_fea::execution::CanonicalSemanticStatePayload::StructuralLinearization {
+                    linearization: Box::new(preload.linearization),
+                },
+        },
+    )
+    .unwrap();
+    let transition = runmat_analysis_fea::execution::CanonicalStateTransition::bind_upstream(
+        &template.model,
+        &template.step_id,
+        &state,
+        runmat_analysis_core::StateUse::Prestress,
+        topology_digest,
+    )
+    .unwrap();
+    let buckling_workload = (*template).bind(transition).unwrap();
+    let buckling_result = runmat_analysis_fea::execute_structural_buckling_workload(
+        &buckling_workload,
+        &meshing_output.artifact,
+        &state,
+    )
+    .unwrap();
+    let buckling_receipt = runmat_analysis_fea::execution::StructuralBucklingNumericalReceipt::new(
+        buckling_test_workload_identity(&buckling_workload, &meshing_output.artifact),
+        &buckling_result,
+    )
+    .unwrap();
+    let envelope = analysis_complete_structural_study_intent_op(
+        intent,
+        meshing_output,
+        StructuralStudyNumericalResult::StructuralBuckling(Box::new(
+            StructuralStudyBucklingNumericalResult {
+                frozen_project_digest: None,
+                preload_step_id,
+                buckling_step_id,
+                preload_result: preload.run,
+                preload_solver_result_identity: source_result,
+                prestress_state: state,
+                buckling_result,
+                buckling_numerical_receipt: buckling_receipt,
+            },
+        )),
+        StructuralStudyCompletionIdentity::new("server-run-buckling").unwrap(),
+    )
+    .expect("buckling result should enter ordinary study publication");
+
+    assert_eq!(envelope.data.steps.len(), 2);
+    assert!(envelope
+        .data
+        .states
+        .iter()
+        .any(|state| state.kind == runmat_analysis_core::StateKind::GeometricStiffness));
+    let persisted = storage::load_run_result(&envelope.data.steps[1].run_id)
+        .unwrap()
+        .expect("buckling run should be persisted");
+    let buckling = persisted
+        .buckling_results
+        .as_ref()
+        .expect("ordinary runtime result should retain buckling modes");
+    assert_eq!(buckling.mode_indices, vec![1]);
+    assert_eq!(buckling.load_factors.len(), 1);
+    assert_eq!(buckling.mode_shapes.len(), 1);
+    let queried = analysis_results_op(
+        &persisted,
+        AnalysisResultsQuery::default(),
+        OperationContext::new(None, None),
+    )
+    .unwrap();
+    assert_eq!(queried.data.summary.buckling_mode_count, 1);
+    assert_eq!(
+        queried.data.summary.available_buckling_mode_indices,
+        vec![1]
+    );
+    assert!(queried.data.summary.minimum_buckling_load_factor.is_some());
+    assert!(queried.data.summary.max_buckling_residual_norm.is_some());
+    drop(_runtime_guard);
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
 fn structural_study_intent_admits_one_typed_direct_transient_workload() {
     let _guard = analysis_test_guard();
     let spec = sample_direct_transient_study_spec("44".repeat(32), 9, 4);
@@ -919,20 +1139,125 @@ fn sample_modal_transient_study_spec(geometry_sha256: String) -> AnalysisStudySp
     spec
 }
 
+fn sample_buckling_study_spec(geometry_sha256: String) -> AnalysisStudySpec {
+    let mut spec = sample_linear_static_study_spec();
+    spec.geometry.source.sha256 = geometry_sha256;
+    let mut model = analysis_create_model_op(
+        &spec.geometry,
+        spec.create_model_intent.clone(),
+        OperationContext::new(None, None),
+    )
+    .expect("sample structural model should resolve")
+    .data;
+    let runmat_analysis_core::PhysicalSignal::Force(signal) = &mut model.signals[0] else {
+        panic!("buckling fixture must carry a force signal")
+    };
+    signal.representation = runmat_analysis_core::SignalRepresentation::Constant(
+        runmat_analysis_core::SignalValue::Vector3([
+            runmat_analysis_core::Force::new(0.0),
+            runmat_analysis_core::Force::new(0.0),
+            runmat_analysis_core::Force::new(-1.0),
+        ]),
+    );
+    let preload = ProcedureStep::structural_preload("step_preload");
+    let mut buckling = ProcedureStep::structural_buckling(
+        "step_buckling",
+        preload.step_id.as_str(),
+        "geometric_stiffness",
+    );
+    buckling.independent_domain =
+        runmat_analysis_core::IndependentDomain::Eigenvalue { requested_count: 1 };
+    let mut sequence =
+        AnalysisSequence::from_steps("sequence_buckling", vec![preload.clone(), buckling.clone()]);
+    sequence.dependencies[0].reason = runmat_analysis_core::SequenceDependencyReason::StateTransfer;
+    sequence
+        .transitions
+        .push(runmat_analysis_core::StateTransition {
+            transition_id: runmat_analysis_core::TransitionId("preload_to_buckling".into()),
+            producer_step: preload.step_id.clone(),
+            consumer_step: buckling.step_id.clone(),
+            state_id: runmat_analysis_core::StateId("geometric_stiffness".into()),
+            method: runmat_analysis_core::StateTransitionMethod::Reuse,
+            topology: runmat_analysis_core::TopologyTransitionPolicy::RequireIdentical,
+            reference: runmat_analysis_core::ReferenceStatePolicy::Preserve,
+        });
+    model.sequence = sequence;
+    spec.model = Some(model);
+    spec.execution = AnalysisExecutionPlan {
+        steps: vec![
+            AnalysisExecutionStep {
+                step_id: preload.step_id,
+                backend: ComputeBackend::Cpu,
+                requirement: FormulationRequirement::Experimental,
+                solver_options: AnalysisSolverOptions::StructuralLinear(
+                    AnalysisRunOptions::default(),
+                ),
+            },
+            AnalysisExecutionStep {
+                step_id: buckling.step_id,
+                backend: ComputeBackend::Cpu,
+                requirement: FormulationRequirement::Experimental,
+                solver_options: AnalysisSolverOptions::StructuralBuckling(
+                    AnalysisBucklingRunOptions {
+                        solver:
+                            runmat_analysis_fea::execution::StructuralBucklingSolverPolicy::new(
+                                1, 1.0e-8, 256,
+                            )
+                            .unwrap(),
+                        ..AnalysisBucklingRunOptions::default()
+                    },
+                ),
+            },
+        ],
+    };
+    spec
+}
+
 fn modal_test_workload_identity(
     workload: &runmat_analysis_fea::execution::StructuralModalWorkload,
     mesh: &runmat_meshing_core::SolverMeshArtifact,
 ) -> runmat_analysis_fea::execution::AnalysisWorkloadIdentity {
+    test_analysis_workload_identity(
+        workload.model(),
+        workload.procedure_step().unwrap(),
+        runmat_analysis_fea::execution::AnalysisWorkKind::ExtractStructuralModes,
+        workload.identity().digest(),
+        mesh,
+        "runtime-modal-completion-test",
+    )
+}
+
+fn buckling_test_workload_identity(
+    workload: &runmat_analysis_fea::execution::StructuralBucklingWorkload,
+    mesh: &runmat_meshing_core::SolverMeshArtifact,
+) -> runmat_analysis_fea::execution::AnalysisWorkloadIdentity {
+    test_analysis_workload_identity(
+        workload.model(),
+        workload.procedure_step().unwrap(),
+        runmat_analysis_fea::execution::AnalysisWorkKind::SolveStructuralBucklingModes,
+        workload.identity().digest(),
+        mesh,
+        "runtime-buckling-completion-test",
+    )
+}
+
+fn test_analysis_workload_identity(
+    model: &runmat_analysis_core::AnalysisModel,
+    procedure_step: &runmat_analysis_core::ProcedureStep,
+    work_kind: runmat_analysis_fea::execution::AnalysisWorkKind,
+    contract_digest: runmat_execution::Digest,
+    mesh: &runmat_meshing_core::SolverMeshArtifact,
+    label: &str,
+) -> runmat_analysis_fea::execution::AnalysisWorkloadIdentity {
     use runmat_analysis_fea::execution::{
-        AnalysisWorkKind, AnalysisWorkloadIdentity, ConstraintPlanIdentity, DiscretizationIdentity,
+        AnalysisWorkloadIdentity, ConstraintPlanIdentity, DiscretizationIdentity,
         ExecutionPlanIdentity, NumericalPlanIdentity, OperatorIdentity, ProblemIdentity,
         SequenceIdentity, StepIdentity, StudyIdentity,
     };
-    let digest = runmat_execution::Digest::sha256(b"runtime-modal-completion-test");
+    let digest = runmat_execution::Digest::sha256(label);
     let study = StudyIdentity::from_authored_digest(digest, None).unwrap();
-    let sequence = SequenceIdentity::from_solver_contract(&workload.model().sequence).unwrap();
-    let step =
-        StepIdentity::from_solver_contract(sequence, workload.procedure_step().unwrap()).unwrap();
+    let sequence = SequenceIdentity::from_solver_contract(&model.sequence).unwrap();
+    let step = StepIdentity::from_solver_contract(sequence, procedure_step).unwrap();
     let constraints = ConstraintPlanIdentity::new(step, digest, digest).unwrap();
     let problem = ProblemIdentity::new(step, digest, None, constraints, Vec::new()).unwrap();
     let mesh_digest = runmat_execution::Digest::from_bytes(*mesh.canonical_digest.bytes());
@@ -944,9 +1269,9 @@ fn modal_test_workload_identity(
         study,
         step,
         execution,
-        AnalysisWorkKind::ExtractStructuralModes,
+        work_kind,
         digest,
-        vec![workload.identity().digest(), mesh_digest],
+        vec![contract_digest, mesh_digest],
     )
     .unwrap()
 }
@@ -979,6 +1304,23 @@ fn ready_minimal_meshing_output() -> crate::meshing::MeshingExecutionOutput {
         evidence,
         boundary_region_ids: std::collections::BTreeMap::new(),
     }
+}
+
+fn ready_buckling_meshing_output() -> crate::meshing::MeshingExecutionOutput {
+    let mut output = ready_minimal_meshing_output();
+    let tip = persistent_face("tip");
+    output.artifact.topology.boundary_faces[1]
+        .provenance
+        .retain(|source| source != &tip);
+    output.artifact.topology.boundary_faces[3]
+        .provenance
+        .push(tip);
+    output.artifact.topology.boundary_faces[3].provenance.sort();
+    output.artifact.canonical_digest = StableDigest::ZERO;
+    output.artifact.seal_canonical_digest().unwrap();
+    output.evidence =
+        runmat_meshing_core::fixtures::canonical_tetrahedron_meshing_evidence(&output.artifact);
+    output
 }
 
 fn digest_hex(digest: StableDigest) -> String {

@@ -22,7 +22,8 @@ pub use lifecycle::{
     structural_study_execution_failure,
 };
 pub(super) use lifecycle::{
-    complete_frequency_study, complete_modal_study, complete_modal_transient_study,
+    complete_buckling_study, complete_frequency_study, complete_modal_study,
+    complete_modal_transient_study, prepare_structural_buckling_template,
     prepare_structural_frequency_workload, prepare_structural_modal_transient_template,
     prepare_structural_modal_workload,
 };
@@ -116,6 +117,10 @@ pub(super) enum PreparedStructuralStudyExecution {
         workload: Box<runmat_analysis_fea::execution::StructuralModalWorkload>,
     },
     StructuralModalTransient {
+        workloads:
+            BTreeMap<ProcedureStepId, runmat_analysis_fea::execution::StructuralStepWorkload>,
+    },
+    StructuralBuckling {
         workloads:
             BTreeMap<ProcedureStepId, runmat_analysis_fea::execution::StructuralStepWorkload>,
     },
@@ -352,6 +357,17 @@ impl PreparedStructuralStudyIntent {
                         })?;
                     match (workload, &step.authored_execution.solver_options) {
                         (
+                            runmat_analysis_fea::execution::StructuralStepWorkload::Linear {
+                                workload,
+                            },
+                            super::AnalysisSolverOptions::StructuralLinear(options),
+                        ) if workload.step_id == step.procedure_step.step_id
+                            && linear_workload_matches_prepared_execution(
+                                workload,
+                                &step.authored_execution,
+                                options,
+                            ) => {}
+                        (
                             runmat_analysis_fea::execution::StructuralStepWorkload::ModalExtraction {
                                 workload,
                             },
@@ -364,6 +380,19 @@ impl PreparedStructuralStudyIntent {
                                 == ObservationExecutionPolicy::scalable()
                             && workload.truncation() == options.truncation
                             && workload.convergence() == options.convergence
+                            && options.solver_mesh_artifact_path.is_none() => {}
+                        (
+                            runmat_analysis_fea::execution::StructuralStepWorkload::Buckling {
+                                template,
+                            },
+                            super::AnalysisSolverOptions::StructuralBuckling(options),
+                        ) if template.step_id == step.procedure_step.step_id
+                            && template.backend == step.authored_execution.backend
+                            && template.formulation_requirement
+                                == step.authored_execution.requirement
+                            && template.observation_execution
+                                == ObservationExecutionPolicy::scalable()
+                            && template.solver == options.solver
                             && options.solver_mesh_artifact_path.is_none() => {}
                         (
                             runmat_analysis_fea::execution::StructuralStepWorkload::ModalTransient {
@@ -408,32 +437,11 @@ impl PreparedStructuralStudyIntent {
                         workloads.get(&step.procedure_step.step_id).ok_or_else(|| {
                             "structural linear workload is missing its step".to_string()
                         })?;
-                    let expected_preconditioner = match options.preconditioner_mode {
-                        super::PreconditionerMode::Auto | super::PreconditionerMode::Jacobi => {
-                            SpdPreconditionerKind::Jacobi
-                        }
-                        super::PreconditionerMode::Ilu => SpdPreconditionerKind::Ilu0,
-                        super::PreconditionerMode::Amg => SpdPreconditionerKind::Jacobi,
-                    };
-                    let backend_matches = match step.authored_execution.backend {
-                        runmat_analysis_fea::ComputeBackend::Cpu => {
-                            workload.algebra_backend == LinearAlgebraBackendKind::CpuReference
-                        }
-                        runmat_analysis_fea::ComputeBackend::Gpu => matches!(
-                            workload.algebra_backend,
-                            LinearAlgebraBackendKind::CpuReference
-                                | LinearAlgebraBackendKind::Accelerator
-                        ),
-                    };
-                    if workload.backend != step.authored_execution.backend
-                        || workload.formulation_requirement != step.authored_execution.requirement
-                        || workload.preconditioner != expected_preconditioner
-                        || !backend_matches
-                        || workload.observation_execution != ObservationExecutionPolicy::scalable()
-                        || !workload.require_solver_mesh_for_solid
-                        || workload.initial_guess_transition.is_some()
-                        || options.solver_mesh_artifact_path.is_some()
-                    {
+                    if !linear_workload_matches_prepared_execution(
+                        workload,
+                        &step.authored_execution,
+                        options,
+                    ) {
                         return Err(
                             "structural linear workload differs from its prepared execution".into(),
                         );
@@ -562,6 +570,37 @@ impl PreparedStructuralStudyIntent {
     }
 }
 
+fn linear_workload_matches_prepared_execution(
+    workload: &runmat_analysis_fea::execution::StructuralLinearWorkload,
+    execution: &AnalysisExecutionStep,
+    options: &super::AnalysisRunOptions,
+) -> bool {
+    let expected_preconditioner = match options.preconditioner_mode {
+        super::PreconditionerMode::Auto | super::PreconditionerMode::Jacobi => {
+            SpdPreconditionerKind::Jacobi
+        }
+        super::PreconditionerMode::Ilu => SpdPreconditionerKind::Ilu0,
+        super::PreconditionerMode::Amg => SpdPreconditionerKind::Jacobi,
+    };
+    let backend_matches = match execution.backend {
+        runmat_analysis_fea::ComputeBackend::Cpu => {
+            workload.algebra_backend == LinearAlgebraBackendKind::CpuReference
+        }
+        runmat_analysis_fea::ComputeBackend::Gpu => matches!(
+            workload.algebra_backend,
+            LinearAlgebraBackendKind::CpuReference | LinearAlgebraBackendKind::Accelerator
+        ),
+    };
+    workload.backend == execution.backend
+        && workload.formulation_requirement == execution.requirement
+        && workload.preconditioner == expected_preconditioner
+        && backend_matches
+        && workload.observation_execution == ObservationExecutionPolicy::scalable()
+        && workload.require_solver_mesh_for_solid
+        && workload.initial_guess_transition.is_none()
+        && options.solver_mesh_artifact_path.is_none()
+}
+
 pub(super) fn resolve_intent_meshing_request(
     source_units: runmat_geometry_core::UnitSystem,
     settings: Option<runmat_meshing_core::MeshingRequestSettings>,
@@ -610,6 +649,11 @@ impl PreparedStructuralStudy {
                 }
             }
             PreparedStructuralStudyExecution::StructuralModalTransient { workloads } => {
+                StructuralStudyWorkloads::HeterogeneousSequence {
+                    workloads: workloads.clone(),
+                }
+            }
+            PreparedStructuralStudyExecution::StructuralBuckling { workloads } => {
                 StructuralStudyWorkloads::HeterogeneousSequence {
                     workloads: workloads.clone(),
                 }

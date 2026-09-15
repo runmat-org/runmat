@@ -167,6 +167,9 @@ fn native_buckling_task_round_trips_the_preload_bound_result() {
     .unwrap();
     let workload_identity = workload.identity();
     let state_identity = state.identity;
+    let recovery_workload = workload.clone();
+    let recovery_state = state.clone();
+    let recovery_mesh = mesh.clone();
     let limits = ObjectInventoryLimits::default();
     let access = ArtifactAccess {
         authorization_scope: "study:buckling".into(),
@@ -221,6 +224,24 @@ fn native_buckling_task_round_trips_the_preload_bound_result() {
         .numerical_receipt
         .validate_against(imported.identity, &imported.result)
         .unwrap();
+    let recovered = runmat_analysis_fea::recover_completed_structural_buckling_run(
+        &recovery_workload,
+        &recovery_mesh,
+        &recovery_state,
+        &imported.result,
+        &imported.numerical_receipt,
+    )
+    .unwrap();
+    assert_eq!(recovered.load_factors.len(), 1);
+    assert_eq!(recovered.mode_shapes.len(), 1);
+    assert!(recovered
+        .run
+        .field(runmat_analysis_fea::FEA_FIELD_BUCKLING_LOAD_FACTOR)
+        .is_some());
+    assert!(recovered
+        .run
+        .field(&runmat_analysis_fea::fea_buckling_mode_shape_field_id(1))
+        .is_some());
 }
 
 fn assert_substituted_inputs_are_rejected(

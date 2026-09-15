@@ -775,6 +775,32 @@ pub struct AnalysisModalRunOptions {
     pub solver_mesh_artifact_path: Option<String>,
 }
 
+/// Numerical policy for eigenvalue buckling after an authored structural preload.
+///
+/// The prestress source is owned by the typed procedure sequence, not duplicated here.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AnalysisBucklingRunOptions {
+    pub deterministic_mode: bool,
+    pub precision_mode: PrecisionMode,
+    pub quality_policy: QualityPolicy,
+    pub solver: runmat_analysis_fea::execution::StructuralBucklingSolverPolicy,
+    #[serde(default)]
+    pub solver_mesh_artifact_path: Option<String>,
+}
+
+impl Default for AnalysisBucklingRunOptions {
+    fn default() -> Self {
+        Self {
+            deterministic_mode: false,
+            precision_mode: PrecisionMode::Fp64,
+            quality_policy: QualityPolicy::Balanced,
+            solver: runmat_analysis_fea::execution::StructuralBucklingSolverPolicy::default(),
+            solver_mesh_artifact_path: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AnalysisNonlinearRunOptions {
     pub deterministic_mode: bool,
@@ -1051,6 +1077,8 @@ pub struct AnalysisRunResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub render_topology: Option<AnalysisRenderTopology>,
     pub modal_results: Option<ModalResultsData>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub buckling_results: Option<BucklingResultsData>,
     #[serde(default)]
     pub thermal_results: Option<ThermalResultsData>,
     pub transient_results: Option<TransientResultsData>,
@@ -1084,6 +1112,7 @@ pub struct AnalysisResultsQuery {
     pub include_diagnostics: bool,
     pub diagnostic_codes: Vec<String>,
     pub include_modal_results: bool,
+    pub include_buckling_results: bool,
     pub mode_indices: Vec<usize>,
     pub include_transient_results: bool,
     pub transient_snapshot_indices: Vec<usize>,
@@ -1099,6 +1128,7 @@ impl Default for AnalysisResultsQuery {
             include_diagnostics: true,
             diagnostic_codes: Vec::new(),
             include_modal_results: true,
+            include_buckling_results: true,
             mode_indices: Vec::new(),
             include_transient_results: true,
             transient_snapshot_indices: Vec::new(),
@@ -1113,6 +1143,7 @@ impl AnalysisResultsQuery {
         Self {
             include_field_values: false,
             include_modal_results: false,
+            include_buckling_results: false,
             include_transient_results: false,
             include_nonlinear_results: false,
             include_electromagnetic_results: false,
@@ -1126,6 +1157,7 @@ impl AnalysisResultsQuery {
             include_field_values: true,
             include_diagnostics: false,
             include_modal_results: false,
+            include_buckling_results: false,
             include_transient_results: false,
             include_nonlinear_results: false,
             include_electromagnetic_results: false,
@@ -2058,6 +2090,10 @@ pub struct AnalysisResultsSummary {
     pub max_frequency_hz: Option<f64>,
     pub max_modal_residual_norm: Option<f64>,
     pub first_mode_converged: Option<bool>,
+    pub buckling_mode_count: usize,
+    pub available_buckling_mode_indices: Vec<usize>,
+    pub minimum_buckling_load_factor: Option<f64>,
+    pub max_buckling_residual_norm: Option<f64>,
     pub frequency_sample_count: usize,
     pub available_frequencies_hz: Vec<f64>,
     pub max_frequency_solver_residual: Option<f64>,
@@ -2157,6 +2193,8 @@ pub struct AnalysisResultsData {
     pub field_descriptors: Vec<AnalysisFieldDescriptor>,
     pub fields: Vec<AnalysisField>,
     pub modal_results: Option<ModalResultsData>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub buckling_results: Option<BucklingResultsData>,
     #[serde(default)]
     pub thermal_results: Option<ThermalResultsData>,
     pub transient_results: Option<TransientResultsData>,
@@ -2213,6 +2251,7 @@ pub enum AnalysisSolverOptions {
     StructuralLinear(AnalysisRunOptions),
     StructuralFrequency(AnalysisStructuralFrequencyRunOptions),
     StructuralModes(AnalysisModalRunOptions),
+    StructuralBuckling(AnalysisBucklingRunOptions),
     AcousticHelmholtz(AnalysisAcousticRunOptions),
     ThermalDiffusion(AnalysisThermalRunOptions),
     StructuralTransient(AnalysisTransientRunOptions),
@@ -2229,6 +2268,7 @@ impl AnalysisSolverOptions {
             Self::StructuralLinear(options) => options.solver_mesh_artifact_path = None,
             Self::StructuralFrequency(options) => options.solver_mesh_artifact_path = None,
             Self::StructuralModes(options) => options.solver_mesh_artifact_path = None,
+            Self::StructuralBuckling(options) => options.solver_mesh_artifact_path = None,
             Self::AcousticHelmholtz(_) => {}
             Self::ThermalDiffusion(options) => options.solver_mesh_artifact_path = None,
             Self::StructuralTransient(options) => options.solver_mesh_artifact_path = None,
@@ -2246,7 +2286,8 @@ impl AnalysisSolverOptions {
 
     pub fn defaults_for(step: &ProcedureStep) -> Result<Self, String> {
         use AnalysisProcedure::{
-            HarmonicResponse, ModalExtraction, Nonlinear, Static, TransientResponse,
+            EigenvalueBuckling, HarmonicResponse, ModalExtraction, Nonlinear, Static,
+            TransientResponse,
         };
         use PhysicsFamily::{Acoustic, Coupled, Electromagnetic, Fluid, Structural, Thermal};
 
@@ -2262,6 +2303,9 @@ impl AnalysisSolverOptions {
             (Structural, ModalExtraction, SolutionSpace::Direct) => {
                 Ok(Self::StructuralModes(AnalysisModalRunOptions::default()))
             }
+            (Structural, EigenvalueBuckling, SolutionSpace::Direct) => Ok(
+                Self::StructuralBuckling(AnalysisBucklingRunOptions::default()),
+            ),
             (Structural, HarmonicResponse, SolutionSpace::Direct) => Ok(Self::StructuralFrequency(
                 AnalysisStructuralFrequencyRunOptions::default(),
             )),
@@ -2860,6 +2904,16 @@ pub struct ModalResultsData {
     pub mode_shapes: Vec<AnalysisField>,
     pub mode_units: ModalFrequencyUnits,
     pub frequency_basis: ModalFrequencyBasis,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BucklingResultsData {
+    pub mode_indices: Vec<usize>,
+    pub load_factors: Vec<f64>,
+    pub residual_norms: Vec<f64>,
+    pub mode_shapes: Vec<AnalysisField>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rotation_mode_shapes: Vec<AnalysisField>,
 }
 
 impl ModalResultsData {

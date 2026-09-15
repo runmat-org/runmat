@@ -58,6 +58,9 @@ pub(crate) fn package_exact_structural_study_result(
         ExactStructuralAnalysisPublication::StructuralModalTransient { completion, .. } => {
             modal_transient_closure(completion, &decoded.artifact_access)?
         }
+        ExactStructuralAnalysisPublication::StructuralBuckling { completion, .. } => {
+            buckling_closure(completion, &decoded.artifact_access)?
+        }
         ExactStructuralAnalysisPublication::StructuralFrequency { completion, .. } => {
             frequency_closure(completion, &decoded.artifact_access)?
         }
@@ -137,6 +140,46 @@ pub(crate) fn package_exact_structural_study_result(
         object.validate().map_err(protocol)?;
     }
     Ok((response, new_objects))
+}
+
+fn buckling_closure(
+    completion: &crate::CompletedStructuralBucklingSequenceStudy,
+    access: &ArtifactAccess,
+) -> NativeExecutionResult<ExactStructuralStudyAnalysisClosure> {
+    let components = [
+        &completion.preload.objects,
+        &completion.preload.numerical_receipt_objects,
+        &completion.prestress_state.objects,
+        &completion.buckling.objects,
+        &completion.buckling.numerical_receipt_objects,
+    ];
+    let mut roots = Vec::with_capacity(components.len());
+    let mut objects = Vec::new();
+    for component in components {
+        roots.push(
+            component
+                .root_reference(access, ValueRefKind::ResultObject)
+                .map_err(protocol)?,
+        );
+        objects.extend(
+            component
+                .unique_references(access, ValueRefKind::ResultObject)
+                .map_err(protocol)?,
+        );
+    }
+    let [preload_result_root, preload_receipt_root, prestress_state_root, buckling_result_root, buckling_receipt_root] =
+        roots.as_slice()
+    else {
+        return Err(protocol("buckling closure has an invalid root inventory"));
+    };
+    Ok(ExactStructuralStudyAnalysisClosure::StructuralBuckling {
+        preload_result_root: Box::new(preload_result_root.clone()),
+        preload_receipt_root: Box::new(preload_receipt_root.clone()),
+        prestress_state_root: Box::new(prestress_state_root.clone()),
+        buckling_result_root: Box::new(buckling_result_root.clone()),
+        buckling_receipt_root: Box::new(buckling_receipt_root.clone()),
+        objects: unique_references(objects)?,
+    })
 }
 
 fn modal_closure(

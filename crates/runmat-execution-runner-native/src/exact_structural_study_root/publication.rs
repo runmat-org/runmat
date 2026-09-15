@@ -5,11 +5,12 @@ use runmat_analysis_execution::{
     StructuralStudyWorkloads,
 };
 use runmat_analysis_fea::execution::{
-    AnalysisNumericalObjectKind, StructuralFrequencyNumericalReceipt,
-    StructuralFrequencySolverResult, StructuralFrequencyWorkload, StructuralLinearWorkload,
-    StructuralModalNumericalReceipt, StructuralModalSolverResult, StructuralModalWorkload,
-    StructuralTransientNumericalReceipt, StructuralTransientSolverResult,
-    StructuralTransientWorkload, StudyIdentity,
+    AnalysisNumericalObjectKind, StructuralBucklingNumericalReceipt,
+    StructuralBucklingSolverResult, StructuralBucklingWorkload,
+    StructuralFrequencyNumericalReceipt, StructuralFrequencySolverResult,
+    StructuralFrequencyWorkload, StructuralLinearWorkload, StructuralModalNumericalReceipt,
+    StructuralModalSolverResult, StructuralModalWorkload, StructuralTransientNumericalReceipt,
+    StructuralTransientSolverResult, StructuralTransientWorkload, StudyIdentity,
 };
 use runmat_canonical_codec::{decode_contract, encode_contract};
 use runmat_execution::value::{ValuePayload, ValueRef, ValueRefKind};
@@ -35,6 +36,7 @@ use super::{
 };
 use crate::{CompletedStructuralTransientSequence, NativeExecutionResult};
 
+mod buckling_import;
 mod frequency_import;
 mod inventory;
 mod modal_import;
@@ -87,6 +89,14 @@ enum ExactStructuralStudyAnalysisClosure {
         transient_receipt_root: Box<ValueRef>,
         objects: Vec<ValueRef>,
     },
+    StructuralBuckling {
+        preload_result_root: Box<ValueRef>,
+        preload_receipt_root: Box<ValueRef>,
+        prestress_state_root: Box<ValueRef>,
+        buckling_result_root: Box<ValueRef>,
+        buckling_receipt_root: Box<ValueRef>,
+        objects: Vec<ValueRef>,
+    },
     StructuralFrequency {
         result_root: Box<ValueRef>,
         receipt_root: Box<ValueRef>,
@@ -123,6 +133,7 @@ impl ExactStructuralStudyAnalysisClosure {
             | Self::StructuralTransient { objects, .. }
             | Self::StructuralModal { objects, .. }
             | Self::StructuralModalTransient { objects, .. }
+            | Self::StructuralBuckling { objects, .. }
             | Self::StructuralFrequency { objects, .. } => objects,
         }
     }
@@ -193,6 +204,23 @@ impl ExactStructuralStudyAnalysisClosure {
                     objects,
                 )?;
             }
+            Self::StructuralBuckling {
+                preload_result_root,
+                preload_receipt_root,
+                prestress_state_root,
+                buckling_result_root,
+                buckling_receipt_root,
+                objects,
+            } => validate_declared_roots(
+                &[
+                    preload_result_root,
+                    preload_receipt_root,
+                    prestress_state_root,
+                    buckling_result_root,
+                    buckling_receipt_root,
+                ],
+                objects,
+            )?,
             Self::StructuralFrequency {
                 result_root,
                 receipt_root,
@@ -338,6 +366,7 @@ pub enum ExactStructuralStudyAnalysisResult {
         numerical_receipt: StructuralModalNumericalReceipt,
     },
     StructuralModalTransient(Box<ExactStructuralModalTransientAnalysisResult>),
+    StructuralBuckling(Box<ExactStructuralBucklingAnalysisResult>),
     StructuralFrequency(Box<ExactStructuralFrequencyAnalysisResult>),
 }
 
@@ -350,6 +379,19 @@ pub struct ExactStructuralModalTransientAnalysisResult {
     pub basis_state: runmat_analysis_fea::execution::CanonicalSemanticState,
     pub transient_result: Box<StructuralTransientSolverResult>,
     pub transient_numerical_receipt: StructuralTransientNumericalReceipt,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExactStructuralBucklingAnalysisResult {
+    pub preload_workload: Box<StructuralLinearWorkload>,
+    pub buckling_workload: Box<StructuralBucklingWorkload>,
+    pub preload_result: Box<runmat_analysis_fea::execution::StructuralLinearWorkloadResult>,
+    pub preload_result_identity: runmat_analysis_fea::execution::SolverResultIdentity,
+    pub preload_numerical_receipt:
+        runmat_analysis_fea::execution::StructuralLinearNumericalReceiptArtifact,
+    pub prestress_state: runmat_analysis_fea::execution::CanonicalSemanticState,
+    pub buckling_result: Box<StructuralBucklingSolverResult>,
+    pub buckling_numerical_receipt: StructuralBucklingNumericalReceipt,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -403,6 +445,12 @@ pub(crate) enum ExactStructuralAnalysisPublication<'a> {
         completion: &'a crate::CompletedStructuralModalTransientStudy,
         unresolved_workloads_digest: Digest,
     },
+    StructuralBuckling {
+        signals:
+            &'a [crate::remote::signal_materialization::CompletedRemoteSignalMaterialization],
+        completion: &'a crate::CompletedStructuralBucklingSequenceStudy,
+        unresolved_workloads_digest: Digest,
+    },
     StructuralFrequency {
         signals:
             &'a [crate::remote::signal_materialization::CompletedRemoteSignalMaterialization],
@@ -420,6 +468,7 @@ impl ExactStructuralAnalysisPublication<'_> {
             | Self::StructuralTransient { signals, .. }
             | Self::StructuralModal { signals, .. }
             | Self::StructuralModalTransient { signals, .. }
+            | Self::StructuralBuckling { signals, .. }
             | Self::StructuralFrequency { signals, .. } => signals,
         }
     }
@@ -439,6 +488,10 @@ impl ExactStructuralAnalysisPublication<'_> {
                 ..
             }
             | Self::StructuralModalTransient {
+                unresolved_workloads_digest,
+                ..
+            }
+            | Self::StructuralBuckling {
                 unresolved_workloads_digest,
                 ..
             }

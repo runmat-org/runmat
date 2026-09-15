@@ -17,10 +17,11 @@ use runmat_execution_runner_native::{
 use runmat_runtime::analysis::{
     analysis_complete_study_sweep_op, structural_study_execution_failure, AnalysisStudyRunData,
     AnalysisStudySweepData, AnalysisStudySweepRunOutcome, AnalysisStudySweepSpec,
-    PreparedStructuralStudyIntent, StructuralStudyExecutionFailure,
-    StructuralStudyFrequencyNumericalResult, StructuralStudyNumericalResult,
-    StructuralStudySequenceNumericalResult, StructuralStudyStepNumericalResult,
-    StructuralStudyTransientNumericalResult,
+    PreparedStructuralStudyIntent, StructuralStudyBucklingNumericalResult,
+    StructuralStudyExecutionFailure, StructuralStudyFrequencyNumericalResult,
+    StructuralStudyModalNumericalResult, StructuralStudyModalTransientNumericalResult,
+    StructuralStudyNumericalResult, StructuralStudySequenceNumericalResult,
+    StructuralStudyStepNumericalResult, StructuralStudyTransientNumericalResult,
 };
 use runmat_runtime::operations::OperationEnvelope;
 
@@ -233,6 +234,48 @@ fn study_result(
                 step_id: resolved_workload.step_id.clone(),
                 result: (**transient).clone(),
                 numerical_receipt: numerical_receipt.clone(),
+            },
+        )),
+        runmat_execution_runner_native::ExactStructuralStudyAnalysisResult::StructuralModal {
+            resolved_workload,
+            result: modal,
+            numerical_receipt,
+        } => StructuralStudyNumericalResult::StructuralModal(Box::new(
+            StructuralStudyModalNumericalResult {
+                frozen_project_digest: result.frozen_project_digest,
+                step_id: resolved_workload.step_id().clone(),
+                result: (**modal).clone(),
+                numerical_receipt: numerical_receipt.clone(),
+            },
+        )),
+        runmat_execution_runner_native::ExactStructuralStudyAnalysisResult::StructuralModalTransient(
+            modal_transient,
+        ) => StructuralStudyNumericalResult::StructuralModalTransient(Box::new(
+            StructuralStudyModalTransientNumericalResult {
+                frozen_project_digest: result.frozen_project_digest,
+                modal_step_id: modal_transient.modal_workload.step_id().clone(),
+                transient_step_id: modal_transient.transient_workload.step_id.clone(),
+                modal_result: (*modal_transient.modal_result).clone(),
+                modal_numerical_receipt: modal_transient.modal_numerical_receipt.clone(),
+                basis_state: modal_transient.basis_state.clone(),
+                transient_result: (*modal_transient.transient_result).clone(),
+                transient_numerical_receipt: modal_transient
+                    .transient_numerical_receipt
+                    .clone(),
+            },
+        )),
+        runmat_execution_runner_native::ExactStructuralStudyAnalysisResult::StructuralBuckling(
+            buckling,
+        ) => StructuralStudyNumericalResult::StructuralBuckling(Box::new(
+            StructuralStudyBucklingNumericalResult {
+                frozen_project_digest: result.frozen_project_digest,
+                preload_step_id: buckling.preload_workload.step_id.clone(),
+                buckling_step_id: buckling.buckling_workload.step_id().clone(),
+                preload_result: buckling.preload_result.run.clone(),
+                preload_solver_result_identity: buckling.preload_result_identity,
+                prestress_state: buckling.prestress_state.clone(),
+                buckling_result: (*buckling.buckling_result).clone(),
+                buckling_numerical_receipt: buckling.buckling_numerical_receipt.clone(),
             },
         )),
         runmat_execution_runner_native::ExactStructuralStudyAnalysisResult::StructuralFrequency(

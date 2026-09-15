@@ -143,13 +143,13 @@ fn fluid_constraint(
 }
 use runmat_analysis_core::AnalysisField;
 use runmat_analysis_fea::{
-    fea_fsi_fluid_velocity_field_id, fea_thermal_temperature_field_id,
-    FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE, FEA_FIELD_CFD_VELOCITY, FEA_FIELD_CHT_FLUID_VELOCITY,
-    FEA_FIELD_EM_VECTOR_POTENTIAL_REAL, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
-    FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT, FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE,
-    FEA_FIELD_STRUCTURAL_SHELL_TRANSVERSE_SHEAR, FEA_FIELD_STRUCTURAL_SHELL_VON_MISES,
-    FEA_FIELD_STRUCTURAL_STRESS, FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY,
-    FEA_FIELD_STRUCTURAL_VON_MISES,
+    fea_buckling_mode_shape_field_id, fea_fsi_fluid_velocity_field_id,
+    fea_thermal_temperature_field_id, FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE,
+    FEA_FIELD_CFD_VELOCITY, FEA_FIELD_CHT_FLUID_VELOCITY, FEA_FIELD_EM_VECTOR_POTENTIAL_REAL,
+    FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT,
+    FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE, FEA_FIELD_STRUCTURAL_SHELL_TRANSVERSE_SHEAR,
+    FEA_FIELD_STRUCTURAL_SHELL_VON_MISES, FEA_FIELD_STRUCTURAL_STRESS,
+    FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY, FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 use runmat_runtime::analysis::{
     AnalysisRunResult, ContactEnforcementOptions, PlasticityConstitutiveOptions,
@@ -675,6 +675,7 @@ fn primary_result_field_id(procedure_step: &ProcedureStep) -> String {
         | AnalysisSolverOptions::StructuralNonlinear(_) => {
             FEA_FIELD_STRUCTURAL_DISPLACEMENT.to_string()
         }
+        AnalysisSolverOptions::StructuralBuckling(_) => fea_buckling_mode_shape_field_id(1),
     }
 }
 
@@ -2717,6 +2718,9 @@ fn run_fixture_cpu(
         AnalysisSolverOptions::StructuralFrequency(_) => panic!(
             "structural-frequency fixtures must execute through the study runner, not the legacy single-run CPU fixture harness"
         ),
+        AnalysisSolverOptions::StructuralBuckling(_) => panic!(
+            "structural-buckling fixtures must execute through the study runner, not the legacy single-run CPU fixture harness"
+        ),
         AnalysisSolverOptions::AcousticHelmholtz(_) => analysis_run_acoustic_with_options_op(
             model,
             ComputeBackend::Cpu,
@@ -2853,6 +2857,9 @@ fn run_fixture_gpu(
         ),
         AnalysisSolverOptions::StructuralFrequency(_) => panic!(
             "structural-frequency fixtures must execute through the study runner, not the legacy single-run GPU fixture harness"
+        ),
+        AnalysisSolverOptions::StructuralBuckling(_) => panic!(
+            "structural-buckling fixtures must execute through the study runner, not the legacy single-run GPU fixture harness"
         ),
         AnalysisSolverOptions::AcousticHelmholtz(_) => analysis_run_acoustic_with_options_op(
             model,
@@ -9316,6 +9323,7 @@ pub(super) fn run_fixture(
                             include_diagnostics: false,
                             diagnostic_codes: Vec::new(),
                             include_modal_results: false,
+                            include_buckling_results: false,
                             mode_indices: Vec::new(),
                             include_transient_results: false,
                             transient_snapshot_indices: Vec::new(),
@@ -9656,6 +9664,7 @@ pub(super) fn run_fixture(
                                 include_diagnostics: false,
                                 diagnostic_codes: Vec::new(),
                                 include_modal_results: false,
+                                include_buckling_results: false,
                                 mode_indices: Vec::new(),
                                 include_transient_results: false,
                                 transient_snapshot_indices: Vec::new(),
@@ -9730,6 +9739,7 @@ pub(super) fn run_fixture(
                                 include_diagnostics: false,
                                 diagnostic_codes: Vec::new(),
                                 include_modal_results: false,
+                                include_buckling_results: false,
                                 mode_indices: Vec::new(),
                                 include_transient_results: false,
                                 transient_snapshot_indices: Vec::new(),

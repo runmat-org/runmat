@@ -127,6 +127,17 @@ pub fn fea_modal_mode_shape_field_id(mode_number: usize) -> String {
     format!("modal.mode_shape.{mode_number}")
 }
 
+pub fn fea_buckling_mode_shape_field_id(mode_number: usize) -> String {
+    format!("buckling.mode_shape.{mode_number}")
+}
+
+pub fn fea_buckling_rotation_shape_field_id(mode_number: usize) -> String {
+    format!("buckling.rotation_shape.{mode_number}")
+}
+
+pub const FEA_FIELD_BUCKLING_LOAD_FACTOR: &str = "buckling.load_factor";
+pub const FEA_FIELD_BUCKLING_RESIDUAL_NORM: &str = "buckling.residual_norm";
+
 pub const FEA_FIELD_MODAL_FREQUENCY_HZ: &str = "modal.frequency_hz";
 pub const FEA_FIELD_MODAL_EIGENVALUE: &str = "modal.eigenvalue";
 pub const FEA_FIELD_MODAL_MODAL_MASS: &str = "modal.modal_mass";
@@ -647,6 +658,16 @@ impl Default for ModalSolveOptions {
 pub struct FeaModalRunResult {
     pub run: FeaRunResult,
     pub basis: crate::pipeline::modal_basis::ModalBasisArtifact,
+    pub mode_shapes: Vec<AnalysisField>,
+    pub rotation_mode_shapes: Vec<AnalysisField>,
+    pub recovered_modes: Vec<ModalRecoveredMode>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FeaBucklingRunResult {
+    pub run: FeaRunResult,
+    pub load_factors: Vec<f64>,
+    pub residual_norms: Vec<f64>,
     pub mode_shapes: Vec<AnalysisField>,
     pub rotation_mode_shapes: Vec<AnalysisField>,
     pub recovered_modes: Vec<ModalRecoveredMode>,

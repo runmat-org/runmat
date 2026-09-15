@@ -14,6 +14,13 @@ pub fn analysis_prepare_structural_study_intent_op(
     let mut transient_block_plan = None;
     let mut frequency_workload = None;
     let mut heterogeneous_workloads = BTreeMap::new();
+    let is_buckling_sequence = study.steps.len() == 2
+        && study.steps.iter().any(|step| {
+            matches!(
+                step.authored_execution.solver_options,
+                AnalysisSolverOptions::StructuralBuckling(_)
+            )
+        });
     for step in &study.steps {
         let mut authored_execution = step.authored_execution.clone();
         match step.authored_execution.solver_options.clone() {
@@ -31,7 +38,16 @@ pub fn analysis_prepare_structural_study_intent_op(
                 )?;
                 authored_execution.solver_options =
                     AnalysisSolverOptions::StructuralLinear(options);
-                linear_workloads.insert(step.procedure_step.step_id.clone(), workload);
+                if is_buckling_sequence {
+                    heterogeneous_workloads.insert(
+                        step.procedure_step.step_id.clone(),
+                        runmat_analysis_fea::execution::StructuralStepWorkload::Linear {
+                            workload: Box::new(workload),
+                        },
+                    );
+                } else {
+                    linear_workloads.insert(step.procedure_step.step_id.clone(), workload);
+                }
             }
             AnalysisSolverOptions::StructuralTransient(mut options)
                 if study.steps.len() == 1
@@ -119,6 +135,24 @@ pub fn analysis_prepare_structural_study_intent_op(
                 )?);
                 authored_execution.solver_options =
                     AnalysisSolverOptions::StructuralFrequency(options);
+            }
+            AnalysisSolverOptions::StructuralBuckling(mut options)
+                if is_buckling_sequence
+                    && linear_workloads.is_empty()
+                    && transient_workload.is_none()
+                    && frequency_workload.is_none()
+                    && heterogeneous_workloads.len() == 1 =>
+            {
+                options.solver_mesh_artifact_path = None;
+                let template = prepare_structural_buckling_template(&study, step, &options)?;
+                heterogeneous_workloads.insert(
+                    step.procedure_step.step_id.clone(),
+                    runmat_analysis_fea::execution::StructuralStepWorkload::Buckling {
+                        template: Box::new(template),
+                    },
+                );
+                authored_execution.solver_options =
+                    AnalysisSolverOptions::StructuralBuckling(options);
             }
             _ => return Err(portable_study_kind_error(&study, step)),
         }
@@ -259,6 +293,31 @@ pub fn analysis_prepare_structural_study_intent_op(
         )
     })?;
     Ok(intent)
+}
+
+pub(in crate::analysis) fn prepare_structural_buckling_template(
+    study: &super::super::PreparedStudySequence,
+    step: &super::super::PreparedStudyStep,
+    options: &crate::analysis::AnalysisBucklingRunOptions,
+) -> Result<runmat_analysis_fea::execution::StructuralBucklingTemplate, OperationErrorEnvelope> {
+    options
+        .solver
+        .validate()
+        .map_err(|error| portable_study_contract_error(study, error.to_string()))?;
+    let template = runmat_analysis_fea::execution::StructuralBucklingTemplate {
+        schema_version: 1,
+        model: study.model.clone(),
+        step_id: step.procedure_step.step_id.clone(),
+        backend: step.authored_execution.backend,
+        formulation_requirement: step.authored_execution.requirement,
+        observation_execution:
+            runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
+        solver: options.solver,
+    };
+    template
+        .validate()
+        .map_err(|error| portable_study_contract_error(study, error.to_string()))?;
+    Ok(template)
 }
 
 pub(in crate::analysis) fn prepare_structural_modal_workload(

@@ -10,6 +10,7 @@ pub(super) enum AnalysisOperation {
     LinearStatic,
     StructuralFrequency,
     Modal,
+    Buckling,
     Acoustic,
     Transient,
     Thermal,
@@ -32,10 +33,11 @@ struct AnalysisOperationDescriptor {
 
 impl AnalysisOperation {
     #[cfg(test)]
-    const ALL: [Self; 11] = [
+    const ALL: [Self; 12] = [
         Self::LinearStatic,
         Self::StructuralFrequency,
         Self::Modal,
+        Self::Buckling,
         Self::Acoustic,
         Self::Transient,
         Self::Thermal,
@@ -73,6 +75,14 @@ impl AnalysisOperation {
                 cancelled_error_code: "RM.FEA.RUN_MODAL.CANCELLED",
                 assembly_error_code: "RM.FEA.RUN_MODAL.ASSEMBLY_FAILED",
                 formulation_admission_error_code: "RM.FEA.RUN_MODAL.FORMULATION_NOT_ADMITTED",
+            },
+            Self::Buckling => AnalysisOperationDescriptor {
+                name: "fea.run_buckling",
+                version: "fea.run_buckling/v1",
+                invalid_model_error_code: "RM.FEA.RUN_BUCKLING.SOLVER_MODEL_INVALID",
+                cancelled_error_code: "RM.FEA.RUN_BUCKLING.CANCELLED",
+                assembly_error_code: "RM.FEA.RUN_BUCKLING.ASSEMBLY_FAILED",
+                formulation_admission_error_code: "RM.FEA.RUN_BUCKLING.FORMULATION_NOT_ADMITTED",
             },
             Self::Acoustic => AnalysisOperationDescriptor {
                 name: "fea.run_acoustic",
@@ -197,7 +207,7 @@ fn run_operation_for_procedure(
     solution_space: SolutionSpace,
 ) -> Option<AnalysisOperation> {
     use AnalysisProcedure::{
-        HarmonicResponse, ModalExtraction, Nonlinear, Static, TransientResponse,
+        EigenvalueBuckling, HarmonicResponse, ModalExtraction, Nonlinear, Static, TransientResponse,
     };
     use PhysicsFamily::{Acoustic, Coupled, Electromagnetic, Fluid, Structural, Thermal};
 
@@ -207,6 +217,9 @@ fn run_operation_for_procedure(
             Some(AnalysisOperation::LinearStatic)
         }
         (Structural, ModalExtraction, SolutionSpace::Direct) => Some(AnalysisOperation::Modal),
+        (Structural, EigenvalueBuckling, SolutionSpace::Direct) => {
+            Some(AnalysisOperation::Buckling)
+        }
         (Structural, HarmonicResponse, SolutionSpace::Direct | SolutionSpace::ModalReduced) => {
             Some(AnalysisOperation::StructuralFrequency)
         }

@@ -40,7 +40,8 @@ mod worker;
 
 pub use analysis_buckling::{
     execute_structural_buckling_locally, execute_structural_buckling_remotely,
-    CompletedStructuralBucklingStudy,
+    execute_structural_buckling_study_locally, execute_structural_buckling_study_remotely,
+    CompletedStructuralBucklingSequenceStudy, CompletedStructuralBucklingStudy,
 };
 pub use analysis_frequency::{
     execute_structural_frequency_locally, execute_structural_frequency_locally_with_source,
@@ -91,10 +92,10 @@ pub use exact_meshing_root::{
 pub use exact_structural_study_root::{
     decode_exact_structural_study_root, import_exact_structural_study_result,
     prepare_exact_structural_study_root, BoundaryRegionResolution, DecodedExactStructuralStudyRoot,
-    ExactStructuralFrequencyAnalysisResult, ExactStructuralModalTransientAnalysisResult,
-    ExactStructuralStudyAnalysisResult, ExactStructuralStudyResult,
-    ExactStructuralStudyResultExpectation, ExactStructuralStudyRootPreparation,
-    PreparedExactStructuralStudyRoot, RequiredStudyProgram,
+    ExactStructuralBucklingAnalysisResult, ExactStructuralFrequencyAnalysisResult,
+    ExactStructuralModalTransientAnalysisResult, ExactStructuralStudyAnalysisResult,
+    ExactStructuralStudyResult, ExactStructuralStudyResultExpectation,
+    ExactStructuralStudyRootPreparation, PreparedExactStructuralStudyRoot, RequiredStudyProgram,
     EXACT_STRUCTURAL_STUDY_ROOT_EXECUTION_MODE, EXACT_STRUCTURAL_STUDY_ROOT_TARGET_PROFILE,
 };
 pub use exact_structural_sweep_root::{

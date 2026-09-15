@@ -4558,6 +4558,7 @@ execution:
                 }],
             }),
             modal_results: None,
+            buckling_results: None,
             thermal_results: None,
             transient_results: None,
             nonlinear_results: None,
@@ -4632,6 +4633,7 @@ execution:
             },
             render_topology: None,
             modal_results: None,
+            buckling_results: None,
             thermal_results: None,
             transient_results: Some(crate::analysis::TransientResultsData {
                 transient_payload_version: "transient_results/v1".to_string(),

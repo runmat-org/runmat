@@ -57,6 +57,22 @@ pub(super) fn execute_study_step(
                 procedure_step.step_id.as_str().to_string(),
             )]),
         )),
+        AnalysisSolverOptions::StructuralBuckling(_) => Err(operation_error(
+            ANALYSIS_RUN_STUDY_OPERATION,
+            ANALYSIS_RUN_STUDY_OP_VERSION,
+            context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_STUDY.BUCKLING_REQUIRES_SEQUENCE",
+                error_type: OperationErrorType::Contract,
+                retryable: false,
+                severity: OperationErrorSeverity::Fatal,
+            },
+            "structural buckling executes with its preload through the portable study boundary",
+            std::collections::BTreeMap::from([(
+                "step_id".to_string(),
+                procedure_step.step_id.as_str().to_string(),
+            )]),
+        )),
         AnalysisSolverOptions::StructuralModes(authored_options) => {
             let mut options = authored_options.clone();
             attach_solver_mesh_artifact_path(

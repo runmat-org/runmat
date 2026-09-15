@@ -255,6 +255,22 @@ pub fn analysis_results_op(
     };
 
     let (
+        buckling_mode_count,
+        available_buckling_mode_indices,
+        minimum_buckling_load_factor,
+        max_buckling_residual_norm,
+    ) = if let Some(buckling) = run_result.buckling_results.as_ref() {
+        (
+            buckling.mode_indices.len(),
+            buckling.mode_indices.clone(),
+            buckling.load_factors.iter().copied().reduce(f64::min),
+            buckling.residual_norms.iter().copied().reduce(f64::max),
+        )
+    } else {
+        (0, Vec::new(), None, None)
+    };
+
+    let (
         snapshot_count,
         time_start_s,
         time_end_s,
@@ -703,6 +719,10 @@ pub fn analysis_results_op(
         max_frequency_hz,
         max_modal_residual_norm,
         first_mode_converged,
+        buckling_mode_count,
+        available_buckling_mode_indices,
+        minimum_buckling_load_factor,
+        max_buckling_residual_norm,
         frequency_sample_count: 0,
         available_frequencies_hz: Vec::new(),
         max_frequency_solver_residual: None,
@@ -1215,6 +1235,12 @@ pub fn analysis_results_op(
         None
     };
 
+    let buckling_results = if query.include_buckling_results && query.include_field_values {
+        run_result.buckling_results.clone()
+    } else {
+        None
+    };
+
     let nonlinear_results = if query.include_nonlinear_results && query.include_field_values {
         run_result.nonlinear_results.clone()
     } else {
@@ -1237,6 +1263,7 @@ pub fn analysis_results_op(
         field_descriptors,
         fields,
         modal_results,
+        buckling_results,
         thermal_results,
         transient_results,
         nonlinear_results,
@@ -1449,6 +1476,7 @@ fn analysis_structural_frequency_results_op(
             field_descriptors: descriptors,
             fields: Vec::new(),
             modal_results: None,
+            buckling_results: None,
             thermal_results: None,
             transient_results: None,
             nonlinear_results: None,

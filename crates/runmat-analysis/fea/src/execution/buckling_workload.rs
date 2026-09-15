@@ -70,6 +70,16 @@ impl StructuralBucklingSolverPolicy {
     }
 }
 
+impl Default for StructuralBucklingSolverPolicy {
+    fn default() -> Self {
+        Self {
+            requested_mode_count: 3,
+            relative_tolerance: 1.0e-8,
+            maximum_iterations: 256,
+        }
+    }
+}
+
 /// Authored buckling intent before the exact preload state has been published.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

@@ -15,11 +15,11 @@ use runmat_analysis_execution::{
     prepare_signal_materialization, PreparedSignalMaterialization, ResolvedSignalArtifact,
 };
 use runmat_analysis_fea::execution::{
-    SignalMaterializationIdentity, StructuralFrequencySolverPlan, StructuralFrequencyWorkload,
-    StructuralFrequencyWorkloadInput, StructuralLinearWorkload, StructuralModalTransientTemplate,
-    StructuralModalWorkload, StructuralModalWorkloadInput, StructuralStepWorkload,
-    StructuralTransientBlockPlan, StructuralTransientWorkload, StudyIdentity,
-    SweepCompositionPolicy, SweepDefinition,
+    SignalMaterializationIdentity, StructuralBucklingSolverPolicy, StructuralBucklingTemplate,
+    StructuralFrequencySolverPlan, StructuralFrequencyWorkload, StructuralFrequencyWorkloadInput,
+    StructuralLinearWorkload, StructuralModalTransientTemplate, StructuralModalWorkload,
+    StructuralModalWorkloadInput, StructuralStepWorkload, StructuralTransientBlockPlan,
+    StructuralTransientWorkload, StudyIdentity, SweepCompositionPolicy, SweepDefinition,
 };
 use runmat_analysis_fea::fixtures::{fixture_model, FixtureId};
 use runmat_analysis_fea::frequency::FrequencyResponsePlan;
@@ -175,6 +175,7 @@ async fn exact_structural_sweep_reaches_ordered_admitted_results_over_encrypted_
         exact_meshing: exact_meshing.clone(),
     })
     .unwrap();
+    let direct = Box::new(direct);
     let direct_expectation = direct.result_expectation();
     let frequency_study_digest = Digest::sha256(b"box structural frequency study");
     let frequency = prepare_exact_structural_study_root(ExactStructuralStudyRootPreparation {
@@ -191,6 +192,7 @@ async fn exact_structural_sweep_reaches_ordered_admitted_results_over_encrypted_
         exact_meshing: exact_meshing.clone(),
     })
     .unwrap();
+    let frequency = Box::new(frequency);
     let frequency_expectation = frequency.result_expectation();
     let modal_study_digest = Digest::sha256(b"box structural modal study");
     let modal = prepare_exact_structural_study_root(ExactStructuralStudyRootPreparation {
@@ -207,6 +209,7 @@ async fn exact_structural_sweep_reaches_ordered_admitted_results_over_encrypted_
         exact_meshing: exact_meshing.clone(),
     })
     .unwrap();
+    let modal = Box::new(modal);
     let modal_expectation = modal.result_expectation();
     let modal_transient_study_digest = Digest::sha256(b"box modal transient study");
     let modal_transient =
@@ -222,7 +225,24 @@ async fn exact_structural_sweep_reaches_ordered_admitted_results_over_encrypted_
             exact_meshing: exact_meshing.clone(),
         })
         .unwrap();
+    let modal_transient = Box::new(modal_transient);
     let modal_transient_expectation = modal_transient.result_expectation();
+    let buckling_study_digest = Digest::sha256(b"box structural buckling study");
+    let buckling = Box::new(
+        prepare_exact_structural_study_root(ExactStructuralStudyRootPreparation {
+            program_revision: revision.clone(),
+            artifact_access: access.clone(),
+            authored_study_digest: buckling_study_digest,
+            frozen_project_digest: Some(Digest::from_bytes(*project_identity.graph_digest.bytes())),
+            geometry_source_digest: source_digest,
+            workloads: box_buckling_workloads(),
+            analysis_accelerator_requests: Vec::new(),
+            signal_materializations: Vec::new(),
+            exact_meshing: exact_meshing.clone(),
+        })
+        .unwrap(),
+    );
+    let buckling_expectation = buckling.result_expectation();
     let mut invalid_workload = workload;
     invalid_workload.model.constraints[0].visit_targets_mut(|target| {
         *target = runmat_analysis_core::RegionTarget::boundary("face_999999");
@@ -624,6 +644,8 @@ async fn exact_structural_sweep_reaches_ordered_admitted_results_over_encrypted_
         modal_expectation,
         modal_transient,
         modal_transient_expectation,
+        buckling,
+        buckling_expectation,
         bundle,
         inventory,
         resources,
@@ -633,14 +655,16 @@ async fn exact_structural_sweep_reaches_ordered_admitted_results_over_encrypted_
 }
 
 struct DirectExactStudyConformance {
-    direct: crate::PreparedExactStructuralStudyRoot,
+    direct: Box<crate::PreparedExactStructuralStudyRoot>,
     direct_expectation: crate::ExactStructuralStudyResultExpectation,
-    frequency: crate::PreparedExactStructuralStudyRoot,
+    frequency: Box<crate::PreparedExactStructuralStudyRoot>,
     frequency_expectation: crate::ExactStructuralStudyResultExpectation,
-    modal: crate::PreparedExactStructuralStudyRoot,
+    modal: Box<crate::PreparedExactStructuralStudyRoot>,
     modal_expectation: crate::ExactStructuralStudyResultExpectation,
-    modal_transient: crate::PreparedExactStructuralStudyRoot,
+    modal_transient: Box<crate::PreparedExactStructuralStudyRoot>,
     modal_transient_expectation: crate::ExactStructuralStudyResultExpectation,
+    buckling: Box<crate::PreparedExactStructuralStudyRoot>,
+    buckling_expectation: crate::ExactStructuralStudyResultExpectation,
     bundle: Vec<u8>,
     inventory: ResourceInventory,
     resources: ResourceRequest,
@@ -657,6 +681,8 @@ async fn run_direct_exact_study_conformance(input: DirectExactStudyConformance) 
         modal_expectation,
         modal_transient,
         modal_transient_expectation,
+        buckling,
+        buckling_expectation,
         bundle,
         inventory,
         resources,
@@ -747,7 +773,7 @@ async fn run_direct_exact_study_conformance(input: DirectExactStudyConformance) 
                     .unwrap();
             }
         }
-        for prepared in [&modal, &modal_transient] {
+        for prepared in [modal.as_ref(), modal_transient.as_ref(), buckling.as_ref()] {
             for object in prepared.transport_objects().unwrap() {
                 if object.is_externalized_value() {
                     pool.register_value_object(object.reference, object.bytes)
@@ -918,6 +944,71 @@ async fn run_direct_exact_study_conformance(input: DirectExactStudyConformance) 
             .validate_for_result(&result.transient_result)
             .unwrap();
         assert_eq!(recovery.closures.len(), 2);
+
+        let response = tokio::time::timeout(
+            Duration::from_secs(180),
+            crate::remote::exact_structural_study::execute_for_test(
+                Arc::clone(&pool),
+                buckling.request(),
+                &access.authorization_scope,
+                &resources,
+                &mut RecordingRecoveryPublisher::default(),
+            ),
+        )
+        .await
+        .expect("remote structural-buckling exact study timed out")
+        .unwrap()
+        .unwrap_or_else(|message| panic!("remote structural-buckling study failed: {message}"));
+        let imported = import_exact_structural_study_result(
+            pool.as_ref(),
+            response,
+            &buckling_expectation,
+            ObjectInventoryLimits::default(),
+        )
+        .unwrap();
+        let crate::ExactStructuralStudyAnalysisResult::StructuralBuckling(buckling_result) =
+            &imported.analysis
+        else {
+            panic!("structural-buckling exact study returned another result kind")
+        };
+        assert_eq!(buckling_result.preload_workload.step_id.as_str(), "preload");
+        assert_eq!(
+            buckling_result.buckling_workload.step_id().as_str(),
+            "buckling"
+        );
+        assert_eq!(
+            buckling_result.prestress_state.source_result,
+            buckling_result.preload_result_identity
+        );
+        buckling_result
+            .preload_numerical_receipt
+            .validate_against(
+                buckling_result.preload_result_identity,
+                &buckling_result.preload_result,
+            )
+            .unwrap();
+        buckling_result
+            .buckling_numerical_receipt
+            .validate_against(
+                buckling_result.buckling_numerical_receipt.source_result(),
+                &buckling_result.buckling_result,
+            )
+            .unwrap();
+        let local = runmat_analysis_fea::execute_structural_buckling_workload(
+            &buckling_result.buckling_workload,
+            &imported.mesh.artifact,
+            &buckling_result.prestress_state,
+        )
+        .unwrap();
+        assert_eq!(local, *buckling_result.buckling_result);
+        let fixed_face = &imported.boundary_resolution.aliases["face_000001"];
+        let loaded_face = &imported.boundary_resolution.aliases["face_000002"];
+        let fixed_centroid = boundary_centroid(&imported.mesh.artifact, fixed_face);
+        let loaded_centroid = boundary_centroid(&imported.mesh.artifact, loaded_face);
+        assert!((fixed_centroid[0] - 0.0).abs() <= 1.0e-12);
+        assert!((loaded_centroid[0] - 1.0).abs() <= 1.0e-12);
+        assert!((fixed_centroid[1] - loaded_centroid[1]).abs() <= 1.0e-12);
+        assert!((fixed_centroid[2] - loaded_centroid[2]).abs() <= 1.0e-12);
         pool.remove_worker(worker.id, false).await.unwrap();
     };
     let (server_result, ()) = tokio::join!(server, client);
@@ -1244,6 +1335,107 @@ fn box_modal_transient_workloads() -> runmat_analysis_execution::StructuralStudy
             ),
         ]),
     }
+}
+
+fn box_buckling_workloads() -> runmat_analysis_execution::StructuralStudyWorkloads {
+    let mut preload_workload = box_structural_workload();
+    let runmat_analysis_core::ExcitationTarget::Region(target) =
+        &mut preload_workload.model.excitations[0]
+            .excitation_mut()
+            .target
+    else {
+        panic!("box preload fixture must use a region excitation")
+    };
+    *target = runmat_analysis_core::RegionTarget::boundary("face_000002");
+    let runmat_analysis_core::PhysicalSignal::Force(signal) =
+        &mut preload_workload.model.signals[0]
+    else {
+        panic!("box preload fixture must carry a force signal")
+    };
+    signal.representation = runmat_analysis_core::SignalRepresentation::Constant(
+        runmat_analysis_core::SignalValue::Vector3([
+            runmat_analysis_core::Force::new(-1_000.0),
+            runmat_analysis_core::Force::new(0.0),
+            runmat_analysis_core::Force::new(0.0),
+        ]),
+    );
+    let preload = ProcedureStep::structural_preload("preload");
+    let mut buckling =
+        ProcedureStep::structural_buckling("buckling", "preload", "geometric_stiffness");
+    buckling.independent_domain = IndependentDomain::Eigenvalue { requested_count: 1 };
+    preload_workload.model.sequence.steps = vec![preload, buckling];
+    preload_workload.model.sequence.dependencies = vec![SequenceDependency {
+        predecessor: ProcedureStepId("preload".into()),
+        successor: ProcedureStepId("buckling".into()),
+        reason: SequenceDependencyReason::StateTransfer,
+    }];
+    preload_workload.model.sequence.transitions = vec![StateTransition {
+        transition_id: TransitionId("preload-to-buckling".into()),
+        producer_step: ProcedureStepId("preload".into()),
+        consumer_step: ProcedureStepId("buckling".into()),
+        state_id: StateId("geometric_stiffness".into()),
+        method: StateTransitionMethod::Reuse,
+        topology: TopologyTransitionPolicy::RequireIdentical,
+        reference: runmat_analysis_core::ReferenceStatePolicy::Preserve,
+    }];
+    preload_workload.step_id = ProcedureStepId("preload".into());
+    let template = StructuralBucklingTemplate {
+        schema_version: 1,
+        model: preload_workload.model.clone(),
+        step_id: ProcedureStepId("buckling".into()),
+        backend: ComputeBackend::Cpu,
+        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+        observation_execution:
+            runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
+        solver: StructuralBucklingSolverPolicy::new(1, 1.0e-8, 256).unwrap(),
+    };
+    runmat_analysis_execution::StructuralStudyWorkloads::HeterogeneousSequence {
+        workloads: std::collections::BTreeMap::from([
+            (
+                ProcedureStepId("preload".into()),
+                StructuralStepWorkload::Linear {
+                    workload: Box::new(preload_workload),
+                },
+            ),
+            (
+                ProcedureStepId("buckling".into()),
+                StructuralStepWorkload::Buckling {
+                    template: Box::new(template),
+                },
+            ),
+        ]),
+    }
+}
+
+fn boundary_centroid(
+    mesh: &runmat_meshing_core::SolverMeshArtifact,
+    source_face: &runmat_geometry_core::PersistentEntityId,
+) -> [f64; 3] {
+    let node_ids = mesh
+        .topology
+        .boundary_faces
+        .iter()
+        .filter(|face| face.provenance.iter().any(|source| source == source_face))
+        .flat_map(|face| face.node_ids.iter().copied())
+        .collect::<BTreeSet<_>>();
+    assert!(!node_ids.is_empty(), "source face must own solver nodes");
+    let mut centroid = [0.0; 3];
+    for node_id in &node_ids {
+        let coordinates = mesh
+            .topology
+            .nodes
+            .iter()
+            .find(|node| node.node_id == *node_id)
+            .expect("boundary node must exist")
+            .coordinates_m;
+        for axis in 0..3 {
+            centroid[axis] += coordinates[axis];
+        }
+    }
+    for coordinate in &mut centroid {
+        *coordinate /= node_ids.len() as f64;
+    }
+    centroid
 }
 
 fn coarse_box_request() -> MeshingRequest {

@@ -154,6 +154,7 @@ pub(super) fn admit_linear_static_result(
             .unwrap_or_else(storage::next_run_id),
         render_topology: render_topology_from_solver_mesh(input.solver_mesh),
         modal_results: None,
+        buckling_results: None,
         thermal_results: None,
         transient_results: None,
         nonlinear_results: None,

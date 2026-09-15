@@ -70,7 +70,14 @@ pub(crate) fn solve_spd_system_cg(
     let mut preconditioned = apply_preconditioner(&residual);
     let mut direction = preconditioned.clone();
     let mut residual_preconditioned = dot(&residual, &preconditioned);
-    let rhs_norm = dot(rhs, rhs).sqrt().max(1.0);
+    let rhs_norm = dot(rhs, rhs).sqrt();
+    if rhs_norm == 0.0 {
+        return SpdSolveAttempt {
+            vector: vec![0.0; rhs.len()],
+            converged: true,
+            accelerator: None,
+        };
+    }
     if dot(&residual, &residual).sqrt() <= options.tol * rhs_norm {
         return SpdSolveAttempt {
             vector: solution,
@@ -83,10 +90,13 @@ pub(crate) fn solve_spd_system_cg(
     for _ in 0..options.max_iters {
         let applied_direction = apply_k(system, &direction);
         let denominator = dot(&direction, &applied_direction);
-        if !denominator.is_finite() || denominator <= 1.0e-24 {
+        if !denominator.is_finite() || denominator <= 0.0 {
             break;
         }
         let alpha = residual_preconditioned / denominator;
+        if !alpha.is_finite() {
+            break;
+        }
         for index in 0..solution.len() {
             solution[index] += alpha * direction[index];
             residual[index] -= alpha * applied_direction[index];
@@ -97,7 +107,10 @@ pub(crate) fn solve_spd_system_cg(
         }
         preconditioned = apply_preconditioner(&residual);
         let next_residual_preconditioned = dot(&residual, &preconditioned);
-        if residual_preconditioned.abs() <= 1.0e-24 {
+        if !next_residual_preconditioned.is_finite()
+            || residual_preconditioned <= 0.0
+            || next_residual_preconditioned < 0.0
+        {
             break;
         }
         let beta = next_residual_preconditioned / residual_preconditioned;
@@ -119,4 +132,62 @@ fn dot(left: &[f64], right: &[f64]) -> f64 {
         .zip(right)
         .map(|(left, right)| left * right)
         .sum()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        algebra::{CanonicalRealOperators, MatrixProperties, OperatorRole, RealSparseMatrix},
+        solve::preconditioner::{build_spd_preconditioner, SpdPreconditionerKind},
+    };
+
+    #[test]
+    fn relative_tolerance_is_invariant_to_rhs_scale() {
+        let stiffness = RealSparseMatrix::diagonal(
+            vec![2.0, 4.0],
+            OperatorRole::Stiffness,
+            MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+        )
+        .unwrap();
+        let mass = RealSparseMatrix::diagonal(
+            vec![1.0; 2],
+            OperatorRole::Mass,
+            MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+        )
+        .unwrap();
+        let damping = RealSparseMatrix::diagonal(
+            vec![0.0; 2],
+            OperatorRole::Damping,
+            MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+        )
+        .unwrap();
+        let system = AssembledRealSystem::try_new(
+            CanonicalRealOperators::try_new(stiffness, mass, damping).unwrap(),
+            vec![false; 2],
+            vec![0.0; 2],
+        )
+        .unwrap();
+        let prepared = system.prepare_linear().unwrap();
+        let preconditioner =
+            build_spd_preconditioner(&prepared, SpdPreconditionerKind::Jacobi).unwrap();
+
+        for scale in [1.0, 1.0e-12, 1.0e-24] {
+            let rhs = [scale, -2.0 * scale];
+            let solved = solve_spd_system_cg(
+                &system,
+                &rhs,
+                SpdCgSolveOptions {
+                    max_iters: 8,
+                    tol: 1.0e-10,
+                    prepared_accelerator_system: None,
+                    cpu_preconditioner: Some(preconditioner.as_ref()),
+                    initial_guess: None,
+                },
+            );
+            assert!(solved.converged);
+            assert!((solved.vector[0] / scale - 0.5).abs() <= 1.0e-12);
+            assert!((solved.vector[1] / scale + 0.5).abs() <= 1.0e-12);
+        }
+    }
 }

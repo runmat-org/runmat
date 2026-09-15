@@ -223,6 +223,70 @@ pub(super) async fn execute_with_completed_meshing(
     };
     let (response, objects) = match workloads {
         StructuralStudyWorkloads::HeterogeneousSequence { workloads } => {
+            let authored = StructuralStudyWorkloads::HeterogeneousSequence { workloads };
+            let step_ids = authored.step_ids().map_err(protocol)?;
+            let [producer_step, _] = step_ids.as_slice() else {
+                return Ok(RemoteExactStructuralStudyComposition::Failed(
+                    "heterogeneous structural execution requires exactly two steps".into(),
+                ));
+            };
+            let producer_is_linear = match &authored {
+                StructuralStudyWorkloads::HeterogeneousSequence { workloads } => matches!(
+                    workloads.get(producer_step),
+                    Some(runmat_analysis_fea::execution::StructuralStepWorkload::Linear { .. })
+                ),
+                _ => false,
+            };
+            if producer_is_linear {
+                if matches!(
+                    &recovery,
+                    StructuralTransientRecoveryAdmission::Available {
+                        restored: Some(_),
+                        ..
+                    }
+                ) {
+                    return Ok(RemoteExactStructuralStudyComposition::Failed(
+                        "buckling execution cannot consume a transient recovery closure".into(),
+                    ));
+                }
+                let completion = match crate::execute_structural_buckling_study_remotely(
+                    Arc::clone(&pool),
+                    runmat_analysis_execution::StructuralBucklingStudyPreparation {
+                        authored_study_digest: decoded.authored_study_digest,
+                        frozen_project_digest: decoded.frozen_project_digest,
+                        workloads: authored,
+                        mesh: completed.result.artifact.clone(),
+                        artifact_access: decoded.artifact_access.clone(),
+                        program_revision: request.recipe.program_revision.clone(),
+                        chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
+                        inventory_limits: ObjectInventoryLimits::default(),
+                        required_capabilities: Default::default(),
+                        accelerator_requests: analysis_accelerator_requests.clone(),
+                    },
+                    policy,
+                )
+                .await
+                {
+                    Ok(completion) => completion,
+                    Err(error) => return Ok(sequence_error_composition(&pool, error.to_string())),
+                };
+                let (response, objects) =
+                    crate::exact_structural_study_root::package_exact_structural_study_result(
+                    request,
+                    &decoded,
+                    &completed.result,
+                    &boundary_objects,
+                    crate::exact_structural_study_root::ExactStructuralAnalysisPublication::StructuralBuckling {
+                        signals: &completed_signals,
+                        completion: &completion,
+                        unresolved_workloads_digest,
+                    },
+                )?;
+                for object in objects {
+                    pool.register_execution_object(object.reference, object.bytes)?;
+                }
+                return Ok(RemoteExactStructuralStudyComposition::Completed(response));
+            }
             let (recovered, recovery_publisher) = match recovery {
                 StructuralTransientRecoveryAdmission::Available {
                     restored,
@@ -245,7 +309,6 @@ pub(super) async fn execute_with_completed_meshing(
                     .map_err(protocol)
                 })
                 .transpose()?;
-            let authored = StructuralStudyWorkloads::HeterogeneousSequence { workloads };
             let completion = match crate::execute_structural_modal_transient_remotely(
                 Arc::clone(&pool),
                 runmat_analysis_execution::StructuralModalTransientStudyPreparation {

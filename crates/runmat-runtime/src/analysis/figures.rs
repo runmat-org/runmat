@@ -2467,6 +2467,7 @@ mod tests {
             },
             render_topology: Some(render_topology),
             modal_results: None,
+            buckling_results: None,
             thermal_results: None,
             transient_results: None,
             nonlinear_results: None,

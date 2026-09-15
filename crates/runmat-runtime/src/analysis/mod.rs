@@ -30,8 +30,9 @@ use runmat_analysis_fea::{
     run_electromagnetic_frequency_response, run_linear_static_with_options, run_modal_with_options,
     run_nonlinear_with_options, run_thermal_with_options, run_transient_with_options,
     AnalysisRunIdentity, ComputeBackend, ElectromagneticSolveOptions, ExecutionBackend,
-    FeaProgressHandler, FeaRunError, FeaRunResult, LinearStaticSolveOptions, ModalSolveOptions,
-    SolverMethod, SolverPreconditioner, ThermalProcedureControl, ThermalSolveOptions,
+    FeaBucklingRunResult, FeaProgressHandler, FeaRunError, FeaRunResult, LinearStaticSolveOptions,
+    ModalSolveOptions, SolverMethod, SolverPreconditioner, ThermalProcedureControl,
+    ThermalSolveOptions,
 };
 use runmat_geometry_core::{GeometryAsset, MaterialEvidenceConfidence, UnitSystem};
 use runmat_meshing_core::SolverMeshArtifact;
@@ -187,10 +188,24 @@ pub struct StructuralStudyModalTransientNumericalResult {
 }
 
 #[derive(Debug, Clone)]
+pub struct StructuralStudyBucklingNumericalResult {
+    pub frozen_project_digest: Option<runmat_execution::Digest>,
+    pub preload_step_id: ProcedureStepId,
+    pub buckling_step_id: ProcedureStepId,
+    pub preload_result: FeaRunResult,
+    pub preload_solver_result_identity: runmat_analysis_fea::execution::SolverResultIdentity,
+    pub prestress_state: runmat_analysis_fea::execution::CanonicalSemanticState,
+    pub buckling_result: runmat_analysis_fea::execution::StructuralBucklingSolverResult,
+    pub buckling_numerical_receipt:
+        runmat_analysis_fea::execution::StructuralBucklingNumericalReceipt,
+}
+
+#[derive(Debug, Clone)]
 pub enum StructuralStudyNumericalResult {
     LinearSequence(StructuralStudySequenceNumericalResult),
     StructuralModal(Box<StructuralStudyModalNumericalResult>),
     StructuralModalTransient(Box<StructuralStudyModalTransientNumericalResult>),
+    StructuralBuckling(Box<StructuralStudyBucklingNumericalResult>),
     StructuralTransient(Box<StructuralStudyTransientNumericalResult>),
     StructuralFrequency(Box<StructuralStudyFrequencyNumericalResult>),
 }
@@ -285,12 +300,13 @@ fn install_fea_solver_context() -> runmat_analysis_fea::FeaProgressContextGuard 
 }
 
 pub use contracts::{
-    analysis_runtime_model_template_catalog, AnalysisAcousticRunOptions, AnalysisCfdRunOptions,
-    AnalysisChtRunOptions, AnalysisCreateModelIntentSpec, AnalysisDiagnosticsArtifactPayload,
-    AnalysisDocumentCheckResult, AnalysisDocumentKind, AnalysisDocumentRunResult,
-    AnalysisElectromagneticRunOptions, AnalysisExecutionPlan, AnalysisExecutionStep,
-    AnalysisFieldBinding, AnalysisFieldBindingsArtifactPayload, AnalysisFieldDescriptor,
-    AnalysisFieldKind, AnalysisFieldLocation, AnalysisFieldPageResult, AnalysisFieldPageValues,
+    analysis_runtime_model_template_catalog, AnalysisAcousticRunOptions,
+    AnalysisBucklingRunOptions, AnalysisCfdRunOptions, AnalysisChtRunOptions,
+    AnalysisCreateModelIntentSpec, AnalysisDiagnosticsArtifactPayload, AnalysisDocumentCheckResult,
+    AnalysisDocumentKind, AnalysisDocumentRunResult, AnalysisElectromagneticRunOptions,
+    AnalysisExecutionPlan, AnalysisExecutionStep, AnalysisFieldBinding,
+    AnalysisFieldBindingsArtifactPayload, AnalysisFieldDescriptor, AnalysisFieldKind,
+    AnalysisFieldLocation, AnalysisFieldPageResult, AnalysisFieldPageValues,
     AnalysisFieldPagingDescriptor, AnalysisFieldRequestOptions, AnalysisFieldSelection,
     AnalysisFieldStorage, AnalysisFieldStorageRef, AnalysisFsiRunOptions,
     AnalysisImmutableValueSpec, AnalysisModalRunOptions, AnalysisModelTemplate,
@@ -309,18 +325,18 @@ pub use contracts::{
     AnalysisStudySweepRunEntry, AnalysisStudySweepSpec, AnalysisStudySweepValidateData,
     AnalysisStudySweepValidateEntry, AnalysisStudyValidateResult, AnalysisThermalRunOptions,
     AnalysisTransientRunOptions, AnalysisTrendKindSummary, AnalysisTrendsData, AnalysisTrendsQuery,
-    AnalysisValidateResult, ContactEnforcementOptions, ElectromagneticResultsData, FallbackEvent,
-    FallbackReason, FallbackStage, ModalFrequencyBasis, ModalFrequencyUnits, ModalResultsData,
-    NonlinearMethod, NonlinearResultsData, PlasticityConstitutiveOptions, PrecisionMode,
-    PreconditionerMode, ProductionPublicationReason, ProductionPublicationReasonCode, QualityGate,
-    QualityPolicy, QualityReason, QualityReasonCode, RunProvenance, RunStatus,
-    StructuralFrequencyResultsData, ThermalResultsData, TransientIntegrationMethod,
-    TransientResultsData, ANALYSIS_ARTIFACT_MANIFEST_KIND, ANALYSIS_DATASET_ARTIFACT_KIND,
-    ANALYSIS_DIAGNOSTICS_ARTIFACT_KIND, ANALYSIS_DIAGNOSTICS_SCHEMA_VERSION,
-    ANALYSIS_FIELD_BINDINGS_ARTIFACT_KIND, ANALYSIS_FIELD_BINDINGS_SCHEMA_VERSION,
-    ANALYSIS_FIELD_DEFAULT_MATERIALIZE_LIMIT, ANALYSIS_FIELD_DEFAULT_PAGE_SIZE,
-    ANALYSIS_OBJECT_ARTIFACT_METADATA_SCHEMA_VERSION, ANALYSIS_RUN_DATASET_KIND,
-    ANALYSIS_RUN_DATASET_SCHEMA_VERSION,
+    AnalysisValidateResult, BucklingResultsData, ContactEnforcementOptions,
+    ElectromagneticResultsData, FallbackEvent, FallbackReason, FallbackStage, ModalFrequencyBasis,
+    ModalFrequencyUnits, ModalResultsData, NonlinearMethod, NonlinearResultsData,
+    PlasticityConstitutiveOptions, PrecisionMode, PreconditionerMode, ProductionPublicationReason,
+    ProductionPublicationReasonCode, QualityGate, QualityPolicy, QualityReason, QualityReasonCode,
+    RunProvenance, RunStatus, StructuralFrequencyResultsData, ThermalResultsData,
+    TransientIntegrationMethod, TransientResultsData, ANALYSIS_ARTIFACT_MANIFEST_KIND,
+    ANALYSIS_DATASET_ARTIFACT_KIND, ANALYSIS_DIAGNOSTICS_ARTIFACT_KIND,
+    ANALYSIS_DIAGNOSTICS_SCHEMA_VERSION, ANALYSIS_FIELD_BINDINGS_ARTIFACT_KIND,
+    ANALYSIS_FIELD_BINDINGS_SCHEMA_VERSION, ANALYSIS_FIELD_DEFAULT_MATERIALIZE_LIMIT,
+    ANALYSIS_FIELD_DEFAULT_PAGE_SIZE, ANALYSIS_OBJECT_ARTIFACT_METADATA_SCHEMA_VERSION,
+    ANALYSIS_RUN_DATASET_KIND, ANALYSIS_RUN_DATASET_SCHEMA_VERSION,
 };
 pub use fea_document::{
     is_fea_file_path, load_fea_document_from_path_async, parse_and_resolve_fea_document,
@@ -1165,6 +1181,74 @@ pub fn analysis_prepare_structural_study_op(
         }
     }
 
+    if let [preload_step, buckling_step] = study.steps.as_slice() {
+        if let (
+            AnalysisSolverOptions::StructuralLinear(mut preload_options),
+            AnalysisSolverOptions::StructuralBuckling(mut buckling_options),
+        ) = (
+            preload_step.authored_execution.solver_options.clone(),
+            buckling_step.authored_execution.solver_options.clone(),
+        ) {
+            if preload_options.solver_mesh_artifact_path.is_none() {
+                preload_options.solver_mesh_artifact_path = study.solver_mesh_artifact_path.clone();
+            }
+            let preload = prepare_linear_static_step_run(
+                &study.model,
+                &preload_step.procedure_step.step_id,
+                preload_step.authored_execution.backend,
+                preload_step.authored_execution.requirement,
+                preload_options,
+                study.context.clone(),
+            )?;
+            buckling_options.solver_mesh_artifact_path = None;
+            let buckling = structural_study::prepare_structural_buckling_template(
+                &study,
+                buckling_step,
+                &buckling_options,
+            )?;
+            let workloads = BTreeMap::from([
+                (
+                    preload_step.procedure_step.step_id.clone(),
+                    runmat_analysis_fea::execution::StructuralStepWorkload::Linear {
+                        workload: Box::new(preload.workload),
+                    },
+                ),
+                (
+                    buckling_step.procedure_step.step_id.clone(),
+                    runmat_analysis_fea::execution::StructuralStepWorkload::Buckling {
+                        template: Box::new(buckling),
+                    },
+                ),
+            ]);
+            runmat_analysis_fea::execution::StructuralStudyWorkloads::HeterogeneousSequence {
+                workloads: workloads.clone(),
+            }
+            .validate()
+            .map_err(|error| {
+                operation_error(
+                    ANALYSIS_RUN_STUDY_OPERATION,
+                    ANALYSIS_RUN_STUDY_OP_VERSION,
+                    &study.context,
+                    OperationErrorSpec {
+                        error_code: "RM.FEA.RUN_STUDY.INVALID_PORTABLE_INTENT",
+                        error_type: OperationErrorType::Contract,
+                        retryable: false,
+                        severity: OperationErrorSeverity::Fatal,
+                    },
+                    error.to_string(),
+                    BTreeMap::new(),
+                )
+            })?;
+            return Ok(PreparedStructuralStudy {
+                study,
+                execution: structural_study::PreparedStructuralStudyExecution::StructuralBuckling {
+                    workloads,
+                },
+                solver_mesh,
+            });
+        }
+    }
+
     if let [modal_step, transient_step] = study.steps.as_slice() {
         if let (
             AnalysisSolverOptions::StructuralModes(mut modal_options),
@@ -1389,6 +1473,30 @@ pub fn analysis_complete_structural_study_op(
                 storage::next_run_id(),
             );
         }
+        Ok(StructuralStudyNumericalResult::StructuralBuckling(result)) => {
+            let workloads = match &prepared.execution {
+                structural_study::PreparedStructuralStudyExecution::StructuralBuckling {
+                    workloads,
+                } => workloads.clone(),
+                _ => {
+                    return Err(structural_study_completion_failure(
+                        &prepared,
+                        "RM.FEA.RUN_STUDY.RESULT_KIND_MISMATCH",
+                        OperationErrorType::Contract,
+                        OperationErrorSeverity::Fatal,
+                        "structural buckling result differs from the prepared study kind",
+                    ));
+                }
+            };
+            return structural_study::complete_buckling_study(
+                study_completion_from_prepared(prepared.study),
+                prepared.solver_mesh,
+                workloads,
+                *result,
+                storage::next_run_id(),
+                storage::next_run_id(),
+            );
+        }
         Ok(StructuralStudyNumericalResult::StructuralFrequency(result)) => {
             let workload = match &prepared.execution {
                 structural_study::PreparedStructuralStudyExecution::StructuralFrequency {
@@ -1405,6 +1513,9 @@ pub fn analysis_complete_structural_study_op(
                 }
                 structural_study::PreparedStructuralStudyExecution::StructuralModal { .. }
                 | structural_study::PreparedStructuralStudyExecution::StructuralModalTransient {
+                    ..
+                }
+                | structural_study::PreparedStructuralStudyExecution::StructuralBuckling {
                     ..
                 } => {
                     return Err(structural_study_completion_failure(
@@ -2382,6 +2493,7 @@ fn analysis_admit_modal_run_with_id(
             mode_units: ModalFrequencyUnits::Hz,
             frequency_basis,
         }),
+        buckling_results: None,
         thermal_results: None,
         transient_results: None,
         nonlinear_results: None,
@@ -2420,6 +2532,102 @@ fn analysis_admit_modal_run_with_id(
     Ok(OperationEnvelope::new(
         AnalysisOperation::Modal.name(),
         AnalysisOperation::Modal.version(),
+        &context,
+        result,
+    ))
+}
+
+fn analysis_admit_buckling_run_with_id(
+    buckling: FeaBucklingRunResult,
+    options: AnalysisBucklingRunOptions,
+    context: OperationContext,
+    solver_mesh: SolverMeshArtifact,
+    assigned_run_id: &str,
+) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
+    let FeaBucklingRunResult {
+        run,
+        load_factors,
+        residual_norms,
+        mode_shapes,
+        rotation_mode_shapes,
+        ..
+    } = buckling;
+    let maximum_residual = residual_norms.iter().copied().fold(0.0_f64, f64::max);
+    let result_quality = if load_factors.is_empty()
+        || load_factors
+            .iter()
+            .any(|factor| !factor.is_finite() || *factor <= 0.0)
+        || maximum_residual > options.solver.relative_tolerance()
+    {
+        QualityGate::Fail
+    } else {
+        QualityGate::Pass
+    };
+    let solver_convergence = result_quality;
+    let mut quality_reasons = Vec::new();
+    if result_quality != QualityGate::Pass {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::SolverNotConverged,
+            detail: format!(
+                "buckling residual {} exceeds threshold {} or no positive mode was retained",
+                maximum_residual,
+                options.solver.relative_tolerance()
+            ),
+        });
+    }
+    let numerically_acceptable = result_quality == QualityGate::Pass;
+    let (production_publishable, production_publication_reasons) =
+        evaluate_production_publication(&run, numerically_acceptable);
+    let run_status = classify_run_status(result_quality, numerically_acceptable);
+    let provenance = RunProvenance {
+        requested_backend: run.requested_backend,
+        execution_backend: run.execution_backend,
+        solver_backend: run.solver_backend,
+        solver_device_apply_k_ratio: run.solver_device_apply_k_ratio,
+        solver_host_sync_count: run.solver_host_sync_count,
+        precision_mode: contracts::format_precision_mode(options.precision_mode),
+        deterministic_mode: options.deterministic_mode,
+        solver_method: run.solver_method,
+        preconditioner: run.preconditioner,
+        quality_policy: contracts::format_quality_policy(options.quality_policy),
+        fallback_events: Vec::new(),
+    };
+    let result = AnalysisRunResult {
+        run_id: assigned_run_id.to_string(),
+        run,
+        render_topology: render_topology_from_solver_mesh(Some(&solver_mesh)),
+        modal_results: None,
+        buckling_results: Some(BucklingResultsData {
+            mode_indices: (1..=load_factors.len()).collect(),
+            load_factors,
+            residual_norms,
+            mode_shapes,
+            rotation_mode_shapes,
+        }),
+        thermal_results: None,
+        transient_results: None,
+        nonlinear_results: None,
+        electromagnetic_results: None,
+        model_validity: QualityGate::Pass,
+        solver_convergence,
+        result_quality,
+        run_status,
+        numerically_acceptable,
+        production_publishable,
+        quality_reasons,
+        production_publication_reasons,
+        provenance,
+    };
+    persist_fea_run_result_with_progress(
+        AnalysisOperation::Buckling.name(),
+        AnalysisOperation::Buckling.version(),
+        "RM.FEA.RUN_BUCKLING.ARTIFACT_STORE_FAILED",
+        &context,
+        &result,
+    )?;
+    Ok(OperationEnvelope::new(
+        AnalysisOperation::Buckling.name(),
+        AnalysisOperation::Buckling.version(),
         &context,
         result,
     ))
@@ -2696,6 +2904,7 @@ pub fn analysis_run_acoustic_with_options_op(
         run,
         render_topology,
         modal_results: None,
+        buckling_results: None,
         thermal_results: None,
         transient_results: None,
         nonlinear_results: None,
@@ -3136,6 +3345,7 @@ pub fn analysis_run_cfd_with_options_op(
         run,
         render_topology: render_topology_from_solver_mesh(solver_mesh.as_ref()),
         modal_results: None,
+        buckling_results: None,
         thermal_results: None,
         transient_results: None,
         nonlinear_results: None,
@@ -3602,6 +3812,7 @@ pub fn analysis_run_cht_with_options_op(
         run,
         render_topology: render_topology_from_solver_mesh(Some(&solver_mesh)),
         modal_results: None,
+        buckling_results: None,
         thermal_results: Some(ThermalResultsData {
             thermal_payload_version: "thermal_results/v1".to_string(),
             time_points_s: thermal_run.time_points_s,
@@ -4007,6 +4218,7 @@ pub fn analysis_run_fsi_with_options_op(
         run,
         render_topology: render_topology_from_solver_mesh(solver_mesh.as_ref()),
         modal_results: None,
+        buckling_results: None,
         thermal_results: None,
         transient_results: None,
         nonlinear_results: None,
@@ -4269,6 +4481,7 @@ pub fn analysis_run_thermal_with_options_op(
         run,
         render_topology: render_topology_from_solver_mesh(Some(&solver_mesh)),
         modal_results: None,
+        buckling_results: None,
         thermal_results: Some(ThermalResultsData {
             thermal_payload_version: "thermal_results/v1".to_string(),
             time_points_s: thermal_run.time_points_s,
@@ -4709,6 +4922,7 @@ fn analysis_admit_transient_run_with_id(
         run,
         render_topology: render_topology_from_solver_mesh(solver_mesh.as_ref()),
         modal_results: None,
+        buckling_results: None,
         thermal_results: None,
         transient_results: Some(TransientResultsData {
             transient_payload_version: "transient_results/v1".to_string(),
@@ -5304,6 +5518,7 @@ pub fn analysis_run_nonlinear_with_options_op(
         run,
         render_topology: render_topology_from_solver_mesh(solver_mesh.as_ref()),
         modal_results: None,
+        buckling_results: None,
         thermal_results: None,
         transient_results: None,
         nonlinear_results: Some(NonlinearResultsData {
@@ -6400,6 +6615,7 @@ pub fn analysis_run_electromagnetic_with_options_op(
         run,
         render_topology: render_topology_from_solver_mesh(solver_mesh.as_ref()),
         modal_results: None,
+        buckling_results: None,
         thermal_results: None,
         transient_results: None,
         nonlinear_results: None,

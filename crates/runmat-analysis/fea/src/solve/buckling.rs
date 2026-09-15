@@ -43,6 +43,8 @@ pub enum BucklingSolveError {
     ConstraintReduction(String),
     #[error("buckling elastic operator is not coercive: {0}")]
     NonCoercive(String),
+    #[error("buckling inner elastic solve failed its forcing bound: {0}")]
+    InnerSolve(String),
     #[error(
         "buckling eigensolver could not maintain a complete K-orthonormal subspace during {0}"
     )]
@@ -148,16 +150,35 @@ pub fn solve_eigenvalue_buckling(
                 &rhs,
                 SpdCgSolveOptions {
                     max_iters: dimension.saturating_mul(20).max(200),
-                    tol: relative_tolerance.min(1.0e-10) * 0.1,
+                    tol: relative_tolerance * 0.1,
                     prepared_accelerator_system: None,
                     cpu_preconditioner: Some(preconditioner.as_ref()),
                     initial_guess: None,
                 },
             );
             if !attempt.converged {
-                return Err(BucklingSolveError::NonCoercive(
-                    "inner elastic solve did not converge".into(),
-                ));
+                let applied =
+                    spmv(system.operators().stiffness(), &attempt.vector).map_err(|error| {
+                        BucklingSolveError::ConstraintReduction(format!("{error:?}"))
+                    })?;
+                let residual_norm = rhs
+                    .iter()
+                    .zip(applied)
+                    .map(|(expected, actual)| (expected - actual).powi(2))
+                    .sum::<f64>()
+                    .sqrt();
+                let rhs_norm = rhs.iter().map(|value| value * value).sum::<f64>().sqrt();
+                let relative_residual = if rhs_norm == 0.0 {
+                    residual_norm
+                } else {
+                    residual_norm / rhs_norm
+                };
+                let forcing_bound = relative_tolerance.sqrt();
+                if !relative_residual.is_finite() || relative_residual > forcing_bound {
+                    return Err(BucklingSolveError::InnerSolve(format!(
+                        "relative residual {relative_residual} exceeds {forcing_bound} using {preconditioner_kind:?}",
+                    )));
+                }
             }
             filtered.push(attempt.vector);
         }

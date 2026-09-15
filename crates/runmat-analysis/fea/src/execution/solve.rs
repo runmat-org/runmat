@@ -438,6 +438,10 @@ impl StructuralLinearNumericalReceiptArtifact {
         self.receipt
     }
 
+    pub const fn source_result(&self) -> SolverResultIdentity {
+        self.source_result
+    }
+
     pub fn validate(&self) -> AnalysisExecutionResult<()> {
         self.receipt.validate()?;
         let expected_source =
