@@ -146,6 +146,9 @@ fn validate_modal_demand(
             < demand.modal_output_value_count_upper_bound.0
         || demand.modal_output_value_count_upper_bound.0 == 0
         || maximum_subspace_dimension != reduced_dimension
+        || demand.reduced_tangent_nonzero_count_upper_bound.0 == 0
+        || (demand.prestress_linearization.is_none()
+            && demand.geometric_stiffness_nonzero_count.0 > 0)
         || demand.operator.partitioning != PartitioningPolicy::Monolithic
         || !prepared_output_is_valid(&demand.result_output)
         || !prepared_output_is_valid(&demand.receipt_output)

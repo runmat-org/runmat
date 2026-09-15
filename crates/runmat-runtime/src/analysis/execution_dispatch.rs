@@ -207,7 +207,8 @@ fn run_operation_for_procedure(
     solution_space: SolutionSpace,
 ) -> Option<AnalysisOperation> {
     use AnalysisProcedure::{
-        EigenvalueBuckling, HarmonicResponse, ModalExtraction, Nonlinear, Static, TransientResponse,
+        EigenvalueBuckling, HarmonicResponse, ModalExtraction, Nonlinear,
+        PrestressedModalExtraction, Static, TransientResponse,
     };
     use PhysicsFamily::{Acoustic, Coupled, Electromagnetic, Fluid, Structural, Thermal};
 
@@ -216,7 +217,9 @@ fn run_operation_for_procedure(
         | (Coupled(CoupledPhysicsFamily::Thermomechanical), Static, SolutionSpace::Direct) => {
             Some(AnalysisOperation::LinearStatic)
         }
-        (Structural, ModalExtraction, SolutionSpace::Direct) => Some(AnalysisOperation::Modal),
+        (Structural, ModalExtraction | PrestressedModalExtraction, SolutionSpace::Direct) => {
+            Some(AnalysisOperation::Modal)
+        }
         (Structural, EigenvalueBuckling, SolutionSpace::Direct) => {
             Some(AnalysisOperation::Buckling)
         }
@@ -319,6 +322,11 @@ mod tests {
             (
                 PhysicsFamily::Structural,
                 AnalysisProcedure::ModalExtraction,
+                AnalysisOperation::Modal,
+            ),
+            (
+                PhysicsFamily::Structural,
+                AnalysisProcedure::PrestressedModalExtraction,
                 AnalysisOperation::Modal,
             ),
             (

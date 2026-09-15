@@ -1,7 +1,7 @@
 use crate::{
     algebra::CoercivitySymbolicPlan,
     constraints::CanonicalStructuralConstraintPlan,
-    execution::StructuralModalWorkload,
+    execution::{CanonicalSemanticState, StructuralModalWorkload},
     post::fields::structural_observable_field_definitions,
     results::observation::{
         resolve_structural_observation_plan, ObservationLimits, ResolvedObservationPlan,
@@ -36,12 +36,32 @@ pub fn build_structural_modal_resource_plan(
     constraints: &CanonicalStructuralConstraintPlan,
     observations: &ResolvedObservationPlan,
     workload: &StructuralModalWorkload,
+    prestress_state: Option<&CanonicalSemanticState>,
     accelerator_requests: &[AcceleratorRequest],
     prepared: PreparedStructuralModalResourceFacts,
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
     workload
         .validate()
         .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+    let topology_digest = mesh
+        .map(|mesh| runmat_execution::Digest::from_bytes(*mesh.canonical_digest.bytes()))
+        .unwrap_or_else(|| constraints.topology.discretization_digest());
+    let linearization = match (workload.prestress_transition(), prestress_state) {
+        (None, None) => None,
+        (Some(transition), Some(state)) => Some(
+            crate::pipeline::prestress::structural_linearization_from_state(
+                transition,
+                state,
+                topology_digest,
+            )
+            .map_err(ResourcePlanningError::Invalid)?,
+        ),
+        _ => {
+            return Err(ResourcePlanningError::Invalid(
+                "modal workload and prestress-state presence differ".into(),
+            ))
+        }
+    };
     let facts = derive_structural_resource_facts(workload.model(), mesh, constraints)?;
     let expected_observations = resolve_modal_observations(mesh, constraints, workload)?;
     if observations != &expected_observations {
@@ -92,30 +112,52 @@ pub fn build_structural_modal_resource_plan(
         / boundary_probe_width
         + 1;
 
-    let reduced_stiffness = reduction
-        .reduce_sparse_pattern(facts.symbolic.stiffness_upper_bound())
+    let tangent_pattern = match linearization {
+        Some(linearization) => facts
+            .symbolic
+            .stiffness_upper_bound()
+            .union(linearization.geometric_stiffness().pattern())
+            .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?,
+        None => facts.symbolic.stiffness_upper_bound().clone(),
+    };
+    let reduced_tangent = reduction
+        .reduce_sparse_pattern(&tangent_pattern)
         .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
     let reduced_mass = reduction
         .reduce_sparse_pattern(facts.symbolic.mass_upper_bound())
         .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
-    let admission = CoercivitySymbolicPlan::derive(&reduced_stiffness)
+    let admission = CoercivitySymbolicPlan::derive(&reduced_tangent)
         .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
-    let reduced_stiffness_nonzeros = count(
-        reduced_stiffness.column_indices().len(),
-        "reduced stiffness nonzeros",
+    let reduced_tangent_nonzeros = count(
+        reduced_tangent.column_indices().len(),
+        "reduced tangent nonzeros",
     )?;
+    let geometric_stiffness_nonzeros = linearization
+        .map(|linearization| {
+            count(
+                linearization.geometric_stiffness().values().len(),
+                "geometric stiffness nonzeros",
+            )
+        })
+        .transpose()?
+        .unwrap_or(0);
     let reduced_mass_nonzeros =
         count(reduced_mass.column_indices().len(), "reduced mass nonzeros")?;
 
     // The solver carries K, M, and the canonical damping operator through assembly/reduction,
     // even though eigenspace iteration applies only K and M. All three therefore remain admitted.
-    let contribution_nonzeros = facts
+    let elastic_contribution_nonzeros = facts
         .sparse
         .operator_nonzeros
         .iter()
         .try_fold(0_u64, |total, value| {
             checked_add(total, value.0, "modal contributions")
         })?;
+    let contribution_nonzeros = checked_add(
+        elastic_contribution_nonzeros,
+        geometric_stiffness_nonzeros,
+        "modal elastic and prestress contributions",
+    )?;
     let contribution_bytes = checked_bytes(contribution_nonzeros, 24, "modal contributions")?;
     let dense_projected_values = checked_mul(
         reduced_dimension,
@@ -125,7 +167,7 @@ pub fn build_structural_modal_resource_plan(
     let workspace_bytes = modal_workspace_bytes(
         full_dimension,
         reduced_dimension,
-        reduced_stiffness_nonzeros,
+        reduced_tangent_nonzeros,
         reduced_mass_nonzeros,
         admission.resident_bytes_upper_bound(),
     )?;
@@ -189,7 +231,7 @@ pub fn build_structural_modal_resource_plan(
         workload.backend(),
         accelerator_requests,
         reduced_dimension,
-        reduced_stiffness_nonzeros,
+        reduced_tangent_nonzeros,
     )?;
     let required_capabilities = accelerators
         .iter()
@@ -199,11 +241,26 @@ pub fn build_structural_modal_resource_plan(
         .procedure_step()
         .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
 
+    let numerical_scope_digest = match linearization {
+        Some(linearization) => runmat_execution::Digest::sha256(
+            [
+                b"runmat-structural-prestressed-modal-operator/v1\0".as_slice(),
+                facts.symbolic.identity().bytes().as_slice(),
+                linearization.identity().digest().bytes().as_slice(),
+            ]
+            .concat(),
+        ),
+        None => facts.symbolic.identity(),
+    };
+
     build_resource_plan(FeaResourcePlanningInput {
         estimation_model_revision: RESOURCE_ESTIMATION_MODEL_REVISION,
         phase: FeaResourcePhase::StructuralModalExtraction(workload.identity()),
         demand: FeaResourceDemand::StructuralModalExtraction(StructuralModalResourceDemand {
             workload: workload.identity(),
+            prestress_linearization: linearization.map(|linearization| linearization.identity()),
+            geometric_stiffness_nonzero_count: Count(geometric_stiffness_nonzeros),
+            reduced_tangent_nonzero_count_upper_bound: Count(reduced_tangent_nonzeros),
             retained_mode_count_upper_bound: Count(reduced_dimension),
             modal_phase_value_count_upper_bound: Count(modal_phase_values),
             modal_output_value_count_upper_bound: Count(modal_output_values),
@@ -212,7 +269,7 @@ pub fn build_structural_modal_resource_plan(
             receipt_output: prepared.receipt_output.clone(),
             operator: StructuralOperatorResourceDemand {
                 topology_digest: facts.topology_digest,
-                numerical_scope_digest: facts.symbolic.identity(),
+                numerical_scope_digest,
                 topology: facts.topology,
                 sparse: facts.sparse,
                 constraints: facts.constraints,

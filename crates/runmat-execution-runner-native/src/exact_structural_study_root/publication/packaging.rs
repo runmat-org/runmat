@@ -61,6 +61,9 @@ pub(crate) fn package_exact_structural_study_result(
         ExactStructuralAnalysisPublication::StructuralBuckling { completion, .. } => {
             buckling_closure(completion, &decoded.artifact_access)?
         }
+        ExactStructuralAnalysisPublication::StructuralPrestressedModal { completion, .. } => {
+            prestressed_modal_closure(completion, &decoded.artifact_access)?
+        }
         ExactStructuralAnalysisPublication::StructuralFrequency { completion, .. } => {
             frequency_closure(completion, &decoded.artifact_access)?
         }
@@ -146,40 +149,83 @@ fn buckling_closure(
     completion: &crate::CompletedStructuralBucklingSequenceStudy,
     access: &ArtifactAccess,
 ) -> NativeExecutionResult<ExactStructuralStudyAnalysisClosure> {
-    let components = [
-        &completion.preload.objects,
-        &completion.preload.numerical_receipt_objects,
-        &completion.prestress_state.objects,
-        &completion.buckling.objects,
-        &completion.buckling.numerical_receipt_objects,
-    ];
-    let mut roots = Vec::with_capacity(components.len());
-    let mut objects = Vec::new();
-    for component in components {
-        roots.push(
+    let (roots, objects) = prestress_sequence_roots(
+        [
+            &completion.preload.objects,
+            &completion.preload.numerical_receipt_objects,
+            &completion.prestress_state.objects,
+            &completion.buckling.objects,
+            &completion.buckling.numerical_receipt_objects,
+        ],
+        access,
+    )?;
+    let [preload_result_root, preload_receipt_root, prestress_state_root, buckling_result_root, buckling_receipt_root] =
+        roots;
+    Ok(ExactStructuralStudyAnalysisClosure::StructuralBuckling {
+        preload_result_root: Box::new(preload_result_root),
+        preload_receipt_root: Box::new(preload_receipt_root),
+        prestress_state_root: Box::new(prestress_state_root),
+        buckling_result_root: Box::new(buckling_result_root),
+        buckling_receipt_root: Box::new(buckling_receipt_root),
+        objects,
+    })
+}
+
+fn prestressed_modal_closure(
+    completion: &crate::CompletedStructuralPrestressedModalStudy,
+    access: &ArtifactAccess,
+) -> NativeExecutionResult<ExactStructuralStudyAnalysisClosure> {
+    let (roots, objects) = prestress_sequence_roots(
+        [
+            &completion.preload.objects,
+            &completion.preload.numerical_receipt_objects,
+            &completion.prestress_state.objects,
+            &completion.modal.objects,
+            &completion.modal.numerical_receipt_objects,
+        ],
+        access,
+    )?;
+    let [preload_result_root, preload_receipt_root, prestress_state_root, modal_result_root, modal_receipt_root] =
+        roots;
+    Ok(
+        ExactStructuralStudyAnalysisClosure::StructuralPrestressedModal {
+            preload_result_root: Box::new(preload_result_root),
+            preload_receipt_root: Box::new(preload_receipt_root),
+            prestress_state_root: Box::new(prestress_state_root),
+            modal_result_root: Box::new(modal_result_root),
+            modal_receipt_root: Box::new(modal_receipt_root),
+            objects,
+        },
+    )
+}
+
+fn prestress_sequence_roots(
+    components: [&runmat_analysis_execution::PreparedAnalysisObjects; 5],
+    access: &ArtifactAccess,
+) -> NativeExecutionResult<([ValueRef; 5], Vec<ValueRef>)> {
+    let roots = components
+        .iter()
+        .map(|component| {
             component
                 .root_reference(access, ValueRefKind::ResultObject)
-                .map_err(protocol)?,
-        );
-        objects.extend(
-            component
-                .unique_references(access, ValueRefKind::ResultObject)
-                .map_err(protocol)?,
-        );
-    }
-    let [preload_result_root, preload_receipt_root, prestress_state_root, buckling_result_root, buckling_receipt_root] =
-        roots.as_slice()
-    else {
-        return Err(protocol("buckling closure has an invalid root inventory"));
-    };
-    Ok(ExactStructuralStudyAnalysisClosure::StructuralBuckling {
-        preload_result_root: Box::new(preload_result_root.clone()),
-        preload_receipt_root: Box::new(preload_receipt_root.clone()),
-        prestress_state_root: Box::new(prestress_state_root.clone()),
-        buckling_result_root: Box::new(buckling_result_root.clone()),
-        buckling_receipt_root: Box::new(buckling_receipt_root.clone()),
-        objects: unique_references(objects)?,
-    })
+                .map_err(protocol)
+        })
+        .collect::<NativeExecutionResult<Vec<_>>>()?
+        .try_into()
+        .map_err(|_| protocol("prestress sequence closure has an invalid root inventory"))?;
+    let objects = unique_references(
+        components
+            .into_iter()
+            .map(|component| {
+                component
+                    .unique_references(access, ValueRefKind::ResultObject)
+                    .map_err(protocol)
+            })
+            .collect::<NativeExecutionResult<Vec<_>>>()?
+            .into_iter()
+            .flatten(),
+    )?;
+    Ok((roots, objects))
 }
 
 fn modal_closure(

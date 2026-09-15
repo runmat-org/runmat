@@ -87,7 +87,7 @@ pub(in crate::analysis) fn complete_modal_study(
     )
 }
 
-fn modal_basis_states_for_completion(
+pub(super) fn modal_basis_states_for_completion(
     prepared: &PreparedStudyCompletion,
     solver_mesh: &runmat_meshing_core::SolverMeshArtifact,
     workload: &runmat_analysis_fea::execution::StructuralModalWorkload,

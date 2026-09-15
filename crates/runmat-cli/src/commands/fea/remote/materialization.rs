@@ -20,8 +20,9 @@ use runmat_runtime::analysis::{
     PreparedStructuralStudyIntent, StructuralStudyBucklingNumericalResult,
     StructuralStudyExecutionFailure, StructuralStudyFrequencyNumericalResult,
     StructuralStudyModalNumericalResult, StructuralStudyModalTransientNumericalResult,
-    StructuralStudyNumericalResult, StructuralStudySequenceNumericalResult,
-    StructuralStudyStepNumericalResult, StructuralStudyTransientNumericalResult,
+    StructuralStudyNumericalResult, StructuralStudyPrestressedModalNumericalResult,
+    StructuralStudySequenceNumericalResult, StructuralStudyStepNumericalResult,
+    StructuralStudyTransientNumericalResult,
 };
 use runmat_runtime::operations::OperationEnvelope;
 
@@ -276,6 +277,20 @@ fn study_result(
                 prestress_state: buckling.prestress_state.clone(),
                 buckling_result: (*buckling.buckling_result).clone(),
                 buckling_numerical_receipt: buckling.buckling_numerical_receipt.clone(),
+            },
+        )),
+        runmat_execution_runner_native::ExactStructuralStudyAnalysisResult::StructuralPrestressedModal(
+            modal,
+        ) => StructuralStudyNumericalResult::StructuralPrestressedModal(Box::new(
+            StructuralStudyPrestressedModalNumericalResult {
+                frozen_project_digest: result.frozen_project_digest,
+                preload_step_id: modal.preload_workload.step_id.clone(),
+                modal_step_id: modal.modal_workload.step_id().clone(),
+                preload_result: modal.preload_result.run.clone(),
+                preload_solver_result_identity: modal.preload_result_identity,
+                prestress_state: modal.prestress_state.clone(),
+                modal_result: (*modal.modal_result).clone(),
+                modal_numerical_receipt: modal.modal_numerical_receipt.clone(),
             },
         )),
         runmat_execution_runner_native::ExactStructuralStudyAnalysisResult::StructuralFrequency(

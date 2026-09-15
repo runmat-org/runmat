@@ -107,6 +107,7 @@ fn modal_plan_binds_k_m_probe_and_monolithic_peak() {
         &constraints,
         &observations,
         &small_workload,
+        None,
         &[],
         prepared(&mesh, &constraints, &small_workload),
     )
@@ -160,6 +161,7 @@ fn modal_plan_binds_k_m_probe_and_monolithic_peak() {
         &constraints,
         &observations,
         &small_workload,
+        None,
         &[],
         understated,
     )
@@ -174,6 +176,7 @@ fn modal_plan_binds_k_m_probe_and_monolithic_peak() {
         &constraints,
         &observations,
         &small_workload,
+        None,
         &[],
         understated_receipt,
     )
@@ -185,6 +188,7 @@ fn modal_plan_binds_k_m_probe_and_monolithic_peak() {
         &constraints,
         &substituted_observations,
         &small_workload,
+        None,
         &[],
         prepared(&mesh, &constraints, &small_workload),
     )
@@ -197,6 +201,7 @@ fn modal_plan_binds_k_m_probe_and_monolithic_peak() {
         &large_constraints,
         &large_observations,
         &large_workload,
+        None,
         &[],
         prepared(&large_mesh, &large_constraints, &large_workload),
     )
@@ -213,6 +218,70 @@ fn modal_plan_binds_k_m_probe_and_monolithic_peak() {
 }
 
 #[test]
+fn prestressed_modal_plan_accounts_for_exact_geometric_state_and_tangent() {
+    let (workload, mesh, state) = crate::tests::prepared_prestressed_modal_case(-1.0);
+    let constraints =
+        CanonicalStructuralConstraintPlan::compile_for_model(workload.model(), Some(&mesh))
+            .unwrap();
+    let fields = structural_observable_field_definitions().unwrap();
+    let observations = resolve_structural_observation_plan(
+        workload.procedure_step().unwrap(),
+        workload.model(),
+        Some(&mesh),
+        &constraints,
+        &fields,
+        ObservationLimits::default(),
+    )
+    .unwrap();
+    let plan = build_structural_modal_resource_plan(
+        Some(&mesh),
+        &constraints,
+        &observations,
+        &workload,
+        Some(&state),
+        &[],
+        prepared(&mesh, &constraints, &workload),
+    )
+    .unwrap();
+    let FeaResourceDemand::StructuralModalExtraction(demand) = plan.input.demand else {
+        panic!("prestressed modal planning must retain typed modal demand")
+    };
+    let linearization = state.payload.structural_linearization().unwrap();
+    assert_eq!(
+        demand.prestress_linearization,
+        Some(linearization.identity())
+    );
+    assert_eq!(
+        demand.geometric_stiffness_nonzero_count.0,
+        linearization.geometric_stiffness().values().len() as u64
+    );
+    assert!(demand.reduced_tangent_nonzero_count_upper_bound.0 > 0);
+
+    assert!(build_structural_modal_resource_plan(
+        Some(&mesh),
+        &constraints,
+        &observations,
+        &workload,
+        None,
+        &[],
+        prepared(&mesh, &constraints, &workload),
+    )
+    .is_err());
+    let mut substituted = state;
+    substituted.topology_digest = runmat_execution::Digest::sha256(b"substituted-topology");
+    assert!(build_structural_modal_resource_plan(
+        Some(&mesh),
+        &constraints,
+        &observations,
+        &workload,
+        Some(&substituted),
+        &[],
+        prepared(&mesh, &constraints, &workload),
+    )
+    .is_err());
+}
+
+#[test]
 fn modal_accelerator_admission_rejects_missing_short_and_cpu_claims() {
     let (cpu_workload, mesh, constraints, observations) = modal_case(2, ComputeBackend::Cpu);
     let spurious = AcceleratorRequest {
@@ -225,6 +294,7 @@ fn modal_accelerator_admission_rejects_missing_short_and_cpu_claims() {
         &constraints,
         &observations,
         &cpu_workload,
+        None,
         std::slice::from_ref(&spurious),
         prepared(&mesh, &constraints, &cpu_workload),
     )
@@ -236,6 +306,7 @@ fn modal_accelerator_admission_rejects_missing_short_and_cpu_claims() {
         &constraints,
         &observations,
         &gpu_workload,
+        None,
         &[],
         prepared(&mesh, &constraints, &gpu_workload),
     )
@@ -248,6 +319,7 @@ fn modal_accelerator_admission_rejects_missing_short_and_cpu_claims() {
             &constraints,
             &observations,
             &workload,
+            None,
             &[],
             prepared(&mesh, &constraints, &workload),
         )
@@ -285,6 +357,7 @@ fn modal_accelerator_admission_rejects_missing_short_and_cpu_claims() {
         &constraints,
         &observations,
         &gpu_workload,
+        None,
         std::slice::from_ref(&short),
         prepared(&mesh, &constraints, &gpu_workload),
     )
@@ -298,6 +371,7 @@ fn modal_accelerator_admission_rejects_missing_short_and_cpu_claims() {
         &constraints,
         &observations,
         &gpu_workload,
+        None,
         std::slice::from_ref(&exact),
         prepared(&mesh, &constraints, &gpu_workload),
     )

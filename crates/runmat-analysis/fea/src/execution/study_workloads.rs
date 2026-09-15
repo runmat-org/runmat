@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use super::{
     AnalysisExecutionError, AnalysisExecutionResult, StructuralBucklingTemplate,
     StructuralFrequencyWorkload, StructuralLinearWorkload, StructuralModalTransientTemplate,
-    StructuralModalWorkload, StructuralTransientWorkload,
+    StructuralModalWorkload, StructuralPrestressedModalTemplate, StructuralTransientWorkload,
 };
 
 const STUDY_WORKLOADS_PREFIX: &[u8] = b"runmat-structural-study-workloads\0";
@@ -94,6 +94,9 @@ pub enum StructuralStepWorkload {
         template: Box<StructuralModalTransientTemplate>,
         block_plan: StructuralTransientBlockPlan,
     },
+    PrestressedModal {
+        template: Box<StructuralPrestressedModalTemplate>,
+    },
     Buckling {
         template: Box<StructuralBucklingTemplate>,
     },
@@ -111,6 +114,7 @@ impl StructuralStepWorkload {
                 template.validate()?;
                 block_plan.validate()
             }
+            Self::PrestressedModal { template } => template.validate(),
             Self::Buckling { template } => template.validate(),
         }
     }
@@ -120,6 +124,7 @@ impl StructuralStepWorkload {
             Self::Linear { workload } => &workload.model,
             Self::ModalExtraction { workload } => workload.model(),
             Self::ModalTransient { template, .. } => &template.model,
+            Self::PrestressedModal { template } => &template.model,
             Self::Buckling { template } => &template.model,
         }
     }
@@ -129,6 +134,7 @@ impl StructuralStepWorkload {
             Self::Linear { workload } => &workload.step_id,
             Self::ModalExtraction { workload } => workload.step_id(),
             Self::ModalTransient { template, .. } => &template.step_id,
+            Self::PrestressedModal { template } => &template.step_id,
             Self::Buckling { template } => &template.step_id,
         }
     }
@@ -138,6 +144,7 @@ impl StructuralStepWorkload {
             Self::Linear { workload } => workload.backend,
             Self::ModalExtraction { workload } => workload.backend(),
             Self::ModalTransient { template, .. } => template.backend,
+            Self::PrestressedModal { template } => template.backend,
             Self::Buckling { template } => template.backend,
         }
     }
@@ -147,6 +154,7 @@ impl StructuralStepWorkload {
             Self::Linear { workload } => workload.model = model,
             Self::ModalExtraction { workload } => workload.replace_model(model)?,
             Self::ModalTransient { template, .. } => template.model = model,
+            Self::PrestressedModal { template } => template.model = model,
             Self::Buckling { template } => template.model = model,
         }
         self.validate()
@@ -402,10 +410,13 @@ fn validate_heterogeneous_sequence(
         ) | (
             StructuralStepWorkload::Linear { .. },
             StructuralStepWorkload::Buckling { .. }
+        ) | (
+            StructuralStepWorkload::Linear { .. },
+            StructuralStepWorkload::PrestressedModal { .. }
         )
     ) {
         return Err(invalid(
-            "heterogeneous structural execution supports modal extraction followed by modal transient response, or linear preload followed by buckling",
+            "heterogeneous structural execution supports modal extraction followed by modal transient response, or linear preload followed by buckling or prestressed modal extraction",
         ));
     }
     Ok(model)

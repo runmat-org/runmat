@@ -15,15 +15,16 @@ use runmat_runtime::analysis::{
     StructuralStudyModalTransientNumericalResult, StructuralStudyNumericalResult,
     StructuralStudyPlacementEntry, StructuralStudyPlacementExecutor,
     StructuralStudyPlacementFuture, StructuralStudyPlacementResult,
-    StructuralStudySequenceNumericalResult, StructuralStudyStepNumericalResult,
+    StructuralStudyPrestressedModalNumericalResult, StructuralStudySequenceNumericalResult,
+    StructuralStudyStepNumericalResult,
 };
 
 use crate::{
     execute_structural_buckling_study_locally, execute_structural_frequency_locally_with_source,
     execute_structural_modal_locally, execute_structural_modal_transient_locally,
-    execute_structural_sequence_locally, NativeExecutionConfig,
-    RetainedStructuralTransientRecovery, StructuralFrequencyExecutionPreparation,
-    StructuralSequenceExecutionPolicy,
+    execute_structural_prestressed_modal_study_locally, execute_structural_sequence_locally,
+    NativeExecutionConfig, RetainedStructuralTransientRecovery,
+    StructuralFrequencyExecutionPreparation, StructuralSequenceExecutionPolicy,
 };
 
 /// Native-process placement for runtime-prepared structural studies.
@@ -169,10 +170,52 @@ async fn execute_one(
                     ))?,
                 _ => unreachable!(),
             };
+            let consumer_is_prestressed_modal = match &authored {
+                StructuralStudyWorkloads::HeterogeneousSequence { workloads } => matches!(
+                    workloads.get(consumer_step_id),
+                    Some(
+                        runmat_analysis_fea::execution::StructuralStepWorkload::PrestressedModal {
+                            ..
+                        }
+                    )
+                ),
+                _ => false,
+            };
             if matches!(
                 producer,
                 runmat_analysis_fea::execution::StructuralStepWorkload::Linear { .. }
             ) {
+                if consumer_is_prestressed_modal {
+                    let completed = execute_structural_prestressed_modal_study_locally(
+                        execution_config,
+                        runmat_analysis_execution::StructuralPrestressedModalStudyPreparation {
+                            authored_study_digest: study_digest,
+                            frozen_project_digest: None,
+                            workloads: authored,
+                            mesh: prepared.solver_mesh().clone(),
+                            artifact_access: access,
+                            program_revision: revision,
+                            chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
+                            inventory_limits: ObjectInventoryLimits::default(),
+                            required_capabilities: BTreeSet::new(),
+                            accelerator_requests,
+                        },
+                        policy,
+                    )
+                    .await?;
+                    return Ok(StructuralStudyNumericalResult::StructuralPrestressedModal(
+                        Box::new(StructuralStudyPrestressedModalNumericalResult {
+                            frozen_project_digest: None,
+                            preload_step_id: producer_step_id.clone(),
+                            modal_step_id: consumer_step_id.clone(),
+                            preload_result: completed.preload.result.run,
+                            preload_solver_result_identity: completed.preload.identity,
+                            prestress_state: completed.prestress_state.state,
+                            modal_result: completed.modal.result,
+                            modal_numerical_receipt: completed.modal.numerical_receipt,
+                        }),
+                    ));
+                }
                 let completed = execute_structural_buckling_study_locally(
                     execution_config,
                     runmat_analysis_execution::StructuralBucklingStudyPreparation {
@@ -322,6 +365,7 @@ async fn execute_one(
                     artifact_access: access,
                     workload: *workload,
                     mesh: prepared.solver_mesh().clone(),
+                    prestress_state: None,
                     chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
                     inventory_limits: ObjectInventoryLimits::default(),
                     required_capabilities: BTreeSet::new(),

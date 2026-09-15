@@ -15,6 +15,7 @@ use crate::execution::{
     StructuralFrequencyEntryRequestIdentity, StructuralFrequencyResultAssemblyRequestIdentity,
     StructuralModalWorkloadIdentity,
 };
+use crate::pipeline::structural_linearization::StructuralLinearizationIdentity;
 
 const RESOURCE_PREFIX: &[u8] = b"runmat-fea-resource-plan/v1\0";
 pub const RESOURCE_PLAN_MAX_ENCODED_BYTES: u64 = 64 * 1024;
@@ -342,6 +343,13 @@ pub struct StructuralOperatorResourceDemand {
 pub struct StructuralModalResourceDemand {
     pub workload: StructuralModalWorkloadIdentity,
     pub operator: StructuralOperatorResourceDemand,
+    /// Exact preload linearization carried by a prestressed-modal task.
+    pub prestress_linearization: Option<StructuralLinearizationIdentity>,
+    /// Full-space nonzeros imported from the exact geometric-stiffness state, or zero for an
+    /// ordinary modal extraction.
+    pub geometric_stiffness_nonzero_count: Count,
+    /// Reduced nonzeros in the exact symbolic union K + Kg used by the modal solve.
+    pub reduced_tangent_nonzero_count_upper_bound: Count,
     pub retained_mode_count_upper_bound: Count,
     pub modal_phase_value_count_upper_bound: Count,
     pub modal_output_value_count_upper_bound: Count,

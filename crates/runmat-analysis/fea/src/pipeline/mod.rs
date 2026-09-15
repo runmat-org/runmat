@@ -8,7 +8,7 @@ pub mod modal;
 pub mod modal_basis;
 pub mod modal_governance;
 pub mod nonlinear;
-mod prestress;
+pub(crate) mod prestress;
 pub mod structural_buckling;
 pub mod structural_frequency;
 pub mod structural_linearization;

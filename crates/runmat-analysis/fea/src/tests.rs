@@ -1849,7 +1849,7 @@ fn portable_buckling_pipeline_consumes_the_exact_published_preload_state() {
     assert!(crate::execute_structural_buckling_workload(&workload, &mesh, &substituted).is_err());
 }
 
-fn prepared_prestressed_modal_case(
+pub(crate) fn prepared_prestressed_modal_case(
     axial_force: f64,
 ) -> (
     crate::execution::StructuralModalWorkload,

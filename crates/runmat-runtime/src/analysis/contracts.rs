@@ -2286,8 +2286,8 @@ impl AnalysisSolverOptions {
 
     pub fn defaults_for(step: &ProcedureStep) -> Result<Self, String> {
         use AnalysisProcedure::{
-            EigenvalueBuckling, HarmonicResponse, ModalExtraction, Nonlinear, Static,
-            TransientResponse,
+            EigenvalueBuckling, HarmonicResponse, ModalExtraction, Nonlinear,
+            PrestressedModalExtraction, Static, TransientResponse,
         };
         use PhysicsFamily::{Acoustic, Coupled, Electromagnetic, Fluid, Structural, Thermal};
 
@@ -2300,7 +2300,11 @@ impl AnalysisSolverOptions {
             ) => {
                 Ok(Self::StructuralLinear(AnalysisRunOptions::default()))
             }
-            (Structural, ModalExtraction, SolutionSpace::Direct) => {
+            (
+                Structural,
+                ModalExtraction | PrestressedModalExtraction,
+                SolutionSpace::Direct,
+            ) => {
                 Ok(Self::StructuralModes(AnalysisModalRunOptions::default()))
             }
             (Structural, EigenvalueBuckling, SolutionSpace::Direct) => Ok(

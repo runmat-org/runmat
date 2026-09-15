@@ -111,7 +111,7 @@ pub(super) async fn execute_for_composition(
             ))
         }
     };
-    execute_with_completed_meshing(
+    Box::pin(execute_with_completed_meshing(
         pool,
         request,
         decoded,
@@ -119,7 +119,7 @@ pub(super) async fn execute_for_composition(
         &signal_outcomes?,
         resources,
         recovery,
-    )
+    ))
     .await
 }
 
@@ -225,7 +225,7 @@ pub(super) async fn execute_with_completed_meshing(
         StructuralStudyWorkloads::HeterogeneousSequence { workloads } => {
             let authored = StructuralStudyWorkloads::HeterogeneousSequence { workloads };
             let step_ids = authored.step_ids().map_err(protocol)?;
-            let [producer_step, _] = step_ids.as_slice() else {
+            let [producer_step, consumer_step] = step_ids.as_slice() else {
                 return Ok(RemoteExactStructuralStudyComposition::Failed(
                     "heterogeneous structural execution requires exactly two steps".into(),
                 ));
@@ -234,6 +234,15 @@ pub(super) async fn execute_with_completed_meshing(
                 StructuralStudyWorkloads::HeterogeneousSequence { workloads } => matches!(
                     workloads.get(producer_step),
                     Some(runmat_analysis_fea::execution::StructuralStepWorkload::Linear { .. })
+                ),
+                _ => false,
+            };
+            let consumer_is_prestressed_modal = match &authored {
+                StructuralStudyWorkloads::HeterogeneousSequence { workloads } => matches!(
+                    workloads.get(consumer_step),
+                    Some(
+                        runmat_analysis_fea::execution::StructuralStepWorkload::PrestressedModal { .. }
+                    )
                 ),
                 _ => false,
             };
@@ -246,8 +255,50 @@ pub(super) async fn execute_with_completed_meshing(
                     }
                 ) {
                     return Ok(RemoteExactStructuralStudyComposition::Failed(
-                        "buckling execution cannot consume a transient recovery closure".into(),
+                        "prestress execution cannot consume a transient recovery closure".into(),
                     ));
+                }
+                if consumer_is_prestressed_modal {
+                    let completion =
+                        match Box::pin(crate::execute_structural_prestressed_modal_study_remotely(
+                            Arc::clone(&pool),
+                            runmat_analysis_execution::StructuralPrestressedModalStudyPreparation {
+                                authored_study_digest: decoded.authored_study_digest,
+                                frozen_project_digest: decoded.frozen_project_digest,
+                                workloads: authored,
+                                mesh: completed.result.artifact.clone(),
+                                artifact_access: decoded.artifact_access.clone(),
+                                program_revision: request.recipe.program_revision.clone(),
+                                chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
+                                inventory_limits: ObjectInventoryLimits::default(),
+                                required_capabilities: Default::default(),
+                                accelerator_requests: analysis_accelerator_requests.clone(),
+                            },
+                            policy,
+                        ))
+                        .await
+                        {
+                            Ok(completion) => completion,
+                            Err(error) => {
+                                return Ok(sequence_error_composition(&pool, error.to_string()))
+                            }
+                        };
+                    let (response, objects) =
+                        crate::exact_structural_study_root::package_exact_structural_study_result(
+                            request,
+                            &decoded,
+                            &completed.result,
+                            &boundary_objects,
+                            crate::exact_structural_study_root::ExactStructuralAnalysisPublication::StructuralPrestressedModal {
+                                signals: &completed_signals,
+                                completion: &completion,
+                                unresolved_workloads_digest,
+                            },
+                        )?;
+                    for object in objects {
+                        pool.register_execution_object(object.reference, object.bytes)?;
+                    }
+                    return Ok(RemoteExactStructuralStudyComposition::Completed(response));
                 }
                 let completion = match crate::execute_structural_buckling_study_remotely(
                     Arc::clone(&pool),
@@ -365,6 +416,7 @@ pub(super) async fn execute_with_completed_meshing(
                     artifact_access: decoded.artifact_access.clone(),
                     workload: *workload,
                     mesh: completed.result.artifact.clone(),
+                    prestress_state: None,
                     chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
                     inventory_limits: ObjectInventoryLimits::default(),
                     required_capabilities: Default::default(),

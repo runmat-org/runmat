@@ -18,8 +18,9 @@ use runmat_analysis_fea::execution::{
     SignalMaterializationIdentity, StructuralBucklingSolverPolicy, StructuralBucklingTemplate,
     StructuralFrequencySolverPlan, StructuralFrequencyWorkload, StructuralFrequencyWorkloadInput,
     StructuralLinearWorkload, StructuralModalTransientTemplate, StructuralModalWorkload,
-    StructuralModalWorkloadInput, StructuralStepWorkload, StructuralTransientBlockPlan,
-    StructuralTransientWorkload, StudyIdentity, SweepCompositionPolicy, SweepDefinition,
+    StructuralModalWorkloadInput, StructuralPrestressedModalTemplate, StructuralStepWorkload,
+    StructuralTransientBlockPlan, StructuralTransientWorkload, StudyIdentity,
+    SweepCompositionPolicy, SweepDefinition,
 };
 use runmat_analysis_fea::fixtures::{fixture_model, FixtureId};
 use runmat_analysis_fea::frequency::FrequencyResponsePlan;
@@ -55,6 +56,8 @@ use crate::{
 };
 
 use super::{prepare_exact_structural_sweep_root, ExactStructuralSweepRootPreparation};
+
+mod prestressed_modal;
 
 const BOX: &[u8] = include_bytes!("../../../runmat-geometry/io/tests/fixtures/box.brep");
 
@@ -1001,6 +1004,7 @@ async fn run_direct_exact_study_conformance(input: DirectExactStudyConformance) 
         )
         .unwrap();
         assert_eq!(local, *buckling_result.buckling_result);
+
         let fixed_face = &imported.boundary_resolution.aliases["face_000001"];
         let loaded_face = &imported.boundary_resolution.aliases["face_000002"];
         let fixed_centroid = boundary_centroid(&imported.mesh.artifact, fixed_face);

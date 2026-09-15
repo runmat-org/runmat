@@ -3,11 +3,11 @@ use std::collections::BTreeSet;
 use runmat_analysis_fea::{
     constraints::CanonicalStructuralConstraintPlan,
     execution::{
-        AnalysisNumericalObjectKind, AnalysisWorkKind, ConstraintPlanIdentity,
-        DiscretizationIdentity, ExecutionPlanIdentity, NumericalPlanIdentity, OperatorIdentity,
-        ProblemIdentity, SequenceIdentity, SolverResultIdentity, StepIdentity,
-        StructuralModalNumericalReceipt, StructuralModalSolverResult, StructuralModalWorkload,
-        StudyIdentity,
+        AnalysisNumericalObjectKind, AnalysisWorkKind, CanonicalSemanticState,
+        ConstraintPlanIdentity, DiscretizationIdentity, ExecutionPlanIdentity,
+        NumericalPlanIdentity, OperatorIdentity, ProblemIdentity, SequenceIdentity,
+        SolverResultIdentity, StepIdentity, StructuralModalNumericalReceipt,
+        StructuralModalSolverResult, StructuralModalWorkload, StudyIdentity,
     },
     planning::resource::{
         build_structural_modal_resource_plan, structural_modal_receipt_payload_bytes_upper_bound,
@@ -31,11 +31,12 @@ use serde::Serialize;
 use crate::{
     decode_prepared_structural_modal_receipt, decode_prepared_structural_modal_result,
     decode_prepared_structural_modal_workload, import_analysis_objects, import_analysis_output_set,
-    prepare_analysis_objects, prepare_analysis_program, prepare_structural_modal_workload_objects,
-    prepared_input_resource_facts, projected_output_resource_facts,
-    projected_output_set_resource_facts, AnalysisBridgeError, AnalysisBridgeResult,
-    AnalysisCapabilityRequirement, AnalysisHostWorkload, AnalysisWorkloadInput,
-    AnalysisWorkloadRequest, PreparedAnalysisObjects, PreparedAnalysisProgram, ANALYSIS_HOST_ABI,
+    prepare_analysis_objects, prepare_analysis_program, prepare_semantic_state_objects,
+    prepare_structural_modal_workload_objects, prepared_input_resource_facts,
+    projected_output_resource_facts, projected_output_set_resource_facts, AnalysisBridgeError,
+    AnalysisBridgeResult, AnalysisCapabilityRequirement, AnalysisHostWorkload,
+    AnalysisWorkloadInput, AnalysisWorkloadRequest, PreparedAnalysisObjects,
+    PreparedAnalysisProgram, ANALYSIS_HOST_ABI,
 };
 
 const MODAL_TASK_PREFIX: &[u8] = b"runmat-analysis-structural-modal-task/v1\0";
@@ -49,6 +50,7 @@ pub struct StructuralModalTaskPreparation {
     pub artifact_access: ArtifactAccess,
     pub workload: StructuralModalWorkload,
     pub mesh: SolverMeshArtifact,
+    pub prestress_state: Option<CanonicalSemanticState>,
     pub chunk_bytes: usize,
     pub inventory_limits: ObjectInventoryLimits,
     pub required_capabilities: BTreeSet<AnalysisCapabilityRequirement>,
@@ -81,12 +83,33 @@ pub fn prepare_structural_modal_task(
         .mesh
         .validate_canonical()
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    if let Some(state) = &preparation.prestress_state {
+        state.validate()?;
+    }
+    let topology_digest = Digest::from_bytes(*preparation.mesh.canonical_digest.bytes());
+    let state_matches = match (
+        preparation.workload.prestress_transition(),
+        preparation.prestress_state.as_ref(),
+    ) {
+        (None, None) => true,
+        (Some(transition), Some(state)) => {
+            state.identity == transition.source_state
+                && state.topology_digest == topology_digest
+                && transition.target_topology_digest == topology_digest
+                && state
+                    .payload
+                    .structural_linearization()
+                    .is_some_and(|linearization| linearization.topology_digest() == topology_digest)
+        }
+        _ => false,
+    };
     if preparation.chunk_bytes == 0
         || preparation.mesh.geometry.geometry_revision
             != u64::from(preparation.workload.model().geometry_revision)
+        || !state_matches
     {
         return Err(AnalysisBridgeError::Invalid(
-            "modal task has an invalid chunk size or mismatched mesh revision".into(),
+            "modal task has an invalid chunk size, mesh revision, or prestress binding".into(),
         ));
     }
     let constraints = CanonicalStructuralConstraintPlan::compile_for_model(
@@ -114,7 +137,7 @@ pub fn prepare_structural_modal_task(
         .mesh
         .canonical_encode()
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    let mesh_digest = Digest::from_bytes(*preparation.mesh.canonical_digest.bytes());
+    let mesh_digest = topology_digest;
     let mesh_objects = prepare_analysis_objects(
         AnalysisNumericalObjectKind::Mesh,
         mesh_digest,
@@ -144,7 +167,16 @@ pub fn prepare_structural_modal_task(
         ObjectNamespace::InputValue,
         preparation.inventory_limits,
     )?;
-    let numerical_inputs = vec![workload_objects, mesh_objects, constraint_objects];
+    let mut numerical_inputs = vec![workload_objects, mesh_objects];
+    if let Some(state) = &preparation.prestress_state {
+        numerical_inputs.push(prepare_semantic_state_objects(
+            state,
+            preparation.chunk_bytes,
+            ObjectNamespace::InputValue,
+            preparation.inventory_limits,
+        )?);
+    }
+    numerical_inputs.push(constraint_objects);
     let result_payload_upper_bound = structural_modal_result_payload_bytes_upper_bound(
         Some(&preparation.mesh),
         &constraints,
@@ -156,6 +188,7 @@ pub fn prepare_structural_modal_task(
         &constraints,
         &observations,
         &preparation.workload,
+        preparation.prestress_state.as_ref(),
         &preparation.accelerator_requests,
         PreparedStructuralModalResourceFacts {
             inputs: prepared_input_resource_facts(&numerical_inputs)?,
@@ -188,7 +221,10 @@ pub fn prepare_structural_modal_task(
             "modal-model",
             &preparation.workload.model().solver_identity_contract(),
         )?,
-        None,
+        preparation
+            .workload
+            .prestress_transition()
+            .map(|transition| transition.identity),
         constraint_identity,
         Vec::new(),
     )?;

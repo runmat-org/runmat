@@ -18,8 +18,8 @@ pub use contract::{
 pub use publication::{
     import_exact_structural_study_result, ExactStructuralBucklingAnalysisResult,
     ExactStructuralFrequencyAnalysisResult, ExactStructuralModalTransientAnalysisResult,
-    ExactStructuralStudyAnalysisResult, ExactStructuralStudyResult,
-    ExactStructuralStudyResultExpectation,
+    ExactStructuralPrestressedModalAnalysisResult, ExactStructuralStudyAnalysisResult,
+    ExactStructuralStudyResult, ExactStructuralStudyResultExpectation,
 };
 pub(crate) use publication::{
     package_exact_structural_study_result, ExactStructuralAnalysisPublication,

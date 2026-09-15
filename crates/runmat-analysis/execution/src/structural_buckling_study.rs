@@ -1,9 +1,9 @@
 use std::collections::BTreeSet;
 
-use runmat_analysis_core::{StateKind, StateUse};
+use runmat_analysis_core::StateUse;
 use runmat_analysis_fea::execution::{
-    AnalysisTaskIdentity, SemanticStatePublicationSource, StructuralBucklingTemplate,
-    StructuralStepWorkload, StructuralStudyWorkloads,
+    AnalysisTaskIdentity, StructuralBucklingTemplate, StructuralStepWorkload,
+    StructuralStudyWorkloads,
 };
 use runmat_execution::{resource::AcceleratorRequest, Digest, ProgramRevision};
 use runmat_execution_artifact::{
@@ -11,15 +11,15 @@ use runmat_execution_artifact::{
 };
 use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
 
+use crate::structural_prestress_producer::{
+    StructuralPrestressProducerCoordinator, StructuralPrestressProducerPreparation,
+};
 use crate::{
-    bind_upstream_state_transition, import_semantic_state_completion,
-    import_structural_linear_completion, prepare_semantic_state_publication,
-    prepare_structural_buckling_task, prepare_structural_sequence_step, AnalysisBridgeError,
-    AnalysisBridgeResult, AnalysisCapabilityRequirement, AnalysisHostWorkload,
-    ImportedSemanticState, ImportedStructuralBucklingResult, ImportedStructuralLinearResult,
+    bind_upstream_state_transition, prepare_structural_buckling_task, AnalysisBridgeError,
+    AnalysisBridgeResult, AnalysisCapabilityRequirement, ImportedSemanticState,
+    ImportedStructuralBucklingResult, ImportedStructuralLinearResult,
     PreparedSemanticStatePublication, PreparedStructuralBucklingTask,
-    PreparedStructuralLinearProgram, SemanticStatePublicationPreparation,
-    StructuralBucklingTaskPreparation, StructuralLinearProgramPreparation,
+    PreparedStructuralLinearProgram, StructuralBucklingTaskPreparation,
 };
 
 /// Placement-neutral inputs for an authored preload → eigenvalue-buckling study.
@@ -37,32 +37,28 @@ pub struct StructuralBucklingStudyPreparation {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum StudyPhase {
-    ReadyForPreload,
-    AwaitingPreload(Digest),
-    ReadyForState,
-    AwaitingState(Digest),
-    ReadyForBuckling,
-    AwaitingBuckling(Digest),
+enum ConsumerPhase {
+    AwaitingPrestress,
+    Ready,
+    Awaiting(Digest),
     Complete,
 }
 
-/// Resolves a buckling template only after its exact geometric-stiffness state is published.
-///
-/// Scheduling, attempts, placement, and transport remain outside this state machine. Each
-/// completion is admitted against the exact immutable task prepared by the preceding transition.
+/// Resolves a buckling template only after the shared producer publishes its exact preload state.
 pub struct StructuralBucklingStudyCoordinator {
-    preparation: StructuralBucklingStudyPreparation,
-    preload_workload: runmat_analysis_fea::execution::StructuralLinearWorkload,
+    authored_study_digest: Digest,
+    frozen_project_digest: Option<Digest>,
+    mesh: SolverMeshArtifact,
+    artifact_access: ArtifactAccess,
+    program_revision: ProgramRevision,
+    chunk_bytes: usize,
+    required_capabilities: BTreeSet<AnalysisCapabilityRequirement>,
+    accelerator_requests: Vec<AcceleratorRequest>,
+    producer: StructuralPrestressProducerCoordinator,
     buckling_template: StructuralBucklingTemplate,
-    preload: Option<ImportedStructuralLinearResult>,
-    preload_host: Option<AnalysisHostWorkload>,
-    preload_task: Option<AnalysisTaskIdentity>,
-    state: Option<ImportedSemanticState>,
-    state_task: Option<AnalysisTaskIdentity>,
     buckling: Option<ImportedStructuralBucklingResult>,
     buckling_task: Option<AnalysisTaskIdentity>,
-    phase: StudyPhase,
+    phase: ConsumerPhase,
 }
 
 impl StructuralBucklingStudyCoordinator {
@@ -72,9 +68,6 @@ impl StructuralBucklingStudyCoordinator {
             .mesh
             .validate_canonical()
             .map_err(|error| invalid(error.to_string()))?;
-        if preparation.chunk_bytes == 0 {
-            return Err(invalid("buckling study requires bounded object chunks"));
-        }
         let StructuralStudyWorkloads::HeterogeneousSequence { workloads } = &preparation.workloads
         else {
             return Err(invalid(
@@ -97,52 +90,38 @@ impl StructuralBucklingStudyCoordinator {
                 "the second authored step must be an unresolved buckling solve",
             ));
         };
-        let preload = workload.procedure_step()?;
-        if preload
-            .state_outputs
-            .iter()
-            .filter(|declaration| declaration.kind == StateKind::GeometricStiffness)
-            .count()
-            != 1
-        {
-            return Err(invalid(
-                "buckling preload must publish exactly one geometric-stiffness state",
-            ));
-        }
+        let producer =
+            StructuralPrestressProducerCoordinator::new(StructuralPrestressProducerPreparation {
+                authored_study_digest: preparation.authored_study_digest,
+                frozen_project_digest: preparation.frozen_project_digest,
+                preload_workload: (**workload).clone(),
+                mesh: preparation.mesh.clone(),
+                artifact_access: preparation.artifact_access.clone(),
+                program_revision: preparation.program_revision.clone(),
+                chunk_bytes: preparation.chunk_bytes,
+                inventory_limits: preparation.inventory_limits,
+                required_capabilities: preparation.required_capabilities.clone(),
+                accelerator_requests: preparation.accelerator_requests.clone(),
+            })?;
         Ok(Self {
-            preload_workload: (**workload).clone(),
+            authored_study_digest: preparation.authored_study_digest,
+            frozen_project_digest: preparation.frozen_project_digest,
+            mesh: preparation.mesh,
+            artifact_access: preparation.artifact_access,
+            program_revision: preparation.program_revision,
+            chunk_bytes: preparation.chunk_bytes,
+            required_capabilities: preparation.required_capabilities,
+            accelerator_requests: preparation.accelerator_requests,
+            producer,
             buckling_template: (**template).clone(),
-            preparation,
-            preload: None,
-            preload_host: None,
-            preload_task: None,
-            state: None,
-            state_task: None,
             buckling: None,
             buckling_task: None,
-            phase: StudyPhase::ReadyForPreload,
+            phase: ConsumerPhase::AwaitingPrestress,
         })
     }
 
     pub fn prepare_preload(&mut self) -> AnalysisBridgeResult<PreparedStructuralLinearProgram> {
-        if self.phase != StudyPhase::ReadyForPreload {
-            return Err(invalid("buckling study is not ready for its preload"));
-        }
-        let prepared = prepare_structural_sequence_step(StructuralLinearProgramPreparation {
-            authored_study_digest: self.preparation.authored_study_digest,
-            frozen_project_digest: self.preparation.frozen_project_digest,
-            program_revision: self.preparation.program_revision.clone(),
-            artifact_access: self.preparation.artifact_access.clone(),
-            workload: self.preload_workload.clone(),
-            mesh: Some(self.preparation.mesh.clone()),
-            initial_guess: None,
-            chunk_bytes: self.preparation.chunk_bytes,
-            inventory_limits: self.preparation.inventory_limits,
-            required_capabilities: self.preparation.required_capabilities.clone(),
-            accelerator_requests: self.preparation.accelerator_requests.clone(),
-        })?;
-        self.phase = StudyPhase::AwaitingPreload(prepared.host.workload.identity.digest());
-        Ok(prepared)
+        self.producer.prepare_preload()
     }
 
     pub fn complete_preload(
@@ -151,65 +130,11 @@ impl StructuralBucklingStudyCoordinator {
         response: ProgramExecutionResponse,
         prepared: &PreparedStructuralLinearProgram,
     ) -> AnalysisBridgeResult<()> {
-        if self.phase != StudyPhase::AwaitingPreload(prepared.host.workload.identity.digest()) {
-            return Err(AnalysisBridgeError::Identity(
-                "preload response differs from the awaited authored step",
-            ));
-        }
-        let preload = import_structural_linear_completion(
-            source,
-            response,
-            prepared,
-            self.preparation.inventory_limits,
-        )?;
-        self.preload_task = Some(AnalysisTaskIdentity::new(
-            prepared.host.workload.identity,
-            Vec::new(),
-        )?);
-        self.preload_host = Some(prepared.host.clone());
-        self.preload = Some(preload);
-        self.phase = StudyPhase::ReadyForState;
-        Ok(())
+        self.producer.complete_preload(source, response, prepared)
     }
 
     pub fn prepare_state(&mut self) -> AnalysisBridgeResult<PreparedSemanticStatePublication> {
-        if self.phase != StudyPhase::ReadyForState {
-            return Err(invalid(
-                "buckling study is not ready to publish geometric stiffness",
-            ));
-        }
-        let preload = self
-            .preload
-            .as_ref()
-            .ok_or_else(|| invalid("completed buckling preload is absent"))?;
-        let host = self
-            .preload_host
-            .as_ref()
-            .ok_or_else(|| invalid("completed buckling preload host is absent"))?;
-        let declaration = self
-            .preload_workload
-            .procedure_step()?
-            .state_outputs
-            .iter()
-            .find(|declaration| declaration.kind == StateKind::GeometricStiffness)
-            .cloned()
-            .ok_or_else(|| invalid("buckling preload state declaration is absent"))?;
-        let prepared = prepare_semantic_state_publication(SemanticStatePublicationPreparation {
-            source_host: host.clone(),
-            source_result: preload.objects.clone(),
-            source: SemanticStatePublicationSource::StructuralLinearization,
-            declaration,
-            topology_digest: preload
-                .result
-                .constraint_result
-                .topology
-                .discretization_digest(),
-            program_revision: self.preparation.program_revision.clone(),
-            chunk_bytes: self.preparation.chunk_bytes,
-            inventory_limits: self.preparation.inventory_limits,
-        })?;
-        self.phase = StudyPhase::AwaitingState(prepared.host.workload.identity.digest());
-        Ok(prepared)
+        self.producer.prepare_state()
     }
 
     pub fn complete_state(
@@ -218,61 +143,48 @@ impl StructuralBucklingStudyCoordinator {
         response: ProgramExecutionResponse,
         prepared: &PreparedSemanticStatePublication,
     ) -> AnalysisBridgeResult<()> {
-        if self.phase != StudyPhase::AwaitingState(prepared.host.workload.identity.digest()) {
-            return Err(AnalysisBridgeError::Identity(
-                "prestress publication differs from the awaited authored transition",
+        if self.phase != ConsumerPhase::AwaitingPrestress {
+            return Err(invalid(
+                "buckling consumer has already bound a prestress state",
             ));
         }
-        let state = import_semantic_state_completion(
-            source,
-            response,
-            prepared,
-            self.preparation.inventory_limits,
-        )?;
-        let preload_task = self
-            .preload_task
-            .ok_or_else(|| invalid("preload producer task identity is absent"))?;
-        self.state_task = Some(AnalysisTaskIdentity::new(
-            prepared.host.workload.identity,
-            vec![preload_task],
-        )?);
-        self.state = Some(state);
-        self.phase = StudyPhase::ReadyForBuckling;
+        self.producer.complete_state(source, response, prepared)?;
+        self.phase = ConsumerPhase::Ready;
         Ok(())
     }
 
     pub fn prepare_buckling(&mut self) -> AnalysisBridgeResult<PreparedStructuralBucklingTask> {
-        if self.phase != StudyPhase::ReadyForBuckling {
+        if self.phase != ConsumerPhase::Ready {
             return Err(invalid(
                 "buckling study has not published its prestress state",
             ));
         }
         let state = self
-            .state
-            .as_ref()
+            .producer
+            .semantic_state()
             .ok_or_else(|| invalid("published prestress state is absent"))?;
         let transition = bind_upstream_state_transition(
             &self.buckling_template.model,
             &self.buckling_template.step_id,
             &state.state,
             StateUse::Prestress,
-            Digest::from_bytes(*self.preparation.mesh.canonical_digest.bytes()),
+            Digest::from_bytes(*self.mesh.canonical_digest.bytes()),
         )?;
         let workload = self.buckling_template.clone().bind(transition)?;
         let prepared = prepare_structural_buckling_task(StructuralBucklingTaskPreparation {
-            authored_study_digest: self.preparation.authored_study_digest,
-            frozen_project_digest: self.preparation.frozen_project_digest,
-            program_revision: self.preparation.program_revision.clone(),
-            artifact_access: self.preparation.artifact_access.clone(),
+            authored_study_digest: self.authored_study_digest,
+            frozen_project_digest: self.frozen_project_digest,
+            program_revision: self.program_revision.clone(),
+            artifact_access: self.artifact_access.clone(),
             workload,
-            mesh: self.preparation.mesh.clone(),
+            mesh: self.mesh.clone(),
             prestress_state: state.state.clone(),
-            chunk_bytes: self.preparation.chunk_bytes,
-            inventory_limits: self.preparation.inventory_limits,
-            required_capabilities: self.preparation.required_capabilities.clone(),
-            accelerator_requests: self.preparation.accelerator_requests.clone(),
+            chunk_bytes: self.chunk_bytes,
+            inventory_limits: self.producer.inventory_limits(),
+            required_capabilities: self.required_capabilities.clone(),
+            accelerator_requests: self.accelerator_requests.clone(),
         })?;
-        self.phase = StudyPhase::AwaitingBuckling(prepared.host.workload.identity.digest());
+        self.phase = ConsumerPhase::Awaiting(prepared.host.workload.identity.digest());
         Ok(prepared)
     }
 
@@ -282,47 +194,47 @@ impl StructuralBucklingStudyCoordinator {
         response: ProgramExecutionResponse,
         prepared: &PreparedStructuralBucklingTask,
     ) -> AnalysisBridgeResult<()> {
-        if self.phase != StudyPhase::AwaitingBuckling(prepared.host.workload.identity.digest()) {
+        if self.phase != ConsumerPhase::Awaiting(prepared.host.workload.identity.digest()) {
             return Err(AnalysisBridgeError::Identity(
                 "buckling response differs from the awaited authored step",
             ));
         }
-        let buckling = crate::import_structural_buckling_result(
+        self.buckling = Some(crate::import_structural_buckling_result(
             source,
             response,
             prepared,
-            self.preparation.inventory_limits,
-        )?;
+            self.producer.inventory_limits(),
+        )?);
         let state_task = self
-            .state_task
+            .producer
+            .state_task_identity()
             .ok_or_else(|| invalid("prestress publication task identity is absent"))?;
         self.buckling_task = Some(AnalysisTaskIdentity::new(
             prepared.host.workload.identity,
             vec![state_task],
         )?);
-        self.buckling = Some(buckling);
-        self.phase = StudyPhase::Complete;
+        self.phase = ConsumerPhase::Complete;
         Ok(())
     }
 
     pub fn preload_task_identity(&self) -> Option<AnalysisTaskIdentity> {
-        self.preload_task
+        self.producer.preload_task_identity()
     }
 
     pub fn state_task_identity(&self) -> Option<AnalysisTaskIdentity> {
-        self.state_task
+        self.producer.state_task_identity()
     }
 
-    pub fn buckling_task_identity(&self) -> Option<AnalysisTaskIdentity> {
+    pub const fn buckling_task_identity(&self) -> Option<AnalysisTaskIdentity> {
         self.buckling_task
     }
 
     pub fn preload_result(&self) -> Option<&ImportedStructuralLinearResult> {
-        self.preload.as_ref()
+        self.producer.preload_result()
     }
 
     pub fn semantic_state(&self) -> Option<&ImportedSemanticState> {
-        self.state.as_ref()
+        self.producer.semantic_state()
     }
 
     pub fn buckling_result(&self) -> Option<&ImportedStructuralBucklingResult> {

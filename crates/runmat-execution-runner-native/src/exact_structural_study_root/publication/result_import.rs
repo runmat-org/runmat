@@ -323,6 +323,31 @@ pub fn import_exact_structural_study_result(
         })?,
         (
             StructuralStudyWorkloads::HeterogeneousSequence { workloads },
+            ExactStructuralStudyAnalysisClosure::StructuralPrestressedModal {
+                preload_result_root,
+                preload_receipt_root,
+                prestress_state_root,
+                modal_result_root,
+                modal_receipt_root,
+                objects,
+            },
+        ) => super::prestressed_modal_import::import_prestressed_modal_result(
+            super::prestressed_modal_import::PrestressedModalResultImport {
+                source,
+                workloads,
+                preload_result_root: *preload_result_root,
+                preload_receipt_root: *preload_receipt_root,
+                prestress_state_root: *prestress_state_root,
+                modal_result_root: *modal_result_root,
+                modal_receipt_root: *modal_receipt_root,
+                objects,
+                mesh: &mesh.artifact,
+                access: &expected.artifact_access,
+                limits,
+            },
+        )?,
+        (
+            StructuralStudyWorkloads::HeterogeneousSequence { workloads },
             ExactStructuralStudyAnalysisClosure::StructuralBuckling {
                 preload_result_root,
                 preload_receipt_root,

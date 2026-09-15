@@ -28,6 +28,7 @@ use crate::analysis::{
 mod buckling_completion;
 mod modal_completion;
 mod preparation;
+mod prestressed_modal_completion;
 
 pub(in crate::analysis) use buckling_completion::complete_buckling_study;
 use buckling_completion::complete_structural_buckling;
@@ -39,7 +40,10 @@ pub use preparation::analysis_prepare_structural_study_intent_op;
 pub(in crate::analysis) use preparation::{
     prepare_structural_buckling_template, prepare_structural_frequency_workload,
     prepare_structural_modal_transient_template, prepare_structural_modal_workload,
+    prepare_structural_prestressed_modal_template,
 };
+pub(in crate::analysis) use prestressed_modal_completion::complete_prestressed_modal_study;
+use prestressed_modal_completion::complete_structural_prestressed_modal;
 
 /// Admits the remotely meshed and solved result of a path-free structural study intent.
 ///
@@ -191,6 +195,20 @@ pub fn analysis_complete_structural_study_intent_op(
             },
             StructuralStudyNumericalResult::StructuralModalTransient(result),
         ) => complete_structural_modal_transient(
+            intent,
+            resolved_model,
+            persisted_mesh,
+            meshing_output.artifact,
+            workloads,
+            *result,
+            completion_identity,
+        ),
+        (
+            runmat_analysis_fea::execution::StructuralStudyWorkloads::HeterogeneousSequence {
+                workloads,
+            },
+            StructuralStudyNumericalResult::StructuralPrestressedModal(result),
+        ) => complete_structural_prestressed_modal(
             intent,
             resolved_model,
             persisted_mesh,

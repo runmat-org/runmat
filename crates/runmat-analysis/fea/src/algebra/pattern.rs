@@ -46,6 +46,7 @@ pub enum SparsePatternError {
     ColumnsNotStrictlyIncreasing {
         row: usize,
     },
+    ShapeMismatch,
 }
 
 impl fmt::Display for SparsePatternError {
@@ -203,6 +204,57 @@ impl SparsePattern {
         )
         .map(Digest::sha256)
     }
+
+    /// Returns the deterministic row-wise union of two canonical sparse patterns.
+    pub fn union(&self, other: &Self) -> Result<Self, SparsePatternError> {
+        if self.rows != other.rows || self.columns != other.columns {
+            return Err(SparsePatternError::ShapeMismatch);
+        }
+        let mut row_offsets = Vec::with_capacity(self.rows().saturating_add(1));
+        let mut column_indices = Vec::with_capacity(
+            self.column_indices
+                .len()
+                .saturating_add(other.column_indices.len()),
+        );
+        row_offsets.push(0);
+        for row in 0..self.rows() {
+            let left = &self.column_indices[self.row_range(row)];
+            let right = &other.column_indices[other.row_range(row)];
+            let (mut left_index, mut right_index) = (0, 0);
+            while left_index < left.len() || right_index < right.len() {
+                let next = match (left.get(left_index), right.get(right_index)) {
+                    (Some(left), Some(right)) if left < right => {
+                        left_index += 1;
+                        *left
+                    }
+                    (Some(left), Some(right)) if right < left => {
+                        right_index += 1;
+                        *right
+                    }
+                    (Some(left), Some(_)) => {
+                        left_index += 1;
+                        right_index += 1;
+                        *left
+                    }
+                    (Some(left), None) => {
+                        left_index += 1;
+                        *left
+                    }
+                    (None, Some(right)) => {
+                        right_index += 1;
+                        *right
+                    }
+                    (None, None) => unreachable!(),
+                };
+                column_indices.push(next);
+            }
+            row_offsets.push(
+                u64::try_from(column_indices.len())
+                    .map_err(|_| SparsePatternError::DimensionOverflow)?,
+            );
+        }
+        Self::try_new(self.rows, self.columns, row_offsets, column_indices)
+    }
 }
 
 #[cfg(test)]
@@ -236,5 +288,22 @@ mod tests {
         let mut encoded = serde_json::to_value(pattern).unwrap();
         encoded["row_offsets"] = serde_json::json!([0, 2, 1]);
         assert!(serde_json::from_value::<SparsePattern>(encoded).is_err());
+    }
+
+    #[test]
+    fn pattern_union_is_canonical_and_rejects_shape_mismatch() {
+        let left = SparsePattern::try_new(3, 3, vec![0, 2, 3, 4], vec![0, 2, 1, 2]).unwrap();
+        let right = SparsePattern::try_new(3, 3, vec![0, 1, 3, 4], vec![1, 0, 1, 2]).unwrap();
+        let expected =
+            SparsePattern::try_new(3, 3, vec![0, 3, 5, 6], vec![0, 1, 2, 0, 1, 2]).unwrap();
+        assert_eq!(left.union(&right).unwrap(), expected);
+        assert_eq!(right.union(&left).unwrap(), expected);
+        assert_eq!(left.union(&left).unwrap(), left);
+
+        let other_shape = SparsePattern::try_new(1, 1, vec![0, 1], vec![0]).unwrap();
+        assert_eq!(
+            left.union(&other_shape),
+            Err(SparsePatternError::ShapeMismatch)
+        );
     }
 }

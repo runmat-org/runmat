@@ -10,7 +10,9 @@ pub(super) fn execute_structural_modal_extraction(
     let mesh_input = unique_input(&invocation, AnalysisNumericalObjectKind::Mesh)?;
     let constraint_input = unique_input(&invocation, AnalysisNumericalObjectKind::ConstraintPlan)?;
     let resource_input = unique_input(&invocation, AnalysisNumericalObjectKind::ResourcePlan)?;
-    if invocation.inputs.len() != 4
+    let prestress_input =
+        optional_unique_input(&invocation, AnalysisNumericalObjectKind::SemanticState)?;
+    if invocation.inputs.len() != 4 + usize::from(prestress_input.is_some())
         || invocation.host.workload.outputs
             != vec![
                 AnalysisNumericalObjectKind::SolverResult,
@@ -23,6 +25,9 @@ pub(super) fn execute_structural_modal_extraction(
     }
 
     let workload = decode_prepared_structural_modal_workload(workload_input)?;
+    let prestress_state = prestress_input
+        .map(decode_prepared_semantic_state)
+        .transpose()?;
     let mesh = SolverMeshArtifact::canonical_decode(&mesh_input.payload())
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     mesh.validate_canonical()
@@ -46,6 +51,11 @@ pub(super) fn execute_structural_modal_extraction(
     if workload_input.manifest.logical_identity != workload.identity().digest()
         || mesh_input.manifest.logical_identity != topology_digest
         || constraint_input.manifest.logical_identity != expected_constraint_identity.digest()
+        || prestress_input.is_some_and(|input| {
+            prestress_state
+                .as_ref()
+                .is_none_or(|state| input.manifest.logical_identity != state.identity.digest())
+        })
         || resource_input.manifest.logical_identity != resource_plan.identity.digest()
     {
         return Err(AnalysisBridgeError::Identity(
@@ -84,6 +94,7 @@ pub(super) fn execute_structural_modal_extraction(
         &constraints,
         &observations,
         &workload,
+        prestress_state.as_ref(),
         &resource_plan.request.accelerators,
         PreparedStructuralModalResourceFacts {
             inputs: prepared_input_resource_facts(&inputs_except_resource_plan(&invocation))?,
@@ -104,8 +115,13 @@ pub(super) fn execute_structural_modal_extraction(
         ));
     }
 
-    let result = runmat_analysis_fea::execute_structural_modal_workload(&workload, &mesh)
-        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let result = match prestress_state.as_ref() {
+        Some(state) => runmat_analysis_fea::execute_structural_prestressed_modal_workload(
+            &workload, &mesh, state,
+        ),
+        None => runmat_analysis_fea::execute_structural_modal_workload(&workload, &mesh),
+    }
+    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let receipt = StructuralModalNumericalReceipt::new(invocation.host.workload.identity, &result)?;
     Ok(vec![
         AnalysisKernelOutput::whole(

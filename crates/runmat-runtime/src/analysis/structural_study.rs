@@ -23,9 +23,10 @@ pub use lifecycle::{
 };
 pub(super) use lifecycle::{
     complete_buckling_study, complete_frequency_study, complete_modal_study,
-    complete_modal_transient_study, prepare_structural_buckling_template,
-    prepare_structural_frequency_workload, prepare_structural_modal_transient_template,
-    prepare_structural_modal_workload,
+    complete_modal_transient_study, complete_prestressed_modal_study,
+    prepare_structural_buckling_template, prepare_structural_frequency_workload,
+    prepare_structural_modal_transient_template, prepare_structural_modal_workload,
+    prepare_structural_prestressed_modal_template,
 };
 pub(super) use publication::{
     complete_study_run, persist_content_addressed_study_evidence, study_completion_from_prepared,
@@ -117,6 +118,10 @@ pub(super) enum PreparedStructuralStudyExecution {
         workload: Box<runmat_analysis_fea::execution::StructuralModalWorkload>,
     },
     StructuralModalTransient {
+        workloads:
+            BTreeMap<ProcedureStepId, runmat_analysis_fea::execution::StructuralStepWorkload>,
+    },
+    StructuralPrestressedModal {
         workloads:
             BTreeMap<ProcedureStepId, runmat_analysis_fea::execution::StructuralStepWorkload>,
     },
@@ -380,6 +385,20 @@ impl PreparedStructuralStudyIntent {
                                 == ObservationExecutionPolicy::scalable()
                             && workload.truncation() == options.truncation
                             && workload.convergence() == options.convergence
+                            && options.solver_mesh_artifact_path.is_none() => {}
+                        (
+                            runmat_analysis_fea::execution::StructuralStepWorkload::PrestressedModal {
+                                template,
+                            },
+                            super::AnalysisSolverOptions::StructuralModes(options),
+                        ) if template.step_id == step.procedure_step.step_id
+                            && template.backend == step.authored_execution.backend
+                            && template.formulation_requirement
+                                == step.authored_execution.requirement
+                            && template.observation_execution
+                                == ObservationExecutionPolicy::scalable()
+                            && template.truncation == options.truncation
+                            && template.convergence == options.convergence
                             && options.solver_mesh_artifact_path.is_none() => {}
                         (
                             runmat_analysis_fea::execution::StructuralStepWorkload::Buckling {
@@ -649,6 +668,11 @@ impl PreparedStructuralStudy {
                 }
             }
             PreparedStructuralStudyExecution::StructuralModalTransient { workloads } => {
+                StructuralStudyWorkloads::HeterogeneousSequence {
+                    workloads: workloads.clone(),
+                }
+            }
+            PreparedStructuralStudyExecution::StructuralPrestressedModal { workloads } => {
                 StructuralStudyWorkloads::HeterogeneousSequence {
                     workloads: workloads.clone(),
                 }

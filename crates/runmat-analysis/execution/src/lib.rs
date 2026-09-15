@@ -36,6 +36,8 @@ mod state_transition;
 mod structural;
 mod structural_buckling_study;
 mod structural_modal_transient_study;
+mod structural_prestress_producer;
+mod structural_prestressed_modal_study;
 mod structural_sequence;
 mod structural_transient_recovery;
 mod structural_transient_sequence;
@@ -206,6 +208,9 @@ pub use structural_buckling_study::{
 };
 pub use structural_modal_transient_study::{
     StructuralModalTransientStudyCoordinator, StructuralModalTransientStudyPreparation,
+};
+pub use structural_prestressed_modal_study::{
+    StructuralPrestressedModalStudyCoordinator, StructuralPrestressedModalStudyPreparation,
 };
 pub use structural_sequence::{
     import_structural_sequence_completion, validate_structural_sequence_workloads,

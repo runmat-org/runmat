@@ -317,6 +317,168 @@ fn structural_buckling_completion_publishes_ordinary_runtime_results() {
 }
 
 #[test]
+fn structural_prestressed_modal_completion_publishes_exact_state_and_modes() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let root = temp_artifact_root("prestressed-modal-runtime-completion");
+    let _ = fs::remove_dir_all(&root);
+    let _runtime_guard = scoped_fea_artifact_roots(&root);
+    let meshing_output = ready_buckling_meshing_output();
+    let spec = sample_prestressed_modal_study_spec(digest_hex(
+        meshing_output.artifact.geometry.source_digest,
+    ));
+    let intent = analysis_prepare_structural_study_intent_op(
+        &spec,
+        OperationContext::new(Some("trace-prestressed-modal-completion".into()), None),
+    )
+    .expect("prestressed-modal intent should prepare");
+    let runmat_analysis_fea::execution::StructuralStudyWorkloads::HeterogeneousSequence {
+        mut workloads,
+    } = intent.workloads()
+    else {
+        panic!("prestressed-modal completion requires a heterogeneous sequence")
+    };
+    let [preload_step_id, modal_step_id] = intent
+        .model()
+        .sequence
+        .steps
+        .iter()
+        .map(|step| step.step_id.clone())
+        .collect::<Vec<_>>()
+        .try_into()
+        .unwrap();
+    let runmat_analysis_fea::execution::StructuralStepWorkload::Linear {
+        workload: preload_workload,
+    } = workloads.remove(&preload_step_id).unwrap()
+    else {
+        panic!("first prestressed-modal workload must be the preload")
+    };
+    let runmat_analysis_fea::execution::StructuralStepWorkload::PrestressedModal { template } =
+        workloads.remove(&modal_step_id).unwrap()
+    else {
+        panic!("second prestressed-modal workload must extract modes")
+    };
+    let model = preload_workload.model.clone();
+    let constraints =
+        runmat_analysis_fea::constraints::CanonicalStructuralConstraintPlan::compile_for_model(
+            &model,
+            Some(&meshing_output.artifact),
+        )
+        .unwrap();
+    let topology_digest =
+        runmat_execution::Digest::from_bytes(*meshing_output.artifact.canonical_digest.bytes());
+    let preload =
+        runmat_analysis_fea::run_linear_static_with_prepared_constraint_plan_and_linearization(
+            &model,
+            ComputeBackend::Cpu,
+            runmat_analysis_fea::LinearStaticSolveOptions {
+                formulation_requirement: FormulationRequirement::Experimental,
+                solver_mesh: Some(meshing_output.artifact.clone()),
+                require_solver_mesh_for_solid: true,
+                ..runmat_analysis_fea::LinearStaticSolveOptions::default()
+            },
+            &constraints,
+            topology_digest,
+        )
+        .unwrap();
+    let sequence =
+        runmat_analysis_fea::execution::SequenceIdentity::from_solver_contract(&model.sequence)
+            .unwrap();
+    let producer = runmat_analysis_fea::execution::StepIdentity::from_solver_contract(
+        sequence,
+        &model.sequence.steps[0],
+    )
+    .unwrap();
+    let source_result = runmat_analysis_fea::execution::SolverResultIdentity::from_step_result(
+        producer,
+        preload.linearization.identity().digest(),
+    )
+    .unwrap();
+    let declaration = model.sequence.steps[0]
+        .state_outputs
+        .iter()
+        .find(|output| output.kind == runmat_analysis_core::StateKind::GeometricStiffness)
+        .unwrap()
+        .clone();
+    let state = runmat_analysis_fea::execution::CanonicalSemanticState::new(
+        runmat_analysis_fea::execution::CanonicalSemanticStateInput {
+            producer,
+            declaration,
+            topology_digest,
+            source_result,
+            payload:
+                runmat_analysis_fea::execution::CanonicalSemanticStatePayload::StructuralLinearization {
+                    linearization: Box::new(preload.linearization),
+                },
+        },
+    )
+    .unwrap();
+    let transition = runmat_analysis_fea::execution::CanonicalStateTransition::bind_upstream(
+        &template.model,
+        &template.step_id,
+        &state,
+        runmat_analysis_core::StateUse::Prestress,
+        topology_digest,
+    )
+    .unwrap();
+    let modal_workload = (*template).bind(transition).unwrap();
+    let modal_result = runmat_analysis_fea::execute_structural_prestressed_modal_workload(
+        &modal_workload,
+        &meshing_output.artifact,
+        &state,
+    )
+    .unwrap();
+    let modal_receipt = runmat_analysis_fea::execution::StructuralModalNumericalReceipt::new(
+        modal_test_workload_identity(&modal_workload, &meshing_output.artifact),
+        &modal_result,
+    )
+    .unwrap();
+    let mode_count = modal_result.basis().modes().len();
+    let envelope = analysis_complete_structural_study_intent_op(
+        intent,
+        meshing_output,
+        StructuralStudyNumericalResult::StructuralPrestressedModal(Box::new(
+            StructuralStudyPrestressedModalNumericalResult {
+                frozen_project_digest: None,
+                preload_step_id,
+                modal_step_id,
+                preload_result: preload.run,
+                preload_solver_result_identity: source_result,
+                prestress_state: state,
+                modal_result,
+                modal_numerical_receipt: modal_receipt,
+            },
+        )),
+        StructuralStudyCompletionIdentity::new("server-run-prestressed-modal").unwrap(),
+    )
+    .expect("prestressed-modal result should enter ordinary study publication");
+
+    assert_eq!(envelope.data.steps.len(), 2);
+    for expected in [
+        runmat_analysis_core::StateKind::StructuralPrimary,
+        runmat_analysis_core::StateKind::GeometricStiffness,
+        runmat_analysis_core::StateKind::ModalBasis,
+    ] {
+        assert!(envelope
+            .data
+            .states
+            .iter()
+            .any(|state| state.kind == expected));
+    }
+    let persisted = storage::load_run_result(&envelope.data.steps[1].run_id)
+        .unwrap()
+        .expect("prestressed-modal run should be persisted");
+    let modal = persisted
+        .modal_results
+        .expect("ordinary runtime result should retain prestressed modes");
+    assert_eq!(modal.mode_shapes.len(), mode_count);
+    assert_eq!(modal.basis.modes().len(), mode_count);
+    assert_eq!(modal.frequencies_hz().len(), mode_count);
+    drop(_runtime_guard);
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
 fn structural_study_intent_admits_one_typed_direct_transient_workload() {
     let _guard = analysis_test_guard();
     let spec = sample_direct_transient_study_spec("44".repeat(32), 9, 4);
@@ -1209,6 +1371,49 @@ fn sample_buckling_study_spec(geometry_sha256: String) -> AnalysisStudySpec {
                 ),
             },
         ],
+    };
+    spec
+}
+
+fn sample_prestressed_modal_study_spec(geometry_sha256: String) -> AnalysisStudySpec {
+    let mut spec = sample_buckling_study_spec(geometry_sha256);
+    let model = spec.model.as_mut().unwrap();
+    let preload = model.sequence.steps[0].clone();
+    let mut modal = ProcedureStep::structural_prestressed_modal(
+        "step_prestressed_modal",
+        preload.step_id.as_str(),
+        "geometric_stiffness",
+    );
+    modal.independent_domain =
+        runmat_analysis_core::IndependentDomain::Eigenvalue { requested_count: 1 };
+    let mut sequence = AnalysisSequence::from_steps(
+        "sequence_prestressed_modal",
+        vec![preload.clone(), modal.clone()],
+    );
+    sequence.dependencies[0].reason = runmat_analysis_core::SequenceDependencyReason::StateTransfer;
+    sequence
+        .transitions
+        .push(runmat_analysis_core::StateTransition {
+            transition_id: runmat_analysis_core::TransitionId(
+                "preload_to_prestressed_modal".into(),
+            ),
+            producer_step: preload.step_id.clone(),
+            consumer_step: modal.step_id.clone(),
+            state_id: runmat_analysis_core::StateId("geometric_stiffness".into()),
+            method: runmat_analysis_core::StateTransitionMethod::Reuse,
+            topology: runmat_analysis_core::TopologyTransitionPolicy::RequireIdentical,
+            reference: runmat_analysis_core::ReferenceStatePolicy::Preserve,
+        });
+    model.sequence = sequence;
+    spec.execution.steps[1] = AnalysisExecutionStep {
+        step_id: modal.step_id,
+        backend: ComputeBackend::Cpu,
+        requirement: FormulationRequirement::Experimental,
+        solver_options: AnalysisSolverOptions::StructuralModes(AnalysisModalRunOptions {
+            truncation: runmat_analysis_fea::ModalTruncationPolicy::requested(1),
+            convergence: runmat_analysis_fea::ModalConvergencePolicy::exploratory(),
+            ..AnalysisModalRunOptions::default()
+        }),
     };
     spec
 }

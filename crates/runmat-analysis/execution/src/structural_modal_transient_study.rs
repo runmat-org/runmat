@@ -128,6 +128,7 @@ impl StructuralModalTransientStudyCoordinator {
             artifact_access: self.preparation.artifact_access.clone(),
             workload: self.modal_workload.clone(),
             mesh: self.preparation.mesh.clone(),
+            prestress_state: None,
             chunk_bytes: self.preparation.chunk_bytes,
             inventory_limits: self.preparation.inventory_limits,
             required_capabilities: self.preparation.required_capabilities.clone(),

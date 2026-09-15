@@ -21,6 +21,12 @@ pub fn analysis_prepare_structural_study_intent_op(
                 AnalysisSolverOptions::StructuralBuckling(_)
             )
         });
+    let is_prestressed_modal_sequence = study.steps.len() == 2
+        && study.steps.iter().any(|step| {
+            step.procedure_step.procedure
+                == runmat_analysis_core::AnalysisProcedure::PrestressedModalExtraction
+        });
+    let is_prestress_sequence = is_buckling_sequence || is_prestressed_modal_sequence;
     for step in &study.steps {
         let mut authored_execution = step.authored_execution.clone();
         match step.authored_execution.solver_options.clone() {
@@ -38,7 +44,7 @@ pub fn analysis_prepare_structural_study_intent_op(
                 )?;
                 authored_execution.solver_options =
                     AnalysisSolverOptions::StructuralLinear(options);
-                if is_buckling_sequence {
+                if is_prestress_sequence {
                     heterogeneous_workloads.insert(
                         step.procedure_step.step_id.clone(),
                         runmat_analysis_fea::execution::StructuralStepWorkload::Linear {
@@ -83,6 +89,24 @@ pub fn analysis_prepare_structural_study_intent_op(
                 );
                 authored_execution.solver_options =
                     AnalysisSolverOptions::StructuralTransient(options);
+            }
+            AnalysisSolverOptions::StructuralModes(mut options)
+                if is_prestressed_modal_sequence
+                    && linear_workloads.is_empty()
+                    && transient_workload.is_none()
+                    && frequency_workload.is_none()
+                    && heterogeneous_workloads.len() == 1 =>
+            {
+                options.solver_mesh_artifact_path = None;
+                let template =
+                    prepare_structural_prestressed_modal_template(&study, step, &options)?;
+                heterogeneous_workloads.insert(
+                    step.procedure_step.step_id.clone(),
+                    runmat_analysis_fea::execution::StructuralStepWorkload::PrestressedModal {
+                        template: Box::new(template),
+                    },
+                );
+                authored_execution.solver_options = AnalysisSolverOptions::StructuralModes(options);
             }
             AnalysisSolverOptions::StructuralModes(mut options)
                 if linear_workloads.is_empty()
@@ -339,6 +363,31 @@ pub(in crate::analysis) fn prepare_structural_modal_workload(
         },
     )
     .map_err(|error| portable_study_contract_error(study, error.to_string()))
+}
+
+pub(in crate::analysis) fn prepare_structural_prestressed_modal_template(
+    study: &super::super::PreparedStudySequence,
+    step: &super::super::PreparedStudyStep,
+    options: &crate::analysis::AnalysisModalRunOptions,
+) -> Result<
+    runmat_analysis_fea::execution::StructuralPrestressedModalTemplate,
+    OperationErrorEnvelope,
+> {
+    let template = runmat_analysis_fea::execution::StructuralPrestressedModalTemplate {
+        schema_version: 1,
+        model: study.model.clone(),
+        step_id: step.procedure_step.step_id.clone(),
+        backend: step.authored_execution.backend,
+        formulation_requirement: step.authored_execution.requirement,
+        observation_execution:
+            runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
+        truncation: options.truncation,
+        convergence: options.convergence,
+    };
+    template
+        .validate()
+        .map_err(|error| portable_study_contract_error(study, error.to_string()))?;
+    Ok(template)
 }
 
 pub(in crate::analysis) fn prepare_structural_modal_transient_template(
