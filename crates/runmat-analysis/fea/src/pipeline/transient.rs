@@ -319,7 +319,7 @@ pub fn run_transient_block(
                 &mut assemble_at,
             )
         }
-        crate::execution::StructuralTransientSolverPlan::ModalReduced { basis_state } => {
+        crate::execution::StructuralTransientSolverPlan::ModalReduced { basis_transition } => {
             if !basis.motions.is_empty() {
                 return Err(FeaRunError::InvalidModel(
                     "modal transient execution with prescribed support motion requires the governed affine modal projection"
@@ -339,7 +339,7 @@ pub fn run_transient_block(
             solve_structural_modal_transient_block_with_assembly(
                 StructuralModalTransientBlockSolveInput {
                     block: block_input,
-                    basis_state: *basis_state,
+                    basis_state: basis_transition.source_state,
                     basis: modal_basis,
                 },
                 &mut assemble_at,

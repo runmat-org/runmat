@@ -2,8 +2,7 @@ use std::collections::BTreeSet;
 
 use runmat_analysis_fea::constraints::CanonicalStructuralConstraintPlan;
 use runmat_analysis_fea::execution::{
-    AnalysisNumericalObjectKind, AnalysisWorkKind, CanonicalSemanticState,
-    CanonicalStateTransition, CanonicalStateTransitionInput, ConstraintPlanIdentity,
+    AnalysisNumericalObjectKind, AnalysisWorkKind, CanonicalSemanticState, ConstraintPlanIdentity,
     DiscretizationIdentity, ExecutionPlanIdentity, NumericalPlanIdentity, OperatorIdentity,
     ProblemIdentity, SequenceIdentity, SignalMaterializationIdentity, SignalRealizationIdentity,
     SolverExcitationIdentity, SolverResultIdentity, StepIdentity,
@@ -26,8 +25,8 @@ use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
 use serde::Serialize;
 
 use crate::{
-    import_analysis_objects, import_analysis_output_set, prepare_analysis_objects,
-    prepare_analysis_program, AnalysisBridgeError, AnalysisBridgeResult,
+    bind_upstream_state_transition, import_analysis_objects, import_analysis_output_set,
+    prepare_analysis_objects, prepare_analysis_program, AnalysisBridgeError, AnalysisBridgeResult,
     AnalysisCapabilityRequirement, AnalysisHostWorkload, AnalysisWorkloadInput,
     AnalysisWorkloadRequest, PreparedAnalysisObjects, PreparedAnalysisProgram, ANALYSIS_HOST_ABI,
 };
@@ -87,15 +86,6 @@ pub fn prepare_structural_sequence_step(
             }
         }
         [input] if input.use_as == runmat_analysis_core::StateUse::InitialGuess => {
-            let runmat_analysis_core::StateSource::Upstream {
-                producer_step,
-                state_id,
-            } = &input.source
-            else {
-                return Err(AnalysisBridgeError::Invalid(
-                    "structural initial guess must come from an upstream sequence state".into(),
-                ));
-            };
             let state_objects = preparation.initial_guess.as_ref().ok_or_else(|| {
                 AnalysisBridgeError::Invalid(
                     "stateful sequence step is missing its upstream semantic state".into(),
@@ -107,60 +97,12 @@ pub fn prepare_structural_sequence_step(
                 ));
             }
             let state = CanonicalSemanticState::from_canonical_bytes(&state_objects.payload())?;
-            if state.state_id != *state_id || state.kind != input.required_kind {
-                return Err(AnalysisBridgeError::Identity(
-                    "upstream semantic state differs from the selected state input",
-                ));
-            }
-            let authored_transition = preparation
-                .workload
-                .model
-                .sequence
-                .transitions
-                .iter()
-                .find(|transition| {
-                    transition.producer_step == *producer_step
-                        && transition.consumer_step == step.step_id
-                        && transition.state_id == *state_id
-                })
-                .ok_or_else(|| {
-                    AnalysisBridgeError::Invalid(
-                        "stateful sequence step has no matching authored transition".into(),
-                    )
-                })?;
-            let sequence =
-                SequenceIdentity::from_solver_contract(&preparation.workload.model.sequence)?;
-            let producer_contract = preparation
-                .workload
-                .model
-                .sequence
-                .steps
-                .iter()
-                .find(|candidate| candidate.step_id == *producer_step)
-                .ok_or_else(|| {
-                    AnalysisBridgeError::Invalid(
-                        "state transition producer is absent from the authored sequence".into(),
-                    )
-                })?;
-            let producer = StepIdentity::from_solver_contract(sequence, producer_contract)?;
-            let consumer = StepIdentity::from_solver_contract(sequence, &step)?;
-            if state.producer != producer {
-                return Err(AnalysisBridgeError::Identity(
-                    "upstream semantic state names a different producer step",
-                ));
-            }
-            preparation.workload.initial_guess_transition = Some(CanonicalStateTransition::new(
-                CanonicalStateTransitionInput {
-                    sequence,
-                    producer,
-                    consumer,
-                    authored: authored_transition,
-                    source: &state,
-                    target_topology_digest: structural_topology_digest(
-                        &preparation.workload,
-                        preparation.mesh.as_ref(),
-                    )?,
-                },
+            preparation.workload.initial_guess_transition = Some(bind_upstream_state_transition(
+                &preparation.workload.model,
+                &step.step_id,
+                &state,
+                input.use_as,
+                structural_topology_digest(&preparation.workload, preparation.mesh.as_ref())?,
             )?);
         }
         _ => {

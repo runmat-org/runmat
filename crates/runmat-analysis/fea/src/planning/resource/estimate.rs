@@ -51,6 +51,13 @@ pub fn build_resource_plan(
             FeaResourceDemand::StructuralLinearPipeline(demand),
         ) => build_operator_resource_plan(input.clone(), demand, None),
         (
+            FeaResourcePhase::StructuralModalExtraction(workload),
+            FeaResourceDemand::StructuralModalExtraction(demand),
+        ) if *workload == demand.workload => {
+            validate_modal_demand(demand)?;
+            build_operator_resource_plan(input.clone(), &demand.operator, Some(&demand.inputs))
+        }
+        (
             FeaResourcePhase::StructuralFrequencyEntry(_),
             FeaResourceDemand::StructuralFrequencyEntry(demand),
         )
@@ -82,6 +89,43 @@ pub fn build_resource_plan(
             "resource phase and typed demand variant differ".into(),
         )),
     }
+}
+
+fn validate_modal_demand(
+    demand: &super::contract::StructuralModalResourceDemand,
+) -> Result<(), ResourcePlanningError> {
+    let SolveResourcePolicy::ModalSubspaceIteration {
+        reduced_dimension,
+        maximum_subspace_dimension,
+        ..
+    } = demand.operator.solve
+    else {
+        return Err(ResourcePlanningError::Invalid(
+            "structural modal demand requires a modal-subspace solve policy".into(),
+        ));
+    };
+    if demand.retained_mode_count_upper_bound.0 == 0
+        || demand.retained_mode_count_upper_bound.0 > reduced_dimension.0
+        || demand.modal_phase_value_count_upper_bound.0
+            < demand.modal_output_value_count_upper_bound.0
+        || demand.modal_output_value_count_upper_bound.0 == 0
+        || maximum_subspace_dimension != reduced_dimension
+        || demand.operator.partitioning != PartitioningPolicy::Monolithic
+        || !prepared_output_is_valid(&demand.result_output)
+        || !prepared_output_is_valid(&demand.receipt_output)
+    {
+        return Err(ResourcePlanningError::Invalid(
+            "structural modal output, subspace, or placement bounds are inconsistent".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn prepared_output_is_valid(output: &PreparedOutputResourceFacts) -> bool {
+    output.encoded_payload_bytes_upper_bound.0 > 0
+        && output.transport_closure_bytes_upper_bound >= output.encoded_payload_bytes_upper_bound
+        && output.construction_resident_bytes_admission_budget
+            >= output.encoded_payload_bytes_upper_bound
 }
 
 fn build_operator_resource_plan(
@@ -579,6 +623,40 @@ fn validate_operator_demand(
                 "modal harmonic dimensions and workspace must be valid".into(),
             ));
         }
+        SolveResourcePolicy::ModalSubspaceIteration {
+            full_dimension,
+            reduced_dimension,
+            requested_mode_count,
+            initial_subspace_dimension,
+            maximum_subspace_dimension,
+            boundary_probe_width,
+            subspace_expansion_count_upper_bound,
+            maximum_iterations_per_expansion,
+            orthogonalization_passes_per_block,
+            dense_projected_value_count_upper_bound,
+            workspace_bytes_upper_bound,
+        } if full_dimension.0 == 0
+            || reduced_dimension.0 == 0
+            || reduced_dimension.0 > full_dimension.0
+            || requested_mode_count.0 == 0
+            || requested_mode_count.0 > reduced_dimension.0
+            || initial_subspace_dimension.0 < requested_mode_count.0
+            || initial_subspace_dimension.0 > maximum_subspace_dimension.0
+            || maximum_subspace_dimension != reduced_dimension
+            || boundary_probe_width.0 == 0
+            || subspace_expansion_count_upper_bound.0 == 0
+            || maximum_iterations_per_expansion.0 == 0
+            || orthogonalization_passes_per_block.0 == 0
+            || dense_projected_value_count_upper_bound.0
+                != maximum_subspace_dimension
+                    .0
+                    .saturating_mul(maximum_subspace_dimension.0)
+            || workspace_bytes_upper_bound.0 == 0 =>
+        {
+            return Err(ResourcePlanningError::Invalid(
+                "modal extraction dimensions, probe bounds, and workspace must be valid".into(),
+            ));
+        }
         _ => {}
     }
     let recovery_phase = matches!(
@@ -765,7 +843,8 @@ fn solve_storage(
         }
         SolveResourcePolicy::NoSolve { .. }
         | SolveResourcePolicy::RestartedGmres { .. }
-        | SolveResourcePolicy::ModalDenseHarmonic { .. } => Ok((ByteCount(0), ByteCount(0))),
+        | SolveResourcePolicy::ModalDenseHarmonic { .. }
+        | SolveResourcePolicy::ModalSubspaceIteration { .. } => Ok((ByteCount(0), ByteCount(0))),
     }
 }
 

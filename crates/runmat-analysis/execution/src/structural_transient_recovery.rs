@@ -286,6 +286,7 @@ struct PreparationIdentityInput<'a> {
     mesh_manifest: &'a runmat_analysis_fea::execution::AnalysisObjectManifest,
     mesh_root: &'a runmat_execution_artifact::ObjectDescriptor,
     terminal_schedule_ordinals: &'a [u64],
+    initial_dependencies: &'a [runmat_analysis_fea::execution::AnalysisTaskIdentity],
     artifact_access: &'a runmat_execution_artifact::ArtifactAccess,
     program_revision: &'a runmat_execution::ProgramRevision,
     chunk_bytes: u64,
@@ -304,6 +305,7 @@ pub(crate) fn preparation_digest(
         mesh_manifest: &preparation.mesh.manifest,
         mesh_root: &preparation.mesh.root,
         terminal_schedule_ordinals: &preparation.terminal_schedule_ordinals,
+        initial_dependencies: &preparation.initial_dependencies,
         artifact_access: &preparation.artifact_access,
         program_revision: &preparation.program_revision,
         chunk_bytes: u64::try_from(preparation.chunk_bytes)

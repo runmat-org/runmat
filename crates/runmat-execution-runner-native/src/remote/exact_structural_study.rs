@@ -222,6 +222,110 @@ pub(super) async fn execute_with_completed_meshing(
         priority: 0,
     };
     let (response, objects) = match workloads {
+        StructuralStudyWorkloads::HeterogeneousSequence { workloads } => {
+            let (recovered, recovery_publisher) = match recovery {
+                StructuralTransientRecoveryAdmission::Available {
+                    restored,
+                    publisher,
+                } => (restored, publisher),
+                StructuralTransientRecoveryAdmission::Unavailable => {
+                    return Ok(RemoteExactStructuralStudyComposition::Failed(
+                        "modal-transient execution requires a transactional recovery publisher"
+                            .into(),
+                    ))
+                }
+            };
+            let recovery = recovered
+                .map(|restored| {
+                    StructuralTransientRecoveryClosure::from_objects(
+                        &decoded.artifact_access,
+                        restored.root.clone(),
+                        restored.objects.clone(),
+                    )
+                    .map_err(protocol)
+                })
+                .transpose()?;
+            let authored = StructuralStudyWorkloads::HeterogeneousSequence { workloads };
+            let completion = match crate::execute_structural_modal_transient_remotely(
+                Arc::clone(&pool),
+                runmat_analysis_execution::StructuralModalTransientStudyPreparation {
+                    authored_study_digest: decoded.authored_study_digest,
+                    frozen_project_digest: decoded.frozen_project_digest,
+                    workloads: authored,
+                    mesh: completed.result.artifact.clone(),
+                    artifact_access: decoded.artifact_access.clone(),
+                    program_revision: request.recipe.program_revision.clone(),
+                    chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
+                    inventory_limits: ObjectInventoryLimits::default(),
+                    required_capabilities: Default::default(),
+                    accelerator_requests: analysis_accelerator_requests.clone(),
+                },
+                policy,
+                recovery.as_ref(),
+                recovery_publisher,
+            )
+            .await
+            {
+                Ok(completion) => completion,
+                Err(error) => return Ok(sequence_error_composition(&pool, error.to_string())),
+            };
+            crate::exact_structural_study_root::package_exact_structural_study_result(
+                request,
+                &decoded,
+                &completed.result,
+                &boundary_objects,
+                crate::exact_structural_study_root::ExactStructuralAnalysisPublication::StructuralModalTransient {
+                    signals: &completed_signals,
+                    completion: &completion,
+                    unresolved_workloads_digest,
+                },
+            )?
+        }
+        StructuralStudyWorkloads::StructuralModal { workload } => {
+            if matches!(
+                &recovery,
+                StructuralTransientRecoveryAdmission::Available {
+                    restored: Some(_),
+                    ..
+                }
+            ) {
+                return Ok(RemoteExactStructuralStudyComposition::Failed(
+                    "modal extraction cannot consume a transient recovery closure".into(),
+                ));
+            }
+            let completion = match crate::execute_structural_modal_remotely(
+                Arc::clone(&pool),
+                runmat_analysis_execution::StructuralModalTaskPreparation {
+                    authored_study_digest: decoded.authored_study_digest,
+                    frozen_project_digest: decoded.frozen_project_digest,
+                    program_revision: request.recipe.program_revision.clone(),
+                    artifact_access: decoded.artifact_access.clone(),
+                    workload: *workload,
+                    mesh: completed.result.artifact.clone(),
+                    chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
+                    inventory_limits: ObjectInventoryLimits::default(),
+                    required_capabilities: Default::default(),
+                    accelerator_requests: analysis_accelerator_requests.clone(),
+                },
+                policy,
+            )
+            .await
+            {
+                Ok(completion) => completion,
+                Err(error) => return Ok(sequence_error_composition(&pool, error.to_string())),
+            };
+            crate::exact_structural_study_root::package_exact_structural_study_result(
+                request,
+                &decoded,
+                &completed.result,
+                &boundary_objects,
+                crate::exact_structural_study_root::ExactStructuralAnalysisPublication::StructuralModal {
+                    signals: &completed_signals,
+                    completion: &completion,
+                    unresolved_workloads_digest,
+                },
+            )?
+        }
         StructuralStudyWorkloads::LinearSequence { workloads } => {
             if matches!(
                 &recovery,
@@ -299,6 +403,7 @@ pub(super) async fn execute_with_completed_meshing(
                     mesh: &completed.result.artifact,
                     modal_state: None,
                     block_plan,
+                    initial_dependencies: Vec::new(),
                     artifact_access: decoded.artifact_access.clone(),
                     program_revision: request.recipe.program_revision.clone(),
                     chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,

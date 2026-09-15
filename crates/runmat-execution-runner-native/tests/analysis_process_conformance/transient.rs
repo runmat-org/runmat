@@ -63,32 +63,7 @@ pub(super) fn preparation_with_encryption(
     authorization_scope: &str,
     encryption_context: &str,
 ) -> StructuralTransientSequencePreparation {
-    let mut model = fixture_model(FixtureId::StructuralTransientTet4Reference);
-    model.material_assignments[0].region_id = "region".into();
-    model.constraints = vec![AnalysisConstraint::Structural(StructuralConstraint {
-        constraint_id: "fixed-face".into(),
-        frame: runmat_analysis_core::CoordinateFrame::Global,
-        kind: StructuralConstraintKind::Prescribed(PrescribedStructuralDofs {
-            target: RegionTarget::boundary("face:0"),
-            translations: [
-                runmat_analysis_core::StructuralTranslationDof::Ux,
-                runmat_analysis_core::StructuralTranslationDof::Uy,
-                runmat_analysis_core::StructuralTranslationDof::Uz,
-            ]
-            .into_iter()
-            .map(|dof| runmat_analysis_core::TranslationDofValue {
-                dof,
-                value: runmat_analysis_core::PrescribedValue::Constant(
-                    runmat_analysis_core::Displacement::new(0.0),
-                ),
-            })
-            .collect(),
-            rotations: Vec::new(),
-        }),
-    })];
-    model.excitations[0].excitation_mut().target =
-        ExcitationTarget::Region(RegionTarget::boundary("face:3"));
-    let mesh = runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+    let (model, mesh) = structural_transient_fixture();
     let workload = StructuralTransientWorkload {
         schema_version: 1,
         step_id: model.sequence.steps[0].step_id.clone(),
@@ -127,6 +102,7 @@ pub(super) fn preparation_with_encryption(
         modal_state: None,
         scope,
         terminal_schedule_ordinals: vec![2, 4],
+        initial_dependencies: Vec::new(),
         artifact_access: ArtifactAccess {
             authorization_scope: authorization_scope.into(),
             encryption_context: Digest::sha256(encryption_context),
@@ -135,4 +111,37 @@ pub(super) fn preparation_with_encryption(
         chunk_bytes: 256,
         inventory_limits: limits,
     }
+}
+
+pub(super) fn structural_transient_fixture() -> (
+    runmat_analysis_core::AnalysisModel,
+    runmat_meshing_core::SolverMeshArtifact,
+) {
+    let mut model = fixture_model(FixtureId::StructuralTransientTet4Reference);
+    model.material_assignments[0].region_id = "region".into();
+    model.constraints = vec![AnalysisConstraint::Structural(StructuralConstraint {
+        constraint_id: "fixed-face".into(),
+        frame: runmat_analysis_core::CoordinateFrame::Global,
+        kind: StructuralConstraintKind::Prescribed(PrescribedStructuralDofs {
+            target: RegionTarget::boundary("face:0"),
+            translations: [
+                runmat_analysis_core::StructuralTranslationDof::Ux,
+                runmat_analysis_core::StructuralTranslationDof::Uy,
+                runmat_analysis_core::StructuralTranslationDof::Uz,
+            ]
+            .into_iter()
+            .map(|dof| runmat_analysis_core::TranslationDofValue {
+                dof,
+                value: runmat_analysis_core::PrescribedValue::Constant(
+                    runmat_analysis_core::Displacement::new(0.0),
+                ),
+            })
+            .collect(),
+            rotations: Vec::new(),
+        }),
+    })];
+    model.excitations[0].excitation_mut().target =
+        ExcitationTarget::Region(RegionTarget::boundary("face:3"));
+    let mesh = runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+    (model, mesh)
 }

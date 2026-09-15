@@ -2250,59 +2250,63 @@ impl AnalysisSolverOptions {
         };
         use PhysicsFamily::{Acoustic, Coupled, Electromagnetic, Fluid, Structural, Thermal};
 
-        if step.solution_space != SolutionSpace::Direct {
-            return Err(format!(
-                "procedure step `{}` selects unsupported solution space {:?}",
-                step.step_id.as_str(),
-                step.solution_space
-            ));
-        }
-        match (step.family, step.procedure) {
-            (Structural, Static)
-            | (Coupled(CoupledPhysicsFamily::Thermomechanical), Static) => {
+        match (step.family, step.procedure, step.solution_space) {
+            (Structural, Static, SolutionSpace::Direct)
+            | (
+                Coupled(CoupledPhysicsFamily::Thermomechanical),
+                Static,
+                SolutionSpace::Direct,
+            ) => {
                 Ok(Self::StructuralLinear(AnalysisRunOptions::default()))
             }
-            (Structural, ModalExtraction) => {
+            (Structural, ModalExtraction, SolutionSpace::Direct) => {
                 Ok(Self::StructuralModes(AnalysisModalRunOptions::default()))
             }
-            (Structural, HarmonicResponse) => Ok(Self::StructuralFrequency(
+            (Structural, HarmonicResponse, SolutionSpace::Direct) => Ok(Self::StructuralFrequency(
                 AnalysisStructuralFrequencyRunOptions::default(),
             )),
-            (Acoustic, HarmonicResponse) => Ok(Self::AcousticHelmholtz(
+            (Acoustic, HarmonicResponse, SolutionSpace::Direct) => Ok(Self::AcousticHelmholtz(
                 AnalysisAcousticRunOptions::default(),
             )),
-            (Thermal, Static | TransientResponse) => Ok(Self::ThermalDiffusion(
+            (Thermal, Static | TransientResponse, SolutionSpace::Direct) => Ok(Self::ThermalDiffusion(
                 AnalysisThermalRunOptions::default(),
             )),
-            (Structural, TransientResponse) => Ok(Self::StructuralTransient(
-                AnalysisTransientRunOptions::default(),
-            )),
-            (Fluid, Static | TransientResponse) => Ok(Self::IncompressibleFlow(
+            (
+                Structural,
+                TransientResponse,
+                SolutionSpace::Direct | SolutionSpace::ModalReduced,
+            ) => Ok(Self::StructuralTransient(AnalysisTransientRunOptions::default())),
+            (Fluid, Static | TransientResponse, SolutionSpace::Direct) => Ok(Self::IncompressibleFlow(
                 AnalysisCfdRunOptions::default(),
             )),
             (
                 Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer),
                 Static | TransientResponse,
+                SolutionSpace::Direct,
             ) => Ok(Self::ConjugateHeatTransfer(
                 AnalysisChtRunOptions::default(),
             )),
             (
                 Coupled(CoupledPhysicsFamily::FluidStructureInteraction),
                 TransientResponse,
+                SolutionSpace::Direct,
             ) => Ok(Self::FluidStructureInteraction(
                 AnalysisFsiRunOptions::default(),
             )),
-            (Structural, Nonlinear)
-            | (Coupled(CoupledPhysicsFamily::Thermomechanical), Nonlinear) => Ok(
-                Self::StructuralNonlinear(AnalysisNonlinearRunOptions::default()),
-            ),
-            (Electromagnetic, HarmonicResponse) => Ok(
+            (Structural, Nonlinear, SolutionSpace::Direct)
+            | (
+                Coupled(CoupledPhysicsFamily::Thermomechanical),
+                Nonlinear,
+                SolutionSpace::Direct,
+            ) => Ok(Self::StructuralNonlinear(
+                AnalysisNonlinearRunOptions::default(),
+            )),
+            (Electromagnetic, HarmonicResponse, SolutionSpace::Direct) => Ok(
                 Self::ElectromagneticPotential(AnalysisElectromagneticRunOptions::default()),
             ),
-            (family, procedure) => Err(format!(
-                "procedure step `{}` selects unsupported execution combination {family:?}/{procedure:?}/{:?}",
-                step.step_id.as_str(),
-                step.solution_space
+            (family, procedure, solution_space) => Err(format!(
+                "procedure step `{}` selects unsupported execution combination {family:?}/{procedure:?}/{solution_space:?}",
+                step.step_id.as_str()
             )),
         }
     }

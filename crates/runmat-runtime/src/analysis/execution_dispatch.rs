@@ -214,7 +214,7 @@ fn run_operation_for_procedure(
         (Thermal, Static | TransientResponse, SolutionSpace::Direct) => {
             Some(AnalysisOperation::Thermal)
         }
-        (Structural, TransientResponse, SolutionSpace::Direct) => {
+        (Structural, TransientResponse, SolutionSpace::Direct | SolutionSpace::ModalReduced) => {
             Some(AnalysisOperation::Transient)
         }
         (Fluid, Static | TransientResponse, SolutionSpace::Direct) => Some(AnalysisOperation::Cfd),

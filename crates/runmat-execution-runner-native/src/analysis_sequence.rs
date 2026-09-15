@@ -7,7 +7,7 @@ use runmat_analysis_execution::{
     StructuralSequenceCoordinator, StructuralSequenceNode, StructuralSequencePreparation,
 };
 use runmat_analysis_fea::execution::AnalysisTaskIdentity;
-use runmat_execution::resource::{Capability, ResourceRequest};
+use runmat_execution::resource::ResourceRequest;
 use runmat_execution::task::RetryPolicy;
 use runmat_execution::TaskId;
 use runmat_execution_artifact::ProgramExecutionResponse;
@@ -15,8 +15,9 @@ use runmat_execution_runner::AttemptSuccess;
 
 use crate::{
     analysis_task_pool::{
-        execute_analysis_task_batch, protocol, AnalysisTaskBatchPolicy, AnalysisTaskDependency,
-        AnalysisTaskPool, LocalAnalysisTaskPool, PreparedAnalysisTask, RemoteAnalysisTaskPool,
+        configure_local_analysis, execute_analysis_task_batch, protocol, AnalysisTaskBatchPolicy,
+        AnalysisTaskDependency, AnalysisTaskPool, LocalAnalysisTaskPool, PreparedAnalysisTask,
+        RemoteAnalysisTaskPool,
     },
     NativeExecutionConfig, NativeExecutionError, NativeExecutionResult, NativeProgramSession,
     RemotePoolDriver,
@@ -44,26 +45,7 @@ pub async fn execute_structural_sequence_locally(
     policy: StructuralSequenceExecutionPolicy,
 ) -> NativeExecutionResult<CompletedStructuralSequence> {
     policy.validate()?;
-    config.worker_accelerators = policy.resources.accelerators.clone();
-    config.worker_capabilities.extend(
-        policy
-            .resources
-            .accelerators
-            .iter()
-            .map(|accelerator| Capability::Accelerator(accelerator.class.clone())),
-    );
-    config
-        .worker_capabilities
-        .extend(policy.resources.required_capabilities.iter().cloned());
-    config
-        .worker_capabilities
-        .insert(Capability::ProcessIsolation);
-    config
-        .worker_capabilities
-        .insert(Capability::Custom(format!(
-            "runmat.analysis.host:{}",
-            runmat_analysis_execution::ANALYSIS_HOST_ABI
-        )));
+    configure_local_analysis(&mut config, &policy.resources);
     let session = NativeProgramSession::new(config)?;
     execute_with_pool(
         &mut LocalAnalysisTaskPool::new(session),

@@ -38,6 +38,9 @@ pub struct StructuralTransientSequencePreparation {
     pub modal_state: Option<PreparedAnalysisObjects>,
     pub scope: StructuralTransientCheckpointScope,
     pub terminal_schedule_ordinals: Vec<u64>,
+    /// Logical task predecessors that produced immutable inputs consumed by the first block.
+    /// Later blocks inherit them transitively through the preceding block task.
+    pub initial_dependencies: Vec<AnalysisTaskIdentity>,
     pub artifact_access: ArtifactAccess,
     pub program_revision: ProgramRevision,
     pub chunk_bytes: usize,
@@ -49,6 +52,7 @@ pub struct StructuralTransientSequencePreparationInput<'a> {
     pub mesh: &'a SolverMeshArtifact,
     pub modal_state: Option<&'a CanonicalSemanticState>,
     pub block_plan: StructuralTransientBlockPlan,
+    pub initial_dependencies: Vec<AnalysisTaskIdentity>,
     pub artifact_access: ArtifactAccess,
     pub program_revision: ProgramRevision,
     pub chunk_bytes: usize,
@@ -110,6 +114,7 @@ pub fn prepare_structural_transient_sequence(
         modal_state,
         scope,
         terminal_schedule_ordinals,
+        initial_dependencies: input.initial_dependencies,
         artifact_access: input.artifact_access,
         program_revision: input.program_revision,
         chunk_bytes: input.chunk_bytes,
@@ -227,12 +232,7 @@ impl StructuralTransientSequenceCoordinator {
             prepared,
             self.preparation.inventory_limits,
         )?;
-        let dependency_identities = self
-            .completed_block_tasks
-            .last()
-            .copied()
-            .into_iter()
-            .collect::<Vec<_>>();
+        let dependency_identities = self.next_block_dependency_identities();
         let task_identity =
             AnalysisTaskIdentity::new(prepared.host.workload.identity, dependency_identities)?;
         self.blocks.push(block);
@@ -296,11 +296,10 @@ impl StructuralTransientSequenceCoordinator {
     }
 
     pub fn next_block_dependency_identities(&self) -> Vec<AnalysisTaskIdentity> {
-        self.completed_block_tasks
-            .last()
-            .copied()
-            .into_iter()
-            .collect()
+        self.completed_block_tasks.last().copied().map_or_else(
+            || self.preparation.initial_dependencies.clone(),
+            |dependency| vec![dependency],
+        )
     }
 
     pub fn assembly_dependency_identities(&self) -> Vec<AnalysisTaskIdentity> {
@@ -420,6 +419,10 @@ fn validate_preparation(
         .map(crate::decode_prepared_semantic_state)
         .transpose()?;
     preparation.scope.identity()?;
+    let mut sorted_dependencies = preparation.initial_dependencies.clone();
+    sorted_dependencies.sort_unstable();
+    let unique_dependency_count = sorted_dependencies.len();
+    sorted_dependencies.dedup();
     let terminal_schedule_ordinal = u64::try_from(
         preparation
             .scope
@@ -443,6 +446,7 @@ fn validate_preparation(
         || preparation.mesh.manifest.logical_identity
             != Digest::from_bytes(*mesh.canonical_digest.bytes())
         || workload.canonical_bytes()?.as_slice() != preparation.workload.payload().as_slice()
+        || sorted_dependencies.len() != unique_dependency_count
     {
         return Err(invalid(
             "transient sequence preparation has invalid scope, workload, or block boundaries",
@@ -459,7 +463,7 @@ fn validate_preparation(
             None,
         ) => true,
         (
-            StructuralTransientSolverPlan::ModalReduced { basis_state },
+            StructuralTransientSolverPlan::ModalReduced { basis_transition },
             StructuralTransientCoordinateSpace::ModalReduced {
                 basis_state: scoped_basis,
                 basis,
@@ -468,7 +472,7 @@ fn validate_preparation(
             },
             Some(state),
         ) => {
-            state.identity == *basis_state
+            state.identity == basis_transition.source_state
                 && state.identity == *scoped_basis
                 && state.topology_digest == Digest::from_bytes(*mesh.canonical_digest.bytes())
                 && state.payload.modal_basis().is_some_and(|state_basis| {

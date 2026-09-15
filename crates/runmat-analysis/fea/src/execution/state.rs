@@ -1,9 +1,9 @@
 use std::collections::BTreeSet;
 
 use runmat_analysis_core::{
-    AnalysisField, AnalysisFieldValues, ProcedureStepId, ReferenceStatePolicy, StateCompleteness,
-    StateId, StateKind, StateOutput, StatePersistence, StateTransition, StateTransitionMethod,
-    TopologyTransitionPolicy,
+    AnalysisField, AnalysisFieldValues, AnalysisModel, ProcedureStepId, ReferenceStatePolicy,
+    StateCompleteness, StateId, StateKind, StateOutput, StatePersistence, StateSource,
+    StateTransition, StateTransitionMethod, StateUse, TopologyTransitionPolicy,
 };
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
@@ -22,14 +22,27 @@ const STATE_LIMITS: CanonicalLimits =
 #[serde(deny_unknown_fields)]
 pub struct SemanticStatePublicationRequest {
     pub schema_version: u16,
+    pub source: SemanticStatePublicationSource,
     pub producer: StepIdentity,
     pub declaration: StateOutput,
     pub topology_digest: Digest,
     pub source_result: SolverResultIdentity,
 }
 
+/// Typed interpretation of the solver result consumed by state publication.
+///
+/// `SolverResult` is deliberately a generic transport object kind. This discriminator prevents a
+/// worker from guessing its schema or accepting one procedure's result as another state kind.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SemanticStatePublicationSource {
+    StructuralPrimaryFields,
+    ModalBasis,
+}
+
 impl SemanticStatePublicationRequest {
-    pub fn structural_linear(
+    pub fn new(
+        source: SemanticStatePublicationSource,
         producer: StepIdentity,
         declaration: StateOutput,
         topology_digest: Digest,
@@ -37,6 +50,7 @@ impl SemanticStatePublicationRequest {
     ) -> AnalysisExecutionResult<Self> {
         let request = Self {
             schema_version: 1,
+            source,
             producer,
             declaration,
             topology_digest,
@@ -51,10 +65,19 @@ impl SemanticStatePublicationRequest {
             || self.declaration.state_id.0.trim().is_empty()
             || self.declaration.completeness != StateCompleteness::Complete
             || self.declaration.persistence == StatePersistence::CheckpointOnly
-            || self.declaration.kind != StateKind::StructuralPrimary
+            || !matches!(
+                (self.source, self.declaration.kind),
+                (
+                    SemanticStatePublicationSource::StructuralPrimaryFields,
+                    StateKind::StructuralPrimary
+                ) | (
+                    SemanticStatePublicationSource::ModalBasis,
+                    StateKind::ModalBasis
+                )
+            )
         {
             return Err(AnalysisExecutionError::Invalid(
-                "structural state publication requires a complete persisted structural-primary declaration"
+                "semantic-state publication source does not match its complete persisted declaration"
                     .into(),
             ));
         }
@@ -127,6 +150,11 @@ impl CanonicalSemanticState {
         fields: &[AnalysisField],
     ) -> AnalysisExecutionResult<Self> {
         request.validate()?;
+        if request.source != SemanticStatePublicationSource::StructuralPrimaryFields {
+            return Err(AnalysisExecutionError::Invalid(
+                "field state publication requires a structural-primary source".into(),
+            ));
+        }
         let mut by_id = std::collections::BTreeMap::new();
         for field in fields {
             if by_id.insert(field.field_id.as_str(), field).is_some() {
@@ -155,6 +183,30 @@ impl CanonicalSemanticState {
             topology_digest: request.topology_digest,
             source_result: request.source_result,
             payload: CanonicalSemanticStatePayload::Fields { fields: selected },
+        })
+    }
+
+    pub fn from_modal_publication(
+        request: &SemanticStatePublicationRequest,
+        basis: crate::pipeline::modal_basis::ModalBasisArtifact,
+    ) -> AnalysisExecutionResult<Self> {
+        request.validate()?;
+        if request.source != SemanticStatePublicationSource::ModalBasis {
+            return Err(AnalysisExecutionError::Invalid(
+                "modal-basis state publication requires a modal result source".into(),
+            ));
+        }
+        basis
+            .validate()
+            .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+        Self::new(CanonicalSemanticStateInput {
+            producer: request.producer,
+            declaration: request.declaration.clone(),
+            topology_digest: request.topology_digest,
+            source_result: request.source_result,
+            payload: CanonicalSemanticStatePayload::ModalBasis {
+                basis: Box::new(basis),
+            },
         })
     }
 
@@ -379,6 +431,89 @@ pub struct CanonicalStateTransitionInput<'a> {
 }
 
 impl CanonicalStateTransition {
+    pub fn bind_upstream(
+        model: &AnalysisModel,
+        consumer_step_id: &ProcedureStepId,
+        source: &CanonicalSemanticState,
+        expected_use: StateUse,
+        target_topology_digest: Digest,
+    ) -> AnalysisExecutionResult<Self> {
+        source.validate()?;
+        let consumer = model
+            .sequence
+            .steps
+            .iter()
+            .find(|step| step.step_id == *consumer_step_id)
+            .ok_or(AnalysisExecutionError::Identity(
+                "state transition consumer is absent from the authored sequence",
+            ))?;
+        let mut matching_inputs = consumer.state_inputs.iter().filter(|input| {
+            input.use_as == expected_use
+                && input.required_kind == source.kind
+                && matches!(
+                    &input.source,
+                    StateSource::Upstream { state_id, .. } if state_id == &source.state_id
+                )
+        });
+        let input = matching_inputs.next().ok_or_else(|| {
+            AnalysisExecutionError::Invalid(
+                "consumer has no upstream state input matching the published state".into(),
+            )
+        })?;
+        if matching_inputs.next().is_some() {
+            return Err(AnalysisExecutionError::Invalid(
+                "consumer has multiple upstream inputs matching one published state".into(),
+            ));
+        }
+        let StateSource::Upstream {
+            producer_step,
+            state_id,
+        } = &input.source
+        else {
+            return Err(AnalysisExecutionError::Invalid(
+                "state transition input must name an upstream producer".into(),
+            ));
+        };
+        let producer_contract = model
+            .sequence
+            .steps
+            .iter()
+            .find(|step| step.step_id == *producer_step)
+            .ok_or(AnalysisExecutionError::Identity(
+                "state transition producer is absent from the authored sequence",
+            ))?;
+        let authored = model
+            .sequence
+            .transitions
+            .iter()
+            .find(|transition| {
+                transition.producer_step == *producer_step
+                    && transition.consumer_step == *consumer_step_id
+                    && transition.state_id == *state_id
+            })
+            .ok_or_else(|| {
+                AnalysisExecutionError::Invalid(
+                    "state input has no matching authored transition".into(),
+                )
+            })?;
+        let sequence = SequenceIdentity::from_solver_contract(&model.sequence)?;
+        let producer = StepIdentity::from_solver_contract(sequence, producer_contract)?;
+        let consumer = StepIdentity::from_solver_contract(sequence, consumer)?;
+        if source.producer != producer {
+            return Err(AnalysisExecutionError::Identity(
+                "published state names a different producer step",
+            ));
+        }
+        Self::new(CanonicalStateTransitionInput {
+            sequence,
+            producer,
+            consumer,
+            authored,
+            source,
+            target_topology_digest,
+        })
+    }
+
     pub fn new(input: CanonicalStateTransitionInput<'_>) -> AnalysisExecutionResult<Self> {
         input.source.validate()?;
         if input.source.producer != input.producer

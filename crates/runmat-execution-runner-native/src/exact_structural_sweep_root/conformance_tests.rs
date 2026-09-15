@@ -5,8 +5,10 @@ use std::time::Duration;
 
 use rcgen::{generate_simple_self_signed, CertifiedKey};
 use runmat_analysis_core::{
-    GeneratorDomain, GeneratorEffectPolicy, PhysicalSignal, SignalExtrapolation, SignalGenerator,
-    SignalInterpolation, SignalRepresentation, SignalSamplingPolicy,
+    GeneratorDomain, GeneratorEffectPolicy, IndependentDomain, PhysicalSignal, ProcedureStep,
+    ProcedureStepId, SequenceDependency, SequenceDependencyReason, SignalExtrapolation,
+    SignalGenerator, SignalInterpolation, SignalRepresentation, SignalSamplingPolicy, StateId,
+    StateTransition, StateTransitionMethod, TopologyTransitionPolicy, TransitionId,
 };
 use runmat_analysis_execution::{
     admit_named_signal_generator, analysis_worker_capabilities, plan_signal_generator_chunks,
@@ -14,8 +16,10 @@ use runmat_analysis_execution::{
 };
 use runmat_analysis_fea::execution::{
     SignalMaterializationIdentity, StructuralFrequencySolverPlan, StructuralFrequencyWorkload,
-    StructuralFrequencyWorkloadInput, StructuralLinearWorkload, StructuralTransientBlockPlan,
-    StructuralTransientWorkload, StudyIdentity, SweepCompositionPolicy, SweepDefinition,
+    StructuralFrequencyWorkloadInput, StructuralLinearWorkload, StructuralModalTransientTemplate,
+    StructuralModalWorkload, StructuralModalWorkloadInput, StructuralStepWorkload,
+    StructuralTransientBlockPlan, StructuralTransientWorkload, StudyIdentity,
+    SweepCompositionPolicy, SweepDefinition,
 };
 use runmat_analysis_fea::fixtures::{fixture_model, FixtureId};
 use runmat_analysis_fea::frequency::FrequencyResponsePlan;
@@ -24,6 +28,7 @@ use runmat_analysis_fea::solve::preconditioner::SpdPreconditionerKind;
 use runmat_analysis_fea::solve::transient::StructuralTimeStepPolicy;
 use runmat_analysis_fea::ComputeBackend;
 use runmat_analysis_fea::FEA_FIELD_STRUCTURAL_DISPLACEMENT;
+use runmat_analysis_fea::{ModalConvergencePolicy, ModalTruncationPolicy};
 use runmat_execution::resource::{Capability, ResourceInventory};
 use runmat_execution::value::ValueLimits;
 use runmat_execution::{Digest, ProgramRevision};
@@ -187,6 +192,37 @@ async fn exact_structural_sweep_reaches_ordered_admitted_results_over_encrypted_
     })
     .unwrap();
     let frequency_expectation = frequency.result_expectation();
+    let modal_study_digest = Digest::sha256(b"box structural modal study");
+    let modal = prepare_exact_structural_study_root(ExactStructuralStudyRootPreparation {
+        program_revision: revision.clone(),
+        artifact_access: access.clone(),
+        authored_study_digest: modal_study_digest,
+        frozen_project_digest: Some(Digest::from_bytes(*project_identity.graph_digest.bytes())),
+        geometry_source_digest: source_digest,
+        workloads: runmat_analysis_execution::StructuralStudyWorkloads::StructuralModal {
+            workload: Box::new(box_structural_modal_workload()),
+        },
+        analysis_accelerator_requests: Vec::new(),
+        signal_materializations: Vec::new(),
+        exact_meshing: exact_meshing.clone(),
+    })
+    .unwrap();
+    let modal_expectation = modal.result_expectation();
+    let modal_transient_study_digest = Digest::sha256(b"box modal transient study");
+    let modal_transient =
+        prepare_exact_structural_study_root(ExactStructuralStudyRootPreparation {
+            program_revision: revision.clone(),
+            artifact_access: access.clone(),
+            authored_study_digest: modal_transient_study_digest,
+            frozen_project_digest: Some(Digest::from_bytes(*project_identity.graph_digest.bytes())),
+            geometry_source_digest: source_digest,
+            workloads: box_modal_transient_workloads(),
+            analysis_accelerator_requests: Vec::new(),
+            signal_materializations: Vec::new(),
+            exact_meshing: exact_meshing.clone(),
+        })
+        .unwrap();
+    let modal_transient_expectation = modal_transient.result_expectation();
     let mut invalid_workload = workload;
     invalid_workload.model.constraints[0].visit_targets_mut(|target| {
         *target = runmat_analysis_core::RegionTarget::boundary("face_999999");
@@ -579,29 +615,53 @@ async fn exact_structural_sweep_reaches_ordered_admitted_results_over_encrypted_
     };
     let (server_result, ()) = tokio::join!(server, client);
     server_result.unwrap();
-    run_direct_exact_study_conformance(
+    run_direct_exact_study_conformance(DirectExactStudyConformance {
         direct,
         direct_expectation,
         frequency,
         frequency_expectation,
+        modal,
+        modal_expectation,
+        modal_transient,
+        modal_transient_expectation,
         bundle,
         inventory,
         resources,
         access,
-    )
+    })
     .await;
 }
 
-async fn run_direct_exact_study_conformance(
+struct DirectExactStudyConformance {
     direct: crate::PreparedExactStructuralStudyRoot,
-    expectation: crate::ExactStructuralStudyResultExpectation,
+    direct_expectation: crate::ExactStructuralStudyResultExpectation,
     frequency: crate::PreparedExactStructuralStudyRoot,
     frequency_expectation: crate::ExactStructuralStudyResultExpectation,
+    modal: crate::PreparedExactStructuralStudyRoot,
+    modal_expectation: crate::ExactStructuralStudyResultExpectation,
+    modal_transient: crate::PreparedExactStructuralStudyRoot,
+    modal_transient_expectation: crate::ExactStructuralStudyResultExpectation,
     bundle: Vec<u8>,
     inventory: ResourceInventory,
     resources: ResourceRequest,
     access: ArtifactAccess,
-) {
+}
+
+async fn run_direct_exact_study_conformance(input: DirectExactStudyConformance) {
+    let DirectExactStudyConformance {
+        direct,
+        direct_expectation,
+        frequency,
+        frequency_expectation,
+        modal,
+        modal_expectation,
+        modal_transient,
+        modal_transient_expectation,
+        bundle,
+        inventory,
+        resources,
+        access,
+    } = input;
     let scope_id = runmat_execution::ExecutionScopeId::derive(&[b"direct-exact-study-scope"]);
     let pool_id = runmat_execution::PoolId::derive(&[b"direct-exact-study-pool"]);
     let worker = WorkerSpec {
@@ -687,6 +747,17 @@ async fn run_direct_exact_study_conformance(
                     .unwrap();
             }
         }
+        for prepared in [&modal, &modal_transient] {
+            for object in prepared.transport_objects().unwrap() {
+                if object.is_externalized_value() {
+                    pool.register_value_object(object.reference, object.bytes)
+                        .unwrap();
+                } else {
+                    pool.register_execution_object(object.reference, object.bytes)
+                        .unwrap();
+                }
+            }
+        }
         let mut recovery = RecordingRecoveryPublisher::default();
         let response = tokio::time::timeout(
             Duration::from_secs(180),
@@ -705,7 +776,7 @@ async fn run_direct_exact_study_conformance(
         let imported = import_exact_structural_study_result(
             pool.as_ref(),
             response,
-            &expectation,
+            &direct_expectation,
             ObjectInventoryLimits::default(),
         )
         .unwrap();
@@ -773,6 +844,80 @@ async fn run_direct_exact_study_conformance(
             result.manifest().identity().digest()
         );
         assert!(resource_usage.evidence.overruns.is_empty());
+
+        let response = tokio::time::timeout(
+            Duration::from_secs(180),
+            crate::remote::exact_structural_study::execute_for_test(
+                Arc::clone(&pool),
+                modal.request(),
+                &access.authorization_scope,
+                &resources,
+                &mut RecordingRecoveryPublisher::default(),
+            ),
+        )
+        .await
+        .expect("remote structural-modal exact study timed out")
+        .unwrap()
+        .unwrap_or_else(|message| panic!("remote structural-modal exact study failed: {message}"));
+        let imported = import_exact_structural_study_result(
+            pool.as_ref(),
+            response,
+            &modal_expectation,
+            ObjectInventoryLimits::default(),
+        )
+        .unwrap();
+        let crate::ExactStructuralStudyAnalysisResult::StructuralModal {
+            resolved_workload,
+            result,
+            numerical_receipt,
+        } = imported.analysis
+        else {
+            panic!("structural-modal exact study returned another result kind")
+        };
+        assert_eq!(resolved_workload.step_id().as_str(), "modes");
+        assert!(!result.basis().modes().is_empty());
+        numerical_receipt
+            .validate_against(numerical_receipt.source_result(), &result)
+            .unwrap();
+
+        let mut recovery = RecordingRecoveryPublisher::default();
+        let response = tokio::time::timeout(
+            Duration::from_secs(180),
+            crate::remote::exact_structural_study::execute_for_test(
+                Arc::clone(&pool),
+                modal_transient.request(),
+                &access.authorization_scope,
+                &resources,
+                &mut recovery,
+            ),
+        )
+        .await
+        .expect("remote modal-transient exact study timed out")
+        .unwrap()
+        .unwrap_or_else(|message| panic!("remote modal-transient exact study failed: {message}"));
+        let imported = import_exact_structural_study_result(
+            pool.as_ref(),
+            response,
+            &modal_transient_expectation,
+            ObjectInventoryLimits::default(),
+        )
+        .unwrap();
+        let crate::ExactStructuralStudyAnalysisResult::StructuralModalTransient(result) =
+            imported.analysis
+        else {
+            panic!("modal-transient exact study returned another result kind")
+        };
+        assert_eq!(result.modal_workload.step_id().as_str(), "modes");
+        assert_eq!(result.transient_workload.step_id.as_str(), "response");
+        assert_eq!(
+            result.basis_state.source_result,
+            result.modal_numerical_receipt.source_result()
+        );
+        result
+            .transient_numerical_receipt
+            .validate_for_result(&result.transient_result)
+            .unwrap();
+        assert_eq!(recovery.closures.len(), 2);
         pool.remove_worker(worker.id, false).await.unwrap();
     };
     let (server_result, ()) = tokio::join!(server, client);
@@ -1013,6 +1158,92 @@ fn box_structural_frequency_workload() -> StructuralFrequencyWorkload {
         },
     })
     .unwrap()
+}
+
+fn box_structural_modal_workload() -> StructuralModalWorkload {
+    let mut model = box_structural_workload().model;
+    let mut step = ProcedureStep::structural_modal("modes");
+    step.independent_domain = IndependentDomain::Eigenvalue { requested_count: 3 };
+    model.sequence = runmat_analysis_core::AnalysisSequence::from_steps(
+        "box-structural-modal-sequence",
+        vec![step.clone()],
+    );
+    StructuralModalWorkload::new(StructuralModalWorkloadInput {
+        model,
+        step_id: step.step_id,
+        backend: ComputeBackend::Cpu,
+        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+        observation_execution:
+            runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
+        truncation: ModalTruncationPolicy::requested(3),
+        convergence: ModalConvergencePolicy::exploratory(),
+    })
+    .unwrap()
+}
+
+fn box_modal_transient_workloads() -> runmat_analysis_execution::StructuralStudyWorkloads {
+    let mut model = box_structural_workload().model;
+    let mut modal_step = ProcedureStep::structural_modal("modes");
+    modal_step.independent_domain = IndependentDomain::Eigenvalue { requested_count: 3 };
+    let mut transient_step =
+        ProcedureStep::structural_modal_transient("response", "modes", "modal_basis");
+    transient_step.independent_domain = IndependentDomain::TimeSeconds {
+        origin: 0.0,
+        start: 0.0,
+        end: 1.0,
+    };
+    model.sequence.steps = vec![modal_step, transient_step];
+    model.sequence.dependencies = vec![SequenceDependency {
+        predecessor: ProcedureStepId("modes".into()),
+        successor: ProcedureStepId("response".into()),
+        reason: SequenceDependencyReason::StateTransfer,
+    }];
+    model.sequence.transitions = vec![StateTransition {
+        transition_id: TransitionId("modal-basis-to-transient".into()),
+        producer_step: ProcedureStepId("modes".into()),
+        consumer_step: ProcedureStepId("response".into()),
+        state_id: StateId("modal_basis".into()),
+        method: StateTransitionMethod::Reuse,
+        topology: TopologyTransitionPolicy::RequireIdentical,
+        reference: runmat_analysis_core::ReferenceStatePolicy::Preserve,
+    }];
+    let modal = StructuralModalWorkload::new(StructuralModalWorkloadInput {
+        model: model.clone(),
+        step_id: ProcedureStepId("modes".into()),
+        backend: ComputeBackend::Cpu,
+        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+        observation_execution:
+            runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
+        truncation: ModalTruncationPolicy::requested(3),
+        convergence: ModalConvergencePolicy::exploratory(),
+    })
+    .unwrap();
+    let transient = StructuralModalTransientTemplate {
+        schema_version: 1,
+        model,
+        step_id: ProcedureStepId("response".into()),
+        backend: ComputeBackend::Cpu,
+        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+        time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 2 },
+        residual_target: 1.0e-8,
+    };
+    runmat_analysis_execution::StructuralStudyWorkloads::HeterogeneousSequence {
+        workloads: std::collections::BTreeMap::from([
+            (
+                ProcedureStepId("modes".into()),
+                StructuralStepWorkload::ModalExtraction {
+                    workload: Box::new(modal),
+                },
+            ),
+            (
+                ProcedureStepId("response".into()),
+                StructuralStepWorkload::ModalTransient {
+                    template: Box::new(transient),
+                    block_plan: StructuralTransientBlockPlan::new(1).unwrap(),
+                },
+            ),
+        ]),
+    }
 }
 
 fn coarse_box_request() -> MeshingRequest {

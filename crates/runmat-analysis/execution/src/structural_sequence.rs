@@ -4,7 +4,9 @@ use runmat_analysis_core::{
     validate_model_sequence, ProcedureStepId, StateId, StateSource, StateUse,
     ValidatedAnalysisSequence,
 };
-use runmat_analysis_fea::execution::{CanonicalSemanticState, StructuralLinearWorkload};
+use runmat_analysis_fea::execution::{
+    CanonicalSemanticState, SemanticStatePublicationSource, StructuralLinearWorkload,
+};
 use runmat_execution::resource::AcceleratorRequest;
 use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::cache::CacheImport;
@@ -438,6 +440,7 @@ impl StructuralSequenceCoordinator {
                     prepare_semantic_state_publication(SemanticStatePublicationPreparation {
                         source_host: task.prepared.host.clone(),
                         source_result: imported.objects.clone(),
+                        source: SemanticStatePublicationSource::StructuralPrimaryFields,
                         declaration: declaration.clone(),
                         topology_digest: imported
                             .result

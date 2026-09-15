@@ -10,6 +10,8 @@ mod frequency_task;
 mod graph;
 mod host;
 mod materialized_signal;
+mod modal_object_access;
+mod modal_task;
 mod object;
 mod observation_assembly;
 mod observation_evaluation;
@@ -28,7 +30,9 @@ mod signal_input;
 mod signal_materialization;
 mod signal_program;
 mod state_publication;
+mod state_transition;
 mod structural;
+mod structural_modal_transient_study;
 mod structural_sequence;
 mod structural_transient_recovery;
 mod structural_transient_sequence;
@@ -91,6 +95,14 @@ pub use host::{
 };
 pub use materialized_signal::{
     canonical_tabulated_signal_content_digest, materialize_signal_for_solver,
+};
+pub use modal_object_access::{
+    decode_prepared_structural_modal_receipt, decode_prepared_structural_modal_result,
+    decode_prepared_structural_modal_workload, prepare_structural_modal_workload_objects,
+};
+pub use modal_task::{
+    import_structural_modal_result, prepare_structural_modal_task, ImportedStructuralModalResult,
+    PreparedStructuralModalTask, StructuralModalTaskPreparation,
 };
 pub use object::{
     analysis_object_references, import_analysis_objects, import_analysis_partition,
@@ -170,11 +182,15 @@ pub use state_publication::{
     import_semantic_state, import_semantic_state_completion, prepare_semantic_state_publication,
     ImportedSemanticState, PreparedSemanticStatePublication, SemanticStatePublicationPreparation,
 };
+pub use state_transition::bind_upstream_state_transition;
 pub use structural::{
     import_structural_linear_completion, import_structural_linear_result,
     prepare_structural_linear_program, prepare_structural_sequence_step,
     ImportedStructuralLinearResult, PreparedStructuralLinearProgram,
     StructuralLinearProgramPreparation,
+};
+pub use structural_modal_transient_study::{
+    StructuralModalTransientStudyCoordinator, StructuralModalTransientStudyPreparation,
 };
 pub use structural_sequence::{
     import_structural_sequence_completion, validate_structural_sequence_workloads,

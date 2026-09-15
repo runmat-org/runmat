@@ -354,7 +354,7 @@ impl ModalBasisArtifact {
         Ok(())
     }
 
-    fn validate(&self) -> Result<(), FeaRunError> {
+    pub(crate) fn validate(&self) -> Result<(), FeaRunError> {
         let count = self.modes.len();
         let valid_scalar = |value: f64| value.is_finite();
         let frequencies = self

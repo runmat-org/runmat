@@ -616,11 +616,11 @@ async fn remote_pool_installs_once_per_node_and_schedules_concurrently() {
     assert_eq!(installs.load(Ordering::SeqCst), 2);
 
     let (program, artifact_id) = program().await;
-    let mut completions = Vec::new();
-    for ordinal in 0_u8..3 {
-        let task_id = TaskId::derive(&[b"task", &[ordinal]]);
-        completions.push(
-            pool.submit(
+    let tasks = (0_u8..3)
+        .map(|ordinal| {
+            let task_id = TaskId::derive(&[b"task", &[ordinal]]);
+            (
+                program.clone(),
                 TaskSubmission {
                     request: TaskRequest {
                         id: task_id,
@@ -643,11 +643,10 @@ async fn remote_pool_installs_once_per_node_and_schedules_concurrently() {
                     dependencies: BTreeSet::new(),
                     priority: 0,
                 },
-                program.clone(),
             )
-            .unwrap(),
-        );
-    }
+        })
+        .collect();
+    let completions = pool.submit_graph(tasks).unwrap();
     for completion in completions {
         assert_eq!(completion.wait().await.unwrap().outputs.len(), 1);
     }
@@ -694,16 +693,10 @@ async fn remote_pool_downloads_and_verifies_externalized_objects_before_success(
     .await
     .unwrap();
     let (result_program, artifact_id) = program().await;
+    let task_id = TaskId::derive(&[b"result-object-task"]);
+    let task_submission = submission(scope_id, pool_id, task_id, artifact_id);
     let success = pool
-        .submit(
-            submission(
-                scope_id,
-                pool_id,
-                TaskId::derive(&[b"result-object-task"]),
-                artifact_id,
-            ),
-            result_program,
-        )
+        .submit(task_submission.clone(), result_program.clone())
         .unwrap()
         .wait()
         .await
@@ -713,6 +706,23 @@ async fn remote_pool_downloads_and_verifies_externalized_objects_before_success(
         pool.execution_object(&reference).unwrap().unwrap().as_ref(),
         bytes.as_slice()
     );
+    let reused = pool
+        .submit(task_submission.clone(), result_program.clone())
+        .unwrap()
+        .wait()
+        .await
+        .unwrap();
+    assert_eq!(reused, success);
+    let [batch_reused] = pool
+        .submit_graph(vec![(result_program.clone(), task_submission.clone())])
+        .unwrap()
+        .try_into()
+        .unwrap_or_else(|_| panic!("one committed graph task must return one completion"));
+    assert_eq!(batch_reused.wait().await.unwrap(), success);
+    let mut collision = task_submission;
+    collision.request.callable.qualified_name = "different-answer".into();
+    collision.request.callable.entrypoint_digest = Digest::sha256(b"different-answer");
+    assert!(pool.submit(collision, result_program).is_err());
 
     let mut substituted = reference;
     substituted.logical_digest = Digest::sha256(b"substituted");

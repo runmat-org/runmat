@@ -5,6 +5,7 @@ mod contract;
 mod estimate;
 mod facts;
 mod frequency;
+mod modal;
 mod post_process;
 mod preflight;
 mod reconciliation;
@@ -25,11 +26,11 @@ pub use contract::{
     ObservationReductionResourceDemand, ObservationResourceFacts, PartitioningPolicy,
     PhaseResourcePolicy, PreconditionerStorage, PreparedInputResourceFacts,
     PreparedOutputResourceFacts, PreparedOutputSetResourceFacts, PreparedPhaseResourceFacts,
-    ResourceAdmission, ResourceBreakdown, ResourcePlanningError, SolveResourcePolicy,
-    SolverAdmissionResourcePolicy, SparseResourceFacts, StructuralFrequencyOperatorResourceDemand,
-    StructuralFrequencyResultAssemblyResourceDemand, StructuralOperatorResourceDemand,
-    TopologyResourceFacts, WorkerResourcePolicy, RESOURCE_ESTIMATION_MODEL_REVISION,
-    RESOURCE_PLAN_MAX_ENCODED_BYTES,
+    PreparedStructuralModalResourceFacts, ResourceAdmission, ResourceBreakdown,
+    ResourcePlanningError, SolveResourcePolicy, SolverAdmissionResourcePolicy, SparseResourceFacts,
+    StructuralFrequencyOperatorResourceDemand, StructuralFrequencyResultAssemblyResourceDemand,
+    StructuralModalResourceDemand, StructuralOperatorResourceDemand, TopologyResourceFacts,
+    WorkerResourcePolicy, RESOURCE_ESTIMATION_MODEL_REVISION, RESOURCE_PLAN_MAX_ENCODED_BYTES,
 };
 pub use estimate::build_resource_plan;
 pub use frequency::{
@@ -38,6 +39,10 @@ pub use frequency::{
     structural_frequency_entry_payload_bytes_upper_bound,
     structural_frequency_recovery_payload_bytes_upper_bound,
     StructuralFrequencyEntryResourceProjection,
+};
+pub use modal::{
+    build_structural_modal_resource_plan, structural_modal_receipt_payload_bytes_upper_bound,
+    structural_modal_result_payload_bytes_upper_bound,
 };
 pub use post_process::{
     build_observation_assembly_resource_plan, build_observation_history_checkpoint_resource_plan,
@@ -59,5 +64,7 @@ pub use usage::{
 
 #[cfg(test)]
 mod frequency_tests;
+#[cfg(test)]
+mod modal_tests;
 #[cfg(test)]
 mod tests;

@@ -7,6 +7,7 @@ use runmat_analysis_execution::{
 use runmat_analysis_fea::execution::{
     AnalysisNumericalObjectKind, StructuralFrequencyNumericalReceipt,
     StructuralFrequencySolverResult, StructuralFrequencyWorkload, StructuralLinearWorkload,
+    StructuralModalNumericalReceipt, StructuralModalSolverResult, StructuralModalWorkload,
     StructuralTransientNumericalReceipt, StructuralTransientSolverResult,
     StructuralTransientWorkload, StudyIdentity,
 };
@@ -36,6 +37,7 @@ use crate::{CompletedStructuralTransientSequence, NativeExecutionResult};
 
 mod frequency_import;
 mod inventory;
+mod modal_import;
 mod packaging;
 mod result_import;
 
@@ -72,6 +74,19 @@ enum ExactStructuralStudyAnalysisClosure {
         receipt_root: Box<ValueRef>,
         objects: Vec<ValueRef>,
     },
+    StructuralModal {
+        result_root: Box<ValueRef>,
+        receipt_root: Box<ValueRef>,
+        objects: Vec<ValueRef>,
+    },
+    StructuralModalTransient {
+        modal_result_root: Box<ValueRef>,
+        modal_receipt_root: Box<ValueRef>,
+        basis_state_root: Box<ValueRef>,
+        transient_result_root: Box<ValueRef>,
+        transient_receipt_root: Box<ValueRef>,
+        objects: Vec<ValueRef>,
+    },
     StructuralFrequency {
         result_root: Box<ValueRef>,
         receipt_root: Box<ValueRef>,
@@ -106,6 +121,8 @@ impl ExactStructuralStudyAnalysisClosure {
         match self {
             Self::LinearSequence { objects, .. }
             | Self::StructuralTransient { objects, .. }
+            | Self::StructuralModal { objects, .. }
+            | Self::StructuralModalTransient { objects, .. }
             | Self::StructuralFrequency { objects, .. } => objects,
         }
     }
@@ -149,6 +166,32 @@ impl ExactStructuralStudyAnalysisClosure {
                     ));
                 }
                 reference_inventory(objects)?;
+            }
+            Self::StructuralModal {
+                result_root,
+                receipt_root,
+                objects,
+            } => {
+                validate_declared_roots(&[result_root, receipt_root], objects)?;
+            }
+            Self::StructuralModalTransient {
+                modal_result_root,
+                modal_receipt_root,
+                basis_state_root,
+                transient_result_root,
+                transient_receipt_root,
+                objects,
+            } => {
+                validate_declared_roots(
+                    &[
+                        modal_result_root,
+                        modal_receipt_root,
+                        basis_state_root,
+                        transient_result_root,
+                        transient_receipt_root,
+                    ],
+                    objects,
+                )?;
             }
             Self::StructuralFrequency {
                 result_root,
@@ -289,7 +332,24 @@ pub enum ExactStructuralStudyAnalysisResult {
         result: Box<StructuralTransientSolverResult>,
         numerical_receipt: StructuralTransientNumericalReceipt,
     },
+    StructuralModal {
+        resolved_workload: Box<StructuralModalWorkload>,
+        result: Box<StructuralModalSolverResult>,
+        numerical_receipt: StructuralModalNumericalReceipt,
+    },
+    StructuralModalTransient(Box<ExactStructuralModalTransientAnalysisResult>),
     StructuralFrequency(Box<ExactStructuralFrequencyAnalysisResult>),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExactStructuralModalTransientAnalysisResult {
+    pub modal_workload: Box<StructuralModalWorkload>,
+    pub transient_workload: Box<StructuralTransientWorkload>,
+    pub modal_result: Box<StructuralModalSolverResult>,
+    pub modal_numerical_receipt: StructuralModalNumericalReceipt,
+    pub basis_state: runmat_analysis_fea::execution::CanonicalSemanticState,
+    pub transient_result: Box<StructuralTransientSolverResult>,
+    pub transient_numerical_receipt: StructuralTransientNumericalReceipt,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -331,6 +391,18 @@ pub(crate) enum ExactStructuralAnalysisPublication<'a> {
         completion: &'a CompletedStructuralTransientSequence,
         unresolved_workloads_digest: Digest,
     },
+    StructuralModal {
+        signals:
+            &'a [crate::remote::signal_materialization::CompletedRemoteSignalMaterialization],
+        completion: &'a crate::CompletedStructuralModalStudy,
+        unresolved_workloads_digest: Digest,
+    },
+    StructuralModalTransient {
+        signals:
+            &'a [crate::remote::signal_materialization::CompletedRemoteSignalMaterialization],
+        completion: &'a crate::CompletedStructuralModalTransientStudy,
+        unresolved_workloads_digest: Digest,
+    },
     StructuralFrequency {
         signals:
             &'a [crate::remote::signal_materialization::CompletedRemoteSignalMaterialization],
@@ -346,6 +418,8 @@ impl ExactStructuralAnalysisPublication<'_> {
         match self {
             Self::LinearSequence { signals, .. }
             | Self::StructuralTransient { signals, .. }
+            | Self::StructuralModal { signals, .. }
+            | Self::StructuralModalTransient { signals, .. }
             | Self::StructuralFrequency { signals, .. } => signals,
         }
     }
@@ -360,12 +434,35 @@ impl ExactStructuralAnalysisPublication<'_> {
                 unresolved_workloads_digest,
                 ..
             }
+            | Self::StructuralModal {
+                unresolved_workloads_digest,
+                ..
+            }
+            | Self::StructuralModalTransient {
+                unresolved_workloads_digest,
+                ..
+            }
             | Self::StructuralFrequency {
                 unresolved_workloads_digest,
                 ..
             } => *unresolved_workloads_digest,
         }
     }
+}
+
+fn validate_declared_roots(roots: &[&ValueRef], objects: &[ValueRef]) -> NativeExecutionResult<()> {
+    if roots.iter().any(|root| !objects.contains(root))
+        || roots
+            .iter()
+            .enumerate()
+            .any(|(index, root)| roots[..index].contains(root))
+    {
+        return Err(protocol(
+            "structural numerical closure omits or aliases a declared root",
+        ));
+    }
+    reference_inventory(objects)?;
+    Ok(())
 }
 
 #[derive(Clone, Debug, PartialEq)]

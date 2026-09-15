@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::time::Instant;
 
 use crate::{
     assembly::AssemblySummary,
@@ -24,7 +23,8 @@ use linear_solve::{solve_k_system_cg, CgSolveOptions};
 use subspace::solve_lowest_eigenspace;
 use truncation::resolve_truncation_boundary;
 
-const BOUNDARY_PROBE_STABILITY_COUNT: usize = 4;
+pub(crate) const MODAL_BOUNDARY_PROBE_WIDTH: usize = 4;
+pub(crate) const MODAL_MASS_ORTHOGONALIZATION_PASSES: usize = 2;
 type ModalCandidate = (f64, Vec<f64>, f64);
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -196,10 +196,8 @@ pub fn solve_modal_system(
     let mut boundary_probe_count = 0usize;
     let mut complete_boundary_eigenspace = false;
     let mut boundary_probe_frequency_hz = None;
-    let mut prepared_build_ms = 0.0_f64;
     let mut accelerator_admission_fallback = None;
     let prepared_accelerator_system = if accelerator_requested {
-        let prepared_start = Instant::now();
         let prepared = prepare_accelerator_linear_system(
             solve_summary
                 .operator
@@ -207,7 +205,6 @@ pub fn solve_modal_system(
                 .expect("modal coercivity was checked before accelerator preparation"),
             64,
         );
-        prepared_build_ms = prepared_start.elapsed().as_secs_f64() * 1_000.0;
         match prepared {
             Ok(prepared) => Some(prepared),
             Err(error) if error.permits_cpu_fallback() => {
@@ -298,11 +295,10 @@ pub fn solve_modal_system(
             boundary_probe_frequency_hz: None,
         };
     }
-    let mut solve_ms = 0.0_f64;
     let mut fallback_apply_count = 0u32;
     let mut accelerator_evidence = Vec::new();
     let mut subspace_dimension = target_mode_count
-        .saturating_add(BOUNDARY_PROBE_STABILITY_COUNT)
+        .saturating_add(MODAL_BOUNDARY_PROBE_WIDTH)
         .min(unconstrained.len());
     let mut subspace_iteration_count = 0usize;
     let mut subspace_maximum_residual = f64::INFINITY;
@@ -318,7 +314,6 @@ pub fn solve_modal_system(
                 if crate::is_fea_cancelled() {
                     return None;
                 }
-                let solve_start = Instant::now();
                 let attempt = solve_k_system_cg(
                     &solve_summary.operator,
                     rhs,
@@ -330,7 +325,6 @@ pub fn solve_modal_system(
                         initial_guess,
                     },
                 );
-                solve_ms += solve_start.elapsed().as_secs_f64() * 1_000.0;
                 if let Some(solve) = &attempt.accelerator {
                     solver_backend = solve.solver_backend;
                     solver_host_sync_count =
@@ -387,7 +381,7 @@ pub fn solve_modal_system(
             break;
         }
         subspace_dimension = subspace_dimension
-            .saturating_add(BOUNDARY_PROBE_STABILITY_COUNT)
+            .saturating_add(MODAL_BOUNDARY_PROBE_WIDTH)
             .min(unconstrained.len());
     }
 
@@ -451,8 +445,12 @@ pub fn solve_modal_system(
         code: "FEA_MODAL_COST".to_string(),
         severity: FeaDiagnosticSeverity::Info,
         message: format!(
-            "prepared_build_ms={} solve_ms={} fallback_apply_count={}",
-            prepared_build_ms, solve_ms, fallback_apply_count
+            "subspace_iteration_count={} fallback_apply_count={} device_apply_k_count={} device_apply_k_attempt_count={} host_sync_count={}",
+            subspace_iteration_count,
+            fallback_apply_count,
+            device_apply_k_count,
+            device_apply_k_attempt_count,
+            solver_host_sync_count,
         ),
     });
 

@@ -71,6 +71,24 @@ pub(crate) async fn execute_structural_frequency_observations(
             "frequency observation sources have different inventories".into(),
         ));
     }
+    if execution.step.observations.is_empty() {
+        let samples = execution
+            .recoveries
+            .iter()
+            .zip(execution.recovered_fields)
+            .map(|(recovery, fields)| {
+                Ok(CompletedStructuralFrequencyObservationSample {
+                    sample: recovered_frequency_sample(recovery, fields)?,
+                    observations: None,
+                })
+            })
+            .collect::<NativeExecutionResult<Vec<_>>>()?;
+        return Ok(CompletedStructuralFrequencyObservations {
+            samples,
+            histories: Vec::new(),
+            resource_attempts: Vec::new(),
+        });
+    }
     let mut fanouts = Vec::with_capacity(execution.recoveries.len());
     for ((recovery, fields), dependency) in execution
         .recoveries
@@ -78,35 +96,7 @@ pub(crate) async fn execute_structural_frequency_observations(
         .zip(execution.recovered_fields)
         .zip(execution.recovery_dependencies)
     {
-        let sample = match recovery.request.source {
-            runmat_analysis_fea::execution::FieldRecoverySource::StructuralFrequencyEntry(_) => {
-                fields
-                    .manifest
-                    .fields
-                    .first()
-                    .map(|entry| entry.sample)
-                    .ok_or_else(|| {
-                        NativeExecutionError::Protocol(
-                            "frequency recovery produced an empty field inventory".into(),
-                        )
-                    })?
-            }
-            _ => {
-                return Err(NativeExecutionError::Protocol(
-                    "frequency observation source is not a frequency recovery".into(),
-                ))
-            }
-        };
-        if fields
-            .manifest
-            .fields
-            .iter()
-            .any(|entry| entry.sample != sample)
-        {
-            return Err(NativeExecutionError::Protocol(
-                "one frequency recovery mixes sample coordinates".into(),
-            ));
-        }
+        let sample = recovered_frequency_sample(recovery, fields)?;
         let fanout = prepare_structural_observation_fanout(
             pool,
             StructuralObservationPreparation {
@@ -272,6 +262,41 @@ pub(crate) async fn execute_structural_frequency_observations(
         histories,
         resource_attempts,
     })
+}
+
+fn recovered_frequency_sample(
+    recovery: &PreparedStructuralFrequencyFieldRecovery,
+    fields: &ImportedRecoveredFields,
+) -> NativeExecutionResult<RecoveredFieldSample> {
+    if !matches!(
+        recovery.request.source,
+        runmat_analysis_fea::execution::FieldRecoverySource::StructuralFrequencyEntry(_)
+    ) {
+        return Err(NativeExecutionError::Protocol(
+            "frequency observation source is not a frequency recovery".into(),
+        ));
+    }
+    let sample = fields
+        .manifest
+        .fields
+        .first()
+        .map(|entry| entry.sample)
+        .ok_or_else(|| {
+            NativeExecutionError::Protocol(
+                "frequency recovery produced an empty field inventory".into(),
+            )
+        })?;
+    if fields
+        .manifest
+        .fields
+        .iter()
+        .any(|entry| entry.sample != sample)
+    {
+        return Err(NativeExecutionError::Protocol(
+            "one frequency recovery mixes sample coordinates".into(),
+        ));
+    }
+    Ok(sample)
 }
 
 struct ContributionGroup {

@@ -5,6 +5,8 @@ mod analysis_frequency;
 mod analysis_frequency_observations;
 mod analysis_host;
 mod analysis_kernel;
+mod analysis_modal;
+mod analysis_modal_transient;
 mod analysis_placement;
 mod analysis_sequence;
 mod analysis_task;
@@ -45,6 +47,14 @@ pub use analysis_frequency_observations::{
 };
 pub use analysis_host::{execute_analysis_program_request, NativeAnalysisHostLimits};
 pub use analysis_kernel::NativeAnalysisKernel;
+pub use analysis_modal::{
+    execute_structural_modal_locally, execute_structural_modal_remotely,
+    CompletedStructuralModalStudy,
+};
+pub use analysis_modal_transient::{
+    execute_structural_modal_transient_locally, execute_structural_modal_transient_remotely,
+    CompletedStructuralModalTransientStudy,
+};
 pub use analysis_placement::NativeStructuralStudyPlacement;
 pub use analysis_sequence::{
     execute_structural_sequence_locally, execute_structural_sequence_remotely,
@@ -52,7 +62,7 @@ pub use analysis_sequence::{
 };
 pub use analysis_transient::{
     execute_structural_transient_remotely, CompletedStructuralTransientSequence,
-    StructuralTransientRecoveryPublisher,
+    RetainedStructuralTransientRecovery, StructuralTransientRecoveryPublisher,
 };
 pub use config::NativeExecutionConfig;
 pub use driver::{
@@ -76,9 +86,10 @@ pub use exact_meshing_root::{
 pub use exact_structural_study_root::{
     decode_exact_structural_study_root, import_exact_structural_study_result,
     prepare_exact_structural_study_root, BoundaryRegionResolution, DecodedExactStructuralStudyRoot,
-    ExactStructuralFrequencyAnalysisResult, ExactStructuralStudyAnalysisResult,
-    ExactStructuralStudyResult, ExactStructuralStudyResultExpectation,
-    ExactStructuralStudyRootPreparation, PreparedExactStructuralStudyRoot, RequiredStudyProgram,
+    ExactStructuralFrequencyAnalysisResult, ExactStructuralModalTransientAnalysisResult,
+    ExactStructuralStudyAnalysisResult, ExactStructuralStudyResult,
+    ExactStructuralStudyResultExpectation, ExactStructuralStudyRootPreparation,
+    PreparedExactStructuralStudyRoot, RequiredStudyProgram,
     EXACT_STRUCTURAL_STUDY_ROOT_EXECUTION_MODE, EXACT_STRUCTURAL_STUDY_ROOT_TARGET_PROFILE,
 };
 pub use exact_structural_sweep_root::{

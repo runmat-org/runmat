@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use runmat_analysis_core::StateOutput;
 use runmat_analysis_fea::execution::{
     AnalysisNumericalObjectKind, AnalysisWorkKind, CanonicalSemanticState,
-    SemanticStatePublicationRequest, SolverResultIdentity,
+    SemanticStatePublicationRequest, SemanticStatePublicationSource, SolverResultIdentity,
 };
 use runmat_execution::value::ValueRefKind;
 use runmat_execution::{Digest, ProgramRevision};
@@ -21,6 +21,7 @@ use crate::{
 pub struct SemanticStatePublicationPreparation {
     pub source_host: AnalysisHostWorkload,
     pub source_result: PreparedAnalysisObjects,
+    pub source: SemanticStatePublicationSource,
     pub declaration: StateOutput,
     pub topology_digest: Digest,
     pub program_revision: ProgramRevision,
@@ -39,13 +40,24 @@ pub struct PreparedSemanticStatePublication {
 pub struct ImportedSemanticState {
     pub state: CanonicalSemanticState,
     pub objects: PreparedAnalysisObjects,
+    pub response: ProgramExecutionResponse,
 }
 
 pub fn prepare_semantic_state_publication(
     preparation: SemanticStatePublicationPreparation,
 ) -> AnalysisBridgeResult<PreparedSemanticStatePublication> {
     preparation.source_host.validate()?;
-    if preparation.source_host.workload.kind != AnalysisWorkKind::Solve
+    let source_kind_matches = matches!(
+        (preparation.source, preparation.source_host.workload.kind),
+        (
+            SemanticStatePublicationSource::StructuralPrimaryFields,
+            AnalysisWorkKind::Solve
+        ) | (
+            SemanticStatePublicationSource::ModalBasis,
+            AnalysisWorkKind::ExtractStructuralModes
+        )
+    );
+    if !source_kind_matches
         || preparation.source_result.manifest.kind != AnalysisNumericalObjectKind::SolverResult
         || preparation.chunk_bytes == 0
     {
@@ -63,7 +75,8 @@ pub fn prepare_semantic_state_publication(
             "solver result identity does not match its source workload and content",
         ));
     }
-    let request = SemanticStatePublicationRequest::structural_linear(
+    let request = SemanticStatePublicationRequest::new(
+        preparation.source,
         preparation.source_host.workload.step,
         preparation.declaration,
         preparation.topology_digest,
@@ -135,6 +148,7 @@ pub fn import_semantic_state_completion(
     limits: ObjectInventoryLimits,
 ) -> AnalysisBridgeResult<ImportedSemanticState> {
     response.validate_against(&prepared.program.request)?;
+    let retained_response = response.clone();
     let output_set = import_analysis_output_set(source, response, &prepared.host)?;
     let [output] = output_set.manifest.outputs.as_slice() else {
         return Err(AnalysisBridgeError::Invalid(
@@ -175,5 +189,6 @@ pub fn import_semantic_state_completion(
     Ok(ImportedSemanticState {
         state,
         objects: imported,
+        response: retained_response,
     })
 }

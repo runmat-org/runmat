@@ -89,6 +89,7 @@ identity_type!(StructuralFrequencyEntryRequestIdentity);
 identity_type!(StructuralFrequencyEntryResultIdentity);
 identity_type!(StructuralFrequencyResultAssemblyRequestIdentity);
 identity_type!(StructuralFrequencyPublicationIdentity);
+identity_type!(StructuralModalWorkloadIdentity);
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -97,6 +98,7 @@ pub enum AnalysisWorkKind {
     CompileConstraints,
     AssembleOperator,
     Solve,
+    ExtractStructuralModes,
     RecoverField,
     PublishState,
     CheckpointObservationHistory,
@@ -488,6 +490,11 @@ impl AnalysisWorkloadIdentity {
                 input_digests,
             ),
         )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_test(label: &str) -> AnalysisExecutionResult<Self> {
+        Self::derive("test-workload", &label)
     }
 }
 

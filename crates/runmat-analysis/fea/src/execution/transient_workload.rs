@@ -18,9 +18,10 @@ use crate::{
 
 use super::{
     AnalysisExecutionError, AnalysisExecutionResult, AnalysisWorkKind, AnalysisWorkloadIdentity,
-    CanonicalSemanticState, ConstraintPlanIdentity, DiscretizationIdentity, ExecutionPlanIdentity,
-    NumericalPlanIdentity, OperatorIdentity, ProblemIdentity, SequenceIdentity, StateIdentity,
-    StepIdentity, StructuralDampingOperatorIdentity, StructuralDofLayoutIdentity,
+    CanonicalSemanticState, CanonicalStateTransition, ConstraintPlanIdentity,
+    DiscretizationIdentity, ExecutionPlanIdentity, NumericalPlanIdentity, OperatorIdentity,
+    ProblemIdentity, SequenceIdentity, StateIdentity, StepIdentity,
+    StructuralDampingOperatorIdentity, StructuralDofLayoutIdentity,
     StructuralExcitationSetIdentity, StructuralFormulationIdentity, StructuralKinematicsIdentity,
     StructuralMassOperatorIdentity, StructuralStiffnessOperatorIdentity,
     StructuralTransientCheckpointScope, StructuralTransientCoordinateSpace,
@@ -40,7 +41,9 @@ const TRANSIENT_IDENTITY_LIMITS: CanonicalLimits =
 #[serde(rename_all = "snake_case", tag = "kind", deny_unknown_fields)]
 pub enum StructuralTransientSolverPlan {
     Direct,
-    ModalReduced { basis_state: StateIdentity },
+    ModalReduced {
+        basis_transition: Box<CanonicalStateTransition>,
+    },
 }
 
 impl StructuralTransientSolverPlan {
@@ -54,7 +57,14 @@ impl StructuralTransientSolverPlan {
     pub const fn basis_state(&self) -> Option<StateIdentity> {
         match self {
             Self::Direct => None,
-            Self::ModalReduced { basis_state } => Some(*basis_state),
+            Self::ModalReduced { basis_transition } => Some(basis_transition.source_state),
+        }
+    }
+
+    pub const fn basis_transition(&self) -> Option<&CanonicalStateTransition> {
+        match self {
+            Self::Direct => None,
+            Self::ModalReduced { basis_transition } => Some(basis_transition),
         }
     }
 }
@@ -111,10 +121,29 @@ impl StructuralTransientWorkload {
         }
         match (&self.solver, step.state_inputs.as_slice()) {
             (StructuralTransientSolverPlan::Direct, []) => {}
-            (StructuralTransientSolverPlan::ModalReduced { .. }, [input])
+            (StructuralTransientSolverPlan::ModalReduced { basis_transition }, [input])
                 if input.use_as == StateUse::ModalBasis
                     && input.required_kind == StateKind::ModalBasis
-                    && matches!(input.source, StateSource::Upstream { .. }) => {}
+                    && matches!(input.source, StateSource::Upstream { .. }) =>
+            {
+                basis_transition.validate()?;
+                let StateSource::Upstream {
+                    producer_step,
+                    state_id,
+                } = &input.source
+                else {
+                    unreachable!()
+                };
+                if basis_transition.producer_step_id != *producer_step
+                    || basis_transition.consumer_step_id != step.step_id
+                    || basis_transition.state_id != *state_id
+                    || basis_transition.method != runmat_analysis_core::StateTransitionMethod::Reuse
+                {
+                    return Err(AnalysisExecutionError::Identity(
+                        "modal transient basis transition differs from its authored state input",
+                    ));
+                }
+            }
             _ => {
                 return Err(AnalysisExecutionError::Invalid(
                     "structural transient solver plan differs from its authored state inputs"
@@ -217,16 +246,18 @@ impl StructuralTransientCheckpointScope {
                 }
                 (StructuralTransientCoordinateSpace::Direct, None)
             }
-            StructuralTransientSolverPlan::ModalReduced { basis_state } => {
+            StructuralTransientSolverPlan::ModalReduced { basis_transition } => {
+                let basis_state = basis_transition.source_state;
                 let state = input.modal_state.ok_or_else(|| {
                     AnalysisExecutionError::Invalid(
                         "modal transient scope is missing its exact modal-basis state".into(),
                     )
                 })?;
                 state.validate()?;
-                if state.identity != *basis_state
+                if state.identity != basis_state
                     || state.kind != StateKind::ModalBasis
                     || state.topology_digest != mesh_digest
+                    || basis_transition.target_topology_digest != mesh_digest
                 {
                     return Err(AnalysisExecutionError::Identity(
                         "modal transient basis state differs from its workload or solver mesh",
@@ -241,12 +272,15 @@ impl StructuralTransientCheckpointScope {
                     .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
                 (
                     StructuralTransientCoordinateSpace::ModalReduced {
-                        basis_state: *basis_state,
+                        basis_state,
                         basis: basis.identity(),
                         projection: reduced.evidence().clone(),
                         coordinate_count: reduced.mode_count(),
                     },
-                    Some(basis_state.digest()),
+                    Some([
+                        basis_transition.source_state.digest(),
+                        basis_transition.identity.digest(),
+                    ]),
                 )
             }
         };
@@ -326,7 +360,7 @@ impl StructuralTransientCheckpointScope {
         )?;
         let workload_bytes = input.workload.canonical_bytes()?;
         let mut dependencies = vec![mesh_digest];
-        dependencies.extend(modal_dependency);
+        dependencies.extend(modal_dependency.into_iter().flatten());
         let source_workload = AnalysisWorkloadIdentity::new(
             study,
             step,
@@ -405,9 +439,10 @@ mod tests {
 
     use super::*;
     use crate::execution::{
-        CanonicalSemanticStateInput, CanonicalSemanticStatePayload, SolverResultIdentity,
-        StructuralTransientBlockRequest, StructuralTransientContinuationApproach,
-        StructuralTransientScheduleArrival, StructuralTransientSchedulePoint,
+        CanonicalSemanticStateInput, CanonicalSemanticStatePayload, CanonicalStateTransitionInput,
+        SolverResultIdentity, StructuralTransientBlockRequest,
+        StructuralTransientContinuationApproach, StructuralTransientScheduleArrival,
+        StructuralTransientSchedulePoint,
     };
 
     fn modal_case() -> (
@@ -469,6 +504,16 @@ mod tests {
             },
         })
         .unwrap();
+        let basis_transition = CanonicalStateTransition::new(CanonicalStateTransitionInput {
+            sequence,
+            producer,
+            consumer: StepIdentity::from_solver_contract(sequence, &model.sequence.steps[1])
+                .unwrap(),
+            authored: &model.sequence.transitions[0],
+            source: &state,
+            target_topology_digest: Digest::from_bytes(*mesh.canonical_digest.bytes()),
+        })
+        .unwrap();
         let workload = StructuralTransientWorkload {
             schema_version: 1,
             model: model.clone(),
@@ -476,7 +521,7 @@ mod tests {
             backend: ComputeBackend::Cpu,
             formulation_requirement: FormulationRequirement::Experimental,
             solver: StructuralTransientSolverPlan::ModalReduced {
-                basis_state: state.identity,
+                basis_transition: Box::new(basis_transition),
             },
             time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 2 },
             residual_target: 1.0e-8,

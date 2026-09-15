@@ -13,6 +13,7 @@ pub fn analysis_prepare_structural_study_intent_op(
     let mut transient_workload = None;
     let mut transient_block_plan = None;
     let mut frequency_workload = None;
+    let mut heterogeneous_workloads = BTreeMap::new();
     for step in &study.steps {
         let mut authored_execution = step.authored_execution.clone();
         match step.authored_execution.solver_options.clone() {
@@ -34,8 +35,11 @@ pub fn analysis_prepare_structural_study_intent_op(
             }
             AnalysisSolverOptions::StructuralTransient(mut options)
                 if study.steps.len() == 1
+                    && step.procedure_step.solution_space
+                        == runmat_analysis_core::SolutionSpace::Direct
                     && linear_workloads.is_empty()
-                    && frequency_workload.is_none() =>
+                    && frequency_workload.is_none()
+                    && heterogeneous_workloads.is_empty() =>
             {
                 options.solver_mesh_artifact_path = None;
                 let interval_count = options.time_step_policy.interval_count();
@@ -64,6 +68,46 @@ pub fn analysis_prepare_structural_study_intent_op(
                 authored_execution.solver_options =
                     AnalysisSolverOptions::StructuralTransient(options);
             }
+            AnalysisSolverOptions::StructuralModes(mut options)
+                if linear_workloads.is_empty()
+                    && transient_workload.is_none()
+                    && frequency_workload.is_none() =>
+            {
+                options.solver_mesh_artifact_path = None;
+                let workload = prepare_structural_modal_workload(&study, step, &options)?;
+                heterogeneous_workloads.insert(
+                    step.procedure_step.step_id.clone(),
+                    runmat_analysis_fea::execution::StructuralStepWorkload::ModalExtraction {
+                        workload: Box::new(workload),
+                    },
+                );
+                authored_execution.solver_options = AnalysisSolverOptions::StructuralModes(options);
+            }
+            AnalysisSolverOptions::StructuralTransient(mut options)
+                if study.steps.len() == 2
+                    && step.procedure_step.solution_space
+                        == runmat_analysis_core::SolutionSpace::ModalReduced
+                    && linear_workloads.is_empty()
+                    && transient_workload.is_none()
+                    && frequency_workload.is_none()
+                    && heterogeneous_workloads.len() == 1 =>
+            {
+                options.solver_mesh_artifact_path = None;
+                let block_plan = runmat_analysis_fea::execution::StructuralTransientBlockPlan::new(
+                    options.maximum_intervals_per_block,
+                )
+                .map_err(|error| portable_study_contract_error(&study, error.to_string()))?;
+                let template = prepare_structural_modal_transient_template(&study, step, &options)?;
+                heterogeneous_workloads.insert(
+                    step.procedure_step.step_id.clone(),
+                    runmat_analysis_fea::execution::StructuralStepWorkload::ModalTransient {
+                        template: Box::new(template),
+                        block_plan,
+                    },
+                );
+                authored_execution.solver_options =
+                    AnalysisSolverOptions::StructuralTransient(options);
+            }
             AnalysisSolverOptions::StructuralFrequency(mut options)
                 if study.steps.len() == 1
                     && linear_workloads.is_empty()
@@ -83,21 +127,46 @@ pub fn analysis_prepare_structural_study_intent_op(
             procedure_step: step.procedure_step.clone(),
         });
     }
-    let workloads = match (transient_workload, transient_block_plan, frequency_workload) {
-        (Some(workload), Some(block_plan), None) => {
+    let workloads = match (
+        transient_workload,
+        transient_block_plan,
+        frequency_workload,
+        heterogeneous_workloads.len(),
+    ) {
+        (Some(workload), Some(block_plan), None, 0) => {
             runmat_analysis_fea::execution::StructuralStudyWorkloads::StructuralTransient {
                 workload: Box::new(workload),
                 block_plan,
             }
         }
-        (None, None, Some(workload)) => {
+        (None, None, Some(workload), 0) => {
             runmat_analysis_fea::execution::StructuralStudyWorkloads::StructuralFrequency {
                 workload: Box::new(workload),
             }
         }
-        (None, None, None) => {
+        (None, None, None, 0) => {
             runmat_analysis_fea::execution::StructuralStudyWorkloads::LinearSequence {
                 workloads: linear_workloads,
+            }
+        }
+        (None, None, None, 1) => {
+            let (_, workload) = heterogeneous_workloads.into_iter().next().ok_or_else(|| {
+                portable_study_contract_error(&study, "structural modal workload is absent".into())
+            })?;
+            let runmat_analysis_fea::execution::StructuralStepWorkload::ModalExtraction {
+                workload,
+            } = workload
+            else {
+                return Err(portable_study_contract_error(
+                    &study,
+                    "standalone heterogeneous workload is not modal extraction".into(),
+                ));
+            };
+            runmat_analysis_fea::execution::StructuralStudyWorkloads::StructuralModal { workload }
+        }
+        (None, None, None, 2) => {
+            runmat_analysis_fea::execution::StructuralStudyWorkloads::HeterogeneousSequence {
+                workloads: heterogeneous_workloads,
             }
         }
         _ => {
@@ -192,6 +261,49 @@ pub fn analysis_prepare_structural_study_intent_op(
     Ok(intent)
 }
 
+pub(in crate::analysis) fn prepare_structural_modal_workload(
+    study: &super::super::PreparedStudySequence,
+    step: &super::super::PreparedStudyStep,
+    options: &crate::analysis::AnalysisModalRunOptions,
+) -> Result<runmat_analysis_fea::execution::StructuralModalWorkload, OperationErrorEnvelope> {
+    runmat_analysis_fea::execution::StructuralModalWorkload::new(
+        runmat_analysis_fea::execution::StructuralModalWorkloadInput {
+            model: study.model.clone(),
+            step_id: step.procedure_step.step_id.clone(),
+            backend: step.authored_execution.backend,
+            formulation_requirement: step.authored_execution.requirement,
+            observation_execution:
+                runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
+            truncation: options.truncation,
+            convergence: options.convergence,
+        },
+    )
+    .map_err(|error| portable_study_contract_error(study, error.to_string()))
+}
+
+pub(in crate::analysis) fn prepare_structural_modal_transient_template(
+    study: &super::super::PreparedStudySequence,
+    step: &super::super::PreparedStudyStep,
+    options: &crate::analysis::AnalysisTransientRunOptions,
+) -> Result<runmat_analysis_fea::execution::StructuralModalTransientTemplate, OperationErrorEnvelope>
+{
+    let template = runmat_analysis_fea::execution::StructuralModalTransientTemplate {
+        schema_version: 1,
+        model: study.model.clone(),
+        step_id: step.procedure_step.step_id.clone(),
+        backend: step.authored_execution.backend,
+        formulation_requirement: step.authored_execution.requirement,
+        time_step_policy: runmat_analysis_fea::solve::transient::StructuralTimeStepPolicy::Fixed {
+            interval_count: options.time_step_policy.interval_count(),
+        },
+        residual_target: options.residual_target,
+    };
+    template
+        .validate()
+        .map_err(|error| portable_study_contract_error(study, error.to_string()))?;
+    Ok(template)
+}
+
 pub(in crate::analysis) fn prepare_structural_frequency_workload(
     study: &super::super::PreparedStudySequence,
     step: &super::super::PreparedStudyStep,
@@ -253,7 +365,7 @@ fn portable_study_kind_error(
             retryable: false,
             severity: OperationErrorSeverity::Error,
         },
-        "portable structural studies require a structural-linear sequence, one direct structural-transient step, or one direct structural-harmonic step",
+        "portable structural studies require a structural-linear sequence, direct transient or harmonic response, modal extraction, or an authored modal-to-transient sequence",
         BTreeMap::from([
             ("study_id".to_string(), study.spec.study_id.clone()),
             (

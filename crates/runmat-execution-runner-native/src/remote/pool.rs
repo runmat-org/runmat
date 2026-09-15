@@ -310,11 +310,91 @@ impl RemotePoolDriver {
         submission: TaskSubmission,
         program: ProgramExecutionRequest,
     ) -> NativeExecutionResult<RemoteTaskCompletion> {
-        self.submit_graph(vec![(program, submission)])?
+        if let Some(completion) = self.reuse_committed_task(&submission, &program)? {
+            return Ok(completion);
+        }
+        self.submit_new_graph(vec![(program, submission)])?
             .pop()
             .ok_or_else(|| {
                 NativeExecutionError::Protocol("remote task admission returned no handle".into())
             })
+    }
+
+    fn reuse_committed_task(
+        &self,
+        submission: &TaskSubmission,
+        program: &ProgramExecutionRequest,
+    ) -> NativeExecutionResult<Option<RemoteTaskCompletion>> {
+        program.validate().map_err(|error| {
+            NativeExecutionError::Protocol(format!("remote program request is invalid: {error}"))
+        })?;
+        let artifact_id =
+            runmat_execution::identity::ArtifactId::derive(&[program.artifact.id.0.bytes()]);
+        if submission.request.scope_id != self.scope_id
+            || submission.request.pool_id != self.pool_id
+            || submission.request.program_artifact_id != artifact_id
+            || submission.request.inputs != program.arguments
+            || submission.request.outputs.requested_outputs != program.requested_outputs
+        {
+            return Err(NativeExecutionError::Protocol(
+                "remote task differs from its exact program request".into(),
+            ));
+        }
+        let existing = self
+            .driver
+            .lock()
+            .expect("remote driver poisoned")
+            .snapshot()
+            .tasks
+            .get(&submission.request.id)
+            .cloned();
+        let Some(existing) = existing else {
+            return Ok(None);
+        };
+        // Retry, deadline, and priority govern an attempt that has already finished; they do not
+        // change the committed program semantics. Everything capable of changing the result or
+        // its admissible placement must still agree before the commit can be reused.
+        if existing.submission.request.id != submission.request.id
+            || existing.submission.request.scope_id != submission.request.scope_id
+            || existing.submission.request.pool_id != submission.request.pool_id
+            || existing.submission.request.program_artifact_id
+                != submission.request.program_artifact_id
+            || existing.submission.request.callable != submission.request.callable
+            || existing.submission.request.inputs != submission.request.inputs
+            || existing.submission.request.outputs != submission.request.outputs
+            || existing.submission.request.resources != submission.request.resources
+            || existing.submission.dependencies != submission.dependencies
+        {
+            return Err(NativeExecutionError::Protocol(format!(
+                "remote task {} collides with a different immutable submission",
+                submission.request.id
+            )));
+        }
+        if existing.state != runmat_execution::state::TaskState::Succeeded {
+            return Err(NativeExecutionError::Protocol(format!(
+                "remote task {} already exists in non-reusable state {:?}",
+                submission.request.id, existing.state
+            )));
+        }
+        let committed = existing.committed.ok_or_else(|| {
+            NativeExecutionError::Protocol(format!(
+                "succeeded remote task {} has no committed result",
+                submission.request.id
+            ))
+        })?;
+        for reference in &committed.result_objects {
+            if self.execution_object(reference)?.is_none() {
+                return Err(NativeExecutionError::Protocol(format!(
+                    "committed remote task {} has an unavailable result object",
+                    submission.request.id
+                )));
+            }
+        }
+        Ok(Some(RemoteTaskCompletion::resolved(Ok(AttemptSuccess {
+            outputs: committed.outputs,
+            result_objects: committed.result_objects,
+            resources: committed.resources,
+        }))))
     }
 
     /// Atomically admits a topologically ordered graph before dispatching any task.
@@ -327,6 +407,49 @@ impl RemotePoolDriver {
                 "remote task graph must not be empty".into(),
             ));
         }
+        let mut ordered = Vec::with_capacity(tasks.len());
+        let mut pending = Vec::new();
+        for (program, submission) in tasks {
+            if let Some(completion) = self.reuse_committed_task(&submission, &program)? {
+                ordered.push(Some(completion));
+            } else {
+                ordered.push(None);
+                pending.push((program, submission));
+            }
+        }
+        if !pending.is_empty() {
+            let mut admitted = self.submit_new_graph(pending)?.into_iter();
+            for completion in &mut ordered {
+                if completion.is_none() {
+                    *completion = Some(admitted.next().ok_or_else(|| {
+                        NativeExecutionError::Protocol(
+                            "remote task graph admission returned too few handles".into(),
+                        )
+                    })?);
+                }
+            }
+            if admitted.next().is_some() {
+                return Err(NativeExecutionError::Protocol(
+                    "remote task graph admission returned too many handles".into(),
+                ));
+            }
+        }
+        ordered
+            .into_iter()
+            .map(|completion| {
+                completion.ok_or_else(|| {
+                    NativeExecutionError::Protocol(
+                        "remote task graph omitted an admitted completion".into(),
+                    )
+                })
+            })
+            .collect()
+    }
+
+    fn submit_new_graph(
+        self: &Arc<Self>,
+        tasks: Vec<(ProgramExecutionRequest, TaskSubmission)>,
+    ) -> NativeExecutionResult<Vec<RemoteTaskCompletion>> {
         let mut registrations = Vec::with_capacity(tasks.len());
         let mut completion_senders = Vec::with_capacity(tasks.len());
         for (program, submission) in tasks {

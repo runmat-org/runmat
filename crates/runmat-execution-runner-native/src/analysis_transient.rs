@@ -22,6 +22,28 @@ pub trait StructuralTransientRecoveryPublisher: Send {
     ) -> NativeExecutionResult<()>;
 }
 
+#[derive(Default)]
+pub struct RetainedStructuralTransientRecovery {
+    latest: Option<StructuralTransientRecoveryClosure>,
+}
+
+impl RetainedStructuralTransientRecovery {
+    pub fn latest(&self) -> Option<&StructuralTransientRecoveryClosure> {
+        self.latest.as_ref()
+    }
+}
+
+#[async_trait]
+impl StructuralTransientRecoveryPublisher for RetainedStructuralTransientRecovery {
+    async fn publish(
+        &mut self,
+        closure: StructuralTransientRecoveryClosure,
+    ) -> NativeExecutionResult<()> {
+        self.latest = Some(closure);
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct CompletedStructuralTransientSequence {
     pub result: ImportedStructuralTransientResult,
@@ -36,10 +58,30 @@ pub async fn execute_structural_transient_remotely(
 ) -> NativeExecutionResult<CompletedStructuralTransientSequence> {
     policy.validate()?;
     let mut pool = RemoteAnalysisTaskPool::new(pool);
+    execute_structural_transient_with_pool(
+        &mut pool,
+        preparation,
+        policy,
+        recovery,
+        publisher,
+        Vec::new(),
+    )
+    .await
+}
+
+pub(crate) async fn execute_structural_transient_with_pool(
+    pool: &mut impl AnalysisTaskPool,
+    preparation: StructuralTransientSequencePreparation,
+    policy: StructuralSequenceExecutionPolicy,
+    recovery: Option<&StructuralTransientRecoveryClosure>,
+    publisher: &mut (impl StructuralTransientRecoveryPublisher + ?Sized),
+    initial_live_tasks: Vec<(AnalysisTaskIdentity, TaskId)>,
+) -> NativeExecutionResult<CompletedStructuralTransientSequence> {
+    policy.validate()?;
     let mut coordinator = match recovery {
         Some(recovery) => {
             for object in &recovery.objects {
-                pool.register_execution_object(object.reference.clone(), object.bytes.clone())?;
+                pool.register_recovery_object(object)?;
             }
             StructuralTransientSequenceCoordinator::restore_from_closure(
                 preparation,
@@ -50,7 +92,7 @@ pub async fn execute_structural_transient_remotely(
         }
         None => StructuralTransientSequenceCoordinator::new(preparation).map_err(protocol)?,
     };
-    let mut live_block_tasks = Vec::new();
+    let mut live_block_tasks = initial_live_tasks;
     while coordinator.has_remaining_blocks() {
         let prepared = coordinator.prepare_next_block().map_err(protocol)?;
         let logical_dependencies = coordinator.next_block_dependency_identities();
@@ -59,7 +101,7 @@ pub async fn execute_structural_transient_remotely(
             live_block_tasks.last().copied().into_iter(),
         );
         let (response, identity, task_id) = execute_task(
-            &mut pool,
+            pool,
             &prepared.host,
             &prepared.program,
             logical_dependencies,
@@ -68,14 +110,14 @@ pub async fn execute_structural_transient_remotely(
         )
         .await?;
         coordinator
-            .complete_block(&pool, response, &prepared)
+            .complete_block(pool, response, &prepared)
             .map_err(protocol)?;
         if coordinator.completed_block_task_identities().last() != Some(&identity) {
             return Err(NativeExecutionError::Protocol(
                 "transient coordinator and remote task identities differ".into(),
             ));
         }
-        let recovery = coordinator.recovery_closure(&pool).map_err(protocol)?;
+        let recovery = coordinator.recovery_closure(pool).map_err(protocol)?;
         publisher.publish(recovery).await?;
         live_block_tasks.push((identity, task_id));
     }
@@ -85,7 +127,7 @@ pub async fn execute_structural_transient_remotely(
     let live_dependencies =
         matching_live_dependencies(&logical_dependencies, live_block_tasks.iter().copied());
     let (response, _, _) = execute_task(
-        &mut pool,
+        pool,
         &prepared.host,
         &prepared.program,
         logical_dependencies,
@@ -94,14 +136,14 @@ pub async fn execute_structural_transient_remotely(
     )
     .await?;
     coordinator
-        .complete_assembly(&pool, response, &prepared)
+        .complete_assembly(pool, response, &prepared)
         .map_err(protocol)?;
     let result = coordinator.finish().map_err(protocol)?;
     Ok(CompletedStructuralTransientSequence { result })
 }
 
 async fn execute_task(
-    pool: &mut RemoteAnalysisTaskPool,
+    pool: &mut impl AnalysisTaskPool,
     host: &runmat_analysis_execution::AnalysisHostWorkload,
     program: &PreparedAnalysisProgram,
     dependency_identities: Vec<AnalysisTaskIdentity>,

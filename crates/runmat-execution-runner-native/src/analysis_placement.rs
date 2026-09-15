@@ -11,6 +11,7 @@ use runmat_execution_artifact::{ArtifactAccess, ArtifactPublishedObjectSource};
 use runmat_runtime::analysis::{
     analysis_study_content_digest, AnalysisStudySpec, PreparedStructuralStudy,
     StructuralStudyExecutionFailure, StructuralStudyFrequencyNumericalResult,
+    StructuralStudyModalNumericalResult, StructuralStudyModalTransientNumericalResult,
     StructuralStudyNumericalResult, StructuralStudyPlacementEntry,
     StructuralStudyPlacementExecutor, StructuralStudyPlacementFuture,
     StructuralStudyPlacementResult, StructuralStudySequenceNumericalResult,
@@ -18,9 +19,10 @@ use runmat_runtime::analysis::{
 };
 
 use crate::{
-    execute_structural_frequency_locally_with_source, execute_structural_sequence_locally,
-    NativeExecutionConfig, StructuralFrequencyExecutionPreparation,
-    StructuralSequenceExecutionPolicy,
+    execute_structural_frequency_locally_with_source, execute_structural_modal_locally,
+    execute_structural_modal_transient_locally, execute_structural_sequence_locally,
+    NativeExecutionConfig, RetainedStructuralTransientRecovery,
+    StructuralFrequencyExecutionPreparation, StructuralSequenceExecutionPolicy,
 };
 
 /// Native-process placement for runtime-prepared structural studies.
@@ -148,6 +150,52 @@ async fn execute_one(
     };
     let access = artifact_access(study_digest);
     match workloads {
+        StructuralStudyWorkloads::HeterogeneousSequence { workloads } => {
+            let authored = StructuralStudyWorkloads::HeterogeneousSequence { workloads };
+            let step_ids = authored.step_ids().map_err(|error| {
+                crate::NativeExecutionError::Configuration(error.to_string())
+            })?;
+            let [modal_step_id, transient_step_id] = step_ids.as_slice() else {
+                return Err(crate::NativeExecutionError::Configuration(
+                    "modal-transient study requires exactly two authored steps".into(),
+                ));
+            };
+            let mut publisher = RetainedStructuralTransientRecovery::default();
+            let completed = execute_structural_modal_transient_locally(
+                execution_config,
+                runmat_analysis_execution::StructuralModalTransientStudyPreparation {
+                    authored_study_digest: study_digest,
+                    frozen_project_digest: None,
+                    workloads: authored,
+                    mesh: prepared.solver_mesh().clone(),
+                    artifact_access: access,
+                    program_revision: revision,
+                    chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
+                    inventory_limits: ObjectInventoryLimits::default(),
+                    required_capabilities: BTreeSet::new(),
+                    accelerator_requests,
+                },
+                policy,
+                None,
+                &mut publisher,
+            )
+            .await?;
+            Ok(StructuralStudyNumericalResult::StructuralModalTransient(
+                Box::new(StructuralStudyModalTransientNumericalResult {
+                    frozen_project_digest: None,
+                    modal_step_id: modal_step_id.clone(),
+                    transient_step_id: transient_step_id.clone(),
+                    modal_result: completed.modal.result,
+                    modal_numerical_receipt: completed.modal.numerical_receipt,
+                    basis_state: completed.basis_state.state,
+                    transient_result: completed.transient.result.result,
+                    transient_numerical_receipt: completed
+                        .transient
+                        .result
+                        .numerical_receipt,
+                }),
+            ))
+        }
         StructuralStudyWorkloads::LinearSequence { workloads } => {
             let completed = execute_structural_sequence_locally(
                 execution_config,
@@ -219,6 +267,34 @@ async fn execute_one(
                     .map_err(crate::NativeExecutionError::Configuration)?,
                 ),
             ))
+        }
+        StructuralStudyWorkloads::StructuralModal { workload } => {
+            let step_id = workload.step_id().clone();
+            let completed = execute_structural_modal_locally(
+                execution_config,
+                runmat_analysis_execution::StructuralModalTaskPreparation {
+                    authored_study_digest: study_digest,
+                    frozen_project_digest: None,
+                    program_revision: revision,
+                    artifact_access: access,
+                    workload: *workload,
+                    mesh: prepared.solver_mesh().clone(),
+                    chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
+                    inventory_limits: ObjectInventoryLimits::default(),
+                    required_capabilities: BTreeSet::new(),
+                    accelerator_requests,
+                },
+                policy,
+            )
+            .await?;
+            Ok(StructuralStudyNumericalResult::StructuralModal(Box::new(
+                StructuralStudyModalNumericalResult {
+                    frozen_project_digest: None,
+                    step_id,
+                    result: completed.result.result,
+                    numerical_receipt: completed.result.numerical_receipt,
+                },
+            )))
         }
         StructuralStudyWorkloads::StructuralTransient { .. } => {
             Err(crate::NativeExecutionError::Configuration(

@@ -1,37 +1,31 @@
 use runmat_analysis_core::{validate_model, AnalysisField, AnalysisModel, AnalysisProcedure};
+use runmat_execution::Digest;
+use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
 
 use crate::{
     assembly::{assemble_structural_system, StructuralFormulationRequirement},
     contracts::{
-        fea_modal_mode_shape_field_id, ComputeBackend, FeaModalRunResult, FeaRunError,
-        FeaRunResult, ModalRecoveredMode, ModalSolveOptions,
+        ComputeBackend, FeaModalRunResult, FeaRunError, FeaRunResult, ModalSolveOptions,
         FEA_FIELD_MODAL_CUMULATIVE_EFFECTIVE_MASS, FEA_FIELD_MODAL_CUMULATIVE_MASS_RATIO,
         FEA_FIELD_MODAL_EFFECTIVE_MASS, FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ,
         FEA_FIELD_MODAL_MODAL_MASS, FEA_FIELD_MODAL_MODAL_STIFFNESS,
         FEA_FIELD_MODAL_M_ORTHOGONALITY, FEA_FIELD_MODAL_PARTICIPATION_FACTOR,
         FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION, FEA_FIELD_MODAL_RESIDUAL_NORM,
-        FEA_FIELD_MODAL_TOTAL_FREE_MASS, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
-        FEA_FIELD_STRUCTURAL_STRAIN, FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY,
-        FEA_FIELD_STRUCTURAL_STRESS,
+        FEA_FIELD_MODAL_TOTAL_FREE_MASS,
     },
     diagnostics::builders::{extend_common_run_diagnostics, CommonRunDiagnosticInputs},
     excitation::{realize_step_excitations, ExcitationSamplePoint},
+    execution::{StructuralModalSolverResult, StructuralModalWorkload},
     pipeline::modal_basis::{ModalBasisArtifact, ModalBasisInputs},
-    pipeline::observation_history::{
-        evaluate_field_histories, required_mode_history_indices, HistoryFieldSeries,
-        HistoryTopology,
-    },
-    pipeline::structural_nodal::{nodal_vector_shape, project_structural_nodal_snapshots},
-    post::fields::recover_deformation_result_fields,
+    pipeline::observation_history::required_mode_history_indices,
     progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
     solve::modal::solve_modal_system,
 };
 
-const MODAL_DISPLACEMENT_HISTORY_SOURCE: &str = "structural.modal.displacement";
-const MODAL_ROTATION_HISTORY_SOURCE: &str = "structural.modal.rotation";
-const MODAL_STRAIN_HISTORY_SOURCE: &str = "structural.modal.strain";
-const MODAL_STRESS_HISTORY_SOURCE: &str = "structural.modal.stress";
-const MODAL_STRAIN_ENERGY_HISTORY_SOURCE: &str = "structural.modal.strain_energy_density";
+mod recovery;
+
+pub use recovery::recover_completed_structural_modal_run;
+use recovery::recover_modal_core;
 
 pub fn run_modal(
     model: &AnalysisModel,
@@ -45,6 +39,76 @@ pub fn run_modal_with_options(
     backend: ComputeBackend,
     options: ModalSolveOptions,
 ) -> Result<FeaModalRunResult, FeaRunError> {
+    execute_modal_numerics(model, backend, options)
+}
+
+/// Executes one path-free modal-extraction workload against its separately transported mesh.
+///
+/// This is the numerical boundary used by portable execution. The workload owns the authored
+/// model and solver policy; the canonical mesh remains an independent object whose digest is
+/// recorded in the returned result.
+pub fn execute_structural_modal_workload(
+    workload: &StructuralModalWorkload,
+    solver_mesh: &SolverMeshArtifact,
+) -> Result<StructuralModalSolverResult, FeaRunError> {
+    workload
+        .validate()
+        .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
+    solver_mesh
+        .validate_canonical()
+        .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
+    if solver_mesh.geometry.geometry_revision != u64::from(workload.model().geometry_revision) {
+        return Err(FeaRunError::InvalidModel(format!(
+            "structural modal workload geometry revision {} does not match solver mesh geometry revision {}",
+            workload.model().geometry_revision,
+            solver_mesh.geometry.geometry_revision
+        )));
+    }
+    let modal = execute_modal_core(
+        workload.model(),
+        workload.backend(),
+        ModalSolveOptions {
+            formulation_requirement: workload.formulation_requirement(),
+            truncation: workload.truncation(),
+            convergence: workload.convergence(),
+            solver_mesh: Some(solver_mesh.clone()),
+        },
+    )?;
+    StructuralModalSolverResult::new(
+        workload,
+        Digest::from_bytes(*solver_mesh.canonical_digest.bytes()),
+        modal.run,
+        modal.basis,
+    )
+    .map_err(|error| FeaRunError::Solve(error.to_string()))
+}
+
+pub(super) struct CompletedModalCore {
+    pub(super) run: FeaRunResult,
+    pub(super) basis: ModalBasisArtifact,
+    pub(super) summary: crate::assembly::AssemblySummary,
+}
+
+fn execute_modal_numerics(
+    model: &AnalysisModel,
+    backend: ComputeBackend,
+    options: ModalSolveOptions,
+) -> Result<FeaModalRunResult, FeaRunError> {
+    let execution_step = super::admission::require_structural(
+        model,
+        AnalysisProcedure::ModalExtraction,
+        options.formulation_requirement,
+    )?;
+    let solver_mesh = options.solver_mesh.clone();
+    let core = execute_modal_core(model, backend, options)?;
+    recover_modal_core(model, execution_step, solver_mesh.as_ref(), core)
+}
+
+fn execute_modal_core(
+    model: &AnalysisModel,
+    backend: ComputeBackend,
+    options: ModalSolveOptions,
+) -> Result<CompletedModalCore, FeaRunError> {
     let execution_step = super::admission::require_structural(
         model,
         AnalysisProcedure::ModalExtraction,
@@ -142,14 +206,6 @@ pub fn run_modal_with_options(
     );
     check_cancelled("fea.run_modal")?;
 
-    emit_phase(
-        "fea.run_modal",
-        FeaProgressPhase::Postprocess,
-        FeaProgressStatus::Started,
-        "recovering modal fields",
-        Some(3),
-        Some(5),
-    );
     let mut diagnostics = modal.diagnostics.clone();
     if !modal.converged {
         return Err(FeaRunError::Assembly(format!(
@@ -165,9 +221,6 @@ pub fn run_modal_with_options(
         },
     );
 
-    let projected_mode_shapes =
-        project_structural_nodal_snapshots(&summary.structural_dof_layout, &modal.mode_shapes)
-            .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
     let basis = ModalBasisArtifact::new(
         identity.clone(),
         &summary,
@@ -209,39 +262,7 @@ pub fn run_modal_with_options(
             basis.truncation().policy().eigenspace_relative_tolerance(),
         ),
     });
-    let recovered_modes = modal
-        .mode_shapes
-        .iter()
-        .enumerate()
-        .map(|(index, shape)| {
-            recover_deformation_result_fields(&summary, shape)
-                .map(|fields| ModalRecoveredMode {
-                    mode_index: index + 1,
-                    fields,
-                })
-                .map_err(|error| FeaRunError::Assembly(error.to_string()))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    let mode_shape = nodal_vector_shape(&summary.structural_dof_layout);
-    let first_translation = basis
-        .modes()
-        .first()
-        .and_then(|_| projected_mode_shapes.first())
-        .map(|shape| shape.translations.clone())
-        .unwrap_or_else(|| vec![0.0; mode_shape.iter().product()]);
-    let mut run_fields = recovered_modes
-        .first()
-        .map(|mode| mode.fields.clone())
-        .unwrap_or_else(|| {
-            vec![AnalysisField::host_f64(
-                FEA_FIELD_STRUCTURAL_DISPLACEMENT,
-                mode_shape.clone(),
-                first_translation,
-            )]
-        });
-    run_fields.extend(modal_result_fields(&basis));
-
-    let mut run = FeaRunResult {
+    let run = FeaRunResult {
         identity,
         requested_backend: backend,
         execution_backend: crate::contracts::ExecutionBackend::from_solver_backend(
@@ -256,167 +277,19 @@ pub fn run_modal_with_options(
         solver_method: modal.solver_method,
         preconditioner: modal.preconditioner,
         solver_host_sync_count: modal.solver_host_sync_count,
-        accelerator_evidence: modal.accelerator_evidence.clone(),
+        accelerator_evidence: modal.accelerator_evidence,
         diagnostics,
         spatial_projection_evidence: summary.spatial_projection_evidence.clone(),
         observations: Vec::new(),
         observation_histories: Vec::new(),
         series_reductions: Vec::new(),
-        fields: run_fields,
+        fields: modal_result_fields(&basis),
     };
-
-    let mode_shapes = projected_mode_shapes
-        .iter()
-        .enumerate()
-        .map(|(index, shape)| {
-            AnalysisField::host_f64(
-                fea_modal_mode_shape_field_id(index + 1),
-                mode_shape.clone(),
-                shape.translations.clone(),
-            )
-        })
-        .collect::<Vec<_>>();
-    let rotation_mode_shapes = projected_mode_shapes
-        .iter()
-        .enumerate()
-        .map(|(index, shape)| {
-            AnalysisField::host_f64(
-                format!("structural.modal.rotation.{}", index + 1),
-                mode_shape.clone(),
-                shape.rotations.clone(),
-            )
-        })
-        .collect::<Vec<_>>();
-    let strain_mode_fields =
-        collect_recovered_mode_fields(&recovered_modes, FEA_FIELD_STRUCTURAL_STRAIN);
-    let stress_mode_fields =
-        collect_recovered_mode_fields(&recovered_modes, FEA_FIELD_STRUCTURAL_STRESS);
-    let strain_energy_mode_fields =
-        collect_recovered_mode_fields(&recovered_modes, FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY);
-    let evaluated_histories = if execution_step.observations.iter().any(|request| {
-        matches!(
-            request,
-            runmat_analysis_core::ObservationRequest::History(_)
-        )
-    }) {
-        let coordinates = (1..=mode_shapes.len())
-            .map(crate::results::field::RecoveredFieldSample::ModeIndex)
-            .collect::<Vec<_>>();
-        let mut series = vec![
-            HistoryFieldSeries {
-                quantity: runmat_analysis_core::ObservationQuantity::Displacement,
-                source_field_id: MODAL_DISPLACEMENT_HISTORY_SOURCE,
-                location: runmat_analysis_core::FieldLocation::Node,
-                entity_domain: crate::results::field::RecoveredFieldEntityDomain::StructuralNodes,
-                value_shape: runmat_analysis_core::ObservationValueShape::Vector3,
-                numeric_representation:
-                    crate::results::field::RecoveredFieldNumericRepresentation::Real,
-                snapshots: &mode_shapes,
-            },
-            HistoryFieldSeries {
-                quantity: runmat_analysis_core::ObservationQuantity::Rotation,
-                source_field_id: MODAL_ROTATION_HISTORY_SOURCE,
-                location: runmat_analysis_core::FieldLocation::Node,
-                entity_domain: crate::results::field::RecoveredFieldEntityDomain::StructuralNodes,
-                value_shape: runmat_analysis_core::ObservationValueShape::Vector3,
-                numeric_representation:
-                    crate::results::field::RecoveredFieldNumericRepresentation::Real,
-                snapshots: &rotation_mode_shapes,
-            },
-        ];
-        if strain_mode_fields.len() == coordinates.len() {
-            series.push(HistoryFieldSeries {
-                quantity: runmat_analysis_core::ObservationQuantity::Strain,
-                source_field_id: MODAL_STRAIN_HISTORY_SOURCE,
-                location: runmat_analysis_core::FieldLocation::Element,
-                entity_domain: crate::results::field::RecoveredFieldEntityDomain::SolidElements,
-                value_shape: runmat_analysis_core::ObservationValueShape::SymmetricTensor3,
-                numeric_representation:
-                    crate::results::field::RecoveredFieldNumericRepresentation::Real,
-                snapshots: &strain_mode_fields,
-            });
-        }
-        if stress_mode_fields.len() == coordinates.len() {
-            series.push(HistoryFieldSeries {
-                quantity: runmat_analysis_core::ObservationQuantity::Stress,
-                source_field_id: MODAL_STRESS_HISTORY_SOURCE,
-                location: runmat_analysis_core::FieldLocation::Element,
-                entity_domain: crate::results::field::RecoveredFieldEntityDomain::SolidElements,
-                value_shape: runmat_analysis_core::ObservationValueShape::SymmetricTensor3,
-                numeric_representation:
-                    crate::results::field::RecoveredFieldNumericRepresentation::Real,
-                snapshots: &stress_mode_fields,
-            });
-        }
-        if strain_energy_mode_fields.len() == coordinates.len() {
-            series.push(HistoryFieldSeries {
-                quantity: runmat_analysis_core::ObservationQuantity::StrainEnergy,
-                source_field_id: MODAL_STRAIN_ENERGY_HISTORY_SOURCE,
-                location: runmat_analysis_core::FieldLocation::Element,
-                entity_domain: crate::results::field::RecoveredFieldEntityDomain::SolidElements,
-                value_shape: runmat_analysis_core::ObservationValueShape::Scalar,
-                numeric_representation:
-                    crate::results::field::RecoveredFieldNumericRepresentation::Real,
-                snapshots: &strain_energy_mode_fields,
-            });
-        }
-        evaluate_field_histories(
-            execution_step,
-            HistoryTopology::Structural {
-                model,
-                mesh: options.solver_mesh.as_ref(),
-            },
-            &coordinates,
-            None,
-            &series,
-        )
-        .map_err(|error| FeaRunError::Observation(error.to_string()))?
-    } else {
-        Default::default()
-    };
-    run.observation_histories = evaluated_histories.histories;
-    run.series_reductions = evaluated_histories.series_reductions;
-
-    emit_phase(
-        "fea.run_modal",
-        FeaProgressPhase::Postprocess,
-        FeaProgressStatus::Completed,
-        "modal result field recovery complete",
-        Some(4),
-        Some(5),
-    );
-    check_cancelled("fea.run_modal")?;
-    emit_phase(
-        "fea.run_modal",
-        FeaProgressPhase::Complete,
-        FeaProgressStatus::Completed,
-        "FEA modal run complete",
-        Some(5),
-        Some(5),
-    );
-
-    Ok(FeaModalRunResult {
+    Ok(CompletedModalCore {
         run,
         basis,
-        mode_shapes,
-        rotation_mode_shapes,
-        recovered_modes,
+        summary,
     })
-}
-
-fn collect_recovered_mode_fields(
-    modes: &[ModalRecoveredMode],
-    field_id: &str,
-) -> Vec<AnalysisField> {
-    modes
-        .iter()
-        .filter_map(|mode| {
-            mode.fields
-                .iter()
-                .find(|field| field.field_id == field_id)
-                .cloned()
-        })
-        .collect()
 }
 
 fn modal_result_fields(basis: &ModalBasisArtifact) -> Vec<AnalysisField> {
@@ -510,4 +383,86 @@ fn modal_result_fields(basis: &ModalBasisArtifact) -> Vec<AnalysisField> {
             basis.mass_orthogonality().to_vec(),
         ),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use runmat_analysis_core::{
+        FormulationRequirement, IndependentDomain, ProcedureStep, ProcedureStepId,
+    };
+    use runmat_meshing_core::CanonicalMeshingContract;
+
+    use super::*;
+    use crate::{
+        execution::{StructuralModalNumericalReceipt, StructuralModalWorkloadInput},
+        fixtures::{fixture_model, FixtureId},
+        pipeline::modal_governance::{ModalConvergencePolicy, ModalTruncationPolicy},
+        results::observation::ObservationExecutionPolicy,
+    };
+
+    fn portable_fixture() -> (StructuralModalWorkload, SolverMeshArtifact) {
+        let truncation = ModalTruncationPolicy::requested(2);
+        let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+        let mut step = ProcedureStep::structural_modal("modes");
+        step.independent_domain = IndependentDomain::Eigenvalue {
+            requested_count: truncation.requested_mode_count(),
+        };
+        model.sequence.steps = vec![step];
+        let mesh = crate::tests::single_tetrahedron_solver_mesh_for_model(&model);
+        let workload = StructuralModalWorkload::new(StructuralModalWorkloadInput {
+            model,
+            step_id: ProcedureStepId("modes".into()),
+            backend: ComputeBackend::Cpu,
+            formulation_requirement: FormulationRequirement::Experimental,
+            observation_execution: ObservationExecutionPolicy::scalable(),
+            truncation,
+            convergence: ModalConvergencePolicy::exploratory(),
+        })
+        .unwrap();
+        (workload, mesh)
+    }
+
+    #[test]
+    fn portable_modal_boundary_is_numerically_equivalent_to_the_in_process_api() {
+        let (workload, mesh) = portable_fixture();
+        let in_process = run_modal_with_options(
+            workload.model(),
+            workload.backend(),
+            ModalSolveOptions {
+                formulation_requirement: workload.formulation_requirement(),
+                truncation: workload.truncation(),
+                convergence: workload.convergence(),
+                solver_mesh: Some(mesh.clone()),
+            },
+        )
+        .unwrap();
+        let portable = execute_structural_modal_workload(&workload, &mesh).unwrap();
+
+        assert_eq!(
+            portable.topology_digest(),
+            Digest::from_bytes(*mesh.canonical_digest.bytes())
+        );
+        portable.validate_for(&workload).unwrap();
+        let source_workload =
+            crate::execution::AnalysisWorkloadIdentity::for_test("portable-modal-equivalence")
+                .unwrap();
+        let receipt = StructuralModalNumericalReceipt::new(source_workload, &portable).unwrap();
+        let recovered =
+            recover_completed_structural_modal_run(&workload, &mesh, &portable, &receipt).unwrap();
+
+        assert_eq!(portable.basis(), &in_process.basis);
+        assert_eq!(recovered, in_process);
+    }
+
+    #[test]
+    fn portable_modal_boundary_rejects_a_canonical_mesh_from_another_geometry_revision() {
+        let (workload, mut mesh) = portable_fixture();
+        mesh.geometry.geometry_revision += 1;
+        mesh.canonical_digest = runmat_meshing_core::StableDigest::ZERO;
+        mesh.seal_canonical_digest().unwrap();
+
+        mesh.validate_canonical().unwrap();
+        let error = execute_structural_modal_workload(&workload, &mesh).unwrap_err();
+        assert!(matches!(error, FeaRunError::InvalidModel(_)));
+    }
 }

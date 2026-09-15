@@ -4,7 +4,7 @@ use runmat_analysis_execution::{
     decode_prepared_structural_frequency_entry_request,
     decode_prepared_structural_frequency_entry_result,
     decode_prepared_structural_frequency_result_assembly_request,
-    decode_prepared_structural_frequency_workload,
+    decode_prepared_structural_frequency_workload, decode_prepared_structural_modal_workload,
     decode_prepared_structural_transient_result_assembly_request,
     decode_prepared_structural_transient_segment, prepared_input_resource_facts,
     projected_output_resource_facts, projected_output_set_resource_facts,
@@ -19,28 +19,32 @@ use runmat_analysis_fea::execution::{
     CanonicalSemanticState, ConstraintPlanIdentity, FieldRecoveryRequest, FieldRecoverySource,
     ObservationAssemblyRequest, ObservationEvaluationRequest, ObservationHistoryCheckpointRequest,
     ObservationPartitionEvaluationRequest, ObservationPartitionReductionRequest,
-    ResultPublicationRequest, SemanticStatePublicationRequest, StructuralFrequencySolverPlan,
-    StructuralFrequencyWorkload, StructuralLinearNumericalReceiptArtifact,
-    StructuralLinearWorkload, StructuralLinearWorkloadResult, StructuralTransientBlockRequest,
-    StructuralTransientCheckpoint, StructuralTransientNumericalReceipt,
-    StructuralTransientSolverResult, StructuralTransientWorkload,
+    ResultPublicationRequest, SemanticStatePublicationRequest, SemanticStatePublicationSource,
+    StructuralFrequencySolverPlan, StructuralFrequencyWorkload,
+    StructuralLinearNumericalReceiptArtifact, StructuralLinearWorkload,
+    StructuralLinearWorkloadResult, StructuralModalNumericalReceipt, StructuralModalSolverResult,
+    StructuralTransientBlockRequest, StructuralTransientCheckpoint,
+    StructuralTransientNumericalReceipt, StructuralTransientSolverResult,
+    StructuralTransientWorkload,
 };
 use runmat_analysis_fea::planning::resource::{
     build_observation_assembly_resource_plan, build_observation_history_checkpoint_resource_plan,
     build_observation_partition_resource_plan, build_observation_reduction_resource_plan,
     build_structural_frequency_entry_resource_plan,
     build_structural_frequency_recovery_resource_plan,
-    build_structural_frequency_result_assembly_resource_plan, build_structural_resource_plan,
-    observation_artifact_payload_bytes_upper_bound,
+    build_structural_frequency_result_assembly_resource_plan, build_structural_modal_resource_plan,
+    build_structural_resource_plan, observation_artifact_payload_bytes_upper_bound,
     observation_history_checkpoint_payload_bytes_upper_bound,
     observation_partition_payload_bytes_upper_bound,
     observation_reduction_payload_bytes_upper_bound,
     structural_frequency_entry_payload_bytes_upper_bound,
     structural_frequency_receipt_payload_bytes_upper_bound,
     structural_frequency_recovery_payload_bytes_upper_bound,
-    structural_frequency_result_payload_bytes_upper_bound, validate_resource_usage_evidence,
+    structural_frequency_result_payload_bytes_upper_bound,
+    structural_modal_receipt_payload_bytes_upper_bound,
+    structural_modal_result_payload_bytes_upper_bound, validate_resource_usage_evidence,
     FeaResourceDemand, FeaResourcePhase, FeaResourcePlan, ObservationPartitionResourcePlanning,
-    PreparedPhaseResourceFacts, ResourceUsageEvidence,
+    PreparedPhaseResourceFacts, PreparedStructuralModalResourceFacts, ResourceUsageEvidence,
 };
 use runmat_analysis_fea::post::fields::{
     structural_observable_field_definitions, take_structural_observable_fields,
@@ -69,6 +73,7 @@ use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
 
 mod field_recovery;
 mod frequency;
+mod modal;
 mod observation;
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -105,6 +110,9 @@ impl AnalysisKernel for NativeAnalysisKernel {
             }
             AnalysisWorkKind::SolveStructuralFrequencyEntry => {
                 frequency::execute_structural_frequency_entry(invocation)
+            }
+            AnalysisWorkKind::ExtractStructuralModes => {
+                modal::execute_structural_modal_extraction(invocation)
             }
             AnalysisWorkKind::AssembleStructuralFrequencyResult => {
                 frequency::execute_structural_frequency_result_assembly(invocation)
@@ -276,7 +284,7 @@ fn execute_structural_transient_block(
         ) => true,
         (
             runmat_analysis_fea::execution::StructuralTransientSolverPlan::ModalReduced {
-                basis_state,
+                basis_transition,
             },
             runmat_analysis_fea::execution::StructuralTransientCoordinateSpace::ModalReduced {
                 basis_state: scoped_basis,
@@ -284,7 +292,7 @@ fn execute_structural_transient_block(
             },
             Some(state),
         ) => {
-            state.identity == *basis_state
+            state.identity == basis_transition.source_state
                 && state.identity == *scoped_basis
                 && state.topology_digest
                     == runmat_execution::Digest::from_bytes(*mesh.canonical_digest.bytes())
@@ -744,9 +752,26 @@ fn execute_state_publication(
             "state publication received a substituted solver result",
         ));
     }
-    let solver_result =
-        StructuralLinearWorkloadResult::from_canonical_bytes(&solver_result.payload())?;
-    let state = CanonicalSemanticState::from_publication(&publication, &solver_result.run.fields)?;
+    let state = match publication.source {
+        SemanticStatePublicationSource::StructuralPrimaryFields => {
+            let solver_result =
+                StructuralLinearWorkloadResult::from_canonical_bytes(&solver_result.payload())?;
+            CanonicalSemanticState::from_publication(&publication, &solver_result.run.fields)?
+        }
+        SemanticStatePublicationSource::ModalBasis => {
+            let solver_result =
+                StructuralModalSolverResult::from_canonical_bytes(&solver_result.payload())?;
+            if solver_result.topology_digest() != publication.topology_digest {
+                return Err(AnalysisBridgeError::Identity(
+                    "modal state publication topology differs from its solver result",
+                ));
+            }
+            CanonicalSemanticState::from_modal_publication(
+                &publication,
+                solver_result.basis().clone(),
+            )?
+        }
+    };
     Ok(vec![AnalysisKernelOutput {
         kind: AnalysisNumericalObjectKind::SemanticState,
         logical_identity: state.identity.digest(),

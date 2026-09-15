@@ -2285,6 +2285,8 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
     let state_prepared = prepare_semantic_state_publication(SemanticStatePublicationPreparation {
         source_host: prepared.host.clone(),
         source_result: completed.outputs[0].clone(),
+        source:
+            runmat_analysis_fea::execution::SemanticStatePublicationSource::StructuralPrimaryFields,
         declaration: solve.model.sequence.steps[0].state_outputs[0].clone(),
         topology_digest: Digest::from_bytes(*mesh.canonical_digest.bytes()),
         program_revision: revision(),

@@ -3,7 +3,8 @@ use super::*;
 pub(super) fn execute(solved: &SolvedPipeline) {
     let host = &solved.prepared.host;
     let step = host.workload.step;
-    let publication = SemanticStatePublicationRequest::structural_linear(
+    let publication = SemanticStatePublicationRequest::new(
+        SemanticStatePublicationSource::StructuralPrimaryFields,
         step,
         solved.solve.model.sequence.steps[0].state_outputs[0].clone(),
         solved.prepared.inputs[1].manifest.logical_identity,

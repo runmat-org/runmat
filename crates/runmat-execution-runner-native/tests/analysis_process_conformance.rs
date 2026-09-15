@@ -42,7 +42,8 @@ use runmat_execution_artifact::{
 use runmat_execution_runner::{PoolSpec, WorkerSpec};
 use runmat_execution_runner_native::{
     execute_analysis_program_request, execute_structural_frequency_locally,
-    execute_structural_frequency_remotely, execute_structural_sequence_locally,
+    execute_structural_frequency_remotely, execute_structural_modal_transient_locally,
+    execute_structural_modal_transient_remotely, execute_structural_sequence_locally,
     execute_structural_sequence_remotely, execute_structural_transient_remotely,
     run_remote_worker_quic, NativeAnalysisHostLimits, NativeAnalysisKernel, NativeExecutionConfig,
     NativeExecutionError, NativeProgramSession, NativeProgramTask, QuicRemoteWorkerChannel,
@@ -53,6 +54,8 @@ use runmat_execution_transport_native::frame::FrameLimits;
 use runmat_execution_transport_native::overlay::{PinnedQuicEndpoint, QuicOverlayListener};
 use runmat_meshing_core::{ElementOrder, PersistentEntityId, PersistentEntityKind, StableDigest};
 
+#[path = "analysis_process_conformance/modal_transient.rs"]
+mod modal_transient;
 #[path = "analysis_process_conformance/publication_chain.rs"]
 mod publication_chain;
 #[path = "analysis_process_conformance/signal.rs"]
@@ -599,6 +602,29 @@ async fn remote_conformance(
     let mut bundle_bytes = Vec::new();
     write_bundle(&bundle, &mut bundle_bytes, ArchiveLimits::default()).unwrap();
 
+    let mut modal_local_config = NativeExecutionConfig::for_current_executable().unwrap();
+    modal_local_config.executable = std::env::current_exe().unwrap();
+    modal_local_config.worker_arguments = vec!["--child".into()];
+    modal_local_config.max_workers = 2;
+    modal_local_config.store_root = project_root.path().join("local-modal-transient");
+    let mut modal_local_publisher = transient::RecordingPublisher {
+        closures: Vec::new(),
+    };
+    let modal_local = execute_structural_modal_transient_locally(
+        modal_local_config,
+        modal_transient::preparation(
+            revision.clone(),
+            "remote-analysis",
+            "modal-transient-local-encryption",
+        ),
+        sequence_policy(),
+        None,
+        &mut modal_local_publisher,
+    )
+    .await
+    .unwrap();
+    assert_eq!(modal_local_publisher.closures.len(), 2);
+
     let CertifiedKey { cert, signing_key } =
         generate_simple_self_signed(vec!["runmat.execution".into()]).unwrap();
     let certificate_der = cert.der().to_vec();
@@ -908,6 +934,113 @@ async fn remote_conformance(
             "local and remote publications must retain their own measured execution evidence"
         );
         assert_eq!(frequency.result.result, expected_frequency_result);
+
+        let mut modal_remote_publisher = transient::RecordingPublisher {
+            closures: Vec::new(),
+        };
+        let modal_remote = execute_structural_modal_transient_remotely(
+            Arc::clone(&pool),
+            modal_transient::preparation(
+                revision.clone(),
+                "remote-analysis",
+                "modal-transient-remote-encryption",
+            ),
+            sequence_policy(),
+            None,
+            &mut modal_remote_publisher,
+        )
+        .await
+        .unwrap();
+        assert_eq!(modal_remote_publisher.closures.len(), 2);
+        modal_transient::assert_numerical_equality(&modal_remote, &modal_local);
+
+        let modal_replacement_pool = RemotePoolDriver::new_with_value_scope(
+            runmat_execution::ExecutionScopeId::derive(&[
+                b"remote-modal-transient-replacement-scope",
+            ]),
+            PoolSpec {
+                id: pool_id,
+                min_workers: 1,
+                max_workers: 2,
+                max_in_flight: 1,
+                resource_limit: scaled_inventory(2),
+            },
+            41,
+            bundle_bytes.clone(),
+            "remote-analysis",
+        )
+        .unwrap();
+        modal_replacement_pool
+            .add_worker(first_channel.clone())
+            .await
+            .unwrap();
+        let replacement_preparation = modal_transient::preparation(
+            revision.clone(),
+            "remote-analysis",
+            "modal-transient-replacement-encryption",
+        );
+        let mut modal_interrupted_publisher = transient::FailAfterFirstPublisher {
+            closures: Vec::new(),
+        };
+        execute_structural_modal_transient_remotely(
+            Arc::clone(&modal_replacement_pool),
+            replacement_preparation,
+            sequence_policy(),
+            None,
+            &mut modal_interrupted_publisher,
+        )
+        .await
+        .expect_err("the injected loss must interrupt modal-transient execution");
+        assert_eq!(modal_interrupted_publisher.closures.len(), 1);
+        let modal_recovery = modal_interrupted_publisher.closures.pop().unwrap();
+        let modal_first_worker_id =
+            runmat_execution::identity::WorkerId::derive(&[b"remote-analysis-worker-a"]);
+        modal_replacement_pool
+            .remove_worker(modal_first_worker_id, true)
+            .await
+            .unwrap();
+        modal_replacement_pool
+            .add_worker(second_channel.clone())
+            .await
+            .unwrap();
+        let mut modal_replacement_publisher = transient::RecordingPublisher {
+            closures: Vec::new(),
+        };
+        let modal_restarted = execute_structural_modal_transient_remotely(
+            Arc::clone(&modal_replacement_pool),
+            modal_transient::preparation(
+                revision.clone(),
+                "remote-analysis",
+                "modal-transient-replacement-encryption",
+            ),
+            sequence_policy(),
+            Some(&modal_recovery),
+            &mut modal_replacement_publisher,
+        )
+        .await
+        .unwrap();
+        assert_eq!(modal_replacement_publisher.closures.len(), 1);
+        modal_transient::assert_numerical_equality(&modal_restarted, &modal_remote);
+        assert_eq!(
+            modal_replacement_pool
+                .snapshot()
+                .attempts
+                .values()
+                .map(|attempt| attempt.request.worker_id)
+                .collect::<BTreeSet<_>>(),
+            BTreeSet::from([
+                modal_first_worker_id,
+                runmat_execution::identity::WorkerId::derive(&[b"remote-analysis-worker-b"]),
+            ])
+        );
+        modal_replacement_pool
+            .remove_worker(
+                runmat_execution::identity::WorkerId::derive(&[b"remote-analysis-worker-b"]),
+                true,
+            )
+            .await
+            .unwrap();
+
         let mut transient_publisher = transient::RecordingPublisher {
             closures: Vec::new(),
         };

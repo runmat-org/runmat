@@ -142,6 +142,324 @@ fn structural_study_intent_admits_one_typed_direct_transient_workload() {
 }
 
 #[test]
+fn structural_modal_intent_recovers_and_publishes_all_mode_shapes_without_resolving_again() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let root = temp_artifact_root("remote-modal-completion");
+    let _ = fs::remove_dir_all(&root);
+    let _runtime_guard = scoped_fea_artifact_roots(&root);
+    let meshing_output = ready_minimal_meshing_output();
+    let spec = sample_modal_study_spec(digest_hex(meshing_output.artifact.geometry.source_digest));
+    let intent = analysis_prepare_structural_study_intent_op(
+        &spec,
+        OperationContext::new(Some("trace-modal-completion".into()), None),
+    )
+    .expect("modal intent should prepare");
+    let runmat_analysis_fea::execution::StructuralStudyWorkloads::StructuralModal { mut workload } =
+        intent.workloads()
+    else {
+        panic!("test requires a standalone modal workload")
+    };
+    let aliases = runmat_analysis_core::BoundaryRegionAliases::new(
+        meshing_output.boundary_region_ids.clone(),
+    )
+    .unwrap();
+    workload
+        .replace_model(
+            runmat_analysis_core::resolve_boundary_region_aliases(workload.model(), &aliases)
+                .unwrap(),
+        )
+        .unwrap();
+    let result = runmat_analysis_fea::pipeline::modal::execute_structural_modal_workload(
+        &workload,
+        &meshing_output.artifact,
+    )
+    .expect("portable modal extraction should succeed");
+    let task_workload = modal_test_workload_identity(&workload, &meshing_output.artifact);
+    let numerical_receipt = runmat_analysis_fea::execution::StructuralModalNumericalReceipt::new(
+        task_workload,
+        &result,
+    )
+    .unwrap();
+    let mode_count = result.basis().modes().len();
+    let source_result = numerical_receipt.source_result();
+    let step_id = workload.step_id().clone();
+    let envelope = analysis_complete_structural_study_intent_op(
+        intent,
+        meshing_output,
+        StructuralStudyNumericalResult::StructuralModal(Box::new(
+            StructuralStudyModalNumericalResult {
+                frozen_project_digest: None,
+                step_id,
+                result,
+                numerical_receipt,
+            },
+        )),
+        StructuralStudyCompletionIdentity::new("server-run-modal").unwrap(),
+    )
+    .expect("portable modal result should enter normal study publication");
+
+    assert_eq!(envelope.data.steps.len(), 1);
+    assert_eq!(envelope.data.states.len(), 1);
+    assert_eq!(envelope.data.states[0].source_result, source_result);
+    let persisted = storage::load_run_result(&envelope.data.steps[0].run_id)
+        .unwrap()
+        .expect("modal run should be persisted");
+    let modal = persisted
+        .modal_results
+        .expect("runtime modal result should retain recovered shapes");
+    assert_eq!(modal.mode_shapes.len(), mode_count);
+    assert_eq!(modal.basis.modes().len(), mode_count);
+    assert!(modal
+        .mode_shapes
+        .iter()
+        .all(|field| field.shape.len() == 2 && field.shape[1] == 3));
+    drop(_runtime_guard);
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn prepared_local_modal_study_uses_the_same_portable_recovery_contract() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let root = temp_artifact_root("local-modal-completion");
+    let _ = fs::remove_dir_all(&root);
+    let _runtime_guard = scoped_fea_artifact_roots(&root);
+    let default_spec = sample_linear_static_study_spec();
+    let mut spec = sample_modal_study_spec(default_spec.geometry.source.sha256);
+    let (mesh_root, mesh_path) =
+        write_ready_minimal_analysis_mesh_artifact("local-modal-completion-mesh");
+    spec.solver_mesh_artifact_path = Some(mesh_path.display().to_string());
+    let prepared = analysis_prepare_structural_study_op(
+        &spec,
+        OperationContext::new(Some("trace-local-modal-completion".into()), None),
+    )
+    .expect("local modal study should prepare");
+    let runmat_analysis_fea::execution::StructuralStudyWorkloads::StructuralModal { workload } =
+        prepared.workloads()
+    else {
+        panic!("prepared local study should contain one modal workload")
+    };
+    let result = runmat_analysis_fea::pipeline::modal::execute_structural_modal_workload(
+        &workload,
+        prepared.solver_mesh(),
+    )
+    .unwrap();
+    let receipt = runmat_analysis_fea::execution::StructuralModalNumericalReceipt::new(
+        modal_test_workload_identity(&workload, prepared.solver_mesh()),
+        &result,
+    )
+    .unwrap();
+    let step_id = workload.step_id().clone();
+    let envelope = analysis_complete_structural_study_op(
+        prepared,
+        Ok(StructuralStudyNumericalResult::StructuralModal(Box::new(
+            StructuralStudyModalNumericalResult {
+                frozen_project_digest: None,
+                step_id,
+                result,
+                numerical_receipt: receipt,
+            },
+        ))),
+    )
+    .expect("local modal result should complete through shared study publication");
+    assert_eq!(envelope.data.steps.len(), 1);
+    assert!(storage::load_run_result(&envelope.data.steps[0].run_id)
+        .unwrap()
+        .unwrap()
+        .modal_results
+        .is_some());
+    drop(_runtime_guard);
+    let _ = fs::remove_dir_all(&root);
+    let _ = fs::remove_dir_all(&mesh_root);
+}
+
+#[test]
+fn modal_transient_intent_publishes_the_exact_basis_and_both_runtime_results() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let root = temp_artifact_root("remote-modal-transient-completion");
+    let _ = fs::remove_dir_all(&root);
+    let _runtime_guard = scoped_fea_artifact_roots(&root);
+    let meshing_output = ready_minimal_meshing_output();
+    let spec = sample_modal_transient_study_spec(digest_hex(
+        meshing_output.artifact.geometry.source_digest,
+    ));
+    let intent = analysis_prepare_structural_study_intent_op(
+        &spec,
+        OperationContext::new(Some("trace-modal-transient-completion".into()), None),
+    )
+    .expect("modal-transient intent should prepare");
+    let runmat_analysis_fea::execution::StructuralStudyWorkloads::HeterogeneousSequence {
+        mut workloads,
+    } = intent.workloads()
+    else {
+        panic!("test requires heterogeneous modal-transient workloads")
+    };
+    let [modal_step_id, transient_step_id] = intent
+        .model()
+        .sequence
+        .steps
+        .iter()
+        .map(|step| step.step_id.clone())
+        .collect::<Vec<_>>()
+        .try_into()
+        .unwrap();
+    let runmat_analysis_fea::execution::StructuralStepWorkload::ModalExtraction {
+        workload: modal_workload,
+    } = workloads.remove(&modal_step_id).unwrap()
+    else {
+        panic!("first workload must extract modes")
+    };
+    let runmat_analysis_fea::execution::StructuralStepWorkload::ModalTransient {
+        template,
+        block_plan,
+    } = workloads.remove(&transient_step_id).unwrap()
+    else {
+        panic!("second workload must be modal transient")
+    };
+    let aliases = runmat_analysis_core::BoundaryRegionAliases::new(
+        meshing_output.boundary_region_ids.clone(),
+    )
+    .unwrap();
+    let resolved_model =
+        runmat_analysis_core::resolve_boundary_region_aliases(modal_workload.model(), &aliases)
+            .unwrap();
+    let mut modal_workload = *modal_workload;
+    modal_workload
+        .replace_model(resolved_model.clone())
+        .unwrap();
+    let modal_result = runmat_analysis_fea::pipeline::modal::execute_structural_modal_workload(
+        &modal_workload,
+        &meshing_output.artifact,
+    )
+    .unwrap();
+    let modal_numerical_receipt =
+        runmat_analysis_fea::execution::StructuralModalNumericalReceipt::new(
+            modal_test_workload_identity(&modal_workload, &meshing_output.artifact),
+            &modal_result,
+        )
+        .unwrap();
+    let sequence = runmat_analysis_fea::execution::SequenceIdentity::from_solver_contract(
+        &resolved_model.sequence,
+    )
+    .unwrap();
+    let modal_step = resolved_model
+        .sequence
+        .steps
+        .iter()
+        .find(|step| step.step_id == modal_step_id)
+        .unwrap();
+    let producer =
+        runmat_analysis_fea::execution::StepIdentity::from_solver_contract(sequence, modal_step)
+            .unwrap();
+    let topology_digest =
+        runmat_execution::Digest::from_bytes(*meshing_output.artifact.canonical_digest.bytes());
+    let basis_state = runmat_analysis_fea::execution::CanonicalSemanticState::new(
+        runmat_analysis_fea::execution::CanonicalSemanticStateInput {
+            producer,
+            declaration: modal_step.state_outputs[0].clone(),
+            topology_digest,
+            source_result: modal_numerical_receipt.source_result(),
+            payload: runmat_analysis_fea::execution::CanonicalSemanticStatePayload::ModalBasis {
+                basis: Box::new(modal_result.basis().clone()),
+            },
+        },
+    )
+    .unwrap();
+    let mut template = *template;
+    template.model = resolved_model;
+    let transition = runmat_analysis_fea::execution::CanonicalStateTransition::bind_upstream(
+        &template.model,
+        &template.step_id,
+        &basis_state,
+        runmat_analysis_core::StateUse::ModalBasis,
+        topology_digest,
+    )
+    .unwrap();
+    let transient_workload = template.bind(transition).unwrap();
+    let scope = runmat_analysis_fea::pipeline::transient::prepare_transient_checkpoint_scope(
+        &transient_workload,
+        &meshing_output.artifact,
+        Some(&basis_state),
+    )
+    .unwrap();
+    let terminal_schedule_ordinal = u64::try_from(scope.schedule.points.len() - 1).unwrap();
+    let mut predecessor = None;
+    let mut segments = Vec::new();
+    for terminal in block_plan
+        .terminal_schedule_ordinals(terminal_schedule_ordinal)
+        .unwrap()
+    {
+        let request = runmat_analysis_fea::execution::StructuralTransientBlockRequest::new(
+            scope.clone(),
+            predecessor.as_ref(),
+            terminal,
+        )
+        .unwrap();
+        let segment = runmat_analysis_fea::pipeline::transient::run_transient_block(
+            runmat_analysis_fea::pipeline::transient::StructuralTransientRunBlockInput {
+                workload: &transient_workload,
+                solver_mesh: &meshing_output.artifact,
+                request: &request,
+                predecessor: predecessor.as_ref(),
+                modal_state: Some(&basis_state),
+                observation_cursors: Vec::new(),
+            },
+        )
+        .unwrap();
+        predecessor = Some(segment.manifest().terminal_checkpoint.clone());
+        segments.push(segment);
+    }
+    let assembly =
+        runmat_analysis_fea::execution::StructuralTransientResultAssemblyRequest::new(&segments)
+            .unwrap();
+    let transient_result =
+        runmat_analysis_fea::execution::StructuralTransientSolverResult::assemble(
+            &assembly, &segments,
+        )
+        .unwrap();
+    let transient_numerical_receipt =
+        runmat_analysis_fea::execution::StructuralTransientNumericalReceipt::new(
+            &transient_result,
+            &assembly,
+            &segments,
+        )
+        .unwrap();
+    let envelope = analysis_complete_structural_study_intent_op(
+        intent,
+        meshing_output,
+        StructuralStudyNumericalResult::StructuralModalTransient(Box::new(
+            StructuralStudyModalTransientNumericalResult {
+                frozen_project_digest: None,
+                modal_step_id,
+                transient_step_id,
+                modal_result,
+                modal_numerical_receipt,
+                basis_state,
+                transient_result,
+                transient_numerical_receipt,
+            },
+        )),
+        StructuralStudyCompletionIdentity::new("server-run-modal-transient").unwrap(),
+    )
+    .expect("modal-transient result should enter normal study publication");
+
+    assert_eq!(envelope.data.steps.len(), 2);
+    assert!(envelope.data.states.len() >= 4);
+    let modal = storage::load_run_result(&envelope.data.steps[0].run_id)
+        .unwrap()
+        .unwrap();
+    assert!(modal.modal_results.is_some());
+    let transient = storage::load_run_result(&envelope.data.steps[1].run_id)
+        .unwrap()
+        .unwrap();
+    assert!(transient.transient_results.is_some());
+    drop(_runtime_guard);
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
 fn structural_study_intent_completes_a_partitioned_direct_transient_with_state() {
     let _guard = analysis_test_guard();
     storage::reset_artifact_store_for_tests();
@@ -497,6 +815,140 @@ fn sample_direct_transient_study_spec(
         }],
     };
     spec
+}
+
+fn sample_modal_study_spec(geometry_sha256: String) -> AnalysisStudySpec {
+    let mut spec = sample_linear_static_study_spec();
+    spec.geometry.source.sha256 = geometry_sha256;
+    let mut model = analysis_create_model_op(
+        &spec.geometry,
+        spec.create_model_intent.clone(),
+        OperationContext::new(None, None),
+    )
+    .expect("sample structural model should resolve")
+    .data;
+    let mut step = ProcedureStep::structural_modal("step_modal");
+    step.independent_domain =
+        runmat_analysis_core::IndependentDomain::Eigenvalue { requested_count: 1 };
+    model.sequence = AnalysisSequence::from_steps("sequence_modal", vec![step.clone()]);
+    spec.model = Some(model);
+    spec.execution = AnalysisExecutionPlan {
+        steps: vec![AnalysisExecutionStep {
+            step_id: step.step_id,
+            backend: ComputeBackend::Cpu,
+            requirement: FormulationRequirement::Experimental,
+            solver_options: AnalysisSolverOptions::StructuralModes(AnalysisModalRunOptions {
+                truncation: runmat_analysis_fea::ModalTruncationPolicy::requested(1),
+                convergence: runmat_analysis_fea::ModalConvergencePolicy::exploratory(),
+                ..AnalysisModalRunOptions::default()
+            }),
+        }],
+    };
+    spec
+}
+
+fn sample_modal_transient_study_spec(geometry_sha256: String) -> AnalysisStudySpec {
+    let mut spec = sample_linear_static_study_spec();
+    spec.geometry.source.sha256 = geometry_sha256;
+    let mut model = analysis_create_model_op(
+        &spec.geometry,
+        spec.create_model_intent.clone(),
+        OperationContext::new(None, None),
+    )
+    .expect("sample structural model should resolve")
+    .data;
+    let mut modal = ProcedureStep::structural_modal("step_modal");
+    modal.independent_domain =
+        runmat_analysis_core::IndependentDomain::Eigenvalue { requested_count: 1 };
+    let mut transient = ProcedureStep::structural_modal_transient(
+        "step_modal_transient",
+        modal.step_id.as_str(),
+        "modal_basis",
+    );
+    transient.independent_domain = runmat_analysis_core::IndependentDomain::TimeSeconds {
+        origin: 0.0,
+        start: 0.0,
+        end: 0.1,
+    };
+    let mut sequence = AnalysisSequence::from_steps(
+        "sequence_modal_transient",
+        vec![modal.clone(), transient.clone()],
+    );
+    sequence.dependencies[0].reason = runmat_analysis_core::SequenceDependencyReason::StateTransfer;
+    sequence
+        .transitions
+        .push(runmat_analysis_core::StateTransition {
+            transition_id: runmat_analysis_core::TransitionId("modal_to_transient".into()),
+            producer_step: modal.step_id.clone(),
+            consumer_step: transient.step_id.clone(),
+            state_id: runmat_analysis_core::StateId("modal_basis".into()),
+            method: runmat_analysis_core::StateTransitionMethod::Reuse,
+            topology: runmat_analysis_core::TopologyTransitionPolicy::RequireIdentical,
+            reference: runmat_analysis_core::ReferenceStatePolicy::Preserve,
+        });
+    model.sequence = sequence;
+    spec.model = Some(model);
+    spec.execution = AnalysisExecutionPlan {
+        steps: vec![
+            AnalysisExecutionStep {
+                step_id: modal.step_id,
+                backend: ComputeBackend::Cpu,
+                requirement: FormulationRequirement::Experimental,
+                solver_options: AnalysisSolverOptions::StructuralModes(AnalysisModalRunOptions {
+                    truncation: runmat_analysis_fea::ModalTruncationPolicy::requested(1),
+                    convergence: runmat_analysis_fea::ModalConvergencePolicy::exploratory(),
+                    ..AnalysisModalRunOptions::default()
+                }),
+            },
+            AnalysisExecutionStep {
+                step_id: transient.step_id,
+                backend: ComputeBackend::Cpu,
+                requirement: FormulationRequirement::Experimental,
+                solver_options: AnalysisSolverOptions::StructuralTransient(
+                    AnalysisTransientRunOptions {
+                        time_step_policy: AnalysisStructuralTimeStepPolicy::Fixed {
+                            interval_count: 4,
+                        },
+                        maximum_intervals_per_block: 2,
+                        ..AnalysisTransientRunOptions::solid_recommended()
+                    },
+                ),
+            },
+        ],
+    };
+    spec
+}
+
+fn modal_test_workload_identity(
+    workload: &runmat_analysis_fea::execution::StructuralModalWorkload,
+    mesh: &runmat_meshing_core::SolverMeshArtifact,
+) -> runmat_analysis_fea::execution::AnalysisWorkloadIdentity {
+    use runmat_analysis_fea::execution::{
+        AnalysisWorkKind, AnalysisWorkloadIdentity, ConstraintPlanIdentity, DiscretizationIdentity,
+        ExecutionPlanIdentity, NumericalPlanIdentity, OperatorIdentity, ProblemIdentity,
+        SequenceIdentity, StepIdentity, StudyIdentity,
+    };
+    let digest = runmat_execution::Digest::sha256(b"runtime-modal-completion-test");
+    let study = StudyIdentity::from_authored_digest(digest, None).unwrap();
+    let sequence = SequenceIdentity::from_solver_contract(&workload.model().sequence).unwrap();
+    let step =
+        StepIdentity::from_solver_contract(sequence, workload.procedure_step().unwrap()).unwrap();
+    let constraints = ConstraintPlanIdentity::new(step, digest, digest).unwrap();
+    let problem = ProblemIdentity::new(step, digest, None, constraints, Vec::new()).unwrap();
+    let mesh_digest = runmat_execution::Digest::from_bytes(*mesh.canonical_digest.bytes());
+    let discretization = DiscretizationIdentity::new(problem, mesh_digest, digest).unwrap();
+    let operator = OperatorIdentity::new(discretization, digest).unwrap();
+    let numerical = NumericalPlanIdentity::new(operator, digest).unwrap();
+    let execution = ExecutionPlanIdentity::new(numerical, digest).unwrap();
+    AnalysisWorkloadIdentity::new(
+        study,
+        step,
+        execution,
+        AnalysisWorkKind::ExtractStructuralModes,
+        digest,
+        vec![workload.identity().digest(), mesh_digest],
+    )
+    .unwrap()
 }
 
 fn ready_minimal_meshing_output() -> crate::meshing::MeshingExecutionOutput {

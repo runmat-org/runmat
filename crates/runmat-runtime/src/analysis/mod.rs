@@ -166,8 +166,31 @@ pub struct StructuralStudyTransientNumericalResult {
 }
 
 #[derive(Debug, Clone)]
+pub struct StructuralStudyModalNumericalResult {
+    pub frozen_project_digest: Option<runmat_execution::Digest>,
+    pub step_id: ProcedureStepId,
+    pub result: runmat_analysis_fea::execution::StructuralModalSolverResult,
+    pub numerical_receipt: runmat_analysis_fea::execution::StructuralModalNumericalReceipt,
+}
+
+#[derive(Debug, Clone)]
+pub struct StructuralStudyModalTransientNumericalResult {
+    pub frozen_project_digest: Option<runmat_execution::Digest>,
+    pub modal_step_id: ProcedureStepId,
+    pub transient_step_id: ProcedureStepId,
+    pub modal_result: runmat_analysis_fea::execution::StructuralModalSolverResult,
+    pub modal_numerical_receipt: runmat_analysis_fea::execution::StructuralModalNumericalReceipt,
+    pub basis_state: runmat_analysis_fea::execution::CanonicalSemanticState,
+    pub transient_result: runmat_analysis_fea::execution::StructuralTransientSolverResult,
+    pub transient_numerical_receipt:
+        runmat_analysis_fea::execution::StructuralTransientNumericalReceipt,
+}
+
+#[derive(Debug, Clone)]
 pub enum StructuralStudyNumericalResult {
     LinearSequence(StructuralStudySequenceNumericalResult),
+    StructuralModal(Box<StructuralStudyModalNumericalResult>),
+    StructuralModalTransient(Box<StructuralStudyModalTransientNumericalResult>),
     StructuralTransient(Box<StructuralStudyTransientNumericalResult>),
     StructuralFrequency(Box<StructuralStudyFrequencyNumericalResult>),
 }
@@ -1126,6 +1149,90 @@ pub fn analysis_prepare_structural_study_op(
     })?;
 
     if let [step] = study.steps.as_slice() {
+        if let AnalysisSolverOptions::StructuralModes(mut options) =
+            step.authored_execution.solver_options.clone()
+        {
+            options.solver_mesh_artifact_path = None;
+            let workload =
+                structural_study::prepare_structural_modal_workload(&study, step, &options)?;
+            return Ok(PreparedStructuralStudy {
+                study,
+                execution: structural_study::PreparedStructuralStudyExecution::StructuralModal {
+                    workload: Box::new(workload),
+                },
+                solver_mesh,
+            });
+        }
+    }
+
+    if let [modal_step, transient_step] = study.steps.as_slice() {
+        if let (
+            AnalysisSolverOptions::StructuralModes(mut modal_options),
+            AnalysisSolverOptions::StructuralTransient(mut transient_options),
+        ) = (
+            modal_step.authored_execution.solver_options.clone(),
+            transient_step.authored_execution.solver_options.clone(),
+        ) {
+            modal_options.solver_mesh_artifact_path = None;
+            transient_options.solver_mesh_artifact_path = None;
+            let modal = structural_study::prepare_structural_modal_workload(
+                &study,
+                modal_step,
+                &modal_options,
+            )?;
+            let transient = structural_study::prepare_structural_modal_transient_template(
+                &study,
+                transient_step,
+                &transient_options,
+            )?;
+            let workloads = BTreeMap::from([
+                (
+                    modal_step.procedure_step.step_id.clone(),
+                    runmat_analysis_fea::execution::StructuralStepWorkload::ModalExtraction {
+                        workload: Box::new(modal),
+                    },
+                ),
+                (
+                    transient_step.procedure_step.step_id.clone(),
+                    runmat_analysis_fea::execution::StructuralStepWorkload::ModalTransient {
+                        template: Box::new(transient),
+                        block_plan:
+                            runmat_analysis_fea::execution::StructuralTransientBlockPlan::new(
+                                transient_options.maximum_intervals_per_block,
+                            )
+                            .map_err(|error| {
+                                operation_error(
+                                    ANALYSIS_RUN_STUDY_OPERATION,
+                                    ANALYSIS_RUN_STUDY_OP_VERSION,
+                                    &study.context,
+                                    OperationErrorSpec {
+                                        error_code: "RM.FEA.RUN_STUDY.INVALID_PORTABLE_INTENT",
+                                        error_type: OperationErrorType::Contract,
+                                        retryable: false,
+                                        severity: OperationErrorSeverity::Fatal,
+                                    },
+                                    error.to_string(),
+                                    BTreeMap::from([(
+                                        "study_id".to_string(),
+                                        study.spec.study_id.clone(),
+                                    )]),
+                                )
+                            })?,
+                    },
+                ),
+            ]);
+            return Ok(PreparedStructuralStudy {
+                study,
+                execution:
+                    structural_study::PreparedStructuralStudyExecution::StructuralModalTransient {
+                        workloads,
+                    },
+                solver_mesh,
+            });
+        }
+    }
+
+    if let [step] = study.steps.as_slice() {
         if let AnalysisSolverOptions::StructuralFrequency(mut options) =
             step.authored_execution.solver_options.clone()
         {
@@ -1235,6 +1342,53 @@ pub fn analysis_complete_structural_study_op(
                 "linear structural-study completion received a direct-transient result",
             ))
         }
+        Ok(StructuralStudyNumericalResult::StructuralModal(result)) => {
+            let workload = match &prepared.execution {
+                structural_study::PreparedStructuralStudyExecution::StructuralModal {
+                    workload,
+                } => workload.as_ref().clone(),
+                _ => {
+                    return Err(structural_study_completion_failure(
+                        &prepared,
+                        "RM.FEA.RUN_STUDY.RESULT_KIND_MISMATCH",
+                        OperationErrorType::Contract,
+                        OperationErrorSeverity::Fatal,
+                        "structural modal result differs from the prepared study kind",
+                    ));
+                }
+            };
+            return structural_study::complete_modal_study(
+                study_completion_from_prepared(prepared.study),
+                prepared.solver_mesh,
+                workload,
+                *result,
+                storage::next_run_id(),
+            );
+        }
+        Ok(StructuralStudyNumericalResult::StructuralModalTransient(result)) => {
+            let workloads = match &prepared.execution {
+                structural_study::PreparedStructuralStudyExecution::StructuralModalTransient {
+                    workloads,
+                } => workloads.clone(),
+                _ => {
+                    return Err(structural_study_completion_failure(
+                        &prepared,
+                        "RM.FEA.RUN_STUDY.RESULT_KIND_MISMATCH",
+                        OperationErrorType::Contract,
+                        OperationErrorSeverity::Fatal,
+                        "modal-transient result differs from the prepared study kind",
+                    ));
+                }
+            };
+            return structural_study::complete_modal_transient_study(
+                study_completion_from_prepared(prepared.study),
+                prepared.solver_mesh,
+                workloads,
+                *result,
+                storage::next_run_id(),
+                storage::next_run_id(),
+            );
+        }
         Ok(StructuralStudyNumericalResult::StructuralFrequency(result)) => {
             let workload = match &prepared.execution {
                 structural_study::PreparedStructuralStudyExecution::StructuralFrequency {
@@ -1247,6 +1401,18 @@ pub fn analysis_complete_structural_study_op(
                         OperationErrorType::Contract,
                         OperationErrorSeverity::Fatal,
                         "linear structural-study completion received a structural-frequency result",
+                    ));
+                }
+                structural_study::PreparedStructuralStudyExecution::StructuralModal { .. }
+                | structural_study::PreparedStructuralStudyExecution::StructuralModalTransient {
+                    ..
+                } => {
+                    return Err(structural_study_completion_failure(
+                        &prepared,
+                        "RM.FEA.RUN_STUDY.RESULT_KIND_MISMATCH",
+                        OperationErrorType::Contract,
+                        OperationErrorSeverity::Fatal,
+                        "modal structural-study completion received a structural-frequency result",
                     ));
                 }
             };
@@ -2084,6 +2250,17 @@ pub fn analysis_run_modal_with_options_op(
     )
     .map_err(|err| map_fea_run_error(AnalysisOperation::Modal, model, &context, err))?;
 
+    analysis_admit_modal_run_with_id(modal_run, backend, options, context, solver_mesh, None)
+}
+
+fn analysis_admit_modal_run_with_id(
+    modal_run: runmat_analysis_fea::FeaModalRunResult,
+    backend: ComputeBackend,
+    options: AnalysisModalRunOptions,
+    context: OperationContext,
+    solver_mesh: Option<SolverMeshArtifact>,
+    assigned_run_id: Option<&str>,
+) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
     let basis = modal_run.basis;
     let run = modal_run.run;
     let mode_shapes = modal_run.mode_shapes;
@@ -2193,7 +2370,9 @@ pub fn analysis_run_modal_with_options_op(
     let selected_preconditioner = run.preconditioner;
 
     let result = AnalysisRunResult {
-        run_id: storage::next_run_id(),
+        run_id: assigned_run_id
+            .map(str::to_string)
+            .unwrap_or_else(storage::next_run_id),
         run,
         render_topology: render_topology_from_solver_mesh(solver_mesh.as_ref()),
         modal_results: Some(ModalResultsData {
@@ -2229,46 +2408,6 @@ pub fn analysis_run_modal_with_options_op(
             fallback_events,
         },
     };
-
-    if let Some(nonlinear) = result.nonlinear_results.as_ref() {
-        let event = format!(
-            "fea.run_nonlinear outcome run_id={} model_id={} backend={:?} run_status={:?} numerically_acceptable={} production_publishable={} failed_increments={} max_iteration_count={} line_search_backtracks={} tangent_rebuild_count={} max_residual_norm={} max_increment_norm={} max_backtracks_per_increment={} quality_reason_count={}",
-            result.run_id,
-            model.model_id.0,
-            backend,
-            result.run_status,
-            result.numerically_acceptable,
-            result.production_publishable,
-            nonlinear.failed_increments,
-            nonlinear
-                .iteration_counts
-                .iter()
-                .copied()
-                .max()
-                .unwrap_or(0),
-            nonlinear.line_search_backtracks,
-            nonlinear.tangent_rebuild_count,
-            nonlinear
-                .residual_norms
-                .iter()
-                .copied()
-                .reduce(f64::max)
-                .unwrap_or(0.0),
-            nonlinear
-                .increment_norms
-                .iter()
-                .copied()
-                .reduce(f64::max)
-                .unwrap_or(0.0),
-            nonlinear.max_line_search_backtracks_per_increment,
-            result.quality_reasons.len()
-        );
-        if matches!(result.run_status, RunStatus::Degraded | RunStatus::Rejected) {
-            tracing::warn!(target: "runmat_analysis", "{event}");
-        } else {
-            tracing::info!(target: "runmat_analysis", "{event}");
-        }
-    }
 
     persist_fea_run_result_with_progress(
         AnalysisOperation::Modal.name(),

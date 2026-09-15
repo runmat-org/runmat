@@ -1,4 +1,4 @@
-use super::{ModalCandidate, BOUNDARY_PROBE_STABILITY_COUNT};
+use super::{ModalCandidate, MODAL_BOUNDARY_PROBE_WIDTH};
 
 pub(super) struct ResolvedTruncationBoundary {
     pub(super) retained: Vec<ModalCandidate>,
@@ -31,7 +31,7 @@ pub(super) fn resolve_truncation_boundary(
         retained_count += 1;
     }
     let probe_count = ordered.len() - retained_count;
-    if !exhausted && probe_count < BOUNDARY_PROBE_STABILITY_COUNT {
+    if !exhausted && probe_count < MODAL_BOUNDARY_PROBE_WIDTH {
         return None;
     }
     let probe_frequency_hz = ordered.get(retained_count).map(|candidate| candidate.0);

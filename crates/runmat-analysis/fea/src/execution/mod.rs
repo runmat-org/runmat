@@ -16,6 +16,8 @@ mod frequency_sample;
 mod frequency_scope;
 mod frequency_workload;
 mod identity;
+mod modal_result;
+mod modal_workload;
 mod object;
 mod observation;
 mod observation_assembly;
@@ -34,6 +36,7 @@ mod transient_coordinates;
 mod transient_result;
 mod transient_schedule;
 mod transient_segment;
+mod transient_template;
 mod transient_workload;
 
 pub use accuracy::AccuracyEvaluationRequest;
@@ -85,7 +88,7 @@ pub use identity::{
     StructuralFrequencyPhysicalSampleIdentity, StructuralFrequencyProblemIdentity,
     StructuralFrequencyPublicationIdentity, StructuralFrequencyResultAssemblyRequestIdentity,
     StructuralFrequencyScopeIdentity, StructuralFrequencyWorkloadIdentity,
-    StructuralKinematicsIdentity, StructuralMassOperatorIdentity,
+    StructuralKinematicsIdentity, StructuralMassOperatorIdentity, StructuralModalWorkloadIdentity,
     StructuralStiffnessOperatorIdentity, StructuralTransientBlockRequestIdentity,
     StructuralTransientCheckpointIdentity, StructuralTransientCheckpointScopeIdentity,
     StructuralTransientPhysicalSampleIdentity, StructuralTransientResultAssemblyRequestIdentity,
@@ -93,6 +96,8 @@ pub use identity::{
     StructuralTransientSegmentSampleIdentity, StructuralTransientSolverOptionsIdentity,
     StudyIdentity, SweepIdentity, SweepResultIdentity,
 };
+pub use modal_result::{StructuralModalNumericalReceipt, StructuralModalSolverResult};
+pub use modal_workload::{StructuralModalWorkload, StructuralModalWorkloadInput};
 pub use object::{
     chunk_numerical_payload, chunk_partitioned_numerical_payload, AnalysisChunkDescriptor,
     AnalysisNumericalObjectKind, AnalysisObjectManifest, AnalysisPayloadPartition,
@@ -118,8 +123,11 @@ pub use solve::{
 pub use state::{
     CanonicalSemanticState, CanonicalSemanticStateInput, CanonicalSemanticStatePayload,
     CanonicalStateTransition, CanonicalStateTransitionInput, SemanticStatePublicationRequest,
+    SemanticStatePublicationSource,
 };
-pub use study_workloads::{StructuralStudyWorkloads, StructuralTransientBlockPlan};
+pub use study_workloads::{
+    StructuralStepWorkload, StructuralStudyWorkloads, StructuralTransientBlockPlan,
+};
 pub use sweep::{
     ComposedSweepResult, SweepCompositionPolicy, SweepDefinition, SweepEntryDisposition,
     SweepEntryOutcome,
@@ -150,6 +158,7 @@ pub use transient_segment::{
     StructuralTransientSegmentManifest, StructuralTransientSegmentSample,
     StructuralTransientSegmentSampleInput,
 };
+pub use transient_template::StructuralModalTransientTemplate;
 pub(crate) use transient_workload::StructuralTransientCheckpointScopeInput;
 pub use transient_workload::{StructuralTransientSolverPlan, StructuralTransientWorkload};
 

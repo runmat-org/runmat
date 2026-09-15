@@ -44,6 +44,7 @@ pub enum AnalysisNumericalObjectKind {
     StructuralFrequencyEntryRequest,
     StructuralFrequencyEntryResult,
     StructuralFrequencyResultAssemblyRequest,
+    StructuralModalWorkload,
     Field,
     FieldSelection,
     FieldPartition,

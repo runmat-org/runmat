@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use runmat_analysis_execution::{AnalysisHostWorkload, PreparedAnalysisProgram};
 use runmat_analysis_fea::execution::AnalysisTaskIdentity;
 use runmat_analysis_fea::planning::resource::FeaResourcePlan;
-use runmat_execution::resource::ResourceRequest;
+use runmat_execution::resource::{Capability, ResourceRequest};
 use runmat_execution::task::RetryPolicy;
 use runmat_execution::{CancellationReason, Digest, ExecutionScopeId, PoolId, TaskId};
 use runmat_execution_artifact::cache::{CacheImport, FilesystemObjectStore};
@@ -16,7 +16,35 @@ use runmat_execution_artifact::{
 use runmat_execution_runner::{AttemptSuccess, TaskSubmission};
 
 use crate::analysis_task::{prepare_analysis_task, AnalysisTaskPolicy};
-use crate::{NativeExecutionError, NativeExecutionResult, NativeProgramSession, RemotePoolDriver};
+use crate::{
+    NativeExecutionConfig, NativeExecutionError, NativeExecutionResult, NativeProgramSession,
+    RemotePoolDriver,
+};
+
+pub(crate) fn configure_local_analysis(
+    config: &mut NativeExecutionConfig,
+    resources: &ResourceRequest,
+) {
+    config.worker_accelerators = resources.accelerators.clone();
+    config.worker_capabilities.extend(
+        resources
+            .accelerators
+            .iter()
+            .map(|accelerator| Capability::Accelerator(accelerator.class.clone())),
+    );
+    config
+        .worker_capabilities
+        .extend(resources.required_capabilities.iter().cloned());
+    config
+        .worker_capabilities
+        .insert(Capability::ProcessIsolation);
+    config
+        .worker_capabilities
+        .insert(Capability::Custom(format!(
+            "runmat.analysis.host:{}",
+            runmat_analysis_execution::ANALYSIS_HOST_ABI
+        )));
+}
 
 /// Placement-neutral pool used by FEA task-graph coordinators.
 ///
@@ -31,6 +59,10 @@ pub(crate) trait AnalysisTaskPool: CacheImport {
         &mut self,
         objects: &runmat_analysis_execution::PreparedAnalysisObjects,
         access: &ArtifactAccess,
+    ) -> NativeExecutionResult<()>;
+    fn register_recovery_object(
+        &mut self,
+        object: &runmat_execution_artifact::ProgramExecutionObject,
     ) -> NativeExecutionResult<()>;
     async fn execute_batch(
         &mut self,
@@ -183,6 +215,27 @@ impl AnalysisTaskPool for LocalAnalysisTaskPool {
         Ok(())
     }
 
+    fn register_recovery_object(
+        &mut self,
+        object: &runmat_execution_artifact::ProgramExecutionObject,
+    ) -> NativeExecutionResult<()> {
+        object.validate().map_err(protocol)?;
+        let logical = runmat_execution_artifact::LogicalObject::new(
+            runmat_execution_artifact::ObjectNamespace::Checkpoint,
+            "analysis-recovery-object",
+            object.reference.media_type.clone(),
+            object.bytes.clone(),
+        )
+        .map_err(protocol)?;
+        if logical.descriptor.digest != object.reference.logical_digest {
+            return Err(protocol(
+                "analysis recovery object bytes differ from their portable reference",
+            ));
+        }
+        runmat_execution_artifact::cache::CacheExport::write_verified(&mut self.store, &logical)
+            .map_err(protocol)
+    }
+
     async fn execute_batch(
         &mut self,
         tasks: Vec<(ProgramExecutionRequest, TaskSubmission)>,
@@ -292,14 +345,6 @@ impl RemoteAnalysisTaskPool {
     pub(crate) fn new(pool: Arc<RemotePoolDriver>) -> Self {
         Self { pool }
     }
-
-    pub(crate) fn register_execution_object(
-        &self,
-        reference: runmat_execution::value::ValueRef,
-        bytes: impl Into<Arc<[u8]>>,
-    ) -> NativeExecutionResult<()> {
-        self.pool.register_execution_object(reference, bytes)
-    }
 }
 
 impl CacheImport for RemoteAnalysisTaskPool {
@@ -339,6 +384,14 @@ impl AnalysisTaskPool for RemoteAnalysisTaskPool {
                 .register_execution_object(reference, object.bytes.clone())?;
         }
         Ok(())
+    }
+
+    fn register_recovery_object(
+        &mut self,
+        object: &runmat_execution_artifact::ProgramExecutionObject,
+    ) -> NativeExecutionResult<()> {
+        self.pool
+            .register_execution_object(object.reference.clone(), object.bytes.clone())
     }
 
     async fn execute_batch(

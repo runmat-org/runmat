@@ -5,22 +5,25 @@ use runmat_analysis_core::{
     StructuralConstraint, StructuralConstraintKind, TopologyTransitionPolicy, TransitionId,
 };
 use runmat_analysis_execution::{
-    execute_serial_analysis, import_structural_transient_block, import_structural_transient_result,
-    prepare_analysis_objects, prepare_structural_transient_block_request_objects,
-    prepare_structural_transient_block_task, prepare_structural_transient_checkpoint_objects,
-    prepare_structural_transient_result_task, prepare_structural_transient_sequence,
-    prepare_structural_transient_workload_objects, AnalysisHostResponse,
-    PreparedStructuralTransientBlockTask, PreparedStructuralTransientResultTask,
-    StructuralTransientBlockPreparation, StructuralTransientResultPreparation,
-    StructuralTransientSequenceCoordinator, StructuralTransientSequencePreparation,
-    StructuralTransientSequencePreparationInput,
+    bind_upstream_state_transition, execute_serial_analysis, import_structural_transient_block,
+    import_structural_transient_result, prepare_analysis_objects,
+    prepare_structural_transient_block_request_objects, prepare_structural_transient_block_task,
+    prepare_structural_transient_checkpoint_objects, prepare_structural_transient_result_task,
+    prepare_structural_transient_sequence, prepare_structural_transient_workload_objects,
+    AnalysisHostResponse, PreparedStructuralTransientBlockTask,
+    PreparedStructuralTransientResultTask, StructuralModalTransientStudyCoordinator,
+    StructuralModalTransientStudyPreparation, StructuralTransientBlockPreparation,
+    StructuralTransientResultPreparation, StructuralTransientSequenceCoordinator,
+    StructuralTransientSequencePreparation, StructuralTransientSequencePreparationInput,
 };
 use runmat_analysis_fea::{
     execution::{
         AnalysisNumericalObjectKind, CanonicalSemanticState, CanonicalSemanticStateInput,
         CanonicalSemanticStatePayload, SequenceIdentity, SolverResultIdentity, StepIdentity,
-        StructuralTransientBlockPlan, StructuralTransientBlockRequest,
-        StructuralTransientSolverPlan, StructuralTransientWorkload,
+        StructuralModalTransientTemplate, StructuralModalWorkload, StructuralModalWorkloadInput,
+        StructuralStepWorkload, StructuralStudyWorkloads, StructuralTransientBlockPlan,
+        StructuralTransientBlockRequest, StructuralTransientSolverPlan,
+        StructuralTransientWorkload,
     },
     fixtures::{fixture_model, FixtureId},
     solve::transient::StructuralTimeStepPolicy,
@@ -103,30 +106,7 @@ fn modal_transient_fixture() -> (
     runmat_meshing_core::SolverMeshArtifact,
     CanonicalSemanticState,
 ) {
-    let (mut model, mesh) = transient_fixture();
-    let modal_step = ProcedureStep::structural_modal("modes");
-    let mut transient_step =
-        ProcedureStep::structural_modal_transient("response", "modes", "modal_basis");
-    transient_step.independent_domain = IndependentDomain::TimeSeconds {
-        origin: 0.0,
-        start: 0.0,
-        end: 1.0,
-    };
-    model.sequence.steps = vec![modal_step, transient_step];
-    model.sequence.dependencies = vec![SequenceDependency {
-        predecessor: ProcedureStepId("modes".into()),
-        successor: ProcedureStepId("response".into()),
-        reason: SequenceDependencyReason::StateTransfer,
-    }];
-    model.sequence.transitions = vec![StateTransition {
-        transition_id: TransitionId("modal-basis-to-transient".into()),
-        producer_step: ProcedureStepId("modes".into()),
-        consumer_step: ProcedureStepId("response".into()),
-        state_id: StateId("modal_basis".into()),
-        method: StateTransitionMethod::Reuse,
-        topology: TopologyTransitionPolicy::RequireIdentical,
-        reference: ReferenceStatePolicy::Preserve,
-    }];
+    let (model, mesh) = authored_modal_transient_fixture();
     let modal = runmat_analysis_fea::run_modal_with_options(
         &model,
         ComputeBackend::Cpu,
@@ -152,6 +132,14 @@ fn modal_transient_fixture() -> (
         },
     })
     .unwrap();
+    let basis_transition = bind_upstream_state_transition(
+        &model,
+        &ProcedureStepId("response".into()),
+        &state,
+        runmat_analysis_core::StateUse::ModalBasis,
+        Digest::from_bytes(*mesh.canonical_digest.bytes()),
+    )
+    .unwrap();
     let workload = StructuralTransientWorkload {
         schema_version: 1,
         model,
@@ -159,12 +147,44 @@ fn modal_transient_fixture() -> (
         backend: ComputeBackend::Cpu,
         formulation_requirement: FormulationRequirement::Experimental,
         solver: StructuralTransientSolverPlan::ModalReduced {
-            basis_state: state.identity,
+            basis_transition: Box::new(basis_transition),
         },
         time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 4 },
         residual_target: 1.0e-8,
     };
     (workload, mesh, state)
+}
+
+fn authored_modal_transient_fixture() -> (
+    runmat_analysis_core::AnalysisModel,
+    runmat_meshing_core::SolverMeshArtifact,
+) {
+    let (mut model, mesh) = transient_fixture();
+    let mut modal_step = ProcedureStep::structural_modal("modes");
+    modal_step.independent_domain = IndependentDomain::Eigenvalue { requested_count: 3 };
+    let mut transient_step =
+        ProcedureStep::structural_modal_transient("response", "modes", "modal_basis");
+    transient_step.independent_domain = IndependentDomain::TimeSeconds {
+        origin: 0.0,
+        start: 0.0,
+        end: 1.0,
+    };
+    model.sequence.steps = vec![modal_step, transient_step];
+    model.sequence.dependencies = vec![SequenceDependency {
+        predecessor: ProcedureStepId("modes".into()),
+        successor: ProcedureStepId("response".into()),
+        reason: SequenceDependencyReason::StateTransfer,
+    }];
+    model.sequence.transitions = vec![StateTransition {
+        transition_id: TransitionId("modal-basis-to-transient".into()),
+        producer_step: ProcedureStepId("modes".into()),
+        consumer_step: ProcedureStepId("response".into()),
+        state_id: StateId("modal_basis".into()),
+        method: StateTransitionMethod::Reuse,
+        topology: TopologyTransitionPolicy::RequireIdentical,
+        reference: ReferenceStatePolicy::Preserve,
+    }];
+    (model, mesh)
 }
 
 fn execute_durable_block(
@@ -466,6 +486,7 @@ fn transient_sequence_coordinator_admits_each_exact_transition_before_assembly()
         modal_state: None,
         scope,
         terminal_schedule_ordinals: vec![2, 4],
+        initial_dependencies: Vec::new(),
         artifact_access: access(),
         program_revision: revision(),
         chunk_bytes: 256,
@@ -601,6 +622,7 @@ fn modal_transient_sequence_transports_one_basis_and_restarts_exact_reduced_stat
             mesh: &mesh,
             modal_state: Some(&modal_state),
             block_plan: StructuralTransientBlockPlan::new(2).unwrap(),
+            initial_dependencies: Vec::new(),
             artifact_access: access(),
             program_revision: revision(),
             chunk_bytes: 256,
@@ -697,3 +719,138 @@ fn modal_transient_sequence_transports_one_basis_and_restarts_exact_reduced_stat
     missing_state.modal_state = None;
     assert!(StructuralTransientSequenceCoordinator::new(missing_state).is_err());
 }
+
+#[test]
+fn authored_modal_transient_study_publishes_and_binds_the_produced_basis() {
+    let (model, mesh) = authored_modal_transient_fixture();
+    let modal = StructuralModalWorkload::new(StructuralModalWorkloadInput {
+        model: model.clone(),
+        step_id: ProcedureStepId("modes".into()),
+        backend: ComputeBackend::Cpu,
+        formulation_requirement: FormulationRequirement::Experimental,
+        observation_execution:
+            runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
+        truncation: ModalTruncationPolicy::requested(3),
+        convergence: runmat_analysis_fea::ModalConvergencePolicy::exploratory(),
+    })
+    .unwrap();
+    let template = StructuralModalTransientTemplate {
+        schema_version: 1,
+        model,
+        step_id: ProcedureStepId("response".into()),
+        backend: ComputeBackend::Cpu,
+        formulation_requirement: FormulationRequirement::Experimental,
+        time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 4 },
+        residual_target: 1.0e-8,
+    };
+    let workloads = StructuralStudyWorkloads::HeterogeneousSequence {
+        workloads: BTreeMap::from([
+            (
+                ProcedureStepId("modes".into()),
+                StructuralStepWorkload::ModalExtraction {
+                    workload: Box::new(modal),
+                },
+            ),
+            (
+                ProcedureStepId("response".into()),
+                StructuralStepWorkload::ModalTransient {
+                    template: Box::new(template),
+                    block_plan: StructuralTransientBlockPlan::new(2).unwrap(),
+                },
+            ),
+        ]),
+    };
+    let limits = ObjectInventoryLimits::default();
+    let mut coordinator =
+        StructuralModalTransientStudyCoordinator::new(StructuralModalTransientStudyPreparation {
+            authored_study_digest: digest("authored-modal-transient"),
+            frozen_project_digest: None,
+            workloads,
+            mesh,
+            artifact_access: access(),
+            program_revision: revision(),
+            chunk_bytes: 256,
+            inventory_limits: limits,
+            required_capabilities: BTreeSet::new(),
+            accelerator_requests: Vec::new(),
+        })
+        .unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let mut store = runmat_execution_artifact::cache::FilesystemObjectStore::open(
+        directory.path().join("objects"),
+        limits.max_object_bytes,
+    )
+    .unwrap();
+
+    let modal = coordinator.prepare_modal().unwrap();
+    modal.program.write_to(&mut store).unwrap();
+    let completed = execute_serial_analysis(
+        &modal.program.request,
+        &mut store,
+        &NativeAnalysisKernel,
+        256,
+        limits,
+    )
+    .unwrap();
+    let response = AnalysisHostResponse::completed(&modal.host, &completed)
+        .unwrap()
+        .program_response();
+    coordinator
+        .complete_modal(&store, response, &modal)
+        .unwrap();
+    let modal_task = coordinator.modal_task_identity().unwrap();
+
+    let state = coordinator.prepare_state().unwrap();
+    state.program.write_to(&mut store).unwrap();
+    let completed = execute_serial_analysis(
+        &state.program.request,
+        &mut store,
+        &NativeAnalysisKernel,
+        256,
+        limits,
+    )
+    .unwrap();
+    let response = AnalysisHostResponse::completed(&state.host, &completed)
+        .unwrap()
+        .program_response();
+    coordinator
+        .complete_state(&store, response, &state)
+        .unwrap();
+    let state_task = coordinator.state_task_identity().unwrap();
+    assert_eq!(
+        state_task,
+        runmat_analysis_fea::execution::AnalysisTaskIdentity::new(
+            state.host.workload.identity,
+            vec![modal_task]
+        )
+        .unwrap()
+    );
+
+    let preparation = coordinator.prepare_transient().unwrap();
+    assert_eq!(preparation.initial_dependencies, vec![state_task]);
+    let published = coordinator.semantic_state().unwrap();
+    let workload = runmat_analysis_execution::decode_prepared_structural_transient_workload(
+        &preparation.workload,
+    )
+    .unwrap();
+    assert!(matches!(
+        workload.solver,
+        StructuralTransientSolverPlan::ModalReduced { basis_transition }
+            if basis_transition.source_state == published.state.identity
+    ));
+
+    let mut transient = StructuralTransientSequenceCoordinator::new(preparation).unwrap();
+    let first = transient.prepare_next_block().unwrap();
+    let response = execute_durable_block(&mut store, &first);
+    let expected_first_task = runmat_analysis_fea::execution::AnalysisTaskIdentity::new(
+        first.host.workload.identity,
+        vec![state_task],
+    )
+    .unwrap();
+    transient.complete_block(&store, response, &first).unwrap();
+    assert_eq!(
+        transient.completed_block_task_identities(),
+        &[expected_first_task]
+    );
+}
+use std::collections::{BTreeMap, BTreeSet};

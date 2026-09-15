@@ -21,7 +21,11 @@ pub use lifecycle::{
     analysis_complete_structural_study_intent_op, analysis_prepare_structural_study_intent_op,
     structural_study_execution_failure,
 };
-pub(super) use lifecycle::{complete_frequency_study, prepare_structural_frequency_workload};
+pub(super) use lifecycle::{
+    complete_frequency_study, complete_modal_study, complete_modal_transient_study,
+    prepare_structural_frequency_workload, prepare_structural_modal_transient_template,
+    prepare_structural_modal_workload,
+};
 pub(super) use publication::{
     complete_study_run, persist_content_addressed_study_evidence, study_completion_from_prepared,
     study_evidence_root, CompletedStudyStep, CompletedStudyStepRun,
@@ -107,6 +111,13 @@ pub(super) enum PreparedStructuralStudyExecution {
     },
     StructuralFrequency {
         workload: Box<runmat_analysis_fea::execution::StructuralFrequencyWorkload>,
+    },
+    StructuralModal {
+        workload: Box<runmat_analysis_fea::execution::StructuralModalWorkload>,
+    },
+    StructuralModalTransient {
+        workloads:
+            BTreeMap<ProcedureStepId, runmat_analysis_fea::execution::StructuralStepWorkload>,
     },
 }
 
@@ -327,6 +338,58 @@ impl PreparedStructuralStudyIntent {
 
     fn validate_workload_alignment(&self) -> Result<(), String> {
         match &self.workloads {
+            StructuralStudyWorkloads::HeterogeneousSequence { workloads } => {
+                if workloads.len() != self.steps.len() {
+                    return Err(
+                        "heterogeneous structural workloads do not cover the prepared intent steps"
+                            .into(),
+                    );
+                }
+                for step in &self.steps {
+                    let workload =
+                        workloads.get(&step.procedure_step.step_id).ok_or_else(|| {
+                            "heterogeneous structural workload is missing its step".to_string()
+                        })?;
+                    match (workload, &step.authored_execution.solver_options) {
+                        (
+                            runmat_analysis_fea::execution::StructuralStepWorkload::ModalExtraction {
+                                workload,
+                            },
+                            super::AnalysisSolverOptions::StructuralModes(options),
+                        ) if workload.step_id() == &step.procedure_step.step_id
+                            && workload.backend() == step.authored_execution.backend
+                            && workload.formulation_requirement()
+                                == step.authored_execution.requirement
+                            && workload.observation_execution()
+                                == ObservationExecutionPolicy::scalable()
+                            && workload.truncation() == options.truncation
+                            && workload.convergence() == options.convergence
+                            && options.solver_mesh_artifact_path.is_none() => {}
+                        (
+                            runmat_analysis_fea::execution::StructuralStepWorkload::ModalTransient {
+                                template,
+                                block_plan,
+                            },
+                            super::AnalysisSolverOptions::StructuralTransient(options),
+                        ) if template.step_id == step.procedure_step.step_id
+                            && template.backend == step.authored_execution.backend
+                            && template.formulation_requirement
+                                == step.authored_execution.requirement
+                            && template.time_step_policy.interval_count()
+                                == options.time_step_policy.interval_count()
+                            && template.residual_target == options.residual_target
+                            && block_plan.maximum_intervals_per_block()
+                                == options.maximum_intervals_per_block
+                            && options.solver_mesh_artifact_path.is_none() => {}
+                        _ => {
+                            return Err(
+                                "heterogeneous structural workload differs from its prepared execution"
+                                    .into(),
+                            )
+                        }
+                    }
+                }
+            }
             StructuralStudyWorkloads::LinearSequence { workloads } => {
                 if workloads.len() != self.steps.len() {
                     return Err(
@@ -452,6 +515,30 @@ impl PreparedStructuralStudyIntent {
                     );
                 }
             }
+            StructuralStudyWorkloads::StructuralModal { workload } => {
+                let [step] = self.steps.as_slice() else {
+                    return Err(
+                        "structural modal extraction requires exactly one prepared step".into(),
+                    );
+                };
+                let super::AnalysisSolverOptions::StructuralModes(options) =
+                    &step.authored_execution.solver_options
+                else {
+                    return Err("structural modal workload has non-modal authored options".into());
+                };
+                if workload.step_id() != &step.procedure_step.step_id
+                    || workload.backend() != step.authored_execution.backend
+                    || workload.formulation_requirement() != step.authored_execution.requirement
+                    || workload.observation_execution() != ObservationExecutionPolicy::scalable()
+                    || workload.truncation() != options.truncation
+                    || workload.convergence() != options.convergence
+                    || options.solver_mesh_artifact_path.is_some()
+                {
+                    return Err(
+                        "structural modal workload differs from its prepared execution".into(),
+                    );
+                }
+            }
         }
         Ok(())
     }
@@ -515,6 +602,16 @@ impl PreparedStructuralStudy {
             PreparedStructuralStudyExecution::StructuralFrequency { workload } => {
                 StructuralStudyWorkloads::StructuralFrequency {
                     workload: workload.clone(),
+                }
+            }
+            PreparedStructuralStudyExecution::StructuralModal { workload } => {
+                StructuralStudyWorkloads::StructuralModal {
+                    workload: workload.clone(),
+                }
+            }
+            PreparedStructuralStudyExecution::StructuralModalTransient { workloads } => {
+                StructuralStudyWorkloads::HeterogeneousSequence {
+                    workloads: workloads.clone(),
                 }
             }
         }

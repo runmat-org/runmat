@@ -21,7 +21,6 @@ use runmat_analysis_fea::execution::{
     StructuralFrequencyWorkload,
 };
 use runmat_analysis_fea::results::observation::ObservationLimits;
-use runmat_execution::resource::Capability;
 use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_artifact::{ArtifactAccess, ObjectNamespace};
@@ -33,9 +32,9 @@ use crate::analysis_frequency_observations::{
 };
 use crate::analysis_sequence::StructuralSequenceExecutionPolicy;
 use crate::analysis_task_pool::{
-    execute_analysis_task_batch, protocol, AnalysisTaskBatchPolicy, AnalysisTaskDependency,
-    AnalysisTaskPool, ExecutedAnalysisTask, LocalAnalysisTaskPool, PreparedAnalysisTask,
-    RemoteAnalysisTaskPool,
+    configure_local_analysis, execute_analysis_task_batch, protocol, AnalysisTaskBatchPolicy,
+    AnalysisTaskDependency, AnalysisTaskPool, ExecutedAnalysisTask, LocalAnalysisTaskPool,
+    PreparedAnalysisTask, RemoteAnalysisTaskPool,
 };
 use crate::{
     NativeExecutionConfig, NativeExecutionError, NativeExecutionResult, NativeProgramSession,
@@ -88,26 +87,7 @@ pub async fn execute_structural_frequency_locally_with_source(
     crate::FilesystemObjectStore,
 )> {
     policy.validate()?;
-    config.worker_accelerators = policy.resources.accelerators.clone();
-    config.worker_capabilities.extend(
-        policy
-            .resources
-            .accelerators
-            .iter()
-            .map(|accelerator| Capability::Accelerator(accelerator.class.clone())),
-    );
-    config
-        .worker_capabilities
-        .extend(policy.resources.required_capabilities.iter().cloned());
-    config
-        .worker_capabilities
-        .insert(Capability::ProcessIsolation);
-    config
-        .worker_capabilities
-        .insert(Capability::Custom(format!(
-            "runmat.analysis.host:{}",
-            runmat_analysis_execution::ANALYSIS_HOST_ABI
-        )));
+    configure_local_analysis(&mut config, &policy.resources);
     let session = NativeProgramSession::new(config)?;
     let mut pool = LocalAnalysisTaskPool::new(session);
     let completion = execute_with_pool(&mut pool, preparation, policy).await?;

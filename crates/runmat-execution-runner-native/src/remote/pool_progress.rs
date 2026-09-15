@@ -34,6 +34,15 @@ impl RemoteTaskCompletion {
         Self { receiver, progress }
     }
 
+    pub(super) fn resolved(result: Result<AttemptSuccess, String>) -> Self {
+        let (sender, receiver) = oneshot::channel();
+        let _ = sender.send(result);
+        Self {
+            receiver,
+            progress: std::sync::Arc::new(RemoteProgressBuffer::default()),
+        }
+    }
+
     pub async fn wait(self) -> Result<AttemptSuccess, String> {
         self.receiver
             .await

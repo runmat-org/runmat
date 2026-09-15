@@ -306,6 +306,47 @@ pub fn import_exact_structural_study_result(
             }
         }
         (
+            StructuralStudyWorkloads::StructuralModal { workload },
+            ExactStructuralStudyAnalysisClosure::StructuralModal {
+                result_root,
+                receipt_root,
+                objects,
+            },
+        ) => super::modal_import::import_modal_result(super::modal_import::ModalResultImport {
+            source,
+            workload: *workload,
+            result_root: *result_root,
+            receipt_root: *receipt_root,
+            objects,
+            access: &expected.artifact_access,
+            limits,
+        })?,
+        (
+            StructuralStudyWorkloads::HeterogeneousSequence { workloads },
+            ExactStructuralStudyAnalysisClosure::StructuralModalTransient {
+                modal_result_root,
+                modal_receipt_root,
+                basis_state_root,
+                transient_result_root,
+                transient_receipt_root,
+                objects,
+            },
+        ) => super::modal_import::import_modal_transient_result(
+            super::modal_import::ModalTransientResultImport {
+                source,
+                workloads,
+                modal_result_root: *modal_result_root,
+                modal_receipt_root: *modal_receipt_root,
+                basis_state_root: *basis_state_root,
+                transient_result_root: *transient_result_root,
+                transient_receipt_root: *transient_receipt_root,
+                objects,
+                mesh: &mesh.artifact,
+                access: &expected.artifact_access,
+                limits,
+            },
+        )?,
+        (
             StructuralStudyWorkloads::StructuralFrequency { workload },
             ExactStructuralStudyAnalysisClosure::StructuralFrequency {
                 result_root,
@@ -489,7 +530,7 @@ fn runtime_artifact_root(
     .map_err(protocol)
 }
 
-fn import_numerical_analysis_objects(
+pub(super) fn import_numerical_analysis_objects(
     source: &impl CacheImport,
     root: &ValueRef,
     declared_objects: &[ValueRef],
@@ -534,7 +575,7 @@ fn import_numerical_analysis_objects(
     Ok(imported)
 }
 
-fn validate_numerical_closure_inventory(
+pub(super) fn validate_numerical_closure_inventory(
     result_objects: &runmat_analysis_execution::PreparedAnalysisObjects,
     receipt_objects: &runmat_analysis_execution::PreparedAnalysisObjects,
     declared_objects: &[ValueRef],
@@ -554,6 +595,28 @@ fn validate_numerical_closure_inventory(
     if reference_inventory(&admitted_objects)? != reference_inventory(declared_objects)? {
         return Err(protocol(
             "structural numerical closure contains missing or unreferenced objects",
+        ));
+    }
+    Ok(())
+}
+
+pub(super) fn validate_complete_numerical_inventory(
+    components: &[&runmat_analysis_execution::PreparedAnalysisObjects],
+    declared_objects: &[ValueRef],
+    access: &ArtifactAccess,
+) -> NativeExecutionResult<()> {
+    let mut admitted = Vec::new();
+    for component in components {
+        admitted.extend(
+            component
+                .unique_references(access, ValueRefKind::ResultObject)
+                .map_err(protocol)?,
+        );
+    }
+    let admitted = unique_references(admitted)?;
+    if reference_inventory(&admitted)? != reference_inventory(declared_objects)? {
+        return Err(protocol(
+            "structural numerical closure contains missing or unrelated objects",
         ));
     }
     Ok(())

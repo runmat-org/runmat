@@ -91,14 +91,14 @@ pub fn prepare_structural_transient_block_task(
             None,
         ) => true,
         (
-            StructuralTransientSolverPlan::ModalReduced { basis_state },
+            StructuralTransientSolverPlan::ModalReduced { basis_transition },
             StructuralTransientCoordinateSpace::ModalReduced {
                 basis_state: scoped_basis,
                 ..
             },
             Some(state),
         ) => {
-            state.identity == *basis_state
+            state.identity == basis_transition.source_state
                 && state.identity == *scoped_basis
                 && state.topology_digest
                     == runmat_execution::Digest::from_bytes(*solver_mesh.canonical_digest.bytes())

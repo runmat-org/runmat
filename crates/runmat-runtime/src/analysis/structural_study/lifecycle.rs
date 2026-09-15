@@ -14,19 +14,28 @@ use super::{
 };
 use crate::analysis::frequency_result::admit_structural_frequency_result;
 use crate::analysis::{
-    analysis_admit_linear_static_run_with_id, analysis_admit_transient_run_with_id,
-    analysis_study_content_digest, meshing, prepare_linear_static_workload_template,
-    prepare_study_semantics, study_fingerprint_from_digest, AnalysisSolverOptions,
-    AnalysisStudyRunData, AnalysisStudySpec, PreparedStructuralLinearRun,
-    StructuralStudyNumericalResult, StructuralStudySequenceNumericalResult,
-    StructuralStudyTransientNumericalResult, ANALYSIS_RUN_STUDY_OPERATION,
-    ANALYSIS_RUN_STUDY_OP_VERSION,
+    analysis_admit_linear_static_run_with_id, analysis_admit_modal_run_with_id,
+    analysis_admit_transient_run_with_id, analysis_study_content_digest, meshing,
+    prepare_linear_static_workload_template, prepare_study_semantics,
+    study_fingerprint_from_digest, AnalysisSolverOptions, AnalysisStudyRunData, AnalysisStudySpec,
+    PreparedStructuralLinearRun, StructuralStudyModalNumericalResult,
+    StructuralStudyModalTransientNumericalResult, StructuralStudyNumericalResult,
+    StructuralStudySequenceNumericalResult, StructuralStudyTransientNumericalResult,
+    ANALYSIS_RUN_STUDY_OPERATION, ANALYSIS_RUN_STUDY_OP_VERSION,
 };
 
+mod modal_completion;
 mod preparation;
 
+pub(in crate::analysis) use modal_completion::{
+    complete_modal_study, complete_modal_transient_study,
+};
+use modal_completion::{complete_structural_modal, complete_structural_modal_transient};
 pub use preparation::analysis_prepare_structural_study_intent_op;
-pub(in crate::analysis) use preparation::prepare_structural_frequency_workload;
+pub(in crate::analysis) use preparation::{
+    prepare_structural_frequency_workload, prepare_structural_modal_transient_template,
+    prepare_structural_modal_workload,
+};
 
 /// Admits the remotely meshed and solved result of a path-free structural study intent.
 ///
@@ -157,6 +166,32 @@ pub fn analysis_complete_structural_study_intent_op(
             persisted_mesh,
             meshing_output.artifact,
             *workload,
+            *result,
+            completion_identity,
+        ),
+        (
+            runmat_analysis_fea::execution::StructuralStudyWorkloads::StructuralModal { workload },
+            StructuralStudyNumericalResult::StructuralModal(result),
+        ) => complete_structural_modal(
+            intent,
+            resolved_model,
+            persisted_mesh,
+            meshing_output.artifact,
+            *workload,
+            *result,
+            completion_identity,
+        ),
+        (
+            runmat_analysis_fea::execution::StructuralStudyWorkloads::HeterogeneousSequence {
+                workloads,
+            },
+            StructuralStudyNumericalResult::StructuralModalTransient(result),
+        ) => complete_structural_modal_transient(
+            intent,
+            resolved_model,
+            persisted_mesh,
+            meshing_output.artifact,
+            workloads,
             *result,
             completion_identity,
         ),

@@ -52,6 +52,12 @@ pub(crate) fn package_exact_structural_study_result(
                 &decoded.artifact_access,
             )?
         }
+        ExactStructuralAnalysisPublication::StructuralModal { completion, .. } => {
+            modal_closure(completion, &decoded.artifact_access)?
+        }
+        ExactStructuralAnalysisPublication::StructuralModalTransient { completion, .. } => {
+            modal_transient_closure(completion, &decoded.artifact_access)?
+        }
         ExactStructuralAnalysisPublication::StructuralFrequency { completion, .. } => {
             frequency_closure(completion, &decoded.artifact_access)?
         }
@@ -131,6 +137,116 @@ pub(crate) fn package_exact_structural_study_result(
         object.validate().map_err(protocol)?;
     }
     Ok((response, new_objects))
+}
+
+fn modal_closure(
+    completion: &crate::CompletedStructuralModalStudy,
+    access: &ArtifactAccess,
+) -> NativeExecutionResult<ExactStructuralStudyAnalysisClosure> {
+    let result_root = completion
+        .result
+        .objects
+        .root_reference(access, ValueRefKind::ResultObject)
+        .map_err(protocol)?;
+    let receipt_root = completion
+        .result
+        .numerical_receipt_objects
+        .root_reference(access, ValueRefKind::ResultObject)
+        .map_err(protocol)?;
+    let objects = unique_references(
+        completion
+            .result
+            .objects
+            .unique_references(access, ValueRefKind::ResultObject)
+            .map_err(protocol)?
+            .into_iter()
+            .chain(
+                completion
+                    .result
+                    .numerical_receipt_objects
+                    .unique_references(access, ValueRefKind::ResultObject)
+                    .map_err(protocol)?,
+            ),
+    )?;
+    Ok(ExactStructuralStudyAnalysisClosure::StructuralModal {
+        result_root: Box::new(result_root),
+        receipt_root: Box::new(receipt_root),
+        objects,
+    })
+}
+
+fn modal_transient_closure(
+    completion: &crate::CompletedStructuralModalTransientStudy,
+    access: &ArtifactAccess,
+) -> NativeExecutionResult<ExactStructuralStudyAnalysisClosure> {
+    let modal = modal_closure(
+        &crate::CompletedStructuralModalStudy {
+            result: completion.modal.clone(),
+        },
+        access,
+    )?;
+    let ExactStructuralStudyAnalysisClosure::StructuralModal {
+        result_root: modal_result_root,
+        receipt_root: modal_receipt_root,
+        objects: modal_objects,
+    } = modal
+    else {
+        return Err(protocol("modal closure has an invalid kind"));
+    };
+    let basis_state_root = completion
+        .basis_state
+        .objects
+        .root_reference(access, ValueRefKind::ResultObject)
+        .map_err(protocol)?;
+    let transient_result_root = completion
+        .transient
+        .result
+        .result_objects
+        .root_reference(access, ValueRefKind::ResultObject)
+        .map_err(protocol)?;
+    let transient_receipt_root = completion
+        .transient
+        .result
+        .receipt_objects
+        .root_reference(access, ValueRefKind::ResultObject)
+        .map_err(protocol)?;
+    let objects = unique_references(
+        modal_objects
+            .into_iter()
+            .chain(
+                completion
+                    .basis_state
+                    .objects
+                    .unique_references(access, ValueRefKind::ResultObject)
+                    .map_err(protocol)?,
+            )
+            .chain(
+                completion
+                    .transient
+                    .result
+                    .result_objects
+                    .unique_references(access, ValueRefKind::ResultObject)
+                    .map_err(protocol)?,
+            )
+            .chain(
+                completion
+                    .transient
+                    .result
+                    .receipt_objects
+                    .unique_references(access, ValueRefKind::ResultObject)
+                    .map_err(protocol)?,
+            ),
+    )?;
+    Ok(
+        ExactStructuralStudyAnalysisClosure::StructuralModalTransient {
+            modal_result_root,
+            modal_receipt_root,
+            basis_state_root: Box::new(basis_state_root),
+            transient_result_root: Box::new(transient_result_root),
+            transient_receipt_root: Box::new(transient_receipt_root),
+            objects,
+        },
+    )
 }
 
 fn transient_closure(
