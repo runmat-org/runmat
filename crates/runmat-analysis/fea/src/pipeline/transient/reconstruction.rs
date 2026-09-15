@@ -86,6 +86,8 @@ pub fn recover_completed_transient_run(
         &basis.execution_step,
         &basis.initial_assembly,
         Some(input.solver_mesh),
+        &basis.motions,
+        basis.schedule.points[0].time_s,
     )?;
     let initial_sample =
         input.result.samples().first().ok_or_else(|| {

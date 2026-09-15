@@ -107,6 +107,26 @@ fn modal_transient_fixture() -> (
     CanonicalSemanticState,
 ) {
     let (model, mesh) = authored_modal_transient_fixture();
+    prepared_modal_transient_fixture(model, mesh)
+}
+
+fn modal_support_motion_fixture() -> (
+    StructuralTransientWorkload,
+    runmat_meshing_core::SolverMeshArtifact,
+    CanonicalSemanticState,
+) {
+    let (model, mesh) = authored_modal_support_motion_fixture();
+    prepared_modal_transient_fixture(model, mesh)
+}
+
+fn prepared_modal_transient_fixture(
+    model: runmat_analysis_core::AnalysisModel,
+    mesh: runmat_meshing_core::SolverMeshArtifact,
+) -> (
+    StructuralTransientWorkload,
+    runmat_meshing_core::SolverMeshArtifact,
+    CanonicalSemanticState,
+) {
     let modal = runmat_analysis_fea::run_modal_with_options(
         &model,
         ComputeBackend::Cpu,
@@ -160,6 +180,14 @@ fn authored_modal_transient_fixture() -> (
     runmat_meshing_core::SolverMeshArtifact,
 ) {
     let (mut model, mesh) = transient_fixture();
+    author_modal_transient_sequence(&mut model, "modal-basis-to-transient");
+    (model, mesh)
+}
+
+fn author_modal_transient_sequence(
+    model: &mut runmat_analysis_core::AnalysisModel,
+    transition_id: &str,
+) {
     let mut modal_step = ProcedureStep::structural_modal("modes");
     modal_step.independent_domain = IndependentDomain::Eigenvalue { requested_count: 3 };
     let mut transient_step =
@@ -176,7 +204,7 @@ fn authored_modal_transient_fixture() -> (
         reason: SequenceDependencyReason::StateTransfer,
     }];
     model.sequence.transitions = vec![StateTransition {
-        transition_id: TransitionId("modal-basis-to-transient".into()),
+        transition_id: TransitionId(transition_id.into()),
         producer_step: ProcedureStepId("modes".into()),
         consumer_step: ProcedureStepId("response".into()),
         state_id: StateId("modal_basis".into()),
@@ -184,6 +212,84 @@ fn authored_modal_transient_fixture() -> (
         topology: TopologyTransitionPolicy::RequireIdentical,
         reference: ReferenceStatePolicy::Preserve,
     }];
+}
+
+fn authored_modal_support_motion_fixture() -> (
+    runmat_analysis_core::AnalysisModel,
+    runmat_meshing_core::SolverMeshArtifact,
+) {
+    use runmat_analysis_core::*;
+
+    let (mut model, mesh) = transient_fixture();
+    model.excitations.clear();
+    model.excitation_cases.clear();
+    model.signals.clear();
+    let acceleration_id = SignalId("root-x-acceleration".into());
+    let acceleration = |value: f64| {
+        SignalOrdinate::Real(SignalValue::Vector3([
+            Acceleration::new(value),
+            Acceleration::new(0.0),
+            Acceleration::new(0.0),
+        ]))
+    };
+    model.signals.push(PhysicalSignal::Acceleration(Signal {
+        signal_id: acceleration_id.clone(),
+        shape: SignalShape::Vector3,
+        frame: Some(CoordinateFrame::Global),
+        representation: SignalRepresentation::Tabulated(TabulatedSignal {
+            domain: TabulatedSignalDomain::TimeSeconds,
+            knots: vec![
+                SignalKnot::continuous(0.0, acceleration(1.0)),
+                SignalKnot::continuous(0.5, acceleration(-1.0)),
+                SignalKnot::continuous(1.0, acceleration(1.0)),
+            ],
+            interpolation: SignalInterpolation::Linear,
+            extrapolation: SignalExtrapolation::Reject,
+        }),
+        precision: SignalPrecision::Real64,
+        evidence: SignalApproximationEvidence {
+            max_absolute_error: Some(0.0),
+            max_relative_error: Some(0.0),
+            derivative_max_absolute_error: None,
+            sample_count: 3,
+        },
+        provenance: SignalProvenance::Authored,
+    }));
+    model.constraints = vec![
+        AnalysisConstraint::Structural(StructuralConstraint {
+            constraint_id: "moving-root-x".into(),
+            frame: CoordinateFrame::Global,
+            kind: StructuralConstraintKind::PrescribedMotion(PrescribedStructuralMotion {
+                target: RegionTarget::boundary("face:0"),
+                translations: vec![TranslationDofMotion {
+                    dof: StructuralTranslationDof::Ux,
+                    history: StructuralKinematicHistory::AccelerationDriven {
+                        acceleration: AccelerationSignalId(acceleration_id),
+                        initial_displacement: Displacement::new(0.02),
+                        initial_velocity: Velocity::new(-0.03),
+                        reconstruction:
+                            StructuralMotionReconstruction::PiecewiseLinearAccelerationExact,
+                    },
+                }],
+            }),
+        }),
+        AnalysisConstraint::Structural(StructuralConstraint {
+            constraint_id: "fixed-root-yz".into(),
+            frame: CoordinateFrame::Global,
+            kind: StructuralConstraintKind::Prescribed(PrescribedStructuralDofs {
+                target: RegionTarget::boundary("face:0"),
+                translations: [StructuralTranslationDof::Uy, StructuralTranslationDof::Uz]
+                    .into_iter()
+                    .map(|dof| TranslationDofValue {
+                        dof,
+                        value: PrescribedValue::Constant(Displacement::new(0.0)),
+                    })
+                    .collect(),
+                rotations: Vec::new(),
+            }),
+        }),
+    ];
+    author_modal_transient_sequence(&mut model, "modal-basis-to-moving-response");
     (model, mesh)
 }
 
@@ -614,110 +720,113 @@ fn transient_sequence_coordinator_admits_each_exact_transition_before_assembly()
 
 #[test]
 fn modal_transient_sequence_transports_one_basis_and_restarts_exact_reduced_state() {
-    let (workload, mesh, modal_state) = modal_transient_fixture();
-    let limits = ObjectInventoryLimits::default();
-    let preparation =
-        prepare_structural_transient_sequence(StructuralTransientSequencePreparationInput {
-            workload: &workload,
-            mesh: &mesh,
-            modal_state: Some(&modal_state),
-            block_plan: StructuralTransientBlockPlan::new(2).unwrap(),
-            initial_dependencies: Vec::new(),
-            artifact_access: access(),
-            program_revision: revision(),
-            chunk_bytes: 256,
-            inventory_limits: limits,
-        })
-        .unwrap();
-    assert_eq!(
-        preparation
-            .modal_state
-            .as_ref()
-            .unwrap()
-            .manifest
-            .logical_identity,
-        modal_state.identity.digest()
-    );
+    for (workload, mesh, modal_state) in [modal_transient_fixture(), modal_support_motion_fixture()]
+    {
+        let limits = ObjectInventoryLimits::default();
+        let preparation =
+            prepare_structural_transient_sequence(StructuralTransientSequencePreparationInput {
+                workload: &workload,
+                mesh: &mesh,
+                modal_state: Some(&modal_state),
+                block_plan: StructuralTransientBlockPlan::new(2).unwrap(),
+                initial_dependencies: Vec::new(),
+                artifact_access: access(),
+                program_revision: revision(),
+                chunk_bytes: 256,
+                inventory_limits: limits,
+            })
+            .unwrap();
+        assert_eq!(
+            preparation
+                .modal_state
+                .as_ref()
+                .unwrap()
+                .manifest
+                .logical_identity,
+            modal_state.identity.digest()
+        );
 
-    let directory = tempfile::tempdir().unwrap();
-    let mut store = runmat_execution_artifact::cache::FilesystemObjectStore::open(
-        directory.path().join("objects"),
-        limits.max_object_bytes,
-    )
-    .unwrap();
-    let mut coordinator = StructuralTransientSequenceCoordinator::new(preparation.clone()).unwrap();
-    let first = coordinator.prepare_next_block().unwrap();
-    assert_eq!(first.modal_state.as_ref(), Some(&modal_state));
-    assert_eq!(
-        first
-            .inputs
-            .iter()
-            .filter(|input| input.manifest.kind == AnalysisNumericalObjectKind::SemanticState)
-            .count(),
-        1
-    );
-    let response = execute_durable_block(&mut store, &first);
-    coordinator
-        .complete_block(&store, response, &first)
+        let directory = tempfile::tempdir().unwrap();
+        let mut store = runmat_execution_artifact::cache::FilesystemObjectStore::open(
+            directory.path().join("objects"),
+            limits.max_object_bytes,
+        )
         .unwrap();
-    let recovery = coordinator.recovery_closure(&store).unwrap();
-    let first_terminal = coordinator.completed_blocks()[0]
-        .segment
-        .manifest()
-        .terminal_checkpoint
-        .clone();
-    let mut coordinator = StructuralTransientSequenceCoordinator::restore_from_closure(
-        preparation.clone(),
-        &recovery.root,
-        &recovery.objects,
-    )
-    .unwrap();
-    assert_eq!(
-        coordinator.completed_blocks()[0]
+        let mut coordinator =
+            StructuralTransientSequenceCoordinator::new(preparation.clone()).unwrap();
+        let first = coordinator.prepare_next_block().unwrap();
+        assert_eq!(first.modal_state.as_ref(), Some(&modal_state));
+        assert_eq!(
+            first
+                .inputs
+                .iter()
+                .filter(|input| input.manifest.kind == AnalysisNumericalObjectKind::SemanticState)
+                .count(),
+            1
+        );
+        let response = execute_durable_block(&mut store, &first);
+        coordinator
+            .complete_block(&store, response, &first)
+            .unwrap();
+        let recovery = coordinator.recovery_closure(&store).unwrap();
+        let first_terminal = coordinator.completed_blocks()[0]
             .segment
             .manifest()
-            .terminal_checkpoint,
-        first_terminal
-    );
-    while coordinator.has_remaining_blocks() {
-        let block = coordinator.prepare_next_block().unwrap();
-        assert_eq!(block.modal_state.as_ref(), Some(&modal_state));
-        let response = execute_durable_block(&mut store, &block);
-        coordinator
-            .complete_block(&store, response, &block)
-            .unwrap();
-    }
-    let terminal_checkpoint = coordinator
-        .completed_blocks()
-        .last()
-        .unwrap()
-        .segment
-        .manifest()
-        .terminal_checkpoint
-        .clone();
-    let assembly = coordinator.prepare_assembly().unwrap();
-    let response = execute_durable_result(&mut store, &assembly);
-    coordinator
-        .complete_assembly(&store, response, &assembly)
+            .terminal_checkpoint
+            .clone();
+        let mut coordinator = StructuralTransientSequenceCoordinator::restore_from_closure(
+            preparation.clone(),
+            &recovery.root,
+            &recovery.objects,
+        )
         .unwrap();
-    let completed = coordinator.finish().unwrap();
-    assert!(matches!(
-        terminal_checkpoint.numerical_state,
-        runmat_analysis_fea::execution::StructuralTransientNumericalState::ModalReduced {
-            basis_state,
-            ..
-        } if basis_state == modal_state.identity
-    ));
-    assert!(completed.numerical_receipt.blocks.iter().all(|block| {
+        assert_eq!(
+            coordinator.completed_blocks()[0]
+                .segment
+                .manifest()
+                .terminal_checkpoint,
+            first_terminal
+        );
+        while coordinator.has_remaining_blocks() {
+            let block = coordinator.prepare_next_block().unwrap();
+            assert_eq!(block.modal_state.as_ref(), Some(&modal_state));
+            let response = execute_durable_block(&mut store, &block);
+            coordinator
+                .complete_block(&store, response, &block)
+                .unwrap();
+        }
+        let terminal_checkpoint = coordinator
+            .completed_blocks()
+            .last()
+            .unwrap()
+            .segment
+            .manifest()
+            .terminal_checkpoint
+            .clone();
+        let assembly = coordinator.prepare_assembly().unwrap();
+        let response = execute_durable_result(&mut store, &assembly);
+        coordinator
+            .complete_assembly(&store, response, &assembly)
+            .unwrap();
+        let completed = coordinator.finish().unwrap();
+        assert!(matches!(
+            terminal_checkpoint.numerical_state,
+            runmat_analysis_fea::execution::StructuralTransientNumericalState::ModalReduced {
+                basis_state,
+                ..
+            } if basis_state == modal_state.identity
+        ));
+        assert!(completed.numerical_receipt.blocks.iter().all(|block| {
         block.solver_method
             == runmat_analysis_fea::contracts::SolverMethod::StructuralModalTransientNewmarkDenseFactorization
             && block.counters.dense_solve_count > 0
             && block.counters.dense_solve_count == block.counters.dense_factorization_count
     }));
 
-    let mut missing_state = preparation;
-    missing_state.modal_state = None;
-    assert!(StructuralTransientSequenceCoordinator::new(missing_state).is_err());
+        let mut missing_state = preparation;
+        missing_state.modal_state = None;
+        assert!(StructuralTransientSequenceCoordinator::new(missing_state).is_err());
+    }
 }
 
 #[test]

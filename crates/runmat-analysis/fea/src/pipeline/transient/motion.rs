@@ -6,7 +6,7 @@ use thiserror::Error;
 use crate::{
     algebra::{spmv, AssembledRealSystem, CanonicalRealOperators},
     assembly::{dofs::StructuralDofKind, AssemblySummary},
-    constraints::{AffineConstraintReduction, ConstraintAlgebraError},
+    constraints::{AffineConstraintReduction, ConstraintAlgebraError, ResolvedConstraintMatrix},
     contracts::{ComputeBackend, FeaRunError},
     excitation::{StructuralMotionError, StructuralMotionSet},
     execution::{
@@ -27,9 +27,11 @@ use crate::{
 pub(super) struct StructuralMotionSnapshot {
     pub(super) full_summary: AssemblySummary,
     pub(super) reduced_summary: AssemblySummary,
+    pub(super) modal_summary: AssemblySummary,
     pub(super) displacement_lift: Vec<f64>,
     pub(super) velocity_lift: Vec<f64>,
     pub(super) acceleration_lift: Vec<f64>,
+    pub(super) velocity_constraints: ResolvedConstraintMatrix,
     pub(super) reduction: AffineConstraintReduction,
 }
 
@@ -54,10 +56,10 @@ pub(super) struct StructuralMotionBlockSolveInput<'a> {
     pub(super) observation_cursors: Vec<StructuralTransientObservationCursor>,
 }
 
-struct ExpandedStructuralState {
-    displacement: Vec<f64>,
-    velocity: Vec<f64>,
-    acceleration: Vec<f64>,
+pub(super) struct ExpandedStructuralState {
+    pub(super) displacement: Vec<f64>,
+    pub(super) velocity: Vec<f64>,
+    pub(super) acceleration: Vec<f64>,
 }
 
 #[derive(Debug, Error)]
@@ -170,14 +172,20 @@ impl StructuralMotionSnapshot {
         reduced_summary.affine_constraint_reduction = None;
         reduced_summary.physical_load = reduced_load.clone();
         reduced_summary.operator = reduced_operator;
+        let mut modal_summary = full_summary.clone();
+        modal_summary.physical_load = effective_full;
+        modal_summary.constraint_matrix = Some(homogeneous);
+        modal_summary.affine_constraint_reduction = Some(reduction.clone());
         full_summary.constraint_matrix = Some(displacement);
         full_summary.affine_constraint_reduction = Some(displacement_reduction.clone());
         Ok(Self {
             full_summary,
             reduced_summary,
+            modal_summary,
             displacement_lift: displacement_reduction.offset,
             velocity_lift: velocity_reduction.offset,
             acceleration_lift: acceleration_reduction.offset,
+            velocity_constraints: velocity,
             reduction,
         })
     }
@@ -206,6 +214,20 @@ impl StructuralMotionSnapshot {
             .collect()
     }
 
+    pub(super) fn relative_displacement(
+        &self,
+        full: &[f64],
+    ) -> Result<Vec<f64>, StructuralMotionReductionError> {
+        subtract_lift(full, &self.displacement_lift)
+    }
+
+    pub(super) fn relative_velocity(
+        &self,
+        full: &[f64],
+    ) -> Result<Vec<f64>, StructuralMotionReductionError> {
+        subtract_lift(full, &self.velocity_lift)
+    }
+
     pub(super) fn expand_displacement(
         &self,
         reduced: &[f64],
@@ -227,7 +249,7 @@ impl StructuralMotionSnapshot {
         expand_with_lift(&self.reduction, reduced, &self.acceleration_lift)
     }
 
-    fn expand_state(
+    pub(super) fn expand_state(
         &self,
         displacement: &[f64],
         velocity: &[f64],
@@ -237,6 +259,19 @@ impl StructuralMotionSnapshot {
             displacement: self.expand_displacement(displacement)?,
             velocity: self.expand_velocity(velocity)?,
             acceleration: self.expand_acceleration(acceleration)?,
+        })
+    }
+
+    pub(super) fn lift_homogeneous_state(
+        &self,
+        displacement: &[f64],
+        velocity: &[f64],
+        acceleration: &[f64],
+    ) -> Result<ExpandedStructuralState, StructuralMotionReductionError> {
+        Ok(ExpandedStructuralState {
+            displacement: add_lift(displacement, &self.displacement_lift)?,
+            velocity: add_lift(velocity, &self.velocity_lift)?,
+            acceleration: add_lift(acceleration, &self.acceleration_lift)?,
         })
     }
 }
@@ -575,7 +610,7 @@ fn retained_snapshot<'a>(
         })
 }
 
-fn snapshot_key(time_s: f64, approach: SignalSampleApproach) -> (u64, u8) {
+pub(super) fn snapshot_key(time_s: f64, approach: SignalSampleApproach) -> (u64, u8) {
     let approach = match approach {
         SignalSampleApproach::At => 0,
         SignalSampleApproach::LeftLimit => 1,
@@ -584,7 +619,9 @@ fn snapshot_key(time_s: f64, approach: SignalSampleApproach) -> (u64, u8) {
     (time_s.to_bits(), approach)
 }
 
-fn assembly_error(error: StructuralMotionReductionError) -> TransientSolveError<FeaRunError> {
+pub(super) fn assembly_error(
+    error: StructuralMotionReductionError,
+) -> TransientSolveError<FeaRunError> {
     TransientSolveError::Assembly(FeaRunError::Assembly(error.to_string()))
 }
 
@@ -603,6 +640,37 @@ fn expand_with_lift(
         *value += lift;
     }
     Ok(full)
+}
+
+fn subtract_lift(full: &[f64], lift: &[f64]) -> Result<Vec<f64>, StructuralMotionReductionError> {
+    if full.len() != lift.len() || full.iter().chain(lift).any(|value| !value.is_finite()) {
+        return Err(StructuralMotionReductionError::Operator(
+            "support-motion physical state dimension or values are invalid".into(),
+        ));
+    }
+    Ok(full
+        .iter()
+        .zip(lift)
+        .map(|(value, lift)| value - lift)
+        .collect())
+}
+
+fn add_lift(homogeneous: &[f64], lift: &[f64]) -> Result<Vec<f64>, StructuralMotionReductionError> {
+    if homogeneous.len() != lift.len()
+        || homogeneous
+            .iter()
+            .chain(lift)
+            .any(|value| !value.is_finite())
+    {
+        return Err(StructuralMotionReductionError::Operator(
+            "support-motion homogeneous state dimension or values are invalid".into(),
+        ));
+    }
+    Ok(homogeneous
+        .iter()
+        .zip(lift)
+        .map(|(value, lift)| value + lift)
+        .collect())
 }
 
 fn require_same_transform(

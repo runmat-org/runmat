@@ -46,18 +46,19 @@ pub(super) fn require_structural(
         requirement,
     )
     .map_err(FeaRunError::from)?;
-    if procedure != AnalysisProcedure::TransientResponse
-        && model.constraints.iter().any(|constraint| {
-            constraint.structural().is_some_and(|constraint| {
-                matches!(
-                    constraint.kind,
-                    StructuralConstraintKind::PrescribedMotion(_)
-                )
-            })
+    if !matches!(
+        procedure,
+        AnalysisProcedure::ModalExtraction | AnalysisProcedure::TransientResponse
+    ) && model.constraints.iter().any(|constraint| {
+        constraint.structural().is_some_and(|constraint| {
+            matches!(
+                constraint.kind,
+                StructuralConstraintKind::PrescribedMotion(_)
+            )
         })
-    {
+    }) {
         return Err(FeaRunError::InvalidModel(format!(
-            "prescribed structural motion is only admitted for transient response, not {procedure:?}"
+            "prescribed structural motion is admitted as a homogeneous support for modal extraction and as physical kinematics for transient response, not {procedure:?}"
         )));
     }
     if procedure != AnalysisProcedure::Static

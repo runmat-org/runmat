@@ -51,15 +51,7 @@ pub fn solve_structural_modal_transient_block_with_assembly<E>(
                 detail: error.to_string(),
             }
         })?;
-    validate_scope(&input, &reduced)?;
-    let initial_conditions = input
-        .block
-        .initial_conditions
-        .as_ref()
-        .map(|initial| project_initial_conditions(&reduced, initial))
-        .transpose()?;
-    let mut strategy = ModalTransientStepStrategy { reduced };
-    let expansion = strategy.reduced.clone();
+    let expansion = reduced.clone();
     let mut map_physical_state =
         |_: f64, _: SignalSampleApproach, summary: &AssemblySummary, state: &SecondOrderState| {
             let displacement = expansion
@@ -75,8 +67,37 @@ pub fn solve_structural_modal_transient_block_with_assembly<E>(
                 .map_err(|error| error.to_string())?;
             Ok::<_, String>((summary.clone(), physical))
         };
-    let basis_state = input.basis_state;
     let physical_dof_count = input.block.initial_summary.dof_count;
+    solve_structural_modal_transient_block_with_mapping(
+        input,
+        reduced,
+        physical_dof_count,
+        &mut assembly_at,
+        &mut map_physical_state,
+    )
+}
+
+pub(crate) fn solve_structural_modal_transient_block_with_mapping<E, M: std::fmt::Display>(
+    input: StructuralModalTransientBlockSolveInput<'_>,
+    reduced: ModalReducedSystem,
+    physical_dof_count: usize,
+    assembly_at: &mut impl FnMut(f64, SignalSampleApproach) -> Result<AssemblySummary, E>,
+    map_physical_state: &mut impl FnMut(
+        f64,
+        SignalSampleApproach,
+        &AssemblySummary,
+        &SecondOrderState,
+    ) -> Result<(AssemblySummary, SecondOrderState), M>,
+) -> Result<StructuralTransientSegment, TransientSolveError<E>> {
+    validate_scope(&input, &reduced)?;
+    let initial_conditions = input
+        .block
+        .initial_conditions
+        .as_ref()
+        .map(|initial| project_initial_conditions(&reduced, initial))
+        .transpose()?;
+    let mut strategy = ModalTransientStepStrategy { reduced };
+    let basis_state = input.basis_state;
     let mut restore_checkpoint_state = |checkpoint: &StructuralTransientCheckpoint| {
         let StructuralTransientNumericalState::ModalReduced {
             basis_state: checkpoint_basis,
@@ -107,8 +128,8 @@ pub fn solve_structural_modal_transient_block_with_assembly<E>(
     solve_structural_transient_block_with_strategy(
         direct,
         physical_dof_count,
-        &mut assembly_at,
-        &mut map_physical_state,
+        assembly_at,
+        map_physical_state,
         &mut restore_checkpoint_state,
         &mut strategy,
     )

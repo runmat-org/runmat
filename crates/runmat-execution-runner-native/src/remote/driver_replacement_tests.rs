@@ -51,6 +51,7 @@ use crate::{
 const BOX: &[u8] = include_bytes!("../../../runmat-geometry/io/tests/fixtures/box.brep");
 const RUN_ID: &str = "driver-replacement-exact-study";
 const DRIVER_ALLOCATION: &str = "driver-allocation";
+const ACTUAL_DRIVER_TEST_STACK_BYTES: usize = 16 * 1024 * 1024;
 
 #[derive(Clone)]
 struct StoredArtifact {
@@ -288,8 +289,24 @@ impl DriverControlPlane for DurableControl {
     }
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn actual_driver_restarts_from_server_checkpoint_on_a_different_worker() {
+#[test]
+fn actual_driver_restarts_from_server_checkpoint_on_a_different_worker() {
+    std::thread::Builder::new()
+        .name("actual-driver-replacement".into())
+        .stack_size(ACTUAL_DRIVER_TEST_STACK_BYTES)
+        .spawn(|| {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("actual-driver replacement runtime")
+                .block_on(actual_driver_replacement_case());
+        })
+        .expect("actual-driver replacement test thread")
+        .join()
+        .expect("actual-driver replacement test thread panicked");
+}
+
+async fn actual_driver_replacement_case() {
     let fixture = exact_study_fixture();
     let driver_material = driver_identity_material();
     let directory = tempfile::tempdir().unwrap();

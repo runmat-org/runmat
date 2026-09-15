@@ -21,7 +21,10 @@ pub(super) fn reconcile_constraints(
     apply_direct_defaults(displacement, velocity, constraints)?;
 
     let derived_reduction;
-    let reduction = match (constraints.affine_reduction, constraints.constraint_matrix) {
+    let reduction = match (
+        constraints.affine_reduction,
+        constraints.displacement_constraints,
+    ) {
         (Some(reduction), _) => Some(reduction),
         (None, Some(matrix)) => {
             derived_reduction = matrix.affine_reduction().map_err(invalid_constraints)?;
@@ -29,18 +32,22 @@ pub(super) fn reconcile_constraints(
         }
         (None, None) => None,
     };
+    let velocity_reduction = velocity_reduction(constraints, reduction)?;
     if let Some(reduction) = reduction {
         apply_affine_defaults(displacement, reduction, false)?;
-        apply_affine_defaults(velocity, reduction, true)?;
+    }
+    if let Some(reduction) = velocity_reduction.as_ref() {
+        apply_affine_defaults(velocity, reduction, false)?;
     }
 
     let displacement_values = values(displacement);
     let velocity_values = values(velocity);
     let (maximum_displacement_residual, maximum_velocity_residual) = constraints
-        .constraint_matrix
+        .displacement_constraints
         .map(|matrix| {
             validate_equations(
                 matrix,
+                constraints.velocity_constraints,
                 displacement,
                 velocity,
                 &displacement_values,
@@ -56,7 +63,7 @@ pub(super) fn reconcile_constraints(
             .filter(|constrained| **constrained)
             .count(),
         constraint_equation_count: constraints
-            .constraint_matrix
+            .displacement_constraints
             .map_or(0, ResolvedConstraintMatrix::row_count),
         maximum_displacement_residual,
         maximum_velocity_residual,
@@ -77,11 +84,30 @@ fn validate_view(
             "direct constraint vectors do not match the structural DOF count",
         ));
     }
-    if let Some(matrix) = constraints.constraint_matrix {
+    if let Some(matrix) = constraints.displacement_constraints {
         matrix.validate().map_err(invalid_constraints)?;
         if matrix.full_dof_count != dof_count {
             return Err(invalid_constraints(
                 "constraint matrix does not match the structural DOF count",
+            ));
+        }
+    }
+    if let Some(matrix) = constraints.velocity_constraints {
+        matrix.validate().map_err(invalid_constraints)?;
+        let Some(displacement) = constraints.displacement_constraints else {
+            return Err(invalid_constraints(
+                "velocity constraints require the same structural DOF space as displacement constraints",
+            ));
+        };
+        if matrix.full_dof_count != dof_count
+            || matrix.row_offsets != displacement.row_offsets
+            || matrix.column_indices != displacement.column_indices
+            || matrix.coefficients != displacement.coefficients
+            || matrix.row_identities != displacement.row_identities
+            || matrix.constraint_ids != displacement.constraint_ids
+        {
+            return Err(invalid_constraints(
+                "velocity constraints differ from the displacement constraint row space",
             ));
         }
     }
@@ -92,7 +118,7 @@ fn validate_view(
                 "affine reduction does not match the structural DOF count",
             ));
         }
-        if constraints.constraint_matrix.is_none() {
+        if constraints.displacement_constraints.is_none() {
             return Err(invalid_constraints(
                 "affine reduction requires its resolved constraint matrix",
             ));
@@ -169,8 +195,40 @@ fn apply_affine_defaults(
     Ok(())
 }
 
+fn velocity_reduction(
+    constraints: StructuralInitialConstraintView<'_>,
+    displacement: Option<&AffineConstraintReduction>,
+) -> Result<Option<AffineConstraintReduction>, StructuralInitialStateError> {
+    let Some(displacement) = displacement else {
+        return Ok(None);
+    };
+    let mut matrix = constraints
+        .velocity_constraints
+        .cloned()
+        .or_else(|| constraints.displacement_constraints.cloned())
+        .ok_or_else(|| invalid_constraints("affine constraints have no resolved row space"))?;
+    if constraints.velocity_constraints.is_none() {
+        matrix.right_hand_side.fill(0.0);
+    }
+    let velocity = matrix.affine_reduction().map_err(invalid_constraints)?;
+    if velocity.full_dof_count != displacement.full_dof_count
+        || velocity.reduced_dof_count != displacement.reduced_dof_count
+        || velocity.free_dof_indices != displacement.free_dof_indices
+        || velocity.pivot_dof_indices != displacement.pivot_dof_indices
+        || velocity.recovery_row_offsets != displacement.recovery_row_offsets
+        || velocity.recovery_column_indices != displacement.recovery_column_indices
+        || velocity.recovery_coefficients != displacement.recovery_coefficients
+    {
+        return Err(invalid_constraints(
+            "displacement and velocity constraints have different homogeneous transforms",
+        ));
+    }
+    Ok(Some(velocity))
+}
+
 fn validate_equations(
-    matrix: &ResolvedConstraintMatrix,
+    displacement_matrix: &ResolvedConstraintMatrix,
+    velocity_matrix: Option<&ResolvedConstraintMatrix>,
     displacement_assignments: &[Option<Assignment>],
     velocity_assignments: &[Option<Assignment>],
     displacement: &[f64],
@@ -178,27 +236,32 @@ fn validate_equations(
 ) -> Result<(f64, f64), StructuralInitialStateError> {
     let mut maximum_displacement_residual = 0.0_f64;
     let mut maximum_velocity_residual = 0.0_f64;
-    for row in 0..matrix.row_count() {
-        let start = matrix.row_offsets[row];
-        let end = matrix.row_offsets[row + 1];
-        let displacement_lhs = row_value(matrix, start, end, displacement);
-        let velocity_lhs = row_value(matrix, start, end, velocity);
-        let scale = matrix.right_hand_side[row]
+    for row in 0..displacement_matrix.row_count() {
+        let start = displacement_matrix.row_offsets[row];
+        let end = displacement_matrix.row_offsets[row + 1];
+        let displacement_lhs = row_value(displacement_matrix, start, end, displacement);
+        let expected_velocity = velocity_matrix.map_or(0.0, |matrix| matrix.right_hand_side[row]);
+        let velocity_rows = velocity_matrix.unwrap_or(displacement_matrix);
+        let velocity_start = velocity_rows.row_offsets[row];
+        let velocity_end = velocity_rows.row_offsets[row + 1];
+        let velocity_lhs = row_value(velocity_rows, velocity_start, velocity_end, velocity);
+        let scale = displacement_matrix.right_hand_side[row]
             .abs()
             .max(displacement_lhs.abs())
             .max(1.0);
-        let displacement_residual = (displacement_lhs - matrix.right_hand_side[row]).abs();
-        let velocity_scale = velocity_lhs.abs().max(1.0);
-        let velocity_residual = velocity_lhs.abs();
+        let displacement_residual =
+            (displacement_lhs - displacement_matrix.right_hand_side[row]).abs();
+        let velocity_scale = velocity_lhs.abs().max(expected_velocity.abs()).max(1.0);
+        let velocity_residual = (velocity_lhs - expected_velocity).abs();
         maximum_displacement_residual = maximum_displacement_residual.max(displacement_residual);
         maximum_velocity_residual = maximum_velocity_residual.max(velocity_residual);
         if displacement_residual > RELATIVE_RESIDUAL_TOLERANCE * scale {
             return Err(
                 StructuralInitialStateError::DisplacementConstraintViolation {
-                    constraint_id: matrix.constraint_ids[row].clone(),
+                    constraint_id: displacement_matrix.constraint_ids[row].clone(),
                     equation_row: row,
                     authored_initial_condition_ids: authored_ids(
-                        matrix,
+                        displacement_matrix,
                         start,
                         end,
                         displacement_assignments,
@@ -208,12 +271,12 @@ fn validate_equations(
         }
         if velocity_residual > RELATIVE_RESIDUAL_TOLERANCE * velocity_scale {
             return Err(StructuralInitialStateError::VelocityConstraintViolation {
-                constraint_id: matrix.constraint_ids[row].clone(),
+                constraint_id: displacement_matrix.constraint_ids[row].clone(),
                 equation_row: row,
                 authored_initial_condition_ids: authored_ids(
-                    matrix,
-                    start,
-                    end,
+                    velocity_rows,
+                    velocity_start,
+                    velocity_end,
                     velocity_assignments,
                 ),
             });

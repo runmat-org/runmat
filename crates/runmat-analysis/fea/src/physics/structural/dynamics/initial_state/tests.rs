@@ -199,7 +199,8 @@ fn implicit_synthetic_basis_rejects_a_nonzero_constraint_default() {
                 operator_identity: Digest::sha256(b"synthetic-operator"),
             },
             StructuralInitialConstraintView {
-                constraint_matrix: None,
+                displacement_constraints: None,
+                velocity_constraints: None,
                 affine_reduction: None,
                 direct_constrained_dofs: &constrained,
                 direct_prescribed_displacement: &prescribed,

@@ -9,7 +9,8 @@ use crate::{
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct StructuralInitialConstraintView<'a> {
-    pub constraint_matrix: Option<&'a ResolvedConstraintMatrix>,
+    pub displacement_constraints: Option<&'a ResolvedConstraintMatrix>,
+    pub velocity_constraints: Option<&'a ResolvedConstraintMatrix>,
     pub affine_reduction: Option<&'a AffineConstraintReduction>,
     pub direct_constrained_dofs: &'a [bool],
     pub direct_prescribed_displacement: &'a [f64],
@@ -19,7 +20,8 @@ impl StructuralInitialConstraintView<'_> {
     #[cfg(test)]
     pub(crate) const fn unconstrained() -> Self {
         Self {
-            constraint_matrix: None,
+            displacement_constraints: None,
+            velocity_constraints: None,
             affine_reduction: None,
             direct_constrained_dofs: &[],
             direct_prescribed_displacement: &[],
@@ -131,7 +133,7 @@ pub(crate) enum StructuralInitialStateError {
         initial_condition_id: String,
         row: usize,
     },
-    #[error("structural initial condition `{initial_condition_id}` conflicts with homogeneous prescribed velocity at DOF row {row}")]
+    #[error("structural initial condition `{initial_condition_id}` conflicts with prescribed velocity at DOF row {row}")]
     PrescribedVelocityConflict {
         initial_condition_id: String,
         row: usize,
@@ -142,7 +144,7 @@ pub(crate) enum StructuralInitialStateError {
         equation_row: usize,
         authored_initial_condition_ids: Vec<String>,
     },
-    #[error("structural initial velocity violates homogeneous constraint `{constraint_id}` at equation row {equation_row}")]
+    #[error("structural initial velocity violates constraint `{constraint_id}` at equation row {equation_row}")]
     VelocityConstraintViolation {
         constraint_id: String,
         equation_row: usize,

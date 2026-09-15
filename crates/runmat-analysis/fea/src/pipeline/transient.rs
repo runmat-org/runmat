@@ -45,6 +45,7 @@ use crate::{
 
 mod constraint_admission;
 mod finalization;
+mod modal_motion;
 mod motion;
 mod reconstruction;
 mod recovery;
@@ -91,6 +92,8 @@ fn realize_transient_initial_state(
     execution_step: &ProcedureStep,
     initial_assembly: &AssemblySummary,
     solver_mesh: Option<&runmat_meshing_core::SolverMeshArtifact>,
+    motions: &StructuralMotionSet,
+    initial_time_s: f64,
 ) -> Result<RealizedStructuralInitialState, FeaRunError> {
     let initial_state_basis = match initial_assembly.structural_formulations.as_slice() {
         [realization]
@@ -109,14 +112,31 @@ fn realize_transient_initial_state(
         }
         _ => StructuralInitialStateRealizationBasis::CanonicalTopology,
     };
+    let motion_snapshot = (!motions.is_empty())
+        .then(|| {
+            motion::StructuralMotionSnapshot::reduce(
+                initial_assembly.clone(),
+                motions,
+                initial_time_s,
+                runmat_analysis_core::SignalSampleApproach::At,
+            )
+        })
+        .transpose()
+        .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
+    let constraint_summary = motion_snapshot
+        .as_ref()
+        .map_or(initial_assembly, |snapshot| &snapshot.full_summary);
     realize_structural_initial_state(
         active_model,
         solver_mesh,
         &initial_assembly.structural_dof_layout,
         initial_state_basis,
         StructuralInitialConstraintView {
-            constraint_matrix: initial_assembly.constraint_matrix.as_ref(),
-            affine_reduction: initial_assembly.affine_constraint_reduction.as_ref(),
+            displacement_constraints: constraint_summary.constraint_matrix.as_ref(),
+            velocity_constraints: motion_snapshot
+                .as_ref()
+                .map(|snapshot| &snapshot.velocity_constraints),
+            affine_reduction: constraint_summary.affine_constraint_reduction.as_ref(),
             direct_constrained_dofs: initial_assembly.operator.constrained_dofs(),
             direct_prescribed_displacement: initial_assembly.operator.load(),
         },
@@ -257,6 +277,8 @@ pub fn run_transient_block(
         &basis.execution_step,
         &basis.initial_assembly,
         Some(input.solver_mesh),
+        &basis.motions,
+        basis.schedule.points[0].time_s,
     )?;
     let initial_conditions =
         input
@@ -320,12 +342,6 @@ pub fn run_transient_block(
             )
         }
         crate::execution::StructuralTransientSolverPlan::ModalReduced { basis_transition } => {
-            if !basis.motions.is_empty() {
-                return Err(FeaRunError::InvalidModel(
-                    "modal transient execution with prescribed support motion requires the governed affine modal projection"
-                        .into(),
-                ));
-            }
             let modal_state = input.modal_state.ok_or_else(|| {
                 FeaRunError::InvalidModel(
                     "modal transient execution is missing its admitted modal-basis state".into(),
@@ -336,14 +352,32 @@ pub fn run_transient_block(
                     "modal transient semantic state does not contain a modal basis".into(),
                 )
             })?;
-            solve_structural_modal_transient_block_with_assembly(
-                StructuralModalTransientBlockSolveInput {
-                    block: block_input,
-                    basis_state: basis_transition.source_state,
-                    basis: modal_basis,
-                },
-                &mut assemble_at,
-            )
+            if basis.motions.is_empty() {
+                solve_structural_modal_transient_block_with_assembly(
+                    StructuralModalTransientBlockSolveInput {
+                        block: block_input,
+                        basis_state: basis_transition.source_state,
+                        basis: modal_basis,
+                    },
+                    &mut assemble_at,
+                )
+            } else {
+                modal_motion::solve_prescribed_modal_motion_block(
+                    motion::StructuralMotionBlockSolveInput {
+                        summary: &basis.initial_assembly,
+                        motions: &basis.motions,
+                        options: &options,
+                        backend: input.workload.backend,
+                        request: input.request,
+                        predecessor: input.predecessor,
+                        initial_conditions: block_input.initial_conditions,
+                        observation_cursors: block_input.observation_cursors,
+                    },
+                    basis_transition.source_state,
+                    modal_basis,
+                    &mut assemble_at,
+                )
+            }
         }
     };
     result.map_err(|error| match error {
@@ -428,6 +462,8 @@ pub fn run_transient_with_options(
         execution_step,
         &summary,
         options.solver_mesh.as_ref(),
+        &structural_motions,
+        start_time_s,
     )?;
     let initial_state_evidence = initial_state.evidence.clone();
     emit_phase(

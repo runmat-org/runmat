@@ -46,6 +46,7 @@ pub(crate) use completed_result::{
 pub(crate) use diagnostics::mechanical_energy_history_diagnostic;
 use diagnostics::transient_diagnostics;
 use effective_solve::EffectiveDynamicsSolveResult;
+pub(crate) use modal_block::solve_structural_modal_transient_block_with_mapping;
 pub use modal_block::{
     solve_structural_modal_transient_block_with_assembly, StructuralModalTransientBlockSolveInput,
 };
