@@ -195,6 +195,19 @@ test("raw keyword modules are explicit and path-checked", () => {
   assert.match(renderModuleCompositionProduct(parsed.products[1]), /pub\(crate\) mod r#struct;/);
 });
 
+test("weak keywords remain canonical ordinary identifiers", () => {
+  const projection = fixtureProjection();
+  projection.products[1].children = [child({
+    module: "union", source_path: "crates/runmat-runtime/src/builtins/math/union.rs",
+    sourceKind: "file", visibility: "public", role: "identity",
+  })];
+  const parsed = parseModuleCompositionProjection(projection);
+  assert.match(renderModuleCompositionProduct(parsed.products[1]), /pub mod union;/);
+
+  projection.products[1].children[0].module = "r#union";
+  assert.throws(() => parseModuleCompositionProjection(projection), /must use r# exactly/);
+});
+
 test("parent-scoped declarations and reexports remain closed and verifiable", () => {
   const product = fixtureProjection().products[0];
   product.children = [child({
