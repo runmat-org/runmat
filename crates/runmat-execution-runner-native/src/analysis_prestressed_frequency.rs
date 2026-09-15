@@ -18,22 +18,33 @@ use crate::{
 pub struct CompletedStructuralPrestressedFrequencyStudy {
     pub preload: ImportedStructuralLinearResult,
     pub prestress_state: ImportedSemanticState,
+    pub resolved_workload: runmat_analysis_fea::execution::StructuralFrequencyWorkload,
     pub frequency: crate::CompletedStructuralFrequencyStudy,
 }
 
 pub async fn execute_structural_prestressed_frequency_study_locally(
-    mut config: NativeExecutionConfig,
+    config: NativeExecutionConfig,
     preparation: StructuralPrestressedFrequencyStudyPreparation,
     policy: StructuralSequenceExecutionPolicy,
 ) -> NativeExecutionResult<CompletedStructuralPrestressedFrequencyStudy> {
+    execute_structural_prestressed_frequency_study_locally_with_source(config, preparation, policy)
+        .await
+        .map(|(completion, _)| completion)
+}
+
+pub async fn execute_structural_prestressed_frequency_study_locally_with_source(
+    mut config: NativeExecutionConfig,
+    preparation: StructuralPrestressedFrequencyStudyPreparation,
+    policy: StructuralSequenceExecutionPolicy,
+) -> NativeExecutionResult<(
+    CompletedStructuralPrestressedFrequencyStudy,
+    crate::FilesystemObjectStore,
+)> {
     configure_local_analysis(&mut config, &policy.resources);
     let session = NativeProgramSession::new(config)?;
-    execute_with_pool(
-        &mut LocalAnalysisTaskPool::new(session),
-        preparation,
-        policy,
-    )
-    .await
+    let mut pool = LocalAnalysisTaskPool::new(session);
+    let completion = execute_with_pool(&mut pool, preparation, policy).await?;
+    Ok((completion, pool.object_store()))
 }
 
 pub async fn execute_structural_prestressed_frequency_study_remotely(
@@ -120,6 +131,7 @@ async fn execute_with_pool(
             "prestressed-frequency binding names another state publication task",
         ));
     }
+    let resolved_workload = bound.workload.clone();
     let frequency = crate::analysis_frequency::execute_with_pool(
         pool,
         StructuralFrequencyExecutionPreparation {
@@ -151,6 +163,7 @@ async fn execute_with_pool(
             .semantic_state()
             .cloned()
             .ok_or_else(|| protocol("published prestress state is absent"))?,
+        resolved_workload,
         frequency,
     })
 }

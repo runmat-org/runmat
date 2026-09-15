@@ -333,6 +333,9 @@ pub(super) fn structural_temporal(procedure: AnalysisProcedure) -> Option<Tempor
         AnalysisProcedure::EigenvalueBuckling => {
             Some(TemporalImplementation::StructuralEigenvalueBuckling)
         }
+        AnalysisProcedure::HarmonicResponse => {
+            Some(TemporalImplementation::StructuralHarmonicSolve)
+        }
         AnalysisProcedure::PrestressedHarmonicResponse => {
             Some(TemporalImplementation::StructuralPrestressedHarmonicSolve)
         }

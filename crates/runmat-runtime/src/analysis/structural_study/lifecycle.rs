@@ -28,6 +28,7 @@ use crate::analysis::{
 mod buckling_completion;
 mod modal_completion;
 mod preparation;
+mod prestressed_frequency_completion;
 mod prestressed_modal_completion;
 
 pub(in crate::analysis) use buckling_completion::complete_buckling_study;
@@ -40,10 +41,33 @@ pub use preparation::analysis_prepare_structural_study_intent_op;
 pub(in crate::analysis) use preparation::{
     prepare_structural_buckling_template, prepare_structural_frequency_workload,
     prepare_structural_modal_transient_template, prepare_structural_modal_workload,
+    prepare_structural_prestressed_frequency_template,
     prepare_structural_prestressed_modal_template,
 };
+pub(in crate::analysis) use prestressed_frequency_completion::complete_prestressed_frequency_study;
+use prestressed_frequency_completion::complete_structural_prestressed_frequency;
 pub(in crate::analysis) use prestressed_modal_completion::complete_prestressed_modal_study;
 use prestressed_modal_completion::complete_structural_prestressed_modal;
+
+fn completion_error(
+    prepared: &PreparedStudyCompletion,
+    error_code: &'static str,
+    message: impl Into<String>,
+) -> OperationErrorEnvelope {
+    operation_error(
+        ANALYSIS_RUN_STUDY_OPERATION,
+        ANALYSIS_RUN_STUDY_OP_VERSION,
+        &prepared.context,
+        OperationErrorSpec {
+            error_code,
+            error_type: OperationErrorType::Contract,
+            retryable: false,
+            severity: OperationErrorSeverity::Fatal,
+        },
+        message,
+        BTreeMap::from([("study_id".to_string(), prepared.study_id.clone())]),
+    )
+}
 
 /// Admits the remotely meshed and solved result of a path-free structural study intent.
 ///
@@ -209,6 +233,20 @@ pub fn analysis_complete_structural_study_intent_op(
             },
             StructuralStudyNumericalResult::StructuralPrestressedModal(result),
         ) => complete_structural_prestressed_modal(
+            intent,
+            resolved_model,
+            persisted_mesh,
+            meshing_output.artifact,
+            workloads,
+            *result,
+            completion_identity,
+        ),
+        (
+            runmat_analysis_fea::execution::StructuralStudyWorkloads::HeterogeneousSequence {
+                workloads,
+            },
+            StructuralStudyNumericalResult::StructuralPrestressedFrequency(result),
+        ) => complete_structural_prestressed_frequency(
             intent,
             resolved_model,
             persisted_mesh,

@@ -19,6 +19,10 @@ fn exposed_identities() -> Vec<(PhysicsFamily, AnalysisProcedure)> {
             PhysicsFamily::Structural,
             AnalysisProcedure::TransientResponse,
         ),
+        (
+            PhysicsFamily::Structural,
+            AnalysisProcedure::HarmonicResponse,
+        ),
         (PhysicsFamily::Structural, AnalysisProcedure::Nonlinear),
         (PhysicsFamily::Thermal, AnalysisProcedure::Static),
         (PhysicsFamily::Thermal, AnalysisProcedure::TransientResponse),

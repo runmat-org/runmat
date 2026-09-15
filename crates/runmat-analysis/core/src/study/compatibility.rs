@@ -38,6 +38,10 @@ pub fn is_exposed_analysis_identity(
                 PhysicsFamily::Structural,
                 AnalysisProcedure::TransientResponse
             )
+            | (
+                PhysicsFamily::Structural,
+                AnalysisProcedure::HarmonicResponse
+            )
             | (PhysicsFamily::Structural, AnalysisProcedure::Nonlinear)
             | (
                 PhysicsFamily::Structural,
@@ -98,6 +102,10 @@ mod tests {
             (
                 PhysicsFamily::Structural,
                 AnalysisProcedure::TransientResponse,
+            ),
+            (
+                PhysicsFamily::Structural,
+                AnalysisProcedure::HarmonicResponse,
             ),
             (PhysicsFamily::Structural, AnalysisProcedure::Nonlinear),
             (

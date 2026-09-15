@@ -26,7 +26,13 @@ pub fn analysis_prepare_structural_study_intent_op(
             step.procedure_step.procedure
                 == runmat_analysis_core::AnalysisProcedure::PrestressedModalExtraction
         });
-    let is_prestress_sequence = is_buckling_sequence || is_prestressed_modal_sequence;
+    let is_prestressed_frequency_sequence = study.steps.len() == 2
+        && study.steps.iter().any(|step| {
+            step.procedure_step.procedure
+                == runmat_analysis_core::AnalysisProcedure::PrestressedHarmonicResponse
+        });
+    let is_prestress_sequence =
+        is_buckling_sequence || is_prestressed_modal_sequence || is_prestressed_frequency_sequence;
     for step in &study.steps {
         let mut authored_execution = step.authored_execution.clone();
         match step.authored_execution.solver_options.clone() {
@@ -147,6 +153,25 @@ pub fn analysis_prepare_structural_study_intent_op(
                 );
                 authored_execution.solver_options =
                     AnalysisSolverOptions::StructuralTransient(options);
+            }
+            AnalysisSolverOptions::StructuralFrequency(mut options)
+                if is_prestressed_frequency_sequence
+                    && linear_workloads.is_empty()
+                    && transient_workload.is_none()
+                    && frequency_workload.is_none()
+                    && heterogeneous_workloads.len() == 1 =>
+            {
+                options.solver_mesh_artifact_path = None;
+                let template =
+                    prepare_structural_prestressed_frequency_template(&study, step, &options)?;
+                heterogeneous_workloads.insert(
+                    step.procedure_step.step_id.clone(),
+                    runmat_analysis_fea::execution::StructuralStepWorkload::PrestressedFrequency {
+                        template: Box::new(template),
+                    },
+                );
+                authored_execution.solver_options =
+                    AnalysisSolverOptions::StructuralFrequency(options);
             }
             AnalysisSolverOptions::StructuralFrequency(mut options)
                 if study.steps.len() == 1
@@ -422,6 +447,61 @@ pub(in crate::analysis) fn prepare_structural_frequency_workload(
         .direct_solver
         .validate()
         .map_err(|error| portable_study_contract_error(study, error.to_string()))?;
+    let plan = prepare_structural_frequency_plan(study, step)?;
+    runmat_analysis_fea::execution::StructuralFrequencyWorkload::new(
+        runmat_analysis_fea::execution::StructuralFrequencyWorkloadInput {
+            model: study.model.clone(),
+            step_id: step.procedure_step.step_id.clone(),
+            backend: step.authored_execution.backend,
+            formulation_requirement: step.authored_execution.requirement,
+            observation_execution:
+                runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
+            plan,
+            solver: runmat_analysis_fea::execution::StructuralFrequencySolverPlan::Direct {
+                policy: options.direct_solver,
+            },
+            prestress_transition: None,
+        },
+    )
+    .map_err(|error| portable_study_contract_error(study, error.to_string()))
+}
+
+pub(in crate::analysis) fn prepare_structural_prestressed_frequency_template(
+    study: &super::super::PreparedStudySequence,
+    step: &super::super::PreparedStudyStep,
+    options: &crate::analysis::AnalysisStructuralFrequencyRunOptions,
+) -> Result<
+    runmat_analysis_fea::execution::StructuralPrestressedFrequencyTemplate,
+    OperationErrorEnvelope,
+> {
+    options
+        .direct_solver
+        .validate()
+        .map_err(|error| portable_study_contract_error(study, error.to_string()))?;
+    let template = runmat_analysis_fea::execution::StructuralPrestressedFrequencyTemplate {
+        schema_version: 1,
+        model: study.model.clone(),
+        step_id: step.procedure_step.step_id.clone(),
+        backend: step.authored_execution.backend,
+        formulation_requirement: step.authored_execution.requirement,
+        observation_execution:
+            runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
+        plan: prepare_structural_frequency_plan(study, step)?,
+        solver:
+            runmat_analysis_fea::execution::StructuralPrestressedFrequencySolverTemplate::Direct {
+                policy: options.direct_solver,
+            },
+    };
+    template
+        .validate()
+        .map_err(|error| portable_study_contract_error(study, error.to_string()))?;
+    Ok(template)
+}
+
+fn prepare_structural_frequency_plan(
+    study: &super::super::PreparedStudySequence,
+    step: &super::super::PreparedStudyStep,
+) -> Result<runmat_analysis_fea::frequency::FrequencyResponsePlan, OperationErrorEnvelope> {
     let runmat_analysis_core::IndependentDomain::FrequencyHertz(frequencies) =
         &step.procedure_step.independent_domain
     else {
@@ -437,26 +517,10 @@ pub(in crate::analysis) fn prepare_structural_frequency_workload(
                 "structural harmonic execution requires at least one frequency".into(),
             )
         })?;
-    let plan = runmat_analysis_fea::frequency::FrequencyResponsePlan::new(
+    runmat_analysis_fea::frequency::FrequencyResponsePlan::new(
         reference_frequency_hz,
         requested_frequencies_hz,
         &[],
-    )
-    .map_err(|error| portable_study_contract_error(study, error.to_string()))?;
-    runmat_analysis_fea::execution::StructuralFrequencyWorkload::new(
-        runmat_analysis_fea::execution::StructuralFrequencyWorkloadInput {
-            model: study.model.clone(),
-            step_id: step.procedure_step.step_id.clone(),
-            backend: step.authored_execution.backend,
-            formulation_requirement: step.authored_execution.requirement,
-            observation_execution:
-                runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
-            plan,
-            solver: runmat_analysis_fea::execution::StructuralFrequencySolverPlan::Direct {
-                policy: options.direct_solver,
-            },
-            prestress_transition: None,
-        },
     )
     .map_err(|error| portable_study_contract_error(study, error.to_string()))
 }

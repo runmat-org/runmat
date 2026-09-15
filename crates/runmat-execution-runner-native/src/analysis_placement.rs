@@ -15,6 +15,7 @@ use runmat_runtime::analysis::{
     StructuralStudyModalTransientNumericalResult, StructuralStudyNumericalResult,
     StructuralStudyPlacementEntry, StructuralStudyPlacementExecutor,
     StructuralStudyPlacementFuture, StructuralStudyPlacementResult,
+    StructuralStudyPrestressedFrequencyNumericalResult,
     StructuralStudyPrestressedModalNumericalResult, StructuralStudySequenceNumericalResult,
     StructuralStudyStepNumericalResult,
 };
@@ -22,6 +23,7 @@ use runmat_runtime::analysis::{
 use crate::{
     execute_structural_buckling_study_locally, execute_structural_frequency_locally_with_source,
     execute_structural_modal_locally, execute_structural_modal_transient_locally,
+    execute_structural_prestressed_frequency_study_locally_with_source,
     execute_structural_prestressed_modal_study_locally, execute_structural_sequence_locally,
     NativeExecutionConfig, RetainedStructuralTransientRecovery,
     StructuralFrequencyExecutionPreparation, StructuralSequenceExecutionPolicy,
@@ -181,10 +183,66 @@ async fn execute_one(
                 ),
                 _ => false,
             };
+            let consumer_is_prestressed_frequency = match &authored {
+                StructuralStudyWorkloads::HeterogeneousSequence { workloads } => matches!(
+                    workloads.get(consumer_step_id),
+                    Some(
+                        runmat_analysis_fea::execution::StructuralStepWorkload::PrestressedFrequency {
+                            ..
+                        }
+                    )
+                ),
+                _ => false,
+            };
             if matches!(
                 producer,
                 runmat_analysis_fea::execution::StructuralStepWorkload::Linear { .. }
             ) {
+                if consumer_is_prestressed_frequency {
+                    let (completed, source) =
+                        execute_structural_prestressed_frequency_study_locally_with_source(
+                            execution_config,
+                            runmat_analysis_execution::StructuralPrestressedFrequencyStudyPreparation {
+                                authored_study_digest: study_digest,
+                                frozen_project_digest: None,
+                                workloads: authored,
+                                mesh: prepared.solver_mesh().clone(),
+                                artifact_access: access.clone(),
+                                program_revision: revision,
+                                chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
+                                inventory_limits: ObjectInventoryLimits::default(),
+                                required_capabilities: BTreeSet::new(),
+                                accelerator_requests,
+                            },
+                            policy,
+                        )
+                        .await?;
+                    let (catalog, artifact_roots) =
+                        completed.frequency.published_artifacts(&access)?;
+                    let frequency = StructuralStudyFrequencyNumericalResult::new(
+                        None,
+                        completed.resolved_workload,
+                        completed.frequency.result.result,
+                        completed.frequency.publication,
+                        catalog,
+                        artifact_roots,
+                        ArtifactPublishedObjectSource::new(source),
+                    )
+                    .map_err(crate::NativeExecutionError::Configuration)?;
+                    return Ok(
+                        StructuralStudyNumericalResult::StructuralPrestressedFrequency(Box::new(
+                            StructuralStudyPrestressedFrequencyNumericalResult {
+                                frozen_project_digest: None,
+                                preload_step_id: producer_step_id.clone(),
+                                frequency_step_id: consumer_step_id.clone(),
+                                preload_result: completed.preload.result.run,
+                                preload_solver_result_identity: completed.preload.identity,
+                                prestress_state: completed.prestress_state.state,
+                                frequency,
+                            },
+                        )),
+                    );
+                }
                 if consumer_is_prestressed_modal {
                     let completed = execute_structural_prestressed_modal_study_locally(
                         execution_config,

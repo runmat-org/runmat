@@ -41,6 +41,7 @@ pub enum TemporalImplementation {
     StructuralSubspaceIteration,
     StructuralPrestressedSubspaceIteration,
     StructuralEigenvalueBuckling,
+    StructuralHarmonicSolve,
     StructuralPrestressedHarmonicSolve,
     StructuralNewmarkAverageAcceleration,
     StructuralScalarResidualIteration,

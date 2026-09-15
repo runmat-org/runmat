@@ -401,12 +401,53 @@ pub(in crate::analysis) fn admit_structural_frequency_result(
     options: &AnalysisStructuralFrequencyRunOptions,
     assigned_run_id: String,
 ) -> Result<CompletedStructuralFrequencyStep, String> {
-    let identity = runmat_analysis_fea::pipeline::structural_frequency::admit_structural_frequency_publication(
-        &numerical.workload,
+    admit_structural_frequency_result_with_state(
+        numerical,
         solver_mesh,
-        &numerical.result,
-        &numerical.publication,
+        options,
+        assigned_run_id,
+        None,
     )
+}
+
+pub(in crate::analysis) fn admit_prestressed_structural_frequency_result(
+    numerical: &StructuralStudyFrequencyNumericalResult,
+    solver_mesh: &runmat_meshing_core::SolverMeshArtifact,
+    options: &AnalysisStructuralFrequencyRunOptions,
+    assigned_run_id: String,
+    prestress_state: &runmat_analysis_fea::execution::CanonicalSemanticState,
+) -> Result<CompletedStructuralFrequencyStep, String> {
+    admit_structural_frequency_result_with_state(
+        numerical,
+        solver_mesh,
+        options,
+        assigned_run_id,
+        Some(prestress_state),
+    )
+}
+
+fn admit_structural_frequency_result_with_state(
+    numerical: &StructuralStudyFrequencyNumericalResult,
+    solver_mesh: &runmat_meshing_core::SolverMeshArtifact,
+    options: &AnalysisStructuralFrequencyRunOptions,
+    assigned_run_id: String,
+    prestress_state: Option<&runmat_analysis_fea::execution::CanonicalSemanticState>,
+) -> Result<CompletedStructuralFrequencyStep, String> {
+    let identity = match prestress_state {
+        Some(state) => runmat_analysis_fea::pipeline::structural_frequency::admit_prestressed_structural_frequency_publication(
+            &numerical.workload,
+            solver_mesh,
+            state,
+            &numerical.result,
+            &numerical.publication,
+        ),
+        None => runmat_analysis_fea::pipeline::structural_frequency::admit_structural_frequency_publication(
+            &numerical.workload,
+            solver_mesh,
+            &numerical.result,
+            &numerical.publication,
+        ),
+    }
     .map_err(|error| error.to_string())?;
     options
         .direct_solver

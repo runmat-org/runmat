@@ -20,9 +20,9 @@ use runmat_runtime::analysis::{
     PreparedStructuralStudyIntent, StructuralStudyBucklingNumericalResult,
     StructuralStudyExecutionFailure, StructuralStudyFrequencyNumericalResult,
     StructuralStudyModalNumericalResult, StructuralStudyModalTransientNumericalResult,
-    StructuralStudyNumericalResult, StructuralStudyPrestressedModalNumericalResult,
-    StructuralStudySequenceNumericalResult, StructuralStudyStepNumericalResult,
-    StructuralStudyTransientNumericalResult,
+    StructuralStudyNumericalResult, StructuralStudyPrestressedFrequencyNumericalResult,
+    StructuralStudyPrestressedModalNumericalResult, StructuralStudySequenceNumericalResult,
+    StructuralStudyStepNumericalResult, StructuralStudyTransientNumericalResult,
 };
 use runmat_runtime::operations::OperationEnvelope;
 
@@ -293,6 +293,31 @@ fn study_result(
                 modal_numerical_receipt: modal.modal_numerical_receipt.clone(),
             },
         )),
+        runmat_execution_runner_native::ExactStructuralStudyAnalysisResult::StructuralPrestressedFrequency(
+            frequency,
+        ) => {
+            let nested = StructuralStudyFrequencyNumericalResult::new(
+                result.frozen_project_digest,
+                (*frequency.frequency.resolved_workload).clone(),
+                (*frequency.frequency.result).clone(),
+                (*frequency.frequency.publication).clone(),
+                frequency.frequency.object_catalog.clone(),
+                frequency.frequency.artifact_roots.clone(),
+                ArtifactPublishedObjectSource::new(source),
+            )
+            .map_err(anyhow::Error::msg)?;
+            StructuralStudyNumericalResult::StructuralPrestressedFrequency(Box::new(
+                StructuralStudyPrestressedFrequencyNumericalResult {
+                    frozen_project_digest: result.frozen_project_digest,
+                    preload_step_id: frequency.preload_workload.step_id.clone(),
+                    frequency_step_id: frequency.frequency.resolved_workload.step_id().clone(),
+                    preload_result: frequency.preload_result.run.clone(),
+                    preload_solver_result_identity: frequency.preload_result_identity,
+                    prestress_state: frequency.prestress_state.clone(),
+                    frequency: nested,
+                },
+            ))
+        }
         runmat_execution_runner_native::ExactStructuralStudyAnalysisResult::StructuralFrequency(
             frequency,
         ) => StructuralStudyNumericalResult::StructuralFrequency(Box::new(

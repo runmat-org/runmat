@@ -213,12 +213,24 @@ pub struct StructuralStudyPrestressedModalNumericalResult {
 }
 
 #[derive(Debug, Clone)]
+pub struct StructuralStudyPrestressedFrequencyNumericalResult {
+    pub frozen_project_digest: Option<runmat_execution::Digest>,
+    pub preload_step_id: ProcedureStepId,
+    pub frequency_step_id: ProcedureStepId,
+    pub preload_result: FeaRunResult,
+    pub preload_solver_result_identity: runmat_analysis_fea::execution::SolverResultIdentity,
+    pub prestress_state: runmat_analysis_fea::execution::CanonicalSemanticState,
+    pub frequency: StructuralStudyFrequencyNumericalResult,
+}
+
+#[derive(Debug, Clone)]
 pub enum StructuralStudyNumericalResult {
     LinearSequence(StructuralStudySequenceNumericalResult),
     StructuralModal(Box<StructuralStudyModalNumericalResult>),
     StructuralModalTransient(Box<StructuralStudyModalTransientNumericalResult>),
     StructuralBuckling(Box<StructuralStudyBucklingNumericalResult>),
     StructuralPrestressedModal(Box<StructuralStudyPrestressedModalNumericalResult>),
+    StructuralPrestressedFrequency(Box<StructuralStudyPrestressedFrequencyNumericalResult>),
     StructuralTransient(Box<StructuralStudyTransientNumericalResult>),
     StructuralFrequency(Box<StructuralStudyFrequencyNumericalResult>),
 }
@@ -1268,6 +1280,81 @@ pub fn analysis_prepare_structural_study_op(
         }
     }
 
+    if let [preload_step, frequency_step] = study.steps.as_slice() {
+        if frequency_step.procedure_step.procedure
+            == runmat_analysis_core::AnalysisProcedure::PrestressedHarmonicResponse
+        {
+            if let (
+                AnalysisSolverOptions::StructuralLinear(mut preload_options),
+                AnalysisSolverOptions::StructuralFrequency(mut frequency_options),
+            ) = (
+                preload_step.authored_execution.solver_options.clone(),
+                frequency_step.authored_execution.solver_options.clone(),
+            ) {
+                if preload_options.solver_mesh_artifact_path.is_none() {
+                    preload_options.solver_mesh_artifact_path =
+                        study.solver_mesh_artifact_path.clone();
+                }
+                let preload = prepare_linear_static_step_run(
+                    &study.model,
+                    &preload_step.procedure_step.step_id,
+                    preload_step.authored_execution.backend,
+                    preload_step.authored_execution.requirement,
+                    preload_options,
+                    study.context.clone(),
+                )?;
+                frequency_options.solver_mesh_artifact_path = None;
+                let frequency =
+                    structural_study::prepare_structural_prestressed_frequency_template(
+                        &study,
+                        frequency_step,
+                        &frequency_options,
+                    )?;
+                let workloads = BTreeMap::from([
+                    (
+                        preload_step.procedure_step.step_id.clone(),
+                        runmat_analysis_fea::execution::StructuralStepWorkload::Linear {
+                            workload: Box::new(preload.workload),
+                        },
+                    ),
+                    (
+                        frequency_step.procedure_step.step_id.clone(),
+                        runmat_analysis_fea::execution::StructuralStepWorkload::PrestressedFrequency {
+                            template: Box::new(frequency),
+                        },
+                    ),
+                ]);
+                runmat_analysis_fea::execution::StructuralStudyWorkloads::HeterogeneousSequence {
+                    workloads: workloads.clone(),
+                }
+                .validate()
+                .map_err(|error| {
+                    operation_error(
+                        ANALYSIS_RUN_STUDY_OPERATION,
+                        ANALYSIS_RUN_STUDY_OP_VERSION,
+                        &study.context,
+                        OperationErrorSpec {
+                            error_code: "RM.FEA.RUN_STUDY.INVALID_PORTABLE_INTENT",
+                            error_type: OperationErrorType::Contract,
+                            retryable: false,
+                            severity: OperationErrorSeverity::Fatal,
+                        },
+                        error.to_string(),
+                        BTreeMap::new(),
+                    )
+                })?;
+                return Ok(PreparedStructuralStudy {
+                    study,
+                    execution:
+                        structural_study::PreparedStructuralStudyExecution::StructuralPrestressedFrequency {
+                            workloads,
+                        },
+                    solver_mesh,
+                });
+            }
+        }
+    }
+
     if let [preload_step, buckling_step] = study.steps.as_slice() {
         if let (
             AnalysisSolverOptions::StructuralLinear(mut preload_options),
@@ -1608,6 +1695,30 @@ pub fn analysis_complete_structural_study_op(
                 storage::next_run_id(),
             );
         }
+        Ok(StructuralStudyNumericalResult::StructuralPrestressedFrequency(result)) => {
+            let workloads = match &prepared.execution {
+                structural_study::PreparedStructuralStudyExecution::StructuralPrestressedFrequency {
+                    workloads,
+                } => workloads.clone(),
+                _ => {
+                    return Err(structural_study_completion_failure(
+                        &prepared,
+                        "RM.FEA.RUN_STUDY.RESULT_KIND_MISMATCH",
+                        OperationErrorType::Contract,
+                        OperationErrorSeverity::Fatal,
+                        "prestressed-frequency result differs from the prepared study kind",
+                    ));
+                }
+            };
+            return structural_study::complete_prestressed_frequency_study(
+                study_completion_from_prepared(prepared.study),
+                prepared.solver_mesh,
+                workloads,
+                *result,
+                storage::next_run_id(),
+                storage::next_run_id(),
+            );
+        }
         Ok(StructuralStudyNumericalResult::StructuralFrequency(result)) => {
             let workload = match &prepared.execution {
                 structural_study::PreparedStructuralStudyExecution::StructuralFrequency {
@@ -1630,6 +1741,9 @@ pub fn analysis_complete_structural_study_op(
                     ..
                 }
                 | structural_study::PreparedStructuralStudyExecution::StructuralPrestressedModal {
+                    ..
+                }
+                | structural_study::PreparedStructuralStudyExecution::StructuralPrestressedFrequency {
                     ..
                 } => {
                     return Err(structural_study_completion_failure(

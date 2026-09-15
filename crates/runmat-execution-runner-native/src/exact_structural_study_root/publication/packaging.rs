@@ -64,6 +64,9 @@ pub(crate) fn package_exact_structural_study_result(
         ExactStructuralAnalysisPublication::StructuralPrestressedModal { completion, .. } => {
             prestressed_modal_closure(completion, &decoded.artifact_access)?
         }
+        ExactStructuralAnalysisPublication::StructuralPrestressedFrequency {
+            completion, ..
+        } => prestressed_frequency_closure(completion, &decoded.artifact_access)?,
         ExactStructuralAnalysisPublication::StructuralFrequency { completion, .. } => {
             frequency_closure(completion, &decoded.artifact_access)?
         }
@@ -194,6 +197,60 @@ fn prestressed_modal_closure(
             prestress_state_root: Box::new(prestress_state_root),
             modal_result_root: Box::new(modal_result_root),
             modal_receipt_root: Box::new(modal_receipt_root),
+            objects,
+        },
+    )
+}
+
+fn prestressed_frequency_closure(
+    completion: &crate::CompletedStructuralPrestressedFrequencyStudy,
+    access: &ArtifactAccess,
+) -> NativeExecutionResult<ExactStructuralStudyAnalysisClosure> {
+    let preload_result_root = completion
+        .preload
+        .objects
+        .root_reference(access, ValueRefKind::ResultObject)
+        .map_err(protocol)?;
+    let preload_receipt_root = completion
+        .preload
+        .numerical_receipt_objects
+        .root_reference(access, ValueRefKind::ResultObject)
+        .map_err(protocol)?;
+    let prestress_state_root = completion
+        .prestress_state
+        .objects
+        .root_reference(access, ValueRefKind::ResultObject)
+        .map_err(protocol)?;
+    let (frequency, frequency_objects) = frequency_components(&completion.frequency, access)?;
+    let objects = unique_references(
+        completion
+            .preload
+            .objects
+            .unique_references(access, ValueRefKind::ResultObject)
+            .map_err(protocol)?
+            .into_iter()
+            .chain(
+                completion
+                    .preload
+                    .numerical_receipt_objects
+                    .unique_references(access, ValueRefKind::ResultObject)
+                    .map_err(protocol)?,
+            )
+            .chain(
+                completion
+                    .prestress_state
+                    .objects
+                    .unique_references(access, ValueRefKind::ResultObject)
+                    .map_err(protocol)?,
+            )
+            .chain(frequency_objects),
+    )?;
+    Ok(
+        ExactStructuralStudyAnalysisClosure::StructuralPrestressedFrequency {
+            preload_result_root: Box::new(preload_result_root),
+            preload_receipt_root: Box::new(preload_receipt_root),
+            prestress_state_root: Box::new(prestress_state_root),
+            frequency: Box::new(frequency),
             objects,
         },
     )
@@ -371,6 +428,17 @@ fn frequency_closure(
     completion: &crate::CompletedStructuralFrequencyStudy,
     access: &ArtifactAccess,
 ) -> NativeExecutionResult<ExactStructuralStudyAnalysisClosure> {
+    let (frequency, objects) = frequency_components(completion, access)?;
+    Ok(ExactStructuralStudyAnalysisClosure::StructuralFrequency {
+        frequency: Box::new(frequency),
+        objects,
+    })
+}
+
+fn frequency_components(
+    completion: &crate::CompletedStructuralFrequencyStudy,
+    access: &ArtifactAccess,
+) -> NativeExecutionResult<(ExactStructuralFrequencyClosure, Vec<ValueRef>)> {
     if completion.entries.len() != completion.observation_samples.len() {
         return Err(protocol(
             "structural frequency fields and observation samples have different inventories",
@@ -431,13 +499,16 @@ fn frequency_closure(
             checkpoint_root,
         });
     }
-    Ok(ExactStructuralStudyAnalysisClosure::StructuralFrequency {
-        result_root: Box::new(result_root),
-        receipt_root: Box::new(receipt_root),
-        publication: Box::new(completion.publication.clone()),
-        entries,
-        histories,
-        resource_usage_root: Box::new(resource_usage_root),
-        objects: catalog.objects,
-    })
+    Ok((
+        ExactStructuralFrequencyClosure {
+            result_root: Box::new(result_root),
+            receipt_root: Box::new(receipt_root),
+            publication: Box::new(completion.publication.clone()),
+            entries,
+            histories,
+            resource_usage_root: Box::new(resource_usage_root),
+            objects: catalog.objects.clone(),
+        },
+        catalog.objects,
+    ))
 }

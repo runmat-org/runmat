@@ -2287,7 +2287,7 @@ impl AnalysisSolverOptions {
     pub fn defaults_for(step: &ProcedureStep) -> Result<Self, String> {
         use AnalysisProcedure::{
             EigenvalueBuckling, HarmonicResponse, ModalExtraction, Nonlinear,
-            PrestressedModalExtraction, Static, TransientResponse,
+            PrestressedHarmonicResponse, PrestressedModalExtraction, Static, TransientResponse,
         };
         use PhysicsFamily::{Acoustic, Coupled, Electromagnetic, Fluid, Structural, Thermal};
 
@@ -2310,7 +2310,11 @@ impl AnalysisSolverOptions {
             (Structural, EigenvalueBuckling, SolutionSpace::Direct) => Ok(
                 Self::StructuralBuckling(AnalysisBucklingRunOptions::default()),
             ),
-            (Structural, HarmonicResponse, SolutionSpace::Direct) => Ok(Self::StructuralFrequency(
+            (
+                Structural,
+                HarmonicResponse | PrestressedHarmonicResponse,
+                SolutionSpace::Direct,
+            ) => Ok(Self::StructuralFrequency(
                 AnalysisStructuralFrequencyRunOptions::default(),
             )),
             (Acoustic, HarmonicResponse, SolutionSpace::Direct) => Ok(Self::AcousticHelmholtz(
@@ -3358,7 +3362,20 @@ mod tests {
     fn solver_defaults_admit_only_implemented_exact_procedures() {
         let mut prestressed_modal = ProcedureStep::structural_modal("prestressed_modal");
         prestressed_modal.procedure = AnalysisProcedure::PrestressedModalExtraction;
-        assert!(AnalysisSolverOptions::defaults_for(&prestressed_modal).is_err());
+        assert!(matches!(
+            AnalysisSolverOptions::defaults_for(&prestressed_modal),
+            Ok(AnalysisSolverOptions::StructuralModes(_))
+        ));
+
+        let prestressed_frequency = ProcedureStep::structural_prestressed_harmonic(
+            "prestressed_frequency",
+            "preload",
+            "prestress",
+        );
+        assert!(matches!(
+            AnalysisSolverOptions::defaults_for(&prestressed_frequency),
+            Ok(AnalysisSolverOptions::StructuralFrequency(_))
+        ));
 
         let thermal_static = ProcedureStep::thermal_steady("thermal_static");
         assert!(matches!(

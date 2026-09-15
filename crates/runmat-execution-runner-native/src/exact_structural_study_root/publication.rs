@@ -37,10 +37,12 @@ use super::{
 use crate::{CompletedStructuralTransientSequence, NativeExecutionResult};
 
 mod buckling_import;
+mod frequency_closure_import;
 mod frequency_import;
 mod inventory;
 mod modal_import;
 mod packaging;
+mod prestressed_frequency_import;
 mod prestressed_modal_import;
 mod result_import;
 
@@ -106,15 +108,29 @@ enum ExactStructuralStudyAnalysisClosure {
         modal_receipt_root: Box<ValueRef>,
         objects: Vec<ValueRef>,
     },
-    StructuralFrequency {
-        result_root: Box<ValueRef>,
-        receipt_root: Box<ValueRef>,
-        publication: Box<runmat_analysis_fea::execution::StructuralFrequencyPublicationManifest>,
-        entries: Vec<ExactStructuralFrequencyEntryClosure>,
-        histories: Vec<ExactStructuralFrequencyHistoryClosure>,
-        resource_usage_root: Box<ValueRef>,
+    StructuralPrestressedFrequency {
+        preload_result_root: Box<ValueRef>,
+        preload_receipt_root: Box<ValueRef>,
+        prestress_state_root: Box<ValueRef>,
+        frequency: Box<ExactStructuralFrequencyClosure>,
         objects: Vec<ValueRef>,
     },
+    StructuralFrequency {
+        frequency: Box<ExactStructuralFrequencyClosure>,
+        objects: Vec<ValueRef>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ExactStructuralFrequencyClosure {
+    result_root: Box<ValueRef>,
+    receipt_root: Box<ValueRef>,
+    publication: Box<runmat_analysis_fea::execution::StructuralFrequencyPublicationManifest>,
+    entries: Vec<ExactStructuralFrequencyEntryClosure>,
+    histories: Vec<ExactStructuralFrequencyHistoryClosure>,
+    resource_usage_root: Box<ValueRef>,
+    objects: Vec<ValueRef>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -144,6 +160,7 @@ impl ExactStructuralStudyAnalysisClosure {
             | Self::StructuralModalTransient { objects, .. }
             | Self::StructuralBuckling { objects, .. }
             | Self::StructuralPrestressedModal { objects, .. }
+            | Self::StructuralPrestressedFrequency { objects, .. }
             | Self::StructuralFrequency { objects, .. } => objects,
         }
     }
@@ -248,50 +265,82 @@ impl ExactStructuralStudyAnalysisClosure {
                 ],
                 objects,
             )?,
-            Self::StructuralFrequency {
-                result_root,
-                receipt_root,
-                publication,
-                entries,
-                histories,
-                resource_usage_root,
+            Self::StructuralPrestressedFrequency {
+                preload_result_root,
+                preload_receipt_root,
+                prestress_state_root,
+                frequency,
                 objects,
             } => {
-                publication.validate().map_err(protocol)?;
-                if result_root == receipt_root
-                    || entries.is_empty()
-                    || !objects.contains(result_root)
-                    || !objects.contains(receipt_root)
-                    || !objects.contains(resource_usage_root)
-                    || entries.iter().any(|entry| {
-                        !objects.contains(&entry.fields_root)
-                            || entry
-                                .observations_root
-                                .as_ref()
-                                .is_some_and(|root| !objects.contains(root))
-                    })
-                    || histories
-                        .iter()
-                        .any(|history| !objects.contains(&history.checkpoint_root))
-                {
-                    return Err(protocol(
-                        "structural frequency closure omits a declared artifact root",
-                    ));
-                }
-                let history_ids = histories
-                    .iter()
-                    .map(|history| &history.observation_id)
-                    .collect::<BTreeSet<_>>();
-                if history_ids.len() != histories.len() {
-                    return Err(protocol(
-                        "structural frequency closure contains duplicate histories",
-                    ));
-                }
-                reference_inventory(objects)?;
+                validate_frequency_closure(frequency, objects)?;
+                validate_declared_roots(
+                    &[
+                        preload_result_root,
+                        preload_receipt_root,
+                        prestress_state_root,
+                        &frequency.result_root,
+                        &frequency.receipt_root,
+                        &frequency.resource_usage_root,
+                    ],
+                    objects,
+                )?;
+            }
+            Self::StructuralFrequency { frequency, objects } => {
+                validate_frequency_closure(frequency, objects)?
             }
         }
         Ok(())
     }
+}
+
+fn validate_frequency_closure(
+    frequency: &ExactStructuralFrequencyClosure,
+    objects: &[ValueRef],
+) -> NativeExecutionResult<()> {
+    frequency.publication.validate().map_err(protocol)?;
+    if frequency
+        .objects
+        .iter()
+        .any(|reference| !objects.contains(reference))
+    {
+        return Err(protocol(
+            "structural frequency object closure escapes its enclosing result",
+        ));
+    }
+    let objects = frequency.objects.as_slice();
+    if frequency.result_root == frequency.receipt_root
+        || frequency.entries.is_empty()
+        || !objects.contains(&frequency.result_root)
+        || !objects.contains(&frequency.receipt_root)
+        || !objects.contains(&frequency.resource_usage_root)
+        || frequency.entries.iter().any(|entry| {
+            !objects.contains(&entry.fields_root)
+                || entry
+                    .observations_root
+                    .as_ref()
+                    .is_some_and(|root| !objects.contains(root))
+        })
+        || frequency
+            .histories
+            .iter()
+            .any(|history| !objects.contains(&history.checkpoint_root))
+    {
+        return Err(protocol(
+            "structural frequency closure omits a declared artifact root",
+        ));
+    }
+    let history_ids = frequency
+        .histories
+        .iter()
+        .map(|history| &history.observation_id)
+        .collect::<BTreeSet<_>>();
+    if history_ids.len() != frequency.histories.len() {
+        return Err(protocol(
+            "structural frequency closure contains duplicate histories",
+        ));
+    }
+    reference_inventory(objects)?;
+    Ok(())
 }
 
 impl ExactStructuralStudyPublication {
@@ -395,6 +444,7 @@ pub enum ExactStructuralStudyAnalysisResult {
     StructuralModalTransient(Box<ExactStructuralModalTransientAnalysisResult>),
     StructuralBuckling(Box<ExactStructuralBucklingAnalysisResult>),
     StructuralPrestressedModal(Box<ExactStructuralPrestressedModalAnalysisResult>),
+    StructuralPrestressedFrequency(Box<ExactStructuralPrestressedFrequencyAnalysisResult>),
     StructuralFrequency(Box<ExactStructuralFrequencyAnalysisResult>),
 }
 
@@ -433,6 +483,17 @@ pub struct ExactStructuralPrestressedModalAnalysisResult {
     pub prestress_state: runmat_analysis_fea::execution::CanonicalSemanticState,
     pub modal_result: Box<StructuralModalSolverResult>,
     pub modal_numerical_receipt: StructuralModalNumericalReceipt,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExactStructuralPrestressedFrequencyAnalysisResult {
+    pub preload_workload: Box<StructuralLinearWorkload>,
+    pub preload_result: Box<runmat_analysis_fea::execution::StructuralLinearWorkloadResult>,
+    pub preload_result_identity: runmat_analysis_fea::execution::SolverResultIdentity,
+    pub preload_numerical_receipt:
+        runmat_analysis_fea::execution::StructuralLinearNumericalReceiptArtifact,
+    pub prestress_state: runmat_analysis_fea::execution::CanonicalSemanticState,
+    pub frequency: ExactStructuralFrequencyAnalysisResult,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -498,6 +559,12 @@ pub(crate) enum ExactStructuralAnalysisPublication<'a> {
         completion: &'a crate::CompletedStructuralPrestressedModalStudy,
         unresolved_workloads_digest: Digest,
     },
+    StructuralPrestressedFrequency {
+        signals:
+            &'a [crate::remote::signal_materialization::CompletedRemoteSignalMaterialization],
+        completion: &'a crate::CompletedStructuralPrestressedFrequencyStudy,
+        unresolved_workloads_digest: Digest,
+    },
     StructuralFrequency {
         signals:
             &'a [crate::remote::signal_materialization::CompletedRemoteSignalMaterialization],
@@ -517,6 +584,7 @@ impl ExactStructuralAnalysisPublication<'_> {
             | Self::StructuralModalTransient { signals, .. }
             | Self::StructuralBuckling { signals, .. }
             | Self::StructuralPrestressedModal { signals, .. }
+            | Self::StructuralPrestressedFrequency { signals, .. }
             | Self::StructuralFrequency { signals, .. } => signals,
         }
     }
@@ -544,6 +612,10 @@ impl ExactStructuralAnalysisPublication<'_> {
                 ..
             }
             | Self::StructuralPrestressedModal {
+                unresolved_workloads_digest,
+                ..
+            }
+            | Self::StructuralPrestressedFrequency {
                 unresolved_workloads_digest,
                 ..
             }

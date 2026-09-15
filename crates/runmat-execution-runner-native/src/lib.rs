@@ -66,6 +66,7 @@ pub use analysis_modal_transient::{
 pub use analysis_placement::NativeStructuralStudyPlacement;
 pub use analysis_prestressed_frequency::{
     execute_structural_prestressed_frequency_study_locally,
+    execute_structural_prestressed_frequency_study_locally_with_source,
     execute_structural_prestressed_frequency_study_remotely,
     CompletedStructuralPrestressedFrequencyStudy,
 };
@@ -104,10 +105,10 @@ pub use exact_structural_study_root::{
     decode_exact_structural_study_root, import_exact_structural_study_result,
     prepare_exact_structural_study_root, BoundaryRegionResolution, DecodedExactStructuralStudyRoot,
     ExactStructuralBucklingAnalysisResult, ExactStructuralFrequencyAnalysisResult,
-    ExactStructuralModalTransientAnalysisResult, ExactStructuralPrestressedModalAnalysisResult,
-    ExactStructuralStudyAnalysisResult, ExactStructuralStudyResult,
-    ExactStructuralStudyResultExpectation, ExactStructuralStudyRootPreparation,
-    PreparedExactStructuralStudyRoot, RequiredStudyProgram,
+    ExactStructuralModalTransientAnalysisResult, ExactStructuralPrestressedFrequencyAnalysisResult,
+    ExactStructuralPrestressedModalAnalysisResult, ExactStructuralStudyAnalysisResult,
+    ExactStructuralStudyResult, ExactStructuralStudyResultExpectation,
+    ExactStructuralStudyRootPreparation, PreparedExactStructuralStudyRoot, RequiredStudyProgram,
     EXACT_STRUCTURAL_STUDY_ROOT_EXECUTION_MODE, EXACT_STRUCTURAL_STUDY_ROOT_TARGET_PROFILE,
 };
 pub use exact_structural_sweep_root::{

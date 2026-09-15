@@ -348,6 +348,29 @@ pub fn import_exact_structural_study_result(
         )?,
         (
             StructuralStudyWorkloads::HeterogeneousSequence { workloads },
+            ExactStructuralStudyAnalysisClosure::StructuralPrestressedFrequency {
+                preload_result_root,
+                preload_receipt_root,
+                prestress_state_root,
+                frequency,
+                objects,
+            },
+        ) => super::prestressed_frequency_import::import_prestressed_frequency_result(
+            super::prestressed_frequency_import::PrestressedFrequencyResultImport {
+                source,
+                workloads,
+                preload_result_root: *preload_result_root,
+                preload_receipt_root: *preload_receipt_root,
+                prestress_state_root: *prestress_state_root,
+                frequency: *frequency,
+                objects,
+                mesh: &mesh.artifact,
+                access: &expected.artifact_access,
+                limits,
+            },
+        )?,
+        (
+            StructuralStudyWorkloads::HeterogeneousSequence { workloads },
             ExactStructuralStudyAnalysisClosure::StructuralBuckling {
                 preload_result_root,
                 preload_receipt_root,
@@ -398,161 +421,21 @@ pub fn import_exact_structural_study_result(
         )?,
         (
             StructuralStudyWorkloads::StructuralFrequency { workload },
-            ExactStructuralStudyAnalysisClosure::StructuralFrequency {
-                result_root,
-                receipt_root,
-                publication: declared_publication,
-                entries,
-                histories,
-                resource_usage_root,
-                objects,
-            },
-        ) => {
-            let result_objects = import_numerical_analysis_objects(
-                source,
-                &result_root,
-                &objects,
-                AnalysisNumericalObjectKind::SolverResult,
-                &expected.artifact_access,
-                limits,
-            )?;
-            let receipt_objects = import_numerical_analysis_objects(
-                source,
-                &receipt_root,
-                &objects,
-                AnalysisNumericalObjectKind::NumericalReceipt,
-                &expected.artifact_access,
-                limits,
-            )?;
-            let result =
-                runmat_analysis_execution::decode_prepared_structural_frequency_solver_result(
-                    &result_objects,
-                )
-                .map_err(protocol)?;
-            let numerical_receipt =
-                runmat_analysis_execution::decode_prepared_structural_frequency_numerical_receipt(
-                    &receipt_objects,
-                )
-                .map_err(protocol)?;
-            numerical_receipt
-                .validate_for_result(&result)
-                .map_err(protocol)?;
-            let prepared =
-                runmat_analysis_fea::pipeline::structural_frequency::prepare_structural_frequency(
-                    &workload,
-                    &mesh.artifact,
-                )
-                .map_err(protocol)?;
-            if result.manifest().scope() != &prepared.scope {
-                return Err(protocol(
-                    "structural frequency result names a different resolved workload",
-                ));
-            }
-            let mut semantic_roots = vec![
-                (*result_root).clone(),
-                (*receipt_root).clone(),
-                (*resource_usage_root).clone(),
-            ];
-            semantic_roots.extend(entries.iter().flat_map(|entry| {
-                std::iter::once(entry.fields_root.clone())
-                    .chain(entry.observations_root.iter().cloned())
-            }));
-            semantic_roots.extend(
-                histories
-                    .iter()
-                    .map(|history| history.checkpoint_root.clone()),
-            );
-            let object_catalog =
-                PublishedObjectCatalog::new(semantic_roots, objects.clone()).map_err(protocol)?;
-            let (entries, histories, resource_usage, publication) =
-                super::frequency_import::import_frequency_artifacts(
-                    super::frequency_import::FrequencyArtifactImport {
-                        source,
-                        workload: &workload,
-                        result: &result,
-                        receipt: &numerical_receipt,
-                        declared_entries: &entries,
-                        declared_histories: &histories,
-                        resource_usage_root: &resource_usage_root,
-                        result_objects: &result_objects,
-                        receipt_objects: &receipt_objects,
-                        declared_objects: &objects,
-                        access: &expected.artifact_access,
-                        limits,
-                        declared_publication: &declared_publication,
-                    },
-                )?;
-            let sample_roots = entries
-                .iter()
-                .map(|entry| {
-                    let fields = runmat_runtime::analysis::StructuralFrequencyArtifactRoot::new(
-                        entry.recovered_fields.output.root.clone(),
-                        entry.recovered_fields.output.kind,
-                        entry.recovered_fields.output.logical_identity,
-                        entry.recovered_fields.output.payload_digest,
-                    )
-                    .map_err(protocol)?;
-                    let observations = entry
-                        .observations
-                        .as_ref()
-                        .map(|observations| {
-                            runmat_runtime::analysis::StructuralFrequencyArtifactRoot::new(
-                                observations.output.root.clone(),
-                                observations.output.kind,
-                                observations.output.logical_identity,
-                                observations.output.payload_digest,
-                            )
-                            .map_err(protocol)
-                        })
-                        .transpose()?;
-                    Ok(
-                        runmat_runtime::analysis::StructuralFrequencySampleArtifactRoots::new(
-                            fields,
-                            observations,
-                        ),
-                    )
-                })
-                .collect::<NativeExecutionResult<Vec<_>>>()?;
-            let history_roots = histories
-                .iter()
-                .map(|history| {
-                    let reference = history
-                        .checkpoint
-                        .objects
-                        .root_reference(&expected.artifact_access, ValueRefKind::ResultObject)
-                        .map_err(protocol)?;
-                    Ok(
-                        runmat_runtime::analysis::StructuralFrequencyHistoryArtifactRoot::new(
-                            runtime_artifact_root(&history.checkpoint.objects, reference)?,
-                        ),
-                    )
-                })
-                .collect::<NativeExecutionResult<Vec<_>>>()?;
-            let artifact_roots =
-                runmat_runtime::analysis::StructuralFrequencyArtifactRootIndex::new(
-                    runtime_artifact_root(&result_objects, (*result_root).clone())?,
-                    runtime_artifact_root(&receipt_objects, (*receipt_root).clone())?,
-                    runtime_artifact_root(&resource_usage.objects, (*resource_usage_root).clone())?,
-                    sample_roots,
-                    history_roots,
-                    &publication,
-                    &object_catalog,
-                )
-                .map_err(protocol)?;
-            ExactStructuralStudyAnalysisResult::StructuralFrequency(Box::new(
-                super::ExactStructuralFrequencyAnalysisResult {
-                    resolved_workload: workload,
-                    result: Box::new(result),
-                    numerical_receipt,
-                    entries,
-                    histories,
-                    resource_usage,
-                    publication: Box::new(publication),
-                    object_catalog,
-                    artifact_roots,
+            ExactStructuralStudyAnalysisClosure::StructuralFrequency { frequency, objects },
+        ) => ExactStructuralStudyAnalysisResult::StructuralFrequency(Box::new(
+            super::frequency_closure_import::import_frequency_closure(
+                super::frequency_closure_import::FrequencyClosureImport {
+                    source,
+                    workload: *workload,
+                    closure: *frequency,
+                    objects,
+                    mesh: &mesh.artifact,
+                    prestress_state: None,
+                    access: &expected.artifact_access,
+                    limits,
                 },
-            ))
-        }
+            )?,
+        )),
         _ => {
             return Err(protocol(
                 "whole-study analysis result kind differs from its authored workload kind",
@@ -567,7 +450,7 @@ pub fn import_exact_structural_study_result(
     })
 }
 
-fn runtime_artifact_root(
+pub(super) fn runtime_artifact_root(
     objects: &runmat_analysis_execution::PreparedAnalysisObjects,
     reference: ValueRef,
 ) -> NativeExecutionResult<runmat_runtime::analysis::StructuralFrequencyArtifactRoot> {

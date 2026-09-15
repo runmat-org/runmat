@@ -283,23 +283,3 @@ pub(super) fn complete_structural_prestressed_modal(
         modal_run_id,
     )
 }
-
-fn completion_error(
-    prepared: &PreparedStudyCompletion,
-    error_code: &'static str,
-    message: impl Into<String>,
-) -> OperationErrorEnvelope {
-    operation_error(
-        ANALYSIS_RUN_STUDY_OPERATION,
-        ANALYSIS_RUN_STUDY_OP_VERSION,
-        &prepared.context,
-        OperationErrorSpec {
-            error_code,
-            error_type: OperationErrorType::Contract,
-            retryable: false,
-            severity: OperationErrorSeverity::Fatal,
-        },
-        message,
-        BTreeMap::from([("study_id".to_string(), prepared.study_id.clone())]),
-    )
-}

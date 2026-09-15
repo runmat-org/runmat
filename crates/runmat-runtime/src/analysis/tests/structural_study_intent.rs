@@ -479,6 +479,50 @@ fn structural_prestressed_modal_completion_publishes_exact_state_and_modes() {
 }
 
 #[test]
+fn structural_prestressed_frequency_intent_is_typed_and_restartable() {
+    let meshing_output = ready_buckling_meshing_output();
+    let spec = sample_prestressed_frequency_study_spec(digest_hex(
+        meshing_output.artifact.geometry.source_digest,
+    ));
+    let intent = analysis_prepare_structural_study_intent_op(
+        &spec,
+        OperationContext::new(Some("trace-prestressed-frequency-intent".into()), None),
+    )
+    .expect("prestressed-frequency intent should prepare");
+    let runmat_analysis_fea::execution::StructuralStudyWorkloads::HeterogeneousSequence {
+        workloads,
+    } = intent.workloads()
+    else {
+        panic!("prestressed-frequency intent requires a heterogeneous sequence")
+    };
+    assert!(matches!(
+        workloads.get(&runmat_analysis_core::ProcedureStepId(
+            "step_preload".into()
+        )),
+        Some(runmat_analysis_fea::execution::StructuralStepWorkload::Linear { .. })
+    ));
+    let Some(runmat_analysis_fea::execution::StructuralStepWorkload::PrestressedFrequency {
+        template,
+    }) = workloads.get(&runmat_analysis_core::ProcedureStepId(
+        "step_prestressed_frequency".into(),
+    ))
+    else {
+        panic!("prestressed-frequency intent must retain its unresolved typed template")
+    };
+    assert!(matches!(
+        template.solver,
+        runmat_analysis_fea::execution::StructuralPrestressedFrequencySolverTemplate::Direct { .. }
+    ));
+    assert_eq!(template.plan.frequencies_hz(), &[20.0, 40.0]);
+    let restored = PreparedStructuralStudyIntent::from_continuation_bytes(
+        &intent.continuation_bytes().unwrap(),
+    )
+    .unwrap();
+    assert_eq!(restored.intent_digest, intent.intent_digest);
+    assert_eq!(restored.workloads(), intent.workloads());
+}
+
+#[test]
 fn structural_study_intent_admits_one_typed_direct_transient_workload() {
     let _guard = analysis_test_guard();
     let spec = sample_direct_transient_study_spec("44".repeat(32), 9, 4);
@@ -1414,6 +1458,47 @@ fn sample_prestressed_modal_study_spec(geometry_sha256: String) -> AnalysisStudy
             convergence: runmat_analysis_fea::ModalConvergencePolicy::exploratory(),
             ..AnalysisModalRunOptions::default()
         }),
+    };
+    spec
+}
+
+fn sample_prestressed_frequency_study_spec(geometry_sha256: String) -> AnalysisStudySpec {
+    let mut spec = sample_buckling_study_spec(geometry_sha256);
+    let model = spec.model.as_mut().unwrap();
+    let preload = model.sequence.steps[0].clone();
+    let mut frequency = ProcedureStep::structural_prestressed_harmonic(
+        "step_prestressed_frequency",
+        preload.step_id.as_str(),
+        "geometric_stiffness",
+    );
+    frequency.independent_domain =
+        runmat_analysis_core::IndependentDomain::FrequencyHertz(vec![20.0, 40.0]);
+    let mut sequence = AnalysisSequence::from_steps(
+        "sequence_prestressed_frequency",
+        vec![preload.clone(), frequency.clone()],
+    );
+    sequence.dependencies[0].reason = runmat_analysis_core::SequenceDependencyReason::StateTransfer;
+    sequence
+        .transitions
+        .push(runmat_analysis_core::StateTransition {
+            transition_id: runmat_analysis_core::TransitionId(
+                "preload_to_prestressed_frequency".into(),
+            ),
+            producer_step: preload.step_id.clone(),
+            consumer_step: frequency.step_id.clone(),
+            state_id: runmat_analysis_core::StateId("geometric_stiffness".into()),
+            method: runmat_analysis_core::StateTransitionMethod::Reuse,
+            topology: runmat_analysis_core::TopologyTransitionPolicy::RequireIdentical,
+            reference: runmat_analysis_core::ReferenceStatePolicy::Preserve,
+        });
+    model.sequence = sequence;
+    spec.execution.steps[1] = AnalysisExecutionStep {
+        step_id: frequency.step_id,
+        backend: ComputeBackend::Cpu,
+        requirement: FormulationRequirement::Experimental,
+        solver_options: AnalysisSolverOptions::StructuralFrequency(
+            AnalysisStructuralFrequencyRunOptions::default(),
+        ),
     };
     spec
 }

@@ -208,7 +208,7 @@ fn run_operation_for_procedure(
 ) -> Option<AnalysisOperation> {
     use AnalysisProcedure::{
         EigenvalueBuckling, HarmonicResponse, ModalExtraction, Nonlinear,
-        PrestressedModalExtraction, Static, TransientResponse,
+        PrestressedHarmonicResponse, PrestressedModalExtraction, Static, TransientResponse,
     };
     use PhysicsFamily::{Acoustic, Coupled, Electromagnetic, Fluid, Structural, Thermal};
 
@@ -223,9 +223,11 @@ fn run_operation_for_procedure(
         (Structural, EigenvalueBuckling, SolutionSpace::Direct) => {
             Some(AnalysisOperation::Buckling)
         }
-        (Structural, HarmonicResponse, SolutionSpace::Direct | SolutionSpace::ModalReduced) => {
-            Some(AnalysisOperation::StructuralFrequency)
-        }
+        (
+            Structural,
+            HarmonicResponse | PrestressedHarmonicResponse,
+            SolutionSpace::Direct | SolutionSpace::ModalReduced,
+        ) => Some(AnalysisOperation::StructuralFrequency),
         (Acoustic, HarmonicResponse, SolutionSpace::Direct) => Some(AnalysisOperation::Acoustic),
         (Thermal, Static | TransientResponse, SolutionSpace::Direct) => {
             Some(AnalysisOperation::Thermal)

@@ -18,9 +18,10 @@ use runmat_analysis_fea::execution::{
     SignalMaterializationIdentity, StructuralBucklingSolverPolicy, StructuralBucklingTemplate,
     StructuralFrequencySolverPlan, StructuralFrequencyWorkload, StructuralFrequencyWorkloadInput,
     StructuralLinearWorkload, StructuralModalTransientTemplate, StructuralModalWorkload,
-    StructuralModalWorkloadInput, StructuralPrestressedModalTemplate, StructuralStepWorkload,
-    StructuralTransientBlockPlan, StructuralTransientWorkload, StudyIdentity,
-    SweepCompositionPolicy, SweepDefinition,
+    StructuralModalWorkloadInput, StructuralPrestressedFrequencySolverTemplate,
+    StructuralPrestressedFrequencyTemplate, StructuralPrestressedModalTemplate,
+    StructuralStepWorkload, StructuralTransientBlockPlan, StructuralTransientWorkload,
+    StudyIdentity, SweepCompositionPolicy, SweepDefinition,
 };
 use runmat_analysis_fea::fixtures::{fixture_model, FixtureId};
 use runmat_analysis_fea::frequency::FrequencyResponsePlan;
@@ -57,6 +58,7 @@ use crate::{
 
 use super::{prepare_exact_structural_sweep_root, ExactStructuralSweepRootPreparation};
 
+mod prestressed_frequency;
 mod prestressed_modal;
 
 const BOX: &[u8] = include_bytes!("../../../runmat-geometry/io/tests/fixtures/box.brep");
