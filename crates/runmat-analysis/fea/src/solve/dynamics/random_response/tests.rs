@@ -90,7 +90,6 @@ fn policy() -> RandomResponseIntegrationPolicy {
         modal_damping_ratio: 0.04,
         minimum_cumulative_mass_ratio: 0.0,
         relative_variance_tolerance: 2.0e-6,
-        absolute_variance_tolerance: 1.0e-20,
         maximum_refinement_levels: 18,
     }
 }

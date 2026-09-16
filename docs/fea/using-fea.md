@@ -482,8 +482,8 @@ model = fea.model("launch_model", geom, ...
 Random response is a two-step structural study: modal extraction publishes a mass-normalized modal
 basis, then the random-response step integrates an authored cross-power spectral-density (CPSD)
 matrix over frequency. The excitation owns the physical input definition. Solver options own only
-modal damping, modal-mass truncation, quadrature tolerances, and how many canonical frequency
-intervals may be grouped into one portable task.
+modal damping, modal-mass truncation, a dimensionless relative quadrature tolerance, and how many
+canonical frequency intervals may be grouped into one portable task.
 
 Each channel has a quantity, coordinate frame, and direction. At every frequency, `values` is the
 complete row-major complex CPSD matrix. Diagonal entries are auto spectra; off-diagonal entries

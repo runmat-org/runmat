@@ -1540,7 +1540,6 @@ fn box_random_response_workloads() -> runmat_analysis_execution::StructuralStudy
             modal_damping_ratio: 0.04,
             minimum_cumulative_mass_ratio: 0.0,
             relative_variance_tolerance: 1.0e-5,
-            absolute_variance_tolerance: 1.0e-14,
             maximum_refinement_levels: 14,
         },
         maximum_intervals_per_task: 2,

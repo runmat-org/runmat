@@ -278,9 +278,7 @@ pub struct StructuralRandomResponseNumericalReceipt {
     minimum_captured_mass_ratio: f64,
     evaluated_frequency_count: usize,
     maximum_refinement_level_used: u8,
-    maximum_estimated_absolute_variance_error: f64,
     maximum_estimated_relative_variance_error: f64,
-    maximum_rms: f64,
 }
 
 #[derive(Deserialize)]
@@ -297,9 +295,7 @@ struct StructuralRandomResponseNumericalReceiptWire {
     minimum_captured_mass_ratio: f64,
     evaluated_frequency_count: usize,
     maximum_refinement_level_used: u8,
-    maximum_estimated_absolute_variance_error: f64,
     maximum_estimated_relative_variance_error: f64,
-    maximum_rms: f64,
 }
 
 impl TryFrom<StructuralRandomResponseNumericalReceiptWire>
@@ -320,11 +316,8 @@ impl TryFrom<StructuralRandomResponseNumericalReceiptWire>
             minimum_captured_mass_ratio: wire.minimum_captured_mass_ratio,
             evaluated_frequency_count: wire.evaluated_frequency_count,
             maximum_refinement_level_used: wire.maximum_refinement_level_used,
-            maximum_estimated_absolute_variance_error: wire
-                .maximum_estimated_absolute_variance_error,
             maximum_estimated_relative_variance_error: wire
                 .maximum_estimated_relative_variance_error,
-            maximum_rms: wire.maximum_rms,
         };
         receipt.validate()?;
         Ok(receipt)
@@ -341,17 +334,6 @@ impl StructuralRandomResponseNumericalReceipt {
         let source_result = SolverResultIdentity::new(source_workload, source_payload_digest)?;
         let numerical = result.numerical();
         let evidence = numerical.evidence();
-        let maximum_rms = numerical
-            .dof_rms()
-            .iter()
-            .copied()
-            .chain(
-                numerical
-                    .fields()
-                    .iter()
-                    .flat_map(|field| field.rms().iter().copied()),
-            )
-            .fold(0.0_f64, f64::max);
         let mut receipt = Self {
             schema_version: 1,
             identity: NumericalReceiptIdentity::new(source_result, Digest::sha256([]))?,
@@ -368,11 +350,8 @@ impl StructuralRandomResponseNumericalReceipt {
                 .fold(f64::INFINITY, f64::min),
             evaluated_frequency_count: evidence.evaluated_frequency_count,
             maximum_refinement_level_used: evidence.maximum_refinement_level_used,
-            maximum_estimated_absolute_variance_error: evidence
-                .maximum_estimated_absolute_variance_error,
             maximum_estimated_relative_variance_error: evidence
                 .maximum_estimated_relative_variance_error,
-            maximum_rms,
         };
         receipt.identity = receipt.derive_identity()?;
         receipt.validate()?;
@@ -429,9 +408,7 @@ impl StructuralRandomResponseNumericalReceipt {
             || !(0.0..=1.0 + 1.0e-12).contains(&self.minimum_captured_mass_ratio)
             || self.evaluated_frequency_count < 3 * self.interval_count
             || self.maximum_refinement_level_used == 0
-            || !nonnegative_finite(self.maximum_estimated_absolute_variance_error)
             || !nonnegative_finite(self.maximum_estimated_relative_variance_error)
-            || !nonnegative_finite(self.maximum_rms)
             || self.source_result
                 != SolverResultIdentity::new(self.source_workload, self.source_payload_digest)?
             || self.identity != self.derive_identity()?
@@ -452,9 +429,7 @@ impl StructuralRandomResponseNumericalReceipt {
                 self.minimum_captured_mass_ratio,
                 self.evaluated_frequency_count,
                 self.maximum_refinement_level_used,
-                self.maximum_estimated_absolute_variance_error,
                 self.maximum_estimated_relative_variance_error,
-                self.maximum_rms,
             ),
             RESULT_LIMITS,
         )?);

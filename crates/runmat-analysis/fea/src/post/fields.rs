@@ -80,6 +80,35 @@ impl StructuralLinearFieldQuantity {
             Self::ShellTransverseShear => FEA_FIELD_STRUCTURAL_SHELL_TRANSVERSE_SHEAR,
         }
     }
+
+    /// Physical quantity represented by this linear recovery channel.
+    ///
+    /// Statistical solvers retain this closed quantity instead of attaching unit strings. The
+    /// model's canonical unit system and this quantity determine the units of RMS; variance uses
+    /// the square of those units.
+    pub const fn observation_quantity(self) -> ObservationQuantity {
+        match self {
+            Self::Displacement => ObservationQuantity::Displacement,
+            Self::Rotation => ObservationQuantity::Rotation,
+            Self::Strain => ObservationQuantity::Strain,
+            Self::Stress => ObservationQuantity::Stress,
+            Self::ShellMembraneForce => ObservationQuantity::ShellMembraneForce,
+            Self::ShellBendingMoment => ObservationQuantity::ShellBendingMoment,
+            Self::ShellTransverseShear => ObservationQuantity::ShellTransverseShear,
+        }
+    }
+
+    /// Canonical topology location of the recovered quantity.
+    pub const fn location(self) -> FieldLocation {
+        match self {
+            Self::Displacement | Self::Rotation => FieldLocation::Node,
+            Self::Strain
+            | Self::Stress
+            | Self::ShellMembraneForce
+            | Self::ShellBendingMoment
+            | Self::ShellTransverseShear => FieldLocation::Element,
+        }
+    }
 }
 
 pub fn recover_result_fields(
@@ -1570,6 +1599,19 @@ mod tests {
         identities.sort();
         identities.dedup();
         assert_eq!(identities.len(), definitions.len());
+    }
+
+    #[test]
+    fn statistical_linear_quantities_reuse_the_observable_catalog_semantics() {
+        let definitions = structural_observable_field_definitions().unwrap();
+        for quantity in StructuralLinearFieldQuantity::ALL {
+            let definition = definitions
+                .iter()
+                .find(|definition| definition.field_id() == quantity.source_field_id())
+                .expect("every statistical linear quantity must have one observable definition");
+            assert_eq!(definition.quantity(), quantity.observation_quantity());
+            assert_eq!(definition.location(), quantity.location());
+        }
     }
 
     fn field_shape<'a>(fields: &'a [AnalysisField], field_id: &str) -> &'a [usize] {

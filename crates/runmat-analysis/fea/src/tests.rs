@@ -76,6 +76,7 @@ use runmat_meshing_core::{
 
 mod prestressed_frequency;
 mod random_response_portable;
+mod random_response_qualification;
 mod response_spectrum_portable;
 mod transient_physical;
 

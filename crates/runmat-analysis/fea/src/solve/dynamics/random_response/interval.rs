@@ -205,7 +205,6 @@ impl RandomResponseFieldVariance {
 pub struct RandomResponseIntervalEvidence {
     pub evaluated_frequency_count: usize,
     pub refinement_level: u8,
-    pub estimated_absolute_error: f64,
     pub estimated_relative_error: f64,
 }
 
@@ -408,8 +407,6 @@ impl ModalRandomResponseIntervalResult {
             || evidence.evaluated_frequency_count < 3
             || evidence.refinement_level == 0
             || evidence.refinement_level > self.policy.maximum_refinement_levels
-            || !evidence.estimated_absolute_error.is_finite()
-            || evidence.estimated_absolute_error < 0.0
             || !evidence.estimated_relative_error.is_finite()
             || evidence.estimated_relative_error < 0.0
             || self.identity != self.derive_identity()?
@@ -534,7 +531,6 @@ pub fn solve_modal_random_response_interval(
         evidence: RandomResponseIntervalEvidence {
             evaluated_frequency_count: integrated.evaluated_frequency_count,
             refinement_level: integrated.refinement_level,
-            estimated_absolute_error: integrated.estimated_absolute_error,
             estimated_relative_error: integrated.estimated_relative_error,
         },
     };
@@ -655,10 +651,6 @@ pub fn assemble_described_random_response_intervals(
                 .map(|interval| interval.evidence.refinement_level)
                 .max()
                 .unwrap_or(0),
-            maximum_estimated_absolute_variance_error: intervals
-                .iter()
-                .map(|interval| interval.evidence.estimated_absolute_error)
-                .fold(0.0_f64, f64::max),
             maximum_estimated_relative_variance_error: intervals
                 .iter()
                 .map(|interval| interval.evidence.estimated_relative_error)

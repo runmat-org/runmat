@@ -41,7 +41,6 @@ pub struct RandomResponseIntegrationPolicy {
     pub modal_damping_ratio: f64,
     pub minimum_cumulative_mass_ratio: f64,
     pub relative_variance_tolerance: f64,
-    pub absolute_variance_tolerance: f64,
     pub maximum_refinement_levels: u8,
 }
 
@@ -51,7 +50,6 @@ impl RandomResponseIntegrationPolicy {
             modal_damping_ratio: 0.05,
             minimum_cumulative_mass_ratio: 0.9,
             relative_variance_tolerance: 1.0e-5,
-            absolute_variance_tolerance: 1.0e-18,
             maximum_refinement_levels: 12,
         }
     }
@@ -63,8 +61,6 @@ impl RandomResponseIntegrationPolicy {
             || !(0.0..=1.0).contains(&self.minimum_cumulative_mass_ratio)
             || !self.relative_variance_tolerance.is_finite()
             || self.relative_variance_tolerance <= 0.0
-            || !self.absolute_variance_tolerance.is_finite()
-            || self.absolute_variance_tolerance < 0.0
             || self.maximum_refinement_levels == 0
             || self.maximum_refinement_levels > 24
         {
@@ -141,7 +137,6 @@ pub struct RandomResponseIntegrationEvidence {
     pub resonance_split_count: usize,
     pub evaluated_frequency_count: usize,
     pub maximum_refinement_level_used: u8,
-    pub maximum_estimated_absolute_variance_error: f64,
     pub maximum_estimated_relative_variance_error: f64,
 }
 
@@ -439,10 +434,6 @@ fn evidence_is_valid(evidence: &RandomResponseIntegrationEvidence) -> bool {
     evidence.authored_interval_count > 0
         && evidence.evaluated_frequency_count >= 2
         && evidence.maximum_refinement_level_used > 0
-        && evidence
-            .maximum_estimated_absolute_variance_error
-            .is_finite()
-        && evidence.maximum_estimated_absolute_variance_error >= 0.0
         && evidence
             .maximum_estimated_relative_variance_error
             .is_finite()

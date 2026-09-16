@@ -8,7 +8,6 @@ pub(super) struct IntervalIntegration {
     pub values: Vec<f64>,
     pub evaluated_frequency_count: usize,
     pub refinement_level: u8,
-    pub estimated_absolute_error: f64,
     pub estimated_relative_error: f64,
 }
 
@@ -66,17 +65,13 @@ where
             .map(|(coarse, midpoints)| 0.5 * coarse + step * midpoints)
             .collect::<Vec<_>>();
         let mut converged = true;
-        let mut maximum_absolute_error = 0.0_f64;
         let mut maximum_relative_error = 0.0_f64;
         for (coarse, value) in prior.iter().zip(&refined) {
             let absolute_error = (value - coarse).abs() / 3.0;
-            let relative_error = absolute_error / value.abs().max(f64::MIN_POSITIVE);
-            maximum_absolute_error = maximum_absolute_error.max(absolute_error);
+            let scale = value.abs().max(coarse.abs()).max(f64::MIN_POSITIVE);
+            let relative_error = absolute_error / scale;
             maximum_relative_error = maximum_relative_error.max(relative_error);
-            if absolute_error
-                > policy.absolute_variance_tolerance
-                    + policy.relative_variance_tolerance * value.abs()
-            {
+            if relative_error > policy.relative_variance_tolerance {
                 converged = false;
             }
         }
@@ -85,7 +80,6 @@ where
                 values: refined,
                 evaluated_frequency_count: cache.len(),
                 refinement_level: level,
-                estimated_absolute_error: maximum_absolute_error,
                 estimated_relative_error: maximum_relative_error,
             });
         }
@@ -150,10 +144,6 @@ where
                 .map(|interval| interval.refinement_level)
                 .max()
                 .unwrap_or(0),
-            maximum_estimated_absolute_variance_error: intervals
-                .iter()
-                .map(|interval| interval.estimated_absolute_error)
-                .fold(0.0_f64, f64::max),
             maximum_estimated_relative_variance_error: intervals
                 .iter()
                 .map(|interval| interval.estimated_relative_error)
@@ -210,7 +200,6 @@ mod tests {
                 modal_damping_ratio: 0.05,
                 minimum_cumulative_mass_ratio: 0.9,
                 relative_variance_tolerance: 1.0e-7,
-                absolute_variance_tolerance: 1.0e-12,
                 maximum_refinement_levels: 12,
             },
             |frequency| Ok(vec![frequency * frequency]),
@@ -218,5 +207,28 @@ mod tests {
         .unwrap();
         assert!((integrated.values[0] - 1.0 / 3.0).abs() < 1.0e-7);
         assert!(integrated.evidence.evaluated_frequency_count > 4);
+    }
+
+    #[test]
+    fn under_resolved_peak_fails_without_a_dimensioned_absolute_escape_hatch() {
+        let outcome = integrate_breakpoints(
+            &[0.0, 1.0],
+            1,
+            RandomResponseIntegrationPolicy {
+                modal_damping_ratio: 0.05,
+                minimum_cumulative_mass_ratio: 0.0,
+                relative_variance_tolerance: 1.0e-8,
+                maximum_refinement_levels: 1,
+            },
+            |frequency| {
+                let offset = (frequency - 0.5) / 0.01;
+                Ok(vec![(-offset * offset).exp()])
+            },
+        );
+        let error = match outcome {
+            Ok(_) => panic!("an under-resolved peak must not publish integration evidence"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("did not converge"));
     }
 }
