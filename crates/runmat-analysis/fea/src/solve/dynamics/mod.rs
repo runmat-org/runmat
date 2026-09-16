@@ -24,8 +24,13 @@ pub use modal_transient::{
     ModalTransientHistory, ModalTransientInitialState, ModalTransientSample, ModalTransientStep,
 };
 pub use response_spectrum::{
-    solve_modal_response_spectrum, solve_modal_response_spectrum_with_operator,
-    ModalResponseSpectrumContribution, ModalResponseSpectrumModeContribution,
-    ModalResponseSpectrumModeKind, ModalResponseSpectrumResult,
-    ModalResponseSpectrumResultIdentity, ModalResponseSpectrumTruncationEvidence,
+    assemble_modal_response_spectrum_direction_results,
+    assemble_modal_response_spectrum_directions, solve_modal_response_spectrum,
+    solve_modal_response_spectrum_direction_with_operator,
+    solve_modal_response_spectrum_with_operator, ModalResponseSpectrumContribution,
+    ModalResponseSpectrumDirectionResult, ModalResponseSpectrumDirectionResultIdentity,
+    ModalResponseSpectrumModeContribution, ModalResponseSpectrumModeKind,
+    ModalResponseSpectrumResult, ModalResponseSpectrumResultIdentity,
+    ModalResponseSpectrumTruncationEvidence, ResponseSpectrumDisplacementConversion,
+    ResponseSpectrumResultSemantics,
 };

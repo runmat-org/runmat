@@ -1,5 +1,6 @@
 mod combine;
 mod correction;
+mod direction_result;
 mod interpolate;
 mod validation;
 
@@ -24,6 +25,9 @@ use combine::{
     combine_directional_responses, combine_modal_responses, combine_periodic_and_rigid_responses,
 };
 use correction::{correction_response, rigid_coefficients};
+pub use direction_result::{
+    ModalResponseSpectrumDirectionResult, ModalResponseSpectrumDirectionResultIdentity,
+};
 use interpolate::interpolate_spectrum;
 use validation::{contribution_is_valid, vectors_close};
 
@@ -59,6 +63,35 @@ pub struct ModalResponseSpectrumModeContribution {
 pub enum ModalResponseSpectrumModeKind {
     Eigenmode,
     ResidualVector,
+}
+
+/// Response-spectrum vectors are component-wise statistical peak magnitudes, not one concurrent
+/// signed structural state.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResponseSpectrumResultSemantics {
+    StatisticalComponentMagnitudeEnvelope,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResponseSpectrumDisplacementConversion {
+    Direct,
+    DivideByAngularFrequency,
+    DivideByAngularFrequencySquared,
+}
+
+impl ResponseSpectrumDisplacementConversion {
+    pub const fn for_response(response: SpectrumResponse) -> Option<Self> {
+        match response {
+            SpectrumResponse::RelativeDisplacement => Some(Self::Direct),
+            SpectrumResponse::PseudoVelocity => Some(Self::DivideByAngularFrequency),
+            SpectrumResponse::PseudoAcceleration => Some(Self::DivideByAngularFrequencySquared),
+            SpectrumResponse::RelativeVelocity
+            | SpectrumResponse::RelativeAcceleration
+            | SpectrumResponse::AbsoluteAcceleration => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -98,6 +131,7 @@ pub struct ModalResponseSpectrumResult {
     identity: ModalResponseSpectrumResultIdentity,
     basis: ModalBasisIdentity,
     response: SpectrumResponse,
+    semantics: ResponseSpectrumResultSemantics,
     directional_combination: DirectionalCombination,
     contributions: Vec<ModalResponseSpectrumContribution>,
     combined_response: Vec<f64>,
@@ -109,6 +143,7 @@ struct ModalResponseSpectrumResultWire {
     identity: ModalResponseSpectrumResultIdentity,
     basis: ModalBasisIdentity,
     response: SpectrumResponse,
+    semantics: ResponseSpectrumResultSemantics,
     directional_combination: DirectionalCombination,
     contributions: Vec<ModalResponseSpectrumContribution>,
     combined_response: Vec<f64>,
@@ -122,6 +157,7 @@ impl TryFrom<ModalResponseSpectrumResultWire> for ModalResponseSpectrumResult {
             identity: wire.identity,
             basis: wire.basis,
             response: wire.response,
+            semantics: wire.semantics,
             directional_combination: wire.directional_combination,
             contributions: wire.contributions,
             combined_response: wire.combined_response,
@@ -153,6 +189,14 @@ impl ModalResponseSpectrumResult {
 
     pub const fn response(&self) -> SpectrumResponse {
         self.response
+    }
+
+    pub const fn semantics(&self) -> ResponseSpectrumResultSemantics {
+        self.semantics
+    }
+
+    pub const fn displacement_conversion(&self) -> Option<ResponseSpectrumDisplacementConversion> {
+        ResponseSpectrumDisplacementConversion::for_response(self.response)
     }
 
     pub const fn directional_combination(&self) -> DirectionalCombination {
@@ -221,7 +265,8 @@ impl ModalResponseSpectrumResult {
     }
 
     fn validate(&self) -> Result<(), FeaRunError> {
-        if self.contributions.is_empty()
+        if self.semantics != ResponseSpectrumResultSemantics::StatisticalComponentMagnitudeEnvelope
+            || self.contributions.is_empty()
             || self.combined_response.is_empty()
             || self
                 .combined_response
@@ -269,6 +314,7 @@ impl ModalResponseSpectrumResult {
             &(
                 self.basis,
                 self.response,
+                self.semantics,
                 self.directional_combination,
                 &self.contributions,
                 &self.combined_response,
@@ -297,6 +343,57 @@ pub fn solve_modal_response_spectrum_with_operator(
     solve_modal_response_spectrum_internal(Some(summary), basis, spectra)
 }
 
+pub fn solve_modal_response_spectrum_direction_with_operator(
+    summary: &AssemblySummary,
+    basis: &ModalBasisArtifact,
+    spectrum: &ResponseSpectrum,
+) -> Result<ModalResponseSpectrumDirectionResult, FeaRunError> {
+    basis.validate_for(summary)?;
+    let contribution = solve_spectrum_direction(Some(summary), basis, spectrum)?;
+    let result = ModalResponseSpectrumDirectionResult::from_contribution(
+        basis.identity(),
+        spectrum.clone(),
+        contribution,
+    )?;
+    result.validate_for(summary, basis)?;
+    Ok(result)
+}
+
+pub fn assemble_modal_response_spectrum_directions(
+    basis: &ModalBasisArtifact,
+    spectra: &[ResponseSpectrum],
+    direction_results: &[ModalResponseSpectrumDirectionResult],
+) -> Result<ModalResponseSpectrumResult, FeaRunError> {
+    basis.validate()?;
+    assemble_modal_response_spectrum_direction_results(basis.identity(), spectra, direction_results)
+}
+
+pub fn assemble_modal_response_spectrum_direction_results(
+    basis: ModalBasisIdentity,
+    spectra: &[ResponseSpectrum],
+    direction_results: &[ModalResponseSpectrumDirectionResult],
+) -> Result<ModalResponseSpectrumResult, FeaRunError> {
+    if spectra.len() != direction_results.len() || spectra.is_empty() {
+        return Err(FeaRunError::Solve(
+            "response-spectrum assembly requires exactly one result per requested direction".into(),
+        ));
+    }
+    let contributions = spectra
+        .iter()
+        .zip(direction_results)
+        .map(|(spectrum, result)| {
+            result.validate()?;
+            if result.basis() != basis || result.spectrum() != spectrum {
+                return Err(FeaRunError::Solve(
+                    "response-spectrum assembly received a substituted direction result".into(),
+                ));
+            }
+            Ok(result.contribution().clone())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    assemble_modal_response_spectrum_result(basis, spectra, contributions)
+}
+
 fn solve_modal_response_spectrum_internal(
     summary: Option<&AssemblySummary>,
     basis: &ModalBasisArtifact,
@@ -306,15 +403,6 @@ fn solve_modal_response_spectrum_internal(
     if spectra.is_empty() {
         return Err(FeaRunError::Solve(
             "modal response requires at least one response spectrum".into(),
-        ));
-    }
-    let response = spectra[0].response;
-    let directional_combination = spectra[0].directional_combination;
-    if spectra.iter().any(|spectrum| {
-        spectrum.response != response || spectrum.directional_combination != directional_combination
-    }) {
-        return Err(FeaRunError::Solve(
-            "directional response combination requires one response quantity and policy".into(),
         ));
     }
     let mut ids = BTreeSet::new();
@@ -328,6 +416,26 @@ fn solve_modal_response_spectrum_internal(
         }
         contributions.push(solve_spectrum_direction(summary, basis, spectrum)?);
     }
+    assemble_modal_response_spectrum_result(basis.identity(), spectra, contributions)
+}
+
+fn assemble_modal_response_spectrum_result(
+    basis: ModalBasisIdentity,
+    spectra: &[ResponseSpectrum],
+    contributions: Vec<ModalResponseSpectrumContribution>,
+) -> Result<ModalResponseSpectrumResult, FeaRunError> {
+    let response = spectra
+        .first()
+        .ok_or_else(|| FeaRunError::Solve("modal response requires a spectrum".into()))?
+        .response;
+    let directional_combination = spectra[0].directional_combination;
+    if spectra.iter().any(|spectrum| {
+        spectrum.response != response || spectrum.directional_combination != directional_combination
+    }) {
+        return Err(FeaRunError::Solve(
+            "directional response combination requires one response quantity and policy".into(),
+        ));
+    }
     let combined_response = combine_directional_responses(
         &contributions
             .iter()
@@ -337,8 +445,9 @@ fn solve_modal_response_spectrum_internal(
     )?;
     let mut result = ModalResponseSpectrumResult {
         identity: ModalResponseSpectrumResultIdentity(Digest::sha256([])),
-        basis: basis.identity(),
+        basis,
         response,
+        semantics: ResponseSpectrumResultSemantics::StatisticalComponentMagnitudeEnvelope,
         directional_combination,
         contributions,
         combined_response,

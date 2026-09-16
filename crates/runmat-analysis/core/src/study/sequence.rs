@@ -247,6 +247,7 @@ pub enum StateKind {
     StructuralKinematics,
     StructuralStressStrain,
     StructuralComplex,
+    StructuralResponseEnvelope,
     GeometricStiffness,
     MaterialHistory,
     ContactHistory,
@@ -421,6 +422,28 @@ impl ProcedureStep {
         step.procedure = AnalysisProcedure::PrestressedModalExtraction;
         step.state_inputs
             .push(prestress_input(producer_step, state_id));
+        step
+    }
+
+    pub fn structural_modal_response_spectrum(
+        step_id: impl Into<String>,
+        spectrum_ids: Vec<ResponseSpectrumId>,
+        producer_step: impl Into<String>,
+        state_id: impl Into<String>,
+    ) -> Self {
+        let mut step = Self::experimental(
+            step_id,
+            PhysicsFamily::Structural,
+            AnalysisProcedure::ModalResponseSpectrum,
+            SolutionSpace::ModalReduced,
+            IndependentDomain::ResponseSpectra { spectrum_ids },
+            vec![state(
+                "response_envelope",
+                StateKind::StructuralResponseEnvelope,
+            )],
+        );
+        step.state_inputs
+            .push(modal_basis_input(producer_step, state_id));
         step
     }
 

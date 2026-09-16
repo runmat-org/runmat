@@ -19,6 +19,26 @@ use super::*;
 
 #[test]
 fn modal_and_directional_combination_policies_have_independent_semantics() {
+    assert_eq!(
+        ResponseSpectrumDisplacementConversion::for_response(
+            SpectrumResponse::RelativeDisplacement
+        ),
+        Some(ResponseSpectrumDisplacementConversion::Direct)
+    );
+    assert_eq!(
+        ResponseSpectrumDisplacementConversion::for_response(SpectrumResponse::PseudoVelocity),
+        Some(ResponseSpectrumDisplacementConversion::DivideByAngularFrequency)
+    );
+    assert_eq!(
+        ResponseSpectrumDisplacementConversion::for_response(SpectrumResponse::PseudoAcceleration),
+        Some(ResponseSpectrumDisplacementConversion::DivideByAngularFrequencySquared)
+    );
+    assert_eq!(
+        ResponseSpectrumDisplacementConversion::for_response(
+            SpectrumResponse::AbsoluteAcceleration
+        ),
+        None
+    );
     let modal = vec![vec![3.0], vec![4.0]];
     assert_eq!(
         combine_modal_responses(&modal, &[1.0, 2.0], 0.05, ModalCombination::Srss).unwrap(),
@@ -251,6 +271,24 @@ fn operator_aware_missing_mass_closes_the_truncated_acceleration_influence() {
     result
         .validate_for_operator(&summary, &run.basis, std::slice::from_ref(&spectrum))
         .unwrap();
+
+    let direction_result =
+        solve_modal_response_spectrum_direction_with_operator(&summary, &run.basis, &spectrum)
+            .unwrap();
+    let restored_direction = ModalResponseSpectrumDirectionResult::from_canonical_bytes(
+        &direction_result.canonical_bytes().unwrap(),
+    )
+    .unwrap();
+    restored_direction
+        .validate_for(&summary, &run.basis)
+        .unwrap();
+    let assembled = assemble_modal_response_spectrum_directions(
+        &run.basis,
+        std::slice::from_ref(&spectrum),
+        &[restored_direction],
+    )
+    .unwrap();
+    assert_eq!(assembled, result);
 }
 
 #[test]

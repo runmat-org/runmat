@@ -139,6 +139,31 @@ pub(super) fn build_frequency_result_assembly_resource_plan(
     )
 }
 
+pub(super) fn build_response_spectrum_assembly_resource_plan(
+    input: FeaResourcePlanningInput,
+    demand: &StructuralModalResponseSpectrumAssemblyResourceDemand,
+) -> Result<FeaResourcePlan, ResourcePlanningError> {
+    if demand.direction_count.0 == 0
+        || demand.direction_count.0 > 3
+        || demand.direction_encoded_bytes.0 == 0
+        || demand.physical_dof_count.0 == 0
+    {
+        return Err(ResourcePlanningError::Invalid(
+            "response-spectrum assembly resource cardinalities are invalid".into(),
+        ));
+    }
+    build_post_process_resource_plan(
+        input,
+        PostProcessAccounting::host_only(
+            demand.scope_digest,
+            &demand.inputs,
+            demand.ordering_workspace_bytes_upper_bound,
+            ByteCount(0),
+            &[&demand.result_output, &demand.receipt_output],
+        ),
+    )
+}
+
 struct PostProcessAccounting<'a> {
     topology_digest: Digest,
     inputs: &'a PreparedInputResourceFacts,

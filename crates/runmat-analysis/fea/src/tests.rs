@@ -75,6 +75,7 @@ use runmat_meshing_core::{
 };
 
 mod prestressed_frequency;
+mod response_spectrum_portable;
 mod transient_physical;
 
 fn experimental_linear_static_options() -> LinearStaticSolveOptions {

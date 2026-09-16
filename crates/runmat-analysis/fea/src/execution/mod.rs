@@ -26,6 +26,10 @@ mod observation_assembly;
 mod observation_history_checkpoint;
 mod observation_partition;
 mod publication;
+mod response_spectrum_entry;
+mod response_spectrum_result;
+mod response_spectrum_scope;
+mod response_spectrum_workload;
 mod signal;
 mod solve;
 mod state;
@@ -100,13 +104,17 @@ pub use identity::{
     StructuralFrequencyPhysicalSampleIdentity, StructuralFrequencyProblemIdentity,
     StructuralFrequencyPublicationIdentity, StructuralFrequencyResultAssemblyRequestIdentity,
     StructuralFrequencyScopeIdentity, StructuralFrequencyWorkloadIdentity,
-    StructuralKinematicsIdentity, StructuralMassOperatorIdentity, StructuralModalWorkloadIdentity,
-    StructuralStiffnessOperatorIdentity, StructuralTransientBlockRequestIdentity,
-    StructuralTransientCheckpointIdentity, StructuralTransientCheckpointScopeIdentity,
-    StructuralTransientPhysicalSampleIdentity, StructuralTransientResultAssemblyRequestIdentity,
-    StructuralTransientScheduleIdentity, StructuralTransientSegmentIdentity,
-    StructuralTransientSegmentSampleIdentity, StructuralTransientSolverOptionsIdentity,
-    StudyIdentity, SweepIdentity, SweepResultIdentity,
+    StructuralKinematicsIdentity, StructuralMassOperatorIdentity,
+    StructuralModalResponseSpectrumAssemblyRequestIdentity,
+    StructuralModalResponseSpectrumDirectionRequestIdentity,
+    StructuralModalResponseSpectrumDirectionResultIdentity,
+    StructuralModalResponseSpectrumScopeIdentity, StructuralModalResponseSpectrumWorkloadIdentity,
+    StructuralModalWorkloadIdentity, StructuralStiffnessOperatorIdentity,
+    StructuralTransientBlockRequestIdentity, StructuralTransientCheckpointIdentity,
+    StructuralTransientCheckpointScopeIdentity, StructuralTransientPhysicalSampleIdentity,
+    StructuralTransientResultAssemblyRequestIdentity, StructuralTransientScheduleIdentity,
+    StructuralTransientSegmentIdentity, StructuralTransientSegmentSampleIdentity,
+    StructuralTransientSolverOptionsIdentity, StudyIdentity, SweepIdentity, SweepResultIdentity,
 };
 pub use modal_result::{StructuralModalNumericalReceipt, StructuralModalSolverResult};
 pub use modal_workload::{
@@ -126,6 +134,19 @@ pub use observation_partition::{
     ObservationPartitionEvaluationRequest, ObservationPartitionReductionRequest,
 };
 pub use publication::ResultPublicationRequest;
+pub use response_spectrum_entry::{
+    StructuralModalResponseSpectrumDirectionRequest, StructuralModalResponseSpectrumDirectionResult,
+};
+pub use response_spectrum_result::{
+    StructuralModalResponseSpectrumAssemblyRequest,
+    StructuralModalResponseSpectrumNumericalReceipt, StructuralModalResponseSpectrumSolverResult,
+};
+pub use response_spectrum_scope::{
+    StructuralModalResponseSpectrumScope, StructuralModalResponseSpectrumScopeInput,
+};
+pub use response_spectrum_workload::{
+    StructuralModalResponseSpectrumWorkload, StructuralModalResponseSpectrumWorkloadInput,
+};
 pub use signal::{
     CanonicalSignalContent, CanonicalSignalKnot, CanonicalSignalRealization,
     CanonicalSignalRealizationInput, CanonicalSignalValues, SignalInputAdmission,

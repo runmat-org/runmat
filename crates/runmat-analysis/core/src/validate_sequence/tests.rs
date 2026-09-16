@@ -114,23 +114,17 @@ fn rejects_family_procedure_and_domain_mismatches() {
 
 #[test]
 fn modal_response_requires_typed_existing_spectrum_ids() {
-    let mut step = ProcedureStep::structural_modal("spectrum");
-    step.procedure = AnalysisProcedure::ModalResponseSpectrum;
-    step.solution_space = SolutionSpace::ModalReduced;
-    step.independent_domain = IndependentDomain::ResponseSpectra {
-        spectrum_ids: vec![ResponseSpectrumId("design".into())],
-    };
-    step.state_inputs.push(StateInput {
-        input_id: "basis".into(),
-        required_kind: StateKind::ModalBasis,
-        source: StateSource::Upstream {
-            producer_step: ProcedureStepId("modes".into()),
-            state_id: StateId("basis".into()),
-        },
-        use_as: StateUse::ModalBasis,
-        conflict: InitialStateConflictPolicy::Reject,
-    });
+    let mut step = ProcedureStep::structural_modal_response_spectrum(
+        "spectrum",
+        vec![ResponseSpectrumId("design".into())],
+        "modes",
+        "basis",
+    );
     super::step::validate(&step).unwrap();
+    assert_eq!(
+        step.state_outputs[0].kind,
+        StateKind::StructuralResponseEnvelope
+    );
     let model = model_with_steps(vec![step.clone()]);
     assert!(matches!(
         super::activation::validate_objects(&model, &step),

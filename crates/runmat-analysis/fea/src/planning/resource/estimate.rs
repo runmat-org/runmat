@@ -3,7 +3,7 @@ mod post_process;
 use post_process::{
     build_frequency_result_assembly_resource_plan, build_observation_assembly_resource_plan,
     build_observation_history_resource_plan, build_observation_partition_resource_plan,
-    build_observation_reduction_resource_plan,
+    build_observation_reduction_resource_plan, build_response_spectrum_assembly_resource_plan,
 };
 
 use runmat_execution::{resource::ResourceRequest, Digest};
@@ -15,7 +15,8 @@ use super::contract::{
     ObservationReductionResourceDemand, ObservationResourceFacts, PartitioningPolicy,
     PreconditionerStorage, PreparedInputResourceFacts, PreparedOutputResourceFacts,
     ResourceBreakdown, ResourcePlanningError, SolveResourcePolicy, SparseResourceFacts,
-    StructuralFrequencyResultAssemblyResourceDemand, StructuralOperatorResourceDemand,
+    StructuralFrequencyResultAssemblyResourceDemand,
+    StructuralModalResponseSpectrumAssemblyResourceDemand, StructuralOperatorResourceDemand,
     RESOURCE_ESTIMATION_MODEL_REVISION, RESOURCE_PLAN_MAX_ENCODED_BYTES,
 };
 
@@ -92,6 +93,14 @@ pub fn build_resource_plan(
             FeaResourcePhase::StructuralFrequencyResultAssembly(_),
             FeaResourceDemand::StructuralFrequencyResultAssembly(demand),
         ) => build_frequency_result_assembly_resource_plan(input.clone(), demand),
+        (
+            FeaResourcePhase::StructuralModalResponseSpectrumDirection(_),
+            FeaResourceDemand::StructuralModalResponseSpectrumDirection(demand),
+        ) => build_operator_resource_plan(input.clone(), &demand.operator, Some(&demand.inputs)),
+        (
+            FeaResourcePhase::StructuralModalResponseSpectrumAssembly(_),
+            FeaResourceDemand::StructuralModalResponseSpectrumAssembly(demand),
+        ) => build_response_spectrum_assembly_resource_plan(input.clone(), demand),
         _ => Err(ResourcePlanningError::Invalid(
             "resource phase and typed demand variant differ".into(),
         )),
@@ -716,6 +725,7 @@ fn validate_operator_demand(
     let recovery_phase = matches!(
         input.phase,
         FeaResourcePhase::StructuralFrequencyFieldRecovery(_)
+            | FeaResourcePhase::StructuralModalResponseSpectrumDirection(_)
     );
     if recovery_phase != matches!(demand.solve, SolveResourcePolicy::NoSolve { .. }) {
         return Err(ResourcePlanningError::Invalid(

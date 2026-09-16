@@ -13,7 +13,8 @@ use crate::execution::{
     ObservationHistoryCheckpointRequestIdentity, ObservationPartitionEvaluationRequestIdentity,
     ObservationPartitionReductionRequestIdentity, StructuralBucklingWorkloadIdentity,
     StructuralFrequencyEntryRequestIdentity, StructuralFrequencyResultAssemblyRequestIdentity,
-    StructuralModalWorkloadIdentity,
+    StructuralModalResponseSpectrumAssemblyRequestIdentity,
+    StructuralModalResponseSpectrumDirectionRequestIdentity, StructuralModalWorkloadIdentity,
 };
 use crate::pipeline::structural_linearization::StructuralLinearizationIdentity;
 
@@ -312,6 +313,10 @@ pub enum FeaResourcePhase {
     StructuralObservationHistoryCheckpoint(ObservationHistoryCheckpointRequestIdentity),
     StructuralObservationAssembly(ObservationAssemblyRequestIdentity),
     StructuralFrequencyResultAssembly(StructuralFrequencyResultAssemblyRequestIdentity),
+    StructuralModalResponseSpectrumDirection(
+        StructuralModalResponseSpectrumDirectionRequestIdentity,
+    ),
+    StructuralModalResponseSpectrumAssembly(StructuralModalResponseSpectrumAssemblyRequestIdentity),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -519,6 +524,31 @@ pub struct StructuralFrequencyResultAssemblyResourceDemand {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StructuralModalResponseSpectrumDirectionResourceDemand {
+    pub operator: StructuralOperatorResourceDemand,
+    pub spectrum_point_count: Count,
+    pub mode_count_upper_bound: Count,
+    pub correlation_pair_count_upper_bound: Count,
+    pub response_vector_count_upper_bound: Count,
+    pub inputs: PreparedInputResourceFacts,
+    pub output: PreparedOutputResourceFacts,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StructuralModalResponseSpectrumAssemblyResourceDemand {
+    pub scope_digest: Digest,
+    pub direction_count: Count,
+    pub direction_encoded_bytes: ByteCount,
+    pub physical_dof_count: Count,
+    pub inputs: PreparedInputResourceFacts,
+    pub ordering_workspace_bytes_upper_bound: ByteCount,
+    pub result_output: PreparedOutputResourceFacts,
+    pub receipt_output: PreparedOutputResourceFacts,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind", content = "demand")]
 pub enum FeaResourceDemand {
     StructuralLinearPipeline(StructuralOperatorResourceDemand),
@@ -531,6 +561,10 @@ pub enum FeaResourceDemand {
     StructuralObservationHistoryCheckpoint(ObservationHistoryCheckpointResourceDemand),
     StructuralObservationAssembly(ObservationAssemblyResourceDemand),
     StructuralFrequencyResultAssembly(StructuralFrequencyResultAssemblyResourceDemand),
+    StructuralModalResponseSpectrumDirection(
+        StructuralModalResponseSpectrumDirectionResourceDemand,
+    ),
+    StructuralModalResponseSpectrumAssembly(StructuralModalResponseSpectrumAssemblyResourceDemand),
 }
 
 impl FeaResourceDemand {
@@ -587,6 +621,18 @@ impl FeaResourceDemand {
                 Self::StructuralFrequencyResultAssembly(demand),
                 AnalysisNumericalObjectKind::NumericalReceipt,
             ) => Some(&demand.receipt_output),
+            (
+                Self::StructuralModalResponseSpectrumDirection(demand),
+                AnalysisNumericalObjectKind::StructuralModalResponseSpectrumDirectionResult,
+            ) => Some(&demand.output),
+            (
+                Self::StructuralModalResponseSpectrumAssembly(demand),
+                AnalysisNumericalObjectKind::SolverResult,
+            ) => Some(&demand.result_output),
+            (
+                Self::StructuralModalResponseSpectrumAssembly(demand),
+                AnalysisNumericalObjectKind::NumericalReceipt,
+            ) => Some(&demand.receipt_output),
             _ => None,
         }
     }
@@ -625,6 +671,12 @@ impl FeaResourcePlanningInput {
             }
             FeaResourceDemand::StructuralObservationAssembly(demand) => demand.topology_digest,
             FeaResourceDemand::StructuralFrequencyResultAssembly(demand) => demand.scope_digest,
+            FeaResourceDemand::StructuralModalResponseSpectrumDirection(demand) => {
+                demand.operator.topology_digest
+            }
+            FeaResourceDemand::StructuralModalResponseSpectrumAssembly(demand) => {
+                demand.scope_digest
+            }
         }
     }
 
@@ -644,6 +696,10 @@ impl FeaResourcePlanningInput {
             | FeaResourceDemand::StructuralObservationHistoryCheckpoint(_)
             | FeaResourceDemand::StructuralObservationAssembly(_)
             | FeaResourceDemand::StructuralFrequencyResultAssembly(_) => None,
+            FeaResourceDemand::StructuralModalResponseSpectrumDirection(demand) => {
+                Some(&demand.operator.observations)
+            }
+            FeaResourceDemand::StructuralModalResponseSpectrumAssembly(_) => None,
         }
     }
 
@@ -664,6 +720,13 @@ impl FeaResourcePlanningInput {
                 static MONOLITHIC: PartitioningPolicy = PartitioningPolicy::Monolithic;
                 &MONOLITHIC
             }
+            FeaResourceDemand::StructuralModalResponseSpectrumDirection(demand) => {
+                &demand.operator.partitioning
+            }
+            FeaResourceDemand::StructuralModalResponseSpectrumAssembly(_) => {
+                static MONOLITHIC: PartitioningPolicy = PartitioningPolicy::Monolithic;
+                &MONOLITHIC
+            }
         }
     }
 
@@ -679,6 +742,10 @@ impl FeaResourcePlanningInput {
             | FeaResourceDemand::StructuralObservationHistoryCheckpoint(_)
             | FeaResourceDemand::StructuralObservationAssembly(_)
             | FeaResourceDemand::StructuralFrequencyResultAssembly(_) => None,
+            FeaResourceDemand::StructuralModalResponseSpectrumDirection(demand) => {
+                Some(&demand.operator)
+            }
+            FeaResourceDemand::StructuralModalResponseSpectrumAssembly(_) => None,
         }
     }
 
@@ -696,6 +763,10 @@ impl FeaResourcePlanningInput {
             | FeaResourceDemand::StructuralObservationHistoryCheckpoint(_)
             | FeaResourceDemand::StructuralObservationAssembly(_)
             | FeaResourceDemand::StructuralFrequencyResultAssembly(_) => None,
+            FeaResourceDemand::StructuralModalResponseSpectrumDirection(demand) => {
+                Some(&mut demand.operator)
+            }
+            FeaResourceDemand::StructuralModalResponseSpectrumAssembly(_) => None,
         }
     }
 }
