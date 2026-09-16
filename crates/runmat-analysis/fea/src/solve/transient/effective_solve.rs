@@ -314,7 +314,18 @@ fn normalize_correction_equation(
         .map(ResolvedConstraintMatrix::affine_reduction)
         .transpose()
         .map_err(EffectiveDynamicsSolveError::InvalidConstraintState)?
-        .or_else(|| direct_constraint_reduction(summary.operator.constrained_dofs()));
+        .or_else(|| {
+            summary
+                .operator
+                .constrained_dofs()
+                .iter()
+                .any(|value| *value)
+                .then(|| {
+                    AffineConstraintReduction::from_constrained_dofs(
+                        summary.operator.constrained_dofs(),
+                    )
+                })
+        });
     let mut constrained_rhs = right_hand_side.to_vec();
     for (value, constrained) in constrained_rhs
         .iter_mut()
@@ -355,48 +366,6 @@ fn normalize_correction_equation(
         summary: normalized_summary,
         solution_scale,
         expansion: reduction,
-    })
-}
-
-fn direct_constraint_reduction(constrained: &[bool]) -> Option<AffineConstraintReduction> {
-    constrained.iter().any(|value| *value).then(|| {
-        let free_dof_indices = constrained
-            .iter()
-            .enumerate()
-            .filter_map(|(dof, constrained)| (!constrained).then_some(dof))
-            .collect::<Vec<_>>();
-        let pivot_dof_indices = constrained
-            .iter()
-            .enumerate()
-            .filter_map(|(dof, constrained)| constrained.then_some(dof))
-            .collect::<Vec<_>>();
-        let free_columns = free_dof_indices
-            .iter()
-            .copied()
-            .enumerate()
-            .map(|(column, dof)| (dof, column))
-            .collect::<std::collections::BTreeMap<_, _>>();
-        let mut recovery_row_offsets = Vec::with_capacity(constrained.len() + 1);
-        let mut recovery_column_indices = Vec::with_capacity(free_dof_indices.len());
-        let mut recovery_coefficients = Vec::with_capacity(free_dof_indices.len());
-        recovery_row_offsets.push(0);
-        for dof in 0..constrained.len() {
-            if let Some(column) = free_columns.get(&dof) {
-                recovery_column_indices.push(*column);
-                recovery_coefficients.push(1.0);
-            }
-            recovery_row_offsets.push(recovery_column_indices.len());
-        }
-        AffineConstraintReduction {
-            full_dof_count: constrained.len(),
-            reduced_dof_count: free_dof_indices.len(),
-            free_dof_indices,
-            pivot_dof_indices,
-            recovery_row_offsets,
-            recovery_column_indices,
-            recovery_coefficients,
-            offset: vec![0.0; constrained.len()],
-        }
     })
 }
 

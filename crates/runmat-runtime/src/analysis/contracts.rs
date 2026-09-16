@@ -772,6 +772,8 @@ pub struct AnalysisModalRunOptions {
     pub truncation: runmat_analysis_fea::ModalTruncationPolicy,
     pub convergence: runmat_analysis_fea::ModalConvergencePolicy,
     #[serde(default)]
+    pub residual_vector_directions: Vec<runmat_analysis_core::SpectrumDirection>,
+    #[serde(default)]
     pub solver_mesh_artifact_path: Option<String>,
 }
 
@@ -913,6 +915,7 @@ impl Default for AnalysisModalRunOptions {
             quality_policy: QualityPolicy::Balanced,
             truncation: runmat_analysis_fea::ModalTruncationPolicy::requested(3),
             convergence: runmat_analysis_fea::ModalConvergencePolicy::production(),
+            residual_vector_directions: Vec::new(),
             solver_mesh_artifact_path: None,
         }
     }
@@ -926,6 +929,7 @@ impl AnalysisModalRunOptions {
             quality_policy: QualityPolicy::Exploratory,
             truncation: runmat_analysis_fea::ModalTruncationPolicy::requested(2),
             convergence: runmat_analysis_fea::ModalConvergencePolicy::exploratory(),
+            residual_vector_directions: Vec::new(),
             solver_mesh_artifact_path: None,
         }
     }
@@ -943,6 +947,7 @@ impl AnalysisModalRunOptions {
             convergence: runmat_analysis_fea::ModalConvergencePolicy::production()
                 .with_relative_residual_tolerance(1.0e-10)
                 .with_maximum_subspace_iterations(512),
+            residual_vector_directions: Vec::new(),
             solver_mesh_artifact_path: None,
         }
     }

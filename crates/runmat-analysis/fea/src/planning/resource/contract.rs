@@ -351,6 +351,9 @@ pub struct StructuralModalResourceDemand {
     /// Reduced nonzeros in the exact symbolic union K + Kg used by the modal solve.
     pub reduced_tangent_nonzero_count_upper_bound: Count,
     pub retained_mode_count_upper_bound: Count,
+    pub residual_vector_count: Count,
+    pub residual_vector_static_iteration_count_upper_bound: Count,
+    pub residual_vector_mass_orthogonalization_passes: Count,
     pub modal_phase_value_count_upper_bound: Count,
     pub modal_output_value_count_upper_bound: Count,
     pub inputs: PreparedInputResourceFacts,

@@ -92,6 +92,7 @@ fn physical_modal_basis_drives_canonical_response_result() {
             formulation_requirement: FormulationRequirement::Experimental,
             truncation,
             convergence: ModalConvergencePolicy::exploratory(),
+            residual_vector_directions: Vec::new(),
             solver_mesh: Some(mesh),
         },
     )
@@ -154,6 +155,7 @@ fn basis_only_solver_rejects_operator_dependent_corrections() {
             formulation_requirement: FormulationRequirement::Experimental,
             truncation,
             convergence: ModalConvergencePolicy::exploratory(),
+            residual_vector_directions: Vec::new(),
             solver_mesh: Some(mesh),
         },
     )
@@ -185,6 +187,7 @@ fn operator_aware_missing_mass_closes_the_truncated_acceleration_influence() {
             formulation_requirement: FormulationRequirement::Experimental,
             truncation,
             convergence: ModalConvergencePolicy::exploratory(),
+            residual_vector_directions: Vec::new(),
             solver_mesh: Some(mesh.clone()),
         },
     )
@@ -247,6 +250,72 @@ fn operator_aware_missing_mass_closes_the_truncated_acceleration_influence() {
     ));
     result
         .validate_for_operator(&summary, &run.basis, std::slice::from_ref(&spectrum))
+        .unwrap();
+}
+
+#[test]
+fn directional_residual_vector_is_generated_in_the_basis_and_combined_as_a_mode() {
+    let truncation = EigenspaceTruncationPolicy::requested(2);
+    let mut model = fixture_model(FixtureId::StructuralShellPlateMomentReference);
+    let mut step = ProcedureStep::structural_modal("modes");
+    step.independent_domain = IndependentDomain::Eigenvalue {
+        requested_count: truncation.requested_mode_count(),
+    };
+    model.sequence.steps = vec![step];
+    let run = run_modal_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        ModalSolveOptions {
+            formulation_requirement: FormulationRequirement::Experimental,
+            truncation,
+            convergence: ModalConvergencePolicy::exploratory(),
+            residual_vector_directions: vec![SpectrumDirection {
+                frame: CoordinateFrame::Global,
+                vector: [1.0, 0.5, 0.25],
+            }],
+            solver_mesh: None,
+        },
+    )
+    .unwrap();
+    let excitations = crate::excitation::realize_step_excitations(
+        &model,
+        &model.sequence.steps[0],
+        crate::excitation::ExcitationSamplePoint::Static,
+    )
+    .unwrap();
+    let summary = crate::assembly::assemble_structural_system(
+        &model,
+        &excitations,
+        None,
+        StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+    )
+    .unwrap();
+    let direction = [1.0, 0.5, 0.25];
+    let basis = run.basis;
+    let residual = &basis.residual_vectors()[0];
+    assert!(residual.frequency_hz() > basis.modes().last().unwrap().frequency_hz());
+    assert!(residual.static_equilibrium_residual_ratio() <= 1.0e-8);
+    assert!(residual.maximum_mass_orthogonality_ratio() <= 1.0e-8);
+    basis.validate_for(&summary).unwrap();
+
+    let mut spectrum = spectrum_fixture(
+        SpectrumAbscissa::FrequencyHertz(vec![
+            basis.modes()[0].frequency_hz() * 0.5,
+            residual.frequency_hz() * 1.5,
+        ]),
+        vec![1.0, 1.0],
+        direction,
+    );
+    spectrum.truncation.correction = runmat_analysis_core::ModalTruncationCorrection::ResidualMode;
+    let result = solve_modal_response_spectrum(&basis, std::slice::from_ref(&spectrum)).unwrap();
+    let contribution = &result.contributions()[0];
+    assert_eq!(contribution.truncation.residual_vector_count, 1);
+    assert_eq!(
+        contribution.modes.last().unwrap().kind,
+        ModalResponseSpectrumModeKind::ResidualVector
+    );
+    result
+        .validate_for(&basis, std::slice::from_ref(&spectrum))
         .unwrap();
 }
 

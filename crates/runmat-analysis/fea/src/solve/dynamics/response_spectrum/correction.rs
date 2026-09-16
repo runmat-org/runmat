@@ -81,9 +81,7 @@ pub(super) fn correction_response(
 ) -> Result<Vec<f64>, FeaRunError> {
     match spectrum.truncation.correction {
         ModalTruncationCorrection::None => Ok(vec![0.0; dof_count]),
-        ModalTruncationCorrection::ResidualMode => Err(FeaRunError::Solve(
-            "residual-mode correction must be generated during modal extraction".into(),
-        )),
+        ModalTruncationCorrection::ResidualMode => Ok(vec![0.0; dof_count]),
         ModalTruncationCorrection::MissingMass {
             zero_period_acceleration,
         } => {

@@ -49,6 +49,7 @@ pub use pipeline::modal_basis::{
 pub use pipeline::modal_governance::{
     ModalConvergencePolicy, ModalEigenspaceEvidence, ModalTruncationEvidence, ModalTruncationPolicy,
 };
+pub use pipeline::modal_residual::ModalResidualVector;
 pub use pipeline::nonlinear::{run_nonlinear, run_nonlinear_with_options};
 pub use pipeline::structural_buckling::{
     execute_structural_buckling_workload, recover_completed_structural_buckling_run,

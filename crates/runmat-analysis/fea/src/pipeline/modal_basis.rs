@@ -12,6 +12,7 @@ use crate::{
 use super::modal_governance::{
     build_modal_governance, ModalEigenspaceEvidence, ModalTruncationEvidence, ModalTruncationPolicy,
 };
+use super::modal_residual::{build_directional_residual_vectors, ModalResidualVector};
 
 const MODAL_BASIS_PREFIX: &[u8] = b"runmat-fea-modal-basis/v1\0";
 const MODAL_BASIS_LIMITS: CanonicalLimits =
@@ -107,7 +108,9 @@ pub struct ModalBasisArtifact {
     operator_digest: Digest,
     node_count: usize,
     modes: Vec<ModalBasisMode>,
+    residual_vectors: Vec<ModalResidualVector>,
     total_free_mass: [f64; 3],
+    directional_mass_gram: [[f64; 3]; 3],
     mass_orthogonality: Vec<f64>,
     truncation: ModalTruncationEvidence,
     eigenspaces: Vec<ModalEigenspaceEvidence>,
@@ -121,7 +124,9 @@ struct ModalBasisArtifactData {
     operator_digest: Digest,
     node_count: usize,
     modes: Vec<ModalBasisMode>,
+    residual_vectors: Vec<ModalResidualVector>,
     total_free_mass: [f64; 3],
+    directional_mass_gram: [[f64; 3]; 3],
     mass_orthogonality: Vec<f64>,
     truncation: ModalTruncationEvidence,
     eigenspaces: Vec<ModalEigenspaceEvidence>,
@@ -147,7 +152,9 @@ impl TryFrom<ModalBasisArtifactData> for ModalBasisArtifact {
             operator_digest: data.operator_digest,
             node_count: data.node_count,
             modes: data.modes,
+            residual_vectors: data.residual_vectors,
             total_free_mass: data.total_free_mass,
+            directional_mass_gram: data.directional_mass_gram,
             mass_orthogonality: data.mass_orthogonality,
             truncation: data.truncation,
             eigenspaces: data.eigenspaces,
@@ -191,9 +198,13 @@ impl ModalBasisArtifact {
         }
         let operator_digest = crate::assembly::identity::structural_operator_digest(summary)?;
         let influence = directional_influence_vectors(summary);
-        let total_free_mass = influence
+        let mass_applied_influence = influence
             .each_ref()
-            .map(|vector| dot(vector, &apply_m(&summary.operator, vector)));
+            .map(|vector| apply_m(&summary.operator, vector));
+        let directional_mass_gram = std::array::from_fn(|row| {
+            std::array::from_fn(|column| dot(&influence[row], &mass_applied_influence[column]))
+        });
+        let total_free_mass = std::array::from_fn(|axis| directional_mass_gram[axis][axis]);
         let separation = relative_frequency_separation(frequencies_hz);
         let mut cumulative = [0.0; 3];
         let mut modes = Vec::with_capacity(count);
@@ -268,7 +279,9 @@ impl ModalBasisArtifact {
             operator_digest,
             node_count: summary.structural_dof_layout.node_count(),
             modes,
+            residual_vectors: Vec::new(),
             total_free_mass,
+            directional_mass_gram,
             mass_orthogonality,
             truncation,
             eigenspaces,
@@ -293,8 +306,30 @@ impl ModalBasisArtifact {
     pub fn modes(&self) -> &[ModalBasisMode] {
         &self.modes
     }
+    pub fn residual_vectors(&self) -> &[ModalResidualVector] {
+        &self.residual_vectors
+    }
+
+    pub(crate) fn with_directional_residual_vectors(
+        mut self,
+        summary: &AssemblySummary,
+        directions: &[[f64; 3]],
+    ) -> Result<Self, FeaRunError> {
+        self.validate_for(summary)?;
+        self.residual_vectors =
+            build_directional_residual_vectors(summary, &self.modes, directions)?;
+        self.identity = self.derive_identity()?;
+        self.validate()?;
+        Ok(self)
+    }
     pub const fn total_free_mass(&self) -> [f64; 3] {
         self.total_free_mass
+    }
+    pub const fn directional_mass_gram(&self) -> [[f64; 3]; 3] {
+        self.directional_mass_gram
+    }
+    pub fn total_free_mass_in_direction(&self, direction: [f64; 3]) -> f64 {
+        directional_mass(self.directional_mass_gram, direction)
     }
     pub fn mass_orthogonality(&self) -> &[f64] {
         &self.mass_orthogonality
@@ -346,6 +381,18 @@ impl ModalBasisArtifact {
                 boundary_probe_frequency_hz: self.truncation.boundary_probe_frequency_hz(),
             },
         )?;
+        let regenerated = if self.residual_vectors.is_empty() {
+            regenerated
+        } else {
+            regenerated.with_directional_residual_vectors(
+                summary,
+                &self
+                    .residual_vectors
+                    .iter()
+                    .map(ModalResidualVector::direction)
+                    .collect::<Vec<_>>(),
+            )?
+        };
         if regenerated.identity != self.identity {
             return Err(FeaRunError::Assembly(
                 "modal basis metrics disagree with the supplied structural operator".into(),
@@ -394,6 +441,7 @@ impl ModalBasisArtifact {
                 .total_free_mass
                 .iter()
                 .any(|value| !valid_scalar(*value) || *value < 0.0)
+            || !directional_mass_gram_is_canonical(self.directional_mass_gram, self.total_free_mass)
             || self.modes.iter().any(|mode| {
                 !valid_scalar(mode.frequency_hz)
                     || mode.frequency_hz < 0.0
@@ -427,6 +475,38 @@ impl ModalBasisArtifact {
                 .mass_orthogonality
                 .iter()
                 .any(|value| !valid_scalar(*value))
+            || self.residual_vectors.len() > 3
+            || !residual_directions_are_canonical(&self.residual_vectors)
+            || self.residual_vectors.iter().any(|residual| {
+                residual.dof_shape().len() != self.modes[0].dof_shape.len()
+                    || residual
+                        .dof_shape()
+                        .iter()
+                        .any(|value| !valid_scalar(*value))
+                    || !valid_scalar(residual.frequency_hz())
+                    || residual.frequency_hz() <= 0.0
+                    || !valid_scalar(residual.modal_mass())
+                    || residual.modal_mass() <= 0.0
+                    || !valid_scalar(residual.modal_stiffness())
+                    || residual.modal_stiffness() <= 0.0
+                    || !valid_scalar(residual.participation_factor())
+                    || !valid_scalar(residual.effective_mass())
+                    || residual.effective_mass() < 0.0
+                    || !scalar_close(
+                        residual.effective_mass(),
+                        residual.participation_factor().powi(2) * residual.modal_mass(),
+                    )
+                    || !scalar_close(
+                        residual.frequency_hz(),
+                        (residual.modal_stiffness() / residual.modal_mass()).sqrt()
+                            / (2.0 * std::f64::consts::PI),
+                    )
+                    || residual.frequency_hz() <= self.modes[count - 1].frequency_hz()
+                    || !valid_scalar(residual.static_equilibrium_residual_ratio())
+                    || !(0.0..=1.0e-8).contains(&residual.static_equilibrium_residual_ratio())
+                    || !valid_scalar(residual.maximum_mass_orthogonality_ratio())
+                    || !(0.0..=1.0e-8).contains(&residual.maximum_mass_orthogonality_ratio())
+            })
             || self.truncation.retained_mode_count() != count
             || self.eigenspaces.is_empty()
             || regenerated_governance
@@ -454,7 +534,9 @@ impl ModalBasisArtifact {
                 self.operator_digest,
                 self.node_count,
                 &self.modes,
+                &self.residual_vectors,
                 self.total_free_mass,
+                self.directional_mass_gram,
                 &self.mass_orthogonality,
                 &self.truncation,
                 &self.eigenspaces,
@@ -465,6 +547,75 @@ impl ModalBasisArtifact {
         .map(ModalBasisIdentity)
         .map_err(|error| FeaRunError::Assembly(error.to_string()))
     }
+}
+
+fn residual_directions_are_canonical(residuals: &[ModalResidualVector]) -> bool {
+    let mut directions = Vec::<[f64; 3]>::with_capacity(residuals.len());
+    for residual in residuals {
+        let direction = residual.direction();
+        if direction.iter().any(|value| !value.is_finite()) {
+            return false;
+        }
+        let norm = direction
+            .iter()
+            .map(|value| value * value)
+            .sum::<f64>()
+            .sqrt();
+        if !scalar_close(norm, 1.0)
+            || directions.iter().any(|existing| {
+                existing
+                    .iter()
+                    .zip(direction)
+                    .all(|(left, right)| scalar_close(*left, right))
+            })
+        {
+            return false;
+        }
+        directions.push(direction);
+    }
+    true
+}
+
+fn directional_mass_gram_is_canonical(gram: [[f64; 3]; 3], diagonal: [f64; 3]) -> bool {
+    let entries_are_valid = (0..3).all(|row| {
+        (0..3).all(|column| {
+            gram[row][column].is_finite() && scalar_close(gram[row][column], gram[column][row])
+        }) && gram[row][row] >= 0.0
+            && scalar_close(gram[row][row], diagonal[row])
+    });
+    let principal_minors_are_nonnegative = (0..3).all(|row| {
+        ((row + 1)..3).all(|column| {
+            let bound = (gram[row][row] * gram[column][column]).sqrt();
+            gram[row][column].abs() <= bound + 1.0e-12 * bound.max(1.0)
+        })
+    });
+    let determinant = gram[0][0] * (gram[1][1] * gram[2][2] - gram[1][2] * gram[2][1])
+        - gram[0][1] * (gram[1][0] * gram[2][2] - gram[1][2] * gram[2][0])
+        + gram[0][2] * (gram[1][0] * gram[2][1] - gram[1][1] * gram[2][0]);
+    let determinant_scale = diagonal
+        .into_iter()
+        .fold(1.0_f64, |scale, value| scale * value.abs().max(1.0));
+    entries_are_valid
+        && principal_minors_are_nonnegative
+        && determinant >= -1.0e-12 * determinant_scale
+}
+
+fn directional_mass(gram: [[f64; 3]; 3], direction: [f64; 3]) -> f64 {
+    direction
+        .iter()
+        .enumerate()
+        .fold(0.0, |total, (row, left)| {
+            total
+                + direction
+                    .iter()
+                    .enumerate()
+                    .map(|(column, right)| left * gram[row][column] * right)
+                    .sum::<f64>()
+        })
+}
+
+fn scalar_close(left: f64, right: f64) -> bool {
+    (left - right).abs() <= 128.0 * f64::EPSILON * left.abs().max(right.abs()).max(1.0)
 }
 
 fn directional_influence_vectors(summary: &AssemblySummary) -> [Vec<f64>; 3] {
@@ -554,4 +705,21 @@ fn directional_metrics_are_consistent(modes: &[ModalBasisMode], total_mass: [f64
         }
     }
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::directional_mass;
+
+    #[test]
+    fn directional_mass_retains_cross_axis_coupling() {
+        let gram = [[2.0, 0.5, 0.0], [0.5, 3.0, -0.25], [0.0, -0.25, 4.0]];
+        let direction = [0.8, 0.48, 0.36];
+        let expected = 2.0 * 0.8_f64.powi(2)
+            + 3.0 * 0.48_f64.powi(2)
+            + 4.0 * 0.36_f64.powi(2)
+            + 2.0 * 0.5 * 0.8 * 0.48
+            - 2.0 * 0.25 * 0.48 * 0.36;
+        assert!((directional_mass(gram, direction) - expected).abs() <= 1.0e-14);
+    }
 }

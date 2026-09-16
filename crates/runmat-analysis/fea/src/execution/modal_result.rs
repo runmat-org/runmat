@@ -127,12 +127,32 @@ impl StructuralModalSolverResult {
         self.validate()?;
         workload.validate()?;
         let step = workload.procedure_step()?;
+        let expected_residual_directions =
+            crate::pipeline::modal_residual::canonical_residual_vector_directions(
+                workload.residual_vector_directions(),
+            )
+            .map_err(AnalysisExecutionError::Invalid)?;
+        let residual_directions_match = expected_residual_directions.len()
+            == self.basis.residual_vectors().len()
+            && expected_residual_directions
+                .iter()
+                .zip(self.basis.residual_vectors())
+                .all(|(expected, actual)| {
+                    expected
+                        .iter()
+                        .zip(actual.direction())
+                        .all(|(left, right)| {
+                            (left - right).abs()
+                                <= 128.0 * f64::EPSILON * left.abs().max(right.abs()).max(1.0)
+                        })
+                });
         if self.workload != workload.identity()
             || self.run.requested_backend != workload.backend()
             || self.run.identity.family() != step.family
             || self.run.identity.procedure() != step.procedure
             || self.run.identity.solution_space() != step.solution_space
             || self.basis.truncation().policy() != workload.truncation()
+            || !residual_directions_match
         {
             return Err(AnalysisExecutionError::Identity(
                 "structural modal result differs from its source workload",
@@ -178,6 +198,9 @@ pub struct StructuralModalNumericalReceipt {
     available_mode_count: usize,
     boundary_probe_count: usize,
     maximum_residual_norm: f64,
+    residual_vector_count: usize,
+    maximum_residual_vector_static_equilibrium_ratio: f64,
+    maximum_residual_vector_mass_orthogonality_ratio: f64,
     complete_boundary_eigenspace: bool,
 }
 
@@ -197,6 +220,9 @@ struct StructuralModalNumericalReceiptWire {
     available_mode_count: usize,
     boundary_probe_count: usize,
     maximum_residual_norm: f64,
+    residual_vector_count: usize,
+    maximum_residual_vector_static_equilibrium_ratio: f64,
+    maximum_residual_vector_mass_orthogonality_ratio: f64,
     complete_boundary_eigenspace: bool,
 }
 
@@ -218,6 +244,11 @@ impl TryFrom<StructuralModalNumericalReceiptWire> for StructuralModalNumericalRe
             available_mode_count: wire.available_mode_count,
             boundary_probe_count: wire.boundary_probe_count,
             maximum_residual_norm: wire.maximum_residual_norm,
+            residual_vector_count: wire.residual_vector_count,
+            maximum_residual_vector_static_equilibrium_ratio: wire
+                .maximum_residual_vector_static_equilibrium_ratio,
+            maximum_residual_vector_mass_orthogonality_ratio: wire
+                .maximum_residual_vector_mass_orthogonality_ratio,
             complete_boundary_eigenspace: wire.complete_boundary_eigenspace,
         };
         receipt.validate()?;
@@ -252,6 +283,17 @@ impl StructuralModalNumericalReceipt {
                 .iter()
                 .map(|mode| mode.residual_norm())
                 .fold(0.0_f64, f64::max),
+            residual_vector_count: basis.residual_vectors().len(),
+            maximum_residual_vector_static_equilibrium_ratio: basis
+                .residual_vectors()
+                .iter()
+                .map(|residual| residual.static_equilibrium_residual_ratio())
+                .fold(0.0_f64, f64::max),
+            maximum_residual_vector_mass_orthogonality_ratio: basis
+                .residual_vectors()
+                .iter()
+                .map(|residual| residual.maximum_mass_orthogonality_ratio())
+                .fold(0.0_f64, f64::max),
             complete_boundary_eigenspace: basis.truncation().complete_boundary_eigenspace(),
         };
         receipt.identity = NumericalReceiptIdentity::new(source_result, receipt.content_digest()?)?;
@@ -271,6 +313,18 @@ impl StructuralModalNumericalReceipt {
         self.basis
     }
 
+    pub const fn residual_vector_count(&self) -> usize {
+        self.residual_vector_count
+    }
+
+    pub const fn maximum_residual_vector_static_equilibrium_ratio(&self) -> f64 {
+        self.maximum_residual_vector_static_equilibrium_ratio
+    }
+
+    pub const fn maximum_residual_vector_mass_orthogonality_ratio(&self) -> f64 {
+        self.maximum_residual_vector_mass_orthogonality_ratio
+    }
+
     pub fn validate(&self) -> AnalysisExecutionResult<()> {
         let expected_source =
             SolverResultIdentity::new(self.source_workload, self.source_payload_digest)?;
@@ -281,8 +335,20 @@ impl StructuralModalNumericalReceipt {
             || self.identity != expected_identity
             || self.retained_mode_count == 0
             || self.available_mode_count < self.retained_mode_count
+            || self.residual_vector_count > 3
             || !self.maximum_residual_norm.is_finite()
             || self.maximum_residual_norm < 0.0
+            || !self
+                .maximum_residual_vector_static_equilibrium_ratio
+                .is_finite()
+            || !(0.0..=1.0e-8).contains(&self.maximum_residual_vector_static_equilibrium_ratio)
+            || !self
+                .maximum_residual_vector_mass_orthogonality_ratio
+                .is_finite()
+            || !(0.0..=1.0e-8).contains(&self.maximum_residual_vector_mass_orthogonality_ratio)
+            || (self.residual_vector_count == 0
+                && (self.maximum_residual_vector_static_equilibrium_ratio != 0.0
+                    || self.maximum_residual_vector_mass_orthogonality_ratio != 0.0))
         {
             return Err(AnalysisExecutionError::Identity(
                 "structural modal numerical receipt identity or evidence does not converge",
@@ -338,6 +404,9 @@ impl StructuralModalNumericalReceipt {
                 self.available_mode_count,
                 self.boundary_probe_count,
                 self.maximum_residual_norm,
+                self.residual_vector_count,
+                self.maximum_residual_vector_static_equilibrium_ratio,
+                self.maximum_residual_vector_mass_orthogonality_ratio,
                 self.complete_boundary_eigenspace,
             ),
             MODAL_RESULT_LIMITS,
@@ -413,6 +482,7 @@ mod tests {
                 crate::results::observation::ObservationExecutionPolicy::scalable(),
             truncation,
             convergence: ModalConvergencePolicy::exploratory(),
+            residual_vector_directions: Vec::new(),
             prestress_transition: None,
         })
         .unwrap();
@@ -423,6 +493,7 @@ mod tests {
                 formulation_requirement: FormulationRequirement::Experimental,
                 truncation,
                 convergence: ModalConvergencePolicy::exploratory(),
+                residual_vector_directions: Vec::new(),
                 solver_mesh: None,
             },
         )
@@ -458,6 +529,77 @@ mod tests {
         receipt
             .validate_against(receipt.source_result(), &result)
             .unwrap();
+    }
+
+    #[test]
+    fn portable_result_and_receipt_bind_residual_vector_inventory() {
+        let truncation = ModalTruncationPolicy::requested(2);
+        let mut model = fixture_model(FixtureId::StructuralShellPlateMomentReference);
+        let mut step = ProcedureStep::structural_modal("modes");
+        step.independent_domain = IndependentDomain::Eigenvalue {
+            requested_count: truncation.requested_mode_count(),
+        };
+        model.sequence.steps = vec![step];
+        let direction = runmat_analysis_core::SpectrumDirection {
+            frame: runmat_analysis_core::CoordinateFrame::Global,
+            vector: [1.0, 0.5, 0.25],
+        };
+        let workload = StructuralModalWorkload::new(super::super::StructuralModalWorkloadInput {
+            model: model.clone(),
+            step_id: runmat_analysis_core::ProcedureStepId("modes".into()),
+            backend: ComputeBackend::Cpu,
+            formulation_requirement: FormulationRequirement::Experimental,
+            observation_execution:
+                crate::results::observation::ObservationExecutionPolicy::scalable(),
+            truncation,
+            convergence: ModalConvergencePolicy::exploratory(),
+            residual_vector_directions: vec![direction.clone()],
+            prestress_transition: None,
+        })
+        .unwrap();
+        let modal = crate::run_modal_with_options(
+            &model,
+            ComputeBackend::Cpu,
+            crate::ModalSolveOptions {
+                formulation_requirement: FormulationRequirement::Experimental,
+                truncation,
+                convergence: ModalConvergencePolicy::exploratory(),
+                residual_vector_directions: vec![direction],
+                solver_mesh: None,
+            },
+        )
+        .unwrap();
+        let topology_digest = crate::physics::structural::topology::explicit_topology_digest(
+            model.structural.as_ref().unwrap(),
+        )
+        .unwrap();
+        let result =
+            StructuralModalSolverResult::new(&workload, topology_digest, modal.run, modal.basis)
+                .unwrap();
+        let source = AnalysisWorkloadIdentity::derive(
+            "modal-residual-result-test-workload",
+            &workload.identity(),
+        )
+        .unwrap();
+        let receipt = StructuralModalNumericalReceipt::new(source, &result).unwrap();
+        assert_eq!(receipt.residual_vector_count(), 1);
+        assert!(receipt.maximum_residual_vector_static_equilibrium_ratio() <= 1.0e-8);
+        assert!(receipt.maximum_residual_vector_mass_orthogonality_ratio() <= 1.0e-8);
+
+        let omitted = StructuralModalWorkload::new(super::super::StructuralModalWorkloadInput {
+            model,
+            step_id: runmat_analysis_core::ProcedureStepId("modes".into()),
+            backend: ComputeBackend::Cpu,
+            formulation_requirement: FormulationRequirement::Experimental,
+            observation_execution:
+                crate::results::observation::ObservationExecutionPolicy::scalable(),
+            truncation,
+            convergence: ModalConvergencePolicy::exploratory(),
+            residual_vector_directions: Vec::new(),
+            prestress_transition: None,
+        })
+        .unwrap();
+        assert!(result.validate_for(&omitted).is_err());
     }
 
     #[test]

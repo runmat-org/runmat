@@ -140,6 +140,16 @@ fn validate_modal_demand(
             "structural modal demand requires a modal-subspace solve policy".into(),
         ));
     };
+    let expected_residual_iterations = if demand.residual_vector_count.0 == 0 {
+        0
+    } else {
+        reduced_dimension.0.saturating_mul(20).max(1_000)
+    };
+    let expected_residual_orthogonalization_passes = if demand.residual_vector_count.0 == 0 {
+        0
+    } else {
+        crate::pipeline::modal_residual::RESIDUAL_MASS_ORTHOGONALIZATION_PASSES as u64
+    };
     if demand.retained_mode_count_upper_bound.0 == 0
         || demand.retained_mode_count_upper_bound.0 > reduced_dimension.0
         || demand.modal_phase_value_count_upper_bound.0
@@ -147,6 +157,11 @@ fn validate_modal_demand(
         || demand.modal_output_value_count_upper_bound.0 == 0
         || maximum_subspace_dimension != reduced_dimension
         || demand.reduced_tangent_nonzero_count_upper_bound.0 == 0
+        || demand.residual_vector_count.0 > 3
+        || demand.residual_vector_static_iteration_count_upper_bound.0
+            != expected_residual_iterations
+        || demand.residual_vector_mass_orthogonalization_passes.0
+            != expected_residual_orthogonalization_passes
         || (demand.prestress_linearization.is_none()
             && demand.geometric_stiffness_nonzero_count.0 > 0)
         || demand.operator.partitioning != PartitioningPolicy::Monolithic

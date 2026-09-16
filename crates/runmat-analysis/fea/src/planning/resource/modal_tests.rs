@@ -93,6 +93,7 @@ fn modal_case(
         observation_execution: ObservationExecutionPolicy::scalable(),
         truncation,
         convergence: ModalConvergencePolicy::exploratory(),
+        residual_vector_directions: Vec::new(),
         prestress_transition: None,
     })
     .unwrap();
@@ -215,6 +216,78 @@ fn modal_plan_binds_k_m_probe_and_monolithic_peak() {
     };
     assert!(large_initial.0 >= initial_subspace_dimension.0);
     assert!(large.request.memory_bytes >= small.request.memory_bytes);
+}
+
+#[test]
+fn modal_plan_accounts_for_requested_residual_vectors() {
+    let (base, mesh, constraints, observations) = modal_case(2, ComputeBackend::Cpu);
+    let enriched = StructuralModalWorkload::new(StructuralModalWorkloadInput {
+        model: base.model().clone(),
+        step_id: base.step_id().clone(),
+        backend: base.backend(),
+        formulation_requirement: base.formulation_requirement(),
+        observation_execution: base.observation_execution(),
+        truncation: base.truncation(),
+        convergence: base.convergence(),
+        residual_vector_directions: vec![runmat_analysis_core::SpectrumDirection {
+            frame: runmat_analysis_core::CoordinateFrame::Global,
+            vector: [1.0, 0.5, 0.25],
+        }],
+        prestress_transition: None,
+    })
+    .unwrap();
+    let base_plan = build_structural_modal_resource_plan(
+        Some(&mesh),
+        &constraints,
+        &observations,
+        &base,
+        None,
+        &[],
+        prepared(&mesh, &constraints, &base),
+    )
+    .unwrap();
+    let enriched_plan = build_structural_modal_resource_plan(
+        Some(&mesh),
+        &constraints,
+        &observations,
+        &enriched,
+        None,
+        &[],
+        prepared(&mesh, &constraints, &enriched),
+    )
+    .unwrap();
+    let FeaResourceDemand::StructuralModalExtraction(base_demand) = base_plan.input.demand else {
+        panic!("modal plan must retain typed demand")
+    };
+    let FeaResourceDemand::StructuralModalExtraction(enriched_demand) = enriched_plan.input.demand
+    else {
+        panic!("modal plan must retain typed demand")
+    };
+    assert_eq!(base_demand.residual_vector_count.0, 0);
+    assert_eq!(
+        base_demand
+            .residual_vector_static_iteration_count_upper_bound
+            .0,
+        0
+    );
+    assert_eq!(enriched_demand.residual_vector_count.0, 1);
+    assert!(
+        enriched_demand
+            .residual_vector_static_iteration_count_upper_bound
+            .0
+            >= 1_000
+    );
+    assert_eq!(
+        enriched_demand
+            .residual_vector_mass_orthogonalization_passes
+            .0,
+        2
+    );
+    assert!(
+        enriched_demand.modal_output_value_count_upper_bound.0
+            > base_demand.modal_output_value_count_upper_bound.0
+    );
+    assert!(enriched_plan.request.memory_bytes > base_plan.request.memory_bytes);
 }
 
 #[test]

@@ -111,6 +111,7 @@ fn execute_structural_modal_workload_with_state(
             formulation_requirement: workload.formulation_requirement(),
             truncation: workload.truncation(),
             convergence: workload.convergence(),
+            residual_vector_directions: workload.residual_vector_directions().to_vec(),
             solver_mesh: Some(solver_mesh.clone()),
         },
         workload
@@ -287,6 +288,15 @@ fn execute_modal_core(
             boundary_probe_frequency_hz: modal.boundary_probe_frequency_hz,
         },
     )?;
+    let residual_directions = super::modal_residual::canonical_residual_vector_directions(
+        &options.residual_vector_directions,
+    )
+    .map_err(FeaRunError::InvalidModel)?;
+    let basis = if residual_directions.is_empty() {
+        basis
+    } else {
+        basis.with_directional_residual_vectors(&summary, &residual_directions)?
+    };
     diagnostics.push(crate::diagnostics::FeaDiagnostic {
         code: "FEA_MODAL_TRUNCATION".into(),
         severity: crate::diagnostics::FeaDiagnosticSeverity::Info,
@@ -470,6 +480,7 @@ mod tests {
             observation_execution: ObservationExecutionPolicy::scalable(),
             truncation,
             convergence: ModalConvergencePolicy::exploratory(),
+            residual_vector_directions: Vec::new(),
             prestress_transition: None,
         })
         .unwrap();
@@ -486,6 +497,7 @@ mod tests {
                 formulation_requirement: workload.formulation_requirement(),
                 truncation: workload.truncation(),
                 convergence: workload.convergence(),
+                residual_vector_directions: workload.residual_vector_directions().to_vec(),
                 solver_mesh: Some(mesh.clone()),
             },
         )

@@ -100,6 +100,10 @@ pub fn build_structural_modal_resource_plan(
         "requested modal count",
     )?
     .min(reduced_dimension);
+    let residual_vector_count = count(
+        workload.residual_vector_directions().len(),
+        "modal residual-vector count",
+    )?;
     let boundary_probe_width = count(MODAL_BOUNDARY_PROBE_WIDTH, "modal boundary probe width")?;
     let initial_subspace_dimension = requested_mode_count
         .checked_add(boundary_probe_width)
@@ -167,11 +171,13 @@ pub fn build_structural_modal_resource_plan(
     let workspace_bytes = modal_workspace_bytes(
         full_dimension,
         reduced_dimension,
+        residual_vector_count,
         reduced_tangent_nonzeros,
         reduced_mass_nonzeros,
         admission.resident_bytes_upper_bound(),
     )?;
-    let modal_output_values = modal_output_value_count(full_dimension, reduced_dimension)?;
+    let modal_output_values =
+        modal_output_value_count(full_dimension, reduced_dimension, residual_vector_count)?;
     let modal_phase_values = modal_phase_value_count(
         modal_output_values,
         full_dimension,
@@ -262,6 +268,27 @@ pub fn build_structural_modal_resource_plan(
             geometric_stiffness_nonzero_count: Count(geometric_stiffness_nonzeros),
             reduced_tangent_nonzero_count_upper_bound: Count(reduced_tangent_nonzeros),
             retained_mode_count_upper_bound: Count(reduced_dimension),
+            residual_vector_count: Count(residual_vector_count),
+            residual_vector_static_iteration_count_upper_bound: Count(
+                if residual_vector_count == 0 {
+                    0
+                } else {
+                    count(
+                        crate::pipeline::modal_residual::residual_static_iteration_limit(
+                            reduction.reduced_dof_count,
+                        ),
+                        "modal residual-vector static iteration limit",
+                    )?
+                },
+            ),
+            residual_vector_mass_orthogonalization_passes: Count(if residual_vector_count == 0 {
+                0
+            } else {
+                count(
+                    crate::pipeline::modal_residual::RESIDUAL_MASS_ORTHOGONALIZATION_PASSES,
+                    "modal residual-vector mass-orthogonalization passes",
+                )?
+            }),
             modal_phase_value_count_upper_bound: Count(modal_phase_values),
             modal_output_value_count_upper_bound: Count(modal_output_values),
             inputs: prepared.inputs.clone(),
@@ -337,6 +364,7 @@ pub fn build_structural_modal_resource_plan(
 fn modal_workspace_bytes(
     full_dimension: u64,
     reduced_dimension: u64,
+    residual_vector_count: u64,
     reduced_stiffness_nonzeros: u64,
     reduced_mass_nonzeros: u64,
     ilu_bytes: u64,
@@ -385,8 +413,21 @@ fn modal_workspace_bytes(
         3,
         "dense modal matrices",
     )?;
+    let residual_workspace_values = if residual_vector_count == 0 {
+        0
+    } else {
+        checked_add(
+            checked_mul(full_dimension, 6, "residual-vector full workspace")?,
+            checked_mul(reduced_dimension, 8, "residual-vector reduced workspace")?,
+            "residual-vector workspace",
+        )?
+    };
     let vector_and_dense = checked_bytes(
-        checked_add(vector_values, dense_values, "modal numerical workspace")?,
+        checked_add(
+            checked_add(vector_values, dense_values, "modal numerical workspace")?,
+            residual_workspace_values,
+            "modal and residual-vector workspace",
+        )?,
         8,
         "modal numerical workspace",
     )?;
@@ -404,6 +445,7 @@ fn modal_workspace_bytes(
 fn modal_output_value_count(
     full_dimension: u64,
     retained_modes: u64,
+    residual_vector_count: u64,
 ) -> Result<u64, ResourcePlanningError> {
     let modal_vectors = checked_mul(full_dimension, retained_modes, "modal basis vectors")?;
     let square_metrics = checked_mul(retained_modes, retained_modes, "modal square metrics")?;
@@ -411,6 +453,11 @@ fn modal_output_value_count(
         modal_vectors,
         checked_mul(square_metrics, 2, "modal orthogonality metrics")?,
         checked_mul(retained_modes, 48, "modal scalar metrics")?,
+        checked_mul(
+            checked_add(full_dimension, 16, "residual-vector values")?,
+            residual_vector_count,
+            "modal residual-vector output values",
+        )?,
         32,
     ]
     .into_iter()
@@ -473,6 +520,10 @@ pub fn structural_modal_result_payload_bytes_upper_bound(
     let values = modal_output_value_count(
         count(reduction.full_dof_count, "modal full dimension")?,
         count(reduction.reduced_dof_count, "modal retained modes")?,
+        count(
+            workload.residual_vector_directions().len(),
+            "modal residual-vector count",
+        )?,
     )?;
     modal_result_payload_bytes(values, 0)
 }

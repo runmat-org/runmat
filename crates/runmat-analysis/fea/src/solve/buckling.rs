@@ -87,7 +87,11 @@ pub fn solve_eigenvalue_buckling(
         .map(|constraints| constraints.affine_reduction())
         .transpose()
         .map_err(|error| BucklingSolveError::ConstraintReduction(error.to_string()))?
-        .unwrap_or_else(|| direct_constraint_reduction(summary.operator.constrained_dofs()));
+        .unwrap_or_else(|| {
+            crate::constraints::AffineConstraintReduction::from_constrained_dofs(
+                summary.operator.constrained_dofs(),
+            )
+        });
     let stiffness = reduction
         .reduce_sparse_operator(summary.operator.operators().stiffness())
         .map_err(|error| BucklingSolveError::ConstraintReduction(error.to_string()))?;
@@ -345,47 +349,6 @@ fn deterministic_basis(rows: usize, columns: usize) -> Vec<Vec<f64>> {
                 .collect()
         })
         .collect()
-}
-
-fn direct_constraint_reduction(
-    constrained: &[bool],
-) -> crate::constraints::AffineConstraintReduction {
-    let dimension = constrained.len();
-    let free_dof_indices = constrained
-        .iter()
-        .enumerate()
-        .filter_map(|(index, constrained)| (!constrained).then_some(index))
-        .collect::<Vec<_>>();
-    let free_columns = free_dof_indices
-        .iter()
-        .enumerate()
-        .map(|(column, dof)| (*dof, column))
-        .collect::<std::collections::BTreeMap<_, _>>();
-    let mut row_offsets = Vec::with_capacity(dimension + 1);
-    let mut column_indices = Vec::with_capacity(free_dof_indices.len());
-    let mut coefficients = Vec::with_capacity(free_dof_indices.len());
-    row_offsets.push(0);
-    for dof in 0..dimension {
-        if let Some(column) = free_columns.get(&dof) {
-            column_indices.push(*column);
-            coefficients.push(1.0);
-        }
-        row_offsets.push(column_indices.len());
-    }
-    crate::constraints::AffineConstraintReduction {
-        full_dof_count: dimension,
-        reduced_dof_count: free_dof_indices.len(),
-        free_dof_indices,
-        pivot_dof_indices: constrained
-            .iter()
-            .enumerate()
-            .filter_map(|(index, constrained)| constrained.then_some(index))
-            .collect(),
-        recovery_row_offsets: row_offsets,
-        recovery_column_indices: column_indices,
-        recovery_coefficients: coefficients,
-        offset: vec![0.0; dimension],
-    }
 }
 
 fn dot(left: &[f64], right: &[f64]) -> f64 {

@@ -389,6 +389,7 @@ pub(in crate::analysis) fn prepare_structural_modal_workload(
                 runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
             truncation: options.truncation,
             convergence: options.convergence,
+            residual_vector_directions: options.residual_vector_directions.clone(),
             prestress_transition: None,
         },
     )
@@ -413,6 +414,7 @@ pub(in crate::analysis) fn prepare_structural_prestressed_modal_template(
             runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
         truncation: options.truncation,
         convergence: options.convergence,
+        residual_vector_directions: options.residual_vector_directions.clone(),
     };
     template
         .validate()

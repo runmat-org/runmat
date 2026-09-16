@@ -536,6 +536,7 @@ mod tests {
             observation_execution: ObservationExecutionPolicy::scalable(),
             truncation: crate::ModalTruncationPolicy::requested(3),
             convergence: crate::ModalConvergencePolicy::exploratory(),
+            residual_vector_directions: Vec::new(),
             prestress_transition: None,
         })
         .unwrap();

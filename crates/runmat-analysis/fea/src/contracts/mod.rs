@@ -640,6 +640,9 @@ pub struct ModalSolveOptions {
     pub formulation_requirement: FormulationRequirement,
     pub truncation: crate::pipeline::modal_governance::ModalTruncationPolicy,
     pub convergence: crate::pipeline::modal_governance::ModalConvergencePolicy,
+    /// Global base-acceleration directions whose load-dependent residual vectors are retained in
+    /// the modal basis for later response-spectrum analysis.
+    pub residual_vector_directions: Vec<runmat_analysis_core::SpectrumDirection>,
     pub solver_mesh: Option<SolverMeshArtifact>,
 }
 
@@ -649,6 +652,7 @@ impl Default for ModalSolveOptions {
             formulation_requirement: FormulationRequirement::Production,
             truncation: crate::pipeline::modal_governance::ModalTruncationPolicy::default(),
             convergence: crate::pipeline::modal_governance::ModalConvergencePolicy::default(),
+            residual_vector_directions: Vec::new(),
             solver_mesh: None,
         }
     }

@@ -1952,6 +1952,7 @@ pub(crate) fn prepared_prestressed_modal_case(
         observation_execution: crate::results::observation::ObservationExecutionPolicy::scalable(),
         truncation: crate::ModalTruncationPolicy::requested(1),
         convergence: crate::ModalConvergencePolicy::exploratory(),
+        residual_vector_directions: Vec::new(),
     }
     .bind(transition)
     .unwrap();
@@ -4135,6 +4136,7 @@ fn modal_large_fixture_emits_orthogonality_and_separation_diagnostics() {
             formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
             truncation: ModalTruncationPolicy::requested(8),
             convergence: crate::ModalConvergencePolicy::default(),
+            residual_vector_directions: Vec::new(),
             solver_mesh: None,
         },
     )

@@ -310,6 +310,7 @@ fn complete_prestressed_modal_basis_matches_the_direct_harmonic_solution() {
         observation_execution: crate::results::observation::ObservationExecutionPolicy::scalable(),
         truncation: ModalTruncationPolicy::requested(3),
         convergence: ModalConvergencePolicy::exploratory(),
+        residual_vector_directions: Vec::new(),
     }
     .bind(modal_transition)
     .unwrap();

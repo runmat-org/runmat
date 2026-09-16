@@ -26,6 +26,6 @@ pub use modal_transient::{
 pub use response_spectrum::{
     solve_modal_response_spectrum, solve_modal_response_spectrum_with_operator,
     ModalResponseSpectrumContribution, ModalResponseSpectrumModeContribution,
-    ModalResponseSpectrumResult, ModalResponseSpectrumResultIdentity,
-    ModalResponseSpectrumTruncationEvidence,
+    ModalResponseSpectrumModeKind, ModalResponseSpectrumResult,
+    ModalResponseSpectrumResultIdentity, ModalResponseSpectrumTruncationEvidence,
 };

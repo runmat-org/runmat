@@ -44,6 +44,7 @@ impl ModalResponseSpectrumResultIdentity {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ModalResponseSpectrumModeContribution {
+    pub kind: ModalResponseSpectrumModeKind,
     pub mode_index: usize,
     pub frequency_hz: f64,
     pub interpolated_ordinate: f64,
@@ -53,11 +54,19 @@ pub struct ModalResponseSpectrumModeContribution {
     pub generalized_peak: f64,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModalResponseSpectrumModeKind {
+    Eigenmode,
+    ResidualVector,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ModalResponseSpectrumTruncationEvidence {
-    pub selected_mode_count: usize,
-    pub available_mode_count: usize,
+    pub selected_eigenmode_count: usize,
+    pub available_eigenmode_count: usize,
+    pub residual_vector_count: usize,
     pub required_cumulative_mass_ratio: f64,
     pub achieved_cumulative_mass_ratio: f64,
     pub directional_total_free_mass: f64,
@@ -349,12 +358,6 @@ fn solve_spectrum_direction(
             "modal response currently requires spectrum directions in the global frame".into(),
         ));
     }
-    if spectrum.truncation.correction == ModalTruncationCorrection::ResidualMode {
-        return Err(FeaRunError::Solve(
-            "residual-mode correction must be generated and orthogonalized during modal extraction"
-                .into(),
-        ));
-    }
     if matches!(
         spectrum.truncation.correction,
         ModalTruncationCorrection::MissingMass { .. }
@@ -366,11 +369,7 @@ fn solve_spectrum_direction(
     }
     let direction = normalized_direction(spectrum.direction.vector)?;
     let damping_ratio = damping_ratio(spectrum.damping)?;
-    let total_free_mass = direction
-        .iter()
-        .zip(basis.total_free_mass())
-        .map(|(component, mass)| component * component * mass)
-        .sum::<f64>();
+    let total_free_mass = basis.total_free_mass_in_direction(direction);
     if !total_free_mass.is_finite() || total_free_mass <= 0.0 {
         return Err(FeaRunError::Solve(
             "spectrum direction has no positive free structural mass".into(),
@@ -396,6 +395,7 @@ fn solve_spectrum_direction(
         };
         let generalized_peak = envelope_sign * participation * ordinate;
         modes.push(ModalResponseSpectrumModeContribution {
+            kind: ModalResponseSpectrumModeKind::Eigenmode,
             mode_index: mode_offset + 1,
             frequency_hz: mode.frequency_hz(),
             interpolated_ordinate: ordinate,
@@ -410,11 +410,49 @@ fn solve_spectrum_direction(
                 .map(|shape| shape * generalized_peak)
                 .collect::<Vec<_>>(),
         );
-        if cumulative_mass_ratio + 64.0 * f64::EPSILON
-            >= spectrum.truncation.minimum_cumulative_mass_ratio
+        if spectrum.truncation.correction != ModalTruncationCorrection::ResidualMode
+            && cumulative_mass_ratio + 64.0 * f64::EPSILON
+                >= spectrum.truncation.minimum_cumulative_mass_ratio
         {
             break;
         }
+    }
+    let selected_eigenmode_count = modes.len();
+    if spectrum.truncation.correction == ModalTruncationCorrection::ResidualMode {
+        let residual = basis
+            .residual_vectors()
+            .iter()
+            .find(|residual| vectors_close(&residual.direction(), &direction))
+            .ok_or_else(|| {
+                FeaRunError::Solve(
+                    "modal basis does not contain the requested directional residual vector".into(),
+                )
+            })?;
+        let ordinate = interpolate_spectrum(spectrum, residual.frequency_hz())?;
+        let envelope_sign = if spectrum.envelope == SpectrumEnvelope::Negative {
+            -1.0
+        } else {
+            1.0
+        };
+        let generalized_peak = envelope_sign * residual.participation_factor() * ordinate;
+        captured_mass += residual.effective_mass();
+        modes.push(ModalResponseSpectrumModeContribution {
+            kind: ModalResponseSpectrumModeKind::ResidualVector,
+            mode_index: modes.len() + 1,
+            frequency_hz: residual.frequency_hz(),
+            interpolated_ordinate: ordinate,
+            directional_participation_factor: residual.participation_factor(),
+            directional_effective_mass: residual.effective_mass(),
+            cumulative_mass_ratio: captured_mass / total_free_mass,
+            generalized_peak,
+        });
+        modal_vectors.push(
+            residual
+                .dof_shape()
+                .iter()
+                .map(|shape| shape * generalized_peak)
+                .collect(),
+        );
     }
     let achieved = modes
         .last()
@@ -493,8 +531,9 @@ fn solve_spectrum_direction(
         rigid_response_policy: spectrum.rigid_response,
         rigid_coefficients,
         truncation: ModalResponseSpectrumTruncationEvidence {
-            selected_mode_count: modes.len(),
-            available_mode_count: basis.truncation().available_mode_count(),
+            selected_eigenmode_count,
+            available_eigenmode_count: basis.truncation().available_mode_count(),
+            residual_vector_count: modes.len() - selected_eigenmode_count,
             required_cumulative_mass_ratio: spectrum.truncation.minimum_cumulative_mass_ratio,
             achieved_cumulative_mass_ratio: achieved,
             directional_total_free_mass: total_free_mass,

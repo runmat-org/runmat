@@ -10,6 +10,6 @@ mod multiplier;
 pub mod nonlinear;
 pub mod preconditioner;
 mod reaction;
-mod spd_linear;
+pub(crate) mod spd_linear;
 mod symmetric_eigen;
 pub mod transient;

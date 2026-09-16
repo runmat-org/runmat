@@ -2696,6 +2696,7 @@ pub fn analysis_run_modal_with_options_op(
             formulation_requirement,
             truncation: options.truncation,
             convergence: options.convergence,
+            residual_vector_directions: options.residual_vector_directions.clone(),
             solver_mesh: solver_mesh.clone(),
         },
     )

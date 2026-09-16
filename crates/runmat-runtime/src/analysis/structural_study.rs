@@ -390,6 +390,8 @@ impl PreparedStructuralStudyIntent {
                                 == ObservationExecutionPolicy::scalable()
                             && workload.truncation() == options.truncation
                             && workload.convergence() == options.convergence
+                            && workload.residual_vector_directions()
+                                == options.residual_vector_directions
                             && options.solver_mesh_artifact_path.is_none() => {}
                         (
                             runmat_analysis_fea::execution::StructuralStepWorkload::PrestressedModal {
@@ -404,6 +406,8 @@ impl PreparedStructuralStudyIntent {
                                 == ObservationExecutionPolicy::scalable()
                             && template.truncation == options.truncation
                             && template.convergence == options.convergence
+                            && template.residual_vector_directions
+                                == options.residual_vector_directions
                             && options.solver_mesh_artifact_path.is_none() => {}
                         (
                             runmat_analysis_fea::execution::StructuralStepWorkload::PrestressedFrequency {
@@ -587,6 +591,7 @@ impl PreparedStructuralStudyIntent {
                     || workload.observation_execution() != ObservationExecutionPolicy::scalable()
                     || workload.truncation() != options.truncation
                     || workload.convergence() != options.convergence
+                    || workload.residual_vector_directions() != options.residual_vector_directions
                     || options.solver_mesh_artifact_path.is_some()
                 {
                     return Err(

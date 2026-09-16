@@ -33,6 +33,7 @@ pub struct StructuralPrestressedModalTemplate {
     pub observation_execution: ObservationExecutionPolicy,
     pub truncation: ModalTruncationPolicy,
     pub convergence: ModalConvergencePolicy,
+    pub residual_vector_directions: Vec<runmat_analysis_core::SpectrumDirection>,
 }
 
 impl StructuralPrestressedModalTemplate {
@@ -52,6 +53,7 @@ impl StructuralPrestressedModalTemplate {
                     .into(),
             ));
         }
+        validate_residual_vector_directions(&self.residual_vector_directions)?;
         Ok(())
     }
 
@@ -68,6 +70,7 @@ impl StructuralPrestressedModalTemplate {
             observation_execution: self.observation_execution,
             truncation: self.truncation,
             convergence: self.convergence,
+            residual_vector_directions: self.residual_vector_directions,
             prestress_transition: Some(prestress_transition),
         })
     }
@@ -90,6 +93,7 @@ pub struct StructuralModalWorkload {
     observation_execution: ObservationExecutionPolicy,
     truncation: ModalTruncationPolicy,
     convergence: ModalConvergencePolicy,
+    residual_vector_directions: Vec<runmat_analysis_core::SpectrumDirection>,
     prestress_transition: Option<CanonicalStateTransition>,
 }
 
@@ -105,6 +109,7 @@ struct StructuralModalWorkloadWire {
     observation_execution: ObservationExecutionPolicy,
     truncation: ModalTruncationPolicy,
     convergence: ModalConvergencePolicy,
+    residual_vector_directions: Vec<runmat_analysis_core::SpectrumDirection>,
     prestress_transition: Option<CanonicalStateTransition>,
 }
 
@@ -122,6 +127,7 @@ impl TryFrom<StructuralModalWorkloadWire> for StructuralModalWorkload {
             observation_execution: wire.observation_execution,
             truncation: wire.truncation,
             convergence: wire.convergence,
+            residual_vector_directions: wire.residual_vector_directions,
             prestress_transition: wire.prestress_transition,
         };
         workload.validate()?;
@@ -137,6 +143,7 @@ pub struct StructuralModalWorkloadInput {
     pub observation_execution: ObservationExecutionPolicy,
     pub truncation: ModalTruncationPolicy,
     pub convergence: ModalConvergencePolicy,
+    pub residual_vector_directions: Vec<runmat_analysis_core::SpectrumDirection>,
     pub prestress_transition: Option<CanonicalStateTransition>,
 }
 
@@ -155,6 +162,7 @@ impl StructuralModalWorkload {
             observation_execution: input.observation_execution,
             truncation: input.truncation,
             convergence: input.convergence,
+            residual_vector_directions: input.residual_vector_directions,
             prestress_transition: input.prestress_transition,
         };
         workload.identity = workload.derive_identity()?;
@@ -192,6 +200,10 @@ impl StructuralModalWorkload {
 
     pub const fn convergence(&self) -> ModalConvergencePolicy {
         self.convergence
+    }
+
+    pub fn residual_vector_directions(&self) -> &[runmat_analysis_core::SpectrumDirection] {
+        &self.residual_vector_directions
     }
 
     pub const fn prestress_transition(&self) -> Option<&CanonicalStateTransition> {
@@ -286,6 +298,7 @@ impl StructuralModalWorkload {
                 "structural modal workload must exactly describe one fresh direct modal-extraction step and its requested eigenspace".into(),
             ));
         }
+        validate_residual_vector_directions(&self.residual_vector_directions)?;
         if self.identity != self.derive_identity()? {
             return Err(AnalysisExecutionError::Identity(
                 "structural modal workload identity does not converge",
@@ -325,10 +338,19 @@ impl StructuralModalWorkload {
                 self.observation_execution,
                 self.truncation,
                 self.convergence,
+                &self.residual_vector_directions,
                 &self.prestress_transition,
             ),
         )
     }
+}
+
+fn validate_residual_vector_directions(
+    directions: &[runmat_analysis_core::SpectrumDirection],
+) -> AnalysisExecutionResult<()> {
+    crate::pipeline::modal_residual::canonical_residual_vector_directions(directions)
+        .map(|_| ())
+        .map_err(AnalysisExecutionError::Invalid)
 }
 
 fn validate_modal_step<'a>(
@@ -425,6 +447,7 @@ mod tests {
             observation_execution: ObservationExecutionPolicy::scalable(),
             truncation,
             convergence: ModalConvergencePolicy::exploratory(),
+            residual_vector_directions: Vec::new(),
             prestress_transition: None,
         })
         .unwrap()
@@ -441,6 +464,56 @@ mod tests {
             workload.modal_basis_output().unwrap(),
             &workload.procedure_step().unwrap().state_outputs[0]
         );
+    }
+
+    #[test]
+    fn residual_vector_directions_are_canonical_workload_inputs() {
+        let base = workload();
+        let direction = runmat_analysis_core::SpectrumDirection {
+            frame: runmat_analysis_core::CoordinateFrame::Global,
+            vector: [1.0, 0.5, 0.25],
+        };
+        let enriched = StructuralModalWorkload::new(StructuralModalWorkloadInput {
+            model: base.model().clone(),
+            step_id: base.step_id().clone(),
+            backend: base.backend(),
+            formulation_requirement: base.formulation_requirement(),
+            observation_execution: base.observation_execution(),
+            truncation: base.truncation(),
+            convergence: base.convergence(),
+            residual_vector_directions: vec![direction.clone()],
+            prestress_transition: base.prestress_transition().cloned(),
+        })
+        .unwrap();
+        assert_ne!(enriched.identity(), base.identity());
+        assert_eq!(
+            enriched.residual_vector_directions(),
+            std::slice::from_ref(&direction)
+        );
+        assert_eq!(
+            StructuralModalWorkload::from_canonical_bytes(&enriched.canonical_bytes().unwrap())
+                .unwrap(),
+            enriched
+        );
+
+        assert!(StructuralModalWorkload::new(StructuralModalWorkloadInput {
+            model: base.model().clone(),
+            step_id: base.step_id().clone(),
+            backend: base.backend(),
+            formulation_requirement: base.formulation_requirement(),
+            observation_execution: base.observation_execution(),
+            truncation: base.truncation(),
+            convergence: base.convergence(),
+            residual_vector_directions: vec![
+                direction.clone(),
+                runmat_analysis_core::SpectrumDirection {
+                    frame: runmat_analysis_core::CoordinateFrame::Global,
+                    vector: [2.0, 1.0, 0.5],
+                },
+            ],
+            prestress_transition: base.prestress_transition().cloned(),
+        })
+        .is_err());
     }
 
     #[test]
@@ -485,6 +558,7 @@ mod tests {
                 observation_execution: valid.observation_execution(),
                 truncation: valid.truncation(),
                 convergence: valid.convergence(),
+                residual_vector_directions: valid.residual_vector_directions().to_vec(),
                 prestress_transition: valid.prestress_transition().cloned(),
             })
             .is_err());
@@ -506,6 +580,7 @@ mod tests {
             observation_execution: valid.observation_execution(),
             truncation: valid.truncation(),
             convergence: valid.convergence(),
+            residual_vector_directions: valid.residual_vector_directions().to_vec(),
             prestress_transition: valid.prestress_transition().cloned(),
         })
         .unwrap();
@@ -529,6 +604,7 @@ mod tests {
             observation_execution: workload.observation_execution(),
             truncation: workload.truncation(),
             convergence: workload.convergence(),
+            residual_vector_directions: workload.residual_vector_directions().to_vec(),
             prestress_transition: workload.prestress_transition().cloned(),
         })
         .is_err());

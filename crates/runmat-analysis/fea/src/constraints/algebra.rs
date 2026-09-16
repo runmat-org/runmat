@@ -317,6 +317,46 @@ impl ResolvedConstraintMatrix {
 }
 
 impl AffineConstraintReduction {
+    pub(crate) fn from_constrained_dofs(constrained: &[bool]) -> Self {
+        let free_dof_indices = constrained
+            .iter()
+            .enumerate()
+            .filter_map(|(dof, constrained)| (!constrained).then_some(dof))
+            .collect::<Vec<_>>();
+        let pivot_dof_indices = constrained
+            .iter()
+            .enumerate()
+            .filter_map(|(dof, constrained)| constrained.then_some(dof))
+            .collect::<Vec<_>>();
+        let free_columns = free_dof_indices
+            .iter()
+            .copied()
+            .enumerate()
+            .map(|(column, dof)| (dof, column))
+            .collect::<BTreeMap<_, _>>();
+        let mut recovery_row_offsets = Vec::with_capacity(constrained.len() + 1);
+        let mut recovery_column_indices = Vec::with_capacity(free_dof_indices.len());
+        let mut recovery_coefficients = Vec::with_capacity(free_dof_indices.len());
+        recovery_row_offsets.push(0);
+        for dof in 0..constrained.len() {
+            if let Some(column) = free_columns.get(&dof) {
+                recovery_column_indices.push(*column);
+                recovery_coefficients.push(1.0);
+            }
+            recovery_row_offsets.push(recovery_column_indices.len());
+        }
+        Self {
+            full_dof_count: constrained.len(),
+            reduced_dof_count: free_dof_indices.len(),
+            free_dof_indices,
+            pivot_dof_indices,
+            recovery_row_offsets,
+            recovery_column_indices,
+            recovery_coefficients,
+            offset: vec![0.0; constrained.len()],
+        }
+    }
+
     pub fn validate(&self) -> Result<(), ConstraintAlgebraError> {
         if self.reduced_dof_count != self.free_dof_indices.len()
             || self.pivot_dof_indices.len() + self.reduced_dof_count != self.full_dof_count

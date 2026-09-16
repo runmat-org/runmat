@@ -9406,6 +9406,7 @@ fn analysis_run_modal_with_options_controls_requested_mode_count() {
             quality_policy: QualityPolicy::Balanced,
             truncation: runmat_analysis_fea::ModalTruncationPolicy::requested(2),
             convergence: runmat_analysis_fea::ModalConvergencePolicy::production(),
+            residual_vector_directions: Vec::new(),
             solver_mesh_artifact_path: None,
         },
         OperationContext::new(None, None),

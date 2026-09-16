@@ -1,6 +1,6 @@
 use runmat_analysis_core::{ModalTruncationCorrection, RigidResponsePolicy};
 
-use super::ModalResponseSpectrumContribution;
+use super::{ModalResponseSpectrumContribution, ModalResponseSpectrumModeKind};
 
 pub(super) fn contribution_is_valid(
     contribution: &ModalResponseSpectrumContribution,
@@ -57,6 +57,10 @@ pub(super) fn contribution_is_valid(
             .all(|value| value.is_finite() && *value >= 0.0)
         && contribution.modes.iter().enumerate().all(|(index, mode)| {
             mode.mode_index == index + 1
+                && (index < truncation.selected_eigenmode_count
+                    && mode.kind == ModalResponseSpectrumModeKind::Eigenmode
+                    || index >= truncation.selected_eigenmode_count
+                        && mode.kind == ModalResponseSpectrumModeKind::ResidualVector)
                 && mode.frequency_hz.is_finite()
                 && mode.frequency_hz >= 0.0
                 && mode.interpolated_ordinate.is_finite()
@@ -72,8 +76,9 @@ pub(super) fn contribution_is_valid(
             pair[0].frequency_hz <= pair[1].frequency_hz
                 && pair[0].cumulative_mass_ratio <= pair[1].cumulative_mass_ratio
         })
-        && truncation.selected_mode_count == contribution.modes.len()
-        && truncation.available_mode_count >= contribution.modes.len()
+        && truncation.selected_eigenmode_count + truncation.residual_vector_count
+            == contribution.modes.len()
+        && truncation.available_eigenmode_count >= truncation.selected_eigenmode_count
         && truncation.required_cumulative_mass_ratio.is_finite()
         && (0.0..=1.0).contains(&truncation.required_cumulative_mass_ratio)
         && truncation.achieved_cumulative_mass_ratio.is_finite()
@@ -82,12 +87,23 @@ pub(super) fn contribution_is_valid(
         && truncation.directional_total_free_mass > 0.0
         && truncation.directional_captured_mass.is_finite()
         && truncation.directional_captured_mass >= 0.0
-        && truncation.correction != ModalTruncationCorrection::ResidualMode
-        && (truncation.correction != ModalTruncationCorrection::None
-            || truncation
-                .correction_response
-                .iter()
-                .all(|value| *value == 0.0))
+        && match truncation.correction {
+            ModalTruncationCorrection::ResidualMode => {
+                truncation.residual_vector_count == 1
+                    && truncation
+                        .correction_response
+                        .iter()
+                        .all(|value| *value == 0.0)
+            }
+            ModalTruncationCorrection::None => {
+                truncation.residual_vector_count == 0
+                    && truncation
+                        .correction_response
+                        .iter()
+                        .all(|value| *value == 0.0)
+            }
+            ModalTruncationCorrection::MissingMass { .. } => truncation.residual_vector_count == 0,
+        }
         && (contribution.rigid_response_policy != RigidResponsePolicy::Disabled
             || (contribution
                 .rigid_coefficients
@@ -99,6 +115,7 @@ pub(super) fn contribution_is_valid(
                     .all(|value| *value == 0.0)))
         && scalar_close(summed_mass, truncation.directional_captured_mass)
         && scalar_close(expected_ratio, truncation.achieved_cumulative_mass_ratio)
+        && truncation.achieved_cumulative_mass_ratio <= 1.0 + 1.0e-10
 }
 
 pub(super) fn vectors_close(left: &[f64], right: &[f64]) -> bool {
