@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 
+use runmat_analysis_core::SpectrumResponse;
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
 use serde::{Deserialize, Serialize};
@@ -460,6 +461,7 @@ fn invalid(message: impl Into<String>) -> AnalysisExecutionError {
 #[serde(deny_unknown_fields)]
 pub struct StructuralResponseEnvelope {
     scope: StructuralModalResponseSpectrumScope,
+    response: SpectrumResponse,
     semantics: ResponseSpectrumResultSemantics,
     values: Vec<f64>,
 }
@@ -471,6 +473,7 @@ impl StructuralResponseEnvelope {
         result.validate()?;
         let envelope = Self {
             scope: result.assembly().scope().clone(),
+            response: result.numerical().response(),
             semantics: result.numerical().semantics(),
             values: result.numerical().combined_response().to_vec(),
         };
@@ -484,6 +487,10 @@ impl StructuralResponseEnvelope {
 
     pub const fn semantics(&self) -> ResponseSpectrumResultSemantics {
         self.semantics
+    }
+
+    pub const fn response(&self) -> SpectrumResponse {
+        self.response
     }
 
     pub fn values(&self) -> &[f64] {

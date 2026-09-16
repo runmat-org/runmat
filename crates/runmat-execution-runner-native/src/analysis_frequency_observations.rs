@@ -21,10 +21,11 @@ use runmat_execution::resource::AcceleratorRequest;
 use runmat_execution::ProgramRevision;
 use runmat_execution_artifact::object::ObjectInventoryLimits;
 
-use crate::analysis_frequency::{batch_policy, resource_attempt};
+use crate::analysis_frequency::batch_policy;
 use crate::analysis_sequence::StructuralSequenceExecutionPolicy;
 use crate::analysis_task_pool::{
-    execute_analysis_task_batch, AnalysisTaskDependency, AnalysisTaskPool, PreparedAnalysisTask,
+    execute_analysis_task_batch, planned_resource_attempt as resource_attempt,
+    AnalysisTaskDependency, AnalysisTaskPool, PreparedAnalysisTask,
 };
 use crate::{NativeExecutionError, NativeExecutionResult};
 

@@ -2783,6 +2783,8 @@ pub struct StructuralResponseSpectrumResultsData {
         runmat_analysis_fea::execution::StructuralModalResponseSpectrumNumericalReceipt,
     pub field_recovery: runmat_analysis_fea::solve::dynamics::ResponseSpectrumFieldRecovery,
     pub accuracy: runmat_analysis_fea::results::accuracy::AccuracyArtifact,
+    pub resource_usage: runmat_analysis_fea::planning::resource::ResourceUsageEvidence,
+    pub publication: runmat_analysis_fea::results::publication::PublishedAnalysisResult,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -2791,6 +2793,8 @@ pub struct StructuralRandomResponseResultsData {
     pub result: runmat_analysis_fea::execution::StructuralRandomResponseSolverResult,
     pub numerical_receipt: runmat_analysis_fea::execution::StructuralRandomResponseNumericalReceipt,
     pub accuracy: runmat_analysis_fea::results::accuracy::AccuracyArtifact,
+    pub resource_usage: runmat_analysis_fea::planning::resource::ResourceUsageEvidence,
+    pub publication: runmat_analysis_fea::results::publication::PublishedAnalysisResult,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

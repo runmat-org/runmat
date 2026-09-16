@@ -271,6 +271,22 @@ fn operator_aware_missing_mass_closes_the_truncated_acceleration_influence() {
     result
         .validate_for_operator(&summary, &run.basis, std::slice::from_ref(&spectrum))
         .unwrap();
+    let recovery = recover_modal_response_spectrum_fields(&summary, &run.basis, &result).unwrap();
+    assert_eq!(
+        recovery.nodal().translation().quantity(),
+        ResponseSpectrumNodalQuantity::AbsoluteAcceleration
+    );
+    assert_eq!(
+        recovery.nodal().translation().values(),
+        &result.combined_response()[..summary.structural_dof_layout.node_dof_count()]
+    );
+    assert_eq!(
+        recovery.deformation().unavailability(),
+        Some(ResponseSpectrumDeformationRecoveryUnavailability::MissingMassStaticCorrectionNotQualified)
+    );
+    recovery
+        .validate_exact_for(&summary, &run.basis, &result)
+        .unwrap();
 
     let direction_result =
         solve_modal_response_spectrum_direction_with_operator(&summary, &run.basis, &spectrum)
@@ -452,8 +468,7 @@ fn linear_field_envelope_recovers_signed_mode_before_statistical_combination() {
         .map(|value| value.abs())
         .collect::<Vec<_>>();
 
-    let fields =
-        recover_modal_response_spectrum_linear_fields(&summary, &run.basis, &result).unwrap();
+    let fields = recover_modal_response_spectrum_fields(&summary, &run.basis, &result).unwrap();
     assert_eq!(
         fields
             .field(StructuralLinearFieldQuantity::Stress)
@@ -467,17 +482,18 @@ fn linear_field_envelope_recovers_signed_mode_before_statistical_combination() {
     assert!(fields
         .field(StructuralLinearFieldQuantity::Displacement)
         .is_some());
-    assert!(fields.fields().iter().all(|field| !matches!(
+    assert!(fields.fields().unwrap().iter().all(|field| !matches!(
         field.quantity(),
         StructuralLinearFieldQuantity::ShellMembraneForce
             | StructuralLinearFieldQuantity::ShellBendingMoment
             | StructuralLinearFieldQuantity::ShellTransverseShear
     )));
-    fields.validate_for(&summary, &run.basis, &result).unwrap();
-    let restored = ModalResponseSpectrumFieldEnvelope::from_canonical_bytes(
-        &fields.canonical_bytes().unwrap(),
-    )
-    .unwrap();
+    fields
+        .validate_exact_for(&summary, &run.basis, &result)
+        .unwrap();
+    let restored =
+        ResponseSpectrumFieldRecovery::from_canonical_bytes(&fields.canonical_bytes().unwrap())
+            .unwrap();
     assert_eq!(restored, fields);
 
     let mut pseudo_acceleration = spectrum;
@@ -491,10 +507,17 @@ fn linear_field_envelope_recovers_signed_mode_before_statistical_combination() {
     )
     .unwrap();
     let pseudo_fields =
-        recover_modal_response_spectrum_linear_fields(&summary, &run.basis, &pseudo_result)
-            .unwrap();
-    assert_eq!(pseudo_fields.fields().len(), fields.fields().len());
-    for (pseudo, displacement) in pseudo_fields.fields().iter().zip(fields.fields()) {
+        recover_modal_response_spectrum_fields(&summary, &run.basis, &pseudo_result).unwrap();
+    assert_eq!(
+        pseudo_fields.fields().unwrap().len(),
+        fields.fields().unwrap().len()
+    );
+    for (pseudo, displacement) in pseudo_fields
+        .fields()
+        .unwrap()
+        .iter()
+        .zip(fields.fields().unwrap())
+    {
         assert_eq!(pseudo.quantity(), displacement.quantity());
         assert_eq!(pseudo.shape(), displacement.shape());
         assert!(pseudo
@@ -506,7 +529,7 @@ fn linear_field_envelope_recovers_signed_mode_before_statistical_combination() {
 }
 
 #[test]
-fn linear_field_recovery_rejects_a_non_displacement_response_quantity() {
+fn direct_acceleration_field_is_retained_when_deformation_is_unavailable() {
     let truncation = EigenspaceTruncationPolicy::requested(1);
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     let mut step = ProcedureStep::structural_modal("modes");
@@ -562,10 +585,173 @@ fn linear_field_recovery_rejects_a_non_displacement_response_quantity() {
         std::slice::from_ref(&spectrum),
     )
     .unwrap();
-    let error = recover_modal_response_spectrum_linear_fields(&summary, &run.basis, &result)
-        .unwrap_err()
-        .to_string();
-    assert!(error.contains("cannot be converted"));
+    let recovery = recover_modal_response_spectrum_fields(&summary, &run.basis, &result).unwrap();
+    assert_eq!(recovery.response(), SpectrumResponse::AbsoluteAcceleration);
+    assert_eq!(
+        recovery.nodal().translation().quantity(),
+        ResponseSpectrumNodalQuantity::AbsoluteAcceleration
+    );
+    assert_eq!(
+        recovery.nodal().translation().values(),
+        &result.combined_response()[..summary.structural_dof_layout.node_dof_count()]
+    );
+    assert!(recovery.nodal().rotation().is_none());
+    assert_eq!(
+        recovery.deformation().unavailability(),
+        Some(
+            ResponseSpectrumDeformationRecoveryUnavailability::ResponseQuantityNotDisplacementConvertible {
+                response: SpectrumResponse::AbsoluteAcceleration,
+            }
+        )
+    );
+    recovery
+        .validate_exact_for(&summary, &run.basis, &result)
+        .unwrap();
+
+    for response in [
+        SpectrumResponse::RelativeDisplacement,
+        SpectrumResponse::RelativeVelocity,
+        SpectrumResponse::RelativeAcceleration,
+        SpectrumResponse::AbsoluteAcceleration,
+        SpectrumResponse::PseudoVelocity,
+        SpectrumResponse::PseudoAcceleration,
+    ] {
+        let mut response_spectrum = spectrum.clone();
+        response_spectrum.response = response;
+        let response_result = solve_modal_response_spectrum_with_operator(
+            &summary,
+            &run.basis,
+            std::slice::from_ref(&response_spectrum),
+        )
+        .unwrap();
+        let response_recovery =
+            recover_modal_response_spectrum_fields(&summary, &run.basis, &response_result).unwrap();
+        assert_eq!(response_recovery.response(), response);
+        assert_eq!(
+            response_recovery.nodal().translation().quantity(),
+            ResponseSpectrumNodalQuantity::for_translation(response)
+        );
+        assert_eq!(
+            response_recovery.nodal().translation().values(),
+            &response_result.combined_response()[..summary.structural_dof_layout.node_dof_count()]
+        );
+        assert_eq!(
+            response_recovery.deformation().fields().is_some(),
+            ResponseSpectrumDisplacementConversion::for_response(response).is_some()
+        );
+        let restored = ResponseSpectrumFieldRecovery::from_canonical_bytes(
+            &response_recovery.canonical_bytes().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(restored, response_recovery);
+    }
+}
+
+#[test]
+fn rotational_layout_publishes_typed_angular_envelopes() {
+    let truncation = EigenspaceTruncationPolicy::requested(6);
+    let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
+    let mut step = ProcedureStep::structural_modal("beam_modes");
+    step.independent_domain = IndependentDomain::Eigenvalue {
+        requested_count: truncation.requested_mode_count(),
+    };
+    model.sequence.steps = vec![step];
+    let run = run_modal_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        ModalSolveOptions {
+            formulation_requirement: FormulationRequirement::Experimental,
+            truncation,
+            convergence: ModalConvergencePolicy::exploratory(),
+            residual_vector_directions: Vec::new(),
+            solver_mesh: None,
+        },
+    )
+    .unwrap();
+    let excitations = crate::excitation::realize_step_excitations(
+        &model,
+        &model.sequence.steps[0],
+        crate::excitation::ExcitationSamplePoint::Static,
+    )
+    .unwrap();
+    let summary = crate::assembly::assemble_structural_system(
+        &model,
+        &excitations,
+        None,
+        StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+    )
+    .unwrap();
+    let first_mode = &run.basis.modes()[0];
+    let axis = first_mode
+        .directional()
+        .iter()
+        .enumerate()
+        .max_by(|(_, left), (_, right)| left.effective_mass().total_cmp(&right.effective_mass()))
+        .map(|(axis, _)| axis)
+        .unwrap();
+    let mut direction = [0.0; 3];
+    direction[axis] = 1.0;
+    let mut spectrum = spectrum_fixture(
+        SpectrumAbscissa::FrequencyHertz(vec![first_mode.frequency_hz()]),
+        vec![1.0],
+        direction,
+    );
+    for response in [
+        SpectrumResponse::RelativeDisplacement,
+        SpectrumResponse::RelativeVelocity,
+        SpectrumResponse::RelativeAcceleration,
+        SpectrumResponse::AbsoluteAcceleration,
+        SpectrumResponse::PseudoVelocity,
+        SpectrumResponse::PseudoAcceleration,
+    ] {
+        spectrum.response = response;
+        let result = solve_modal_response_spectrum_with_operator(
+            &summary,
+            &run.basis,
+            std::slice::from_ref(&spectrum),
+        )
+        .unwrap();
+        let recovery =
+            recover_modal_response_spectrum_fields(&summary, &run.basis, &result).unwrap();
+        assert_eq!(
+            recovery.nodal().translation().quantity(),
+            ResponseSpectrumNodalQuantity::for_translation(response)
+        );
+        let rotation = recovery.nodal().rotation().unwrap();
+        assert_eq!(
+            rotation.quantity(),
+            ResponseSpectrumNodalQuantity::for_rotation(response)
+        );
+        assert_eq!(rotation.shape(), recovery.nodal().translation().shape());
+        use crate::assembly::dofs::StructuralDofKind::{Rx, Ry, Rz, Ux, Uy, Uz};
+        for node in 0..summary.structural_dof_layout.node_count() {
+            for (component, (translation_kind, rotation_kind)) in
+                [(Ux, Rx), (Uy, Ry), (Uz, Rz)].into_iter().enumerate()
+            {
+                let field_index = node * 3 + component;
+                let translation_index = summary
+                    .structural_dof_layout
+                    .index(node, translation_kind)
+                    .unwrap();
+                let rotation_index = summary
+                    .structural_dof_layout
+                    .index(node, rotation_kind)
+                    .unwrap();
+                assert_eq!(
+                    recovery.nodal().translation().values()[field_index],
+                    result.combined_response()[translation_index]
+                );
+                assert_eq!(
+                    rotation.values()[field_index],
+                    result.combined_response()[rotation_index]
+                );
+            }
+        }
+        assert_eq!(
+            recovery.deformation().fields().is_some(),
+            ResponseSpectrumDisplacementConversion::for_response(response).is_some()
+        );
+    }
 }
 
 fn spectrum_fixture(

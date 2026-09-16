@@ -19,8 +19,8 @@ use crate::{
         ResourcePlanningError, StructuralModalResponseSpectrumResourceProjection,
     },
     solve::dynamics::{
-        recover_modal_response_spectrum_linear_fields,
-        solve_modal_response_spectrum_direction_with_operator, ModalResponseSpectrumFieldEnvelope,
+        recover_modal_response_spectrum_fields,
+        solve_modal_response_spectrum_direction_with_operator, ResponseSpectrumFieldRecovery,
     },
 };
 
@@ -178,14 +178,14 @@ pub fn recover_structural_modal_response_spectrum_fields(
     workload: &StructuralModalResponseSpectrumWorkload,
     prepared: &PreparedStructuralModalResponseSpectrum,
     result: &crate::solve::dynamics::ModalResponseSpectrumResult,
-) -> AnalysisExecutionResult<ModalResponseSpectrumFieldEnvelope> {
+) -> AnalysisExecutionResult<ResponseSpectrumFieldRecovery> {
     prepared.scope.validate_for(workload)?;
     let basis = prepared
         .modal_state
         .payload
         .modal_basis()
         .ok_or_else(|| invalid("prepared response-spectrum modal basis is absent"))?;
-    recover_modal_response_spectrum_linear_fields(&prepared.summary, basis, result)
+    recover_modal_response_spectrum_fields(&prepared.summary, basis, result)
         .map_err(|error| invalid(error.to_string()))
 }
 

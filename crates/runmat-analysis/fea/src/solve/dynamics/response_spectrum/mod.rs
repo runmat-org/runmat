@@ -34,10 +34,11 @@ pub use direction_result::{
 };
 use interpolate::interpolate_spectrum;
 pub use recovery::{
-    recover_modal_response_spectrum_linear_fields, response_spectrum_field_recovery_unavailability,
-    ModalResponseSpectrumFieldEnvelope, ModalResponseSpectrumFieldEnvelopeIdentity,
-    ResponseSpectrumFieldRecovery, ResponseSpectrumFieldRecoveryUnavailability,
-    ResponseSpectrumLinearField,
+    recover_modal_response_spectrum_fields, response_spectrum_deformation_recovery_unavailability,
+    ResponseSpectrumDeformationRecovery, ResponseSpectrumDeformationRecoveryUnavailability,
+    ResponseSpectrumFieldRecovery, ResponseSpectrumFieldRecoveryIdentity,
+    ResponseSpectrumLinearField, ResponseSpectrumNodalEnvelope, ResponseSpectrumNodalField,
+    ResponseSpectrumNodalQuantity,
 };
 use validation::{contribution_is_valid, vectors_close};
 

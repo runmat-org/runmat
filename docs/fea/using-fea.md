@@ -485,6 +485,26 @@ workers, while canonical fan-in always follows authored direction order. The ter
 retains participation and effective mass by mode, captured-mass evidence, combination and
 correction policy, the component-magnitude envelope, and its accuracy artifact.
 
+The field result keeps the authored spectrum response rather than forcing every response through
+displacement recovery. Every study therefore publishes a typed nodal translation envelope for
+relative displacement, relative velocity, relative acceleration, absolute acceleration, pseudo
+velocity, or pseudo acceleration. Models with rotational degrees of freedom also publish the
+corresponding rotation, angular-velocity, or angular-acceleration envelope. These values are
+nonnegative statistical component magnitudes, not one simultaneous signed state.
+
+Stress, strain, and formulation-specific linear resultants are a separate recovery contract. They
+are available when the response has a qualified displacement conversion: directly for relative
+displacement and through modal-frequency conversion for pseudo velocity and pseudo acceleration.
+Ordinary relative or absolute velocity and acceleration responses remain useful as nodal fields,
+but RunMat does not invent a deformation state from them. Missing-mass acceleration likewise
+retains its corrected nodal envelope while deformation recovery reports a typed unavailable
+reason until a separately qualified static-correction recovery exists.
+
+Final publication binds the response result, whole-result accuracy artifact, exact assembly
+resource plan, and aggregated resource-usage evidence. Local and remote execution import and
+validate the same chain before publishing the response state; a substituted result, resource
+record, or overrun blocks publication rather than being reduced to a warning.
+
 The complete runnable study is
 [`modal-response-spectrum-experimental.fea`](examples/modal-response-spectrum-experimental.fea):
 
@@ -534,8 +554,10 @@ state transition. RunMat partitions the spectrum into resonance-aware frequency 
 the resources for each interval, executes the same canonical tasks locally or on remote workers,
 and reduces interval contributions in ordinal order. Completion publishes variances and RMS fields
 plus a numerical receipt bound to the model, basis, excitation, integration policy, task set, and
-result. CPU execution is available as an experimental formulation; unsupported accelerator
-placement is rejected rather than silently falling back.
+result. Its terminal publication is also bound to the accepted whole-result accuracy artifact,
+the exact assembly resource plan, and the aggregated interval-and-assembly usage evidence. CPU
+execution is available as an experimental formulation; unsupported accelerator placement is
+rejected rather than silently falling back.
 
 The complete runnable study is
 [`modal-random-response-experimental.fea`](examples/modal-random-response-experimental.fea):

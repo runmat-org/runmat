@@ -433,6 +433,8 @@ async fn execute_one(
                             response_result: completed.response.result,
                             response_numerical_receipt: completed.response.numerical_receipt,
                             response_accuracy: completed.accuracy.artifact,
+                            response_resource_usage: completed.resource_usage.evidence,
+                            response_publication: completed.publication.result,
                             field_recovery: completed.response.field_recovery,
                             envelope_state: completed.envelope_state.state,
                         },
@@ -469,6 +471,8 @@ async fn execute_one(
                         response_result: completed.response.result,
                         response_numerical_receipt: completed.response.numerical_receipt,
                         response_accuracy: completed.accuracy.artifact,
+                        response_resource_usage: completed.resource_usage.evidence,
+                        response_publication: completed.publication.result,
                         statistics_state: completed.statistics_state.state,
                     }),
                 ));

@@ -450,12 +450,14 @@ fn modal_response_spectrum_closure(
             &completion.response.result_objects,
             &completion.response.receipt_objects,
             &completion.accuracy.objects,
+            &completion.resource_usage.objects,
+            &completion.publication.objects,
             &completion.response.field_recovery_objects,
             &completion.envelope_state.objects,
         ],
         access,
     )?;
-    let [modal_result_root, modal_receipt_root, basis_state_root, response_result_root, response_receipt_root, response_accuracy_root, field_recovery_root, envelope_state_root] =
+    let [modal_result_root, modal_receipt_root, basis_state_root, response_result_root, response_receipt_root, response_accuracy_root, response_resource_usage_root, response_publication_root, field_recovery_root, envelope_state_root] =
         roots;
     Ok(
         ExactStructuralStudyAnalysisClosure::StructuralModalResponseSpectrum {
@@ -465,6 +467,8 @@ fn modal_response_spectrum_closure(
             response_result_root: Box::new(response_result_root),
             response_receipt_root: Box::new(response_receipt_root),
             response_accuracy_root: Box::new(response_accuracy_root),
+            response_resource_usage_root: Box::new(response_resource_usage_root),
+            response_publication_root: Box::new(response_publication_root),
             field_recovery_root: Box::new(field_recovery_root),
             envelope_state_root: Box::new(envelope_state_root),
             objects,
@@ -484,11 +488,13 @@ fn random_response_closure(
             &completion.response.result_objects,
             &completion.response.receipt_objects,
             &completion.accuracy.objects,
+            &completion.resource_usage.objects,
+            &completion.publication.objects,
             &completion.statistics_state.objects,
         ],
         access,
     )?;
-    let [modal_result_root, modal_receipt_root, basis_state_root, response_result_root, response_receipt_root, response_accuracy_root, statistics_state_root] =
+    let [modal_result_root, modal_receipt_root, basis_state_root, response_result_root, response_receipt_root, response_accuracy_root, response_resource_usage_root, response_publication_root, statistics_state_root] =
         roots;
     Ok(
         ExactStructuralStudyAnalysisClosure::StructuralRandomResponse {
@@ -498,6 +504,8 @@ fn random_response_closure(
             response_result_root: Box::new(response_result_root),
             response_receipt_root: Box::new(response_receipt_root),
             response_accuracy_root: Box::new(response_accuracy_root),
+            response_resource_usage_root: Box::new(response_resource_usage_root),
+            response_publication_root: Box::new(response_publication_root),
             statistics_state_root: Box::new(statistics_state_root),
             objects,
         },

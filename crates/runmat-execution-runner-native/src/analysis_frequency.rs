@@ -9,7 +9,7 @@ use runmat_analysis_execution::{
     prepare_structural_frequency_result_assembly_request_objects,
     prepare_structural_frequency_result_task, prepare_structural_frequency_workload_objects,
     ImportedRecoveredFields, ImportedStructuralFrequencyEntry, ImportedStructuralFrequencyResult,
-    PlannedResourceUsageAttempt, PlannedResourceUsageGraph, PreparedStructuralResourceUsage,
+    PlannedResourceUsageGraph, PreparedStructuralResourceUsage,
     StructuralFrequencyFanoutPreparation, StructuralFrequencyFieldRecoveryPreparation,
     StructuralFrequencyResultPreparation,
 };
@@ -220,7 +220,10 @@ pub(crate) async fn execute_with_pool(
     let mut imported_entries = Vec::with_capacity(entry_tasks.len());
     let mut entry_dependencies = Vec::with_capacity(entry_tasks.len());
     for (task, executed) in entry_tasks.iter().zip(executed_entries) {
-        resource_attempts.push(resource_attempt(&task.resource_plan, &executed)?);
+        resource_attempts.push(crate::analysis_task_pool::planned_resource_attempt(
+            &task.resource_plan,
+            &executed,
+        )?);
         entry_dependencies.push(task_dependency(&executed));
         imported_entries.push(
             import_structural_frequency_entry(
@@ -276,7 +279,10 @@ pub(crate) async fn execute_with_pool(
         .zip(&recovery_tasks)
         .zip(executed_recoveries)
     {
-        resource_attempts.push(resource_attempt(&task.resource_plan, &executed)?);
+        resource_attempts.push(crate::analysis_task_pool::planned_resource_attempt(
+            &task.resource_plan,
+            &executed,
+        )?);
         recovery_dependencies.push(task_dependency(&executed));
         let recovered_fields = import_structural_frequency_recovered_fields(
             pool,
@@ -369,7 +375,7 @@ pub(crate) async fn execute_with_pool(
             "structural frequency fan-in returned the wrong task inventory".into(),
         )
     })?;
-    resource_attempts.push(resource_attempt(
+    resource_attempts.push(crate::analysis_task_pool::planned_resource_attempt(
         &result_task.resource_plan,
         &executed_result,
     )?);
@@ -450,34 +456,4 @@ fn task_dependency(task: &ExecutedAnalysisTask) -> AnalysisTaskDependency {
         identity: task.identity,
         task_id: task.task_id,
     }
-}
-
-pub(crate) fn resource_attempt(
-    plan: &runmat_analysis_fea::planning::resource::FeaResourcePlan,
-    task: &ExecutedAnalysisTask,
-) -> NativeExecutionResult<PlannedResourceUsageAttempt> {
-    let success = task.attempt.as_ref().ok_or_else(|| {
-        NativeExecutionError::Protocol(
-            "structural frequency task lacks scheduler attempt evidence".into(),
-        )
-    })?;
-    success.validate_accounting().map_err(protocol)?;
-    let accounting = success.resources.as_deref().cloned().ok_or_else(|| {
-        NativeExecutionError::Protocol(
-            "structural frequency task lacks scheduler resource accounting".into(),
-        )
-    })?;
-    if !runmat_analysis_fea::planning::resource::allocation_matches_plan(
-        &accounting.resources.allocation,
-        &plan.request,
-    ) {
-        return Err(NativeExecutionError::Protocol(format!(
-            "structural frequency scheduler allocation differs from its admitted resource plan: actual={:?}, planned={:?}",
-            accounting.resources.allocation, plan.request
-        )));
-    }
-    Ok(PlannedResourceUsageAttempt {
-        plan: plan.clone(),
-        accounting,
-    })
 }

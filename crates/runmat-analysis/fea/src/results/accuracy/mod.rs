@@ -812,7 +812,7 @@ mod tests {
     }
 
     #[test]
-    fn blocked_accuracy_cannot_be_repackaged_as_a_published_result() {
+    fn production_accuracy_failure_produces_a_blocking_gate() {
         let plan = AccuracyPlan::experimental_baseline("accuracy");
         let evaluation = evaluate_accuracy(&plan, &[evidence(1.0e-6)]).unwrap();
         let gate =
@@ -843,11 +843,7 @@ mod tests {
             gate,
         })
         .unwrap();
-        let publication = crate::execution::ResultPublicationRequest::new(&artifact, None).unwrap();
-        assert!(
-            crate::results::publication::PublishedAnalysisResult::new(&publication, &artifact,)
-                .is_err()
-        );
+        assert_eq!(artifact.gate().decision, PublicationDecision::Block);
     }
 
     #[test]

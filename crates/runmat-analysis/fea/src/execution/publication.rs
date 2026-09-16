@@ -1,6 +1,9 @@
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use serde::{Deserialize, Serialize};
 
+use crate::planning::resource::{
+    FeaResourcePlan, FeaResourcePlanIdentity, ResourceUsageEvidence, ResourceUsageEvidenceIdentity,
+};
 use crate::results::accuracy::{AccuracyArtifact, AccuracyArtifactIdentity};
 use crate::results::observation::{ObservationArtifactIdentity, ObservationArtifactManifest};
 
@@ -23,6 +26,8 @@ pub struct ResultPublicationRequest {
     pub source_observations: Option<ObservationArtifactIdentity>,
     pub accuracy_request: AccuracyEvaluationRequestIdentity,
     pub source_accuracy: AccuracyArtifactIdentity,
+    pub source_resource_plan: FeaResourcePlanIdentity,
+    pub source_resource_usage: ResourceUsageEvidenceIdentity,
 }
 
 #[derive(Deserialize)]
@@ -35,6 +40,8 @@ struct ResultPublicationRequestWire {
     source_observations: Option<ObservationArtifactIdentity>,
     accuracy_request: AccuracyEvaluationRequestIdentity,
     source_accuracy: AccuracyArtifactIdentity,
+    source_resource_plan: FeaResourcePlanIdentity,
+    source_resource_usage: ResourceUsageEvidenceIdentity,
 }
 
 impl TryFrom<ResultPublicationRequestWire> for ResultPublicationRequest {
@@ -49,6 +56,8 @@ impl TryFrom<ResultPublicationRequestWire> for ResultPublicationRequest {
             source_observations: wire.source_observations,
             accuracy_request: wire.accuracy_request,
             source_accuracy: wire.source_accuracy,
+            source_resource_plan: wire.source_resource_plan,
+            source_resource_usage: wire.source_resource_usage,
         };
         request.validate()?;
         Ok(request)
@@ -59,6 +68,8 @@ impl ResultPublicationRequest {
     pub fn new(
         accuracy: &AccuracyArtifact,
         observations: Option<&ObservationArtifactManifest>,
+        resource_plan: &FeaResourcePlan,
+        resource_usage: &ResourceUsageEvidence,
     ) -> AnalysisExecutionResult<Self> {
         accuracy
             .validate()
@@ -85,6 +96,20 @@ impl ResultPublicationRequest {
                 ))
             }
         };
+        resource_plan
+            .validate_identity()
+            .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+        resource_usage
+            .validate_identity()
+            .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+        if resource_usage.primary_plan != resource_plan.identity
+            || resource_usage.result_digest != accuracy.source_result.digest()
+            || !resource_usage.overruns.is_empty()
+        {
+            return Err(AnalysisExecutionError::Identity(
+                "publication resource evidence differs from the accuracy source",
+            ));
+        }
         let identity = PublicationRequestIdentity::derive(
             "result-publication-request",
             &(
@@ -93,6 +118,8 @@ impl ResultPublicationRequest {
                 observation_identity,
                 accuracy.evaluation_request,
                 accuracy.identity(),
+                resource_plan.identity,
+                resource_usage.identity(),
             ),
         )?;
         let request = Self {
@@ -103,6 +130,8 @@ impl ResultPublicationRequest {
             source_observations: observation_identity,
             accuracy_request: accuracy.evaluation_request,
             source_accuracy: accuracy.identity(),
+            source_resource_plan: resource_plan.identity,
+            source_resource_usage: resource_usage.identity(),
         };
         request.validate()?;
         Ok(request)
@@ -121,6 +150,8 @@ impl ResultPublicationRequest {
                 self.source_observations,
                 self.accuracy_request,
                 self.source_accuracy,
+                self.source_resource_plan,
+                self.source_resource_usage,
             ),
         )?;
         if self.schema_version != 1 || self.identity != expected {

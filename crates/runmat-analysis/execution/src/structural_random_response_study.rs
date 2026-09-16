@@ -13,16 +13,18 @@ use runmat_execution_artifact::{
 use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
 
 use crate::{
-    bind_upstream_state_transition, import_semantic_state_completion, import_structural_accuracy,
-    import_structural_modal_result, import_structural_random_response_interval,
-    import_structural_random_response_result, prepare_semantic_state_publication,
-    prepare_structural_accuracy, prepare_structural_modal_task,
-    prepare_structural_random_response_assembly, prepare_structural_random_response_fanout,
-    AnalysisBridgeError, AnalysisBridgeResult, AnalysisCapabilityRequirement, ImportedAccuracy,
+    bind_upstream_state_transition, import_published_result, import_semantic_state_completion,
+    import_structural_accuracy, import_structural_modal_result,
+    import_structural_random_response_interval, import_structural_random_response_result,
+    prepare_result_publication, prepare_semantic_state_publication, prepare_structural_accuracy,
+    prepare_structural_modal_task, prepare_structural_random_response_assembly,
+    prepare_structural_random_response_fanout, AnalysisBridgeError, AnalysisBridgeResult,
+    AnalysisCapabilityRequirement, ImportedAccuracy, ImportedPublishedResult,
     ImportedSemanticState, ImportedStructuralModalResult, ImportedStructuralRandomResponseInterval,
-    ImportedStructuralRandomResponseResult, PreparedSemanticStatePublication,
-    PreparedStructuralAccuracy, PreparedStructuralModalTask,
+    ImportedStructuralRandomResponseResult, PreparedResultPublication,
+    PreparedSemanticStatePublication, PreparedStructuralAccuracy, PreparedStructuralModalTask,
     PreparedStructuralRandomResponseAssemblyTask, PreparedStructuralRandomResponseIntervalTask,
+    PreparedStructuralResourceUsage, ResultPublicationPreparation,
     SemanticStatePublicationPreparation, StructuralAccuracyPreparation,
     StructuralModalTaskPreparation, StructuralRandomResponseAssemblyPreparation,
     StructuralRandomResponseFanoutPreparation,
@@ -53,6 +55,8 @@ enum StudyPhase {
     AwaitingAssembly(Digest),
     ReadyForAccuracy,
     AwaitingAccuracy(Digest),
+    ReadyForPublication,
+    AwaitingPublication(Digest),
     ReadyForStatisticsState,
     AwaitingStatisticsState(Digest),
     Complete,
@@ -68,8 +72,12 @@ pub struct StructuralRandomResponseStudyCoordinator {
     basis_state: Option<ImportedSemanticState>,
     intervals: Vec<ImportedStructuralRandomResponseInterval>,
     assembly_host: Option<crate::AnalysisHostWorkload>,
+    assembly_resource_plan_objects: Option<crate::PreparedAnalysisObjects>,
     result: Option<ImportedStructuralRandomResponseResult>,
+    accuracy_host: Option<crate::AnalysisHostWorkload>,
     accuracy: Option<ImportedAccuracy>,
+    resource_usage: Option<PreparedStructuralResourceUsage>,
+    publication: Option<ImportedPublishedResult>,
     statistics_state: Option<ImportedSemanticState>,
     phase: StudyPhase,
 }
@@ -128,8 +136,12 @@ impl StructuralRandomResponseStudyCoordinator {
             basis_state: None,
             intervals: Vec::new(),
             assembly_host: None,
+            assembly_resource_plan_objects: None,
             result: None,
+            accuracy_host: None,
             accuracy: None,
+            resource_usage: None,
+            publication: None,
             statistics_state: None,
             phase: StudyPhase::ReadyForModal,
         })
@@ -362,6 +374,7 @@ impl StructuralRandomResponseStudyCoordinator {
             self.preparation.inventory_limits,
         )?);
         self.assembly_host = Some(task.host.clone());
+        self.assembly_resource_plan_objects = Some(task.resource_plan_objects.clone());
         self.phase = StudyPhase::ReadyForAccuracy;
         Ok(())
     }
@@ -410,14 +423,66 @@ impl StructuralRandomResponseStudyCoordinator {
         }
         let accuracy =
             import_structural_accuracy(source, response, task, self.preparation.inventory_limits)?;
-        if accuracy.artifact.gate().decision
-            != runmat_analysis_fea::results::accuracy::PublicationDecision::Allow
-        {
+        self.accuracy_host = Some(task.host.clone());
+        self.accuracy = Some(accuracy);
+        self.phase = StudyPhase::ReadyForPublication;
+        Ok(())
+    }
+
+    pub fn prepare_publication(
+        &mut self,
+        resource_usage: PreparedStructuralResourceUsage,
+    ) -> AnalysisBridgeResult<PreparedResultPublication> {
+        if self.phase != StudyPhase::ReadyForPublication {
             return Err(invalid(
-                "random-response accuracy gate blocks semantic-state publication",
+                "random-response study is not ready for result publication",
             ));
         }
-        self.accuracy = Some(accuracy);
+        let task = prepare_result_publication(ResultPublicationPreparation {
+            accuracy_host: self
+                .accuracy_host
+                .as_ref()
+                .ok_or_else(|| invalid("random-response accuracy host is absent"))?
+                .clone(),
+            source_accuracy: self
+                .accuracy
+                .as_ref()
+                .ok_or_else(|| invalid("random-response accuracy is absent"))?
+                .objects
+                .clone(),
+            source_resource_plan: self
+                .assembly_resource_plan_objects
+                .as_ref()
+                .ok_or_else(|| invalid("random-response assembly resource plan is absent"))?
+                .clone(),
+            source_resource_usage: resource_usage.objects.clone(),
+            source_observations: None,
+            program_revision: self.preparation.program_revision.clone(),
+            chunk_bytes: self.preparation.chunk_bytes,
+            inventory_limits: self.preparation.inventory_limits,
+        })?;
+        self.resource_usage = Some(resource_usage);
+        self.phase = StudyPhase::AwaitingPublication(task.host.workload.identity.digest());
+        Ok(task)
+    }
+
+    pub fn complete_publication(
+        &mut self,
+        source: &impl CacheImport,
+        response: ProgramExecutionResponse,
+        task: &PreparedResultPublication,
+    ) -> AnalysisBridgeResult<()> {
+        if self.phase != StudyPhase::AwaitingPublication(task.host.workload.identity.digest()) {
+            return Err(AnalysisBridgeError::Identity(
+                "random-response publication differs from the awaited terminal receipt",
+            ));
+        }
+        self.publication = Some(import_published_result(
+            source,
+            response,
+            task,
+            self.preparation.inventory_limits,
+        )?);
         self.phase = StudyPhase::ReadyForStatisticsState;
         Ok(())
     }
@@ -507,6 +572,14 @@ impl StructuralRandomResponseStudyCoordinator {
 
     pub fn accuracy(&self) -> Option<&ImportedAccuracy> {
         self.accuracy.as_ref()
+    }
+
+    pub fn resource_usage(&self) -> Option<&PreparedStructuralResourceUsage> {
+        self.resource_usage.as_ref()
+    }
+
+    pub fn publication(&self) -> Option<&ImportedPublishedResult> {
+        self.publication.as_ref()
     }
 
     fn bound_workload(&self) -> AnalysisBridgeResult<&StructuralRandomResponseWorkload> {

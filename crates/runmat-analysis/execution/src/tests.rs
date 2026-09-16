@@ -1607,6 +1607,27 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         ObjectInventoryLimits::default(),
     )
     .unwrap();
+    let mut alternate_attempt_request = attempt_request.clone();
+    alternate_attempt_request.id =
+        runmat_execution::identity::AttemptId::derive(&[b"alternate-structural-attempt"]);
+    let alternate_unmetered = completed.attempt_success();
+    let alternate_metered = runmat_execution_runner::AttemptSuccess::new(
+        &alternate_attempt_request,
+        alternate_unmetered.outputs,
+        alternate_unmetered.result_objects,
+        1,
+        0,
+        0,
+    )
+    .unwrap();
+    let alternate_resource_usage = prepare_structural_resource_usage(
+        &prepared,
+        &imported_completion,
+        &alternate_metered,
+        4096,
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
     let unmetered = completed.attempt_success();
     let overrun_success = runmat_execution_runner::AttemptSuccess::new(
         &attempt_request,
@@ -2236,16 +2257,39 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         accuracy_host: accuracy_prepared.host.clone(),
         source_accuracy: accuracy_completed.outputs[0].clone(),
         source_resource_plan: prepared.inputs[3].clone(),
-        source_resource_usage: resource_usage.objects,
-        source_observations: Some(imported_observations),
+        source_resource_usage: resource_usage.objects.clone(),
+        source_observations: Some(imported_observations.clone()),
         program_revision: revision(),
         chunk_bytes: 4096,
         inventory_limits: ObjectInventoryLimits::default(),
     })
     .unwrap();
+    let alternate_publication_request =
+        runmat_analysis_fea::execution::ResultPublicationRequest::new(
+            &accuracy_artifact,
+            Some(&imported_observations.manifest),
+            &prepared.resource_plan,
+            &alternate_resource_usage.evidence,
+        )
+        .unwrap();
+    assert_ne!(
+        publication_prepared.request.identity(),
+        alternate_publication_request.identity()
+    );
+    assert!(
+        runmat_analysis_fea::results::publication::PublishedAnalysisResult::new(
+            &publication_prepared.request,
+            &accuracy_artifact,
+            &prepared.resource_plan,
+            &alternate_resource_usage.evidence,
+        )
+        .is_err()
+    );
     let published_result = runmat_analysis_fea::results::publication::PublishedAnalysisResult::new(
         &publication_prepared.request,
         &accuracy_artifact,
+        &prepared.resource_plan,
+        &resource_usage.evidence,
     )
     .unwrap();
     publication_prepared.program.write_to(&mut store).unwrap();

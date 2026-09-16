@@ -1,17 +1,20 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::time::Instant;
 
 use runmat_analysis_execution::{
-    ImportedAccuracy, ImportedSemanticState, ImportedStructuralModalResponseSpectrumResult,
-    ImportedStructuralModalResult, StructuralModalResponseSpectrumStudyCoordinator,
+    prepare_planned_resource_graph_usage, ImportedAccuracy, ImportedPublishedResult,
+    ImportedSemanticState, ImportedStructuralModalResponseSpectrumResult,
+    ImportedStructuralModalResult, PlannedResourceUsageGraph, PreparedStructuralResourceUsage,
+    StructuralModalResponseSpectrumStudyCoordinator,
     StructuralModalResponseSpectrumStudyPreparation,
 };
 
 use crate::{
     analysis_task_pool::{
-        configure_local_analysis, execute_analysis_task_batch, AnalysisTaskBatchPolicy,
-        AnalysisTaskDependency, AnalysisTaskPool, LocalAnalysisTaskPool, PreparedAnalysisTask,
-        RemoteAnalysisTaskPool,
+        configure_local_analysis, execute_analysis_task_batch, planned_resource_attempt,
+        AnalysisTaskBatchPolicy, AnalysisTaskDependency, AnalysisTaskPool, LocalAnalysisTaskPool,
+        PreparedAnalysisTask, RemoteAnalysisTaskPool,
     },
     NativeExecutionConfig, NativeExecutionError, NativeExecutionResult, NativeProgramSession,
     RemotePoolDriver, StructuralSequenceExecutionPolicy,
@@ -24,6 +27,8 @@ pub struct CompletedStructuralModalResponseSpectrumStudy {
     pub resolved_workload: runmat_analysis_fea::execution::StructuralModalResponseSpectrumWorkload,
     pub response: ImportedStructuralModalResponseSpectrumResult,
     pub accuracy: ImportedAccuracy,
+    pub resource_usage: PreparedStructuralResourceUsage,
+    pub publication: ImportedPublishedResult,
     pub envelope_state: ImportedSemanticState,
 }
 
@@ -57,6 +62,9 @@ async fn execute_with_pool(
     policy: StructuralSequenceExecutionPolicy,
 ) -> NativeExecutionResult<CompletedStructuralModalResponseSpectrumStudy> {
     policy.validate()?;
+    let publication_access = preparation.artifact_access.clone();
+    let chunk_bytes = preparation.chunk_bytes;
+    let inventory_limits = preparation.inventory_limits;
     let mut coordinator =
         StructuralModalResponseSpectrumStudyCoordinator::new(preparation).map_err(protocol)?;
 
@@ -100,6 +108,7 @@ async fn execute_with_pool(
         .complete_basis_state(pool, executed_basis.response, &basis)
         .map_err(protocol)?;
 
+    let response_started = Instant::now();
     let directions = coordinator.prepare_directions().map_err(protocol)?;
     let prepared = directions
         .iter()
@@ -117,11 +126,15 @@ async fn execute_with_pool(
         .iter()
         .map(dependency)
         .collect::<Vec<_>>();
-    let responses = directions
-        .iter()
-        .zip(executed_directions)
-        .map(|(direction, executed)| (direction.host.workload.identity.digest(), executed.response))
-        .collect::<BTreeMap<_, _>>();
+    let mut resource_attempts = Vec::with_capacity(directions.len() + 1);
+    let mut responses = BTreeMap::new();
+    for (direction, executed) in directions.iter().zip(executed_directions) {
+        resource_attempts.push(planned_resource_attempt(
+            &direction.resource_plan,
+            &executed,
+        )?);
+        responses.insert(direction.host.workload.identity.digest(), executed.response);
+    }
     coordinator
         .complete_directions(pool, directions, responses)
         .map_err(protocol)?;
@@ -142,9 +155,37 @@ async fn execute_with_pool(
     .try_into()
     .map_err(|_| protocol("response-spectrum assembly returned an invalid task inventory"))?;
     let assembly_dependency = dependency(&executed_assembly);
+    resource_attempts.push(planned_resource_attempt(
+        &assembly.resource_plan,
+        &executed_assembly,
+    )?);
     coordinator
         .complete_assembly(pool, executed_assembly.response, &assembly)
         .map_err(protocol)?;
+    let graph = PlannedResourceUsageGraph::new(
+        resource_attempts,
+        u64::try_from(response_started.elapsed().as_millis()).unwrap_or(u64::MAX),
+    )
+    .map_err(protocol)?;
+    let resource_usage = prepare_planned_resource_graph_usage(
+        &assembly.resource_plan,
+        coordinator
+            .resolved_workload()
+            .ok_or_else(|| protocol("resolved response-spectrum workload is absent"))?
+            .identity()
+            .digest(),
+        coordinator
+            .result()
+            .ok_or_else(|| protocol("completed response-spectrum result is absent"))?
+            .identity
+            .digest(),
+        &graph,
+        &publication_access,
+        chunk_bytes,
+        inventory_limits,
+    )
+    .map_err(protocol)?;
+    pool.register_result_objects(&resource_usage.objects, &publication_access)?;
 
     let accuracy = coordinator.prepare_accuracy().map_err(protocol)?;
     let [executed_accuracy] = execute_analysis_task_batch(
@@ -166,6 +207,28 @@ async fn execute_with_pool(
         .complete_accuracy(pool, executed_accuracy.response, &accuracy)
         .map_err(protocol)?;
 
+    let publication = coordinator
+        .prepare_publication(resource_usage)
+        .map_err(protocol)?;
+    let [executed_publication] = execute_analysis_task_batch(
+        pool,
+        vec![PreparedAnalysisTask {
+            host: &publication.host,
+            program: &publication.program,
+            resource_plan: None,
+            fallback_resources: policy.resources.clone(),
+            dependencies: vec![accuracy_dependency],
+        }],
+        task_policy(&policy),
+    )
+    .await?
+    .try_into()
+    .map_err(|_| protocol("response-spectrum publication returned an invalid task inventory"))?;
+    let publication_dependency = dependency(&executed_publication);
+    coordinator
+        .complete_publication(pool, executed_publication.response, &publication)
+        .map_err(protocol)?;
+
     let envelope = coordinator.prepare_envelope_state().map_err(protocol)?;
     let [executed_envelope] = execute_analysis_task_batch(
         pool,
@@ -174,7 +237,7 @@ async fn execute_with_pool(
             program: &envelope.program,
             resource_plan: None,
             fallback_resources: policy.resources.clone(),
-            dependencies: vec![accuracy_dependency],
+            dependencies: vec![publication_dependency],
         }],
         task_policy(&policy),
     )
@@ -206,6 +269,14 @@ async fn execute_with_pool(
             .accuracy()
             .cloned()
             .ok_or_else(|| protocol("response-spectrum accuracy is absent"))?,
+        resource_usage: coordinator
+            .resource_usage()
+            .cloned()
+            .ok_or_else(|| protocol("response-spectrum resource usage is absent"))?,
+        publication: coordinator
+            .publication()
+            .cloned()
+            .ok_or_else(|| protocol("response-spectrum publication is absent"))?,
         envelope_state: coordinator
             .envelope_state()
             .cloned()

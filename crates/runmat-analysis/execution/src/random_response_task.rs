@@ -255,6 +255,7 @@ pub struct PreparedStructuralRandomResponseAssemblyTask {
     pub workload: StructuralRandomResponseWorkload,
     pub request: StructuralRandomResponseAssemblyRequest,
     pub resource_plan: FeaResourcePlan,
+    pub resource_plan_objects: PreparedAnalysisObjects,
     pub host: AnalysisHostWorkload,
     pub program: PreparedAnalysisProgram,
     pub inputs: Vec<PreparedAnalysisObjects>,
@@ -368,11 +369,12 @@ pub fn prepare_structural_random_response_assembly(
             projected_output_set_resource_facts(),
         )
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    numerical_inputs.push(resource_plan_objects(
+    let resource_plan_objects = resource_plan_objects(
         &resource_plan,
         preparation.chunk_bytes,
         preparation.inventory_limits,
-    )?);
+    )?;
+    numerical_inputs.push(resource_plan_objects.clone());
     let execution_plan = execution_plan(
         &preparation.workload,
         prepared.scope(),
@@ -402,6 +404,7 @@ pub fn prepare_structural_random_response_assembly(
         workload: preparation.workload,
         request,
         resource_plan,
+        resource_plan_objects,
         host,
         program,
         inputs: numerical_inputs,

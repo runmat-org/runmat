@@ -425,7 +425,12 @@ building or diagnosing a formulation, but cannot make an experimental formulatio
 Numerical acceptance, formulation maturity, and publication status remain independent decisions.
 Response-spectrum and random-response steps evaluate their typed whole-result evidence at the
 portable execution boundary. A blocked accuracy gate prevents terminal semantic-state
-publication. Experimental indeterminate evidence appears as degraded only when the authored
+publication. Their publication request also names the exact resource plan and canonical aggregated
+usage evidence for the response subgraph. Publication independently verifies that the usage names
+the terminal result, uses the assembly plan as its primary plan, and contains no admitted-resource
+overrun. The published receipt retains those identities, so exact local and remote import cannot
+substitute an otherwise valid accuracy artifact or result onto different resource evidence.
+Experimental indeterminate evidence appears as degraded only when the authored
 unavailable-evidence policy explicitly permits publication.
 
 ## Selection Is Not Rendering

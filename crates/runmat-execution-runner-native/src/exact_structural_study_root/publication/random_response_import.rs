@@ -27,6 +27,8 @@ pub(super) struct RandomResponseResultImport<'a, Source> {
     pub response_result_root: ValueRef,
     pub response_receipt_root: ValueRef,
     pub response_accuracy_root: ValueRef,
+    pub response_resource_usage_root: ValueRef,
+    pub response_publication_root: ValueRef,
     pub statistics_state_root: ValueRef,
     pub objects: Vec<ValueRef>,
     pub mesh: &'a SolverMeshArtifact,
@@ -88,6 +90,14 @@ pub(super) fn import_random_response_result<Source: CacheImport>(
             AnalysisNumericalObjectKind::AccuracyReport,
         ),
         (
+            &input.response_resource_usage_root,
+            AnalysisNumericalObjectKind::ResourceUsage,
+        ),
+        (
+            &input.response_publication_root,
+            AnalysisNumericalObjectKind::PublishedResult,
+        ),
+        (
             &input.statistics_state_root,
             AnalysisNumericalObjectKind::SemanticState,
         ),
@@ -110,7 +120,7 @@ pub(super) fn import_random_response_result<Source: CacheImport>(
         &input.objects,
         input.access,
     )?;
-    let [modal_result_objects, modal_receipt_objects, basis_state_objects, response_result_objects, response_receipt_objects, response_accuracy_objects, statistics_state_objects] =
+    let [modal_result_objects, modal_receipt_objects, basis_state_objects, response_result_objects, response_receipt_objects, response_accuracy_objects, response_resource_usage_objects, response_publication_objects, statistics_state_objects] =
         imported.as_slice()
     else {
         return Err(protocol("random-response result closure is incomplete"));
@@ -218,6 +228,29 @@ pub(super) fn import_random_response_result<Source: CacheImport>(
             "random-response accuracy differs from its exact numerical source",
         ));
     }
+    let (response_resource_usage, response_publication) =
+        super::specialized_publication_import::import_specialized_publication(
+            response_resource_usage_objects,
+            response_publication_objects,
+            response_workload.identity().digest(),
+            response_numerical_receipt.source_result().digest(),
+            &response_accuracy,
+        )?;
+    let primary_plan = response_resource_usage
+        .evidence
+        .plans
+        .iter()
+        .find(|plan| plan.identity == response_resource_usage.evidence.primary_plan)
+        .ok_or_else(|| protocol("random-response resource evidence omits its primary plan"))?;
+    if primary_plan.input.phase
+        != runmat_analysis_fea::planning::resource::FeaResourcePhase::StructuralRandomResponseAssembly(
+            response_result.assembly().identity(),
+        )
+    {
+        return Err(protocol(
+            "random-response resource evidence names another terminal assembly",
+        ));
+    }
     let constraints =
         runmat_analysis_fea::constraints::CanonicalStructuralConstraintPlan::compile_for_model(
             response_workload.model(),
@@ -274,6 +307,8 @@ pub(super) fn import_random_response_result<Source: CacheImport>(
                 response_result: Box::new(response_result),
                 response_numerical_receipt,
                 response_accuracy,
+                response_resource_usage,
+                response_publication,
                 statistics_state,
             },
         )),

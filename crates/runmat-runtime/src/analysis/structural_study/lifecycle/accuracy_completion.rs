@@ -4,6 +4,33 @@ use runmat_analysis_fea::results::accuracy::{
 
 use crate::analysis::{QualityGate, QualityReason, QualityReasonCode, RunStatus};
 
+pub(super) fn validate_publication_chain(
+    workload_digest: runmat_execution::Digest,
+    expected_primary_phase: &runmat_analysis_fea::planning::resource::FeaResourcePhase,
+    accuracy: &AccuracyArtifact,
+    usage: &runmat_analysis_fea::planning::resource::ResourceUsageEvidence,
+    publication: &runmat_analysis_fea::results::publication::PublishedAnalysisResult,
+) -> Result<(), String> {
+    usage
+        .validate_identity()
+        .map_err(|error| error.to_string())?;
+    let primary_plan = usage
+        .plans
+        .iter()
+        .find(|plan| plan.identity == usage.primary_plan)
+        .ok_or_else(|| "resource evidence omits its primary plan".to_string())?;
+    publication
+        .validate_sources(accuracy, primary_plan, usage)
+        .map_err(|error| error.to_string())?;
+    if usage.workload_digest != workload_digest {
+        return Err("resource evidence names another analysis workload".into());
+    }
+    if &primary_plan.input.phase != expected_primary_phase {
+        return Err("resource evidence names another terminal analysis phase".into());
+    }
+    Ok(())
+}
+
 pub(super) struct CompletedAccuracy {
     pub run_status: RunStatus,
     pub numerically_acceptable: bool,

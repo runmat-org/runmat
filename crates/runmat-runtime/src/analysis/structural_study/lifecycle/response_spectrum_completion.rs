@@ -217,38 +217,33 @@ pub(in crate::analysis) fn complete_response_spectrum_study(
 
     let field_recovery = numerical.field_recovery.clone();
     field_recovery
-        .validate_for(numerical.response_result.numerical())
+        .validate_for_result(numerical.response_result.numerical())
         .map_err(|error| completion_error(&prepared, error.to_string()))?;
-    if let runmat_analysis_fea::solve::dynamics::ResponseSpectrumFieldRecovery::Recovered(
-        recovered,
-    ) = &field_recovery
-    {
-        let constraint_plan =
-            runmat_analysis_fea::constraints::CanonicalStructuralConstraintPlan::compile_for_model(
-                &prepared.model,
-                Some(&solver_mesh),
-            )
-            .map_err(|error| completion_error(&prepared, error.to_string()))?;
-        let prepared_response = runmat_analysis_fea::prepare_structural_modal_response_spectrum(
-            &response_workload,
-            &solver_mesh,
-            &numerical.basis_state,
-            &constraint_plan,
-            &[],
+    let constraint_plan =
+        runmat_analysis_fea::constraints::CanonicalStructuralConstraintPlan::compile_for_model(
+            &prepared.model,
+            Some(&solver_mesh),
         )
         .map_err(|error| completion_error(&prepared, error.to_string()))?;
-        let expected = runmat_analysis_fea::recover_structural_modal_response_spectrum_fields(
-            &response_workload,
-            &prepared_response,
-            numerical.response_result.numerical(),
-        )
-        .map_err(|error| completion_error(&prepared, error.to_string()))?;
-        if recovered != &expected {
-            return Err(completion_error(
-                &prepared,
-                "response-spectrum field recovery differs from its exact physical inputs",
-            ));
-        }
+    let prepared_response = runmat_analysis_fea::prepare_structural_modal_response_spectrum(
+        &response_workload,
+        &solver_mesh,
+        &numerical.basis_state,
+        &constraint_plan,
+        &[],
+    )
+    .map_err(|error| completion_error(&prepared, error.to_string()))?;
+    let expected = runmat_analysis_fea::recover_structural_modal_response_spectrum_fields(
+        &response_workload,
+        &prepared_response,
+        numerical.response_result.numerical(),
+    )
+    .map_err(|error| completion_error(&prepared, error.to_string()))?;
+    if field_recovery != expected {
+        return Err(completion_error(
+            &prepared,
+            "response-spectrum field recovery differs from its exact physical inputs",
+        ));
     }
 
     let modal_identity = &modal_run.data.run.identity;
@@ -293,6 +288,16 @@ pub(in crate::analysis) fn complete_response_spectrum_study(
             "response-spectrum accuracy artifact differs from its exact numerical source",
         ));
     }
+    super::accuracy_completion::validate_publication_chain(
+        response_workload.identity().digest(),
+        &runmat_analysis_fea::planning::resource::FeaResourcePhase::StructuralModalResponseSpectrumAssembly(
+            numerical.response_result.assembly().identity(),
+        ),
+        &numerical.response_accuracy,
+        &numerical.response_resource_usage,
+        &numerical.response_publication,
+    )
+    .map_err(|error| completion_error(&prepared, error))?;
     let accuracy = numerical.response_accuracy;
     let completed_accuracy = super::accuracy_completion::classify_accuracy(&accuracy);
     let (production_publishable, production_publication_reasons) =
@@ -335,6 +340,8 @@ pub(in crate::analysis) fn complete_response_spectrum_study(
             numerical_receipt: numerical.response_numerical_receipt,
             field_recovery,
             accuracy,
+            resource_usage: numerical.response_resource_usage,
+            publication: numerical.response_publication,
         },
     };
 

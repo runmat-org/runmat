@@ -6,6 +6,10 @@ use crate::execution::{
     AnalysisExecutionError, AnalysisExecutionResult, PublicationIdentity,
     PublicationRequestIdentity, ResultPublicationRequest, SolverResultIdentity, StepIdentity,
 };
+use crate::planning::resource::{
+    validate_resource_usage_evidence, FeaResourcePlan, FeaResourcePlanIdentity,
+    ResourceUsageEvidence, ResourceUsageEvidenceIdentity,
+};
 
 use super::accuracy::{
     AccuracyArtifact, AccuracyArtifactIdentity, AccuracyPublicationGate, AccuracyStatus,
@@ -28,6 +32,8 @@ pub struct PublishedAnalysisResult {
     pub source_result: SolverResultIdentity,
     pub source_observations: Option<ObservationArtifactIdentity>,
     pub source_accuracy: AccuracyArtifactIdentity,
+    pub source_resource_plan: FeaResourcePlanIdentity,
+    pub source_resource_usage: ResourceUsageEvidenceIdentity,
     pub formulation_requirement: FormulationRequirement,
     pub accuracy_status: AccuracyStatus,
     pub gate: AccuracyPublicationGate,
@@ -43,6 +49,8 @@ struct PublishedAnalysisResultWire {
     source_result: SolverResultIdentity,
     source_observations: Option<ObservationArtifactIdentity>,
     source_accuracy: AccuracyArtifactIdentity,
+    source_resource_plan: FeaResourcePlanIdentity,
+    source_resource_usage: ResourceUsageEvidenceIdentity,
     formulation_requirement: FormulationRequirement,
     accuracy_status: AccuracyStatus,
     gate: AccuracyPublicationGate,
@@ -60,6 +68,8 @@ impl TryFrom<PublishedAnalysisResultWire> for PublishedAnalysisResult {
             source_result: wire.source_result,
             source_observations: wire.source_observations,
             source_accuracy: wire.source_accuracy,
+            source_resource_plan: wire.source_resource_plan,
+            source_resource_usage: wire.source_resource_usage,
             formulation_requirement: wire.formulation_requirement,
             accuracy_status: wire.accuracy_status,
             gate: wire.gate,
@@ -73,6 +83,8 @@ impl PublishedAnalysisResult {
     pub fn new(
         request: &ResultPublicationRequest,
         accuracy: &AccuracyArtifact,
+        resource_plan: &FeaResourcePlan,
+        resource_usage: &ResourceUsageEvidence,
     ) -> AnalysisExecutionResult<Self> {
         request.validate()?;
         accuracy
@@ -83,6 +95,8 @@ impl PublishedAnalysisResult {
             || request.source_observations != accuracy.source_observations
             || request.accuracy_request != accuracy.evaluation_request
             || request.source_accuracy != accuracy.identity()
+            || request.source_resource_plan != resource_plan.identity
+            || request.source_resource_usage != resource_usage.identity()
         {
             return Err(AnalysisExecutionError::Identity(
                 "published result sources differ from the admitted request",
@@ -95,6 +109,8 @@ impl PublishedAnalysisResult {
                 .source_observations
                 .map(|identity| identity.digest()),
             request.source_accuracy.digest(),
+            request.source_resource_plan.digest(),
+            request.source_resource_usage.digest(),
         )?;
         let result = Self {
             schema_version: 1,
@@ -104,11 +120,14 @@ impl PublishedAnalysisResult {
             source_result: request.source_result,
             source_observations: request.source_observations,
             source_accuracy: request.source_accuracy,
+            source_resource_plan: request.source_resource_plan,
+            source_resource_usage: request.source_resource_usage,
             formulation_requirement: accuracy.formulation_requirement,
             accuracy_status: accuracy.evaluation().report().status,
             gate: accuracy.gate().clone(),
         };
         result.validate()?;
+        result.validate_sources(accuracy, resource_plan, resource_usage)?;
         Ok(result)
     }
 
@@ -122,6 +141,8 @@ impl PublishedAnalysisResult {
             self.source_result,
             self.source_observations.map(|identity| identity.digest()),
             self.source_accuracy.digest(),
+            self.source_resource_plan.digest(),
+            self.source_resource_usage.digest(),
         )?;
         if self.schema_version != 1
             || self.identity != expected
@@ -132,6 +153,35 @@ impl PublishedAnalysisResult {
         {
             return Err(AnalysisExecutionError::Invalid(
                 "published result lacks a convergent identity or an allowing accuracy gate".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn validate_sources(
+        &self,
+        accuracy: &AccuracyArtifact,
+        resource_plan: &FeaResourcePlan,
+        resource_usage: &ResourceUsageEvidence,
+    ) -> AnalysisExecutionResult<()> {
+        self.validate()?;
+        accuracy
+            .validate()
+            .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+        validate_resource_usage_evidence(resource_plan, resource_usage)
+            .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+        if self.producer != accuracy.producer
+            || self.source_result != accuracy.source_result
+            || self.source_observations != accuracy.source_observations
+            || self.source_accuracy != accuracy.identity()
+            || self.source_resource_plan != resource_plan.identity
+            || self.source_resource_usage != resource_usage.identity()
+            || resource_usage.primary_plan != resource_plan.identity
+            || resource_usage.result_digest != self.source_result.digest()
+            || !resource_usage.overruns.is_empty()
+        {
+            return Err(AnalysisExecutionError::Identity(
+                "published result differs from its governed accuracy or resource sources",
             ));
         }
         Ok(())

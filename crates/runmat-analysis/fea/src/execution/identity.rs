@@ -604,10 +604,19 @@ impl PublicationIdentity {
         source_result: SolverResultIdentity,
         observations: Option<Digest>,
         accuracy: Digest,
+        resource_plan: Digest,
+        resource_usage: Digest,
     ) -> AnalysisExecutionResult<Self> {
         Self::derive(
             "publication",
-            &(request, source_result, observations, accuracy),
+            &(
+                request,
+                source_result,
+                observations,
+                accuracy,
+                resource_plan,
+                resource_usage,
+            ),
         )
     }
 }

@@ -301,6 +301,16 @@ pub(in crate::analysis) fn complete_random_response_study(
             "random-response accuracy artifact differs from its exact numerical source",
         ));
     }
+    super::accuracy_completion::validate_publication_chain(
+        response_workload.identity().digest(),
+        &runmat_analysis_fea::planning::resource::FeaResourcePhase::StructuralRandomResponseAssembly(
+            numerical.response_result.assembly().identity(),
+        ),
+        &numerical.response_accuracy,
+        &numerical.response_resource_usage,
+        &numerical.response_publication,
+    )
+    .map_err(|error| completion_error(&prepared, error))?;
     let accuracy = numerical.response_accuracy;
     let completed_accuracy = super::accuracy_completion::classify_accuracy(&accuracy);
     let (production_publishable, reasons) =
@@ -341,6 +351,8 @@ pub(in crate::analysis) fn complete_random_response_study(
             result: numerical.response_result,
             numerical_receipt: numerical.response_numerical_receipt,
             accuracy,
+            resource_usage: numerical.response_resource_usage,
+            publication: numerical.response_publication,
         },
     };
 

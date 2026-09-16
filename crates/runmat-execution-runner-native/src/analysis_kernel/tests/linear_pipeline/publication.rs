@@ -58,16 +58,6 @@ pub(super) fn execute(solved: &SolvedPipeline, observations: &ObservationArtifac
     assert_eq!(accuracy.gate().decision, PublicationDecision::Allow);
     assert_eq!(accuracy.source_result, solved.source_result);
 
-    let publication_request = ResultPublicationRequest::new(&accuracy, Some(observations)).unwrap();
-    let publication_request = runmat_analysis_execution::prepare_analysis_objects(
-        AnalysisNumericalObjectKind::PublicationRequest,
-        publication_request.identity().digest(),
-        &publication_request.canonical_bytes().unwrap(),
-        4096,
-        ObjectNamespace::InputValue,
-        ObjectInventoryLimits::default(),
-    )
-    .unwrap();
     let accuracy_artifact = runmat_analysis_execution::prepare_analysis_objects(
         accuracy_outputs[0].kind,
         accuracy_outputs[0].logical_identity,
@@ -95,6 +85,22 @@ pub(super) fn execute(solved: &SolvedPipeline, observations: &ObservationArtifac
             .unwrap(),
         }],
         1,
+    )
+    .unwrap();
+    let publication_request = ResultPublicationRequest::new(
+        &accuracy,
+        Some(observations),
+        &solved.prepared.resource_plan,
+        &resource_usage,
+    )
+    .unwrap();
+    let publication_request = runmat_analysis_execution::prepare_analysis_objects(
+        AnalysisNumericalObjectKind::PublicationRequest,
+        publication_request.identity().digest(),
+        &publication_request.canonical_bytes().unwrap(),
+        4096,
+        ObjectNamespace::InputValue,
+        ObjectInventoryLimits::default(),
     )
     .unwrap();
     let resource_usage = runmat_analysis_execution::prepare_analysis_objects(

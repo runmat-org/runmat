@@ -48,6 +48,7 @@ mod prestressed_modal_import;
 mod random_response_import;
 mod response_spectrum_import;
 mod result_import;
+mod specialized_publication_import;
 
 use inventory::*;
 pub(crate) use packaging::package_exact_structural_study_result;
@@ -102,6 +103,8 @@ enum ExactStructuralStudyAnalysisClosure {
         response_result_root: Box<ValueRef>,
         response_receipt_root: Box<ValueRef>,
         response_accuracy_root: Box<ValueRef>,
+        response_resource_usage_root: Box<ValueRef>,
+        response_publication_root: Box<ValueRef>,
         field_recovery_root: Box<ValueRef>,
         envelope_state_root: Box<ValueRef>,
         objects: Vec<ValueRef>,
@@ -113,6 +116,8 @@ enum ExactStructuralStudyAnalysisClosure {
         response_result_root: Box<ValueRef>,
         response_receipt_root: Box<ValueRef>,
         response_accuracy_root: Box<ValueRef>,
+        response_resource_usage_root: Box<ValueRef>,
+        response_publication_root: Box<ValueRef>,
         statistics_state_root: Box<ValueRef>,
         objects: Vec<ValueRef>,
     },
@@ -275,6 +280,8 @@ impl ExactStructuralStudyAnalysisClosure {
                 response_result_root,
                 response_receipt_root,
                 response_accuracy_root,
+                response_resource_usage_root,
+                response_publication_root,
                 field_recovery_root,
                 envelope_state_root,
                 objects,
@@ -287,6 +294,8 @@ impl ExactStructuralStudyAnalysisClosure {
                         response_result_root,
                         response_receipt_root,
                         response_accuracy_root,
+                        response_resource_usage_root,
+                        response_publication_root,
                         field_recovery_root,
                         envelope_state_root,
                     ],
@@ -300,6 +309,8 @@ impl ExactStructuralStudyAnalysisClosure {
                 response_result_root,
                 response_receipt_root,
                 response_accuracy_root,
+                response_resource_usage_root,
+                response_publication_root,
                 statistics_state_root,
                 objects,
             } => {
@@ -311,6 +322,8 @@ impl ExactStructuralStudyAnalysisClosure {
                         response_result_root,
                         response_receipt_root,
                         response_accuracy_root,
+                        response_resource_usage_root,
+                        response_publication_root,
                         statistics_state_root,
                     ],
                     objects,
@@ -588,6 +601,8 @@ pub struct ExactStructuralModalResponseSpectrumAnalysisResult {
     pub response_numerical_receipt:
         runmat_analysis_fea::execution::StructuralModalResponseSpectrumNumericalReceipt,
     pub response_accuracy: runmat_analysis_fea::results::accuracy::AccuracyArtifact,
+    pub response_resource_usage: runmat_analysis_execution::PreparedStructuralResourceUsage,
+    pub response_publication: runmat_analysis_execution::ImportedPublishedResult,
     pub field_recovery: runmat_analysis_fea::solve::dynamics::ResponseSpectrumFieldRecovery,
     pub envelope_state: runmat_analysis_fea::execution::CanonicalSemanticState,
 }
@@ -603,6 +618,8 @@ pub struct ExactStructuralRandomResponseAnalysisResult {
     pub response_numerical_receipt:
         runmat_analysis_fea::execution::StructuralRandomResponseNumericalReceipt,
     pub response_accuracy: runmat_analysis_fea::results::accuracy::AccuracyArtifact,
+    pub response_resource_usage: runmat_analysis_execution::PreparedStructuralResourceUsage,
+    pub response_publication: runmat_analysis_execution::ImportedPublishedResult,
     pub statistics_state: runmat_analysis_fea::execution::CanonicalSemanticState,
 }
 

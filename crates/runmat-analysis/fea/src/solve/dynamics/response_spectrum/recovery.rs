@@ -27,19 +27,26 @@ use super::{
     ResponseSpectrumResultSemantics,
 };
 
-const FIELD_ENVELOPE_PREFIX: &[u8] = b"runmat-modal-response-spectrum-field-envelope\0";
 const FIELD_RECOVERY_PREFIX: &[u8] = b"runmat-modal-response-spectrum-field-recovery\0";
-const FIELD_ENVELOPE_LIMITS: CanonicalLimits =
+const FIELD_RECOVERY_LIMITS: CanonicalLimits =
     CanonicalLimits::new(1024 * 1024 * 1024, 40_000_000, 65_536, 24);
+
+mod nodal;
+
+pub use nodal::{
+    ResponseSpectrumNodalEnvelope, ResponseSpectrumNodalField, ResponseSpectrumNodalQuantity,
+};
+
+use nodal::recover_nodal_envelope;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ResponseSpectrumFieldRecoveryUnavailability {
+pub enum ResponseSpectrumDeformationRecoveryUnavailability {
     ResponseQuantityNotDisplacementConvertible { response: SpectrumResponse },
     MissingMassStaticCorrectionNotQualified,
 }
 
-impl std::fmt::Display for ResponseSpectrumFieldRecoveryUnavailability {
+impl std::fmt::Display for ResponseSpectrumDeformationRecoveryUnavailability {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::ResponseQuantityNotDisplacementConvertible { response } => write!(
@@ -55,91 +62,46 @@ impl std::fmt::Display for ResponseSpectrumFieldRecoveryUnavailability {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ResponseSpectrumFieldRecovery {
-    Recovered(ModalResponseSpectrumFieldEnvelope),
+pub enum ResponseSpectrumDeformationRecovery {
+    Recovered {
+        conversion: ResponseSpectrumDisplacementConversion,
+        fields: Vec<ResponseSpectrumLinearField>,
+    },
     Unavailable {
-        source_result: ModalResponseSpectrumResultIdentity,
-        reason: ResponseSpectrumFieldRecoveryUnavailability,
+        reason: ResponseSpectrumDeformationRecoveryUnavailability,
     },
 }
 
-impl ResponseSpectrumFieldRecovery {
-    pub fn unavailable(
-        source_result: ModalResponseSpectrumResultIdentity,
-        reason: ResponseSpectrumFieldRecoveryUnavailability,
-    ) -> Self {
-        Self::Unavailable {
-            source_result,
-            reason,
-        }
-    }
-
-    pub const fn source_result(&self) -> ModalResponseSpectrumResultIdentity {
+impl ResponseSpectrumDeformationRecovery {
+    pub const fn conversion(&self) -> Option<ResponseSpectrumDisplacementConversion> {
         match self {
-            Self::Recovered(envelope) => envelope.source_result(),
-            Self::Unavailable { source_result, .. } => *source_result,
+            Self::Recovered { conversion, .. } => Some(*conversion),
+            Self::Unavailable { .. } => None,
         }
     }
 
-    pub fn identity(&self) -> Result<Digest, FeaRunError> {
-        self.validate()?;
-        self.canonical_bytes().map(Digest::sha256)
-    }
-
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, FeaRunError> {
-        self.validate()?;
-        encode_contract(
-            FIELD_RECOVERY_PREFIX,
-            "modal-response-spectrum-field-recovery",
-            self,
-            FIELD_ENVELOPE_LIMITS,
-        )
-        .map_err(|error| FeaRunError::Solve(error.to_string()))
-    }
-
-    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, FeaRunError> {
-        let recovery: Self = decode_contract(
-            FIELD_RECOVERY_PREFIX,
-            "modal-response-spectrum-field-recovery",
-            bytes,
-            FIELD_ENVELOPE_LIMITS,
-        )
-        .map_err(|error| FeaRunError::Solve(error.to_string()))?;
-        recovery.validate()?;
-        Ok(recovery)
-    }
-
-    pub fn validate_for(&self, result: &ModalResponseSpectrumResult) -> Result<(), FeaRunError> {
-        self.validate()?;
-        if self.source_result() != result.identity() {
-            return Err(FeaRunError::Solve(
-                "response-spectrum field recovery names another numerical result".into(),
-            ));
-        }
+    pub fn fields(&self) -> Option<&[ResponseSpectrumLinearField]> {
         match self {
-            Self::Recovered(_)
-                if response_spectrum_field_recovery_unavailability(result).is_some() =>
-            {
-                Err(FeaRunError::Solve(
-                    "response-spectrum result cannot support its claimed recovered fields".into(),
-                ))
-            }
-            Self::Unavailable { reason, .. }
-                if Some(*reason) != response_spectrum_field_recovery_unavailability(result) =>
-            {
-                Err(FeaRunError::Solve(
-                    "response-spectrum field unavailability differs from the numerical result"
-                        .into(),
-                ))
-            }
-            _ => Ok(()),
+            Self::Recovered { fields, .. } => Some(fields),
+            Self::Unavailable { .. } => None,
         }
     }
 
-    fn validate(&self) -> Result<(), FeaRunError> {
+    pub fn field(
+        &self,
+        quantity: StructuralLinearFieldQuantity,
+    ) -> Option<&ResponseSpectrumLinearField> {
+        self.fields()?
+            .iter()
+            .find(|field| field.quantity == quantity)
+    }
+
+    pub const fn unavailability(
+        &self,
+    ) -> Option<ResponseSpectrumDeformationRecoveryUnavailability> {
         match self {
-            Self::Recovered(envelope) => envelope.validate(),
-            Self::Unavailable { .. } => Ok(()),
+            Self::Recovered { .. } => None,
+            Self::Unavailable { reason } => Some(*reason),
         }
     }
 }
@@ -193,61 +155,76 @@ impl ResponseSpectrumLinearField {
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct ModalResponseSpectrumFieldEnvelopeIdentity(Digest);
+pub struct ResponseSpectrumFieldRecoveryIdentity(Digest);
 
-impl ModalResponseSpectrumFieldEnvelopeIdentity {
+impl ResponseSpectrumFieldRecoveryIdentity {
     pub const fn digest(self) -> Digest {
         self.0
     }
 }
 
-/// Canonical linear-field projection of one modal response-spectrum result.
+/// Canonical typed nodal envelope and optional deformation recovery for one response-spectrum result.
+///
+/// Nodal values retain the response quantity exactly. Deformation fields are a separate contract
+/// because only displacement and pseudo-response ordinates admit a qualified displacement
+/// conversion. Every value remains a nonconcurrent statistical component magnitude.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct ModalResponseSpectrumFieldEnvelope {
-    identity: ModalResponseSpectrumFieldEnvelopeIdentity,
+pub struct ResponseSpectrumFieldRecovery {
+    identity: ResponseSpectrumFieldRecoveryIdentity,
     source_result: ModalResponseSpectrumResultIdentity,
+    response: SpectrumResponse,
     semantics: ResponseSpectrumResultSemantics,
-    fields: Vec<ResponseSpectrumLinearField>,
+    nodal: ResponseSpectrumNodalEnvelope,
+    deformation: ResponseSpectrumDeformationRecovery,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct ModalResponseSpectrumFieldEnvelopeWire {
-    identity: ModalResponseSpectrumFieldEnvelopeIdentity,
+struct ResponseSpectrumFieldRecoveryWire {
+    identity: ResponseSpectrumFieldRecoveryIdentity,
     source_result: ModalResponseSpectrumResultIdentity,
+    response: SpectrumResponse,
     semantics: ResponseSpectrumResultSemantics,
-    fields: Vec<ResponseSpectrumLinearField>,
+    nodal: ResponseSpectrumNodalEnvelope,
+    deformation: ResponseSpectrumDeformationRecovery,
 }
 
-impl TryFrom<ModalResponseSpectrumFieldEnvelopeWire> for ModalResponseSpectrumFieldEnvelope {
+impl TryFrom<ResponseSpectrumFieldRecoveryWire> for ResponseSpectrumFieldRecovery {
     type Error = FeaRunError;
 
-    fn try_from(wire: ModalResponseSpectrumFieldEnvelopeWire) -> Result<Self, Self::Error> {
+    fn try_from(wire: ResponseSpectrumFieldRecoveryWire) -> Result<Self, Self::Error> {
         let envelope = Self {
             identity: wire.identity,
             source_result: wire.source_result,
+            response: wire.response,
             semantics: wire.semantics,
-            fields: wire.fields,
+            nodal: wire.nodal,
+            deformation: wire.deformation,
         };
         envelope.validate()?;
         Ok(envelope)
     }
 }
 
-impl<'de> Deserialize<'de> for ModalResponseSpectrumFieldEnvelope {
+impl<'de> Deserialize<'de> for ResponseSpectrumFieldRecovery {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        ModalResponseSpectrumFieldEnvelopeWire::deserialize(deserializer)?
+        ResponseSpectrumFieldRecoveryWire::deserialize(deserializer)?
             .try_into()
             .map_err(serde::de::Error::custom)
     }
 }
 
-impl ModalResponseSpectrumFieldEnvelope {
-    pub const fn identity(&self) -> ModalResponseSpectrumFieldEnvelopeIdentity {
+impl ResponseSpectrumFieldRecovery {
+    pub fn identity(&self) -> Result<Digest, FeaRunError> {
+        self.validate()?;
+        Ok(self.canonical_identity().digest())
+    }
+
+    pub const fn canonical_identity(&self) -> ResponseSpectrumFieldRecoveryIdentity {
         self.identity
     }
 
@@ -259,45 +236,76 @@ impl ModalResponseSpectrumFieldEnvelope {
         self.semantics
     }
 
-    pub fn fields(&self) -> &[ResponseSpectrumLinearField] {
-        &self.fields
+    pub const fn response(&self) -> SpectrumResponse {
+        self.response
+    }
+
+    pub const fn nodal(&self) -> &ResponseSpectrumNodalEnvelope {
+        &self.nodal
+    }
+
+    pub const fn deformation(&self) -> &ResponseSpectrumDeformationRecovery {
+        &self.deformation
+    }
+
+    pub fn fields(&self) -> Option<&[ResponseSpectrumLinearField]> {
+        self.deformation.fields()
     }
 
     pub fn field(
         &self,
         quantity: StructuralLinearFieldQuantity,
     ) -> Option<&ResponseSpectrumLinearField> {
-        self.fields.iter().find(|field| field.quantity == quantity)
+        self.deformation.field(quantity)
     }
 
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, FeaRunError> {
         self.validate()?;
         encode_contract(
-            FIELD_ENVELOPE_PREFIX,
-            "modal-response-spectrum-field-envelope",
+            FIELD_RECOVERY_PREFIX,
+            "modal-response-spectrum-field-recovery",
             self,
-            FIELD_ENVELOPE_LIMITS,
+            FIELD_RECOVERY_LIMITS,
         )
         .map_err(|error| FeaRunError::Solve(error.to_string()))
     }
 
     pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, FeaRunError> {
         decode_contract(
-            FIELD_ENVELOPE_PREFIX,
-            "modal-response-spectrum-field-envelope",
+            FIELD_RECOVERY_PREFIX,
+            "modal-response-spectrum-field-recovery",
             bytes,
-            FIELD_ENVELOPE_LIMITS,
+            FIELD_RECOVERY_LIMITS,
         )
         .map_err(|error| FeaRunError::Solve(error.to_string()))
     }
 
-    pub fn validate_for(
+    pub fn validate_for_result(
+        &self,
+        result: &ModalResponseSpectrumResult,
+    ) -> Result<(), FeaRunError> {
+        self.validate()?;
+        if self.source_result != result.identity()
+            || self.response != result.response()
+            || self.semantics != result.semantics()
+            || self.deformation.unavailability()
+                != response_spectrum_deformation_recovery_unavailability(result)
+        {
+            return Err(FeaRunError::Solve(
+                "response-spectrum field recovery differs from its numerical result".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn validate_exact_for(
         &self,
         summary: &AssemblySummary,
         basis: &ModalBasisArtifact,
         result: &ModalResponseSpectrumResult,
     ) -> Result<(), FeaRunError> {
-        if self != &recover_modal_response_spectrum_linear_fields(summary, basis, result)? {
+        self.validate_for_result(result)?;
+        if self != &recover_modal_response_spectrum_fields(summary, basis, result)? {
             return Err(FeaRunError::Solve(
                 "response-spectrum field envelope differs from its operator, basis, or numerical result"
                     .into(),
@@ -307,13 +315,30 @@ impl ModalResponseSpectrumFieldEnvelope {
     }
 
     fn validate(&self) -> Result<(), FeaRunError> {
+        self.nodal.validate_for(self.response)?;
+        let deformation_is_valid = match &self.deformation {
+            ResponseSpectrumDeformationRecovery::Recovered { conversion, fields } => {
+                Some(*conversion)
+                    == ResponseSpectrumDisplacementConversion::for_response(self.response)
+                    && !fields.is_empty()
+                    && fields.iter().all(|field| field.validate().is_ok())
+                    && !fields
+                        .windows(2)
+                        .any(|pair| pair[0].quantity >= pair[1].quantity)
+            }
+            ResponseSpectrumDeformationRecovery::Unavailable { reason } => {
+                matches!(
+                    reason,
+                ResponseSpectrumDeformationRecoveryUnavailability::ResponseQuantityNotDisplacementConvertible { response }
+                        if *response == self.response
+                ) || matches!(
+                reason,
+                ResponseSpectrumDeformationRecoveryUnavailability::MissingMassStaticCorrectionNotQualified
+            )
+            }
+        };
         if self.semantics != ResponseSpectrumResultSemantics::StatisticalComponentMagnitudeEnvelope
-            || self.fields.is_empty()
-            || self.fields.iter().any(|field| field.validate().is_err())
-            || self
-                .fields
-                .windows(2)
-                .any(|pair| pair[0].quantity >= pair[1].quantity)
+            || !deformation_is_valid
             || self.identity != self.derive_identity()?
         {
             return Err(FeaRunError::Solve(
@@ -323,24 +348,30 @@ impl ModalResponseSpectrumFieldEnvelope {
         Ok(())
     }
 
-    fn derive_identity(&self) -> Result<ModalResponseSpectrumFieldEnvelopeIdentity, FeaRunError> {
+    fn derive_identity(&self) -> Result<ResponseSpectrumFieldRecoveryIdentity, FeaRunError> {
         encode_contract(
-            FIELD_ENVELOPE_PREFIX,
-            "modal-response-spectrum-field-envelope-identity",
-            &(self.source_result, self.semantics, &self.fields),
-            FIELD_ENVELOPE_LIMITS,
+            FIELD_RECOVERY_PREFIX,
+            "modal-response-spectrum-field-recovery-identity",
+            &(
+                self.source_result,
+                self.response,
+                self.semantics,
+                &self.nodal,
+                &self.deformation,
+            ),
+            FIELD_RECOVERY_LIMITS,
         )
         .map(Digest::sha256)
-        .map(ModalResponseSpectrumFieldEnvelopeIdentity)
+        .map(ResponseSpectrumFieldRecoveryIdentity)
         .map_err(|error| FeaRunError::Solve(error.to_string()))
     }
 }
 
-pub fn recover_modal_response_spectrum_linear_fields(
+pub fn recover_modal_response_spectrum_fields(
     summary: &AssemblySummary,
     basis: &ModalBasisArtifact,
     result: &ModalResponseSpectrumResult,
-) -> Result<ModalResponseSpectrumFieldEnvelope, FeaRunError> {
+) -> Result<ResponseSpectrumFieldRecovery, FeaRunError> {
     basis.validate_for(summary)?;
     result.validate()?;
     if result.basis() != basis.identity() {
@@ -348,13 +379,39 @@ pub fn recover_modal_response_spectrum_linear_fields(
             "response-spectrum result names another modal basis".into(),
         ));
     }
-    if let Some(reason) = response_spectrum_field_recovery_unavailability(result) {
-        return Err(FeaRunError::Solve(reason.to_string()));
-    }
-    let conversion = result
-        .displacement_conversion()
-        .expect("availability checked displacement conversion");
+    let nodal = recover_nodal_envelope(summary, result)?;
+    let deformation = match response_spectrum_deformation_recovery_unavailability(result) {
+        Some(reason) => ResponseSpectrumDeformationRecovery::Unavailable { reason },
+        None => {
+            let conversion = result
+                .displacement_conversion()
+                .expect("availability checked displacement conversion");
+            ResponseSpectrumDeformationRecovery::Recovered {
+                conversion,
+                fields: recover_deformation_fields(summary, basis, result, conversion)?,
+            }
+        }
+    };
 
+    let mut envelope = ResponseSpectrumFieldRecovery {
+        identity: ResponseSpectrumFieldRecoveryIdentity(Digest::sha256([])),
+        source_result: result.identity(),
+        response: result.response(),
+        semantics: result.semantics(),
+        nodal,
+        deformation,
+    };
+    envelope.identity = envelope.derive_identity()?;
+    envelope.validate()?;
+    Ok(envelope)
+}
+
+fn recover_deformation_fields(
+    summary: &AssemblySummary,
+    basis: &ModalBasisArtifact,
+    result: &ModalResponseSpectrumResult,
+    conversion: ResponseSpectrumDisplacementConversion,
+) -> Result<Vec<ResponseSpectrumLinearField>, FeaRunError> {
     let directional = result
         .contributions()
         .iter()
@@ -405,40 +462,27 @@ pub fn recover_modal_response_spectrum_linear_fields(
             "response-spectrum directions produced different linear field inventories".into(),
         ));
     }
-
-    let mut envelope = ModalResponseSpectrumFieldEnvelope {
-        identity: ModalResponseSpectrumFieldEnvelopeIdentity(Digest::sha256([])),
-        source_result: result.identity(),
-        semantics: result.semantics(),
-        fields,
-    };
-    envelope.identity = envelope.derive_identity()?;
-    envelope.validate()?;
-    Ok(envelope)
+    Ok(fields)
 }
 
-pub fn response_spectrum_field_recovery_unavailability(
+pub fn response_spectrum_deformation_recovery_unavailability(
     result: &ModalResponseSpectrumResult,
-) -> Option<ResponseSpectrumFieldRecoveryUnavailability> {
-    if result.displacement_conversion().is_none() {
+) -> Option<ResponseSpectrumDeformationRecoveryUnavailability> {
+    if result.contributions().iter().any(|contribution| {
+        matches!(
+            contribution.truncation.correction,
+            ModalTruncationCorrection::MissingMass { .. }
+        )
+    }) {
         return Some(
-            ResponseSpectrumFieldRecoveryUnavailability::ResponseQuantityNotDisplacementConvertible {
-                response: result.response(),
-            },
+            ResponseSpectrumDeformationRecoveryUnavailability::MissingMassStaticCorrectionNotQualified,
         );
     }
-    result
-        .contributions()
-        .iter()
-        .any(|contribution| {
-            matches!(
-                contribution.truncation.correction,
-                ModalTruncationCorrection::MissingMass { .. }
-            )
-        })
-        .then_some(
-            ResponseSpectrumFieldRecoveryUnavailability::MissingMassStaticCorrectionNotQualified,
-        )
+    result.displacement_conversion().is_none().then_some(
+        ResponseSpectrumDeformationRecoveryUnavailability::ResponseQuantityNotDisplacementConvertible {
+            response: result.response(),
+        },
+    )
 }
 
 fn recover_direction(

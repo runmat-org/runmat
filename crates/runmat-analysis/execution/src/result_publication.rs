@@ -124,7 +124,12 @@ pub fn prepare_result_publication(
             Ok(observations.manifest.clone())
         })
         .transpose()?;
-    let request = ResultPublicationRequest::new(&accuracy, observations.as_ref())?;
+    let request = ResultPublicationRequest::new(
+        &accuracy,
+        observations.as_ref(),
+        &resource_plan,
+        &resource_usage,
+    )?;
     let request_bytes = request.canonical_bytes()?;
     let request_objects = prepare_analysis_objects(
         AnalysisNumericalObjectKind::PublicationRequest,
@@ -233,6 +238,8 @@ pub fn import_published_result(
         || result.source_result != prepared.request.source_result
         || result.source_observations != prepared.request.source_observations
         || result.source_accuracy != prepared.request.source_accuracy
+        || result.source_resource_plan != prepared.request.source_resource_plan
+        || result.source_resource_usage != prepared.request.source_resource_usage
     {
         return Err(AnalysisBridgeError::Identity(
             "published result differs from its admitted request",

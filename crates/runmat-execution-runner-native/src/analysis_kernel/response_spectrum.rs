@@ -200,26 +200,13 @@ pub(super) fn execute_assembly(
         invocation.host.workload.identity,
         &result,
     )?;
-    let field_recovery =
-        match runmat_analysis_fea::solve::dynamics::response_spectrum_field_recovery_unavailability(
-            result.numerical(),
-        ) {
-            Some(reason) => {
-                runmat_analysis_fea::solve::dynamics::ResponseSpectrumFieldRecovery::unavailable(
-                    result.numerical().identity(),
-                    reason,
-                )
-            }
-            None => runmat_analysis_fea::solve::dynamics::ResponseSpectrumFieldRecovery::Recovered(
-                runmat_analysis_fea::recover_structural_modal_response_spectrum_fields(
-                    &decoded.workload,
-                    &prepared,
-                    result.numerical(),
-                )?,
-            ),
-        };
+    let field_recovery = runmat_analysis_fea::recover_structural_modal_response_spectrum_fields(
+        &decoded.workload,
+        &prepared,
+        result.numerical(),
+    )?;
     field_recovery
-        .validate_for(result.numerical())
+        .validate_for_result(result.numerical())
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     Ok(vec![
         AnalysisKernelOutput::whole(

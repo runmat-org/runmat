@@ -3,7 +3,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use runmat_analysis_execution::{AnalysisHostWorkload, PreparedAnalysisProgram};
+use runmat_analysis_execution::{
+    AnalysisHostWorkload, PlannedResourceUsageAttempt, PreparedAnalysisProgram,
+};
 use runmat_analysis_fea::execution::AnalysisTaskIdentity;
 use runmat_analysis_fea::planning::resource::FeaResourcePlan;
 use runmat_execution::resource::{Capability, ResourceRequest};
@@ -96,6 +98,32 @@ pub(crate) struct ExecutedAnalysisTask {
     pub task_id: TaskId,
     pub response: ProgramExecutionResponse,
     pub attempt: Option<AttemptSuccess>,
+}
+
+pub(crate) fn planned_resource_attempt(
+    plan: &FeaResourcePlan,
+    task: &ExecutedAnalysisTask,
+) -> NativeExecutionResult<PlannedResourceUsageAttempt> {
+    let success = task.attempt.as_ref().ok_or_else(|| {
+        NativeExecutionError::Protocol("analysis task lacks scheduler attempt evidence".into())
+    })?;
+    success.validate_accounting().map_err(protocol)?;
+    let accounting = success.resources.as_deref().cloned().ok_or_else(|| {
+        NativeExecutionError::Protocol("analysis task lacks scheduler resource accounting".into())
+    })?;
+    if !runmat_analysis_fea::planning::resource::allocation_matches_plan(
+        &accounting.resources.allocation,
+        &plan.request,
+    ) {
+        return Err(NativeExecutionError::Protocol(format!(
+            "analysis scheduler allocation differs from its admitted resource plan: actual={:?}, planned={:?}",
+            accounting.resources.allocation, plan.request
+        )));
+    }
+    Ok(PlannedResourceUsageAttempt {
+        plan: plan.clone(),
+        accounting,
+    })
 }
 
 /// Registers and executes one independent task wave through the shared task substrate.

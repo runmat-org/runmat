@@ -8,9 +8,10 @@ use runmat_analysis_core::{
 };
 use runmat_analysis_execution::{
     execute_serial_analysis, import_semantic_state, import_structural_random_response_interval,
-    import_structural_random_response_result, prepare_semantic_state_publication,
-    prepare_structural_random_response_assembly, prepare_structural_random_response_fanout,
-    AnalysisHostResponse, SemanticStatePublicationPreparation,
+    import_structural_random_response_result, prepare_planned_resource_graph_usage,
+    prepare_semantic_state_publication, prepare_structural_random_response_assembly,
+    prepare_structural_random_response_fanout, AnalysisHostResponse, PlannedResourceUsageAttempt,
+    PlannedResourceUsageGraph, SemanticStatePublicationPreparation,
     StructuralRandomResponseAssemblyPreparation, StructuralRandomResponseFanoutPreparation,
     StructuralRandomResponseStudyCoordinator, StructuralRandomResponseStudyPreparation,
 };
@@ -28,8 +29,11 @@ use runmat_analysis_fea::{
     solve::dynamics::RandomResponseIntegrationPolicy,
     ComputeBackend,
 };
+use runmat_execution::identity::{AttemptId, WorkerId};
+use runmat_execution::resource::ResourceAccounting;
 use runmat_execution::{Digest, ProgramEnvironment, ProgramRevision};
 use runmat_execution_artifact::{object::ObjectInventoryLimits, ArtifactAccess};
+use runmat_execution_runner::AttemptResourceAccounting;
 use runmat_meshing_core::{ElementOrder, PersistentEntityId, PersistentEntityKind, StableDigest};
 
 use super::NativeAnalysisKernel;
@@ -235,6 +239,10 @@ fn authored_random_response_study_runs_the_complete_governed_lifecycle() {
         .complete_basis_state(&store, basis_response, &basis)
         .unwrap();
     let intervals = coordinator.prepare_intervals().unwrap();
+    let interval_plans = intervals
+        .iter()
+        .map(|task| task.resource_plan.clone())
+        .collect::<Vec<_>>();
     let mut responses = BTreeMap::new();
     for task in &intervals {
         responses.insert(
@@ -255,12 +263,51 @@ fn authored_random_response_study_runs_the_complete_governed_lifecycle() {
     coordinator
         .complete_accuracy(&store, accuracy_response, &accuracy)
         .unwrap();
+    let mut attempts = interval_plans
+        .iter()
+        .enumerate()
+        .map(|(ordinal, plan)| planned_attempt(plan, ordinal))
+        .collect::<Vec<_>>();
+    attempts.push(planned_attempt(&assembly.resource_plan, attempts.len()));
+    let graph = PlannedResourceUsageGraph::new(attempts, 1).unwrap();
+    let resource_usage = prepare_planned_resource_graph_usage(
+        &assembly.resource_plan,
+        coordinator.resolved_workload().unwrap().identity().digest(),
+        coordinator.result().unwrap().identity.digest(),
+        &graph,
+        &access(),
+        256,
+        limits,
+    )
+    .unwrap();
+    for object in &resource_usage.objects.objects {
+        runmat_execution_artifact::cache::CacheExport::write_verified(&mut store, object).unwrap();
+    }
+    let publication = coordinator.prepare_publication(resource_usage).unwrap();
+    let publication_response = execute(&mut store, &publication.host, &publication.program, limits);
+    coordinator
+        .complete_publication(&store, publication_response, &publication)
+        .unwrap();
     let statistics = coordinator.prepare_statistics_state().unwrap();
     let statistics_response = execute(&mut store, &statistics.host, &statistics.program, limits);
     coordinator
         .complete_statistics_state(&store, statistics_response, &statistics)
         .unwrap();
     assert!(coordinator.is_complete());
+    let usage = coordinator.resource_usage().unwrap();
+    assert_eq!(usage.evidence.attempts.len(), interval_plans.len() + 1);
+    assert_eq!(usage.evidence.primary_plan, assembly.resource_plan.identity);
+    assert!(usage.evidence.overruns.is_empty());
+    let publication = &coordinator.publication().unwrap().result;
+    assert_eq!(
+        publication.source_resource_plan,
+        usage.evidence.primary_plan
+    );
+    assert_eq!(publication.source_resource_usage, usage.evidence.identity());
+    assert_eq!(
+        publication.source_accuracy,
+        coordinator.accuracy().unwrap().artifact.identity()
+    );
     assert_eq!(
         coordinator
             .statistics_state()
@@ -274,6 +321,22 @@ fn authored_random_response_study_runs_the_complete_governed_lifecycle() {
         )
         .unwrap()
     );
+}
+
+fn planned_attempt(
+    plan: &runmat_analysis_fea::planning::resource::FeaResourcePlan,
+    ordinal: usize,
+) -> PlannedResourceUsageAttempt {
+    let ordinal = ordinal.to_le_bytes();
+    PlannedResourceUsageAttempt {
+        plan: plan.clone(),
+        accounting: AttemptResourceAccounting {
+            attempt_id: AttemptId::derive(&[b"random-response-test-attempt", &ordinal]),
+            worker_id: WorkerId::derive(&[b"random-response-test-worker"]),
+            resources: ResourceAccounting::for_reserved_interval(plan.request.clone(), 1, 0, 0, 0)
+                .unwrap(),
+        },
+    }
 }
 
 fn execute(

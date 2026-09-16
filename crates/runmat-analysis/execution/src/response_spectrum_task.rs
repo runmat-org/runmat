@@ -263,6 +263,7 @@ pub struct PreparedStructuralModalResponseSpectrumAssemblyTask {
     pub workload: StructuralModalResponseSpectrumWorkload,
     pub request: StructuralModalResponseSpectrumAssemblyRequest,
     pub resource_plan: FeaResourcePlan,
+    pub resource_plan_objects: PreparedAnalysisObjects,
     pub host: AnalysisHostWorkload,
     pub program: PreparedAnalysisProgram,
     pub inputs: Vec<PreparedAnalysisObjects>,
@@ -386,11 +387,12 @@ pub fn prepare_structural_modal_response_spectrum_assembly(
             projected_output_set_resource_facts(),
         )
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    numerical_inputs.push(resource_plan_objects(
+    let resource_plan_objects = resource_plan_objects(
         &resource_plan,
         preparation.chunk_bytes,
         preparation.inventory_limits,
-    )?);
+    )?;
+    numerical_inputs.push(resource_plan_objects.clone());
     let execution_plan = execution_plan(
         &preparation.workload,
         prepared.scope(),
@@ -421,6 +423,7 @@ pub fn prepare_structural_modal_response_spectrum_assembly(
         workload: preparation.workload,
         request,
         resource_plan,
+        resource_plan_objects,
         host,
         program,
         inputs: numerical_inputs,
@@ -498,7 +501,7 @@ pub fn import_structural_modal_response_spectrum_result(
     let field_recovery =
         decode_prepared_structural_modal_response_spectrum_field_recovery(&field_recovery_objects)?;
     field_recovery
-        .validate_for(result.numerical())
+        .validate_for_result(result.numerical())
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     if field_recovery_output.logical_identity
         != field_recovery

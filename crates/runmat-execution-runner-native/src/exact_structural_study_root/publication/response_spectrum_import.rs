@@ -28,6 +28,8 @@ pub(super) struct ResponseSpectrumResultImport<'a, Source> {
     pub response_result_root: ValueRef,
     pub response_receipt_root: ValueRef,
     pub response_accuracy_root: ValueRef,
+    pub response_resource_usage_root: ValueRef,
+    pub response_publication_root: ValueRef,
     pub field_recovery_root: ValueRef,
     pub envelope_state_root: ValueRef,
     pub objects: Vec<ValueRef>,
@@ -96,6 +98,14 @@ pub(super) fn import_response_spectrum_result<Source: CacheImport>(
             AnalysisNumericalObjectKind::AccuracyReport,
         ),
         (
+            &input.response_resource_usage_root,
+            AnalysisNumericalObjectKind::ResourceUsage,
+        ),
+        (
+            &input.response_publication_root,
+            AnalysisNumericalObjectKind::PublishedResult,
+        ),
+        (
             &input.field_recovery_root,
             AnalysisNumericalObjectKind::StructuralModalResponseSpectrumFieldRecovery,
         ),
@@ -122,7 +132,7 @@ pub(super) fn import_response_spectrum_result<Source: CacheImport>(
         &input.objects,
         input.access,
     )?;
-    let [modal_result_objects, modal_receipt_objects, basis_state_objects, response_result_objects, response_receipt_objects, response_accuracy_objects, field_recovery_objects, envelope_state_objects] =
+    let [modal_result_objects, modal_receipt_objects, basis_state_objects, response_result_objects, response_receipt_objects, response_accuracy_objects, response_resource_usage_objects, response_publication_objects, field_recovery_objects, envelope_state_objects] =
         imported.as_slice()
     else {
         return Err(protocol("response-spectrum result closure is incomplete"));
@@ -232,13 +242,36 @@ pub(super) fn import_response_spectrum_result<Source: CacheImport>(
             "response-spectrum accuracy differs from its exact numerical source",
         ));
     }
+    let (response_resource_usage, response_publication) =
+        super::specialized_publication_import::import_specialized_publication(
+            response_resource_usage_objects,
+            response_publication_objects,
+            response_workload.identity().digest(),
+            response_numerical_receipt.source_result().digest(),
+            &response_accuracy,
+        )?;
+    let primary_plan = response_resource_usage
+        .evidence
+        .plans
+        .iter()
+        .find(|plan| plan.identity == response_resource_usage.evidence.primary_plan)
+        .ok_or_else(|| protocol("response-spectrum resource evidence omits its primary plan"))?;
+    if primary_plan.input.phase
+        != runmat_analysis_fea::planning::resource::FeaResourcePhase::StructuralModalResponseSpectrumAssembly(
+            response_result.assembly().identity(),
+        )
+    {
+        return Err(protocol(
+            "response-spectrum resource evidence names another terminal assembly",
+        ));
+    }
     let field_recovery =
         runmat_analysis_execution::decode_prepared_structural_modal_response_spectrum_field_recovery(
             field_recovery_objects,
         )
         .map_err(protocol)?;
     field_recovery
-        .validate_for(response_result.numerical())
+        .validate_for_result(response_result.numerical())
         .map_err(protocol)?;
     let constraint_plan =
         runmat_analysis_fea::constraints::CanonicalStructuralConstraintPlan::compile_for_model(
@@ -254,21 +287,16 @@ pub(super) fn import_response_spectrum_result<Source: CacheImport>(
         &[],
     )
     .map_err(protocol)?;
-    if let runmat_analysis_fea::solve::dynamics::ResponseSpectrumFieldRecovery::Recovered(
-        recovered,
-    ) = &field_recovery
-    {
-        let expected = runmat_analysis_fea::recover_structural_modal_response_spectrum_fields(
-            &response_workload,
-            &prepared_response,
-            response_result.numerical(),
-        )
-        .map_err(protocol)?;
-        if recovered != &expected {
-            return Err(protocol(
-                "response-spectrum field recovery differs from its exact physical inputs",
-            ));
-        }
+    let expected = runmat_analysis_fea::recover_structural_modal_response_spectrum_fields(
+        &response_workload,
+        &prepared_response,
+        response_result.numerical(),
+    )
+    .map_err(protocol)?;
+    if field_recovery != expected {
+        return Err(protocol(
+            "response-spectrum field recovery differs from its exact physical inputs",
+        ));
     }
     let envelope_state =
         runmat_analysis_execution::decode_prepared_semantic_state(envelope_state_objects)
@@ -295,6 +323,8 @@ pub(super) fn import_response_spectrum_result<Source: CacheImport>(
                 response_result: Box::new(response_result),
                 response_numerical_receipt,
                 response_accuracy,
+                response_resource_usage,
+                response_publication,
                 field_recovery,
                 envelope_state,
             },

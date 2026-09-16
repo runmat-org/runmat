@@ -11,9 +11,10 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_analysis_execution::{
     execute_serial_analysis, import_structural_modal_response_spectrum_direction,
-    import_structural_modal_response_spectrum_result,
+    import_structural_modal_response_spectrum_result, prepare_planned_resource_graph_usage,
     prepare_structural_modal_response_spectrum_assembly,
     prepare_structural_modal_response_spectrum_fanout, AnalysisHostResponse,
+    PlannedResourceUsageAttempt, PlannedResourceUsageGraph,
     StructuralModalResponseSpectrumAssemblyPreparation,
     StructuralModalResponseSpectrumFanoutPreparation,
     StructuralModalResponseSpectrumStudyCoordinator,
@@ -32,8 +33,11 @@ use runmat_analysis_fea::{
     results::observation::ObservationExecutionPolicy,
     ComputeBackend,
 };
+use runmat_execution::identity::{AttemptId, WorkerId};
+use runmat_execution::resource::ResourceAccounting;
 use runmat_execution::{Digest, ProgramEnvironment, ProgramRevision};
 use runmat_execution_artifact::{object::ObjectInventoryLimits, ArtifactAccess};
+use runmat_execution_runner::AttemptResourceAccounting;
 use runmat_meshing_core::{ElementOrder, PersistentEntityId, PersistentEntityKind, StableDigest};
 
 use super::NativeAnalysisKernel;
@@ -125,12 +129,8 @@ fn native_response_spectrum_fanout_and_fanin_are_portable_and_order_independent(
         .numerical_receipt
         .validate_against(imported.identity, &imported.result)
         .unwrap();
-    let runmat_analysis_fea::solve::dynamics::ResponseSpectrumFieldRecovery::Recovered(fields) =
-        &imported.field_recovery
-    else {
-        panic!("displacement-convertible response did not publish recovered fields");
-    };
-    assert!(fields
+    assert!(imported
+        .field_recovery
         .field(runmat_analysis_fea::solve::dynamics::StructuralLinearFieldQuantity::Stress)
         .is_some());
 }
@@ -238,6 +238,10 @@ fn authored_response_spectrum_study_publishes_basis_and_terminal_envelope() {
         )
         .unwrap();
     let directions = coordinator.prepare_directions().unwrap();
+    let direction_plans = directions
+        .iter()
+        .map(|task| task.resource_plan.clone())
+        .collect::<Vec<_>>();
     let mut responses = BTreeMap::new();
     for task in &directions {
         task.program.write_to(&mut store).unwrap();
@@ -297,6 +301,45 @@ fn authored_response_spectrum_study_publishes_basis_and_terminal_envelope() {
             &accuracy,
         )
         .unwrap();
+    let mut attempts = direction_plans
+        .iter()
+        .enumerate()
+        .map(|(ordinal, plan)| planned_attempt(plan, ordinal))
+        .collect::<Vec<_>>();
+    attempts.push(planned_attempt(&assembly.resource_plan, attempts.len()));
+    let graph = PlannedResourceUsageGraph::new(attempts, 1).unwrap();
+    let resource_usage = prepare_planned_resource_graph_usage(
+        &assembly.resource_plan,
+        coordinator.resolved_workload().unwrap().identity().digest(),
+        coordinator.result().unwrap().identity.digest(),
+        &graph,
+        &access(),
+        256,
+        limits,
+    )
+    .unwrap();
+    for object in &resource_usage.objects.objects {
+        runmat_execution_artifact::cache::CacheExport::write_verified(&mut store, object).unwrap();
+    }
+    let publication = coordinator.prepare_publication(resource_usage).unwrap();
+    publication.program.write_to(&mut store).unwrap();
+    let completed = execute_serial_analysis(
+        &publication.program.request,
+        &mut store,
+        &NativeAnalysisKernel,
+        256,
+        limits,
+    )
+    .unwrap();
+    coordinator
+        .complete_publication(
+            &store,
+            AnalysisHostResponse::completed(&publication.host, &completed)
+                .unwrap()
+                .program_response(),
+            &publication,
+        )
+        .unwrap();
     let envelope = coordinator.prepare_envelope_state().unwrap();
     envelope.program.write_to(&mut store).unwrap();
     let completed = execute_serial_analysis(
@@ -317,10 +360,26 @@ fn authored_response_spectrum_study_publishes_basis_and_terminal_envelope() {
         )
         .unwrap();
     assert!(coordinator.is_complete());
-    assert!(matches!(
-        coordinator.result().unwrap().field_recovery,
-        runmat_analysis_fea::solve::dynamics::ResponseSpectrumFieldRecovery::Recovered(_)
-    ));
+    let usage = coordinator.resource_usage().unwrap();
+    assert_eq!(usage.evidence.attempts.len(), direction_plans.len() + 1);
+    assert_eq!(usage.evidence.primary_plan, assembly.resource_plan.identity);
+    assert!(usage.evidence.overruns.is_empty());
+    let publication = &coordinator.publication().unwrap().result;
+    assert_eq!(
+        publication.source_resource_plan,
+        usage.evidence.primary_plan
+    );
+    assert_eq!(publication.source_resource_usage, usage.evidence.identity());
+    assert_eq!(
+        publication.source_accuracy,
+        coordinator.accuracy().unwrap().artifact.identity()
+    );
+    assert!(coordinator
+        .result()
+        .unwrap()
+        .field_recovery
+        .fields()
+        .is_some());
     assert_eq!(
         coordinator
             .envelope_state()
@@ -334,6 +393,22 @@ fn authored_response_spectrum_study_publishes_basis_and_terminal_envelope() {
         )
         .unwrap()
     );
+}
+
+fn planned_attempt(
+    plan: &runmat_analysis_fea::planning::resource::FeaResourcePlan,
+    ordinal: usize,
+) -> PlannedResourceUsageAttempt {
+    let ordinal = ordinal.to_le_bytes();
+    PlannedResourceUsageAttempt {
+        plan: plan.clone(),
+        accounting: AttemptResourceAccounting {
+            attempt_id: AttemptId::derive(&[b"response-spectrum-test-attempt", &ordinal]),
+            worker_id: WorkerId::derive(&[b"response-spectrum-test-worker"]),
+            resources: ResourceAccounting::for_reserved_interval(plan.request.clone(), 1, 0, 0, 0)
+                .unwrap(),
+        },
+    }
 }
 
 fn fixture() -> (

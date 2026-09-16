@@ -22,7 +22,7 @@ pub mod transient;
 mod activation;
 mod admission;
 mod observation_history;
-mod structural_nodal;
+pub(crate) mod structural_nodal;
 
 use runmat_analysis_core::{
     AnalysisModel, ExcitationAction, ExcitationTarget, StructuralConstraint,

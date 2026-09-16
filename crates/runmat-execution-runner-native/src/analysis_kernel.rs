@@ -459,13 +459,19 @@ fn execute_result_publication(
     if let Some(observations) = &observations {
         validate_observation_resource_usage(observations, &resource_usage)?;
     }
-    let expected_request = ResultPublicationRequest::new(&accuracy, observations.as_ref())?;
+    let expected_request = ResultPublicationRequest::new(
+        &accuracy,
+        observations.as_ref(),
+        &resource_plan,
+        &resource_usage,
+    )?;
     if expected_request != request {
         return Err(AnalysisBridgeError::Identity(
             "publication request does not converge from its source artifacts",
         ));
     }
-    let result = PublishedAnalysisResult::new(&request, &accuracy)?;
+    let result =
+        PublishedAnalysisResult::new(&request, &accuracy, &resource_plan, &resource_usage)?;
     Ok(vec![AnalysisKernelOutput {
         kind: AnalysisNumericalObjectKind::PublishedResult,
         logical_identity: result.identity().digest(),

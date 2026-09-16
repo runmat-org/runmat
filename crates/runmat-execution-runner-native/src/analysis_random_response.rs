@@ -1,17 +1,19 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::time::Instant;
 
 use runmat_analysis_execution::{
-    ImportedAccuracy, ImportedSemanticState, ImportedStructuralModalResult,
-    ImportedStructuralRandomResponseResult, StructuralRandomResponseStudyCoordinator,
-    StructuralRandomResponseStudyPreparation,
+    prepare_planned_resource_graph_usage, ImportedAccuracy, ImportedPublishedResult,
+    ImportedSemanticState, ImportedStructuralModalResult, ImportedStructuralRandomResponseResult,
+    PlannedResourceUsageGraph, PreparedStructuralResourceUsage,
+    StructuralRandomResponseStudyCoordinator, StructuralRandomResponseStudyPreparation,
 };
 
 use crate::{
     analysis_task_pool::{
-        configure_local_analysis, execute_analysis_task_batch, AnalysisTaskBatchPolicy,
-        AnalysisTaskDependency, AnalysisTaskPool, LocalAnalysisTaskPool, PreparedAnalysisTask,
-        RemoteAnalysisTaskPool,
+        configure_local_analysis, execute_analysis_task_batch, planned_resource_attempt,
+        AnalysisTaskBatchPolicy, AnalysisTaskDependency, AnalysisTaskPool, LocalAnalysisTaskPool,
+        PreparedAnalysisTask, RemoteAnalysisTaskPool,
     },
     NativeExecutionConfig, NativeExecutionError, NativeExecutionResult, NativeProgramSession,
     RemotePoolDriver, StructuralSequenceExecutionPolicy,
@@ -24,6 +26,8 @@ pub struct CompletedStructuralRandomResponseStudy {
     pub resolved_workload: runmat_analysis_fea::execution::StructuralRandomResponseWorkload,
     pub response: ImportedStructuralRandomResponseResult,
     pub accuracy: ImportedAccuracy,
+    pub resource_usage: PreparedStructuralResourceUsage,
+    pub publication: ImportedPublishedResult,
     pub statistics_state: ImportedSemanticState,
 }
 
@@ -57,6 +61,9 @@ async fn execute_with_pool(
     policy: StructuralSequenceExecutionPolicy,
 ) -> NativeExecutionResult<CompletedStructuralRandomResponseStudy> {
     policy.validate()?;
+    let publication_access = preparation.artifact_access.clone();
+    let chunk_bytes = preparation.chunk_bytes;
+    let inventory_limits = preparation.inventory_limits;
     let mut coordinator =
         StructuralRandomResponseStudyCoordinator::new(preparation).map_err(protocol)?;
 
@@ -100,6 +107,7 @@ async fn execute_with_pool(
         .complete_basis_state(pool, executed_basis.response, &basis)
         .map_err(protocol)?;
 
+    let response_started = Instant::now();
     let intervals = coordinator.prepare_intervals().map_err(protocol)?;
     let prepared = intervals
         .iter()
@@ -117,11 +125,15 @@ async fn execute_with_pool(
         .iter()
         .map(dependency)
         .collect::<Vec<_>>();
-    let responses = intervals
-        .iter()
-        .zip(executed_intervals)
-        .map(|(interval, executed)| (interval.host.workload.identity.digest(), executed.response))
-        .collect::<BTreeMap<_, _>>();
+    let mut resource_attempts = Vec::with_capacity(intervals.len() + 1);
+    let mut responses = BTreeMap::new();
+    for (interval, executed) in intervals.iter().zip(executed_intervals) {
+        resource_attempts.push(planned_resource_attempt(
+            &interval.resource_plan,
+            &executed,
+        )?);
+        responses.insert(interval.host.workload.identity.digest(), executed.response);
+    }
     coordinator
         .complete_intervals(pool, intervals, responses)
         .map_err(protocol)?;
@@ -142,9 +154,37 @@ async fn execute_with_pool(
     .try_into()
     .map_err(|_| protocol("random-response assembly returned an invalid task inventory"))?;
     let assembly_dependency = dependency(&executed_assembly);
+    resource_attempts.push(planned_resource_attempt(
+        &assembly.resource_plan,
+        &executed_assembly,
+    )?);
     coordinator
         .complete_assembly(pool, executed_assembly.response, &assembly)
         .map_err(protocol)?;
+    let graph = PlannedResourceUsageGraph::new(
+        resource_attempts,
+        u64::try_from(response_started.elapsed().as_millis()).unwrap_or(u64::MAX),
+    )
+    .map_err(protocol)?;
+    let resource_usage = prepare_planned_resource_graph_usage(
+        &assembly.resource_plan,
+        coordinator
+            .resolved_workload()
+            .ok_or_else(|| protocol("resolved random-response workload is absent"))?
+            .identity()
+            .digest(),
+        coordinator
+            .result()
+            .ok_or_else(|| protocol("completed random-response result is absent"))?
+            .identity
+            .digest(),
+        &graph,
+        &publication_access,
+        chunk_bytes,
+        inventory_limits,
+    )
+    .map_err(protocol)?;
+    pool.register_result_objects(&resource_usage.objects, &publication_access)?;
 
     let accuracy = coordinator.prepare_accuracy().map_err(protocol)?;
     let [executed_accuracy] = execute_analysis_task_batch(
@@ -166,6 +206,28 @@ async fn execute_with_pool(
         .complete_accuracy(pool, executed_accuracy.response, &accuracy)
         .map_err(protocol)?;
 
+    let publication = coordinator
+        .prepare_publication(resource_usage)
+        .map_err(protocol)?;
+    let [executed_publication] = execute_analysis_task_batch(
+        pool,
+        vec![PreparedAnalysisTask {
+            host: &publication.host,
+            program: &publication.program,
+            resource_plan: None,
+            fallback_resources: policy.resources.clone(),
+            dependencies: vec![accuracy_dependency],
+        }],
+        task_policy(&policy),
+    )
+    .await?
+    .try_into()
+    .map_err(|_| protocol("random-response publication returned an invalid task inventory"))?;
+    let publication_dependency = dependency(&executed_publication);
+    coordinator
+        .complete_publication(pool, executed_publication.response, &publication)
+        .map_err(protocol)?;
+
     let statistics = coordinator.prepare_statistics_state().map_err(protocol)?;
     let [executed_statistics] = execute_analysis_task_batch(
         pool,
@@ -174,7 +236,7 @@ async fn execute_with_pool(
             program: &statistics.program,
             resource_plan: None,
             fallback_resources: policy.resources.clone(),
-            dependencies: vec![accuracy_dependency],
+            dependencies: vec![publication_dependency],
         }],
         task_policy(&policy),
     )
@@ -206,6 +268,14 @@ async fn execute_with_pool(
             .accuracy()
             .cloned()
             .ok_or_else(|| protocol("random-response accuracy is absent"))?,
+        resource_usage: coordinator
+            .resource_usage()
+            .cloned()
+            .ok_or_else(|| protocol("random-response resource usage is absent"))?,
+        publication: coordinator
+            .publication()
+            .cloned()
+            .ok_or_else(|| protocol("random-response publication is absent"))?,
         statistics_state: coordinator
             .statistics_state()
             .cloned()

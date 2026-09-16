@@ -202,6 +202,8 @@ pub struct StructuralStudyModalResponseSpectrumNumericalResult {
     pub response_numerical_receipt:
         runmat_analysis_fea::execution::StructuralModalResponseSpectrumNumericalReceipt,
     pub response_accuracy: runmat_analysis_fea::results::accuracy::AccuracyArtifact,
+    pub response_resource_usage: runmat_analysis_fea::planning::resource::ResourceUsageEvidence,
+    pub response_publication: runmat_analysis_fea::results::publication::PublishedAnalysisResult,
     pub field_recovery: runmat_analysis_fea::solve::dynamics::ResponseSpectrumFieldRecovery,
     pub envelope_state: runmat_analysis_fea::execution::CanonicalSemanticState,
 }
@@ -220,6 +222,8 @@ pub struct StructuralStudyRandomResponseNumericalResult {
     pub response_numerical_receipt:
         runmat_analysis_fea::execution::StructuralRandomResponseNumericalReceipt,
     pub response_accuracy: runmat_analysis_fea::results::accuracy::AccuracyArtifact,
+    pub response_resource_usage: runmat_analysis_fea::planning::resource::ResourceUsageEvidence,
+    pub response_publication: runmat_analysis_fea::results::publication::PublishedAnalysisResult,
     pub statistics_state: runmat_analysis_fea::execution::CanonicalSemanticState,
 }
 
