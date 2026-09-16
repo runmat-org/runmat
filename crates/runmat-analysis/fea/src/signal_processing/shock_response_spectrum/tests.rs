@@ -65,10 +65,9 @@ fn request(response: SpectrumResponse, envelope: SpectrumEnvelope) -> ShockRespo
         directional_combination: DirectionalCombination::Srss,
         truncation: ModalTruncationPolicy {
             minimum_cumulative_mass_ratio: 1.0,
-            include_residual_mode: false,
-            include_rigid_response: false,
-            include_missing_mass: false,
+            correction: runmat_analysis_core::ModalTruncationCorrection::None,
         },
+        rigid_response: runmat_analysis_core::RigidResponsePolicy::Disabled,
         method: ShockResponseSpectrumMethod::ExactPiecewiseLinear,
     }
 }

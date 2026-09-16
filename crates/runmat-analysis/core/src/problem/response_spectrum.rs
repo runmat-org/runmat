@@ -20,6 +20,7 @@ pub struct ResponseSpectrum {
     pub modal_combination: ModalCombination,
     pub directional_combination: DirectionalCombination,
     pub truncation: ModalTruncationPolicy,
+    pub rigid_response: RigidResponsePolicy,
     pub construction: SpectrumConstruction,
     pub evidence: SpectrumEvidence,
     pub provenance_digest: String,
@@ -108,6 +109,63 @@ impl ResponseSpectrum {
             || self.provenance_digest.trim().is_empty()
         {
             return Err("spectrum policy, evidence, and provenance must be valid".to_string());
+        }
+        match self.truncation.correction {
+            ModalTruncationCorrection::None | ModalTruncationCorrection::ResidualMode => {}
+            ModalTruncationCorrection::MissingMass {
+                zero_period_acceleration,
+            } => {
+                if !zero_period_acceleration.is_finite()
+                    || zero_period_acceleration < 0.0
+                    || !matches!(
+                        self.response,
+                        SpectrumResponse::AbsoluteAcceleration
+                            | SpectrumResponse::PseudoAcceleration
+                    )
+                {
+                    return Err(
+                        "missing-mass correction requires a finite nonnegative ZPA and an acceleration spectrum"
+                            .to_string(),
+                    );
+                }
+            }
+        }
+        match self.rigid_response {
+            RigidResponsePolicy::Disabled => {}
+            RigidResponsePolicy::Gupta {
+                periodic_frequency_hz,
+                rigid_frequency_hz,
+            } => {
+                if !periodic_frequency_hz.is_finite()
+                    || !rigid_frequency_hz.is_finite()
+                    || periodic_frequency_hz <= 0.0
+                    || rigid_frequency_hz <= periodic_frequency_hz
+                {
+                    return Err(
+                        "Gupta rigid response requires positive ordered periodic and rigid frequencies"
+                            .to_string(),
+                    );
+                }
+            }
+            RigidResponsePolicy::LindleyYow {
+                zero_period_acceleration,
+            } if !zero_period_acceleration.is_finite() || zero_period_acceleration < 0.0 => {
+                return Err(
+                    "Lindley-Yow rigid response requires a finite nonnegative ZPA".to_string(),
+                );
+            }
+            RigidResponsePolicy::LindleyYow { .. } => {}
+        }
+        if self.rigid_response != RigidResponsePolicy::Disabled
+            && (!matches!(
+                self.response,
+                SpectrumResponse::AbsoluteAcceleration | SpectrumResponse::PseudoAcceleration
+            ) || self.modal_combination != ModalCombination::CompleteQuadraticCombination)
+        {
+            return Err(
+                "rigid-response separation requires an acceleration spectrum and CQC modal combination"
+                    .to_string(),
+            );
         }
         Ok(())
     }
@@ -206,9 +264,28 @@ pub enum ShockResponseSpectrumMethod {
 #[serde(deny_unknown_fields)]
 pub struct ModalTruncationPolicy {
     pub minimum_cumulative_mass_ratio: f64,
-    pub include_residual_mode: bool,
-    pub include_rigid_response: bool,
-    pub include_missing_mass: bool,
+    pub correction: ModalTruncationCorrection,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModalTruncationCorrection {
+    None,
+    ResidualMode,
+    MissingMass { zero_period_acceleration: f64 },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RigidResponsePolicy {
+    Disabled,
+    Gupta {
+        periodic_frequency_hz: f64,
+        rigid_frequency_hz: f64,
+    },
+    LindleyYow {
+        zero_period_acceleration: f64,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -216,4 +293,62 @@ pub struct ModalTruncationPolicy {
 pub struct SpectrumEvidence {
     pub sampling_adequacy_ratio: f64,
     pub max_interpolation_error: Option<f64>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::CoordinateFrame;
+
+    fn spectrum() -> ResponseSpectrum {
+        ResponseSpectrum {
+            spectrum_id: ResponseSpectrumId("design".into()),
+            abscissa: SpectrumAbscissa::FrequencyHertz(vec![1.0, 10.0]),
+            ordinates: vec![2.0, 1.0],
+            damping: SpectrumDamping::Ratio(0.05),
+            response: SpectrumResponse::AbsoluteAcceleration,
+            envelope: SpectrumEnvelope::Maximax,
+            interpolation: SpectrumInterpolation::LinearFrequency,
+            extrapolation: SpectrumExtrapolation::Reject,
+            direction: SpectrumDirection {
+                frame: CoordinateFrame::Global,
+                vector: [1.0, 0.0, 0.0],
+            },
+            modal_combination: ModalCombination::CompleteQuadraticCombination,
+            directional_combination: DirectionalCombination::Srss,
+            truncation: ModalTruncationPolicy {
+                minimum_cumulative_mass_ratio: 0.9,
+                correction: ModalTruncationCorrection::MissingMass {
+                    zero_period_acceleration: 1.0,
+                },
+            },
+            rigid_response: RigidResponsePolicy::LindleyYow {
+                zero_period_acceleration: 1.0,
+            },
+            construction: SpectrumConstruction::AuthoredDesign,
+            evidence: SpectrumEvidence {
+                sampling_adequacy_ratio: 1.0,
+                max_interpolation_error: None,
+            },
+            provenance_digest: "sha256:design".into(),
+        }
+    }
+
+    #[test]
+    fn correction_policies_are_typed_and_physically_compatible() {
+        let mut value = spectrum();
+        value.validate_intrinsic().unwrap();
+
+        value.response = SpectrumResponse::RelativeDisplacement;
+        assert!(value.validate_intrinsic().is_err());
+        value.response = SpectrumResponse::AbsoluteAcceleration;
+        value.modal_combination = ModalCombination::Srss;
+        assert!(value.validate_intrinsic().is_err());
+        value.modal_combination = ModalCombination::CompleteQuadraticCombination;
+        value.rigid_response = RigidResponsePolicy::Gupta {
+            periodic_frequency_hz: 10.0,
+            rigid_frequency_hz: 5.0,
+        };
+        assert!(value.validate_intrinsic().is_err());
+    }
 }

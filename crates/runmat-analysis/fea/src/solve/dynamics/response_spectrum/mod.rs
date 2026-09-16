@@ -1,5 +1,7 @@
 mod combine;
+mod correction;
 mod interpolate;
+mod validation;
 
 #[cfg(test)]
 mod tests;
@@ -7,17 +9,23 @@ mod tests;
 use std::collections::BTreeSet;
 
 use runmat_analysis_core::{
-    CoordinateFrame, DirectionalCombination, ModalCombination, ResponseSpectrum,
-    ResponseSpectrumId, SpectrumDamping, SpectrumEnvelope, SpectrumResponse,
+    CoordinateFrame, DirectionalCombination, ModalCombination, ModalTruncationCorrection,
+    ResponseSpectrum, ResponseSpectrumId, RigidResponsePolicy, SpectrumDamping, SpectrumEnvelope,
+    SpectrumResponse,
 };
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
 use serde::{Deserialize, Serialize};
 
+use crate::assembly::AssemblySummary;
 use crate::{contracts::FeaRunError, ModalBasisArtifact, ModalBasisIdentity};
 
-use combine::{combine_directional_responses, combine_modal_responses};
+use combine::{
+    combine_directional_responses, combine_modal_responses, combine_periodic_and_rigid_responses,
+};
+use correction::{correction_response, rigid_coefficients};
 use interpolate::interpolate_spectrum;
+use validation::{contribution_is_valid, vectors_close};
 
 const RESULT_PREFIX: &[u8] = b"runmat-modal-response-spectrum-result\0";
 const RESULT_LIMITS: CanonicalLimits =
@@ -54,9 +62,8 @@ pub struct ModalResponseSpectrumTruncationEvidence {
     pub achieved_cumulative_mass_ratio: f64,
     pub directional_total_free_mass: f64,
     pub directional_captured_mass: f64,
-    pub residual_mode_included: bool,
-    pub rigid_response_included: bool,
-    pub missing_mass_included: bool,
+    pub correction: ModalTruncationCorrection,
+    pub correction_response: Vec<f64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -67,8 +74,12 @@ pub struct ModalResponseSpectrumContribution {
     pub direction: [f64; 3],
     pub damping_ratio: f64,
     pub modal_combination: ModalCombination,
+    pub rigid_response_policy: RigidResponsePolicy,
+    pub rigid_coefficients: Vec<f64>,
     pub modes: Vec<ModalResponseSpectrumModeContribution>,
     pub truncation: ModalResponseSpectrumTruncationEvidence,
+    pub periodic_response: Vec<f64>,
+    pub rigid_response: Vec<f64>,
     pub combined_response: Vec<f64>,
 }
 
@@ -184,6 +195,22 @@ impl ModalResponseSpectrumResult {
         Ok(())
     }
 
+    pub fn validate_for_operator(
+        &self,
+        summary: &AssemblySummary,
+        basis: &ModalBasisArtifact,
+        spectra: &[ResponseSpectrum],
+    ) -> Result<(), FeaRunError> {
+        self.validate()?;
+        if solve_modal_response_spectrum_with_operator(summary, basis, spectra)? != *self {
+            return Err(FeaRunError::Solve(
+                "modal response-spectrum result differs from its operator, basis, or spectrum inputs"
+                    .into(),
+            ));
+        }
+        Ok(())
+    }
+
     fn validate(&self) -> Result<(), FeaRunError> {
         if self.contributions.is_empty()
             || self.combined_response.is_empty()
@@ -249,6 +276,23 @@ pub fn solve_modal_response_spectrum(
     basis: &ModalBasisArtifact,
     spectra: &[ResponseSpectrum],
 ) -> Result<ModalResponseSpectrumResult, FeaRunError> {
+    solve_modal_response_spectrum_internal(None, basis, spectra)
+}
+
+pub fn solve_modal_response_spectrum_with_operator(
+    summary: &AssemblySummary,
+    basis: &ModalBasisArtifact,
+    spectra: &[ResponseSpectrum],
+) -> Result<ModalResponseSpectrumResult, FeaRunError> {
+    basis.validate_for(summary)?;
+    solve_modal_response_spectrum_internal(Some(summary), basis, spectra)
+}
+
+fn solve_modal_response_spectrum_internal(
+    summary: Option<&AssemblySummary>,
+    basis: &ModalBasisArtifact,
+    spectra: &[ResponseSpectrum],
+) -> Result<ModalResponseSpectrumResult, FeaRunError> {
     basis.validate()?;
     if spectra.is_empty() {
         return Err(FeaRunError::Solve(
@@ -273,7 +317,7 @@ pub fn solve_modal_response_spectrum(
                 "modal response repeats a response-spectrum identity".into(),
             ));
         }
-        contributions.push(solve_spectrum_direction(basis, spectrum)?);
+        contributions.push(solve_spectrum_direction(summary, basis, spectrum)?);
     }
     let combined_response = combine_directional_responses(
         &contributions
@@ -296,6 +340,7 @@ pub fn solve_modal_response_spectrum(
 }
 
 fn solve_spectrum_direction(
+    summary: Option<&AssemblySummary>,
     basis: &ModalBasisArtifact,
     spectrum: &ResponseSpectrum,
 ) -> Result<ModalResponseSpectrumContribution, FeaRunError> {
@@ -304,13 +349,19 @@ fn solve_spectrum_direction(
             "modal response currently requires spectrum directions in the global frame".into(),
         ));
     }
-    if spectrum.truncation.include_residual_mode
-        || spectrum.truncation.include_rigid_response
-        || spectrum.truncation.include_missing_mass
+    if spectrum.truncation.correction == ModalTruncationCorrection::ResidualMode {
+        return Err(FeaRunError::Solve(
+            "residual-mode correction must be generated and orthogonalized during modal extraction"
+                .into(),
+        ));
+    }
+    if matches!(
+        spectrum.truncation.correction,
+        ModalTruncationCorrection::MissingMass { .. }
+    ) && summary.is_none()
     {
         return Err(FeaRunError::Solve(
-            "residual-mode, rigid-response, and missing-mass corrections require the physical operator and are not admitted by the basis-only solver"
-                .into(),
+            "missing-mass correction requires the exact physical operator".into(),
         ));
     }
     let direction = normalized_direction(spectrum.direction.vector)?;
@@ -379,18 +430,68 @@ fn solve_spectrum_direction(
         .iter()
         .map(|mode| mode.frequency_hz)
         .collect::<Vec<_>>();
-    let combined_response = combine_modal_responses(
-        &modal_vectors,
-        &frequencies,
-        damping_ratio,
-        spectrum.modal_combination,
+    if spectrum.modal_combination == ModalCombination::Srss
+        && frequencies.windows(2).any(|pair| {
+            (pair[1] - pair[0]).abs() / pair[0].abs().max(pair[1].abs()).max(1.0e-12) <= 0.1
+        })
+    {
+        return Err(FeaRunError::Solve(
+            "SRSS requires every selected mode to be separated by more than ten percent".into(),
+        ));
+    }
+    let rigid_coefficients = rigid_coefficients(spectrum, &modes)?;
+    let (periodic_response, mut rigid_response) =
+        if spectrum.rigid_response == RigidResponsePolicy::Disabled {
+            (
+                combine_modal_responses(
+                    &modal_vectors,
+                    &frequencies,
+                    damping_ratio,
+                    spectrum.modal_combination,
+                )?,
+                vec![0.0; modal_vectors[0].len()],
+            )
+        } else {
+            combine_periodic_and_rigid_responses(
+                &modal_vectors,
+                &frequencies,
+                &rigid_coefficients,
+                damping_ratio,
+                spectrum.modal_combination,
+            )?
+        };
+    let correction_response = correction_response(
+        summary,
+        basis,
+        spectrum,
+        direction,
+        &modes,
+        modal_vectors[0].len(),
     )?;
+    let combined_response = if spectrum.rigid_response == RigidResponsePolicy::Disabled {
+        periodic_response
+            .iter()
+            .zip(&correction_response)
+            .map(|(periodic, correction)| (periodic * periodic + correction * correction).sqrt())
+            .collect()
+    } else {
+        for (rigid, correction) in rigid_response.iter_mut().zip(&correction_response) {
+            *rigid += correction;
+        }
+        periodic_response
+            .iter()
+            .zip(&rigid_response)
+            .map(|(periodic, rigid)| (periodic * periodic + rigid * rigid).sqrt())
+            .collect()
+    };
     Ok(ModalResponseSpectrumContribution {
         spectrum_id: spectrum.spectrum_id.clone(),
         spectrum_provenance_digest: spectrum.provenance_digest.clone(),
         direction,
         damping_ratio,
         modal_combination: spectrum.modal_combination,
+        rigid_response_policy: spectrum.rigid_response,
+        rigid_coefficients,
         truncation: ModalResponseSpectrumTruncationEvidence {
             selected_mode_count: modes.len(),
             available_mode_count: basis.truncation().available_mode_count(),
@@ -398,11 +499,12 @@ fn solve_spectrum_direction(
             achieved_cumulative_mass_ratio: achieved,
             directional_total_free_mass: total_free_mass,
             directional_captured_mass: captured_mass,
-            residual_mode_included: false,
-            rigid_response_included: false,
-            missing_mass_included: false,
+            correction: spectrum.truncation.correction,
+            correction_response,
         },
         modes,
+        periodic_response,
+        rigid_response,
         combined_response,
     })
 }
@@ -428,85 +530,4 @@ fn damping_ratio(damping: SpectrumDamping) -> Result<f64, FeaRunError> {
         ));
     }
     Ok(ratio)
-}
-
-fn contribution_is_valid(
-    contribution: &ModalResponseSpectrumContribution,
-    response_length: usize,
-) -> bool {
-    let truncation = &contribution.truncation;
-    let summed_mass = contribution
-        .modes
-        .iter()
-        .map(|mode| mode.directional_effective_mass)
-        .sum::<f64>();
-    let expected_ratio = summed_mass / truncation.directional_total_free_mass;
-    let direction_norm = contribution
-        .direction
-        .iter()
-        .map(|value| value * value)
-        .sum::<f64>()
-        .sqrt();
-    !contribution.spectrum_id.0.trim().is_empty()
-        && !contribution.spectrum_provenance_digest.trim().is_empty()
-        && contribution.direction.iter().all(|value| value.is_finite())
-        && scalar_close(direction_norm, 1.0)
-        && contribution.damping_ratio.is_finite()
-        && (0.0..1.0).contains(&contribution.damping_ratio)
-        && !contribution.modes.is_empty()
-        && contribution.combined_response.len() == response_length
-        && contribution
-            .combined_response
-            .iter()
-            .all(|value| value.is_finite() && *value >= 0.0)
-        && contribution.modes.iter().enumerate().all(|(index, mode)| {
-            mode.mode_index == index + 1
-                && mode.frequency_hz.is_finite()
-                && mode.frequency_hz >= 0.0
-                && mode.interpolated_ordinate.is_finite()
-                && mode.interpolated_ordinate >= 0.0
-                && mode.directional_participation_factor.is_finite()
-                && mode.directional_effective_mass.is_finite()
-                && mode.directional_effective_mass >= 0.0
-                && mode.cumulative_mass_ratio.is_finite()
-                && mode.cumulative_mass_ratio >= 0.0
-                && mode.generalized_peak.is_finite()
-        })
-        && contribution.modes.windows(2).all(|pair| {
-            pair[0].frequency_hz <= pair[1].frequency_hz
-                && pair[0].cumulative_mass_ratio <= pair[1].cumulative_mass_ratio
-        })
-        && truncation.selected_mode_count == contribution.modes.len()
-        && truncation.available_mode_count >= contribution.modes.len()
-        && truncation.required_cumulative_mass_ratio.is_finite()
-        && (0.0..=1.0).contains(&truncation.required_cumulative_mass_ratio)
-        && truncation.achieved_cumulative_mass_ratio.is_finite()
-        && truncation.achieved_cumulative_mass_ratio >= 0.0
-        && contribution
-            .truncation
-            .directional_total_free_mass
-            .is_finite()
-        && contribution.truncation.directional_total_free_mass > 0.0
-        && contribution
-            .truncation
-            .directional_captured_mass
-            .is_finite()
-        && contribution.truncation.directional_captured_mass >= 0.0
-        && !truncation.residual_mode_included
-        && !truncation.rigid_response_included
-        && !truncation.missing_mass_included
-        && scalar_close(summed_mass, truncation.directional_captured_mass)
-        && scalar_close(expected_ratio, truncation.achieved_cumulative_mass_ratio)
-}
-
-fn vectors_close(left: &[f64], right: &[f64]) -> bool {
-    left.len() == right.len()
-        && left
-            .iter()
-            .zip(right)
-            .all(|(left, right)| scalar_close(*left, *right))
-}
-
-fn scalar_close(left: f64, right: f64) -> bool {
-    (left - right).abs() <= 128.0 * f64::EPSILON * left.abs().max(right.abs()).max(1.0)
 }

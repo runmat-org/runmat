@@ -19,12 +19,13 @@ const FIELDS: &[&str] = &[
     "modal_combination",
     "directional_combination",
     "truncation",
+    "rigid_response",
     "construction",
     "evidence",
     "provenance_digest",
 ];
 
-const INPUTS: [BuiltinParamDescriptor; 15] = [
+const INPUTS: [BuiltinParamDescriptor; 16] = [
     required(
         "id",
         BuiltinParamType::StringScalar,
@@ -82,6 +83,11 @@ const INPUTS: [BuiltinParamDescriptor; 15] = [
         "Typed fea.ModalTruncation.",
     ),
     required(
+        "rigidResponse",
+        BuiltinParamType::Any,
+        "Typed fea.RigidResponse policy.",
+    ),
+    required(
         "construction",
         BuiltinParamType::Any,
         "Typed fea.SpectrumConstruction.",
@@ -98,7 +104,7 @@ const INPUTS: [BuiltinParamDescriptor; 15] = [
     ),
 ];
 const SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "spectrum = fea.ResponseSpectrum.new(id, axis, ordinates, damping, response, envelope, interpolation, extrapolation, direction, modalCombination, directionalCombination, truncation, construction, evidence, provenanceDigest)",
+    label: "spectrum = fea.ResponseSpectrum.new(id, axis, ordinates, damping, response, envelope, interpolation, extrapolation, direction, modalCombination, directionalCombination, truncation, rigidResponse, construction, evidence, provenanceDigest)",
     inputs: &INPUTS,
     outputs: &OUT_ANY,
 }];
@@ -151,12 +157,12 @@ const fn required(
     builtin_path = "crate::builtins::fea::response_spectra"
 )]
 pub async fn response_spectrum(args: Vec<Value>) -> BuiltinResult<Value> {
-    let [id, axis, ordinates, damping, response, envelope, interpolation, extrapolation, direction, modal_combination, directional_combination, truncation, construction, evidence, provenance_digest] =
-        <[Value; 15]>::try_from(args).map_err(|args| {
+    let [id, axis, ordinates, damping, response, envelope, interpolation, extrapolation, direction, modal_combination, directional_combination, truncation, rigid_response, construction, evidence, provenance_digest] =
+        <[Value; 16]>::try_from(args).map_err(|args| {
             builtin_error(
                 BUILTIN,
                 &ERROR_INPUT,
-                format!("{BUILTIN} requires 15 arguments; got {}", args.len()),
+                format!("{BUILTIN} requires 16 arguments; got {}", args.len()),
             )
         })?;
     let id = scalar_string(&id, BUILTIN, &ERROR_INPUT)?;
@@ -190,6 +196,10 @@ pub async fn response_spectrum(args: Vec<Value>) -> BuiltinResult<Value> {
             &directional_combination,
         )?,
         truncation: super::response_spectrum_policies::truncation(BUILTIN, &truncation)?,
+        rigid_response: super::response_spectrum_policies::rigid_response(
+            BUILTIN,
+            &rigid_response,
+        )?,
         construction: super::response_spectrum_policies::construction(BUILTIN, &construction)?,
         evidence: super::response_spectrum_policies::evidence(BUILTIN, &evidence)?,
         provenance_digest,
@@ -314,13 +324,21 @@ mod tests {
         let modal = super::super::response_spectrum_policies::choices::modal_cqc().await?;
         let directional =
             super::super::response_spectrum_policies::choices::directional_srss().await?;
+        let correction =
+            super::super::response_spectrum_policies::parameters::truncation_missing_mass(
+                9.0.into(),
+            )
+            .await?;
         let truncation = super::super::response_spectrum_policies::parameters::modal_truncation(
             0.9.into(),
-            true,
-            true,
-            true,
+            correction,
         )
         .await?;
+        let rigid_response =
+            super::super::response_spectrum_policies::parameters::rigid_response_lindley_yow(
+                9.0.into(),
+            )
+            .await?;
         let construction =
             super::super::response_spectrum_policies::parameters::authored_design().await?;
         let evidence = super::super::response_spectrum_policies::parameters::spectrum_evidence(
@@ -341,6 +359,7 @@ mod tests {
             modal,
             directional,
             truncation,
+            rigid_response,
             construction,
             evidence,
             Value::String("sha256:launch-spectrum".into()),

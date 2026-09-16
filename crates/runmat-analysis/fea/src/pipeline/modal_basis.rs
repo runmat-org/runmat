@@ -497,6 +497,20 @@ fn directional_influence_vectors(summary: &AssemblySummary) -> [Vec<f64>; 3] {
     })
 }
 
+pub(crate) fn directional_influence_vector(
+    summary: &AssemblySummary,
+    direction: [f64; 3],
+) -> Vec<f64> {
+    let axes = directional_influence_vectors(summary);
+    let mut vector = vec![0.0; summary.dof_count];
+    for (component, axis) in direction.into_iter().zip(axes) {
+        for (value, axis_value) in vector.iter_mut().zip(axis) {
+            *value += component * axis_value;
+        }
+    }
+    vector
+}
+
 fn relative_frequency_separation(frequencies: &[f64]) -> Vec<f64> {
     if frequencies.len() < 2 {
         return vec![1.0; frequencies.len()];

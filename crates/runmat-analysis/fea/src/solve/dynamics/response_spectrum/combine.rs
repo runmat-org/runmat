@@ -74,6 +74,42 @@ pub(super) fn combine_modal_responses(
     Ok(combined)
 }
 
+pub(super) fn combine_periodic_and_rigid_responses(
+    modal_vectors: &[Vec<f64>],
+    frequencies_hz: &[f64],
+    rigid_coefficients: &[f64],
+    damping_ratio: f64,
+    policy: ModalCombination,
+) -> Result<(Vec<f64>, Vec<f64>), FeaRunError> {
+    if modal_vectors.len() != rigid_coefficients.len()
+        || rigid_coefficients
+            .iter()
+            .any(|coefficient| !coefficient.is_finite() || !(0.0..=1.0).contains(coefficient))
+    {
+        return Err(FeaRunError::Solve(
+            "rigid-response coefficients do not match the modal inventory".into(),
+        ));
+    }
+    let periodic_vectors = modal_vectors
+        .iter()
+        .zip(rigid_coefficients)
+        .map(|(vector, coefficient)| {
+            let scale = (1.0 - coefficient * coefficient).max(0.0).sqrt();
+            vector.iter().map(|value| scale * value).collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    let periodic =
+        combine_modal_responses(&periodic_vectors, frequencies_hz, damping_ratio, policy)?;
+    let width = validate_vectors(modal_vectors)?;
+    let mut rigid = vec![0.0; width];
+    for (vector, coefficient) in modal_vectors.iter().zip(rigid_coefficients) {
+        for (rigid, value) in rigid.iter_mut().zip(vector) {
+            *rigid += coefficient * value;
+        }
+    }
+    Ok((periodic, rigid))
+}
+
 pub(super) fn combine_directional_responses(
     responses: &[&[f64]],
     policy: DirectionalCombination,

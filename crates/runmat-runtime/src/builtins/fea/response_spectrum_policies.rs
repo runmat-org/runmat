@@ -7,9 +7,10 @@ use crate::builtins::fea::values::{
     finite_numeric_scalar, finite_numeric_vector, finite_numeric_vector3,
 };
 use runmat_analysis_core::{
-    DirectionalCombination, ModalCombination, ModalTruncationPolicy, ShockResponseSpectrumMethod,
-    SpectrumAbscissa, SpectrumConstruction, SpectrumDamping, SpectrumDirection, SpectrumEnvelope,
-    SpectrumEvidence, SpectrumExtrapolation, SpectrumInterpolation, SpectrumResponse,
+    DirectionalCombination, ModalCombination, ModalTruncationCorrection, ModalTruncationPolicy,
+    RigidResponsePolicy, ShockResponseSpectrumMethod, SpectrumAbscissa, SpectrumConstruction,
+    SpectrumDamping, SpectrumDirection, SpectrumEnvelope, SpectrumEvidence, SpectrumExtrapolation,
+    SpectrumInterpolation, SpectrumResponse,
 };
 
 pub(super) const AXIS_CLASS: &str = "fea.SpectrumAxis";
@@ -22,6 +23,8 @@ pub(super) const EXTRAPOLATION_CLASS: &str = "fea.SpectrumExtrapolation";
 pub(super) const MODAL_COMBINATION_CLASS: &str = "fea.ModalCombination";
 pub(super) const DIRECTIONAL_COMBINATION_CLASS: &str = "fea.DirectionalCombination";
 pub(super) const TRUNCATION_CLASS: &str = "fea.ModalTruncation";
+pub(super) const TRUNCATION_CORRECTION_CLASS: &str = "fea.ModalTruncationCorrection";
+pub(super) const RIGID_RESPONSE_CLASS: &str = "fea.RigidResponse";
 pub(super) const CONSTRUCTION_CLASS: &str = "fea.SpectrumConstruction";
 pub(super) const EVIDENCE_CLASS: &str = "fea.SpectrumEvidence";
 
@@ -116,26 +119,16 @@ const PERCENTAGE_INPUTS: [BuiltinParamDescriptor; 2] = [
         "Secondary fraction.",
     ),
 ];
-const TRUNCATION_INPUTS: [BuiltinParamDescriptor; 4] = [
+const TRUNCATION_INPUTS: [BuiltinParamDescriptor; 2] = [
     required(
         "minimumMassRatio",
         BuiltinParamType::NumericScalar,
         "Required cumulative modal-mass fraction.",
     ),
     required(
-        "includeResidualMode",
-        BuiltinParamType::LogicalArray,
-        "Include residual-mode correction.",
-    ),
-    required(
-        "includeRigidResponse",
-        BuiltinParamType::LogicalArray,
-        "Include rigid response.",
-    ),
-    required(
-        "includeMissingMass",
-        BuiltinParamType::LogicalArray,
-        "Include missing-mass correction.",
+        "correction",
+        BuiltinParamType::Any,
+        "Typed fea.ModalTruncationCorrection.",
     ),
 ];
 const CONSTRUCTION_SIGNAL_INPUTS: [BuiltinParamDescriptor; 1] = [required(
@@ -243,6 +236,12 @@ numeric_capabilities!(
     ["minimumMassRatio"]
 );
 numeric_capabilities!(
+    GUPTA_NUMERIC_INPUTS,
+    GUPTA_NUMERIC_CAPABILITIES,
+    "typed Gupta rigid-response policy",
+    ["periodicFrequencyHertz", "rigidFrequencyHertz"]
+);
+numeric_capabilities!(
     EVIDENCE_NUMERIC_INPUTS,
     EVIDENCE_NUMERIC_CAPABILITIES,
     "typed response-spectrum evidence",
@@ -298,6 +297,9 @@ pub(super) fn directional_combination(
 pub(super) fn truncation(b: &'static str, v: &Value) -> BuiltinResult<ModalTruncationPolicy> {
     typed_value_from(b, v, TRUNCATION_CLASS)
 }
+pub(super) fn rigid_response(b: &'static str, v: &Value) -> BuiltinResult<RigidResponsePolicy> {
+    typed_value_from(b, v, RIGID_RESPONSE_CLASS)
+}
 pub(super) fn construction(b: &'static str, v: &Value) -> BuiltinResult<SpectrumConstruction> {
     typed_value_from(b, v, CONSTRUCTION_CLASS)
 }
@@ -310,7 +312,7 @@ type Schema = (
     &'static str,
     &'static [(&'static str, &'static str)],
 );
-fn schemas() -> [Schema; 12] {
+fn schemas() -> [Schema; 14] {
     [
         (
             AXIS_CLASS,
@@ -412,6 +414,24 @@ fn schemas() -> [Schema; 12] {
             TRUNCATION_CLASS,
             "runmat.fea.modal-truncation",
             &[("new", "fea.ModalTruncation.new")],
+        ),
+        (
+            TRUNCATION_CORRECTION_CLASS,
+            "runmat.fea.modal-truncation-correction",
+            &[
+                ("none", "fea.ModalTruncationCorrection.none"),
+                ("residualMode", "fea.ModalTruncationCorrection.residualMode"),
+                ("missingMass", "fea.ModalTruncationCorrection.missingMass"),
+            ],
+        ),
+        (
+            RIGID_RESPONSE_CLASS,
+            "runmat.fea.rigid-response",
+            &[
+                ("disabled", "fea.RigidResponse.disabled"),
+                ("gupta", "fea.RigidResponse.gupta"),
+                ("lindleyYow", "fea.RigidResponse.lindleyYow"),
+            ],
         ),
         (
             CONSTRUCTION_CLASS,

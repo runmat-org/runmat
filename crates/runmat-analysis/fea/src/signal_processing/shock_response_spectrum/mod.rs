@@ -43,6 +43,7 @@ pub struct ShockResponseSpectrumRequest {
     pub modal_combination: ModalCombination,
     pub directional_combination: DirectionalCombination,
     pub truncation: ModalTruncationPolicy,
+    pub rigid_response: runmat_analysis_core::RigidResponsePolicy,
     pub method: ShockResponseSpectrumMethod,
 }
 
@@ -104,6 +105,7 @@ pub fn construct_shock_response_spectrum(
         modal_combination: request.modal_combination,
         directional_combination: request.directional_combination,
         truncation: request.truncation,
+        rigid_response: request.rigid_response,
         construction: SpectrumConstruction::DerivedFromAccelerationHistory {
             source_signal_id: source.signal_id.clone(),
             method: request.method,

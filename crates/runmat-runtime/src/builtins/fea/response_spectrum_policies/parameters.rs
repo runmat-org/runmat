@@ -203,7 +203,11 @@ pub async fn directional_percentage(primary: Value, secondary: Value) -> Builtin
     )
 }
 
-const TRUNCATION_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor { label: "policy = fea.ModalTruncation.new(minimumMassRatio, includeResidualMode, includeRigidResponse, includeMissingMass)", inputs: &TRUNCATION_INPUTS, outputs: &OUT_ANY }];
+const TRUNCATION_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "policy = fea.ModalTruncation.new(minimumMassRatio, correction)",
+    inputs: &TRUNCATION_INPUTS,
+    outputs: &OUT_ANY,
+}];
 pub(super) const TRUNCATION_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &TRUNCATION_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
@@ -223,9 +227,7 @@ pub(super) const TRUNCATION_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 )]
 pub async fn modal_truncation(
     minimum_mass_ratio: Value,
-    include_residual_mode: bool,
-    include_rigid_response: bool,
-    include_missing_mass: bool,
+    correction: Value,
 ) -> BuiltinResult<Value> {
     let ratio = finite_numeric_scalar(
         "fea.ModalTruncation.new",
@@ -244,9 +246,109 @@ pub async fn modal_truncation(
         TRUNCATION_CLASS,
         ModalTruncationPolicy {
             minimum_cumulative_mass_ratio: ratio,
-            include_residual_mode,
-            include_rigid_response,
-            include_missing_mass,
+            correction: typed_value_from(
+                "fea.ModalTruncation.new",
+                &correction,
+                TRUNCATION_CORRECTION_CLASS,
+            )?,
+        },
+    )
+}
+
+unary_policy!(
+    truncation_missing_mass,
+    CORRECTION_MISSING_MASS_DESCRIPTOR,
+    CORRECTION_MISSING_MASS_SIGNATURES,
+    "fea.ModalTruncationCorrection.missingMass",
+    "correction = fea.ModalTruncationCorrection.missingMass(zeroPeriodAcceleration)",
+    "Request missing-mass correction with an explicit zero-period acceleration.",
+    TRUNCATION_CORRECTION_CLASS,
+    |value| if value >= 0.0 {
+        Ok(ModalTruncationCorrection::MissingMass {
+            zero_period_acceleration: value,
+        })
+    } else {
+        Err(builtin_error(
+            "fea.ModalTruncationCorrection.missingMass",
+            &ERROR_INPUT,
+            "zero-period acceleration must be nonnegative",
+        ))
+    }
+);
+
+unary_policy!(
+    rigid_response_lindley_yow,
+    RIGID_LINDLEY_DESCRIPTOR,
+    RIGID_LINDLEY_SIGNATURES,
+    "fea.RigidResponse.lindleyYow",
+    "policy = fea.RigidResponse.lindleyYow(zeroPeriodAcceleration)",
+    "Use Lindley-Yow periodic/rigid separation with an explicit ZPA.",
+    RIGID_RESPONSE_CLASS,
+    |value| if value >= 0.0 {
+        Ok(RigidResponsePolicy::LindleyYow {
+            zero_period_acceleration: value,
+        })
+    } else {
+        Err(builtin_error(
+            "fea.RigidResponse.lindleyYow",
+            &ERROR_INPUT,
+            "zero-period acceleration must be nonnegative",
+        ))
+    }
+);
+
+const GUPTA_INPUTS: [BuiltinParamDescriptor; 2] = [
+    required(
+        "periodicFrequencyHertz",
+        BuiltinParamType::NumericScalar,
+        "Upper bound of the wholly periodic frequency region.",
+    ),
+    required(
+        "rigidFrequencyHertz",
+        BuiltinParamType::NumericScalar,
+        "Lower bound of the wholly rigid frequency region.",
+    ),
+];
+const GUPTA_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "policy = fea.RigidResponse.gupta(periodicFrequencyHertz, rigidFrequencyHertz)",
+    inputs: &GUPTA_INPUTS,
+    outputs: &OUT_ANY,
+}];
+pub(super) const GUPTA_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &GUPTA_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ERRORS,
+};
+#[runtime_builtin(
+    name = "fea.RigidResponse.gupta",
+    category = "fea",
+    summary = "Use Gupta periodic/rigid response separation.",
+    keywords = "fea,response,spectrum,rigid,gupta,typed",
+    descriptor(crate::builtins::fea::response_spectrum_policies::parameters::GUPTA_DESCRIPTOR),
+    integer_capabilities(GUPTA_NUMERIC_CAPABILITIES),
+    builtin_path = "crate::builtins::fea::response_spectrum_policies::parameters"
+)]
+pub async fn rigid_response_gupta(periodic: Value, rigid: Value) -> BuiltinResult<Value> {
+    let periodic = finite_numeric_scalar(
+        "fea.RigidResponse.gupta",
+        &periodic,
+        "periodicFrequencyHertz",
+    )?;
+    let rigid = finite_numeric_scalar("fea.RigidResponse.gupta", &rigid, "rigidFrequencyHertz")?;
+    if periodic <= 0.0 || rigid <= periodic {
+        return Err(builtin_error(
+            "fea.RigidResponse.gupta",
+            &ERROR_INPUT,
+            "frequencies must be positive with rigid frequency greater than periodic frequency",
+        ));
+    }
+    typed_value(
+        "fea.RigidResponse.gupta",
+        RIGID_RESPONSE_CLASS,
+        RigidResponsePolicy::Gupta {
+            periodic_frequency_hz: periodic,
+            rigid_frequency_hz: rigid,
         },
     )
 }

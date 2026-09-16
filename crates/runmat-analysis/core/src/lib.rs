@@ -95,10 +95,10 @@ pub use problem::region_resolution::{
     resolve_boundary_region_aliases, BoundaryRegionAliases, BoundaryRegionResolutionError,
 };
 pub use problem::response_spectrum::{
-    DirectionalCombination, ModalCombination, ModalTruncationPolicy, ResponseSpectrum,
-    ResponseSpectrumId, ShockResponseSpectrumMethod, SpectrumAbscissa, SpectrumConstruction,
-    SpectrumDamping, SpectrumDirection, SpectrumEnvelope, SpectrumEvidence, SpectrumExtrapolation,
-    SpectrumInterpolation, SpectrumResponse,
+    DirectionalCombination, ModalCombination, ModalTruncationCorrection, ModalTruncationPolicy,
+    ResponseSpectrum, ResponseSpectrumId, RigidResponsePolicy, ShockResponseSpectrumMethod,
+    SpectrumAbscissa, SpectrumConstruction, SpectrumDamping, SpectrumDirection, SpectrumEnvelope,
+    SpectrumEvidence, SpectrumExtrapolation, SpectrumInterpolation, SpectrumResponse,
 };
 pub use problem::signal::{
     GeneratorArgument, GeneratorCallable, GeneratorDomain, GeneratorEffectPolicy,
@@ -806,9 +806,12 @@ mod tests {
             directional_combination: DirectionalCombination::Srss,
             truncation: ModalTruncationPolicy {
                 minimum_cumulative_mass_ratio: 0.9,
-                include_residual_mode: true,
-                include_rigid_response: true,
-                include_missing_mass: true,
+                correction: ModalTruncationCorrection::MissingMass {
+                    zero_period_acceleration: 20.0,
+                },
+            },
+            rigid_response: RigidResponsePolicy::LindleyYow {
+                zero_period_acceleration: 20.0,
             },
             construction: SpectrumConstruction::AuthoredDesign,
             evidence: SpectrumEvidence {

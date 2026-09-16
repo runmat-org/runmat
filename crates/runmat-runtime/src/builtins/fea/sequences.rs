@@ -1140,10 +1140,11 @@ mod tests {
             directional_combination: runmat_analysis_core::DirectionalCombination::Srss,
             truncation: runmat_analysis_core::ModalTruncationPolicy {
                 minimum_cumulative_mass_ratio: 0.9,
-                include_residual_mode: true,
-                include_rigid_response: false,
-                include_missing_mass: true,
+                correction: runmat_analysis_core::ModalTruncationCorrection::MissingMass {
+                    zero_period_acceleration: 9.0,
+                },
             },
+            rigid_response: runmat_analysis_core::RigidResponsePolicy::Disabled,
             construction: runmat_analysis_core::SpectrumConstruction::AuthoredDesign,
             evidence: runmat_analysis_core::SpectrumEvidence {
                 sampling_adequacy_ratio: 1.0,

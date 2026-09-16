@@ -200,3 +200,33 @@ noarg_policy!(
     DIRECTIONAL_COMBINATION_CLASS,
     DirectionalCombination::AbsoluteSum
 );
+noarg_policy!(
+    truncation_correction_none,
+    CORRECTION_NONE_DESCRIPTOR,
+    CORRECTION_NONE_SIGNATURES,
+    "fea.ModalTruncationCorrection.none",
+    "correction = fea.ModalTruncationCorrection.none()",
+    "Disable high-frequency truncation correction.",
+    TRUNCATION_CORRECTION_CLASS,
+    ModalTruncationCorrection::None
+);
+noarg_policy!(
+    truncation_correction_residual_mode,
+    CORRECTION_RESIDUAL_DESCRIPTOR,
+    CORRECTION_RESIDUAL_SIGNATURES,
+    "fea.ModalTruncationCorrection.residualMode",
+    "correction = fea.ModalTruncationCorrection.residualMode()",
+    "Request a load-dependent residual mode.",
+    TRUNCATION_CORRECTION_CLASS,
+    ModalTruncationCorrection::ResidualMode
+);
+noarg_policy!(
+    rigid_response_disabled,
+    RIGID_DISABLED_DESCRIPTOR,
+    RIGID_DISABLED_SIGNATURES,
+    "fea.RigidResponse.disabled",
+    "policy = fea.RigidResponse.disabled()",
+    "Disable rigid-response separation.",
+    RIGID_RESPONSE_CLASS,
+    RigidResponsePolicy::Disabled
+);

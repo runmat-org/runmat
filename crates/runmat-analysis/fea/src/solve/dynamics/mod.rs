@@ -24,7 +24,8 @@ pub use modal_transient::{
     ModalTransientHistory, ModalTransientInitialState, ModalTransientSample, ModalTransientStep,
 };
 pub use response_spectrum::{
-    solve_modal_response_spectrum, ModalResponseSpectrumContribution,
-    ModalResponseSpectrumModeContribution, ModalResponseSpectrumResult,
-    ModalResponseSpectrumResultIdentity, ModalResponseSpectrumTruncationEvidence,
+    solve_modal_response_spectrum, solve_modal_response_spectrum_with_operator,
+    ModalResponseSpectrumContribution, ModalResponseSpectrumModeContribution,
+    ModalResponseSpectrumResult, ModalResponseSpectrumResultIdentity,
+    ModalResponseSpectrumTruncationEvidence,
 };
