@@ -1,0 +1,202 @@
+use runmat_analysis_core::{
+    CoordinateFrame, DirectionalCombination, FormulationRequirement, IndependentDomain,
+    ModalCombination, ProcedureStep, ResponseSpectrum, ResponseSpectrumId, SpectrumAbscissa,
+    SpectrumConstruction, SpectrumDamping, SpectrumDirection, SpectrumEnvelope, SpectrumEvidence,
+    SpectrumExtrapolation, SpectrumInterpolation, SpectrumResponse,
+};
+
+use crate::{
+    fixtures::{fixture_model, FixtureId},
+    pipeline::modal_governance::{
+        ModalConvergencePolicy, ModalTruncationPolicy as EigenspaceTruncationPolicy,
+    },
+    run_modal_with_options, ComputeBackend, ModalSolveOptions,
+};
+
+use super::*;
+
+#[test]
+fn modal_and_directional_combination_policies_have_independent_semantics() {
+    let modal = vec![vec![3.0], vec![4.0]];
+    assert_eq!(
+        combine_modal_responses(&modal, &[1.0, 2.0], 0.05, ModalCombination::Srss).unwrap(),
+        vec![5.0]
+    );
+    assert_eq!(
+        combine_modal_responses(&modal, &[1.0, 2.0], 0.05, ModalCombination::AbsoluteSum,).unwrap(),
+        vec![7.0]
+    );
+    assert_eq!(
+        combine_modal_responses(
+            &modal,
+            &[1.0, 1.0],
+            0.05,
+            ModalCombination::CompleteQuadraticCombination,
+        )
+        .unwrap(),
+        vec![7.0]
+    );
+    assert_eq!(
+        combine_modal_responses(&modal, &[1.0, 2.0], 0.05, ModalCombination::TenPercent,).unwrap(),
+        vec![5.0]
+    );
+
+    let first = [10.0];
+    let second = [2.0];
+    let third = [1.0];
+    let directional = combine_directional_responses(
+        &[&first, &second, &third],
+        DirectionalCombination::PercentageRule {
+            primary: 1.0,
+            secondary: 0.4,
+        },
+    )
+    .unwrap();
+    assert!((directional[0] - 11.2).abs() <= 1.0e-14);
+}
+
+#[test]
+fn spectrum_interpolation_respects_axis_and_extrapolation_policy() {
+    let mut spectrum = spectrum_fixture(
+        SpectrumAbscissa::FrequencyHertz(vec![1.0, 10.0]),
+        vec![2.0, 20.0],
+        [1.0, 0.0, 0.0],
+    );
+    assert!((interpolate_spectrum(&spectrum, 5.5).unwrap() - 11.0).abs() <= 1.0e-14);
+    assert!(interpolate_spectrum(&spectrum, 0.5).is_err());
+    spectrum.extrapolation = SpectrumExtrapolation::HoldEndpoint;
+    assert_eq!(interpolate_spectrum(&spectrum, 0.5).unwrap(), 2.0);
+
+    spectrum.abscissa = SpectrumAbscissa::PeriodSeconds(vec![0.1, 1.0]);
+    spectrum.ordinates = vec![20.0, 2.0];
+    spectrum.interpolation = SpectrumInterpolation::LinearPeriod;
+    assert!((interpolate_spectrum(&spectrum, 2.0).unwrap() - 12.0).abs() <= 1.0e-14);
+}
+
+#[test]
+fn physical_modal_basis_drives_canonical_response_result() {
+    let truncation = EigenspaceTruncationPolicy::requested(2);
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    let mut step = ProcedureStep::structural_modal("modes");
+    step.independent_domain = IndependentDomain::Eigenvalue {
+        requested_count: truncation.requested_mode_count(),
+    };
+    model.sequence.steps = vec![step];
+    let mesh = crate::tests::single_tetrahedron_solver_mesh_for_model(&model);
+    let run = run_modal_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        ModalSolveOptions {
+            formulation_requirement: FormulationRequirement::Experimental,
+            truncation,
+            convergence: ModalConvergencePolicy::exploratory(),
+            solver_mesh: Some(mesh),
+        },
+    )
+    .unwrap();
+    let first_mode = &run.basis.modes()[0];
+    let axis = first_mode
+        .directional()
+        .iter()
+        .enumerate()
+        .max_by(|(_, left), (_, right)| left.effective_mass().total_cmp(&right.effective_mass()))
+        .map(|(axis, _)| axis)
+        .unwrap();
+    let mut direction = [0.0; 3];
+    direction[axis] = 1.0;
+    let frequencies = [
+        run.basis.modes()[0].frequency_hz() * 0.5,
+        run.basis.modes().last().unwrap().frequency_hz() * 1.5,
+    ];
+    let spectrum = spectrum_fixture(
+        SpectrumAbscissa::FrequencyHertz(frequencies.to_vec()),
+        vec![1.0; frequencies.len()],
+        direction,
+    );
+    let result =
+        solve_modal_response_spectrum(&run.basis, std::slice::from_ref(&spectrum)).unwrap();
+    assert_eq!(result.basis(), run.basis.identity());
+    assert_eq!(result.contributions().len(), 1);
+    assert_eq!(result.contributions()[0].modes.len(), 1);
+    assert!(result.combined_response().iter().any(|value| *value > 0.0));
+    let restored =
+        ModalResponseSpectrumResult::from_canonical_bytes(&result.canonical_bytes().unwrap())
+            .unwrap();
+    assert_eq!(restored, result);
+    restored
+        .validate_for(&run.basis, std::slice::from_ref(&spectrum))
+        .unwrap();
+
+    let mut substituted = restored;
+    substituted.contributions[0].modes[0].interpolated_ordinate *= 2.0;
+    substituted.identity = substituted.derive_identity().unwrap();
+    assert!(substituted
+        .validate_for(&run.basis, std::slice::from_ref(&spectrum))
+        .is_err());
+}
+
+#[test]
+fn basis_only_solver_rejects_operator_dependent_corrections() {
+    let truncation = EigenspaceTruncationPolicy::requested(1);
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    let mut step = ProcedureStep::structural_modal("modes");
+    step.independent_domain = IndependentDomain::Eigenvalue {
+        requested_count: truncation.requested_mode_count(),
+    };
+    model.sequence.steps = vec![step];
+    let mesh = crate::tests::single_tetrahedron_solver_mesh_for_model(&model);
+    let run = run_modal_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        ModalSolveOptions {
+            formulation_requirement: FormulationRequirement::Experimental,
+            truncation,
+            convergence: ModalConvergencePolicy::exploratory(),
+            solver_mesh: Some(mesh),
+        },
+    )
+    .unwrap();
+    let frequency = run.basis.modes()[0].frequency_hz();
+    let mut spectrum = spectrum_fixture(
+        SpectrumAbscissa::FrequencyHertz(vec![frequency]),
+        vec![1.0],
+        [1.0, 0.0, 0.0],
+    );
+    spectrum.truncation.include_missing_mass = true;
+    assert!(solve_modal_response_spectrum(&run.basis, &[spectrum]).is_err());
+}
+
+fn spectrum_fixture(
+    abscissa: SpectrumAbscissa,
+    ordinates: Vec<f64>,
+    direction: [f64; 3],
+) -> ResponseSpectrum {
+    ResponseSpectrum {
+        spectrum_id: ResponseSpectrumId("design".into()),
+        abscissa,
+        ordinates,
+        damping: SpectrumDamping::Ratio(0.05),
+        response: SpectrumResponse::RelativeDisplacement,
+        envelope: SpectrumEnvelope::Maximax,
+        interpolation: SpectrumInterpolation::LinearFrequency,
+        extrapolation: SpectrumExtrapolation::Reject,
+        direction: SpectrumDirection {
+            frame: CoordinateFrame::Global,
+            vector: direction,
+        },
+        modal_combination: ModalCombination::CompleteQuadraticCombination,
+        directional_combination: DirectionalCombination::Srss,
+        truncation: runmat_analysis_core::ModalTruncationPolicy {
+            minimum_cumulative_mass_ratio: 0.0,
+            include_residual_mode: false,
+            include_rigid_response: false,
+            include_missing_mass: false,
+        },
+        construction: SpectrumConstruction::AuthoredDesign,
+        evidence: SpectrumEvidence {
+            sampling_adequacy_ratio: 1.0,
+            max_interpolation_error: None,
+        },
+        provenance_digest: "sha256:design".into(),
+    }
+}

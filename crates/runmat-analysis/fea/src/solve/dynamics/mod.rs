@@ -6,6 +6,7 @@ mod harmonic_balance;
 mod modal_harmonic;
 mod modal_projection;
 mod modal_transient;
+mod response_spectrum;
 
 pub use direct_harmonic::{
     solve_direct_harmonic, DirectHarmonicError, DirectHarmonicPolicy, DirectHarmonicResponse,
@@ -21,4 +22,9 @@ pub use modal_transient::{
     advance_modal_transient_state, continue_modal_transient, initialize_modal_transient_state,
     refresh_modal_transient_state, solve_modal_transient, ModalTransientError,
     ModalTransientHistory, ModalTransientInitialState, ModalTransientSample, ModalTransientStep,
+};
+pub use response_spectrum::{
+    solve_modal_response_spectrum, ModalResponseSpectrumContribution,
+    ModalResponseSpectrumModeContribution, ModalResponseSpectrumResult,
+    ModalResponseSpectrumResultIdentity, ModalResponseSpectrumTruncationEvidence,
 };
