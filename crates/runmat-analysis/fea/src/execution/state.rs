@@ -323,6 +323,7 @@ impl CanonicalSemanticState {
                     StateKind::ModalBasis
                         | StateKind::StructuralComplex
                         | StateKind::StructuralResponseEnvelope
+                        | StateKind::StructuralRandomStatistics
                 ) || fields.is_empty()
                 {
                     return Err(AnalysisExecutionError::Invalid(

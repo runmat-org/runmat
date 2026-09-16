@@ -2601,6 +2601,7 @@ mod tests {
             excitation_cases: vec![test_case("force_load"), test_case("body_force")],
             initial_conditions: Vec::new(),
             response_spectra: Vec::new(),
+            random_excitations: Vec::new(),
             sequence: AnalysisSequence::from_steps(
                 "figure_sequence",
                 vec![ProcedureStep::structural_static("static_step")],

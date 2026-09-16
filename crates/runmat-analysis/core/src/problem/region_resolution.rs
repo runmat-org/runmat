@@ -301,6 +301,7 @@ mod tests {
                 applies_before_step_id: "step".into(),
             })],
             response_spectra: Vec::new(),
+            random_excitations: Vec::new(),
             sequence,
         }
     }

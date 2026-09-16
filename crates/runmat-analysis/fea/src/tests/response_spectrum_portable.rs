@@ -182,7 +182,7 @@ fn portable_direction_tasks_reassemble_in_authored_order_and_bind_receipt() {
             .unwrap();
     assert_eq!(recovered.source_result(), result.numerical().identity());
     assert!(recovered
-        .field(crate::solve::dynamics::ResponseSpectrumLinearFieldQuantity::Stress)
+        .field(crate::solve::dynamics::StructuralLinearFieldQuantity::Stress)
         .is_some());
     let result_payload =
         structural_modal_response_spectrum_assembly_payload_bytes_upper_bound(result.assembly())

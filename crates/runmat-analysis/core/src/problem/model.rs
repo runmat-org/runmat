@@ -15,6 +15,7 @@ use super::{
     interfaces::AnalysisInterface,
     material_assignment::MaterialAssignment,
     materials::MaterialModel,
+    random_vibration::RandomExcitationSpectrum,
     response_spectrum::ResponseSpectrum,
     signal::PhysicalSignal,
     structure::StructuralModel,
@@ -63,6 +64,8 @@ pub struct AnalysisModel {
     pub excitation_cases: Vec<ExcitationCase>,
     pub initial_conditions: Vec<InitialCondition>,
     pub response_spectra: Vec<ResponseSpectrum>,
+    #[serde(default)]
+    pub random_excitations: Vec<RandomExcitationSpectrum>,
     pub sequence: AnalysisSequence,
 }
 
@@ -117,6 +120,7 @@ pub struct SolverAnalysisModel<'a> {
     pub excitation_cases: &'a [ExcitationCase],
     pub initial_conditions: &'a [InitialCondition],
     pub response_spectra: &'a [ResponseSpectrum],
+    pub random_excitations: &'a [RandomExcitationSpectrum],
     pub sequence: SolverAnalysisSequence<'a>,
 }
 
@@ -145,6 +149,7 @@ impl AnalysisModel {
             excitation_cases: &self.excitation_cases,
             initial_conditions: &self.initial_conditions,
             response_spectra: &self.response_spectra,
+            random_excitations: &self.random_excitations,
             sequence: self.sequence.solver_identity_contract(),
         }
     }

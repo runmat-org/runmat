@@ -25,6 +25,29 @@ pub(crate) fn validate_model_excitations(
     validate_cases(&model.excitation_cases, &model.excitations, &steps)?;
     validate_initial_conditions(&model.initial_conditions, &signals, &steps)?;
     validate_response_spectra(&model.response_spectra, &signals)?;
+    validate_random_excitations(&model.random_excitations)?;
+    Ok(())
+}
+
+fn validate_random_excitations(
+    excitations: &[crate::RandomExcitationSpectrum],
+) -> Result<(), AnalysisValidationError> {
+    let mut ids = HashSet::new();
+    for excitation in excitations {
+        let id = excitation.excitation_id.0.as_str();
+        if !ids.insert(id) {
+            return Err(AnalysisValidationError::InvalidRandomExcitation {
+                excitation_id: id.to_string(),
+                detail: "random-excitation ids must be unique".into(),
+            });
+        }
+        if let Err(detail) = excitation.validate_intrinsic() {
+            return Err(AnalysisValidationError::InvalidRandomExcitation {
+                excitation_id: id.to_string(),
+                detail,
+            });
+        }
+    }
     Ok(())
 }
 

@@ -137,6 +137,9 @@ pub enum IndependentDomain {
     ResponseSpectra {
         spectrum_ids: Vec<ResponseSpectrumId>,
     },
+    RandomExcitation {
+        excitation_id: crate::RandomExcitationId,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -248,6 +251,7 @@ pub enum StateKind {
     StructuralStressStrain,
     StructuralComplex,
     StructuralResponseEnvelope,
+    StructuralRandomStatistics,
     GeometricStiffness,
     MaterialHistory,
     ContactHistory,
@@ -440,6 +444,28 @@ impl ProcedureStep {
             vec![state(
                 "response_envelope",
                 StateKind::StructuralResponseEnvelope,
+            )],
+        );
+        step.state_inputs
+            .push(modal_basis_input(producer_step, state_id));
+        step
+    }
+
+    pub fn structural_random_response(
+        step_id: impl Into<String>,
+        excitation_id: crate::RandomExcitationId,
+        producer_step: impl Into<String>,
+        state_id: impl Into<String>,
+    ) -> Self {
+        let mut step = Self::experimental(
+            step_id,
+            PhysicsFamily::Structural,
+            AnalysisProcedure::RandomResponse,
+            SolutionSpace::ModalReduced,
+            IndependentDomain::RandomExcitation { excitation_id },
+            vec![state(
+                "random_statistics",
+                StateKind::StructuralRandomStatistics,
             )],
         );
         step.state_inputs

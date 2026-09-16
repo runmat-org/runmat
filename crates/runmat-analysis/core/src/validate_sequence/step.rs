@@ -124,12 +124,16 @@ fn validate_independent_domain(step: &ProcedureStep) -> Result<(), AnalysisValid
                 IndependentDomain::TimeSeconds { .. }
             )
         }
-        AnalysisProcedure::HarmonicResponse
-        | AnalysisProcedure::PrestressedHarmonicResponse
-        | AnalysisProcedure::RandomResponse => {
+        AnalysisProcedure::HarmonicResponse | AnalysisProcedure::PrestressedHarmonicResponse => {
             matches!(
                 step.independent_domain,
                 IndependentDomain::FrequencyHertz(_)
+            )
+        }
+        AnalysisProcedure::RandomResponse => {
+            matches!(
+                step.independent_domain,
+                IndependentDomain::RandomExcitation { .. }
             )
         }
         AnalysisProcedure::ModalResponseSpectrum => {
@@ -193,6 +197,7 @@ fn validate_independent_domain(step: &ProcedureStep) -> Result<(), AnalysisValid
                     .all(|spectrum_id| !spectrum_id.0.trim().is_empty())
                 && spectrum_ids.iter().collect::<HashSet<_>>().len() == spectrum_ids.len()
         }
+        IndependentDomain::RandomExcitation { excitation_id } => !excitation_id.0.trim().is_empty(),
     };
     if valid {
         Ok(())
@@ -348,6 +353,7 @@ fn family_can_publish_state(family: PhysicsFamily, kind: StateKind) -> bool {
                 | StateKind::StructuralStressStrain
                 | StateKind::StructuralComplex
                 | StateKind::StructuralResponseEnvelope
+                | StateKind::StructuralRandomStatistics
                 | StateKind::GeometricStiffness
                 | StateKind::MaterialHistory
                 | StateKind::ContactHistory

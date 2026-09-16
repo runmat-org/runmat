@@ -39,6 +39,49 @@ use crate::{
 const VECTOR_COMPONENT_COUNT: usize = 3;
 const TENSOR_COMPONENT_COUNT: usize = 6;
 
+/// Structural quantities whose recovery is linear in the displacement state.
+///
+/// Statistical modal procedures may combine these component transfers before applying any
+/// nonlinear derived transform. Equivalent/principal stress, energy, and beam peak-end selectors
+/// are intentionally absent.
+#[derive(
+    Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum StructuralLinearFieldQuantity {
+    Displacement,
+    Rotation,
+    Strain,
+    Stress,
+    ShellMembraneForce,
+    ShellBendingMoment,
+    ShellTransverseShear,
+}
+
+impl StructuralLinearFieldQuantity {
+    pub const ALL: [Self; 7] = [
+        Self::Displacement,
+        Self::Rotation,
+        Self::Strain,
+        Self::Stress,
+        Self::ShellMembraneForce,
+        Self::ShellBendingMoment,
+        Self::ShellTransverseShear,
+    ];
+
+    pub const fn source_field_id(self) -> &'static str {
+        match self {
+            Self::Displacement => FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+            Self::Rotation => FEA_FIELD_STRUCTURAL_ROTATION,
+            Self::Strain => FEA_FIELD_STRUCTURAL_STRAIN,
+            Self::Stress => FEA_FIELD_STRUCTURAL_STRESS,
+            Self::ShellMembraneForce => FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE,
+            Self::ShellBendingMoment => FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT,
+            Self::ShellTransverseShear => FEA_FIELD_STRUCTURAL_SHELL_TRANSVERSE_SHEAR,
+        }
+    }
+}
+
 pub fn recover_result_fields(
     summary: &AssemblySummary,
     solve_result: &LinearSolveResult,

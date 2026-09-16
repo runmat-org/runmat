@@ -14,6 +14,7 @@ pub mod problem {
     pub mod model;
     pub mod prescribed_value;
     pub mod quantity;
+    pub mod random_vibration;
     pub mod reference_point;
     pub mod region_resolution;
     pub mod response_spectrum;
@@ -89,6 +90,12 @@ pub use problem::quantity::{
     RayleighMassCoefficient, RayleighStiffnessCoefficient, Rotation, SpecificAcousticImpedance,
     Stiffness, Temperature, TemperatureDifference, ThermalContactResistance, Traction, Translation,
     TurbulenceIntensity, Velocity,
+};
+pub use problem::random_vibration::{
+    ComplexSpectralDensity, CrossPowerSpectralDensity, RandomExcitationChannel,
+    RandomExcitationChannelId, RandomExcitationId, RandomExcitationQuantity,
+    RandomExcitationSpectrum, RandomSpectrumEvidence, RandomSpectrumExtrapolation,
+    RandomSpectrumInterpolation, SpectralDensityConvention,
 };
 pub use problem::reference_point::ReferencePoint;
 pub use problem::region_resolution::{
@@ -240,6 +247,7 @@ mod tests {
             }],
             initial_conditions: Vec::new(),
             response_spectra: Vec::new(),
+            random_excitations: Vec::new(),
             sequence: AnalysisSequence::from_steps(
                 "analysis_sequence",
                 vec![ProcedureStep::structural_static("step_static")],

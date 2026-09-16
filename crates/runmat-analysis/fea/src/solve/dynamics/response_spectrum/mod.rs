@@ -22,6 +22,7 @@ use serde::{Deserialize, Serialize};
 use crate::assembly::AssemblySummary;
 use crate::{contracts::FeaRunError, ModalBasisArtifact, ModalBasisIdentity};
 
+pub use crate::post::StructuralLinearFieldQuantity;
 use combine::{
     combine_directional_responses, combine_modal_responses, combine_periodic_and_rigid_responses,
 };
@@ -34,7 +35,7 @@ pub use recovery::{
     recover_modal_response_spectrum_linear_fields, response_spectrum_field_recovery_unavailability,
     ModalResponseSpectrumFieldEnvelope, ModalResponseSpectrumFieldEnvelopeIdentity,
     ResponseSpectrumFieldRecovery, ResponseSpectrumFieldRecoveryUnavailability,
-    ResponseSpectrumLinearField, ResponseSpectrumLinearFieldQuantity,
+    ResponseSpectrumLinearField,
 };
 use validation::{contribution_is_valid, vectors_close};
 

@@ -913,6 +913,7 @@ fn empty_model(model_id: String, geometry: &GeometryAsset) -> AnalysisModel {
         excitation_cases: Vec::new(),
         initial_conditions: Vec::new(),
         response_spectra: Vec::new(),
+        random_excitations: Vec::new(),
         sequence: AnalysisSequence::from_steps(format!("{model_id}.sequence"), Vec::new()),
     }
 }

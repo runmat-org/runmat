@@ -10,14 +10,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     assembly::AssemblySummary,
-    contracts::{
-        FeaRunError, FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_ROTATION,
-        FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT, FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE,
-        FEA_FIELD_STRUCTURAL_SHELL_TRANSVERSE_SHEAR, FEA_FIELD_STRUCTURAL_STRAIN,
-        FEA_FIELD_STRUCTURAL_STRESS,
-    },
+    contracts::FeaRunError,
     pipeline::modal_basis::ModalBasisArtifact,
-    post::fields::recover_deformation_result_fields,
+    post::fields::{recover_deformation_result_fields, StructuralLinearFieldQuantity},
 };
 
 use super::{
@@ -36,18 +31,6 @@ const FIELD_ENVELOPE_PREFIX: &[u8] = b"runmat-modal-response-spectrum-field-enve
 const FIELD_RECOVERY_PREFIX: &[u8] = b"runmat-modal-response-spectrum-field-recovery\0";
 const FIELD_ENVELOPE_LIMITS: CanonicalLimits =
     CanonicalLimits::new(1024 * 1024 * 1024, 40_000_000, 65_536, 24);
-
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ResponseSpectrumLinearFieldQuantity {
-    Displacement,
-    Rotation,
-    Strain,
-    Stress,
-    ShellMembraneForce,
-    ShellBendingMoment,
-    ShellTransverseShear,
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -161,30 +144,6 @@ impl ResponseSpectrumFieldRecovery {
     }
 }
 
-impl ResponseSpectrumLinearFieldQuantity {
-    const ALL: [Self; 7] = [
-        Self::Displacement,
-        Self::Rotation,
-        Self::Strain,
-        Self::Stress,
-        Self::ShellMembraneForce,
-        Self::ShellBendingMoment,
-        Self::ShellTransverseShear,
-    ];
-
-    const fn source_field_id(self) -> &'static str {
-        match self {
-            Self::Displacement => FEA_FIELD_STRUCTURAL_DISPLACEMENT,
-            Self::Rotation => FEA_FIELD_STRUCTURAL_ROTATION,
-            Self::Strain => FEA_FIELD_STRUCTURAL_STRAIN,
-            Self::Stress => FEA_FIELD_STRUCTURAL_STRESS,
-            Self::ShellMembraneForce => FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE,
-            Self::ShellBendingMoment => FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT,
-            Self::ShellTransverseShear => FEA_FIELD_STRUCTURAL_SHELL_TRANSVERSE_SHEAR,
-        }
-    }
-}
-
 /// One statistically combined component envelope of a signed linear recovery quantity.
 ///
 /// `values` are nonnegative component magnitudes. They do not describe a simultaneous signed
@@ -192,13 +151,13 @@ impl ResponseSpectrumLinearFieldQuantity {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ResponseSpectrumLinearField {
-    quantity: ResponseSpectrumLinearFieldQuantity,
+    quantity: StructuralLinearFieldQuantity,
     shape: Vec<usize>,
     values: Vec<f64>,
 }
 
 impl ResponseSpectrumLinearField {
-    pub const fn quantity(&self) -> ResponseSpectrumLinearFieldQuantity {
+    pub const fn quantity(&self) -> StructuralLinearFieldQuantity {
         self.quantity
     }
 
@@ -306,7 +265,7 @@ impl ModalResponseSpectrumFieldEnvelope {
 
     pub fn field(
         &self,
-        quantity: ResponseSpectrumLinearFieldQuantity,
+        quantity: StructuralLinearFieldQuantity,
     ) -> Option<&ResponseSpectrumLinearField> {
         self.fields.iter().find(|field| field.quantity == quantity)
     }
@@ -405,7 +364,7 @@ pub fn recover_modal_response_spectrum_linear_fields(
         FeaRunError::Solve("response-spectrum field recovery has no directions".into())
     })?;
     let mut fields = Vec::with_capacity(first.len());
-    for quantity in ResponseSpectrumLinearFieldQuantity::ALL {
+    for quantity in StructuralLinearFieldQuantity::ALL {
         let Some(reference) = first.get(&quantity) else {
             continue;
         };
@@ -487,8 +446,7 @@ fn recover_direction(
     basis: &ModalBasisArtifact,
     contribution: &ModalResponseSpectrumContribution,
     conversion: ResponseSpectrumDisplacementConversion,
-) -> Result<BTreeMap<ResponseSpectrumLinearFieldQuantity, ResponseSpectrumLinearField>, FeaRunError>
-{
+) -> Result<BTreeMap<StructuralLinearFieldQuantity, ResponseSpectrumLinearField>, FeaRunError> {
     let mode_fields = contribution
         .modes
         .iter()
@@ -508,7 +466,7 @@ fn recover_direction(
         .map(|mode| mode.frequency_hz)
         .collect::<Vec<_>>();
     let mut combined = BTreeMap::new();
-    for quantity in ResponseSpectrumLinearFieldQuantity::ALL {
+    for quantity in StructuralLinearFieldQuantity::ALL {
         let Some(reference) = first.get(&quantity) else {
             continue;
         };
@@ -627,12 +585,11 @@ fn mode_shape<'a>(
 fn recover_linear_fields(
     summary: &AssemblySummary,
     displacement: &[f64],
-) -> Result<BTreeMap<ResponseSpectrumLinearFieldQuantity, ResponseSpectrumLinearField>, FeaRunError>
-{
+) -> Result<BTreeMap<StructuralLinearFieldQuantity, ResponseSpectrumLinearField>, FeaRunError> {
     let recovered = recover_deformation_result_fields(summary, displacement)
         .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
     let mut fields = BTreeMap::new();
-    for quantity in ResponseSpectrumLinearFieldQuantity::ALL {
+    for quantity in StructuralLinearFieldQuantity::ALL {
         let Some(field) = recovered
             .iter()
             .find(|field| field.field_id == quantity.source_field_id() && !field.is_empty())

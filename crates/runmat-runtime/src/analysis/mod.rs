@@ -946,6 +946,7 @@ pub fn analysis_create_model_op(
         excitation_cases: Vec::new(),
         initial_conditions: Vec::new(),
         response_spectra: Vec::new(),
+        random_excitations: Vec::new(),
         sequence: AnalysisSequence::from_steps(
             format!("{}.sequence", intent.model_id),
             default_steps,
@@ -8338,6 +8339,17 @@ fn map_validate_error(
             format!("response spectrum `{spectrum_id}` is invalid: {detail}"),
             BTreeMap::from([
                 ("spectrum_id".to_string(), spectrum_id),
+                ("detail".to_string(), detail),
+            ]),
+        ),
+        AnalysisValidationError::InvalidRandomExcitation {
+            excitation_id,
+            detail,
+        } => (
+            "RM.FEA.VALIDATE.INVALID_RANDOM_EXCITATION",
+            format!("random excitation `{excitation_id}` is invalid: {detail}"),
+            BTreeMap::from([
+                ("excitation_id".to_string(), excitation_id),
                 ("detail".to_string(), detail),
             ]),
         ),

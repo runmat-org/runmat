@@ -321,6 +321,7 @@ fn sample_model() -> AnalysisModel {
         excitation_cases: Vec::new(),
         initial_conditions: Vec::new(),
         response_spectra: Vec::new(),
+        random_excitations: Vec::new(),
         sequence: AnalysisSequence::from_steps(
             "sample_sequence",
             vec![ProcedureStep::structural_static("step_static")],

@@ -27,6 +27,21 @@ pub(super) fn validate_objects(
             }
         }
     }
+    if let crate::IndependentDomain::RandomExcitation { excitation_id } = &step.independent_domain {
+        if !model
+            .random_excitations
+            .iter()
+            .any(|excitation| excitation.excitation_id == *excitation_id)
+        {
+            return Err(step_error(
+                step,
+                format!(
+                    "random-response procedure references unknown excitation `{}`",
+                    excitation_id.0
+                ),
+            ));
+        }
+    }
     let mut seen = HashSet::new();
     for activation in &step.activations {
         if !seen.insert(&activation.object) {

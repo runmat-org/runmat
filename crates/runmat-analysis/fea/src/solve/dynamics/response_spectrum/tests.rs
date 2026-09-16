@@ -456,22 +456,22 @@ fn linear_field_envelope_recovers_signed_mode_before_statistical_combination() {
         recover_modal_response_spectrum_linear_fields(&summary, &run.basis, &result).unwrap();
     assert_eq!(
         fields
-            .field(ResponseSpectrumLinearFieldQuantity::Stress)
+            .field(StructuralLinearFieldQuantity::Stress)
             .unwrap()
             .values(),
         expected_stress
     );
     assert!(fields
-        .field(ResponseSpectrumLinearFieldQuantity::Strain)
+        .field(StructuralLinearFieldQuantity::Strain)
         .is_some());
     assert!(fields
-        .field(ResponseSpectrumLinearFieldQuantity::Displacement)
+        .field(StructuralLinearFieldQuantity::Displacement)
         .is_some());
     assert!(fields.fields().iter().all(|field| !matches!(
         field.quantity(),
-        ResponseSpectrumLinearFieldQuantity::ShellMembraneForce
-            | ResponseSpectrumLinearFieldQuantity::ShellBendingMoment
-            | ResponseSpectrumLinearFieldQuantity::ShellTransverseShear
+        StructuralLinearFieldQuantity::ShellMembraneForce
+            | StructuralLinearFieldQuantity::ShellBendingMoment
+            | StructuralLinearFieldQuantity::ShellTransverseShear
     )));
     fields.validate_for(&summary, &run.basis, &result).unwrap();
     let restored = ModalResponseSpectrumFieldEnvelope::from_canonical_bytes(

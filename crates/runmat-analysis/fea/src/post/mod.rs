@@ -13,3 +13,4 @@ pub use constraint_fields::{
     recover_complex_constraint_group_observable_fields, recover_constraint_group_observable_fields,
 };
 pub use error::StructuralFieldRecoveryError;
+pub use fields::StructuralLinearFieldQuantity;

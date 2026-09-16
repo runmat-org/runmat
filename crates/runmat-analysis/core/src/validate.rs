@@ -82,6 +82,13 @@ pub enum AnalysisValidationError {
         "ANALYSIS_VALIDATION_INVALID_RESPONSE_SPECTRUM: response spectrum `{spectrum_id}` is invalid: {detail}"
     )]
     InvalidResponseSpectrum { spectrum_id: String, detail: String },
+    #[error(
+        "ANALYSIS_VALIDATION_INVALID_RANDOM_EXCITATION: random excitation `{excitation_id}` is invalid: {detail}"
+    )]
+    InvalidRandomExcitation {
+        excitation_id: String,
+        detail: String,
+    },
     #[error("ANALYSIS_VALIDATION_INVALID_SEQUENCE: sequence `{sequence_id}` is invalid: {detail}")]
     InvalidSequence { sequence_id: String, detail: String },
     #[error("ANALYSIS_VALIDATION_INVALID_PROCEDURE_STEP: procedure step `{step_id}` is invalid: {detail}")]

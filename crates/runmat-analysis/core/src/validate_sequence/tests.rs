@@ -5,10 +5,11 @@ use crate::{
     ActivationLifecycle, AnalysisBoundary, AnalysisModel, AnalysisModelId, AnalysisProcedure,
     AnalysisValidationError, BoundaryOperator, CoordinateFrame, IndependentDomain,
     InitialCondition, InitialConditionTarget, InitialConditionValue, InitialStateConflictPolicy,
-    InitialValue, PhysicsFamily, ProcedureStep, ProcedureStepId, RegionTarget, ResponseSpectrumId,
-    RestartPolicy, SequenceBranch, SequenceBranchId, SequenceDependency, SequenceDependencyReason,
-    SolutionSpace, StateCompleteness, StateId, StateInput, StateKind, StateOutput,
-    StatePersistence, StateSource, StateUse, StepObjectActivation, StepObjectRef, Velocity,
+    InitialValue, PhysicsFamily, ProcedureStep, ProcedureStepId, RandomExcitationId, RegionTarget,
+    ResponseSpectrumId, RestartPolicy, SequenceBranch, SequenceBranchId, SequenceDependency,
+    SequenceDependencyReason, SolutionSpace, StateCompleteness, StateId, StateInput, StateKind,
+    StateOutput, StatePersistence, StateSource, StateUse, StepObjectActivation, StepObjectRef,
+    Velocity,
 };
 
 fn model_with_steps(steps: Vec<ProcedureStep>) -> AnalysisModel {
@@ -35,6 +36,7 @@ fn model_with_steps(steps: Vec<ProcedureStep>) -> AnalysisModel {
         excitation_cases: Vec::new(),
         initial_conditions: Vec::new(),
         response_spectra: Vec::new(),
+        random_excitations: Vec::new(),
         sequence: crate::AnalysisSequence::from_steps("sequence", steps),
     }
 }
@@ -135,6 +137,32 @@ fn modal_response_requires_typed_existing_spectrum_ids() {
         parameter_id: "spectrum".into(),
         canonical_values: vec![1.0],
     };
+    assert!(matches!(
+        super::step::validate(&step),
+        Err(AnalysisValidationError::InvalidProcedureStep { .. })
+    ));
+}
+
+#[test]
+fn random_response_requires_one_typed_existing_excitation() {
+    let mut step = ProcedureStep::structural_random_response(
+        "random",
+        RandomExcitationId("launch".into()),
+        "modes",
+        "basis",
+    );
+    super::step::validate(&step).unwrap();
+    assert_eq!(
+        step.state_outputs[0].kind,
+        StateKind::StructuralRandomStatistics
+    );
+    let model = model_with_steps(vec![step.clone()]);
+    assert!(matches!(
+        super::activation::validate_objects(&model, &step),
+        Err(AnalysisValidationError::InvalidProcedureStep { .. })
+    ));
+
+    step.independent_domain = IndependentDomain::FrequencyHertz(vec![10.0, 20.0]);
     assert!(matches!(
         super::step::validate(&step),
         Err(AnalysisValidationError::InvalidProcedureStep { .. })

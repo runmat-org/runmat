@@ -6,6 +6,7 @@ mod harmonic_balance;
 mod modal_harmonic;
 mod modal_projection;
 mod modal_transient;
+mod random_response;
 mod response_spectrum;
 
 pub use direct_harmonic::{
@@ -23,6 +24,11 @@ pub use modal_transient::{
     refresh_modal_transient_state, solve_modal_transient, ModalTransientError,
     ModalTransientHistory, ModalTransientInitialState, ModalTransientSample, ModalTransientStep,
 };
+pub use random_response::{
+    solve_modal_random_response, ModalRandomResponseResult, ModalRandomResponseResultIdentity,
+    RandomResponseFieldStatistics, RandomResponseIntegrationEvidence,
+    RandomResponseIntegrationPolicy,
+};
 pub use response_spectrum::{
     assemble_modal_response_spectrum_direction_results,
     assemble_modal_response_spectrum_directions, recover_modal_response_spectrum_linear_fields,
@@ -35,6 +41,5 @@ pub use response_spectrum::{
     ModalResponseSpectrumResult, ModalResponseSpectrumResultIdentity,
     ModalResponseSpectrumTruncationEvidence, ResponseSpectrumDisplacementConversion,
     ResponseSpectrumFieldRecovery, ResponseSpectrumFieldRecoveryUnavailability,
-    ResponseSpectrumLinearField, ResponseSpectrumLinearFieldQuantity,
-    ResponseSpectrumResultSemantics,
+    ResponseSpectrumLinearField, ResponseSpectrumResultSemantics, StructuralLinearFieldQuantity,
 };

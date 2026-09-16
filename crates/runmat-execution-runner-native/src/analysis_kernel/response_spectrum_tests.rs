@@ -131,7 +131,7 @@ fn native_response_spectrum_fanout_and_fanin_are_portable_and_order_independent(
         panic!("displacement-convertible response did not publish recovered fields");
     };
     assert!(fields
-        .field(runmat_analysis_fea::solve::dynamics::ResponseSpectrumLinearFieldQuantity::Stress)
+        .field(runmat_analysis_fea::solve::dynamics::StructuralLinearFieldQuantity::Stress)
         .is_some());
 }
 

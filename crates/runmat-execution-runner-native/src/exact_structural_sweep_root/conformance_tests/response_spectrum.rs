@@ -265,6 +265,6 @@ async fn verify_response_spectrum_result(
         panic!("relative-displacement spectrum did not publish recovered fields")
     };
     assert!(fields
-        .field(runmat_analysis_fea::solve::dynamics::ResponseSpectrumLinearFieldQuantity::Stress)
+        .field(runmat_analysis_fea::solve::dynamics::StructuralLinearFieldQuantity::Stress)
         .is_some());
 }
