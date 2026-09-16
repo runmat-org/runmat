@@ -77,8 +77,15 @@ struct DurableControl {
     run_key: RunKeyMaterial,
     resources: ResourceRequest,
     workers: BTreeMap<u64, DriverWorkerAllocation>,
+    interruption: ReplacementInterruption,
     state: Mutex<DurableState>,
     recovery_committed: tokio::sync::Notify,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ReplacementInterruption {
+    RecoveryClosure,
+    ReplayableExecutionStart,
 }
 
 #[async_trait]
@@ -166,20 +173,24 @@ impl DriverControlPlane for DurableControl {
             return Err(runmat_execution_transport_native::TransportError::Integrity);
         }
         let kind = artifact_kind(artifact.kind);
-        let committed_recovery_checkpoint = artifact.checkpoint.is_some_and(|(_, disposition)| {
-            if disposition != CheckpointDisposition::ResumeSafe {
-                return false;
-            }
-            open_object(
-                &self.run_key,
-                artifact.ciphertext,
-                RUN_ID,
-                EncryptionPurpose::Checkpoint,
-            )
-            .ok()
-            .and_then(|bytes| RemoteDriverCheckpoint::from_canonical_bytes(&bytes).ok())
-            .is_some_and(|checkpoint| checkpoint.closure_catalog.is_some())
-        });
+        let committed_replacement_checkpoint =
+            artifact.checkpoint.is_some_and(|(_, disposition)| {
+                if disposition != CheckpointDisposition::ResumeSafe {
+                    return false;
+                }
+                open_object(
+                    &self.run_key,
+                    artifact.ciphertext,
+                    RUN_ID,
+                    EncryptionPurpose::Checkpoint,
+                )
+                .ok()
+                .and_then(|bytes| RemoteDriverCheckpoint::from_canonical_bytes(&bytes).ok())
+                .is_some_and(|checkpoint| {
+                    self.interruption == ReplacementInterruption::RecoveryClosure
+                        && checkpoint.closure_catalog.is_some()
+                })
+            });
         let (stored, interrupt_driver) = {
             let mut state = self.state.lock().unwrap();
             state.next_artifact += 1;
@@ -195,7 +206,7 @@ impl DriverControlPlane for DurableControl {
                 state.latest_checkpoint = Some(artifact_id.clone());
             }
             let interrupt_driver = authority.fencing_token == 1
-                && committed_recovery_checkpoint
+                && committed_replacement_checkpoint
                 && !state.driver_interrupted_at_commit;
             if interrupt_driver {
                 state.driver_interrupted_at_commit = true;
@@ -280,34 +291,61 @@ impl DriverControlPlane for DurableControl {
         {
             return Err(runmat_execution_transport_native::TransportError::Integrity);
         }
-        self.state
-            .lock()
-            .unwrap()
-            .worker_authorizations
-            .push((authority.fencing_token, allocation_lease_id.into()));
+        let interrupt_driver = {
+            let mut state = self.state.lock().unwrap();
+            state
+                .worker_authorizations
+                .push((authority.fencing_token, allocation_lease_id.into()));
+            let interrupt_driver = self.interruption
+                == ReplacementInterruption::ReplayableExecutionStart
+                && authority.fencing_token == 1
+                && !state.driver_interrupted_at_commit;
+            if interrupt_driver {
+                state.driver_interrupted_at_commit = true;
+            }
+            interrupt_driver
+        };
+        if interrupt_driver {
+            self.recovery_committed.notify_waiters();
+            return std::future::pending().await;
+        }
         Ok(())
     }
 }
 
 #[test]
 fn actual_driver_restarts_from_server_checkpoint_on_a_different_worker() {
+    run_actual_driver_replacement(ExactStudyFamily::StructuralTransient);
+}
+
+#[test]
+fn response_spectrum_driver_replacement_replays_on_a_different_worker() {
+    run_actual_driver_replacement(ExactStudyFamily::ModalResponseSpectrum);
+}
+
+#[test]
+fn random_response_driver_replacement_replays_on_a_different_worker() {
+    run_actual_driver_replacement(ExactStudyFamily::ModalRandomResponse);
+}
+
+fn run_actual_driver_replacement(family: ExactStudyFamily) {
     std::thread::Builder::new()
-        .name("actual-driver-replacement".into())
+        .name(format!("actual-driver-replacement-{family:?}"))
         .stack_size(ACTUAL_DRIVER_TEST_STACK_BYTES)
-        .spawn(|| {
+        .spawn(move || {
             tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
                 .expect("actual-driver replacement runtime")
-                .block_on(actual_driver_replacement_case());
+                .block_on(actual_driver_replacement_case(family));
         })
         .expect("actual-driver replacement test thread")
         .join()
         .expect("actual-driver replacement test thread panicked");
 }
 
-async fn actual_driver_replacement_case() {
-    let fixture = exact_study_fixture();
+async fn actual_driver_replacement_case(family: ExactStudyFamily) {
+    let fixture = exact_study_fixture(family);
     let driver_material = driver_identity_material();
     let directory = tempfile::tempdir().unwrap();
     let identity_path = directory.path().join("driver-endpoint.json");
@@ -435,18 +473,51 @@ async fn actual_driver_replacement_case() {
         ObjectInventoryLimits::default(),
     )
     .unwrap();
-    let ExactStructuralStudyAnalysisResult::StructuralTransient {
-        result,
-        numerical_receipt,
-        ..
-    } = imported.analysis
-    else {
-        panic!("replacement returned the wrong structural study family")
-    };
-    assert_eq!(result.samples().len(), 3);
-    assert_eq!(numerical_receipt.blocks.len(), 2);
-    assert_eq!(result.samples().last().unwrap().schedule_ordinal, 2);
-    numerical_receipt.validate_for_result(&result).unwrap();
+    assert_replacement_result(family, imported.analysis);
+}
+
+fn assert_replacement_result(
+    family: ExactStudyFamily,
+    analysis: ExactStructuralStudyAnalysisResult,
+) {
+    match (family, analysis) {
+        (
+            ExactStudyFamily::StructuralTransient,
+            ExactStructuralStudyAnalysisResult::StructuralTransient {
+                result,
+                numerical_receipt,
+                ..
+            },
+        ) => {
+            assert_eq!(result.samples().len(), 3);
+            assert_eq!(numerical_receipt.blocks.len(), 2);
+            assert_eq!(result.samples().last().unwrap().schedule_ordinal, 2);
+            numerical_receipt.validate_for_result(&result).unwrap();
+        }
+        (
+            ExactStudyFamily::ModalResponseSpectrum,
+            ExactStructuralStudyAnalysisResult::StructuralModalResponseSpectrum(result),
+        ) => result
+            .response_numerical_receipt
+            .validate_against(
+                result.response_numerical_receipt.source_result(),
+                &result.response_result,
+            )
+            .unwrap(),
+        (
+            ExactStudyFamily::ModalRandomResponse,
+            ExactStructuralStudyAnalysisResult::StructuralRandomResponse(result),
+        ) => result
+            .response_numerical_receipt
+            .validate_against(
+                result.response_numerical_receipt.source_result(),
+                &result.response_result,
+            )
+            .unwrap(),
+        (expected, actual) => panic!(
+            "replacement returned the wrong structural study family: expected {expected:?}, got {actual:?}"
+        ),
+    }
 }
 
 #[path = "driver_replacement_tests/fixture.rs"]

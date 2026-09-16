@@ -7,7 +7,44 @@ pub(super) struct ExactStudyFixture {
     pub(super) expectation: crate::ExactStructuralStudyResultExpectation,
 }
 
-pub(super) fn exact_study_fixture() -> ExactStudyFixture {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum ExactStudyFamily {
+    StructuralTransient,
+    ModalResponseSpectrum,
+    ModalRandomResponse,
+}
+
+impl ExactStudyFamily {
+    pub(super) const fn authored_digest_label(self) -> &'static [u8] {
+        match self {
+            Self::StructuralTransient => b"driver replacement direct transient",
+            Self::ModalResponseSpectrum => b"driver replacement modal response spectrum",
+            Self::ModalRandomResponse => b"driver replacement modal random response",
+        }
+    }
+
+    pub(super) const fn interruption(self) -> ReplacementInterruption {
+        match self {
+            Self::StructuralTransient => ReplacementInterruption::RecoveryClosure,
+            Self::ModalResponseSpectrum | Self::ModalRandomResponse => {
+                ReplacementInterruption::ReplayableExecutionStart
+            }
+        }
+    }
+
+    fn workloads(self) -> StructuralStudyWorkloads {
+        match self {
+            Self::StructuralTransient => StructuralStudyWorkloads::StructuralTransient {
+                workload: Box::new(box_direct_transient_workload()),
+                block_plan: StructuralTransientBlockPlan::new(1).unwrap(),
+            },
+            Self::ModalResponseSpectrum => crate::exact_structural_sweep_root::conformance_tests::box_modal_response_spectrum_workloads(),
+            Self::ModalRandomResponse => crate::exact_structural_sweep_root::conformance_tests::box_random_response_workloads(),
+        }
+    }
+}
+
+pub(super) fn exact_study_fixture(family: ExactStudyFamily) -> ExactStudyFixture {
     let project_root = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(project_root.path().join("src")).unwrap();
     std::fs::write(
@@ -48,13 +85,10 @@ pub(super) fn exact_study_fixture() -> ExactStudyFixture {
     let prepared = prepare_exact_structural_study_root(ExactStructuralStudyRootPreparation {
         program_revision: revision.clone(),
         artifact_access: access,
-        authored_study_digest: Digest::sha256(b"driver replacement direct transient"),
+        authored_study_digest: Digest::sha256(family.authored_digest_label()),
         frozen_project_digest: Some(Digest::from_bytes(*project_identity.graph_digest.bytes())),
         geometry_source_digest: Digest::sha256(BOX),
-        workloads: StructuralStudyWorkloads::StructuralTransient {
-            workload: Box::new(box_direct_transient_workload()),
-            block_plan: StructuralTransientBlockPlan::new(1).unwrap(),
-        },
+        workloads: family.workloads(),
         analysis_accelerator_requests: Vec::new(),
         signal_materializations: Vec::new(),
         exact_meshing,
@@ -162,6 +196,7 @@ pub(super) fn exact_study_fixture() -> ExactStudyFixture {
             run_key: run_key.clone(),
             resources,
             workers,
+            interruption: family.interruption(),
             state: Mutex::new(DurableState {
                 artifacts,
                 initial_artifacts,

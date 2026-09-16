@@ -379,6 +379,14 @@ the checkpointed sample chunks and produces the ordinary canonical history, so u
 restarted attempts have the same scientific identity and result while preserving distinct execution
 lineage.
 
+Not every replacement is a physical restart. Modal response-spectrum directions and random-response
+frequency intervals are immutable, independent tasks followed by a deterministic fan-in. If their
+driver is lost, the replacement driver may replay the same closed, explicitly idempotent study from
+its execution-start checkpoint: logical workload and result identities remain fixed, while worker
+and attempt lineage remain execution evidence. Direct and modal transient continuation instead
+resumes from a complete integrator-state checkpoint. RunMat does not relabel whole-study replay as
+transient-state restart or manufacture a procedure checkpoint for a stateless fan-out.
+
 ## Diagnostics and Monitors
 
 Diagnostics use `fea.Observation.diagnostic(id, kind, sampling, retention)`. Typed kinds cover

@@ -43,4 +43,4 @@ fn protocol(error: impl std::fmt::Display) -> crate::NativeExecutionError {
 mod tests;
 
 #[cfg(all(test, feature = "occt-native"))]
-mod conformance_tests;
+pub(crate) mod conformance_tests;

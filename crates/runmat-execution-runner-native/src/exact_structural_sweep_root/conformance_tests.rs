@@ -1372,7 +1372,8 @@ fn box_modal_transient_workloads() -> runmat_analysis_execution::StructuralStudy
     }
 }
 
-fn box_modal_response_spectrum_workloads() -> runmat_analysis_execution::StructuralStudyWorkloads {
+pub(crate) fn box_modal_response_spectrum_workloads(
+) -> runmat_analysis_execution::StructuralStudyWorkloads {
     let mut model = box_structural_workload().model;
     let mut modal_step = ProcedureStep::structural_modal("modes");
     modal_step.independent_domain = IndependentDomain::Eigenvalue {
@@ -1467,7 +1468,8 @@ fn box_modal_response_spectrum_workloads() -> runmat_analysis_execution::Structu
     }
 }
 
-fn box_random_response_workloads() -> runmat_analysis_execution::StructuralStudyWorkloads {
+pub(crate) fn box_random_response_workloads() -> runmat_analysis_execution::StructuralStudyWorkloads
+{
     let mut model = box_structural_workload().model;
     let mut modal_step = ProcedureStep::structural_modal("modes");
     modal_step.independent_domain = IndependentDomain::Eigenvalue { requested_count: 3 };
