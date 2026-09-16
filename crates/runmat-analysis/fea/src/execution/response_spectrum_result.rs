@@ -319,7 +319,7 @@ impl TryFrom<StructuralModalResponseSpectrumNumericalReceiptWire>
             minimum_achieved_mass_ratio: wire.minimum_achieved_mass_ratio,
             maximum_response_magnitude: wire.maximum_response_magnitude,
         };
-        receipt.validate()?;
+        receipt.validate_source()?;
         Ok(receipt)
     }
 }
@@ -362,7 +362,7 @@ impl StructuralModalResponseSpectrumNumericalReceipt {
                 .fold(0.0_f64, f64::max),
         };
         receipt.identity = receipt.derive_identity()?;
-        receipt.validate()?;
+        receipt.validate_source()?;
         Ok(receipt)
     }
 
@@ -371,6 +371,14 @@ impl StructuralModalResponseSpectrumNumericalReceipt {
     }
     pub const fn source_result(&self) -> SolverResultIdentity {
         self.source_result
+    }
+
+    pub const fn source_workload(&self) -> AnalysisWorkloadIdentity {
+        self.source_workload
+    }
+
+    pub const fn minimum_achieved_mass_ratio(&self) -> f64 {
+        self.minimum_achieved_mass_ratio
     }
 
     pub fn validate_against(
@@ -388,7 +396,7 @@ impl StructuralModalResponseSpectrumNumericalReceipt {
     }
 
     pub fn canonical_bytes(&self) -> AnalysisExecutionResult<Vec<u8>> {
-        self.validate()?;
+        self.validate_source()?;
         Ok(encode_contract(
             RESULT_PREFIX,
             "structural-modal-response-spectrum-receipt",
@@ -406,7 +414,7 @@ impl StructuralModalResponseSpectrumNumericalReceipt {
         )?)
     }
 
-    fn validate(&self) -> AnalysisExecutionResult<()> {
+    pub fn validate_source(&self) -> AnalysisExecutionResult<()> {
         if self.schema_version != 1
             || self.spectrum_count == 0
             || !self.minimum_achieved_mass_ratio.is_finite()

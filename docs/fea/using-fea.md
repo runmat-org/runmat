@@ -477,6 +477,22 @@ model = fea.model("launch_model", geom, ...
     "ResponseSpectra", {launchSpectrum});
 ```
 
+Modal response spectrum is a two-step study. Modal extraction publishes the exact mass-normalized
+basis; the response-spectrum step consumes that state and names one or more spectrum ids in its
+independent domain. The dependency and state transition are explicit, so a spectrum cannot be
+silently left unused or paired with an unrelated basis. Direction solves may run on separate
+workers, while canonical fan-in always follows authored direction order. The terminal result
+retains participation and effective mass by mode, captured-mass evidence, combination and
+correction policy, the component-magnitude envelope, and its accuracy artifact.
+
+The complete runnable study is
+[`modal-response-spectrum-experimental.fea`](examples/modal-response-spectrum-experimental.fea):
+
+```sh
+runmat check docs/fea/examples/modal-response-spectrum-experimental.fea
+runmat run docs/fea/examples/modal-response-spectrum-experimental.fea
+```
+
 ### Random vibration from cross-power spectra
 
 Random response is a two-step structural study: modal extraction publishes a mass-normalized modal

@@ -25,6 +25,7 @@ use crate::analysis::{
     ANALYSIS_RUN_STUDY_OP_VERSION,
 };
 
+mod accuracy_completion;
 mod buckling_completion;
 mod modal_completion;
 mod preparation;

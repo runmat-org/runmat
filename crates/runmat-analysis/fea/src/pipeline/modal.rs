@@ -104,8 +104,13 @@ fn execute_structural_modal_workload_with_state(
             ))
         }
     };
+    let procedure_step = workload
+        .procedure_step()
+        .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
+    let active_model =
+        super::activation::model_with_active_constraints(workload.model(), procedure_step);
     let modal = execute_modal_core(
-        workload.model(),
+        &active_model,
         workload.backend(),
         ModalSolveOptions {
             formulation_requirement: workload.formulation_requirement(),
@@ -114,10 +119,7 @@ fn execute_structural_modal_workload_with_state(
             residual_vector_directions: workload.residual_vector_directions().to_vec(),
             solver_mesh: Some(solver_mesh.clone()),
         },
-        workload
-            .procedure_step()
-            .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?
-            .procedure,
+        procedure_step.procedure,
         linearization,
     )?;
     StructuralModalSolverResult::new(workload, topology_digest, modal.run, modal.basis)

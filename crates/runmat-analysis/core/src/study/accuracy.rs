@@ -32,6 +32,7 @@ pub struct AccuracyCriterion {
 pub enum AccuracyTarget {
     Observation(ObservationId),
     Quantity(ObservationQuantity),
+    NumericalResult,
     GlobalEquilibrium,
     InterfaceClosure,
     ExecutionEquivalence,
@@ -140,5 +141,32 @@ impl AccuracyPlan {
                 maximum_resident_bytes: 8 * 1024 * 1024 * 1024,
             },
         }
+    }
+
+    pub fn modal_response_spectrum(id: impl Into<String>) -> Self {
+        let mut plan = Self::experimental_baseline(id);
+        plan.criteria = vec![AccuracyCriterion {
+            criterion_id: "modal_mass_capture".into(),
+            target: AccuracyTarget::NumericalResult,
+            contribution: ErrorContributionKind::ModalTruncation,
+            tolerance: AccuracyTolerance::Relative(0.1),
+            evidence: RequiredAccuracyEvidence::ConvergenceStudy,
+            mandatory: true,
+        }];
+        plan
+    }
+
+    pub fn random_response(id: impl Into<String>) -> Self {
+        let mut plan = Self::experimental_baseline(id);
+        plan.criteria = vec![AccuracyCriterion {
+            criterion_id: "frequency_quadrature".into(),
+            target: AccuracyTarget::NumericalResult,
+            contribution: ErrorContributionKind::FrequencySampling,
+            tolerance: AccuracyTolerance::Relative(1.0e-5),
+            evidence: RequiredAccuracyEvidence::ConvergenceStudy,
+            mandatory: true,
+        }];
+        plan.resources.maximum_refinement_cycles = 14;
+        plan
     }
 }

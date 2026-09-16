@@ -6,6 +6,8 @@ mod recovery;
 mod validation;
 
 #[cfg(test)]
+mod qualification;
+#[cfg(test)]
 mod tests;
 
 use std::collections::BTreeSet;

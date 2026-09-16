@@ -1241,6 +1241,48 @@ mod tests {
     }
 
     #[test]
+    fn response_spectrum_example_consumes_its_authored_spectrum() {
+        let path = documentation_example_path("modal-response-spectrum-experimental.fea");
+        let FeaResolvedDocument::Study(study) =
+            pollster::block_on(load_fea_document_from_path_async(&path)).unwrap()
+        else {
+            panic!("{} must contain a study", path.display());
+        };
+        let model = study.model.as_ref().unwrap();
+        assert_eq!(model.sequence.steps.len(), 2);
+        assert_eq!(study.execution.steps.len(), 2);
+        assert_eq!(
+            model
+                .sequence
+                .steps
+                .iter()
+                .map(|step| step.procedure)
+                .collect::<Vec<_>>(),
+            vec![
+                runmat_analysis_core::AnalysisProcedure::ModalExtraction,
+                runmat_analysis_core::AnalysisProcedure::ModalResponseSpectrum,
+            ]
+        );
+        let response = &model.sequence.steps[1];
+        assert!(matches!(
+            &response.independent_domain,
+            runmat_analysis_core::IndependentDomain::ResponseSpectra { spectrum_ids }
+                if spectrum_ids == &[runmat_analysis_core::ResponseSpectrumId("design_spectrum".into())]
+        ));
+        assert_eq!(response.state_inputs.len(), 1);
+        assert_eq!(
+            response.state_inputs[0].required_kind,
+            runmat_analysis_core::StateKind::ModalBasis
+        );
+        assert_eq!(
+            response.state_outputs[0].kind,
+            runmat_analysis_core::StateKind::StructuralResponseEnvelope
+        );
+        assert_eq!(model.sequence.dependencies.len(), 1);
+        assert_eq!(model.sequence.transitions.len(), 1);
+    }
+
+    #[test]
     fn documentation_examples_expose_formulation_requirement_truth() {
         let experimental_names = vec![
             "structural-static-experimental.fea",

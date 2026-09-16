@@ -101,6 +101,18 @@ pub(crate) fn validate_accuracy(step: &ProcedureStep) -> Result<(), AnalysisVali
             AccuracyTolerance::Relative(_) => {}
         }
 
+        if criterion.target == AccuracyTarget::NumericalResult
+            && !matches!(criterion.tolerance, AccuracyTolerance::Relative(_))
+        {
+            return accuracy_error(
+                plan,
+                format!(
+                    "criterion `{}` targets a whole numerical result and requires a dimensionless relative tolerance",
+                    criterion.criterion_id
+                ),
+            );
+        }
+
         validate_target_contribution(plan, criterion)?;
         validate_evidence(plan, criterion)?;
     }
@@ -133,6 +145,11 @@ fn validate_target_contribution(
             ErrorContributionKind::Coupling
                 | ErrorContributionKind::InterfaceProjection
                 | ErrorContributionKind::FieldTransfer
+        ),
+        AccuracyTarget::NumericalResult => !matches!(
+            criterion.contribution,
+            ErrorContributionKind::ObservationSampling
+                | ErrorContributionKind::ExecutionEquivalence
         ),
         AccuracyTarget::Observation(_) | AccuracyTarget::Quantity(_) => !matches!(
             criterion.contribution,

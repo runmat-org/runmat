@@ -2,9 +2,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_analysis_core::{StateKind, StateUse};
 use runmat_analysis_fea::execution::{
-    SemanticStatePublicationSource, StructuralModalResponseSpectrumTemplate,
-    StructuralModalResponseSpectrumWorkload, StructuralModalWorkload, StructuralStepWorkload,
-    StructuralStudyWorkloads,
+    AccuracySourceKind, SemanticStatePublicationSource, SequenceIdentity,
+    StructuralModalResponseSpectrumTemplate, StructuralModalResponseSpectrumWorkload,
+    StructuralModalWorkload, StructuralStepWorkload, StructuralStudyWorkloads,
 };
 use runmat_execution::{resource::AcceleratorRequest, Digest, ProgramRevision};
 use runmat_execution_artifact::{
@@ -13,17 +13,20 @@ use runmat_execution_artifact::{
 use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
 
 use crate::{
-    bind_upstream_state_transition, import_semantic_state_completion,
+    bind_upstream_state_transition, import_semantic_state_completion, import_structural_accuracy,
     import_structural_modal_response_spectrum_direction,
     import_structural_modal_response_spectrum_result, import_structural_modal_result,
-    prepare_semantic_state_publication, prepare_structural_modal_response_spectrum_assembly,
+    prepare_semantic_state_publication, prepare_structural_accuracy,
+    prepare_structural_modal_response_spectrum_assembly,
     prepare_structural_modal_response_spectrum_fanout, prepare_structural_modal_task,
-    AnalysisBridgeError, AnalysisBridgeResult, AnalysisCapabilityRequirement,
+    AnalysisBridgeError, AnalysisBridgeResult, AnalysisCapabilityRequirement, ImportedAccuracy,
     ImportedSemanticState, ImportedStructuralModalResponseSpectrumDirection,
     ImportedStructuralModalResponseSpectrumResult, ImportedStructuralModalResult,
-    PreparedSemanticStatePublication, PreparedStructuralModalResponseSpectrumAssemblyTask,
+    PreparedSemanticStatePublication, PreparedStructuralAccuracy,
+    PreparedStructuralModalResponseSpectrumAssemblyTask,
     PreparedStructuralModalResponseSpectrumDirectionTask, PreparedStructuralModalTask,
-    SemanticStatePublicationPreparation, StructuralModalResponseSpectrumAssemblyPreparation,
+    SemanticStatePublicationPreparation, StructuralAccuracyPreparation,
+    StructuralModalResponseSpectrumAssemblyPreparation,
     StructuralModalResponseSpectrumFanoutPreparation, StructuralModalTaskPreparation,
 };
 
@@ -50,6 +53,8 @@ enum StudyPhase {
     AwaitingDirections(BTreeSet<Digest>),
     ReadyForAssembly,
     AwaitingAssembly(Digest),
+    ReadyForAccuracy,
+    AwaitingAccuracy(Digest),
     ReadyForEnvelopeState,
     AwaitingEnvelopeState(Digest),
     Complete,
@@ -66,6 +71,7 @@ pub struct StructuralModalResponseSpectrumStudyCoordinator {
     directions: Vec<ImportedStructuralModalResponseSpectrumDirection>,
     assembly_host: Option<crate::AnalysisHostWorkload>,
     result: Option<ImportedStructuralModalResponseSpectrumResult>,
+    accuracy: Option<ImportedAccuracy>,
     envelope_state: Option<ImportedSemanticState>,
     phase: StudyPhase,
 }
@@ -126,6 +132,7 @@ impl StructuralModalResponseSpectrumStudyCoordinator {
             directions: Vec::new(),
             assembly_host: None,
             result: None,
+            accuracy: None,
             envelope_state: None,
             phase: StudyPhase::ReadyForModal,
         })
@@ -364,6 +371,65 @@ impl StructuralModalResponseSpectrumStudyCoordinator {
             self.preparation.inventory_limits,
         )?);
         self.assembly_host = Some(task.host.clone());
+        self.phase = StudyPhase::ReadyForAccuracy;
+        Ok(())
+    }
+
+    pub fn prepare_accuracy(&mut self) -> AnalysisBridgeResult<PreparedStructuralAccuracy> {
+        if self.phase != StudyPhase::ReadyForAccuracy {
+            return Err(invalid(
+                "response-spectrum study is not ready for accuracy evaluation",
+            ));
+        }
+        let workload = self
+            .response_workload
+            .as_ref()
+            .ok_or_else(|| invalid("bound response-spectrum workload is absent"))?;
+        let result = self
+            .result
+            .as_ref()
+            .ok_or_else(|| invalid("completed response-spectrum result is absent"))?;
+        let task = prepare_structural_accuracy(StructuralAccuracyPreparation {
+            solve_host: self
+                .assembly_host
+                .as_ref()
+                .ok_or_else(|| invalid("response-spectrum assembly host is absent"))?
+                .clone(),
+            source_kind: AccuracySourceKind::StructuralModalResponseSpectrum,
+            source_numerical_receipt: result.receipt_objects.clone(),
+            source_observations: None,
+            sequence: SequenceIdentity::from_solver_contract(&workload.model().sequence)?,
+            step: workload.procedure_step()?.clone(),
+            formulation_requirement: workload.formulation_requirement(),
+            program_revision: self.preparation.program_revision.clone(),
+            chunk_bytes: self.preparation.chunk_bytes,
+            inventory_limits: self.preparation.inventory_limits,
+        })?;
+        self.phase = StudyPhase::AwaitingAccuracy(task.host.workload.identity.digest());
+        Ok(task)
+    }
+
+    pub fn complete_accuracy(
+        &mut self,
+        source: &impl CacheImport,
+        response: ProgramExecutionResponse,
+        task: &PreparedStructuralAccuracy,
+    ) -> AnalysisBridgeResult<()> {
+        if self.phase != StudyPhase::AwaitingAccuracy(task.host.workload.identity.digest()) {
+            return Err(AnalysisBridgeError::Identity(
+                "response-spectrum accuracy differs from the awaited evaluation",
+            ));
+        }
+        let accuracy =
+            import_structural_accuracy(source, response, task, self.preparation.inventory_limits)?;
+        if accuracy.artifact.gate().decision
+            != runmat_analysis_fea::results::accuracy::PublicationDecision::Allow
+        {
+            return Err(invalid(
+                "response-spectrum accuracy gate blocks semantic-state publication",
+            ));
+        }
+        self.accuracy = Some(accuracy);
         self.phase = StudyPhase::ReadyForEnvelopeState;
         Ok(())
     }
@@ -452,6 +518,10 @@ impl StructuralModalResponseSpectrumStudyCoordinator {
 
     pub fn envelope_state(&self) -> Option<&ImportedSemanticState> {
         self.envelope_state.as_ref()
+    }
+
+    pub fn accuracy(&self) -> Option<&ImportedAccuracy> {
+        self.accuracy.as_ref()
     }
 }
 

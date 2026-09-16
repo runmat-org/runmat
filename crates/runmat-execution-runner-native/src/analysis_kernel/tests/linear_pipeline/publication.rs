@@ -1,10 +1,12 @@
 use super::*;
+use runmat_analysis_fea::execution::AccuracySourceKind;
 
 pub(super) fn execute(solved: &SolvedPipeline, observations: &ObservationArtifactManifest) {
     let host = &solved.prepared.host;
     let step = host.workload.step;
     let accuracy_request = AccuracyEvaluationRequest::new(
         step,
+        AccuracySourceKind::StructuralLinear,
         solved.source_result,
         Some(observations),
         solved.solve.formulation_requirement,

@@ -295,6 +295,7 @@ pub struct AccuracyArtifact {
     identity: AccuracyArtifactIdentity,
     pub evaluation_request: AccuracyEvaluationRequestIdentity,
     pub producer: StepIdentity,
+    pub source_kind: crate::execution::AccuracySourceKind,
     pub source_result: SolverResultIdentity,
     pub source_observations: Option<ObservationArtifactIdentity>,
     pub formulation_requirement: FormulationRequirement,
@@ -310,6 +311,7 @@ struct AccuracyArtifactWire {
     identity: AccuracyArtifactIdentity,
     evaluation_request: AccuracyEvaluationRequestIdentity,
     producer: StepIdentity,
+    source_kind: crate::execution::AccuracySourceKind,
     source_result: SolverResultIdentity,
     source_observations: Option<ObservationArtifactIdentity>,
     formulation_requirement: FormulationRequirement,
@@ -327,6 +329,7 @@ impl TryFrom<AccuracyArtifactWire> for AccuracyArtifact {
             identity: wire.identity,
             evaluation_request: wire.evaluation_request,
             producer: wire.producer,
+            source_kind: wire.source_kind,
             source_result: wire.source_result,
             source_observations: wire.source_observations,
             formulation_requirement: wire.formulation_requirement,
@@ -342,6 +345,7 @@ impl TryFrom<AccuracyArtifactWire> for AccuracyArtifact {
 pub struct AccuracyArtifactInput {
     pub evaluation_request: AccuracyEvaluationRequestIdentity,
     pub producer: StepIdentity,
+    pub source_kind: crate::execution::AccuracySourceKind,
     pub source_result: SolverResultIdentity,
     pub source_observations: Option<ObservationArtifactIdentity>,
     pub formulation_requirement: FormulationRequirement,
@@ -357,6 +361,7 @@ impl AccuracyArtifact {
             identity: AccuracyArtifactIdentity(Digest::sha256([])),
             evaluation_request: input.evaluation_request,
             producer: input.producer,
+            source_kind: input.source_kind,
             source_result: input.source_result,
             source_observations: input.source_observations,
             formulation_requirement: input.formulation_requirement,
@@ -437,6 +442,7 @@ impl AccuracyArtifact {
                 self.schema_version,
                 self.evaluation_request,
                 self.producer,
+                self.source_kind,
                 self.source_result,
                 self.source_observations,
                 self.formulation_requirement,
@@ -450,6 +456,29 @@ impl AccuracyArtifact {
         .map(AccuracyArtifactIdentity)
         .map_err(|error| AccuracyEvaluationError::IdentityEncoding(error.to_string()))
     }
+}
+
+/// Evaluate one admitted request and package its exact evidence into the canonical artifact.
+///
+/// Family implementations own evidence construction; this function remains the single authority
+/// for plan evaluation and publication admission.
+pub fn evaluate_accuracy_artifact(
+    request: &crate::execution::AccuracyEvaluationRequest,
+    evidence: Vec<AccuracyEvidence>,
+) -> Result<AccuracyArtifact, AccuracyEvaluationError> {
+    let evaluation = evaluate_accuracy(&request.plan, &evidence)?;
+    let gate = publication_gate(&request.plan, request.formulation_requirement, &evaluation)?;
+    AccuracyArtifact::new(AccuracyArtifactInput {
+        evaluation_request: request.identity(),
+        producer: request.producer,
+        source_kind: request.source_kind,
+        source_result: request.source_result,
+        source_observations: request.source_observations,
+        formulation_requirement: request.formulation_requirement,
+        evidence,
+        evaluation,
+        gate,
+    })
 }
 
 #[derive(Debug, Error, Clone, PartialEq)]
@@ -795,6 +824,7 @@ mod tests {
                 .unwrap();
         let request = crate::execution::AccuracyEvaluationRequest::new(
             producer,
+            crate::execution::AccuracySourceKind::StructuralLinear,
             source_result,
             None,
             FormulationRequirement::Production,
@@ -804,6 +834,7 @@ mod tests {
         let artifact = AccuracyArtifact::new(AccuracyArtifactInput {
             evaluation_request: request.identity(),
             producer,
+            source_kind: request.source_kind,
             source_result,
             source_observations: None,
             formulation_requirement: FormulationRequirement::Production,

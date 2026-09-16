@@ -400,11 +400,15 @@ fn validate_modal_step<'a>(
             "structural modal extraction must declare exactly one modal-basis output".into(),
         ));
     };
+    if requested_count != truncation.requested_mode_count() {
+        return Err(AnalysisExecutionError::Invalid(format!(
+            "structural modal step requests {requested_count} modes but its solver policy requests {}",
+            truncation.requested_mode_count()
+        )));
+    }
     if step.family != PhysicsFamily::Structural
         || step.solution_space != SolutionSpace::Direct
-        || !step.activations.is_empty()
         || step.restart != RestartPolicy::Fresh
-        || requested_count != truncation.requested_mode_count()
         || output.kind != StateKind::ModalBasis
         || output.completeness != StateCompleteness::Complete
         || output.persistence == StatePersistence::CheckpointOnly

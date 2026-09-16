@@ -1,6 +1,4 @@
-use runmat_analysis_core::{
-    AccuracyTarget, ErrorContributionKind, RequiredAccuracyEvidence, StateKind,
-};
+use runmat_analysis_core::StateKind;
 use runmat_analysis_execution::{
     decode_prepared_observation_history_checkpoint, decode_prepared_semantic_state,
     decode_prepared_structural_buckling_workload,
@@ -75,10 +73,7 @@ use runmat_analysis_fea::post::fields::{
     structural_observable_field_definitions, take_structural_observable_fields,
 };
 use runmat_analysis_fea::post::recover_constraint_group_observable_fields;
-use runmat_analysis_fea::results::accuracy::{
-    evaluate_accuracy, publication_gate, AccuracyArtifact, AccuracyArtifactInput, AccuracyEvidence,
-    AccuracyEvidenceScope, AccuracyMeasure,
-};
+use runmat_analysis_fea::results::accuracy::AccuracyArtifact;
 use runmat_analysis_fea::results::field::{
     canonical_field_partitions, RecoveredFieldArtifact, RecoveredFieldPartitionSet,
     StructuralRecoveredFieldTopology,
@@ -524,53 +519,22 @@ fn execute_accuracy_evaluation(
             ));
         }
     }
-    let numerical_receipt = StructuralLinearNumericalReceiptArtifact::from_canonical_bytes(
-        &numerical_receipt.payload(),
-    )?;
+    let numerical_receipt =
+        runmat_analysis_fea::execution::AccuracySourceReceipt::from_canonical_bytes(
+            request.source_kind,
+            &numerical_receipt.payload(),
+        )?;
     if numerical_receipt.identity().digest() != receipt_manifest_identity
-        || numerical_receipt.source_result != request.source_result
+        || numerical_receipt.source_result() != request.source_result
     {
         return Err(AnalysisBridgeError::Identity(
             "accuracy numerical receipt differs from its admitted source result",
         ));
     }
-    let evidence = if request.plan.criteria.iter().any(|criterion| {
-        criterion.target == AccuracyTarget::GlobalEquilibrium
-            && criterion.contribution == ErrorContributionKind::Algebraic
-            && criterion.evidence == RequiredAccuracyEvidence::ResidualBound
-    }) {
-        vec![AccuracyEvidence::new(
-            AccuracyTarget::GlobalEquilibrium,
-            ErrorContributionKind::Algebraic,
-            RequiredAccuracyEvidence::ResidualBound,
-            AccuracyMeasure::Relative(
-                numerical_receipt.receipt().relative_equilibrium_residual,
-            ),
-            vec![
-                "canonical unconstrained equilibrium residual projected into the admissible constraint space"
-                    .into(),
-            ],
-            AccuracyEvidenceScope::SolverResult(request.source_result),
-        )
-        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?]
-    } else {
-        Vec::new()
-    };
-    let evaluation = evaluate_accuracy(&request.plan, &evidence)
-        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    let gate = publication_gate(&request.plan, request.formulation_requirement, &evaluation)
-        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    let artifact = AccuracyArtifact::new(AccuracyArtifactInput {
-        evaluation_request: request.identity(),
-        producer: request.producer,
-        source_result: request.source_result,
-        source_observations: request.source_observations,
-        formulation_requirement: request.formulation_requirement,
-        evidence,
-        evaluation,
-        gate,
-    })
-    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let evidence = numerical_receipt.evidence(&request)?;
+    let artifact =
+        runmat_analysis_fea::results::accuracy::evaluate_accuracy_artifact(&request, evidence)
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     Ok(vec![AnalysisKernelOutput {
         kind: AnalysisNumericalObjectKind::AccuracyReport,
         logical_identity: artifact.identity().digest(),

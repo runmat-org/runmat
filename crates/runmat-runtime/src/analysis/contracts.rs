@@ -452,6 +452,8 @@ pub enum QualityReasonCode {
     ThermoMechanicalNonlinearStress,
     ThermalResidualExceeded,
     ThermalConstitutiveSpreadHigh,
+    AccuracyEvidenceIndeterminate,
+    AccuracyLimitExceeded,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -2780,6 +2782,7 @@ pub struct StructuralResponseSpectrumResultsData {
     pub numerical_receipt:
         runmat_analysis_fea::execution::StructuralModalResponseSpectrumNumericalReceipt,
     pub field_recovery: runmat_analysis_fea::solve::dynamics::ResponseSpectrumFieldRecovery,
+    pub accuracy: runmat_analysis_fea::results::accuracy::AccuracyArtifact,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -2787,6 +2790,7 @@ pub struct StructuralResponseSpectrumResultsData {
 pub struct StructuralRandomResponseResultsData {
     pub result: runmat_analysis_fea::execution::StructuralRandomResponseSolverResult,
     pub numerical_receipt: runmat_analysis_fea::execution::StructuralRandomResponseNumericalReceipt,
+    pub accuracy: runmat_analysis_fea::results::accuracy::AccuracyArtifact,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

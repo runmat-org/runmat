@@ -402,9 +402,12 @@ or solver state.
 ## Accuracy Plans
 
 An accuracy criterion has one target, error contribution, tolerance, required evidence, and
-mandatory flag. Targets may name an observation, a quantity, global equilibrium, interface
-closure, or execution equivalence. Relative tolerances are dimensionless; absolute tolerances pair
-a typed quantity with a canonical-unit value.
+mandatory flag. Targets may name an observation, a quantity, the complete numerical result,
+global equilibrium, interface closure, or execution equivalence. The numerical-result target is
+for whole-result evidence such as modal mass capture or a quadrature convergence bound; it does
+not relabel those measures as equilibrium residuals for one physical quantity. Relative
+tolerances are dimensionless; absolute tolerances pair a typed quantity with a canonical-unit
+value.
 
 Error contributions remain separate: geometry admission, boundary approximation, spatial,
 algebraic, nonlinear, temporal, frequency-sampling, modal-truncation, stochastic, coupling,
@@ -420,6 +423,10 @@ sampling, or warn only for explicitly experimental work.
 `fea.AccuracyPlan.experimentalBaseline(id)` is intentionally non-production. It is useful while
 building or diagnosing a formulation, but cannot make an experimental formulation publishable.
 Numerical acceptance, formulation maturity, and publication status remain independent decisions.
+Response-spectrum and random-response steps evaluate their typed whole-result evidence at the
+portable execution boundary. A blocked accuracy gate prevents terminal semantic-state
+publication. Experimental indeterminate evidence appears as degraded only when the authored
+unavailable-evidence policy explicitly permits publication.
 
 ## Selection Is Not Rendering
 

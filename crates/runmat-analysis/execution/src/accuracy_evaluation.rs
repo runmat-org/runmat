@@ -2,8 +2,8 @@ use std::collections::BTreeSet;
 
 use runmat_analysis_core::ProcedureStep;
 use runmat_analysis_fea::execution::{
-    AccuracyEvaluationRequest, AnalysisNumericalObjectKind, AnalysisWorkKind, SequenceIdentity,
-    StepIdentity, StructuralLinearNumericalReceiptArtifact,
+    AccuracyEvaluationRequest, AccuracySourceKind, AccuracySourceReceipt,
+    AnalysisNumericalObjectKind, AnalysisWorkKind, SequenceIdentity, StepIdentity,
 };
 use runmat_analysis_fea::results::accuracy::{
     evaluate_accuracy, publication_gate, AccuracyArtifact,
@@ -24,6 +24,7 @@ use crate::{
 
 pub struct StructuralAccuracyPreparation {
     pub solve_host: AnalysisHostWorkload,
+    pub source_kind: AccuracySourceKind,
     pub source_numerical_receipt: PreparedAnalysisObjects,
     pub source_observations: Option<ImportedObservations>,
     pub sequence: SequenceIdentity,
@@ -51,13 +52,23 @@ pub fn prepare_structural_accuracy(
     preparation: StructuralAccuracyPreparation,
 ) -> AnalysisBridgeResult<PreparedStructuralAccuracy> {
     preparation.solve_host.validate()?;
-    if preparation.solve_host.workload.kind != AnalysisWorkKind::Solve
+    let expected_work_kind = match preparation.source_kind {
+        AccuracySourceKind::StructuralLinear => AnalysisWorkKind::Solve,
+        AccuracySourceKind::StructuralModalResponseSpectrum => {
+            AnalysisWorkKind::AssembleStructuralModalResponseSpectrumResult
+        }
+        AccuracySourceKind::StructuralRandomResponse => {
+            AnalysisWorkKind::AssembleStructuralRandomResponseResult
+        }
+    };
+    if preparation.solve_host.workload.kind != expected_work_kind
         || preparation.source_numerical_receipt.manifest.kind
             != AnalysisNumericalObjectKind::NumericalReceipt
         || preparation.chunk_bytes == 0
     {
         return Err(AnalysisBridgeError::Invalid(
-            "accuracy evaluation requires one completed solve and bounded chunks".into(),
+            "accuracy evaluation requires a matching completed numerical source and bounded chunks"
+                .into(),
         ));
     }
     let producer = StepIdentity::from_solver_contract(preparation.sequence, &preparation.step)?;
@@ -66,7 +77,8 @@ pub fn prepare_structural_accuracy(
             "accuracy procedure step differs from its solver workload",
         ));
     }
-    let numerical_receipt = StructuralLinearNumericalReceiptArtifact::from_canonical_bytes(
+    let numerical_receipt = AccuracySourceReceipt::from_canonical_bytes(
+        preparation.source_kind,
         &preparation.source_numerical_receipt.payload(),
     )?;
     if preparation
@@ -74,13 +86,20 @@ pub fn prepare_structural_accuracy(
         .manifest
         .logical_identity
         != numerical_receipt.identity().digest()
-        || numerical_receipt.source_workload != preparation.solve_host.workload.identity
+        || numerical_receipt.source_workload() != preparation.solve_host.workload.identity
     {
         return Err(AnalysisBridgeError::Identity(
             "accuracy numerical receipt differs from its canonical solve",
         ));
     }
-    let source_result = numerical_receipt.source_result;
+    let source_result = numerical_receipt.source_result();
+    if preparation.source_kind != AccuracySourceKind::StructuralLinear
+        && preparation.source_observations.is_some()
+    {
+        return Err(AnalysisBridgeError::Invalid(
+            "specialized dynamics accuracy does not yet admit observation artifacts".into(),
+        ));
+    }
     let observations = preparation
         .source_observations
         .as_ref()
@@ -107,6 +126,7 @@ pub fn prepare_structural_accuracy(
         .transpose()?;
     let request = AccuracyEvaluationRequest::new(
         producer,
+        preparation.source_kind,
         source_result,
         observations.as_ref(),
         preparation.formulation_requirement,
@@ -224,6 +244,7 @@ pub fn import_structural_accuracy(
     if artifact.identity().digest() != output.logical_identity
         || artifact.evaluation_request != prepared.request.identity()
         || artifact.producer != prepared.request.producer
+        || artifact.source_kind != prepared.request.source_kind
         || artifact.source_result != prepared.request.source_result
         || artifact.source_observations != prepared.request.source_observations
         || artifact.formulation_requirement != prepared.request.formulation_requirement

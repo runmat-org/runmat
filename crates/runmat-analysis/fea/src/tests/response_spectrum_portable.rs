@@ -11,9 +11,10 @@ use runmat_execution::Digest;
 
 use crate::{
     execution::{
-        AnalysisWorkloadIdentity, CanonicalSemanticState, CanonicalSemanticStateInput,
-        CanonicalSemanticStatePayload, CanonicalStateTransition, SequenceIdentity,
-        SolverResultIdentity, StepIdentity, StructuralModalResponseSpectrumAssemblyRequest,
+        AccuracySourceKind, AccuracySourceReceipt, AnalysisWorkloadIdentity,
+        CanonicalSemanticState, CanonicalSemanticStateInput, CanonicalSemanticStatePayload,
+        CanonicalStateTransition, SequenceIdentity, SolverResultIdentity, StepIdentity,
+        StructuralModalResponseSpectrumAssemblyRequest,
         StructuralModalResponseSpectrumDirectionRequest,
         StructuralModalResponseSpectrumNumericalReceipt,
         StructuralModalResponseSpectrumSolverResult, StructuralModalResponseSpectrumWorkload,
@@ -218,6 +219,20 @@ fn portable_direction_tasks_reassemble_in_authored_order_and_bind_receipt() {
     receipt
         .validate_against(receipt.source_result(), &result)
         .unwrap();
+    let receipt_bytes = receipt.canonical_bytes().unwrap();
+    assert!(matches!(
+        AccuracySourceReceipt::from_canonical_bytes(
+            AccuracySourceKind::StructuralModalResponseSpectrum,
+            &receipt_bytes,
+        )
+        .unwrap(),
+        AccuracySourceReceipt::StructuralModalResponseSpectrum(_)
+    ));
+    assert!(AccuracySourceReceipt::from_canonical_bytes(
+        AccuracySourceKind::StructuralRandomResponse,
+        &receipt_bytes,
+    )
+    .is_err());
 }
 
 fn prepared_inputs() -> PreparedInputResourceFacts {
@@ -259,7 +274,7 @@ fn spectrum(id: &str, direction: [f64; 3]) -> ResponseSpectrum {
         modal_combination: ModalCombination::AbsoluteSum,
         directional_combination: DirectionalCombination::Srss,
         truncation: SpectrumTruncationPolicy {
-            minimum_cumulative_mass_ratio: 0.0,
+            minimum_cumulative_mass_ratio: 0.9,
             correction: ModalTruncationCorrection::None,
         },
         rigid_response: RigidResponsePolicy::Disabled,

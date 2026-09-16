@@ -85,6 +85,41 @@ fn canonical_fea_documentation_examples_check_cleanly() {
 }
 
 #[test]
+fn response_spectrum_documentation_example_runs_its_two_step_study() {
+    let temp = TempDir::new().unwrap();
+    let path = "docs/fea/examples/modal-response-spectrum-experimental.fea";
+    let output = runmat_from_repository(&temp, &["run", path, "--json"]);
+    assert!(
+        output.status.success(),
+        "{path} failed run:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let payload: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(payload["study_id"], "modal_response_spectrum_experimental");
+    let steps = payload["steps"].as_array().expect("study steps");
+    assert_eq!(steps.len(), 2);
+    assert_eq!(steps[0]["procedure_step"]["procedure"], "modal_extraction");
+    assert_eq!(
+        steps[1]["procedure_step"]["procedure"],
+        "modal_response_spectrum"
+    );
+    assert_eq!(
+        steps[1]["numerical_result"]["kind"],
+        "structural_response_spectrum"
+    );
+    assert_eq!(
+        steps[1]["numerical_result"]["data"]["accuracy"]["evaluation"]["report"]["status"],
+        "satisfied"
+    );
+    let states = payload["states"].as_array().expect("published states");
+    assert!(states.iter().any(|state| state["kind"] == "modal_basis"));
+    assert!(states
+        .iter()
+        .any(|state| state["kind"] == "structural_response_envelope"));
+}
+
+#[test]
 fn fea_check_and_run_materialize_a_named_project_signal_generator() {
     let temp = TempDir::new().unwrap();
     let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");

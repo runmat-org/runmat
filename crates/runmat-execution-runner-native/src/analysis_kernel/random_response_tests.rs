@@ -250,6 +250,11 @@ fn authored_random_response_study_runs_the_complete_governed_lifecycle() {
     coordinator
         .complete_assembly(&store, assembly_response, &assembly)
         .unwrap();
+    let accuracy = coordinator.prepare_accuracy().unwrap();
+    let accuracy_response = execute(&mut store, &accuracy.host, &accuracy.program, limits);
+    coordinator
+        .complete_accuracy(&store, accuracy_response, &accuracy)
+        .unwrap();
     let statistics = coordinator.prepare_statistics_state().unwrap();
     let statistics_response = execute(&mut store, &statistics.host, &statistics.program, limits);
     coordinator

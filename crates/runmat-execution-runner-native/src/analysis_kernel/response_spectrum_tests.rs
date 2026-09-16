@@ -278,6 +278,25 @@ fn authored_response_spectrum_study_publishes_basis_and_terminal_envelope() {
             &assembly,
         )
         .unwrap();
+    let accuracy = coordinator.prepare_accuracy().unwrap();
+    accuracy.program.write_to(&mut store).unwrap();
+    let completed = execute_serial_analysis(
+        &accuracy.program.request,
+        &mut store,
+        &NativeAnalysisKernel,
+        256,
+        limits,
+    )
+    .unwrap();
+    coordinator
+        .complete_accuracy(
+            &store,
+            AnalysisHostResponse::completed(&accuracy.host, &completed)
+                .unwrap()
+                .program_response(),
+            &accuracy,
+        )
+        .unwrap();
     let envelope = coordinator.prepare_envelope_state().unwrap();
     envelope.program.write_to(&mut store).unwrap();
     let completed = execute_serial_analysis(
@@ -448,7 +467,7 @@ fn spectrum(id: &str, direction: [f64; 3]) -> ResponseSpectrum {
         modal_combination: ModalCombination::AbsoluteSum,
         directional_combination: DirectionalCombination::Srss,
         truncation: SpectrumTruncationPolicy {
-            minimum_cumulative_mass_ratio: 0.0,
+            minimum_cumulative_mass_ratio: 0.9,
             correction: ModalTruncationCorrection::None,
         },
         rigid_response: RigidResponsePolicy::Disabled,

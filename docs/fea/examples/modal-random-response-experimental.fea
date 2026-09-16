@@ -120,7 +120,7 @@ sequence:
         accuracy_plan_id: random_response.accuracy
         criteria:
           - criterion_id: integration_error
-            target: { quantity: displacement }
+            target: numerical_result
             contribution: frequency_sampling
             tolerance: { relative: 1.0e-5 }
             evidence: convergence_study

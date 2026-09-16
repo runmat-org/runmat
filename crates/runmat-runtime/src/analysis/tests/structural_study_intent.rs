@@ -1506,7 +1506,7 @@ fn sample_response_spectrum_study_spec(geometry_sha256: String) -> AnalysisStudy
         modal_combination: runmat_analysis_core::ModalCombination::AbsoluteSum,
         directional_combination: runmat_analysis_core::DirectionalCombination::Srss,
         truncation: runmat_analysis_core::ModalTruncationPolicy {
-            minimum_cumulative_mass_ratio: 0.0,
+            minimum_cumulative_mass_ratio: 0.9,
             correction: runmat_analysis_core::ModalTruncationCorrection::ResidualMode,
         },
         rigid_response: runmat_analysis_core::RigidResponsePolicy::Disabled,

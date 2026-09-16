@@ -3,11 +3,15 @@ use runmat_geometry_core::UnitSystem;
 use super::validate_sequence;
 use crate::{
     ActivationLifecycle, AnalysisBoundary, AnalysisModel, AnalysisModelId, AnalysisProcedure,
-    AnalysisValidationError, BoundaryOperator, CoordinateFrame, IndependentDomain,
-    InitialCondition, InitialConditionTarget, InitialConditionValue, InitialStateConflictPolicy,
-    InitialValue, PhysicsFamily, ProcedureStep, ProcedureStepId, RandomExcitationId, RegionTarget,
-    ResponseSpectrumId, RestartPolicy, SequenceBranch, SequenceBranchId, SequenceDependency,
-    SequenceDependencyReason, SolutionSpace, StateCompleteness, StateId, StateInput, StateKind,
+    AnalysisValidationError, BoundaryOperator, CoordinateFrame, DirectionalCombination,
+    IndependentDomain, InitialCondition, InitialConditionTarget, InitialConditionValue,
+    InitialStateConflictPolicy, InitialValue, ModalCombination, ModalTruncationCorrection,
+    ModalTruncationPolicy as SpectrumTruncationPolicy, PhysicsFamily, ProcedureStep,
+    ProcedureStepId, RandomExcitationId, RegionTarget, ResponseSpectrum, ResponseSpectrumId,
+    RestartPolicy, RigidResponsePolicy, SequenceBranch, SequenceBranchId, SequenceDependency,
+    SequenceDependencyReason, SolutionSpace, SpectrumAbscissa, SpectrumConstruction,
+    SpectrumDamping, SpectrumDirection, SpectrumEnvelope, SpectrumEvidence, SpectrumExtrapolation,
+    SpectrumInterpolation, SpectrumResponse, StateCompleteness, StateId, StateInput, StateKind,
     StateOutput, StatePersistence, StateSource, StateUse, StepObjectActivation, StepObjectRef,
     Velocity,
 };
@@ -132,6 +136,43 @@ fn modal_response_requires_typed_existing_spectrum_ids() {
         super::activation::validate_objects(&model, &step),
         Err(AnalysisValidationError::InvalidProcedureStep { .. })
     ));
+
+    let mut model = model_with_steps(vec![step.clone()]);
+    model.response_spectra.push(ResponseSpectrum {
+        spectrum_id: ResponseSpectrumId("design".into()),
+        abscissa: SpectrumAbscissa::FrequencyHertz(vec![1.0, 10.0]),
+        ordinates: vec![1.0, 1.0],
+        damping: SpectrumDamping::Ratio(0.05),
+        response: SpectrumResponse::RelativeDisplacement,
+        envelope: SpectrumEnvelope::Maximax,
+        interpolation: SpectrumInterpolation::LinearFrequency,
+        extrapolation: SpectrumExtrapolation::HoldEndpoint,
+        direction: SpectrumDirection {
+            frame: CoordinateFrame::Global,
+            vector: [1.0, 0.0, 0.0],
+        },
+        modal_combination: ModalCombination::AbsoluteSum,
+        directional_combination: DirectionalCombination::Srss,
+        truncation: SpectrumTruncationPolicy {
+            minimum_cumulative_mass_ratio: 0.5,
+            correction: ModalTruncationCorrection::None,
+        },
+        rigid_response: RigidResponsePolicy::Disabled,
+        construction: SpectrumConstruction::AuthoredDesign,
+        evidence: SpectrumEvidence {
+            sampling_adequacy_ratio: 1.0,
+            max_interpolation_error: None,
+        },
+        provenance_digest: "sha256:design".into(),
+    });
+    assert!(matches!(
+        super::activation::validate_objects(&model, &step),
+        Err(AnalysisValidationError::InvalidProcedureStep { .. })
+    ));
+    model.response_spectra[0]
+        .truncation
+        .minimum_cumulative_mass_ratio = 0.9;
+    super::activation::validate_objects(&model, &step).unwrap();
 
     step.independent_domain = IndependentDomain::StudyParameter {
         parameter_id: "spectrum".into(),

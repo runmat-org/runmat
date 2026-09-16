@@ -274,22 +274,49 @@ pub(in crate::analysis) fn complete_random_response_study(
     .map_err(|error| completion_error(&prepared, error.to_string()))?
     .into_identity();
     response_options.solver_mesh_artifact_path = prepared.solver_mesh_artifact_path.clone();
-    let production_publishable =
-        response_identity.qualification() == runmat_analysis_core::FormulationMaturity::Production;
-    let reasons = (!production_publishable)
-        .then(|| crate::analysis::ProductionPublicationReason {
-            code:
-                crate::analysis::ProductionPublicationReasonCode::FormulationNotProductionQualified,
-            detail: "structural random response is not yet production-qualified".into(),
-        })
-        .into_iter()
-        .collect();
+    let accuracy_request = runmat_analysis_fea::execution::AccuracyEvaluationRequest::new(
+        producer,
+        runmat_analysis_fea::execution::AccuracySourceKind::StructuralRandomResponse,
+        response_result_identity,
+        None,
+        response_step.authored_execution.requirement,
+        response_step.procedure_step.accuracy.clone(),
+    )
+    .map_err(|error| completion_error(&prepared, error.to_string()))?;
+    let accuracy_source =
+        runmat_analysis_fea::execution::AccuracySourceReceipt::StructuralRandomResponse(
+            numerical.response_numerical_receipt.clone(),
+        );
+    let evidence = accuracy_source
+        .evidence(&accuracy_request)
+        .map_err(|error| completion_error(&prepared, error.to_string()))?;
+    let expected_accuracy = runmat_analysis_fea::results::accuracy::evaluate_accuracy_artifact(
+        &accuracy_request,
+        evidence,
+    )
+    .map_err(|error| completion_error(&prepared, error.to_string()))?;
+    if numerical.response_accuracy != expected_accuracy {
+        return Err(completion_error(
+            &prepared,
+            "random-response accuracy artifact differs from its exact numerical source",
+        ));
+    }
+    let accuracy = numerical.response_accuracy;
+    let completed_accuracy = super::accuracy_completion::classify_accuracy(&accuracy);
+    let (production_publishable, reasons) =
+        super::super::super::result_policy::evaluate_identity_production_publication(
+            &response_identity,
+            completed_accuracy.numerically_acceptable,
+        );
     let response_run = super::super::publication::CompletedStructuralRandomResponseStep {
         identity: response_identity,
         run_id: response_run_id,
-        numerically_acceptable: true,
+        run_status: completed_accuracy.run_status,
+        numerically_acceptable: completed_accuracy.numerically_acceptable,
+        solver_convergence: completed_accuracy.solver_convergence,
+        result_quality: completed_accuracy.result_quality,
         production_publishable,
-        quality_reasons: Vec::new(),
+        quality_reasons: completed_accuracy.quality_reasons,
         production_publication_reasons: reasons,
         provenance: crate::analysis::RunProvenance {
             requested_backend: response_workload.backend(),
@@ -313,6 +340,7 @@ pub(in crate::analysis) fn complete_random_response_study(
         numerical_result: crate::analysis::StructuralRandomResponseResultsData {
             result: numerical.response_result,
             numerical_receipt: numerical.response_numerical_receipt,
+            accuracy,
         },
     };
 

@@ -27,6 +27,7 @@ pub(super) struct ResponseSpectrumResultImport<'a, Source> {
     pub basis_state_root: ValueRef,
     pub response_result_root: ValueRef,
     pub response_receipt_root: ValueRef,
+    pub response_accuracy_root: ValueRef,
     pub field_recovery_root: ValueRef,
     pub envelope_state_root: ValueRef,
     pub objects: Vec<ValueRef>,
@@ -91,6 +92,10 @@ pub(super) fn import_response_spectrum_result<Source: CacheImport>(
             AnalysisNumericalObjectKind::NumericalReceipt,
         ),
         (
+            &input.response_accuracy_root,
+            AnalysisNumericalObjectKind::AccuracyReport,
+        ),
+        (
             &input.field_recovery_root,
             AnalysisNumericalObjectKind::StructuralModalResponseSpectrumFieldRecovery,
         ),
@@ -117,7 +122,7 @@ pub(super) fn import_response_spectrum_result<Source: CacheImport>(
         &input.objects,
         input.access,
     )?;
-    let [modal_result_objects, modal_receipt_objects, basis_state_objects, response_result_objects, response_receipt_objects, field_recovery_objects, envelope_state_objects] =
+    let [modal_result_objects, modal_receipt_objects, basis_state_objects, response_result_objects, response_receipt_objects, response_accuracy_objects, field_recovery_objects, envelope_state_objects] =
         imported.as_slice()
     else {
         return Err(protocol("response-spectrum result closure is incomplete"));
@@ -184,6 +189,49 @@ pub(super) fn import_response_spectrum_result<Source: CacheImport>(
     response_numerical_receipt
         .validate_against(response_numerical_receipt.source_result(), &response_result)
         .map_err(protocol)?;
+    let response_accuracy =
+        runmat_analysis_fea::results::accuracy::AccuracyArtifact::from_canonical_bytes(
+            &response_accuracy_objects.payload(),
+        )
+        .map_err(protocol)?;
+    let sequence = runmat_analysis_fea::execution::SequenceIdentity::from_solver_contract(
+        &response_workload.model().sequence,
+    )
+    .map_err(protocol)?;
+    let producer = runmat_analysis_fea::execution::StepIdentity::from_solver_contract(
+        sequence,
+        response_workload.procedure_step().map_err(protocol)?,
+    )
+    .map_err(protocol)?;
+    let accuracy_request = runmat_analysis_fea::execution::AccuracyEvaluationRequest::new(
+        producer,
+        runmat_analysis_fea::execution::AccuracySourceKind::StructuralModalResponseSpectrum,
+        response_numerical_receipt.source_result(),
+        None,
+        response_workload.formulation_requirement(),
+        response_workload
+            .procedure_step()
+            .map_err(protocol)?
+            .accuracy
+            .clone(),
+    )
+    .map_err(protocol)?;
+    let source =
+        runmat_analysis_fea::execution::AccuracySourceReceipt::StructuralModalResponseSpectrum(
+            response_numerical_receipt.clone(),
+        );
+    let expected_accuracy = runmat_analysis_fea::results::accuracy::evaluate_accuracy_artifact(
+        &accuracy_request,
+        source.evidence(&accuracy_request).map_err(protocol)?,
+    )
+    .map_err(protocol)?;
+    if response_accuracy_objects.manifest.logical_identity != response_accuracy.identity().digest()
+        || response_accuracy != expected_accuracy
+    {
+        return Err(protocol(
+            "response-spectrum accuracy differs from its exact numerical source",
+        ));
+    }
     let field_recovery =
         runmat_analysis_execution::decode_prepared_structural_modal_response_spectrum_field_recovery(
             field_recovery_objects,
@@ -246,6 +294,7 @@ pub(super) fn import_response_spectrum_result<Source: CacheImport>(
                 basis_state,
                 response_result: Box::new(response_result),
                 response_numerical_receipt,
+                response_accuracy,
                 field_recovery,
                 envelope_state,
             },

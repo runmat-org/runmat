@@ -10,14 +10,15 @@ use runmat_execution::Digest;
 
 use crate::{
     execution::{
-        AnalysisWorkloadIdentity, CanonicalSemanticState, CanonicalSemanticStateInput,
-        CanonicalSemanticStatePayload, CanonicalStateTransition, SemanticStatePublicationRequest,
-        SemanticStatePublicationSource, SequenceIdentity, SolverResultIdentity, StepIdentity,
-        StructuralModalWorkload, StructuralModalWorkloadInput,
-        StructuralRandomResponseAssemblyRequest, StructuralRandomResponseIntervalRequest,
-        StructuralRandomResponseIntervalResult, StructuralRandomResponseNumericalReceipt,
-        StructuralRandomResponseScope, StructuralRandomResponseSolverResult,
-        StructuralRandomResponseWorkload, StructuralRandomResponseWorkloadInput,
+        AccuracySourceKind, AccuracySourceReceipt, AnalysisWorkloadIdentity,
+        CanonicalSemanticState, CanonicalSemanticStateInput, CanonicalSemanticStatePayload,
+        CanonicalStateTransition, SemanticStatePublicationRequest, SemanticStatePublicationSource,
+        SequenceIdentity, SolverResultIdentity, StepIdentity, StructuralModalWorkload,
+        StructuralModalWorkloadInput, StructuralRandomResponseAssemblyRequest,
+        StructuralRandomResponseIntervalRequest, StructuralRandomResponseIntervalResult,
+        StructuralRandomResponseNumericalReceipt, StructuralRandomResponseScope,
+        StructuralRandomResponseSolverResult, StructuralRandomResponseWorkload,
+        StructuralRandomResponseWorkloadInput,
     },
     fixtures::{fixture_model, FixtureId},
     pipeline::{
@@ -149,6 +150,20 @@ fn portable_interval_tasks_are_grouping_invariant_and_bind_receipt() {
         .unwrap(),
         receipt
     );
+    let receipt_bytes = receipt.canonical_bytes().unwrap();
+    assert!(matches!(
+        AccuracySourceReceipt::from_canonical_bytes(
+            AccuracySourceKind::StructuralRandomResponse,
+            &receipt_bytes,
+        )
+        .unwrap(),
+        AccuracySourceReceipt::StructuralRandomResponse(_)
+    ));
+    assert!(AccuracySourceReceipt::from_canonical_bytes(
+        AccuracySourceKind::StructuralModalResponseSpectrum,
+        &receipt_bytes,
+    )
+    .is_err());
     let consumer = StepIdentity::from_solver_contract(sequence_identity, &response).unwrap();
     let publication = SemanticStatePublicationRequest::new(
         SemanticStatePublicationSource::StructuralRandomStatistics,

@@ -4,6 +4,7 @@
 //! encryption, and object storage remain owned by RunMat's generic execution crates.
 
 mod accuracy;
+mod accuracy_source;
 mod buckling_result;
 mod buckling_workload;
 mod error;
@@ -49,7 +50,8 @@ mod transient_segment;
 mod transient_template;
 mod transient_workload;
 
-pub use accuracy::AccuracyEvaluationRequest;
+pub use accuracy::{AccuracyEvaluationRequest, AccuracySourceKind};
+pub use accuracy_source::AccuracySourceReceipt;
 pub use buckling_result::{
     StructuralBucklingMode, StructuralBucklingNumericalReceipt, StructuralBucklingSolverResult,
     StructuralBucklingSolverResultInput,

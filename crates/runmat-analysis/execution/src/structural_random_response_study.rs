@@ -2,8 +2,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_analysis_core::{StateKind, StateUse};
 use runmat_analysis_fea::execution::{
-    SemanticStatePublicationSource, StructuralModalWorkload, StructuralRandomResponseTemplate,
-    StructuralRandomResponseWorkload, StructuralStepWorkload, StructuralStudyWorkloads,
+    AccuracySourceKind, SemanticStatePublicationSource, SequenceIdentity, StructuralModalWorkload,
+    StructuralRandomResponseTemplate, StructuralRandomResponseWorkload, StructuralStepWorkload,
+    StructuralStudyWorkloads,
 };
 use runmat_execution::{resource::AcceleratorRequest, Digest, ProgramRevision};
 use runmat_execution_artifact::{
@@ -12,17 +13,19 @@ use runmat_execution_artifact::{
 use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
 
 use crate::{
-    bind_upstream_state_transition, import_semantic_state_completion,
+    bind_upstream_state_transition, import_semantic_state_completion, import_structural_accuracy,
     import_structural_modal_result, import_structural_random_response_interval,
     import_structural_random_response_result, prepare_semantic_state_publication,
-    prepare_structural_modal_task, prepare_structural_random_response_assembly,
-    prepare_structural_random_response_fanout, AnalysisBridgeError, AnalysisBridgeResult,
-    AnalysisCapabilityRequirement, ImportedSemanticState, ImportedStructuralModalResult,
-    ImportedStructuralRandomResponseInterval, ImportedStructuralRandomResponseResult,
-    PreparedSemanticStatePublication, PreparedStructuralModalTask,
+    prepare_structural_accuracy, prepare_structural_modal_task,
+    prepare_structural_random_response_assembly, prepare_structural_random_response_fanout,
+    AnalysisBridgeError, AnalysisBridgeResult, AnalysisCapabilityRequirement, ImportedAccuracy,
+    ImportedSemanticState, ImportedStructuralModalResult, ImportedStructuralRandomResponseInterval,
+    ImportedStructuralRandomResponseResult, PreparedSemanticStatePublication,
+    PreparedStructuralAccuracy, PreparedStructuralModalTask,
     PreparedStructuralRandomResponseAssemblyTask, PreparedStructuralRandomResponseIntervalTask,
-    SemanticStatePublicationPreparation, StructuralModalTaskPreparation,
-    StructuralRandomResponseAssemblyPreparation, StructuralRandomResponseFanoutPreparation,
+    SemanticStatePublicationPreparation, StructuralAccuracyPreparation,
+    StructuralModalTaskPreparation, StructuralRandomResponseAssemblyPreparation,
+    StructuralRandomResponseFanoutPreparation,
 };
 
 pub struct StructuralRandomResponseStudyPreparation {
@@ -48,6 +51,8 @@ enum StudyPhase {
     AwaitingIntervals(BTreeSet<Digest>),
     ReadyForAssembly,
     AwaitingAssembly(Digest),
+    ReadyForAccuracy,
+    AwaitingAccuracy(Digest),
     ReadyForStatisticsState,
     AwaitingStatisticsState(Digest),
     Complete,
@@ -64,6 +69,7 @@ pub struct StructuralRandomResponseStudyCoordinator {
     intervals: Vec<ImportedStructuralRandomResponseInterval>,
     assembly_host: Option<crate::AnalysisHostWorkload>,
     result: Option<ImportedStructuralRandomResponseResult>,
+    accuracy: Option<ImportedAccuracy>,
     statistics_state: Option<ImportedSemanticState>,
     phase: StudyPhase,
 }
@@ -123,6 +129,7 @@ impl StructuralRandomResponseStudyCoordinator {
             intervals: Vec::new(),
             assembly_host: None,
             result: None,
+            accuracy: None,
             statistics_state: None,
             phase: StudyPhase::ReadyForModal,
         })
@@ -355,6 +362,62 @@ impl StructuralRandomResponseStudyCoordinator {
             self.preparation.inventory_limits,
         )?);
         self.assembly_host = Some(task.host.clone());
+        self.phase = StudyPhase::ReadyForAccuracy;
+        Ok(())
+    }
+
+    pub fn prepare_accuracy(&mut self) -> AnalysisBridgeResult<PreparedStructuralAccuracy> {
+        if self.phase != StudyPhase::ReadyForAccuracy {
+            return Err(invalid(
+                "random-response study is not ready for accuracy evaluation",
+            ));
+        }
+        let workload = self.bound_workload()?;
+        let result = self
+            .result
+            .as_ref()
+            .ok_or_else(|| invalid("completed random-response result is absent"))?;
+        let task = prepare_structural_accuracy(StructuralAccuracyPreparation {
+            solve_host: self
+                .assembly_host
+                .as_ref()
+                .ok_or_else(|| invalid("random-response assembly host is absent"))?
+                .clone(),
+            source_kind: AccuracySourceKind::StructuralRandomResponse,
+            source_numerical_receipt: result.receipt_objects.clone(),
+            source_observations: None,
+            sequence: SequenceIdentity::from_solver_contract(&workload.model().sequence)?,
+            step: workload.procedure_step()?.clone(),
+            formulation_requirement: workload.formulation_requirement(),
+            program_revision: self.preparation.program_revision.clone(),
+            chunk_bytes: self.preparation.chunk_bytes,
+            inventory_limits: self.preparation.inventory_limits,
+        })?;
+        self.phase = StudyPhase::AwaitingAccuracy(task.host.workload.identity.digest());
+        Ok(task)
+    }
+
+    pub fn complete_accuracy(
+        &mut self,
+        source: &impl CacheImport,
+        response: ProgramExecutionResponse,
+        task: &PreparedStructuralAccuracy,
+    ) -> AnalysisBridgeResult<()> {
+        if self.phase != StudyPhase::AwaitingAccuracy(task.host.workload.identity.digest()) {
+            return Err(AnalysisBridgeError::Identity(
+                "random-response accuracy differs from the awaited evaluation",
+            ));
+        }
+        let accuracy =
+            import_structural_accuracy(source, response, task, self.preparation.inventory_limits)?;
+        if accuracy.artifact.gate().decision
+            != runmat_analysis_fea::results::accuracy::PublicationDecision::Allow
+        {
+            return Err(invalid(
+                "random-response accuracy gate blocks semantic-state publication",
+            ));
+        }
+        self.accuracy = Some(accuracy);
         self.phase = StudyPhase::ReadyForStatisticsState;
         Ok(())
     }
@@ -440,6 +503,10 @@ impl StructuralRandomResponseStudyCoordinator {
 
     pub fn statistics_state(&self) -> Option<&ImportedSemanticState> {
         self.statistics_state.as_ref()
+    }
+
+    pub fn accuracy(&self) -> Option<&ImportedAccuracy> {
+        self.accuracy.as_ref()
     }
 
     fn bound_workload(&self) -> AnalysisBridgeResult<&StructuralRandomResponseWorkload> {

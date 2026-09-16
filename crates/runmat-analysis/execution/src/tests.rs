@@ -2091,6 +2091,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
 
     let accuracy_prepared = prepare_structural_accuracy(StructuralAccuracyPreparation {
         solve_host: prepared.host.clone(),
+        source_kind: runmat_analysis_fea::execution::AccuracySourceKind::StructuralLinear,
         source_numerical_receipt: completed.outputs[1].clone(),
         source_observations: Some(imported_observations.clone()),
         sequence,
@@ -2135,6 +2136,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
     .unwrap();
     assert!(prepare_structural_accuracy(StructuralAccuracyPreparation {
         solve_host: prepared.host.clone(),
+        source_kind: runmat_analysis_fea::execution::AccuracySourceKind::StructuralLinear,
         source_numerical_receipt: unrelated_receipt,
         source_observations: Some(imported_observations.clone()),
         sequence,
@@ -2183,6 +2185,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         runmat_analysis_fea::results::accuracy::AccuracyArtifactInput {
             evaluation_request: accuracy_prepared.request.identity(),
             producer: accuracy_prepared.request.producer,
+            source_kind: accuracy_prepared.request.source_kind,
             source_result: accuracy_prepared.request.source_result,
             source_observations: accuracy_prepared.request.source_observations,
             formulation_requirement: accuracy_prepared.request.formulation_requirement,

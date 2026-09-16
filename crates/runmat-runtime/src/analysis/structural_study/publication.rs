@@ -234,6 +234,9 @@ pub(in crate::analysis) struct CompletedStructuralResponseSpectrumStep {
     pub identity: runmat_analysis_fea::AnalysisRunIdentity,
     pub run_id: String,
     pub numerically_acceptable: bool,
+    pub run_status: RunStatus,
+    pub solver_convergence: QualityGate,
+    pub result_quality: QualityGate,
     pub production_publishable: bool,
     pub quality_reasons: Vec<crate::analysis::QualityReason>,
     pub production_publication_reasons: Vec<crate::analysis::ProductionPublicationReason>,
@@ -245,6 +248,9 @@ pub(in crate::analysis) struct CompletedStructuralRandomResponseStep {
     pub identity: runmat_analysis_fea::AnalysisRunIdentity,
     pub run_id: String,
     pub numerically_acceptable: bool,
+    pub run_status: RunStatus,
+    pub solver_convergence: QualityGate,
+    pub result_quality: QualityGate,
     pub production_publishable: bool,
     pub quality_reasons: Vec<crate::analysis::QualityReason>,
     pub production_publication_reasons: Vec<crate::analysis::ProductionPublicationReason>,
@@ -325,23 +331,11 @@ fn completed_run_facts(run: CompletedStudyStepRun) -> CompletedRunFacts {
                 operation: operation.name().to_string(),
                 op_version: operation.version().to_string(),
                 run_id: run.run_id,
-                run_status: if run.numerically_acceptable {
-                    RunStatus::Completed
-                } else {
-                    RunStatus::Rejected
-                },
+                run_status: run.run_status,
                 numerically_acceptable: run.numerically_acceptable,
                 production_publishable: run.production_publishable,
-                solver_convergence: if run.numerically_acceptable {
-                    QualityGate::Pass
-                } else {
-                    QualityGate::Fail
-                },
-                result_quality: if run.numerically_acceptable {
-                    QualityGate::Pass
-                } else {
-                    QualityGate::Fail
-                },
+                solver_convergence: run.solver_convergence,
+                result_quality: run.result_quality,
                 quality_reasons: run.quality_reasons,
                 production_publication_reasons: run.production_publication_reasons,
                 provenance: run.provenance,
@@ -362,23 +356,11 @@ fn completed_run_facts(run: CompletedStudyStepRun) -> CompletedRunFacts {
                 operation: operation.name().to_string(),
                 op_version: operation.version().to_string(),
                 run_id: run.run_id,
-                run_status: if run.numerically_acceptable {
-                    RunStatus::Completed
-                } else {
-                    RunStatus::Rejected
-                },
+                run_status: run.run_status,
                 numerically_acceptable: run.numerically_acceptable,
                 production_publishable: run.production_publishable,
-                solver_convergence: if run.numerically_acceptable {
-                    QualityGate::Pass
-                } else {
-                    QualityGate::Fail
-                },
-                result_quality: if run.numerically_acceptable {
-                    QualityGate::Pass
-                } else {
-                    QualityGate::Fail
-                },
+                solver_convergence: run.solver_convergence,
+                result_quality: run.result_quality,
                 quality_reasons: run.quality_reasons,
                 production_publication_reasons: run.production_publication_reasons,
                 provenance: run.provenance,

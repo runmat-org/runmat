@@ -319,7 +319,7 @@ impl TryFrom<StructuralRandomResponseNumericalReceiptWire>
             maximum_estimated_relative_variance_error: wire
                 .maximum_estimated_relative_variance_error,
         };
-        receipt.validate()?;
+        receipt.validate_source()?;
         Ok(receipt)
     }
 }
@@ -354,7 +354,7 @@ impl StructuralRandomResponseNumericalReceipt {
                 .maximum_estimated_relative_variance_error,
         };
         receipt.identity = receipt.derive_identity()?;
-        receipt.validate()?;
+        receipt.validate_source()?;
         Ok(receipt)
     }
 
@@ -364,6 +364,18 @@ impl StructuralRandomResponseNumericalReceipt {
 
     pub const fn source_result(&self) -> SolverResultIdentity {
         self.source_result
+    }
+
+    pub const fn source_workload(&self) -> AnalysisWorkloadIdentity {
+        self.source_workload
+    }
+
+    pub const fn minimum_captured_mass_ratio(&self) -> f64 {
+        self.minimum_captured_mass_ratio
+    }
+
+    pub const fn maximum_estimated_relative_variance_error(&self) -> f64 {
+        self.maximum_estimated_relative_variance_error
     }
 
     pub fn validate_against(
@@ -381,7 +393,7 @@ impl StructuralRandomResponseNumericalReceipt {
     }
 
     pub fn canonical_bytes(&self) -> AnalysisExecutionResult<Vec<u8>> {
-        self.validate()?;
+        self.validate_source()?;
         Ok(encode_contract(
             RESULT_PREFIX,
             "structural-random-response-receipt",
@@ -399,7 +411,7 @@ impl StructuralRandomResponseNumericalReceipt {
         )?)
     }
 
-    fn validate(&self) -> AnalysisExecutionResult<()> {
+    pub fn validate_source(&self) -> AnalysisExecutionResult<()> {
         if self.schema_version != 1
             || self.task_count == 0
             || self.interval_count < self.task_count

@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use runmat_analysis_execution::{
-    ImportedSemanticState, ImportedStructuralModalResponseSpectrumResult,
+    ImportedAccuracy, ImportedSemanticState, ImportedStructuralModalResponseSpectrumResult,
     ImportedStructuralModalResult, StructuralModalResponseSpectrumStudyCoordinator,
     StructuralModalResponseSpectrumStudyPreparation,
 };
@@ -23,6 +23,7 @@ pub struct CompletedStructuralModalResponseSpectrumStudy {
     pub basis_state: ImportedSemanticState,
     pub resolved_workload: runmat_analysis_fea::execution::StructuralModalResponseSpectrumWorkload,
     pub response: ImportedStructuralModalResponseSpectrumResult,
+    pub accuracy: ImportedAccuracy,
     pub envelope_state: ImportedSemanticState,
 }
 
@@ -145,6 +146,26 @@ async fn execute_with_pool(
         .complete_assembly(pool, executed_assembly.response, &assembly)
         .map_err(protocol)?;
 
+    let accuracy = coordinator.prepare_accuracy().map_err(protocol)?;
+    let [executed_accuracy] = execute_analysis_task_batch(
+        pool,
+        vec![PreparedAnalysisTask {
+            host: &accuracy.host,
+            program: &accuracy.program,
+            resource_plan: None,
+            fallback_resources: policy.resources.clone(),
+            dependencies: vec![assembly_dependency],
+        }],
+        task_policy(&policy),
+    )
+    .await?
+    .try_into()
+    .map_err(|_| protocol("response-spectrum accuracy returned an invalid task inventory"))?;
+    let accuracy_dependency = dependency(&executed_accuracy);
+    coordinator
+        .complete_accuracy(pool, executed_accuracy.response, &accuracy)
+        .map_err(protocol)?;
+
     let envelope = coordinator.prepare_envelope_state().map_err(protocol)?;
     let [executed_envelope] = execute_analysis_task_batch(
         pool,
@@ -153,7 +174,7 @@ async fn execute_with_pool(
             program: &envelope.program,
             resource_plan: None,
             fallback_resources: policy.resources.clone(),
-            dependencies: vec![assembly_dependency],
+            dependencies: vec![accuracy_dependency],
         }],
         task_policy(&policy),
     )
@@ -181,6 +202,10 @@ async fn execute_with_pool(
             .result()
             .cloned()
             .ok_or_else(|| protocol("completed response-spectrum result is absent"))?,
+        accuracy: coordinator
+            .accuracy()
+            .cloned()
+            .ok_or_else(|| protocol("response-spectrum accuracy is absent"))?,
         envelope_state: coordinator
             .envelope_state()
             .cloned()

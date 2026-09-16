@@ -448,6 +448,8 @@ impl ProcedureStep {
         );
         step.state_inputs
             .push(modal_basis_input(producer_step, state_id));
+        step.accuracy =
+            AccuracyPlan::modal_response_spectrum(format!("{}.accuracy", step.step_id.0));
         step
     }
 
@@ -470,6 +472,7 @@ impl ProcedureStep {
         );
         step.state_inputs
             .push(modal_basis_input(producer_step, state_id));
+        step.accuracy = AccuracyPlan::random_response(format!("{}.accuracy", step.step_id.0));
         step
     }
 

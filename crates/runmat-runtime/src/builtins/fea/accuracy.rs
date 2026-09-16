@@ -224,6 +224,12 @@ descriptor!(
     )]
 );
 descriptor!(
+    TARGET_NUMERICAL_RESULT_DESCRIPTOR,
+    TARGET_NUMERICAL_RESULT_SIGNATURES,
+    "target = fea.AccuracyTarget.numericalResult()",
+    &NO_INPUTS
+);
+descriptor!(
     TARGET_GLOBAL_DESCRIPTOR,
     TARGET_GLOBAL_SIGNATURES,
     "target = fea.AccuracyTarget.globalEquilibrium()",
@@ -283,6 +289,12 @@ macro_rules! no_arg_target {
         pub async fn $function() -> BuiltinResult<Value> { to_typed_value($name, TARGET_CLASS, $value) }
     };
 }
+no_arg_target!(
+    target_numerical_result,
+    "fea.AccuracyTarget.numericalResult",
+    TARGET_NUMERICAL_RESULT_DESCRIPTOR,
+    AccuracyTarget::NumericalResult
+);
 no_arg_target!(
     target_global,
     "fea.AccuracyTarget.globalEquilibrium",

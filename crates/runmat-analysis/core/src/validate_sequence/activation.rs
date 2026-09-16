@@ -1,7 +1,8 @@
 use std::collections::HashSet;
 
 use crate::{
-    ActivationLifecycle, AnalysisModel, AnalysisValidationError, ProcedureStep, StepObjectRef,
+    AccuracyTarget, AccuracyTolerance, ActivationLifecycle, AnalysisModel, AnalysisValidationError,
+    ErrorContributionKind, ProcedureStep, StepObjectRef,
 };
 
 use super::{graph::ValidatedGraph, step_error};
@@ -11,17 +12,44 @@ pub(super) fn validate_objects(
     step: &ProcedureStep,
 ) -> Result<(), AnalysisValidationError> {
     if let crate::IndependentDomain::ResponseSpectra { spectrum_ids } = &step.independent_domain {
+        let required_captured_mass_ratio = step
+            .accuracy
+            .criteria
+            .iter()
+            .filter(|criterion| {
+                criterion.mandatory
+                    && criterion.target == AccuracyTarget::NumericalResult
+                    && criterion.contribution == ErrorContributionKind::ModalTruncation
+            })
+            .filter_map(|criterion| match criterion.tolerance {
+                AccuracyTolerance::Relative(tolerance) => Some((1.0 - tolerance).max(0.0)),
+                AccuracyTolerance::Absolute { .. } => None,
+            })
+            .fold(0.0_f64, f64::max);
         for spectrum_id in spectrum_ids {
-            if !model
+            let Some(spectrum) = model
                 .response_spectra
                 .iter()
-                .any(|spectrum| spectrum.spectrum_id == *spectrum_id)
-            {
+                .find(|spectrum| spectrum.spectrum_id == *spectrum_id)
+            else {
                 return Err(step_error(
                     step,
                     format!(
                         "response-spectrum procedure references unknown spectrum `{}`",
                         spectrum_id.0
+                    ),
+                ));
+            };
+            if spectrum.truncation.minimum_cumulative_mass_ratio + 64.0 * f64::EPSILON
+                < required_captured_mass_ratio
+            {
+                return Err(step_error(
+                    step,
+                    format!(
+                        "response spectrum `{}` stops at captured-mass ratio {} but the accuracy plan requires at least {}",
+                        spectrum_id.0,
+                        spectrum.truncation.minimum_cumulative_mass_ratio,
+                        required_captured_mass_ratio
                     ),
                 ));
             }

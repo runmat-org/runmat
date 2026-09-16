@@ -13,12 +13,21 @@ const ACCURACY_EVALUATION_PREFIX: &[u8] = b"runmat-analysis-accuracy-evaluation/
 const ACCURACY_EVALUATION_LIMITS: CanonicalLimits =
     CanonicalLimits::new(16 * 1024 * 1024, 1_000_000, 65_536, 64);
 
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AccuracySourceKind {
+    StructuralLinear,
+    StructuralModalResponseSpectrum,
+    StructuralRandomResponse,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, try_from = "AccuracyEvaluationRequestWire")]
 pub struct AccuracyEvaluationRequest {
     pub schema_version: u16,
     identity: AccuracyEvaluationRequestIdentity,
     pub producer: StepIdentity,
+    pub source_kind: AccuracySourceKind,
     pub source_result: SolverResultIdentity,
     pub observation_request: Option<ObservationEvaluationRequestIdentity>,
     pub source_observations: Option<ObservationArtifactIdentity>,
@@ -32,6 +41,7 @@ struct AccuracyEvaluationRequestWire {
     schema_version: u16,
     identity: AccuracyEvaluationRequestIdentity,
     producer: StepIdentity,
+    source_kind: AccuracySourceKind,
     source_result: SolverResultIdentity,
     observation_request: Option<ObservationEvaluationRequestIdentity>,
     source_observations: Option<ObservationArtifactIdentity>,
@@ -47,6 +57,7 @@ impl TryFrom<AccuracyEvaluationRequestWire> for AccuracyEvaluationRequest {
             schema_version: wire.schema_version,
             identity: wire.identity,
             producer: wire.producer,
+            source_kind: wire.source_kind,
             source_result: wire.source_result,
             observation_request: wire.observation_request,
             source_observations: wire.source_observations,
@@ -61,6 +72,7 @@ impl TryFrom<AccuracyEvaluationRequestWire> for AccuracyEvaluationRequest {
 impl AccuracyEvaluationRequest {
     pub fn new(
         producer: StepIdentity,
+        source_kind: AccuracySourceKind,
         source_result: SolverResultIdentity,
         observations: Option<&ObservationArtifactManifest>,
         formulation_requirement: FormulationRequirement,
@@ -89,6 +101,7 @@ impl AccuracyEvaluationRequest {
             "accuracy-evaluation-request",
             &(
                 producer,
+                source_kind,
                 source_result,
                 observation_request,
                 source_observations,
@@ -100,6 +113,7 @@ impl AccuracyEvaluationRequest {
             schema_version: 1,
             identity,
             producer,
+            source_kind,
             source_result,
             observation_request,
             source_observations,
@@ -128,6 +142,7 @@ impl AccuracyEvaluationRequest {
             "accuracy-evaluation-request",
             &(
                 self.producer,
+                self.source_kind,
                 self.source_result,
                 self.observation_request,
                 self.source_observations,

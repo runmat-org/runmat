@@ -270,6 +270,7 @@ pub(super) async fn execute_publication_chain<D: PublicationChainDriver>(
 
     let accuracy = prepare_structural_accuracy(StructuralAccuracyPreparation {
         solve_host: solve.host.clone(),
+        source_kind: runmat_analysis_fea::execution::AccuracySourceKind::StructuralLinear,
         source_numerical_receipt,
         source_observations: Some(imported_observations.clone()),
         sequence,

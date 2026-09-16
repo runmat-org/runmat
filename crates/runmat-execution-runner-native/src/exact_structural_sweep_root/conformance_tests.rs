@@ -1375,7 +1375,9 @@ fn box_modal_transient_workloads() -> runmat_analysis_execution::StructuralStudy
 fn box_modal_response_spectrum_workloads() -> runmat_analysis_execution::StructuralStudyWorkloads {
     let mut model = box_structural_workload().model;
     let mut modal_step = ProcedureStep::structural_modal("modes");
-    modal_step.independent_domain = IndependentDomain::Eigenvalue { requested_count: 3 };
+    modal_step.independent_domain = IndependentDomain::Eigenvalue {
+        requested_count: 12,
+    };
     let spectrum = ResponseSpectrum {
         spectrum_id: ResponseSpectrumId("box-global-x".into()),
         abscissa: SpectrumAbscissa::FrequencyHertz(vec![1.0e-3, 1.0e8]),
@@ -1392,7 +1394,7 @@ fn box_modal_response_spectrum_workloads() -> runmat_analysis_execution::Structu
         modal_combination: ModalCombination::AbsoluteSum,
         directional_combination: DirectionalCombination::Srss,
         truncation: SpectrumTruncationPolicy {
-            minimum_cumulative_mass_ratio: 0.0,
+            minimum_cumulative_mass_ratio: 0.9,
             correction: ModalTruncationCorrection::None,
         },
         rigid_response: RigidResponsePolicy::Disabled,
@@ -1432,7 +1434,7 @@ fn box_modal_response_spectrum_workloads() -> runmat_analysis_execution::Structu
         formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         observation_execution:
             runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
-        truncation: ModalTruncationPolicy::requested(3),
+        truncation: ModalTruncationPolicy::requested(12),
         convergence: ModalConvergencePolicy::exploratory(),
         residual_vector_directions: Vec::new(),
         prestress_transition: None,
