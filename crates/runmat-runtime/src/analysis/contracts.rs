@@ -1506,6 +1506,8 @@ pub struct AnalysisFieldDescriptor {
     pub family: String,
     #[serde(default)]
     pub quantity: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub statistic: Option<AnalysisFieldStatistic>,
     #[serde(default)]
     pub topology_id: Option<String>,
     #[serde(default)]
@@ -1561,6 +1563,7 @@ impl AnalysisFieldDescriptor {
             numeric_representation: None,
             family: infer_field_family(&field.field_id).to_string(),
             quantity: infer_field_quantity(&field.field_id).to_string(),
+            statistic: infer_field_statistic(&field.field_id),
             topology_id: infer_field_topology_id(&field.field_id, location).map(str::to_string),
             element_kind: infer_field_element_kind(&field.field_id, location).map(str::to_string),
             class_name,
@@ -1650,6 +1653,7 @@ impl AnalysisFieldDescriptor {
             numeric_representation: Some(entry.definition.numeric_representation()),
             family: "structural".to_string(),
             quantity,
+            statistic: None,
             topology_id: None,
             element_kind: None,
             class_name: "fea.Field".to_string(),
@@ -1681,6 +1685,14 @@ impl AnalysisFieldDescriptor {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AnalysisFieldStatistic {
+    ComponentMagnitudeEnvelope,
+    RootMeanSquare,
+    Variance,
+}
+
 fn infer_entity_count(
     shape: &[usize],
     location: AnalysisFieldLocation,
@@ -1707,6 +1719,16 @@ fn infer_field_family(field_id: &str) -> &str {
 }
 
 fn infer_field_quantity(field_id: &str) -> &str {
+    for prefix in [
+        "structural.response_spectrum.nodal.",
+        "structural.response_spectrum.envelope.",
+        "structural.random_response.rms.",
+        "structural.random_response.variance.",
+    ] {
+        if let Some(quantity) = field_id.strip_prefix(prefix) {
+            return quantity;
+        }
+    }
     let Some((_, rest)) = field_id.split_once('.') else {
         return field_id;
     };
@@ -1720,8 +1742,42 @@ fn infer_field_quantity(field_id: &str) -> &str {
     }
 }
 
+fn infer_field_statistic(field_id: &str) -> Option<AnalysisFieldStatistic> {
+    if field_id.starts_with("structural.response_spectrum.") {
+        Some(AnalysisFieldStatistic::ComponentMagnitudeEnvelope)
+    } else if field_id.starts_with("structural.random_response.rms.") {
+        Some(AnalysisFieldStatistic::RootMeanSquare)
+    } else if field_id.starts_with("structural.random_response.variance.") {
+        Some(AnalysisFieldStatistic::Variance)
+    } else {
+        None
+    }
+}
+
 fn infer_field_unit(field_id: &str) -> Option<&'static str> {
     let normalized = field_id.to_ascii_lowercase();
+    if normalized.starts_with("structural.random_response.variance.") {
+        if normalized.ends_with(".displacement") {
+            return Some("m^2");
+        }
+        if normalized.ends_with(".stress") {
+            return Some("Pa^2");
+        }
+        if normalized.ends_with(".shell_membrane_force")
+            || normalized.ends_with(".shell_transverse_shear")
+        {
+            return Some("N^2");
+        }
+        if normalized.ends_with(".shell_bending_moment") {
+            return Some("N^2*m^2");
+        }
+        if normalized.ends_with(".rotation") {
+            return Some("rad^2");
+        }
+        if normalized.ends_with(".strain") {
+            return Some("1");
+        }
+    }
     if normalized.contains("frequency_hz") || normalized.contains("frequency_response") {
         return Some("Hz");
     }
@@ -1818,6 +1874,12 @@ fn infer_field_unit(field_id: &str) -> Option<&'static str> {
     {
         return Some("N*m");
     }
+    if normalized.contains("angular_velocity") {
+        return Some("rad/s");
+    }
+    if normalized.contains("angular_acceleration") {
+        return Some("rad/s^2");
+    }
     if normalized.contains("rotation") {
         return Some("rad");
     }
@@ -1889,6 +1951,16 @@ fn infer_field_location(field_id: &str) -> AnalysisFieldLocation {
     }
     if normalized.contains("beam_") || normalized.contains("shell_") {
         return AnalysisFieldLocation::Element;
+    }
+    if normalized.starts_with("structural.response_spectrum.nodal.")
+        || normalized.starts_with("structural.response_spectrum.envelope.displacement")
+        || normalized.starts_with("structural.response_spectrum.envelope.rotation")
+        || normalized.starts_with("structural.random_response.rms.displacement")
+        || normalized.starts_with("structural.random_response.rms.rotation")
+        || normalized.starts_with("structural.random_response.variance.displacement")
+        || normalized.starts_with("structural.random_response.variance.rotation")
+    {
+        return AnalysisFieldLocation::Node;
     }
     if normalized.contains("temperature_gradient")
         || normalized.contains("heat_flux")

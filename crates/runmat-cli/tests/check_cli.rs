@@ -87,6 +87,7 @@ fn canonical_fea_documentation_examples_check_cleanly() {
 #[test]
 fn response_spectrum_documentation_example_runs_its_two_step_study() {
     let temp = TempDir::new().unwrap();
+    let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let path = "docs/fea/examples/modal-response-spectrum-experimental.fea";
     let output = runmat_from_repository(&temp, &["run", path, "--json"]);
     assert!(
@@ -117,6 +118,62 @@ fn response_spectrum_documentation_example_runs_its_two_step_study() {
     assert!(states
         .iter()
         .any(|state| state["kind"] == "structural_response_envelope"));
+
+    let study_path = repository.join(path);
+    let script_path = temp.path().join("response-spectrum-field.m");
+    fs::write(
+        &script_path,
+        format!(
+            "study = fea.load(\"{}\");\nrun = fea.run(study);\nresponse = run.step(\"response_spectrum\");\nfield = response.field(fea.ResponseSpectrumField.absoluteAcceleration());\npage = field.page(1, 3);\ndisp(field.field_id);\ndisp(field.statistic);\ndisp(page.count);\n",
+            study_path.display()
+        ),
+    )
+    .unwrap();
+    let output = runmat_from_repository(
+        &temp,
+        &["run", script_path.to_str().expect("UTF-8 script path")],
+    );
+    assert!(
+        output.status.success(),
+        "response-spectrum language field smoke failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("structural.response_spectrum.nodal.absolute_acceleration"));
+    assert!(stdout.contains("component_magnitude_envelope"));
+    assert!(stdout.contains("3"));
+}
+
+#[test]
+fn random_response_documentation_example_exposes_paged_statistical_fields() {
+    let temp = TempDir::new().unwrap();
+    let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let study_path = repository.join("docs/fea/examples/modal-random-response-experimental.fea");
+    let script_path = temp.path().join("random-response-fields.m");
+    fs::write(
+        &script_path,
+        format!(
+            "study = fea.load(\"{}\");\nrun = fea.run(study);\nresponse = run.step(\"random_response\");\nrms = response.field(fea.RandomResponseField.rms(fea.StructuralField.displacement()));\nrmsPage = rms.page(1, 3);\nvariance = response.field(fea.RandomResponseField.variance(fea.StructuralField.stress()));\nvariancePage = variance.page(1, 3);\ndisp(rms.field_id);\ndisp(rms.statistic);\ndisp(rmsPage.count);\ndisp(variance.field_id);\ndisp(variance.statistic);\ndisp(variancePage.count);\n",
+            study_path.display()
+        ),
+    )
+    .unwrap();
+    let output = runmat_from_repository(
+        &temp,
+        &["run", script_path.to_str().expect("UTF-8 script path")],
+    );
+    assert!(
+        output.status.success(),
+        "random-response language field smoke failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("structural.random_response.rms.displacement"));
+    assert!(stdout.contains("root_mean_square"));
+    assert!(stdout.contains("structural.random_response.variance.stress"));
+    assert!(stdout.contains("variance"));
 }
 
 #[test]

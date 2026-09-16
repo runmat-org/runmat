@@ -35,6 +35,7 @@ mod prestressed_frequency_states;
 mod prestressed_modal_completion;
 mod random_response_completion;
 mod response_spectrum_completion;
+mod statistical_persistence;
 
 pub(in crate::analysis) use buckling_completion::complete_buckling_study;
 use buckling_completion::complete_structural_buckling;

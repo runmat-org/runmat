@@ -390,7 +390,7 @@ pub use contracts::{
     AnalysisFieldBindingsArtifactPayload, AnalysisFieldDescriptor, AnalysisFieldKind,
     AnalysisFieldLocation, AnalysisFieldPageResult, AnalysisFieldPageValues,
     AnalysisFieldPagingDescriptor, AnalysisFieldRequestOptions, AnalysisFieldSelection,
-    AnalysisFieldStorage, AnalysisFieldStorageRef, AnalysisFsiRunOptions,
+    AnalysisFieldStatistic, AnalysisFieldStorage, AnalysisFieldStorageRef, AnalysisFsiRunOptions,
     AnalysisImmutableValueSpec, AnalysisModalRunOptions, AnalysisModelTemplate,
     AnalysisNonlinearRunOptions, AnalysisObjectArtifactMetadata, AnalysisRandomResponseRunOptions,
     AnalysisRenderMesh, AnalysisRenderRegion, AnalysisRenderTopology, AnalysisRenderTopologySource,

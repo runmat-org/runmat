@@ -242,6 +242,7 @@ pub(in crate::analysis) struct CompletedStructuralResponseSpectrumStep {
     pub production_publication_reasons: Vec<crate::analysis::ProductionPublicationReason>,
     pub provenance: crate::analysis::RunProvenance,
     pub numerical_result: crate::analysis::StructuralResponseSpectrumResultsData,
+    pub persistence: AnalysisRunResult,
 }
 
 pub(in crate::analysis) struct CompletedStructuralRandomResponseStep {
@@ -256,6 +257,7 @@ pub(in crate::analysis) struct CompletedStructuralRandomResponseStep {
     pub production_publication_reasons: Vec<crate::analysis::ProductionPublicationReason>,
     pub provenance: crate::analysis::RunProvenance,
     pub numerical_result: crate::analysis::StructuralRandomResponseResultsData,
+    pub persistence: AnalysisRunResult,
 }
 
 struct CompletedRunFacts {
@@ -343,7 +345,7 @@ fn completed_run_facts(run: CompletedStudyStepRun) -> CompletedRunFacts {
                     crate::analysis::AnalysisStudyStepNumericalResultData::StructuralResponseSpectrum(
                         Box::new(run.numerical_result),
                     ),
-                standard_persistence: None,
+                standard_persistence: Some(run.persistence),
                 frequency_persistence: None,
             }
         }
@@ -368,7 +370,7 @@ fn completed_run_facts(run: CompletedStudyStepRun) -> CompletedRunFacts {
                     crate::analysis::AnalysisStudyStepNumericalResultData::StructuralRandomResponse(
                         Box::new(run.numerical_result),
                     ),
-                standard_persistence: None,
+                standard_persistence: Some(run.persistence),
                 frequency_persistence: None,
             }
         }

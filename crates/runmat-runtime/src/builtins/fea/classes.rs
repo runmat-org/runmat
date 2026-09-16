@@ -236,6 +236,7 @@ pub(super) const FIELD_FIELDS: &[&str] = &[
     "kind",
     "family",
     "quantity",
+    "statistic",
     "topology_id",
     "element_kind",
     "component_count",
@@ -341,6 +342,12 @@ pub(crate) fn ensure_fea_classes_registered() {
                 FEA_RESULTS_CLASS => results_methods(),
                 FEA_FIELD_CLASS => field_methods(),
                 super::field_selectors::STRUCTURAL_FIELD_CLASS => structural_field_methods(),
+                super::field_selectors::RESPONSE_SPECTRUM_FIELD_CLASS => {
+                    response_spectrum_field_methods()
+                }
+                super::field_selectors::RANDOM_RESPONSE_FIELD_CLASS => {
+                    random_response_field_methods()
+                }
                 _ => HashMap::new(),
             };
             crate::class_registry::register_class(crate::class_registry::RuntimeClass {
@@ -783,6 +790,61 @@ fn structural_field_methods() -> HashMap<String, crate::class_registry::RuntimeM
     ])
 }
 
+fn response_spectrum_field_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
+    static_methods(&[
+        (
+            "relativeDisplacement",
+            "fea.ResponseSpectrumField.relativeDisplacement",
+        ),
+        ("rotation", "fea.ResponseSpectrumField.rotation"),
+        (
+            "relativeVelocity",
+            "fea.ResponseSpectrumField.relativeVelocity",
+        ),
+        (
+            "relativeAngularVelocity",
+            "fea.ResponseSpectrumField.relativeAngularVelocity",
+        ),
+        (
+            "relativeAcceleration",
+            "fea.ResponseSpectrumField.relativeAcceleration",
+        ),
+        (
+            "relativeAngularAcceleration",
+            "fea.ResponseSpectrumField.relativeAngularAcceleration",
+        ),
+        (
+            "absoluteAcceleration",
+            "fea.ResponseSpectrumField.absoluteAcceleration",
+        ),
+        (
+            "absoluteAngularAcceleration",
+            "fea.ResponseSpectrumField.absoluteAngularAcceleration",
+        ),
+        ("pseudoVelocity", "fea.ResponseSpectrumField.pseudoVelocity"),
+        (
+            "pseudoAngularVelocity",
+            "fea.ResponseSpectrumField.pseudoAngularVelocity",
+        ),
+        (
+            "pseudoAcceleration",
+            "fea.ResponseSpectrumField.pseudoAcceleration",
+        ),
+        (
+            "pseudoAngularAcceleration",
+            "fea.ResponseSpectrumField.pseudoAngularAcceleration",
+        ),
+        ("envelope", "fea.ResponseSpectrumField.envelope"),
+    ])
+}
+
+fn random_response_field_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
+    static_methods(&[
+        ("rms", "fea.RandomResponseField.rms"),
+        ("variance", "fea.RandomResponseField.variance"),
+    ])
+}
+
 fn static_methods(names: &[(&str, &str)]) -> HashMap<String, crate::class_registry::RuntimeMethod> {
     names
         .iter()
@@ -803,7 +865,7 @@ fn static_methods(names: &[(&str, &str)]) -> HashMap<String, crate::class_regist
         .collect()
 }
 
-fn fea_class_schemas() -> [FeaClassSchema; 46] {
+fn fea_class_schemas() -> [FeaClassSchema; 48] {
     [
         (
             FEA_STUDY_CLASS,
@@ -1155,6 +1217,20 @@ fn fea_class_schemas() -> [FeaClassSchema; 46] {
         (
             super::field_selectors::STRUCTURAL_FIELD_CLASS,
             "runmat.fea.structural-field",
+            super::study_values::VALUE_FIELD,
+            super::study_values::VALUE_FIELD,
+            validate_fea_object,
+        ),
+        (
+            super::field_selectors::RESPONSE_SPECTRUM_FIELD_CLASS,
+            "runmat.fea.response-spectrum-field",
+            super::study_values::VALUE_FIELD,
+            super::study_values::VALUE_FIELD,
+            validate_fea_object,
+        ),
+        (
+            super::field_selectors::RANDOM_RESPONSE_FIELD_CLASS,
+            "runmat.fea.random-response-field",
             super::study_values::VALUE_FIELD,
             super::study_values::VALUE_FIELD,
             validate_fea_object,

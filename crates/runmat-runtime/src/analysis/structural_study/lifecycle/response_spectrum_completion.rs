@@ -305,6 +305,26 @@ pub(in crate::analysis) fn complete_response_spectrum_study(
             &response_identity,
             completed_accuracy.numerically_acceptable,
         );
+    let persisted = super::statistical_persistence::admit_statistical_persistence(
+        super::statistical_persistence::StatisticalPersistenceRequest {
+            identity: &response_identity,
+            run_id: &response_run_id,
+            backend: response_workload.backend(),
+            solver_method:
+                runmat_analysis_fea::SolverMethod::StructuralModalResponseSpectrumCombination,
+            solver_options: &AnalysisSolverOptions::StructuralResponseSpectrum(
+                response_options.clone(),
+            ),
+            solver_mesh: &solver_mesh,
+            accuracy: &completed_accuracy,
+            production_publishable,
+            production_publication_reasons: &production_publication_reasons,
+            fields: runmat_analysis_fea::results::statistical_fields::response_spectrum_fields(
+                &field_recovery,
+            ),
+        },
+    )
+    .map_err(|error| completion_error(&prepared, error))?;
     let response_run = super::super::publication::CompletedStructuralResponseSpectrumStep {
         identity: response_identity,
         run_id: response_run_id,
@@ -315,26 +335,7 @@ pub(in crate::analysis) fn complete_response_spectrum_study(
         production_publishable,
         quality_reasons: completed_accuracy.quality_reasons,
         production_publication_reasons,
-        provenance: crate::analysis::RunProvenance {
-            requested_backend: response_workload.backend(),
-            execution_backend: runmat_analysis_fea::ExecutionBackend::Cpu,
-            solver_backend:
-                runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
-            solver_device_apply_k_ratio: 0.0,
-            solver_host_sync_count: 0,
-            precision_mode: "fp64".into(),
-            deterministic_mode: response_options.deterministic_mode,
-            solver_method:
-                runmat_analysis_fea::SolverMethod::StructuralModalResponseSpectrumCombination,
-            preconditioner: runmat_analysis_fea::SolverPreconditioner::None,
-            quality_policy: match response_options.quality_policy {
-                crate::analysis::QualityPolicy::Strict => "strict",
-                crate::analysis::QualityPolicy::Balanced => "balanced",
-                crate::analysis::QualityPolicy::Exploratory => "exploratory",
-            }
-            .into(),
-            fallback_events: Vec::new(),
-        },
+        provenance: persisted.provenance,
         numerical_result: crate::analysis::StructuralResponseSpectrumResultsData {
             result: numerical.response_result,
             numerical_receipt: numerical.response_numerical_receipt,
@@ -343,6 +344,7 @@ pub(in crate::analysis) fn complete_response_spectrum_study(
             resource_usage: numerical.response_resource_usage,
             publication: numerical.response_publication,
         },
+        persistence: persisted.run,
     };
 
     prepared.steps[0].authored_execution.solver_options =

@@ -79,6 +79,7 @@ mod run_results;
 pub(crate) mod sequences;
 pub(crate) mod signal_policies;
 pub(crate) mod signals;
+pub(crate) mod statistical_field_selectors;
 pub(crate) mod steps;
 pub(crate) mod study_policies;
 mod study_values;
@@ -918,7 +919,7 @@ pub async fn fea_run_builtin(input: Value) -> BuiltinResult<Value> {
                 &composed.frozen_generators,
             )
             .await?;
-            run_study_result_to_object(&composed.study)
+            run_study_result_to_object(&composed.study).await
         }
         RuntimeResolvedDocument::Sweep(mut composed) => {
             signals::materialize::materialize_sweep(
@@ -926,10 +927,7 @@ pub async fn fea_run_builtin(input: Value) -> BuiltinResult<Value> {
                 &composed.frozen_generators,
             )
             .await?;
-            sweep_run_result_to_object(analysis_run_study_sweep_op(
-                &composed.sweep,
-                OperationContext::new(None, None),
-            ))
+            sweep_run_result_to_object(run_sweep(&composed.sweep).await)
         }
     }
 }
@@ -1197,9 +1195,7 @@ fn create_field_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
             "fea.field requires results/run input, a typed field selector, and an optional typed sample",
         ));
     }
-    let field_id = field_selectors::from_value(FIELD_NAME, &args[1])?
-        .field_id()
-        .to_string();
+    let field_id = field_selectors::from_value(FIELD_NAME, &args[1])?.field_id();
     let sample = args
         .get(2)
         .map(|value| {
@@ -1499,9 +1495,16 @@ fn results_data_from_value(
     }
 }
 
-fn run_study_result_to_object(spec: &AnalysisStudySpec) -> BuiltinResult<Value> {
-    let envelope = analysis_run_study_op(spec, OperationContext::new(None, None))
-        .map_err(|err| operation_error(RUN_NAME, &ERROR_OPERATION, err))?;
+async fn run_study_result_to_object(spec: &AnalysisStudySpec) -> BuiltinResult<Value> {
+    let context = OperationContext::new(None, None);
+    let envelope = if let Some(service) = crate::context::legacy::active()
+        .and_then(|runtime| runtime.service_ports().analysis().cloned())
+    {
+        service.execute_study(spec.clone(), context).await
+    } else {
+        analysis_run_study_op(spec, context)
+    }
+    .map_err(|err| operation_error(RUN_NAME, &ERROR_OPERATION, err))?;
     let mut object = serializable_to_object_value(
         RUN_NAME,
         &ERROR_INTERNAL,
@@ -1510,6 +1513,19 @@ fn run_study_result_to_object(spec: &AnalysisStudySpec) -> BuiltinResult<Value> 
     )?;
     insert_study_context(&mut object, spec)?;
     Ok(Value::Object(object))
+}
+
+async fn run_sweep(
+    spec: &AnalysisStudySweepSpec,
+) -> Result<OperationEnvelope<AnalysisStudySweepData>, OperationErrorEnvelope> {
+    let context = OperationContext::new(None, None);
+    if let Some(service) = crate::context::legacy::active()
+        .and_then(|runtime| runtime.service_ports().analysis().cloned())
+    {
+        service.execute_sweep(spec.clone(), context).await
+    } else {
+        analysis_run_study_sweep_op(spec, context)
+    }
 }
 
 fn insert_study_context(
@@ -1618,6 +1634,20 @@ fn field_object(
     object.properties.insert(
         "quantity".to_string(),
         Value::String(descriptor.quantity.clone()),
+    );
+    object.properties.insert(
+        "statistic".to_string(),
+        descriptor
+            .statistic
+            .map(|statistic| {
+                Value::String(
+                    serde_json::to_value(statistic)
+                        .ok()
+                        .and_then(|value| value.as_str().map(str::to_string))
+                        .unwrap_or_default(),
+                )
+            })
+            .unwrap_or_else(empty_double_value),
     );
     object.properties.insert(
         "topology_id".to_string(),
@@ -3711,7 +3741,9 @@ mod tests {
         assert_eq!(object.class_name, field_selectors::STRUCTURAL_FIELD_CLASS);
         assert_eq!(
             field_selectors::from_value("test", &selector).unwrap(),
-            runmat_analysis_fea::contracts::StructuralFieldSelector::Stress
+            field_selectors::FieldSelector::Structural(
+                runmat_analysis_fea::contracts::StructuralFieldSelector::Stress
+            )
         );
         let encoded = crate::execution::value_codec::encode_inline_value(&selector)
             .expect("structural field selector should be portable");
@@ -3719,6 +3751,62 @@ mod tests {
             .expect("portable structural field selector should decode");
         assert_eq!(selector, decoded);
         assert!(field_selectors::from_value("test", &Value::String("stress".into())).is_err());
+    }
+
+    #[test]
+    fn statistical_field_selectors_are_typed_composable_and_portable() {
+        ensure_value_classes_registered();
+        let stress = block_on(field_selectors::stress()).expect("typed structural field");
+        let envelope = block_on(statistical_field_selectors::response_spectrum_envelope(
+            stress.clone(),
+        ))
+        .expect("typed spectrum envelope");
+        assert_eq!(
+            field_selectors::from_value("test", &envelope)
+                .unwrap()
+                .field_id(),
+            "structural.response_spectrum.envelope.stress"
+        );
+        let rms = block_on(statistical_field_selectors::random_response_rms(
+            stress.clone(),
+        ))
+        .expect("typed random RMS");
+        assert_eq!(
+            field_selectors::from_value("test", &rms)
+                .unwrap()
+                .field_id(),
+            "structural.random_response.rms.stress"
+        );
+        let variance = block_on(statistical_field_selectors::random_response_variance(
+            stress,
+        ))
+        .expect("typed random variance");
+        assert_eq!(
+            field_selectors::from_value("test", &variance)
+                .unwrap()
+                .field_id(),
+            "structural.random_response.variance.stress"
+        );
+        let nodal =
+            block_on(statistical_field_selectors::response_spectrum_absolute_acceleration())
+                .expect("typed nodal envelope");
+        assert_eq!(
+            field_selectors::from_value("test", &nodal)
+                .unwrap()
+                .field_id(),
+            "structural.response_spectrum.nodal.absolute_acceleration"
+        );
+        for selector in [envelope, rms, variance, nodal] {
+            let encoded = crate::execution::value_codec::encode_inline_value(&selector)
+                .expect("statistical selector should be portable");
+            assert_eq!(
+                crate::execution::value_codec::decode_inline_value(&encoded)
+                    .expect("portable selector should decode"),
+                selector
+            );
+        }
+        let von_mises = block_on(field_selectors::von_mises()).expect("typed derived field");
+        assert!(block_on(statistical_field_selectors::random_response_rms(von_mises)).is_err());
     }
 
     #[test]

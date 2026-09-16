@@ -20,7 +20,7 @@ pub(crate) fn create_session(
     .context("failed to initialize local process execution")?;
     engine.install_execution_services(std::rc::Rc::new(execution));
     engine.install_analysis_service(std::rc::Rc::new(
-        crate::commands::fea::NativeAnalysisService,
+        crate::commands::fea::NativeAnalysisService::new(parser_compat(config.language.compat)),
     ));
     engine.set_telemetry_consent(config.telemetry.enabled);
     engine.set_telemetry_sink(runtime_sink());

@@ -190,6 +190,32 @@ pub trait RuntimeAnalysisService {
         &self,
         request: RuntimeSignalMaterializationRequest,
     ) -> RuntimeServiceFuture<Result<runmat_analysis_core::PhysicalSignal, crate::RuntimeError>>;
+
+    /// Execute a validated study through the host's canonical placement adapter.
+    ///
+    /// The runtime retains admission and publication; the host supplies local or distributed
+    /// process placement without making language builtins depend on a native runner crate.
+    fn execute_study(
+        &self,
+        study: crate::analysis::AnalysisStudySpec,
+        context: crate::operations::OperationContext,
+    ) -> RuntimeServiceFuture<
+        Result<
+            crate::operations::OperationEnvelope<crate::analysis::AnalysisStudyRunData>,
+            crate::operations::OperationErrorEnvelope,
+        >,
+    >;
+
+    fn execute_sweep(
+        &self,
+        sweep: crate::analysis::AnalysisStudySweepSpec,
+        context: crate::operations::OperationContext,
+    ) -> RuntimeServiceFuture<
+        Result<
+            crate::operations::OperationEnvelope<crate::analysis::AnalysisStudySweepData>,
+            crate::operations::OperationErrorEnvelope,
+        >,
+    >;
 }
 
 /// Session-owned authority over the exact immutable executable active in an invocation.

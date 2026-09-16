@@ -38,6 +38,9 @@ pub const FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT: &str = "structural.shell_be
 pub const FEA_FIELD_STRUCTURAL_SHELL_TRANSVERSE_SHEAR: &str = "structural.shell_transverse_shear";
 pub const FEA_FIELD_STRUCTURAL_SHELL_VON_MISES: &str = "structural.shell_von_mises";
 
+const FEA_FIELD_RESPONSE_SPECTRUM_PREFIX: &str = "structural.response_spectrum";
+const FEA_FIELD_RANDOM_RESPONSE_PREFIX: &str = "structural.random_response";
+
 /// Closed structural field selector used by language and storage boundaries.
 ///
 /// Field identifiers remain stable data names, while callers select supported structural
@@ -101,6 +104,136 @@ impl StructuralFieldSelector {
             Self::ShellTransverseShear => FEA_FIELD_STRUCTURAL_SHELL_TRANSVERSE_SHEAR,
             Self::ShellVonMises => FEA_FIELD_STRUCTURAL_SHELL_VON_MISES,
         }
+    }
+}
+
+/// Closed selector for a response-spectrum statistical field.
+///
+/// Nodal quantities preserve the configured spectrum ordinate. Deformation quantities are
+/// component-magnitude envelopes recovered from a displacement-convertible response and must not
+/// be confused with a simultaneous signed structural state.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResponseSpectrumFieldSelector {
+    Nodal(crate::solve::dynamics::ResponseSpectrumNodalQuantity),
+    Deformation(crate::post::fields::StructuralLinearFieldQuantity),
+}
+
+impl ResponseSpectrumFieldSelector {
+    pub fn field_id(self) -> String {
+        match self {
+            Self::Nodal(quantity) => format!(
+                "{FEA_FIELD_RESPONSE_SPECTRUM_PREFIX}.nodal.{}",
+                response_spectrum_nodal_quantity_name(quantity)
+            ),
+            Self::Deformation(quantity) => format!(
+                "{FEA_FIELD_RESPONSE_SPECTRUM_PREFIX}.envelope.{}",
+                structural_linear_quantity_name(quantity)
+            ),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RandomResponseStatistic {
+    RootMeanSquare,
+    Variance,
+}
+
+/// Closed selector for a random-response statistical field.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct RandomResponseFieldSelector {
+    statistic: RandomResponseStatistic,
+    quantity: crate::post::fields::StructuralLinearFieldQuantity,
+}
+
+impl RandomResponseFieldSelector {
+    pub const fn root_mean_square(
+        quantity: crate::post::fields::StructuralLinearFieldQuantity,
+    ) -> Self {
+        Self {
+            statistic: RandomResponseStatistic::RootMeanSquare,
+            quantity,
+        }
+    }
+
+    pub const fn variance(quantity: crate::post::fields::StructuralLinearFieldQuantity) -> Self {
+        Self {
+            statistic: RandomResponseStatistic::Variance,
+            quantity,
+        }
+    }
+
+    pub const fn statistic(self) -> RandomResponseStatistic {
+        self.statistic
+    }
+
+    pub const fn quantity(self) -> crate::post::fields::StructuralLinearFieldQuantity {
+        self.quantity
+    }
+
+    pub fn field_id(self) -> String {
+        let statistic = match self.statistic {
+            RandomResponseStatistic::RootMeanSquare => "rms",
+            RandomResponseStatistic::Variance => "variance",
+        };
+        format!(
+            "{FEA_FIELD_RANDOM_RESPONSE_PREFIX}.{statistic}.{}",
+            structural_linear_quantity_name(self.quantity)
+        )
+    }
+}
+
+pub const fn structural_linear_quantity_for_selector(
+    selector: StructuralFieldSelector,
+) -> Option<crate::post::fields::StructuralLinearFieldQuantity> {
+    use crate::post::fields::StructuralLinearFieldQuantity as Quantity;
+    match selector {
+        StructuralFieldSelector::Displacement => Some(Quantity::Displacement),
+        StructuralFieldSelector::Rotation => Some(Quantity::Rotation),
+        StructuralFieldSelector::Strain => Some(Quantity::Strain),
+        StructuralFieldSelector::Stress => Some(Quantity::Stress),
+        StructuralFieldSelector::ShellMembraneForce => Some(Quantity::ShellMembraneForce),
+        StructuralFieldSelector::ShellBendingMoment => Some(Quantity::ShellBendingMoment),
+        StructuralFieldSelector::ShellTransverseShear => Some(Quantity::ShellTransverseShear),
+        _ => None,
+    }
+}
+
+pub const fn structural_linear_quantity_name(
+    quantity: crate::post::fields::StructuralLinearFieldQuantity,
+) -> &'static str {
+    use crate::post::fields::StructuralLinearFieldQuantity as Quantity;
+    match quantity {
+        Quantity::Displacement => "displacement",
+        Quantity::Rotation => "rotation",
+        Quantity::Strain => "strain",
+        Quantity::Stress => "stress",
+        Quantity::ShellMembraneForce => "shell_membrane_force",
+        Quantity::ShellBendingMoment => "shell_bending_moment",
+        Quantity::ShellTransverseShear => "shell_transverse_shear",
+    }
+}
+
+pub const fn response_spectrum_nodal_quantity_name(
+    quantity: crate::solve::dynamics::ResponseSpectrumNodalQuantity,
+) -> &'static str {
+    use crate::solve::dynamics::ResponseSpectrumNodalQuantity as Quantity;
+    match quantity {
+        Quantity::RelativeDisplacement => "relative_displacement",
+        Quantity::Rotation => "rotation",
+        Quantity::RelativeVelocity => "relative_velocity",
+        Quantity::RelativeAngularVelocity => "relative_angular_velocity",
+        Quantity::RelativeAcceleration => "relative_acceleration",
+        Quantity::RelativeAngularAcceleration => "relative_angular_acceleration",
+        Quantity::AbsoluteAcceleration => "absolute_acceleration",
+        Quantity::AbsoluteAngularAcceleration => "absolute_angular_acceleration",
+        Quantity::PseudoVelocity => "pseudo_velocity",
+        Quantity::PseudoAngularVelocity => "pseudo_angular_velocity",
+        Quantity::PseudoAcceleration => "pseudo_acceleration",
+        Quantity::PseudoAngularAcceleration => "pseudo_angular_acceleration",
     }
 }
 pub const FEA_FIELD_EM_VECTOR_POTENTIAL_REAL: &str = "em.vector_potential_real";

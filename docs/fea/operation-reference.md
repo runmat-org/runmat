@@ -124,6 +124,19 @@ Error codes use `RM.<DOMAIN>.<OPERATION>.<REASON>`, for example `RM.FEA.RUN_STUD
 | `fea.compare(baselineRunId, candidateRunId)` | Compare two persisted runs; no Name, Value options are accepted. |
 | `fea.trends(Name, Value, ...)` | Summarize recent persisted runs. |
 
+Statistical structural procedures use typed selectors rather than overloading ordinary signed
+fields:
+
+| Selector | Meaning |
+|---|---|
+| `fea.ResponseSpectrumField.relativeDisplacement()` (and the velocity, acceleration, pseudo, absolute, and angular counterparts) | The configured nonconcurrent nodal component envelope. |
+| `fea.ResponseSpectrumField.envelope(fea.StructuralField.stress())` | A displacement-derived component envelope for a supported linear structural quantity. |
+| `fea.RandomResponseField.rms(fea.StructuralField.displacement())` | Root-mean-square response for a supported linear quantity. |
+| `fea.RandomResponseField.variance(fea.StructuralField.displacement())` | Variance for that quantity, with squared physical units. |
+
+The compositional constructors accept only linear structural quantities. They reject nonlinear
+derived selectors such as von Mises stress rather than assigning an invalid statistical meaning.
+
 Family-specific constraints and boundaries require immutable `geometry.Region` values, so every authored condition carries the source geometry identity and revision. Model composition rejects regions from another geometry or an earlier revision. Numeric physical inputs are dimensioned values rather than bare scalars: pressure, heat flux, ambient temperature, heat-transfer coefficient, and acoustic impedance each use their corresponding `fea.*` quantity class. Constraints are supplied through the `Constraints` model/study option; natural and Robin operators are supplied through `Boundaries`.
 
 | Boundary constructor | Typed value |

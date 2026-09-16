@@ -4357,6 +4357,51 @@ fn analysis_field_descriptors_include_physics_units_and_locations() {
 }
 
 #[test]
+fn statistical_field_descriptors_preserve_statistic_units_and_locations() {
+    let cases = [
+        (
+            "structural.response_spectrum.nodal.absolute_acceleration",
+            "absolute_acceleration",
+            Some(AnalysisFieldStatistic::ComponentMagnitudeEnvelope),
+            Some("m/s^2"),
+            AnalysisFieldLocation::Node,
+        ),
+        (
+            "structural.response_spectrum.envelope.stress",
+            "stress",
+            Some(AnalysisFieldStatistic::ComponentMagnitudeEnvelope),
+            Some("Pa"),
+            AnalysisFieldLocation::Element,
+        ),
+        (
+            "structural.random_response.rms.displacement",
+            "displacement",
+            Some(AnalysisFieldStatistic::RootMeanSquare),
+            Some("m"),
+            AnalysisFieldLocation::Node,
+        ),
+        (
+            "structural.random_response.variance.stress",
+            "stress",
+            Some(AnalysisFieldStatistic::Variance),
+            Some("Pa^2"),
+            AnalysisFieldLocation::Element,
+        ),
+    ];
+    for (field_id, quantity, statistic, unit, location) in cases {
+        let descriptor = AnalysisFieldDescriptor::from_field(&AnalysisField::host_f64(
+            field_id,
+            vec![2, 3],
+            vec![0.0; 6],
+        ));
+        assert_eq!(descriptor.statistic, statistic, "{field_id}");
+        assert_eq!(descriptor.quantity, quantity, "{field_id}");
+        assert_eq!(descriptor.unit.as_deref(), unit, "{field_id}");
+        assert_eq!(descriptor.location, location, "{field_id}");
+    }
+}
+
+#[test]
 fn analysis_results_describes_structural_l2_fields() {
     let _guard = analysis_test_guard();
     let model = sample_model();

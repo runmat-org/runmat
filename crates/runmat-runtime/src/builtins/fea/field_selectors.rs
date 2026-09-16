@@ -1,9 +1,30 @@
-use runmat_analysis_fea::contracts::StructuralFieldSelector;
+use runmat_analysis_fea::contracts::{
+    RandomResponseFieldSelector, ResponseSpectrumFieldSelector, StructuralFieldSelector,
+};
 
 use super::*;
 use crate::builtins::fea::study_values::{from_typed_value, to_typed_value};
 
 pub(super) const STRUCTURAL_FIELD_CLASS: &str = "fea.StructuralField";
+pub(super) const RESPONSE_SPECTRUM_FIELD_CLASS: &str = "fea.ResponseSpectrumField";
+pub(super) const RANDOM_RESPONSE_FIELD_CLASS: &str = "fea.RandomResponseField";
+
+#[derive(Debug, PartialEq)]
+pub(super) enum FieldSelector {
+    Structural(StructuralFieldSelector),
+    ResponseSpectrum(ResponseSpectrumFieldSelector),
+    RandomResponse(RandomResponseFieldSelector),
+}
+
+impl FieldSelector {
+    pub(super) fn field_id(&self) -> String {
+        match self {
+            Self::Structural(selector) => selector.field_id().to_string(),
+            Self::ResponseSpectrum(selector) => selector.field_id(),
+            Self::RandomResponse(selector) => selector.field_id(),
+        }
+    }
+}
 
 const NO_INPUTS: [BuiltinParamDescriptor; 0] = [];
 const INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
@@ -213,9 +234,29 @@ selector!(
     ShellVonMises
 );
 
-pub(super) fn from_value(
-    builtin: &'static str,
-    value: &Value,
-) -> BuiltinResult<StructuralFieldSelector> {
-    from_typed_value(builtin, STRUCTURAL_FIELD_CLASS, value)
+pub(super) fn from_value(builtin: &'static str, value: &Value) -> BuiltinResult<FieldSelector> {
+    let Value::Object(object) = value else {
+        return Err(builtin_error(
+            builtin,
+            &ERROR_INPUT,
+            "field selector must be a typed FEA field selector",
+        ));
+    };
+    match object.class_name.as_str() {
+        STRUCTURAL_FIELD_CLASS => from_typed_value(builtin, STRUCTURAL_FIELD_CLASS, value)
+            .map(FieldSelector::Structural),
+        RESPONSE_SPECTRUM_FIELD_CLASS => {
+            from_typed_value(builtin, RESPONSE_SPECTRUM_FIELD_CLASS, value)
+                .map(FieldSelector::ResponseSpectrum)
+        }
+        RANDOM_RESPONSE_FIELD_CLASS => {
+            from_typed_value(builtin, RANDOM_RESPONSE_FIELD_CLASS, value)
+                .map(FieldSelector::RandomResponse)
+        }
+        _ => Err(builtin_error(
+            builtin,
+            &ERROR_INPUT,
+            "field selector must be a fea.StructuralField, fea.ResponseSpectrumField, or fea.RandomResponseField value",
+        )),
+    }
 }

@@ -445,6 +445,20 @@ plot(stress);
 mesh(results);
 ```
 
+Response-spectrum and random-response results use separate typed statistical selectors. This keeps
+an ordinary signed stress field distinct from a nonconcurrent component envelope, RMS, or
+variance. For example:
+
+```matlab
+stressEnvelope = fea.field(responseResults, ...
+    fea.ResponseSpectrumField.envelope(fea.StructuralField.stress()));
+stressRms = fea.field(randomResults, ...
+    fea.RandomResponseField.rms(fea.StructuralField.stress()));
+```
+
+These fields use the ordinary persisted field, paging, and plotting path after the FEA layer has
+assigned their typed statistical semantics.
+
 `plot` does not select stress, choose a recovery method, or trigger an unplanned full-field
 transfer. `mesh` displays geometry or solver topology and does not assign materials or define an
 analysis region.

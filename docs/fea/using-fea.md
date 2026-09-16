@@ -505,6 +505,31 @@ resource plan, and aggregated resource-usage evidence. Local and remote executio
 validate the same chain before publishing the response state; a substituted result, resource
 record, or overrun blocks publication rather than being reduced to a warning.
 
+The completed consumer step publishes its statistical fields through the same chunked field
+store used by direct procedures. Select the nodal quantity that matches the authored spectrum:
+
+```matlab
+run = fea.run(fea.load("docs/fea/examples/modal-response-spectrum-experimental.fea"));
+response = run.step("response_spectrum");
+acceleration = response.field( ...
+    fea.ResponseSpectrumField.absoluteAcceleration());
+page = acceleration.page(1, 1024);
+plot(acceleration);
+```
+
+For displacement-convertible spectra, select a linear deformation envelope compositionally. The
+inner selector names the physical quantity; the outer selector states that the values are a
+nonconcurrent component-magnitude envelope:
+
+```matlab
+stressEnvelope = response.field( ...
+    fea.ResponseSpectrumField.envelope(fea.StructuralField.stress()));
+```
+
+Derived nonlinear quantities such as von Mises stress are rejected at this boundary: combining
+modal or directional von Mises values is not equivalent to deriving von Mises from a qualified
+tensor result.
+
 The complete runnable study is
 [`modal-response-spectrum-experimental.fea`](examples/modal-response-spectrum-experimental.fea):
 
@@ -571,6 +596,23 @@ Use the ordinary result surface after completion: select a published field with 
 then call `plot(field)`; call `mesh(run)` to inspect the solver topology. Random-excitation
 authoring is also available through the typed document operations `add_random_excitation`,
 `update_random_excitation`, and `remove_random_excitation`.
+
+RMS and variance are distinct typed selectors and retain distinct units. For example, displacement
+RMS has units of metres while displacement variance has units of square metres:
+
+```matlab
+run = fea.run(fea.load("docs/fea/examples/modal-random-response-experimental.fea"));
+response = run.step("random_response");
+rmsDisplacement = response.field( ...
+    fea.RandomResponseField.rms(fea.StructuralField.displacement()));
+displacementVariance = response.field( ...
+    fea.RandomResponseField.variance(fea.StructuralField.displacement()));
+plot(rmsDisplacement);
+```
+
+Both handles support bounded `page(start, count)` access. The generic storage and visualization
+layers transport these fields, but the FEA domain remains the authority for their quantity,
+statistic, shape, and stable field identity.
 
 ## Project Entrypoints
 

@@ -20,8 +20,16 @@ pub(super) mod callables;
 pub(crate) mod remote;
 mod signal_materialization;
 
-#[derive(Debug, Default)]
-pub(crate) struct NativeAnalysisService;
+#[derive(Debug)]
+pub(crate) struct NativeAnalysisService {
+    compatibility_mode: runmat_core::CompatMode,
+}
+
+impl NativeAnalysisService {
+    pub(crate) const fn new(compatibility_mode: runmat_core::CompatMode) -> Self {
+        Self { compatibility_mode }
+    }
+}
 
 impl runmat_runtime::context::RuntimeAnalysisService for NativeAnalysisService {
     fn materialize_signal(
@@ -38,6 +46,60 @@ impl runmat_runtime::context::RuntimeAnalysisService for NativeAnalysisService {
             })
         })
     }
+
+    fn execute_study(
+        &self,
+        study: runmat_runtime::analysis::AnalysisStudySpec,
+        context: OperationContext,
+    ) -> runmat_runtime::context::RuntimeServiceFuture<
+        Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope>,
+    > {
+        let compatibility_mode = self.compatibility_mode;
+        Box::pin(async move {
+            let error_context = context.clone();
+            let placement =
+                NativeStructuralStudyPlacement::for_current_executable(compatibility_mode)
+                    .map_err(|error| host_placement_error("study", error, &error_context))?;
+            analysis_execute_structural_study_with_placement(&study, context, &placement).await
+        })
+    }
+
+    fn execute_sweep(
+        &self,
+        sweep: runmat_runtime::analysis::AnalysisStudySweepSpec,
+        context: OperationContext,
+    ) -> runmat_runtime::context::RuntimeServiceFuture<
+        Result<OperationEnvelope<AnalysisStudySweepData>, OperationErrorEnvelope>,
+    > {
+        let compatibility_mode = self.compatibility_mode;
+        Box::pin(async move {
+            let error_context = context.clone();
+            let placement =
+                NativeStructuralStudyPlacement::for_current_executable(compatibility_mode)
+                    .map_err(|error| host_placement_error("sweep", error, &error_context))?;
+            analysis_execute_structural_sweep_with_placement(&sweep, context, &placement).await
+        })
+    }
+}
+
+fn host_placement_error(
+    kind: &str,
+    error: std::io::Error,
+    context: &OperationContext,
+) -> OperationErrorEnvelope {
+    runmat_runtime::operations::operation_error(
+        "fea.run_study",
+        "fea.run_study/v1",
+        context,
+        runmat_runtime::operations::OperationErrorSpec {
+            error_code: "RM.FEA.RUN_STUDY.HOST_PLACEMENT_UNAVAILABLE",
+            error_type: runmat_runtime::operations::OperationErrorType::Backend,
+            retryable: false,
+            severity: runmat_runtime::operations::OperationErrorSeverity::Fatal,
+        },
+        format!("native {kind} placement is unavailable: {error}"),
+        std::collections::BTreeMap::new(),
+    )
 }
 
 pub async fn execute_fea_path(
