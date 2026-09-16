@@ -432,6 +432,7 @@ pub enum SolverMethod {
     StructuralModalTransientNewmarkDenseFactorization,
     StructuralDirectHarmonicGmres,
     StructuralModalHarmonicDenseDirect,
+    StructuralModalResponseSpectrumCombination,
     IncrementalNewtonRaphson,
     ElectromagneticEdgeCurlCurlHarmonicBlockBicgstab,
     AcousticDomainGraphHelmholtzHarmonic,
@@ -455,6 +456,9 @@ impl SolverMethod {
             }
             Self::StructuralDirectHarmonicGmres => "structural_direct_harmonic_gmres",
             Self::StructuralModalHarmonicDenseDirect => "structural_modal_harmonic_dense_direct",
+            Self::StructuralModalResponseSpectrumCombination => {
+                "structural_modal_response_spectrum_combination"
+            }
             Self::IncrementalNewtonRaphson => "incremental_newton_raphson",
             Self::ElectromagneticEdgeCurlCurlHarmonicBlockBicgstab => {
                 "electromagnetic_edge_curl_curl_harmonic_block_bicgstab"

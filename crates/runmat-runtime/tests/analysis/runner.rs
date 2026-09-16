@@ -675,6 +675,9 @@ fn primary_result_field_id(procedure_step: &ProcedureStep) -> String {
         | AnalysisSolverOptions::StructuralNonlinear(_) => {
             FEA_FIELD_STRUCTURAL_DISPLACEMENT.to_string()
         }
+        AnalysisSolverOptions::StructuralResponseSpectrum(_) => {
+            panic!("response-spectrum envelopes do not have one ordinary primary field")
+        }
         AnalysisSolverOptions::StructuralBuckling(_) => fea_buckling_mode_shape_field_id(1),
     }
 }
@@ -2718,6 +2721,9 @@ fn run_fixture_cpu(
         AnalysisSolverOptions::StructuralFrequency(_) => panic!(
             "structural-frequency fixtures must execute through the study runner, not the legacy single-run CPU fixture harness"
         ),
+        AnalysisSolverOptions::StructuralResponseSpectrum(_) => panic!(
+            "response-spectrum fixtures must execute through the study runner, not the legacy single-run CPU fixture harness"
+        ),
         AnalysisSolverOptions::StructuralBuckling(_) => panic!(
             "structural-buckling fixtures must execute through the study runner, not the legacy single-run CPU fixture harness"
         ),
@@ -2857,6 +2863,9 @@ fn run_fixture_gpu(
         ),
         AnalysisSolverOptions::StructuralFrequency(_) => panic!(
             "structural-frequency fixtures must execute through the study runner, not the legacy single-run GPU fixture harness"
+        ),
+        AnalysisSolverOptions::StructuralResponseSpectrum(_) => panic!(
+            "response-spectrum fixtures must execute through the study runner, not the legacy single-run GPU fixture harness"
         ),
         AnalysisSolverOptions::StructuralBuckling(_) => panic!(
             "structural-buckling fixtures must execute through the study runner, not the legacy single-run GPU fixture harness"

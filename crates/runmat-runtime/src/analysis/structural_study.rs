@@ -24,10 +24,11 @@ pub use lifecycle::{
 pub(super) use lifecycle::{
     complete_buckling_study, complete_frequency_study, complete_modal_study,
     complete_modal_transient_study, complete_prestressed_frequency_study,
-    complete_prestressed_modal_study, prepare_structural_buckling_template,
+    complete_prestressed_modal_study, complete_response_spectrum_modal_options,
+    complete_response_spectrum_study, prepare_structural_buckling_template,
     prepare_structural_frequency_workload, prepare_structural_modal_transient_template,
     prepare_structural_modal_workload, prepare_structural_prestressed_frequency_template,
-    prepare_structural_prestressed_modal_template,
+    prepare_structural_prestressed_modal_template, prepare_structural_response_spectrum_template,
 };
 pub(super) use publication::{
     complete_study_run, persist_content_addressed_study_evidence, study_completion_from_prepared,
@@ -119,6 +120,10 @@ pub(super) enum PreparedStructuralStudyExecution {
         workload: Box<runmat_analysis_fea::execution::StructuralModalWorkload>,
     },
     StructuralModalTransient {
+        workloads:
+            BTreeMap<ProcedureStepId, runmat_analysis_fea::execution::StructuralStepWorkload>,
+    },
+    StructuralModalResponseSpectrum {
         workloads:
             BTreeMap<ProcedureStepId, runmat_analysis_fea::execution::StructuralStepWorkload>,
     },
@@ -461,6 +466,19 @@ impl PreparedStructuralStudyIntent {
                             && block_plan.maximum_intervals_per_block()
                                 == options.maximum_intervals_per_block
                             && options.solver_mesh_artifact_path.is_none() => {}
+                        (
+                            runmat_analysis_fea::execution::StructuralStepWorkload::ModalResponseSpectrum {
+                                template,
+                            },
+                            super::AnalysisSolverOptions::StructuralResponseSpectrum(options),
+                        ) if template.step_id == step.procedure_step.step_id
+                            && template.backend == step.authored_execution.backend
+                            && template.formulation_requirement
+                                == step.authored_execution.requirement
+                            && template.observation_execution
+                                == ObservationExecutionPolicy::scalable()
+                            && options.precision_mode == super::PrecisionMode::Fp64
+                            && options.solver_mesh_artifact_path.is_none() => {}
                         _ => {
                             return Err(
                                 "heterogeneous structural workload differs from its prepared execution"
@@ -701,6 +719,11 @@ impl PreparedStructuralStudy {
                 }
             }
             PreparedStructuralStudyExecution::StructuralModalTransient { workloads } => {
+                StructuralStudyWorkloads::HeterogeneousSequence {
+                    workloads: workloads.clone(),
+                }
+            }
+            PreparedStructuralStudyExecution::StructuralModalResponseSpectrum { workloads } => {
                 StructuralStudyWorkloads::HeterogeneousSequence {
                     workloads: workloads.clone(),
                 }

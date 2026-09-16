@@ -555,6 +555,32 @@ impl Default for AnalysisStructuralFrequencyRunOptions {
     }
 }
 
+/// Execution policy for a modal response-spectrum consumer.
+///
+/// Spectrum interpolation, modal/directional combination, rigid response, and truncation
+/// correction belong to the typed spectra referenced by the procedure step. They are deliberately
+/// absent here so runtime execution cannot introduce a second scientific authority.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AnalysisResponseSpectrumRunOptions {
+    pub deterministic_mode: bool,
+    pub precision_mode: PrecisionMode,
+    pub quality_policy: QualityPolicy,
+    #[serde(default)]
+    pub solver_mesh_artifact_path: Option<String>,
+}
+
+impl Default for AnalysisResponseSpectrumRunOptions {
+    fn default() -> Self {
+        Self {
+            deterministic_mode: false,
+            precision_mode: PrecisionMode::Fp64,
+            quality_policy: QualityPolicy::Balanced,
+            solver_mesh_artifact_path: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AnalysisStructuralTimeStepPolicy {
@@ -2256,6 +2282,7 @@ pub enum AnalysisSolverOptions {
     StructuralLinear(AnalysisRunOptions),
     StructuralFrequency(AnalysisStructuralFrequencyRunOptions),
     StructuralModes(AnalysisModalRunOptions),
+    StructuralResponseSpectrum(AnalysisResponseSpectrumRunOptions),
     StructuralBuckling(AnalysisBucklingRunOptions),
     AcousticHelmholtz(AnalysisAcousticRunOptions),
     ThermalDiffusion(AnalysisThermalRunOptions),
@@ -2273,6 +2300,9 @@ impl AnalysisSolverOptions {
             Self::StructuralLinear(options) => options.solver_mesh_artifact_path = None,
             Self::StructuralFrequency(options) => options.solver_mesh_artifact_path = None,
             Self::StructuralModes(options) => options.solver_mesh_artifact_path = None,
+            Self::StructuralResponseSpectrum(options) => {
+                options.solver_mesh_artifact_path = None;
+            }
             Self::StructuralBuckling(options) => options.solver_mesh_artifact_path = None,
             Self::AcousticHelmholtz(_) => {}
             Self::ThermalDiffusion(options) => options.solver_mesh_artifact_path = None,
@@ -2291,8 +2321,9 @@ impl AnalysisSolverOptions {
 
     pub fn defaults_for(step: &ProcedureStep) -> Result<Self, String> {
         use AnalysisProcedure::{
-            EigenvalueBuckling, HarmonicResponse, ModalExtraction, Nonlinear,
-            PrestressedHarmonicResponse, PrestressedModalExtraction, Static, TransientResponse,
+            EigenvalueBuckling, HarmonicResponse, ModalExtraction, ModalResponseSpectrum,
+            Nonlinear, PrestressedHarmonicResponse, PrestressedModalExtraction, Static,
+            TransientResponse,
         };
         use PhysicsFamily::{Acoustic, Coupled, Electromagnetic, Fluid, Structural, Thermal};
 
@@ -2312,6 +2343,9 @@ impl AnalysisSolverOptions {
             ) => {
                 Ok(Self::StructuralModes(AnalysisModalRunOptions::default()))
             }
+            (Structural, ModalResponseSpectrum, SolutionSpace::ModalReduced) => Ok(
+                Self::StructuralResponseSpectrum(AnalysisResponseSpectrumRunOptions::default()),
+            ),
             (Structural, EigenvalueBuckling, SolutionSpace::Direct) => Ok(
                 Self::StructuralBuckling(AnalysisBucklingRunOptions::default()),
             ),
@@ -2679,12 +2713,21 @@ pub struct AnalysisStudyStepRunData {
 pub enum AnalysisStudyStepNumericalResultData {
     Standard,
     StructuralFrequency(Box<StructuralFrequencyResultsData>),
+    StructuralResponseSpectrum(Box<StructuralResponseSpectrumResultsData>),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StructuralFrequencyResultsData {
     pub publication: runmat_analysis_fea::execution::StructuralFrequencyPublicationManifest,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StructuralResponseSpectrumResultsData {
+    pub result: runmat_analysis_fea::execution::StructuralModalResponseSpectrumSolverResult,
+    pub numerical_receipt:
+        runmat_analysis_fea::execution::StructuralModalResponseSpectrumNumericalReceipt,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -226,6 +226,18 @@ pub(in crate::analysis) struct CompletedStudyStep {
 pub(in crate::analysis) enum CompletedStudyStepRun {
     Standard(Box<OperationEnvelope<AnalysisRunResult>>),
     StructuralFrequency(Box<CompletedStructuralFrequencyStep>),
+    StructuralResponseSpectrum(Box<CompletedStructuralResponseSpectrumStep>),
+}
+
+pub(in crate::analysis) struct CompletedStructuralResponseSpectrumStep {
+    pub identity: runmat_analysis_fea::AnalysisRunIdentity,
+    pub run_id: String,
+    pub numerically_acceptable: bool,
+    pub production_publishable: bool,
+    pub quality_reasons: Vec<crate::analysis::QualityReason>,
+    pub production_publication_reasons: Vec<crate::analysis::ProductionPublicationReason>,
+    pub provenance: crate::analysis::RunProvenance,
+    pub numerical_result: crate::analysis::StructuralResponseSpectrumResultsData,
 }
 
 struct CompletedRunFacts {
@@ -290,6 +302,43 @@ fn completed_run_facts(run: CompletedStudyStepRun) -> CompletedRunFacts {
                 numerical_result: run.numerical_result,
                 standard_persistence: None,
                 frequency_persistence: Some(run.persistence),
+            }
+        }
+        CompletedStudyStepRun::StructuralResponseSpectrum(run) => {
+            let run = *run;
+            let operation = run_operation_for_identity(&run.identity)
+                .expect("admitted response-spectrum identity has a runtime operation");
+            CompletedRunFacts {
+                identity: run.identity,
+                operation: operation.name().to_string(),
+                op_version: operation.version().to_string(),
+                run_id: run.run_id,
+                run_status: if run.numerically_acceptable {
+                    RunStatus::Completed
+                } else {
+                    RunStatus::Rejected
+                },
+                numerically_acceptable: run.numerically_acceptable,
+                production_publishable: run.production_publishable,
+                solver_convergence: if run.numerically_acceptable {
+                    QualityGate::Pass
+                } else {
+                    QualityGate::Fail
+                },
+                result_quality: if run.numerically_acceptable {
+                    QualityGate::Pass
+                } else {
+                    QualityGate::Fail
+                },
+                quality_reasons: run.quality_reasons,
+                production_publication_reasons: run.production_publication_reasons,
+                provenance: run.provenance,
+                numerical_result:
+                    crate::analysis::AnalysisStudyStepNumericalResultData::StructuralResponseSpectrum(
+                        Box::new(run.numerical_result),
+                    ),
+                standard_persistence: None,
+                frequency_persistence: None,
             }
         }
     }

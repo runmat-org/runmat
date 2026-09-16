@@ -533,6 +533,7 @@ fn resolve_meshing_settings(
             entry.solver_options,
             AnalysisSolverOptions::StructuralLinear(_)
                 | AnalysisSolverOptions::StructuralFrequency(_)
+                | AnalysisSolverOptions::StructuralResponseSpectrum(_)
                 | AnalysisSolverOptions::StructuralBuckling(_)
         )
     });

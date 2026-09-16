@@ -19,8 +19,9 @@ use runmat_runtime::analysis::{
     AnalysisStudySweepData, AnalysisStudySweepRunOutcome, AnalysisStudySweepSpec,
     PreparedStructuralStudyIntent, StructuralStudyBucklingNumericalResult,
     StructuralStudyExecutionFailure, StructuralStudyFrequencyNumericalResult,
-    StructuralStudyModalNumericalResult, StructuralStudyModalTransientNumericalResult,
-    StructuralStudyNumericalResult, StructuralStudyPrestressedFrequencyNumericalResult,
+    StructuralStudyModalNumericalResult, StructuralStudyModalResponseSpectrumNumericalResult,
+    StructuralStudyModalTransientNumericalResult, StructuralStudyNumericalResult,
+    StructuralStudyPrestressedFrequencyNumericalResult,
     StructuralStudyPrestressedModalNumericalResult, StructuralStudySequenceNumericalResult,
     StructuralStudyStepNumericalResult, StructuralStudyTransientNumericalResult,
 };
@@ -263,6 +264,22 @@ fn study_result(
                 transient_numerical_receipt: modal_transient
                     .transient_numerical_receipt
                     .clone(),
+            },
+        )),
+        runmat_execution_runner_native::ExactStructuralStudyAnalysisResult::StructuralModalResponseSpectrum(
+            response,
+        ) => StructuralStudyNumericalResult::StructuralModalResponseSpectrum(Box::new(
+            StructuralStudyModalResponseSpectrumNumericalResult {
+                frozen_project_digest: result.frozen_project_digest,
+                modal_step_id: response.modal_workload.step_id().clone(),
+                response_step_id: response.response_workload.step_id().clone(),
+                modal_result: (*response.modal_result).clone(),
+                modal_numerical_receipt: response.modal_numerical_receipt.clone(),
+                basis_state: response.basis_state.clone(),
+                resolved_response_workload: (*response.response_workload).clone(),
+                response_result: (*response.response_result).clone(),
+                response_numerical_receipt: response.response_numerical_receipt.clone(),
+                envelope_state: response.envelope_state.clone(),
             },
         )),
         runmat_execution_runner_native::ExactStructuralStudyAnalysisResult::StructuralBuckling(

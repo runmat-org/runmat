@@ -339,6 +339,9 @@ pub(super) fn structural_temporal(procedure: AnalysisProcedure) -> Option<Tempor
         AnalysisProcedure::PrestressedHarmonicResponse => {
             Some(TemporalImplementation::StructuralPrestressedHarmonicSolve)
         }
+        AnalysisProcedure::ModalResponseSpectrum => {
+            Some(TemporalImplementation::StructuralModalResponseSpectrumCombination)
+        }
         AnalysisProcedure::TransientResponse => {
             Some(TemporalImplementation::StructuralNewmarkAverageAcceleration)
         }
@@ -386,6 +389,27 @@ mod tests {
         .expect("valid reordered structural realization");
 
         assert_eq!(first, reordered);
+    }
+
+    #[test]
+    fn modal_response_spectrum_has_a_distinct_admitted_temporal_realization() {
+        let mut input = structural_input(vec![SourceImplementation::CanonicalBoundaryProjection]);
+        input.procedure = AnalysisProcedure::ModalResponseSpectrum;
+        let realization = structural_exact_realization(input)
+            .expect("response-spectrum combination should have an exact realization");
+        assert_eq!(
+            realization.temporals,
+            vec![TemporalImplementation::StructuralModalResponseSpectrumCombination]
+        );
+        let admitted = admit_formulation(FormulationAdmissionRequest {
+            family: PhysicsFamily::Structural,
+            procedure: AnalysisProcedure::ModalResponseSpectrum,
+            solution_space: SolutionSpace::ModalReduced,
+            requirement: FormulationRequirement::Experimental,
+            realization,
+        })
+        .expect("modal response-spectrum formulation should be admitted experimentally");
+        assert_eq!(admitted.qualification(), FormulationMaturity::Experimental);
     }
 
     #[test]

@@ -1,0 +1,322 @@
+use super::*;
+use runmat_analysis_fea::admission::{admit_formulation, FormulationAdmissionRequest};
+
+pub(super) fn complete_structural_response_spectrum(
+    intent: PreparedStructuralStudyIntent,
+    resolved_model: runmat_analysis_core::AnalysisModel,
+    persisted_mesh: crate::analysis::meshing::ResolvedStudyMesh,
+    solver_mesh: runmat_meshing_core::SolverMeshArtifact,
+    authored_workloads: BTreeMap<
+        runmat_analysis_core::ProcedureStepId,
+        runmat_analysis_fea::execution::StructuralStepWorkload,
+    >,
+    numerical: crate::analysis::StructuralStudyModalResponseSpectrumNumericalResult,
+    completion_identity: StructuralStudyCompletionIdentity,
+) -> Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope> {
+    let [modal_step, response_step] = intent.steps.as_slice() else {
+        return Err(intent_completion_error(
+            &intent,
+            "RM.FEA.RUN_STUDY.STEP_INVENTORY_MISMATCH",
+            OperationErrorType::Contract,
+            OperationErrorSeverity::Fatal,
+            "modal response-spectrum completion requires exactly two authored steps",
+        ));
+    };
+    let modal_run_id = completion_identity.local_run_id(
+        intent.authored_study_digest,
+        &modal_step.procedure_step.step_id,
+    );
+    let response_run_id = completion_identity.local_run_id(
+        intent.authored_study_digest,
+        &response_step.procedure_step.step_id,
+    );
+    complete_response_spectrum_study(
+        super::modal_completion::prepared_completion(intent, resolved_model, persisted_mesh),
+        solver_mesh,
+        authored_workloads,
+        numerical,
+        modal_run_id,
+        response_run_id,
+    )
+}
+
+pub(in crate::analysis) fn complete_response_spectrum_study(
+    mut prepared: PreparedStudyCompletion,
+    solver_mesh: runmat_meshing_core::SolverMeshArtifact,
+    mut authored_workloads: BTreeMap<
+        runmat_analysis_core::ProcedureStepId,
+        runmat_analysis_fea::execution::StructuralStepWorkload,
+    >,
+    numerical: crate::analysis::StructuralStudyModalResponseSpectrumNumericalResult,
+    modal_run_id: String,
+    response_run_id: String,
+) -> Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope> {
+    let [modal_step, response_step] = prepared.steps.as_slice() else {
+        return Err(completion_error(
+            &prepared,
+            "modal response-spectrum completion requires exactly two authored steps",
+        ));
+    };
+    let modal_step = modal_step.clone();
+    let response_step = response_step.clone();
+    if numerical.modal_step_id != modal_step.procedure_step.step_id
+        || numerical.response_step_id != response_step.procedure_step.step_id
+    {
+        return Err(completion_error(
+            &prepared,
+            "modal response-spectrum result step order differs from the authored sequence",
+        ));
+    }
+    let Some(runmat_analysis_fea::execution::StructuralStepWorkload::ModalExtraction {
+        workload: modal_workload,
+    }) = authored_workloads.remove(&numerical.modal_step_id)
+    else {
+        return Err(completion_error(
+            &prepared,
+            "modal response-spectrum workload is missing its modal producer",
+        ));
+    };
+    let Some(runmat_analysis_fea::execution::StructuralStepWorkload::ModalResponseSpectrum {
+        template,
+    }) = authored_workloads.remove(&numerical.response_step_id)
+    else {
+        return Err(completion_error(
+            &prepared,
+            "modal response-spectrum workload is missing its response consumer",
+        ));
+    };
+    if !authored_workloads.is_empty() {
+        return Err(completion_error(
+            &prepared,
+            "modal response-spectrum workload contains an unauthored step",
+        ));
+    }
+
+    let AnalysisSolverOptions::StructuralModes(mut modal_options) =
+        modal_step.authored_execution.solver_options.clone()
+    else {
+        return Err(completion_error(
+            &prepared,
+            "modal response-spectrum producer has non-modal solver options",
+        ));
+    };
+    let AnalysisSolverOptions::StructuralResponseSpectrum(mut response_options) =
+        response_step.authored_execution.solver_options.clone()
+    else {
+        return Err(completion_error(
+            &prepared,
+            "modal response-spectrum consumer has incompatible solver options",
+        ));
+    };
+
+    let mut modal_workload = *modal_workload;
+    modal_workload
+        .replace_model(prepared.model.clone())
+        .map_err(|error| completion_error(&prepared, error.to_string()))?;
+    let recovered_modal =
+        runmat_analysis_fea::pipeline::modal::recover_completed_structural_modal_run(
+            &modal_workload,
+            &solver_mesh,
+            &numerical.modal_result,
+            &numerical.modal_numerical_receipt,
+        )
+        .map_err(|error| completion_error(&prepared, error.to_string()))?;
+    modal_options.solver_mesh_artifact_path = prepared.solver_mesh_artifact_path.clone();
+    let modal_run = analysis_admit_modal_run_with_id(
+        recovered_modal,
+        modal_workload.backend(),
+        modal_options.clone(),
+        prepared.context.clone(),
+        Some(solver_mesh.clone()),
+        Some(&modal_run_id),
+    )?;
+    let modal_result_identity = numerical.modal_numerical_receipt.source_result();
+    let expected_basis_states = super::modal_completion::modal_basis_states_for_completion(
+        &prepared,
+        &solver_mesh,
+        &modal_workload,
+        modal_result_identity,
+        numerical.modal_result.basis(),
+    )?;
+    if expected_basis_states.as_slice() != [numerical.basis_state.clone()] {
+        return Err(completion_error(
+            &prepared,
+            "published modal basis differs from the admitted producer result",
+        ));
+    }
+
+    let mut template = *template;
+    template.model = prepared.model.clone();
+    let topology_digest =
+        runmat_execution::Digest::from_bytes(*solver_mesh.canonical_digest.bytes());
+    let transition = runmat_analysis_fea::execution::CanonicalStateTransition::bind_upstream(
+        &prepared.model,
+        &template.step_id,
+        &numerical.basis_state,
+        runmat_analysis_core::StateUse::ModalBasis,
+        topology_digest,
+    )
+    .map_err(|error| completion_error(&prepared, error.to_string()))?;
+    let response_workload = template
+        .bind(transition)
+        .map_err(|error| completion_error(&prepared, error.to_string()))?;
+    if response_workload != numerical.resolved_response_workload {
+        return Err(completion_error(
+            &prepared,
+            "resolved response-spectrum workload differs from the admitted state transition",
+        ));
+    }
+    numerical
+        .response_result
+        .validate_for(&response_workload)
+        .map_err(|error| completion_error(&prepared, error.to_string()))?;
+    let response_result_identity = numerical.response_numerical_receipt.source_result();
+    numerical
+        .response_numerical_receipt
+        .validate_against(response_result_identity, &numerical.response_result)
+        .map_err(|error| completion_error(&prepared, error.to_string()))?;
+
+    let declaration = response_step
+        .procedure_step
+        .state_outputs
+        .iter()
+        .find(|output| output.kind == runmat_analysis_core::StateKind::StructuralResponseEnvelope)
+        .ok_or_else(|| completion_error(&prepared, "response-envelope declaration is absent"))?;
+    let sequence = runmat_analysis_fea::execution::SequenceIdentity::from_solver_contract(
+        &prepared.model.sequence,
+    )
+    .map_err(|error| completion_error(&prepared, error.to_string()))?;
+    let producer = runmat_analysis_fea::execution::StepIdentity::from_solver_contract(
+        sequence,
+        &response_step.procedure_step,
+    )
+    .map_err(|error| completion_error(&prepared, error.to_string()))?;
+    let expected_envelope = runmat_analysis_fea::execution::CanonicalSemanticState::new(
+        runmat_analysis_fea::execution::CanonicalSemanticStateInput {
+            producer,
+            declaration: declaration.clone(),
+            topology_digest,
+            source_result: response_result_identity,
+            payload: runmat_analysis_fea::execution::CanonicalSemanticStatePayload::StructuralResponseEnvelope {
+                envelope: Box::new(
+                    runmat_analysis_fea::execution::StructuralResponseEnvelope::from_result(
+                        &numerical.response_result,
+                    )
+                    .map_err(|error| completion_error(&prepared, error.to_string()))?,
+                ),
+            },
+        },
+    )
+    .map_err(|error| completion_error(&prepared, error.to_string()))?;
+    if expected_envelope != numerical.envelope_state {
+        return Err(completion_error(
+            &prepared,
+            "published response envelope differs from the admitted response result",
+        ));
+    }
+
+    let modal_identity = &modal_run.data.run.identity;
+    let mut response_realization = modal_identity.realization().clone();
+    response_realization.temporals = vec![
+        runmat_analysis_core::TemporalImplementation::StructuralModalResponseSpectrumCombination,
+    ];
+    let response_identity = admit_formulation(FormulationAdmissionRequest {
+        family: response_step.procedure_step.family,
+        procedure: response_step.procedure_step.procedure,
+        solution_space: response_step.procedure_step.solution_space,
+        requirement: response_step.authored_execution.requirement,
+        realization: response_realization,
+    })
+    .map_err(|error| completion_error(&prepared, error.to_string()))?
+    .into_identity();
+    response_options.solver_mesh_artifact_path = prepared.solver_mesh_artifact_path.clone();
+    let production_publishable =
+        response_identity.qualification() == runmat_analysis_core::FormulationMaturity::Production;
+    let production_publication_reasons = (!production_publishable)
+        .then(|| crate::analysis::ProductionPublicationReason {
+            code:
+                crate::analysis::ProductionPublicationReasonCode::FormulationNotProductionQualified,
+            detail: "modal response spectrum is not yet production-qualified".into(),
+        })
+        .into_iter()
+        .collect();
+    let response_run = super::super::publication::CompletedStructuralResponseSpectrumStep {
+        identity: response_identity,
+        run_id: response_run_id,
+        numerically_acceptable: true,
+        production_publishable,
+        quality_reasons: Vec::new(),
+        production_publication_reasons,
+        provenance: crate::analysis::RunProvenance {
+            requested_backend: response_workload.backend(),
+            execution_backend: runmat_analysis_fea::ExecutionBackend::Cpu,
+            solver_backend:
+                runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
+            solver_device_apply_k_ratio: 0.0,
+            solver_host_sync_count: 0,
+            precision_mode: "fp64".into(),
+            deterministic_mode: response_options.deterministic_mode,
+            solver_method:
+                runmat_analysis_fea::SolverMethod::StructuralModalResponseSpectrumCombination,
+            preconditioner: runmat_analysis_fea::SolverPreconditioner::None,
+            quality_policy: match response_options.quality_policy {
+                crate::analysis::QualityPolicy::Strict => "strict",
+                crate::analysis::QualityPolicy::Balanced => "balanced",
+                crate::analysis::QualityPolicy::Exploratory => "exploratory",
+            }
+            .into(),
+            fallback_events: Vec::new(),
+        },
+        numerical_result: crate::analysis::StructuralResponseSpectrumResultsData {
+            result: numerical.response_result,
+            numerical_receipt: numerical.response_numerical_receipt,
+        },
+    };
+
+    prepared.steps[0].authored_execution.solver_options =
+        AnalysisSolverOptions::StructuralModes(modal_options.clone());
+    prepared.steps[1].authored_execution.solver_options =
+        AnalysisSolverOptions::StructuralResponseSpectrum(response_options.clone());
+    let mut states = expected_basis_states;
+    states.push(numerical.envelope_state);
+    complete_study_run(
+        prepared,
+        vec![
+            CompletedStudyStep {
+                step_id: numerical.modal_step_id,
+                solver_result_identity: modal_result_identity,
+                run: CompletedStudyStepRun::Standard(Box::new(modal_run)),
+                resolved_solver_options: AnalysisSolverOptions::StructuralModes(modal_options),
+            },
+            CompletedStudyStep {
+                step_id: numerical.response_step_id,
+                solver_result_identity: response_result_identity,
+                run: CompletedStudyStepRun::StructuralResponseSpectrum(Box::new(response_run)),
+                resolved_solver_options: AnalysisSolverOptions::StructuralResponseSpectrum(
+                    response_options,
+                ),
+            },
+        ],
+        states,
+        numerical.frozen_project_digest,
+    )
+}
+
+fn completion_error(
+    prepared: &PreparedStudyCompletion,
+    message: impl Into<String>,
+) -> OperationErrorEnvelope {
+    operation_error(
+        ANALYSIS_RUN_STUDY_OPERATION,
+        ANALYSIS_RUN_STUDY_OP_VERSION,
+        &prepared.context,
+        OperationErrorSpec {
+            error_code: "RM.FEA.RUN_STUDY.RESPONSE_SPECTRUM_RESULT_INVALID",
+            error_type: OperationErrorType::Contract,
+            retryable: false,
+            severity: OperationErrorSeverity::Fatal,
+        },
+        message,
+        BTreeMap::from([("study_id".to_string(), prepared.study_id.clone())]),
+    )
+}

@@ -58,6 +58,9 @@ pub(crate) fn package_exact_structural_study_result(
         ExactStructuralAnalysisPublication::StructuralModalTransient { completion, .. } => {
             modal_transient_closure(completion, &decoded.artifact_access)?
         }
+        ExactStructuralAnalysisPublication::StructuralModalResponseSpectrum {
+            completion, ..
+        } => modal_response_spectrum_closure(completion, &decoded.artifact_access)?,
         ExactStructuralAnalysisPublication::StructuralBuckling { completion, .. } => {
             buckling_closure(completion, &decoded.artifact_access)?
         }
@@ -427,6 +430,36 @@ fn modal_transient_closure(
             basis_state_root: Box::new(basis_state_root),
             transient_result_root: Box::new(transient_result_root),
             transient_receipt_root: Box::new(transient_receipt_root),
+            objects,
+        },
+    )
+}
+
+fn modal_response_spectrum_closure(
+    completion: &crate::CompletedStructuralModalResponseSpectrumStudy,
+    access: &ArtifactAccess,
+) -> NativeExecutionResult<ExactStructuralStudyAnalysisClosure> {
+    let (roots, objects) = numerical_closure_roots(
+        [
+            &completion.modal.objects,
+            &completion.modal.numerical_receipt_objects,
+            &completion.basis_state.objects,
+            &completion.response.result_objects,
+            &completion.response.receipt_objects,
+            &completion.envelope_state.objects,
+        ],
+        access,
+    )?;
+    let [modal_result_root, modal_receipt_root, basis_state_root, response_result_root, response_receipt_root, envelope_state_root] =
+        roots;
+    Ok(
+        ExactStructuralStudyAnalysisClosure::StructuralModalResponseSpectrum {
+            modal_result_root: Box::new(modal_result_root),
+            modal_receipt_root: Box::new(modal_receipt_root),
+            basis_state_root: Box::new(basis_state_root),
+            response_result_root: Box::new(response_result_root),
+            response_receipt_root: Box::new(response_receipt_root),
+            envelope_state_root: Box::new(envelope_state_root),
             objects,
         },
     )

@@ -13,6 +13,7 @@ pub fn is_exposed_analysis_identity(
                 AnalysisProcedure::TransientResponse
                     | AnalysisProcedure::HarmonicResponse
                     | AnalysisProcedure::PrestressedHarmonicResponse
+                    | AnalysisProcedure::ModalResponseSpectrum
             )
         );
     }
@@ -168,6 +169,11 @@ mod tests {
         assert!(is_exposed_analysis_identity(
             PhysicsFamily::Structural,
             AnalysisProcedure::HarmonicResponse,
+            SolutionSpace::ModalReduced
+        ));
+        assert!(is_exposed_analysis_identity(
+            PhysicsFamily::Structural,
+            AnalysisProcedure::ModalResponseSpectrum,
             SolutionSpace::ModalReduced
         ));
         assert!(!is_exposed_analysis_identity(

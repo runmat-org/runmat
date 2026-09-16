@@ -12,6 +12,7 @@ mod analysis_placement;
 mod analysis_prestressed_frequency;
 mod analysis_prestressed_modal;
 mod analysis_prestressed_modal_frequency;
+mod analysis_response_spectrum;
 mod analysis_sequence;
 mod analysis_task;
 mod analysis_task_pool;
@@ -80,6 +81,11 @@ pub use analysis_prestressed_modal_frequency::{
     execute_structural_prestressed_modal_frequency_study_remotely,
     CompletedStructuralPrestressedModalFrequencyStudy,
 };
+pub use analysis_response_spectrum::{
+    execute_structural_modal_response_spectrum_locally,
+    execute_structural_modal_response_spectrum_remotely,
+    CompletedStructuralModalResponseSpectrumStudy,
+};
 pub use analysis_sequence::{
     execute_structural_sequence_locally, execute_structural_sequence_remotely,
     StructuralSequenceExecutionPolicy,
@@ -111,6 +117,7 @@ pub use exact_structural_study_root::{
     decode_exact_structural_study_root, import_exact_structural_study_result,
     prepare_exact_structural_study_root, BoundaryRegionResolution, DecodedExactStructuralStudyRoot,
     ExactStructuralBucklingAnalysisResult, ExactStructuralFrequencyAnalysisResult,
+    ExactStructuralModalResponseSpectrumAnalysisResult,
     ExactStructuralModalTransientAnalysisResult, ExactStructuralPrestressedFrequencyAnalysisResult,
     ExactStructuralPrestressedModalAnalysisResult, ExactStructuralStudyAnalysisResult,
     ExactStructuralStudyResult, ExactStructuralStudyResultExpectation,

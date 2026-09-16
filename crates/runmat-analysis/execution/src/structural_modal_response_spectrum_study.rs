@@ -438,6 +438,18 @@ impl StructuralModalResponseSpectrumStudyCoordinator {
         self.result.as_ref()
     }
 
+    pub fn modal_result(&self) -> Option<&ImportedStructuralModalResult> {
+        self.modal.as_ref()
+    }
+
+    pub fn basis_state(&self) -> Option<&ImportedSemanticState> {
+        self.basis_state.as_ref()
+    }
+
+    pub fn resolved_workload(&self) -> Option<&StructuralModalResponseSpectrumWorkload> {
+        self.response_workload.as_ref()
+    }
+
     pub fn envelope_state(&self) -> Option<&ImportedSemanticState> {
         self.envelope_state.as_ref()
     }

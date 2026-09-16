@@ -32,6 +32,7 @@ mod prestressed_frequency_completion;
 mod prestressed_frequency_modal_reduction;
 mod prestressed_frequency_states;
 mod prestressed_modal_completion;
+mod response_spectrum_completion;
 
 pub(in crate::analysis) use buckling_completion::complete_buckling_study;
 use buckling_completion::complete_structural_buckling;
@@ -41,15 +42,17 @@ pub(in crate::analysis) use modal_completion::{
 use modal_completion::{complete_structural_modal, complete_structural_modal_transient};
 pub use preparation::analysis_prepare_structural_study_intent_op;
 pub(in crate::analysis) use preparation::{
-    prepare_structural_buckling_template, prepare_structural_frequency_workload,
-    prepare_structural_modal_transient_template, prepare_structural_modal_workload,
-    prepare_structural_prestressed_frequency_template,
-    prepare_structural_prestressed_modal_template,
+    complete_response_spectrum_modal_options, prepare_structural_buckling_template,
+    prepare_structural_frequency_workload, prepare_structural_modal_transient_template,
+    prepare_structural_modal_workload, prepare_structural_prestressed_frequency_template,
+    prepare_structural_prestressed_modal_template, prepare_structural_response_spectrum_template,
 };
 pub(in crate::analysis) use prestressed_frequency_completion::complete_prestressed_frequency_study;
 use prestressed_frequency_completion::complete_structural_prestressed_frequency;
 pub(in crate::analysis) use prestressed_modal_completion::complete_prestressed_modal_study;
 use prestressed_modal_completion::complete_structural_prestressed_modal;
+pub(in crate::analysis) use response_spectrum_completion::complete_response_spectrum_study;
+use response_spectrum_completion::complete_structural_response_spectrum;
 
 fn completion_error(
     prepared: &PreparedStudyCompletion,
@@ -221,6 +224,20 @@ pub fn analysis_complete_structural_study_intent_op(
             },
             StructuralStudyNumericalResult::StructuralModalTransient(result),
         ) => complete_structural_modal_transient(
+            intent,
+            resolved_model,
+            persisted_mesh,
+            meshing_output.artifact,
+            workloads,
+            *result,
+            completion_identity,
+        ),
+        (
+            runmat_analysis_fea::execution::StructuralStudyWorkloads::HeterogeneousSequence {
+                workloads,
+            },
+            StructuralStudyNumericalResult::StructuralModalResponseSpectrum(result),
+        ) => complete_structural_response_spectrum(
             intent,
             resolved_model,
             persisted_mesh,

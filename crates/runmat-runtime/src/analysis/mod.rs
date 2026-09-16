@@ -188,6 +188,23 @@ pub struct StructuralStudyModalTransientNumericalResult {
 }
 
 #[derive(Debug, Clone)]
+pub struct StructuralStudyModalResponseSpectrumNumericalResult {
+    pub frozen_project_digest: Option<runmat_execution::Digest>,
+    pub modal_step_id: ProcedureStepId,
+    pub response_step_id: ProcedureStepId,
+    pub modal_result: runmat_analysis_fea::execution::StructuralModalSolverResult,
+    pub modal_numerical_receipt: runmat_analysis_fea::execution::StructuralModalNumericalReceipt,
+    pub basis_state: runmat_analysis_fea::execution::CanonicalSemanticState,
+    pub resolved_response_workload:
+        runmat_analysis_fea::execution::StructuralModalResponseSpectrumWorkload,
+    pub response_result:
+        runmat_analysis_fea::execution::StructuralModalResponseSpectrumSolverResult,
+    pub response_numerical_receipt:
+        runmat_analysis_fea::execution::StructuralModalResponseSpectrumNumericalReceipt,
+    pub envelope_state: runmat_analysis_fea::execution::CanonicalSemanticState,
+}
+
+#[derive(Debug, Clone)]
 pub struct StructuralStudyBucklingNumericalResult {
     pub frozen_project_digest: Option<runmat_execution::Digest>,
     pub preload_step_id: ProcedureStepId,
@@ -243,6 +260,7 @@ pub enum StructuralStudyNumericalResult {
     LinearSequence(StructuralStudySequenceNumericalResult),
     StructuralModal(Box<StructuralStudyModalNumericalResult>),
     StructuralModalTransient(Box<StructuralStudyModalTransientNumericalResult>),
+    StructuralModalResponseSpectrum(Box<StructuralStudyModalResponseSpectrumNumericalResult>),
     StructuralBuckling(Box<StructuralStudyBucklingNumericalResult>),
     StructuralPrestressedModal(Box<StructuralStudyPrestressedModalNumericalResult>),
     StructuralPrestressedFrequency(Box<StructuralStudyPrestressedFrequencyNumericalResult>),
@@ -352,8 +370,8 @@ pub use contracts::{
     AnalysisImmutableValueSpec, AnalysisModalRunOptions, AnalysisModelTemplate,
     AnalysisNonlinearRunOptions, AnalysisObjectArtifactMetadata, AnalysisRenderMesh,
     AnalysisRenderRegion, AnalysisRenderTopology, AnalysisRenderTopologySource,
-    AnalysisRenderTriangleRange, AnalysisResultsCompareData, AnalysisResultsCompareQuery,
-    AnalysisResultsData, AnalysisResultsQuery, AnalysisResultsSummary,
+    AnalysisRenderTriangleRange, AnalysisResponseSpectrumRunOptions, AnalysisResultsCompareData,
+    AnalysisResultsCompareQuery, AnalysisResultsData, AnalysisResultsQuery, AnalysisResultsSummary,
     AnalysisRunDatasetFieldPagingPolicy, AnalysisRunDatasetPayload, AnalysisRunDatasetStudyRef,
     AnalysisRunOptions, AnalysisRunResult, AnalysisRuntimeCapabilities,
     AnalysisRuntimeModelTemplateCatalogEntry, AnalysisRuntimeModelTemplateDefaultObservation,
@@ -370,13 +388,14 @@ pub use contracts::{
     ModalFrequencyUnits, ModalResultsData, NonlinearMethod, NonlinearResultsData,
     PlasticityConstitutiveOptions, PrecisionMode, PreconditionerMode, ProductionPublicationReason,
     ProductionPublicationReasonCode, QualityGate, QualityPolicy, QualityReason, QualityReasonCode,
-    RunProvenance, RunStatus, StructuralFrequencyResultsData, ThermalResultsData,
-    TransientIntegrationMethod, TransientResultsData, ANALYSIS_ARTIFACT_MANIFEST_KIND,
-    ANALYSIS_DATASET_ARTIFACT_KIND, ANALYSIS_DIAGNOSTICS_ARTIFACT_KIND,
-    ANALYSIS_DIAGNOSTICS_SCHEMA_VERSION, ANALYSIS_FIELD_BINDINGS_ARTIFACT_KIND,
-    ANALYSIS_FIELD_BINDINGS_SCHEMA_VERSION, ANALYSIS_FIELD_DEFAULT_MATERIALIZE_LIMIT,
-    ANALYSIS_FIELD_DEFAULT_PAGE_SIZE, ANALYSIS_OBJECT_ARTIFACT_METADATA_SCHEMA_VERSION,
-    ANALYSIS_RUN_DATASET_KIND, ANALYSIS_RUN_DATASET_SCHEMA_VERSION,
+    RunProvenance, RunStatus, StructuralFrequencyResultsData,
+    StructuralResponseSpectrumResultsData, ThermalResultsData, TransientIntegrationMethod,
+    TransientResultsData, ANALYSIS_ARTIFACT_MANIFEST_KIND, ANALYSIS_DATASET_ARTIFACT_KIND,
+    ANALYSIS_DIAGNOSTICS_ARTIFACT_KIND, ANALYSIS_DIAGNOSTICS_SCHEMA_VERSION,
+    ANALYSIS_FIELD_BINDINGS_ARTIFACT_KIND, ANALYSIS_FIELD_BINDINGS_SCHEMA_VERSION,
+    ANALYSIS_FIELD_DEFAULT_MATERIALIZE_LIMIT, ANALYSIS_FIELD_DEFAULT_PAGE_SIZE,
+    ANALYSIS_OBJECT_ARTIFACT_METADATA_SCHEMA_VERSION, ANALYSIS_RUN_DATASET_KIND,
+    ANALYSIS_RUN_DATASET_SCHEMA_VERSION,
 };
 pub use fea_document::{
     is_fea_file_path, load_fea_document_from_path_async, parse_and_resolve_fea_document,
@@ -1179,7 +1198,7 @@ pub fn analysis_prepare_structural_study_op(
     spec: &AnalysisStudySpec,
     context: OperationContext,
 ) -> Result<PreparedStructuralStudy, OperationErrorEnvelope> {
-    let study = prepare_study_run(spec, context)?;
+    let mut study = prepare_study_run(spec, context)?;
     let solver_mesh = resolve_solver_mesh_artifact(
         &study.model,
         study.solver_mesh_artifact_path.as_deref(),
@@ -1218,6 +1237,97 @@ pub fn analysis_prepare_structural_study_op(
                 },
                 solver_mesh,
             });
+        }
+    }
+
+    if let [modal_step, response_step] = study.steps.as_slice() {
+        if response_step.procedure_step.procedure
+            == runmat_analysis_core::AnalysisProcedure::ModalResponseSpectrum
+        {
+            if let (
+                AnalysisSolverOptions::StructuralModes(mut modal_options),
+                AnalysisSolverOptions::StructuralResponseSpectrum(mut response_options),
+            ) = (
+                modal_step.authored_execution.solver_options.clone(),
+                response_step.authored_execution.solver_options.clone(),
+            ) {
+                modal_options.solver_mesh_artifact_path = None;
+                response_options.solver_mesh_artifact_path = None;
+                structural_study::complete_response_spectrum_modal_options(
+                    &study.model,
+                    &response_step.procedure_step,
+                    &mut modal_options,
+                )
+                .map_err(|message| {
+                    operation_error(
+                        ANALYSIS_RUN_STUDY_OPERATION,
+                        ANALYSIS_RUN_STUDY_OP_VERSION,
+                        &study.context,
+                        OperationErrorSpec {
+                            error_code: "RM.FEA.RUN_STUDY.INVALID_PORTABLE_INTENT",
+                            error_type: OperationErrorType::Contract,
+                            retryable: false,
+                            severity: OperationErrorSeverity::Fatal,
+                        },
+                        message,
+                        BTreeMap::new(),
+                    )
+                })?;
+                let modal = structural_study::prepare_structural_modal_workload(
+                    &study,
+                    modal_step,
+                    &modal_options,
+                )?;
+                let response = structural_study::prepare_structural_response_spectrum_template(
+                    &study,
+                    response_step,
+                    &response_options,
+                )?;
+                let workloads = BTreeMap::from([
+                    (
+                        modal_step.procedure_step.step_id.clone(),
+                        runmat_analysis_fea::execution::StructuralStepWorkload::ModalExtraction {
+                            workload: Box::new(modal),
+                        },
+                    ),
+                    (
+                        response_step.procedure_step.step_id.clone(),
+                        runmat_analysis_fea::execution::StructuralStepWorkload::ModalResponseSpectrum {
+                            template: Box::new(response),
+                        },
+                    ),
+                ]);
+                runmat_analysis_fea::execution::StructuralStudyWorkloads::HeterogeneousSequence {
+                    workloads: workloads.clone(),
+                }
+                .validate()
+                .map_err(|error| {
+                    operation_error(
+                        ANALYSIS_RUN_STUDY_OPERATION,
+                        ANALYSIS_RUN_STUDY_OP_VERSION,
+                        &study.context,
+                        OperationErrorSpec {
+                            error_code: "RM.FEA.RUN_STUDY.INVALID_PORTABLE_INTENT",
+                            error_type: OperationErrorType::Contract,
+                            retryable: false,
+                            severity: OperationErrorSeverity::Fatal,
+                        },
+                        error.to_string(),
+                        BTreeMap::new(),
+                    )
+                })?;
+                study.steps[0].authored_execution.solver_options =
+                    AnalysisSolverOptions::StructuralModes(modal_options);
+                study.steps[1].authored_execution.solver_options =
+                    AnalysisSolverOptions::StructuralResponseSpectrum(response_options);
+                return Ok(PreparedStructuralStudy {
+                    study,
+                    execution: structural_study::PreparedStructuralStudyExecution::StructuralModalResponseSpectrum {
+                        workloads,
+                    },
+                    solver_mesh,
+                });
+            }
         }
     }
 
@@ -1753,6 +1863,30 @@ pub fn analysis_complete_structural_study_op(
                 storage::next_run_id(),
             );
         }
+        Ok(StructuralStudyNumericalResult::StructuralModalResponseSpectrum(result)) => {
+            let workloads = match &prepared.execution {
+                structural_study::PreparedStructuralStudyExecution::StructuralModalResponseSpectrum {
+                    workloads,
+                } => workloads.clone(),
+                _ => {
+                    return Err(structural_study_completion_failure(
+                        &prepared,
+                        "RM.FEA.RUN_STUDY.RESULT_KIND_MISMATCH",
+                        OperationErrorType::Contract,
+                        OperationErrorSeverity::Fatal,
+                        "modal response-spectrum result differs from the prepared study kind",
+                    ));
+                }
+            };
+            return structural_study::complete_response_spectrum_study(
+                study_completion_from_prepared(prepared.study),
+                prepared.solver_mesh,
+                workloads,
+                *result,
+                storage::next_run_id(),
+                storage::next_run_id(),
+            );
+        }
         Ok(StructuralStudyNumericalResult::StructuralBuckling(result)) => {
             let workloads = match &prepared.execution {
                 structural_study::PreparedStructuralStudyExecution::StructuralBuckling {
@@ -1847,6 +1981,9 @@ pub fn analysis_complete_structural_study_op(
                 }
                 structural_study::PreparedStructuralStudyExecution::StructuralModal { .. }
                 | structural_study::PreparedStructuralStudyExecution::StructuralModalTransient {
+                    ..
+                }
+                | structural_study::PreparedStructuralStudyExecution::StructuralModalResponseSpectrum {
                     ..
                 }
                 | structural_study::PreparedStructuralStudyExecution::StructuralBuckling {

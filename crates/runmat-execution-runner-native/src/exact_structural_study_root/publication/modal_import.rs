@@ -245,7 +245,7 @@ pub(super) fn import_modal_transient_result<Source: CacheImport>(
     )
 }
 
-fn validate_modal_pair(
+pub(super) fn validate_modal_pair(
     result_objects: &runmat_analysis_execution::PreparedAnalysisObjects,
     result: &runmat_analysis_fea::execution::StructuralModalSolverResult,
     receipt: &runmat_analysis_fea::execution::StructuralModalNumericalReceipt,

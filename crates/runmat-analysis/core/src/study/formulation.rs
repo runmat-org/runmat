@@ -43,6 +43,7 @@ pub enum TemporalImplementation {
     StructuralEigenvalueBuckling,
     StructuralHarmonicSolve,
     StructuralPrestressedHarmonicSolve,
+    StructuralModalResponseSpectrumCombination,
     StructuralNewmarkAverageAcceleration,
     StructuralScalarResidualIteration,
     ThermalSteadyLinearSolve,

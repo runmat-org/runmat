@@ -1,6 +1,47 @@
 use super::*;
 
 #[test]
+fn response_spectrum_intent_derives_required_modal_residual_directions() {
+    let _guard = analysis_test_guard();
+    let spec = sample_response_spectrum_study_spec("31".repeat(32));
+    let intent = analysis_prepare_structural_study_intent_op(
+        &spec,
+        OperationContext::new(Some("trace-response-spectrum".into()), None),
+    )
+    .expect("response-spectrum intent should prepare without a solver mesh");
+    let runmat_analysis_fea::execution::StructuralStudyWorkloads::HeterogeneousSequence {
+        workloads,
+    } = intent.workloads()
+    else {
+        panic!("response-spectrum intent must remain a heterogeneous sequence")
+    };
+    let [modal_step, response_step] = intent.model().sequence.steps.as_slice() else {
+        panic!("response-spectrum fixture must have two steps")
+    };
+    let runmat_analysis_fea::execution::StructuralStepWorkload::ModalExtraction { workload } =
+        &workloads[&modal_step.step_id]
+    else {
+        panic!("first response-spectrum step must extract modes")
+    };
+    assert_eq!(
+        workload.residual_vector_directions(),
+        &[runmat_analysis_core::SpectrumDirection {
+            frame: runmat_analysis_core::CoordinateFrame::Global,
+            vector: [1.0, 0.0, 0.0],
+        }]
+    );
+    assert!(matches!(
+        workloads.get(&response_step.step_id),
+        Some(runmat_analysis_fea::execution::StructuralStepWorkload::ModalResponseSpectrum { .. })
+    ));
+    let restored = PreparedStructuralStudyIntent::from_continuation_bytes(
+        &intent.continuation_bytes().unwrap(),
+    )
+    .expect("response-spectrum intent should round trip");
+    assert_eq!(restored.workloads(), intent.workloads());
+}
+
+#[test]
 fn structural_study_intent_is_path_free_and_does_not_require_a_mesh() {
     let _guard = analysis_test_guard();
     let mut spec = sample_linear_static_study_spec();
@@ -1385,6 +1426,96 @@ fn sample_modal_transient_study_spec(geometry_sha256: String) -> AnalysisStudySp
                         maximum_intervals_per_block: 2,
                         ..AnalysisTransientRunOptions::solid_recommended()
                     },
+                ),
+            },
+        ],
+    };
+    spec
+}
+
+fn sample_response_spectrum_study_spec(geometry_sha256: String) -> AnalysisStudySpec {
+    let mut spec = sample_linear_static_study_spec();
+    spec.geometry.source.sha256 = geometry_sha256;
+    let mut model = analysis_create_model_op(
+        &spec.geometry,
+        spec.create_model_intent.clone(),
+        OperationContext::new(None, None),
+    )
+    .expect("sample structural model should resolve")
+    .data;
+    let mut modal = ProcedureStep::structural_modal("step_modal");
+    modal.independent_domain =
+        runmat_analysis_core::IndependentDomain::Eigenvalue { requested_count: 3 };
+    let spectrum = runmat_analysis_core::ResponseSpectrum {
+        spectrum_id: runmat_analysis_core::ResponseSpectrumId("spectrum_x".into()),
+        abscissa: runmat_analysis_core::SpectrumAbscissa::FrequencyHertz(vec![0.1, 100.0]),
+        ordinates: vec![1.0, 1.0],
+        damping: runmat_analysis_core::SpectrumDamping::Ratio(0.05),
+        response: runmat_analysis_core::SpectrumResponse::RelativeDisplacement,
+        envelope: runmat_analysis_core::SpectrumEnvelope::Maximax,
+        interpolation: runmat_analysis_core::SpectrumInterpolation::LinearFrequency,
+        extrapolation: runmat_analysis_core::SpectrumExtrapolation::HoldEndpoint,
+        direction: runmat_analysis_core::SpectrumDirection {
+            frame: runmat_analysis_core::CoordinateFrame::Global,
+            vector: [1.0, 0.0, 0.0],
+        },
+        modal_combination: runmat_analysis_core::ModalCombination::AbsoluteSum,
+        directional_combination: runmat_analysis_core::DirectionalCombination::Srss,
+        truncation: runmat_analysis_core::ModalTruncationPolicy {
+            minimum_cumulative_mass_ratio: 0.0,
+            correction: runmat_analysis_core::ModalTruncationCorrection::ResidualMode,
+        },
+        rigid_response: runmat_analysis_core::RigidResponsePolicy::Disabled,
+        construction: runmat_analysis_core::SpectrumConstruction::AuthoredDesign,
+        evidence: runmat_analysis_core::SpectrumEvidence {
+            sampling_adequacy_ratio: 1.0,
+            max_interpolation_error: None,
+        },
+        provenance_digest: "sha256:response-spectrum-intent".into(),
+    };
+    let response = ProcedureStep::structural_modal_response_spectrum(
+        "step_response",
+        vec![spectrum.spectrum_id.clone()],
+        modal.step_id.as_str(),
+        "modal_basis",
+    );
+    let mut sequence = AnalysisSequence::from_steps(
+        "sequence_response_spectrum",
+        vec![modal.clone(), response.clone()],
+    );
+    sequence.dependencies[0].reason = runmat_analysis_core::SequenceDependencyReason::StateTransfer;
+    sequence
+        .transitions
+        .push(runmat_analysis_core::StateTransition {
+            transition_id: runmat_analysis_core::TransitionId("modal_to_response".into()),
+            producer_step: modal.step_id.clone(),
+            consumer_step: response.step_id.clone(),
+            state_id: runmat_analysis_core::StateId("modal_basis".into()),
+            method: runmat_analysis_core::StateTransitionMethod::Reuse,
+            topology: runmat_analysis_core::TopologyTransitionPolicy::RequireIdentical,
+            reference: runmat_analysis_core::ReferenceStatePolicy::Preserve,
+        });
+    model.sequence = sequence;
+    model.response_spectra = vec![spectrum];
+    spec.model = Some(model);
+    spec.execution = AnalysisExecutionPlan {
+        steps: vec![
+            AnalysisExecutionStep {
+                step_id: modal.step_id,
+                backend: ComputeBackend::Cpu,
+                requirement: FormulationRequirement::Experimental,
+                solver_options: AnalysisSolverOptions::StructuralModes(AnalysisModalRunOptions {
+                    truncation: runmat_analysis_fea::ModalTruncationPolicy::requested(3),
+                    convergence: runmat_analysis_fea::ModalConvergencePolicy::exploratory(),
+                    ..AnalysisModalRunOptions::default()
+                }),
+            },
+            AnalysisExecutionStep {
+                step_id: response.step_id,
+                backend: ComputeBackend::Cpu,
+                requirement: FormulationRequirement::Experimental,
+                solver_options: AnalysisSolverOptions::StructuralResponseSpectrum(
+                    AnalysisResponseSpectrumRunOptions::default(),
                 ),
             },
         ],

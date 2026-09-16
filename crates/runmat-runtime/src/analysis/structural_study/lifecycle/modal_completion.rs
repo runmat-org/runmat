@@ -492,7 +492,7 @@ pub(super) fn complete_structural_modal_transient(
     )
 }
 
-fn prepared_completion(
+pub(super) fn prepared_completion(
     intent: PreparedStructuralStudyIntent,
     resolved_model: runmat_analysis_core::AnalysisModel,
     persisted_mesh: crate::analysis::meshing::ResolvedStudyMesh,

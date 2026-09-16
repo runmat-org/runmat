@@ -1,5 +1,37 @@
 use super::*;
 
+pub(in crate::analysis) fn complete_response_spectrum_modal_options(
+    model: &runmat_analysis_core::AnalysisModel,
+    response_step: &runmat_analysis_core::ProcedureStep,
+    options: &mut crate::analysis::AnalysisModalRunOptions,
+) -> Result<(), String> {
+    let runmat_analysis_core::IndependentDomain::ResponseSpectra { spectrum_ids } =
+        &response_step.independent_domain
+    else {
+        return Err("modal response-spectrum step has no response-spectrum domain".into());
+    };
+    for spectrum_id in spectrum_ids {
+        let spectrum = model
+            .response_spectra
+            .iter()
+            .find(|candidate| candidate.spectrum_id == *spectrum_id)
+            .ok_or_else(|| {
+                "modal response-spectrum step references an absent spectrum".to_string()
+            })?;
+        if spectrum.truncation.correction
+            == runmat_analysis_core::ModalTruncationCorrection::ResidualMode
+            && !options
+                .residual_vector_directions
+                .contains(&spectrum.direction)
+        {
+            options
+                .residual_vector_directions
+                .push(spectrum.direction.clone());
+        }
+    }
+    Ok(())
+}
+
 /// Resolves and validates structural study semantics without running meshing or loading a solver
 /// mesh artifact. The returned intent is path-free and can be checkpointed by a remote study
 /// coordinator before geometry admission begins.
@@ -30,6 +62,16 @@ pub fn analysis_prepare_structural_study_intent_op(
         && study.steps.iter().any(|step| {
             step.procedure_step.procedure
                 == runmat_analysis_core::AnalysisProcedure::PrestressedHarmonicResponse
+        });
+    let response_spectrum_step = study.steps.iter().find(|step| {
+        step.procedure_step.procedure
+            == runmat_analysis_core::AnalysisProcedure::ModalResponseSpectrum
+    });
+    let is_modal_response_spectrum_sequence = study.steps.len() == 2
+        && response_spectrum_step.is_some()
+        && study.steps.iter().any(|step| {
+            step.procedure_step.procedure
+                == runmat_analysis_core::AnalysisProcedure::ModalExtraction
         });
     let is_prestress_sequence =
         is_buckling_sequence || is_prestressed_modal_sequence || is_prestressed_frequency_sequence;
@@ -120,6 +162,20 @@ pub fn analysis_prepare_structural_study_intent_op(
                     && frequency_workload.is_none() =>
             {
                 options.solver_mesh_artifact_path = None;
+                if is_modal_response_spectrum_sequence {
+                    let response_step = response_spectrum_step.ok_or_else(|| {
+                        portable_study_contract_error(
+                            &study,
+                            "modal response-spectrum consumer is absent".into(),
+                        )
+                    })?;
+                    complete_response_spectrum_modal_options(
+                        &study.model,
+                        &response_step.procedure_step,
+                        &mut options,
+                    )
+                    .map_err(|error| portable_study_contract_error(&study, error))?;
+                }
                 let workload = prepare_structural_modal_workload(&study, step, &options)?;
                 heterogeneous_workloads.insert(
                     step.procedure_step.step_id.clone(),
@@ -128,6 +184,25 @@ pub fn analysis_prepare_structural_study_intent_op(
                     },
                 );
                 authored_execution.solver_options = AnalysisSolverOptions::StructuralModes(options);
+            }
+            AnalysisSolverOptions::StructuralResponseSpectrum(mut options)
+                if is_modal_response_spectrum_sequence
+                    && linear_workloads.is_empty()
+                    && transient_workload.is_none()
+                    && frequency_workload.is_none()
+                    && heterogeneous_workloads.len() == 1 =>
+            {
+                options.solver_mesh_artifact_path = None;
+                let template =
+                    prepare_structural_response_spectrum_template(&study, step, &options)?;
+                heterogeneous_workloads.insert(
+                    step.procedure_step.step_id.clone(),
+                    runmat_analysis_fea::execution::StructuralStepWorkload::ModalResponseSpectrum {
+                        template: Box::new(template),
+                    },
+                );
+                authored_execution.solver_options =
+                    AnalysisSolverOptions::StructuralResponseSpectrum(options);
             }
             AnalysisSolverOptions::StructuralTransient(mut options)
                 if study.steps.len() == 2
@@ -438,6 +513,38 @@ pub(in crate::analysis) fn prepare_structural_modal_transient_template(
             interval_count: options.time_step_policy.interval_count(),
         },
         residual_target: options.residual_target,
+    };
+    template
+        .validate()
+        .map_err(|error| portable_study_contract_error(study, error.to_string()))?;
+    Ok(template)
+}
+
+pub(in crate::analysis) fn prepare_structural_response_spectrum_template(
+    study: &super::super::PreparedStudySequence,
+    step: &super::super::PreparedStudyStep,
+    options: &crate::analysis::AnalysisResponseSpectrumRunOptions,
+) -> Result<
+    runmat_analysis_fea::execution::StructuralModalResponseSpectrumTemplate,
+    OperationErrorEnvelope,
+> {
+    if options.precision_mode != crate::analysis::PrecisionMode::Fp64
+        || options.solver_mesh_artifact_path.is_some()
+    {
+        return Err(portable_study_contract_error(
+            study,
+            "modal response spectrum currently requires fp64 and a path-free prepared workload"
+                .into(),
+        ));
+    }
+    let template = runmat_analysis_fea::execution::StructuralModalResponseSpectrumTemplate {
+        schema_version: 1,
+        model: study.model.clone(),
+        step_id: step.procedure_step.step_id.clone(),
+        backend: step.authored_execution.backend,
+        formulation_requirement: step.authored_execution.requirement,
+        observation_execution:
+            runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
     };
     template
         .validate()

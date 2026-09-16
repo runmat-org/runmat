@@ -12,6 +12,7 @@ use runmat_runtime::analysis::{
     analysis_study_content_digest, AnalysisStudySpec, PreparedStructuralStudy,
     StructuralStudyBucklingNumericalResult, StructuralStudyExecutionFailure,
     StructuralStudyFrequencyNumericalResult, StructuralStudyModalNumericalResult,
+    StructuralStudyModalResponseSpectrumNumericalResult,
     StructuralStudyModalTransientNumericalResult, StructuralStudyNumericalResult,
     StructuralStudyPlacementEntry, StructuralStudyPlacementExecutor,
     StructuralStudyPlacementFuture, StructuralStudyPlacementResult,
@@ -22,7 +23,8 @@ use runmat_runtime::analysis::{
 
 use crate::{
     execute_structural_buckling_study_locally, execute_structural_frequency_locally_with_source,
-    execute_structural_modal_locally, execute_structural_modal_transient_locally,
+    execute_structural_modal_locally, execute_structural_modal_response_spectrum_locally,
+    execute_structural_modal_transient_locally,
     execute_structural_prestressed_frequency_study_locally_with_source,
     execute_structural_prestressed_modal_frequency_study_locally_with_source,
     execute_structural_prestressed_modal_study_locally, execute_structural_sequence_locally,
@@ -266,6 +268,17 @@ async fn execute_one(
                 ),
                 _ => false,
             };
+            let consumer_is_response_spectrum = match &authored {
+                StructuralStudyWorkloads::HeterogeneousSequence { workloads } => matches!(
+                    workloads.get(consumer_step_id),
+                    Some(
+                        runmat_analysis_fea::execution::StructuralStepWorkload::ModalResponseSpectrum {
+                            ..
+                        }
+                    )
+                ),
+                _ => false,
+            };
             if matches!(
                 producer,
                 runmat_analysis_fea::execution::StructuralStepWorkload::Linear { .. }
@@ -376,6 +389,41 @@ async fn execute_one(
                         buckling_numerical_receipt: completed.buckling.numerical_receipt,
                     },
                 )));
+            }
+            if consumer_is_response_spectrum {
+                let completed = execute_structural_modal_response_spectrum_locally(
+                    execution_config,
+                    runmat_analysis_execution::StructuralModalResponseSpectrumStudyPreparation {
+                        authored_study_digest: study_digest,
+                        frozen_project_digest: None,
+                        workloads: authored,
+                        mesh: prepared.solver_mesh().clone(),
+                        artifact_access: access,
+                        program_revision: revision,
+                        chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
+                        inventory_limits: ObjectInventoryLimits::default(),
+                        required_capabilities: BTreeSet::new(),
+                        accelerator_requests,
+                    },
+                    policy,
+                )
+                .await?;
+                return Ok(
+                    StructuralStudyNumericalResult::StructuralModalResponseSpectrum(Box::new(
+                        StructuralStudyModalResponseSpectrumNumericalResult {
+                            frozen_project_digest: None,
+                            modal_step_id: producer_step_id.clone(),
+                            response_step_id: consumer_step_id.clone(),
+                            modal_result: completed.modal.result,
+                            modal_numerical_receipt: completed.modal.numerical_receipt,
+                            basis_state: completed.basis_state.state,
+                            resolved_response_workload: completed.resolved_workload,
+                            response_result: completed.response.result,
+                            response_numerical_receipt: completed.response.numerical_receipt,
+                            envelope_state: completed.envelope_state.state,
+                        },
+                    )),
+                );
             }
             let mut publisher = RetainedStructuralTransientRecovery::default();
             let completed = execute_structural_modal_transient_locally(

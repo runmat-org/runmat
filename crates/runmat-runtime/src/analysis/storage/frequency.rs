@@ -247,7 +247,8 @@ pub(super) fn artifact_record(
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect(),
-        AnalysisStudyStepNumericalResultData::Standard => Vec::new(),
+        AnalysisStudyStepNumericalResultData::Standard
+        | AnalysisStudyStepNumericalResultData::StructuralResponseSpectrum(_) => Vec::new(),
     };
     AnalysisArtifactRecord {
         run_id: artifact.step.run_id.clone(),
