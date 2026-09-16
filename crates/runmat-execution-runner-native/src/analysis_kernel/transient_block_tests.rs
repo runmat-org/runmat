@@ -841,6 +841,7 @@ fn authored_modal_transient_study_publishes_and_binds_the_produced_basis() {
             runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
         truncation: ModalTruncationPolicy::requested(3),
         convergence: runmat_analysis_fea::ModalConvergencePolicy::exploratory(),
+        residual_vector_directions: Vec::new(),
         prestress_transition: None,
     })
     .unwrap();

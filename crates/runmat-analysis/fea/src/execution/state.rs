@@ -39,6 +39,7 @@ pub enum SemanticStatePublicationSource {
     StructuralPrimaryFields,
     StructuralLinearization,
     ModalBasis,
+    StructuralResponseEnvelope,
 }
 
 impl SemanticStatePublicationRequest {
@@ -77,6 +78,9 @@ impl SemanticStatePublicationRequest {
                 ) | (
                     SemanticStatePublicationSource::ModalBasis,
                     StateKind::ModalBasis
+                ) | (
+                    SemanticStatePublicationSource::StructuralResponseEnvelope,
+                    StateKind::StructuralResponseEnvelope
                 )
             )
         {
@@ -141,6 +145,9 @@ pub enum CanonicalSemanticStatePayload {
     StructuralLinearization {
         linearization:
             Box<crate::pipeline::structural_linearization::StructuralLinearizationArtifact>,
+    },
+    StructuralResponseEnvelope {
+        envelope: Box<super::StructuralResponseEnvelope>,
     },
 }
 
@@ -245,6 +252,31 @@ impl CanonicalSemanticState {
         })
     }
 
+    pub fn from_structural_response_envelope_publication(
+        request: &SemanticStatePublicationRequest,
+        result: &super::StructuralModalResponseSpectrumSolverResult,
+    ) -> AnalysisExecutionResult<Self> {
+        request.validate()?;
+        result.validate()?;
+        if request.source != SemanticStatePublicationSource::StructuralResponseEnvelope
+            || result.assembly().scope().topology_digest() != request.topology_digest
+        {
+            return Err(AnalysisExecutionError::Invalid(
+                "structural response-envelope state publication requires a topology-matched response-spectrum result"
+                    .into(),
+            ));
+        }
+        Self::new(CanonicalSemanticStateInput {
+            producer: request.producer,
+            declaration: request.declaration.clone(),
+            topology_digest: request.topology_digest,
+            source_result: request.source_result,
+            payload: CanonicalSemanticStatePayload::StructuralResponseEnvelope {
+                envelope: Box::new(super::StructuralResponseEnvelope::from_result(result)?),
+            },
+        })
+    }
+
     pub fn new(input: CanonicalSemanticStateInput) -> AnalysisExecutionResult<Self> {
         let mut state = Self {
             schema_version: 1,
@@ -288,7 +320,9 @@ impl CanonicalSemanticState {
             CanonicalSemanticStatePayload::Fields { fields } => {
                 if matches!(
                     self.kind,
-                    StateKind::ModalBasis | StateKind::StructuralComplex
+                    StateKind::ModalBasis
+                        | StateKind::StructuralComplex
+                        | StateKind::StructuralResponseEnvelope
                 ) || fields.is_empty()
                 {
                     return Err(AnalysisExecutionError::Invalid(
@@ -332,6 +366,17 @@ impl CanonicalSemanticState {
                 linearization
                     .validate()
                     .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+            }
+            CanonicalSemanticStatePayload::StructuralResponseEnvelope { envelope } => {
+                if self.kind != StateKind::StructuralResponseEnvelope
+                    || envelope.scope().topology_digest() != self.topology_digest
+                {
+                    return Err(AnalysisExecutionError::Invalid(
+                        "structural response-envelope payload does not match its declared state kind or topology"
+                            .into(),
+                    ));
+                }
+                envelope.validate()?;
             }
         }
         let content_digest = self.derive_content_digest()?;
@@ -396,7 +441,8 @@ impl CanonicalSemanticStatePayload {
             Self::Fields { fields } => Some(fields),
             Self::StructuralFrequency { .. }
             | Self::ModalBasis { .. }
-            | Self::StructuralLinearization { .. } => None,
+            | Self::StructuralLinearization { .. }
+            | Self::StructuralResponseEnvelope { .. } => None,
         }
     }
 
@@ -405,7 +451,8 @@ impl CanonicalSemanticStatePayload {
             Self::StructuralFrequency { publication } => Some(publication.as_ref()),
             Self::Fields { .. }
             | Self::ModalBasis { .. }
-            | Self::StructuralLinearization { .. } => None,
+            | Self::StructuralLinearization { .. }
+            | Self::StructuralResponseEnvelope { .. } => None,
         }
     }
 
@@ -413,7 +460,8 @@ impl CanonicalSemanticStatePayload {
         match self {
             Self::Fields { .. }
             | Self::StructuralFrequency { .. }
-            | Self::StructuralLinearization { .. } => None,
+            | Self::StructuralLinearization { .. }
+            | Self::StructuralResponseEnvelope { .. } => None,
             Self::ModalBasis { basis } => Some(basis.as_ref()),
         }
     }
@@ -423,9 +471,20 @@ impl CanonicalSemanticStatePayload {
     ) -> Option<&crate::pipeline::structural_linearization::StructuralLinearizationArtifact> {
         match self {
             Self::StructuralLinearization { linearization } => Some(linearization.as_ref()),
-            Self::Fields { .. } | Self::StructuralFrequency { .. } | Self::ModalBasis { .. } => {
-                None
-            }
+            Self::Fields { .. }
+            | Self::StructuralFrequency { .. }
+            | Self::ModalBasis { .. }
+            | Self::StructuralResponseEnvelope { .. } => None,
+        }
+    }
+
+    pub fn structural_response_envelope(&self) -> Option<&super::StructuralResponseEnvelope> {
+        match self {
+            Self::StructuralResponseEnvelope { envelope } => Some(envelope.as_ref()),
+            Self::Fields { .. }
+            | Self::StructuralFrequency { .. }
+            | Self::ModalBasis { .. }
+            | Self::StructuralLinearization { .. } => None,
         }
     }
 }

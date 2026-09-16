@@ -25,6 +25,8 @@ mod observation_partition;
 mod observation_source;
 mod resource_usage;
 mod response;
+mod response_spectrum_object_access;
+mod response_spectrum_task;
 mod result_publication;
 mod semantic_state_object_access;
 mod serial;
@@ -35,6 +37,7 @@ mod state_publication;
 mod state_transition;
 mod structural;
 mod structural_buckling_study;
+mod structural_modal_response_spectrum_study;
 mod structural_modal_transient_study;
 mod structural_prestress_producer;
 mod structural_prestressed_frequency_study;
@@ -168,6 +171,31 @@ pub use response::{
     import_analysis_output_set, AnalysisHostResponse, AnalysisOutputRoot, AnalysisOutputSet,
     ImportedAnalysisOutputSet, ANALYSIS_OUTPUT_SET_MEDIA_TYPE, ANALYSIS_OUTPUT_SET_VALUE_SCHEMA,
 };
+pub use response_spectrum_object_access::{
+    decode_prepared_structural_modal_response_spectrum_assembly_request,
+    decode_prepared_structural_modal_response_spectrum_direction_request,
+    decode_prepared_structural_modal_response_spectrum_direction_result,
+    decode_prepared_structural_modal_response_spectrum_numerical_receipt,
+    decode_prepared_structural_modal_response_spectrum_solver_result,
+    decode_prepared_structural_modal_response_spectrum_workload,
+    prepare_structural_modal_response_spectrum_assembly_request_objects,
+    prepare_structural_modal_response_spectrum_direction_request_objects,
+    prepare_structural_modal_response_spectrum_direction_result_objects,
+    prepare_structural_modal_response_spectrum_numerical_receipt_objects,
+    prepare_structural_modal_response_spectrum_workload_objects,
+};
+pub use response_spectrum_task::{
+    import_structural_modal_response_spectrum_direction,
+    import_structural_modal_response_spectrum_result,
+    prepare_structural_modal_response_spectrum_assembly,
+    prepare_structural_modal_response_spectrum_fanout,
+    ImportedStructuralModalResponseSpectrumDirection,
+    ImportedStructuralModalResponseSpectrumResult,
+    PreparedStructuralModalResponseSpectrumAssemblyTask,
+    PreparedStructuralModalResponseSpectrumDirectionTask,
+    StructuralModalResponseSpectrumAssemblyPreparation,
+    StructuralModalResponseSpectrumFanoutPreparation,
+};
 pub use result_publication::{
     import_published_result, prepare_result_publication, ImportedPublishedResult,
     PreparedResultPublication, ResultPublicationPreparation,
@@ -207,6 +235,10 @@ pub use structural::{
 };
 pub use structural_buckling_study::{
     StructuralBucklingStudyCoordinator, StructuralBucklingStudyPreparation,
+};
+pub use structural_modal_response_spectrum_study::{
+    StructuralModalResponseSpectrumStudyCoordinator,
+    StructuralModalResponseSpectrumStudyPreparation,
 };
 pub use structural_modal_transient_study::{
     StructuralModalTransientStudyCoordinator, StructuralModalTransientStudyPreparation,

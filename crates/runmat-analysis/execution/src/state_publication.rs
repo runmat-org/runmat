@@ -58,6 +58,9 @@ pub fn prepare_semantic_state_publication(
         ) | (
             SemanticStatePublicationSource::ModalBasis,
             AnalysisWorkKind::ExtractStructuralModes
+        ) | (
+            SemanticStatePublicationSource::StructuralResponseEnvelope,
+            AnalysisWorkKind::AssembleStructuralModalResponseSpectrumResult
         )
     );
     if !source_kind_matches

@@ -140,12 +140,14 @@ pub use response_spectrum_entry::{
 pub use response_spectrum_result::{
     StructuralModalResponseSpectrumAssemblyRequest,
     StructuralModalResponseSpectrumNumericalReceipt, StructuralModalResponseSpectrumSolverResult,
+    StructuralResponseEnvelope,
 };
 pub use response_spectrum_scope::{
     StructuralModalResponseSpectrumScope, StructuralModalResponseSpectrumScopeInput,
 };
 pub use response_spectrum_workload::{
-    StructuralModalResponseSpectrumWorkload, StructuralModalResponseSpectrumWorkloadInput,
+    StructuralModalResponseSpectrumTemplate, StructuralModalResponseSpectrumWorkload,
+    StructuralModalResponseSpectrumWorkloadInput,
 };
 pub use signal::{
     CanonicalSignalContent, CanonicalSignalKnot, CanonicalSignalRealization,

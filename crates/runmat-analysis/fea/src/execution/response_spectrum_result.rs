@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::solve::dynamics::{
     assemble_modal_response_spectrum_direction_results, ModalResponseSpectrumModeKind,
-    ModalResponseSpectrumResult,
+    ModalResponseSpectrumResult, ResponseSpectrumResultSemantics,
 };
 
 use super::{
@@ -441,4 +441,70 @@ impl StructuralModalResponseSpectrumNumericalReceipt {
 
 fn invalid(message: impl Into<String>) -> AnalysisExecutionError {
     AnalysisExecutionError::Invalid(message.into())
+}
+
+/// Compact terminal semantic state for downstream consumers and publication.
+///
+/// Direction-level modal contributions remain in the solver result. The state carries only the
+/// final statistical envelope and the exact scope needed to interpret it, avoiding a second copy
+/// of every direction artifact.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StructuralResponseEnvelope {
+    scope: StructuralModalResponseSpectrumScope,
+    semantics: ResponseSpectrumResultSemantics,
+    values: Vec<f64>,
+}
+
+impl StructuralResponseEnvelope {
+    pub fn from_result(
+        result: &StructuralModalResponseSpectrumSolverResult,
+    ) -> AnalysisExecutionResult<Self> {
+        result.validate()?;
+        let envelope = Self {
+            scope: result.assembly().scope().clone(),
+            semantics: result.numerical().semantics(),
+            values: result.numerical().combined_response().to_vec(),
+        };
+        envelope.validate()?;
+        Ok(envelope)
+    }
+
+    pub fn scope(&self) -> &StructuralModalResponseSpectrumScope {
+        &self.scope
+    }
+
+    pub const fn semantics(&self) -> ResponseSpectrumResultSemantics {
+        self.semantics
+    }
+
+    pub fn values(&self) -> &[f64] {
+        &self.values
+    }
+
+    pub fn validate_for(
+        &self,
+        result: &StructuralModalResponseSpectrumSolverResult,
+    ) -> AnalysisExecutionResult<()> {
+        if self != &Self::from_result(result)? {
+            return Err(AnalysisExecutionError::Identity(
+                "structural response envelope differs from its solver result",
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn validate(&self) -> AnalysisExecutionResult<()> {
+        self.scope.validate()?;
+        if self.semantics != ResponseSpectrumResultSemantics::StatisticalComponentMagnitudeEnvelope
+            || self.values.len() != self.scope.physical_dof_count()
+            || self
+                .values
+                .iter()
+                .any(|value| !value.is_finite() || *value < 0.0)
+        {
+            return Err(invalid("structural response envelope is not canonical"));
+        }
+        Ok(())
+    }
 }

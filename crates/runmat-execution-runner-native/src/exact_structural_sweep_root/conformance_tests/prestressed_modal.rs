@@ -323,6 +323,7 @@ fn box_prestressed_modal_workloads() -> runmat_analysis_execution::StructuralStu
             runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
         truncation: ModalTruncationPolicy::requested(1),
         convergence: ModalConvergencePolicy::exploratory(),
+        residual_vector_directions: Vec::new(),
     };
     runmat_analysis_execution::StructuralStudyWorkloads::HeterogeneousSequence {
         workloads: std::collections::BTreeMap::from([

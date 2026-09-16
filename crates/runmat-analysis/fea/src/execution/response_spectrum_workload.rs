@@ -58,6 +58,50 @@ pub struct StructuralModalResponseSpectrumWorkloadInput {
     pub modal_basis_transition: CanonicalStateTransition,
 }
 
+/// Authored response-spectrum intent before the producer's immutable modal state exists.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StructuralModalResponseSpectrumTemplate {
+    pub schema_version: u16,
+    pub model: AnalysisModel,
+    pub step_id: ProcedureStepId,
+    pub backend: ComputeBackend,
+    pub formulation_requirement: FormulationRequirement,
+    pub observation_execution: ObservationExecutionPolicy,
+}
+
+impl StructuralModalResponseSpectrumTemplate {
+    pub fn validate(&self) -> AnalysisExecutionResult<()> {
+        if self.schema_version != 1 {
+            return Err(invalid(
+                "modal response-spectrum template requires schema version one",
+            ));
+        }
+        validate_common(
+            self.schema_version,
+            &self.model,
+            &self.step_id,
+            self.backend,
+        )?;
+        Ok(())
+    }
+
+    pub fn bind(
+        self,
+        modal_basis_transition: CanonicalStateTransition,
+    ) -> AnalysisExecutionResult<StructuralModalResponseSpectrumWorkload> {
+        self.validate()?;
+        StructuralModalResponseSpectrumWorkload::new(StructuralModalResponseSpectrumWorkloadInput {
+            model: self.model,
+            step_id: self.step_id,
+            backend: self.backend,
+            formulation_requirement: self.formulation_requirement,
+            observation_execution: self.observation_execution,
+            modal_basis_transition,
+        })
+    }
+}
+
 impl TryFrom<StructuralModalResponseSpectrumWorkloadWire>
     for StructuralModalResponseSpectrumWorkload
 {

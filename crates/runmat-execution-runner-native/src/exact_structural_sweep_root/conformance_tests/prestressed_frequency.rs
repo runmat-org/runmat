@@ -449,6 +449,7 @@ fn box_prestressed_modal_frequency_workloads() -> runmat_analysis_execution::Str
             runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
         truncation: ModalTruncationPolicy::requested(2),
         convergence: ModalConvergencePolicy::exploratory(),
+        residual_vector_directions: Vec::new(),
     };
     let frequency_template = StructuralPrestressedFrequencyTemplate {
         schema_version: 1,

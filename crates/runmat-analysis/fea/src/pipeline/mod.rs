@@ -13,6 +13,7 @@ pub(crate) mod prestress;
 pub mod structural_buckling;
 pub mod structural_frequency;
 pub mod structural_linearization;
+pub mod structural_response_spectrum;
 pub mod thermal;
 pub mod thermo_mechanical;
 pub mod transient;

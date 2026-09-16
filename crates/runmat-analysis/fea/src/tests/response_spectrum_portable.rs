@@ -10,30 +10,32 @@ use runmat_analysis_core::{
 use runmat_execution::Digest;
 
 use crate::{
-    assembly::{assemble_structural_system, identity::structural_operator_digest},
-    excitation::{realize_step_excitations, ExcitationSamplePoint},
     execution::{
         AnalysisWorkloadIdentity, CanonicalSemanticState, CanonicalSemanticStateInput,
         CanonicalSemanticStatePayload, CanonicalStateTransition, SequenceIdentity,
         SolverResultIdentity, StepIdentity, StructuralModalResponseSpectrumAssemblyRequest,
         StructuralModalResponseSpectrumDirectionRequest,
-        StructuralModalResponseSpectrumDirectionResult,
-        StructuralModalResponseSpectrumNumericalReceipt, StructuralModalResponseSpectrumScope,
-        StructuralModalResponseSpectrumScopeInput, StructuralModalResponseSpectrumSolverResult,
-        StructuralModalResponseSpectrumWorkload, StructuralModalResponseSpectrumWorkloadInput,
-        StructuralModalWorkload, StructuralModalWorkloadInput,
+        StructuralModalResponseSpectrumNumericalReceipt,
+        StructuralModalResponseSpectrumSolverResult, StructuralModalResponseSpectrumWorkload,
+        StructuralModalResponseSpectrumWorkloadInput, StructuralModalWorkload,
+        StructuralModalWorkloadInput,
     },
     fixtures::{fixture_model, FixtureId},
-    pipeline::modal_governance::{ModalConvergencePolicy, ModalTruncationPolicy},
+    pipeline::{
+        modal_governance::{ModalConvergencePolicy, ModalTruncationPolicy},
+        structural_response_spectrum::{
+            execute_structural_modal_response_spectrum_direction,
+            prepare_structural_modal_response_spectrum,
+        },
+    },
     planning::resource::{
         structural_modal_response_spectrum_assembly_payload_bytes_upper_bound,
         structural_modal_response_spectrum_direction_payload_bytes_upper_bound,
         structural_modal_response_spectrum_receipt_payload_bytes_upper_bound, ByteCount,
         FeaResourceDemand, PreparedInputResourceFacts, PreparedOutputResourceFacts,
-        PreparedOutputSetResourceFacts, StructuralModalResponseSpectrumResourceProjection,
+        PreparedOutputSetResourceFacts,
     },
     results::observation::ObservationExecutionPolicy,
-    solve::dynamics::solve_modal_response_spectrum_direction_with_operator,
     ComputeBackend,
 };
 
@@ -125,27 +127,15 @@ fn portable_direction_tasks_reassemble_in_authored_order_and_bind_receipt() {
         },
     )
     .unwrap();
-    let excitations =
-        realize_step_excitations(&model, &modal, ExcitationSamplePoint::Static).unwrap();
-    let summary = assemble_structural_system(
-        &model,
-        &excitations,
-        Some(mesh.clone()),
-        crate::assembly::StructuralFormulationRequirement::ExperimentalSyntheticOperator,
-    )
-    .unwrap();
-    modal_result.basis().validate_for(&summary).unwrap();
-    let scope = StructuralModalResponseSpectrumScope::new(
+    let prepared = prepare_structural_modal_response_spectrum(
         &workload,
-        StructuralModalResponseSpectrumScopeInput {
-            topology_digest,
-            source_state: basis_state.identity,
-            basis: modal_result.basis_identity(),
-            operator_digest: structural_operator_digest(&summary).unwrap(),
-            physical_dof_count: summary.dof_count,
-        },
+        &mesh,
+        &basis_state,
+        &constraints,
+        &[],
     )
     .unwrap();
+    let scope = prepared.scope().clone();
     let mut entries = workload
         .spectra()
         .unwrap()
@@ -158,23 +148,12 @@ fn portable_direction_tasks_reassemble_in_authored_order_and_bind_receipt() {
                 ordinal,
             )
             .unwrap();
-            let numerical = solve_modal_response_spectrum_direction_with_operator(
-                &summary,
-                modal_result.basis(),
-                spectrum,
-            )
-            .unwrap();
-            StructuralModalResponseSpectrumDirectionResult::new(request, numerical).unwrap()
+            assert_eq!(request.spectrum(), *spectrum);
+            execute_structural_modal_response_spectrum_direction(&workload, &prepared, &request)
+                .unwrap()
         })
         .collect::<Vec<_>>();
-    let projection = StructuralModalResponseSpectrumResourceProjection::new(
-        &mesh,
-        &constraints,
-        &workload,
-        &basis_state,
-        &[],
-    )
-    .unwrap();
+    let projection = prepared.resources();
     let direction_payload = structural_modal_response_spectrum_direction_payload_bytes_upper_bound(
         entries[0].request(),
     )
