@@ -446,11 +446,12 @@ fn modal_response_spectrum_closure(
             &completion.basis_state.objects,
             &completion.response.result_objects,
             &completion.response.receipt_objects,
+            &completion.response.field_recovery_objects,
             &completion.envelope_state.objects,
         ],
         access,
     )?;
-    let [modal_result_root, modal_receipt_root, basis_state_root, response_result_root, response_receipt_root, envelope_state_root] =
+    let [modal_result_root, modal_receipt_root, basis_state_root, response_result_root, response_receipt_root, field_recovery_root, envelope_state_root] =
         roots;
     Ok(
         ExactStructuralStudyAnalysisClosure::StructuralModalResponseSpectrum {
@@ -459,6 +460,7 @@ fn modal_response_spectrum_closure(
             basis_state_root: Box::new(basis_state_root),
             response_result_root: Box::new(response_result_root),
             response_receipt_root: Box::new(response_receipt_root),
+            field_recovery_root: Box::new(field_recovery_root),
             envelope_state_root: Box::new(envelope_state_root),
             objects,
         },

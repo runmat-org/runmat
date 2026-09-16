@@ -107,7 +107,7 @@ async fn execute_with_pool(
             program: &direction.program,
             resource_plan: Some(&direction.resource_plan),
             fallback_resources: policy.resources.clone(),
-            dependencies: vec![basis_dependency.clone()],
+            dependencies: vec![basis_dependency],
         })
         .collect();
     let executed_directions =

@@ -18,7 +18,10 @@ use crate::{
     planning::resource::{
         ResourcePlanningError, StructuralModalResponseSpectrumResourceProjection,
     },
-    solve::dynamics::solve_modal_response_spectrum_direction_with_operator,
+    solve::dynamics::{
+        recover_modal_response_spectrum_linear_fields,
+        solve_modal_response_spectrum_direction_with_operator, ModalResponseSpectrumFieldEnvelope,
+    },
 };
 
 /// FEA-owned physical preparation shared by local and portable response-spectrum execution.
@@ -165,6 +168,25 @@ pub fn execute_structural_modal_response_spectrum_direction(
     )
     .map_err(|error| invalid(error.to_string()))?;
     StructuralModalResponseSpectrumDirectionResult::new(request.clone(), numerical)
+}
+
+/// Recovers statistically combined linear fields from the exact prepared producer operator.
+///
+/// Recovery deliberately consumes the signed modal contributions retained by the numerical
+/// result. The terminal statistical DOF envelope is never treated as a simultaneous deformation.
+pub fn recover_structural_modal_response_spectrum_fields(
+    workload: &StructuralModalResponseSpectrumWorkload,
+    prepared: &PreparedStructuralModalResponseSpectrum,
+    result: &crate::solve::dynamics::ModalResponseSpectrumResult,
+) -> AnalysisExecutionResult<ModalResponseSpectrumFieldEnvelope> {
+    prepared.scope.validate_for(workload)?;
+    let basis = prepared
+        .modal_state
+        .payload
+        .modal_basis()
+        .ok_or_else(|| invalid("prepared response-spectrum modal basis is absent"))?;
+    recover_modal_response_spectrum_linear_fields(&prepared.summary, basis, result)
+        .map_err(|error| invalid(error.to_string()))
 }
 
 fn resource_error(error: ResourcePlanningError) -> AnalysisExecutionError {

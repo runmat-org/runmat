@@ -2728,6 +2728,7 @@ pub struct StructuralResponseSpectrumResultsData {
     pub result: runmat_analysis_fea::execution::StructuralModalResponseSpectrumSolverResult,
     pub numerical_receipt:
         runmat_analysis_fea::execution::StructuralModalResponseSpectrumNumericalReceipt,
+    pub field_recovery: runmat_analysis_fea::solve::dynamics::ResponseSpectrumFieldRecovery,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

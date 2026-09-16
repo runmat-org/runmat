@@ -2,6 +2,7 @@ mod combine;
 mod correction;
 mod direction_result;
 mod interpolate;
+mod recovery;
 mod validation;
 
 #[cfg(test)]
@@ -29,6 +30,12 @@ pub use direction_result::{
     ModalResponseSpectrumDirectionResult, ModalResponseSpectrumDirectionResultIdentity,
 };
 use interpolate::interpolate_spectrum;
+pub use recovery::{
+    recover_modal_response_spectrum_linear_fields, response_spectrum_field_recovery_unavailability,
+    ModalResponseSpectrumFieldEnvelope, ModalResponseSpectrumFieldEnvelopeIdentity,
+    ResponseSpectrumFieldRecovery, ResponseSpectrumFieldRecoveryUnavailability,
+    ResponseSpectrumLinearField, ResponseSpectrumLinearFieldQuantity,
+};
 use validation::{contribution_is_valid, vectors_close};
 
 const RESULT_PREFIX: &[u8] = b"runmat-modal-response-spectrum-result\0";

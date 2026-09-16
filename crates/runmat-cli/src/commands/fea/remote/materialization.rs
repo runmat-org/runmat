@@ -279,6 +279,7 @@ fn study_result(
                 resolved_response_workload: (*response.response_workload).clone(),
                 response_result: (*response.response_result).clone(),
                 response_numerical_receipt: response.response_numerical_receipt.clone(),
+                field_recovery: response.field_recovery.clone(),
                 envelope_state: response.envelope_state.clone(),
             },
         )),

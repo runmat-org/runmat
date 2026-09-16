@@ -376,6 +376,198 @@ fn rigid_response_separates_periodic_and_in_phase_components() {
     );
 }
 
+#[test]
+fn linear_field_envelope_recovers_signed_mode_before_statistical_combination() {
+    let truncation = EigenspaceTruncationPolicy::requested(2);
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    let mut step = ProcedureStep::structural_modal("modes");
+    step.independent_domain = IndependentDomain::Eigenvalue {
+        requested_count: truncation.requested_mode_count(),
+    };
+    model.sequence.steps = vec![step];
+    let mesh = crate::tests::single_tetrahedron_solver_mesh_for_model(&model);
+    let run = run_modal_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        ModalSolveOptions {
+            formulation_requirement: FormulationRequirement::Experimental,
+            truncation,
+            convergence: ModalConvergencePolicy::exploratory(),
+            residual_vector_directions: Vec::new(),
+            solver_mesh: Some(mesh.clone()),
+        },
+    )
+    .unwrap();
+    let excitations = crate::excitation::realize_step_excitations(
+        &model,
+        &model.sequence.steps[0],
+        crate::excitation::ExcitationSamplePoint::Static,
+    )
+    .unwrap();
+    let summary = crate::assembly::assemble_structural_system(
+        &model,
+        &excitations,
+        Some(mesh),
+        StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+    )
+    .unwrap();
+    let first_mode = &run.basis.modes()[0];
+    let axis = first_mode
+        .directional()
+        .iter()
+        .enumerate()
+        .max_by(|(_, left), (_, right)| left.effective_mass().total_cmp(&right.effective_mass()))
+        .map(|(axis, _)| axis)
+        .unwrap();
+    let mut direction = [0.0; 3];
+    direction[axis] = 1.0;
+    let frequency = first_mode.frequency_hz();
+    let spectrum = spectrum_fixture(
+        SpectrumAbscissa::FrequencyHertz(vec![frequency]),
+        vec![0.002],
+        direction,
+    );
+    let result = solve_modal_response_spectrum_with_operator(
+        &summary,
+        &run.basis,
+        std::slice::from_ref(&spectrum),
+    )
+    .unwrap();
+    let contribution = &result.contributions()[0].modes[0];
+    let signed_displacement = first_mode
+        .dof_shape()
+        .iter()
+        .map(|value| value * contribution.generalized_peak)
+        .collect::<Vec<_>>();
+    let directly_recovered =
+        crate::post::fields::recover_deformation_result_fields(&summary, &signed_displacement)
+            .unwrap();
+    let expected_stress = directly_recovered
+        .iter()
+        .find(|field| field.field_id == crate::FEA_FIELD_STRUCTURAL_STRESS)
+        .unwrap()
+        .as_host_f64()
+        .unwrap()
+        .iter()
+        .map(|value| value.abs())
+        .collect::<Vec<_>>();
+
+    let fields =
+        recover_modal_response_spectrum_linear_fields(&summary, &run.basis, &result).unwrap();
+    assert_eq!(
+        fields
+            .field(ResponseSpectrumLinearFieldQuantity::Stress)
+            .unwrap()
+            .values(),
+        expected_stress
+    );
+    assert!(fields
+        .field(ResponseSpectrumLinearFieldQuantity::Strain)
+        .is_some());
+    assert!(fields
+        .field(ResponseSpectrumLinearFieldQuantity::Displacement)
+        .is_some());
+    assert!(fields.fields().iter().all(|field| !matches!(
+        field.quantity(),
+        ResponseSpectrumLinearFieldQuantity::ShellMembraneForce
+            | ResponseSpectrumLinearFieldQuantity::ShellBendingMoment
+            | ResponseSpectrumLinearFieldQuantity::ShellTransverseShear
+    )));
+    fields.validate_for(&summary, &run.basis, &result).unwrap();
+    let restored = ModalResponseSpectrumFieldEnvelope::from_canonical_bytes(
+        &fields.canonical_bytes().unwrap(),
+    )
+    .unwrap();
+    assert_eq!(restored, fields);
+
+    let mut pseudo_acceleration = spectrum;
+    pseudo_acceleration.response = SpectrumResponse::PseudoAcceleration;
+    pseudo_acceleration.ordinates = vec![0.002 * (std::f64::consts::TAU * frequency).powi(2)];
+    pseudo_acceleration.provenance_digest = "sha256:equivalent-pseudo-acceleration".into();
+    let pseudo_result = solve_modal_response_spectrum_with_operator(
+        &summary,
+        &run.basis,
+        std::slice::from_ref(&pseudo_acceleration),
+    )
+    .unwrap();
+    let pseudo_fields =
+        recover_modal_response_spectrum_linear_fields(&summary, &run.basis, &pseudo_result)
+            .unwrap();
+    assert_eq!(pseudo_fields.fields().len(), fields.fields().len());
+    for (pseudo, displacement) in pseudo_fields.fields().iter().zip(fields.fields()) {
+        assert_eq!(pseudo.quantity(), displacement.quantity());
+        assert_eq!(pseudo.shape(), displacement.shape());
+        assert!(pseudo
+            .values()
+            .iter()
+            .zip(displacement.values())
+            .all(|(left, right)| (left - right).abs() <= 1.0e-12 * right.abs().max(1.0)));
+    }
+}
+
+#[test]
+fn linear_field_recovery_rejects_a_non_displacement_response_quantity() {
+    let truncation = EigenspaceTruncationPolicy::requested(1);
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    let mut step = ProcedureStep::structural_modal("modes");
+    step.independent_domain = IndependentDomain::Eigenvalue {
+        requested_count: truncation.requested_mode_count(),
+    };
+    model.sequence.steps = vec![step];
+    let mesh = crate::tests::single_tetrahedron_solver_mesh_for_model(&model);
+    let run = run_modal_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        ModalSolveOptions {
+            formulation_requirement: FormulationRequirement::Experimental,
+            truncation,
+            convergence: ModalConvergencePolicy::exploratory(),
+            residual_vector_directions: Vec::new(),
+            solver_mesh: Some(mesh.clone()),
+        },
+    )
+    .unwrap();
+    let excitations = crate::excitation::realize_step_excitations(
+        &model,
+        &model.sequence.steps[0],
+        crate::excitation::ExcitationSamplePoint::Static,
+    )
+    .unwrap();
+    let summary = crate::assembly::assemble_structural_system(
+        &model,
+        &excitations,
+        Some(mesh),
+        StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+    )
+    .unwrap();
+    let first_mode = &run.basis.modes()[0];
+    let axis = first_mode
+        .directional()
+        .iter()
+        .enumerate()
+        .max_by(|(_, left), (_, right)| left.effective_mass().total_cmp(&right.effective_mass()))
+        .map(|(axis, _)| axis)
+        .unwrap();
+    let mut direction = [0.0; 3];
+    direction[axis] = 1.0;
+    let mut spectrum = spectrum_fixture(
+        SpectrumAbscissa::FrequencyHertz(vec![first_mode.frequency_hz()]),
+        vec![1.0],
+        direction,
+    );
+    spectrum.response = SpectrumResponse::AbsoluteAcceleration;
+    let result = solve_modal_response_spectrum_with_operator(
+        &summary,
+        &run.basis,
+        std::slice::from_ref(&spectrum),
+    )
+    .unwrap();
+    let error = recover_modal_response_spectrum_linear_fields(&summary, &run.basis, &result)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("cannot be converted"));
+}
+
 fn spectrum_fixture(
     abscissa: SpectrumAbscissa,
     ordinates: Vec<f64>,

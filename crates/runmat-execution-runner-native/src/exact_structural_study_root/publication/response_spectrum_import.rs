@@ -27,6 +27,7 @@ pub(super) struct ResponseSpectrumResultImport<'a, Source> {
     pub basis_state_root: ValueRef,
     pub response_result_root: ValueRef,
     pub response_receipt_root: ValueRef,
+    pub field_recovery_root: ValueRef,
     pub envelope_state_root: ValueRef,
     pub objects: Vec<ValueRef>,
     pub mesh: &'a SolverMeshArtifact,
@@ -90,6 +91,10 @@ pub(super) fn import_response_spectrum_result<Source: CacheImport>(
             AnalysisNumericalObjectKind::NumericalReceipt,
         ),
         (
+            &input.field_recovery_root,
+            AnalysisNumericalObjectKind::StructuralModalResponseSpectrumFieldRecovery,
+        ),
+        (
             &input.envelope_state_root,
             AnalysisNumericalObjectKind::SemanticState,
         ),
@@ -112,7 +117,7 @@ pub(super) fn import_response_spectrum_result<Source: CacheImport>(
         &input.objects,
         input.access,
     )?;
-    let [modal_result_objects, modal_receipt_objects, basis_state_objects, response_result_objects, response_receipt_objects, envelope_state_objects] =
+    let [modal_result_objects, modal_receipt_objects, basis_state_objects, response_result_objects, response_receipt_objects, field_recovery_objects, envelope_state_objects] =
         imported.as_slice()
     else {
         return Err(protocol("response-spectrum result closure is incomplete"));
@@ -179,6 +184,44 @@ pub(super) fn import_response_spectrum_result<Source: CacheImport>(
     response_numerical_receipt
         .validate_against(response_numerical_receipt.source_result(), &response_result)
         .map_err(protocol)?;
+    let field_recovery =
+        runmat_analysis_execution::decode_prepared_structural_modal_response_spectrum_field_recovery(
+            field_recovery_objects,
+        )
+        .map_err(protocol)?;
+    field_recovery
+        .validate_for(response_result.numerical())
+        .map_err(protocol)?;
+    let constraint_plan =
+        runmat_analysis_fea::constraints::CanonicalStructuralConstraintPlan::compile_for_model(
+            response_workload.model(),
+            Some(input.mesh),
+        )
+        .map_err(protocol)?;
+    let prepared_response = runmat_analysis_fea::prepare_structural_modal_response_spectrum(
+        &response_workload,
+        input.mesh,
+        &basis_state,
+        &constraint_plan,
+        &[],
+    )
+    .map_err(protocol)?;
+    if let runmat_analysis_fea::solve::dynamics::ResponseSpectrumFieldRecovery::Recovered(
+        recovered,
+    ) = &field_recovery
+    {
+        let expected = runmat_analysis_fea::recover_structural_modal_response_spectrum_fields(
+            &response_workload,
+            &prepared_response,
+            response_result.numerical(),
+        )
+        .map_err(protocol)?;
+        if recovered != &expected {
+            return Err(protocol(
+                "response-spectrum field recovery differs from its exact physical inputs",
+            ));
+        }
+    }
     let envelope_state =
         runmat_analysis_execution::decode_prepared_semantic_state(envelope_state_objects)
             .map_err(protocol)?;
@@ -203,6 +246,7 @@ pub(super) fn import_response_spectrum_result<Source: CacheImport>(
                 basis_state,
                 response_result: Box::new(response_result),
                 response_numerical_receipt,
+                field_recovery,
                 envelope_state,
             },
         )),

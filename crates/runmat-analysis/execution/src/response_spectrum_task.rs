@@ -30,6 +30,7 @@ use serde::Serialize;
 
 use crate::{
     decode_prepared_structural_modal_response_spectrum_direction_result,
+    decode_prepared_structural_modal_response_spectrum_field_recovery,
     decode_prepared_structural_modal_response_spectrum_numerical_receipt,
     decode_prepared_structural_modal_response_spectrum_solver_result, import_analysis_objects,
     import_analysis_output_set, prepare_analysis_objects, prepare_analysis_program,
@@ -277,6 +278,8 @@ pub struct ImportedStructuralModalResponseSpectrumResult {
     pub result_objects: PreparedAnalysisObjects,
     pub numerical_receipt: StructuralModalResponseSpectrumNumericalReceipt,
     pub receipt_objects: PreparedAnalysisObjects,
+    pub field_recovery: runmat_analysis_fea::solve::dynamics::ResponseSpectrumFieldRecovery,
+    pub field_recovery_objects: PreparedAnalysisObjects,
     pub response: ProgramExecutionResponse,
 }
 
@@ -377,6 +380,12 @@ pub fn prepare_structural_modal_response_spectrum_assembly(
             projected_output_resource_facts(
                 structural_modal_response_spectrum_receipt_payload_bytes_upper_bound(),
             )?,
+            projected_output_resource_facts(
+                prepared
+                    .resources()
+                    .field_recovery_payload_bytes_upper_bound()
+                    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
+            )?,
             projected_output_set_resource_facts(),
         )
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
@@ -406,6 +415,7 @@ pub fn prepare_structural_modal_response_spectrum_assembly(
         vec![
             AnalysisNumericalObjectKind::SolverResult,
             AnalysisNumericalObjectKind::NumericalReceipt,
+            AnalysisNumericalObjectKind::StructuralModalResponseSpectrumFieldRecovery,
         ],
         preparation.artifact_access,
     )?;
@@ -429,9 +439,12 @@ pub fn import_structural_modal_response_spectrum_result(
     response.validate_against(&prepared.program.request)?;
     let retained_response = response.clone();
     let output_set = import_analysis_output_set(source, response, &prepared.host)?;
-    let [result_output, receipt_output] = output_set.manifest.outputs.as_slice() else {
+    let [result_output, receipt_output, field_recovery_output] =
+        output_set.manifest.outputs.as_slice()
+    else {
         return Err(AnalysisBridgeError::Invalid(
-            "response-spectrum fan-in must return one result and one receipt".into(),
+            "response-spectrum fan-in must return one result, one receipt, and one field-recovery result"
+                .into(),
         ));
     };
     let identity = SolverResultIdentity::new(
@@ -461,6 +474,15 @@ pub fn import_structural_modal_response_spectrum_result(
         &prepared.host.artifact_access,
         limits,
     )?;
+    let field_recovery_objects = import_analysis_objects(
+        source,
+        &field_recovery_output.root,
+        AnalysisNumericalObjectKind::StructuralModalResponseSpectrumFieldRecovery,
+        field_recovery_output.logical_identity,
+        field_recovery_output.payload_digest,
+        &prepared.host.artifact_access,
+        limits,
+    )?;
     let result = decode_prepared_structural_modal_response_spectrum_solver_result(&result_objects)?;
     result.validate_for(&prepared.workload)?;
     if result.assembly() != &prepared.request {
@@ -476,10 +498,28 @@ pub fn import_structural_modal_response_spectrum_result(
             "response-spectrum receipt root differs from its canonical identity",
         ));
     }
+    let field_recovery =
+        decode_prepared_structural_modal_response_spectrum_field_recovery(&field_recovery_objects)?;
+    field_recovery
+        .validate_for(result.numerical())
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    if field_recovery_output.logical_identity
+        != field_recovery
+            .identity()
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?
+    {
+        return Err(AnalysisBridgeError::Identity(
+            "response-spectrum field-recovery root differs from its canonical identity",
+        ));
+    }
     let mut expected = result_objects
         .unique_references(&prepared.host.artifact_access, ValueRefKind::ResultObject)?;
     expected.extend(
         receipt_objects
+            .unique_references(&prepared.host.artifact_access, ValueRefKind::ResultObject)?,
+    );
+    expected.extend(
+        field_recovery_objects
             .unique_references(&prepared.host.artifact_access, ValueRefKind::ResultObject)?,
     );
     crate::object::retain_unique_references(&mut expected);
@@ -495,6 +535,8 @@ pub fn import_structural_modal_response_spectrum_result(
         result_objects,
         numerical_receipt,
         receipt_objects,
+        field_recovery,
+        field_recovery_objects,
         response: retained_response,
     })
 }

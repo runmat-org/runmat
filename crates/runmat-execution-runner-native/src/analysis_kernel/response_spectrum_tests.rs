@@ -125,6 +125,14 @@ fn native_response_spectrum_fanout_and_fanin_are_portable_and_order_independent(
         .numerical_receipt
         .validate_against(imported.identity, &imported.result)
         .unwrap();
+    let runmat_analysis_fea::solve::dynamics::ResponseSpectrumFieldRecovery::Recovered(fields) =
+        &imported.field_recovery
+    else {
+        panic!("displacement-convertible response did not publish recovered fields");
+    };
+    assert!(fields
+        .field(runmat_analysis_fea::solve::dynamics::ResponseSpectrumLinearFieldQuantity::Stress)
+        .is_some());
 }
 
 #[test]
@@ -290,6 +298,10 @@ fn authored_response_spectrum_study_publishes_basis_and_terminal_envelope() {
         )
         .unwrap();
     assert!(coordinator.is_complete());
+    assert!(matches!(
+        coordinator.result().unwrap().field_recovery,
+        runmat_analysis_fea::solve::dynamics::ResponseSpectrumFieldRecovery::Recovered(_)
+    ));
     assert_eq!(
         coordinator
             .envelope_state()

@@ -114,6 +114,7 @@ pub(super) fn execute_assembly(
             != vec![
                 AnalysisNumericalObjectKind::SolverResult,
                 AnalysisNumericalObjectKind::NumericalReceipt,
+                AnalysisNumericalObjectKind::StructuralModalResponseSpectrumFieldRecovery,
             ]
     {
         return Err(AnalysisBridgeError::Invalid(
@@ -177,6 +178,12 @@ pub(super) fn execute_assembly(
             projected_output_resource_facts(
                 structural_modal_response_spectrum_receipt_payload_bytes_upper_bound(),
             )?,
+            projected_output_resource_facts(
+                prepared
+                    .resources()
+                    .field_recovery_payload_bytes_upper_bound()
+                    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
+            )?,
             projected_output_set_resource_facts(),
         )
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
@@ -193,6 +200,27 @@ pub(super) fn execute_assembly(
         invocation.host.workload.identity,
         &result,
     )?;
+    let field_recovery =
+        match runmat_analysis_fea::solve::dynamics::response_spectrum_field_recovery_unavailability(
+            result.numerical(),
+        ) {
+            Some(reason) => {
+                runmat_analysis_fea::solve::dynamics::ResponseSpectrumFieldRecovery::unavailable(
+                    result.numerical().identity(),
+                    reason,
+                )
+            }
+            None => runmat_analysis_fea::solve::dynamics::ResponseSpectrumFieldRecovery::Recovered(
+                runmat_analysis_fea::recover_structural_modal_response_spectrum_fields(
+                    &decoded.workload,
+                    &prepared,
+                    result.numerical(),
+                )?,
+            ),
+        };
+    field_recovery
+        .validate_for(result.numerical())
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     Ok(vec![
         AnalysisKernelOutput::whole(
             AnalysisNumericalObjectKind::SolverResult,
@@ -203,6 +231,15 @@ pub(super) fn execute_assembly(
             AnalysisNumericalObjectKind::NumericalReceipt,
             receipt.identity().digest(),
             receipt.canonical_bytes()?,
+        ),
+        AnalysisKernelOutput::whole(
+            AnalysisNumericalObjectKind::StructuralModalResponseSpectrumFieldRecovery,
+            field_recovery
+                .identity()
+                .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
+            field_recovery
+                .canonical_bytes()
+                .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
         ),
     ])
 }

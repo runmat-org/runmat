@@ -56,7 +56,8 @@ pub use pipeline::structural_buckling::{
 };
 pub use pipeline::structural_response_spectrum::{
     execute_structural_modal_response_spectrum_direction,
-    prepare_structural_modal_response_spectrum, PreparedStructuralModalResponseSpectrum,
+    prepare_structural_modal_response_spectrum, recover_structural_modal_response_spectrum_fields,
+    PreparedStructuralModalResponseSpectrum,
 };
 pub use pipeline::thermal::run_thermal_with_options;
 pub use pipeline::transient::{run_transient, run_transient_with_options};

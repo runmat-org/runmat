@@ -201,6 +201,7 @@ pub struct StructuralStudyModalResponseSpectrumNumericalResult {
         runmat_analysis_fea::execution::StructuralModalResponseSpectrumSolverResult,
     pub response_numerical_receipt:
         runmat_analysis_fea::execution::StructuralModalResponseSpectrumNumericalReceipt,
+    pub field_recovery: runmat_analysis_fea::solve::dynamics::ResponseSpectrumFieldRecovery,
     pub envelope_state: runmat_analysis_fea::execution::CanonicalSemanticState,
 }
 

@@ -5,10 +5,15 @@ use std::time::Duration;
 
 use rcgen::{generate_simple_self_signed, CertifiedKey};
 use runmat_analysis_core::{
-    GeneratorDomain, GeneratorEffectPolicy, IndependentDomain, PhysicalSignal, ProcedureStep,
-    ProcedureStepId, SequenceDependency, SequenceDependencyReason, SignalExtrapolation,
-    SignalGenerator, SignalInterpolation, SignalRepresentation, SignalSamplingPolicy, StateId,
-    StateTransition, StateTransitionMethod, TopologyTransitionPolicy, TransitionId,
+    DirectionalCombination, GeneratorDomain, GeneratorEffectPolicy, IndependentDomain,
+    ModalCombination, ModalTruncationCorrection, ModalTruncationPolicy as SpectrumTruncationPolicy,
+    PhysicalSignal, ProcedureStep, ProcedureStepId, ReferenceStatePolicy, ResponseSpectrum,
+    ResponseSpectrumId, RigidResponsePolicy, SequenceDependency, SequenceDependencyReason,
+    SignalExtrapolation, SignalGenerator, SignalInterpolation, SignalRepresentation,
+    SignalSamplingPolicy, SpectrumAbscissa, SpectrumConstruction, SpectrumDamping,
+    SpectrumDirection, SpectrumEnvelope, SpectrumEvidence, SpectrumExtrapolation,
+    SpectrumInterpolation, SpectrumResponse, StateId, StateTransition, StateTransitionMethod,
+    TopologyTransitionPolicy, TransitionId,
 };
 use runmat_analysis_execution::{
     admit_named_signal_generator, analysis_worker_capabilities, plan_signal_generator_chunks,
@@ -17,11 +22,11 @@ use runmat_analysis_execution::{
 use runmat_analysis_fea::execution::{
     SignalMaterializationIdentity, StructuralBucklingSolverPolicy, StructuralBucklingTemplate,
     StructuralFrequencySolverPlan, StructuralFrequencyWorkload, StructuralFrequencyWorkloadInput,
-    StructuralLinearWorkload, StructuralModalTransientTemplate, StructuralModalWorkload,
-    StructuralModalWorkloadInput, StructuralPrestressedFrequencySolverTemplate,
-    StructuralPrestressedFrequencyTemplate, StructuralPrestressedModalTemplate,
-    StructuralStepWorkload, StructuralTransientBlockPlan, StructuralTransientWorkload,
-    StudyIdentity, SweepCompositionPolicy, SweepDefinition,
+    StructuralLinearWorkload, StructuralModalResponseSpectrumTemplate,
+    StructuralModalTransientTemplate, StructuralModalWorkload, StructuralModalWorkloadInput,
+    StructuralPrestressedFrequencySolverTemplate, StructuralPrestressedFrequencyTemplate,
+    StructuralPrestressedModalTemplate, StructuralStepWorkload, StructuralTransientBlockPlan,
+    StructuralTransientWorkload, StudyIdentity, SweepCompositionPolicy, SweepDefinition,
 };
 use runmat_analysis_fea::fixtures::{fixture_model, FixtureId};
 use runmat_analysis_fea::frequency::FrequencyResponsePlan;
@@ -60,6 +65,7 @@ use super::{prepare_exact_structural_sweep_root, ExactStructuralSweepRootPrepara
 
 mod prestressed_frequency;
 mod prestressed_modal;
+mod response_spectrum;
 
 const BOX: &[u8] = include_bytes!("../../../runmat-geometry/io/tests/fixtures/box.brep");
 
@@ -81,6 +87,10 @@ impl StructuralTransientRecoveryPublisher for RecordingRecoveryPublisher {
 
 #[tokio::test(flavor = "current_thread")]
 async fn exact_structural_sweep_reaches_ordered_admitted_results_over_encrypted_quic() {
+    Box::pin(run_exact_structural_sweep_conformance()).await;
+}
+
+async fn run_exact_structural_sweep_conformance() {
     let project_root = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(project_root.path().join("src")).unwrap();
     std::fs::write(
@@ -1342,6 +1352,99 @@ fn box_modal_transient_workloads() -> runmat_analysis_execution::StructuralStudy
                 StructuralStepWorkload::ModalTransient {
                     template: Box::new(transient),
                     block_plan: StructuralTransientBlockPlan::new(1).unwrap(),
+                },
+            ),
+        ]),
+    }
+}
+
+fn box_modal_response_spectrum_workloads() -> runmat_analysis_execution::StructuralStudyWorkloads {
+    let mut model = box_structural_workload().model;
+    let mut modal_step = ProcedureStep::structural_modal("modes");
+    modal_step.independent_domain = IndependentDomain::Eigenvalue { requested_count: 3 };
+    let spectrum = ResponseSpectrum {
+        spectrum_id: ResponseSpectrumId("box-global-x".into()),
+        abscissa: SpectrumAbscissa::FrequencyHertz(vec![1.0e-3, 1.0e8]),
+        ordinates: vec![1.0e-3, 1.0e-3],
+        damping: SpectrumDamping::Ratio(0.05),
+        response: SpectrumResponse::RelativeDisplacement,
+        envelope: SpectrumEnvelope::Maximax,
+        interpolation: SpectrumInterpolation::LinearFrequency,
+        extrapolation: SpectrumExtrapolation::HoldEndpoint,
+        direction: SpectrumDirection {
+            frame: runmat_analysis_core::CoordinateFrame::Global,
+            vector: [1.0, 0.0, 0.0],
+        },
+        modal_combination: ModalCombination::AbsoluteSum,
+        directional_combination: DirectionalCombination::Srss,
+        truncation: SpectrumTruncationPolicy {
+            minimum_cumulative_mass_ratio: 0.0,
+            correction: ModalTruncationCorrection::None,
+        },
+        rigid_response: RigidResponsePolicy::Disabled,
+        construction: SpectrumConstruction::AuthoredDesign,
+        evidence: SpectrumEvidence {
+            sampling_adequacy_ratio: 1.0,
+            max_interpolation_error: None,
+        },
+        provenance_digest: "sha256:box-global-x".into(),
+    };
+    let response_step = ProcedureStep::structural_modal_response_spectrum(
+        "spectrum",
+        vec![spectrum.spectrum_id.clone()],
+        "modes",
+        "modal_basis",
+    );
+    let mut sequence = runmat_analysis_core::AnalysisSequence::from_steps(
+        "box-modal-response-spectrum-sequence",
+        vec![modal_step.clone(), response_step.clone()],
+    );
+    sequence.dependencies[0].reason = SequenceDependencyReason::StateTransfer;
+    sequence.transitions.push(StateTransition {
+        transition_id: TransitionId("modes-to-spectrum".into()),
+        producer_step: modal_step.step_id.clone(),
+        consumer_step: response_step.step_id.clone(),
+        state_id: StateId("modal_basis".into()),
+        method: StateTransitionMethod::Reuse,
+        topology: TopologyTransitionPolicy::RequireIdentical,
+        reference: ReferenceStatePolicy::Preserve,
+    });
+    model.sequence = sequence;
+    model.response_spectra = vec![spectrum];
+    let modal = StructuralModalWorkload::new(StructuralModalWorkloadInput {
+        model: model.clone(),
+        step_id: modal_step.step_id.clone(),
+        backend: ComputeBackend::Cpu,
+        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+        observation_execution:
+            runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
+        truncation: ModalTruncationPolicy::requested(3),
+        convergence: ModalConvergencePolicy::exploratory(),
+        residual_vector_directions: Vec::new(),
+        prestress_transition: None,
+    })
+    .unwrap();
+    let response = StructuralModalResponseSpectrumTemplate {
+        schema_version: 1,
+        model,
+        step_id: response_step.step_id.clone(),
+        backend: ComputeBackend::Cpu,
+        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+        observation_execution:
+            runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
+    };
+    runmat_analysis_execution::StructuralStudyWorkloads::HeterogeneousSequence {
+        workloads: std::collections::BTreeMap::from([
+            (
+                modal_step.step_id,
+                StructuralStepWorkload::ModalExtraction {
+                    workload: Box::new(modal),
+                },
+            ),
+            (
+                response_step.step_id,
+                StructuralStepWorkload::ModalResponseSpectrum {
+                    template: Box::new(response),
                 },
             ),
         ]),

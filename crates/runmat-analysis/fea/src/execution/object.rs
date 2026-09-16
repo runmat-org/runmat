@@ -49,6 +49,7 @@ pub enum AnalysisNumericalObjectKind {
     StructuralModalResponseSpectrumDirectionRequest,
     StructuralModalResponseSpectrumDirectionResult,
     StructuralModalResponseSpectrumAssemblyRequest,
+    StructuralModalResponseSpectrumFieldRecovery,
     StructuralBucklingWorkload,
     Field,
     FieldSelection,

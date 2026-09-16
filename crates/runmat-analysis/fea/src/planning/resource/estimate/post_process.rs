@@ -157,9 +157,21 @@ pub(super) fn build_response_spectrum_assembly_resource_plan(
         PostProcessAccounting::host_only(
             demand.scope_digest,
             &demand.inputs,
-            demand.ordering_workspace_bytes_upper_bound,
+            ByteCount(
+                demand
+                    .ordering_workspace_bytes_upper_bound
+                    .0
+                    .checked_add(demand.field_recovery_workspace_bytes_upper_bound.0)
+                    .ok_or(ResourcePlanningError::Overflow(
+                        "response-spectrum assembly and field-recovery workspace",
+                    ))?,
+            ),
             ByteCount(0),
-            &[&demand.result_output, &demand.receipt_output],
+            &[
+                &demand.result_output,
+                &demand.receipt_output,
+                &demand.field_recovery_output,
+            ],
         ),
     )
 }

@@ -25,12 +25,16 @@ pub use modal_transient::{
 };
 pub use response_spectrum::{
     assemble_modal_response_spectrum_direction_results,
-    assemble_modal_response_spectrum_directions, solve_modal_response_spectrum,
+    assemble_modal_response_spectrum_directions, recover_modal_response_spectrum_linear_fields,
+    response_spectrum_field_recovery_unavailability, solve_modal_response_spectrum,
     solve_modal_response_spectrum_direction_with_operator,
     solve_modal_response_spectrum_with_operator, ModalResponseSpectrumContribution,
     ModalResponseSpectrumDirectionResult, ModalResponseSpectrumDirectionResultIdentity,
+    ModalResponseSpectrumFieldEnvelope, ModalResponseSpectrumFieldEnvelopeIdentity,
     ModalResponseSpectrumModeContribution, ModalResponseSpectrumModeKind,
     ModalResponseSpectrumResult, ModalResponseSpectrumResultIdentity,
     ModalResponseSpectrumTruncationEvidence, ResponseSpectrumDisplacementConversion,
+    ResponseSpectrumFieldRecovery, ResponseSpectrumFieldRecoveryUnavailability,
+    ResponseSpectrumLinearField, ResponseSpectrumLinearFieldQuantity,
     ResponseSpectrumResultSemantics,
 };

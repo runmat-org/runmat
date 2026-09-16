@@ -544,8 +544,10 @@ pub struct StructuralModalResponseSpectrumAssemblyResourceDemand {
     pub physical_dof_count: Count,
     pub inputs: PreparedInputResourceFacts,
     pub ordering_workspace_bytes_upper_bound: ByteCount,
+    pub field_recovery_workspace_bytes_upper_bound: ByteCount,
     pub result_output: PreparedOutputResourceFacts,
     pub receipt_output: PreparedOutputResourceFacts,
+    pub field_recovery_output: PreparedOutputResourceFacts,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -633,6 +635,10 @@ impl FeaResourceDemand {
                 Self::StructuralModalResponseSpectrumAssembly(demand),
                 AnalysisNumericalObjectKind::NumericalReceipt,
             ) => Some(&demand.receipt_output),
+            (
+                Self::StructuralModalResponseSpectrumAssembly(demand),
+                AnalysisNumericalObjectKind::StructuralModalResponseSpectrumFieldRecovery,
+            ) => Some(&demand.field_recovery_output),
             _ => None,
         }
     }

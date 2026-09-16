@@ -30,6 +30,7 @@ const FIXED_ASSEMBLY_SCRATCH_BYTES: u64 = 64 * 1024;
 const ASSEMBLY_SCRATCH_BYTES_PER_ELEMENT: u64 = 8 * 1024;
 const DIRECTION_FIXED_PAYLOAD_BYTES: u64 = 256 * 1024;
 const ASSEMBLY_FIXED_PAYLOAD_BYTES: u64 = 256 * 1024;
+const FIELD_RECOVERY_FIXED_PAYLOAD_BYTES: u64 = 256 * 1024;
 const RECEIPT_PAYLOAD_BYTES: u64 = 16 * 1024;
 
 /// Reusable exact projection for every independently scheduled direction in one spectrum step.
@@ -45,6 +46,7 @@ pub struct StructuralModalResponseSpectrumResourceProjection {
     operator_digest: runmat_execution::Digest,
     physical_dof_count: u64,
     mode_count: u64,
+    linear_field_value_count_upper_bound: u64,
     worker: WorkerResourcePolicy,
     accuracy_ceiling: runmat_analysis_core::AccuracyResourceCeiling,
 }
@@ -112,6 +114,43 @@ impl StructuralModalResponseSpectrumResourceProjection {
             basis.modes().len() + basis.residual_vectors().len(),
             "response-spectrum mode count",
         )?;
+        let nodal_values = multiply(
+            count(
+                facts.recovery_node_count,
+                "response-spectrum recovery nodes",
+            )?,
+            if facts.recovery_has_rotational_dofs {
+                6
+            } else {
+                3
+            },
+            "response-spectrum nodal field values",
+        )?;
+        let solid_values = multiply(
+            count(
+                facts.recovery_solid_element_count,
+                "response-spectrum solid recovery elements",
+            )?,
+            12,
+            "response-spectrum solid strain and stress values",
+        )?;
+        let shell_values = multiply(
+            count(
+                facts.recovery_shell_element_count,
+                "response-spectrum shell recovery elements",
+            )?,
+            8,
+            "response-spectrum shell resultant values",
+        )?;
+        let linear_field_value_count_upper_bound = add(
+            add(
+                nodal_values,
+                solid_values,
+                "response-spectrum nodal and solid fields",
+            )?,
+            shell_values,
+            "response-spectrum linear field values",
+        )?;
         let sparse = super::SparseResourceFacts::from_patterns([
             facts.symbolic.stiffness_upper_bound(),
             facts.symbolic.mass_upper_bound(),
@@ -145,6 +184,7 @@ impl StructuralModalResponseSpectrumResourceProjection {
             operator_digest: basis.operator_digest(),
             physical_dof_count,
             mode_count,
+            linear_field_value_count_upper_bound,
             worker: WorkerResourcePolicy {
                 cpu_millicores: 1_000,
                 maximum_wall_milliseconds: step.accuracy.resources.maximum_wall_time_milliseconds,
@@ -273,6 +313,7 @@ impl StructuralModalResponseSpectrumResourceProjection {
         inputs: PreparedInputResourceFacts,
         result_output: PreparedOutputResourceFacts,
         receipt_output: PreparedOutputResourceFacts,
+        field_recovery_output: PreparedOutputResourceFacts,
         output_set: PreparedOutputSetResourceFacts,
     ) -> Result<FeaResourcePlan, ResourcePlanningError> {
         request.validate().map_err(invalid_error)?;
@@ -294,8 +335,14 @@ impl StructuralModalResponseSpectrumResourceProjection {
         let result_bytes =
             structural_modal_response_spectrum_assembly_payload_bytes_upper_bound(request)?;
         let receipt_bytes = structural_modal_response_spectrum_receipt_payload_bytes_upper_bound();
+        let field_recovery_bytes = self.field_recovery_payload_bytes_upper_bound()?;
         validate_output(&result_output, result_bytes, "response-spectrum result")?;
         validate_output(&receipt_output, receipt_bytes, "response-spectrum receipt")?;
+        validate_output(
+            &field_recovery_output,
+            field_recovery_bytes,
+            "response-spectrum field recovery",
+        )?;
         let ordering_workspace = multiply(
             add(
                 multiply(
@@ -309,6 +356,15 @@ impl StructuralModalResponseSpectrumResourceProjection {
             8,
             "response-spectrum assembly workspace",
         )?;
+        let field_recovery_workspace = multiply(
+            multiply(
+                self.linear_field_value_count_upper_bound,
+                self.mode_count,
+                "response-spectrum modal field values",
+            )?,
+            8,
+            "response-spectrum field recovery workspace",
+        )?;
         build_resource_plan(FeaResourcePlanningInput {
             estimation_model_revision: RESOURCE_ESTIMATION_MODEL_REVISION,
             phase: FeaResourcePhase::StructuralModalResponseSpectrumAssembly(request.identity()),
@@ -320,14 +376,28 @@ impl StructuralModalResponseSpectrumResourceProjection {
                     physical_dof_count: Count(self.physical_dof_count),
                     inputs,
                     ordering_workspace_bytes_upper_bound: ByteCount(ordering_workspace),
+                    field_recovery_workspace_bytes_upper_bound: ByteCount(field_recovery_workspace),
                     result_output,
                     receipt_output,
+                    field_recovery_output,
                 },
             ),
             output_set: Some(output_set),
             worker: self.worker.clone(),
             accuracy_ceiling: self.accuracy_ceiling,
         })
+    }
+
+    pub fn field_recovery_payload_bytes_upper_bound(&self) -> Result<u64, ResourcePlanningError> {
+        add(
+            FIELD_RECOVERY_FIXED_PAYLOAD_BYTES,
+            multiply(
+                self.linear_field_value_count_upper_bound,
+                8,
+                "response-spectrum linear field payload",
+            )?,
+            "response-spectrum field recovery payload",
+        )
     }
 }
 

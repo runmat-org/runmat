@@ -5,6 +5,7 @@ use runmat_analysis_fea::execution::{
     StructuralModalResponseSpectrumNumericalReceipt, StructuralModalResponseSpectrumSolverResult,
     StructuralModalResponseSpectrumWorkload,
 };
+use runmat_analysis_fea::solve::dynamics::ResponseSpectrumFieldRecovery;
 use runmat_execution_artifact::{object::ObjectInventoryLimits, ObjectNamespace};
 
 use crate::{
@@ -98,4 +99,48 @@ pub fn decode_prepared_structural_modal_response_spectrum_solver_result(
     }
     StructuralModalResponseSpectrumSolverResult::from_canonical_bytes(&prepared.payload())
         .map_err(Into::into)
+}
+
+pub fn prepare_structural_modal_response_spectrum_field_recovery_objects(
+    value: &ResponseSpectrumFieldRecovery,
+    chunk_bytes: usize,
+    namespace: ObjectNamespace,
+    limits: ObjectInventoryLimits,
+) -> AnalysisBridgeResult<PreparedAnalysisObjects> {
+    prepare_analysis_objects(
+        AnalysisNumericalObjectKind::StructuralModalResponseSpectrumFieldRecovery,
+        value
+            .identity()
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
+        &value
+            .canonical_bytes()
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
+        chunk_bytes,
+        namespace,
+        limits,
+    )
+}
+
+pub fn decode_prepared_structural_modal_response_spectrum_field_recovery(
+    prepared: &PreparedAnalysisObjects,
+) -> AnalysisBridgeResult<ResponseSpectrumFieldRecovery> {
+    if prepared.manifest.kind
+        != AnalysisNumericalObjectKind::StructuralModalResponseSpectrumFieldRecovery
+    {
+        return Err(AnalysisBridgeError::Invalid(
+            "expected a structural modal response-spectrum field-recovery object".into(),
+        ));
+    }
+    let value = ResponseSpectrumFieldRecovery::from_canonical_bytes(&prepared.payload())
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    if prepared.manifest.logical_identity
+        != value
+            .identity()
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?
+    {
+        return Err(AnalysisBridgeError::Identity(
+            "response-spectrum field recovery has the wrong logical identity",
+        ));
+    }
+    Ok(value)
 }

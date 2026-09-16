@@ -420,6 +420,7 @@ async fn execute_one(
                             resolved_response_workload: completed.resolved_workload,
                             response_result: completed.response.result,
                             response_numerical_receipt: completed.response.numerical_receipt,
+                            field_recovery: completed.response.field_recovery,
                             envelope_state: completed.envelope_state.state,
                         },
                     )),

@@ -215,6 +215,42 @@ pub(in crate::analysis) fn complete_response_spectrum_study(
         ));
     }
 
+    let field_recovery = numerical.field_recovery.clone();
+    field_recovery
+        .validate_for(numerical.response_result.numerical())
+        .map_err(|error| completion_error(&prepared, error.to_string()))?;
+    if let runmat_analysis_fea::solve::dynamics::ResponseSpectrumFieldRecovery::Recovered(
+        recovered,
+    ) = &field_recovery
+    {
+        let constraint_plan =
+            runmat_analysis_fea::constraints::CanonicalStructuralConstraintPlan::compile_for_model(
+                &prepared.model,
+                Some(&solver_mesh),
+            )
+            .map_err(|error| completion_error(&prepared, error.to_string()))?;
+        let prepared_response = runmat_analysis_fea::prepare_structural_modal_response_spectrum(
+            &response_workload,
+            &solver_mesh,
+            &numerical.basis_state,
+            &constraint_plan,
+            &[],
+        )
+        .map_err(|error| completion_error(&prepared, error.to_string()))?;
+        let expected = runmat_analysis_fea::recover_structural_modal_response_spectrum_fields(
+            &response_workload,
+            &prepared_response,
+            numerical.response_result.numerical(),
+        )
+        .map_err(|error| completion_error(&prepared, error.to_string()))?;
+        if recovered != &expected {
+            return Err(completion_error(
+                &prepared,
+                "response-spectrum field recovery differs from its exact physical inputs",
+            ));
+        }
+    }
+
     let modal_identity = &modal_run.data.run.identity;
     let mut response_realization = modal_identity.realization().clone();
     response_realization.temporals = vec![
@@ -270,6 +306,7 @@ pub(in crate::analysis) fn complete_response_spectrum_study(
         numerical_result: crate::analysis::StructuralResponseSpectrumResultsData {
             result: numerical.response_result,
             numerical_receipt: numerical.response_numerical_receipt,
+            field_recovery,
         },
     };
 

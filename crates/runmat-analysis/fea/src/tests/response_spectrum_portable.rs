@@ -26,6 +26,7 @@ use crate::{
         structural_response_spectrum::{
             execute_structural_modal_response_spectrum_direction,
             prepare_structural_modal_response_spectrum,
+            recover_structural_modal_response_spectrum_fields,
         },
     },
     planning::resource::{
@@ -176,6 +177,13 @@ fn portable_direction_tasks_reassemble_in_authored_order_and_bind_receipt() {
     let assembly = StructuralModalResponseSpectrumAssemblyRequest::new(scope, entries).unwrap();
     assert_eq!(assembly.entries()[0].request().ordinal(), 0);
     let result = StructuralModalResponseSpectrumSolverResult::new(&workload, assembly).unwrap();
+    let recovered =
+        recover_structural_modal_response_spectrum_fields(&workload, &prepared, result.numerical())
+            .unwrap();
+    assert_eq!(recovered.source_result(), result.numerical().identity());
+    assert!(recovered
+        .field(crate::solve::dynamics::ResponseSpectrumLinearFieldQuantity::Stress)
+        .is_some());
     let result_payload =
         structural_modal_response_spectrum_assembly_payload_bytes_upper_bound(result.assembly())
             .unwrap();
@@ -185,6 +193,11 @@ fn portable_direction_tasks_reassemble_in_authored_order_and_bind_receipt() {
             prepared_inputs(),
             prepared_output(result_payload),
             prepared_output(structural_modal_response_spectrum_receipt_payload_bytes_upper_bound()),
+            prepared_output(
+                projection
+                    .field_recovery_payload_bytes_upper_bound()
+                    .unwrap(),
+            ),
             prepared_output_set(),
         )
         .unwrap();

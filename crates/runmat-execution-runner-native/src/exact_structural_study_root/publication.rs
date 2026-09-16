@@ -100,6 +100,7 @@ enum ExactStructuralStudyAnalysisClosure {
         basis_state_root: Box<ValueRef>,
         response_result_root: Box<ValueRef>,
         response_receipt_root: Box<ValueRef>,
+        field_recovery_root: Box<ValueRef>,
         envelope_state_root: Box<ValueRef>,
         objects: Vec<ValueRef>,
     },
@@ -260,6 +261,7 @@ impl ExactStructuralStudyAnalysisClosure {
                 basis_state_root,
                 response_result_root,
                 response_receipt_root,
+                field_recovery_root,
                 envelope_state_root,
                 objects,
             } => {
@@ -270,6 +272,7 @@ impl ExactStructuralStudyAnalysisClosure {
                         basis_state_root,
                         response_result_root,
                         response_receipt_root,
+                        field_recovery_root,
                         envelope_state_root,
                     ],
                     objects,
@@ -545,6 +548,7 @@ pub struct ExactStructuralModalResponseSpectrumAnalysisResult {
         Box<runmat_analysis_fea::execution::StructuralModalResponseSpectrumSolverResult>,
     pub response_numerical_receipt:
         runmat_analysis_fea::execution::StructuralModalResponseSpectrumNumericalReceipt,
+    pub field_recovery: runmat_analysis_fea::solve::dynamics::ResponseSpectrumFieldRecovery,
     pub envelope_state: runmat_analysis_fea::execution::CanonicalSemanticState,
 }
 
