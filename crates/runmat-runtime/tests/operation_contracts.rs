@@ -410,6 +410,7 @@ fn contract_study_spec(
             model_id: model_id.to_string(),
             template,
         },
+        model_source_evidence: None,
         model,
         execution: AnalysisExecutionPlan {
             steps: vec![AnalysisExecutionStep {

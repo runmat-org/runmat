@@ -14,7 +14,7 @@ use runmat_meshing_core::ElementOrder;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value as JsonValue;
 
-use super::super::contracts::{AnalysisModelTemplate, AnalysisSolverOptions};
+use super::super::contracts::AnalysisSolverOptions;
 pub use super::super::fea_document::FeaRegionSelector;
 
 pub const FEA_STUDY_DOCUMENT_OPERATION_NAMES: &[&str] = &[
@@ -143,8 +143,7 @@ pub struct FeaStudyCreateInput {
     pub model: FeaStudyModelInput,
     #[serde(default)]
     pub mesh: Option<FeaStudyMeshInput>,
-    #[serde(default)]
-    pub sequence: Option<AnalysisSequence>,
+    pub sequence: AnalysisSequence,
     #[serde(default)]
     pub execution: Option<Vec<FeaStudyExecutionInput>>,
 }
@@ -171,19 +170,34 @@ pub struct FeaStudyGeometryImportInput {
 pub struct FeaStudyModelInput {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
-    pub template: AnalysisModelTemplate,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub frame: Option<CoordinateFrame>,
     #[serde(default)]
-    pub defaults: FeaStudyModelDefaults,
+    pub source: FeaStudyModelSourceInput,
 }
 
-#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum FeaStudyModelDefaults {
-    #[default]
-    TemplateScaffold,
-    None,
+pub enum FeaStudyModelSourceInput {
+    Inline(FeaStudyInlineModelInput),
+    File(FeaStudyModelFileInput),
+    Compose(Vec<FeaStudyModelSourceInput>),
+}
+
+impl Default for FeaStudyModelSourceInput {
+    fn default() -> Self {
+        Self::Inline(FeaStudyInlineModelInput {})
+    }
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FeaStudyInlineModelInput {}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FeaStudyModelFileInput {
+    pub path: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -367,7 +381,7 @@ pub struct FeaStudySummary {
     pub study_id: Option<String>,
     pub geometry_path: Option<String>,
     pub geometry_units: Option<UnitSystem>,
-    pub model_template: Option<AnalysisModelTemplate>,
+    pub model_source: Option<String>,
     pub mesh: Option<FeaStudyMeshInput>,
     pub execution_backend: Option<ComputeBackend>,
     pub sequence_id: Option<String>,

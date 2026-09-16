@@ -931,6 +931,7 @@ fn sample_linear_static_study_spec() -> AnalysisStudySpec {
             model_id: "study_model_linear_static_001".to_string(),
             template: AnalysisModelTemplate::LinearStaticStructural,
         },
+        model_source_evidence: None,
         model: None,
         execution: AnalysisExecutionPlan {
             steps: vec![AnalysisExecutionStep {
@@ -956,6 +957,7 @@ fn sample_electromagnetic_study_spec() -> AnalysisStudySpec {
             model_id: "study_model_electromagnetic_001".to_string(),
             template: AnalysisModelTemplate::ElectromagneticHarmonic,
         },
+        model_source_evidence: None,
         model: None,
         execution: AnalysisExecutionPlan {
             steps: vec![AnalysisExecutionStep {

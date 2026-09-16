@@ -8,6 +8,7 @@ use runmat_analysis_fea::execution::{SequenceIdentity, SolverResultIdentity, Sta
 use runmat_analysis_fea::{
     AnalysisRunIdentity, ComputeBackend, ExecutionBackend, FeaProgressEvent, FeaRunResult,
 };
+use runmat_execution::Digest;
 use runmat_geometry_core::GeometryAsset;
 use runmat_meshing_core::MeshingRequestSettings;
 use serde::{Deserialize, Serialize};
@@ -2762,6 +2763,8 @@ pub struct AnalysisStudySpec {
     pub study_id: String,
     pub geometry: GeometryAsset,
     pub create_model_intent: AnalysisCreateModelIntentSpec,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_source_evidence: Option<AnalysisModelSourceEvidence>,
     #[serde(default)]
     pub model: Option<AnalysisModel>,
     pub execution: AnalysisExecutionPlan,
@@ -2773,6 +2776,30 @@ pub struct AnalysisStudySpec {
     pub solver_mesh_artifact_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub meshing_evidence_artifact_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AnalysisModelSourceKind {
+    Inline,
+    File,
+    Compose,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AnalysisModelSourceFileEvidence {
+    pub path: String,
+    pub content_digest: Digest,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AnalysisModelSourceEvidence {
+    pub kind: AnalysisModelSourceKind,
+    pub resolved_model_digest: Digest,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<AnalysisModelSourceFileEvidence>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

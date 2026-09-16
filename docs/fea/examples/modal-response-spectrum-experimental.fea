@@ -7,61 +7,60 @@ geometry:
   units: meter
 
 model:
-  template: modal_structural
-  defaults: none
+  source:
+    inline:
+      materials:
+        steel:
+          name: Structural steel
+          mechanical:
+            youngs_modulus_pa: 200000000000.0
+            poisson_ratio: 0.3
+            density_kg_per_m3: 7850.0
 
-materials:
-  steel:
-    name: Structural steel
-    mechanical:
-      youngs_modulus_pa: 200000000000.0
-      poisson_ratio: 0.3
-      density_kg_per_m3: 7850.0
+      material_assignments:
+        - target: { solid: { region: solid_000001 } }
+          material: steel
 
-material_assignments:
-  - target: { solid: { region: solid_000001 } }
-    material: steel
+      regions:
+        fixed_face:
+          selector: { id: face_000001 }
 
-regions:
-  fixed_face:
-    selector: { id: face_000001 }
+      constraints:
+        - structural:
+            constraint_id: fixed_support
+            frame: global
+            kind:
+              fixed:
+                target:
+                  region_id: fixed_face
+                  entity_dimension: face
+                  expected_topology: boundary_face
+                  cardinality: one_or_more
 
-constraints:
-  - structural:
-      constraint_id: fixed_support
-      frame: global
-      kind:
-        fixed:
-          target:
-            region_id: fixed_face
-            entity_dimension: face
-            expected_topology: boundary_face
-            cardinality: one_or_more
-
-response_spectra:
-  - spectrum_id: design_spectrum
-    abscissa:
-      frequency_hertz: [5.0, 10.0, 20.0, 40.0]
-    ordinates: [1.2, 2.5, 1.8, 0.7]
-    damping: { ratio: 0.05 }
-    response: absolute_acceleration
-    envelope: maximax
-    interpolation: linear_frequency
-    extrapolation: hold_endpoint
-    direction:
-      frame: global
-      vector: [1.0, 0.0, 0.0]
-    modal_combination: complete_quadratic_combination
-    directional_combination: srss
-    truncation:
-      minimum_cumulative_mass_ratio: 0.9
-      correction: none
-    rigid_response: disabled
-    construction: authored_design
-    evidence:
-      sampling_adequacy_ratio: 0.95
-      max_interpolation_error: 0.02
-    provenance_digest: sha256:documented-design-spectrum
+      response_spectra:
+        - spectrum_id: design_spectrum
+          abscissa:
+            frequency_hertz: [5.0, 10.0, 20.0, 40.0]
+          ordinates: [1.2, 2.5, 1.8, 0.7]
+          damping: { ratio: 0.05 }
+          response: absolute_acceleration
+          envelope: maximax
+          interpolation: linear_frequency
+          extrapolation: hold_endpoint
+          direction:
+            frame: global
+            vector: [1.0, 0.0, 0.0]
+          modal_combination: complete_quadratic_combination
+          directional_combination: srss
+          truncation:
+            minimum_cumulative_mass_ratio: 0.9
+            correction: none
+          rigid_response: disabled
+          construction: authored_design
+          evidence:
+            sampling_adequacy_ratio: 0.95
+            max_interpolation_error: 0.02
+          provenance_digest: sha256:documented-design-spectrum
 
 mesh:
   target_edge_length_m: 10.0

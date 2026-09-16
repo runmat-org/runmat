@@ -21,7 +21,7 @@ V&V levels are defined in [Verification & Validation](/docs/fea/validation). The
 | Can I check before running? | Yes. `runmat check` supports `.m` scripts and `.fea` documents. | `.m` check compiles the source path; `.fea` check validates and plans but does not solve. |
 | Can I use named entrypoints? | Yes. Project entrypoints can target `.m` or `.fea` paths. | Entrypoint resolution must resolve to an actual file. |
 | Can I use RunMat code? | Yes. Typed geometry, meshing, FEA construction, workflow, and result-query builtins are registered. | `.m` code and `.fea` files can express the same study content; use `.m` when generation or parameterization is the better shape. |
-| Can I define studies in files? | Yes. `.fea` supports geometry loading, model templates or explicit model data, semantic sequences, per-step execution plans, studies, and sweeps. | `.fea` is YAML with extension `.fea`; unsupported sections reject rather than being interpreted as another contract. |
+| Can I define studies in files? | Yes. `.fea` supports geometry loading, explicit inline/file/composed model sources, semantic sequences, per-step execution plans, studies, and sweeps. | `.fea` is YAML with extension `.fea`; unsupported sections reject rather than being interpreted as another contract. |
 | Can hosts call lower-level operations? | Yes. Runtime operations cover geometry, model creation, validation, run families, results, studies, and sweeps. | Rust function names still use internal `analysis_*` APIs, while public operation identifiers are `fea.*`. |
 | Are artifacts configurable? | Yes. `[runtime.fea]` configures FEA run, study, and thermo-field artifact roots. | Environment configuration uses the documented `RUNMAT_FEA_*` variables. |
 

@@ -288,7 +288,9 @@ geometry:
   units: millimeter
 
 model:
-  template: linear_static_structural
+  source:
+    file:
+      path: models/bracket-structural.fea
 
 mesh:
   element_order: tet10

@@ -188,14 +188,17 @@ These constructors, planning operations, field projections, comparisons, and plo
 | `fea.fieldPage` | `page = fea.fieldPage(field, start, count)` | The field must retain a persisted run identity. Start and count are positive exact host integers; count defaults to 256 and is capped at 4096. Every selected object and chunk is verified before values are returned. |
 | `fea.trends` | `trends = fea.trends(Name, Value, ...)` | `WindowSize` is checked before artifact-store access. |
 
-`fea.study` requires `Template`, defaults to a CPU/production execution entry for every sequence
-step, uses defaults mode `template_scaffold`, and creates a sanitized `<study-id>_model` model id
+The RunMat-code `fea.study` constructor requires `Template`, defaults to a CPU/production execution
+entry for every sequence step, uses defaults mode `template_scaffold`, and creates a sanitized `<study-id>_model` model id
 when none is supplied. Its constructor options include `Template`, `Execution`, `ModelId`, `Model`,
 `Frame`, `Defaults`, `Materials`, `MaterialAssignments`/`Assignments`, `Constraints`, `Boundaries`,
 `Signals`, `Excitations`, `ExcitationCases`/`Cases`, `InitialConditions`, `ResponseSpectra`, `Steps`,
 `Sequence`, `Domains`, `Interfaces`, and `Mesh`. `Steps` and `Sequence` are mutually exclusive.
 `fea.model` accepts the model-component subset. Direct integer values do not substitute for any
 identity or typed-object option.
+
+Those constructor conveniences do not apply to `.fea` documents. File-authored studies use an
+explicit `model.source` (`inline`, `file`, or `compose`) and never expand a hidden model template.
 
 ### Execution-plan contracts
 

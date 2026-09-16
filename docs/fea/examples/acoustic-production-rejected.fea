@@ -7,77 +7,76 @@ geometry:
   units: meter
 
 model:
-  template: acoustic_harmonic
-  defaults: template_scaffold
+  source:
+    inline:
+      materials:
+        air:
+          name: Air
+          mechanical:
+            youngs_modulus_pa: 142000.0
+            poisson_ratio: 0.0
+            density_kg_per_m3: 1.225
+          acoustic:
+            density_kg_per_m3: 1.225
+            speed_of_sound_m_per_s: 343.0
+            damping_ratio: 0.0
 
-materials:
-  air:
-    name: Air
-    mechanical:
-      youngs_modulus_pa: 142000.0
-      poisson_ratio: 0.0
-      density_kg_per_m3: 1.225
-    acoustic:
-      density_kg_per_m3: 1.225
-      speed_of_sound_m_per_s: 343.0
-      damping_ratio: 0.0
+      material_assignments:
+        - target: { cell: { region: region_default } }
+          material: air
 
-material_assignments:
-  - target: { cell: { region: region_default } }
-    material: air
+      boundaries:
+        - boundary_id: rigid_wall
+          target:
+            region_id: region_default
+            entity_dimension: face
+            expected_topology: boundary_face
+            cardinality: one_or_more
+          operator: acoustic_rigid_wall
 
-boundaries:
-  - boundary_id: rigid_wall
-    target:
-      region_id: region_default
-      entity_dimension: face
-      expected_topology: boundary_face
-      cardinality: one_or_more
-    operator: acoustic_rigid_wall
+      signals:
+        - pressure:
+            signal_id: incident_pressure_signal
+            shape: scalar
+            frame: null
+            representation:
+              constant:
+                scalar:
+                  pascals: 1.0
+            precision: real64
+            evidence:
+              max_absolute_error: null
+              max_relative_error: null
+              derivative_max_absolute_error: null
+              sample_count: 1
+            provenance: authored
 
-signals:
-  - pressure:
-      signal_id: incident_pressure_signal
-      shape: scalar
-      frame: null
-      representation:
-        constant:
-          scalar:
-            pascals: 1.0
-      precision: real64
-      evidence:
-        max_absolute_error: null
-        max_relative_error: null
-        derivative_max_absolute_error: null
-        sample_count: 1
-      provenance: authored
+      excitation_cases:
+        - case_id: incident_pressure_case
+          action_ids: [incident_pressure]
+          activation: always
 
-excitation_cases:
-  - case_id: incident_pressure_case
-    action_ids: [incident_pressure]
-    activation: always
-
-excitations:
-  - acoustic_pressure:
-      excitation_id: incident_pressure
-      case_id: incident_pressure_case
-      target:
-        region:
-          region_id: region_default
-          entity_dimension: face
-          expected_topology: boundary_face
-          cardinality: one_or_more
-      frame: global
-      direction: null
-      distribution: intensity_per_area
-      kinematics: fixed_frame
-      signal_id: incident_pressure_signal
-      active_step_ids: [harmonic]
-      combination_group: null
-      projection:
-        preserve_resultant: false
-        preserve_moment: false
-        relative_tolerance: 1.0e-10
+      excitations:
+        - acoustic_pressure:
+            excitation_id: incident_pressure
+            case_id: incident_pressure_case
+            target:
+              region:
+                region_id: region_default
+                entity_dimension: face
+                expected_topology: boundary_face
+                cardinality: one_or_more
+            frame: global
+            direction: null
+            distribution: intensity_per_area
+            kinematics: fixed_frame
+            signal_id: incident_pressure_signal
+            active_step_ids: [harmonic]
+            combination_group: null
+            projection:
+              preserve_resultant: false
+              preserve_moment: false
+              relative_tolerance: 1.0e-10
 
 sequence:
   sequence_id: acoustic_sequence

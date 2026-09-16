@@ -22,15 +22,17 @@ pub fn summarize_fea_study_document_contract(
 ) -> Result<FeaStudyDocumentOperationResult, String> {
     let document = parse_document(source)?;
     let summary = summarize(&document);
-    let regions = map_entries(&document, "regions", |key, value| FeaStudyRegionEntry {
+    let empty_model = YamlValue::Mapping(serde_yaml::Mapping::new());
+    let model = inline_model_data(&document).unwrap_or(&empty_model);
+    let regions = map_entries(model, "regions", |key, value| FeaStudyRegionEntry {
         key,
         selector: typed_at(value, &["selector"]),
     });
-    let materials = map_entries(&document, "materials", |key, value| FeaStudyMaterialEntry {
+    let materials = map_entries(model, "materials", |key, value| FeaStudyMaterialEntry {
         key,
         name: scalar(value, &["name"]),
     });
-    let material_assignments = sequence_values(&document, "material_assignments")
+    let material_assignments = sequence_values(model, "material_assignments")
         .iter()
         .enumerate()
         .map(|(index, value)| {
@@ -62,37 +64,31 @@ pub fn summarize_fea_study_document_contract(
             }
         })
         .collect::<Vec<_>>();
-    let constraints = named_entries::<AnalysisConstraint>(&document, "constraints", |value| {
+    let constraints = named_entries::<AnalysisConstraint>(model, "constraints", |value| {
         value.constraint_id().to_string()
     });
-    let boundaries = named_entries::<AnalysisBoundary>(&document, "boundaries", |value| {
-        value.boundary_id.clone()
-    });
-    let connectors = named_entries::<AnalysisConnector>(&document, "connectors", |value| {
-        value.connector_id.clone()
-    });
-    let interfaces = named_entries::<AnalysisInterface>(&document, "interfaces", |value| {
-        value.interface_id.clone()
-    });
+    let boundaries =
+        named_entries::<AnalysisBoundary>(model, "boundaries", |value| value.boundary_id.clone());
+    let connectors =
+        named_entries::<AnalysisConnector>(model, "connectors", |value| value.connector_id.clone());
+    let interfaces =
+        named_entries::<AnalysisInterface>(model, "interfaces", |value| value.interface_id.clone());
     let signals =
-        named_entries::<PhysicalSignal>(&document, "signals", |value| value.signal_id().0.clone());
+        named_entries::<PhysicalSignal>(model, "signals", |value| value.signal_id().0.clone());
     let excitation_cases =
-        named_entries::<ExcitationCase>(&document, "excitation_cases", |value| {
-            value.case_id.0.clone()
-        });
-    let excitations = named_entries::<ExcitationAction>(&document, "excitations", |value| {
+        named_entries::<ExcitationCase>(model, "excitation_cases", |value| value.case_id.0.clone());
+    let excitations = named_entries::<ExcitationAction>(model, "excitations", |value| {
         value.excitation().excitation_id.0.clone()
     });
     let initial_conditions =
-        named_entries::<InitialCondition>(&document, "initial_conditions", |value| {
+        named_entries::<InitialCondition>(model, "initial_conditions", |value| {
             value.initial_condition_id().to_string()
         });
-    let response_spectra =
-        named_entries::<ResponseSpectrum>(&document, "response_spectra", |value| {
-            value.spectrum_id.0.clone()
-        });
+    let response_spectra = named_entries::<ResponseSpectrum>(model, "response_spectra", |value| {
+        value.spectrum_id.0.clone()
+    });
     let random_excitations =
-        named_entries::<RandomExcitationSpectrum>(&document, "random_excitations", |value| {
+        named_entries::<RandomExcitationSpectrum>(model, "random_excitations", |value| {
             value.excitation_id.0.clone()
         });
     let sequence = typed_at::<AnalysisSequence>(&document, &["sequence"]).map(|value| {
@@ -152,7 +148,11 @@ fn summarize(document: &YamlValue) -> FeaStudySummary {
         study_id: scalar(document, &["id"]),
         geometry_path: scalar(document, &["geometry", "path"]),
         geometry_units: typed_at(document, &["geometry", "units"]),
-        model_template: typed_at(document, &["model", "template"]),
+        model_source: yaml_at(document, &["model", "source"])
+            .and_then(YamlValue::as_mapping)
+            .and_then(|source| source.keys().next())
+            .and_then(YamlValue::as_str)
+            .map(str::to_string),
         mesh: typed_at(document, &["mesh"]),
         execution_backend: yaml_at(document, &["execution"])
             .and_then(YamlValue::as_sequence)
@@ -169,17 +169,24 @@ fn readiness(summary: &FeaStudySummary, counts: &FeaStudyDocumentCounts) -> FeaS
     if summary.geometry_path.as_deref().is_none_or(str::is_empty) {
         blockers.push("Select study geometry.".into());
     }
-    if summary.model_template.is_none() {
-        blockers.push("Select a model template.".into());
+    if summary.model_source.is_none() {
+        blockers.push("Select an explicit model source.".into());
     }
     if counts.sequence_steps == 0 {
         blockers.push("Define at least one canonical procedure step.".into());
     }
-    if counts.materials == 0 {
-        blockers.push("Define at least one material or medium.".into());
-    }
-    if counts.material_assignments == 0 {
-        blockers.push("Assign materials or media to model regions.".into());
+    if summary.model_source.as_deref() == Some("inline") {
+        if counts.materials == 0 {
+            blockers.push("Define at least one material or medium.".into());
+        }
+        if counts.material_assignments == 0 {
+            blockers.push("Assign materials or media to model regions.".into());
+        }
+    } else if matches!(summary.model_source.as_deref(), Some("file" | "compose")) {
+        blockers.push(
+            "Resolve referenced model sources with `runmat check` before treating the study as ready."
+                .into(),
+        );
     }
     FeaStudyReadiness {
         ready_to_solve: blockers.is_empty(),

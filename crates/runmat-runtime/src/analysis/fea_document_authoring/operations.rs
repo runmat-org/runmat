@@ -1,18 +1,17 @@
 //! Canonical document construction and domain-aware mutations.
 
 use runmat_analysis_core::{
-    AnalysisBoundary, AnalysisConnector, AnalysisConstraint, AnalysisInterface, AnalysisProcedure,
-    AnalysisSequence, CoupledPhysicsFamily, ExcitationAction, ExcitationCase,
-    FormulationRequirement, InitialCondition, MaterialAcousticModel, MaterialElectricalModel,
-    MaterialMechanicalModel, MaterialPlasticModel, MaterialThermalModel, PhysicalSignal,
-    ProcedureStep, RandomExcitationSpectrum, ResponseSpectrum,
+    AnalysisBoundary, AnalysisConnector, AnalysisConstraint, AnalysisInterface, AnalysisSequence,
+    ExcitationAction, ExcitationCase, FormulationRequirement, InitialCondition,
+    MaterialAcousticModel, MaterialElectricalModel, MaterialMechanicalModel, MaterialPlasticModel,
+    MaterialThermalModel, PhysicalSignal, RandomExcitationSpectrum, ResponseSpectrum,
 };
 use runmat_analysis_fea::ComputeBackend;
 use serde::Serialize;
 use serde_json::Value as JsonValue;
 use serde_yaml::Value as YamlValue;
 
-use super::super::contracts::{AnalysisModelTemplate, AnalysisSolverOptions};
+use super::super::contracts::AnalysisSolverOptions;
 use super::yaml::*;
 use super::*;
 
@@ -22,13 +21,26 @@ pub(super) fn mutate(
     input: JsonValue,
 ) -> Result<&'static str, String> {
     let add = |candidate| operation == candidate;
+    let edits_model = !matches!(
+        operation,
+        FeaStudyDocumentOperation::SetSequence
+            | FeaStudyDocumentOperation::SetMesh
+            | FeaStudyDocumentOperation::ClearMesh
+            | FeaStudyDocumentOperation::Create
+            | FeaStudyDocumentOperation::GetSummary
+    );
+    let model_data = if edits_model {
+        inline_model_data_mut(document)?
+    } else {
+        document
+    };
     match operation {
         FeaStudyDocumentOperation::AddRegion | FeaStudyDocumentOperation::UpdateRegion => {
             let value: FeaStudyRegionInput = decode(input, operation.as_str())?;
             validate_id(&value.region_id, "region_id")?;
             let id = value.region_id.clone();
             mutate_map(
-                document,
+                model_data,
                 "regions",
                 id,
                 to_yaml(&RegionValue {
@@ -39,7 +51,7 @@ pub(super) fn mutate(
             Ok("regions")
         }
         FeaStudyDocumentOperation::RemoveRegion => {
-            remove_map(document, "regions", &decode_id(input, "region")?)?;
+            remove_map(model_data, "regions", &decode_id(input, "region")?)?;
             Ok("regions")
         }
         FeaStudyDocumentOperation::AddMaterial | FeaStudyDocumentOperation::UpdateMaterial => {
@@ -47,7 +59,7 @@ pub(super) fn mutate(
             validate_id(&value.material_id, "material_id")?;
             let id = value.material_id.clone();
             mutate_map(
-                document,
+                model_data,
                 "materials",
                 id,
                 to_yaml(&MaterialValue::from(value))?,
@@ -56,26 +68,26 @@ pub(super) fn mutate(
             Ok("materials")
         }
         FeaStudyDocumentOperation::RemoveMaterial => {
-            remove_map(document, "materials", &decode_id(input, "material")?)?;
+            remove_map(model_data, "materials", &decode_id(input, "material")?)?;
             Ok("materials")
         }
         FeaStudyDocumentOperation::AssignMaterial => {
             let value: FeaStudyMaterialAssignmentInput = decode(input, operation.as_str())?;
             let target = to_yaml(&value.target)?;
-            append_pair(document, &target, &value.material, to_yaml(&value)?)?;
+            append_pair(model_data, &target, &value.material, to_yaml(&value)?)?;
             Ok("material_assignments")
         }
         FeaStudyDocumentOperation::RemoveMaterialAssignment => {
             let value: AssignmentIdInput = decode(input, operation.as_str())?;
             let target = to_yaml(&value.target)?;
-            remove_pair(document, &target, &value.material)?;
+            remove_pair(model_data, &target, &value.material)?;
             Ok("material_assignments")
         }
         FeaStudyDocumentOperation::AddConstraint | FeaStudyDocumentOperation::UpdateConstraint => {
             let value: AnalysisConstraint = decode(input, operation.as_str())?;
             let id = value.constraint_id().to_string();
             mutate_sequence(
-                document,
+                model_data,
                 "constraints",
                 &id,
                 to_yaml(&value)?,
@@ -85,13 +97,13 @@ pub(super) fn mutate(
             Ok("constraints")
         }
         FeaStudyDocumentOperation::RemoveConstraint => {
-            remove_named(document, "constraints", input, constraint_id)
+            remove_named(model_data, "constraints", input, constraint_id)
         }
         FeaStudyDocumentOperation::AddBoundary | FeaStudyDocumentOperation::UpdateBoundary => {
             let value: AnalysisBoundary = decode(input, operation.as_str())?;
             let id = value.boundary_id.clone();
             mutate_sequence(
-                document,
+                model_data,
                 "boundaries",
                 &id,
                 to_yaml(&value)?,
@@ -101,13 +113,13 @@ pub(super) fn mutate(
             Ok("boundaries")
         }
         FeaStudyDocumentOperation::RemoveBoundary => {
-            remove_named(document, "boundaries", input, boundary_id)
+            remove_named(model_data, "boundaries", input, boundary_id)
         }
         FeaStudyDocumentOperation::AddConnector | FeaStudyDocumentOperation::UpdateConnector => {
             let value: AnalysisConnector = decode(input, operation.as_str())?;
             let id = value.connector_id.clone();
             mutate_sequence(
-                document,
+                model_data,
                 "connectors",
                 &id,
                 to_yaml(&value)?,
@@ -117,13 +129,13 @@ pub(super) fn mutate(
             Ok("connectors")
         }
         FeaStudyDocumentOperation::RemoveConnector => {
-            remove_named(document, "connectors", input, connector_id)
+            remove_named(model_data, "connectors", input, connector_id)
         }
         FeaStudyDocumentOperation::AddInterface | FeaStudyDocumentOperation::UpdateInterface => {
             let value: AnalysisInterface = decode(input, operation.as_str())?;
             let id = value.interface_id.clone();
             mutate_sequence(
-                document,
+                model_data,
                 "interfaces",
                 &id,
                 to_yaml(&value)?,
@@ -133,13 +145,13 @@ pub(super) fn mutate(
             Ok("interfaces")
         }
         FeaStudyDocumentOperation::RemoveInterface => {
-            remove_named(document, "interfaces", input, interface_id)
+            remove_named(model_data, "interfaces", input, interface_id)
         }
         FeaStudyDocumentOperation::AddSignal | FeaStudyDocumentOperation::UpdateSignal => {
             let value: PhysicalSignal = decode(input, operation.as_str())?;
             let id = value.signal_id().0.clone();
             mutate_sequence(
-                document,
+                model_data,
                 "signals",
                 &id,
                 to_yaml(&value)?,
@@ -149,14 +161,14 @@ pub(super) fn mutate(
             Ok("signals")
         }
         FeaStudyDocumentOperation::RemoveSignal => {
-            remove_named(document, "signals", input, signal_id)
+            remove_named(model_data, "signals", input, signal_id)
         }
         FeaStudyDocumentOperation::AddExcitationCase
         | FeaStudyDocumentOperation::UpdateExcitationCase => {
             let value: ExcitationCase = decode(input, operation.as_str())?;
             let id = value.case_id.0.clone();
             mutate_sequence(
-                document,
+                model_data,
                 "excitation_cases",
                 &id,
                 to_yaml(&value)?,
@@ -166,13 +178,13 @@ pub(super) fn mutate(
             Ok("excitation_cases")
         }
         FeaStudyDocumentOperation::RemoveExcitationCase => {
-            remove_named(document, "excitation_cases", input, excitation_case_id)
+            remove_named(model_data, "excitation_cases", input, excitation_case_id)
         }
         FeaStudyDocumentOperation::AddExcitation | FeaStudyDocumentOperation::UpdateExcitation => {
             let value: ExcitationAction = decode(input, operation.as_str())?;
             let id = value.excitation().excitation_id.0.clone();
             mutate_sequence(
-                document,
+                model_data,
                 "excitations",
                 &id,
                 to_yaml(&value)?,
@@ -182,14 +194,14 @@ pub(super) fn mutate(
             Ok("excitations")
         }
         FeaStudyDocumentOperation::RemoveExcitation => {
-            remove_named(document, "excitations", input, excitation_id)
+            remove_named(model_data, "excitations", input, excitation_id)
         }
         FeaStudyDocumentOperation::AddInitialCondition
         | FeaStudyDocumentOperation::UpdateInitialCondition => {
             let value: InitialCondition = decode(input, operation.as_str())?;
             let id = value.initial_condition_id().to_string();
             mutate_sequence(
-                document,
+                model_data,
                 "initial_conditions",
                 &id,
                 to_yaml(&value)?,
@@ -198,15 +210,18 @@ pub(super) fn mutate(
             )?;
             Ok("initial_conditions")
         }
-        FeaStudyDocumentOperation::RemoveInitialCondition => {
-            remove_named(document, "initial_conditions", input, initial_condition_id)
-        }
+        FeaStudyDocumentOperation::RemoveInitialCondition => remove_named(
+            model_data,
+            "initial_conditions",
+            input,
+            initial_condition_id,
+        ),
         FeaStudyDocumentOperation::AddResponseSpectrum
         | FeaStudyDocumentOperation::UpdateResponseSpectrum => {
             let value: ResponseSpectrum = decode(input, operation.as_str())?;
             let id = value.spectrum_id.0.clone();
             mutate_sequence(
-                document,
+                model_data,
                 "response_spectra",
                 &id,
                 to_yaml(&value)?,
@@ -216,14 +231,14 @@ pub(super) fn mutate(
             Ok("response_spectra")
         }
         FeaStudyDocumentOperation::RemoveResponseSpectrum => {
-            remove_named(document, "response_spectra", input, response_spectrum_id)
+            remove_named(model_data, "response_spectra", input, response_spectrum_id)
         }
         FeaStudyDocumentOperation::AddRandomExcitation
         | FeaStudyDocumentOperation::UpdateRandomExcitation => {
             let value: RandomExcitationSpectrum = decode(input, operation.as_str())?;
             let id = value.excitation_id.0.clone();
             mutate_sequence(
-                document,
+                model_data,
                 "random_excitations",
                 &id,
                 to_yaml(&value)?,
@@ -232,27 +247,30 @@ pub(super) fn mutate(
             )?;
             Ok("random_excitations")
         }
-        FeaStudyDocumentOperation::RemoveRandomExcitation => {
-            remove_named(document, "random_excitations", input, random_excitation_id)
-        }
+        FeaStudyDocumentOperation::RemoveRandomExcitation => remove_named(
+            model_data,
+            "random_excitations",
+            input,
+            random_excitation_id,
+        ),
         FeaStudyDocumentOperation::SetSequence => {
             let value: AnalysisSequence = decode(input, operation.as_str())?;
-            set_value(document, "sequence", to_yaml(&value)?);
+            set_value(model_data, "sequence", to_yaml(&value)?);
             Ok("sequence")
         }
         FeaStudyDocumentOperation::SetDomains => {
             let value: FeaStudyDomainsInput = decode(input, operation.as_str())?;
-            set_value(document, "domains", to_yaml(&value)?);
+            set_value(model_data, "domains", to_yaml(&value)?);
             Ok("domains")
         }
         FeaStudyDocumentOperation::SetMesh => {
             let value: FeaStudyMeshInput = decode(input, operation.as_str())?;
             validate_mesh(&value)?;
-            set_value(document, "mesh", to_yaml(&value)?);
+            set_value(model_data, "mesh", to_yaml(&value)?);
             Ok("mesh")
         }
         FeaStudyDocumentOperation::ClearMesh => {
-            remove_value(document, "mesh");
+            remove_value(model_data, "mesh");
             Ok("mesh")
         }
         FeaStudyDocumentOperation::Create | FeaStudyDocumentOperation::GetSummary => unreachable!(),
@@ -314,9 +332,7 @@ pub(super) fn create_source(path: &str, input: FeaStudyCreateInput) -> Result<St
     if let Some(mesh) = &input.mesh {
         validate_mesh(mesh)?;
     }
-    let sequence = input
-        .sequence
-        .unwrap_or_else(|| default_sequence(input.model.template, &id));
+    let sequence = input.sequence;
     let execution = match input.execution {
         Some(execution) => execution,
         None => sequence
@@ -383,45 +399,6 @@ fn validate_execution(
         }
     }
     Ok(())
-}
-
-fn default_sequence(template: AnalysisModelTemplate, id: &str) -> AnalysisSequence {
-    let step = match template {
-        AnalysisModelTemplate::LinearStaticStructural => ProcedureStep::structural_static("solve"),
-        AnalysisModelTemplate::StructuralHarmonic => {
-            let mut step = ProcedureStep::structural_harmonic("solve");
-            step.independent_domain =
-                runmat_analysis_core::IndependentDomain::FrequencyHertz(vec![10.0, 100.0, 1_000.0]);
-            step
-        }
-        AnalysisModelTemplate::ThermoMechanicalCoupled => ProcedureStep::coupled(
-            "solve",
-            CoupledPhysicsFamily::Thermomechanical,
-            AnalysisProcedure::Static,
-        ),
-        AnalysisModelTemplate::ThermalSteady => ProcedureStep::thermal_steady("solve"),
-        AnalysisModelTemplate::ThermalTransient => ProcedureStep::thermal_transient("solve"),
-        AnalysisModelTemplate::ModalStructural => ProcedureStep::structural_modal("solve"),
-        AnalysisModelTemplate::AcousticHarmonic => ProcedureStep::acoustic_harmonic("solve"),
-        AnalysisModelTemplate::TransientStructural => ProcedureStep::structural_transient("solve"),
-        AnalysisModelTemplate::NonlinearStructural => ProcedureStep::structural_nonlinear("solve"),
-        AnalysisModelTemplate::ElectromagneticHarmonic => {
-            ProcedureStep::electromagnetic_harmonic("solve")
-        }
-        AnalysisModelTemplate::CfdSteadyState => ProcedureStep::fluid_static("solve"),
-        AnalysisModelTemplate::CfdTransient => ProcedureStep::fluid_transient("solve"),
-        AnalysisModelTemplate::ChtCoupled => ProcedureStep::coupled(
-            "solve",
-            CoupledPhysicsFamily::ConjugateHeatTransfer,
-            AnalysisProcedure::Static,
-        ),
-        AnalysisModelTemplate::FsiCoupled => ProcedureStep::coupled(
-            "solve",
-            CoupledPhysicsFamily::FluidStructureInteraction,
-            AnalysisProcedure::TransientResponse,
-        ),
-    };
-    AnalysisSequence::from_steps(format!("{id}.sequence"), vec![step])
 }
 
 fn validate_mesh(mesh: &FeaStudyMeshInput) -> Result<(), String> {

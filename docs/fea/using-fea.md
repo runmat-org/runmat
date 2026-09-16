@@ -42,10 +42,10 @@ runmat check docs/fea/examples/structural-static-experimental.fea
 runmat run docs/fea/examples/structural-static-experimental.fea
 ```
 
-The file is intentionally explicit. A study contains a typed model template, authored physical
-objects, one semantic `sequence`, and an `execution` entry for each step that will run. The
-sequence owns physics and dataflow; execution owns backend, formulation requirement, and solver
-options. Neither is inferred from a generic run kind.
+The file is intentionally explicit. A study contains an inspectable model source, one semantic
+`sequence`, and an `execution` entry for each step that will run. The model owns physical objects;
+the sequence owns physics and dataflow; execution owns backend, formulation requirement, and
+solver options. None of those responsibilities is inferred from a generic run kind.
 
 The top-level shape is:
 
@@ -62,18 +62,17 @@ geometry:
 
 model:
   id: bracket_static_model
-  template: linear_static_structural
-  defaults: none
   frame: global
+  source:
+    inline:
+      regions:
+        fixed_base:
+          selector: { name: Base_Mount }
+        load_face:
+          selector: { name: Tip_Load }
 
-regions:
-  fixed_base:
-    selector: { name: Base_Mount }
-  load_face:
-    selector: { name: Tip_Load }
-
-# Typed materials, assignments, constraints, signals, excitation cases,
-# excitations, initial conditions, response spectra, domains, and interfaces.
+      # Typed materials, assignments, constraints, signals, excitation cases,
+      # excitations, initial conditions, response spectra, domains, and interfaces.
 
 sequence:
   sequence_id: bracket_sequence
@@ -89,9 +88,10 @@ execution:
 ```
 
 The abbreviated sequence above documents structure; use the checked-in example for runnable step,
-activation, state, observation, and accuracy records. `model.defaults: template_scaffold` asks
-RunMat to provide template-owned model defaults; `none` requires the document to provide the
-physical model explicitly.
+activation, state, observation, and accuracy records. Model data is never synthesized by a hidden
+template. It is either visible under `source.inline`, loaded from a `kind: model` `.fea` file, or
+composed from an ordered list of those sources. The study's typed sequence determines the analysis
+procedure independently of the model data.
 
 Region selectors are closed objects containing exactly one of `id`, `name`, or `tag`. CAD imports
 commonly expose tags such as `occt_face`, `cad_body`, `cad_layer`, and `cad_material`; inspect the
@@ -113,14 +113,14 @@ studies:
   - version: 1
     id: bracket_aluminum
     geometry: { path: ../geometry/bracket.stl, units: meter }
-    model: { template: linear_static_structural }
+    model: { source: { file: { path: models/bracket-aluminum.fea } } }
     sequence: # complete typed sequence, as in the runnable example
     execution: # one typed entry per executable step
 
   - version: 1
     id: bracket_steel
     geometry: { path: ../geometry/bracket.stl, units: meter }
-    model: { template: linear_static_structural }
+    model: { source: { file: { path: models/bracket-steel.fea } } }
     sequence: # complete typed sequence
     execution: # one typed entry per executable step
 ```
@@ -377,7 +377,7 @@ sections, laminate layups, property orientation, and contact/interface laws rema
 objects with their own coverage and validation; they are not options on `materialAssignment`.
 | `fea.ExecutionStep.new(...)`, `fea.ExecutionPlan.new(...)`, `fea.ExecutionPlan.defaults(...)` | Bind each semantic procedure step to typed backend, formulation maturity, and solver options. |
 | `fea.model(...)` | Explicit model assembled from typed components. |
-| `fea.study(...)` | Study assembled from geometry, a typed model template/model, sequence, backend, and formulation requirement. |
+| `fea.study(...)` | Study assembled in RunMat code from geometry, a typed constructor template or explicit model, sequence, backend, and formulation requirement. |
 | `fea.sweep(...)` | Study sweep assembled from `fea.Study` objects. |
 | `fea.stepResult(run, stepId)` | Select a typed `fea.StepRunResult` from an aggregate study result. |
 | `plot(field, ...)` | Plot an `fea.Field` through the ordinary plotting function. |

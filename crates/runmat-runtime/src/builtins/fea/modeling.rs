@@ -244,6 +244,7 @@ pub(super) fn create_study_object_from_args(args: Vec<Value>) -> BuiltinResult<V
         study_id,
         geometry,
         create_model_intent: AnalysisCreateModelIntentSpec { model_id, template },
+        model_source_evidence: None,
         model: Some(model),
         execution,
         meshing_settings: None,

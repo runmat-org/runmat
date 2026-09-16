@@ -16,38 +16,35 @@ A model attaches physics data to geometry. It defines what material exists where
 | Response spectra | Direction, damping, response measure, modal combination, truncation, construction, and evidence for modal response-spectrum work. |
 | Domains | Thermo-mechanical, electro-thermal, electromagnetic, or CFD domain data. |
 | Interfaces | Contact and coupling interfaces between regions. |
-| Sequence | Typed procedure steps, activation lifecycles, state transitions, observations, accuracy plans, branches, and restart policy. |
 
-## Model Templates
+The study's sibling `sequence` block owns typed procedure steps, activation lifecycles, state
+transitions, observations, accuracy plans, branches, and restart policy. It is deliberately not
+model data: reusing a material-and-boundary model must not silently select a solver procedure.
 
-Templates create a family-appropriate starting model shape. Procedure steps and execution entries,
-not the template name, determine what is solved:
+## Model Sources
 
-| Template | Starting model shape |
+A `.fea` study names exactly one typed model source. There are three source forms:
+
+| Source | Meaning |
 | --- | --- |
-| `linear_static_structural` | Structural solid model with a static procedure scaffold |
-| `modal_structural` | Structural model with a modal-extraction scaffold |
-| `acoustic_harmonic` | Acoustic frequency-domain model |
-| `thermal_steady` | Steady thermal equilibrium model |
-| `thermal_transient` | Transient thermal model |
-| `transient_structural` | Transient structural model |
-| `nonlinear_structural` | Nonlinear structural model |
-| `thermo_mechanical_coupled` | Coupled thermomechanical model |
-| `electromagnetic_harmonic` | Harmonic electromagnetic model |
-| `cfd_steady_state`, `cfd_transient` | Steady or transient fluid model |
-| `cht_coupled` | Conjugate heat-transfer model |
-| `fsi_coupled` | Fluid-structure interaction model |
+| `inline` | The model data is written directly in the study. |
+| `file` | The model data comes from a relative `.fea` file whose document kind is `model`. |
+| `compose` | An ordered, non-empty list of inline or file sources is merged into one model. |
 
-In a `.fea` file, `model.defaults: template_scaffold` lets RunMat create defaults owned by the
-selected template. `model.defaults: none` starts from an empty model and expects the file to
-provide the physical data it needs.
+There is no hidden template expansion. Every material, assignment, condition, signal, excitation,
+domain, and interface can be traced to an authored source. Procedure steps and execution entries,
+not the model source, determine what is solved.
 
-When a template scaffold has one unambiguous material, the resulting model contains visible,
-explicit whole-domain assignments appropriate to the template: `all_solids`, `all_cells`, or both
-for a coupled solid/cell model. This is authored model data, not an assembly fallback. If imported
-geometry exposes several materials without trustworthy body-to-material ownership, RunMat leaves
-the assignments empty so the author must provide the mapping. Volumetric scaffold sources such as
-heat generation target the whole active volume rather than borrowing a boundary-face name.
+File paths are relative to the document containing the reference. Absolute paths and parent
+traversal are rejected, imported documents must use `version: 1` and `kind: model`, and import
+cycles are rejected. Composition is typed: equal repeated definitions are deduplicated, while two
+different definitions with the same identity—or two different material assignments for the same
+target—are an error. Sources do not silently override earlier sources.
+
+Resolution records the top-level source kind, every imported logical path and content digest, and
+a digest of the fully resolved model. That evidence travels with the study contract, so local and
+cluster execution identify the same composed model without depending on an absolute workstation
+path.
 
 ## Define Model Data
 
@@ -60,26 +57,36 @@ and restart contracts are described in [Procedure Sequences, Observations, and A
 ```yaml
 model:
   id: bracket_static_model
-  template: linear_static_structural
-  defaults: none
   frame: global
+  source:
+    compose:
+      - file:
+          path: models/steel-solid.fea
+      - inline:
+          constraints: # typed AnalysisConstraint records
+          signals: # typed physical signal records
+          excitation_cases: # typed excitation-case records
+          excitations: # typed ExcitationAction records
 
-materials:
-  steel:
-    mechanical:
-      youngs_modulus_pa: 200000000000.0
-      poisson_ratio: 0.30
-
-material_assignments:
-  - target: all_solids
-    material: steel
-
-constraints: # typed AnalysisConstraint records
-signals: # typed physical signal records
-excitation_cases: # typed excitation-case records
-excitations: # typed ExcitationAction records
 sequence: # typed AnalysisSequence record
 execution: # per-step backend, requirement, and solver options
+```
+
+The referenced file is a model document, not a runnable study:
+
+```yaml
+version: 1
+kind: model
+source:
+  inline:
+    materials:
+      steel:
+        mechanical:
+          youngs_modulus_pa: 200000000000.0
+          poisson_ratio: 0.30
+    material_assignments:
+      - target: all_solids
+        material: steel
 ```
 
 Material definitions and material assignments are separate. `all_solids`, `all_shells`,

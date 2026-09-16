@@ -54,6 +54,50 @@ fn root(value: &mut YamlValue) -> &mut Mapping {
     value.as_mapping_mut().expect("mapping")
 }
 
+pub(super) fn inline_model_data(value: &YamlValue) -> Option<&YamlValue> {
+    inline_source_data(yaml_at(value, &["model", "source"])?)
+}
+
+pub(super) fn inline_model_data_mut(value: &mut YamlValue) -> Result<&mut YamlValue, String> {
+    let model = root(value)
+        .get_mut(YamlValue::String("model".into()))
+        .and_then(YamlValue::as_mapping_mut)
+        .ok_or_else(|| "study model must be a mapping".to_string())?;
+    let source = model
+        .get_mut(YamlValue::String("source".into()))
+        .and_then(YamlValue::as_mapping_mut)
+        .ok_or_else(|| "study model source must be a typed mapping".to_string())?;
+    inline_source_data_mut(source).ok_or_else(|| {
+        "model-data mutations require an inline model source or an explicit inline overlay in a composed source"
+            .to_string()
+    })
+}
+
+fn inline_source_data(source: &YamlValue) -> Option<&YamlValue> {
+    let source = source.as_mapping()?;
+    if let Some(inline) = source.get(YamlValue::String("inline".into())) {
+        return Some(inline);
+    }
+    source
+        .get(YamlValue::String("compose".into()))?
+        .as_sequence()?
+        .iter()
+        .rev()
+        .find_map(inline_source_data)
+}
+
+fn inline_source_data_mut(source: &mut Mapping) -> Option<&mut YamlValue> {
+    if source.contains_key(YamlValue::String("inline".into())) {
+        return source.get_mut(YamlValue::String("inline".into()));
+    }
+    source
+        .get_mut(YamlValue::String("compose".into()))?
+        .as_sequence_mut()?
+        .iter_mut()
+        .rev()
+        .find_map(|source| inline_source_data_mut(source.as_mapping_mut()?))
+}
+
 pub(super) fn set_value(value: &mut YamlValue, key: &str, entry: YamlValue) {
     root(value).insert(YamlValue::String(key.into()), entry);
 }

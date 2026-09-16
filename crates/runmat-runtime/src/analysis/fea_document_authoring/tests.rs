@@ -1,13 +1,47 @@
 use super::*;
 use crate::analysis::contracts::{AnalysisModelTemplate, ANALYSIS_MODEL_TEMPLATE_CATALOG};
+use runmat_analysis_core::{
+    AnalysisProcedure, AnalysisSequence, CoupledPhysicsFamily, ProcedureStep,
+};
 use runmat_meshing_core::ElementOrder;
 use serde_json::Value as JsonValue;
 use serde_yaml::Value as YamlValue;
 
 fn input(template: AnalysisModelTemplate) -> JsonValue {
+    let step = match template {
+        AnalysisModelTemplate::LinearStaticStructural => ProcedureStep::structural_static("solve"),
+        AnalysisModelTemplate::StructuralHarmonic => ProcedureStep::structural_harmonic("solve"),
+        AnalysisModelTemplate::ThermoMechanicalCoupled => ProcedureStep::coupled(
+            "solve",
+            CoupledPhysicsFamily::Thermomechanical,
+            AnalysisProcedure::Static,
+        ),
+        AnalysisModelTemplate::ThermalSteady => ProcedureStep::thermal_steady("solve"),
+        AnalysisModelTemplate::ThermalTransient => ProcedureStep::thermal_transient("solve"),
+        AnalysisModelTemplate::ModalStructural => ProcedureStep::structural_modal("solve"),
+        AnalysisModelTemplate::AcousticHarmonic => ProcedureStep::acoustic_harmonic("solve"),
+        AnalysisModelTemplate::TransientStructural => ProcedureStep::structural_transient("solve"),
+        AnalysisModelTemplate::NonlinearStructural => ProcedureStep::structural_nonlinear("solve"),
+        AnalysisModelTemplate::ElectromagneticHarmonic => {
+            ProcedureStep::electromagnetic_harmonic("solve")
+        }
+        AnalysisModelTemplate::CfdSteadyState => ProcedureStep::fluid_static("solve"),
+        AnalysisModelTemplate::CfdTransient => ProcedureStep::fluid_transient("solve"),
+        AnalysisModelTemplate::ChtCoupled => ProcedureStep::coupled(
+            "solve",
+            CoupledPhysicsFamily::ConjugateHeatTransfer,
+            AnalysisProcedure::Static,
+        ),
+        AnalysisModelTemplate::FsiCoupled => ProcedureStep::coupled(
+            "solve",
+            CoupledPhysicsFamily::FluidStructureInteraction,
+            AnalysisProcedure::TransientResponse,
+        ),
+    };
     serde_json::json!({
         "geometry": { "path": "part.stl", "units": "meter" },
-        "model": { "template": template }
+        "model": { "source": { "inline": {} } },
+        "sequence": AnalysisSequence::from_steps("study.sequence", vec![step])
     })
 }
 
@@ -59,7 +93,10 @@ fn create_covers_templates_without_retired_sections() {
         assert!(yaml::yaml_at(&execution[0], &["options"])
             .and_then(YamlValue::as_mapping)
             .is_some());
-        assert_eq!(output.result.summary.model_template, Some(entry.template));
+        assert_eq!(
+            output.result.summary.model_source.as_deref(),
+            Some("inline")
+        );
         assert!(output.result.summary.primary_procedure.is_some());
     }
 }
@@ -112,6 +149,49 @@ fn canonical_edits_are_validated_and_summarized() {
     .unwrap();
     assert_eq!(assignment.result.counts.material_assignments, 1);
     assert!(assignment.result.readiness.ready_to_solve);
+}
+
+#[test]
+fn composed_sources_edit_only_the_explicit_inline_overlay() {
+    let mut create = input(AnalysisModelTemplate::LinearStaticStructural);
+    create["model"]["source"] = serde_json::json!({
+        "compose": [
+            { "file": { "path": "models/shared.fea" } },
+            { "inline": {} }
+        ]
+    });
+    let created = apply_fea_study_document_operation("create", "/p/a.fea", None, create).unwrap();
+    assert_eq!(
+        created.result.summary.model_source.as_deref(),
+        Some("compose")
+    );
+    assert!(!created.result.readiness.ready_to_solve);
+    assert!(created
+        .result
+        .readiness
+        .blockers
+        .iter()
+        .any(|blocker| blocker.contains("runmat check")));
+
+    let material = apply_fea_study_document_operation(
+        "add_material",
+        "/p/a.fea",
+        Some(&created.source),
+        serde_json::json!({
+            "material_id": "steel",
+            "mechanical": {
+                "youngs_modulus_pa": 2e11,
+                "poisson_ratio": 0.3,
+                "density_kg_per_m3": 7850.0
+            }
+        }),
+    )
+    .unwrap();
+    let document: YamlValue = serde_yaml::from_str(&material.source).unwrap();
+    let composed = yaml::yaml_at(&document, &["model", "source", "compose"])
+        .and_then(YamlValue::as_sequence)
+        .expect("composed model sources");
+    assert!(yaml::yaml_at(&composed[1], &["inline", "materials", "steel"]).is_some());
 }
 
 #[test]

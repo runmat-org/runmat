@@ -7,77 +7,9 @@ geometry:
   units: meter
 
 model:
-  template: linear_static_structural
-  defaults: template_scaffold
-
-materials:
-  steel:
-    name: Structural steel
-    mechanical:
-      youngs_modulus_pa: 200000000000.0
-      poisson_ratio: 0.3
-      density_kg_per_m3: 7850.0
-
-material_assignments:
-  - target: { solid: { region: region_default } }
-    material: steel
-
-constraints:
-  - structural:
-      constraint_id: fixed_support
-      frame: global
-      kind:
-        fixed:
-          target:
-            region_id: region_default
-            entity_dimension: face
-            expected_topology: boundary_face
-            cardinality: one_or_more
-
-signals:
-  - force:
-      signal_id: tip_force_signal
-      shape: scalar
-      frame: null
-      representation:
-        constant:
-          scalar:
-            newtons: 1000.0
-      precision: real64
-      evidence:
-        max_absolute_error: null
-        max_relative_error: null
-        derivative_max_absolute_error: null
-        sample_count: 1
-      provenance: authored
-
-excitation_cases:
-  - case_id: service_load
-    action_ids: [tip_force]
-    activation: always
-
-excitations:
-  - force:
-      excitation_id: tip_force
-      case_id: service_load
-      target:
-        region:
-          region_id: region_default
-          entity_dimension: face
-          expected_topology: boundary_face
-          cardinality: one_or_more
-      frame: global
-      direction:
-        vector: [0.0, -1.0, 0.0]
-      distribution: preserve_resultant
-      kinematics: fixed_frame
-      signal_id: tip_force_signal
-      active_step_ids: [static]
-      combination_group: null
-      projection:
-        preserve_resultant: true
-        preserve_moment: false
-        relative_tolerance: 1.0e-10
+  source:
+    file:
+      path: models/structural-static-load.fea
 
 sequence:
   sequence_id: structural_static_sequence

@@ -21,9 +21,10 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::contracts::validate_immutable_value_inventory;
 use super::{
-    analysis_create_model_op, AnalysisCreateModelIntentSpec, AnalysisExecutionPlan,
-    AnalysisExecutionStep, AnalysisImmutableValueSpec, AnalysisModelTemplate,
-    AnalysisSolverOptions, AnalysisStudySpec, AnalysisStudySweepSpec,
+    AnalysisCreateModelIntentSpec, AnalysisExecutionPlan, AnalysisExecutionStep,
+    AnalysisImmutableValueSpec, AnalysisModelSourceEvidence, AnalysisModelSourceFileEvidence,
+    AnalysisModelSourceKind, AnalysisModelTemplate, AnalysisSolverOptions, AnalysisStudySpec,
+    AnalysisStudySweepSpec,
 };
 use crate::operations::OperationContext;
 
@@ -40,6 +41,7 @@ pub enum FeaResolvedDocument {
 enum RawFeaDocument {
     Study(Box<FeaStudyDocument>),
     Sweep(FeaSweepDocument),
+    Model(Box<FeaStandaloneModelDocument>),
 }
 
 #[derive(Debug, Deserialize)]
@@ -62,6 +64,62 @@ struct FeaStudyDocument {
     execution: Vec<FeaExecutionDocument>,
     #[serde(default)]
     mesh: Option<FeaMeshDocument>,
+    #[serde(default)]
+    immutable_values: Vec<AnalysisImmutableValueSpec>,
+    sequence: AnalysisSequence,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FeaGeometryDocument {
+    path: PathBuf,
+    #[serde(default = "default_units")]
+    units: UnitSystem,
+    #[serde(default)]
+    import: FeaGeometryImportDocument,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FeaGeometryImportDocument {
+    #[serde(default)]
+    max_triangles: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FeaModelDocument {
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    frame: Option<CoordinateFrame>,
+    source: FeaModelSourceDocument,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FeaStandaloneModelDocument {
+    version: u32,
+    source: FeaModelSourceDocument,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum FeaModelSourceDocument {
+    Inline(Box<FeaModelDataDocument>),
+    File(FeaModelFileSourceDocument),
+    Compose(Vec<FeaModelSourceDocument>),
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FeaModelFileSourceDocument {
+    path: PathBuf,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct FeaModelDataDocument {
     #[serde(default)]
     regions: BTreeMap<String, FeaRegionDocument>,
     #[serde(default)]
@@ -91,39 +149,7 @@ struct FeaStudyDocument {
     #[serde(default)]
     random_excitations: Vec<RandomExcitationSpectrum>,
     #[serde(default)]
-    immutable_values: Vec<AnalysisImmutableValueSpec>,
-    sequence: AnalysisSequence,
-    #[serde(default)]
     domains: FeaDomainsDocument,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct FeaGeometryDocument {
-    path: PathBuf,
-    #[serde(default = "default_units")]
-    units: UnitSystem,
-    #[serde(default)]
-    import: FeaGeometryImportDocument,
-}
-
-#[derive(Debug, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct FeaGeometryImportDocument {
-    #[serde(default)]
-    max_triangles: Option<u64>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct FeaModelDocument {
-    #[serde(default)]
-    id: Option<String>,
-    template: AnalysisModelTemplate,
-    #[serde(default)]
-    frame: Option<CoordinateFrame>,
-    #[serde(default)]
-    defaults: FeaModelDefaultsMode,
 }
 
 #[derive(Debug, Deserialize)]
@@ -143,15 +169,7 @@ struct FeaMeshDocument {
     deterministic_seed: u64,
 }
 
-#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-enum FeaModelDefaultsMode {
-    #[default]
-    TemplateScaffold,
-    None,
-}
-
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct FeaRegionDocument {
     selector: FeaRegionSelector,
@@ -207,7 +225,7 @@ impl<'de> Deserialize<'de> for FeaRegionSelector {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct FeaMaterialDocument {
     #[serde(default)]
@@ -223,7 +241,7 @@ struct FeaMaterialDocument {
     plastic: Option<MaterialPlasticModel>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct FeaMaterialAssignmentDocument {
     target: FeaPropertyRegionTargetDocument,
@@ -234,7 +252,7 @@ struct FeaMaterialAssignmentDocument {
     confidence: EvidenceConfidence,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum FeaPropertyRegionTargetDocument {
     Beam(FeaPropertyRegionSelectionDocument),
@@ -247,13 +265,13 @@ enum FeaPropertyRegionTargetDocument {
     AllCells,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct FeaPropertyRegionSelectionDocument {
     region: String,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct FeaStructuralDocument {
     #[serde(default)]
@@ -264,7 +282,7 @@ struct FeaStructuralDocument {
     sections: Vec<FeaStructuralSectionDocument>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct FeaStructuralNodeDocument {
     id: u32,
@@ -273,13 +291,13 @@ struct FeaStructuralNodeDocument {
     solid_attachment: Option<FeaConformalSolidAttachmentDocument>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct FeaConformalSolidAttachmentDocument {
     geometry_vertex: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct FeaStructuralElementDocument {
     id: String,
@@ -292,14 +310,14 @@ struct FeaStructuralElementDocument {
     reference_axis: Option<[f64; 3]>,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum FeaStructuralElementType {
     Beam,
     Shell,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct FeaStructuralSectionDocument {
     id: String,
@@ -327,7 +345,7 @@ struct FeaStructuralSectionDocument {
     torsion_outer_radius_m: f64,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 enum FeaStructuralSectionType {
     Beam,
@@ -344,7 +362,7 @@ impl FeaStructuralSectionType {
     }
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct FeaDomainsDocument {
     #[serde(default)]
@@ -443,6 +461,25 @@ struct ResolvedStudyParts {
     spec: AnalysisStudySpec,
 }
 
+#[derive(Debug)]
+struct ResolvedModelSource {
+    data: FeaModelDataDocument,
+    kind: AnalysisModelSourceKind,
+    files: Vec<AnalysisModelSourceFileEvidence>,
+}
+
+impl ResolvedModelSource {
+    fn evidence(&self) -> Result<AnalysisModelSourceEvidence, String> {
+        let encoded = serde_json::to_vec(&self.data)
+            .map_err(|error| format!("failed to encode resolved model source: {error}"))?;
+        Ok(AnalysisModelSourceEvidence {
+            kind: self.kind,
+            resolved_model_digest: runmat_execution::Digest::sha256(encoded),
+            files: self.files.clone(),
+        })
+    }
+}
+
 pub fn is_fea_file_path(path: &Path) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
@@ -474,6 +511,10 @@ pub async fn parse_and_resolve_fea_document(
             Ok(FeaResolvedDocument::Study(Box::new(resolved.spec)))
         }
         RawFeaDocument::Sweep(sweep) => resolve_sweep(sweep, base_dir).await,
+        RawFeaDocument::Model(_) => Err(
+            "a model-source document cannot be run directly; reference it from a study model source"
+                .into(),
+        ),
     }
 }
 
@@ -488,6 +529,388 @@ fn parse_raw_fea_value(yaml: serde_yaml::Value) -> Result<RawFeaDocument, String
         .map_err(|err| format!("FEA YAML is not JSON-compatible: {err}"))?;
     serde_json::from_value(canonical)
         .map_err(|err| format!("failed to parse canonical FEA document: {err}"))
+}
+
+async fn resolve_model_source(
+    source: &FeaModelSourceDocument,
+    base_dir: &Path,
+    source_root: &Path,
+    logical_dir: &Path,
+    stack: &mut Vec<PathBuf>,
+) -> Result<ResolvedModelSource, String> {
+    match source {
+        FeaModelSourceDocument::Inline(data) => Ok(ResolvedModelSource {
+            data: data.as_ref().clone(),
+            kind: AnalysisModelSourceKind::Inline,
+            files: Vec::new(),
+        }),
+        FeaModelSourceDocument::File(file) => {
+            if file.path.as_os_str().is_empty()
+                || file.path.is_absolute()
+                || file.path.components().any(|component| {
+                    matches!(
+                        component,
+                        std::path::Component::ParentDir
+                            | std::path::Component::RootDir
+                            | std::path::Component::Prefix(_)
+                    )
+                })
+            {
+                return Err(
+                    "model file source path must be a non-empty, non-traversing relative path"
+                        .into(),
+                );
+            }
+            let path = resolve_document_path(base_dir, &file.path);
+            if !is_fea_file_path(&path) {
+                return Err(format!(
+                    "model file source must use the .fea extension: {}",
+                    path.display()
+                ));
+            }
+            let canonical =
+                runmat_filesystem::canonicalize_async(&path)
+                    .await
+                    .map_err(|error| {
+                        format!(
+                            "failed to resolve model file source {}: {error}",
+                            path.display()
+                        )
+                    })?;
+            if !canonical.starts_with(source_root) {
+                return Err(format!(
+                    "model file source resolves outside the study source tree: {}",
+                    file.path.display()
+                ));
+            }
+            if let Some(index) = stack.iter().position(|entry| entry == &canonical) {
+                let mut cycle = stack[index..]
+                    .iter()
+                    .map(|entry| entry.display().to_string())
+                    .collect::<Vec<_>>();
+                cycle.push(canonical.display().to_string());
+                return Err(format!("model source import cycle: {}", cycle.join(" -> ")));
+            }
+            stack.push(canonical.clone());
+            let input = runmat_filesystem::read_to_string_async(&canonical)
+                .await
+                .map_err(|error| {
+                    format!(
+                        "failed to read model file source {}: {error}",
+                        canonical.display()
+                    )
+                })?;
+            let logical_path = logical_dir.join(&file.path);
+            let file_evidence = AnalysisModelSourceFileEvidence {
+                path: logical_path.to_string_lossy().replace('\\', "/"),
+                content_digest: runmat_execution::Digest::sha256(input.as_bytes()),
+            };
+            let document = match parse_raw_fea_document(&input)? {
+                RawFeaDocument::Model(document) => document,
+                RawFeaDocument::Study(_) | RawFeaDocument::Sweep(_) => {
+                    return Err(format!(
+                        "model file source {} must declare `kind: model`",
+                        canonical.display()
+                    ))
+                }
+            };
+            validate_version(document.version)?;
+            let nested_base = canonical.parent().unwrap_or_else(|| Path::new(""));
+            let nested_logical_dir = logical_path.parent().unwrap_or_else(|| Path::new(""));
+            let resolved = Box::pin(resolve_model_source(
+                &document.source,
+                nested_base,
+                source_root,
+                nested_logical_dir,
+                stack,
+            ))
+            .await;
+            stack.pop();
+            let mut resolved = resolved?;
+            resolved.files.insert(0, file_evidence);
+            resolved.kind = AnalysisModelSourceKind::File;
+            Ok(resolved)
+        }
+        FeaModelSourceDocument::Compose(sources) => {
+            if sources.is_empty() {
+                return Err("composed model source requires at least one source".into());
+            }
+            let mut composed = FeaModelDataDocument::default();
+            let mut files = Vec::new();
+            for source in sources {
+                let next = Box::pin(resolve_model_source(
+                    source,
+                    base_dir,
+                    source_root,
+                    logical_dir,
+                    stack,
+                ))
+                .await?;
+                merge_model_data(&mut composed, next.data)?;
+                files.extend(next.files);
+            }
+            Ok(ResolvedModelSource {
+                data: composed,
+                kind: AnalysisModelSourceKind::Compose,
+                files,
+            })
+        }
+    }
+}
+
+fn merge_model_data(
+    target: &mut FeaModelDataDocument,
+    incoming: FeaModelDataDocument,
+) -> Result<(), String> {
+    merge_map(&mut target.regions, incoming.regions, "region")?;
+    merge_map(&mut target.materials, incoming.materials, "material")?;
+    merge_assignments(
+        &mut target.material_assignments,
+        incoming.material_assignments,
+    )?;
+    merge_structural(&mut target.structural, incoming.structural)?;
+    merge_named(
+        &mut target.constraints,
+        incoming.constraints,
+        |value| value.constraint_id().to_string(),
+        "constraint",
+    )?;
+    merge_named(
+        &mut target.boundaries,
+        incoming.boundaries,
+        |value| value.boundary_id.clone(),
+        "boundary",
+    )?;
+    merge_named(
+        &mut target.connectors,
+        incoming.connectors,
+        |value| value.connector_id.clone(),
+        "connector",
+    )?;
+    merge_named(
+        &mut target.interfaces,
+        incoming.interfaces,
+        |value| value.interface_id.clone(),
+        "interface",
+    )?;
+    merge_named(
+        &mut target.signals,
+        incoming.signals,
+        |value| value.signal_id().0.clone(),
+        "signal",
+    )?;
+    merge_named(
+        &mut target.excitation_cases,
+        incoming.excitation_cases,
+        |value| value.case_id.0.clone(),
+        "excitation case",
+    )?;
+    merge_named(
+        &mut target.excitations,
+        incoming.excitations,
+        |value| value.excitation().excitation_id.0.clone(),
+        "excitation",
+    )?;
+    merge_named(
+        &mut target.initial_conditions,
+        incoming.initial_conditions,
+        |value| value.initial_condition_id().to_string(),
+        "initial condition",
+    )?;
+    merge_named(
+        &mut target.response_spectra,
+        incoming.response_spectra,
+        |value| value.spectrum_id.0.clone(),
+        "response spectrum",
+    )?;
+    merge_named(
+        &mut target.random_excitations,
+        incoming.random_excitations,
+        |value| value.excitation_id.0.clone(),
+        "random excitation",
+    )?;
+    merge_domains(&mut target.domains, incoming.domains)
+}
+
+fn merge_map<T: PartialEq>(
+    target: &mut BTreeMap<String, T>,
+    incoming: BTreeMap<String, T>,
+    kind: &str,
+) -> Result<(), String> {
+    for (id, value) in incoming {
+        match target.get(&id) {
+            Some(existing) if existing != &value => {
+                return Err(format!(
+                    "conflicting {kind} definition `{id}` in model sources"
+                ))
+            }
+            Some(_) => {}
+            None => {
+                target.insert(id, value);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn merge_named<T: PartialEq>(
+    target: &mut Vec<T>,
+    incoming: Vec<T>,
+    key: impl Fn(&T) -> String,
+    kind: &str,
+) -> Result<(), String> {
+    for value in incoming {
+        let id = key(&value);
+        match target.iter().find(|existing| key(existing) == id) {
+            Some(existing) if existing != &value => {
+                return Err(format!(
+                    "conflicting {kind} definition `{id}` in model sources"
+                ))
+            }
+            Some(_) => {}
+            None => target.push(value),
+        }
+    }
+    Ok(())
+}
+
+fn merge_assignments(
+    target: &mut Vec<FeaMaterialAssignmentDocument>,
+    incoming: Vec<FeaMaterialAssignmentDocument>,
+) -> Result<(), String> {
+    for value in incoming {
+        match target
+            .iter()
+            .find(|existing| existing.target == value.target)
+        {
+            Some(existing) if existing != &value => {
+                return Err(
+                    "conflicting material assignments target the same property region".into(),
+                )
+            }
+            Some(_) => {}
+            None => target.push(value),
+        }
+    }
+    Ok(())
+}
+
+fn merge_structural(
+    target: &mut Option<FeaStructuralDocument>,
+    incoming: Option<FeaStructuralDocument>,
+) -> Result<(), String> {
+    let Some(incoming) = incoming else {
+        return Ok(());
+    };
+    let target = target.get_or_insert_with(FeaStructuralDocument::default);
+    merge_named(
+        &mut target.nodes,
+        incoming.nodes,
+        |value| value.id.to_string(),
+        "structural node",
+    )?;
+    merge_named(
+        &mut target.elements,
+        incoming.elements,
+        |value| value.id.clone(),
+        "structural element",
+    )?;
+    merge_named(
+        &mut target.sections,
+        incoming.sections,
+        |value| value.id.clone(),
+        "structural section",
+    )
+}
+
+fn merge_domains(
+    target: &mut FeaDomainsDocument,
+    incoming: FeaDomainsDocument,
+) -> Result<(), String> {
+    merge_optional(&mut target.thermal, incoming.thermal, "thermal domain")?;
+    merge_optional(
+        &mut target.thermo_mechanical,
+        incoming.thermo_mechanical,
+        "thermo-mechanical domain",
+    )?;
+    merge_optional(
+        &mut target.electro_thermal,
+        incoming.electro_thermal,
+        "electro-thermal domain",
+    )?;
+    merge_optional(
+        &mut target.electromagnetic,
+        incoming.electromagnetic,
+        "electromagnetic domain",
+    )?;
+    merge_optional(&mut target.cfd, incoming.cfd, "CFD domain")
+}
+
+fn merge_optional<T: PartialEq>(
+    target: &mut Option<T>,
+    incoming: Option<T>,
+    kind: &str,
+) -> Result<(), String> {
+    match (&*target, incoming) {
+        (_, None) => Ok(()),
+        (Some(existing), Some(value)) if existing != &value => {
+            Err(format!("conflicting {kind} definitions in model sources"))
+        }
+        (Some(_), Some(_)) => Ok(()),
+        (None, Some(value)) => {
+            *target = Some(value);
+            Ok(())
+        }
+    }
+}
+
+fn model_template_for_sequence(
+    sequence: &AnalysisSequence,
+) -> Result<AnalysisModelTemplate, String> {
+    use runmat_analysis_core::{
+        AnalysisProcedure as Procedure, CoupledPhysicsFamily, PhysicsFamily,
+    };
+
+    let step = sequence
+        .steps
+        .first()
+        .ok_or_else(|| "FEA study sequence must contain at least one procedure step".to_string())?;
+    Ok(match (step.family, step.procedure) {
+        (
+            PhysicsFamily::Structural,
+            Procedure::HarmonicResponse | Procedure::PrestressedHarmonicResponse,
+        ) => AnalysisModelTemplate::StructuralHarmonic,
+        (PhysicsFamily::Structural, Procedure::TransientResponse) => {
+            AnalysisModelTemplate::TransientStructural
+        }
+        (PhysicsFamily::Structural, Procedure::Nonlinear | Procedure::Adaptive) => {
+            AnalysisModelTemplate::NonlinearStructural
+        }
+        (PhysicsFamily::Structural, Procedure::Static) => {
+            AnalysisModelTemplate::LinearStaticStructural
+        }
+        (PhysicsFamily::Structural, _) => AnalysisModelTemplate::ModalStructural,
+        (PhysicsFamily::Thermal, Procedure::TransientResponse) => {
+            AnalysisModelTemplate::ThermalTransient
+        }
+        (PhysicsFamily::Thermal, _) => AnalysisModelTemplate::ThermalSteady,
+        (PhysicsFamily::Electromagnetic, _) => AnalysisModelTemplate::ElectromagneticHarmonic,
+        (PhysicsFamily::Acoustic, _) => AnalysisModelTemplate::AcousticHarmonic,
+        (PhysicsFamily::Fluid, Procedure::TransientResponse) => AnalysisModelTemplate::CfdTransient,
+        (PhysicsFamily::Fluid, _) => AnalysisModelTemplate::CfdSteadyState,
+        (PhysicsFamily::Coupled(CoupledPhysicsFamily::Thermomechanical), _) => {
+            AnalysisModelTemplate::ThermoMechanicalCoupled
+        }
+        (PhysicsFamily::Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer), _) => {
+            AnalysisModelTemplate::ChtCoupled
+        }
+        (PhysicsFamily::Coupled(CoupledPhysicsFamily::FluidStructureInteraction), _) => {
+            AnalysisModelTemplate::FsiCoupled
+        }
+        (PhysicsFamily::Coupled(CoupledPhysicsFamily::Electrothermal), _) => {
+            return Err("electro-thermal study execution is not supported yet".into())
+        }
+    })
 }
 
 async fn resolve_sweep(
@@ -517,7 +940,23 @@ async fn resolve_study(
     if study.id.trim().is_empty() {
         return Err("study id must be non-empty".to_string());
     }
-    validate_immutable_value_inventory(&study.immutable_values, &study.signals)?;
+    let root_input = if base_dir.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        base_dir
+    };
+    let source_root = runmat_filesystem::canonicalize_async(root_input)
+        .await
+        .map_err(|error| format!("failed to resolve FEA document directory: {error}"))?;
+    let model_source = resolve_model_source(
+        &study.model.source,
+        base_dir,
+        &source_root,
+        Path::new(""),
+        &mut Vec::new(),
+    )
+    .await?;
+    validate_immutable_value_inventory(&study.immutable_values, &model_source.data.signals)?;
 
     let geometry = load_geometry(&study.geometry, base_dir).await?;
     let model_id = study
@@ -527,15 +966,16 @@ async fn resolve_study(
         .unwrap_or_else(|| format!("{}_model", sanitize_id(&study.id)));
     let intent = AnalysisCreateModelIntentSpec {
         model_id: model_id.clone(),
-        template: study.model.template,
+        template: model_template_for_sequence(&study.sequence)?,
     };
-    let model = resolve_model(&study, &geometry, &intent)?;
+    let model = resolve_model(&study, &model_source.data, &geometry, &intent)?;
     let execution = resolve_execution(&study.execution, &study.sequence)?;
     let meshing_settings = resolve_meshing_settings(study.mesh.as_ref(), &execution)?;
     let spec = AnalysisStudySpec {
         study_id: study.id,
         geometry,
         create_model_intent: intent,
+        model_source_evidence: Some(model_source.evidence()?),
         model,
         execution,
         meshing_settings,
@@ -618,64 +1058,58 @@ async fn load_geometry(
 
 fn resolve_model(
     study: &FeaStudyDocument,
+    data: &FeaModelDataDocument,
     geometry: &GeometryAsset,
     intent: &AnalysisCreateModelIntentSpec,
 ) -> Result<Option<AnalysisModel>, String> {
-    let mut model = match study.model.defaults {
-        FeaModelDefaultsMode::TemplateScaffold => {
-            analysis_create_model_op(geometry, intent.clone(), OperationContext::new(None, None))
-                .map(|envelope| envelope.data)
-                .map_err(|err| format!("failed to create FEA model scaffold: {}", err.message))?
-        }
-        FeaModelDefaultsMode::None => empty_model(intent.model_id.clone(), geometry),
-    };
+    let mut model = empty_model(intent.model_id.clone(), geometry);
 
     if let Some(frame) = &study.model.frame {
         model.frame = frame.clone();
     }
-    if !study.materials.is_empty() {
-        model.materials = study
+    if !data.materials.is_empty() {
+        model.materials = data
             .materials
             .iter()
             .map(|(id, material)| resolve_material(id, material))
             .collect();
     }
-    if !study.material_assignments.is_empty() {
-        model.material_assignments = study
+    if !data.material_assignments.is_empty() {
+        model.material_assignments = data
             .material_assignments
             .iter()
-            .map(|assignment| resolve_material_assignment(assignment, geometry, &study.regions))
+            .map(|assignment| resolve_material_assignment(assignment, geometry, &data.regions))
             .collect::<Result<Vec<_>, _>>()?;
     }
-    if has_structural_model_data(study) {
-        model.structural = Some(resolve_structural_model(study, geometry)?);
+    if has_structural_model_data(data) {
+        model.structural = Some(resolve_structural_model(data, geometry)?);
     }
-    model.constraints = study.constraints.clone();
-    model.boundaries = study.boundaries.clone();
-    model.connectors = study.connectors.clone();
-    model.interfaces = study.interfaces.clone();
-    model.signals = study.signals.clone();
-    model.excitation_cases = study.excitation_cases.clone();
-    model.excitations = study.excitations.clone();
-    model.initial_conditions = study.initial_conditions.clone();
-    model.response_spectra = study.response_spectra.clone();
-    model.random_excitations = study.random_excitations.clone();
+    model.constraints = data.constraints.clone();
+    model.boundaries = data.boundaries.clone();
+    model.connectors = data.connectors.clone();
+    model.interfaces = data.interfaces.clone();
+    model.signals = data.signals.clone();
+    model.excitation_cases = data.excitation_cases.clone();
+    model.excitations = data.excitations.clone();
+    model.initial_conditions = data.initial_conditions.clone();
+    model.response_spectra = data.response_spectra.clone();
+    model.random_excitations = data.random_excitations.clone();
     model.sequence = study.sequence.clone();
-    resolve_typed_region_targets(&mut model, geometry, &study.regions)?;
-    if study.domains.thermal.is_some() {
-        model.thermal = study.domains.thermal.clone();
+    resolve_typed_region_targets(&mut model, geometry, &data.regions)?;
+    if data.domains.thermal.is_some() {
+        model.thermal = data.domains.thermal.clone();
     }
-    if study.domains.thermo_mechanical.is_some() {
-        model.thermo_mechanical = study.domains.thermo_mechanical.clone();
+    if data.domains.thermo_mechanical.is_some() {
+        model.thermo_mechanical = data.domains.thermo_mechanical.clone();
     }
-    if study.domains.electro_thermal.is_some() {
-        model.electro_thermal = study.domains.electro_thermal.clone();
+    if data.domains.electro_thermal.is_some() {
+        model.electro_thermal = data.domains.electro_thermal.clone();
     }
-    if study.domains.electromagnetic.is_some() {
-        model.electromagnetic = study.domains.electromagnetic.clone();
+    if data.domains.electromagnetic.is_some() {
+        model.electromagnetic = data.domains.electromagnetic.clone();
     }
-    if study.domains.cfd.is_some() {
-        model.cfd = study.domains.cfd.clone();
+    if data.domains.cfd.is_some() {
+        model.cfd = data.domains.cfd.clone();
     }
     Ok(Some(model))
 }
@@ -772,10 +1206,10 @@ fn resolve_property_region_ref(
 }
 
 fn resolve_structural_model(
-    study: &FeaStudyDocument,
+    data: &FeaModelDataDocument,
     geometry: &GeometryAsset,
 ) -> Result<StructuralModel, String> {
-    let structural = study.structural.as_ref();
+    let structural = data.structural.as_ref();
     let node_docs = structural
         .map(|value| value.nodes.as_slice())
         .unwrap_or(&[]);
@@ -814,7 +1248,7 @@ fn resolve_structural_model(
             .collect::<Result<Vec<_>, String>>()?,
         elements: element_docs
             .iter()
-            .map(|element| resolve_structural_element(element, geometry, &study.regions))
+            .map(|element| resolve_structural_element(element, geometry, &data.regions))
             .collect::<Result<Vec<_>, _>>()?,
         beam_sections: section_docs
             .iter()
@@ -962,8 +1396,8 @@ fn empty_model(model_id: String, geometry: &GeometryAsset) -> AnalysisModel {
     }
 }
 
-fn has_structural_model_data(study: &FeaStudyDocument) -> bool {
-    study.structural.as_ref().is_some_and(|structural| {
+fn has_structural_model_data(data: &FeaModelDataDocument) -> bool {
+    data.structural.as_ref().is_some_and(|structural| {
         !structural.nodes.is_empty()
             || !structural.elements.is_empty()
             || !structural.sections.is_empty()
@@ -1310,10 +1744,9 @@ mod tests {
         );
         let mut model = serde_yaml::Mapping::new();
         model.insert(
-            "template".into(),
-            canonical_yaml(AnalysisModelTemplate::LinearStaticStructural),
+            "source".into(),
+            serde_yaml::from_str("inline: {}\n").expect("inline model source YAML"),
         );
-        model.insert("defaults".into(), "none".into());
         document.insert("model".into(), model.into());
         document.insert(
             "execution".into(),
@@ -1329,6 +1762,43 @@ mod tests {
             )),
         );
         document.into()
+    }
+
+    fn inline_model_yaml(document: &mut serde_yaml::Value) -> &mut serde_yaml::Mapping {
+        document
+            .as_mapping_mut()
+            .expect("study mapping")
+            .get_mut("model")
+            .expect("model")
+            .as_mapping_mut()
+            .expect("model mapping")
+            .get_mut("source")
+            .expect("model source")
+            .as_mapping_mut()
+            .expect("model source mapping")
+            .get_mut("inline")
+            .expect("inline model")
+            .as_mapping_mut()
+            .expect("inline model mapping")
+    }
+
+    fn inline_model(study: &FeaStudyDocument) -> &FeaModelDataDocument {
+        let FeaModelSourceDocument::Inline(data) = &study.model.source else {
+            panic!("expected inline model source")
+        };
+        data
+    }
+
+    fn inline_model_mut(study: &mut FeaStudyDocument) -> &mut FeaModelDataDocument {
+        let FeaModelSourceDocument::Inline(data) = &mut study.model.source else {
+            panic!("expected inline model source")
+        };
+        data
+    }
+
+    fn model_source_yaml(source: &str) -> FeaModelSourceDocument {
+        let yaml = serde_yaml::from_str::<serde_yaml::Value>(source).unwrap();
+        serde_json::from_value(serde_json::to_value(yaml).unwrap()).unwrap()
     }
 
     fn documentation_example_path(name: &str) -> PathBuf {
@@ -1362,6 +1832,15 @@ mod tests {
                 study.execution.steps.len(),
                 study.model.as_ref().unwrap().sequence.steps.len()
             );
+            if name == "structural-static-experimental.fea" {
+                let evidence = study
+                    .model_source_evidence
+                    .as_ref()
+                    .expect("file-authored model must retain source evidence");
+                assert_eq!(evidence.kind, AnalysisModelSourceKind::File);
+                assert_eq!(evidence.files.len(), 1);
+                assert_eq!(evidence.files[0].path, "models/structural-static-load.fea");
+            }
         }
     }
 
@@ -1494,11 +1973,11 @@ mod tests {
     fn immutable_signal_arguments_require_an_exact_closed_declaration_inventory() {
         let digest = runmat_execution::Digest::sha256(b"immutable-magnitudes");
         let mut document = minimal_study_yaml();
-        let mapping = document.as_mapping_mut().expect("study mapping");
-        mapping.insert(
+        inline_model_yaml(&mut document).insert(
             "signals".into(),
             canonical_yaml(vec![immutable_artifact_signal(digest)]),
         );
+        let mapping = document.as_mapping_mut().expect("study mapping");
         mapping.insert(
             "immutable_values".into(),
             canonical_yaml(vec![AnalysisImmutableValueSpec {
@@ -1512,27 +1991,29 @@ mod tests {
         else {
             panic!("expected study")
         };
-        validate_immutable_value_inventory(&study.immutable_values, &study.signals)
+        validate_immutable_value_inventory(&study.immutable_values, &inline_model(&study).signals)
             .expect("exact declaration inventory");
 
         let declaration = study.immutable_values.pop().expect("declaration");
-        assert!(
-            validate_immutable_value_inventory(&study.immutable_values, &study.signals)
-                .expect_err("missing declaration must fail")
-                .contains("no immutable value declaration")
-        );
+        assert!(validate_immutable_value_inventory(
+            &study.immutable_values,
+            &inline_model(&study).signals
+        )
+        .expect_err("missing declaration must fail")
+        .contains("no immutable value declaration"));
         study.immutable_values.push(declaration);
 
         study.immutable_values[0].logical_digest =
             runmat_execution::Digest::sha256(b"substituted").to_string();
-        assert!(
-            validate_immutable_value_inventory(&study.immutable_values, &study.signals)
-                .expect_err("substituted declaration must fail")
-                .contains("differs")
-        );
+        assert!(validate_immutable_value_inventory(
+            &study.immutable_values,
+            &inline_model(&study).signals
+        )
+        .expect_err("substituted declaration must fail")
+        .contains("differs"));
         study.immutable_values[0].logical_digest = digest.to_string();
 
-        let PhysicalSignal::Force(signal) = &mut study.signals[0] else {
+        let PhysicalSignal::Force(signal) = &mut inline_model_mut(&mut study).signals[0] else {
             panic!("expected force signal")
         };
         let SignalRepresentation::Generator(generator) = &mut signal.representation else {
@@ -1542,12 +2023,13 @@ mod tests {
             panic!("expected immutable artifact argument")
         };
         artifact.schema = "application-specific-value".into();
-        assert!(
-            validate_immutable_value_inventory(&study.immutable_values, &study.signals)
-                .expect_err("unsupported value schema must fail")
-                .contains("unsupported immutable value schema")
-        );
-        let PhysicalSignal::Force(signal) = &mut study.signals[0] else {
+        assert!(validate_immutable_value_inventory(
+            &study.immutable_values,
+            &inline_model(&study).signals
+        )
+        .expect_err("unsupported value schema must fail")
+        .contains("unsupported immutable value schema"));
+        let PhysicalSignal::Force(signal) = &mut inline_model_mut(&mut study).signals[0] else {
             unreachable!()
         };
         let SignalRepresentation::Generator(generator) = &mut signal.representation else {
@@ -1563,17 +2045,18 @@ mod tests {
             relative_path: "inputs/unused.value.json".into(),
             logical_digest: runmat_execution::Digest::sha256(b"unused").to_string(),
         });
-        assert!(
-            validate_immutable_value_inventory(&study.immutable_values, &study.signals)
-                .expect_err("unused declaration must fail")
-                .contains("referenced exactly")
-        );
+        assert!(validate_immutable_value_inventory(
+            &study.immutable_values,
+            &inline_model(&study).signals
+        )
+        .expect_err("unused declaration must fail")
+        .contains("referenced exactly"));
     }
 
     #[test]
     fn typed_document_fields_deserialize_without_legacy_translation() {
         let mut document = minimal_study_yaml();
-        let mapping = document.as_mapping_mut().expect("study mapping");
+        let mapping = inline_model_yaml(&mut document);
         mapping.insert(
             "constraints".into(),
             canonical_yaml(vec![AnalysisConstraint::Structural(
@@ -1610,18 +2093,15 @@ mod tests {
         let RawFeaDocument::Study(study) = parsed else {
             panic!("expected study")
         };
-        assert_eq!(study.constraints[0].constraint_id(), "fixed");
-        assert_eq!(study.signals[0].signal_id().0, "push");
+        assert_eq!(inline_model(&study).constraints[0].constraint_id(), "fixed");
+        assert_eq!(inline_model(&study).signals[0].signal_id().0, "push");
         assert_eq!(study.sequence.steps[0].step_id.as_str(), "solve");
     }
 
     #[test]
     fn structural_solid_attachment_preserves_exact_cad_vertex_identity() {
         let mut document = minimal_study_yaml();
-        document
-            .as_mapping_mut()
-            .expect("study mapping")
-            .insert(
+        inline_model_yaml(&mut document).insert(
                 "structural".into(),
                 serde_yaml::from_str(
                     "nodes:\n  - id: 7\n    coordinates_m: [0.0, 0.0, 0.0]\n    solid_attachment:\n      geometry_vertex: vertex_000007\n",
@@ -1634,9 +2114,9 @@ mod tests {
         };
         let intent = AnalysisCreateModelIntentSpec {
             model_id: "mixed-model".into(),
-            template: study.model.template,
+            template: model_template_for_sequence(&study.sequence).unwrap(),
         };
-        let model = resolve_model(&study, &sample_geometry(), &intent)
+        let model = resolve_model(&study, inline_model(&study), &sample_geometry(), &intent)
             .expect("resolve model")
             .expect("model");
         assert_eq!(
@@ -1652,10 +2132,7 @@ mod tests {
     #[test]
     fn structural_solid_attachment_rejects_empty_vertex_identity() {
         let mut document = minimal_study_yaml();
-        document
-            .as_mapping_mut()
-            .expect("study mapping")
-            .insert(
+        inline_model_yaml(&mut document).insert(
                 "structural".into(),
                 serde_yaml::from_str(
                     "nodes:\n  - id: 7\n    coordinates_m: [0.0, 0.0, 0.0]\n    solid_attachment:\n      geometry_vertex: '   '\n",
@@ -1668,15 +2145,15 @@ mod tests {
         };
         let intent = AnalysisCreateModelIntentSpec {
             model_id: "mixed-model".into(),
-            template: study.model.template,
+            template: model_template_for_sequence(&study.sequence).unwrap(),
         };
-        let error = resolve_model(&study, &sample_geometry(), &intent)
+        let error = resolve_model(&study, inline_model(&study), &sample_geometry(), &intent)
             .expect_err("empty persistent vertex identity must fail");
         assert!(error.contains("empty solid_attachment.geometry_vertex"));
     }
 
     #[test]
-    fn template_scaffold_retains_the_authored_sequence() {
+    fn retired_template_scaffold_switch_is_rejected() {
         let mut document = minimal_study_yaml();
         document
             .as_mapping_mut()
@@ -1686,22 +2163,126 @@ mod tests {
             .as_mapping_mut()
             .expect("model mapping")
             .insert("defaults".into(), "template_scaffold".into());
+        assert!(parse_raw_fea_value(document)
+            .expect_err("hidden scaffold switch must be rejected")
+            .contains("unknown field `defaults`"));
+    }
 
-        let parsed = parse_raw_fea_value(document).expect("study document");
-        let RawFeaDocument::Study(study) = parsed else {
-            panic!("expected study")
-        };
+    #[test]
+    fn model_file_sources_compose_by_typed_identity() {
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("shared.fea");
+        std::fs::write(
+            &source,
+            r#"version: 1
+kind: model
+source:
+  inline:
+    regions:
+      loaded:
+        selector: { id: tip }
+"#,
+        )
+        .unwrap();
+        let authored = model_source_yaml(
+            r#"compose:
+  - file: { path: shared.fea }
+  - inline:
+      materials:
+        steel:
+          mechanical:
+            youngs_modulus_pa: 200000000000.0
+            poisson_ratio: 0.3
+            density_kg_per_m3: 7850.0
+"#,
+        );
+        let resolved = pollster::block_on(resolve_model_source(
+            &authored,
+            directory.path(),
+            &std::fs::canonicalize(directory.path()).unwrap(),
+            Path::new(""),
+            &mut Vec::new(),
+        ))
+        .unwrap();
+        assert_eq!(resolved.data.regions.len(), 1);
+        assert_eq!(resolved.data.materials.len(), 1);
+        assert_eq!(resolved.files.len(), 1);
+        assert_eq!(resolved.files[0].path, "shared.fea");
+    }
 
-        assert!(!study.sequence.steps.is_empty());
-        assert_eq!(study.model.defaults, FeaModelDefaultsMode::TemplateScaffold);
-        let intent = AnalysisCreateModelIntentSpec {
-            model_id: "scaffold-model".into(),
-            template: study.model.template,
-        };
-        let model = resolve_model(&study, &sample_geometry(), &intent)
-            .expect("resolve scaffold model")
-            .expect("resolved model");
-        assert_eq!(model.sequence, study.sequence);
+    #[test]
+    fn model_source_composition_rejects_conflicts() {
+        let authored = model_source_yaml(
+            r#"compose:
+  - inline:
+      regions:
+        support: { selector: { id: base } }
+  - inline:
+      regions:
+        support: { selector: { id: tip } }
+"#,
+        );
+        let error = pollster::block_on(resolve_model_source(
+            &authored,
+            Path::new("."),
+            &std::fs::canonicalize(".").unwrap(),
+            Path::new(""),
+            &mut Vec::new(),
+        ))
+        .expect_err("conflicting typed identity must fail");
+        assert!(error.contains("conflicting region definition `support`"));
+    }
+
+    #[test]
+    fn nested_model_file_sources_reject_cycles() {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(
+            directory.path().join("a.fea"),
+            "version: 1\nkind: model\nsource:\n  file: { path: b.fea }\n",
+        )
+        .unwrap();
+        std::fs::write(
+            directory.path().join("b.fea"),
+            "version: 1\nkind: model\nsource:\n  file: { path: a.fea }\n",
+        )
+        .unwrap();
+        let authored = model_source_yaml("file: { path: a.fea }\n");
+        let error = pollster::block_on(resolve_model_source(
+            &authored,
+            directory.path(),
+            &std::fs::canonicalize(directory.path()).unwrap(),
+            Path::new(""),
+            &mut Vec::new(),
+        ))
+        .expect_err("recursive model sources must fail");
+        assert!(error.contains("model source import cycle"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn model_file_sources_cannot_escape_through_symlinks() {
+        use std::os::unix::fs::symlink;
+
+        let study_directory = tempfile::tempdir().unwrap();
+        let outside_directory = tempfile::tempdir().unwrap();
+        let outside_model = outside_directory.path().join("outside.fea");
+        std::fs::write(
+            &outside_model,
+            "version: 1\nkind: model\nsource:\n  inline: {}\n",
+        )
+        .unwrap();
+        symlink(&outside_model, study_directory.path().join("linked.fea")).unwrap();
+
+        let authored = model_source_yaml("file: { path: linked.fea }\n");
+        let error = pollster::block_on(resolve_model_source(
+            &authored,
+            study_directory.path(),
+            &std::fs::canonicalize(study_directory.path()).unwrap(),
+            Path::new(""),
+            &mut Vec::new(),
+        ))
+        .expect_err("symlinked model source outside the study tree must fail");
+        assert!(error.contains("outside the study source tree"));
     }
 
     #[test]
@@ -1714,10 +2295,7 @@ mod tests {
                 reference_temperature: runmat_analysis_core::Temperature::new(318.15),
             }),
         );
-        document
-            .as_mapping_mut()
-            .expect("study mapping")
-            .insert("domains".into(), domains.into());
+        inline_model_yaml(&mut document).insert("domains".into(), domains.into());
 
         let parsed = parse_raw_fea_value(document).expect("thermal study document");
         let RawFeaDocument::Study(study) = parsed else {
@@ -1725,9 +2303,9 @@ mod tests {
         };
         let intent = AnalysisCreateModelIntentSpec {
             model_id: "thermal-model".into(),
-            template: study.model.template,
+            template: model_template_for_sequence(&study.sequence).unwrap(),
         };
-        let model = resolve_model(&study, &sample_geometry(), &intent)
+        let model = resolve_model(&study, inline_model(&study), &sample_geometry(), &intent)
             .expect("resolve thermal model")
             .expect("resolved model");
         assert_eq!(model.thermal.unwrap().reference_temperature.kelvin, 318.15);

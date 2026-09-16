@@ -7,57 +7,56 @@ geometry:
   units: meter
 
 model:
-  template: modal_structural
-  defaults: none
+  source:
+    inline:
+      materials:
+        steel:
+          name: Structural steel
+          mechanical:
+            youngs_modulus_pa: 200000000000.0
+            poisson_ratio: 0.3
+            density_kg_per_m3: 7850.0
 
-materials:
-  steel:
-    name: Structural steel
-    mechanical:
-      youngs_modulus_pa: 200000000000.0
-      poisson_ratio: 0.3
-      density_kg_per_m3: 7850.0
+      material_assignments:
+        - target: { solid: { region: solid_000001 } }
+          material: steel
 
-material_assignments:
-  - target: { solid: { region: solid_000001 } }
-    material: steel
+      regions:
+        fixed_face:
+          selector: { id: face_000001 }
 
-regions:
-  fixed_face:
-    selector: { id: face_000001 }
+      constraints:
+        - structural:
+            constraint_id: fixed_support
+            frame: global
+            kind:
+              fixed:
+                target:
+                  region_id: fixed_face
+                  entity_dimension: face
+                  expected_topology: boundary_face
+                  cardinality: one_or_more
 
-constraints:
-  - structural:
-      constraint_id: fixed_support
-      frame: global
-      kind:
-        fixed:
-          target:
-            region_id: fixed_face
-            entity_dimension: face
-            expected_topology: boundary_face
-            cardinality: one_or_more
-
-random_excitations:
-  - excitation_id: broadband_base
-    frequencies_hz: [0.1, 10.0, 100.0]
-    channels:
-      - channel_id: base_x
-        quantity: base_acceleration
-        direction:
-          frame: global
-          vector: [1.0, 0.0, 0.0]
-    spectral_density:
-      - values: [{ real: 0.0001, imaginary: 0.0 }]
-      - values: [{ real: 0.0002, imaginary: 0.0 }]
-      - values: [{ real: 0.0001, imaginary: 0.0 }]
-    convention: one_sided_per_hertz
-    interpolation: linear_frequency
-    extrapolation: reject
-    evidence:
-      max_absolute_density_error: 0.0
-      equivalent_degrees_of_freedom: null
-    provenance_digest: sha256:documented-broadband-base
+      random_excitations:
+        - excitation_id: broadband_base
+          frequencies_hz: [0.1, 10.0, 100.0]
+          channels:
+            - channel_id: base_x
+              quantity: base_acceleration
+              direction:
+                frame: global
+                vector: [1.0, 0.0, 0.0]
+          spectral_density:
+            - values: [{ real: 0.0001, imaginary: 0.0 }]
+            - values: [{ real: 0.0002, imaginary: 0.0 }]
+            - values: [{ real: 0.0001, imaginary: 0.0 }]
+          convention: one_sided_per_hertz
+          interpolation: linear_frequency
+          extrapolation: reject
+          evidence:
+            max_absolute_density_error: 0.0
+            equivalent_degrees_of_freedom: null
+          provenance_digest: sha256:documented-broadband-base
 
 mesh:
   target_edge_length_m: 10.0

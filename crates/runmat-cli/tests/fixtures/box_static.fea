@@ -7,77 +7,76 @@ geometry:
   units: meter
 
 model:
-  template: linear_static_structural
-  defaults: none
+  source:
+    inline:
+      materials:
+        steel:
+          name: Structural steel
+          mechanical:
+            youngs_modulus_pa: 200000000000.0
+            poisson_ratio: 0.3
+            density_kg_per_m3: 7850.0
 
-materials:
-  steel:
-    name: Structural steel
-    mechanical:
-      youngs_modulus_pa: 200000000000.0
-      poisson_ratio: 0.3
-      density_kg_per_m3: 7850.0
+      regions:
+        fixed_face:
+          selector: { id: face_000001 }
+        loaded_face:
+          selector: { id: face_000002 }
 
-regions:
-  fixed_face:
-    selector: { id: face_000001 }
-  loaded_face:
-    selector: { id: face_000002 }
+      constraints:
+        - structural:
+            constraint_id: fixed_support
+            frame: global
+            kind:
+              fixed:
+                target:
+                  region_id: fixed_face
+                  entity_dimension: face
+                  expected_topology: boundary_face
+                  cardinality: one_or_more
 
-constraints:
-  - structural:
-      constraint_id: fixed_support
-      frame: global
-      kind:
-        fixed:
-          target:
-            region_id: fixed_face
-            entity_dimension: face
-            expected_topology: boundary_face
-            cardinality: one_or_more
+      signals:
+        - force:
+            signal_id: applied_force_signal
+            shape: scalar
+            frame: null
+            representation:
+              constant:
+                scalar: { newtons: 1000.0 }
+            precision: real64
+            evidence:
+              max_absolute_error: null
+              max_relative_error: null
+              derivative_max_absolute_error: null
+              sample_count: 1
+            provenance: authored
 
-signals:
-  - force:
-      signal_id: applied_force_signal
-      shape: scalar
-      frame: null
-      representation:
-        constant:
-          scalar: { newtons: 1000.0 }
-      precision: real64
-      evidence:
-        max_absolute_error: null
-        max_relative_error: null
-        derivative_max_absolute_error: null
-        sample_count: 1
-      provenance: authored
+      excitation_cases:
+        - case_id: static_load
+          action_ids: [applied_force]
+          activation: always
 
-excitation_cases:
-  - case_id: static_load
-    action_ids: [applied_force]
-    activation: always
-
-excitations:
-  - force:
-      excitation_id: applied_force
-      case_id: static_load
-      target:
-        region:
-          region_id: loaded_face
-          entity_dimension: face
-          expected_topology: boundary_face
-          cardinality: one_or_more
-      frame: global
-      direction: { vector: [0.0, -1.0, 0.0] }
-      distribution: preserve_resultant
-      kinematics: fixed_frame
-      signal_id: applied_force_signal
-      active_step_ids: [step_default_static]
-      combination_group: null
-      projection:
-        preserve_resultant: true
-        preserve_moment: false
-        relative_tolerance: 1.0e-10
+      excitations:
+        - force:
+            excitation_id: applied_force
+            case_id: static_load
+            target:
+              region:
+                region_id: loaded_face
+                entity_dimension: face
+                expected_topology: boundary_face
+                cardinality: one_or_more
+            frame: global
+            direction: { vector: [0.0, -1.0, 0.0] }
+            distribution: preserve_resultant
+            kinematics: fixed_frame
+            signal_id: applied_force_signal
+            active_step_ids: [step_default_static]
+            combination_group: null
+            projection:
+              preserve_resultant: true
+              preserve_moment: false
+              relative_tolerance: 1.0e-10
 
 mesh:
   target_edge_length_m: 10.0

@@ -7,111 +7,110 @@ geometry:
   units: meter
 
 model:
-  template: transient_structural
-  defaults: template_scaffold
+  source:
+    inline:
+      materials:
+        steel:
+          name: Structural steel
+          mechanical:
+            youngs_modulus_pa: 200000000000.0
+            poisson_ratio: 0.3
+            density_kg_per_m3: 7850.0
 
-materials:
-  steel:
-    name: Structural steel
-    mechanical:
-      youngs_modulus_pa: 200000000000.0
-      poisson_ratio: 0.3
-      density_kg_per_m3: 7850.0
+      material_assignments:
+        - target: { solid: { region: region_default } }
+          material: steel
 
-material_assignments:
-  - target: { solid: { region: region_default } }
-    material: steel
+      constraints:
+        - structural:
+            constraint_id: fixed_support
+            frame: global
+            kind:
+              fixed:
+                target:
+                  region_id: region_default
+                  entity_dimension: face
+                  expected_topology: boundary_face
+                  cardinality: one_or_more
 
-constraints:
-  - structural:
-      constraint_id: fixed_support
-      frame: global
-      kind:
-        fixed:
-          target:
-            region_id: region_default
-            entity_dimension: face
-            expected_topology: boundary_face
-            cardinality: one_or_more
+      signals:
+        - force:
+            signal_id: pulse_force
+            shape: scalar
+            frame: null
+            representation:
+              waveform:
+                kind: half_sine_pulse
+                amplitude: { scalar: { newtons: 500.0 } }
+                offset: null
+                start_seconds: 0.0
+                duration_seconds: 0.25
+                frequency_hz: null
+                phase_radians: 0.0
+                duty_cycle: null
+            precision: real64
+            evidence:
+              max_absolute_error: null
+              max_relative_error: null
+              derivative_max_absolute_error: null
+              sample_count: 0
+            provenance: authored
+        - velocity:
+            signal_id: initial_velocity
+            shape: vector3
+            frame: global
+            representation:
+              constant:
+                vector3:
+                  - { meters_per_second: 0.0 }
+                  - { meters_per_second: 0.0 }
+                  - { meters_per_second: 0.0 }
+            precision: real64
+            evidence:
+              max_absolute_error: null
+              max_relative_error: null
+              derivative_max_absolute_error: null
+              sample_count: 1
+            provenance: authored
 
-signals:
-  - force:
-      signal_id: pulse_force
-      shape: scalar
-      frame: null
-      representation:
-        waveform:
-          kind: half_sine_pulse
-          amplitude: { scalar: { newtons: 500.0 } }
-          offset: null
-          start_seconds: 0.0
-          duration_seconds: 0.25
-          frequency_hz: null
-          phase_radians: 0.0
-          duty_cycle: null
-      precision: real64
-      evidence:
-        max_absolute_error: null
-        max_relative_error: null
-        derivative_max_absolute_error: null
-        sample_count: 0
-      provenance: authored
-  - velocity:
-      signal_id: initial_velocity
-      shape: vector3
-      frame: global
-      representation:
-        constant:
-          vector3:
-            - { meters_per_second: 0.0 }
-            - { meters_per_second: 0.0 }
-            - { meters_per_second: 0.0 }
-      precision: real64
-      evidence:
-        max_absolute_error: null
-        max_relative_error: null
-        derivative_max_absolute_error: null
-        sample_count: 1
-      provenance: authored
+      excitation_cases:
+        - case_id: transient_load
+          action_ids: [pulse]
+          activation: { steps: [transient] }
 
-excitation_cases:
-  - case_id: transient_load
-    action_ids: [pulse]
-    activation: { steps: [transient] }
+      excitations:
+        - force:
+            excitation_id: pulse
+            case_id: transient_load
+            target:
+              region:
+                region_id: region_default
+                entity_dimension: face
+                expected_topology: boundary_face
+                cardinality: one_or_more
+            frame: global
+            direction: { vector: [0.0, -1.0, 0.0] }
+            distribution: preserve_resultant
+            kinematics: fixed_frame
+            signal_id: pulse_force
+            active_step_ids: [transient]
+            combination_group: null
+            projection:
+              preserve_resultant: true
+              preserve_moment: false
+              relative_tolerance: 1.0e-10
 
-excitations:
-  - force:
-      excitation_id: pulse
-      case_id: transient_load
-      target:
-        region:
-          region_id: region_default
-          entity_dimension: face
-          expected_topology: boundary_face
-          cardinality: one_or_more
-      frame: global
-      direction: { vector: [0.0, -1.0, 0.0] }
-      distribution: preserve_resultant
-      kinematics: fixed_frame
-      signal_id: pulse_force
-      active_step_ids: [transient]
-      combination_group: null
-      projection:
-        preserve_resultant: true
-        preserve_moment: false
-        relative_tolerance: 1.0e-10
-
-initial_conditions:
-  - velocity:
-      initial_condition_id: initial_velocity_state
-      target: whole_model
-      frame: global
-      value:
-        signal_sample:
-          signal_id: initial_velocity
-          abscissa: 0.0
-          approach: at
-      applies_before_step_id: transient
+      initial_conditions:
+        - velocity:
+            initial_condition_id: initial_velocity_state
+            target: whole_model
+            frame: global
+            value:
+              signal_sample:
+                signal_id: initial_velocity
+                abscissa: 0.0
+                approach: at
+            applies_before_step_id: transient
 
 sequence:
   sequence_id: structural_transient_sequence
