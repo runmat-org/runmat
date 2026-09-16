@@ -98,6 +98,7 @@ Error codes use `RM.<DOMAIN>.<OPERATION>.<REASON>`, for example `RM.FEA.RUN_STUD
 | `fea.<Family>Excitation.<action>(...)`, `fea.ExcitationCase.<activation>(...)` | Bind signals to geometry, then group actions under a typed activation policy. |
 | `fea.InitialConditionTarget.wholeModel()`, `fea.<Family>InitialCondition.<state>(...)` | Create whole-model or region-bound initial state from a typed signal sample. |
 | `fea.ResponseSpectrum.new(...)` and `fea.Spectrum*` policy classes | Create a typed modal response spectrum with explicit axis, direction, combination, evidence, and provenance. |
+| `.fea` `random_excitations` and the `add_random_excitation`/`update_random_excitation`/`remove_random_excitation` document operations | Author typed channel directions and complete complex cross-power spectral-density matrices for modal random response. |
 | `fea.<Family>Step.<procedure>(id)`, `fea.<Physics>Domain.<constructor>(...)` | Create concrete typed analysis steps and physics domains. |
 | `fea.StepObjectRef.*`, `fea.ActivationLifecycle.*`, `fea.StepObjectActivation.new(...)` | Bind authored model objects to an explicit step lifecycle. |
 | `fea.StateInput.*`, `fea.StateOutput.new(...)`, `fea.StateTransition.new(...)` | Declare solver-neutral state production, consumption, and transfer. |

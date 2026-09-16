@@ -100,7 +100,9 @@ fn available_qualifications(
         PhysicsFamily::Structural
             | PhysicsFamily::Coupled(runmat_analysis_core::CoupledPhysicsFamily::Thermomechanical)
     ) {
-        if is_exposed_analysis_identity(family, procedure, SolutionSpace::Direct) {
+        if is_exposed_analysis_identity(family, procedure, SolutionSpace::Direct)
+            || is_exposed_analysis_identity(family, procedure, SolutionSpace::ModalReduced)
+        {
             structural_available_qualifications()
         } else {
             Vec::new()

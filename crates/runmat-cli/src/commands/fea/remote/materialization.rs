@@ -22,8 +22,9 @@ use runmat_runtime::analysis::{
     StructuralStudyModalNumericalResult, StructuralStudyModalResponseSpectrumNumericalResult,
     StructuralStudyModalTransientNumericalResult, StructuralStudyNumericalResult,
     StructuralStudyPrestressedFrequencyNumericalResult,
-    StructuralStudyPrestressedModalNumericalResult, StructuralStudySequenceNumericalResult,
-    StructuralStudyStepNumericalResult, StructuralStudyTransientNumericalResult,
+    StructuralStudyPrestressedModalNumericalResult, StructuralStudyRandomResponseNumericalResult,
+    StructuralStudySequenceNumericalResult, StructuralStudyStepNumericalResult,
+    StructuralStudyTransientNumericalResult,
 };
 use runmat_runtime::operations::OperationEnvelope;
 
@@ -281,6 +282,22 @@ fn study_result(
                 response_numerical_receipt: response.response_numerical_receipt.clone(),
                 field_recovery: response.field_recovery.clone(),
                 envelope_state: response.envelope_state.clone(),
+            },
+        )),
+        runmat_execution_runner_native::ExactStructuralStudyAnalysisResult::StructuralRandomResponse(
+            response,
+        ) => StructuralStudyNumericalResult::StructuralRandomResponse(Box::new(
+            StructuralStudyRandomResponseNumericalResult {
+                frozen_project_digest: result.frozen_project_digest,
+                modal_step_id: response.modal_workload.step_id().clone(),
+                response_step_id: response.response_workload.step_id().clone(),
+                modal_result: (*response.modal_result).clone(),
+                modal_numerical_receipt: response.modal_numerical_receipt.clone(),
+                basis_state: response.basis_state.clone(),
+                resolved_response_workload: (*response.response_workload).clone(),
+                response_result: (*response.response_result).clone(),
+                response_numerical_receipt: response.response_numerical_receipt.clone(),
+                statistics_state: response.statistics_state.clone(),
             },
         )),
         runmat_execution_runner_native::ExactStructuralStudyAnalysisResult::StructuralBuckling(

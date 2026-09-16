@@ -342,6 +342,9 @@ pub(super) fn structural_temporal(procedure: AnalysisProcedure) -> Option<Tempor
         AnalysisProcedure::ModalResponseSpectrum => {
             Some(TemporalImplementation::StructuralModalResponseSpectrumCombination)
         }
+        AnalysisProcedure::RandomResponse => {
+            Some(TemporalImplementation::StructuralRandomResponseIntegration)
+        }
         AnalysisProcedure::TransientResponse => {
             Some(TemporalImplementation::StructuralNewmarkAverageAcceleration)
         }
@@ -409,6 +412,27 @@ mod tests {
             realization,
         })
         .expect("modal response-spectrum formulation should be admitted experimentally");
+        assert_eq!(admitted.qualification(), FormulationMaturity::Experimental);
+    }
+
+    #[test]
+    fn random_response_has_a_distinct_admitted_temporal_realization() {
+        let mut input = structural_input(vec![SourceImplementation::CanonicalBoundaryProjection]);
+        input.procedure = AnalysisProcedure::RandomResponse;
+        let realization = structural_exact_realization(input)
+            .expect("random-response integration should have an exact realization");
+        assert_eq!(
+            realization.temporals,
+            vec![TemporalImplementation::StructuralRandomResponseIntegration]
+        );
+        let admitted = admit_formulation(FormulationAdmissionRequest {
+            family: PhysicsFamily::Structural,
+            procedure: AnalysisProcedure::RandomResponse,
+            solution_space: SolutionSpace::ModalReduced,
+            requirement: FormulationRequirement::Experimental,
+            realization,
+        })
+        .expect("random-response formulation should be admitted experimentally");
         assert_eq!(admitted.qualification(), FormulationMaturity::Experimental);
     }
 

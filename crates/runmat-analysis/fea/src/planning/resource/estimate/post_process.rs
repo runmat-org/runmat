@@ -176,6 +176,31 @@ pub(super) fn build_response_spectrum_assembly_resource_plan(
     )
 }
 
+pub(super) fn build_random_response_assembly_resource_plan(
+    input: FeaResourcePlanningInput,
+    demand: &StructuralRandomResponseAssemblyResourceDemand,
+) -> Result<FeaResourcePlan, ResourcePlanningError> {
+    if demand.task_count.0 == 0
+        || demand.interval_count.0 < demand.task_count.0
+        || demand.interval_encoded_bytes.0 == 0
+        || demand.response_value_count.0 == 0
+    {
+        return Err(ResourcePlanningError::Invalid(
+            "random-response assembly resource cardinalities are invalid".into(),
+        ));
+    }
+    build_post_process_resource_plan(
+        input,
+        PostProcessAccounting::host_only(
+            demand.scope_digest,
+            &demand.inputs,
+            demand.ordering_workspace_bytes_upper_bound,
+            ByteCount(0),
+            &[&demand.result_output, &demand.receipt_output],
+        ),
+    )
+}
+
 struct PostProcessAccounting<'a> {
     topology_digest: Digest,
     inputs: &'a PreparedInputResourceFacts,

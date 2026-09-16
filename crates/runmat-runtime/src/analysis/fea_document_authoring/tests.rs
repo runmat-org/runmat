@@ -191,6 +191,86 @@ fn mesh_has_only_canonical_settings() {
 }
 
 #[test]
+fn random_excitation_authoring_round_trips_and_removes_by_typed_id() {
+    const TRIANGLE_STL: &str = "solid triangle\n  facet normal 0 0 1\n    outer loop\n      vertex 0 0 0\n      vertex 1 0 0\n      vertex 0 1 0\n    endloop\n  endfacet\nendsolid triangle\n";
+    let directory = tempfile::tempdir().expect("temporary study directory");
+    std::fs::write(directory.path().join("part.stl"), TRIANGLE_STL)
+        .expect("write geometry fixture");
+    let path = directory.path().join("random-response.fea");
+    let created = apply_fea_study_document_operation(
+        "create",
+        path.to_string_lossy().as_ref(),
+        None,
+        input(AnalysisModelTemplate::ModalStructural),
+    )
+    .expect("create modal structural study");
+    let excitation = serde_json::json!({
+        "excitation_id": "broadband_base",
+        "frequencies_hz": [0.1, 10.0, 100.0],
+        "channels": [{
+            "channel_id": "base_x",
+            "quantity": "base_acceleration",
+            "direction": {
+                "frame": "global",
+                "vector": [1.0, 0.0, 0.0]
+            }
+        }],
+        "spectral_density": [
+            { "values": [{ "real": 1.0e-4, "imaginary": 0.0 }] },
+            { "values": [{ "real": 2.0e-4, "imaginary": 0.0 }] },
+            { "values": [{ "real": 1.0e-4, "imaginary": 0.0 }] }
+        ],
+        "convention": "one_sided_per_hertz",
+        "interpolation": "linear_frequency",
+        "extrapolation": "reject",
+        "evidence": {
+            "max_absolute_density_error": 0.0,
+            "equivalent_degrees_of_freedom": null
+        },
+        "provenance_digest": "sha256:document-authoring-random-response"
+    });
+    let added = apply_fea_study_document_operation(
+        "add_random_excitation",
+        path.to_string_lossy().as_ref(),
+        Some(&created.source),
+        excitation.clone(),
+    )
+    .expect("add random excitation");
+    assert_eq!(added.result.counts.random_excitations, 1);
+    assert_eq!(added.result.random_excitations[0].id, "broadband_base");
+    let resolved = pollster::block_on(super::super::fea_document::parse_and_resolve_fea_document(
+        &added.source,
+        directory.path(),
+    ))
+    .expect("authored random excitation must pass the execution parser");
+    let super::super::fea_document::FeaResolvedDocument::Study(study) = resolved else {
+        panic!("authoring must preserve a study document");
+    };
+    assert_eq!(study.model.unwrap().random_excitations.len(), 1);
+
+    let mut updated_excitation = excitation;
+    updated_excitation["spectral_density"][1]["values"][0]["real"] = serde_json::json!(3.0e-4);
+    let updated = apply_fea_study_document_operation(
+        "update_random_excitation",
+        path.to_string_lossy().as_ref(),
+        Some(&added.source),
+        updated_excitation,
+    )
+    .expect("update random excitation");
+    assert_eq!(updated.result.counts.random_excitations, 1);
+
+    let removed = apply_fea_study_document_operation(
+        "remove_random_excitation",
+        path.to_string_lossy().as_ref(),
+        Some(&updated.source),
+        serde_json::json!({ "id": "broadband_base" }),
+    )
+    .expect("remove random excitation");
+    assert_eq!(removed.result.counts.random_excitations, 0);
+    assert!(removed.result.random_excitations.is_empty());
+}
+
+#[test]
 fn created_source_is_accepted_by_the_execution_parser() {
     const TRIANGLE_STL: &str = "solid triangle\n  facet normal 0 0 1\n    outer loop\n      vertex 0 0 0\n      vertex 1 0 0\n      vertex 0 1 0\n    endloop\n  endfacet\nendsolid triangle\n";
     let directory = tempfile::tempdir().expect("temporary study directory");

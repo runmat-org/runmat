@@ -113,17 +113,25 @@ async fn response_spectrum_fields_reach_an_admitted_result_over_encrypted_quic()
         inventory,
         resources,
         access,
+        ModalConsumerExpectation::ResponseSpectrum,
     ))
     .await;
 }
 
-async fn run_response_spectrum_conformance(
+#[derive(Clone, Copy)]
+pub(super) enum ModalConsumerExpectation {
+    ResponseSpectrum,
+    RandomResponse,
+}
+
+pub(super) async fn run_response_spectrum_conformance(
     prepared: Box<crate::PreparedExactStructuralStudyRoot>,
     expectation: crate::ExactStructuralStudyResultExpectation,
     bundle: Vec<u8>,
     inventory: ResourceInventory,
     resources: ResourceRequest,
     access: ArtifactAccess,
+    expected: ModalConsumerExpectation,
 ) {
     let scope_id = runmat_execution::ExecutionScopeId::derive(&[b"response-spectrum-scope"]);
     let pool_id = runmat_execution::PoolId::derive(&[b"response-spectrum-pool"]);
@@ -207,6 +215,7 @@ async fn run_response_spectrum_conformance(
             &expectation,
             &access,
             &resources,
+            expected,
         ))
         .await;
         pool.remove_worker(worker.id, false).await.unwrap();
@@ -221,6 +230,7 @@ async fn verify_response_spectrum_result(
     expectation: &crate::ExactStructuralStudyResultExpectation,
     access: &ArtifactAccess,
     resources: &ResourceRequest,
+    expected: ModalConsumerExpectation,
 ) {
     let response = tokio::time::timeout(
         Duration::from_secs(180),
@@ -245,26 +255,55 @@ async fn verify_response_spectrum_result(
         ObjectInventoryLimits::default(),
     )
     .unwrap();
-    let crate::ExactStructuralStudyAnalysisResult::StructuralModalResponseSpectrum(result) =
-        imported.analysis
-    else {
-        panic!("modal response-spectrum exact study returned another result kind")
-    };
-    assert_eq!(result.modal_workload.step_id().as_str(), "modes");
-    assert_eq!(result.response_workload.step_id().as_str(), "spectrum");
-    result
-        .response_numerical_receipt
-        .validate_against(
-            result.response_numerical_receipt.source_result(),
-            &result.response_result,
-        )
-        .unwrap();
-    let runmat_analysis_fea::solve::dynamics::ResponseSpectrumFieldRecovery::Recovered(fields) =
-        &result.field_recovery
-    else {
-        panic!("relative-displacement spectrum did not publish recovered fields")
-    };
-    assert!(fields
-        .field(runmat_analysis_fea::solve::dynamics::StructuralLinearFieldQuantity::Stress)
-        .is_some());
+    match (expected, imported.analysis) {
+        (
+            ModalConsumerExpectation::ResponseSpectrum,
+            crate::ExactStructuralStudyAnalysisResult::StructuralModalResponseSpectrum(result),
+        ) => {
+            assert_eq!(result.modal_workload.step_id().as_str(), "modes");
+            assert_eq!(result.response_workload.step_id().as_str(), "spectrum");
+            result
+                .response_numerical_receipt
+                .validate_against(
+                    result.response_numerical_receipt.source_result(),
+                    &result.response_result,
+                )
+                .unwrap();
+            let runmat_analysis_fea::solve::dynamics::ResponseSpectrumFieldRecovery::Recovered(
+                fields,
+            ) = &result.field_recovery
+            else {
+                panic!("relative-displacement spectrum did not publish recovered fields")
+            };
+            assert!(fields
+                .field(runmat_analysis_fea::solve::dynamics::StructuralLinearFieldQuantity::Stress)
+                .is_some());
+        }
+        (
+            ModalConsumerExpectation::RandomResponse,
+            crate::ExactStructuralStudyAnalysisResult::StructuralRandomResponse(result),
+        ) => {
+            assert_eq!(result.modal_workload.step_id().as_str(), "modes");
+            assert_eq!(result.response_workload.step_id().as_str(), "random");
+            result
+                .response_numerical_receipt
+                .validate_against(
+                    result.response_numerical_receipt.source_result(),
+                    &result.response_result,
+                )
+                .unwrap();
+            assert_eq!(
+                result
+                    .statistics_state
+                    .payload
+                    .structural_random_statistics()
+                    .unwrap(),
+                &runmat_analysis_fea::execution::StructuralRandomStatistics::from_result(
+                    &result.response_result,
+                )
+                .unwrap()
+            );
+        }
+        _ => panic!("encrypted modal-consumer study returned another result kind"),
+    }
 }

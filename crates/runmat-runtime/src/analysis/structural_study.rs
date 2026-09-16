@@ -24,11 +24,13 @@ pub use lifecycle::{
 pub(super) use lifecycle::{
     complete_buckling_study, complete_frequency_study, complete_modal_study,
     complete_modal_transient_study, complete_prestressed_frequency_study,
-    complete_prestressed_modal_study, complete_response_spectrum_modal_options,
-    complete_response_spectrum_study, prepare_structural_buckling_template,
-    prepare_structural_frequency_workload, prepare_structural_modal_transient_template,
-    prepare_structural_modal_workload, prepare_structural_prestressed_frequency_template,
-    prepare_structural_prestressed_modal_template, prepare_structural_response_spectrum_template,
+    complete_prestressed_modal_study, complete_random_response_study,
+    complete_response_spectrum_modal_options, complete_response_spectrum_study,
+    prepare_structural_buckling_template, prepare_structural_frequency_workload,
+    prepare_structural_modal_transient_template, prepare_structural_modal_workload,
+    prepare_structural_prestressed_frequency_template,
+    prepare_structural_prestressed_modal_template, prepare_structural_random_response_template,
+    prepare_structural_response_spectrum_template,
 };
 pub(super) use publication::{
     complete_study_run, persist_content_addressed_study_evidence, study_completion_from_prepared,
@@ -124,6 +126,10 @@ pub(super) enum PreparedStructuralStudyExecution {
             BTreeMap<ProcedureStepId, runmat_analysis_fea::execution::StructuralStepWorkload>,
     },
     StructuralModalResponseSpectrum {
+        workloads:
+            BTreeMap<ProcedureStepId, runmat_analysis_fea::execution::StructuralStepWorkload>,
+    },
+    StructuralRandomResponse {
         workloads:
             BTreeMap<ProcedureStepId, runmat_analysis_fea::execution::StructuralStepWorkload>,
     },
@@ -479,6 +485,22 @@ impl PreparedStructuralStudyIntent {
                                 == ObservationExecutionPolicy::scalable()
                             && options.precision_mode == super::PrecisionMode::Fp64
                             && options.solver_mesh_artifact_path.is_none() => {}
+                        (
+                            runmat_analysis_fea::execution::StructuralStepWorkload::RandomResponse {
+                                template,
+                            },
+                            super::AnalysisSolverOptions::StructuralRandomResponse(options),
+                        ) if template.step_id == step.procedure_step.step_id
+                            && template.backend == step.authored_execution.backend
+                            && template.formulation_requirement
+                                == step.authored_execution.requirement
+                            && template.observation_execution
+                                == ObservationExecutionPolicy::scalable()
+                            && template.integration_policy == options.integration
+                            && template.maximum_intervals_per_task
+                                == options.maximum_intervals_per_task
+                            && options.precision_mode == super::PrecisionMode::Fp64
+                            && options.solver_mesh_artifact_path.is_none() => {}
                         _ => {
                             return Err(
                                 "heterogeneous structural workload differs from its prepared execution"
@@ -724,6 +746,11 @@ impl PreparedStructuralStudy {
                 }
             }
             PreparedStructuralStudyExecution::StructuralModalResponseSpectrum { workloads } => {
+                StructuralStudyWorkloads::HeterogeneousSequence {
+                    workloads: workloads.clone(),
+                }
+            }
+            PreparedStructuralStudyExecution::StructuralRandomResponse { workloads } => {
                 StructuralStudyWorkloads::HeterogeneousSequence {
                     workloads: workloads.clone(),
                 }

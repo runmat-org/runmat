@@ -15,6 +15,7 @@ use crate::{
         StructuralRandomResponseScope, StructuralRandomResponseScopeInput,
         StructuralRandomResponseWorkload,
     },
+    planning::resource::{ResourcePlanningError, StructuralRandomResponseResourceProjection},
     solve::dynamics::{describe_modal_random_response, solve_modal_random_response_interval},
 };
 
@@ -27,11 +28,16 @@ pub struct PreparedStructuralRandomResponse {
     scope: StructuralRandomResponseScope,
     summary: AssemblySummary,
     modal_state: CanonicalSemanticState,
+    resources: StructuralRandomResponseResourceProjection,
 }
 
 impl PreparedStructuralRandomResponse {
     pub fn scope(&self) -> &StructuralRandomResponseScope {
         &self.scope
+    }
+
+    pub fn resources(&self) -> &StructuralRandomResponseResourceProjection {
+        &self.resources
     }
 }
 
@@ -120,11 +126,23 @@ pub fn prepare_structural_random_response(
             plan,
         },
     )?;
+    let resources = StructuralRandomResponseResourceProjection::new(
+        solver_mesh,
+        constraints,
+        workload,
+        modal_state,
+    )
+    .map_err(resource_error)?;
     Ok(PreparedStructuralRandomResponse {
         scope,
         summary,
         modal_state: modal_state.clone(),
+        resources,
     })
+}
+
+fn resource_error(error: ResourcePlanningError) -> AnalysisExecutionError {
+    invalid(error.to_string())
 }
 
 pub fn execute_structural_random_response_intervals(

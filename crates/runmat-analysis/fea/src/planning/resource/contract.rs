@@ -15,6 +15,8 @@ use crate::execution::{
     StructuralFrequencyEntryRequestIdentity, StructuralFrequencyResultAssemblyRequestIdentity,
     StructuralModalResponseSpectrumAssemblyRequestIdentity,
     StructuralModalResponseSpectrumDirectionRequestIdentity, StructuralModalWorkloadIdentity,
+    StructuralRandomResponseAssemblyRequestIdentity,
+    StructuralRandomResponseIntervalRequestIdentity,
 };
 use crate::pipeline::structural_linearization::StructuralLinearizationIdentity;
 
@@ -317,6 +319,8 @@ pub enum FeaResourcePhase {
         StructuralModalResponseSpectrumDirectionRequestIdentity,
     ),
     StructuralModalResponseSpectrumAssembly(StructuralModalResponseSpectrumAssemblyRequestIdentity),
+    StructuralRandomResponseInterval(StructuralRandomResponseIntervalRequestIdentity),
+    StructuralRandomResponseAssembly(StructuralRandomResponseAssemblyRequestIdentity),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -551,6 +555,36 @@ pub struct StructuralModalResponseSpectrumAssemblyResourceDemand {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StructuralRandomResponseIntervalResourceDemand {
+    pub operator: StructuralOperatorResourceDemand,
+    pub interval_count: Count,
+    pub channel_count: Count,
+    pub spectral_matrix_complex_value_count: Count,
+    pub selected_mode_count: Count,
+    pub physical_dof_count: Count,
+    pub linear_field_value_count: Count,
+    pub response_value_count: Count,
+    pub maximum_frequency_evaluation_count: Count,
+    pub inputs: PreparedInputResourceFacts,
+    pub output: PreparedOutputResourceFacts,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StructuralRandomResponseAssemblyResourceDemand {
+    pub scope_digest: Digest,
+    pub task_count: Count,
+    pub interval_count: Count,
+    pub interval_encoded_bytes: ByteCount,
+    pub response_value_count: Count,
+    pub inputs: PreparedInputResourceFacts,
+    pub ordering_workspace_bytes_upper_bound: ByteCount,
+    pub result_output: PreparedOutputResourceFacts,
+    pub receipt_output: PreparedOutputResourceFacts,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind", content = "demand")]
 pub enum FeaResourceDemand {
     StructuralLinearPipeline(StructuralOperatorResourceDemand),
@@ -567,6 +601,8 @@ pub enum FeaResourceDemand {
         StructuralModalResponseSpectrumDirectionResourceDemand,
     ),
     StructuralModalResponseSpectrumAssembly(StructuralModalResponseSpectrumAssemblyResourceDemand),
+    StructuralRandomResponseInterval(StructuralRandomResponseIntervalResourceDemand),
+    StructuralRandomResponseAssembly(StructuralRandomResponseAssemblyResourceDemand),
 }
 
 impl FeaResourceDemand {
@@ -639,6 +675,18 @@ impl FeaResourceDemand {
                 Self::StructuralModalResponseSpectrumAssembly(demand),
                 AnalysisNumericalObjectKind::StructuralModalResponseSpectrumFieldRecovery,
             ) => Some(&demand.field_recovery_output),
+            (
+                Self::StructuralRandomResponseInterval(demand),
+                AnalysisNumericalObjectKind::StructuralRandomResponseIntervalResult,
+            ) => Some(&demand.output),
+            (
+                Self::StructuralRandomResponseAssembly(demand),
+                AnalysisNumericalObjectKind::SolverResult,
+            ) => Some(&demand.result_output),
+            (
+                Self::StructuralRandomResponseAssembly(demand),
+                AnalysisNumericalObjectKind::NumericalReceipt,
+            ) => Some(&demand.receipt_output),
             _ => None,
         }
     }
@@ -683,6 +731,10 @@ impl FeaResourcePlanningInput {
             FeaResourceDemand::StructuralModalResponseSpectrumAssembly(demand) => {
                 demand.scope_digest
             }
+            FeaResourceDemand::StructuralRandomResponseInterval(demand) => {
+                demand.operator.topology_digest
+            }
+            FeaResourceDemand::StructuralRandomResponseAssembly(demand) => demand.scope_digest,
         }
     }
 
@@ -706,6 +758,10 @@ impl FeaResourcePlanningInput {
                 Some(&demand.operator.observations)
             }
             FeaResourceDemand::StructuralModalResponseSpectrumAssembly(_) => None,
+            FeaResourceDemand::StructuralRandomResponseInterval(demand) => {
+                Some(&demand.operator.observations)
+            }
+            FeaResourceDemand::StructuralRandomResponseAssembly(_) => None,
         }
     }
 
@@ -733,6 +789,13 @@ impl FeaResourcePlanningInput {
                 static MONOLITHIC: PartitioningPolicy = PartitioningPolicy::Monolithic;
                 &MONOLITHIC
             }
+            FeaResourceDemand::StructuralRandomResponseInterval(demand) => {
+                &demand.operator.partitioning
+            }
+            FeaResourceDemand::StructuralRandomResponseAssembly(_) => {
+                static MONOLITHIC: PartitioningPolicy = PartitioningPolicy::Monolithic;
+                &MONOLITHIC
+            }
         }
     }
 
@@ -752,6 +815,8 @@ impl FeaResourcePlanningInput {
                 Some(&demand.operator)
             }
             FeaResourceDemand::StructuralModalResponseSpectrumAssembly(_) => None,
+            FeaResourceDemand::StructuralRandomResponseInterval(demand) => Some(&demand.operator),
+            FeaResourceDemand::StructuralRandomResponseAssembly(_) => None,
         }
     }
 
@@ -773,6 +838,10 @@ impl FeaResourcePlanningInput {
                 Some(&mut demand.operator)
             }
             FeaResourceDemand::StructuralModalResponseSpectrumAssembly(_) => None,
+            FeaResourceDemand::StructuralRandomResponseInterval(demand) => {
+                Some(&mut demand.operator)
+            }
+            FeaResourceDemand::StructuralRandomResponseAssembly(_) => None,
         }
     }
 }

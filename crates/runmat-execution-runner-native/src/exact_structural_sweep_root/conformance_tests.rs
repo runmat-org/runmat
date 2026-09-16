@@ -65,9 +65,11 @@ use super::{prepare_exact_structural_sweep_root, ExactStructuralSweepRootPrepara
 
 mod prestressed_frequency;
 mod prestressed_modal;
+mod random_response;
 mod response_spectrum;
 
 const BOX: &[u8] = include_bytes!("../../../runmat-geometry/io/tests/fixtures/box.brep");
+const EXACT_SWEEP_CONFORMANCE_STACK_BYTES: usize = 16 * 1024 * 1024;
 
 #[derive(Default)]
 struct RecordingRecoveryPublisher {
@@ -85,9 +87,21 @@ impl StructuralTransientRecoveryPublisher for RecordingRecoveryPublisher {
     }
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn exact_structural_sweep_reaches_ordered_admitted_results_over_encrypted_quic() {
-    Box::pin(run_exact_structural_sweep_conformance()).await;
+#[test]
+fn exact_structural_sweep_reaches_ordered_admitted_results_over_encrypted_quic() {
+    std::thread::Builder::new()
+        .name("exact-structural-sweep-conformance".into())
+        .stack_size(EXACT_SWEEP_CONFORMANCE_STACK_BYTES)
+        .spawn(|| {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("exact structural sweep conformance runtime")
+                .block_on(run_exact_structural_sweep_conformance());
+        })
+        .expect("exact structural sweep conformance thread")
+        .join()
+        .expect("exact structural sweep conformance thread panicked");
 }
 
 async fn run_exact_structural_sweep_conformance() {
@@ -1444,6 +1458,104 @@ fn box_modal_response_spectrum_workloads() -> runmat_analysis_execution::Structu
             (
                 response_step.step_id,
                 StructuralStepWorkload::ModalResponseSpectrum {
+                    template: Box::new(response),
+                },
+            ),
+        ]),
+    }
+}
+
+fn box_random_response_workloads() -> runmat_analysis_execution::StructuralStudyWorkloads {
+    let mut model = box_structural_workload().model;
+    let mut modal_step = ProcedureStep::structural_modal("modes");
+    modal_step.independent_domain = IndependentDomain::Eigenvalue { requested_count: 3 };
+    let excitation = runmat_analysis_core::RandomExcitationSpectrum {
+        excitation_id: runmat_analysis_core::RandomExcitationId("box-broadband-x".into()),
+        frequencies_hz: vec![1.0e-3, 100.0, 1_000.0, 10_000.0],
+        channels: vec![runmat_analysis_core::RandomExcitationChannel {
+            channel_id: runmat_analysis_core::RandomExcitationChannelId("base-x".into()),
+            quantity: runmat_analysis_core::RandomExcitationQuantity::BaseAcceleration,
+            direction: SpectrumDirection {
+                frame: runmat_analysis_core::CoordinateFrame::Global,
+                vector: [1.0, 0.0, 0.0],
+            },
+        }],
+        spectral_density: vec![
+            runmat_analysis_core::CrossPowerSpectralDensity::diagonal(&[2.5e-4]);
+            4
+        ],
+        convention: runmat_analysis_core::SpectralDensityConvention::OneSidedPerHertz,
+        interpolation: runmat_analysis_core::RandomSpectrumInterpolation::LinearFrequency,
+        extrapolation: runmat_analysis_core::RandomSpectrumExtrapolation::Reject,
+        evidence: runmat_analysis_core::RandomSpectrumEvidence {
+            max_absolute_density_error: Some(0.0),
+            equivalent_degrees_of_freedom: None,
+        },
+        provenance_digest: "sha256:box-broadband-x".into(),
+    };
+    let response_step = ProcedureStep::structural_random_response(
+        "random",
+        excitation.excitation_id.clone(),
+        "modes",
+        "modal_basis",
+    );
+    let mut sequence = runmat_analysis_core::AnalysisSequence::from_steps(
+        "box-random-response-sequence",
+        vec![modal_step.clone(), response_step.clone()],
+    );
+    sequence.dependencies[0].reason = SequenceDependencyReason::StateTransfer;
+    sequence.transitions.push(StateTransition {
+        transition_id: TransitionId("modes-to-random".into()),
+        producer_step: modal_step.step_id.clone(),
+        consumer_step: response_step.step_id.clone(),
+        state_id: StateId("modal_basis".into()),
+        method: StateTransitionMethod::Reuse,
+        topology: TopologyTransitionPolicy::RequireIdentical,
+        reference: ReferenceStatePolicy::Preserve,
+    });
+    model.sequence = sequence;
+    model.random_excitations = vec![excitation];
+    let modal = StructuralModalWorkload::new(StructuralModalWorkloadInput {
+        model: model.clone(),
+        step_id: modal_step.step_id.clone(),
+        backend: ComputeBackend::Cpu,
+        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+        observation_execution:
+            runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
+        truncation: ModalTruncationPolicy::requested(3),
+        convergence: ModalConvergencePolicy::exploratory(),
+        residual_vector_directions: Vec::new(),
+        prestress_transition: None,
+    })
+    .unwrap();
+    let response = runmat_analysis_fea::execution::StructuralRandomResponseTemplate {
+        schema_version: 1,
+        model,
+        step_id: response_step.step_id.clone(),
+        backend: ComputeBackend::Cpu,
+        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+        observation_execution:
+            runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
+        integration_policy: runmat_analysis_fea::solve::dynamics::RandomResponseIntegrationPolicy {
+            modal_damping_ratio: 0.04,
+            minimum_cumulative_mass_ratio: 0.0,
+            relative_variance_tolerance: 1.0e-5,
+            absolute_variance_tolerance: 1.0e-14,
+            maximum_refinement_levels: 14,
+        },
+        maximum_intervals_per_task: 2,
+    };
+    runmat_analysis_execution::StructuralStudyWorkloads::HeterogeneousSequence {
+        workloads: std::collections::BTreeMap::from([
+            (
+                modal_step.step_id,
+                StructuralStepWorkload::ModalExtraction {
+                    workload: Box::new(modal),
+                },
+            ),
+            (
+                response_step.step_id,
+                StructuralStepWorkload::RandomResponse {
                     template: Box::new(response),
                 },
             ),

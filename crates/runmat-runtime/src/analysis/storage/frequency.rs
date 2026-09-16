@@ -248,7 +248,8 @@ pub(super) fn artifact_record(
             .into_iter()
             .collect(),
         AnalysisStudyStepNumericalResultData::Standard
-        | AnalysisStudyStepNumericalResultData::StructuralResponseSpectrum(_) => Vec::new(),
+        | AnalysisStudyStepNumericalResultData::StructuralResponseSpectrum(_)
+        | AnalysisStudyStepNumericalResultData::StructuralRandomResponse(_) => Vec::new(),
     };
     AnalysisArtifactRecord {
         run_id: artifact.step.run_id.clone(),

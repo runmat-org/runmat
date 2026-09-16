@@ -42,6 +42,50 @@ fn response_spectrum_intent_derives_required_modal_residual_directions() {
 }
 
 #[test]
+fn random_response_intent_is_typed_path_free_and_round_trips() {
+    let _guard = analysis_test_guard();
+    let spec = sample_random_response_study_spec("32".repeat(32));
+    let intent = analysis_prepare_structural_study_intent_op(
+        &spec,
+        OperationContext::new(Some("trace-random-response".into()), None),
+    )
+    .expect("random-response intent should prepare without a solver mesh");
+    let runmat_analysis_fea::execution::StructuralStudyWorkloads::HeterogeneousSequence {
+        workloads,
+    } = intent.workloads()
+    else {
+        panic!("random-response intent must remain a heterogeneous sequence")
+    };
+    let [modal_step, response_step] = intent.model().sequence.steps.as_slice() else {
+        panic!("random-response fixture must have two steps")
+    };
+    assert!(matches!(
+        workloads.get(&modal_step.step_id),
+        Some(runmat_analysis_fea::execution::StructuralStepWorkload::ModalExtraction { .. })
+    ));
+    let Some(runmat_analysis_fea::execution::StructuralStepWorkload::RandomResponse { template }) =
+        workloads.get(&response_step.step_id)
+    else {
+        panic!("random-response consumer must retain its typed template")
+    };
+    let AnalysisSolverOptions::StructuralRandomResponse(options) =
+        &spec.execution.steps[1].solver_options
+    else {
+        panic!("random-response fixture must retain typed solver options")
+    };
+    assert_eq!(template.integration_policy, options.integration);
+    assert_eq!(
+        template.maximum_intervals_per_task,
+        options.maximum_intervals_per_task
+    );
+    let restored = PreparedStructuralStudyIntent::from_continuation_bytes(
+        &intent.continuation_bytes().unwrap(),
+    )
+    .expect("random-response intent should round trip");
+    assert_eq!(restored.workloads(), intent.workloads());
+}
+
+#[test]
 fn structural_study_intent_is_path_free_and_does_not_require_a_mesh() {
     let _guard = analysis_test_guard();
     let mut spec = sample_linear_static_study_spec();
@@ -1516,6 +1560,100 @@ fn sample_response_spectrum_study_spec(geometry_sha256: String) -> AnalysisStudy
                 requirement: FormulationRequirement::Experimental,
                 solver_options: AnalysisSolverOptions::StructuralResponseSpectrum(
                     AnalysisResponseSpectrumRunOptions::default(),
+                ),
+            },
+        ],
+    };
+    spec
+}
+
+fn sample_random_response_study_spec(geometry_sha256: String) -> AnalysisStudySpec {
+    let mut spec = sample_linear_static_study_spec();
+    spec.geometry.source.sha256 = geometry_sha256;
+    let mut model = analysis_create_model_op(
+        &spec.geometry,
+        spec.create_model_intent.clone(),
+        OperationContext::new(None, None),
+    )
+    .expect("sample structural model should resolve")
+    .data;
+    let mut modal = ProcedureStep::structural_modal("step_modal");
+    modal.independent_domain =
+        runmat_analysis_core::IndependentDomain::Eigenvalue { requested_count: 3 };
+    let excitation = runmat_analysis_core::RandomExcitationSpectrum {
+        excitation_id: runmat_analysis_core::RandomExcitationId("broadband_x".into()),
+        frequencies_hz: vec![0.1, 10.0, 100.0],
+        channels: vec![runmat_analysis_core::RandomExcitationChannel {
+            channel_id: runmat_analysis_core::RandomExcitationChannelId("base_x".into()),
+            quantity: runmat_analysis_core::RandomExcitationQuantity::BaseAcceleration,
+            direction: runmat_analysis_core::SpectrumDirection {
+                frame: runmat_analysis_core::CoordinateFrame::Global,
+                vector: [1.0, 0.0, 0.0],
+            },
+        }],
+        spectral_density: vec![
+            runmat_analysis_core::CrossPowerSpectralDensity::diagonal(&[1.0e-4]);
+            3
+        ],
+        convention: runmat_analysis_core::SpectralDensityConvention::OneSidedPerHertz,
+        interpolation: runmat_analysis_core::RandomSpectrumInterpolation::LinearFrequency,
+        extrapolation: runmat_analysis_core::RandomSpectrumExtrapolation::Reject,
+        evidence: runmat_analysis_core::RandomSpectrumEvidence {
+            max_absolute_density_error: Some(0.0),
+            equivalent_degrees_of_freedom: None,
+        },
+        provenance_digest: "sha256:random-response-intent".into(),
+    };
+    let response = ProcedureStep::structural_random_response(
+        "step_response",
+        excitation.excitation_id.clone(),
+        modal.step_id.as_str(),
+        "modal_basis",
+    );
+    let mut sequence = AnalysisSequence::from_steps(
+        "sequence_random_response",
+        vec![modal.clone(), response.clone()],
+    );
+    sequence.dependencies[0].reason = runmat_analysis_core::SequenceDependencyReason::StateTransfer;
+    sequence
+        .transitions
+        .push(runmat_analysis_core::StateTransition {
+            transition_id: runmat_analysis_core::TransitionId("modal_to_random".into()),
+            producer_step: modal.step_id.clone(),
+            consumer_step: response.step_id.clone(),
+            state_id: runmat_analysis_core::StateId("modal_basis".into()),
+            method: runmat_analysis_core::StateTransitionMethod::Reuse,
+            topology: runmat_analysis_core::TopologyTransitionPolicy::RequireIdentical,
+            reference: runmat_analysis_core::ReferenceStatePolicy::Preserve,
+        });
+    model.sequence = sequence;
+    model.random_excitations = vec![excitation];
+    spec.model = Some(model);
+    spec.execution = AnalysisExecutionPlan {
+        steps: vec![
+            AnalysisExecutionStep {
+                step_id: modal.step_id,
+                backend: ComputeBackend::Cpu,
+                requirement: FormulationRequirement::Experimental,
+                solver_options: AnalysisSolverOptions::StructuralModes(AnalysisModalRunOptions {
+                    truncation: runmat_analysis_fea::ModalTruncationPolicy::requested(3),
+                    convergence: runmat_analysis_fea::ModalConvergencePolicy::exploratory(),
+                    ..AnalysisModalRunOptions::default()
+                }),
+            },
+            AnalysisExecutionStep {
+                step_id: response.step_id,
+                backend: ComputeBackend::Cpu,
+                requirement: FormulationRequirement::Experimental,
+                solver_options: AnalysisSolverOptions::StructuralRandomResponse(
+                    AnalysisRandomResponseRunOptions {
+                        integration: runmat_analysis_fea::solve::dynamics::RandomResponseIntegrationPolicy {
+                            minimum_cumulative_mass_ratio: 0.0,
+                            ..runmat_analysis_fea::solve::dynamics::RandomResponseIntegrationPolicy::production_default()
+                        },
+                        maximum_intervals_per_task: 2,
+                        ..AnalysisRandomResponseRunOptions::default()
+                    },
                 ),
             },
         ],

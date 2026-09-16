@@ -44,6 +44,7 @@ pub enum TemporalImplementation {
     StructuralHarmonicSolve,
     StructuralPrestressedHarmonicSolve,
     StructuralModalResponseSpectrumCombination,
+    StructuralRandomResponseIntegration,
     StructuralNewmarkAverageAcceleration,
     StructuralScalarResidualIteration,
     ThermalSteadyLinearSolve,

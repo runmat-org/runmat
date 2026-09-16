@@ -61,6 +61,9 @@ pub fn prepare_semantic_state_publication(
         ) | (
             SemanticStatePublicationSource::StructuralResponseEnvelope,
             AnalysisWorkKind::AssembleStructuralModalResponseSpectrumResult
+        ) | (
+            SemanticStatePublicationSource::StructuralRandomStatistics,
+            AnalysisWorkKind::AssembleStructuralRandomResponseResult
         )
     );
     if !source_kind_matches

@@ -7,9 +7,10 @@ use runmat_analysis_core::{
     CoordinateFrame, ElectroThermalDomain, ElectromagneticDomain, EvidenceConfidence,
     ExcitationAction, ExcitationCase, ExcitationTarget, FormulationRequirement, InitialCondition,
     MaterialAcousticModel, MaterialAssignment, MaterialElectricalModel, MaterialMechanicalModel,
-    MaterialModel, MaterialPlasticModel, MaterialThermalModel, PhysicalSignal, RegionTarget,
-    ResponseSpectrum, ShellElementModel, ShellSectionModel, StructuralElement,
-    StructuralElementKind, StructuralModel, StructuralNode, ThermalDomain, ThermoMechanicalDomain,
+    MaterialModel, MaterialPlasticModel, MaterialThermalModel, PhysicalSignal,
+    RandomExcitationSpectrum, RegionTarget, ResponseSpectrum, ShellElementModel, ShellSectionModel,
+    StructuralElement, StructuralElementKind, StructuralModel, StructuralNode, ThermalDomain,
+    ThermoMechanicalDomain,
 };
 use runmat_analysis_fea::ComputeBackend;
 use runmat_geometry_core::{GeometryAsset, UnitSystem};
@@ -87,6 +88,8 @@ struct FeaStudyDocument {
     initial_conditions: Vec<InitialCondition>,
     #[serde(default)]
     response_spectra: Vec<ResponseSpectrum>,
+    #[serde(default)]
+    random_excitations: Vec<RandomExcitationSpectrum>,
     #[serde(default)]
     immutable_values: Vec<AnalysisImmutableValueSpec>,
     sequence: AnalysisSequence,
@@ -534,6 +537,7 @@ fn resolve_meshing_settings(
             AnalysisSolverOptions::StructuralLinear(_)
                 | AnalysisSolverOptions::StructuralFrequency(_)
                 | AnalysisSolverOptions::StructuralResponseSpectrum(_)
+                | AnalysisSolverOptions::StructuralRandomResponse(_)
                 | AnalysisSolverOptions::StructuralBuckling(_)
         )
     });
@@ -636,6 +640,7 @@ fn resolve_model(
     model.excitations = study.excitations.clone();
     model.initial_conditions = study.initial_conditions.clone();
     model.response_spectra = study.response_spectra.clone();
+    model.random_excitations = study.random_excitations.clone();
     model.sequence = study.sequence.clone();
     resolve_typed_region_targets(&mut model, geometry, &study.regions)?;
     if study.domains.thermal.is_some() {
@@ -1209,12 +1214,19 @@ mod tests {
 
     #[test]
     fn canonical_documentation_examples_parse_and_resolve() {
-        for name in [
+        let names = vec![
             "structural-static-experimental.fea",
             "structural-transient-experimental.fea",
             "modal-response-spectrum-experimental.fea",
             "acoustic-production-rejected.fea",
-        ] {
+        ];
+        #[cfg(feature = "occt-native")]
+        let names = {
+            let mut names = names;
+            names.push("modal-random-response-experimental.fea");
+            names
+        };
+        for name in names {
             let path = documentation_example_path(name);
             let resolved = pollster::block_on(load_fea_document_from_path_async(&path))
                 .unwrap_or_else(|error| panic!("{} must resolve: {error}", path.display()));
@@ -1230,11 +1242,18 @@ mod tests {
 
     #[test]
     fn documentation_examples_expose_formulation_requirement_truth() {
-        for name in [
+        let experimental_names = vec![
             "structural-static-experimental.fea",
             "structural-transient-experimental.fea",
             "modal-response-spectrum-experimental.fea",
-        ] {
+        ];
+        #[cfg(feature = "occt-native")]
+        let experimental_names = {
+            let mut names = experimental_names;
+            names.push("modal-random-response-experimental.fea");
+            names
+        };
+        for name in experimental_names {
             let path = documentation_example_path(name);
             let FeaResolvedDocument::Study(study) =
                 pollster::block_on(load_fea_document_from_path_async(&path)).unwrap()

@@ -76,6 +76,7 @@ fn canonical_fea_documentation_examples_check_cleanly() {
         "structural-static-experimental.fea",
         "structural-transient-experimental.fea",
         "modal-response-spectrum-experimental.fea",
+        "modal-random-response-experimental.fea",
         "acoustic-production-rejected.fea",
     ] {
         let path = format!("docs/fea/examples/{name}");

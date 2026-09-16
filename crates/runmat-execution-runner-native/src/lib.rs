@@ -12,6 +12,7 @@ mod analysis_placement;
 mod analysis_prestressed_frequency;
 mod analysis_prestressed_modal;
 mod analysis_prestressed_modal_frequency;
+mod analysis_random_response;
 mod analysis_response_spectrum;
 mod analysis_sequence;
 mod analysis_task;
@@ -81,6 +82,10 @@ pub use analysis_prestressed_modal_frequency::{
     execute_structural_prestressed_modal_frequency_study_remotely,
     CompletedStructuralPrestressedModalFrequencyStudy,
 };
+pub use analysis_random_response::{
+    execute_structural_random_response_locally, execute_structural_random_response_remotely,
+    CompletedStructuralRandomResponseStudy,
+};
 pub use analysis_response_spectrum::{
     execute_structural_modal_response_spectrum_locally,
     execute_structural_modal_response_spectrum_remotely,
@@ -119,9 +124,10 @@ pub use exact_structural_study_root::{
     ExactStructuralBucklingAnalysisResult, ExactStructuralFrequencyAnalysisResult,
     ExactStructuralModalResponseSpectrumAnalysisResult,
     ExactStructuralModalTransientAnalysisResult, ExactStructuralPrestressedFrequencyAnalysisResult,
-    ExactStructuralPrestressedModalAnalysisResult, ExactStructuralStudyAnalysisResult,
-    ExactStructuralStudyResult, ExactStructuralStudyResultExpectation,
-    ExactStructuralStudyRootPreparation, PreparedExactStructuralStudyRoot, RequiredStudyProgram,
+    ExactStructuralPrestressedModalAnalysisResult, ExactStructuralRandomResponseAnalysisResult,
+    ExactStructuralStudyAnalysisResult, ExactStructuralStudyResult,
+    ExactStructuralStudyResultExpectation, ExactStructuralStudyRootPreparation,
+    PreparedExactStructuralStudyRoot, RequiredStudyProgram,
     EXACT_STRUCTURAL_STUDY_ROOT_EXECUTION_MODE, EXACT_STRUCTURAL_STUDY_ROOT_TARGET_PROFILE,
 };
 pub use exact_structural_sweep_root::{

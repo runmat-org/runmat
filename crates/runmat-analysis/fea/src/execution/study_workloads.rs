@@ -10,7 +10,8 @@ use super::{
     StructuralFrequencyWorkload, StructuralLinearWorkload, StructuralModalResponseSpectrumTemplate,
     StructuralModalTransientTemplate, StructuralModalWorkload,
     StructuralPrestressedFrequencySolverTemplate, StructuralPrestressedFrequencyTemplate,
-    StructuralPrestressedModalTemplate, StructuralTransientWorkload,
+    StructuralPrestressedModalTemplate, StructuralRandomResponseTemplate,
+    StructuralTransientWorkload,
 };
 
 const STUDY_WORKLOADS_PREFIX: &[u8] = b"runmat-structural-study-workloads\0";
@@ -99,6 +100,9 @@ pub enum StructuralStepWorkload {
     ModalResponseSpectrum {
         template: Box<StructuralModalResponseSpectrumTemplate>,
     },
+    RandomResponse {
+        template: Box<StructuralRandomResponseTemplate>,
+    },
     PrestressedModal {
         template: Box<StructuralPrestressedModalTemplate>,
     },
@@ -123,6 +127,7 @@ impl StructuralStepWorkload {
                 block_plan.validate()
             }
             Self::ModalResponseSpectrum { template } => template.validate(),
+            Self::RandomResponse { template } => template.validate(),
             Self::PrestressedModal { template } => template.validate(),
             Self::Buckling { template } => template.validate(),
             Self::PrestressedFrequency { template } => template.validate(),
@@ -135,6 +140,7 @@ impl StructuralStepWorkload {
             Self::ModalExtraction { workload } => workload.model(),
             Self::ModalTransient { template, .. } => &template.model,
             Self::ModalResponseSpectrum { template } => &template.model,
+            Self::RandomResponse { template } => &template.model,
             Self::PrestressedModal { template } => &template.model,
             Self::Buckling { template } => &template.model,
             Self::PrestressedFrequency { template } => &template.model,
@@ -147,6 +153,7 @@ impl StructuralStepWorkload {
             Self::ModalExtraction { workload } => workload.step_id(),
             Self::ModalTransient { template, .. } => &template.step_id,
             Self::ModalResponseSpectrum { template } => &template.step_id,
+            Self::RandomResponse { template } => &template.step_id,
             Self::PrestressedModal { template } => &template.step_id,
             Self::Buckling { template } => &template.step_id,
             Self::PrestressedFrequency { template } => &template.step_id,
@@ -159,6 +166,7 @@ impl StructuralStepWorkload {
             Self::ModalExtraction { workload } => workload.backend(),
             Self::ModalTransient { template, .. } => template.backend,
             Self::ModalResponseSpectrum { template } => template.backend,
+            Self::RandomResponse { template } => template.backend,
             Self::PrestressedModal { template } => template.backend,
             Self::Buckling { template } => template.backend,
             Self::PrestressedFrequency { template } => template.backend,
@@ -171,6 +179,7 @@ impl StructuralStepWorkload {
             Self::ModalExtraction { workload } => workload.replace_model(model)?,
             Self::ModalTransient { template, .. } => template.model = model,
             Self::ModalResponseSpectrum { template } => template.model = model,
+            Self::RandomResponse { template } => template.model = model,
             Self::PrestressedModal { template } => template.model = model,
             Self::Buckling { template } => template.model = model,
             Self::PrestressedFrequency { template } => template.model = model,
@@ -418,6 +427,7 @@ fn validate_heterogeneous_sequence(
     let supported = match ordered.as_slice() {
         [StructuralStepWorkload::ModalExtraction { .. }, StructuralStepWorkload::ModalTransient { .. }]
         | [StructuralStepWorkload::ModalExtraction { .. }, StructuralStepWorkload::ModalResponseSpectrum { .. }]
+        | [StructuralStepWorkload::ModalExtraction { .. }, StructuralStepWorkload::RandomResponse { .. }]
         | [StructuralStepWorkload::Linear { .. }, StructuralStepWorkload::Buckling { .. }]
         | [StructuralStepWorkload::Linear { .. }, StructuralStepWorkload::PrestressedModal { .. }] => {
             true

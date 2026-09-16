@@ -341,6 +341,9 @@ jobs:
           cargo test -p runmat-execution-runner-native --all-features --lib \
             actual_driver_restarts_from_server_checkpoint_on_a_different_worker \
             2>&1 | tee "${EVIDENCE_DIR}/execution-conformance.log"
+          cargo test -p runmat-execution-runner-native --all-features --lib \
+            random_response_reaches_an_admitted_result_over_encrypted_quic \
+            2>&1 | tee -a "${EVIDENCE_DIR}/execution-conformance.log"
           cargo test -p runmat-execution-runner-native --all-features \
             --test occt_exact_meshing \
             --test meshing_process_conformance \

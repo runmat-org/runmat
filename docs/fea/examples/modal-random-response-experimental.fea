@@ -1,0 +1,158 @@
+version: 1
+kind: study
+id: modal_random_response_experimental
+
+geometry:
+  path: ../../../crates/runmat-geometry/io/tests/fixtures/box.brep
+  units: meter
+
+model:
+  template: modal_structural
+  defaults: none
+
+materials:
+  steel:
+    name: Structural steel
+    mechanical:
+      youngs_modulus_pa: 200000000000.0
+      poisson_ratio: 0.3
+      density_kg_per_m3: 7850.0
+
+regions:
+  fixed_face:
+    selector: { id: face_000001 }
+
+constraints:
+  - structural:
+      constraint_id: fixed_support
+      frame: global
+      kind:
+        fixed:
+          target:
+            region_id: fixed_face
+            entity_dimension: face
+            expected_topology: boundary_face
+            cardinality: one_or_more
+
+random_excitations:
+  - excitation_id: broadband_base
+    frequencies_hz: [0.1, 10.0, 100.0]
+    channels:
+      - channel_id: base_x
+        quantity: base_acceleration
+        direction:
+          frame: global
+          vector: [1.0, 0.0, 0.0]
+    spectral_density:
+      - values: [{ real: 0.0001, imaginary: 0.0 }]
+      - values: [{ real: 0.0002, imaginary: 0.0 }]
+      - values: [{ real: 0.0001, imaginary: 0.0 }]
+    convention: one_sided_per_hertz
+    interpolation: linear_frequency
+    extrapolation: reject
+    evidence:
+      max_absolute_density_error: 0.0
+      equivalent_degrees_of_freedom: null
+    provenance_digest: sha256:documented-broadband-base
+
+mesh:
+  target_edge_length_m: 10.0
+  maximum_chordal_deviation_m: 0.1
+  maximum_elements: 10000
+  deterministic_seed: 7
+
+sequence:
+  sequence_id: modal_random_response_sequence
+  steps:
+    - step_id: modes
+      family: structural
+      procedure: modal_extraction
+      solution_space: direct
+      independent_domain: { eigenvalue: { requested_count: 12 } }
+      activations: []
+      state_inputs: []
+      state_outputs:
+        - state_id: modal_basis
+          kind: modal_basis
+          completeness: complete
+          persistence: until_dependents_complete
+      observations: []
+      accuracy:
+        accuracy_plan_id: modes.accuracy
+        criteria:
+          - criterion_id: algebraic_residual
+            target: global_equilibrium
+            contribution: algebraic
+            tolerance: { relative: 1.0e-8 }
+            evidence: residual_bound
+            mandatory: true
+        unavailable_evidence: mark_indeterminate_experimental
+        exceeded_limit: fail
+        equivalence: { relative_tolerance: 1.0e-10 }
+        resources:
+          maximum_refinement_cycles: 0
+          maximum_solver_tightenings: 0
+          maximum_samples: 1000000
+          maximum_wall_time_milliseconds: 3600000
+          maximum_resident_bytes: 8589934592
+      restart: fresh
+    - step_id: random_response
+      family: structural
+      procedure: random_response
+      solution_space: modal_reduced
+      independent_domain:
+        random_excitation: { excitation_id: broadband_base }
+      activations: []
+      state_inputs:
+        - input_id: modal_basis
+          required_kind: modal_basis
+          source:
+            upstream: { producer_step: modes, state_id: modal_basis }
+          use_as: modal_basis
+          conflict: reject
+      state_outputs:
+        - state_id: random_statistics
+          kind: structural_random_statistics
+          completeness: complete
+          persistence: until_dependents_complete
+      observations: []
+      accuracy:
+        accuracy_plan_id: random_response.accuracy
+        criteria:
+          - criterion_id: integration_error
+            target: { quantity: displacement }
+            contribution: frequency_sampling
+            tolerance: { relative: 1.0e-5 }
+            evidence: convergence_study
+            mandatory: true
+        unavailable_evidence: mark_indeterminate_experimental
+        exceeded_limit: fail
+        equivalence: { relative_tolerance: 1.0e-10 }
+        resources:
+          maximum_refinement_cycles: 14
+          maximum_solver_tightenings: 0
+          maximum_samples: 1000000
+          maximum_wall_time_milliseconds: 3600000
+          maximum_resident_bytes: 8589934592
+      restart: fresh
+  dependencies:
+    - predecessor: modes
+      successor: random_response
+      reason: state_transfer
+  transitions:
+    - transition_id: modal_to_random
+      producer_step: modes
+      consumer_step: random_response
+      state_id: modal_basis
+      method: reuse
+      topology: require_identical
+      reference: preserve
+  branches: []
+
+execution:
+  - step: modes
+    backend: cpu
+    requirement: experimental
+  - step: random_response
+    backend: cpu
+    requirement: experimental

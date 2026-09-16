@@ -39,9 +39,8 @@ response_spectra:
     directional_combination: srss
     truncation:
       minimum_cumulative_mass_ratio: 0.9
-      include_residual_mode: true
-      include_rigid_response: true
-      include_missing_mass: true
+      correction: none
+    rigid_response: disabled
     construction: authored_design
     evidence:
       sampling_adequacy_ratio: 0.95

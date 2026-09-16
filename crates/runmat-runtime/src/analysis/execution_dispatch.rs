@@ -10,6 +10,7 @@ pub(super) enum AnalysisOperation {
     LinearStatic,
     StructuralFrequency,
     StructuralResponseSpectrum,
+    StructuralRandomResponse,
     Modal,
     Buckling,
     Acoustic,
@@ -34,10 +35,11 @@ struct AnalysisOperationDescriptor {
 
 impl AnalysisOperation {
     #[cfg(test)]
-    const ALL: [Self; 13] = [
+    const ALL: [Self; 14] = [
         Self::LinearStatic,
         Self::StructuralFrequency,
         Self::StructuralResponseSpectrum,
+        Self::StructuralRandomResponse,
         Self::Modal,
         Self::Buckling,
         Self::Acoustic,
@@ -79,6 +81,16 @@ impl AnalysisOperation {
                 assembly_error_code: "RM.FEA.RUN_STRUCTURAL_RESPONSE_SPECTRUM.ASSEMBLY_FAILED",
                 formulation_admission_error_code:
                     "RM.FEA.RUN_STRUCTURAL_RESPONSE_SPECTRUM.FORMULATION_NOT_ADMITTED",
+            },
+            Self::StructuralRandomResponse => AnalysisOperationDescriptor {
+                name: "fea.run_structural_random_response",
+                version: "fea.run_structural_random_response/v1",
+                invalid_model_error_code:
+                    "RM.FEA.RUN_STRUCTURAL_RANDOM_RESPONSE.SOLVER_MODEL_INVALID",
+                cancelled_error_code: "RM.FEA.RUN_STRUCTURAL_RANDOM_RESPONSE.CANCELLED",
+                assembly_error_code: "RM.FEA.RUN_STRUCTURAL_RANDOM_RESPONSE.ASSEMBLY_FAILED",
+                formulation_admission_error_code:
+                    "RM.FEA.RUN_STRUCTURAL_RANDOM_RESPONSE.FORMULATION_NOT_ADMITTED",
             },
             Self::Modal => AnalysisOperationDescriptor {
                 name: "fea.run_modal",
@@ -220,7 +232,8 @@ fn run_operation_for_procedure(
 ) -> Option<AnalysisOperation> {
     use AnalysisProcedure::{
         EigenvalueBuckling, HarmonicResponse, ModalExtraction, ModalResponseSpectrum, Nonlinear,
-        PrestressedHarmonicResponse, PrestressedModalExtraction, Static, TransientResponse,
+        PrestressedHarmonicResponse, PrestressedModalExtraction, RandomResponse, Static,
+        TransientResponse,
     };
     use PhysicsFamily::{Acoustic, Coupled, Electromagnetic, Fluid, Structural, Thermal};
 
@@ -234,6 +247,9 @@ fn run_operation_for_procedure(
         }
         (Structural, ModalResponseSpectrum, SolutionSpace::ModalReduced) => {
             Some(AnalysisOperation::StructuralResponseSpectrum)
+        }
+        (Structural, RandomResponse, SolutionSpace::ModalReduced) => {
+            Some(AnalysisOperation::StructuralRandomResponse)
         }
         (Structural, EigenvalueBuckling, SolutionSpace::Direct) => {
             Some(AnalysisOperation::Buckling)

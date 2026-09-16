@@ -352,6 +352,33 @@ pub fn import_exact_structural_study_result(
         )?,
         (
             StructuralStudyWorkloads::HeterogeneousSequence { workloads },
+            ExactStructuralStudyAnalysisClosure::StructuralRandomResponse {
+                modal_result_root,
+                modal_receipt_root,
+                basis_state_root,
+                response_result_root,
+                response_receipt_root,
+                statistics_state_root,
+                objects,
+            },
+        ) => super::random_response_import::import_random_response_result(
+            super::random_response_import::RandomResponseResultImport {
+                source,
+                workloads,
+                modal_result_root: *modal_result_root,
+                modal_receipt_root: *modal_receipt_root,
+                basis_state_root: *basis_state_root,
+                response_result_root: *response_result_root,
+                response_receipt_root: *response_receipt_root,
+                statistics_state_root: *statistics_state_root,
+                objects,
+                mesh: &mesh.artifact,
+                access: &expected.artifact_access,
+                limits,
+            },
+        )?,
+        (
+            StructuralStudyWorkloads::HeterogeneousSequence { workloads },
             ExactStructuralStudyAnalysisClosure::StructuralPrestressedModal {
                 preload_result_root,
                 preload_receipt_root,

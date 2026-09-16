@@ -13,6 +13,10 @@ use runmat_analysis_execution::{
     decode_prepared_structural_modal_response_spectrum_direction_result,
     decode_prepared_structural_modal_response_spectrum_workload,
     decode_prepared_structural_modal_workload,
+    decode_prepared_structural_random_response_assembly_request,
+    decode_prepared_structural_random_response_interval_request,
+    decode_prepared_structural_random_response_interval_result,
+    decode_prepared_structural_random_response_workload,
     decode_prepared_structural_transient_result_assembly_request,
     decode_prepared_structural_transient_segment, prepared_input_resource_facts,
     projected_output_resource_facts, projected_output_set_resource_facts,
@@ -33,9 +37,10 @@ use runmat_analysis_fea::execution::{
     StructuralLinearNumericalReceiptArtifact, StructuralLinearWorkload,
     StructuralLinearWorkloadResult, StructuralModalNumericalReceipt,
     StructuralModalResponseSpectrumNumericalReceipt, StructuralModalResponseSpectrumSolverResult,
-    StructuralModalSolverResult, StructuralTransientBlockRequest, StructuralTransientCheckpoint,
-    StructuralTransientNumericalReceipt, StructuralTransientSolverResult,
-    StructuralTransientWorkload,
+    StructuralModalSolverResult, StructuralRandomResponseNumericalReceipt,
+    StructuralRandomResponseSolverResult, StructuralTransientBlockRequest,
+    StructuralTransientCheckpoint, StructuralTransientNumericalReceipt,
+    StructuralTransientSolverResult, StructuralTransientWorkload,
 };
 use runmat_analysis_fea::planning::resource::{
     build_observation_assembly_resource_plan, build_observation_history_checkpoint_resource_plan,
@@ -57,7 +62,10 @@ use runmat_analysis_fea::planning::resource::{
     structural_modal_response_spectrum_assembly_payload_bytes_upper_bound,
     structural_modal_response_spectrum_direction_payload_bytes_upper_bound,
     structural_modal_response_spectrum_receipt_payload_bytes_upper_bound,
-    structural_modal_result_payload_bytes_upper_bound, validate_resource_usage_evidence,
+    structural_modal_result_payload_bytes_upper_bound,
+    structural_random_response_assembly_payload_bytes_upper_bound,
+    structural_random_response_interval_payload_bytes_upper_bound,
+    structural_random_response_receipt_payload_bytes_upper_bound, validate_resource_usage_evidence,
     FeaResourceDemand, FeaResourcePhase, FeaResourcePlan, ObservationPartitionResourcePlanning,
     PreparedPhaseResourceFacts, PreparedStructuralBucklingResourceFacts,
     PreparedStructuralModalResourceFacts, ResourceUsageEvidence,
@@ -95,6 +103,9 @@ mod field_recovery;
 mod frequency;
 mod modal;
 mod observation;
+mod random_response;
+#[cfg(test)]
+mod random_response_tests;
 mod response_spectrum;
 #[cfg(test)]
 mod response_spectrum_tests;
@@ -145,6 +156,12 @@ impl AnalysisKernel for NativeAnalysisKernel {
             }
             AnalysisWorkKind::AssembleStructuralModalResponseSpectrumResult => {
                 response_spectrum::execute_assembly(invocation)
+            }
+            AnalysisWorkKind::SolveStructuralRandomResponseIntervals => {
+                random_response::execute_intervals(invocation)
+            }
+            AnalysisWorkKind::AssembleStructuralRandomResponseResult => {
+                random_response::execute_assembly(invocation)
             }
             AnalysisWorkKind::AssembleStructuralFrequencyResult => {
                 frequency::execute_structural_frequency_result_assembly(invocation)
@@ -847,6 +864,15 @@ fn execute_state_publication(
                 &solver_result.payload(),
             )?;
             CanonicalSemanticState::from_structural_response_envelope_publication(
+                &publication,
+                &solver_result,
+            )?
+        }
+        SemanticStatePublicationSource::StructuralRandomStatistics => {
+            let solver_result = StructuralRandomResponseSolverResult::from_canonical_bytes(
+                &solver_result.payload(),
+            )?;
+            CanonicalSemanticState::from_structural_random_statistics_publication(
                 &publication,
                 &solver_result,
             )?

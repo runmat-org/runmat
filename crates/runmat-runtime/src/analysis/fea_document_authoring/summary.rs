@@ -2,7 +2,8 @@
 
 use runmat_analysis_core::{
     AnalysisBoundary, AnalysisConnector, AnalysisConstraint, AnalysisInterface, AnalysisSequence,
-    ExcitationAction, ExcitationCase, InitialCondition, PhysicalSignal, ResponseSpectrum,
+    ExcitationAction, ExcitationCase, InitialCondition, PhysicalSignal, RandomExcitationSpectrum,
+    ResponseSpectrum,
 };
 use serde_json::Value as JsonValue;
 use serde_yaml::Value as YamlValue;
@@ -67,6 +68,10 @@ pub fn summarize_fea_study_document_contract(
         named_entries::<ResponseSpectrum>(&document, "response_spectra", |value| {
             value.spectrum_id.0.clone()
         });
+    let random_excitations =
+        named_entries::<RandomExcitationSpectrum>(&document, "random_excitations", |value| {
+            value.excitation_id.0.clone()
+        });
     let sequence = typed_at::<AnalysisSequence>(&document, &["sequence"]).map(|value| {
         let first = value.steps.first();
         FeaStudySequenceSummary {
@@ -89,6 +94,7 @@ pub fn summarize_fea_study_document_contract(
         excitations: excitations.len(),
         initial_conditions: initial_conditions.len(),
         response_spectra: response_spectra.len(),
+        random_excitations: random_excitations.len(),
         sequence_steps: sequence.as_ref().map_or(0, |value| value.step_count),
     };
     let readiness = readiness(&summary, &counts);
@@ -108,6 +114,7 @@ pub fn summarize_fea_study_document_contract(
         excitations,
         initial_conditions,
         response_spectra,
+        random_excitations,
         sequence,
         counts,
         readiness,

@@ -231,6 +231,12 @@ pub(super) fn response_spectrum_id(value: &YamlValue) -> Option<String> {
     typed_id::<ResponseSpectrum>(value, |value| value.spectrum_id.0.clone())
 }
 
+pub(super) fn random_excitation_id(value: &YamlValue) -> Option<String> {
+    typed_id::<runmat_analysis_core::RandomExcitationSpectrum>(value, |value| {
+        value.excitation_id.0.clone()
+    })
+}
+
 pub(super) fn named_entries<T: DeserializeOwned>(
     value: &YamlValue,
     section: &str,

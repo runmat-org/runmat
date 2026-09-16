@@ -73,6 +73,14 @@ pub fn analysis_prepare_structural_study_intent_op(
             step.procedure_step.procedure
                 == runmat_analysis_core::AnalysisProcedure::ModalExtraction
         });
+    let is_random_response_sequence = study.steps.len() == 2
+        && study.steps.iter().any(|step| {
+            step.procedure_step.procedure == runmat_analysis_core::AnalysisProcedure::RandomResponse
+        })
+        && study.steps.iter().any(|step| {
+            step.procedure_step.procedure
+                == runmat_analysis_core::AnalysisProcedure::ModalExtraction
+        });
     let is_prestress_sequence =
         is_buckling_sequence || is_prestressed_modal_sequence || is_prestressed_frequency_sequence;
     for step in &study.steps {
@@ -203,6 +211,24 @@ pub fn analysis_prepare_structural_study_intent_op(
                 );
                 authored_execution.solver_options =
                     AnalysisSolverOptions::StructuralResponseSpectrum(options);
+            }
+            AnalysisSolverOptions::StructuralRandomResponse(mut options)
+                if is_random_response_sequence
+                    && linear_workloads.is_empty()
+                    && transient_workload.is_none()
+                    && frequency_workload.is_none()
+                    && heterogeneous_workloads.len() == 1 =>
+            {
+                options.solver_mesh_artifact_path = None;
+                let template = prepare_structural_random_response_template(&study, step, &options)?;
+                heterogeneous_workloads.insert(
+                    step.procedure_step.step_id.clone(),
+                    runmat_analysis_fea::execution::StructuralStepWorkload::RandomResponse {
+                        template: Box::new(template),
+                    },
+                );
+                authored_execution.solver_options =
+                    AnalysisSolverOptions::StructuralRandomResponse(options);
             }
             AnalysisSolverOptions::StructuralTransient(mut options)
                 if study.steps.len() == 2
@@ -545,6 +571,39 @@ pub(in crate::analysis) fn prepare_structural_response_spectrum_template(
         formulation_requirement: step.authored_execution.requirement,
         observation_execution:
             runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
+    };
+    template
+        .validate()
+        .map_err(|error| portable_study_contract_error(study, error.to_string()))?;
+    Ok(template)
+}
+
+pub(in crate::analysis) fn prepare_structural_random_response_template(
+    study: &super::super::PreparedStudySequence,
+    step: &super::super::PreparedStudyStep,
+    options: &crate::analysis::AnalysisRandomResponseRunOptions,
+) -> Result<runmat_analysis_fea::execution::StructuralRandomResponseTemplate, OperationErrorEnvelope>
+{
+    if options.precision_mode != crate::analysis::PrecisionMode::Fp64
+        || options.maximum_intervals_per_task == 0
+        || options.solver_mesh_artifact_path.is_some()
+    {
+        return Err(portable_study_contract_error(
+            study,
+            "random response requires fp64, nonzero interval tasks, and a path-free prepared workload"
+                .into(),
+        ));
+    }
+    let template = runmat_analysis_fea::execution::StructuralRandomResponseTemplate {
+        schema_version: 1,
+        model: study.model.clone(),
+        step_id: step.procedure_step.step_id.clone(),
+        backend: step.authored_execution.backend,
+        formulation_requirement: step.authored_execution.requirement,
+        observation_execution:
+            runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
+        integration_policy: options.integration,
+        maximum_intervals_per_task: options.maximum_intervals_per_task,
     };
     template
         .validate()

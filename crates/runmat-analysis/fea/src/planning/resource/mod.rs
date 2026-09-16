@@ -9,6 +9,7 @@ mod frequency;
 mod modal;
 mod post_process;
 mod preflight;
+mod random_response;
 mod reconciliation;
 mod response_spectrum;
 mod structural_facts;
@@ -38,6 +39,7 @@ pub use contract::{
     StructuralFrequencyResultAssemblyResourceDemand, StructuralModalResourceDemand,
     StructuralModalResponseSpectrumAssemblyResourceDemand,
     StructuralModalResponseSpectrumDirectionResourceDemand, StructuralOperatorResourceDemand,
+    StructuralRandomResponseAssemblyResourceDemand, StructuralRandomResponseIntervalResourceDemand,
     TopologyResourceFacts, WorkerResourcePolicy, RESOURCE_ESTIMATION_MODEL_REVISION,
     RESOURCE_PLAN_MAX_ENCODED_BYTES,
 };
@@ -65,6 +67,12 @@ pub use post_process::{
     structural_frequency_result_payload_bytes_upper_bound, ObservationPartitionResourcePlanning,
 };
 pub use preflight::build_structural_resource_plan;
+pub use random_response::{
+    structural_random_response_assembly_payload_bytes_upper_bound,
+    structural_random_response_interval_payload_bytes_upper_bound,
+    structural_random_response_receipt_payload_bytes_upper_bound,
+    StructuralRandomResponseResourceProjection,
+};
 pub use response_spectrum::{
     structural_modal_response_spectrum_assembly_payload_bytes_upper_bound,
     structural_modal_response_spectrum_direction_payload_bytes_upper_bound,

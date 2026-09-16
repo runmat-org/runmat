@@ -11,9 +11,9 @@ use runmat_execution::Digest;
 use crate::{
     execution::{
         AnalysisWorkloadIdentity, CanonicalSemanticState, CanonicalSemanticStateInput,
-        CanonicalSemanticStatePayload, CanonicalStateTransition, SequenceIdentity,
-        SemanticStatePublicationRequest, SemanticStatePublicationSource, SolverResultIdentity,
-        StepIdentity, StructuralModalWorkload, StructuralModalWorkloadInput,
+        CanonicalSemanticStatePayload, CanonicalStateTransition, SemanticStatePublicationRequest,
+        SemanticStatePublicationSource, SequenceIdentity, SolverResultIdentity, StepIdentity,
+        StructuralModalWorkload, StructuralModalWorkloadInput,
         StructuralRandomResponseAssemblyRequest, StructuralRandomResponseIntervalRequest,
         StructuralRandomResponseIntervalResult, StructuralRandomResponseNumericalReceipt,
         StructuralRandomResponseScope, StructuralRandomResponseSolverResult,
@@ -25,6 +25,13 @@ use crate::{
         structural_random_response::{
             execute_structural_random_response_intervals, prepare_structural_random_response,
         },
+    },
+    planning::resource::{
+        build_resource_plan, structural_random_response_assembly_payload_bytes_upper_bound,
+        structural_random_response_interval_payload_bytes_upper_bound,
+        structural_random_response_receipt_payload_bytes_upper_bound, ByteCount, FeaResourceDemand,
+        FeaResourcePlan, PreparedInputResourceFacts, PreparedOutputResourceFacts,
+        PreparedOutputSetResourceFacts,
     },
     results::observation::ObservationExecutionPolicy,
     solve::dynamics::RandomResponseIntegrationPolicy,
@@ -128,6 +135,10 @@ fn portable_interval_tasks_are_grouping_invariant_and_bind_receipt() {
     let generic_workload = AnalysisWorkloadIdentity::for_test("modal-random").unwrap();
     let receipt =
         StructuralRandomResponseNumericalReceipt::new(generic_workload, &grouped).unwrap();
+    assert!(
+        receipt.canonical_bytes().unwrap().len() as u64
+            <= structural_random_response_receipt_payload_bytes_upper_bound()
+    );
     receipt
         .validate_against(receipt.source_result(), &grouped)
         .unwrap();
@@ -188,6 +199,7 @@ fn execute_with_group_size(
     );
     let prepared =
         prepare_structural_random_response(&workload, mesh, basis_state, constraints).unwrap();
+    let projection = prepared.resources();
     let scope = prepared.scope().clone();
     assert_eq!(
         StructuralRandomResponseScope::from_canonical_bytes(&scope.canonical_bytes().unwrap())
@@ -206,8 +218,59 @@ fn execute_with_group_size(
                 .unwrap(),
                 request
             );
+            let payload =
+                structural_random_response_interval_payload_bytes_upper_bound(&request).unwrap();
+            let plan = projection
+                .plan_for_intervals(
+                    &request,
+                    prepared_inputs(),
+                    prepared_output(payload),
+                    prepared_output_set(),
+                )
+                .unwrap();
+            let FeaResourceDemand::StructuralRandomResponseInterval(demand) = &plan.input.demand
+            else {
+                panic!("random-response interval plan has the wrong typed demand");
+            };
+            assert_eq!(
+                demand.response_value_count.0,
+                request.scope().plan().value_count() as u64
+            );
+            assert!(demand.maximum_frequency_evaluation_count.0 >= 3 * demand.interval_count.0);
+            assert_eq!(demand.spectral_matrix_complex_value_count.0, 4);
+            assert_eq!(
+                demand.selected_mode_count.0,
+                request.scope().plan().selected_mode_count() as u64
+            );
+            assert_eq!(
+                demand.linear_field_value_count.0 + demand.physical_dof_count.0,
+                demand.response_value_count.0
+            );
+            assert_eq!(
+                FeaResourcePlan::from_canonical_bytes(&plan.canonical_bytes().unwrap()).unwrap(),
+                plan
+            );
+            if ordinal == 0 {
+                let mut underreported = plan.input.clone();
+                let FeaResourceDemand::StructuralRandomResponseInterval(demand) =
+                    &mut underreported.demand
+                else {
+                    unreachable!()
+                };
+                demand.response_value_count.0 -= 1;
+                assert!(build_resource_plan(underreported).is_err());
+                assert!(projection
+                    .plan_for_intervals(
+                        &request,
+                        prepared_inputs(),
+                        prepared_output(payload - 1),
+                        prepared_output_set(),
+                    )
+                    .is_err());
+            }
             let task = execute_structural_random_response_intervals(&workload, &prepared, &request)
                 .unwrap();
+            assert!(task.canonical_bytes().unwrap().len() as u64 <= payload);
             assert_eq!(
                 StructuralRandomResponseIntervalResult::from_canonical_bytes(
                     &task.canonical_bytes().unwrap(),
@@ -230,7 +293,38 @@ fn execute_with_group_size(
         .unwrap(),
         assembly
     );
+    let result_payload =
+        structural_random_response_assembly_payload_bytes_upper_bound(&assembly).unwrap();
+    let assembly_plan = projection
+        .plan_for_assembly(
+            &assembly,
+            prepared_inputs(),
+            prepared_output(result_payload),
+            prepared_output(structural_random_response_receipt_payload_bytes_upper_bound()),
+            prepared_output_set(),
+        )
+        .unwrap();
+    let FeaResourceDemand::StructuralRandomResponseAssembly(demand) = &assembly_plan.input.demand
+    else {
+        panic!("random-response assembly plan has the wrong typed demand");
+    };
+    assert_eq!(
+        demand.interval_count.0,
+        assembly.scope().plan().interval_count() as u64
+    );
+    assert_eq!(
+        FeaResourcePlan::from_canonical_bytes(&assembly_plan.canonical_bytes().unwrap()).unwrap(),
+        assembly_plan
+    );
+    let mut underreported = assembly_plan.input.clone();
+    let FeaResourceDemand::StructuralRandomResponseAssembly(demand) = &mut underreported.demand
+    else {
+        unreachable!()
+    };
+    demand.interval_count.0 = demand.task_count.0.saturating_sub(1);
+    assert!(build_resource_plan(underreported).is_err());
     let result = StructuralRandomResponseSolverResult::new(&workload, assembly).unwrap();
+    assert!(result.canonical_bytes().unwrap().len() as u64 <= result_payload);
     assert_eq!(
         StructuralRandomResponseSolverResult::from_canonical_bytes(
             &result.canonical_bytes().unwrap(),
@@ -239,6 +333,28 @@ fn execute_with_group_size(
         result
     );
     result
+}
+
+fn prepared_inputs() -> PreparedInputResourceFacts {
+    PreparedInputResourceFacts {
+        encoded_payload_bytes: ByteCount(1024),
+        transport_closure_bytes: ByteCount(2048),
+        decoded_resident_bytes_admission_budget: ByteCount(4096),
+    }
+}
+
+fn prepared_output(payload: u64) -> PreparedOutputResourceFacts {
+    PreparedOutputResourceFacts {
+        encoded_payload_bytes_upper_bound: ByteCount(payload),
+        transport_closure_bytes_upper_bound: ByteCount(payload + 4096),
+        construction_resident_bytes_admission_budget: ByteCount(payload),
+    }
+}
+
+fn prepared_output_set() -> PreparedOutputSetResourceFacts {
+    PreparedOutputSetResourceFacts {
+        encoded_bytes_upper_bound: ByteCount(4096),
+    }
 }
 
 fn integration_policy() -> RandomResponseIntegrationPolicy {

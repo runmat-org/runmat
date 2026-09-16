@@ -23,6 +23,9 @@ mod observation_history_checkpoint;
 mod observation_history_task;
 mod observation_partition;
 mod observation_source;
+mod portable_task_support;
+mod random_response_object_access;
+mod random_response_task;
 mod resource_usage;
 mod response;
 mod response_spectrum_object_access;
@@ -43,6 +46,7 @@ mod structural_prestress_producer;
 mod structural_prestressed_frequency_study;
 mod structural_prestressed_modal_frequency_study;
 mod structural_prestressed_modal_study;
+mod structural_random_response_study;
 mod structural_sequence;
 mod structural_transient_recovery;
 mod structural_transient_sequence;
@@ -161,6 +165,26 @@ pub use observation_partition::{
     PreparedStructuralObservationReduction, StructuralObservationReductionPreparation,
 };
 pub use observation_source::StructuralObservationWorkloadSource;
+pub use random_response_object_access::{
+    decode_prepared_structural_random_response_assembly_request,
+    decode_prepared_structural_random_response_interval_request,
+    decode_prepared_structural_random_response_interval_result,
+    decode_prepared_structural_random_response_numerical_receipt,
+    decode_prepared_structural_random_response_solver_result,
+    decode_prepared_structural_random_response_workload,
+    prepare_structural_random_response_assembly_request_objects,
+    prepare_structural_random_response_interval_request_objects,
+    prepare_structural_random_response_interval_result_objects,
+    prepare_structural_random_response_numerical_receipt_objects,
+    prepare_structural_random_response_workload_objects,
+};
+pub use random_response_task::{
+    import_structural_random_response_interval, import_structural_random_response_result,
+    prepare_structural_random_response_assembly, prepare_structural_random_response_fanout,
+    ImportedStructuralRandomResponseInterval, ImportedStructuralRandomResponseResult,
+    PreparedStructuralRandomResponseAssemblyTask, PreparedStructuralRandomResponseIntervalTask,
+    StructuralRandomResponseAssemblyPreparation, StructuralRandomResponseFanoutPreparation,
+};
 pub use resource_usage::{
     extend_structural_resource_usage, prepare_planned_resource_graph_usage,
     prepare_structural_resource_usage, validate_observation_resource_usage,
@@ -252,6 +276,9 @@ pub use structural_prestressed_frequency_study::{
 pub use structural_prestressed_modal_frequency_study::StructuralPrestressedModalFrequencyStudyCoordinator;
 pub use structural_prestressed_modal_study::{
     StructuralPrestressedModalStudyCoordinator, StructuralPrestressedModalStudyPreparation,
+};
+pub use structural_random_response_study::{
+    StructuralRandomResponseStudyCoordinator, StructuralRandomResponseStudyPreparation,
 };
 pub use structural_sequence::{
     import_structural_sequence_completion, validate_structural_sequence_workloads,

@@ -433,6 +433,7 @@ pub enum SolverMethod {
     StructuralDirectHarmonicGmres,
     StructuralModalHarmonicDenseDirect,
     StructuralModalResponseSpectrumCombination,
+    StructuralRandomResponseIntegration,
     IncrementalNewtonRaphson,
     ElectromagneticEdgeCurlCurlHarmonicBlockBicgstab,
     AcousticDomainGraphHelmholtzHarmonic,
@@ -459,6 +460,7 @@ impl SolverMethod {
             Self::StructuralModalResponseSpectrumCombination => {
                 "structural_modal_response_spectrum_combination"
             }
+            Self::StructuralRandomResponseIntegration => "structural_random_response_integration",
             Self::IncrementalNewtonRaphson => "incremental_newton_raphson",
             Self::ElectromagneticEdgeCurlCurlHarmonicBlockBicgstab => {
                 "electromagnetic_edge_curl_curl_harmonic_block_bicgstab"

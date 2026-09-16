@@ -1,5 +1,3 @@
-use std::collections::BTreeSet;
-
 use runmat_analysis_fea::{
     constraints::CanonicalStructuralConstraintPlan,
     execution::{
@@ -28,6 +26,7 @@ use runmat_execution_artifact::{
 use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
 use serde::Serialize;
 
+use crate::portable_task_support::{resource_plan_objects, task_host};
 use crate::{
     decode_prepared_structural_modal_response_spectrum_direction_result,
     decode_prepared_structural_modal_response_spectrum_field_recovery,
@@ -39,9 +38,7 @@ use crate::{
     prepare_structural_modal_response_spectrum_direction_request_objects,
     prepare_structural_modal_response_spectrum_workload_objects, prepared_input_resource_facts,
     projected_output_resource_facts, projected_output_set_resource_facts, AnalysisBridgeError,
-    AnalysisBridgeResult, AnalysisCapabilityRequirement, AnalysisHostWorkload,
-    AnalysisWorkloadInput, AnalysisWorkloadRequest, PreparedAnalysisObjects,
-    PreparedAnalysisProgram, ANALYSIS_HOST_ABI,
+    AnalysisBridgeResult, AnalysisHostWorkload, PreparedAnalysisObjects, PreparedAnalysisProgram,
 };
 
 const TASK_PREFIX: &[u8] = b"runmat-analysis-structural-modal-response-spectrum-task/v1\0";
@@ -585,65 +582,6 @@ fn execution_plan(
         contract_digest("response-spectrum-execution", &resources.identity)?,
     )
     .map_err(Into::into)
-}
-
-fn task_host(
-    study: StudyIdentity,
-    step: StepIdentity,
-    execution_plan: ExecutionPlanIdentity,
-    work_kind: AnalysisWorkKind,
-    inputs: &[PreparedAnalysisObjects],
-    outputs: Vec<AnalysisNumericalObjectKind>,
-    artifact_access: ArtifactAccess,
-) -> AnalysisBridgeResult<AnalysisHostWorkload> {
-    let workload_inputs = inputs
-        .iter()
-        .map(|input| AnalysisWorkloadInput {
-            kind: input.manifest.kind,
-            logical_identity: input.manifest.logical_identity,
-            payload_digest: input.manifest.payload_digest,
-            manifest_digest: input.root.digest,
-            manifest_encoded_length: input.root.encoded_length,
-            reference_kind: if matches!(
-                input.manifest.kind,
-                AnalysisNumericalObjectKind::SemanticState
-                    | AnalysisNumericalObjectKind::StructuralModalResponseSpectrumDirectionResult
-            ) {
-                ValueRefKind::ResultObject
-            } else {
-                ValueRefKind::DriverObject
-            },
-        })
-        .collect();
-    let request = AnalysisWorkloadRequest::new(
-        study,
-        step,
-        execution_plan,
-        work_kind,
-        workload_inputs,
-        outputs,
-        BTreeSet::from([AnalysisCapabilityRequirement::Host {
-            abi: ANALYSIS_HOST_ABI.into(),
-        }]),
-    )?;
-    AnalysisHostWorkload::new(request, artifact_access)
-}
-
-fn resource_plan_objects(
-    plan: &FeaResourcePlan,
-    chunk_bytes: usize,
-    limits: ObjectInventoryLimits,
-) -> AnalysisBridgeResult<PreparedAnalysisObjects> {
-    prepare_analysis_objects(
-        AnalysisNumericalObjectKind::ResourcePlan,
-        plan.identity.digest(),
-        &plan
-            .canonical_bytes()
-            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
-        chunk_bytes,
-        ObjectNamespace::InputValue,
-        limits,
-    )
 }
 
 fn contract_digest<T: Serialize>(domain: &'static str, value: &T) -> AnalysisBridgeResult<Digest> {

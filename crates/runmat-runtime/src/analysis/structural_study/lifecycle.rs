@@ -32,6 +32,7 @@ mod prestressed_frequency_completion;
 mod prestressed_frequency_modal_reduction;
 mod prestressed_frequency_states;
 mod prestressed_modal_completion;
+mod random_response_completion;
 mod response_spectrum_completion;
 
 pub(in crate::analysis) use buckling_completion::complete_buckling_study;
@@ -45,12 +46,15 @@ pub(in crate::analysis) use preparation::{
     complete_response_spectrum_modal_options, prepare_structural_buckling_template,
     prepare_structural_frequency_workload, prepare_structural_modal_transient_template,
     prepare_structural_modal_workload, prepare_structural_prestressed_frequency_template,
-    prepare_structural_prestressed_modal_template, prepare_structural_response_spectrum_template,
+    prepare_structural_prestressed_modal_template, prepare_structural_random_response_template,
+    prepare_structural_response_spectrum_template,
 };
 pub(in crate::analysis) use prestressed_frequency_completion::complete_prestressed_frequency_study;
 use prestressed_frequency_completion::complete_structural_prestressed_frequency;
 pub(in crate::analysis) use prestressed_modal_completion::complete_prestressed_modal_study;
 use prestressed_modal_completion::complete_structural_prestressed_modal;
+pub(in crate::analysis) use random_response_completion::complete_random_response_study;
+use random_response_completion::complete_structural_random_response;
 pub(in crate::analysis) use response_spectrum_completion::complete_response_spectrum_study;
 use response_spectrum_completion::complete_structural_response_spectrum;
 
@@ -238,6 +242,20 @@ pub fn analysis_complete_structural_study_intent_op(
             },
             StructuralStudyNumericalResult::StructuralModalResponseSpectrum(result),
         ) => complete_structural_response_spectrum(
+            intent,
+            resolved_model,
+            persisted_mesh,
+            meshing_output.artifact,
+            workloads,
+            *result,
+            completion_identity,
+        ),
+        (
+            runmat_analysis_fea::execution::StructuralStudyWorkloads::HeterogeneousSequence {
+                workloads,
+            },
+            StructuralStudyNumericalResult::StructuralRandomResponse(result),
+        ) => complete_structural_random_response(
             intent,
             resolved_model,
             persisted_mesh,

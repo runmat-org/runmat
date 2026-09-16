@@ -61,6 +61,9 @@ pub(crate) fn package_exact_structural_study_result(
         ExactStructuralAnalysisPublication::StructuralModalResponseSpectrum {
             completion, ..
         } => modal_response_spectrum_closure(completion, &decoded.artifact_access)?,
+        ExactStructuralAnalysisPublication::StructuralRandomResponse { completion, .. } => {
+            random_response_closure(completion, &decoded.artifact_access)?
+        }
         ExactStructuralAnalysisPublication::StructuralBuckling { completion, .. } => {
             buckling_closure(completion, &decoded.artifact_access)?
         }
@@ -462,6 +465,36 @@ fn modal_response_spectrum_closure(
             response_receipt_root: Box::new(response_receipt_root),
             field_recovery_root: Box::new(field_recovery_root),
             envelope_state_root: Box::new(envelope_state_root),
+            objects,
+        },
+    )
+}
+
+fn random_response_closure(
+    completion: &crate::CompletedStructuralRandomResponseStudy,
+    access: &ArtifactAccess,
+) -> NativeExecutionResult<ExactStructuralStudyAnalysisClosure> {
+    let (roots, objects) = numerical_closure_roots(
+        [
+            &completion.modal.objects,
+            &completion.modal.numerical_receipt_objects,
+            &completion.basis_state.objects,
+            &completion.response.result_objects,
+            &completion.response.receipt_objects,
+            &completion.statistics_state.objects,
+        ],
+        access,
+    )?;
+    let [modal_result_root, modal_receipt_root, basis_state_root, response_result_root, response_receipt_root, statistics_state_root] =
+        roots;
+    Ok(
+        ExactStructuralStudyAnalysisClosure::StructuralRandomResponse {
+            modal_result_root: Box::new(modal_result_root),
+            modal_receipt_root: Box::new(modal_receipt_root),
+            basis_state_root: Box::new(basis_state_root),
+            response_result_root: Box::new(response_result_root),
+            response_receipt_root: Box::new(response_receipt_root),
+            statistics_state_root: Box::new(statistics_state_root),
             objects,
         },
     )

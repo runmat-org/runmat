@@ -477,6 +477,63 @@ model = fea.model("launch_model", geom, ...
     "ResponseSpectra", {launchSpectrum});
 ```
 
+### Random vibration from cross-power spectra
+
+Random response is a two-step structural study: modal extraction publishes a mass-normalized modal
+basis, then the random-response step integrates an authored cross-power spectral-density (CPSD)
+matrix over frequency. The excitation owns the physical input definition. Solver options own only
+modal damping, modal-mass truncation, quadrature tolerances, and how many canonical frequency
+intervals may be grouped into one portable task.
+
+Each channel has a quantity, coordinate frame, and direction. At every frequency, `values` is the
+complete row-major complex CPSD matrix. Diagonal entries are auto spectra; off-diagonal entries
+retain phase and correlation between channels. RunMat requires a Hermitian positive-semidefinite
+matrix, one-sided density per hertz, strictly increasing nonnegative frequencies, and units of the
+channel quantity squared per hertz. For one base-acceleration channel, a sample is a one-entry
+matrix:
+
+```yaml
+random_excitations:
+  - excitation_id: broadband_base
+    frequencies_hz: [0.1, 10.0, 100.0]
+    channels:
+      - channel_id: base_x
+        quantity: base_acceleration
+        direction: { frame: global, vector: [1.0, 0.0, 0.0] }
+    spectral_density:
+      - values: [{ real: 0.0001, imaginary: 0.0 }]
+      - values: [{ real: 0.0002, imaginary: 0.0 }]
+      - values: [{ real: 0.0001, imaginary: 0.0 }]
+    convention: one_sided_per_hertz
+    interpolation: linear_frequency
+    extrapolation: reject
+    evidence:
+      max_absolute_density_error: 0.0
+      equivalent_degrees_of_freedom: null
+    provenance_digest: sha256:documented-broadband-base
+```
+
+The consumer step names that excitation and consumes the exact modal-basis state through a typed
+state transition. RunMat partitions the spectrum into resonance-aware frequency intervals, admits
+the resources for each interval, executes the same canonical tasks locally or on remote workers,
+and reduces interval contributions in ordinal order. Completion publishes variances and RMS fields
+plus a numerical receipt bound to the model, basis, excitation, integration policy, task set, and
+result. CPU execution is available as an experimental formulation; unsupported accelerator
+placement is rejected rather than silently falling back.
+
+The complete runnable study is
+[`modal-random-response-experimental.fea`](examples/modal-random-response-experimental.fea):
+
+```sh
+runmat check docs/fea/examples/modal-random-response-experimental.fea
+runmat run docs/fea/examples/modal-random-response-experimental.fea
+```
+
+Use the ordinary result surface after completion: select a published field with `fea.field(...)`,
+then call `plot(field)`; call `mesh(run)` to inspect the solver topology. Random-excitation
+authoring is also available through the typed document operations `add_random_excitation`,
+`update_random_excitation`, and `remove_random_excitation`.
+
 ## Project Entrypoints
 
 Named entrypoints can target `.m` or `.fea` files:

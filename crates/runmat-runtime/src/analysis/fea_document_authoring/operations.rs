@@ -5,7 +5,7 @@ use runmat_analysis_core::{
     AnalysisSequence, CoupledPhysicsFamily, ExcitationAction, ExcitationCase,
     FormulationRequirement, InitialCondition, MaterialAcousticModel, MaterialElectricalModel,
     MaterialMechanicalModel, MaterialPlasticModel, MaterialThermalModel, PhysicalSignal,
-    ProcedureStep, ResponseSpectrum,
+    ProcedureStep, RandomExcitationSpectrum, ResponseSpectrum,
 };
 use runmat_analysis_fea::ComputeBackend;
 use serde::Serialize;
@@ -215,6 +215,23 @@ pub(super) fn mutate(
         }
         FeaStudyDocumentOperation::RemoveResponseSpectrum => {
             remove_named(document, "response_spectra", input, response_spectrum_id)
+        }
+        FeaStudyDocumentOperation::AddRandomExcitation
+        | FeaStudyDocumentOperation::UpdateRandomExcitation => {
+            let value: RandomExcitationSpectrum = decode(input, operation.as_str())?;
+            let id = value.excitation_id.0.clone();
+            mutate_sequence(
+                document,
+                "random_excitations",
+                &id,
+                to_yaml(&value)?,
+                add(FeaStudyDocumentOperation::AddRandomExcitation),
+                random_excitation_id,
+            )?;
+            Ok("random_excitations")
+        }
+        FeaStudyDocumentOperation::RemoveRandomExcitation => {
+            remove_named(document, "random_excitations", input, random_excitation_id)
         }
         FeaStudyDocumentOperation::SetSequence => {
             let value: AnalysisSequence = decode(input, operation.as_str())?;

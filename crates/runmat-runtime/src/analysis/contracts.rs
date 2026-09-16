@@ -581,6 +581,35 @@ impl Default for AnalysisResponseSpectrumRunOptions {
     }
 }
 
+/// Numerical execution policy for a modal random-response consumer.
+///
+/// The referenced excitation owns channels, PSD units, correlation, interpolation, and
+/// extrapolation. These options own only quadrature accuracy and portable interval sizing.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AnalysisRandomResponseRunOptions {
+    pub deterministic_mode: bool,
+    pub precision_mode: PrecisionMode,
+    pub quality_policy: QualityPolicy,
+    pub integration: runmat_analysis_fea::solve::dynamics::RandomResponseIntegrationPolicy,
+    pub maximum_intervals_per_task: usize,
+    #[serde(default)]
+    pub solver_mesh_artifact_path: Option<String>,
+}
+
+impl Default for AnalysisRandomResponseRunOptions {
+    fn default() -> Self {
+        Self {
+            deterministic_mode: false,
+            precision_mode: PrecisionMode::Fp64,
+            quality_policy: QualityPolicy::Balanced,
+            integration: runmat_analysis_fea::solve::dynamics::RandomResponseIntegrationPolicy::production_default(),
+            maximum_intervals_per_task: 32,
+            solver_mesh_artifact_path: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AnalysisStructuralTimeStepPolicy {
@@ -2283,6 +2312,7 @@ pub enum AnalysisSolverOptions {
     StructuralFrequency(AnalysisStructuralFrequencyRunOptions),
     StructuralModes(AnalysisModalRunOptions),
     StructuralResponseSpectrum(AnalysisResponseSpectrumRunOptions),
+    StructuralRandomResponse(AnalysisRandomResponseRunOptions),
     StructuralBuckling(AnalysisBucklingRunOptions),
     AcousticHelmholtz(AnalysisAcousticRunOptions),
     ThermalDiffusion(AnalysisThermalRunOptions),
@@ -2301,6 +2331,9 @@ impl AnalysisSolverOptions {
             Self::StructuralFrequency(options) => options.solver_mesh_artifact_path = None,
             Self::StructuralModes(options) => options.solver_mesh_artifact_path = None,
             Self::StructuralResponseSpectrum(options) => {
+                options.solver_mesh_artifact_path = None;
+            }
+            Self::StructuralRandomResponse(options) => {
                 options.solver_mesh_artifact_path = None;
             }
             Self::StructuralBuckling(options) => options.solver_mesh_artifact_path = None,
@@ -2322,8 +2355,8 @@ impl AnalysisSolverOptions {
     pub fn defaults_for(step: &ProcedureStep) -> Result<Self, String> {
         use AnalysisProcedure::{
             EigenvalueBuckling, HarmonicResponse, ModalExtraction, ModalResponseSpectrum,
-            Nonlinear, PrestressedHarmonicResponse, PrestressedModalExtraction, Static,
-            TransientResponse,
+            Nonlinear, PrestressedHarmonicResponse, PrestressedModalExtraction, RandomResponse,
+            Static, TransientResponse,
         };
         use PhysicsFamily::{Acoustic, Coupled, Electromagnetic, Fluid, Structural, Thermal};
 
@@ -2341,10 +2374,27 @@ impl AnalysisSolverOptions {
                 ModalExtraction | PrestressedModalExtraction,
                 SolutionSpace::Direct,
             ) => {
-                Ok(Self::StructuralModes(AnalysisModalRunOptions::default()))
+                let runmat_analysis_core::IndependentDomain::Eigenvalue { requested_count } =
+                    &step.independent_domain
+                else {
+                    return Err(format!(
+                        "modal procedure step `{}` requires an eigenvalue domain",
+                        step.step_id.as_str()
+                    ));
+                };
+                let options = AnalysisModalRunOptions {
+                    truncation: runmat_analysis_fea::ModalTruncationPolicy::requested(
+                        *requested_count,
+                    ),
+                    ..AnalysisModalRunOptions::default()
+                };
+                Ok(Self::StructuralModes(options))
             }
             (Structural, ModalResponseSpectrum, SolutionSpace::ModalReduced) => Ok(
                 Self::StructuralResponseSpectrum(AnalysisResponseSpectrumRunOptions::default()),
+            ),
+            (Structural, RandomResponse, SolutionSpace::ModalReduced) => Ok(
+                Self::StructuralRandomResponse(AnalysisRandomResponseRunOptions::default()),
             ),
             (Structural, EigenvalueBuckling, SolutionSpace::Direct) => Ok(
                 Self::StructuralBuckling(AnalysisBucklingRunOptions::default()),
@@ -2714,6 +2764,7 @@ pub enum AnalysisStudyStepNumericalResultData {
     Standard,
     StructuralFrequency(Box<StructuralFrequencyResultsData>),
     StructuralResponseSpectrum(Box<StructuralResponseSpectrumResultsData>),
+    StructuralRandomResponse(Box<StructuralRandomResponseResultsData>),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -2729,6 +2780,13 @@ pub struct StructuralResponseSpectrumResultsData {
     pub numerical_receipt:
         runmat_analysis_fea::execution::StructuralModalResponseSpectrumNumericalReceipt,
     pub field_recovery: runmat_analysis_fea::solve::dynamics::ResponseSpectrumFieldRecovery,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StructuralRandomResponseResultsData {
+    pub result: runmat_analysis_fea::execution::StructuralRandomResponseSolverResult,
+    pub numerical_receipt: runmat_analysis_fea::execution::StructuralRandomResponseNumericalReceipt,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -3446,6 +3504,20 @@ mod tests {
             AnalysisProcedure::TransientResponse,
         );
         assert!(AnalysisSolverOptions::defaults_for(&electrothermal).is_err());
+    }
+
+    #[test]
+    fn modal_solver_defaults_preserve_the_authored_requested_count() {
+        let mut modal = ProcedureStep::structural_modal("modes");
+        modal.independent_domain = runmat_analysis_core::IndependentDomain::Eigenvalue {
+            requested_count: 11,
+        };
+        let AnalysisSolverOptions::StructuralModes(options) =
+            AnalysisSolverOptions::defaults_for(&modal).expect("modal defaults")
+        else {
+            panic!("modal step must resolve modal solver options");
+        };
+        assert_eq!(options.truncation.requested_mode_count(), 11);
     }
 
     #[test]

@@ -45,6 +45,7 @@ mod packaging;
 mod prestressed_frequency_import;
 mod prestressed_modal_frequency_import;
 mod prestressed_modal_import;
+mod random_response_import;
 mod response_spectrum_import;
 mod result_import;
 
@@ -102,6 +103,15 @@ enum ExactStructuralStudyAnalysisClosure {
         response_receipt_root: Box<ValueRef>,
         field_recovery_root: Box<ValueRef>,
         envelope_state_root: Box<ValueRef>,
+        objects: Vec<ValueRef>,
+    },
+    StructuralRandomResponse {
+        modal_result_root: Box<ValueRef>,
+        modal_receipt_root: Box<ValueRef>,
+        basis_state_root: Box<ValueRef>,
+        response_result_root: Box<ValueRef>,
+        response_receipt_root: Box<ValueRef>,
+        statistics_state_root: Box<ValueRef>,
         objects: Vec<ValueRef>,
     },
     StructuralBuckling {
@@ -181,6 +191,7 @@ impl ExactStructuralStudyAnalysisClosure {
             | Self::StructuralModal { objects, .. }
             | Self::StructuralModalTransient { objects, .. }
             | Self::StructuralModalResponseSpectrum { objects, .. }
+            | Self::StructuralRandomResponse { objects, .. }
             | Self::StructuralBuckling { objects, .. }
             | Self::StructuralPrestressedModal { objects, .. }
             | Self::StructuralPrestressedFrequency { objects, .. }
@@ -274,6 +285,27 @@ impl ExactStructuralStudyAnalysisClosure {
                         response_receipt_root,
                         field_recovery_root,
                         envelope_state_root,
+                    ],
+                    objects,
+                )?;
+            }
+            Self::StructuralRandomResponse {
+                modal_result_root,
+                modal_receipt_root,
+                basis_state_root,
+                response_result_root,
+                response_receipt_root,
+                statistics_state_root,
+                objects,
+            } => {
+                validate_declared_roots(
+                    &[
+                        modal_result_root,
+                        modal_receipt_root,
+                        basis_state_root,
+                        response_result_root,
+                        response_receipt_root,
+                        statistics_state_root,
                     ],
                     objects,
                 )?;
@@ -516,6 +548,7 @@ pub enum ExactStructuralStudyAnalysisResult {
     },
     StructuralModalTransient(Box<ExactStructuralModalTransientAnalysisResult>),
     StructuralModalResponseSpectrum(Box<ExactStructuralModalResponseSpectrumAnalysisResult>),
+    StructuralRandomResponse(Box<ExactStructuralRandomResponseAnalysisResult>),
     StructuralBuckling(Box<ExactStructuralBucklingAnalysisResult>),
     StructuralPrestressedModal(Box<ExactStructuralPrestressedModalAnalysisResult>),
     StructuralPrestressedFrequency(Box<ExactStructuralPrestressedFrequencyAnalysisResult>),
@@ -550,6 +583,19 @@ pub struct ExactStructuralModalResponseSpectrumAnalysisResult {
         runmat_analysis_fea::execution::StructuralModalResponseSpectrumNumericalReceipt,
     pub field_recovery: runmat_analysis_fea::solve::dynamics::ResponseSpectrumFieldRecovery,
     pub envelope_state: runmat_analysis_fea::execution::CanonicalSemanticState,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExactStructuralRandomResponseAnalysisResult {
+    pub modal_workload: Box<StructuralModalWorkload>,
+    pub response_workload: Box<runmat_analysis_fea::execution::StructuralRandomResponseWorkload>,
+    pub modal_result: Box<StructuralModalSolverResult>,
+    pub modal_numerical_receipt: StructuralModalNumericalReceipt,
+    pub basis_state: runmat_analysis_fea::execution::CanonicalSemanticState,
+    pub response_result: Box<runmat_analysis_fea::execution::StructuralRandomResponseSolverResult>,
+    pub response_numerical_receipt:
+        runmat_analysis_fea::execution::StructuralRandomResponseNumericalReceipt,
+    pub statistics_state: runmat_analysis_fea::execution::CanonicalSemanticState,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -661,6 +707,12 @@ pub(crate) enum ExactStructuralAnalysisPublication<'a> {
         completion: &'a crate::CompletedStructuralModalResponseSpectrumStudy,
         unresolved_workloads_digest: Digest,
     },
+    StructuralRandomResponse {
+        signals:
+            &'a [crate::remote::signal_materialization::CompletedRemoteSignalMaterialization],
+        completion: &'a crate::CompletedStructuralRandomResponseStudy,
+        unresolved_workloads_digest: Digest,
+    },
     StructuralBuckling {
         signals:
             &'a [crate::remote::signal_materialization::CompletedRemoteSignalMaterialization],
@@ -703,6 +755,7 @@ impl ExactStructuralAnalysisPublication<'_> {
             | Self::StructuralModal { signals, .. }
             | Self::StructuralModalTransient { signals, .. }
             | Self::StructuralModalResponseSpectrum { signals, .. }
+            | Self::StructuralRandomResponse { signals, .. }
             | Self::StructuralBuckling { signals, .. }
             | Self::StructuralPrestressedModal { signals, .. }
             | Self::StructuralPrestressedFrequency { signals, .. }
@@ -730,6 +783,10 @@ impl ExactStructuralAnalysisPublication<'_> {
                 ..
             }
             | Self::StructuralModalResponseSpectrum {
+                unresolved_workloads_digest,
+                ..
+            }
+            | Self::StructuralRandomResponse {
                 unresolved_workloads_digest,
                 ..
             }

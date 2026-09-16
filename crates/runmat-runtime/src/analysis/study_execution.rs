@@ -73,6 +73,22 @@ pub(super) fn execute_study_step(
                 procedure_step.step_id.as_str().to_string(),
             )]),
         )),
+        AnalysisSolverOptions::StructuralRandomResponse(_) => Err(operation_error(
+            ANALYSIS_RUN_STUDY_OPERATION,
+            ANALYSIS_RUN_STUDY_OP_VERSION,
+            context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_STUDY.RANDOM_RESPONSE_REQUIRES_SEQUENCE",
+                error_type: OperationErrorType::Contract,
+                retryable: false,
+                severity: OperationErrorSeverity::Fatal,
+            },
+            "random response executes with its modal producer through the portable study boundary",
+            std::collections::BTreeMap::from([(
+                "step_id".to_string(),
+                procedure_step.step_id.as_str().to_string(),
+            )]),
+        )),
         AnalysisSolverOptions::StructuralBuckling(_) => Err(operation_error(
             ANALYSIS_RUN_STUDY_OPERATION,
             ANALYSIS_RUN_STUDY_OP_VERSION,
