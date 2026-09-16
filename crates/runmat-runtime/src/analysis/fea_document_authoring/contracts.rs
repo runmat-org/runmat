@@ -299,12 +299,31 @@ pub struct FeaStudyMaterialInput {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FeaStudyMaterialAssignmentInput {
-    pub region: String,
+    pub target: FeaStudyPropertyRegionTargetInput,
     pub material: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expected_material: Option<String>,
     #[serde(default = "default_assignment_confidence")]
     pub confidence: EvidenceConfidence,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FeaStudyPropertyRegionTargetInput {
+    Beam(FeaStudyPropertyRegionSelectionInput),
+    Shell(FeaStudyPropertyRegionSelectionInput),
+    Solid(FeaStudyPropertyRegionSelectionInput),
+    Cell(FeaStudyPropertyRegionSelectionInput),
+    AllBeams,
+    AllShells,
+    AllSolids,
+    AllCells,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FeaStudyPropertyRegionSelectionInput {
+    pub region: String,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -331,7 +350,7 @@ pub(super) struct IdInput {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct AssignmentIdInput {
-    pub region: String,
+    pub target: FeaStudyPropertyRegionTargetInput,
     pub material: String,
 }
 
@@ -374,6 +393,8 @@ pub struct FeaStudyMaterialEntry {
 #[serde(rename_all = "camelCase")]
 pub struct FeaStudyMaterialAssignmentEntry {
     pub index: usize,
+    pub target_kind: Option<String>,
+    pub target_scope: Option<String>,
     pub region: Option<String>,
     pub material: Option<String>,
 }

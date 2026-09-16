@@ -99,7 +99,10 @@ fn native_buckling_task_round_trips_the_preload_bound_result() {
     }
     let volume_region = PersistentEntityId {
         kind: PersistentEntityKind::Region,
-        source_topology_id: model.material_assignments[0].region_id.clone(),
+        source_topology_id: model.material_assignments[0]
+            .selected_region_id()
+            .expect("fixture uses selected material region")
+            .to_owned(),
         assembly_path: vec!["root".into()],
     };
     mesh.topology.volume_elements[0].region_id = volume_region.clone();

@@ -36,7 +36,9 @@ pub struct NativeExactMeshingJob<'a> {
 
 pub struct NativeExactMeshingResult {
     pub dag_result: ExactMeshingDagRunResult,
+    pub source_edge_ids: BTreeMap<u64, runmat_geometry_core::PersistentEntityId>,
     pub source_face_ids: BTreeMap<u64, runmat_geometry_core::PersistentEntityId>,
+    pub source_region_ids: BTreeMap<u64, runmat_geometry_core::PersistentEntityId>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -51,6 +53,8 @@ pub enum NativeExactMeshingJobError {
     Session(#[from] NativeExecutionError),
     #[error(transparent)]
     Run(#[from] ExactMeshingDagRunError),
+    #[error("meshed volume domains do not preserve admitted CAD-region identity")]
+    RegionIdentityMismatch,
 }
 
 impl NativeExactMeshingJobError {
@@ -102,7 +106,9 @@ pub fn mesh_exact_geometry(
     job.request.tolerance = admitted_tolerance;
     job.evidence.platform.exact_kernel_abi =
         prepared_geometry.document().source.kernel_version.clone();
+    let source_edge_ids = prepared_geometry.source_edge_ids().clone();
     let source_face_ids = prepared_geometry.source_face_ids().clone();
+    let source_region_ids = prepared_geometry.source_region_ids().clone();
     let (session, access, geometry) = {
         let span = tracing::info_span!("meshing.native_session");
         let _entered = span.enter();
@@ -141,9 +147,27 @@ pub fn mesh_exact_geometry(
             &mut executor,
         )?
     };
+    let meshed_region_ids = dag_result
+        .artifact
+        .topology
+        .regions
+        .iter()
+        .map(|region| region.region_id.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+    let admitted_region_ids = source_region_ids
+        .values()
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>();
+    if source_region_ids.len() != meshed_region_ids.len()
+        || admitted_region_ids != meshed_region_ids
+    {
+        return Err(NativeExactMeshingJobError::RegionIdentityMismatch);
+    }
     Ok(NativeExactMeshingResult {
         dag_result,
+        source_edge_ids,
         source_face_ids,
+        source_region_ids,
     })
 }
 

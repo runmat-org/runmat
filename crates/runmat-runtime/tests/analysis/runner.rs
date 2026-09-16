@@ -488,7 +488,11 @@ fn set_electric_potential_history(
         .first()
         .map(|assignment| {
             runmat_analysis_core::ExcitationTarget::Region(
-                runmat_analysis_core::RegionTarget::boundary(&assignment.region_id),
+                runmat_analysis_core::RegionTarget::boundary(
+                    assignment
+                        .selected_region_id()
+                        .expect("fixture uses selected material region"),
+                ),
             )
         })
         .unwrap_or_else(|| {
@@ -1309,7 +1313,10 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
         });
         model.material_assignments.truncate(1);
         if let Some(assignment) = model.material_assignments.first_mut() {
-            assignment.region_id = "thermal_core".to_owned();
+            *assignment
+                .target
+                .selected_region_id_mut()
+                .expect("fixture uses selected material region") = "thermal_core".to_owned();
         }
         model.sequence.steps = vec![runmat_analysis_core::ProcedureStep::thermal_transient(
             format!("step_thermal_{}", spec_id),
@@ -1859,14 +1866,20 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                     model
                         .material_assignments
                         .push(runmat_analysis_core::MaterialAssignment {
-                            region_id: "em_region_homogeneous".to_string(),
+                            target: runmat_analysis_core::PropertyRegionTarget::solid(
+                                "em_region_homogeneous",
+                            ),
                             expected_material_id: material_id.clone(),
                             assigned_material_id: material_id,
                             confidence: runmat_analysis_core::EvidenceConfidence::Verified,
                         });
                 } else {
                     for assignment in &mut model.material_assignments {
-                        assignment.region_id = "em_region_homogeneous".to_string();
+                        *assignment
+                            .target
+                            .selected_region_id_mut()
+                            .expect("fixture uses selected material region") =
+                            "em_region_homogeneous".to_string();
                         assignment.expected_material_id = material_id.clone();
                         assignment.assigned_material_id = material_id.clone();
                         assignment.confidence = runmat_analysis_core::EvidenceConfidence::Verified;
@@ -1880,7 +1893,9 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                         .iter()
                         .enumerate()
                         .map(|(idx, material)| runmat_analysis_core::MaterialAssignment {
-                            region_id: format!("em_region_{idx}"),
+                            target: runmat_analysis_core::PropertyRegionTarget::solid(format!(
+                                "em_region_{idx}"
+                            )),
                             expected_material_id: material.material_id.clone(),
                             assigned_material_id: material.material_id.clone(),
                             confidence: match idx % 3 {
@@ -1892,7 +1907,11 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                         .collect();
                 } else {
                     for (idx, assignment) in model.material_assignments.iter_mut().enumerate() {
-                        assignment.region_id = format!("em_region_{idx}");
+                        *assignment
+                            .target
+                            .selected_region_id_mut()
+                            .expect("fixture uses selected material region") =
+                            format!("em_region_{idx}");
                         let material_id = &model.materials[idx % model.materials.len()].material_id;
                         assignment.expected_material_id = material_id.clone();
                         assignment.assigned_material_id = material_id.clone();
@@ -1915,7 +1934,9 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                         if idx < 4 {
                             let material_id = ids[idx % ids.len()].clone();
                             runmat_analysis_core::MaterialAssignment {
-                                region_id: format!("em_sparse_region_{idx}"),
+                                target: runmat_analysis_core::PropertyRegionTarget::solid(format!(
+                                    "em_sparse_region_{idx}"
+                                )),
                                 expected_material_id: material_id.clone(),
                                 assigned_material_id: material_id,
                                 confidence: if idx % 2 == 0 {
@@ -1927,7 +1948,9 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                         } else {
                             let material_id = ids[idx % ids.len()].clone();
                             runmat_analysis_core::MaterialAssignment {
-                                region_id: format!("em_sparse_region_{idx}"),
+                                target: runmat_analysis_core::PropertyRegionTarget::solid(format!(
+                                    "em_sparse_region_{idx}"
+                                )),
                                 expected_material_id: material_id.clone(),
                                 assigned_material_id: material_id,
                                 confidence: runmat_analysis_core::EvidenceConfidence::Inferred,
@@ -1946,7 +1969,9 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                     .map(|idx| {
                         let material_id = ids[idx % ids.len()].clone();
                         runmat_analysis_core::MaterialAssignment {
-                            region_id: format!("em_multiregion_region_{idx}"),
+                            target: runmat_analysis_core::PropertyRegionTarget::solid(format!(
+                                "em_multiregion_region_{idx}"
+                            )),
                             expected_material_id: material_id.clone(),
                             assigned_material_id: material_id,
                             confidence: if idx % 2 == 0 {
@@ -1966,7 +1991,9 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                         .enumerate()
                         .take(3)
                         .map(|(idx, material)| runmat_analysis_core::MaterialAssignment {
-                            region_id: format!("em_overlap_region_{idx}"),
+                            target: runmat_analysis_core::PropertyRegionTarget::solid(format!(
+                                "em_overlap_region_{idx}"
+                            )),
                             expected_material_id: material.material_id.clone(),
                             assigned_material_id: material.material_id.clone(),
                             confidence: runmat_analysis_core::EvidenceConfidence::Verified,
@@ -1974,7 +2001,11 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                         .collect();
                 } else {
                     for (idx, assignment) in model.material_assignments.iter_mut().enumerate() {
-                        assignment.region_id = format!("em_overlap_region_{}", idx % 3);
+                        *assignment
+                            .target
+                            .selected_region_id_mut()
+                            .expect("fixture uses selected material region") =
+                            format!("em_overlap_region_{}", idx % 3);
                         let material_id = &model.materials[idx % model.materials.len()].material_id;
                         assignment.expected_material_id = material_id.clone();
                         assignment.assigned_material_id = material_id.clone();
@@ -1992,7 +2023,9 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                     .map(|idx| {
                         let material_id = ids[idx % ids.len()].clone();
                         runmat_analysis_core::MaterialAssignment {
-                            region_id: format!("em_boundary_region_{idx}"),
+                            target: runmat_analysis_core::PropertyRegionTarget::solid(format!(
+                                "em_boundary_region_{idx}"
+                            )),
                             expected_material_id: material_id.clone(),
                             assigned_material_id: material_id,
                             confidence: if idx % 2 == 0 {
@@ -2014,7 +2047,9 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                     .map(|idx| {
                         let material_id = ids[idx % ids.len()].clone();
                         runmat_analysis_core::MaterialAssignment {
-                            region_id: format!("em_penalty_region_{idx}"),
+                            target: runmat_analysis_core::PropertyRegionTarget::solid(format!(
+                                "em_penalty_region_{idx}"
+                            )),
                             expected_material_id: material_id.clone(),
                             assigned_material_id: material_id,
                             confidence: if idx % 4 == 0 {
@@ -2036,7 +2071,9 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                     .map(|idx| {
                         let material_id = ids[idx % ids.len()].clone();
                         runmat_analysis_core::MaterialAssignment {
-                            region_id: format!("em_phase_region_{idx}"),
+                            target: runmat_analysis_core::PropertyRegionTarget::solid(format!(
+                                "em_phase_region_{idx}"
+                            )),
                             expected_material_id: material_id.clone(),
                             assigned_material_id: material_id,
                             confidence: if idx % 3 == 0 {
@@ -2587,7 +2624,12 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
         let mut regions = model
             .material_assignments
             .iter()
-            .map(|assignment| assignment.region_id.clone())
+            .map(|assignment| {
+                assignment
+                    .selected_region_id()
+                    .expect("fixture uses selected material region")
+                    .to_owned()
+            })
             .collect::<Vec<_>>();
         if regions.is_empty() {
             regions.push("root".to_string());
@@ -4438,7 +4480,10 @@ fn write_fixture_solver_mesh_artifact(
     mesh.geometry.geometry_revision = u64::from(model.geometry_revision);
 
     if let Some(assignment) = model.material_assignments.first() {
-        let assigned_region = assignment.region_id.clone();
+        let assigned_region = assignment
+            .selected_region_id()
+            .expect("fixture uses selected material region")
+            .to_owned();
         let region_identity = PersistentEntityId {
             kind: PersistentEntityKind::Region,
             source_topology_id: assigned_region.clone(),

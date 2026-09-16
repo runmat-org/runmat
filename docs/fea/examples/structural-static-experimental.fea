@@ -10,6 +10,18 @@ model:
   template: linear_static_structural
   defaults: template_scaffold
 
+materials:
+  steel:
+    name: Structural steel
+    mechanical:
+      youngs_modulus_pa: 200000000000.0
+      poisson_ratio: 0.3
+      density_kg_per_m3: 7850.0
+
+material_assignments:
+  - target: { solid: { region: region_default } }
+    material: steel
+
 constraints:
   - structural:
       constraint_id: fixed_support

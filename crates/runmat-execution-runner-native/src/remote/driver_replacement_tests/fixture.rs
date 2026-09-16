@@ -219,7 +219,8 @@ fn box_direct_transient_workload() -> StructuralTransientWorkload {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     model.geometry_id = "box".into();
     model.geometry_revision = 1;
-    model.material_assignments.clear();
+    model.material_assignments[0].target =
+        runmat_analysis_core::PropertyRegionTarget::solid("solid_000001");
     model.constraints[0].visit_targets_mut(|target| {
         *target = runmat_analysis_core::RegionTarget::boundary("face_000001");
     });

@@ -3,7 +3,59 @@ use super::signals::bindings::{
     FROZEN_STUDY_GENERATORS_PROPERTY,
 };
 use super::*;
-use runmat_analysis_core::ThermalDomain;
+use runmat_analysis_core::{PropertyRegionTarget, ThermalDomain};
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct GeometryBoundPropertyRegionTarget {
+    geometry_id: String,
+    geometry_revision: u32,
+    target: PropertyRegionTarget,
+}
+
+#[cfg(test)]
+impl GeometryBoundPropertyRegionTarget {
+    pub(super) const fn target(&self) -> &PropertyRegionTarget {
+        &self.target
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct GeometryBoundMaterialAssignment {
+    geometry_id: String,
+    geometry_revision: u32,
+    target: PropertyRegionTarget,
+    expected_material_id: String,
+    assigned_material_id: String,
+    confidence: EvidenceConfidence,
+}
+
+impl GeometryBoundMaterialAssignment {
+    fn require_geometry(
+        &self,
+        builtin: &'static str,
+        geometry: &GeometryAsset,
+    ) -> BuiltinResult<()> {
+        crate::builtins::fea::constraints::require_geometry_binding(
+            builtin,
+            "material assignment",
+            &self.geometry_id,
+            self.geometry_revision,
+            geometry,
+        )
+    }
+
+    fn into_assignment(self) -> MaterialAssignment {
+        MaterialAssignment {
+            target: self.target,
+            expected_material_id: self.expected_material_id,
+            assigned_material_id: self.assigned_material_id,
+            confidence: self.confidence,
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub(super) enum DomainPayload {
@@ -81,7 +133,7 @@ pub(super) struct StudyConstructorOptions {
     pub(super) frame: Option<CoordinateFrame>,
     pub(super) model_defaults: ModelDefaultsMode,
     pub(super) materials: Vec<MaterialModel>,
-    pub(super) material_assignments: Vec<MaterialAssignment>,
+    pub(super) material_assignments: Vec<GeometryBoundMaterialAssignment>,
     pub(super) constraints: Vec<BoundConstraintPayload>,
     pub(super) boundaries: Vec<GeometryBoundBoundary>,
     pub(super) signals: Vec<PhysicalSignal>,
@@ -165,10 +217,9 @@ pub(super) fn create_study_object_from_args(args: Vec<Value>) -> BuiltinResult<V
         }
     };
     if let Some(mesh) = supplied_mesh.as_ref() {
-        let aliases =
-            runmat_analysis_core::BoundaryRegionAliases::new(mesh.boundary_region_ids.clone())
-                .map_err(|error| builtin_error(STUDY_NAME, &ERROR_INPUT, error.to_string()))?;
-        model = runmat_analysis_core::resolve_boundary_region_aliases(&model, &aliases)
+        let aliases = runmat_analysis_core::GeometryRegionAliases::new(mesh.region_aliases.clone())
+            .map_err(|error| builtin_error(STUDY_NAME, &ERROR_INPUT, error.to_string()))?;
+        model = runmat_analysis_core::resolve_geometry_region_aliases(&model, &aliases)
             .map_err(|error| builtin_error(STUDY_NAME, &ERROR_INPUT, error.to_string()))?;
     }
     let execution = match supplied_execution {
@@ -345,7 +396,7 @@ struct ModelConstructorOptions {
     frame: Option<CoordinateFrame>,
     defaults: ModelDefaultsMode,
     materials: Vec<MaterialModel>,
-    material_assignments: Vec<MaterialAssignment>,
+    material_assignments: Vec<GeometryBoundMaterialAssignment>,
     constraints: Vec<BoundConstraintPayload>,
     boundaries: Vec<GeometryBoundBoundary>,
     signals: Vec<PhysicalSignal>,
@@ -692,18 +743,25 @@ pub(super) fn create_material_assignment_object_from_args(
         return Err(builtin_error(
             MATERIAL_ASSIGNMENT_NAME,
             &ERROR_INPUT,
-            "fea.materialAssignment requires region and material arguments",
+            "fea.materialAssignment requires a fea.PropertyRegionTarget and fea.Material",
         ));
     }
-    let region_id = scalar_string(&args[0], MATERIAL_ASSIGNMENT_NAME, &ERROR_INPUT)?;
-    let assigned_material_id = scalar_string(&args[1], MATERIAL_ASSIGNMENT_NAME, &ERROR_INPUT)?;
+    let target: GeometryBoundPropertyRegionTarget = object_payload(
+        MATERIAL_ASSIGNMENT_NAME,
+        &args[0],
+        FEA_PROPERTY_REGION_TARGET_CLASS,
+    )?;
+    let material: MaterialModel =
+        object_payload(MATERIAL_ASSIGNMENT_NAME, &args[1], FEA_MATERIAL_CLASS)?;
+    let assigned_material_id = material.material_id;
     let mut expected_material_id = assigned_material_id.clone();
     let mut confidence = EvidenceConfidence::Verified;
     for pair in expect_name_value_tail(MATERIAL_ASSIGNMENT_NAME, &args[2..])? {
         match pair.key.as_str() {
             "expectedmaterial" | "expectedmaterialid" => {
-                expected_material_id =
-                    scalar_string(pair.value, MATERIAL_ASSIGNMENT_NAME, &ERROR_INPUT)?;
+                let material: MaterialModel =
+                    object_payload(MATERIAL_ASSIGNMENT_NAME, pair.value, FEA_MATERIAL_CLASS)?;
+                expected_material_id = material.material_id;
             }
             "confidence" => {
                 let text = scalar_string(pair.value, MATERIAL_ASSIGNMENT_NAME, &ERROR_INPUT)?;
@@ -718,12 +776,50 @@ pub(super) fn create_material_assignment_object_from_args(
             }
         }
     }
-    material_assignment_to_object(MaterialAssignment {
-        region_id,
+    material_assignment_to_object(GeometryBoundMaterialAssignment {
+        geometry_id: target.geometry_id,
+        geometry_revision: target.geometry_revision,
+        target: target.target,
         expected_material_id,
         assigned_material_id,
         confidence,
     })
+}
+
+pub(super) fn create_property_region_target_object(
+    builtin: &'static str,
+    region: &Value,
+    kind: fn(String) -> PropertyRegionTarget,
+) -> BuiltinResult<Value> {
+    let region = crate::builtins::geometry::region::region_ref_from_value(builtin, region)?;
+    serializable_to_object(
+        builtin,
+        &ERROR_INTERNAL,
+        FEA_PROPERTY_REGION_TARGET_CLASS,
+        &GeometryBoundPropertyRegionTarget {
+            geometry_id: region.geometry_id,
+            geometry_revision: region.geometry_revision,
+            target: kind(region.region_id),
+        },
+    )
+}
+
+pub(super) fn create_all_property_region_target_object(
+    builtin: &'static str,
+    geometry: &Value,
+    target: PropertyRegionTarget,
+) -> BuiltinResult<Value> {
+    let geometry = geometry_asset_from_value(builtin, geometry)?;
+    serializable_to_object(
+        builtin,
+        &ERROR_INTERNAL,
+        FEA_PROPERTY_REGION_TARGET_CLASS,
+        &GeometryBoundPropertyRegionTarget {
+            geometry_id: geometry.geometry_id,
+            geometry_revision: geometry.revision,
+            target,
+        },
+    )
 }
 
 fn build_model_from_parts(
@@ -734,7 +830,7 @@ fn build_model_from_parts(
     defaults: ModelDefaultsMode,
     frame: Option<CoordinateFrame>,
     materials: Vec<MaterialModel>,
-    material_assignments: Vec<MaterialAssignment>,
+    material_assignments: Vec<GeometryBoundMaterialAssignment>,
     constraints: Vec<BoundConstraintPayload>,
     boundaries: Vec<GeometryBoundBoundary>,
     signals: Vec<PhysicalSignal>,
@@ -773,10 +869,9 @@ fn build_model_from_parts(
     if !material_assignments.is_empty() {
         model.material_assignments = material_assignments
             .into_iter()
-            .map(|mut assignment| {
-                assignment.region_id =
-                    resolve_region_selector(builtin, &assignment.region_id, geometry)?;
-                Ok(assignment)
+            .map(|assignment| {
+                assignment.require_geometry(builtin, geometry)?;
+                Ok(assignment.into_assignment())
             })
             .collect::<BuiltinResult<Vec<_>>>()?;
     }
@@ -918,67 +1013,6 @@ fn empty_model(model_id: String, geometry: &GeometryAsset) -> AnalysisModel {
     }
 }
 
-fn resolve_region_selector(
-    builtin: &'static str,
-    selector: &str,
-    geometry: &GeometryAsset,
-) -> BuiltinResult<String> {
-    if let Some(id) = selector
-        .strip_prefix("id:")
-        .or_else(|| selector.strip_prefix("region:"))
-    {
-        return require_region_id(builtin, id, geometry);
-    }
-    if let Some(tag) = selector.strip_prefix("tag:") {
-        return geometry
-            .regions
-            .iter()
-            .find(|region| region.tag.as_deref() == Some(tag))
-            .map(|region| region.region_id.clone())
-            .ok_or_else(|| {
-                builtin_error(
-                    builtin,
-                    &ERROR_INPUT,
-                    format!("region tag `{tag}` was not found in geometry"),
-                )
-            });
-    }
-    if let Some(name) = selector.strip_prefix("name:") {
-        return geometry
-            .regions
-            .iter()
-            .find(|region| region.name == name)
-            .map(|region| region.region_id.clone())
-            .ok_or_else(|| {
-                builtin_error(
-                    builtin,
-                    &ERROR_INPUT,
-                    format!("region name `{name}` was not found in geometry"),
-                )
-            });
-    }
-    require_region_id(builtin, selector, geometry)
-}
-
-fn require_region_id(
-    builtin: &'static str,
-    region_id: &str,
-    geometry: &GeometryAsset,
-) -> BuiltinResult<String> {
-    geometry
-        .regions
-        .iter()
-        .find(|region| region.region_id == region_id)
-        .map(|region| region.region_id.clone())
-        .ok_or_else(|| {
-            builtin_error(
-                builtin,
-                &ERROR_INPUT,
-                format!("region id `{region_id}` was not found in geometry"),
-            )
-        })
-}
-
 fn material_to_object(material: MaterialModel) -> BuiltinResult<Value> {
     serializable_to_object(
         MATERIAL_NAME,
@@ -988,7 +1022,9 @@ fn material_to_object(material: MaterialModel) -> BuiltinResult<Value> {
     )
 }
 
-fn material_assignment_to_object(assignment: MaterialAssignment) -> BuiltinResult<Value> {
+fn material_assignment_to_object(
+    assignment: GeometryBoundMaterialAssignment,
+) -> BuiltinResult<Value> {
     serializable_to_object(
         MATERIAL_ASSIGNMENT_NAME,
         &ERROR_INTERNAL,
@@ -1159,7 +1195,7 @@ fn material_vec_from_value(
 fn material_assignment_vec_from_value(
     builtin: &'static str,
     value: &Value,
-) -> BuiltinResult<Vec<MaterialAssignment>> {
+) -> BuiltinResult<Vec<GeometryBoundMaterialAssignment>> {
     object_vec_from_value(builtin, value, FEA_MATERIAL_ASSIGNMENT_CLASS)
 }
 

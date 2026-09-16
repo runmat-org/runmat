@@ -1423,7 +1423,10 @@ fn mixed_fixture(
     let assignment = model.material_assignments.first().unwrap();
     let region = PersistentEntityId {
         kind: PersistentEntityKind::Region,
-        source_topology_id: assignment.region_id.clone(),
+        source_topology_id: assignment
+            .selected_region_id()
+            .expect("fixture uses selected material region")
+            .to_owned(),
         assembly_path: vec!["root".into()],
     };
     mesh.topology.volume_elements[0].region_id = region.clone();
@@ -1804,7 +1807,10 @@ fn solver_mesh(
     let assignment = model.material_assignments.first().unwrap();
     let region = PersistentEntityId {
         kind: PersistentEntityKind::Region,
-        source_topology_id: assignment.region_id.clone(),
+        source_topology_id: assignment
+            .selected_region_id()
+            .expect("fixture uses selected material region")
+            .to_owned(),
         assembly_path: vec!["root".into()],
     };
     mesh.topology.volume_elements[0].region_id = region.clone();

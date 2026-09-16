@@ -34,7 +34,7 @@ use runmat_analysis_fea::{
     ModalSolveOptions, SolverMethod, SolverPreconditioner, ThermalProcedureControl,
     ThermalSolveOptions,
 };
-use runmat_geometry_core::{GeometryAsset, MaterialEvidenceConfidence, UnitSystem};
+use runmat_geometry_core::{GeometryAsset, UnitSystem};
 use runmat_meshing_core::SolverMeshArtifact;
 
 use crate::operations::{
@@ -84,7 +84,9 @@ mod study_placement;
 mod study_sweep;
 pub mod value_admission;
 
-use excitation_authoring::{append_constant_excitation, ConstantExcitation};
+use excitation_authoring::{
+    append_constant_excitation, append_whole_model_heat_generation, ConstantExcitation,
+};
 use execution_dispatch::{execution_operation, run_operation_for_identity, AnalysisOperation};
 use execution_error::{admit_runtime_proxy_for_operation, map_fea_run_error};
 use formulation_admission::{RuntimeDomainSource, RuntimeDomainTopology, RuntimeProxyFormulation};
@@ -696,7 +698,7 @@ pub fn analysis_create_model_op(
             material.electrical = Some(runmat_analysis_core::MaterialElectricalModel::default());
         }
     }
-    let inferred_assignments = infer_material_assignments(geometry, &inferred_materials);
+    let inferred_assignments = infer_material_assignments(intent.template, &inferred_materials);
 
     let (default_bc, default_excitation, default_steps) = match intent.template {
         AnalysisModelTemplate::LinearStaticStructural => (
@@ -977,7 +979,14 @@ pub fn analysis_create_model_op(
     };
 
     if let Some((excitation_id, excitation)) = default_excitation {
-        append_constant_excitation(&mut model, excitation_id, load_region_id, excitation);
+        match excitation {
+            ConstantExcitation::HeatGeneration(value) => {
+                append_whole_model_heat_generation(&mut model, excitation_id, value);
+            }
+            excitation => {
+                append_constant_excitation(&mut model, excitation_id, load_region_id, excitation);
+            }
+        }
     }
     validate_model_against_geometry(&model, geometry.units, &CoordinateFrame::Global).map_err(
         |error| {
@@ -2424,14 +2433,14 @@ fn prepare_study_run(
             BTreeMap::new(),
         )
     })?;
-    let aliases = runmat_analysis_core::BoundaryRegionAliases::new(study_mesh.boundary_region_ids)
+    let aliases = runmat_analysis_core::GeometryRegionAliases::new(study_mesh.region_aliases)
         .map_err(|error| {
             operation_error(
                 ANALYSIS_RUN_STUDY_OPERATION,
                 ANALYSIS_RUN_STUDY_OP_VERSION,
                 &prepared.context,
                 OperationErrorSpec {
-                    error_code: "RM.FEA.RUN_STUDY.BOUNDARY_RESOLUTION_FAILED",
+                    error_code: "RM.FEA.RUN_STUDY.TOPOLOGY_RESOLUTION_FAILED",
                     error_type: OperationErrorType::Validation,
                     retryable: false,
                     severity: OperationErrorSeverity::Error,
@@ -2441,14 +2450,14 @@ fn prepare_study_run(
             )
         })?;
     prepared.model =
-        runmat_analysis_core::resolve_boundary_region_aliases(&prepared.model, &aliases).map_err(
+        runmat_analysis_core::resolve_geometry_region_aliases(&prepared.model, &aliases).map_err(
             |error| {
                 operation_error(
                     ANALYSIS_RUN_STUDY_OPERATION,
                     ANALYSIS_RUN_STUDY_OP_VERSION,
                     &prepared.context,
                     OperationErrorSpec {
-                        error_code: "RM.FEA.RUN_STUDY.BOUNDARY_RESOLUTION_FAILED",
+                        error_code: "RM.FEA.RUN_STUDY.TOPOLOGY_RESOLUTION_FAILED",
                         error_type: OperationErrorType::Validation,
                         retryable: false,
                         severity: OperationErrorSeverity::Error,
@@ -7390,7 +7399,10 @@ fn validate_electromagnetic_run_model(
             "fea.run_electromagnetic requires every material assignment to reference an assigned electrical material",
             BTreeMap::from([
                 ("analysis_model_id".to_string(), model.model_id.0.clone()),
-                ("region_id".to_string(), assignment.region_id.clone()),
+                (
+                    "material_target".to_string(),
+                    assignment.target_label().to_owned(),
+                ),
                 (
                     "assigned_material_id".to_string(),
                     assignment.assigned_material_id.clone(),
@@ -8233,73 +8245,50 @@ fn select_load_region_id(geometry: &GeometryAsset) -> Option<String> {
 }
 
 fn infer_material_assignments(
-    geometry: &GeometryAsset,
+    template: AnalysisModelTemplate,
     materials: &[MaterialModel],
 ) -> Vec<MaterialAssignment> {
-    let default_material = materials
-        .first()
-        .map(|m| m.material_id.clone())
-        .unwrap_or_else(|| "mat_default_steel".to_string());
-    let mut assignments = Vec::new();
+    // Geometry material evidence is currently asset-wide. It cannot truthfully associate several
+    // imported materials with individual domains, so only the unambiguous single-material case is
+    // scaffolded. The resulting all-domain assignments remain explicit model data and can be
+    // replaced by selected-region assignments before execution.
+    let [material] = materials else {
+        return Vec::new();
+    };
+    let material_id = material.material_id.clone();
+    let targets: &[runmat_analysis_core::PropertyRegionTarget] = match template {
+        AnalysisModelTemplate::LinearStaticStructural
+        | AnalysisModelTemplate::StructuralHarmonic
+        | AnalysisModelTemplate::ThermoMechanicalCoupled
+        | AnalysisModelTemplate::ThermalSteady
+        | AnalysisModelTemplate::ThermalTransient
+        | AnalysisModelTemplate::ModalStructural
+        | AnalysisModelTemplate::TransientStructural
+        | AnalysisModelTemplate::NonlinearStructural => {
+            &[runmat_analysis_core::PropertyRegionTarget::all_solids()]
+        }
+        AnalysisModelTemplate::AcousticHarmonic
+        | AnalysisModelTemplate::ElectromagneticHarmonic
+        | AnalysisModelTemplate::CfdSteadyState
+        | AnalysisModelTemplate::CfdTransient => {
+            &[runmat_analysis_core::PropertyRegionTarget::all_cells()]
+        }
+        AnalysisModelTemplate::ChtCoupled | AnalysisModelTemplate::FsiCoupled => &[
+            runmat_analysis_core::PropertyRegionTarget::all_solids(),
+            runmat_analysis_core::PropertyRegionTarget::all_cells(),
+        ],
+    };
 
-    for region in &geometry.regions {
-        let key = format!(
-            "{} {}",
-            region.name.to_ascii_lowercase(),
-            region
-                .tag
-                .as_deref()
-                .unwrap_or_default()
-                .to_ascii_lowercase()
-        );
-        let assigned_material = if key.contains("aluminum") {
-            materials
-                .iter()
-                .find(|m| m.material_id.contains("aluminum"))
-                .map(|m| m.material_id.clone())
-                .unwrap_or_else(|| default_material.clone())
-        } else if key.contains("steel") {
-            materials
-                .iter()
-                .find(|m| m.material_id.contains("steel"))
-                .map(|m| m.material_id.clone())
-                .unwrap_or_else(|| default_material.clone())
-        } else if key.contains("polymer") || key.contains("plastic") {
-            materials
-                .iter()
-                .find(|m| m.material_id.contains("polymer"))
-                .map(|m| m.material_id.clone())
-                .unwrap_or_else(|| default_material.clone())
-        } else {
-            default_material.clone()
-        };
-
-        let evidence_confidence = if geometry
-            .source_geometry
-            .material_evidence
-            .iter()
-            .any(|e| e.confidence == MaterialEvidenceConfidence::High)
-        {
-            EvidenceConfidence::Verified
-        } else if geometry
-            .source_geometry
-            .material_evidence
-            .iter()
-            .any(|e| e.confidence == MaterialEvidenceConfidence::Medium)
-        {
-            EvidenceConfidence::Probable
-        } else {
-            EvidenceConfidence::Inferred
-        };
-        assignments.push(MaterialAssignment {
-            region_id: region.region_id.clone(),
-            expected_material_id: assigned_material.clone(),
-            assigned_material_id: assigned_material,
-            confidence: evidence_confidence,
-        });
-    }
-
-    assignments
+    targets
+        .iter()
+        .cloned()
+        .map(|target| MaterialAssignment {
+            target,
+            expected_material_id: material_id.clone(),
+            assigned_material_id: material_id.clone(),
+            confidence: EvidenceConfidence::Inferred,
+        })
+        .collect()
 }
 
 fn map_validate_error(

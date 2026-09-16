@@ -366,40 +366,65 @@ pub(super) fn material_coverage_gap_detail(
         return None;
     }
     if model.material_assignments.is_empty() {
-        return (model.materials.len() != 1).then(|| {
-            format!(
-                "solver mesh has {} regions but model has {} materials and no region assignments",
-                mesh.topology.regions.len(),
-                model.materials.len()
-            )
-        });
+        return Some(format!(
+            "solver mesh has {} regions but model has no explicit solid material assignment",
+            mesh.topology.regions.len()
+        ));
     }
     let material_ids = model
         .materials
         .iter()
         .map(|material| material.material_id.as_str())
         .collect::<HashSet<_>>();
-    let assigned_regions = model
+    let assigned_scopes = model
         .material_assignments
         .iter()
-        .filter(|assignment| material_ids.contains(assignment.assigned_material_id.as_str()))
-        .map(|assignment| assignment.region_id.as_str())
-        .collect::<HashSet<_>>();
-    let mut uncovered = mesh
-        .topology
-        .regions
-        .iter()
-        .map(|region| region.region_id.source_topology_id.as_str())
-        .filter(|region_id| !assigned_regions.contains(region_id))
+        .filter_map(|assignment| {
+            if !material_ids.contains(assignment.assigned_material_id.as_str()) {
+                return None;
+            }
+            let runmat_analysis_core::PropertyRegionTarget::Solid(scope) = &assignment.target
+            else {
+                return None;
+            };
+            Some(scope)
+        })
         .collect::<Vec<_>>();
+    let mut uncovered = Vec::new();
+    let mut multiply_covered = Vec::new();
+    for region in &mesh.topology.regions {
+        let count = assigned_scopes
+            .iter()
+            .filter(|scope| match scope {
+                runmat_analysis_core::PropertyRegionScope::All => true,
+                runmat_analysis_core::PropertyRegionScope::Region(selection) => region
+                    .region_id
+                    .matches_analysis_selection(selection.region_id()),
+            })
+            .count();
+        match count {
+            0 => uncovered.push(region.region_id.source_topology_id.as_str()),
+            1 => {}
+            _ => multiply_covered.push(region.region_id.source_topology_id.as_str()),
+        }
+    }
     uncovered.sort_unstable();
     uncovered.dedup();
-    (!uncovered.is_empty()).then(|| {
-        format!(
+    multiply_covered.sort_unstable();
+    multiply_covered.dedup();
+    if !uncovered.is_empty() {
+        Some(format!(
             "solver mesh regions lack valid analysis material assignments: {}",
             uncovered.join(",")
-        )
-    })
+        ))
+    } else if !multiply_covered.is_empty() {
+        Some(format!(
+            "solver mesh regions have overlapping analysis material assignments: {}",
+            multiply_covered.join(",")
+        ))
+    } else {
+        None
+    }
 }
 
 fn primary_solver_mesh_field_expected_count(

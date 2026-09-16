@@ -883,6 +883,12 @@ fn beam_end_moment_solves_rotation_and_reaction_moment() {
         }],
         shell_sections: Vec::new(),
     });
+    model.material_assignments = vec![runmat_analysis_core::MaterialAssignment {
+        target: runmat_analysis_core::PropertyRegionTarget::beam("beam_span"),
+        expected_material_id: "mat_steel".into(),
+        assigned_material_id: "mat_steel".into(),
+        confidence: runmat_analysis_core::EvidenceConfidence::Verified,
+    }];
     model.constraints = vec![fixed_constraint("fixed_root", "node:1")];
     replace_fixture_excitations(
         &mut model,
@@ -1059,6 +1065,7 @@ fn grounded_explicit_spring_changes_the_completed_physical_solution() {
 #[test]
 fn thermo_mechanical_linear_static_emits_coupled_fields() {
     let mut model = fixture_model(FixtureId::ThermoMechanicalKickoff);
+    model.material_assignments.truncate(1);
     configure_thermo_mechanical_excitation(&mut model, 65.0, 1.2e-5);
     model.sequence.steps = vec![ProcedureStep::coupled(
         "thermomechanical_static",
@@ -1514,7 +1521,10 @@ pub(crate) fn single_tetrahedron_solver_mesh_for_model(
     if let Some(assignment) = model.material_assignments.first() {
         let region = PersistentEntityId {
             kind: PersistentEntityKind::Region,
-            source_topology_id: assignment.region_id.clone(),
+            source_topology_id: assignment
+                .selected_region_id()
+                .expect("fixture uses selected material region")
+                .to_owned(),
             assembly_path: vec!["root".to_owned()],
         };
         mesh.topology.volume_elements[0].region_id = region.clone();
@@ -1546,12 +1556,12 @@ pub(crate) fn single_tetrahedron_solver_mesh_for_model(
             })
             .filter(|region| region != "dynamic_force"),
     );
-    loaded_regions.extend(
-        model
-            .material_assignments
-            .iter()
-            .map(|assignment| assignment.region_id.clone()),
-    );
+    loaded_regions.extend(model.material_assignments.iter().map(|assignment| {
+        assignment
+            .selected_region_id()
+            .expect("fixture uses selected material region")
+            .to_owned()
+    }));
     loaded_regions.extend(
         model
             .material_assignments

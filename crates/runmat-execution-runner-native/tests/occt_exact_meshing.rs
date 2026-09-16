@@ -22,6 +22,8 @@ use runmat_meshing_execution::{
 };
 
 const BOX: &[u8] = include_bytes!("../../runmat-geometry/io/tests/fixtures/box.brep");
+const DISCONNECTED_SOLIDS: &[u8] =
+    include_bytes!("../../runmat-geometry/io/tests/fixtures/disconnected_solids.brep");
 const EXPECTED_BOX_ARTIFACT_DIGEST: &str =
     "db671df44a5e6c9c1eda01312223222ec07efbec28581b7d661e27e0fa73e6d6";
 
@@ -51,6 +53,104 @@ fn occt_box_artifact_is_independent_of_legal_partition_layout() {
     );
 }
 
+#[test]
+fn disconnected_cad_solids_retain_distinct_region_identity_through_meshing() {
+    let (topology, result) =
+        execute_fixture_with_layout("disconnected_solids.brep", DISCONNECTED_SOLIDS, 8, 8);
+    let source_regions = topology
+        .regions
+        .iter()
+        .map(|region| region.id.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+    let meshed_regions = result
+        .artifact
+        .topology
+        .regions
+        .iter()
+        .map(|region| region.region_id.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+
+    assert_eq!(source_regions.len(), 2);
+    assert_eq!(source_regions, meshed_regions);
+    assert!(result
+        .artifact
+        .topology
+        .volume_elements
+        .iter()
+        .all(|element| {
+            result
+                .artifact
+                .topology
+                .regions
+                .iter()
+                .any(|region| region.region_id == element.region_id)
+        }));
+
+    let aliases = runmat_analysis_core::GeometryRegionAliases::new(
+        topology
+            .regions
+            .iter()
+            .enumerate()
+            .map(|(index, region)| (format!("solid_{:06}", index + 1), region.id.clone()))
+            .collect(),
+    )
+    .expect("source-solid aliases should be valid");
+    let mut model = runmat_analysis_fea::fixtures::fixture_model(
+        runmat_analysis_fea::fixtures::FixtureId::CantileverLinearStatic,
+    );
+    let mut second_material = model.materials[0].clone();
+    second_material.material_id = "second-solid-material".into();
+    second_material.name = "Second solid material".into();
+    second_material.mechanical.density_kg_per_m3 *= 0.5;
+    model.materials.push(second_material);
+    model.material_assignments = vec![
+        material_assignment("solid_000001", &model.materials[0].material_id),
+        material_assignment("solid_000002", &model.materials[1].material_id),
+    ];
+    let resolved = runmat_analysis_core::resolve_geometry_region_aliases(&model, &aliases)
+        .expect("source-solid aliases should resolve to persistent identities");
+    let inventory =
+        runmat_analysis_fea::physics::structural::material::StructuralMaterialInventory::from_model(
+            &resolved,
+        );
+    runmat_analysis_fea::assembly::solver_solid::assemble_solver_solid_operators(
+        &result.artifact,
+        &inventory,
+    )
+    .expect("two selected CAD solids should receive exactly one material each");
+
+    model.material_assignments.pop();
+    let incomplete = runmat_analysis_core::resolve_geometry_region_aliases(&model, &aliases)
+        .expect("the remaining source-solid alias should still resolve");
+    let incomplete_inventory =
+        runmat_analysis_fea::physics::structural::material::StructuralMaterialInventory::from_model(
+            &incomplete,
+        );
+    let error = runmat_analysis_fea::assembly::solver_solid::assemble_solver_solid_operators(
+        &result.artifact,
+        &incomplete_inventory,
+    )
+    .expect_err("unassigned CAD solids must fail before operator assembly");
+    assert!(matches!(
+        error,
+        runmat_analysis_fea::assembly::solver_solid::SolverSolidAssemblyError::InvalidMaterialCoverage(
+            detail
+        ) if detail.contains("requires exactly one solid material assignment")
+    ));
+}
+
+fn material_assignment(
+    region: &str,
+    material_id: &str,
+) -> runmat_analysis_core::MaterialAssignment {
+    runmat_analysis_core::MaterialAssignment {
+        target: runmat_analysis_core::PropertyRegionTarget::solid(region),
+        expected_material_id: material_id.into(),
+        assigned_material_id: material_id.into(),
+        confidence: runmat_analysis_core::EvidenceConfidence::Verified,
+    }
+}
+
 fn execute_box() -> (
     runmat_geometry_core::ExactBRepTopology,
     runmat_meshing_execution::ExactMeshingDagRunResult,
@@ -65,9 +165,26 @@ fn execute_box_with_layout(
     runmat_geometry_core::ExactBRepTopology,
     runmat_meshing_execution::ExactMeshingDagRunResult,
 ) {
-    let imported = import_exact_cad(
+    execute_fixture_with_layout(
         "box.brep",
         BOX,
+        preferred_edges_per_partition,
+        preferred_faces_per_partition,
+    )
+}
+
+fn execute_fixture_with_layout(
+    source_name: &str,
+    source_bytes: &[u8],
+    preferred_edges_per_partition: u32,
+    preferred_faces_per_partition: u32,
+) -> (
+    runmat_geometry_core::ExactBRepTopology,
+    runmat_meshing_execution::ExactMeshingDagRunResult,
+) {
+    let imported = import_exact_cad(
+        source_name,
+        source_bytes,
         GeometryFormat::Brep,
         &ExactCadImportOptions::default(),
         &GeometryImportContext::new(),

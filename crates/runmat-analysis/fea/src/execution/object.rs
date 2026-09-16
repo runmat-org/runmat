@@ -23,7 +23,7 @@ pub enum AnalysisNumericalObjectKind {
     Signal,
     ResponseSpectrum,
     RealizedExcitation,
-    BoundaryResolution,
+    TopologyResolution,
     SolverInvocation,
     SolverResult,
     NumericalReceipt,

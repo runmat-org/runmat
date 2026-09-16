@@ -24,29 +24,33 @@ pub(crate) fn validate_materials(
 
     let mut assigned_regions = HashSet::new();
     for assignment in assignments {
-        if assignment.region_id.trim().is_empty() {
+        let target_label = assignment.target_label();
+        if assignment
+            .selected_region_id()
+            .is_some_and(|region_id| region_id.trim().is_empty())
+        {
             return Err(invalid_assignment(
-                &assignment.region_id,
+                target_label,
                 "region id must be non-empty",
             ));
         }
-        if !assigned_regions.insert(assignment.region_id.as_str()) {
+        if !assigned_regions.insert(&assignment.target) {
             return Err(invalid_assignment(
-                &assignment.region_id,
-                "a region may have only one material assignment",
+                target_label,
+                "a material domain target may have only one material assignment",
             ));
         }
         if assignment.expected_material_id.trim().is_empty()
             || assignment.assigned_material_id.trim().is_empty()
         {
             return Err(invalid_assignment(
-                &assignment.region_id,
+                target_label,
                 "expected and assigned material ids must be non-empty",
             ));
         }
         if !material_ids.contains(assignment.expected_material_id.as_str()) {
             return Err(invalid_assignment(
-                &assignment.region_id,
+                target_label,
                 format!(
                     "expected material `{}` does not exist",
                     assignment.expected_material_id
@@ -55,7 +59,7 @@ pub(crate) fn validate_materials(
         }
         if !material_ids.contains(assignment.assigned_material_id.as_str()) {
             return Err(invalid_assignment(
-                &assignment.region_id,
+                target_label,
                 format!(
                     "assigned material `{}` does not exist",
                     assignment.assigned_material_id
@@ -348,9 +352,9 @@ mod tests {
     }
 
     #[test]
-    fn validates_material_assignment_references_and_cardinality() {
+    fn validates_material_assignment_references_and_evidence() {
         let assignment = MaterialAssignment {
-            region_id: "solid".to_string(),
+            target: crate::PropertyRegionTarget::solid("solid"),
             expected_material_id: "steel".to_string(),
             assigned_material_id: "missing".to_string(),
             confidence: EvidenceConfidence::Verified,
@@ -364,7 +368,7 @@ mod tests {
         alternate.material_id = "polymer".to_string();
         alternate.name = "Polymer".to_string();
         let mismatch = MaterialAssignment {
-            region_id: "solid".to_string(),
+            target: crate::PropertyRegionTarget::solid("solid"),
             expected_material_id: "steel".to_string(),
             assigned_material_id: "polymer".to_string(),
             confidence: EvidenceConfidence::Inferred,

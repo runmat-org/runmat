@@ -337,11 +337,14 @@ fn write_model_solver_mesh(model: &AnalysisModel) -> (tempfile::TempDir, PathBuf
     let mesh_path = artifact_root.path().join("solver_mesh.cbor");
     let mut mesh =
         runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
-    let volume_region = PersistentEntityId {
-        kind: PersistentEntityKind::Region,
-        source_topology_id: model.material_assignments[0].region_id.clone(),
-        assembly_path: vec!["root".to_owned()],
-    };
+    let volume_region = model.material_assignments[0]
+        .selected_region_id()
+        .map(|region_id| PersistentEntityId {
+            kind: PersistentEntityKind::Region,
+            source_topology_id: region_id.to_owned(),
+            assembly_path: vec!["root".to_owned()],
+        })
+        .unwrap_or_else(|| mesh.topology.regions[0].region_id.clone());
     mesh.topology.regions[0].region_id = volume_region.clone();
     for element in &mut mesh.topology.volume_elements {
         element.region_id = volume_region.clone();
@@ -437,7 +440,7 @@ fn material_conflict_contract_model() -> AnalysisModel {
     polymer.mechanical.youngs_modulus_pa = 3.0e9;
     model.materials.push(polymer);
     model.material_assignments = vec![MaterialAssignment {
-        region_id: "beam_span".to_string(),
+        target: runmat_analysis_core::PropertyRegionTarget::beam("beam_span"),
         expected_material_id: "mat_steel".to_string(),
         assigned_material_id: "mat_polymer".to_string(),
         confidence: EvidenceConfidence::Inferred,
@@ -1128,7 +1131,11 @@ fn analysis_create_model_infers_materials_from_step_metadata_contract() {
         envelope.data.excitations[0].excitation().target,
         ExcitationTarget::Region(RegionTarget::authored("region_2"))
     );
-    assert_eq!(envelope.data.material_assignments.len(), 2);
+    assert_eq!(envelope.data.material_assignments.len(), 1);
+    assert_eq!(
+        envelope.data.material_assignments[0].target,
+        runmat_analysis_core::PropertyRegionTarget::all_solids()
+    );
 }
 
 #[test]

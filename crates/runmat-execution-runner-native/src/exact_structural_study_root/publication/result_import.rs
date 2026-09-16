@@ -53,7 +53,7 @@ pub fn import_exact_structural_study_result(
     let expected_inventory = publication
         .meshing_objects
         .iter()
-        .chain(&publication.boundary_objects)
+        .chain(&publication.region_resolution_objects)
         .chain(&publication.signal_objects)
         .chain(publication.analysis.objects())
         .cloned()
@@ -87,38 +87,38 @@ pub fn import_exact_structural_study_result(
             "whole-study mesh differs from the authored meshing request",
         ));
     }
-    let boundary_manifest_bytes = read(source, &publication.boundary_root)?;
-    let boundary_manifest =
+    let region_resolution_manifest_bytes = read(source, &publication.region_resolution_root)?;
+    let region_resolution_manifest =
         runmat_analysis_fea::execution::AnalysisObjectManifest::from_canonical_bytes(
-            &boundary_manifest_bytes,
+            &region_resolution_manifest_bytes,
         )
         .map_err(protocol)?;
-    let boundary_objects = runmat_analysis_execution::import_analysis_objects(
+    let region_resolution_objects = runmat_analysis_execution::import_analysis_objects(
         source,
-        &publication.boundary_root,
-        AnalysisNumericalObjectKind::BoundaryResolution,
-        boundary_manifest.logical_identity,
-        boundary_manifest.payload_digest,
+        &publication.region_resolution_root,
+        AnalysisNumericalObjectKind::TopologyResolution,
+        region_resolution_manifest.logical_identity,
+        region_resolution_manifest.payload_digest,
         &expected.artifact_access,
         limits,
     )
     .map_err(protocol)?;
-    let expected_boundary_objects = boundary_objects
+    let expected_region_resolution_objects = region_resolution_objects
         .references(&expected.artifact_access, ValueRefKind::ResultObject)
         .map_err(protocol)?;
-    if expected_boundary_objects != publication.boundary_objects {
+    if expected_region_resolution_objects != publication.region_resolution_objects {
         return Err(protocol(
-            "boundary resolution inventory differs from its canonical closure",
+            "topology-region resolution inventory differs from its canonical closure",
         ));
     }
-    let boundary_resolution =
-        BoundaryRegionResolution::from_canonical_bytes(&boundary_objects.payload())?;
-    if boundary_resolution.geometry_source_digest != expected.geometry_source_digest
-        || boundary_resolution.solver_mesh_digest
+    let region_resolution =
+        TopologyRegionResolution::from_canonical_bytes(&region_resolution_objects.payload())?;
+    if region_resolution.geometry_source_digest != expected.geometry_source_digest
+        || region_resolution.solver_mesh_digest
             != Digest::from_bytes(*mesh.artifact.canonical_digest.bytes())
     {
         return Err(protocol(
-            "boundary resolution differs from the returned geometry or mesh",
+            "topology-region resolution differs from the returned geometry or mesh",
         ));
     }
     if publication.signal_roots.len() != expected.signal_materializations.len() {
@@ -181,7 +181,7 @@ pub fn import_exact_structural_study_result(
         ));
     }
     let aliases =
-        runmat_analysis_core::BoundaryRegionAliases::new(boundary_resolution.aliases.clone())
+        runmat_analysis_core::GeometryRegionAliases::new(region_resolution.aliases.clone())
             .map_err(protocol)?;
     let mut resolved_model = expected
         .workloads
@@ -208,7 +208,7 @@ pub fn import_exact_structural_study_result(
         ));
     }
     resolved_model =
-        runmat_analysis_core::resolve_boundary_region_aliases(&resolved_model, &aliases)
+        runmat_analysis_core::resolve_geometry_region_aliases(&resolved_model, &aliases)
             .map_err(protocol)?;
     let mut resolved_workloads = expected.workloads.clone();
     resolved_workloads
@@ -543,7 +543,7 @@ pub fn import_exact_structural_study_result(
     Ok(ExactStructuralStudyResult {
         frozen_project_digest: expected.frozen_project_digest,
         mesh,
-        boundary_resolution,
+        region_resolution,
         analysis,
     })
 }

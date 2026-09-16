@@ -96,7 +96,10 @@ fn fixture_model_and_mesh() -> (
     runmat_meshing_core::SolverMeshArtifact,
 ) {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
-    model.material_assignments[0].region_id = "region".into();
+    *model.material_assignments[0]
+        .target
+        .selected_region_id_mut()
+        .expect("fixture uses selected material region") = "region".into();
     model.constraints = vec![AnalysisConstraint::Structural(StructuralConstraint {
         constraint_id: "fixed-face".into(),
         frame: runmat_analysis_core::CoordinateFrame::Global,

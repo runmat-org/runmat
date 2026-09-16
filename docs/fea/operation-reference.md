@@ -249,7 +249,7 @@ Top-level study fields:
 | `execution` | Yes | Per-step backend, formulation requirement, and optional typed solver/options pair. |
 | `regions` | No | Named aliases for geometry region selectors. |
 | `materials` | No | Material definitions keyed by material id. |
-| `material_assignments` | No | Region-to-material assignments. |
+| `material_assignments` | Required for material-bearing formulations | Typed beam, shell, solid, or cell material-domain assignments. Each active element must have exactly one assignment; use an explicit `all_*` target or selected region target. |
 | `constraints` | No | Typed prescribed-unknown and kinematic constraints. |
 | `boundaries` | No | Typed natural, flux, impedance, and Robin boundary operators. |
 | `connectors` | No | Typed relations between model targets. |

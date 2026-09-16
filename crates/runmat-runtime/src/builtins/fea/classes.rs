@@ -10,6 +10,7 @@ pub(super) const FEA_SWEEP_RUN_RESULT_CLASS: &str = "fea.SweepRunResult";
 pub(super) const FEA_MODEL_CLASS: &str = "fea.Model";
 pub(super) const FEA_MATERIAL_CLASS: &str = "fea.Material";
 pub(super) const FEA_MATERIAL_ASSIGNMENT_CLASS: &str = "fea.MaterialAssignment";
+pub(super) const FEA_PROPERTY_REGION_TARGET_CLASS: &str = "fea.PropertyRegionTarget";
 pub(super) const FEA_STRUCTURAL_CONSTRAINT_CLASS: &str = "fea.StructuralConstraint";
 pub(super) const FEA_THERMAL_CONSTRAINT_CLASS: &str = "fea.ThermalConstraint";
 pub(super) const FEA_ELECTRICAL_CONSTRAINT_CLASS: &str = "fea.ElectricalConstraint";
@@ -166,6 +167,7 @@ pub(super) const MODEL_FIELDS: &[&str] = &[
     "excitation_cases",
     "initial_conditions",
     "response_spectra",
+    "random_excitations",
     "sequence",
     super::signals::bindings::FROZEN_GENERATORS_PROPERTY,
 ];
@@ -179,11 +181,15 @@ pub(super) const MATERIAL_FIELDS: &[&str] = &[
     "plastic",
 ];
 pub(super) const MATERIAL_ASSIGNMENT_FIELDS: &[&str] = &[
-    "region_id",
+    "geometry_id",
+    "geometry_revision",
+    "target",
     "expected_material_id",
     "assigned_material_id",
     "confidence",
 ];
+pub(super) const PROPERTY_REGION_TARGET_FIELDS: &[&str] =
+    &["geometry_id", "geometry_revision", "target"];
 pub(super) const STRUCTURAL_CONSTRAINT_FIELDS: &[&str] =
     &["geometry_id", "geometry_revision", "constraint"];
 pub(super) const BOUNDARY_FIELDS: &[&str] = &["geometry_id", "geometry_revision", "boundary"];
@@ -865,7 +871,7 @@ fn static_methods(names: &[(&str, &str)]) -> HashMap<String, crate::class_regist
         .collect()
 }
 
-fn fea_class_schemas() -> [FeaClassSchema; 48] {
+fn fea_class_schemas() -> [FeaClassSchema; 49] {
     [
         (
             FEA_STUDY_CLASS,
@@ -960,6 +966,13 @@ fn fea_class_schemas() -> [FeaClassSchema; 48] {
             "runmat.fea.material",
             MATERIAL_FIELDS,
             &["material_id", "name", "mechanical", "thermal"],
+            validate_fea_object,
+        ),
+        (
+            FEA_PROPERTY_REGION_TARGET_CLASS,
+            "runmat.fea.property-region-target",
+            PROPERTY_REGION_TARGET_FIELDS,
+            PROPERTY_REGION_TARGET_FIELDS,
             validate_fea_object,
         ),
         (

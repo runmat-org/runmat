@@ -613,12 +613,9 @@ async fn run_exact_structural_sweep_conformance() {
             .signals
             .iter()
             .all(|signal| signal.generator().is_none()));
-        assert!(result
-            .boundary_resolution
-            .aliases
-            .contains_key("face_000001"));
-        let constrained_face = &result.boundary_resolution.aliases["face_000001"];
-        let loaded_face = &result.boundary_resolution.aliases["face_000002"];
+        assert!(result.region_resolution.aliases.contains_key("face_000001"));
+        let constrained_face = &result.region_resolution.aliases["face_000001"];
+        let loaded_face = &result.region_resolution.aliases["face_000002"];
         assert_eq!(
             resolved_workload.model.constraints[0]
                 .target()
@@ -649,13 +646,13 @@ async fn run_exact_structural_sweep_conformance() {
         missing_alias.model.constraints[0].visit_targets_mut(|target| {
             *target = runmat_analysis_core::RegionTarget::boundary("face_999999");
         });
-        let aliases = runmat_analysis_core::BoundaryRegionAliases::new(
-            result.boundary_resolution.aliases.clone(),
+        let aliases = runmat_analysis_core::GeometryRegionAliases::new(
+            result.region_resolution.aliases.clone(),
         )
         .unwrap();
         assert!(matches!(
-            runmat_analysis_core::resolve_boundary_region_aliases(&missing_alias.model, &aliases),
-            Err(runmat_analysis_core::BoundaryRegionResolutionError::UnresolvedImporterAlias {
+            runmat_analysis_core::resolve_geometry_region_aliases(&missing_alias.model, &aliases),
+            Err(runmat_analysis_core::GeometryRegionResolutionError::UnresolvedImporterAlias {
                 alias
             }) if alias == "face_999999"
         ));
@@ -1031,8 +1028,8 @@ async fn run_direct_exact_study_conformance(input: DirectExactStudyConformance) 
         .unwrap();
         assert_eq!(local, *buckling_result.buckling_result);
 
-        let fixed_face = &imported.boundary_resolution.aliases["face_000001"];
-        let loaded_face = &imported.boundary_resolution.aliases["face_000002"];
+        let fixed_face = &imported.region_resolution.aliases["face_000001"];
+        let loaded_face = &imported.region_resolution.aliases["face_000002"];
         let fixed_centroid = boundary_centroid(&imported.mesh.artifact, fixed_face);
         let loaded_centroid = boundary_centroid(&imported.mesh.artifact, loaded_face);
         assert!((fixed_centroid[0] - 0.0).abs() <= 1.0e-12);
@@ -1210,7 +1207,8 @@ fn box_structural_workload() -> StructuralLinearWorkload {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     model.geometry_id = "box".into();
     model.geometry_revision = 1;
-    model.material_assignments.clear();
+    model.material_assignments[0].target =
+        runmat_analysis_core::PropertyRegionTarget::solid("solid_000001");
     model.constraints[0].visit_targets_mut(|target| {
         *target = runmat_analysis_core::RegionTarget::boundary("face_000001");
     });

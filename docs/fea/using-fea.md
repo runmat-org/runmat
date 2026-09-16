@@ -144,6 +144,8 @@ solverMesh = meshing.generate(geom, ...
 steel = fea.material("steel", ...
     "YoungsModulusPa", 200e9, ...
     "PoissonRatio", 0.30);
+solidDomain = fea.PropertyRegionTarget.allSolids(geom);
+steelAssignment = fea.materialAssignment(solidDomain, steel);
 
 base = geometry.region(geom, "name:Base_Mount");
 fixed = fea.StructuralConstraint.fixed("fixed_base", base);
@@ -163,6 +165,7 @@ execution = fea.ExecutionPlan.defaults(sequence, backend, requirement);
 model = fea.model("bracket_static_model", geom, ...
     "Template", "linear_static_structural", ...
     "Materials", {steel}, ...
+    "MaterialAssignments", {steelAssignment}, ...
     "Constraints", {fixed}, ...
     "Signals", {forceSignal}, ...
     "Excitations", {tipLoad}, ...
@@ -314,7 +317,9 @@ The typed constructors are:
 | Builtin | Use |
 | --- | --- |
 | `fea.material(...)` | Mechanical, thermal, electrical, and plastic material data. |
-| `fea.materialAssignment(...)` | Region-to-material assignment. |
+| `fea.PropertyRegionTarget.beam(region)`, `.shell(region)`, `.solid(region)`, `.cell(region)` | Bind a selected geometry region to its material-bearing formulation role. |
+| `fea.PropertyRegionTarget.allBeams(asset)`, `.allShells(asset)`, `.allSolids(asset)`, `.allCells(asset)` | Explicitly select every compatible domain in one geometry revision. |
+| `fea.materialAssignment(target, material, ...)` | Bind a typed material target to a typed `fea.Material`. Raw region and material strings are rejected. |
 | `fea.<Family>Constraint.<kind>(...)` | Essential, kinematic, gauge, pairing, and reference constraints bound to a `geometry.Region`. |
 | `fea.<Family>Boundary.<kind>(...)` | Natural and Robin boundary operators such as pressure, heat flux, convection, radiation, impedance, and outlet pressure. |
 | `fea.<Quantity>Signal.constant<Unit>(...)` | A constant, quantity-typed physical signal in the unit named by the constructor. |
@@ -333,6 +338,43 @@ The typed constructors are:
 | `fea.FluidStructureInterface.noSlip(...)` | No-slip fluid-to-structure transfer across two typed regions. |
 | `fea.ConjugateHeatTransferInterface.perfect(...)`, `.conductance(...)`, `.resistance(...)` | Fluid-to-solid heat transfer with exactly one physical transfer law. |
 | `fea.SolverOptions.defaults(step)` | Create typed solver options compatible with one procedure step. |
+
+Material targets are not boundary selectors. A face on a solid remains a boundary face for loads,
+constraints, and interfaces; it is a shell material domain only when the model contains a shell
+formulation on that surface. Likewise, edges carry material only for beam formulations, continuum
+volumes use `solid`, and finite-volume formulations use `cell`.
+
+For a homogeneous continuum model, make the whole-domain choice explicit:
+
+```matlab
+geom = geometry.load("geometry/bracket.step", "Units", "millimeter");
+steel = fea.material("steel", ...
+    "YoungsModulusPa", 200e9, ...
+    "PoissonRatio", 0.30, ...
+    "DensityKgPerM3", 7850);
+domain = fea.PropertyRegionTarget.allSolids(geom);
+steelAssignment = fea.materialAssignment(domain, steel);
+```
+
+For a heterogeneous model, bind selected regions instead:
+
+```matlab
+insert = geometry.region(geom, "insert_body");
+titanium = fea.material("titanium", ...
+    "YoungsModulusPa", 116e9, ...
+    "PoissonRatio", 0.32, ...
+    "DensityKgPerM3", 4500);
+insertDomain = fea.PropertyRegionTarget.solid(insert);
+insertAssignment = fea.materialAssignment(insertDomain, titanium);
+```
+
+The target retains the geometry id and revision. `fea.model` rejects assignments created from a
+different asset or revision. Before assembly, RunMat resolves selected aliases through exact CAD
+and mesh provenance, then requires exactly one compatible material assignment for every active
+element. Missing coverage, overlap between an `all*` target and a selected target, stale selectors,
+and wrong roles such as a `cell` assignment in a structural-solid solve fail closed. Beam/shell
+sections, laminate layups, property orientation, and contact/interface laws remain separate typed
+objects with their own coverage and validation; they are not options on `materialAssignment`.
 | `fea.ExecutionStep.new(...)`, `fea.ExecutionPlan.new(...)`, `fea.ExecutionPlan.defaults(...)` | Bind each semantic procedure step to typed backend, formulation maturity, and solver options. |
 | `fea.model(...)` | Explicit model assembled from typed components. |
 | `fea.study(...)` | Study assembled from geometry, a typed model template/model, sequence, backend, and formulation requirement. |

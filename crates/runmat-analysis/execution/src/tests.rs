@@ -1383,7 +1383,10 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
     let assignment = solve.model.material_assignments.first().unwrap();
     let region = PersistentEntityId {
         kind: PersistentEntityKind::Region,
-        source_topology_id: assignment.region_id.clone(),
+        source_topology_id: assignment
+            .selected_region_id()
+            .expect("fixture uses selected material region")
+            .to_owned(),
         assembly_path: vec!["root".into()],
     };
     mesh.topology.volume_elements[0].region_id = region.clone();
@@ -2681,7 +2684,10 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
     let assignment = workload.model.material_assignments.first().unwrap();
     let region = PersistentEntityId {
         kind: PersistentEntityKind::Region,
-        source_topology_id: assignment.region_id.clone(),
+        source_topology_id: assignment
+            .selected_region_id()
+            .expect("fixture uses selected material region")
+            .to_owned(),
         assembly_path: vec!["root".into()],
     };
     mesh.topology.volume_elements[0].region_id = region.clone();

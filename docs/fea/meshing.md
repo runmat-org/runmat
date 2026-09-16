@@ -533,11 +533,18 @@ the evidence binding, verifies geometry compatibility, and then projects it into
 Meshing owns region identity, not material assignment. A canonical mesh can therefore be reused by
 multiple studies that assign different materials to the same regions without changing mesh
 identity. The analysis document resolves its `material_assignments` against each mesh region's
-persistent source identity when it constructs solver coefficients. A study with one material and no
-explicit assignments applies that material uniformly; multi-material studies must cover every mesh
-region explicitly. Boundary selectors such as `face_000001` resolve to the imported exact face
-identity returned by meshing, so loads and boundary conditions are not assigned by nearest triangle
-or centroid.
+persistent source identity when it constructs solver coefficients. Material declarations never
+imply coverage: every active material-bearing element must be covered by exactly one compatible
+typed assignment, even when the study declares only one material. Use an explicit `all_solids`
+scope when one material intentionally covers every continuum solid, or selected `solid`, `shell`,
+`beam`, and `cell` scopes for heterogeneous and mixed-dimensional models. Gaps, overlaps, stale
+selectors, and formulation mismatches fail before operator assembly. The meshing result carries one
+typed topology-alias inventory: `edge_######`, `face_######`, and `solid_######` retain the
+importer's source order and persistent occurrence-qualified identity on local and remote paths.
+Thus `solid_000002` can select the second imported solid without depending on final element order,
+while `face_000001` resolves the exact face used by a load or boundary condition rather than a
+nearest triangle or centroid. A face becomes a material-bearing target only when it is deliberately
+used as a shell domain.
 
 ## Failures, Budgets, and Cancellation
 

@@ -4,15 +4,15 @@ pub(crate) fn package_exact_structural_study_result(
     request: &ProgramExecutionRequest,
     decoded: &DecodedExactStructuralStudyRoot,
     meshing: &ExactMeshingDagRunResult,
-    boundary: &runmat_analysis_execution::PreparedAnalysisObjects,
+    region_resolution: &runmat_analysis_execution::PreparedAnalysisObjects,
     analysis: ExactStructuralAnalysisPublication<'_>,
 ) -> NativeExecutionResult<(ProgramExecutionResponse, Vec<ProgramExecutionObject>)> {
-    let boundary_objects = boundary
+    let region_resolution_objects = region_resolution
         .references(&decoded.artifact_access, ValueRefKind::ResultObject)
         .map_err(protocol)?;
-    let boundary_root = boundary_objects
+    let region_resolution_root = region_resolution_objects
         .first()
-        .ok_or_else(|| protocol("boundary resolution closure is empty"))?
+        .ok_or_else(|| protocol("topology-region resolution closure is empty"))?
         .clone();
     let signal_closures = analysis
         .signals()
@@ -95,16 +95,16 @@ pub(crate) fn package_exact_structural_study_result(
         ),
         meshing_root: meshing.root.clone(),
         meshing_objects: meshing.result_objects.clone(),
-        boundary_root,
-        boundary_objects: boundary_objects.clone(),
+        region_resolution_root,
+        region_resolution_objects: region_resolution_objects.clone(),
         signal_roots,
         signal_objects: signal_objects.clone(),
         analysis,
     };
-    let mut new_objects = boundary
+    let mut new_objects = region_resolution
         .objects
         .iter()
-        .zip(&boundary_objects)
+        .zip(&region_resolution_objects)
         .map(|(object, reference)| ProgramExecutionObject {
             reference: reference.clone(),
             bytes: object.bytes.clone(),
@@ -130,7 +130,7 @@ pub(crate) fn package_exact_structural_study_result(
     for reference in meshing
         .result_objects
         .iter()
-        .chain(&boundary_objects)
+        .chain(&region_resolution_objects)
         .chain(&signal_objects)
         .chain(publication.analysis.objects())
         .chain(std::iter::once(&publication_root))

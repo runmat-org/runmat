@@ -718,13 +718,12 @@ fn structural_modal_intent_recovers_and_publishes_all_mode_shapes_without_resolv
     else {
         panic!("test requires a standalone modal workload")
     };
-    let aliases = runmat_analysis_core::BoundaryRegionAliases::new(
-        meshing_output.boundary_region_ids.clone(),
-    )
-    .unwrap();
+    let aliases =
+        runmat_analysis_core::GeometryRegionAliases::new(meshing_output.region_aliases.clone())
+            .unwrap();
     workload
         .replace_model(
-            runmat_analysis_core::resolve_boundary_region_aliases(workload.model(), &aliases)
+            runmat_analysis_core::resolve_geometry_region_aliases(workload.model(), &aliases)
                 .unwrap(),
         )
         .unwrap();
@@ -876,12 +875,11 @@ fn modal_transient_intent_publishes_the_exact_basis_and_both_runtime_results() {
     else {
         panic!("second workload must be modal transient")
     };
-    let aliases = runmat_analysis_core::BoundaryRegionAliases::new(
-        meshing_output.boundary_region_ids.clone(),
-    )
-    .unwrap();
+    let aliases =
+        runmat_analysis_core::GeometryRegionAliases::new(meshing_output.region_aliases.clone())
+            .unwrap();
     let resolved_model =
-        runmat_analysis_core::resolve_boundary_region_aliases(modal_workload.model(), &aliases)
+        runmat_analysis_core::resolve_geometry_region_aliases(modal_workload.model(), &aliases)
             .unwrap();
     let mut modal_workload = *modal_workload;
     modal_workload
@@ -1042,12 +1040,11 @@ fn structural_study_intent_completes_a_partitioned_direct_transient_with_state()
     else {
         panic!("test requires a direct transient workload")
     };
-    let aliases = runmat_analysis_core::BoundaryRegionAliases::new(
-        meshing_output.boundary_region_ids.clone(),
-    )
-    .unwrap();
+    let aliases =
+        runmat_analysis_core::GeometryRegionAliases::new(meshing_output.region_aliases.clone())
+            .unwrap();
     workload.model =
-        runmat_analysis_core::resolve_boundary_region_aliases(&workload.model, &aliases).unwrap();
+        runmat_analysis_core::resolve_geometry_region_aliases(&workload.model, &aliases).unwrap();
     let scope = runmat_analysis_fea::pipeline::transient::prepare_transient_checkpoint_scope(
         &workload,
         &meshing_output.artifact,
@@ -1999,7 +1996,7 @@ fn ready_minimal_meshing_output() -> crate::meshing::MeshingExecutionOutput {
     crate::meshing::MeshingExecutionOutput {
         artifact,
         evidence,
-        boundary_region_ids: std::collections::BTreeMap::new(),
+        region_aliases: std::collections::BTreeMap::new(),
     }
 }
 

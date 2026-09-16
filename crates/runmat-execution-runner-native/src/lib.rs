@@ -120,14 +120,14 @@ pub use exact_meshing_root::{
 };
 pub use exact_structural_study_root::{
     decode_exact_structural_study_root, import_exact_structural_study_result,
-    prepare_exact_structural_study_root, BoundaryRegionResolution, DecodedExactStructuralStudyRoot,
+    prepare_exact_structural_study_root, DecodedExactStructuralStudyRoot,
     ExactStructuralBucklingAnalysisResult, ExactStructuralFrequencyAnalysisResult,
     ExactStructuralModalResponseSpectrumAnalysisResult,
     ExactStructuralModalTransientAnalysisResult, ExactStructuralPrestressedFrequencyAnalysisResult,
     ExactStructuralPrestressedModalAnalysisResult, ExactStructuralRandomResponseAnalysisResult,
     ExactStructuralStudyAnalysisResult, ExactStructuralStudyResult,
     ExactStructuralStudyResultExpectation, ExactStructuralStudyRootPreparation,
-    PreparedExactStructuralStudyRoot, RequiredStudyProgram,
+    PreparedExactStructuralStudyRoot, RequiredStudyProgram, TopologyRegionResolution,
     EXACT_STRUCTURAL_STUDY_ROOT_EXECUTION_MODE, EXACT_STRUCTURAL_STUDY_ROOT_TARGET_PROFILE,
 };
 pub use exact_structural_sweep_root::{

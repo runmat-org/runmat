@@ -226,12 +226,31 @@ struct FeaMaterialDocument {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct FeaMaterialAssignmentDocument {
-    region: String,
+    target: FeaPropertyRegionTargetDocument,
     material: String,
     #[serde(default)]
     expected_material: Option<String>,
     #[serde(default = "default_assignment_confidence")]
     confidence: EvidenceConfidence,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum FeaPropertyRegionTargetDocument {
+    Beam(FeaPropertyRegionSelectionDocument),
+    Shell(FeaPropertyRegionSelectionDocument),
+    Solid(FeaPropertyRegionSelectionDocument),
+    Cell(FeaPropertyRegionSelectionDocument),
+    AllBeams,
+    AllShells,
+    AllSolids,
+    AllCells,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FeaPropertyRegionSelectionDocument {
+    region: String,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -678,9 +697,58 @@ fn resolve_material_assignment(
     geometry: &GeometryAsset,
     aliases: &BTreeMap<String, FeaRegionDocument>,
 ) -> Result<MaterialAssignment, String> {
-    let region_id = resolve_region_ref(&assignment.region, geometry, aliases)?;
+    let target = match &assignment.target {
+        FeaPropertyRegionTargetDocument::Beam(selection) => {
+            let region = resolve_property_region_ref(
+                &selection.region,
+                geometry,
+                aliases,
+                is_importer_edge_alias,
+            )?;
+            runmat_analysis_core::PropertyRegionTarget::beam(region)
+        }
+        FeaPropertyRegionTargetDocument::Shell(selection) => {
+            let region = resolve_property_region_ref(
+                &selection.region,
+                geometry,
+                aliases,
+                is_importer_face_alias,
+            )?;
+            runmat_analysis_core::PropertyRegionTarget::shell(region)
+        }
+        FeaPropertyRegionTargetDocument::Solid(selection) => {
+            let region = resolve_property_region_ref(
+                &selection.region,
+                geometry,
+                aliases,
+                is_importer_solid_alias,
+            )?;
+            runmat_analysis_core::PropertyRegionTarget::solid(region)
+        }
+        FeaPropertyRegionTargetDocument::Cell(selection) => {
+            let region = resolve_property_region_ref(
+                &selection.region,
+                geometry,
+                aliases,
+                is_importer_solid_alias,
+            )?;
+            runmat_analysis_core::PropertyRegionTarget::cell(region)
+        }
+        FeaPropertyRegionTargetDocument::AllBeams => {
+            runmat_analysis_core::PropertyRegionTarget::all_beams()
+        }
+        FeaPropertyRegionTargetDocument::AllShells => {
+            runmat_analysis_core::PropertyRegionTarget::all_shells()
+        }
+        FeaPropertyRegionTargetDocument::AllSolids => {
+            runmat_analysis_core::PropertyRegionTarget::all_solids()
+        }
+        FeaPropertyRegionTargetDocument::AllCells => {
+            runmat_analysis_core::PropertyRegionTarget::all_cells()
+        }
+    };
     Ok(MaterialAssignment {
-        region_id,
+        target,
         expected_material_id: assignment
             .expected_material
             .clone()
@@ -688,6 +756,19 @@ fn resolve_material_assignment(
         assigned_material_id: assignment.material.clone(),
         confidence: assignment.confidence,
     })
+}
+
+fn resolve_property_region_ref(
+    region: &str,
+    geometry: &GeometryAsset,
+    aliases: &BTreeMap<String, FeaRegionDocument>,
+    is_exact_importer_alias: fn(&str) -> bool,
+) -> Result<String, String> {
+    if is_exact_importer_alias(region) {
+        Ok(region.to_owned())
+    } else {
+        resolve_region_ref(region, geometry, aliases)
+    }
 }
 
 fn resolve_structural_model(
@@ -896,7 +977,32 @@ fn resolve_typed_region_targets(
 ) -> Result<(), String> {
     let mut failure = None;
     for assignment in &mut model.material_assignments {
-        resolve_region_id(&mut assignment.region_id, geometry, aliases, &mut failure);
+        let Some(region_id) = assignment.selected_region_id() else {
+            continue;
+        };
+        let importer_alias = match &assignment.target {
+            runmat_analysis_core::PropertyRegionTarget::Beam(_) => {
+                is_importer_edge_alias(region_id)
+            }
+            runmat_analysis_core::PropertyRegionTarget::Shell(_) => {
+                is_importer_face_alias(region_id)
+            }
+            runmat_analysis_core::PropertyRegionTarget::Solid(_)
+            | runmat_analysis_core::PropertyRegionTarget::Cell(_) => {
+                is_importer_solid_alias(region_id)
+            }
+        };
+        if !importer_alias {
+            resolve_region_id(
+                assignment
+                    .target
+                    .selected_region_id_mut()
+                    .expect("selected material target has a region id"),
+                geometry,
+                aliases,
+                &mut failure,
+            );
+        }
     }
     if let Some(structural) = &mut model.structural {
         for element in &mut structural.elements {
@@ -1036,6 +1142,25 @@ fn require_region_id(region_id: &str, geometry: &GeometryAsset) -> Result<String
         .find(|region| region.region_id == region_id)
         .map(|region| region.region_id.clone())
         .ok_or_else(|| format!("region id `{region_id}` was not found in geometry"))
+}
+
+fn is_importer_solid_alias(region_id: &str) -> bool {
+    is_importer_alias(region_id, "solid_")
+}
+
+fn is_importer_face_alias(region_id: &str) -> bool {
+    is_importer_alias(region_id, "face_")
+}
+
+fn is_importer_edge_alias(region_id: &str) -> bool {
+    is_importer_alias(region_id, "edge_")
+}
+
+fn is_importer_alias(region_id: &str, prefix: &str) -> bool {
+    let Some(ordinal) = region_id.strip_prefix(prefix) else {
+        return false;
+    };
+    ordinal.len() == 6 && ordinal.bytes().all(|byte| byte.is_ascii_digit()) && ordinal != "000000"
 }
 
 fn required_f64(value: Option<f64>, label: &str) -> Result<f64, String> {
@@ -1911,6 +2036,54 @@ mod tests {
         let error = resolve_region_ref("tag:tip", &sample_geometry(), &BTreeMap::new())
             .expect_err("legacy prefixes are not direct region ids");
         assert!(error.contains("tag:tip"));
+    }
+
+    #[test]
+    fn material_assignment_targets_are_closed_typed_domains_with_explicit_scope() {
+        let parse = |source: &str| -> Result<FeaMaterialAssignmentDocument, String> {
+            let yaml = serde_yaml::from_str::<serde_yaml::Value>(source)
+                .map_err(|error| error.to_string())?;
+            let canonical = serde_json::to_value(yaml).map_err(|error| error.to_string())?;
+            serde_json::from_value(canonical).map_err(|error| error.to_string())
+        };
+        for (name, expected) in [
+            ("all_beams", "beam"),
+            ("all_shells", "shell"),
+            ("all_solids", "solid"),
+            ("all_cells", "cell"),
+        ] {
+            let parsed = parse(&format!("target: {name}\nmaterial: material\n"))
+                .expect("whole-domain material target");
+            let actual = match parsed.target {
+                FeaPropertyRegionTargetDocument::AllBeams => "beam",
+                FeaPropertyRegionTargetDocument::AllShells => "shell",
+                FeaPropertyRegionTargetDocument::AllSolids => "solid",
+                FeaPropertyRegionTargetDocument::AllCells => "cell",
+                _ => panic!("whole-domain target parsed as a selected target"),
+            };
+            assert_eq!(actual, expected);
+        }
+
+        for kind in ["beam", "shell", "solid", "cell"] {
+            let parsed = parse(&format!(
+                "target:\n  {kind}:\n    region: selected_domain\nmaterial: material\n"
+            ))
+            .expect("selected material target");
+            let (actual_kind, selection) = match parsed.target {
+                FeaPropertyRegionTargetDocument::Beam(selection) => ("beam", selection),
+                FeaPropertyRegionTargetDocument::Shell(selection) => ("shell", selection),
+                FeaPropertyRegionTargetDocument::Solid(selection) => ("solid", selection),
+                FeaPropertyRegionTargetDocument::Cell(selection) => ("cell", selection),
+                _ => panic!("selected target parsed as a whole-domain target"),
+            };
+            assert_eq!(actual_kind, kind);
+            assert_eq!(selection.region, "selected_domain");
+        }
+
+        parse("region: region_default\nmaterial: steel\n")
+            .expect_err("untyped legacy region assignments must be rejected");
+        parse("target: face\nmaterial: steel\n")
+            .expect_err("boundary faces are not material domains");
     }
 
     #[test]

@@ -202,7 +202,9 @@ pub(crate) struct ExactGeometryAdmission {
     pub schema_version: u16,
     pub document: GeometryDocument,
     pub geometry_root: ValueRef,
+    pub source_edge_ids: BTreeMap<u64, PersistentEntityId>,
     pub source_face_ids: BTreeMap<u64, PersistentEntityId>,
+    pub source_region_ids: BTreeMap<u64, PersistentEntityId>,
     pub platform: PlatformBuildIdentity,
 }
 
@@ -219,24 +221,32 @@ impl ExactGeometryAdmission {
         {
             return Err(protocol("exact geometry admission contract is invalid"));
         }
-        validate_source_face_order(&self.source_face_ids)?;
+        validate_source_entity_order(&self.source_edge_ids, PersistentEntityKind::Edge, "edge")?;
+        validate_source_entity_order(&self.source_face_ids, PersistentEntityKind::Face, "face")?;
+        validate_source_entity_order(
+            &self.source_region_ids,
+            PersistentEntityKind::Region,
+            "region",
+        )?;
         Ok(())
     }
 }
 
-fn validate_source_face_order(
-    source_face_ids: &BTreeMap<u64, PersistentEntityId>,
+fn validate_source_entity_order(
+    source_ids: &BTreeMap<u64, PersistentEntityId>,
+    expected_kind: PersistentEntityKind,
+    label: &str,
 ) -> NativeExecutionResult<()> {
     let mut identities = BTreeSet::new();
-    for (expected_index, (source_index, identity)) in source_face_ids.iter().enumerate() {
+    for (expected_index, (source_index, identity)) in source_ids.iter().enumerate() {
         identity.validate().map_err(protocol)?;
         if *source_index != expected_index as u64
-            || identity.kind != PersistentEntityKind::Face
+            || identity.kind != expected_kind
             || !identities.insert(identity)
         {
-            return Err(protocol(
-                "exact geometry admission source-face map is not a contiguous face bijection",
-            ));
+            return Err(protocol(format!(
+                "exact geometry admission source-{label} map is not a contiguous {label} bijection"
+            )));
         }
     }
     Ok(())
@@ -272,7 +282,9 @@ where
             ));
         }
         let document = prepared.document().clone();
+        let source_edge_ids = prepared.source_edge_ids().clone();
         let source_face_ids = prepared.source_face_ids().clone();
+        let source_region_ids = prepared.source_region_ids().clone();
         let geometry_objects = prepared.into_objects();
         for object in &geometry_objects.objects {
             store.write_verified(object).map_err(protocol)?;
@@ -288,7 +300,9 @@ where
             platform: native_meshing_platform(None, document.source.kernel_version.clone()),
             document,
             geometry_root: geometry.root_input().clone(),
+            source_edge_ids,
             source_face_ids,
+            source_region_ids,
         };
         let admission_object = logical_object(
             ObjectNamespace::ResultValue,
@@ -769,19 +783,38 @@ mod tests {
     }
 
     #[test]
-    fn source_face_order_requires_contiguous_unique_face_occurrences() {
+    fn source_entity_order_requires_contiguous_unique_typed_occurrences() {
         let valid = BTreeMap::from([(0, face("shared", "a")), (1, face("shared", "b"))]);
-        validate_source_face_order(&valid).unwrap();
+        validate_source_entity_order(&valid, PersistentEntityKind::Face, "face").unwrap();
 
         let sparse = BTreeMap::from([(0, face("a", "a")), (2, face("b", "b"))]);
-        assert!(validate_source_face_order(&sparse).is_err());
+        assert!(validate_source_entity_order(&sparse, PersistentEntityKind::Face, "face").is_err());
 
         let duplicate = BTreeMap::from([(0, face("same", "a")), (1, face("same", "a"))]);
-        assert!(validate_source_face_order(&duplicate).is_err());
+        assert!(
+            validate_source_entity_order(&duplicate, PersistentEntityKind::Face, "face").is_err()
+        );
 
         let mut non_face = face("solid", "a");
         non_face.kind = PersistentEntityKind::Solid;
-        assert!(validate_source_face_order(&BTreeMap::from([(0, non_face)])).is_err());
+        assert!(validate_source_entity_order(
+            &BTreeMap::from([(0, non_face)]),
+            PersistentEntityKind::Face,
+            "face"
+        )
+        .is_err());
+
+        let region = PersistentEntityId {
+            kind: PersistentEntityKind::Region,
+            source_topology_id: "solid".into(),
+            assembly_path: vec!["root".into()],
+        };
+        validate_source_entity_order(
+            &BTreeMap::from([(0, region)]),
+            PersistentEntityKind::Region,
+            "region",
+        )
+        .unwrap();
     }
 
     #[cfg(feature = "occt-native")]
@@ -843,6 +876,7 @@ mod tests {
             admission.platform.exact_kernel_abi,
             admission.document.source.kernel_version
         );
+        let source_region_ids = admission.source_region_ids.clone();
         let geometry = import_exact_geometry_input(
             &store,
             admission.document,
@@ -852,6 +886,16 @@ mod tests {
         )
         .unwrap();
         assert!(!geometry.geometry_objects().topology.regions.is_empty());
+        assert_eq!(
+            source_region_ids.values().cloned().collect::<BTreeSet<_>>(),
+            geometry
+                .geometry_objects()
+                .topology
+                .regions
+                .iter()
+                .map(|region| region.id.clone())
+                .collect::<BTreeSet<_>>()
+        );
     }
 
     #[cfg(feature = "occt-native")]

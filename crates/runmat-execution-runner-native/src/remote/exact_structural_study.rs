@@ -20,7 +20,7 @@ use super::pool_execution::RemotePoolExecutionOutcome;
 use super::pool_tasks::{execution_failure_outcome, packaged};
 use super::RemotePoolDriver;
 use crate::StructuralTransientRecoveryPublisher;
-use crate::{BoundaryRegionResolution, NativeExecutionError, NativeExecutionResult};
+use crate::{NativeExecutionError, NativeExecutionResult, TopologyRegionResolution};
 
 #[derive(Clone, Debug)]
 pub(super) enum RemoteExactStructuralStudyComposition {
@@ -165,29 +165,46 @@ pub(super) async fn execute_with_completed_meshing(
         ));
     }
 
-    let aliases = completed
-        .source_face_ids
+    let mut aliases = completed
+        .source_edge_ids
         .iter()
         .map(|(index, identity)| {
             (
-                format!("face_{:06}", index.saturating_add(1)),
+                format!("edge_{:06}", index.saturating_add(1)),
                 identity.clone(),
             )
         })
         .collect::<BTreeMap<_, _>>();
-    let resolution = BoundaryRegionResolution {
+    for (index, identity) in &completed.source_face_ids {
+        let alias = format!("face_{:06}", index.saturating_add(1));
+        if aliases.insert(alias, identity.clone()).is_some() {
+            return Ok(RemoteExactStructuralStudyComposition::Failed(
+                "geometry region aliases are not unique".into(),
+            ));
+        }
+    }
+    for (index, identity) in &completed.source_region_ids {
+        let alias = format!("solid_{:06}", index.saturating_add(1));
+        if aliases.insert(alias, identity.clone()).is_some() {
+            return Ok(RemoteExactStructuralStudyComposition::Failed(
+                "geometry region aliases are not unique".into(),
+            ));
+        }
+    }
+    let resolution = TopologyRegionResolution {
         schema_version: 1,
         geometry_source_digest: decoded.geometry_source_digest,
         solver_mesh_digest: Digest::from_bytes(*completed.result.artifact.canonical_digest.bytes()),
         aliases,
     };
     resolution.validate()?;
-    let boundary_objects = crate::exact_structural_study_root::prepare_boundary_resolution_objects(
-        &resolution,
-        &decoded.artifact_access,
-        DEFAULT_ANALYSIS_CHUNK_BYTES,
-        ObjectInventoryLimits::default(),
-    )?;
+    let region_resolution_objects =
+        crate::exact_structural_study_root::prepare_topology_resolution_objects(
+            &resolution,
+            &decoded.artifact_access,
+            DEFAULT_ANALYSIS_CHUNK_BYTES,
+            ObjectInventoryLimits::default(),
+        )?;
 
     let unresolved_workloads_digest =
         crate::exact_structural_study_root::structural_workload_inventory_digest(
@@ -287,7 +304,7 @@ pub(super) async fn execute_with_completed_meshing(
                         request,
                         &decoded,
                         &completed.result,
-                        &boundary_objects,
+                        &region_resolution_objects,
                         crate::exact_structural_study_root::ExactStructuralAnalysisPublication::StructuralPrestressedModalFrequency {
                             signals: &completed_signals,
                             completion: &completion,
@@ -394,7 +411,7 @@ pub(super) async fn execute_with_completed_meshing(
                             request,
                             &decoded,
                             &completed.result,
-                            &boundary_objects,
+                            &region_resolution_objects,
                             crate::exact_structural_study_root::ExactStructuralAnalysisPublication::StructuralPrestressedFrequency {
                                 signals: &completed_signals,
                                 completion: &completion,
@@ -436,7 +453,7 @@ pub(super) async fn execute_with_completed_meshing(
                             request,
                             &decoded,
                             &completed.result,
-                            &boundary_objects,
+                            &region_resolution_objects,
                             crate::exact_structural_study_root::ExactStructuralAnalysisPublication::StructuralPrestressedModal {
                                 signals: &completed_signals,
                                 completion: &completion,
@@ -474,7 +491,7 @@ pub(super) async fn execute_with_completed_meshing(
                     request,
                     &decoded,
                     &completed.result,
-                    &boundary_objects,
+                    &region_resolution_objects,
                     crate::exact_structural_study_root::ExactStructuralAnalysisPublication::StructuralBuckling {
                         signals: &completed_signals,
                         completion: &completion,
@@ -525,7 +542,7 @@ pub(super) async fn execute_with_completed_meshing(
                     request,
                     &decoded,
                     &completed.result,
-                    &boundary_objects,
+                    &region_resolution_objects,
                     crate::exact_structural_study_root::ExactStructuralAnalysisPublication::StructuralModalResponseSpectrum {
                         signals: &completed_signals,
                         completion: &completion,
@@ -576,7 +593,7 @@ pub(super) async fn execute_with_completed_meshing(
                         request,
                         &decoded,
                         &completed.result,
-                        &boundary_objects,
+                        &region_resolution_objects,
                         crate::exact_structural_study_root::ExactStructuralAnalysisPublication::StructuralRandomResponse {
                             signals: &completed_signals,
                             completion: &completion,
@@ -637,7 +654,7 @@ pub(super) async fn execute_with_completed_meshing(
                 request,
                 &decoded,
                 &completed.result,
-                &boundary_objects,
+                &region_resolution_objects,
                 crate::exact_structural_study_root::ExactStructuralAnalysisPublication::StructuralModalTransient {
                     signals: &completed_signals,
                     completion: &completion,
@@ -683,7 +700,7 @@ pub(super) async fn execute_with_completed_meshing(
                 request,
                 &decoded,
                 &completed.result,
-                &boundary_objects,
+                &region_resolution_objects,
                 crate::exact_structural_study_root::ExactStructuralAnalysisPublication::StructuralModal {
                     signals: &completed_signals,
                     completion: &completion,
@@ -728,7 +745,7 @@ pub(super) async fn execute_with_completed_meshing(
                 request,
                 &decoded,
                 &completed.result,
-                &boundary_objects,
+                &region_resolution_objects,
                 crate::exact_structural_study_root::ExactStructuralAnalysisPublication::LinearSequence {
                     signals: &completed_signals,
                     sequence: &sequence,
@@ -792,7 +809,7 @@ pub(super) async fn execute_with_completed_meshing(
                 request,
                 &decoded,
                 &completed.result,
-                &boundary_objects,
+                &region_resolution_objects,
                 crate::exact_structural_study_root::ExactStructuralAnalysisPublication::StructuralTransient {
                     signals: &completed_signals,
                     completion: &completion,
@@ -846,7 +863,7 @@ pub(super) async fn execute_with_completed_meshing(
                 request,
                 &decoded,
                 &completed.result,
-                &boundary_objects,
+                &region_resolution_objects,
                 crate::exact_structural_study_root::ExactStructuralAnalysisPublication::StructuralFrequency {
                     signals: &completed_signals,
                     completion: &completion,
@@ -983,11 +1000,11 @@ fn protocol(error: impl std::fmt::Display) -> NativeExecutionError {
 
 fn resolve_model_boundary_aliases(
     model: &mut runmat_analysis_core::AnalysisModel,
-    resolution: &BoundaryRegionResolution,
+    resolution: &TopologyRegionResolution,
 ) -> Result<(), String> {
-    let aliases = runmat_analysis_core::BoundaryRegionAliases::new(resolution.aliases.clone())
+    let aliases = runmat_analysis_core::GeometryRegionAliases::new(resolution.aliases.clone())
         .map_err(|error| error.to_string())?;
-    *model = runmat_analysis_core::resolve_boundary_region_aliases(model, &aliases)
+    *model = runmat_analysis_core::resolve_geometry_region_aliases(model, &aliases)
         .map_err(|error| error.to_string())?;
     Ok(())
 }
@@ -1024,7 +1041,7 @@ mod tests {
         workload.model.constraints[0].visit_targets_mut(|target| {
             *target = runmat_analysis_core::RegionTarget::boundary("face_000002")
         });
-        let resolution = BoundaryRegionResolution {
+        let resolution = TopologyRegionResolution {
             schema_version: 1,
             geometry_source_digest: Digest::sha256(b"geometry"),
             solver_mesh_digest: Digest::sha256(b"mesh"),

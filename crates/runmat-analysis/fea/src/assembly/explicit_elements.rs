@@ -59,6 +59,9 @@ pub(super) fn assemble_explicit_elements(
     if beam_count == 0 && shell_count == 0 {
         return Err(StructuralAssemblyError::MissingDiscretization);
     }
+    materials
+        .validate_explicit_coverage(structural)
+        .map_err(StructuralAssemblyError::InvalidMaterialCoverage)?;
 
     let dof_count = layout.total_dof_count();
     let mut stiffness = RealSparseAssembler::square(
@@ -94,7 +97,7 @@ pub(super) fn assemble_explicit_elements(
                             section_id: beam.section_id.clone(),
                         }
                     })?;
-                let material = materials.resolve(&element.region_id).ok_or_else(|| {
+                let material = materials.resolve_beam(&element.region_id).ok_or_else(|| {
                     StructuralAssemblyError::UnassignedExplicitRegion {
                         element_id: element.element_id.clone(),
                         region_id: element.region_id.clone(),
@@ -168,7 +171,7 @@ pub(super) fn assemble_explicit_elements(
                             section_id: shell.section_id.clone(),
                         }
                     })?;
-                let material = materials.resolve(&element.region_id).ok_or_else(|| {
+                let material = materials.resolve_shell(&element.region_id).ok_or_else(|| {
                     StructuralAssemblyError::UnassignedExplicitRegion {
                         element_id: element.element_id.clone(),
                         region_id: element.region_id.clone(),

@@ -33,10 +33,33 @@ pub fn summarize_fea_study_document_contract(
     let material_assignments = sequence_values(&document, "material_assignments")
         .iter()
         .enumerate()
-        .map(|(index, value)| FeaStudyMaterialAssignmentEntry {
-            index,
-            region: scalar(value, &["region"]),
-            material: scalar(value, &["material"]),
+        .map(|(index, value)| {
+            let selected_kind = ["beam", "shell", "solid", "cell"]
+                .into_iter()
+                .find(|kind| scalar(value, &["target", kind, "region"]).is_some())
+                .map(str::to_owned);
+            let region = ["beam", "shell", "solid", "cell"]
+                .into_iter()
+                .find_map(|kind| scalar(value, &["target", kind, "region"]));
+            let all_kind = scalar(value, &["target"]).and_then(|target| match target.as_str() {
+                "all_beams" => Some("beam".to_string()),
+                "all_shells" => Some("shell".to_string()),
+                "all_solids" => Some("solid".to_string()),
+                "all_cells" => Some("cell".to_string()),
+                _ => None,
+            });
+            let target_scope = if selected_kind.is_some() {
+                Some("region".to_string())
+            } else {
+                all_kind.as_ref().map(|_| "all".to_string())
+            };
+            FeaStudyMaterialAssignmentEntry {
+                index,
+                target_kind: selected_kind.or(all_kind),
+                target_scope,
+                region,
+                material: scalar(value, &["material"]),
+            }
         })
         .collect::<Vec<_>>();
     let constraints = named_entries::<AnalysisConstraint>(&document, "constraints", |value| {

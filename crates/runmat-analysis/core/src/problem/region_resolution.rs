@@ -1,4 +1,4 @@
-//! Resolution of importer-authored boundary aliases into persistent geometry identities.
+//! Resolution of importer-authored edge, face, and solid aliases into persistent identities.
 
 use std::collections::BTreeMap;
 
@@ -6,37 +6,46 @@ use runmat_geometry_core::{PersistentEntityId, PersistentEntityKind};
 
 use super::{
     excitation::ExcitationTarget,
+    material_assignment::PropertyRegionTarget,
     model::AnalysisModel,
     target::{EntityDimension, ExpectedTopology, RegionTarget},
 };
 use crate::ObservationTarget;
 
-/// A validated mapping from geometry-importer boundary aliases to persistent face identities.
+/// A validated mapping from geometry-importer aliases to persistent edge, face, or solid-region
+/// identities.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct BoundaryRegionAliases {
+pub struct GeometryRegionAliases {
     aliases: BTreeMap<String, PersistentEntityId>,
 }
 
-impl BoundaryRegionAliases {
+impl GeometryRegionAliases {
     pub fn new(
         aliases: BTreeMap<String, PersistentEntityId>,
-    ) -> Result<Self, BoundaryRegionResolutionError> {
+    ) -> Result<Self, GeometryRegionResolutionError> {
         for (alias, identity) in &aliases {
-            if !is_importer_face_alias(alias) {
-                return Err(BoundaryRegionResolutionError::InvalidAlias {
+            let expected_kind = if is_importer_edge_alias(alias) {
+                PersistentEntityKind::Edge
+            } else if is_importer_face_alias(alias) {
+                PersistentEntityKind::Face
+            } else if is_importer_solid_alias(alias) {
+                PersistentEntityKind::Region
+            } else {
+                return Err(GeometryRegionResolutionError::InvalidAlias {
                     alias: alias.clone(),
                 });
-            }
+            };
             identity.validate().map_err(|error| {
-                BoundaryRegionResolutionError::InvalidPersistentIdentity {
+                GeometryRegionResolutionError::InvalidPersistentIdentity {
                     alias: alias.clone(),
                     reason: error.to_string(),
                 }
             })?;
-            if identity.kind != PersistentEntityKind::Face {
-                return Err(BoundaryRegionResolutionError::NonFaceIdentity {
+            if identity.kind != expected_kind {
+                return Err(GeometryRegionResolutionError::WrongIdentityKind {
                     alias: alias.clone(),
-                    kind: identity.kind,
+                    expected: expected_kind,
+                    actual: identity.kind,
                 });
             }
         }
@@ -53,48 +62,58 @@ impl BoundaryRegionAliases {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-pub enum BoundaryRegionResolutionError {
-    #[error("boundary region alias `{alias}` is invalid")]
+pub enum GeometryRegionResolutionError {
+    #[error("geometry region alias `{alias}` is invalid")]
     InvalidAlias { alias: String },
-    #[error("boundary region alias `{alias}` has an invalid persistent identity: {reason}")]
+    #[error("geometry region alias `{alias}` has an invalid persistent identity: {reason}")]
     InvalidPersistentIdentity { alias: String, reason: String },
-    #[error("boundary region alias `{alias}` resolves to {kind:?}, not a face")]
-    NonFaceIdentity {
+    #[error("geometry region alias `{alias}` resolves to {actual:?}, expected {expected:?}")]
+    WrongIdentityKind {
         alias: String,
-        kind: PersistentEntityKind,
+        expected: PersistentEntityKind,
+        actual: PersistentEntityKind,
     },
-    #[error("importer boundary alias `{alias}` has no persistent face resolution")]
+    #[error("importer geometry alias `{alias}` has no persistent resolution")]
     UnresolvedImporterAlias { alias: String },
 }
 
-/// Returns a model with every mapped boundary target rewritten to its canonical persistent
-/// selection identity.
+/// Returns a model with every mapped material or boundary target rewritten to its canonical
+/// persistent selection identity.
 ///
-/// The input model is never partially changed. Importer aliases use the canonical `face_######`
-/// spelling and fail closed when absent from `aliases`. Other authored or already-persistent region
-/// identifiers remain unchanged when they do not occur in the mapping.
-pub fn resolve_boundary_region_aliases(
+/// The input model is never partially changed. Importer aliases use canonical `edge_######`,
+/// `face_######`, and `solid_######` spellings and fail closed when absent from `aliases`. Other
+/// authored or already-persistent region identifiers remain unchanged when they do not occur in
+/// the mapping.
+pub fn resolve_geometry_region_aliases(
     model: &AnalysisModel,
-    aliases: &BoundaryRegionAliases,
-) -> Result<AnalysisModel, BoundaryRegionResolutionError> {
+    aliases: &GeometryRegionAliases,
+) -> Result<AnalysisModel, GeometryRegionResolutionError> {
     let mut resolved = model.clone();
-    visit_boundary_targets(&mut resolved, |target| {
-        if target.entity_dimension != EntityDimension::Face
-            || target.expected_topology != ExpectedTopology::BoundaryFace
-            || !is_importer_face_alias(&target.region_id)
-        {
+    for assignment in &mut resolved.material_assignments {
+        resolve_property_region_target(&mut assignment.target, aliases)?;
+    }
+    visit_region_targets(&mut resolved, |target| {
+        let is_importer_alias = matches!(
+            (target.entity_dimension, target.expected_topology),
+            (EntityDimension::Face, ExpectedTopology::BoundaryFace)
+        ) && is_importer_face_alias(&target.region_id)
+            || matches!(
+                (target.entity_dimension, target.expected_topology),
+                (EntityDimension::Volume, ExpectedTopology::MeshElement)
+            ) && is_importer_solid_alias(&target.region_id);
+        if !is_importer_alias {
             return Ok(());
         }
         if let Some(identity) = aliases.get(&target.region_id) {
             target.region_id = identity.analysis_selection_id().map_err(|error| {
-                BoundaryRegionResolutionError::InvalidPersistentIdentity {
+                GeometryRegionResolutionError::InvalidPersistentIdentity {
                     alias: target.region_id.clone(),
                     reason: error.to_string(),
                 }
             })?;
             Ok(())
         } else {
-            Err(BoundaryRegionResolutionError::UnresolvedImporterAlias {
+            Err(GeometryRegionResolutionError::UnresolvedImporterAlias {
                 alias: target.region_id.clone(),
             })
         }
@@ -102,10 +121,10 @@ pub fn resolve_boundary_region_aliases(
     Ok(resolved)
 }
 
-fn visit_boundary_targets(
+fn visit_region_targets(
     model: &mut AnalysisModel,
-    mut visit: impl FnMut(&mut RegionTarget) -> Result<(), BoundaryRegionResolutionError>,
-) -> Result<(), BoundaryRegionResolutionError> {
+    mut visit: impl FnMut(&mut RegionTarget) -> Result<(), GeometryRegionResolutionError>,
+) -> Result<(), GeometryRegionResolutionError> {
     for constraint in &mut model.constraints {
         let mut failure = None;
         constraint.visit_targets_mut(|target| {
@@ -153,8 +172,55 @@ fn visit_boundary_targets(
     Ok(())
 }
 
+fn resolve_property_region_target(
+    target: &mut PropertyRegionTarget,
+    aliases: &GeometryRegionAliases,
+) -> Result<(), GeometryRegionResolutionError> {
+    let Some(region_id) = target.selected_region_id() else {
+        return Ok(());
+    };
+    let is_importer_alias = match target {
+        PropertyRegionTarget::Beam(_) => is_importer_edge_alias(region_id),
+        PropertyRegionTarget::Shell(_) => is_importer_face_alias(region_id),
+        PropertyRegionTarget::Solid(_) | PropertyRegionTarget::Cell(_) => {
+            is_importer_solid_alias(region_id)
+        }
+    };
+    if !is_importer_alias {
+        return Ok(());
+    }
+    let region_id = target
+        .selected_region_id_mut()
+        .expect("selected importer alias has a selected region id");
+    let alias = region_id.clone();
+    let identity = aliases.get(&alias).ok_or_else(|| {
+        GeometryRegionResolutionError::UnresolvedImporterAlias {
+            alias: alias.clone(),
+        }
+    })?;
+    *region_id = identity.analysis_selection_id().map_err(|error| {
+        GeometryRegionResolutionError::InvalidPersistentIdentity {
+            alias,
+            reason: error.to_string(),
+        }
+    })?;
+    Ok(())
+}
+
+fn is_importer_edge_alias(region_id: &str) -> bool {
+    is_importer_alias_with_prefix(region_id, "edge_")
+}
+
 fn is_importer_face_alias(region_id: &str) -> bool {
-    let Some(ordinal) = region_id.strip_prefix("face_") else {
+    is_importer_alias_with_prefix(region_id, "face_")
+}
+
+fn is_importer_solid_alias(region_id: &str) -> bool {
+    is_importer_alias_with_prefix(region_id, "solid_")
+}
+
+fn is_importer_alias_with_prefix(region_id: &str, prefix: &str) -> bool {
+    let Some(ordinal) = region_id.strip_prefix(prefix) else {
         return false;
     };
     ordinal.len() == 6 && ordinal.bytes().all(|byte| byte.is_ascii_digit()) && ordinal != "000000"
@@ -188,6 +254,14 @@ mod tests {
 
     fn selection(id: &str) -> String {
         face(id).analysis_selection_id().unwrap()
+    }
+
+    fn identity(kind: PersistentEntityKind, id: &str) -> PersistentEntityId {
+        PersistentEntityId {
+            kind,
+            source_topology_id: id.into(),
+            assembly_path: vec!["root".into()],
+        }
     }
 
     fn model_with_all_boundary_targets() -> AnalysisModel {
@@ -309,7 +383,7 @@ mod tests {
     #[test]
     fn resolves_every_boundary_target_category_without_mutating_the_input() {
         let model = model_with_all_boundary_targets();
-        let aliases = BoundaryRegionAliases::new(
+        let aliases = GeometryRegionAliases::new(
             (1..=9)
                 .map(|index| {
                     (
@@ -321,7 +395,7 @@ mod tests {
         )
         .unwrap();
 
-        let resolved = resolve_boundary_region_aliases(&model, &aliases).unwrap();
+        let resolved = resolve_geometry_region_aliases(&model, &aliases).unwrap();
 
         assert_eq!(
             model.constraints[0].target().unwrap().region_id,
@@ -372,16 +446,16 @@ mod tests {
     fn missing_importer_alias_fails_closed_and_authored_ids_remain_intact() {
         let mut model = model_with_all_boundary_targets();
         model.boundaries[0].target.region_id = "authored-wall".into();
-        let aliases = BoundaryRegionAliases::new(BTreeMap::from([(
+        let aliases = GeometryRegionAliases::new(BTreeMap::from([(
             "face_000001".into(),
             face("persistent-1"),
         )]))
         .unwrap();
 
-        let error = resolve_boundary_region_aliases(&model, &aliases).unwrap_err();
+        let error = resolve_geometry_region_aliases(&model, &aliases).unwrap_err();
         assert_eq!(
             error,
-            BoundaryRegionResolutionError::UnresolvedImporterAlias {
+            GeometryRegionResolutionError::UnresolvedImporterAlias {
                 alias: "face_000003".into()
             }
         );
@@ -403,9 +477,9 @@ mod tests {
         model.initial_conditions.clear();
         model.sequence.steps[0].observations.clear();
 
-        let resolved = resolve_boundary_region_aliases(
+        let resolved = resolve_geometry_region_aliases(
             &model,
-            &BoundaryRegionAliases::new(BTreeMap::new()).unwrap(),
+            &GeometryRegionAliases::new(BTreeMap::new()).unwrap(),
         )
         .unwrap();
         assert_eq!(
@@ -427,11 +501,11 @@ mod tests {
             "authored-wall",
         ] {
             assert!(matches!(
-                BoundaryRegionAliases::new(BTreeMap::from([(alias.into(), face("persistent"))])),
-                Err(BoundaryRegionResolutionError::InvalidAlias { .. })
+                GeometryRegionAliases::new(BTreeMap::from([(alias.into(), face("persistent"))])),
+                Err(GeometryRegionResolutionError::InvalidAlias { .. })
             ));
         }
-        BoundaryRegionAliases::new(BTreeMap::from([("face_999999".into(), face("persistent"))]))
+        GeometryRegionAliases::new(BTreeMap::from([("face_999999".into(), face("persistent"))]))
             .unwrap();
     }
 
@@ -447,9 +521,9 @@ mod tests {
         model.initial_conditions.clear();
         model.sequence.steps[0].observations.clear();
 
-        let resolved = resolve_boundary_region_aliases(
+        let resolved = resolve_geometry_region_aliases(
             &model,
-            &BoundaryRegionAliases::new(BTreeMap::from([
+            &GeometryRegionAliases::new(BTreeMap::from([
                 ("face_000001".into(), face("persistent-1")),
                 ("face_000002".into(), face("persistent-2")),
             ]))
@@ -466,11 +540,11 @@ mod tests {
         );
 
         assert!(matches!(
-            BoundaryRegionAliases::new(BTreeMap::from([(
+            GeometryRegionAliases::new(BTreeMap::from([(
                 "authored-wall".into(),
                 face("persistent")
             )])),
-            Err(BoundaryRegionResolutionError::InvalidAlias { .. })
+            Err(GeometryRegionResolutionError::InvalidAlias { .. })
         ));
     }
 
@@ -482,12 +556,76 @@ mod tests {
             assembly_path: Vec::new(),
         };
         assert!(matches!(
-            BoundaryRegionAliases::new(BTreeMap::from([("face_000001".into(), non_face)])),
-            Err(BoundaryRegionResolutionError::NonFaceIdentity { .. })
+            GeometryRegionAliases::new(BTreeMap::from([("face_000001".into(), non_face)])),
+            Err(GeometryRegionResolutionError::WrongIdentityKind { .. })
         ));
         assert!(matches!(
-            BoundaryRegionAliases::new(BTreeMap::from([("face_000001".into(), face(""))])),
-            Err(BoundaryRegionResolutionError::InvalidPersistentIdentity { .. })
+            GeometryRegionAliases::new(BTreeMap::from([("face_000001".into(), face(""))])),
+            Err(GeometryRegionResolutionError::InvalidPersistentIdentity { .. })
         ));
+    }
+
+    #[test]
+    fn material_targets_resolve_only_against_their_compatible_topology_aliases() {
+        let mut model = model_with_all_boundary_targets();
+        model.constraints.clear();
+        model.boundaries.clear();
+        model.connectors.clear();
+        model.interfaces.clear();
+        model.excitations.clear();
+        model.initial_conditions.clear();
+        model.sequence.steps[0].observations.clear();
+        model.material_assignments = vec![
+            crate::MaterialAssignment {
+                target: crate::PropertyRegionTarget::beam("edge_000001"),
+                expected_material_id: "material".into(),
+                assigned_material_id: "material".into(),
+                confidence: crate::EvidenceConfidence::Verified,
+            },
+            crate::MaterialAssignment {
+                target: crate::PropertyRegionTarget::shell("face_000001"),
+                expected_material_id: "material".into(),
+                assigned_material_id: "material".into(),
+                confidence: crate::EvidenceConfidence::Verified,
+            },
+            crate::MaterialAssignment {
+                target: crate::PropertyRegionTarget::solid("solid_000001"),
+                expected_material_id: "material".into(),
+                assigned_material_id: "material".into(),
+                confidence: crate::EvidenceConfidence::Verified,
+            },
+            crate::MaterialAssignment {
+                target: crate::PropertyRegionTarget::cell("solid_000001"),
+                expected_material_id: "material".into(),
+                assigned_material_id: "material".into(),
+                confidence: crate::EvidenceConfidence::Verified,
+            },
+        ];
+        let aliases = GeometryRegionAliases::new(BTreeMap::from([
+            (
+                "edge_000001".into(),
+                identity(PersistentEntityKind::Edge, "edge"),
+            ),
+            ("face_000001".into(), face("face")),
+            (
+                "solid_000001".into(),
+                identity(PersistentEntityKind::Region, "solid-region"),
+            ),
+        ]))
+        .unwrap();
+
+        let resolved = resolve_geometry_region_aliases(&model, &aliases).unwrap();
+        for assignment in &resolved.material_assignments {
+            assert!(assignment
+                .selected_region_id()
+                .expect("fixture uses selected material region")
+                .starts_with("persistent-entity:sha256:"));
+        }
+        assert_eq!(
+            model.material_assignments[0]
+                .selected_region_id()
+                .expect("fixture uses selected material region"),
+            "edge_000001"
+        );
     }
 }

@@ -70,7 +70,10 @@ pub use problem::interfaces::{
     ContactInterfaceModel, FluidStructureInterfaceModel, FluidStructureKinematics,
     ThermalInterfaceTransfer,
 };
-pub use problem::material_assignment::{EvidenceConfidence, MaterialAssignment};
+pub use problem::material_assignment::{
+    EvidenceConfidence, MaterialAssignment, PropertyRegionScope, PropertyRegionSelection,
+    PropertyRegionTarget,
+};
 pub use problem::materials::{
     ConductivityFrequencyPoint, MaterialAcousticModel, MaterialElectricalModel,
     MaterialMechanicalModel, MaterialModel, MaterialPlasticModel, MaterialThermalModel,
@@ -99,7 +102,7 @@ pub use problem::random_vibration::{
 };
 pub use problem::reference_point::ReferencePoint;
 pub use problem::region_resolution::{
-    resolve_boundary_region_aliases, BoundaryRegionAliases, BoundaryRegionResolutionError,
+    resolve_geometry_region_aliases, GeometryRegionAliases, GeometryRegionResolutionError,
 };
 pub use problem::response_spectrum::{
     DirectionalCombination, ModalCombination, ModalTruncationCorrection, ModalTruncationPolicy,

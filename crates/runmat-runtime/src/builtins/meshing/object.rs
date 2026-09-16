@@ -24,7 +24,7 @@ static MESHING_CLASSES_REGISTERED: crate::class_registry::ClassRegistration =
 pub(super) struct MeshPayload {
     pub artifact: SolverMeshArtifact,
     pub evidence: MeshingEvidence,
-    pub boundary_region_ids: BTreeMap<String, PersistentEntityId>,
+    pub region_aliases: BTreeMap<String, PersistentEntityId>,
 }
 
 pub(super) fn mesh_object(payload: MeshPayload) -> BuiltinResult<Value> {
@@ -75,7 +75,7 @@ pub(super) fn mesh_object(payload: MeshPayload) -> BuiltinResult<Value> {
     object.properties.insert(
         REGION_MAP_PROPERTY.to_string(),
         Value::String(
-            serde_json::to_string(&payload.boundary_region_ids)
+            serde_json::to_string(&payload.region_aliases)
                 .map_err(|cause| error(GENERATE_NAME, cause.to_string()))?,
         ),
     );
@@ -236,7 +236,7 @@ pub(super) fn payload_from_value(
     evidence
         .validate(&artifact)
         .map_err(|cause| error(builtin, cause.to_string()))?;
-    let boundary_region_ids = match object.properties.get(REGION_MAP_PROPERTY) {
+    let region_aliases = match object.properties.get(REGION_MAP_PROPERTY) {
         Some(Value::String(json)) => {
             serde_json::from_str(json).map_err(|cause| error(builtin, cause.to_string()))?
         }
@@ -245,7 +245,7 @@ pub(super) fn payload_from_value(
     Ok(MeshPayload {
         artifact,
         evidence,
-        boundary_region_ids,
+        region_aliases,
     })
 }
 
@@ -281,7 +281,7 @@ impl From<crate::meshing::MeshingExecutionOutput> for MeshPayload {
         Self {
             artifact: output.artifact,
             evidence: output.evidence,
-            boundary_region_ids: output.boundary_region_ids,
+            region_aliases: output.region_aliases,
         }
     }
 }
@@ -294,7 +294,7 @@ pub(crate) fn execution_output_from_value(
     Ok(crate::meshing::MeshingExecutionOutput {
         artifact: payload.artifact,
         evidence: payload.evidence,
-        boundary_region_ids: payload.boundary_region_ids,
+        region_aliases: payload.region_aliases,
     })
 }
 
@@ -360,7 +360,7 @@ mod tests {
         MeshPayload {
             artifact,
             evidence,
-            boundary_region_ids: BTreeMap::new(),
+            region_aliases: BTreeMap::new(),
         }
     }
 

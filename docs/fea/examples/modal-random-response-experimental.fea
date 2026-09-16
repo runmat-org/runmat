@@ -18,6 +18,10 @@ materials:
       poisson_ratio: 0.3
       density_kg_per_m3: 7850.0
 
+material_assignments:
+  - target: { solid: { region: solid_000001 } }
+    material: steel
+
 regions:
   fixed_face:
     selector: { id: face_000001 }

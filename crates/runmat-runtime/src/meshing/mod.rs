@@ -35,7 +35,10 @@ pub struct MeshingExecutionRequest {
 pub struct MeshingExecutionOutput {
     pub artifact: SolverMeshArtifact,
     pub evidence: MeshingEvidence,
-    pub boundary_region_ids: BTreeMap<String, PersistentEntityId>,
+    /// Importer-authored aliases for material domains and boundary entities, bound to persistent
+    /// exact-geometry identity. Alias prefixes encode the entity role (`edge_`, `face_`, or
+    /// `solid_`); consumers still validate compatibility with their typed target.
+    pub region_aliases: BTreeMap<String, PersistentEntityId>,
 }
 
 pub type MeshingExecutionProvider = Arc<

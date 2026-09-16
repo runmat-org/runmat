@@ -71,6 +71,7 @@ pub(crate) mod field_selectors;
 pub(crate) mod generator_policies;
 pub(crate) mod initial_conditions;
 pub(crate) mod interfaces;
+pub(crate) mod material_assignments;
 mod modeling;
 pub(crate) mod observations;
 pub(crate) mod response_spectra;
@@ -91,6 +92,8 @@ use boundaries::*;
 use classes::*;
 use constraints::*;
 use interfaces::*;
+#[cfg(test)]
+use material_assignments::*;
 use modeling::*;
 use steps::*;
 #[cfg(test)]
@@ -225,29 +228,6 @@ const MATERIAL_INPUTS: [BuiltinParamDescriptor; 2] = [
         arity: BuiltinParamArity::Variadic,
         default: None,
         description: "Mechanical, thermal, acoustic, electrical, and plastic material fields.",
-    },
-];
-const MATERIAL_ASSIGNMENT_INPUTS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "region",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Geometry region selector.",
-    },
-    BuiltinParamDescriptor {
-        name: "material",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Assigned material id.",
-    },
-    BuiltinParamDescriptor {
-        name: "Name, Value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Expected-material and confidence options.",
     },
 ];
 const SWEEP_INPUTS: [BuiltinParamDescriptor; 3] = [
@@ -438,12 +418,6 @@ const MATERIAL_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDe
     inputs: &MATERIAL_INPUTS,
     outputs: &OUT_ANY,
 }];
-const MATERIAL_ASSIGNMENT_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
-    [BuiltinSignatureDescriptor {
-        label: "assignment = fea.materialAssignment(region, material, Name, Value, ...)",
-        inputs: &MATERIAL_ASSIGNMENT_INPUTS,
-        outputs: &OUT_ANY,
-    }];
 const COMPONENT_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "component = fea.component(args, ...)",
     inputs: &IN_VARIADIC_ARGS,
@@ -556,12 +530,6 @@ pub const FEA_MODEL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 };
 pub const FEA_MATERIAL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &MATERIAL_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-pub const FEA_MATERIAL_ASSIGNMENT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &MATERIAL_ASSIGNMENT_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ERRORS,
@@ -835,19 +803,6 @@ pub async fn fea_model_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 )]
 pub async fn fea_material_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     create_material_object_from_args(args)
-}
-
-#[runtime_builtin(
-    name = "fea.materialAssignment",
-    category = "fea",
-    summary = "Create a typed FEA material assignment.",
-    keywords = "fea,material,assignment,region",
-    descriptor(crate::builtins::fea::FEA_MATERIAL_ASSIGNMENT_DESCRIPTOR),
-    integer_audit(crate::builtins::fea::FEA_STRUCTURAL_INTEGER_AUDIT),
-    builtin_path = "crate::builtins::fea"
-)]
-pub async fn fea_material_assignment_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    create_material_assignment_object_from_args(args)
 }
 
 #[runtime_builtin(
@@ -4148,12 +4103,96 @@ execution:
         .expect("material should build");
         assert_object_class(&material, FEA_MATERIAL_CLASS);
 
+        let material_region = block_on(crate::builtins::geometry::region::geometry_region_builtin(
+            geometry.clone(),
+            region_id.clone(),
+        ))
+        .expect("material region should resolve");
+        let beam_target = block_on(fea_property_region_target_beam_builtin(
+            material_region.clone(),
+        ))
+        .expect("beam material target should build");
+        let shell_target = block_on(fea_property_region_target_shell_builtin(
+            material_region.clone(),
+        ))
+        .expect("shell material target should build");
+        let material_target = block_on(fea_property_region_target_solid_builtin(
+            material_region.clone(),
+        ))
+        .expect("solid material target should build");
+        let cell_target = block_on(fea_property_region_target_cell_builtin(material_region))
+            .expect("cell material target should build");
+        for (target, expected) in [
+            (beam_target, "beam"),
+            (shell_target, "shell"),
+            (material_target.clone(), "solid"),
+            (cell_target, "cell"),
+        ] {
+            let decoded: modeling::GeometryBoundPropertyRegionTarget = object_payload(&target);
+            let actual = match decoded.target() {
+                runmat_analysis_core::PropertyRegionTarget::Beam(_) => "beam",
+                runmat_analysis_core::PropertyRegionTarget::Shell(_) => "shell",
+                runmat_analysis_core::PropertyRegionTarget::Solid(_) => "solid",
+                runmat_analysis_core::PropertyRegionTarget::Cell(_) => "cell",
+            };
+            assert_eq!(actual, expected);
+            assert!(!decoded.target().selects_all());
+        }
+        let all_solids_target = block_on(fea_property_region_target_all_solids_builtin(
+            geometry.clone(),
+        ))
+        .expect("all-solids material target should build");
+        let all_targets = [
+            block_on(fea_property_region_target_all_beams_builtin(
+                geometry.clone(),
+            ))
+            .expect("all-beams material target should build"),
+            block_on(fea_property_region_target_all_shells_builtin(
+                geometry.clone(),
+            ))
+            .expect("all-shells material target should build"),
+            all_solids_target,
+            block_on(fea_property_region_target_all_cells_builtin(
+                geometry.clone(),
+            ))
+            .expect("all-cells material target should build"),
+        ];
+        for target in all_targets {
+            assert_object_class(&target, FEA_PROPERTY_REGION_TARGET_CLASS);
+            let decoded: modeling::GeometryBoundPropertyRegionTarget = object_payload(&target);
+            assert!(decoded.target().selects_all());
+        }
         let assignment = block_on(fea_material_assignment_builtin(vec![
-            Value::String(region_id.clone()),
-            Value::String("steel".to_string()),
+            material_target,
+            material.clone(),
         ]))
         .expect("material assignment should build");
         assert_object_class(&assignment, FEA_MATERIAL_ASSIGNMENT_CLASS);
+        assert!(block_on(fea_material_assignment_builtin(vec![
+            Value::String(region_id.clone()),
+            Value::String("steel".into()),
+        ]))
+        .is_err());
+
+        let mut foreign_assignment = assignment.clone();
+        let Value::Object(foreign_assignment_object) = &mut foreign_assignment else {
+            unreachable!("material assignment is an object")
+        };
+        foreign_assignment_object.properties.insert(
+            "geometry_id".into(),
+            Value::String("different_geometry".into()),
+        );
+        assert!(block_on(fea_model_builtin(vec![
+            Value::String("cross_geometry_model".into()),
+            geometry.clone(),
+            Value::String("Template".into()),
+            Value::String("linear_static_structural".into()),
+            Value::String("Materials".into()),
+            cell(vec![material.clone()]),
+            Value::String("MaterialAssignments".into()),
+            cell(vec![foreign_assignment]),
+        ]))
+        .is_err());
 
         let fixed_region = block_on(crate::builtins::geometry::region::geometry_region_builtin(
             geometry.clone(),

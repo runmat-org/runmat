@@ -60,7 +60,7 @@ fn realize_thermo_mechanical_context(
     let model_region_ids = model
         .material_assignments
         .iter()
-        .map(|assignment| assignment.region_id.as_str())
+        .filter_map(|assignment| assignment.selected_region_id())
         .chain(
             model
                 .structural

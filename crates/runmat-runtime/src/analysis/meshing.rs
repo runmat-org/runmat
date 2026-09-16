@@ -15,7 +15,7 @@ use super::{
 pub(crate) struct ResolvedStudyMesh {
     pub artifact_path: Option<String>,
     pub evidence_path: Option<String>,
-    pub boundary_region_ids: BTreeMap<String, PersistentEntityId>,
+    pub region_aliases: BTreeMap<String, PersistentEntityId>,
 }
 
 pub(super) fn resolve_study_mesh(spec: &AnalysisStudySpec) -> Result<ResolvedStudyMesh, String> {
@@ -25,14 +25,14 @@ pub(super) fn resolve_study_mesh(spec: &AnalysisStudySpec) -> Result<ResolvedStu
         return Ok(ResolvedStudyMesh {
             artifact_path: Some(path.to_owned()),
             evidence_path: spec.meshing_evidence_artifact_path.clone(),
-            boundary_region_ids: BTreeMap::new(),
+            region_aliases: BTreeMap::new(),
         });
     }
     let Some(settings) = spec.meshing_settings.clone() else {
         return Ok(ResolvedStudyMesh {
             artifact_path: None,
             evidence_path: None,
-            boundary_region_ids: BTreeMap::new(),
+            region_aliases: BTreeMap::new(),
         });
     };
     let output = crate::meshing::execute_meshing(&crate::meshing::MeshingExecutionRequest {
@@ -109,7 +109,7 @@ pub(crate) fn persist_mesh_output(
     Ok(ResolvedStudyMesh {
         artifact_path: Some(artifact_path.display().to_string()),
         evidence_path: Some(evidence_path.display().to_string()),
-        boundary_region_ids: output.boundary_region_ids.clone(),
+        region_aliases: output.region_aliases.clone(),
     })
 }
 

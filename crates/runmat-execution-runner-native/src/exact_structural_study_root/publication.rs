@@ -25,11 +25,11 @@ use runmat_meshing_core::{CanonicalMeshingContract, MeshingRequest};
 use runmat_meshing_execution::ExactMeshingDagRunResult;
 use serde::{Deserialize, Serialize};
 
-use super::boundary::BoundaryRegionResolution;
 use super::contract::{
     structural_workload_inventory_digest, validate_analysis_accelerator_requests,
     DecodedExactStructuralStudyRoot,
 };
+use super::region_resolution::TopologyRegionResolution;
 use super::{
     protocol, read, CONTRACT_LIMITS, PUBLICATION_DOMAIN, PUBLICATION_MEDIA_TYPE,
     PUBLICATION_PREFIX, PUBLICATION_VALUE_SCHEMA,
@@ -64,8 +64,8 @@ struct ExactStructuralStudyPublication {
     meshing_request_digest: Digest,
     meshing_root: ValueRef,
     meshing_objects: Vec<ValueRef>,
-    boundary_root: ValueRef,
-    boundary_objects: Vec<ValueRef>,
+    region_resolution_root: ValueRef,
+    region_resolution_objects: Vec<ValueRef>,
     signal_roots: Vec<ValueRef>,
     signal_objects: Vec<ValueRef>,
     analysis: ExactStructuralStudyAnalysisClosure,
@@ -474,7 +474,7 @@ impl ExactStructuralStudyPublication {
             || self.unresolved_workloads_digest.bytes() == &[0; 32]
             || self.meshing_request_digest.bytes() == &[0; 32]
             || self.meshing_objects.is_empty()
-            || self.boundary_objects.is_empty()
+            || self.region_resolution_objects.is_empty()
             || self.analysis.objects().is_empty()
             || self.signal_roots.len() > self.signal_objects.len()
             || self
@@ -487,7 +487,7 @@ impl ExactStructuralStudyPublication {
         for reference in self
             .meshing_objects
             .iter()
-            .chain(&self.boundary_objects)
+            .chain(&self.region_resolution_objects)
             .chain(&self.signal_objects)
             .chain(self.analysis.objects())
         {
@@ -502,7 +502,10 @@ impl ExactStructuralStudyPublication {
         }
         for (root, inventory) in [
             (&self.meshing_root, &self.meshing_objects),
-            (&self.boundary_root, &self.boundary_objects),
+            (
+                &self.region_resolution_root,
+                &self.region_resolution_objects,
+            ),
         ] {
             if !inventory.contains(root) {
                 return Err(protocol(
@@ -544,7 +547,7 @@ impl ExactStructuralStudyPublication {
 pub struct ExactStructuralStudyResult {
     pub frozen_project_digest: Option<Digest>,
     pub mesh: ExactMeshingDagRunResult,
-    pub boundary_resolution: BoundaryRegionResolution,
+    pub region_resolution: TopologyRegionResolution,
     pub analysis: ExactStructuralStudyAnalysisResult,
 }
 

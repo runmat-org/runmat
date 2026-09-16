@@ -18,9 +18,10 @@ The purpose of validation is to determine whether the implementation, numerical 
 No single test makes a FEA family production-grade. Readiness is earned per family and per intended use.
 
 Model validation runs before formulation admission or solver progress. It rejects non-finite or
-inadmissible constitutive properties, duplicate materials, dangling or duplicate region-to-material
-assignments, invalid typed domain reference states, and mismatched signal, excitation, constraint,
-boundary, and interface quantities. A deliberate expected-versus-assigned material mismatch is
+inadmissible constitutive properties, duplicate materials, and material-domain gaps, overlaps,
+stale selectors, wrong formulation roles, or cross-geometry assignments. It also rejects invalid
+typed domain reference states and mismatched signal, excitation, constraint, boundary, and
+interface quantities. A deliberate expected-versus-assigned material mismatch is
 valid when both materials exist; its confidence is retained as quality evidence. Invalid material
 data and invalid assignments use distinct typed diagnostics, so a solver failure is not used as an
 input-validation mechanism.

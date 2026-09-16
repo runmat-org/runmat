@@ -61,12 +61,14 @@ pub(super) fn mutate(
         }
         FeaStudyDocumentOperation::AssignMaterial => {
             let value: FeaStudyMaterialAssignmentInput = decode(input, operation.as_str())?;
-            append_pair(document, &value.region, &value.material, to_yaml(&value)?)?;
+            let target = to_yaml(&value.target)?;
+            append_pair(document, &target, &value.material, to_yaml(&value)?)?;
             Ok("material_assignments")
         }
         FeaStudyDocumentOperation::RemoveMaterialAssignment => {
             let value: AssignmentIdInput = decode(input, operation.as_str())?;
-            remove_pair(document, &value.region, &value.material)?;
+            let target = to_yaml(&value.target)?;
+            remove_pair(document, &target, &value.material)?;
             Ok("material_assignments")
         }
         FeaStudyDocumentOperation::AddConstraint | FeaStudyDocumentOperation::UpdateConstraint => {

@@ -104,7 +104,7 @@ fn canonical_edits_are_validated_and_summarized() {
         "/p/a.fea",
         Some(&material.source),
         serde_json::json!({
-            "region": "solid",
+            "target": { "solid": { "region": "solid" } },
             "material": "steel",
             "confidence": "verified"
         }),

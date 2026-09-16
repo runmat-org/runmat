@@ -29,7 +29,10 @@ fn native_kernel_executes_conformal_mixed_structural_workload() {
     let assignment = model.material_assignments.first().unwrap();
     let region = PersistentEntityId {
         kind: PersistentEntityKind::Region,
-        source_topology_id: assignment.region_id.clone(),
+        source_topology_id: assignment
+            .selected_region_id()
+            .expect("fixture uses selected material region")
+            .to_owned(),
         assembly_path: vec!["root".into()],
     };
     mesh.topology.volume_elements[0].region_id = region.clone();
@@ -77,6 +80,9 @@ fn native_kernel_executes_conformal_mixed_structural_workload() {
         }],
         shell_sections: Vec::new(),
     });
+    let mut beam_assignment = model.material_assignments[0].clone();
+    beam_assignment.target = runmat_analysis_core::PropertyRegionTarget::beam("beam_span");
+    model.material_assignments.push(beam_assignment);
     model
         .constraints
         .push(AnalysisConstraint::Structural(StructuralConstraint {

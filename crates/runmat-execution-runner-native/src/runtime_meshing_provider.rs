@@ -94,17 +94,47 @@ pub fn native_meshing_execution_provider() -> MeshingExecutionProvider {
             settings: request.settings.clone(),
             partition_policy: NativeMeshingPartitionPolicy::default(),
         })
-        .map(|result| MeshingExecutionOutput {
-            artifact: result.dag_result.artifact,
-            evidence: result.dag_result.evidence,
-            boundary_region_ids: result
-                .source_face_ids
-                .into_iter()
-                .map(|(index, id)| (format!("face_{:06}", index + 1), id))
-                .collect(),
+        .map(|result| {
+            let NativeExactMeshingResult {
+                dag_result,
+                source_edge_ids,
+                source_face_ids,
+                source_region_ids,
+            } = result;
+            MeshingExecutionOutput {
+                artifact: dag_result.artifact,
+                evidence: dag_result.evidence,
+                region_aliases: source_region_aliases(
+                    source_edge_ids,
+                    source_face_ids,
+                    source_region_ids,
+                ),
+            }
         })
         .map_err(|error| error.to_string())
     })
+}
+
+fn source_region_aliases(
+    source_edge_ids: std::collections::BTreeMap<u64, runmat_geometry_core::PersistentEntityId>,
+    source_face_ids: std::collections::BTreeMap<u64, runmat_geometry_core::PersistentEntityId>,
+    source_region_ids: std::collections::BTreeMap<u64, runmat_geometry_core::PersistentEntityId>,
+) -> std::collections::BTreeMap<String, runmat_geometry_core::PersistentEntityId> {
+    let mut aliases = source_edge_ids
+        .into_iter()
+        .map(|(index, id)| (format!("edge_{:06}", index + 1), id))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    aliases.extend(
+        source_face_ids
+            .into_iter()
+            .map(|(index, id)| (format!("face_{:06}", index + 1), id)),
+    );
+    aliases.extend(
+        source_region_ids
+            .into_iter()
+            .map(|(index, id)| (format!("solid_{:06}", index + 1), id)),
+    );
+    aliases
 }
 
 pub fn mesh_source_with_native_execution(
@@ -198,6 +228,17 @@ fn verify_expected_source_sha256(
 mod tests {
     use super::*;
 
+    fn identity(
+        kind: runmat_geometry_core::PersistentEntityKind,
+        source: &str,
+    ) -> runmat_geometry_core::PersistentEntityId {
+        runmat_geometry_core::PersistentEntityId {
+            kind,
+            source_topology_id: source.into(),
+            assembly_path: vec!["root".into()],
+        }
+    }
+
     #[test]
     fn admitted_geometry_digest_rejects_changed_source_bytes() {
         let expected = *Digest::sha256(b"original").bytes();
@@ -205,5 +246,23 @@ mod tests {
             verify_expected_source_sha256(Path::new("part.step"), b"changed", Some(expected))
                 .expect_err("changed geometry must fail");
         assert!(error.to_string().contains("changed after geometry.load"));
+    }
+
+    #[test]
+    fn runtime_meshing_exports_typed_edge_face_and_solid_aliases() {
+        let edge = identity(runmat_geometry_core::PersistentEntityKind::Edge, "edge");
+        let face = identity(runmat_geometry_core::PersistentEntityKind::Face, "face");
+        let solid = identity(runmat_geometry_core::PersistentEntityKind::Region, "solid");
+        let aliases = source_region_aliases(
+            std::collections::BTreeMap::from([(0, edge.clone())]),
+            std::collections::BTreeMap::from([(0, face.clone())]),
+            std::collections::BTreeMap::from([(0, solid.clone())]),
+        );
+
+        assert_eq!(aliases["edge_000001"], edge);
+        assert_eq!(aliases["face_000001"], face);
+        assert_eq!(aliases["solid_000001"], solid);
+        runmat_analysis_core::GeometryRegionAliases::new(aliases)
+            .expect("runtime meshing aliases should satisfy typed topology validation");
     }
 }

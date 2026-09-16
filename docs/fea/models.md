@@ -42,6 +42,13 @@ In a `.fea` file, `model.defaults: template_scaffold` lets RunMat create default
 selected template. `model.defaults: none` starts from an empty model and expects the file to
 provide the physical data it needs.
 
+When a template scaffold has one unambiguous material, the resulting model contains visible,
+explicit whole-domain assignments appropriate to the template: `all_solids`, `all_cells`, or both
+for a coupled solid/cell model. This is authored model data, not an assembly fallback. If imported
+geometry exposes several materials without trustworthy body-to-material ownership, RunMat leaves
+the assignments empty so the author must provide the mapping. Volumetric scaffold sources such as
+heat generation target the whole active volume rather than borrowing a boundary-face name.
+
 ## Define Model Data
 
 Model data can be written in a `.fea` file or assembled in RunMat code with typed constructors such as `fea.material(...)`, the family-specific constraint, boundary, signal, excitation, and initial-condition classes, `fea.ExcitationCase`, `fea.ResponseSpectrum`, concrete domain classes such as `fea.ElectromagneticDomain` and `fea.FluidDomain`, and `fea.model(...)`. Use a `.fea` file when the model definition is a portable study artifact. Use `.m` code when the model is generated from parameters, calculations, or loops.
@@ -64,7 +71,7 @@ materials:
       poisson_ratio: 0.30
 
 material_assignments:
-  - region: bracket_body
+  - target: all_solids
     material: steel
 
 constraints: # typed AnalysisConstraint records
@@ -75,7 +82,13 @@ sequence: # typed AnalysisSequence record
 execution: # per-step backend, requirement, and solver options
 ```
 
-Region references use typed `RegionTarget` records and can name aliases from the `regions` block.
+Material definitions and material assignments are separate. `all_solids`, `all_shells`,
+`all_beams`, and `all_cells` are explicit whole-formulation scopes. A selected scope uses a closed
+target variant such as `target: { solid: { region: bracket_body } }`; the region may be a direct
+geometry identity or an alias from the `regions` block. Every active material-bearing element must
+match exactly one compatible assignment. A CAD face used as a volume boundary is not a shell
+material domain. Beam and shell sections, laminate layups, contact/interface laws, and material
+orientation are separate model properties rather than material-assignment options.
 
 Direct moment excitations use a typed moment signal and coordinate frame. They require
 rotational-DOF structural elements. Beam nodes and shell/plate nodes can own `rx`, `ry`, and `rz`;

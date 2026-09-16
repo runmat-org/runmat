@@ -97,7 +97,7 @@ pub async fn load_builtin(mesh_path: String, evidence_path: String) -> BuiltinRe
     mesh_object(MeshPayload {
         artifact,
         evidence,
-        boundary_region_ids: Default::default(),
+        region_aliases: Default::default(),
     })
 }
 
@@ -272,7 +272,7 @@ mod tests {
         mesh_object(MeshPayload {
             artifact,
             evidence,
-            boundary_region_ids: Default::default(),
+            region_aliases: Default::default(),
         })
         .expect("fixture mesh object")
     }

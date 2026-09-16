@@ -27,7 +27,9 @@ use crate::{
 /// Exact meshing output retained in driver-owned form for composition into a larger root.
 #[derive(Clone)]
 pub(super) struct CompletedRemoteExactMeshing {
+    pub(super) source_edge_ids: BTreeMap<u64, PersistentEntityId>,
     pub(super) source_face_ids: BTreeMap<u64, PersistentEntityId>,
+    pub(super) source_region_ids: BTreeMap<u64, PersistentEntityId>,
     pub(super) result: ExactMeshingDagRunResult,
 }
 
@@ -46,10 +48,14 @@ pub(crate) async fn execute(
     match execute_for_composition(Arc::clone(&pool), &request, &run_id, &resources).await? {
         RemoteExactMeshingComposition::Completed(completed) => {
             let CompletedRemoteExactMeshing {
+                source_edge_ids,
                 source_face_ids,
+                source_region_ids,
                 result,
             } = *completed;
+            drop(source_edge_ids);
             drop(source_face_ids);
+            drop(source_region_ids);
             package_completed(pool, &request, result)
         }
         RemoteExactMeshingComposition::Terminal(outcome) => Ok(outcome),
@@ -144,8 +150,10 @@ pub(super) async fn execute_for_composition(
     .to_vec();
     expected_admission_inventory.push(admission_reference.clone());
     validate_reference_closure(&admitted.result_objects, &expected_admission_inventory)?;
-    validate_source_faces(&admission, geometry.geometry_objects())?;
+    validate_source_entities(&admission, geometry.geometry_objects())?;
+    let source_edge_ids = admission.source_edge_ids.clone();
     let source_face_ids = admission.source_face_ids.clone();
+    let source_region_ids = admission.source_region_ids.clone();
     let mut meshing_request = decoded.request.meshing_request;
     if !crate::exact_geometry_admission::same_requested_tolerance(
         &meshing_request.tolerance,
@@ -183,9 +191,19 @@ pub(super) async fn execute_for_composition(
                 .map(RemoteExactMeshingComposition::Terminal)
         }
     };
+    let meshed_region_ids = result
+        .artifact
+        .topology
+        .regions
+        .iter()
+        .map(|region| region.region_id.clone())
+        .collect::<BTreeSet<_>>();
+    validate_source_entity_bijection("region", &source_region_ids, &meshed_region_ids)?;
     Ok(RemoteExactMeshingComposition::Completed(Box::new(
         CompletedRemoteExactMeshing {
+            source_edge_ids,
             source_face_ids,
+            source_region_ids,
             result,
         },
     )))
@@ -204,28 +222,43 @@ fn package_completed(
     packaged(response, pool).map(RemotePoolExecutionOutcome::Completed)
 }
 
-fn validate_source_faces(
+fn validate_source_entities(
     admission: &crate::exact_meshing_root::ExactGeometryAdmission,
     geometry: &runmat_meshing_execution::PreparedExactGeometryObjects,
 ) -> NativeExecutionResult<()> {
+    let edge_ids = geometry
+        .topology
+        .edges
+        .iter()
+        .map(|edge| edge.id.clone())
+        .collect::<BTreeSet<_>>();
+    validate_source_entity_bijection("edge", &admission.source_edge_ids, &edge_ids)?;
     let face_ids = geometry
         .topology
         .faces
         .iter()
         .map(|face| face.id.clone())
         .collect::<BTreeSet<_>>();
-    validate_source_face_bijection(&admission.source_face_ids, &face_ids)
+    validate_source_entity_bijection("face", &admission.source_face_ids, &face_ids)?;
+    let region_ids = geometry
+        .topology
+        .regions
+        .iter()
+        .map(|region| region.id.clone())
+        .collect::<BTreeSet<_>>();
+    validate_source_entity_bijection("region", &admission.source_region_ids, &region_ids)
 }
 
-fn validate_source_face_bijection(
-    source_face_ids: &BTreeMap<u64, PersistentEntityId>,
-    topology_face_ids: &BTreeSet<PersistentEntityId>,
+fn validate_source_entity_bijection(
+    label: &str,
+    source_ids: &BTreeMap<u64, PersistentEntityId>,
+    topology_ids: &BTreeSet<PersistentEntityId>,
 ) -> NativeExecutionResult<()> {
-    let mapped_face_ids = source_face_ids.values().cloned().collect::<BTreeSet<_>>();
-    if source_face_ids.len() != topology_face_ids.len() || &mapped_face_ids != topology_face_ids {
-        return Err(protocol(
-            "exact geometry admission source-face map does not cover exact topology bijectively",
-        ));
+    let mapped_ids = source_ids.values().cloned().collect::<BTreeSet<_>>();
+    if source_ids.len() != topology_ids.len() || &mapped_ids != topology_ids {
+        return Err(protocol(format!(
+            "exact geometry admission source-{label} map does not cover exact topology bijectively"
+        )));
     }
     Ok(())
 }
@@ -326,21 +359,26 @@ mod tests {
         let first = face("shared", "a");
         let second = face("shared", "b");
         let topology = BTreeSet::from([first.clone(), second.clone()]);
-        validate_source_face_bijection(
+        validate_source_entity_bijection(
+            "face",
             &BTreeMap::from([(0, first.clone()), (1, second.clone())]),
             &topology,
         )
         .unwrap();
-        assert!(
-            validate_source_face_bijection(&BTreeMap::from([(0, first.clone())]), &topology)
-                .is_err()
-        );
-        assert!(validate_source_face_bijection(
+        assert!(validate_source_entity_bijection(
+            "face",
+            &BTreeMap::from([(0, first.clone())]),
+            &topology
+        )
+        .is_err());
+        assert!(validate_source_entity_bijection(
+            "face",
             &BTreeMap::from([(0, first.clone()), (1, first)]),
             &topology
         )
         .is_err());
-        assert!(validate_source_face_bijection(
+        assert!(validate_source_entity_bijection(
+            "face",
             &BTreeMap::from([(0, second), (1, face("extra", "c"))]),
             &topology
         )

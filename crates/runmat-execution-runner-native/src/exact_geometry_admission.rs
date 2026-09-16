@@ -38,7 +38,9 @@ pub enum ExactGeometryAdmissionError {
 
 pub struct PreparedExactGeometryAdmission {
     objects: PreparedExactGeometryObjects,
+    source_edge_ids: std::collections::BTreeMap<u64, runmat_geometry_core::PersistentEntityId>,
     source_face_ids: std::collections::BTreeMap<u64, runmat_geometry_core::PersistentEntityId>,
+    source_region_ids: std::collections::BTreeMap<u64, runmat_geometry_core::PersistentEntityId>,
 }
 
 impl PreparedExactGeometryAdmission {
@@ -54,6 +56,18 @@ impl PreparedExactGeometryAdmission {
         &self,
     ) -> &std::collections::BTreeMap<u64, runmat_geometry_core::PersistentEntityId> {
         &self.source_face_ids
+    }
+
+    pub fn source_edge_ids(
+        &self,
+    ) -> &std::collections::BTreeMap<u64, runmat_geometry_core::PersistentEntityId> {
+        &self.source_edge_ids
+    }
+
+    pub fn source_region_ids(
+        &self,
+    ) -> &std::collections::BTreeMap<u64, runmat_geometry_core::PersistentEntityId> {
+        &self.source_region_ids
     }
 
     pub fn healing_report(&self) -> Option<&runmat_geometry_core::GeometryHealingReport> {
@@ -84,6 +98,20 @@ pub fn prepare_exact_geometry_admission(
     let imported = import_exact_cad(source_name, bytes, format, options, import_context)?;
     let contacts = resolve_contact_definitions(&imported, contact_definitions)?;
     let imported = imported.with_contacts(&contacts)?;
+    let source_edge_ids = imported
+        .topology
+        .edges
+        .iter()
+        .enumerate()
+        .map(|(index, edge)| (index as u64, edge.id.clone()))
+        .collect();
+    let source_region_ids = imported
+        .topology
+        .regions
+        .iter()
+        .enumerate()
+        .map(|(index, region)| (index as u64, region.id.clone()))
+        .collect();
     let document = imported.geometry_document()?;
     let objects = prepare_exact_geometry_objects(
         document,
@@ -95,7 +123,9 @@ pub fn prepare_exact_geometry_admission(
     )?;
     Ok(PreparedExactGeometryAdmission {
         objects,
+        source_edge_ids,
         source_face_ids: imported.source_face_ids,
+        source_region_ids,
     })
 }
 
@@ -217,6 +247,12 @@ mod tests {
     #[cfg(feature = "occt-native")]
     const BOX: &[u8] = include_bytes!("../../runmat-geometry/io/tests/fixtures/box.brep");
     #[cfg(feature = "occt-native")]
+    const DISCONNECTED_SOLIDS: &[u8] =
+        include_bytes!("../../runmat-geometry/io/tests/fixtures/disconnected_solids.brep");
+    #[cfg(feature = "occt-native")]
+    const TWO_BOX_ASSEMBLY: &[u8] =
+        include_bytes!("../../runmat-geometry/io/tests/fixtures/two_box_assembly.step");
+    #[cfg(feature = "occt-native")]
     const INDEPENDENT_CONTACT: &[u8] =
         include_bytes!("../../runmat-geometry/io/tests/fixtures/independent_contact.step");
 
@@ -309,5 +345,62 @@ mod tests {
         assert_eq!(prepared.topology().contacts.len(), 1);
         assert_eq!(prepared.topology().contacts[0].side_a_face_ids.len(), 1);
         assert_eq!(prepared.topology().contacts[0].side_b_face_ids.len(), 1);
+    }
+
+    #[cfg(feature = "occt-native")]
+    #[test]
+    fn source_solid_aliases_preserve_imported_region_order_and_identity() {
+        let prepared = prepare_exact_geometry_admission(
+            "disconnected_solids.brep",
+            DISCONNECTED_SOLIDS,
+            &ExactCadImportOptions::default(),
+            &[],
+            &GeometryImportContext::new(),
+            ObjectInventoryLimits::default(),
+        )
+        .unwrap();
+
+        assert_eq!(prepared.source_region_ids().len(), 2);
+        for (index, region) in prepared.topology().regions.iter().enumerate() {
+            assert_eq!(
+                prepared.source_region_ids().get(&(index as u64)),
+                Some(&region.id)
+            );
+        }
+        assert_eq!(
+            prepared
+                .source_region_ids()
+                .values()
+                .collect::<BTreeSet<_>>()
+                .len(),
+            2
+        );
+    }
+
+    #[cfg(feature = "occt-native")]
+    #[test]
+    fn repeated_part_occurrences_receive_distinct_source_solid_aliases() {
+        let prepared = prepare_exact_geometry_admission(
+            "two_box_assembly.step",
+            TWO_BOX_ASSEMBLY,
+            &ExactCadImportOptions::default(),
+            &[],
+            &GeometryImportContext::new(),
+            ObjectInventoryLimits::default(),
+        )
+        .unwrap();
+
+        let identities = prepared.source_region_ids().values().collect::<Vec<_>>();
+        assert_eq!(identities.len(), 2);
+        assert_ne!(identities[0], identities[1]);
+        assert_ne!(identities[0].assembly_path, identities[1].assembly_path);
+        assert_eq!(
+            identities[0].kind,
+            runmat_geometry_core::PersistentEntityKind::Region
+        );
+        assert_eq!(
+            identities[1].kind,
+            runmat_geometry_core::PersistentEntityKind::Region
+        );
     }
 }

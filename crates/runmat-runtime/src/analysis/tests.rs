@@ -272,7 +272,12 @@ fn sample_model() -> AnalysisModel {
             electrical: None,
             plastic: None,
         }],
-        material_assignments: Vec::new(),
+        material_assignments: vec![MaterialAssignment {
+            target: runmat_analysis_core::PropertyRegionTarget::beam("beam_span"),
+            expected_material_id: "mat_steel".to_string(),
+            assigned_material_id: "mat_steel".to_string(),
+            confidence: EvidenceConfidence::Verified,
+        }],
         structural: Some(StructuralModel {
             nodes: vec![
                 StructuralNode {
@@ -348,6 +353,8 @@ fn sample_solid_model() -> AnalysisModel {
     model.geometry_id = "geo:closed_cube".to_string();
     model.geometry_revision = 1;
     model.structural = None;
+    model.material_assignments[0].target =
+        runmat_analysis_core::PropertyRegionTarget::solid("region");
     model.constraints = vec![fixed_constraint("bc_root", "root")];
     model.signals.clear();
     model.excitations.clear();
@@ -382,7 +389,7 @@ fn sample_model_with_material_assignment_mismatch() -> AnalysisModel {
         plastic: None,
     });
     model.material_assignments = vec![MaterialAssignment {
-        region_id: "beam_span".to_string(),
+        target: runmat_analysis_core::PropertyRegionTarget::beam("beam_span"),
         expected_material_id: "mat_steel".to_string(),
         assigned_material_id: "mat_polymer".to_string(),
         confidence: EvidenceConfidence::Verified,
@@ -1165,7 +1172,10 @@ fn fea_document_resolves_explicit_model_and_sweep() {
                     }
                 }
             },
-            "material_assignments": [{ "region": "bracket", "material": "aluminum" }],
+            "material_assignments": [{
+                "target": { "solid": { "region": "bracket" } },
+                "material": "aluminum"
+            }],
             "constraints": authored.constraints,
             "signals": authored.signals,
             "excitation_cases": authored.excitation_cases,
@@ -1193,7 +1203,12 @@ fn fea_document_resolves_explicit_model_and_sweep() {
     assert_eq!(model.model_id.0, "bracket_model");
     assert_eq!(model.materials.len(), 1);
     assert_eq!(model.material_assignments.len(), 1);
-    assert_eq!(model.material_assignments[0].region_id, "region_1");
+    assert_eq!(
+        model.material_assignments[0]
+            .selected_region_id()
+            .expect("fixture uses selected material region"),
+        "region_1"
+    );
     assert_eq!(model.constraints.len(), 1);
     assert_eq!(model.excitations.len(), 1);
     assert_eq!(model.signals.len(), 1);
@@ -1237,7 +1252,10 @@ fn fea_document_resolves_moment_excitations() {
                 }
             }
         },
-        "material_assignments": [{ "region": "tip", "material": "steel" }],
+        "material_assignments": [{
+            "target": { "solid": { "region": "tip" } },
+            "material": "steel"
+        }],
         "constraints": [fixed_constraint("fixed_tip", "tip")],
         "signals": authored.signals,
         "excitation_cases": authored.excitation_cases,
@@ -1312,7 +1330,10 @@ fn fea_document_resolves_prescribed_rotation_boundary_conditions() {
                 }
             }
         },
-        "material_assignments": [{ "region": "tip", "material": "steel" }],
+        "material_assignments": [{
+            "target": { "solid": { "region": "tip" } },
+            "material": "steel"
+        }],
         "constraints": [rotation_constraint],
         "signals": authored.signals,
         "excitation_cases": authored.excitation_cases,
@@ -1384,7 +1405,10 @@ fn fea_document_resolves_beam_structural_model_data() {
                 }
             }
         },
-        "material_assignments": [{ "region": "beam_span", "material": "steel" }],
+        "material_assignments": [{
+            "target": { "beam": { "region": "beam_span" } },
+            "material": "steel"
+        }],
         "structural": {
             "nodes": [
                 { "id": 1, "coordinates_m": [0.0, 0.0, 0.0] },
@@ -1489,7 +1513,10 @@ fn fea_document_resolves_shell_structural_model_data() {
                 }
             }
         },
-        "material_assignments": [{ "region": "shell_panel", "material": "steel" }],
+        "material_assignments": [{
+            "target": { "shell": { "region": "shell_panel" } },
+            "material": "steel"
+        }],
         "structural": {
             "nodes": [
                 { "id": 1, "coordinates_m": [0.0, 0.0, 0.0] },
@@ -2824,7 +2851,7 @@ fn analysis_run_study_preserves_requested_canonical_solver_mesh_artifact() {
     model.geometry_revision = spec.geometry.revision;
     model.units = spec.geometry.units;
     model.material_assignments = vec![MaterialAssignment {
-        region_id: "body".to_string(),
+        target: runmat_analysis_core::PropertyRegionTarget::solid("region"),
         expected_material_id: "mat_steel".to_string(),
         assigned_material_id: "mat_steel".to_string(),
         confidence: EvidenceConfidence::Verified,
@@ -3367,12 +3394,15 @@ fn analysis_create_model_infers_materials_and_assignments_from_geometry_evidence
         .materials
         .iter()
         .any(|material| material.material_id == "mat_aluminum"));
-    assert_eq!(envelope.data.material_assignments.len(), 2);
-    assert!(envelope
-        .data
-        .material_assignments
-        .iter()
-        .all(|assignment| assignment.assigned_material_id == "mat_aluminum"));
+    assert_eq!(envelope.data.material_assignments.len(), 1);
+    assert_eq!(
+        envelope.data.material_assignments[0].target,
+        runmat_analysis_core::PropertyRegionTarget::all_solids()
+    );
+    assert_eq!(
+        envelope.data.material_assignments[0].assigned_material_id,
+        "mat_aluminum"
+    );
     assert_eq!(
         envelope.data.constraints[0]
             .target()
@@ -3384,6 +3414,73 @@ fn analysis_create_model_infers_materials_and_assignments_from_geometry_evidence
         excitation_region_id(&envelope.data.excitations[0]),
         "region_tip"
     );
+}
+
+#[test]
+fn analysis_create_model_scaffolds_only_unambiguous_typed_material_domains() {
+    let _guard = analysis_test_guard();
+    let geometry = sample_geometry_asset();
+    for (template, expected_targets) in [
+        (
+            AnalysisModelTemplate::LinearStaticStructural,
+            vec![runmat_analysis_core::PropertyRegionTarget::all_solids()],
+        ),
+        (
+            AnalysisModelTemplate::AcousticHarmonic,
+            vec![runmat_analysis_core::PropertyRegionTarget::all_cells()],
+        ),
+        (
+            AnalysisModelTemplate::ChtCoupled,
+            vec![
+                runmat_analysis_core::PropertyRegionTarget::all_solids(),
+                runmat_analysis_core::PropertyRegionTarget::all_cells(),
+            ],
+        ),
+    ] {
+        let model = analysis_create_model_op(
+            &geometry,
+            AnalysisCreateModelIntentSpec {
+                model_id: format!("typed_domains_{template:?}"),
+                template,
+            },
+            OperationContext::new(None, None),
+        )
+        .expect("single-material scaffold should resolve")
+        .data;
+        assert_eq!(
+            model
+                .material_assignments
+                .iter()
+                .map(|assignment| assignment.target.clone())
+                .collect::<Vec<_>>(),
+            expected_targets
+        );
+    }
+
+    let mut ambiguous_geometry = sample_step_like_geometry_asset();
+    ambiguous_geometry
+        .source_geometry
+        .material_evidence
+        .push(MaterialEvidence {
+            source_key: "STEP:MATERIAL:2".to_string(),
+            normalized_key: "material_name".to_string(),
+            value: "Structural steel".to_string(),
+            confidence: MaterialEvidenceConfidence::High,
+            unit_basis: None,
+            assumptions: vec!["imported without body ownership".to_string()],
+        });
+    let model = analysis_create_model_op(
+        &ambiguous_geometry,
+        AnalysisCreateModelIntentSpec {
+            model_id: "ambiguous_material_ownership".to_string(),
+            template: AnalysisModelTemplate::LinearStaticStructural,
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("material declarations remain usable without guessing ownership")
+    .data;
+    assert_eq!(model.materials.len(), 2);
+    assert!(model.material_assignments.is_empty());
 }
 
 #[test]
@@ -5455,9 +5552,9 @@ fn canonical_meshing_boundary_ids_replace_display_face_aliases() {
         .analysis_selection_id()
         .expect("persistent face B must produce a selection identity");
 
-    model = runmat_analysis_core::resolve_boundary_region_aliases(
+    model = runmat_analysis_core::resolve_geometry_region_aliases(
         &model,
-        &runmat_analysis_core::BoundaryRegionAliases::new(aliases).unwrap(),
+        &runmat_analysis_core::GeometryRegionAliases::new(aliases).unwrap(),
     )
     .unwrap();
 
@@ -5477,7 +5574,7 @@ fn canonical_meshing_boundary_ids_replace_display_face_aliases() {
 }
 
 #[test]
-fn one_analysis_material_applies_uniformly_without_changing_the_mesh() {
+fn one_analysis_material_requires_and_uses_an_explicit_solid_assignment() {
     let model = sample_solid_model();
     let mesh = runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
 
@@ -5495,10 +5592,10 @@ fn multiple_analysis_materials_require_mesh_region_coverage() {
 
     let gap = linear_static_result::material_coverage_gap_detail(&model, &mesh)
         .expect("region coverage must be required");
-    assert!(gap.contains("2 materials and no region assignments"));
+    assert!(gap.contains("no explicit solid material assignment"));
 
     model.material_assignments = vec![MaterialAssignment {
-        region_id: "region".to_string(),
+        target: runmat_analysis_core::PropertyRegionTarget::solid("region"),
         expected_material_id: "mat_steel".to_string(),
         assigned_material_id: "mat_polymer".to_string(),
         confidence: EvidenceConfidence::Verified,
@@ -5939,16 +6036,7 @@ fn ilu_preconditioner_fallback_is_recorded_when_solver_uses_jacobi() {
 #[test]
 fn quality_policy_exploratory_allows_numerically_acceptable_warn_path() {
     let _guard = analysis_test_guard();
-    let mut model = runmat_analysis_fea::fixtures::fixture_model(
-        runmat_analysis_fea::fixtures::FixtureId::MultiMaterialAssembly,
-    );
-    let beam_model = sample_model();
-    model.structural = beam_model.structural;
-    model.constraints = beam_model.constraints;
-    model.boundaries = beam_model.boundaries;
-    model.signals = beam_model.signals;
-    model.excitations = beam_model.excitations;
-    model.excitation_cases = beam_model.excitation_cases;
+    let model = sample_model_with_material_assignment_mismatch();
     let envelope = analysis_run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
@@ -7330,6 +7418,7 @@ fn analysis_run_thermal_returns_temperature_payload() {
     let (mesh_root, mesh_path) = write_ready_minimal_analysis_mesh_artifact("thermal-payload");
     let mut model = sample_model();
     model.sequence.steps = vec![ProcedureStep::thermal_transient("thermal_1".to_string())];
+    model.material_assignments[0].target = runmat_analysis_core::PropertyRegionTarget::all_solids();
     model.thermal = Some(runmat_analysis_core::ThermalDomain {
         reference_temperature: Temperature::new(293.15),
     });
@@ -7435,6 +7524,7 @@ fn analysis_run_thermal_reports_host_execution_for_gpu_request() {
     model.sequence.steps = vec![ProcedureStep::thermal_transient(
         "thermal_execution_provenance",
     )];
+    model.material_assignments[0].target = runmat_analysis_core::PropertyRegionTarget::all_solids();
     model.thermal = Some(runmat_analysis_core::ThermalDomain {
         reference_temperature: Temperature::new(293.15),
     });
@@ -7497,7 +7587,7 @@ fn analysis_run_thermal_balanced_degrades_on_high_constitutive_spread() {
         plastic: None,
     });
     model.material_assignments.push(MaterialAssignment {
-        region_id: "region".into(),
+        target: runmat_analysis_core::PropertyRegionTarget::solid("region"),
         expected_material_id: "mat_steel".into(),
         assigned_material_id: "mat_steel".into(),
         confidence: EvidenceConfidence::Verified,

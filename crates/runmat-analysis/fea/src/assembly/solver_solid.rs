@@ -28,6 +28,7 @@ pub struct SolverSolidTopology {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SolverSolidAssemblyError {
     InvalidArtifact(String),
+    InvalidMaterialCoverage(String),
     InvalidElementNodeCount {
         element_id: u64,
         expected: usize,
@@ -40,6 +41,11 @@ pub enum SolverSolidAssemblyError {
     UnassignedRegion {
         element_id: u64,
         region_id: String,
+    },
+    AmbiguousRegion {
+        element_id: u64,
+        region_id: String,
+        assignment_count: usize,
     },
     ElementStiffness {
         element_id: u64,
@@ -132,6 +138,9 @@ pub fn assemble_solver_solid_operators(
     materials: &StructuralMaterialInventory,
 ) -> Result<SolverSolidOperators, SolverSolidAssemblyError> {
     let topology = solver_solid_topology(artifact)?;
+    materials
+        .validate_solid_coverage(artifact)
+        .map_err(SolverSolidAssemblyError::InvalidMaterialCoverage)?;
     let nodes = artifact
         .topology
         .nodes
@@ -198,7 +207,14 @@ pub(super) fn resolve_element_material(
     materials: &StructuralMaterialInventory,
 ) -> Result<StructuralElementMaterial, SolverSolidAssemblyError> {
     materials
-        .resolve(&element.region_id.source_topology_id)
+        .resolve_solid(&element.region_id)
+        .map_err(
+            |assignment_count| SolverSolidAssemblyError::AmbiguousRegion {
+                element_id: element.element_id,
+                region_id: element.region_id.source_topology_id.clone(),
+                assignment_count,
+            },
+        )?
         .ok_or_else(|| SolverSolidAssemblyError::UnassignedRegion {
             element_id: element.element_id,
             region_id: element.region_id.source_topology_id.clone(),

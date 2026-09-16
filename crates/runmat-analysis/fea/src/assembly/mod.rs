@@ -278,6 +278,7 @@ pub enum StructuralAssemblyError {
         element_id: String,
         region_id: String,
     },
+    InvalidMaterialCoverage(String),
     ExplicitTopologyIdentity(String),
     InvalidConstraintPlan(String),
     InvalidSpatialProjectionEvidence {
@@ -424,6 +425,9 @@ impl fmt::Display for StructuralAssemblyError {
                 f,
                 "explicit structural element region has no material assignment: element_id={element_id} region_id={region_id}"
             ),
+            Self::InvalidMaterialCoverage(message) => {
+                write!(f, "explicit structural material coverage is invalid: {message}")
+            }
             Self::ExplicitTopologyIdentity(message) => write!(
                 f,
                 "explicit structural topology identity could not be derived: {message}"
@@ -1185,12 +1189,14 @@ fn assemble_linear_system_impl(
     let structural_materials = StructuralMaterialInventory::from_model(model);
     let structural_solid_recovery = solver_mesh
         .as_ref()
+        .filter(|_| structural_requirement.is_some())
         .map(|mesh| solid_recovery_from_solver_mesh(mesh, &structural_materials))
         .transpose()
         .map_err(LinearAssemblyError::SolidOperator)?
         .unwrap_or_default();
     let solid_operators = solver_mesh
         .as_ref()
+        .filter(|_| structural_requirement.is_some())
         .map(|mesh| assemble_solver_solid_operators(mesh, &structural_materials))
         .transpose()
         .map_err(LinearAssemblyError::SolidOperator)?;
@@ -2105,7 +2111,7 @@ fn apply_thermo_material_heterogeneity(
             .unwrap_or(expected_temp_response)
             .clamp(-0.4, 0.2);
         let response_delta = (assigned_temp_response - expected_temp_response).clamp(-0.35, 0.35);
-        let region_phase = ((region_hash(&assignment.region_id) % 11) as f64) / 10.0;
+        let region_phase = ((region_hash(assignment.target_label()) % 11) as f64) / 10.0;
         let activity =
             (0.7 * modulus_delta_ratio.abs() + 0.3 * response_delta.abs()).clamp(0.0, 1.0);
         let signed_bias = base_amplitude
@@ -2114,7 +2120,7 @@ fn apply_thermo_material_heterogeneity(
                 + 0.35 * response_delta
                 + 0.2 * modulus_delta_ratio.signum() * region_phase);
         let stride = model.material_assignments.len().saturating_add(1).max(2);
-        let start = ((region_hash(&assignment.region_id) as usize).wrapping_add(idx * 3))
+        let start = ((region_hash(assignment.target_label()) as usize).wrapping_add(idx * 3))
             % dof_count.max(1);
         let mut cursor = start;
         for hop in 0..dof_count {
@@ -2323,6 +2329,14 @@ mod tests {
             }],
             shell_sections: Vec::new(),
         });
+        model
+            .material_assignments
+            .push(runmat_analysis_core::MaterialAssignment {
+                target: runmat_analysis_core::PropertyRegionTarget::beam("span"),
+                expected_material_id: "mat_steel".into(),
+                assigned_material_id: "mat_steel".into(),
+                confidence: runmat_analysis_core::EvidenceConfidence::Verified,
+            });
 
         let summary = assemble_structural_system(
             &model,
@@ -2611,7 +2625,7 @@ mod tests {
         soft.mechanical.youngs_modulus_pa = 20.0e9;
         soft_model.materials = vec![hard.clone(), soft.clone()];
         soft_model.material_assignments = vec![runmat_analysis_core::MaterialAssignment {
-            region_id: "soft_region".to_string(),
+            target: runmat_analysis_core::PropertyRegionTarget::solid("soft_region"),
             expected_material_id: "mat_hard".to_string(),
             assigned_material_id: "mat_soft".to_string(),
             confidence: runmat_analysis_core::EvidenceConfidence::Verified,
@@ -2621,7 +2635,7 @@ mod tests {
 
         let mut hard_model = soft_model.clone();
         hard_model.material_assignments = vec![runmat_analysis_core::MaterialAssignment {
-            region_id: "soft_region".to_string(),
+            target: runmat_analysis_core::PropertyRegionTarget::solid("soft_region"),
             expected_material_id: "mat_hard".to_string(),
             assigned_material_id: "mat_hard".to_string(),
             confidence: runmat_analysis_core::EvidenceConfidence::Verified,
@@ -3018,13 +3032,13 @@ mod tests {
         model.materials.push(second_material);
         model.material_assignments = vec![
             runmat_analysis_core::MaterialAssignment {
-                region_id: "span_first".into(),
+                target: runmat_analysis_core::PropertyRegionTarget::beam("span_first"),
                 expected_material_id: "mat_steel".into(),
                 assigned_material_id: "mat_steel".into(),
                 confidence: runmat_analysis_core::EvidenceConfidence::Verified,
             },
             runmat_analysis_core::MaterialAssignment {
-                region_id: "span_second".into(),
+                target: runmat_analysis_core::PropertyRegionTarget::beam("span_second"),
                 expected_material_id: "mat_second".into(),
                 assigned_material_id: "mat_second".into(),
                 confidence: runmat_analysis_core::EvidenceConfidence::Verified,
@@ -3101,13 +3115,14 @@ mod tests {
             StructuralFormulationRequirement::PhysicalDiscretization,
         )
         .expect_err("multi-material explicit topology requires an exact region assignment");
-        assert_eq!(
+        assert!(matches!(
             error,
-            LinearAssemblyError::Structural(StructuralAssemblyError::UnassignedExplicitRegion {
-                element_id: "beam_1".into(),
-                region_id: "beam_span".into(),
-            })
-        );
+            LinearAssemblyError::Structural(
+                StructuralAssemblyError::InvalidMaterialCoverage(message)
+            ) if message.contains("beam_1")
+                && message.contains("beam_span")
+                && message.contains("found 0")
+        ));
     }
 
     #[test]
@@ -4126,6 +4141,14 @@ mod tests {
     #[test]
     fn beam_nullspace_evidence_requires_every_disconnected_component_to_be_anchored() {
         let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
+        model
+            .material_assignments
+            .push(runmat_analysis_core::MaterialAssignment {
+                target: runmat_analysis_core::PropertyRegionTarget::beam("beam_span_2"),
+                expected_material_id: "mat_steel".into(),
+                assigned_material_id: "mat_steel".into(),
+                confidence: runmat_analysis_core::EvidenceConfidence::Verified,
+            });
         let structural = model.structural.as_mut().unwrap();
         structural.nodes.extend([
             runmat_analysis_core::StructuralNode {

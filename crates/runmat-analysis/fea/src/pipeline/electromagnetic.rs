@@ -1707,12 +1707,12 @@ fn electromagnetic_coefficient_profile(
         } else {
             return Err(FeaRunError::InvalidModel(format!(
                 "electromagnetic solve requires assigned electrical material for region {}",
-                assignment.region_id
+                assignment.target_label()
             )));
         };
         covered_assignments += usize::from(covered);
         samples.push(RegionElectromagneticCoefficients {
-            region_id: assignment.region_id.clone(),
+            region_id: assignment.target_label().to_owned(),
             conductivity_s_per_m: conductivity,
             conductivity_frequency_scale,
             relative_permittivity_frequency_scale,

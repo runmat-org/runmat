@@ -63,10 +63,70 @@ fn multi_material_assembly_rejects_an_unassigned_mesh_region() {
     let artifact = artifact(ElementOrder::Tet4);
     assert!(matches!(
         assemble_solver_solid_operators(&artifact, &empty_inventory()),
-        Err(SolverSolidAssemblyError::UnassignedRegion {
-            element_id: 1,
-            region_id,
-        }) if region_id == "region"
+        Err(SolverSolidAssemblyError::InvalidMaterialCoverage(message))
+            if message.contains("element 1") && message.contains("found 0")
+    ));
+}
+
+#[test]
+fn solid_material_coverage_rejects_overlap_stale_and_wrong_role() {
+    let artifact = artifact(ElementOrder::Tet4);
+    let mut model =
+        crate::fixtures::fixture_model(crate::fixtures::FixtureId::CantileverLinearStatic);
+    let exact_selector = artifact.topology.volume_elements[0]
+        .region_id
+        .analysis_selection_id()
+        .unwrap();
+    let mut overlap = model.material_assignments[0].clone();
+    overlap.target = runmat_analysis_core::PropertyRegionTarget::solid(exact_selector);
+    model.material_assignments.push(overlap);
+    let overlapping = StructuralMaterialInventory::from_model(&model);
+    assert!(matches!(
+        assemble_solver_solid_operators(&artifact, &overlapping),
+        Err(SolverSolidAssemblyError::InvalidMaterialCoverage(message))
+            if message.contains("element 1") && message.contains("found 2")
+    ));
+
+    model.material_assignments.pop();
+    let mut stale = model.material_assignments[0].clone();
+    stale.target = runmat_analysis_core::PropertyRegionTarget::solid("stale-region");
+    model.material_assignments.push(stale);
+    let stale = StructuralMaterialInventory::from_model(&model);
+    assert!(matches!(
+        assemble_solver_solid_operators(&artifact, &stale),
+        Err(SolverSolidAssemblyError::InvalidMaterialCoverage(message))
+            if message.contains("selects no solver element")
+    ));
+
+    model.material_assignments.truncate(1);
+    model.material_assignments[0].target =
+        runmat_analysis_core::PropertyRegionTarget::cell("region");
+    let wrong_role = StructuralMaterialInventory::from_model(&model);
+    assert!(matches!(
+        assemble_solver_solid_operators(&artifact, &wrong_role),
+        Err(SolverSolidAssemblyError::InvalidMaterialCoverage(message))
+            if message.contains("element 1") && message.contains("found 0")
+    ));
+}
+
+#[test]
+fn explicit_all_solids_scope_covers_every_solid_and_overlaps_fail_closed() {
+    let artifact = artifact(ElementOrder::Tet4);
+    let mut model =
+        crate::fixtures::fixture_model(crate::fixtures::FixtureId::CantileverLinearStatic);
+    model.material_assignments[0].target = runmat_analysis_core::PropertyRegionTarget::all_solids();
+    let all_solids = StructuralMaterialInventory::from_model(&model);
+    assemble_solver_solid_operators(&artifact, &all_solids)
+        .expect("an explicit all-solids scope should cover the canonical solid mesh");
+
+    let mut selected = model.material_assignments[0].clone();
+    selected.target = runmat_analysis_core::PropertyRegionTarget::solid("region");
+    model.material_assignments.push(selected);
+    let overlap = StructuralMaterialInventory::from_model(&model);
+    assert!(matches!(
+        assemble_solver_solid_operators(&artifact, &overlap),
+        Err(SolverSolidAssemblyError::InvalidMaterialCoverage(message))
+            if message.contains("element 1") && message.contains("found 2")
     ));
 }
 
@@ -171,7 +231,6 @@ fn inventory(material: StructuralElementMaterial) -> StructuralMaterialInventory
     model.materials[0].mechanical.poisson_ratio = material.poisson_ratio;
     model.materials[0].mechanical.density_kg_per_m3 = material.density_kg_per_m3;
     model.materials[0].mechanical.damping = material.damping;
-    model.material_assignments.clear();
     StructuralMaterialInventory::from_model(&model)
 }
 
@@ -194,7 +253,10 @@ fn assigned_inventory(
     selected.mechanical.density_kg_per_m3 = assigned.density_kg_per_m3;
     selected.mechanical.damping = assigned.damping;
     model.materials.push(selected);
-    model.material_assignments[0].region_id = region_id.into();
+    *model.material_assignments[0]
+        .target
+        .selected_region_id_mut()
+        .expect("fixture uses selected material region") = region_id.into();
     model.material_assignments[0].expected_material_id = "selected".into();
     model.material_assignments[0].assigned_material_id = "selected".into();
     StructuralMaterialInventory::from_model(&model)

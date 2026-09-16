@@ -152,17 +152,17 @@ pub(super) fn remove_named<F: Fn(&YamlValue) -> Option<String>>(
 
 pub(super) fn append_pair(
     value: &mut YamlValue,
-    region: &str,
+    target: &YamlValue,
     material: &str,
     entry: YamlValue,
 ) -> Result<(), String> {
     let entries = sequence_mut(value, "material_assignments")?;
     if entries.iter().any(|value| {
-        scalar(value, &["region"]).as_deref() == Some(region)
+        mapping_entry(value, "target") == Some(target)
             && scalar(value, &["material"]).as_deref() == Some(material)
     }) {
         return Err(format!(
-            "material_assignments entry `{region}`/`{material}` already exists"
+            "material_assignments entry for `{material}` and the same target already exists"
         ));
     }
     entries.push(entry);
@@ -171,21 +171,25 @@ pub(super) fn append_pair(
 
 pub(super) fn remove_pair(
     value: &mut YamlValue,
-    region: &str,
+    target: &YamlValue,
     material: &str,
 ) -> Result<(), String> {
     let entries = sequence_mut(value, "material_assignments")?;
     let index = entries
         .iter()
         .position(|value| {
-            scalar(value, &["region"]).as_deref() == Some(region)
+            mapping_entry(value, "target") == Some(target)
                 && scalar(value, &["material"]).as_deref() == Some(material)
         })
         .ok_or_else(|| {
-            format!("material_assignments entry `{region}`/`{material}` does not exist")
+            format!("material_assignments entry for `{material}` and the requested target does not exist")
         })?;
     entries.remove(index);
     Ok(())
+}
+
+fn mapping_entry<'a>(value: &'a YamlValue, key: &str) -> Option<&'a YamlValue> {
+    value.as_mapping()?.get(YamlValue::String(key.to_string()))
 }
 
 fn typed_id<T: DeserializeOwned>(

@@ -132,7 +132,7 @@ pub(crate) fn material_assignment_diagnostics(
             severity,
             message: format!(
                 "region={} expected_material={} assigned_material={} confidence={:?}",
-                assignment.region_id,
+                assignment.target_label(),
                 assignment.expected_material_id,
                 assignment.assigned_material_id,
                 assignment.confidence

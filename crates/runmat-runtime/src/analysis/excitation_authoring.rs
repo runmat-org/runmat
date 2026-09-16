@@ -86,6 +86,30 @@ pub(crate) fn append_constant_excitation(
     });
 }
 
+pub(crate) fn append_whole_model_heat_generation(
+    model: &mut AnalysisModel,
+    id: impl Into<String>,
+    watts_per_cubic_meter: f64,
+) {
+    let id = id.into();
+    let case_id = ExcitationCaseId(format!("{id}.case"));
+    append_scalar(
+        model,
+        &id,
+        case_id.clone(),
+        ExcitationTarget::WholeModel,
+        HeatGenerationDensity::new(watts_per_cubic_meter),
+        ExcitationDistribution::IntensityPerVolume,
+        PhysicalSignal::HeatGenerationDensity,
+        ExcitationAction::HeatGeneration,
+    );
+    model.excitation_cases.push(ExcitationCase {
+        case_id,
+        action_ids: vec![ExcitationId(id)],
+        activation: ExcitationCaseActivation::Always,
+    });
+}
+
 fn append_scalar<Q>(
     model: &mut AnalysisModel,
     id: &str,

@@ -135,24 +135,23 @@ pub fn analysis_complete_structural_study_intent_op(
         ));
     }
 
-    let aliases = runmat_analysis_core::BoundaryRegionAliases::new(
-        meshing_output.boundary_region_ids.clone(),
-    )
-    .map_err(|error| {
-        intent_completion_error(
-            &intent,
-            "RM.FEA.RUN_STUDY.BOUNDARY_RESOLUTION_FAILED",
-            OperationErrorType::Validation,
-            OperationErrorSeverity::Error,
-            error.to_string(),
-        )
-    })?;
+    let aliases =
+        runmat_analysis_core::GeometryRegionAliases::new(meshing_output.region_aliases.clone())
+            .map_err(|error| {
+                intent_completion_error(
+                    &intent,
+                    "RM.FEA.RUN_STUDY.TOPOLOGY_RESOLUTION_FAILED",
+                    OperationErrorType::Validation,
+                    OperationErrorSeverity::Error,
+                    error.to_string(),
+                )
+            })?;
     let resolved_model =
-        runmat_analysis_core::resolve_boundary_region_aliases(&intent.model, &aliases).map_err(
+        runmat_analysis_core::resolve_geometry_region_aliases(&intent.model, &aliases).map_err(
             |error| {
                 intent_completion_error(
                     &intent,
-                    "RM.FEA.RUN_STUDY.BOUNDARY_RESOLUTION_FAILED",
+                    "RM.FEA.RUN_STUDY.TOPOLOGY_RESOLUTION_FAILED",
                     OperationErrorType::Validation,
                     OperationErrorSeverity::Error,
                     error.to_string(),

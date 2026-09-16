@@ -7,14 +7,15 @@ use runmat_analysis_core::{
     Force, MaterialAssignment, MaterialMechanicalModel, MaterialModel, MaterialThermalModel,
     MechanicalDampingModel, Moment, PhysicalSignal, PrescribedStructuralDofs,
     PrescribedStructuralMotion, PrescribedValue, Pressure, ProcedureStep, ProjectionRequirement,
-    RayleighMassCoefficient, RayleighStiffnessCoefficient, RegionTarget, Rotation,
-    RotationDofValue, ShellElementModel, ShellSectionModel, Signal, SignalApproximationEvidence,
-    SignalExtrapolation, SignalId, SignalInterpolation, SignalKnot, SignalOrdinate,
-    SignalPrecision, SignalProvenance, SignalRepresentation, SignalShape, SignalValue, Stiffness,
-    StructuralConstraint, StructuralConstraintKind, StructuralElement, StructuralElementKind,
-    StructuralKinematicHistory, StructuralModel, StructuralMotionReconstruction, StructuralNode,
-    StructuralRotationDof, StructuralTranslationDof, TabulatedSignal, TabulatedSignalDomain,
-    TranslationDofMotion, TranslationDofValue, Velocity,
+    PropertyRegionTarget, RayleighMassCoefficient, RayleighStiffnessCoefficient, RegionTarget,
+    Rotation, RotationDofValue, ShellElementModel, ShellSectionModel, Signal,
+    SignalApproximationEvidence, SignalExtrapolation, SignalId, SignalInterpolation, SignalKnot,
+    SignalOrdinate, SignalPrecision, SignalProvenance, SignalRepresentation, SignalShape,
+    SignalValue, Stiffness, StructuralConstraint, StructuralConstraintKind, StructuralElement,
+    StructuralElementKind, StructuralKinematicHistory, StructuralModel,
+    StructuralMotionReconstruction, StructuralNode, StructuralRotationDof,
+    StructuralTranslationDof, TabulatedSignal, TabulatedSignalDomain, TranslationDofMotion,
+    TranslationDofValue, Velocity,
 };
 #[cfg(test)]
 use runmat_analysis_core::{
@@ -59,6 +60,12 @@ pub(crate) fn replace_fixture_excitations(
 
 pub fn mixed_solid_beam_model(attached_coordinates_m: [f64; 3]) -> AnalysisModel {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    model.material_assignments.push(MaterialAssignment {
+        target: PropertyRegionTarget::beam("span"),
+        expected_material_id: "mat_steel".into(),
+        assigned_material_id: "mat_steel".into(),
+        confidence: EvidenceConfidence::Verified,
+    });
     model.structural = Some(StructuralModel {
         nodes: vec![
             StructuralNode {
@@ -665,7 +672,7 @@ fn cantilever_linear_static() -> AnalysisModel {
             plastic: None,
         }],
         material_assignments: vec![MaterialAssignment {
-            region_id: "tip".to_string(),
+            target: PropertyRegionTarget::solid("region"),
             expected_material_id: "mat_steel".to_string(),
             assigned_material_id: "mat_steel".to_string(),
             confidence: EvidenceConfidence::Verified,
@@ -749,7 +756,7 @@ fn structural_axial_bar_reference() -> AnalysisModel {
         .collect();
     replace_fixture_excitations(&mut model, excitations);
     model.material_assignments = vec![MaterialAssignment {
-        region_id: "bar_span".to_string(),
+        target: PropertyRegionTarget::solid("bar_span"),
         expected_material_id: "mat_steel".to_string(),
         assigned_material_id: "mat_steel".to_string(),
         confidence: EvidenceConfidence::Verified,
@@ -773,7 +780,7 @@ fn structural_beam_bending_reference() -> AnalysisModel {
         .collect();
     replace_fixture_excitations(&mut model, excitations);
     model.material_assignments = vec![MaterialAssignment {
-        region_id: "beam_span".to_string(),
+        target: PropertyRegionTarget::solid("beam_span"),
         expected_material_id: "mat_steel".to_string(),
         assigned_material_id: "mat_steel".to_string(),
         confidence: EvidenceConfidence::Verified,
@@ -853,7 +860,7 @@ fn structural_shell_plate_moment_reference() -> AnalysisModel {
         }],
     );
     model.material_assignments = vec![MaterialAssignment {
-        region_id: "shell_panel".to_string(),
+        target: PropertyRegionTarget::shell("shell_panel"),
         expected_material_id: "mat_steel".to_string(),
         assigned_material_id: "mat_steel".to_string(),
         confidence: EvidenceConfidence::Verified,
@@ -907,7 +914,7 @@ fn structural_beam_reference_model(
     model.constraints = vec![fixed_constraint("fixed_root", "node:1")];
     replace_fixture_excitations(&mut model, excitations);
     model.material_assignments = vec![MaterialAssignment {
-        region_id: "beam_span".to_string(),
+        target: PropertyRegionTarget::beam("beam_span"),
         expected_material_id: "mat_steel".to_string(),
         assigned_material_id: "mat_steel".to_string(),
         confidence: EvidenceConfidence::Verified,
@@ -1002,7 +1009,7 @@ fn structural_transient_tet4_reference() -> AnalysisModel {
         stiffness_coefficient: RayleighStiffnessCoefficient::new(2.0e-4),
     };
     model.material_assignments = vec![MaterialAssignment {
-        region_id: "dynamic_volume".into(),
+        target: PropertyRegionTarget::solid("dynamic_volume"),
         expected_material_id: "mat_steel".into(),
         assigned_material_id: "mat_steel".into(),
         confidence: EvidenceConfidence::Verified,
@@ -1203,13 +1210,13 @@ fn nonlinear_softening_benchmark_fixture() -> AnalysisModel {
     ];
     model.material_assignments = vec![
         MaterialAssignment {
-            region_id: "nonlinear_soft_region_root".to_string(),
+            target: PropertyRegionTarget::solid("nonlinear_soft_region_root"),
             expected_material_id: "mat_soft_polymer".to_string(),
             assigned_material_id: "mat_soft_polymer".to_string(),
             confidence: EvidenceConfidence::Verified,
         },
         MaterialAssignment {
-            region_id: "nonlinear_soft_region_tip".to_string(),
+            target: PropertyRegionTarget::solid("nonlinear_soft_region_tip"),
             expected_material_id: "mat_aluminum".to_string(),
             assigned_material_id: "mat_aluminum".to_string(),
             confidence: EvidenceConfidence::Verified,
@@ -1290,19 +1297,19 @@ fn nonlinear_contact_frictionless_reference_fixture() -> AnalysisModel {
         AnalysisModelId("nonlinear_contact_frictionless_reference_fixture".to_string());
     model.material_assignments = vec![
         MaterialAssignment {
-            region_id: "tip_steel".to_string(),
+            target: PropertyRegionTarget::solid("tip_steel"),
             expected_material_id: "mat_steel".to_string(),
             assigned_material_id: "mat_steel".to_string(),
             confidence: EvidenceConfidence::Verified,
         },
         MaterialAssignment {
-            region_id: "mid_aluminum".to_string(),
+            target: PropertyRegionTarget::solid("mid_aluminum"),
             expected_material_id: "mat_aluminum".to_string(),
             assigned_material_id: "mat_aluminum".to_string(),
             confidence: EvidenceConfidence::Verified,
         },
         MaterialAssignment {
-            region_id: "polymer_segment".to_string(),
+            target: PropertyRegionTarget::solid("polymer_segment"),
             expected_material_id: "mat_polymer".to_string(),
             assigned_material_id: "mat_polymer".to_string(),
             confidence: EvidenceConfidence::Verified,
@@ -1346,19 +1353,19 @@ fn nonlinear_plastic_hardening_reference_fixture() -> AnalysisModel {
     model.model_id = AnalysisModelId("nonlinear_plastic_hardening_reference_fixture".to_string());
     model.material_assignments = vec![
         MaterialAssignment {
-            region_id: "tip_steel".to_string(),
+            target: PropertyRegionTarget::solid("tip_steel"),
             expected_material_id: "mat_steel".to_string(),
             assigned_material_id: "mat_steel".to_string(),
             confidence: EvidenceConfidence::Verified,
         },
         MaterialAssignment {
-            region_id: "mid_aluminum".to_string(),
+            target: PropertyRegionTarget::solid("mid_aluminum"),
             expected_material_id: "mat_aluminum".to_string(),
             assigned_material_id: "mat_aluminum".to_string(),
             confidence: EvidenceConfidence::Verified,
         },
         MaterialAssignment {
-            region_id: "polymer_segment".to_string(),
+            target: PropertyRegionTarget::solid("polymer_segment"),
             expected_material_id: "mat_polymer".to_string(),
             assigned_material_id: "mat_polymer".to_string(),
             confidence: EvidenceConfidence::Verified,
@@ -1434,19 +1441,19 @@ fn thermo_gradient_benign_fixture() -> AnalysisModel {
     model.model_id = AnalysisModelId("thermo_gradient_benign_fixture".to_string());
     model.material_assignments = vec![
         MaterialAssignment {
-            region_id: "tip_steel".to_string(),
+            target: PropertyRegionTarget::solid("tip_steel"),
             expected_material_id: "mat_steel".to_string(),
             assigned_material_id: "mat_steel".to_string(),
             confidence: EvidenceConfidence::Verified,
         },
         MaterialAssignment {
-            region_id: "mid_aluminum".to_string(),
+            target: PropertyRegionTarget::solid("mid_aluminum"),
             expected_material_id: "mat_aluminum".to_string(),
             assigned_material_id: "mat_aluminum".to_string(),
             confidence: EvidenceConfidence::Verified,
         },
         MaterialAssignment {
-            region_id: "polymer_segment".to_string(),
+            target: PropertyRegionTarget::solid("polymer_segment"),
             expected_material_id: "mat_polymer".to_string(),
             assigned_material_id: "mat_polymer".to_string(),
             confidence: EvidenceConfidence::Probable,
@@ -1474,19 +1481,19 @@ fn thermo_gradient_pathological_fixture() -> AnalysisModel {
     model.model_id = AnalysisModelId("thermo_gradient_pathological_fixture".to_string());
     model.material_assignments = vec![
         MaterialAssignment {
-            region_id: "tip_steel".to_string(),
+            target: PropertyRegionTarget::solid("tip_steel"),
             expected_material_id: "mat_steel".to_string(),
             assigned_material_id: "mat_polymer".to_string(),
             confidence: EvidenceConfidence::Verified,
         },
         MaterialAssignment {
-            region_id: "mid_aluminum".to_string(),
+            target: PropertyRegionTarget::solid("mid_aluminum"),
             expected_material_id: "mat_aluminum".to_string(),
             assigned_material_id: "mat_polymer".to_string(),
             confidence: EvidenceConfidence::Verified,
         },
         MaterialAssignment {
-            region_id: "polymer_segment".to_string(),
+            target: PropertyRegionTarget::solid("polymer_segment"),
             expected_material_id: "mat_polymer".to_string(),
             assigned_material_id: "mat_steel".to_string(),
             confidence: EvidenceConfidence::Inferred,
@@ -1648,19 +1655,19 @@ fn multi_material_assembly() -> AnalysisModel {
 
     model.material_assignments = vec![
         MaterialAssignment {
-            region_id: "tip_steel".to_string(),
+            target: PropertyRegionTarget::solid("tip_steel"),
             expected_material_id: "mat_steel".to_string(),
             assigned_material_id: "mat_steel".to_string(),
             confidence: EvidenceConfidence::Verified,
         },
         MaterialAssignment {
-            region_id: "mid_aluminum".to_string(),
+            target: PropertyRegionTarget::solid("mid_aluminum"),
             expected_material_id: "mat_aluminum".to_string(),
             assigned_material_id: "mat_polymer".to_string(),
             confidence: EvidenceConfidence::Inferred,
         },
         MaterialAssignment {
-            region_id: "polymer_segment".to_string(),
+            target: PropertyRegionTarget::solid("polymer_segment"),
             expected_material_id: "mat_polymer".to_string(),
             assigned_material_id: "mat_polymer".to_string(),
             confidence: EvidenceConfidence::Probable,
