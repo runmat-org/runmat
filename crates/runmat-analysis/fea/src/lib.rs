@@ -18,6 +18,7 @@ pub mod planning;
 pub mod post;
 pub mod progress;
 pub mod results;
+pub mod signal_processing;
 pub mod solve;
 pub mod topology;
 
@@ -61,6 +62,7 @@ pub use progress::{
     FeaProgressContextGuard, FeaProgressEvent, FeaProgressHandler, FeaProgressPhase,
     FeaProgressStatus,
 };
+pub use signal_processing::{construct_shock_response_spectrum, ShockResponseSpectrumRequest};
 
 #[cfg(test)]
 mod tests;

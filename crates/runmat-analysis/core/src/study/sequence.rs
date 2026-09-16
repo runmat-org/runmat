@@ -2,6 +2,8 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::ResponseSpectrumId;
+
 use super::{
     accuracy::AccuracyPlan, output::ObservationRequest, AnalysisProcedure, CoupledPhysicsFamily,
     PhysicsFamily, SolutionSpace,
@@ -131,6 +133,9 @@ pub enum IndependentDomain {
     StudyParameter {
         parameter_id: String,
         canonical_values: Vec<f64>,
+    },
+    ResponseSpectra {
+        spectrum_ids: Vec<ResponseSpectrumId>,
     },
 }
 

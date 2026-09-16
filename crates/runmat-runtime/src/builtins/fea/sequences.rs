@@ -103,6 +103,11 @@ const DOMAIN_PARAMETER_INPUTS: [BuiltinParamDescriptor; 2] = [
         "Finite canonical parameter values.",
     ),
 ];
+const DOMAIN_SPECTRA_INPUTS: [BuiltinParamDescriptor; 1] = [required(
+    "spectra",
+    BuiltinParamType::Any,
+    "One or more typed fea.ResponseSpectrum values consumed by the procedure.",
+)];
 const DOMAIN_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
     name: "count or coordinates",
     classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
@@ -179,6 +184,12 @@ descriptor!(
     DOMAIN_PARAMETER_SIGNATURES,
     "domain = fea.IndependentDomain.studyParameter(id, values)",
     &DOMAIN_PARAMETER_INPUTS
+);
+descriptor!(
+    DOMAIN_SPECTRA_DESCRIPTOR,
+    DOMAIN_SPECTRA_SIGNATURES,
+    "domain = fea.IndependentDomain.responseSpectra(spectra)",
+    &DOMAIN_SPECTRA_INPUTS
 );
 
 #[runtime_builtin(
@@ -320,6 +331,48 @@ pub async fn domain_parameter(id: String, values: Value) -> BuiltinResult<Value>
             parameter_id: nonempty_id(NAME, "parameter id", id)?,
             canonical_values: numeric_values(NAME, &values, "values")?,
         },
+    )
+}
+
+#[runtime_builtin(
+    name = "fea.IndependentDomain.responseSpectra",
+    category = "fea",
+    summary = "Bind a modal-response procedure to typed response spectra.",
+    keywords = "fea,step,domain,response,spectrum,typed",
+    descriptor(DOMAIN_SPECTRA_DESCRIPTOR),
+    integer_audit(STRUCTURAL_INTEGER_AUDIT),
+    builtin_path = "crate::builtins::fea::sequences"
+)]
+pub async fn domain_response_spectra(spectra: Value) -> BuiltinResult<Value> {
+    const NAME: &str = "fea.IndependentDomain.responseSpectra";
+    let spectra = super::response_spectra::response_spectrum_vec_from_value(NAME, &spectra)?;
+    if spectra.is_empty() {
+        return Err(builtin_error(
+            NAME,
+            &ERROR_INPUT,
+            "spectra must contain at least one typed response spectrum",
+        ));
+    }
+    let spectrum_ids = spectra
+        .into_iter()
+        .map(|spectrum| spectrum.spectrum_id)
+        .collect::<Vec<_>>();
+    if spectrum_ids
+        .iter()
+        .collect::<std::collections::BTreeSet<_>>()
+        .len()
+        != spectrum_ids.len()
+    {
+        return Err(builtin_error(
+            NAME,
+            &ERROR_INPUT,
+            "spectra must have unique typed response-spectrum identities",
+        ));
+    }
+    to_typed_value(
+        NAME,
+        INDEPENDENT_DOMAIN_CLASS,
+        IndependentDomain::ResponseSpectra { spectrum_ids },
     )
 }
 
@@ -1066,6 +1119,54 @@ mod tests {
     fn cell(values: Vec<Value>) -> Value {
         let columns = values.len();
         Value::Cell(CellArray::new(values, 1, columns).expect("valid row cell"))
+    }
+
+    #[tokio::test]
+    async fn response_spectrum_domain_retains_typed_spectrum_id() {
+        let spectrum = runmat_analysis_core::ResponseSpectrum {
+            spectrum_id: runmat_analysis_core::ResponseSpectrumId("launch".into()),
+            abscissa: runmat_analysis_core::SpectrumAbscissa::FrequencyHertz(vec![10.0, 20.0]),
+            ordinates: vec![1.0, 2.0],
+            damping: runmat_analysis_core::SpectrumDamping::Ratio(0.05),
+            response: runmat_analysis_core::SpectrumResponse::AbsoluteAcceleration,
+            envelope: runmat_analysis_core::SpectrumEnvelope::Maximax,
+            interpolation: runmat_analysis_core::SpectrumInterpolation::LinearFrequency,
+            extrapolation: runmat_analysis_core::SpectrumExtrapolation::Reject,
+            direction: runmat_analysis_core::SpectrumDirection {
+                frame: runmat_analysis_core::CoordinateFrame::Global,
+                vector: [0.0, 0.0, 1.0],
+            },
+            modal_combination: runmat_analysis_core::ModalCombination::CompleteQuadraticCombination,
+            directional_combination: runmat_analysis_core::DirectionalCombination::Srss,
+            truncation: runmat_analysis_core::ModalTruncationPolicy {
+                minimum_cumulative_mass_ratio: 0.9,
+                include_residual_mode: true,
+                include_rigid_response: false,
+                include_missing_mass: true,
+            },
+            construction: runmat_analysis_core::SpectrumConstruction::AuthoredDesign,
+            evidence: runmat_analysis_core::SpectrumEvidence {
+                sampling_adequacy_ratio: 1.0,
+                max_interpolation_error: None,
+            },
+            provenance_digest: "sha256:launch".into(),
+        };
+        let typed = super::super::serializable_to_object(
+            "test",
+            &ERROR_INTERNAL,
+            super::super::response_spectra::RESPONSE_SPECTRUM_CLASS,
+            &spectrum,
+        )
+        .unwrap();
+        let domain = domain_response_spectra(typed).await.unwrap();
+        let decoded: IndependentDomain =
+            from_typed_value("test", INDEPENDENT_DOMAIN_CLASS, &domain).unwrap();
+        assert_eq!(
+            decoded,
+            IndependentDomain::ResponseSpectra {
+                spectrum_ids: vec![runmat_analysis_core::ResponseSpectrumId("launch".into())],
+            }
+        );
     }
 
     #[tokio::test]

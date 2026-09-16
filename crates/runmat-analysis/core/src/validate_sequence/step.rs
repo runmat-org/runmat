@@ -135,7 +135,7 @@ fn validate_independent_domain(step: &ProcedureStep) -> Result<(), AnalysisValid
         AnalysisProcedure::ModalResponseSpectrum => {
             matches!(
                 step.independent_domain,
-                IndependentDomain::StudyParameter { .. }
+                IndependentDomain::ResponseSpectra { .. }
             )
         }
         AnalysisProcedure::Nonlinear => matches!(
@@ -185,6 +185,13 @@ fn validate_independent_domain(step: &ProcedureStep) -> Result<(), AnalysisValid
                 && !canonical_values.is_empty()
                 && canonical_values.iter().all(|value| value.is_finite())
                 && strictly_increasing(canonical_values)
+        }
+        IndependentDomain::ResponseSpectra { spectrum_ids } => {
+            !spectrum_ids.is_empty()
+                && spectrum_ids
+                    .iter()
+                    .all(|spectrum_id| !spectrum_id.0.trim().is_empty())
+                && spectrum_ids.iter().collect::<HashSet<_>>().len() == spectrum_ids.len()
         }
     };
     if valid {

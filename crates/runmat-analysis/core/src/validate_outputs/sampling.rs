@@ -68,7 +68,8 @@ pub fn observation_sampling_matches_domain(
         (
             IndependentDomain::TimeSeconds { .. }
             | IndependentDomain::FrequencyHertz(_)
-            | IndependentDomain::LoadFactor { .. },
+            | IndependentDomain::LoadFactor { .. }
+            | IndependentDomain::ResponseSpectra { .. },
             SamplingPolicy::EveryAcceptedIncrement | SamplingPolicy::Adaptive { .. },
         ) => true,
         (

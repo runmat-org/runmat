@@ -1609,7 +1609,7 @@ fn study_parameter_history_keeps_parameter_identity_and_exact_values() {
         collective_count: 0,
     };
     let mut step = ProcedureStep::structural_modal("parameter-study");
-    step.procedure = runmat_analysis_core::AnalysisProcedure::ModalResponseSpectrum;
+    step.procedure = runmat_analysis_core::AnalysisProcedure::Adaptive;
     step.independent_domain = runmat_analysis_core::IndependentDomain::StudyParameter {
         parameter_id: "damping_ratio".into(),
         canonical_values: vec![0.01, 0.02, 0.05],

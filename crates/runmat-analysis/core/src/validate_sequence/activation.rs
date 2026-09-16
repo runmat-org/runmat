@@ -10,6 +10,23 @@ pub(super) fn validate_objects(
     model: &AnalysisModel,
     step: &ProcedureStep,
 ) -> Result<(), AnalysisValidationError> {
+    if let crate::IndependentDomain::ResponseSpectra { spectrum_ids } = &step.independent_domain {
+        for spectrum_id in spectrum_ids {
+            if !model
+                .response_spectra
+                .iter()
+                .any(|spectrum| spectrum.spectrum_id == *spectrum_id)
+            {
+                return Err(step_error(
+                    step,
+                    format!(
+                        "response-spectrum procedure references unknown spectrum `{}`",
+                        spectrum_id.0
+                    ),
+                ));
+            }
+        }
+    }
     let mut seen = HashSet::new();
     for activation in &step.activations {
         if !seen.insert(&activation.object) {

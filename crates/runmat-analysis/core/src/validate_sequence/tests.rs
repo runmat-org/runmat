@@ -5,10 +5,10 @@ use crate::{
     ActivationLifecycle, AnalysisBoundary, AnalysisModel, AnalysisModelId, AnalysisProcedure,
     AnalysisValidationError, BoundaryOperator, CoordinateFrame, IndependentDomain,
     InitialCondition, InitialConditionTarget, InitialConditionValue, InitialStateConflictPolicy,
-    InitialValue, PhysicsFamily, ProcedureStep, ProcedureStepId, RegionTarget, RestartPolicy,
-    SequenceBranch, SequenceBranchId, SequenceDependency, SequenceDependencyReason, SolutionSpace,
-    StateCompleteness, StateId, StateInput, StateKind, StateOutput, StatePersistence, StateSource,
-    StateUse, StepObjectActivation, StepObjectRef, Velocity,
+    InitialValue, PhysicsFamily, ProcedureStep, ProcedureStepId, RegionTarget, ResponseSpectrumId,
+    RestartPolicy, SequenceBranch, SequenceBranchId, SequenceDependency, SequenceDependencyReason,
+    SolutionSpace, StateCompleteness, StateId, StateInput, StateKind, StateOutput,
+    StatePersistence, StateSource, StateUse, StepObjectActivation, StepObjectRef, Velocity,
 };
 
 fn model_with_steps(steps: Vec<ProcedureStep>) -> AnalysisModel {
@@ -108,6 +108,41 @@ fn rejects_family_procedure_and_domain_mismatches() {
     };
     assert!(matches!(
         validate_sequence(&model_with_steps(vec![invalid_domain])),
+        Err(AnalysisValidationError::InvalidProcedureStep { .. })
+    ));
+}
+
+#[test]
+fn modal_response_requires_typed_existing_spectrum_ids() {
+    let mut step = ProcedureStep::structural_modal("spectrum");
+    step.procedure = AnalysisProcedure::ModalResponseSpectrum;
+    step.solution_space = SolutionSpace::ModalReduced;
+    step.independent_domain = IndependentDomain::ResponseSpectra {
+        spectrum_ids: vec![ResponseSpectrumId("design".into())],
+    };
+    step.state_inputs.push(StateInput {
+        input_id: "basis".into(),
+        required_kind: StateKind::ModalBasis,
+        source: StateSource::Upstream {
+            producer_step: ProcedureStepId("modes".into()),
+            state_id: StateId("basis".into()),
+        },
+        use_as: StateUse::ModalBasis,
+        conflict: InitialStateConflictPolicy::Reject,
+    });
+    super::step::validate(&step).unwrap();
+    let model = model_with_steps(vec![step.clone()]);
+    assert!(matches!(
+        super::activation::validate_objects(&model, &step),
+        Err(AnalysisValidationError::InvalidProcedureStep { .. })
+    ));
+
+    step.independent_domain = IndependentDomain::StudyParameter {
+        parameter_id: "spectrum".into(),
+        canonical_values: vec![1.0],
+    };
+    assert!(matches!(
+        super::step::validate(&step),
         Err(AnalysisValidationError::InvalidProcedureStep { .. })
     ));
 }
