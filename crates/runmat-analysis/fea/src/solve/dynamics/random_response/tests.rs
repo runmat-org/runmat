@@ -112,6 +112,43 @@ fn physical_random_response_matches_independent_dense_reference_and_round_trips(
     );
     let result = solve_modal_random_response(&summary, &basis, &excitation, policy()).unwrap();
     result.validate_for(&summary, &basis, &excitation).unwrap();
+    let breakpoints =
+        random_response_interval_breakpoints(&summary, &basis, &excitation, policy()).unwrap();
+    let mut intervals = (0..breakpoints.len() - 1)
+        .map(|ordinal| {
+            solve_modal_random_response_interval(&summary, &basis, &excitation, policy(), ordinal)
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+    let first = intervals[0].clone();
+    assert_eq!(
+        ModalRandomResponseIntervalResult::from_canonical_bytes(&first.canonical_bytes().unwrap())
+            .unwrap(),
+        first
+    );
+    intervals.reverse();
+    assert_eq!(
+        assemble_modal_random_response_intervals(
+            &summary,
+            &basis,
+            &excitation,
+            policy(),
+            intervals.clone(),
+        )
+        .unwrap(),
+        result
+    );
+    intervals.pop();
+    assert!(assemble_modal_random_response_intervals(
+        &summary,
+        &basis,
+        &excitation,
+        policy(),
+        intervals,
+    )
+    .unwrap_err()
+    .to_string()
+    .contains("incomplete"));
 
     let participation = mode.directional()[0].participation_factor();
     let dof = mode

@@ -95,6 +95,11 @@ identity_type!(StructuralModalResponseSpectrumScopeIdentity);
 identity_type!(StructuralModalResponseSpectrumDirectionRequestIdentity);
 identity_type!(StructuralModalResponseSpectrumDirectionResultIdentity);
 identity_type!(StructuralModalResponseSpectrumAssemblyRequestIdentity);
+identity_type!(StructuralRandomResponseWorkloadIdentity);
+identity_type!(StructuralRandomResponseScopeIdentity);
+identity_type!(StructuralRandomResponseIntervalRequestIdentity);
+identity_type!(StructuralRandomResponseIntervalResultIdentity);
+identity_type!(StructuralRandomResponseAssemblyRequestIdentity);
 identity_type!(StructuralBucklingWorkloadIdentity);
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -107,6 +112,8 @@ pub enum AnalysisWorkKind {
     ExtractStructuralModes,
     SolveStructuralModalResponseSpectrumDirection,
     AssembleStructuralModalResponseSpectrumResult,
+    SolveStructuralRandomResponseIntervals,
+    AssembleStructuralRandomResponseResult,
     SolveStructuralBucklingModes,
     RecoverField,
     PublishState,

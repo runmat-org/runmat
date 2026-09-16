@@ -26,6 +26,10 @@ mod observation_assembly;
 mod observation_history_checkpoint;
 mod observation_partition;
 mod publication;
+mod random_response_interval;
+mod random_response_result;
+mod random_response_scope;
+mod random_response_workload;
 mod response_spectrum_entry;
 mod response_spectrum_result;
 mod response_spectrum_scope;
@@ -109,7 +113,10 @@ pub use identity::{
     StructuralModalResponseSpectrumDirectionRequestIdentity,
     StructuralModalResponseSpectrumDirectionResultIdentity,
     StructuralModalResponseSpectrumScopeIdentity, StructuralModalResponseSpectrumWorkloadIdentity,
-    StructuralModalWorkloadIdentity, StructuralStiffnessOperatorIdentity,
+    StructuralModalWorkloadIdentity, StructuralRandomResponseAssemblyRequestIdentity,
+    StructuralRandomResponseIntervalRequestIdentity,
+    StructuralRandomResponseIntervalResultIdentity, StructuralRandomResponseScopeIdentity,
+    StructuralRandomResponseWorkloadIdentity, StructuralStiffnessOperatorIdentity,
     StructuralTransientBlockRequestIdentity, StructuralTransientCheckpointIdentity,
     StructuralTransientCheckpointScopeIdentity, StructuralTransientPhysicalSampleIdentity,
     StructuralTransientResultAssemblyRequestIdentity, StructuralTransientScheduleIdentity,
@@ -134,6 +141,20 @@ pub use observation_partition::{
     ObservationPartitionEvaluationRequest, ObservationPartitionReductionRequest,
 };
 pub use publication::ResultPublicationRequest;
+pub use random_response_interval::{
+    StructuralRandomResponseIntervalRequest, StructuralRandomResponseIntervalResult,
+};
+pub use random_response_result::{
+    StructuralRandomResponseAssemblyRequest, StructuralRandomResponseNumericalReceipt,
+    StructuralRandomResponseSolverResult, StructuralRandomStatistics,
+};
+pub use random_response_scope::{
+    StructuralRandomResponseScope, StructuralRandomResponseScopeInput,
+};
+pub use random_response_workload::{
+    StructuralRandomResponseTemplate, StructuralRandomResponseWorkload,
+    StructuralRandomResponseWorkloadInput,
+};
 pub use response_spectrum_entry::{
     StructuralModalResponseSpectrumDirectionRequest, StructuralModalResponseSpectrumDirectionResult,
 };

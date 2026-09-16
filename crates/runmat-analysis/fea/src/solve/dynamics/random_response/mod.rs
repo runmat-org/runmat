@@ -1,5 +1,7 @@
 mod complex;
 mod integrate;
+mod interval;
+mod plan;
 mod quadrature;
 mod recovery;
 mod spectrum;
@@ -20,6 +22,13 @@ use crate::{
 };
 
 pub use integrate::solve_modal_random_response;
+pub use interval::{
+    assemble_described_random_response_intervals, assemble_modal_random_response_intervals,
+    describe_modal_random_response, random_response_interval_breakpoints,
+    solve_modal_random_response_interval, ModalRandomResponseIntervalIdentity,
+    ModalRandomResponseIntervalResult, RandomResponseFieldLayout, RandomResponseFieldVariance,
+    RandomResponseIntervalEvidence, RandomResponsePlanDescription,
+};
 
 const RESULT_PREFIX: &[u8] = b"runmat-modal-random-response-result\0";
 const EXCITATION_PREFIX: &[u8] = b"runmat-random-excitation-spectrum\0";
@@ -47,7 +56,7 @@ impl RandomResponseIntegrationPolicy {
         }
     }
 
-    fn validate(self) -> Result<(), FeaRunError> {
+    pub(crate) fn validate(self) -> Result<(), FeaRunError> {
         if !self.modal_damping_ratio.is_finite()
             || !(0.0..1.0).contains(&self.modal_damping_ratio)
             || !self.minimum_cumulative_mass_ratio.is_finite()
@@ -331,7 +340,7 @@ impl ModalRandomResponseResult {
         self.validate()?;
         if self.basis != basis.identity()
             || self.excitation != excitation.excitation_id
-            || self.excitation_digest != random_excitation_digest(excitation)?
+            || self.excitation_digest != random_excitation_spectrum_digest(excitation)?
         {
             return Err(FeaRunError::Solve(
                 "random-response result does not name the supplied basis and excitation".into(),
@@ -410,7 +419,9 @@ impl ModalRandomResponseResult {
     }
 }
 
-fn random_excitation_digest(excitation: &RandomExcitationSpectrum) -> Result<Digest, FeaRunError> {
+pub(crate) fn random_excitation_spectrum_digest(
+    excitation: &RandomExcitationSpectrum,
+) -> Result<Digest, FeaRunError> {
     excitation
         .validate_intrinsic()
         .map_err(FeaRunError::Solve)?;

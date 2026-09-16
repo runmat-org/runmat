@@ -54,6 +54,10 @@ pub use pipeline::nonlinear::{run_nonlinear, run_nonlinear_with_options};
 pub use pipeline::structural_buckling::{
     execute_structural_buckling_workload, recover_completed_structural_buckling_run,
 };
+pub use pipeline::structural_random_response::{
+    execute_structural_random_response_intervals, prepare_structural_random_response,
+    PreparedStructuralRandomResponse,
+};
 pub use pipeline::structural_response_spectrum::{
     execute_structural_modal_response_spectrum_direction,
     prepare_structural_modal_response_spectrum, recover_structural_modal_response_spectrum_fields,

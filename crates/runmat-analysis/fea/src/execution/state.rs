@@ -40,6 +40,7 @@ pub enum SemanticStatePublicationSource {
     StructuralLinearization,
     ModalBasis,
     StructuralResponseEnvelope,
+    StructuralRandomStatistics,
 }
 
 impl SemanticStatePublicationRequest {
@@ -81,6 +82,9 @@ impl SemanticStatePublicationRequest {
                 ) | (
                     SemanticStatePublicationSource::StructuralResponseEnvelope,
                     StateKind::StructuralResponseEnvelope
+                ) | (
+                    SemanticStatePublicationSource::StructuralRandomStatistics,
+                    StateKind::StructuralRandomStatistics
                 )
             )
         {
@@ -148,6 +152,9 @@ pub enum CanonicalSemanticStatePayload {
     },
     StructuralResponseEnvelope {
         envelope: Box<super::StructuralResponseEnvelope>,
+    },
+    StructuralRandomStatistics {
+        statistics: Box<super::StructuralRandomStatistics>,
     },
 }
 
@@ -277,6 +284,31 @@ impl CanonicalSemanticState {
         })
     }
 
+    pub fn from_structural_random_statistics_publication(
+        request: &SemanticStatePublicationRequest,
+        result: &super::StructuralRandomResponseSolverResult,
+    ) -> AnalysisExecutionResult<Self> {
+        request.validate()?;
+        result.validate()?;
+        if request.source != SemanticStatePublicationSource::StructuralRandomStatistics
+            || result.assembly().scope().topology_digest() != request.topology_digest
+        {
+            return Err(AnalysisExecutionError::Invalid(
+                "structural random-statistics state publication requires a topology-matched random-response result"
+                    .into(),
+            ));
+        }
+        Self::new(CanonicalSemanticStateInput {
+            producer: request.producer,
+            declaration: request.declaration.clone(),
+            topology_digest: request.topology_digest,
+            source_result: request.source_result,
+            payload: CanonicalSemanticStatePayload::StructuralRandomStatistics {
+                statistics: Box::new(super::StructuralRandomStatistics::from_result(result)?),
+            },
+        })
+    }
+
     pub fn new(input: CanonicalSemanticStateInput) -> AnalysisExecutionResult<Self> {
         let mut state = Self {
             schema_version: 1,
@@ -379,6 +411,17 @@ impl CanonicalSemanticState {
                 }
                 envelope.validate()?;
             }
+            CanonicalSemanticStatePayload::StructuralRandomStatistics { statistics } => {
+                if self.kind != StateKind::StructuralRandomStatistics
+                    || statistics.scope().topology_digest() != self.topology_digest
+                {
+                    return Err(AnalysisExecutionError::Invalid(
+                        "structural random-statistics payload does not match its declared state kind or topology"
+                            .into(),
+                    ));
+                }
+                statistics.validate()?;
+            }
         }
         let content_digest = self.derive_content_digest()?;
         if self.content_digest != content_digest || self.identity != self.derive_identity()? {
@@ -443,7 +486,8 @@ impl CanonicalSemanticStatePayload {
             Self::StructuralFrequency { .. }
             | Self::ModalBasis { .. }
             | Self::StructuralLinearization { .. }
-            | Self::StructuralResponseEnvelope { .. } => None,
+            | Self::StructuralResponseEnvelope { .. }
+            | Self::StructuralRandomStatistics { .. } => None,
         }
     }
 
@@ -453,7 +497,8 @@ impl CanonicalSemanticStatePayload {
             Self::Fields { .. }
             | Self::ModalBasis { .. }
             | Self::StructuralLinearization { .. }
-            | Self::StructuralResponseEnvelope { .. } => None,
+            | Self::StructuralResponseEnvelope { .. }
+            | Self::StructuralRandomStatistics { .. } => None,
         }
     }
 
@@ -462,7 +507,8 @@ impl CanonicalSemanticStatePayload {
             Self::Fields { .. }
             | Self::StructuralFrequency { .. }
             | Self::StructuralLinearization { .. }
-            | Self::StructuralResponseEnvelope { .. } => None,
+            | Self::StructuralResponseEnvelope { .. }
+            | Self::StructuralRandomStatistics { .. } => None,
             Self::ModalBasis { basis } => Some(basis.as_ref()),
         }
     }
@@ -475,7 +521,8 @@ impl CanonicalSemanticStatePayload {
             Self::Fields { .. }
             | Self::StructuralFrequency { .. }
             | Self::ModalBasis { .. }
-            | Self::StructuralResponseEnvelope { .. } => None,
+            | Self::StructuralResponseEnvelope { .. }
+            | Self::StructuralRandomStatistics { .. } => None,
         }
     }
 
@@ -485,7 +532,19 @@ impl CanonicalSemanticStatePayload {
             Self::Fields { .. }
             | Self::StructuralFrequency { .. }
             | Self::ModalBasis { .. }
-            | Self::StructuralLinearization { .. } => None,
+            | Self::StructuralLinearization { .. }
+            | Self::StructuralRandomStatistics { .. } => None,
+        }
+    }
+
+    pub fn structural_random_statistics(&self) -> Option<&super::StructuralRandomStatistics> {
+        match self {
+            Self::StructuralRandomStatistics { statistics } => Some(statistics.as_ref()),
+            Self::Fields { .. }
+            | Self::StructuralFrequency { .. }
+            | Self::ModalBasis { .. }
+            | Self::StructuralLinearization { .. }
+            | Self::StructuralResponseEnvelope { .. } => None,
         }
     }
 }

@@ -24,10 +24,15 @@ pub use modal_transient::{
     refresh_modal_transient_state, solve_modal_transient, ModalTransientError,
     ModalTransientHistory, ModalTransientInitialState, ModalTransientSample, ModalTransientStep,
 };
+pub(crate) use random_response::random_excitation_spectrum_digest;
 pub use random_response::{
-    solve_modal_random_response, ModalRandomResponseResult, ModalRandomResponseResultIdentity,
-    RandomResponseFieldStatistics, RandomResponseIntegrationEvidence,
-    RandomResponseIntegrationPolicy,
+    assemble_described_random_response_intervals, assemble_modal_random_response_intervals,
+    describe_modal_random_response, random_response_interval_breakpoints,
+    solve_modal_random_response, solve_modal_random_response_interval,
+    ModalRandomResponseIntervalIdentity, ModalRandomResponseIntervalResult,
+    ModalRandomResponseResult, ModalRandomResponseResultIdentity, RandomResponseFieldLayout,
+    RandomResponseFieldStatistics, RandomResponseFieldVariance, RandomResponseIntegrationEvidence,
+    RandomResponseIntegrationPolicy, RandomResponseIntervalEvidence, RandomResponsePlanDescription,
 };
 pub use response_spectrum::{
     assemble_modal_response_spectrum_direction_results,
