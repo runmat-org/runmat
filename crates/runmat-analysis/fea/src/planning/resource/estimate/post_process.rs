@@ -143,10 +143,42 @@ pub(super) fn build_response_spectrum_assembly_resource_plan(
     input: FeaResourcePlanningInput,
     demand: &StructuralModalResponseSpectrumAssemblyResourceDemand,
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
+    let missing_mass_values = [
+        demand.missing_mass_reduced_dof_count.0,
+        demand.missing_mass_system_workspace_bytes_upper_bound.0,
+        demand.missing_mass_total_iteration_count_upper_bound.0,
+    ];
+    let missing_mass_is_absent = demand.missing_mass_static_solve_count.0 == 0;
+    let missing_mass_tuple_is_valid = if missing_mass_is_absent {
+        missing_mass_values.iter().all(|value| *value == 0)
+    } else {
+        missing_mass_values.iter().all(|value| *value > 0)
+    };
+    let expected_iteration_count = if missing_mass_is_absent {
+        0
+    } else {
+        let dimension = usize::try_from(demand.missing_mass_reduced_dof_count.0)
+            .map_err(|_| ResourcePlanningError::Overflow("missing-mass reduced dimension"))?;
+        let per_solve = u64::try_from(
+            crate::pipeline::homogeneous_static::homogeneous_static_iteration_limit(dimension),
+        )
+        .map_err(|_| ResourcePlanningError::Overflow("missing-mass static iteration limit"))?;
+        demand
+            .missing_mass_static_solve_count
+            .0
+            .checked_mul(per_solve)
+            .ok_or(ResourcePlanningError::Overflow(
+                "missing-mass total static iterations",
+            ))?
+    };
     if demand.direction_count.0 == 0
         || demand.direction_count.0 > 3
         || demand.direction_encoded_bytes.0 == 0
         || demand.physical_dof_count.0 == 0
+        || demand.missing_mass_static_solve_count.0 > demand.direction_count.0
+        || demand.missing_mass_reduced_dof_count.0 > demand.physical_dof_count.0
+        || !missing_mass_tuple_is_valid
+        || demand.missing_mass_total_iteration_count_upper_bound.0 != expected_iteration_count
     {
         return Err(ResourcePlanningError::Invalid(
             "response-spectrum assembly resource cardinalities are invalid".into(),
@@ -162,8 +194,11 @@ pub(super) fn build_response_spectrum_assembly_resource_plan(
                     .ordering_workspace_bytes_upper_bound
                     .0
                     .checked_add(demand.field_recovery_workspace_bytes_upper_bound.0)
+                    .and_then(|value| {
+                        value.checked_add(demand.missing_mass_system_workspace_bytes_upper_bound.0)
+                    })
                     .ok_or(ResourcePlanningError::Overflow(
-                        "response-spectrum assembly and field-recovery workspace",
+                        "response-spectrum assembly, field-recovery, and missing-mass workspace",
                     ))?,
             ),
             ByteCount(0),

@@ -353,6 +353,9 @@ jobs:
           cargo test -p runmat-analysis-fea --all-features --lib \
             response_spectrum::qualification \
             2>&1 | tee -a "${EVIDENCE_DIR}/execution-conformance.log"
+          cargo test -p runmat-analysis-fea --all-features --lib \
+            pseudo_acceleration_missing_mass \
+            2>&1 | tee -a "${EVIDENCE_DIR}/execution-conformance.log"
           cargo test -p runmat --all-features --test check_cli \
             response_spectrum_documentation_example_runs_its_two_step_study \
             2>&1 | tee -a "${EVIDENCE_DIR}/execution-conformance.log"

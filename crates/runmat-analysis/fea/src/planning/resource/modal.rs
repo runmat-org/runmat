@@ -274,7 +274,7 @@ pub fn build_structural_modal_resource_plan(
                     0
                 } else {
                     count(
-                        crate::pipeline::modal_residual::residual_static_iteration_limit(
+                        crate::pipeline::homogeneous_static::homogeneous_static_iteration_limit(
                             reduction.reduced_dof_count,
                         ),
                         "modal residual-vector static iteration limit",

@@ -425,6 +425,27 @@ fn resource_usage(
     .unwrap()
 }
 
+fn assert_publication_semantics(
+    actual: &runmat_analysis_fea::results::publication::PublishedAnalysisResult,
+    expected: &runmat_analysis_fea::results::publication::PublishedAnalysisResult,
+) {
+    // Publication identity intentionally binds measured attempt accounting. Equivalent work run
+    // through another execution driver must retain its scientific sources and gate decision, while
+    // naming the resource-usage evidence produced by that execution rather than an earlier run.
+    assert_eq!(actual.schema_version, expected.schema_version);
+    assert_eq!(actual.producer, expected.producer);
+    assert_eq!(actual.source_result, expected.source_result);
+    assert_eq!(actual.source_observations, expected.source_observations);
+    assert_eq!(actual.source_accuracy, expected.source_accuracy);
+    assert_eq!(actual.source_resource_plan, expected.source_resource_plan);
+    assert_eq!(
+        actual.formulation_requirement,
+        expected.formulation_requirement
+    );
+    assert_eq!(actual.accuracy_status, expected.accuracy_status);
+    assert_eq!(actual.gate, expected.gate);
+}
+
 async fn run_durable_driver() {
     let invocation = runmat_execution_runner_native::supervisor::prepare_batch_driver().unwrap();
     let job_directory = invocation.job_directory().to_path_buf();
@@ -500,7 +521,11 @@ async fn durable_conformance(
         revision(),
     )
     .await;
-    assert_eq!(publication, expected_publication);
+    assert_publication_semantics(&publication, &expected_publication);
+    assert_ne!(
+        publication.source_resource_usage, expected_publication.source_resource_usage,
+        "process and durable publications must retain their own measured execution evidence"
+    );
 
     let (mixed_host, mixed_program, _, mixed_resource_plan) =
         mixed_fixture(revision(), "durable-analysis");
@@ -543,7 +568,11 @@ async fn durable_conformance(
         revision(),
     )
     .await;
-    assert_eq!(publication, expected_explicit_publication);
+    assert_publication_semantics(&publication, &expected_explicit_publication);
+    assert_ne!(
+        publication.source_resource_usage, expected_explicit_publication.source_resource_usage,
+        "process and durable publications must retain their own measured execution evidence"
+    );
 }
 
 async fn remote_conformance(
@@ -882,7 +911,11 @@ async fn remote_conformance(
             revision.clone(),
         )
         .await;
-        assert_eq!(publication, expected_publication);
+        assert_publication_semantics(&publication, &expected_publication);
+        assert_ne!(
+            publication.source_resource_usage, expected_publication.source_resource_usage,
+            "local and remote publications must retain their own measured execution evidence"
+        );
         let publication = publication_chain::execute_publication_chain(
             &mut publication_driver,
             &explicit,
@@ -891,7 +924,11 @@ async fn remote_conformance(
             revision.clone(),
         )
         .await;
-        assert_eq!(publication, expected_explicit_publication);
+        assert_publication_semantics(&publication, &expected_explicit_publication);
+        assert_ne!(
+            publication.source_resource_usage, expected_explicit_publication.source_resource_usage,
+            "local and remote publications must retain their own measured execution evidence"
+        );
         let sequence = execute_structural_sequence_remotely(
             Arc::clone(&pool),
             sequence_preparation(revision.clone(), "remote-analysis"),

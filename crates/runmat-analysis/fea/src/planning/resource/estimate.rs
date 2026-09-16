@@ -205,7 +205,12 @@ fn validate_modal_demand(
     let expected_residual_iterations = if demand.residual_vector_count.0 == 0 {
         0
     } else {
-        reduced_dimension.0.saturating_mul(20).max(1_000)
+        let dimension = usize::try_from(reduced_dimension.0)
+            .map_err(|_| ResourcePlanningError::Overflow("modal reduced dimension"))?;
+        u64::try_from(
+            crate::pipeline::homogeneous_static::homogeneous_static_iteration_limit(dimension),
+        )
+        .map_err(|_| ResourcePlanningError::Overflow("modal static iteration limit"))?
     };
     let expected_residual_orthogonalization_passes = if demand.residual_vector_count.0 == 0 {
         0

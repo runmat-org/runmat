@@ -496,9 +496,12 @@ Stress, strain, and formulation-specific linear resultants are a separate recove
 are available when the response has a qualified displacement conversion: directly for relative
 displacement and through modal-frequency conversion for pseudo velocity and pseudo acceleration.
 Ordinary relative or absolute velocity and acceleration responses remain useful as nodal fields,
-but RunMat does not invent a deformation state from them. Missing-mass acceleration likewise
-retains its corrected nodal envelope while deformation recovery reports a typed unavailable
-reason until a separately qualified static-correction recovery exists.
+but RunMat does not invent a deformation state from them. For pseudo-acceleration with a
+missing-mass correction, RunMat solves the residual inertial load against the exact constrained
+static stiffness before recovering deformation fields. That signed static correction combines by
+SRSS with the periodic component, or in phase with the rigid component when a rigid-response
+policy is active. Missing-mass absolute acceleration still retains its corrected nodal envelope
+without claiming a displacement-derived stress field.
 
 Final publication binds the response result, whole-result accuracy artifact, exact assembly
 resource plan, and aggregated resource-usage evidence. Local and remote execution import and

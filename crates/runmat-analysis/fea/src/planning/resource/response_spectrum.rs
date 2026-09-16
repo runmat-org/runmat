@@ -1,10 +1,13 @@
 use std::collections::BTreeSet;
 
-use runmat_analysis_core::{ModalCombination, SpectrumAbscissa};
+use runmat_analysis_core::{
+    ModalCombination, ModalTruncationCorrection, SpectrumAbscissa, SpectrumResponse,
+};
 use runmat_execution::resource::AcceleratorRequest;
 use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
 
 use crate::{
+    algebra::CoercivitySymbolicPlan,
     constraints::CanonicalStructuralConstraintPlan,
     execution::{
         CanonicalSemanticState, StructuralModalResponseSpectrumAssemblyRequest,
@@ -47,6 +50,8 @@ pub struct StructuralModalResponseSpectrumResourceProjection {
     physical_dof_count: u64,
     mode_count: u64,
     linear_field_value_count_upper_bound: u64,
+    missing_mass_reduced_dof_count: u64,
+    missing_mass_system_workspace_bytes_upper_bound: u64,
     worker: WorkerResourcePolicy,
     accuracy_ceiling: runmat_analysis_core::AccuracyResourceCeiling,
 }
@@ -81,6 +86,34 @@ impl StructuralModalResponseSpectrumResourceProjection {
         }
         let facts = derive_structural_resource_facts(workload.model(), Some(mesh), constraints)?;
         let physical_dof_count = facts.sparse.rows.0;
+        let reduction = facts
+            .constraint_matrix
+            .affine_reduction()
+            .map_err(invalid_error)?;
+        if reduction.offset.iter().any(|value| *value != 0.0) || reduction.reduced_dof_count == 0 {
+            return Err(invalid(
+                "modal response-spectrum resource admission requires a nonempty homogeneous reduction",
+            ));
+        }
+        let reduced_stiffness = reduction
+            .reduce_sparse_pattern(facts.symbolic.stiffness_upper_bound())
+            .map_err(invalid_error)?;
+        let missing_mass_reduced_dof_count = count(
+            reduction.reduced_dof_count,
+            "missing-mass reduced degree-of-freedom count",
+        )?;
+        let missing_mass_system_workspace_bytes_upper_bound =
+            missing_mass_static_system_workspace_bytes(
+                physical_dof_count,
+                missing_mass_reduced_dof_count,
+                count(
+                    reduced_stiffness.column_indices().len(),
+                    "missing-mass reduced stiffness nonzeros",
+                )?,
+                CoercivitySymbolicPlan::derive(&reduced_stiffness)
+                    .map_err(invalid_error)?
+                    .resident_bytes_upper_bound(),
+            )?;
         if basis
             .modes()
             .iter()
@@ -185,6 +218,8 @@ impl StructuralModalResponseSpectrumResourceProjection {
             physical_dof_count,
             mode_count,
             linear_field_value_count_upper_bound,
+            missing_mass_reduced_dof_count,
+            missing_mass_system_workspace_bytes_upper_bound,
             worker: WorkerResourcePolicy {
                 cpu_millicores: 1_000,
                 maximum_wall_milliseconds: step.accuracy.resources.maximum_wall_time_milliseconds,
@@ -365,6 +400,46 @@ impl StructuralModalResponseSpectrumResourceProjection {
             8,
             "response-spectrum field recovery workspace",
         )?;
+        let missing_mass_static_solve_count = count(
+            request
+                .entries()
+                .iter()
+                .filter(|entry| {
+                    let spectrum = entry.request().spectrum();
+                    spectrum.response == SpectrumResponse::PseudoAcceleration
+                        && matches!(
+                            spectrum.truncation.correction,
+                            ModalTruncationCorrection::MissingMass { .. }
+                        )
+                })
+                .count(),
+            "missing-mass static solve count",
+        )?;
+        let (
+            missing_mass_reduced_dof_count,
+            missing_mass_system_workspace_bytes_upper_bound,
+            missing_mass_total_iteration_count_upper_bound,
+        ) = if missing_mass_static_solve_count == 0 {
+            (0, 0, 0)
+        } else {
+            let iteration_count_per_solve = count(
+                crate::pipeline::homogeneous_static::homogeneous_static_iteration_limit(
+                    usize::try_from(self.missing_mass_reduced_dof_count).map_err(|_| {
+                        ResourcePlanningError::Overflow("missing-mass reduced dimension")
+                    })?,
+                ),
+                "missing-mass static iteration limit",
+            )?;
+            (
+                self.missing_mass_reduced_dof_count,
+                self.missing_mass_system_workspace_bytes_upper_bound,
+                multiply(
+                    missing_mass_static_solve_count,
+                    iteration_count_per_solve,
+                    "missing-mass total static iterations",
+                )?,
+            )
+        };
         build_resource_plan(FeaResourcePlanningInput {
             estimation_model_revision: RESOURCE_ESTIMATION_MODEL_REVISION,
             phase: FeaResourcePhase::StructuralModalResponseSpectrumAssembly(request.identity()),
@@ -377,6 +452,14 @@ impl StructuralModalResponseSpectrumResourceProjection {
                     inputs,
                     ordering_workspace_bytes_upper_bound: ByteCount(ordering_workspace),
                     field_recovery_workspace_bytes_upper_bound: ByteCount(field_recovery_workspace),
+                    missing_mass_static_solve_count: Count(missing_mass_static_solve_count),
+                    missing_mass_reduced_dof_count: Count(missing_mass_reduced_dof_count),
+                    missing_mass_system_workspace_bytes_upper_bound: ByteCount(
+                        missing_mass_system_workspace_bytes_upper_bound,
+                    ),
+                    missing_mass_total_iteration_count_upper_bound: Count(
+                        missing_mass_total_iteration_count_upper_bound,
+                    ),
                     result_output,
                     receipt_output,
                     field_recovery_output,
@@ -399,6 +482,53 @@ impl StructuralModalResponseSpectrumResourceProjection {
             "response-spectrum field recovery payload",
         )
     }
+}
+
+fn missing_mass_static_system_workspace_bytes(
+    full_dimension: u64,
+    reduced_dimension: u64,
+    reduced_stiffness_nonzeros: u64,
+    preconditioner_bytes: u64,
+) -> Result<u64, ResourcePlanningError> {
+    let reduced_stiffness_bytes = add(
+        multiply(
+            add(reduced_dimension, 1, "missing-mass reduced stiffness rows")?,
+            8,
+            "missing-mass reduced stiffness row offsets",
+        )?,
+        multiply(
+            reduced_stiffness_nonzeros,
+            16,
+            "missing-mass reduced stiffness entries",
+        )?,
+        "missing-mass reduced stiffness storage",
+    )?;
+    let vector_values = add(
+        multiply(
+            full_dimension,
+            6,
+            "missing-mass full-order static workspace",
+        )?,
+        multiply(
+            reduced_dimension,
+            8,
+            "missing-mass reduced static workspace",
+        )?,
+        "missing-mass static vector workspace",
+    )?;
+    add(
+        add(
+            reduced_stiffness_bytes,
+            preconditioner_bytes,
+            "missing-mass reduced system and preconditioner",
+        )?,
+        multiply(
+            vector_values,
+            8,
+            "missing-mass static vector workspace bytes",
+        )?,
+        "missing-mass static system workspace",
+    )
 }
 
 pub fn structural_modal_response_spectrum_direction_payload_bytes_upper_bound(

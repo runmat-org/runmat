@@ -21,6 +21,7 @@ pub mod transient;
 
 mod activation;
 mod admission;
+pub(crate) mod homogeneous_static;
 mod observation_history;
 pub(crate) mod structural_nodal;
 

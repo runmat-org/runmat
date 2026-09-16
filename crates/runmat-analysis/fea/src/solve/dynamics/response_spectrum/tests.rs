@@ -282,7 +282,12 @@ fn operator_aware_missing_mass_closes_the_truncated_acceleration_influence() {
     );
     assert_eq!(
         recovery.deformation().unavailability(),
-        Some(ResponseSpectrumDeformationRecoveryUnavailability::MissingMassStaticCorrectionNotQualified)
+        Some(
+            ResponseSpectrumDeformationRecoveryUnavailability::
+                MissingMassStaticCorrectionRequiresPseudoAcceleration {
+                    response: SpectrumResponse::AbsoluteAcceleration,
+                }
+        )
     );
     recovery
         .validate_exact_for(&summary, &run.basis, &result)
@@ -305,6 +310,145 @@ fn operator_aware_missing_mass_closes_the_truncated_acceleration_influence() {
     )
     .unwrap();
     assert_eq!(assembled, result);
+}
+
+#[test]
+fn pseudo_acceleration_missing_mass_recovers_the_independent_static_field() {
+    let truncation = EigenspaceTruncationPolicy::requested(2);
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    let mut step = ProcedureStep::structural_modal("modes");
+    step.independent_domain = IndependentDomain::Eigenvalue {
+        requested_count: truncation.requested_mode_count(),
+    };
+    model.sequence.steps = vec![step];
+    let mesh = crate::tests::single_tetrahedron_solver_mesh_for_model(&model);
+    let run = run_modal_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        ModalSolveOptions {
+            formulation_requirement: FormulationRequirement::Experimental,
+            truncation,
+            convergence: ModalConvergencePolicy::exploratory(),
+            residual_vector_directions: Vec::new(),
+            solver_mesh: Some(mesh.clone()),
+        },
+    )
+    .unwrap();
+    let excitations = crate::excitation::realize_step_excitations(
+        &model,
+        &model.sequence.steps[0],
+        crate::excitation::ExcitationSamplePoint::Static,
+    )
+    .unwrap();
+    let summary = crate::assembly::assemble_structural_system(
+        &model,
+        &excitations,
+        Some(mesh),
+        StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+    )
+    .unwrap();
+    let first_mode = &run.basis.modes()[0];
+    let axis = first_mode
+        .directional()
+        .iter()
+        .enumerate()
+        .max_by(|(_, left), (_, right)| left.effective_mass().total_cmp(&right.effective_mass()))
+        .map(|(axis, _)| axis)
+        .unwrap();
+    let mut direction = [0.0; 3];
+    direction[axis] = 1.0;
+    let frequency = first_mode.frequency_hz();
+    let mut spectrum = spectrum_fixture(
+        SpectrumAbscissa::FrequencyHertz(vec![frequency]),
+        vec![3.0],
+        direction,
+    );
+    spectrum.response = SpectrumResponse::PseudoAcceleration;
+    spectrum.truncation.correction = runmat_analysis_core::ModalTruncationCorrection::MissingMass {
+        zero_period_acceleration: 5.0,
+    };
+
+    for rigid_response in [
+        runmat_analysis_core::RigidResponsePolicy::Disabled,
+        runmat_analysis_core::RigidResponsePolicy::Gupta {
+            periodic_frequency_hz: frequency * 0.25,
+            rigid_frequency_hz: frequency * 0.5,
+        },
+    ] {
+        spectrum.rigid_response = rigid_response;
+        let result = solve_modal_response_spectrum_with_operator(
+            &summary,
+            &run.basis,
+            std::slice::from_ref(&spectrum),
+        )
+        .unwrap();
+        let contribution = &result.contributions()[0];
+        let correction_displacement =
+            independent_static_displacement(&summary, &contribution.truncation.correction_response);
+        let correction_fields = crate::post::fields::recover_deformation_result_fields(
+            &summary,
+            &correction_displacement,
+        )
+        .unwrap();
+        let correction_stress = correction_fields
+            .iter()
+            .find(|field| field.field_id == crate::FEA_FIELD_STRUCTURAL_STRESS)
+            .unwrap()
+            .as_host_f64()
+            .unwrap();
+
+        let mode = &contribution.modes[0];
+        let omega = std::f64::consts::TAU * mode.frequency_hz;
+        let modal_displacement = first_mode
+            .dof_shape()
+            .iter()
+            .map(|shape| shape * mode.generalized_peak / (omega * omega))
+            .collect::<Vec<_>>();
+        let modal_fields =
+            crate::post::fields::recover_deformation_result_fields(&summary, &modal_displacement)
+                .unwrap();
+        let modal_stress = modal_fields
+            .iter()
+            .find(|field| field.field_id == crate::FEA_FIELD_STRUCTURAL_STRESS)
+            .unwrap()
+            .as_host_f64()
+            .unwrap();
+        let expected = modal_stress
+            .iter()
+            .zip(correction_stress)
+            .map(|(modal, correction)| match rigid_response {
+                runmat_analysis_core::RigidResponsePolicy::Disabled => {
+                    (modal * modal + correction * correction).sqrt()
+                }
+                _ => (modal + correction).abs(),
+            })
+            .collect::<Vec<_>>();
+        let recovery =
+            recover_modal_response_spectrum_fields(&summary, &run.basis, &result).unwrap();
+        let recovered = recovery
+            .field(StructuralLinearFieldQuantity::Stress)
+            .unwrap();
+        assert!(recovered
+            .values()
+            .iter()
+            .zip(&expected)
+            .all(|(left, right)| (left - right).abs() <= 1.0e-9 * right.abs().max(1.0)));
+        assert!(correction_displacement
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| summary.operator.constrained_dofs()[*index])
+            .all(|(_, value)| value.abs() <= 1.0e-12));
+        recovery
+            .validate_exact_for(&summary, &run.basis, &result)
+            .unwrap();
+        assert_eq!(
+            ResponseSpectrumFieldRecovery::from_canonical_bytes(
+                &recovery.canonical_bytes().unwrap()
+            )
+            .unwrap(),
+            recovery
+        );
+    }
 }
 
 #[test]
@@ -752,6 +896,97 @@ fn rotational_layout_publishes_typed_angular_envelopes() {
             ResponseSpectrumDisplacementConversion::for_response(response).is_some()
         );
     }
+}
+
+fn independent_static_displacement(
+    summary: &crate::assembly::AssemblySummary,
+    acceleration: &[f64],
+) -> Vec<f64> {
+    let reduction = if let Some(matrix) = &summary.constraint_matrix {
+        matrix.affine_reduction().unwrap()
+    } else {
+        crate::constraints::AffineConstraintReduction::from_constrained_dofs(
+            summary.operator.constrained_dofs(),
+        )
+    };
+    let full_load = crate::algebra::apply_m(&summary.operator, acceleration);
+    let reduced_load = reduction.transpose_apply(&full_load).unwrap();
+    let stiffness = reduction
+        .reduce_sparse_operator(summary.operator.operators().stiffness())
+        .unwrap();
+    let dimension = stiffness.rows();
+    let mut dense = (0..dimension)
+        .map(|row| {
+            (0..dimension)
+                .map(|column| stiffness.get(row, column))
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    let mut rhs = reduced_load.clone();
+    for pivot in 0..dimension {
+        let pivot_row = (pivot..dimension)
+            .max_by(|left, right| {
+                dense[*left][pivot]
+                    .abs()
+                    .total_cmp(&dense[*right][pivot].abs())
+            })
+            .unwrap();
+        assert!(dense[pivot_row][pivot].abs() > 1.0e-20);
+        dense.swap(pivot, pivot_row);
+        rhs.swap(pivot, pivot_row);
+        for row in pivot + 1..dimension {
+            let factor = dense[row][pivot] / dense[pivot][pivot];
+            dense[row][pivot] = 0.0;
+            for column in pivot + 1..dimension {
+                dense[row][column] -= factor * dense[pivot][column];
+            }
+            rhs[row] -= factor * rhs[pivot];
+        }
+    }
+    let mut reduced = vec![0.0; dimension];
+    for row in (0..dimension).rev() {
+        let remainder = (row + 1..dimension)
+            .map(|column| dense[row][column] * reduced[column])
+            .sum::<f64>();
+        reduced[row] = (rhs[row] - remainder) / dense[row][row];
+    }
+    let residual = crate::algebra::apply_k(
+        &crate::algebra::AssembledRealSystem::try_new(
+            crate::algebra::CanonicalRealOperators::try_new(
+                stiffness,
+                crate::algebra::RealSparseMatrix::diagonal(
+                    vec![1.0; dimension],
+                    crate::algebra::OperatorRole::Mass,
+                    crate::algebra::MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+                )
+                .unwrap(),
+                crate::algebra::RealSparseMatrix::diagonal(
+                    vec![0.0; dimension],
+                    crate::algebra::OperatorRole::Damping,
+                    crate::algebra::MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+                )
+                .unwrap(),
+            )
+            .unwrap(),
+            vec![false; dimension],
+            vec![0.0; dimension],
+        )
+        .unwrap(),
+        &reduced,
+    );
+    let residual_norm = residual
+        .iter()
+        .zip(&reduced_load)
+        .map(|(left, right)| (left - right).powi(2))
+        .sum::<f64>()
+        .sqrt();
+    let load_norm = reduced_load
+        .iter()
+        .map(|value| value * value)
+        .sum::<f64>()
+        .sqrt();
+    assert!(residual_norm / load_norm <= 1.0e-10);
+    reduction.expand_linear(&reduced).unwrap()
 }
 
 fn spectrum_fixture(

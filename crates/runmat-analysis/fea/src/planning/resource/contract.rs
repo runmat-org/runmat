@@ -23,7 +23,7 @@ use crate::pipeline::structural_linearization::StructuralLinearizationIdentity;
 const RESOURCE_PREFIX: &[u8] = b"runmat-fea-resource-plan/v1\0";
 pub const RESOURCE_PLAN_MAX_ENCODED_BYTES: u64 = 64 * 1024;
 const RESOURCE_LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024, 8_192, 65_536, 64);
-pub const RESOURCE_ESTIMATION_MODEL_REVISION: u16 = 2;
+pub const RESOURCE_ESTIMATION_MODEL_REVISION: u16 = 3;
 
 #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -549,6 +549,10 @@ pub struct StructuralModalResponseSpectrumAssemblyResourceDemand {
     pub inputs: PreparedInputResourceFacts,
     pub ordering_workspace_bytes_upper_bound: ByteCount,
     pub field_recovery_workspace_bytes_upper_bound: ByteCount,
+    pub missing_mass_static_solve_count: Count,
+    pub missing_mass_reduced_dof_count: Count,
+    pub missing_mass_system_workspace_bytes_upper_bound: ByteCount,
+    pub missing_mass_total_iteration_count_upper_bound: Count,
     pub result_output: PreparedOutputResourceFacts,
     pub receipt_output: PreparedOutputResourceFacts,
     pub field_recovery_output: PreparedOutputResourceFacts,
