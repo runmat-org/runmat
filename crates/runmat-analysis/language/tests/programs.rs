@@ -274,7 +274,20 @@ material invalid {
 
 #[test]
 fn imported_geometry_inspection_is_path_confined_and_retained() {
-    let source = "geometry part {\nfile = \"./geometry/part.step\"\nunits = mm\n}\n";
+    let source = r#"
+geometry part {
+    file = "./geometry/part.step"
+    units = mm
+    region body : solid {
+        select name "Part body"
+        expect exactly_one
+    }
+    region mounting_faces : faces {
+        select tag "mount"
+        expect one_or_more
+    }
+}
+"#;
     let host = TestHost::default().with_geometry("project/geometry/part.step", 8);
     let program = FeaCompiler::new(&host).check(CheckRequest {
         modules: ModuleGraphRequest {
@@ -293,4 +306,15 @@ fn imported_geometry_inspection_is_path_confined_and_retained() {
         .facts
         .capabilities
         .contains(&GeometryInspectionCapability::PersistentIds));
+    let geometry = program.geometries.values().next().unwrap();
+    assert_eq!(geometry.geometry_id, "part");
+    assert_eq!(geometry.regions.len(), 2);
+    assert_eq!(
+        geometry.regions[1].role,
+        runmat_geometry_core::GeometryRegionRole::Face
+    );
+    assert_eq!(
+        geometry.regions[1].cardinality,
+        runmat_geometry_core::GeometryRegionCardinality::OneOrMore
+    );
 }

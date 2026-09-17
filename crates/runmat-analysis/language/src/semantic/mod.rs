@@ -1,4 +1,5 @@
 mod expression;
+mod geometry;
 mod inspection;
 mod material;
 mod procedure;
@@ -9,6 +10,7 @@ mod types;
 mod units;
 
 pub use expression::*;
+pub use geometry::*;
 pub use inspection::*;
 pub use material::*;
 pub use procedure::*;
