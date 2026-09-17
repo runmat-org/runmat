@@ -98,8 +98,9 @@ pub trait RunMatFunctionSource {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GeometryInspectionRequest {
+    pub referrer: LogicalSourcePath,
     pub logical_path: LogicalSourcePath,
-    pub content_digest: SourceDigest,
+    pub expected_content_digest: Option<SourceDigest>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]

@@ -4,7 +4,7 @@ use super::scope::{
 use super::{check_expression, CheckedExpression, ExpressionCheck, ExpressionScope, FeaType};
 use crate::{
     AnalysisOperationCatalog, BoundFeaProgram, FeaDiagnostic, FeaDiagnosticLocation,
-    FeaDiagnosticPhase, FeaSymbolKey, LogicalSourcePath,
+    FeaDiagnosticPhase, FeaSymbolKey, GeometryInspectionSource, LogicalSourcePath,
 };
 use runmat_parser::fea::{
     FeaAssignmentRelation, FeaBlock, FeaDeclaration, FeaModuleItem, FeaStatementKind,
@@ -17,6 +17,8 @@ pub struct CheckedFeaProgram {
     pub bound: BoundFeaProgram,
     pub declarations: BTreeMap<(LogicalSourcePath, FeaSymbolKey), CheckedFeaDeclaration>,
     pub diagnostics: Vec<FeaDiagnostic>,
+    pub geometry_inspections:
+        BTreeMap<(LogicalSourcePath, String), super::CheckedGeometryInspection>,
 }
 
 impl CheckedFeaProgram {
@@ -83,7 +85,7 @@ pub enum CheckedFeaStatementKind {
     Command(String),
 }
 
-pub fn check_program<C: AnalysisOperationCatalog + ?Sized>(
+pub fn check_program<C: AnalysisOperationCatalog + GeometryInspectionSource + ?Sized>(
     catalog: &C,
     bound: BoundFeaProgram,
 ) -> CheckedFeaProgram {
@@ -112,10 +114,13 @@ pub fn check_program<C: AnalysisOperationCatalog + ?Sized>(
             declarations.insert((path.clone(), key), checked);
         }
     }
+    let geometry_inspections =
+        super::inspect_geometry_declarations(catalog, &bound, &mut diagnostics);
     CheckedFeaProgram {
         bound,
         declarations,
         diagnostics,
+        geometry_inspections,
     }
 }
 

@@ -5,12 +5,28 @@ use std::collections::BTreeMap;
 #[derive(Default)]
 pub struct TestHost {
     modules: BTreeMap<String, SourceModule>,
+    geometries: BTreeMap<String, GeometryInspection>,
 }
 
 impl TestHost {
     pub fn with_module(mut self, path: &str, source: &str, digest: u8) -> Self {
         self.modules
             .insert(path.to_string(), source_module(path, source, digest));
+        self
+    }
+
+    pub fn with_geometry(mut self, path: &str, digest: u8) -> Self {
+        self.geometries.insert(
+            path.to_string(),
+            GeometryInspection {
+                content_digest: SourceDigest([digest; 32]),
+                topology_digest: SourceDigest([digest.wrapping_add(1); 32]),
+                capabilities: vec![
+                    GeometryInspectionCapability::Topology,
+                    GeometryInspectionCapability::PersistentIds,
+                ],
+            },
+        );
         self
     }
 }
@@ -45,9 +61,16 @@ impl RunMatFunctionSource for TestHost {
 impl GeometryInspectionSource for TestHost {
     fn inspect(
         &self,
-        _request: &GeometryInspectionRequest,
+        request: &GeometryInspectionRequest,
     ) -> Result<GeometryInspection, SourceDiagnostic> {
-        unreachable!("semantic-only tests do not inspect geometry")
+        self.geometries
+            .get(request.logical_path.as_str())
+            .cloned()
+            .ok_or_else(|| SourceDiagnostic {
+                code: "fea.test.geometry_unavailable".to_string(),
+                message: "geometry inspection is unavailable in this test host".to_string(),
+                availability: SourceAvailability::Unavailable,
+            })
     }
 }
 

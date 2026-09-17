@@ -6,6 +6,7 @@ use support::{source_module, TestHost};
 #[test]
 fn compiler_loads_transitive_modules_and_binds_explicit_symbols() {
     let host = TestHost::default()
+        .with_geometry("project/unused.step", 10)
         .with_module(
             "project/models/bracket.fea",
             "import material steel from \"../materials/steel.fea\"\nmodel bracket {\n}\n",

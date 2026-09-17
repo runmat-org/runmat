@@ -140,3 +140,26 @@ study solve {
         .any(|diagnostic| { diagnostic.code == "fea.semantic.declaration_arguments" }));
     assert!(!program.is_valid());
 }
+
+#[test]
+fn imported_geometry_inspection_is_path_confined_and_retained() {
+    let source = "geometry part {\nfile = \"./geometry/part.step\"\nunits = mm\n}\n";
+    let host = TestHost::default().with_geometry("project/geometry/part.step", 8);
+    let program = FeaCompiler::new(&host).check(CheckRequest {
+        modules: ModuleGraphRequest {
+            source_root: LogicalSourcePath::new("project").unwrap(),
+            root: source_module("project/main.fea", source, 1),
+        },
+    });
+    assert!(program.is_valid(), "{:#?}", program.diagnostics);
+    let inspection = program.geometry_inspections.values().next().unwrap();
+    assert_eq!(
+        inspection.source_path.as_str(),
+        "project/geometry/part.step"
+    );
+    assert_eq!(inspection.facts.content_digest, SourceDigest([8; 32]));
+    assert!(inspection
+        .facts
+        .capabilities
+        .contains(&GeometryInspectionCapability::PersistentIds));
+}
