@@ -882,47 +882,35 @@ fn assemble_linear_system_impl(
         .map(|plan| plan.reference_points.len())
         .unwrap_or(0);
     let dof_count = mesh_dof_count + reference_point_count * 6;
-    let avg_youngs_modulus = if model.materials.is_empty() {
-        1.0e9
-    } else {
-        model
-            .materials
-            .iter()
-            .map(|material| material.mechanical.youngs_modulus_pa)
-            .sum::<f64>()
-            / model.materials.len() as f64
-    };
-    let avg_poisson_ratio = if model.materials.is_empty() {
-        0.3
-    } else {
-        model
-            .materials
-            .iter()
-            .map(|material| material.mechanical.poisson_ratio)
-            .sum::<f64>()
-            / model.materials.len() as f64
-    };
-    let avg_reference_temperature_k = if model.materials.is_empty() {
-        293.15
-    } else {
-        model
-            .materials
-            .iter()
-            .map(|material| material.thermal.reference_temperature_k)
-            .sum::<f64>()
-            / model.materials.len() as f64
-    };
+    let avg_youngs_modulus = mean(model.materials.iter().filter_map(|material| {
+        material
+            .mechanical
+            .as_ref()
+            .map(|mechanical| mechanical.youngs_modulus_pa)
+    }))
+    .unwrap_or(1.0e9);
+    let avg_poisson_ratio = mean(model.materials.iter().filter_map(|material| {
+        material
+            .mechanical
+            .as_ref()
+            .map(|mechanical| mechanical.poisson_ratio)
+    }))
+    .unwrap_or(0.3);
+    let avg_reference_temperature_k = mean(model.materials.iter().filter_map(|material| {
+        material
+            .thermal
+            .as_ref()
+            .map(|thermal| thermal.reference_temperature_k)
+    }))
+    .unwrap_or(293.15);
     let shear_modulus_pa = avg_youngs_modulus / (2.0 * (1.0 + avg_poisson_ratio));
-    let avg_density_kg_per_m3 = if model.materials.is_empty() {
-        7850.0
-    } else {
+    let avg_density_kg_per_m3 = mean(
         model
             .materials
             .iter()
-            .map(|material| material.mechanical.density_kg_per_m3)
-            .sum::<f64>()
-            / model.materials.len() as f64
-    };
+            .filter_map(|material| material.mass_density_kg_per_m3),
+    )
+    .unwrap_or(7850.0);
     let lame_lambda_pa = avg_youngs_modulus * avg_poisson_ratio
         / ((1.0 + avg_poisson_ratio) * (1.0 - 2.0 * avg_poisson_ratio));
     let structural_material = StructuralMaterialSummary {
@@ -1057,19 +1045,15 @@ fn assemble_linear_system_impl(
         let constitutive_temperature_factor = if model.materials.is_empty() {
             (-(2.5e-4) * context.applied_temperature_delta_k).clamp(-0.25, 0.25)
         } else {
-            let response = model
-                .materials
-                .iter()
-                .map(|material| {
+            let response = mean(model.materials.iter().filter_map(|material| {
+                material.thermal.as_ref().map(|thermal| {
                     let adjusted_delta = context.applied_temperature_delta_k
-                        + (context.reference_temperature_k
-                            - material.thermal.reference_temperature_k)
-                        + (avg_reference_temperature_k - material.thermal.reference_temperature_k)
-                            * 0.1;
-                    material.thermal.modulus_temp_coeff_per_k * adjusted_delta
+                        + (context.reference_temperature_k - thermal.reference_temperature_k)
+                        + (avg_reference_temperature_k - thermal.reference_temperature_k) * 0.1;
+                    thermal.modulus_temp_coeff_per_k * adjusted_delta
                 })
-                .sum::<f64>()
-                / model.materials.len() as f64;
+            }))
+            .unwrap_or(-(2.5e-4) * context.applied_temperature_delta_k);
             response.clamp(-0.25, 0.25)
         };
         let constitutive_poisson_coupling =
@@ -1793,37 +1777,28 @@ fn assemble_explicit_structural_system(
 }
 
 fn structural_material_summary(model: &AnalysisModel) -> StructuralMaterialSummary {
-    let avg_youngs_modulus = if model.materials.is_empty() {
-        1.0e9
-    } else {
-        model
-            .materials
-            .iter()
-            .map(|material| material.mechanical.youngs_modulus_pa)
-            .sum::<f64>()
-            / model.materials.len() as f64
-    };
-    let avg_poisson_ratio = if model.materials.is_empty() {
-        0.3
-    } else {
-        model
-            .materials
-            .iter()
-            .map(|material| material.mechanical.poisson_ratio)
-            .sum::<f64>()
-            / model.materials.len() as f64
-    };
+    let avg_youngs_modulus = mean(model.materials.iter().filter_map(|material| {
+        material
+            .mechanical
+            .as_ref()
+            .map(|mechanical| mechanical.youngs_modulus_pa)
+    }))
+    .unwrap_or(1.0e9);
+    let avg_poisson_ratio = mean(model.materials.iter().filter_map(|material| {
+        material
+            .mechanical
+            .as_ref()
+            .map(|mechanical| mechanical.poisson_ratio)
+    }))
+    .unwrap_or(0.3);
     let shear_modulus_pa = avg_youngs_modulus / (2.0 * (1.0 + avg_poisson_ratio));
-    let avg_density_kg_per_m3 = if model.materials.is_empty() {
-        7850.0
-    } else {
+    let avg_density_kg_per_m3 = mean(
         model
             .materials
             .iter()
-            .map(|material| material.mechanical.density_kg_per_m3)
-            .sum::<f64>()
-            / model.materials.len() as f64
-    };
+            .filter_map(|material| material.mass_density_kg_per_m3),
+    )
+    .unwrap_or(7850.0);
     let lame_lambda_pa = avg_youngs_modulus * avg_poisson_ratio
         / ((1.0 + avg_poisson_ratio) * (1.0 - 2.0 * avg_poisson_ratio));
     StructuralMaterialSummary {
@@ -1833,6 +1808,15 @@ fn structural_material_summary(model: &AnalysisModel) -> StructuralMaterialSumma
         lame_lambda_pa,
         shear_modulus_pa,
     }
+}
+
+fn mean(values: impl IntoIterator<Item = f64>) -> Option<f64> {
+    let (sum, count) = values
+        .into_iter()
+        .fold((0.0, 0_usize), |(sum, count), value| {
+            (sum + value, count + 1)
+        });
+    (count > 0).then_some(sum / count as f64)
 }
 
 fn add_rhs(
@@ -2078,26 +2062,22 @@ fn apply_thermo_material_heterogeneity(
     if base_amplitude <= 0.0 {
         return 0.0;
     }
-    let mut weighted_activity = 0.0_f64;
-    let mut weight_sum = 0.0_f64;
+    let mut activity_sum = 0.0_f64;
     for (idx, assignment) in model.material_assignments.iter().enumerate() {
-        let confidence_weight = match assignment.confidence {
-            runmat_analysis_core::EvidenceConfidence::Verified => 1.0,
-            runmat_analysis_core::EvidenceConfidence::Probable => 0.65,
-            runmat_analysis_core::EvidenceConfidence::Inferred => 0.4,
-        };
         let expected_modulus = model
             .materials
             .iter()
             .find(|material| material.material_id == assignment.expected_material_id)
-            .map(|material| material.mechanical.youngs_modulus_pa)
+            .and_then(|material| material.mechanical.as_ref())
+            .map(|mechanical| mechanical.youngs_modulus_pa)
             .unwrap_or(1.0e9)
             .max(1.0);
         let assigned_modulus = model
             .materials
             .iter()
             .find(|material| material.material_id == assignment.assigned_material_id)
-            .map(|material| material.mechanical.youngs_modulus_pa)
+            .and_then(|material| material.mechanical.as_ref())
+            .map(|mechanical| mechanical.youngs_modulus_pa)
             .unwrap_or(expected_modulus)
             .max(1.0);
         let modulus_delta_ratio =
@@ -2106,10 +2086,11 @@ fn apply_thermo_material_heterogeneity(
             .materials
             .iter()
             .find(|material| material.material_id == assignment.expected_material_id)
-            .map(|material| {
-                material.thermal.modulus_temp_coeff_per_k
+            .and_then(|material| material.thermal.as_ref())
+            .map(|thermal| {
+                thermal.modulus_temp_coeff_per_k
                     * (applied_temperature_delta_k
-                        + (reference_temperature_k - material.thermal.reference_temperature_k))
+                        + (reference_temperature_k - thermal.reference_temperature_k))
             })
             .unwrap_or(constitutive_temperature_factor)
             .clamp(-0.4, 0.2);
@@ -2117,10 +2098,11 @@ fn apply_thermo_material_heterogeneity(
             .materials
             .iter()
             .find(|material| material.material_id == assignment.assigned_material_id)
-            .map(|material| {
-                material.thermal.modulus_temp_coeff_per_k
+            .and_then(|material| material.thermal.as_ref())
+            .map(|thermal| {
+                thermal.modulus_temp_coeff_per_k
                     * (applied_temperature_delta_k
-                        + (reference_temperature_k - material.thermal.reference_temperature_k))
+                        + (reference_temperature_k - thermal.reference_temperature_k))
             })
             .unwrap_or(expected_temp_response)
             .clamp(-0.4, 0.2);
@@ -2129,7 +2111,6 @@ fn apply_thermo_material_heterogeneity(
         let activity =
             (0.7 * modulus_delta_ratio.abs() + 0.3 * response_delta.abs()).clamp(0.0, 1.0);
         let signed_bias = base_amplitude
-            * confidence_weight
             * (0.45 * modulus_delta_ratio
                 + 0.35 * response_delta
                 + 0.2 * modulus_delta_ratio.signum() * region_phase);
@@ -2145,17 +2126,12 @@ fn apply_thermo_material_heterogeneity(
             dof_adjustments[cursor] += signed_bias * wave;
             cursor = (cursor + stride) % dof_count.max(1);
         }
-        weighted_activity += activity * confidence_weight;
-        weight_sum += confidence_weight;
+        activity_sum += activity;
     }
     for value in dof_adjustments.iter_mut() {
         *value = value.clamp(-0.18, 0.18);
     }
-    if weight_sum > 0.0 {
-        (weighted_activity / weight_sum).clamp(0.0, 1.0)
-    } else {
-        0.0
-    }
+    (activity_sum / model.material_assignments.len() as f64).clamp(0.0, 1.0)
 }
 
 fn region_hash(region_id: &str) -> u64 {
@@ -2260,7 +2236,7 @@ mod tests {
                 [0.0, 0.0, 1.0],
             ]
         );
-        let expected_mass_kg = model.materials[0].mechanical.density_kg_per_m3 / 6.0;
+        let expected_mass_kg = model.materials[0].require_mass_density().unwrap() / 6.0;
         assert!(
             (summary.structural_solid_total_mass_kg - expected_mass_kg).abs()
                 <= expected_mass_kg * 1.0e-12
@@ -2633,11 +2609,11 @@ mod tests {
         soft_model.constraints.clear();
         let mut hard = soft_model.materials[0].clone();
         hard.material_id = "mat_hard".to_string();
-        hard.mechanical.youngs_modulus_pa = 200.0e9;
-        hard.mechanical.poisson_ratio = 0.3;
+        hard.mechanical.as_mut().unwrap().youngs_modulus_pa = 200.0e9;
+        hard.mechanical.as_mut().unwrap().poisson_ratio = 0.3;
         let mut soft = hard.clone();
         soft.material_id = "mat_soft".to_string();
-        soft.mechanical.youngs_modulus_pa = 20.0e9;
+        soft.mechanical.as_mut().unwrap().youngs_modulus_pa = 20.0e9;
         soft_model.materials = vec![hard.clone(), soft.clone()];
         soft_model.material_assignments = vec![runmat_analysis_core::MaterialAssignment {
             target: runmat_analysis_core::PropertyRegionTarget::solid("soft_region"),
@@ -2675,13 +2651,13 @@ mod tests {
             soft_summary.structural_solid_recovery[0]
                 .material
                 .youngs_modulus_pa,
-            soft.mechanical.youngs_modulus_pa
+            soft.require_mechanical().unwrap().youngs_modulus_pa
         );
         assert_eq!(
             hard_summary.structural_solid_recovery[0]
                 .material
                 .youngs_modulus_pa,
-            hard.mechanical.youngs_modulus_pa
+            hard.require_mechanical().unwrap().youngs_modulus_pa
         );
     }
 
@@ -2690,9 +2666,17 @@ mod tests {
         let mut model = fixture_model(FixtureId::CantileverLinearStatic);
         model.excitations.clear();
         model.constraints.clear();
-        model.materials[0].mechanical.youngs_modulus_pa = 0.5;
-        model.materials[0].mechanical.poisson_ratio = -0.25;
-        model.materials[0].mechanical.density_kg_per_m3 = 0.125;
+        model.materials[0]
+            .mechanical
+            .as_mut()
+            .unwrap()
+            .youngs_modulus_pa = 0.5;
+        model.materials[0]
+            .mechanical
+            .as_mut()
+            .unwrap()
+            .poisson_ratio = -0.25;
+        model.materials[0].mass_density_kg_per_m3 = Some(0.125);
 
         let summary = assemble_physical_structural_system(&model, Some(tetrahedron4_mesh()))
             .expect("valid low-valued auxetic material should assemble without coercion");
@@ -2714,13 +2698,10 @@ mod tests {
         model.constraints.clear();
         let alpha = 1.5;
         let beta = 2.0e-6;
-        model.materials[0].mechanical.damping =
-            runmat_analysis_core::MechanicalDampingModel::Rayleigh {
-                mass_coefficient: runmat_analysis_core::RayleighMassCoefficient::new(alpha),
-                stiffness_coefficient: runmat_analysis_core::RayleighStiffnessCoefficient::new(
-                    beta,
-                ),
-            };
+        model.materials[0].damping = Some(runmat_analysis_core::MechanicalDampingModel::Rayleigh {
+            mass_coefficient: runmat_analysis_core::RayleighMassCoefficient::new(alpha),
+            stiffness_coefficient: runmat_analysis_core::RayleighStiffnessCoefficient::new(beta),
+        });
 
         let summary = assemble_physical_structural_system(&model, Some(tetrahedron4_mesh()))
             .expect("valid Rayleigh-damped solid should assemble");
@@ -2743,13 +2724,10 @@ mod tests {
         let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
         let alpha = 1.0;
         let beta = 2.0e-5;
-        model.materials[0].mechanical.damping =
-            runmat_analysis_core::MechanicalDampingModel::Rayleigh {
-                mass_coefficient: runmat_analysis_core::RayleighMassCoefficient::new(alpha),
-                stiffness_coefficient: runmat_analysis_core::RayleighStiffnessCoefficient::new(
-                    beta,
-                ),
-            };
+        model.materials[0].damping = Some(runmat_analysis_core::MechanicalDampingModel::Rayleigh {
+            mass_coefficient: runmat_analysis_core::RayleighMassCoefficient::new(alpha),
+            stiffness_coefficient: runmat_analysis_core::RayleighStiffnessCoefficient::new(beta),
+        });
 
         let summary = assemble_structural_system(
             &model,
@@ -2996,11 +2974,10 @@ mod tests {
     #[test]
     fn shell_assembles_authored_rayleigh_damping() {
         let mut model = fixture_model(FixtureId::StructuralShellPlateMomentReference);
-        model.materials[0].mechanical.damping =
-            runmat_analysis_core::MechanicalDampingModel::Rayleigh {
-                mass_coefficient: runmat_analysis_core::RayleighMassCoefficient::new(1.0),
-                stiffness_coefficient: runmat_analysis_core::RayleighStiffnessCoefficient::new(0.0),
-            };
+        model.materials[0].damping = Some(runmat_analysis_core::MechanicalDampingModel::Rayleigh {
+            mass_coefficient: runmat_analysis_core::RayleighMassCoefficient::new(1.0),
+            stiffness_coefficient: runmat_analysis_core::RayleighStiffnessCoefficient::new(0.0),
+        });
 
         let summary = assemble_structural_system(
             &model,
@@ -3024,26 +3001,28 @@ mod tests {
     #[test]
     fn explicit_beam_elements_use_their_exact_region_materials() {
         let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
-        model.materials[0].mechanical.youngs_modulus_pa = 100.0e9;
-        model.materials[0].mechanical.density_kg_per_m3 = 1_000.0;
-        model.materials[0].mechanical.damping =
-            runmat_analysis_core::MechanicalDampingModel::Rayleigh {
-                mass_coefficient: runmat_analysis_core::RayleighMassCoefficient::new(0.1),
-                stiffness_coefficient: runmat_analysis_core::RayleighStiffnessCoefficient::new(
-                    1.0e-5,
-                ),
-            };
+        model.materials[0]
+            .mechanical
+            .as_mut()
+            .unwrap()
+            .youngs_modulus_pa = 100.0e9;
+        model.materials[0].mass_density_kg_per_m3 = Some(1_000.0);
+        model.materials[0].damping = Some(runmat_analysis_core::MechanicalDampingModel::Rayleigh {
+            mass_coefficient: runmat_analysis_core::RayleighMassCoefficient::new(0.1),
+            stiffness_coefficient: runmat_analysis_core::RayleighStiffnessCoefficient::new(1.0e-5),
+        });
         let mut second_material = model.materials[0].clone();
         second_material.material_id = "mat_second".into();
-        second_material.mechanical.youngs_modulus_pa = 200.0e9;
-        second_material.mechanical.density_kg_per_m3 = 2_000.0;
-        second_material.mechanical.damping =
-            runmat_analysis_core::MechanicalDampingModel::Rayleigh {
-                mass_coefficient: runmat_analysis_core::RayleighMassCoefficient::new(0.2),
-                stiffness_coefficient: runmat_analysis_core::RayleighStiffnessCoefficient::new(
-                    2.0e-5,
-                ),
-            };
+        second_material
+            .mechanical
+            .as_mut()
+            .unwrap()
+            .youngs_modulus_pa = 200.0e9;
+        second_material.mass_density_kg_per_m3 = Some(2_000.0);
+        second_material.damping = Some(runmat_analysis_core::MechanicalDampingModel::Rayleigh {
+            mass_coefficient: runmat_analysis_core::RayleighMassCoefficient::new(0.2),
+            stiffness_coefficient: runmat_analysis_core::RayleighStiffnessCoefficient::new(2.0e-5),
+        });
         model.materials.push(second_material);
         model.material_assignments = vec![
             runmat_analysis_core::MaterialAssignment {

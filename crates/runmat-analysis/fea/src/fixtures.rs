@@ -646,6 +646,36 @@ pub fn fixture_model(fixture: FixtureId) -> AnalysisModel {
     }
 }
 
+fn isotropic_material(
+    material_id: &str,
+    name: &str,
+    youngs_modulus_pa: f64,
+    poisson_ratio: f64,
+    mass_density_kg_per_m3: f64,
+    modulus_temp_coeff_per_k: f64,
+) -> MaterialModel {
+    MaterialModel {
+        material_id: material_id.to_string(),
+        name: name.to_string(),
+        mass_density_kg_per_m3: Some(mass_density_kg_per_m3),
+        mechanical: Some(MaterialMechanicalModel {
+            youngs_modulus_pa,
+            poisson_ratio,
+        }),
+        damping: None,
+        thermal: Some(MaterialThermalModel {
+            reference_temperature_k: 293.15,
+            modulus_temp_coeff_per_k,
+            conductivity_w_per_mk: 45.0,
+            specific_heat_j_per_kgk: 500.0,
+            expansion_coefficient_per_k: 1.2e-5,
+        }),
+        acoustic: None,
+        electrical: None,
+        plastic: None,
+    }
+}
+
 fn cantilever_linear_static() -> AnalysisModel {
     let mut model = AnalysisModel {
         model_id: AnalysisModelId("cantilever".to_string()),
@@ -653,24 +683,14 @@ fn cantilever_linear_static() -> AnalysisModel {
         geometry_revision: 1,
         units: UnitSystem::Meter,
         frame: CoordinateFrame::Global,
-        materials: vec![MaterialModel {
-            material_id: "mat_steel".to_string(),
-            name: "Steel".to_string(),
-            mechanical: MaterialMechanicalModel {
-                youngs_modulus_pa: 200e9,
-                poisson_ratio: 0.3,
-                density_kg_per_m3: 7850.0,
-                damping: Default::default(),
-            },
-            thermal: MaterialThermalModel {
-                reference_temperature_k: 293.15,
-                modulus_temp_coeff_per_k: -2.5e-4,
-                ..MaterialThermalModel::default()
-            },
-            acoustic: None,
-            electrical: None,
-            plastic: None,
-        }],
+        materials: vec![isotropic_material(
+            "mat_steel",
+            "Steel",
+            200e9,
+            0.3,
+            7850.0,
+            -2.5e-4,
+        )],
         material_assignments: vec![MaterialAssignment {
             target: PropertyRegionTarget::solid("region"),
             expected_material_id: "mat_steel".to_string(),
@@ -1001,13 +1021,17 @@ fn structural_transient_tet4_reference() -> AnalysisModel {
     let mut model = cantilever_linear_static();
     model.model_id = AnalysisModelId("structural_transient_tet4_reference".into());
     model.geometry_id = "geo:structural_transient_tet4_reference".into();
-    model.materials[0].mechanical.youngs_modulus_pa = 1.0e5;
-    model.materials[0].mechanical.poisson_ratio = 0.25;
-    model.materials[0].mechanical.density_kg_per_m3 = 1_000.0;
-    model.materials[0].mechanical.damping = MechanicalDampingModel::Rayleigh {
+    let mechanical = model.materials[0]
+        .mechanical
+        .as_mut()
+        .expect("cantilever fixture declares linear elasticity");
+    mechanical.youngs_modulus_pa = 1.0e5;
+    mechanical.poisson_ratio = 0.25;
+    model.materials[0].mass_density_kg_per_m3 = Some(1_000.0);
+    model.materials[0].damping = Some(MechanicalDampingModel::Rayleigh {
         mass_coefficient: RayleighMassCoefficient::new(0.2),
         stiffness_coefficient: RayleighStiffnessCoefficient::new(2.0e-4),
-    };
+    });
     model.material_assignments = vec![MaterialAssignment {
         target: PropertyRegionTarget::solid("dynamic_volume"),
         expected_material_id: "mat_steel".into(),
@@ -1171,42 +1195,15 @@ fn nonlinear_softening_benchmark_fixture() -> AnalysisModel {
     let mut model = nonlinear_assembly_stress_fixture();
     model.model_id = AnalysisModelId("nonlinear_softening_benchmark_fixture".to_string());
     model.materials = vec![
-        MaterialModel {
-            material_id: "mat_soft_polymer".to_string(),
-            name: "Soft Polymer".to_string(),
-            mechanical: MaterialMechanicalModel {
-                youngs_modulus_pa: 1.4e9,
-                poisson_ratio: 0.39,
-                density_kg_per_m3: 1200.0,
-                damping: Default::default(),
-            },
-            thermal: MaterialThermalModel {
-                reference_temperature_k: 293.15,
-                modulus_temp_coeff_per_k: -1.2e-3,
-                ..MaterialThermalModel::default()
-            },
-            acoustic: None,
-            electrical: None,
-            plastic: None,
-        },
-        MaterialModel {
-            material_id: "mat_aluminum".to_string(),
-            name: "Aluminum".to_string(),
-            mechanical: MaterialMechanicalModel {
-                youngs_modulus_pa: 69e9,
-                poisson_ratio: 0.33,
-                density_kg_per_m3: 2700.0,
-                damping: Default::default(),
-            },
-            thermal: MaterialThermalModel {
-                reference_temperature_k: 293.15,
-                modulus_temp_coeff_per_k: -3.6e-4,
-                ..MaterialThermalModel::default()
-            },
-            acoustic: None,
-            electrical: None,
-            plastic: None,
-        },
+        isotropic_material(
+            "mat_soft_polymer",
+            "Soft Polymer",
+            1.4e9,
+            0.39,
+            1200.0,
+            -1.2e-3,
+        ),
+        isotropic_material("mat_aluminum", "Aluminum", 69e9, 0.33, 2700.0, -3.6e-4),
     ];
     model.material_assignments = vec![
         MaterialAssignment {
@@ -1571,60 +1568,9 @@ fn multi_material_assembly() -> AnalysisModel {
     let mut model = cantilever_linear_static();
     model.model_id = AnalysisModelId("multi_material_assembly".to_string());
     model.materials = vec![
-        MaterialModel {
-            material_id: "mat_steel".to_string(),
-            name: "Steel".to_string(),
-            mechanical: MaterialMechanicalModel {
-                youngs_modulus_pa: 200e9,
-                poisson_ratio: 0.3,
-                density_kg_per_m3: 7850.0,
-                damping: Default::default(),
-            },
-            thermal: MaterialThermalModel {
-                reference_temperature_k: 293.15,
-                modulus_temp_coeff_per_k: -2.5e-4,
-                ..MaterialThermalModel::default()
-            },
-            acoustic: None,
-            electrical: None,
-            plastic: None,
-        },
-        MaterialModel {
-            material_id: "mat_aluminum".to_string(),
-            name: "Aluminum".to_string(),
-            mechanical: MaterialMechanicalModel {
-                youngs_modulus_pa: 69e9,
-                poisson_ratio: 0.33,
-                density_kg_per_m3: 2700.0,
-                damping: Default::default(),
-            },
-            thermal: MaterialThermalModel {
-                reference_temperature_k: 293.15,
-                modulus_temp_coeff_per_k: -3.6e-4,
-                ..MaterialThermalModel::default()
-            },
-            acoustic: None,
-            electrical: None,
-            plastic: None,
-        },
-        MaterialModel {
-            material_id: "mat_polymer".to_string(),
-            name: "Polymer".to_string(),
-            mechanical: MaterialMechanicalModel {
-                youngs_modulus_pa: 3.2e9,
-                poisson_ratio: 0.37,
-                density_kg_per_m3: 1150.0,
-                damping: Default::default(),
-            },
-            thermal: MaterialThermalModel {
-                reference_temperature_k: 293.15,
-                modulus_temp_coeff_per_k: -8.0e-4,
-                ..MaterialThermalModel::default()
-            },
-            acoustic: None,
-            electrical: None,
-            plastic: None,
-        },
+        isotropic_material("mat_steel", "Steel", 200e9, 0.3, 7850.0, -2.5e-4),
+        isotropic_material("mat_aluminum", "Aluminum", 69e9, 0.33, 2700.0, -3.6e-4),
+        isotropic_material("mat_polymer", "Polymer", 3.2e9, 0.37, 1150.0, -8.0e-4),
     ];
 
     model.constraints = vec![

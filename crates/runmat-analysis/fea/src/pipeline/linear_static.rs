@@ -725,9 +725,9 @@ fn structural_beam_closed_form_diagnostic(
     }
     let section = structural.beam_sections.first()?;
     let material = model.materials.first()?;
-    let youngs_modulus_pa = material.mechanical.youngs_modulus_pa;
-    let shear_modulus_pa =
-        youngs_modulus_pa / (2.0 * (1.0 + material.mechanical.poisson_ratio)).max(1.0e-9);
+    let mechanical = material.require_mechanical().ok()?;
+    let youngs_modulus_pa = mechanical.youngs_modulus_pa;
+    let shear_modulus_pa = youngs_modulus_pa / (2.0 * (1.0 + mechanical.poisson_ratio)).max(1.0e-9);
     let length_m = distance3(
         structural.nodes[0].coordinates_m,
         structural.nodes[1].coordinates_m,

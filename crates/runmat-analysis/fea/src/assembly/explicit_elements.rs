@@ -116,10 +116,14 @@ pub(super) fn assemble_explicit_elements(
                 })?;
                 let material = properties
                     .beam_material(element_identity)
-                    .map(|entry| StructuralElementMaterial::from_model(&entry.material))
                     .ok_or_else(|| StructuralAssemblyError::UnassignedExplicitRegion {
                         element_id: element.element_id.clone(),
                         region_id: element.region_id.clone(),
+                    })
+                    .and_then(|entry| {
+                        StructuralElementMaterial::from_model(&entry.material).map_err(|error| {
+                            StructuralAssemblyError::InvalidMaterialCoverage(error.to_string())
+                        })
                     })?;
                 let beam_material = BeamMaterial {
                     youngs_modulus_pa: material.youngs_modulus_pa,
@@ -200,10 +204,14 @@ pub(super) fn assemble_explicit_elements(
                 })?;
                 let material = properties
                     .shell_material(element_identity)
-                    .map(|entry| StructuralElementMaterial::from_model(&entry.material))
                     .ok_or_else(|| StructuralAssemblyError::UnassignedExplicitRegion {
                         element_id: element.element_id.clone(),
                         region_id: element.region_id.clone(),
+                    })
+                    .and_then(|entry| {
+                        StructuralElementMaterial::from_model(&entry.material).map_err(|error| {
+                            StructuralAssemblyError::InvalidMaterialCoverage(error.to_string())
+                        })
                     })?;
                 let shell_material = ShellMaterial {
                     youngs_modulus_pa: material.youngs_modulus_pa,

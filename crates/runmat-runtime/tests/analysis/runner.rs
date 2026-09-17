@@ -1228,8 +1228,8 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
             format!("step_acoustic_{}", spec_id),
         )];
         for material in &mut model.materials {
+            material.mass_density_kg_per_m3 = Some(1.225);
             material.acoustic = Some(runmat_analysis_core::MaterialAcousticModel {
-                density_kg_per_m3: 1.225,
                 speed_of_sound_m_per_s: 343.0,
                 damping_ratio: 0.024,
             });
@@ -1238,15 +1238,11 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
             model.materials.push(runmat_analysis_core::MaterialModel {
                 material_id: "mat_acoustic_air".to_string(),
                 name: "Acoustic Air".to_string(),
-                mechanical: runmat_analysis_core::MaterialMechanicalModel {
-                    youngs_modulus_pa: 1.0,
-                    poisson_ratio: 0.0,
-                    density_kg_per_m3: 1.225,
-                    damping: Default::default(),
-                },
-                thermal: runmat_analysis_core::MaterialThermalModel::default(),
+                mass_density_kg_per_m3: Some(1.225),
+                mechanical: None,
+                damping: None,
+                thermal: None,
                 acoustic: Some(runmat_analysis_core::MaterialAcousticModel {
-                    density_kg_per_m3: 1.225,
                     speed_of_sound_m_per_s: 343.0,
                     damping_ratio: 0.024,
                 }),
@@ -1358,7 +1354,11 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
         match spec_id {
             "thermal_standalone_ramp_invalid_material" => {
                 if let Some(material) = model.materials.first_mut() {
-                    material.thermal.conductivity_w_per_mk = 0.0;
+                    material
+                        .thermal
+                        .as_mut()
+                        .expect("thermal fixture material")
+                        .conductivity_w_per_mk = 0.0;
                 }
             }
             "thermal_standalone_ramp_invalid_source" => {
@@ -1615,13 +1615,19 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                 runmat_analysis_core::MaterialModel {
                     material_id: "mat_default".to_string(),
                     name: "Default".to_string(),
-                    mechanical: runmat_analysis_core::MaterialMechanicalModel {
+                    mass_density_kg_per_m3: Some(7850.0),
+                    mechanical: Some(runmat_analysis_core::MaterialMechanicalModel {
                         youngs_modulus_pa: 110e9,
                         poisson_ratio: 0.31,
-                        density_kg_per_m3: 7850.0,
-                        damping: Default::default(),
-                    },
-                    thermal: runmat_analysis_core::MaterialThermalModel::default(),
+                    }),
+                    damping: None,
+                    thermal: Some(runmat_analysis_core::MaterialThermalModel {
+                        reference_temperature_k: 293.15,
+                        modulus_temp_coeff_per_k: -2.5e-4,
+                        conductivity_w_per_mk: 45.0,
+                        specific_heat_j_per_kgk: 500.0,
+                        expansion_coefficient_per_k: 1.2e-5,
+                    }),
                     acoustic: None,
                     electrical: None,
                     plastic: None,
@@ -2561,8 +2567,9 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
             );
         }
         for material in &mut model.materials {
-            material.thermal.reference_temperature_k = value.reference_temperature_k;
-            material.thermal.expansion_coefficient_per_k = value.thermal_expansion_coefficient;
+            let thermal = material.thermal.as_mut().expect("thermal fixture material");
+            thermal.reference_temperature_k = value.reference_temperature_k;
+            thermal.expansion_coefficient_per_k = value.thermal_expansion_coefficient;
         }
         model.thermo_mechanical = Some(runmat_analysis_core::ThermoMechanicalDomain {
             reference_temperature: runmat_analysis_core::Temperature::new(

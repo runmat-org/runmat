@@ -230,7 +230,12 @@ impl<'de> Deserialize<'de> for FeaRegionSelector {
 struct FeaMaterialDocument {
     #[serde(default)]
     name: Option<String>,
-    mechanical: MaterialMechanicalModel,
+    #[serde(default)]
+    mass_density_kg_per_m3: Option<f64>,
+    #[serde(default)]
+    mechanical: Option<MaterialMechanicalModel>,
+    #[serde(default)]
+    damping: Option<runmat_analysis_core::MechanicalDampingModel>,
     #[serde(default)]
     thermal: Option<MaterialThermalModel>,
     #[serde(default)]
@@ -1156,8 +1161,10 @@ fn resolve_material(id: &str, material: &FeaMaterialDocument) -> MaterialModel {
     MaterialModel {
         material_id: id.to_string(),
         name: material.name.clone().unwrap_or_else(|| id.to_string()),
+        mass_density_kg_per_m3: material.mass_density_kg_per_m3,
         mechanical: material.mechanical.clone(),
-        thermal: material.thermal.clone().unwrap_or_default(),
+        damping: material.damping,
+        thermal: material.thermal.clone(),
         acoustic: material.acoustic.clone(),
         electrical: material.electrical.clone(),
         plastic: material.plastic.clone(),
@@ -2278,10 +2285,10 @@ source:
   - inline:
       materials:
         steel:
+          mass_density_kg_per_m3: 7850.0
           mechanical:
             youngs_modulus_pa: 200000000000.0
             poisson_ratio: 0.3
-            density_kg_per_m3: 7850.0
 "#,
         );
         let resolved = pollster::block_on(resolve_model_source(

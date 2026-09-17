@@ -286,7 +286,12 @@ struct RegionValue {
 struct MaterialValue {
     #[serde(skip_serializing_if = "Option::is_none")]
     name: Option<String>,
-    mechanical: MaterialMechanicalModel,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mass_density_kg_per_m3: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mechanical: Option<MaterialMechanicalModel>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    damping: Option<runmat_analysis_core::MechanicalDampingModel>,
     #[serde(skip_serializing_if = "Option::is_none")]
     thermal: Option<MaterialThermalModel>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -301,7 +306,9 @@ impl From<FeaStudyMaterialInput> for MaterialValue {
     fn from(value: FeaStudyMaterialInput) -> Self {
         Self {
             name: value.name,
+            mass_density_kg_per_m3: value.mass_density_kg_per_m3,
             mechanical: value.mechanical,
+            damping: value.damping,
             thermal: value.thermal,
             acoustic: value.acoustic,
             electrical: value.electrical,

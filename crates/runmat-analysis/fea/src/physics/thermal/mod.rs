@@ -19,9 +19,13 @@ pub fn constitutive_stats(model: &AnalysisModel) -> ThermalConstitutiveStats {
     let mut heat_capacities = Vec::new();
     let mut densities = Vec::new();
     for material in &model.materials {
-        conductivities.push(material.thermal.conductivity_w_per_mk.max(1.0e-6));
-        heat_capacities.push(material.thermal.specific_heat_j_per_kgk.max(1.0));
-        densities.push(material.mechanical.density_kg_per_m3.max(1.0e-12));
+        if let Some(thermal) = material.thermal.as_ref() {
+            conductivities.push(thermal.conductivity_w_per_mk.max(1.0e-6));
+            heat_capacities.push(thermal.specific_heat_j_per_kgk.max(1.0));
+        }
+        if let Some(density) = material.mass_density_kg_per_m3 {
+            densities.push(density.max(1.0e-12));
+        }
     }
     let conductivity_mean = if conductivities.is_empty() {
         1.0

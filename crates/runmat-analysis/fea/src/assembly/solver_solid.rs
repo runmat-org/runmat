@@ -210,10 +210,14 @@ pub(super) fn resolve_element_material(
 ) -> Result<StructuralElementMaterial, SolverSolidAssemblyError> {
     properties
         .solid_material(element.stable_identity)
-        .map(|entry| StructuralElementMaterial::from_model(&entry.material))
         .ok_or_else(|| SolverSolidAssemblyError::UnassignedRegion {
             element_id: element.element_id,
             region_id: element.region_id.source_topology_id.clone(),
+        })
+        .and_then(|entry| {
+            StructuralElementMaterial::from_model(&entry.material).map_err(|error| {
+                SolverSolidAssemblyError::InvalidMaterialCoverage(error.to_string())
+            })
         })
 }
 

@@ -37,24 +37,31 @@ fn realize_thermo_mechanical_context(
     if !reference_temperature_k.is_finite() || reference_temperature_k <= 0.0 {
         return Err("thermo-mechanical reference temperature must be finite and positive".into());
     }
-    if model.materials.iter().any(|material| {
-        !material.thermal.expansion_coefficient_per_k.is_finite()
-            || material.thermal.expansion_coefficient_per_k < 0.0
+    let thermal_materials = model
+        .materials
+        .iter()
+        .map(|material| {
+            material
+                .require_thermal()
+                .map_err(|error| format!("thermo-mechanical material is incomplete: {error}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if thermal_materials.is_empty() {
+        return Err("thermo-mechanical analysis requires at least one thermal material".into());
+    }
+    if thermal_materials.iter().any(|thermal| {
+        !thermal.expansion_coefficient_per_k.is_finite()
+            || thermal.expansion_coefficient_per_k < 0.0
     }) {
         return Err(
             "thermo-mechanical expansion coefficients must be finite and non-negative".into(),
         );
     }
-    let thermal_expansion_coefficient = if model.materials.is_empty() {
-        1.2e-5
-    } else {
-        model
-            .materials
-            .iter()
-            .map(|material| material.thermal.expansion_coefficient_per_k.max(0.0))
-            .sum::<f64>()
-            / model.materials.len() as f64
-    };
+    let thermal_expansion_coefficient = thermal_materials
+        .iter()
+        .map(|thermal| thermal.expansion_coefficient_per_k)
+        .sum::<f64>()
+        / thermal_materials.len() as f64;
     let mut whole_model_delta = None;
     let mut region_deltas = BTreeMap::new();
     let model_region_ids = model

@@ -299,7 +299,12 @@ pub struct FeaStudyMaterialInput {
     pub material_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    pub mechanical: MaterialMechanicalModel,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mass_density_kg_per_m3: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mechanical: Option<MaterialMechanicalModel>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub damping: Option<runmat_analysis_core::MechanicalDampingModel>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thermal: Option<MaterialThermalModel>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -688,7 +688,10 @@ pub fn analysis_create_model_op(
     let mut inferred_materials = infer_material_models(geometry);
     if matches!(intent.template, AnalysisModelTemplate::AcousticHarmonic) {
         for material in &mut inferred_materials {
-            material.acoustic = Some(runmat_analysis_core::MaterialAcousticModel::default());
+            material.acoustic = Some(runmat_analysis_core::MaterialAcousticModel {
+                speed_of_sound_m_per_s: 343.0,
+                damping_ratio: 0.02,
+            });
         }
     }
     if matches!(
@@ -696,7 +699,14 @@ pub fn analysis_create_model_op(
         AnalysisModelTemplate::ElectromagneticHarmonic
     ) {
         for material in &mut inferred_materials {
-            material.electrical = Some(runmat_analysis_core::MaterialElectricalModel::default());
+            material.electrical = Some(runmat_analysis_core::MaterialElectricalModel {
+                reference_temperature_k: 293.15,
+                conductivity_s_per_m: 1.0,
+                resistive_heating_coefficient: 0.0,
+                relative_permittivity: 1.0,
+                relative_permeability: 1.0,
+                conductivity_frequency_response: Vec::new(),
+            });
         }
     }
     let inferred_assignments = infer_material_assignments(intent.template, &inferred_materials);
@@ -5151,11 +5161,13 @@ fn validate_thermal_run_model(
     model: &AnalysisModel,
     context: &OperationContext,
 ) -> Result<(), OperationErrorEnvelope> {
-    if let Some(material) = model.materials.iter().find(|material| {
-        !material.thermal.conductivity_w_per_mk.is_finite()
-            || material.thermal.conductivity_w_per_mk <= 0.0
-            || !material.thermal.specific_heat_j_per_kgk.is_finite()
-            || material.thermal.specific_heat_j_per_kgk <= 0.0
+    if let Some((material, thermal)) = model.materials.iter().find_map(|material| {
+        let thermal = material.thermal.as_ref()?;
+        (!thermal.conductivity_w_per_mk.is_finite()
+            || thermal.conductivity_w_per_mk <= 0.0
+            || !thermal.specific_heat_j_per_kgk.is_finite()
+            || thermal.specific_heat_j_per_kgk <= 0.0)
+            .then_some((material, thermal))
     }) {
         return Err(operation_error(
             AnalysisOperation::Thermal.name(),
@@ -5173,11 +5185,11 @@ fn validate_thermal_run_model(
                 ("material_id".to_string(), material.material_id.clone()),
                 (
                     "conductivity_w_per_mk".to_string(),
-                    material.thermal.conductivity_w_per_mk.to_string(),
+                    thermal.conductivity_w_per_mk.to_string(),
                 ),
                 (
                     "specific_heat_j_per_kgk".to_string(),
-                    material.thermal.specific_heat_j_per_kgk.to_string(),
+                    thermal.specific_heat_j_per_kgk.to_string(),
                 ),
             ]),
         ));
@@ -8160,17 +8172,19 @@ fn infer_material_models(geometry: &GeometryAsset) -> Vec<MaterialModel> {
         materials.push(MaterialModel {
             material_id: material_id.to_string(),
             name: name.to_string(),
-            mechanical: MaterialMechanicalModel {
+            mass_density_kg_per_m3: Some(7850.0),
+            mechanical: Some(MaterialMechanicalModel {
                 youngs_modulus_pa,
                 poisson_ratio,
-                density_kg_per_m3: 7850.0,
-                damping: Default::default(),
-            },
-            thermal: MaterialThermalModel {
+            }),
+            damping: None,
+            thermal: Some(MaterialThermalModel {
                 reference_temperature_k: 293.15,
                 modulus_temp_coeff_per_k: -2.5e-4,
-                ..MaterialThermalModel::default()
-            },
+                conductivity_w_per_mk: 45.0,
+                specific_heat_j_per_kgk: 500.0,
+                expansion_coefficient_per_k: 1.2e-5,
+            }),
             acoustic: None,
             electrical: None,
             plastic: None,
@@ -8181,17 +8195,19 @@ fn infer_material_models(geometry: &GeometryAsset) -> Vec<MaterialModel> {
         materials.push(MaterialModel {
             material_id: "mat_default_steel".to_string(),
             name: "Steel (Default)".to_string(),
-            mechanical: MaterialMechanicalModel {
+            mass_density_kg_per_m3: Some(7850.0),
+            mechanical: Some(MaterialMechanicalModel {
                 youngs_modulus_pa: 200e9,
                 poisson_ratio: 0.3,
-                density_kg_per_m3: 7850.0,
-                damping: Default::default(),
-            },
-            thermal: MaterialThermalModel {
+            }),
+            damping: None,
+            thermal: Some(MaterialThermalModel {
                 reference_temperature_k: 293.15,
                 modulus_temp_coeff_per_k: -2.5e-4,
-                ..MaterialThermalModel::default()
-            },
+                conductivity_w_per_mk: 45.0,
+                specific_heat_j_per_kgk: 500.0,
+                expansion_coefficient_per_k: 1.2e-5,
+            }),
             acoustic: None,
             electrical: None,
             plastic: None,

@@ -74,22 +74,38 @@ fn validate_material(material: &MaterialModel) -> Result<(), AnalysisValidationE
     if material.name.trim().is_empty() {
         return Err(invalid_material(material, "name must be non-empty"));
     }
-    let mechanical = &material.mechanical;
-    require_positive(material, "Young's modulus", mechanical.youngs_modulus_pa)?;
-    require_positive(material, "mechanical density", mechanical.density_kg_per_m3)?;
-    if !mechanical.poisson_ratio.is_finite()
-        || mechanical.poisson_ratio <= -1.0
-        || mechanical.poisson_ratio >= 0.5
+    if material.mass_density_kg_per_m3.is_none()
+        && material.mechanical.is_none()
+        && material.damping.is_none()
+        && material.thermal.is_none()
+        && material.acoustic.is_none()
+        && material.electrical.is_none()
+        && material.plastic.is_none()
     {
         return Err(invalid_material(
             material,
-            "Poisson ratio must be finite and in (-1, 0.5)",
+            "at least one constitutive capability must be declared",
         ));
     }
-    if let crate::MechanicalDampingModel::Rayleigh {
+    if let Some(density) = material.mass_density_kg_per_m3 {
+        require_positive(material, "mass density", density)?;
+    }
+    if let Some(mechanical) = &material.mechanical {
+        require_positive(material, "Young's modulus", mechanical.youngs_modulus_pa)?;
+        if !mechanical.poisson_ratio.is_finite()
+            || mechanical.poisson_ratio <= -1.0
+            || mechanical.poisson_ratio >= 0.5
+        {
+            return Err(invalid_material(
+                material,
+                "Poisson ratio must be finite and in (-1, 0.5)",
+            ));
+        }
+    }
+    if let Some(crate::MechanicalDampingModel::Rayleigh {
         mass_coefficient,
         stiffness_coefficient,
-    } = mechanical.damping
+    }) = material.damping
     {
         if !mass_coefficient.is_finite()
             || !stiffness_coefficient.is_finite()
@@ -104,31 +120,31 @@ fn validate_material(material: &MaterialModel) -> Result<(), AnalysisValidationE
         }
     }
 
-    let thermal = &material.thermal;
-    require_nonnegative(
-        material,
-        "thermal reference temperature",
-        thermal.reference_temperature_k,
-    )?;
-    require_finite(
-        material,
-        "temperature coefficient of modulus",
-        thermal.modulus_temp_coeff_per_k,
-    )?;
-    require_positive(
-        material,
-        "thermal conductivity",
-        thermal.conductivity_w_per_mk,
-    )?;
-    require_positive(material, "specific heat", thermal.specific_heat_j_per_kgk)?;
-    require_finite(
-        material,
-        "thermal expansion coefficient",
-        thermal.expansion_coefficient_per_k,
-    )?;
+    if let Some(thermal) = &material.thermal {
+        require_nonnegative(
+            material,
+            "thermal reference temperature",
+            thermal.reference_temperature_k,
+        )?;
+        require_finite(
+            material,
+            "temperature coefficient of modulus",
+            thermal.modulus_temp_coeff_per_k,
+        )?;
+        require_positive(
+            material,
+            "thermal conductivity",
+            thermal.conductivity_w_per_mk,
+        )?;
+        require_positive(material, "specific heat", thermal.specific_heat_j_per_kgk)?;
+        require_finite(
+            material,
+            "thermal expansion coefficient",
+            thermal.expansion_coefficient_per_k,
+        )?;
+    }
 
     if let Some(acoustic) = &material.acoustic {
-        require_positive(material, "acoustic density", acoustic.density_kg_per_m3)?;
         require_positive(material, "speed of sound", acoustic.speed_of_sound_m_per_s)?;
         if !acoustic.damping_ratio.is_finite() || !(0.0..1.0).contains(&acoustic.damping_ratio) {
             return Err(invalid_material(
@@ -293,15 +309,28 @@ mod tests {
         MaterialModel {
             material_id: "steel".to_string(),
             name: "Steel".to_string(),
-            mechanical: MaterialMechanicalModel {
+            mass_density_kg_per_m3: Some(7850.0),
+            mechanical: Some(MaterialMechanicalModel {
                 youngs_modulus_pa: 200.0e9,
                 poisson_ratio: 0.3,
-                density_kg_per_m3: 7850.0,
-                damping: MechanicalDampingModel::Undamped,
-            },
-            thermal: MaterialThermalModel::default(),
+            }),
+            damping: None,
+            thermal: Some(MaterialThermalModel {
+                reference_temperature_k: 293.15,
+                modulus_temp_coeff_per_k: -2.5e-4,
+                conductivity_w_per_mk: 45.0,
+                specific_heat_j_per_kgk: 500.0,
+                expansion_coefficient_per_k: 1.2e-5,
+            }),
             acoustic: None,
-            electrical: Some(MaterialElectricalModel::default()),
+            electrical: Some(MaterialElectricalModel {
+                reference_temperature_k: 293.15,
+                conductivity_s_per_m: 1.0,
+                resistive_heating_coefficient: 0.0,
+                relative_permittivity: 1.0,
+                relative_permeability: 1.0,
+                conductivity_frequency_response: Vec::new(),
+            }),
             plastic: None,
         }
     }
@@ -316,39 +345,59 @@ mod tests {
         ));
 
         let mut invalid = material();
-        invalid.mechanical.poisson_ratio = 0.5;
+        invalid.mechanical.as_mut().unwrap().poisson_ratio = 0.5;
         assert!(matches!(
             validate_materials(&[invalid], &[]),
             Err(AnalysisValidationError::InvalidMaterial { .. })
         ));
 
         let mut invalid = material();
-        invalid.mechanical.poisson_ratio = -1.0;
+        invalid.mechanical.as_mut().unwrap().poisson_ratio = -1.0;
         assert!(matches!(
             validate_materials(&[invalid], &[]),
             Err(AnalysisValidationError::InvalidMaterial { .. })
         ));
 
         let mut auxetic = material();
-        auxetic.mechanical.poisson_ratio = -0.25;
+        auxetic.mechanical.as_mut().unwrap().poisson_ratio = -0.25;
         validate_materials(&[auxetic], &[]).expect("finite auxetic material should be valid");
 
         let mut damped = material();
-        damped.mechanical.damping = MechanicalDampingModel::Rayleigh {
+        damped.damping = Some(MechanicalDampingModel::Rayleigh {
             mass_coefficient: RayleighMassCoefficient::new(0.0),
             stiffness_coefficient: RayleighStiffnessCoefficient::new(0.0),
-        };
+        });
         assert!(matches!(
             validate_materials(&[damped], &[]),
             Err(AnalysisValidationError::InvalidMaterial { .. })
         ));
 
         let mut damped = material();
-        damped.mechanical.damping = MechanicalDampingModel::Rayleigh {
+        damped.damping = Some(MechanicalDampingModel::Rayleigh {
             mass_coefficient: RayleighMassCoefficient::new(0.25),
             stiffness_coefficient: RayleighStiffnessCoefficient::new(1.0e-5),
-        };
+        });
         validate_materials(&[damped], &[]).expect("positive Rayleigh damping should be valid");
+    }
+
+    #[test]
+    fn accepts_partial_capabilities_and_rejects_an_empty_material() {
+        let mut density_only = material();
+        density_only.mechanical = None;
+        density_only.damping = None;
+        density_only.thermal = None;
+        density_only.acoustic = None;
+        density_only.electrical = None;
+        density_only.plastic = None;
+        validate_materials(&[density_only.clone()], &[])
+            .expect("a density-only material is meaningful for compatible formulations");
+
+        density_only.mass_density_kg_per_m3 = None;
+        assert!(matches!(
+            validate_materials(&[density_only], &[]),
+            Err(AnalysisValidationError::InvalidMaterial { detail, .. })
+                if detail.contains("at least one constitutive capability")
+        ));
     }
 
     #[test]

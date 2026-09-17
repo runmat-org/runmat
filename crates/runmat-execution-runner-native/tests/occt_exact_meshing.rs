@@ -101,7 +101,9 @@ fn disconnected_cad_solids_retain_distinct_region_identity_through_meshing() {
     let mut second_material = model.materials[0].clone();
     second_material.material_id = "second-solid-material".into();
     second_material.name = "Second solid material".into();
-    second_material.mechanical.density_kg_per_m3 *= 0.5;
+    second_material.mass_density_kg_per_m3 = second_material
+        .mass_density_kg_per_m3
+        .map(|density| density * 0.5);
     model.materials.push(second_material);
     model.material_assignments = vec![
         material_assignment("solid_000001", &model.materials[0].material_id),
@@ -110,9 +112,8 @@ fn disconnected_cad_solids_retain_distinct_region_identity_through_meshing() {
     let resolved = runmat_analysis_core::resolve_geometry_region_aliases(&model, &aliases)
         .expect("source-solid aliases should resolve to persistent identities");
     let inventory =
-        runmat_analysis_fea::physics::structural::material::StructuralMaterialInventory::from_model(
-            &resolved,
-        );
+        runmat_analysis_fea::properties::compile_solid_property_map(&resolved, &result.artifact)
+            .expect("two selected CAD solids should compile their material assignments");
     runmat_analysis_fea::assembly::solver_solid::assemble_solver_solid_operators(
         &result.artifact,
         &inventory,
@@ -122,20 +123,16 @@ fn disconnected_cad_solids_retain_distinct_region_identity_through_meshing() {
     model.material_assignments.pop();
     let incomplete = runmat_analysis_core::resolve_geometry_region_aliases(&model, &aliases)
         .expect("the remaining source-solid alias should still resolve");
-    let incomplete_inventory =
-        runmat_analysis_fea::physics::structural::material::StructuralMaterialInventory::from_model(
-            &incomplete,
-        );
-    let error = runmat_analysis_fea::assembly::solver_solid::assemble_solver_solid_operators(
-        &result.artifact,
-        &incomplete_inventory,
-    )
-    .expect_err("unassigned CAD solids must fail before operator assembly");
+    let error =
+        runmat_analysis_fea::properties::compile_solid_property_map(&incomplete, &result.artifact)
+            .expect_err("unassigned CAD solids must fail during property compilation");
     assert!(matches!(
         error,
-        runmat_analysis_fea::assembly::solver_solid::SolverSolidAssemblyError::InvalidMaterialCoverage(
-            detail
-        ) if detail.contains("requires exactly one solid material assignment")
+        runmat_analysis_fea::properties::PropertyCompilationError::InvalidCoverage {
+            role: "solid",
+            assignment_count: 0,
+            ..
+        }
     ));
 }
 

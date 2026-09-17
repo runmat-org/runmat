@@ -1025,7 +1025,7 @@ fn constant_acceleration_support_model(
         extrapolation: SignalExtrapolation::Reject,
     });
     signal.evidence.sample_count = 2;
-    model.materials[0].mechanical.damping = MechanicalDampingModel::Undamped;
+    model.materials[0].damping = Some(MechanicalDampingModel::Undamped);
     model
 }
 
@@ -1266,7 +1266,7 @@ fn physical_tet4_finite_pulse_converges_across_a_force_discontinuity() {
 #[test]
 fn physical_tet4_undamped_step_preserves_work_energy_balance() {
     let mut model = fixture_model(FixtureId::StructuralTransientTet4Reference);
-    model.materials[0].mechanical.damping = runmat_analysis_core::MechanicalDampingModel::Undamped;
+    model.materials[0].damping = Some(runmat_analysis_core::MechanicalDampingModel::Undamped);
     let mesh = single_tetrahedron_solver_mesh_for_model(&model);
     let (free_dof, mass, damping, stiffness, force) =
         physical_reference_coefficients(&model, &mesh);

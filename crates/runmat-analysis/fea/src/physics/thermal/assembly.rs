@@ -201,9 +201,15 @@ pub(crate) fn assemble(
                 region_id: element.region_id.source_topology_id.clone(),
             })?
             .material;
-        element_conductivity_w_per_mk.push(material.thermal.conductivity_w_per_mk);
+        let thermal = material
+            .require_thermal()
+            .map_err(|error| ThermalAssemblyError::InvalidMaterialCoverage(error.to_string()))?;
+        let mass_density_kg_per_m3 = material
+            .require_mass_density()
+            .map_err(|error| ThermalAssemblyError::InvalidMaterialCoverage(error.to_string()))?;
+        element_conductivity_w_per_mk.push(thermal.conductivity_w_per_mk);
         element_volumetric_capacity_j_per_m3k
-            .push(material.mechanical.density_kg_per_m3 * material.thermal.specific_heat_j_per_kgk);
+            .push(mass_density_kg_per_m3 * thermal.specific_heat_j_per_kgk);
         projection
             .visit_element_quadrature(element, |point| {
                 for (local_row, &row) in element.node_indices.iter().enumerate() {
@@ -216,15 +222,15 @@ pub(crate) fn assemble(
                         conductivity.add(
                             row,
                             column,
-                            material.thermal.conductivity_w_per_mk
+                            thermal.conductivity_w_per_mk
                                 * gradient_product
                                 * point.volume_weight_m3,
                         );
                         capacity.add(
                             row,
                             column,
-                            material.mechanical.density_kg_per_m3
-                                * material.thermal.specific_heat_j_per_kgk
+                            mass_density_kg_per_m3
+                                * thermal.specific_heat_j_per_kgk
                                 * point.shape_values()[local_row]
                                 * point.shape_values()[local_column]
                                 * point.volume_weight_m3,
@@ -586,9 +592,13 @@ mod tests {
         model.boundaries.clear();
         model.excitations.clear();
         let material = &mut model.materials[0];
-        material.thermal.conductivity_w_per_mk = 1.0;
-        material.thermal.specific_heat_j_per_kgk = 1.0;
-        material.mechanical.density_kg_per_m3 = 1.0;
+        let thermal = material
+            .thermal
+            .as_mut()
+            .expect("thermal fixture declares thermal capability");
+        thermal.conductivity_w_per_mk = 1.0;
+        thermal.specific_heat_j_per_kgk = 1.0;
+        material.mass_density_kg_per_m3 = Some(1.0);
 
         let mut mesh =
             runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
@@ -974,8 +984,9 @@ mod tests {
         assert!(conductivity_sum.abs() <= conductivity_scale * 1.0e-12);
 
         let material = &model.materials[0];
-        let expected_capacity = material.mechanical.density_kg_per_m3
-            * material.thermal.specific_heat_j_per_kgk
+        let thermal = material.require_thermal().unwrap();
+        let expected_capacity = material.require_mass_density().unwrap()
+            * thermal.specific_heat_j_per_kgk
             * assembly.projection.elements[0].signed_volume_m3;
         let integrated_capacity = assembly.capacity.values().iter().sum::<f64>();
         assert!((integrated_capacity - expected_capacity).abs() <= expected_capacity * 1.0e-12);
@@ -997,7 +1008,7 @@ mod tests {
         let flux = assembly
             .recover_element_heat_flux(&linear_temperature)
             .unwrap()[0];
-        let conductivity = material.thermal.conductivity_w_per_mk;
+        let conductivity = thermal.conductivity_w_per_mk;
         assert!((flux[0] + 2.0 * conductivity).abs() <= conductivity * 1.0e-12);
         assert!((flux[1] + 3.0 * conductivity).abs() <= conductivity * 1.0e-12);
         assert!((flux[2] - conductivity).abs() <= conductivity * 1.0e-12);

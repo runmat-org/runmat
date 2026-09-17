@@ -12,12 +12,8 @@ model:
       materials:
         air:
           name: Air
-          mechanical:
-            youngs_modulus_pa: 142000.0
-            poisson_ratio: 0.0
-            density_kg_per_m3: 1.225
+          mass_density_kg_per_m3: 1.225
           acoustic:
-            density_kg_per_m3: 1.225
             speed_of_sound_m_per_s: 343.0
             damping_ratio: 0.0
 

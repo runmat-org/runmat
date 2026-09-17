@@ -9,14 +9,14 @@ use runmat_analysis_core::{
     FluidConstraintKind, FluidStructureInterfaceModel, FluidStructureKinematics, Frequency,
     FrictionCoefficient, HeatFlux, HeatTransferCoefficient, MagneticConstraint,
     MagneticConstraintKind, MagneticVectorPotential, MassDensity, MaterialAcousticModel,
-    MaterialAssignment, MaterialElectricalModel, MaterialMechanicalModel, MaterialModel,
-    MaterialPlasticModel, MaterialThermalModel, MechanicalDampingModel, PairedConstraint,
-    PairingPolicy, PeriodicConstraint, PeriodicTransform, PhaseShiftedPeriodicConstraint,
-    PhysicalSignal, PhysicsFamily, PrescribedStructuralDofs, PrescribedValue, Pressure,
-    ProcedureStep, RegionTarget, Rotation, RotationDofValue, SolutionSpace,
-    SpecificAcousticImpedance, StructuralConstraint, StructuralConstraintKind,
-    StructuralRotationDof, StructuralTranslationDof, Temperature, TemperatureDifference,
-    ThermalConstraint, ThermalConstraintKind, ThermalContactResistance, ThermalInterfaceTransfer,
+    MaterialAssignment, MaterialMechanicalModel, MaterialModel, MaterialPlasticModel,
+    MaterialThermalModel, MechanicalDampingModel, PairedConstraint, PairingPolicy,
+    PeriodicConstraint, PeriodicTransform, PhaseShiftedPeriodicConstraint, PhysicalSignal,
+    PhysicsFamily, PrescribedStructuralDofs, PrescribedValue, Pressure, ProcedureStep,
+    RegionTarget, Rotation, RotationDofValue, SolutionSpace, SpecificAcousticImpedance,
+    StructuralConstraint, StructuralConstraintKind, StructuralRotationDof,
+    StructuralTranslationDof, Temperature, TemperatureDifference, ThermalConstraint,
+    ThermalConstraintKind, ThermalContactResistance, ThermalInterfaceTransfer,
     ThermoMechanicalDomain, Translation, TranslationDofValue, TurbulenceIntensity, Velocity,
 };
 use runmat_builtins::{
@@ -1854,7 +1854,7 @@ fn canonical_field_name(text: &str) -> String {
     match normalize_token(&out).as_str() {
         "youngsmoduluspa" => "youngs_modulus_pa".to_string(),
         "poissonratio" => "poisson_ratio".to_string(),
-        "density" | "densitykgperm3" => "density_kg_per_m3".to_string(),
+        "massdensitykgperm3" => "mass_density_kg_per_m3".to_string(),
         "magnitude" | "magnitudepa" => "magnitude_pa".to_string(),
         "current" | "currenta" => "current_a".to_string(),
         "phase" | "phaserad" => "phase_rad".to_string(),
@@ -3510,7 +3510,13 @@ mod tests {
             ]))
             .expect("material integer field");
             let material: MaterialModel = object_payload(&material);
-            assert_eq!(material.mechanical.youngs_modulus_pa, expected);
+            assert_eq!(
+                material
+                    .require_mechanical()
+                    .expect("authored mechanical capability")
+                    .youngs_modulus_pa,
+                expected
+            );
         }
     }
 
@@ -3534,13 +3540,13 @@ mod tests {
         .expect("material");
         let material: MaterialModel = object_payload(&material);
         assert_eq!(
-            material.mechanical.damping,
-            MechanicalDampingModel::Rayleigh {
+            material.damping,
+            Some(MechanicalDampingModel::Rayleigh {
                 mass_coefficient: runmat_analysis_core::RayleighMassCoefficient::new(0.2),
                 stiffness_coefficient: runmat_analysis_core::RayleighStiffnessCoefficient::new(
                     0.003
                 ),
-            }
+            })
         );
 
         let error = block_on(fea_material_builtin(vec![
@@ -3554,6 +3560,32 @@ mod tests {
         ]))
         .expect_err("untyped damping must be rejected");
         assert!(error.message().contains("typed fea.MechanicalDamping"));
+    }
+
+    #[test]
+    fn fea_material_requires_explicit_capabilities_and_canonical_density_name() {
+        let material = block_on(fea_material_builtin(vec![
+            Value::String("air".into()),
+            Value::String("MassDensityKgPerM3".into()),
+            Value::Num(1.225),
+        ]))
+        .expect("a density-only material is valid for compatible formulations");
+        let material: MaterialModel = object_payload(&material);
+        assert_eq!(material.mass_density_kg_per_m3, Some(1.225));
+        assert!(material.mechanical.is_none());
+
+        let empty = block_on(fea_material_builtin(vec![Value::String("empty".into())]))
+            .expect_err("an empty material must fail at construction");
+        assert!(empty.message().contains("constitutive capability"));
+
+        let retired = block_on(fea_material_builtin(vec![
+            Value::String("air".into()),
+            Value::String("DensityKgPerM3".into()),
+            Value::Num(1.225),
+        ]))
+        .expect_err("the ambiguous retired density spelling must not be accepted");
+        assert!(retired.message().contains("unsupported option field"));
+        assert!(retired.message().contains("density_kg_per_m3"));
     }
 
     #[test]

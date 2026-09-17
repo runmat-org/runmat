@@ -22,6 +22,17 @@ fn magnetic_ground(
     })
 }
 
+fn test_electrical_material() -> MaterialElectricalModel {
+    MaterialElectricalModel {
+        reference_temperature_k: 293.15,
+        conductivity_s_per_m: 1.0,
+        resistive_heating_coefficient: 0.0,
+        relative_permittivity: 1.0,
+        relative_permeability: 1.0,
+        conductivity_frequency_response: Vec::new(),
+    }
+}
+
 fn magnetic_insulation(id: &str, region: &str) -> runmat_analysis_core::AnalysisBoundary {
     runmat_analysis_core::AnalysisBoundary {
         boundary_id: id.to_string(),
@@ -438,7 +449,11 @@ fn material_conflict_contract_model() -> AnalysisModel {
     let mut polymer = model.materials[0].clone();
     polymer.material_id = "mat_polymer".to_string();
     polymer.name = "Polymer".to_string();
-    polymer.mechanical.youngs_modulus_pa = 3.0e9;
+    polymer
+        .mechanical
+        .as_mut()
+        .expect("structural fixture material")
+        .youngs_modulus_pa = 3.0e9;
     model.materials.push(polymer);
     model.material_assignments = vec![MaterialAssignment {
         target: runmat_analysis_core::PropertyRegionTarget::beam("beam_span"),
@@ -2071,7 +2086,7 @@ fn analysis_run_electromagnetic_contract_is_v1_typed_payload() {
     let mut model = contract_linear_static_model();
     model.sequence.steps[0] =
         runmat_analysis_core::ProcedureStep::electromagnetic_harmonic("electromagnetic");
-    model.materials[0].electrical = Some(MaterialElectricalModel::default());
+    model.materials[0].electrical = Some(test_electrical_material());
     let region_id = model.constraints[0]
         .target()
         .expect("target")
@@ -2083,7 +2098,7 @@ fn analysis_run_electromagnetic_contract_is_v1_typed_payload() {
     model.electromagnetic = Some(ElectromagneticDomain {
         reference_frequency: runmat_analysis_core::Frequency::new(60.0),
     });
-    model.materials[0].electrical = Some(MaterialElectricalModel::default());
+    model.materials[0].electrical = Some(test_electrical_material());
     model.constraints = vec![magnetic_ground("em_contract_ground", "em_contract_region")];
     model.boundaries = vec![magnetic_insulation(
         "em_contract_insulation",
@@ -2237,7 +2252,7 @@ fn electromagnetic_contract_snapshot_matches_expected_shape() {
     let mut model = contract_linear_static_model();
     model.sequence.steps[0] =
         runmat_analysis_core::ProcedureStep::electromagnetic_harmonic("electromagnetic");
-    model.materials[0].electrical = Some(MaterialElectricalModel::default());
+    model.materials[0].electrical = Some(test_electrical_material());
     let region_id = model.constraints[0]
         .target()
         .expect("target")

@@ -67,6 +67,17 @@ fn static_excitations(
     )
     .expect("test model excitations should realize at the static sample")
 }
+
+fn test_electrical_material() -> MaterialElectricalModel {
+    MaterialElectricalModel {
+        reference_temperature_k: 293.15,
+        conductivity_s_per_m: 1.0,
+        resistive_heating_coefficient: 0.0,
+        relative_permittivity: 1.0,
+        relative_permeability: 1.0,
+        conductivity_frequency_response: Vec::new(),
+    }
+}
 use runmat_analysis_core::{
     AnalysisProcedure, ElectromagneticDomain, Frequency, MaterialElectricalModel, ProcedureStep,
 };
@@ -125,8 +136,12 @@ fn configure_thermo_mechanical_excitation(
         reference_temperature: runmat_analysis_core::Temperature::new(reference_temperature_k),
     });
     for material in &mut model.materials {
-        material.thermal.reference_temperature_k = reference_temperature_k;
-        material.thermal.expansion_coefficient_per_k = expansion_coefficient_per_k;
+        let thermal = material
+            .thermal
+            .as_mut()
+            .expect("thermo-mechanical fixture declares thermal capability");
+        thermal.reference_temperature_k = reference_temperature_k;
+        thermal.expansion_coefficient_per_k = expansion_coefficient_per_k;
     }
     append_fixture_temperature_field(
         model,
@@ -474,7 +489,7 @@ fn solid_physics_pipelines_assemble_from_the_canonical_solver_mesh() {
     });
     electromagnetic_model.sequence.steps = vec![ProcedureStep::electromagnetic_harmonic("em")];
     for material in &mut electromagnetic_model.materials {
-        material.electrical = Some(MaterialElectricalModel::default());
+        material.electrical = Some(test_electrical_material());
     }
     let electromagnetic = crate::run_electromagnetic_with_options(
         &electromagnetic_model,
@@ -2440,7 +2455,7 @@ fn electromagnetic_pipeline_rejects_a_model_without_the_requested_step() {
     });
     model.sequence.steps = vec![ProcedureStep::structural_static("structural")];
     for material in &mut model.materials {
-        material.electrical = Some(MaterialElectricalModel::default());
+        material.electrical = Some(test_electrical_material());
     }
 
     let error = crate::run_electromagnetic_with_options(
@@ -2464,7 +2479,7 @@ fn electromagnetic_pipeline_consumes_electric_current_without_structural_admissi
     });
     model.sequence.steps = vec![ProcedureStep::electromagnetic_harmonic("em")];
     for material in &mut model.materials {
-        material.electrical = Some(MaterialElectricalModel::default());
+        material.electrical = Some(test_electrical_material());
     }
 
     let result = crate::run_electromagnetic_with_options(
@@ -2517,7 +2532,7 @@ fn electromagnetic_frequency_response_publishes_exact_complex_resultant_history(
     step.observations = vec![observation];
     model.sequence.steps = vec![step];
     for material in &mut model.materials {
-        material.electrical = Some(MaterialElectricalModel::default());
+        material.electrical = Some(test_electrical_material());
     }
     let mesh = runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(
         runmat_meshing_core::ElementOrder::Tet4,

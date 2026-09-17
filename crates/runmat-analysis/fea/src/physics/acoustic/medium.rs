@@ -27,7 +27,10 @@ pub(super) fn material_summary(
         let Some(acoustic) = &material.acoustic else {
             continue;
         };
-        density_sum += acoustic.density_kg_per_m3.max(1.0e-9);
+        let Some(density_kg_per_m3) = material.mass_density_kg_per_m3 else {
+            continue;
+        };
+        density_sum += density_kg_per_m3.max(1.0e-9);
         speed_sum += acoustic.speed_of_sound_m_per_s.max(1.0);
         damping_sum += acoustic.damping_ratio.max(0.0);
         explicit_material_count += 1;
@@ -113,14 +116,17 @@ pub(super) fn boundary_summary(
 }
 
 fn reference_temperature_k(model: &AnalysisModel) -> f64 {
-    if model.materials.is_empty() {
-        293.15
+    let (sum, count) = model
+        .materials
+        .iter()
+        .filter_map(|material| material.thermal.as_ref())
+        .map(|thermal| thermal.reference_temperature_k.max(1.0))
+        .fold((0.0, 0_usize), |(sum, count), value| {
+            (sum + value, count + 1)
+        });
+    if count > 0 {
+        sum / count as f64
     } else {
-        model
-            .materials
-            .iter()
-            .map(|material| material.thermal.reference_temperature_k.max(1.0))
-            .sum::<f64>()
-            / model.materials.len() as f64
+        293.15
     }
 }

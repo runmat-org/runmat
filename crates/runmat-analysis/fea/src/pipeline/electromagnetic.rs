@@ -3376,6 +3376,17 @@ mod tests {
         relative_permittivity_scale_at_frequency, MaxwellEdgeTopology,
     };
 
+    fn test_electrical_material() -> MaterialElectricalModel {
+        MaterialElectricalModel {
+            reference_temperature_k: 293.15,
+            conductivity_s_per_m: 1.0,
+            resistive_heating_coefficient: 0.0,
+            relative_permittivity: 1.0,
+            relative_permeability: 1.0,
+            conductivity_frequency_response: Vec::new(),
+        }
+    }
+
     #[test]
     fn conductivity_scale_interpolates_on_log_frequency_axis() {
         let response = vec![
@@ -3424,7 +3435,7 @@ mod tests {
 
     #[test]
     fn conductivity_frequency_sample_defaults_when_response_is_empty() {
-        let electrical = MaterialElectricalModel::default();
+        let electrical = test_electrical_material();
         let sample = conductivity_frequency_sample(&electrical, 60.0);
         assert!((sample.scale - 1.0).abs() < 1.0e-12);
         assert!((sample.relative_permittivity_scale - 1.0).abs() < 1.0e-12);
@@ -3539,7 +3550,7 @@ mod tests {
                     relative_permeability_scale: Some(1.2),
                 },
             ],
-            ..MaterialElectricalModel::default()
+            ..test_electrical_material()
         };
         let sample = conductivity_frequency_sample(&electrical, 100.0);
         assert!(sample.has_frequency_response);

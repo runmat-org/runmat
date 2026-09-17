@@ -247,6 +247,17 @@ fn analysis_test_guard() -> std::sync::MutexGuard<'static, ()> {
     storage::artifact_store_test_guard()
 }
 
+fn test_electrical_material() -> MaterialElectricalModel {
+    MaterialElectricalModel {
+        reference_temperature_k: 293.15,
+        conductivity_s_per_m: 1.0,
+        resistive_heating_coefficient: 0.0,
+        relative_permittivity: 1.0,
+        relative_permeability: 1.0,
+        conductivity_frequency_response: Vec::new(),
+    }
+}
+
 fn sample_model() -> AnalysisModel {
     let mut model = AnalysisModel {
         model_id: AnalysisModelId("beam_model".to_string()),
@@ -257,17 +268,19 @@ fn sample_model() -> AnalysisModel {
         materials: vec![MaterialModel {
             material_id: "mat_steel".to_string(),
             name: "Steel".to_string(),
-            mechanical: MaterialMechanicalModel {
+            mass_density_kg_per_m3: Some(7850.0),
+            mechanical: Some(MaterialMechanicalModel {
                 youngs_modulus_pa: 200e9,
                 poisson_ratio: 0.3,
-                density_kg_per_m3: 7850.0,
-                damping: Default::default(),
-            },
-            thermal: MaterialThermalModel {
+            }),
+            damping: None,
+            thermal: Some(MaterialThermalModel {
                 reference_temperature_k: 293.15,
                 modulus_temp_coeff_per_k: -2.5e-4,
-                ..MaterialThermalModel::default()
-            },
+                conductivity_w_per_mk: 45.0,
+                specific_heat_j_per_kgk: 500.0,
+                expansion_coefficient_per_k: 1.2e-5,
+            }),
             acoustic: None,
             electrical: None,
             plastic: None,
@@ -373,17 +386,19 @@ fn sample_model_with_material_assignment_mismatch() -> AnalysisModel {
     model.materials.push(MaterialModel {
         material_id: "mat_polymer".to_string(),
         name: "Polymer".to_string(),
-        mechanical: MaterialMechanicalModel {
+        mass_density_kg_per_m3: Some(1150.0),
+        mechanical: Some(MaterialMechanicalModel {
             youngs_modulus_pa: 3.2e9,
             poisson_ratio: 0.37,
-            density_kg_per_m3: 1150.0,
-            damping: Default::default(),
-        },
-        thermal: MaterialThermalModel {
+        }),
+        damping: None,
+        thermal: Some(MaterialThermalModel {
             reference_temperature_k: 293.15,
             modulus_temp_coeff_per_k: -7.0e-4,
-            ..MaterialThermalModel::default()
-        },
+            conductivity_w_per_mk: 45.0,
+            specific_heat_j_per_kgk: 500.0,
+            expansion_coefficient_per_k: 1.2e-5,
+        }),
         acoustic: None,
         electrical: None,
         plastic: None,
@@ -678,8 +693,9 @@ fn sample_fsi_model() -> AnalysisModel {
 
 fn set_model_thermo_coupling(model: &mut AnalysisModel, coupling: TestThermoMechanicalCoupling) {
     for material in &mut model.materials {
-        material.thermal.reference_temperature_k = coupling.reference_temperature_k;
-        material.thermal.expansion_coefficient_per_k = coupling.thermal_expansion_coefficient;
+        let thermal = material.thermal.as_mut().expect("thermal fixture material");
+        thermal.reference_temperature_k = coupling.reference_temperature_k;
+        thermal.expansion_coefficient_per_k = coupling.thermal_expansion_coefficient;
     }
     append_scalar_constant_excitation(
         model,
@@ -1167,10 +1183,10 @@ fn fea_document_resolves_explicit_model_and_sweep() {
             "materials": {
                 "aluminum": {
                     "name": "Aluminum 6061",
+                    "mass_density_kg_per_m3": 2700.0,
                     "mechanical": {
                         "youngs_modulus_pa": 69000000000.0,
-                        "poisson_ratio": 0.33,
-                        "density_kg_per_m3": 2700.0
+                        "poisson_ratio": 0.33
                     }
                 }
             },
@@ -1247,10 +1263,10 @@ fn fea_document_resolves_moment_excitations() {
         "regions": { "tip": { "selector": { "name": "Bracket_A" } } },
         "materials": {
             "steel": {
+                "mass_density_kg_per_m3": 7850.0,
                 "mechanical": {
                     "youngs_modulus_pa": 200000000000.0,
-                    "poisson_ratio": 0.30,
-                    "density_kg_per_m3": 7850.0
+                    "poisson_ratio": 0.30
                 }
             }
         },
@@ -1325,10 +1341,10 @@ fn fea_document_resolves_prescribed_rotation_boundary_conditions() {
         "regions": { "tip": { "selector": { "name": "Bracket_A" } } },
         "materials": {
             "steel": {
+                "mass_density_kg_per_m3": 7850.0,
                 "mechanical": {
                     "youngs_modulus_pa": 200000000000.0,
-                    "poisson_ratio": 0.30,
-                    "density_kg_per_m3": 7850.0
+                    "poisson_ratio": 0.30
                 }
             }
         },
@@ -1400,10 +1416,10 @@ fn fea_document_resolves_beam_structural_model_data() {
         "regions": { "beam_span": { "selector": { "name": "Bracket_A" } } },
         "materials": {
             "steel": {
+                "mass_density_kg_per_m3": 7850.0,
                 "mechanical": {
                     "youngs_modulus_pa": 200000000000.0,
-                    "poisson_ratio": 0.30,
-                    "density_kg_per_m3": 7850.0
+                    "poisson_ratio": 0.30
                 }
             }
         },
@@ -1508,10 +1524,10 @@ fn fea_document_resolves_shell_structural_model_data() {
         "regions": { "shell_panel": { "selector": { "name": "Bracket_A" } } },
         "materials": {
             "steel": {
+                "mass_density_kg_per_m3": 7850.0,
                 "mechanical": {
                     "youngs_modulus_pa": 200000000000.0,
-                    "poisson_ratio": 0.30,
-                    "density_kg_per_m3": 7850.0
+                    "poisson_ratio": 0.30
                 }
             }
         },
@@ -6447,7 +6463,11 @@ fn analysis_run_thermal_rejects_invalid_thermal_material_values() {
     model.sequence.steps = vec![ProcedureStep::thermal_transient(
         "thermal_invalid_material".to_string(),
     )];
-    model.materials[0].thermal.conductivity_w_per_mk = 0.0;
+    model.materials[0]
+        .thermal
+        .as_mut()
+        .expect("thermal fixture material")
+        .conductivity_w_per_mk = 0.0;
 
     let err = analysis_run_thermal_with_options_op(
         &model,
@@ -6873,7 +6893,7 @@ fn analysis_run_electromagnetic_rejects_models_without_em_step() {
 fn configure_valid_em_authoring(model: &mut AnalysisModel) {
     for material in &mut model.materials {
         if material.electrical.is_none() {
-            material.electrical = Some(MaterialElectricalModel::default());
+            material.electrical = Some(test_electrical_material());
         }
     }
     model.electromagnetic = Some(ElectromagneticDomain {
@@ -7572,18 +7592,19 @@ fn analysis_run_thermal_balanced_degrades_on_high_constitutive_spread() {
     model.materials.push(MaterialModel {
         material_id: "mat_poly_high_k".to_string(),
         name: "High K Composite".to_string(),
-        mechanical: MaterialMechanicalModel {
+        mass_density_kg_per_m3: Some(1800.0),
+        mechanical: Some(MaterialMechanicalModel {
             youngs_modulus_pa: 5.0e9,
             poisson_ratio: 0.33,
-            density_kg_per_m3: 1800.0,
-            damping: Default::default(),
-        },
-        thermal: MaterialThermalModel {
+        }),
+        damping: None,
+        thermal: Some(MaterialThermalModel {
             reference_temperature_k: 293.15,
+            modulus_temp_coeff_per_k: -2.5e-4,
             conductivity_w_per_mk: 1200.0,
             specific_heat_j_per_kgk: 160.0,
-            ..MaterialThermalModel::default()
-        },
+            expansion_coefficient_per_k: 1.2e-5,
+        }),
         acoustic: None,
         electrical: None,
         plastic: None,
@@ -7913,7 +7934,11 @@ fn nonlinear_balanced_degrades_when_thermo_mechanical_severity_is_high() {
         AnalysisProcedure::Nonlinear,
     )];
     for material in &mut model.materials {
-        material.thermal.expansion_coefficient_per_k = 1.0e-3;
+        material
+            .thermal
+            .as_mut()
+            .expect("thermal fixture material")
+            .expansion_coefficient_per_k = 1.0e-3;
     }
     set_model_thermo_coupling(
         &mut model,

@@ -12,10 +12,10 @@ model:
       materials:
         steel:
           name: Structural steel
+          mass_density_kg_per_m3: 7850.0
           mechanical:
             youngs_modulus_pa: 200000000000.0
             poisson_ratio: 0.3
-            density_kg_per_m3: 7850.0
 
       material_assignments:
         - target: { solid: { region: region_default } }

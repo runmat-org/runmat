@@ -252,10 +252,7 @@ fn inventory(
     let mut model =
         crate::fixtures::fixture_model(crate::fixtures::FixtureId::CantileverLinearStatic);
     model.materials.truncate(1);
-    model.materials[0].mechanical.youngs_modulus_pa = material.youngs_modulus_pa;
-    model.materials[0].mechanical.poisson_ratio = material.poisson_ratio;
-    model.materials[0].mechanical.density_kg_per_m3 = material.density_kg_per_m3;
-    model.materials[0].mechanical.damping = material.damping;
+    apply_structural_material(&mut model.materials[0], material);
     model.geometry_revision = u32::try_from(artifact.geometry.geometry_revision).unwrap();
     model.material_assignments[0].target = runmat_analysis_core::PropertyRegionTarget::all_solids();
     crate::properties::compile_solid_property_map(&model, artifact).unwrap()
@@ -270,16 +267,10 @@ fn assigned_inventory(
     let mut model =
         crate::fixtures::fixture_model(crate::fixtures::FixtureId::CantileverLinearStatic);
     model.materials.truncate(1);
-    model.materials[0].mechanical.youngs_modulus_pa = default.youngs_modulus_pa;
-    model.materials[0].mechanical.poisson_ratio = default.poisson_ratio;
-    model.materials[0].mechanical.density_kg_per_m3 = default.density_kg_per_m3;
-    model.materials[0].mechanical.damping = default.damping;
+    apply_structural_material(&mut model.materials[0], default);
     let mut selected = model.materials[0].clone();
     selected.material_id = "selected".into();
-    selected.mechanical.youngs_modulus_pa = assigned.youngs_modulus_pa;
-    selected.mechanical.poisson_ratio = assigned.poisson_ratio;
-    selected.mechanical.density_kg_per_m3 = assigned.density_kg_per_m3;
-    selected.mechanical.damping = assigned.damping;
+    apply_structural_material(&mut selected, assigned);
     model.materials.push(selected);
     *model.material_assignments[0]
         .target
@@ -289,6 +280,18 @@ fn assigned_inventory(
     model.material_assignments[0].assigned_material_id = "selected".into();
     model.geometry_revision = u32::try_from(artifact.geometry.geometry_revision).unwrap();
     crate::properties::compile_solid_property_map(&model, artifact).unwrap()
+}
+
+fn apply_structural_material(
+    target: &mut runmat_analysis_core::MaterialModel,
+    source: StructuralElementMaterial,
+) {
+    target.mechanical = Some(runmat_analysis_core::MaterialMechanicalModel {
+        youngs_modulus_pa: source.youngs_modulus_pa,
+        poisson_ratio: source.poisson_ratio,
+    });
+    target.mass_density_kg_per_m3 = Some(source.density_kg_per_m3);
+    target.damping = Some(source.damping);
 }
 
 fn empty_inventory(

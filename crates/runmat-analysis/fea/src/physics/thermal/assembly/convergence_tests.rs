@@ -38,9 +38,13 @@ fn transient_slab_has_second_order_spatial_convergence() {
         model.constraints.clear();
         model.boundaries.clear();
         model.excitations.clear();
-        model.materials[0].thermal.conductivity_w_per_mk = 1.0;
-        model.materials[0].thermal.specific_heat_j_per_kgk = 1.0;
-        model.materials[0].mechanical.density_kg_per_m3 = 1.0;
+        let thermal = model.materials[0]
+            .thermal
+            .as_mut()
+            .expect("thermal fixture declares thermal capability");
+        thermal.conductivity_w_per_mk = 1.0;
+        thermal.specific_heat_j_per_kgk = 1.0;
+        model.materials[0].mass_density_kg_per_m3 = Some(1.0);
         for (id, region) in [
             ("left_temperature", "slab_left"),
             ("right_temperature", "slab_right"),

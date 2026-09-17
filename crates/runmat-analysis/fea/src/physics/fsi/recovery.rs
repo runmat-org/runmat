@@ -289,7 +289,7 @@ fn structural_compliance_per_pa(model: &AnalysisModel) -> f64 {
         .materials
         .iter()
         .filter_map(|material| {
-            let modulus = material.mechanical.youngs_modulus_pa;
+            let modulus = material.mechanical.as_ref()?.youngs_modulus_pa;
             (modulus.is_finite() && modulus > 0.0).then_some(modulus)
         })
         .fold((0.0_f64, 0_usize), |(sum, count), modulus| {

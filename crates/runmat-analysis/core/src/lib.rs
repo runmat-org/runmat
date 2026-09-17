@@ -75,9 +75,9 @@ pub use problem::material_assignment::{
     PropertyRegionTarget,
 };
 pub use problem::materials::{
-    ConductivityFrequencyPoint, MaterialAcousticModel, MaterialElectricalModel,
+    ConductivityFrequencyPoint, MaterialAcousticModel, MaterialCapability, MaterialElectricalModel,
     MaterialMechanicalModel, MaterialModel, MaterialPlasticModel, MaterialThermalModel,
-    MechanicalDampingModel,
+    MechanicalDampingModel, MissingMaterialCapability,
 };
 pub use problem::model::{
     AnalysisModel, AnalysisModelId, SolverAnalysisModel, SolverAnalysisSequence,
@@ -181,13 +181,19 @@ mod tests {
             materials: vec![MaterialModel {
                 material_id: "mat_steel".to_string(),
                 name: "Steel".to_string(),
-                mechanical: MaterialMechanicalModel {
+                mass_density_kg_per_m3: Some(7850.0),
+                mechanical: Some(MaterialMechanicalModel {
                     youngs_modulus_pa: 200e9,
                     poisson_ratio: 0.3,
-                    density_kg_per_m3: 7850.0,
-                    damping: MechanicalDampingModel::Undamped,
-                },
-                thermal: MaterialThermalModel::default(),
+                }),
+                damping: None,
+                thermal: Some(MaterialThermalModel {
+                    reference_temperature_k: 293.15,
+                    modulus_temp_coeff_per_k: -2.5e-4,
+                    conductivity_w_per_mk: 45.0,
+                    specific_heat_j_per_kgk: 500.0,
+                    expansion_coefficient_per_k: 1.2e-5,
+                }),
                 acoustic: None,
                 electrical: None,
                 plastic: None,
@@ -443,8 +449,15 @@ mod tests {
     }
 
     #[test]
-    fn electrical_model_defaults_frequency_response() {
-        let electrical = MaterialElectricalModel::default();
+    fn electrical_frequency_response_is_explicitly_empty() {
+        let electrical = MaterialElectricalModel {
+            reference_temperature_k: 293.15,
+            conductivity_s_per_m: 1.0,
+            resistive_heating_coefficient: 0.0,
+            relative_permittivity: 1.0,
+            relative_permeability: 1.0,
+            conductivity_frequency_response: Vec::new(),
+        };
         assert!(electrical.conductivity_frequency_response.is_empty());
     }
 

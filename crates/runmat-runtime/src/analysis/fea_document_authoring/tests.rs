@@ -128,10 +128,10 @@ fn canonical_edits_are_validated_and_summarized() {
         serde_json::json!({
             "material_id": "steel",
             "name": "Steel",
+            "mass_density_kg_per_m3": 7850.0,
             "mechanical": {
                 "youngs_modulus_pa": 2e11,
-                "poisson_ratio": 0.3,
-                "density_kg_per_m3": 7850.0
+                "poisson_ratio": 0.3
             }
         }),
     )
@@ -179,10 +179,10 @@ fn composed_sources_edit_only_the_explicit_inline_overlay() {
         Some(&created.source),
         serde_json::json!({
             "material_id": "steel",
+            "mass_density_kg_per_m3": 7850.0,
             "mechanical": {
                 "youngs_modulus_pa": 2e11,
-                "poisson_ratio": 0.3,
-                "density_kg_per_m3": 7850.0
+                "poisson_ratio": 0.3
             }
         }),
     )

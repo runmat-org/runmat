@@ -602,39 +602,73 @@ pub(super) fn create_material_object_from_args(args: Vec<Value>) -> BuiltinResul
         .map(json_to_string)
         .transpose()?
         .unwrap_or_else(|| material_id.clone());
+    let mass_density_kg_per_m3 =
+        remove_optional_f64(&mut fields, MATERIAL_NAME, "mass_density_kg_per_m3")?;
+    fields.remove("damping");
+    let damping = authored_damping;
     let mechanical = if let Some(value) = fields.remove("mechanical") {
-        json_deserialize(MATERIAL_NAME, value, "mechanical material model")?
+        Some(json_deserialize(
+            MATERIAL_NAME,
+            value,
+            "mechanical material model",
+        )?)
+    } else if fields.contains_key("youngs_modulus_pa") || fields.contains_key("poisson_ratio") {
+        Some(MaterialMechanicalModel {
+            youngs_modulus_pa: remove_required_f64(
+                &mut fields,
+                MATERIAL_NAME,
+                "youngs_modulus_pa",
+            )?,
+            poisson_ratio: remove_required_f64(&mut fields, MATERIAL_NAME, "poisson_ratio")?,
+        })
     } else {
-        let youngs = remove_required_f64(&mut fields, MATERIAL_NAME, "youngs_modulus_pa")?;
-        let poisson = remove_required_f64(&mut fields, MATERIAL_NAME, "poisson_ratio")?;
-        let density =
-            remove_optional_f64(&mut fields, MATERIAL_NAME, "density_kg_per_m3")?.unwrap_or(7850.0);
-        fields.remove("damping");
-        let damping = authored_damping.unwrap_or_default();
-        MaterialMechanicalModel {
-            youngs_modulus_pa: youngs,
-            poisson_ratio: poisson,
-            density_kg_per_m3: density,
-            damping,
-        }
+        None
     };
     let thermal = if let Some(value) = fields.remove("thermal") {
-        json_deserialize(MATERIAL_NAME, value, "thermal material model")?
-    } else {
-        let mut thermal = serde_json::to_value(MaterialThermalModel::default())
-            .map_err(|err| builtin_error(MATERIAL_NAME, &ERROR_INTERNAL, err.to_string()))?;
-        move_known_fields(
-            &mut fields,
-            thermal.as_object_mut().expect("thermal model is object"),
-            &[
+        Some(json_deserialize(
+            MATERIAL_NAME,
+            value,
+            "thermal material model",
+        )?)
+    } else if [
+        "reference_temperature_k",
+        "modulus_temp_coeff_per_k",
+        "conductivity_w_per_mk",
+        "specific_heat_j_per_kgk",
+        "expansion_coefficient_per_k",
+    ]
+    .iter()
+    .any(|field| fields.contains_key(*field))
+    {
+        Some(MaterialThermalModel {
+            reference_temperature_k: remove_required_f64(
+                &mut fields,
+                MATERIAL_NAME,
                 "reference_temperature_k",
+            )?,
+            modulus_temp_coeff_per_k: remove_required_f64(
+                &mut fields,
+                MATERIAL_NAME,
                 "modulus_temp_coeff_per_k",
+            )?,
+            conductivity_w_per_mk: remove_required_f64(
+                &mut fields,
+                MATERIAL_NAME,
                 "conductivity_w_per_mk",
+            )?,
+            specific_heat_j_per_kgk: remove_required_f64(
+                &mut fields,
+                MATERIAL_NAME,
                 "specific_heat_j_per_kgk",
+            )?,
+            expansion_coefficient_per_k: remove_required_f64(
+                &mut fields,
+                MATERIAL_NAME,
                 "expansion_coefficient_per_k",
-            ],
-        );
-        json_deserialize(MATERIAL_NAME, thermal, "thermal material model")?
+            )?,
+        })
+    } else {
+        None
     };
     let electrical = if let Some(value) = fields.remove("electrical") {
         Some(json_deserialize(
@@ -642,14 +676,20 @@ pub(super) fn create_material_object_from_args(args: Vec<Value>) -> BuiltinResul
             value,
             "electrical material model",
         )?)
-    } else {
-        let mut electrical = serde_json::to_value(MaterialElectricalModel::default())
-            .map_err(|err| builtin_error(MATERIAL_NAME, &ERROR_INTERNAL, err.to_string()))?;
-        let moved = move_known_fields(
+    } else if [
+        "conductivity_s_per_m",
+        "resistive_heating_coefficient",
+        "relative_permittivity",
+        "relative_permeability",
+        "conductivity_frequency_response",
+    ]
+    .iter()
+    .any(|field| fields.contains_key(*field))
+    {
+        let mut electrical = serde_json::Map::new();
+        move_known_fields(
             &mut fields,
-            electrical
-                .as_object_mut()
-                .expect("electrical material model is object"),
+            &mut electrical,
             &[
                 "reference_temperature_k",
                 "conductivity_s_per_m",
@@ -659,15 +699,13 @@ pub(super) fn create_material_object_from_args(args: Vec<Value>) -> BuiltinResul
                 "conductivity_frequency_response",
             ],
         );
-        if moved {
-            Some(json_deserialize(
-                MATERIAL_NAME,
-                electrical,
-                "electrical material model",
-            )?)
-        } else {
-            None
-        }
+        Some(json_deserialize(
+            MATERIAL_NAME,
+            serde_json::Value::Object(electrical),
+            "electrical material model",
+        )?)
+    } else {
+        None
     };
     let acoustic = if let Some(value) = fields.remove("acoustic") {
         Some(json_deserialize(
@@ -675,29 +713,18 @@ pub(super) fn create_material_object_from_args(args: Vec<Value>) -> BuiltinResul
             value,
             "acoustic material model",
         )?)
-    } else {
-        let mut acoustic = serde_json::to_value(MaterialAcousticModel::default())
-            .map_err(|err| builtin_error(MATERIAL_NAME, &ERROR_INTERNAL, err.to_string()))?;
-        let moved = move_known_fields(
-            &mut fields,
-            acoustic
-                .as_object_mut()
-                .expect("acoustic material model is object"),
-            &[
-                "density_kg_per_m3",
-                "speed_of_sound_m_per_s",
-                "damping_ratio",
-            ],
-        );
-        if moved {
-            Some(json_deserialize(
+    } else if fields.contains_key("speed_of_sound_m_per_s") || fields.contains_key("damping_ratio")
+    {
+        Some(MaterialAcousticModel {
+            speed_of_sound_m_per_s: remove_required_f64(
+                &mut fields,
                 MATERIAL_NAME,
-                acoustic,
-                "acoustic material model",
-            )?)
-        } else {
-            None
-        }
+                "speed_of_sound_m_per_s",
+            )?,
+            damping_ratio: remove_required_f64(&mut fields, MATERIAL_NAME, "damping_ratio")?,
+        })
+    } else {
+        None
     };
     let plastic = if let Some(value) = fields.remove("plastic") {
         Some(json_deserialize(
@@ -726,10 +753,26 @@ pub(super) fn create_material_object_from_args(args: Vec<Value>) -> BuiltinResul
         None
     };
     reject_unknown_fields(MATERIAL_NAME, fields)?;
+    if mass_density_kg_per_m3.is_none()
+        && mechanical.is_none()
+        && damping.is_none()
+        && thermal.is_none()
+        && acoustic.is_none()
+        && electrical.is_none()
+        && plastic.is_none()
+    {
+        return Err(builtin_error(
+            MATERIAL_NAME,
+            &ERROR_INPUT,
+            "fea.material requires at least one explicit constitutive capability",
+        ));
+    }
     material_to_object(MaterialModel {
         material_id,
         name,
+        mass_density_kg_per_m3,
         mechanical,
+        damping,
         thermal,
         acoustic,
         electrical,
