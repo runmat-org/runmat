@@ -26,7 +26,7 @@ const EXPECTED_SUFFIXES = [
   "logical/relational", "math", "math/elementwise", "math/fft", "math/linalg", "math/linalg/factor",
   "math/reduction", "math/signal", "math/symbolic", "math/trigonometry", "objects", "objects/test_support",
   "parallel", "plotting", "plotting/animation", "plotting/axes", "plotting/colormaps",
-  "plotting/figure_lifecycle", "plotting/properties", "plotting/ui",
+  "plotting/figures", "plotting/properties", "plotting/ui",
   "stats", "stats/hist", "stats/ml", "stats/random", "stats/summary", "strings", "strings/core", "strings/queries",
   "strings/search", "strings/text_analytics", "strings/transform", "structs", "table", "table/timetable", "testing",
   "testing/plugins", "testing/runner", "timing", "timing/timer",
@@ -38,7 +38,7 @@ const REVIEWED_SHARED_TARGET_PACKAGES = [
   "datetime/components", "datetime/core", "io/archive", "io/filetext", "io/repl_fs",
   "io/tabular_reading", "logical/relational", "math/fft", "math/linalg/factor", "math/reduction", "math/signal",
   "math/symbolic", "objects/test_support", "plotting/animation", "plotting/axes", "plotting/colormaps",
-  "plotting/figure_lifecycle", "plotting/ui", "stats/hist", "stats/ml", "stats/random", "stats/summary",
+  "plotting/figures", "plotting/ui", "stats/hist", "stats/ml", "stats/random", "stats/summary",
   "strings/core", "strings/queries", "strings/search", "strings/text_analytics",
   "strings/transform", "table/timetable", "testing/plugins", "testing/runner",
 ];

@@ -59,7 +59,7 @@ const PAIRED_PRODUCT_CONFIGURATIONS = deepImmutable(validatePairedConfigurations
   paired("plotting/animation"),
   paired("plotting/axes"),
   paired("plotting/colormaps"),
-  paired("plotting/figure_lifecycle"),
+  paired("plotting/figures"),
   paired("plotting/properties"),
   paired("plotting/ui"),
   paired("stats"),
