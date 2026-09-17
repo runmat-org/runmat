@@ -644,7 +644,11 @@ fn solve_spectrum_direction(
     };
     Ok(ModalResponseSpectrumContribution {
         spectrum_id: spectrum.spectrum_id.clone(),
-        spectrum_provenance_digest: spectrum.provenance_digest.clone(),
+        spectrum_provenance_digest: spectrum
+            .ordinates
+            .numerical_digest()
+            .map_err(FeaRunError::Solve)?
+            .to_owned(),
         direction,
         damping_ratio,
         modal_combination: spectrum.modal_combination,

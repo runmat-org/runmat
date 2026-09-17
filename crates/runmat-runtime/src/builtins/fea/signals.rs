@@ -615,7 +615,7 @@ fn frozen_generator_from_value(
             "only callable-backed signals may retain a frozen generator",
         )
     })?;
-    if generator.callable.display_name() != callable.qualified_name {
+    if generator.invocation.callable.display_name() != callable.qualified_name {
         return Err(builtin_error(
             builtin,
             &ERROR_INPUT,

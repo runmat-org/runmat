@@ -40,18 +40,18 @@ pub(crate) async fn execute(
             });
         studies.push((study, study_root, meshing_index));
     }
-    let signal_execution = super::signal_materialization::execute(
+    let input_execution = super::input_materialization::execute(
         Arc::clone(&pool),
         studies
             .iter()
-            .flat_map(|(_, study, _)| study.signal_materializations.iter().cloned()),
+            .flat_map(|(_, study, _)| study.input_materializations.iter().cloned()),
         &decoded.artifact_access,
         &resources,
     );
     let meshing_execution =
         execute_shared_meshing(Arc::clone(&pool), meshing_requests, &run_id, &resources);
-    let (signal_outcomes, meshing_outcomes) = tokio::join!(signal_execution, meshing_execution);
-    let signal_outcomes = signal_outcomes?;
+    let (input_outcomes, meshing_outcomes) = tokio::join!(input_execution, meshing_execution);
+    let input_outcomes = input_outcomes?;
     let meshing_outcomes = meshing_outcomes?;
 
     if decoded.composition.fail_fast() {
@@ -95,7 +95,7 @@ pub(crate) async fn execute(
         let shared_meshing = meshing_outcomes[meshing_index].clone();
         let pool = Arc::clone(&pool);
         let resources = resources.clone();
-        let signal_outcomes = signal_outcomes.clone();
+        let input_outcomes = input_outcomes.clone();
         tasks.spawn(async move {
             let outcome = match shared_meshing {
                 SharedMeshingOutcome::Completed(completed) => {
@@ -104,7 +104,7 @@ pub(crate) async fn execute(
                         &study,
                         study_root,
                         completed,
-                        &signal_outcomes,
+                        &input_outcomes,
                         &resources,
                         super::exact_structural_study::StructuralTransientRecoveryAdmission::Unavailable,
                     )

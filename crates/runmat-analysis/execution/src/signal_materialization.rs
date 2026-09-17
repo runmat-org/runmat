@@ -22,7 +22,7 @@ const RESULT_ENVELOPE_BYTES: usize = 4096;
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct SignalGeneratorChunk {
+pub struct GeneratorChunk {
     pub ordinal: u32,
     pub first_sample: usize,
     pub sample_points: Vec<u64>,
@@ -30,7 +30,7 @@ pub struct SignalGeneratorChunk {
     pub identity: Digest,
 }
 
-impl SignalGeneratorChunk {
+impl GeneratorChunk {
     pub fn sample_points(&self) -> impl ExactSizeIterator<Item = f64> + '_ {
         self.sample_points
             .iter()
@@ -39,14 +39,14 @@ impl SignalGeneratorChunk {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SignalGeneratorChunkOutput {
+pub struct GeneratorChunkOutput {
     pub chunk_identity: Digest,
     pub value: ValuePayload,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct PlannedSignalGenerator {
-    pub chunks: Vec<SignalGeneratorChunk>,
+pub struct PlannedGenerator {
+    pub chunks: Vec<GeneratorChunk>,
     pub input_admissions: Vec<SignalInputAdmission>,
 }
 
@@ -60,8 +60,8 @@ pub fn plan_signal_generator_chunks(
     admitted: &AdmittedSignalGenerator,
     topology_entity_count: Option<usize>,
     maximum_inline_result_bytes: usize,
-    mut resolve_artifact: impl FnMut(&SignalArtifactRef) -> AnalysisBridgeResult<ResolvedSignalArtifact>,
-) -> AnalysisBridgeResult<PlannedSignalGenerator> {
+    resolve_artifact: impl FnMut(&SignalArtifactRef) -> AnalysisBridgeResult<ResolvedSignalArtifact>,
+) -> AnalysisBridgeResult<PlannedGenerator> {
     let generator = matching_generator(signal, admitted)?;
     let component_count = signal
         .shape()
@@ -71,7 +71,27 @@ pub fn plan_signal_generator_chunks(
                 "signal shape cannot be realized against the selected topology".into(),
             )
         })?;
-    let result_bytes_per_sample = component_count.checked_mul(16).ok_or_else(|| {
+    plan_generator_chunks(
+        &generator.invocation,
+        &admitted.captures,
+        admitted.materialization_identity.digest(),
+        &admitted.sample_points,
+        component_count,
+        maximum_inline_result_bytes,
+        resolve_artifact,
+    )
+}
+
+pub fn plan_generator_chunks(
+    invocation: &runmat_analysis_core::GeneratorInvocation,
+    captures: &[ValuePayload],
+    materialization_digest: Digest,
+    sample_points: &[f64],
+    values_per_sample: usize,
+    maximum_inline_result_bytes: usize,
+    mut resolve_artifact: impl FnMut(&SignalArtifactRef) -> AnalysisBridgeResult<ResolvedSignalArtifact>,
+) -> AnalysisBridgeResult<PlannedGenerator> {
+    let result_bytes_per_sample = values_per_sample.checked_mul(16).ok_or_else(|| {
         AnalysisBridgeError::Invalid("signal result width exceeds the platform bound".into())
     })?;
     let payload_budget = maximum_inline_result_bytes
@@ -89,14 +109,13 @@ pub fn plan_signal_generator_chunks(
     }
 
     let mut input_admissions = BTreeMap::new();
-    let authored_arguments = generator
+    let authored_arguments = invocation
         .arguments
         .iter()
         .map(|argument| encode_argument(argument, &mut resolve_artifact, &mut input_admissions))
         .collect::<AnalysisBridgeResult<Vec<_>>>()?;
     let mut chunks = Vec::new();
-    for (ordinal, (first_sample, points)) in admitted
-        .sample_points
+    for (ordinal, (first_sample, points)) in sample_points
         .chunks(samples_per_chunk)
         .enumerate()
         .map(|(ordinal, points)| (ordinal, (ordinal * samples_per_chunk, points)))
@@ -108,22 +127,21 @@ pub fn plan_signal_generator_chunks(
             .iter()
             .map(|point| point.to_bits())
             .collect::<Vec<_>>();
-        let mut arguments =
-            Vec::with_capacity(admitted.captures.len() + authored_arguments.len() + 1);
-        arguments.extend(admitted.captures.iter().cloned());
+        let mut arguments = Vec::with_capacity(captures.len() + authored_arguments.len() + 1);
+        arguments.extend(captures.iter().cloned());
         arguments.push(axis_argument(points)?);
         arguments.extend(authored_arguments.iter().cloned());
         for argument in &arguments {
             argument.validate(ValueLimits::default())?;
         }
         let identity = chunk_identity(
-            admitted.materialization_identity,
+            materialization_digest,
             ordinal,
             first_sample,
             &point_bits,
             &arguments,
         )?;
-        chunks.push(SignalGeneratorChunk {
+        chunks.push(GeneratorChunk {
             ordinal,
             first_sample,
             sample_points: point_bits,
@@ -136,7 +154,7 @@ pub fn plan_signal_generator_chunks(
             "signal generator produced no executable chunks".into(),
         ));
     }
-    Ok(PlannedSignalGenerator {
+    Ok(PlannedGenerator {
         chunks,
         input_admissions: input_admissions.into_values().collect(),
     })
@@ -148,8 +166,8 @@ pub fn canonicalize_signal_generator_outputs(
     admitted: &AdmittedSignalGenerator,
     topology_entity_count: Option<usize>,
     input_admissions: &[SignalInputAdmission],
-    chunks: &[SignalGeneratorChunk],
-    outputs: &[SignalGeneratorChunkOutput],
+    chunks: &[GeneratorChunk],
+    outputs: &[GeneratorChunkOutput],
 ) -> AnalysisBridgeResult<CanonicalSignalRealization> {
     validate_signal_generator_chunks(signal, admitted, chunks)?;
     let generator = matching_generator(signal, admitted)?;
@@ -235,9 +253,25 @@ pub fn canonicalize_signal_generator_outputs(
 pub fn validate_signal_generator_chunks(
     signal: &PhysicalSignal,
     admitted: &AdmittedSignalGenerator,
-    chunks: &[SignalGeneratorChunk],
+    chunks: &[GeneratorChunk],
 ) -> AnalysisBridgeResult<()> {
     let generator = matching_generator(signal, admitted)?;
+    validate_generator_chunks(
+        &generator.invocation,
+        &admitted.captures,
+        admitted.materialization_identity.digest(),
+        &admitted.sample_points,
+        chunks,
+    )
+}
+
+pub fn validate_generator_chunks(
+    invocation: &runmat_analysis_core::GeneratorInvocation,
+    captures: &[ValuePayload],
+    materialization_digest: Digest,
+    sample_points: &[f64],
+    chunks: &[GeneratorChunk],
+) -> AnalysisBridgeResult<()> {
     if chunks.is_empty() {
         return Err(AnalysisBridgeError::Invalid(
             "signal generator produced no executable chunks".into(),
@@ -251,13 +285,13 @@ pub fn validate_signal_generator_chunks(
         let end = expected_first_sample
             .checked_add(chunk.sample_points.len())
             .ok_or_else(|| AnalysisBridgeError::Invalid("signal sample count overflows".into()))?;
-        let expected_points = admitted
-            .sample_points
-            .get(expected_first_sample..end)
-            .ok_or(AnalysisBridgeError::Identity(
-                "signal chunks exceed the admitted sample axis",
-            ))?;
-        let axis_index = admitted.captures.len();
+        let expected_points =
+            sample_points
+                .get(expected_first_sample..end)
+                .ok_or(AnalysisBridgeError::Identity(
+                    "signal chunks exceed the admitted sample axis",
+                ))?;
+        let axis_index = captures.len();
         if chunk.ordinal != expected_ordinal
             || chunk.first_sample != expected_first_sample
             || chunk.sample_points
@@ -265,15 +299,15 @@ pub fn validate_signal_generator_chunks(
                     .iter()
                     .map(|point| point.to_bits())
                     .collect::<Vec<_>>()
-            || chunk.arguments.get(..axis_index) != Some(admitted.captures.as_slice())
+            || chunk.arguments.get(..axis_index) != Some(captures)
             || chunk.arguments.get(axis_index) != Some(&axis_argument(expected_points)?)
-            || chunk.arguments.len() != axis_index + generator.arguments.len() + 1
+            || chunk.arguments.len() != axis_index + invocation.arguments.len() + 1
         {
             return Err(AnalysisBridgeError::Identity(
                 "signal chunk differs from its admitted sample or argument layout",
             ));
         }
-        for (declared, encoded) in generator
+        for (declared, encoded) in invocation
             .arguments
             .iter()
             .zip(&chunk.arguments[axis_index + 1..])
@@ -281,7 +315,7 @@ pub fn validate_signal_generator_chunks(
             validate_encoded_argument(declared, encoded)?;
         }
         let identity = chunk_identity(
-            admitted.materialization_identity,
+            materialization_digest,
             chunk.ordinal,
             chunk.first_sample,
             &chunk.sample_points,
@@ -294,7 +328,7 @@ pub fn validate_signal_generator_chunks(
         }
         expected_first_sample = end;
     }
-    if expected_first_sample != admitted.sample_points.len() {
+    if expected_first_sample != sample_points.len() {
         return Err(AnalysisBridgeError::Identity(
             "signal chunks do not cover every admitted sample",
         ));
@@ -309,7 +343,7 @@ fn matching_generator<'a>(
     let generator = signal.generator().ok_or_else(|| {
         AnalysisBridgeError::Invalid("signal is not backed by a callable generator".into())
     })?;
-    if generator.callable.display_name() != admitted.callable.qualified_name {
+    if generator.invocation.callable.display_name() != admitted.callable.qualified_name {
         return Err(AnalysisBridgeError::Identity(
             "signal generator differs from its admitted callable",
         ));
@@ -418,7 +452,7 @@ fn validate_encoded_argument(
 }
 
 fn chunk_identity(
-    materialization: runmat_analysis_fea::execution::SignalMaterializationIdentity,
+    materialization_digest: Digest,
     ordinal: u32,
     first_sample: usize,
     sample_points: &[u64],
@@ -432,7 +466,7 @@ fn chunk_identity(
         CHUNK_IDENTITY_PREFIX,
         "signal-generator-chunk",
         &(
-            materialization,
+            materialization_digest,
             ordinal,
             first_sample,
             sample_points,
@@ -501,7 +535,7 @@ fn quantize_real(value: f64, precision: SignalPrecision) -> f64 {
     }
 }
 
-enum NumericValues {
+pub(crate) enum NumericValues {
     Real(Vec<f64>),
     Complex(Vec<(f64, f64)>),
 }
@@ -513,33 +547,54 @@ fn decode_chunk(
     topology_entity_count: Option<usize>,
     component_count: usize,
 ) -> AnalysisBridgeResult<NumericValues> {
+    let output = decode_numeric_output(payload)?;
+    if output.dimensions.is_empty() {
+        if sample_count == 1 && component_count == 1 {
+            return Ok(output.values);
+        }
+        return Err(AnalysisBridgeError::Invalid(
+            "scalar generator output cannot realize multiple signal values".into(),
+        ));
+    }
+    validate_result_shape(
+        &output.dimensions,
+        sample_count,
+        shape,
+        topology_entity_count,
+    )?;
+    reorder_sample_major(output.values, sample_count, component_count)
+}
+
+pub(crate) struct DecodedNumericOutput {
+    pub dimensions: Vec<u64>,
+    pub values: NumericValues,
+}
+
+pub(crate) fn decode_numeric_output(
+    payload: &ValuePayload,
+) -> AnalysisBridgeResult<DecodedNumericOutput> {
     payload.validate(ValueLimits::default())?;
     let ValuePayload::Inline(value) = payload else {
         return Err(AnalysisBridgeError::Invalid(
-            "signal chunk output must be materialized before canonicalization".into(),
+            "generator output must be materialized before canonicalization".into(),
         ));
     };
     let (dimensions, values) = match value.as_ref() {
-        InlineValue::F64Bits(bits) if sample_count == 1 && component_count == 1 => {
-            return Ok(NumericValues::Real(vec![f64::from_bits(*bits)]));
+        InlineValue::F64Bits(bits) => {
+            (Vec::new(), NumericValues::Real(vec![f64::from_bits(*bits)]))
         }
-        InlineValue::ComplexF64Bits { real, imaginary }
-            if sample_count == 1 && component_count == 1 =>
-        {
-            return Ok(NumericValues::Complex(vec![(
-                f64::from_bits(*real),
-                f64::from_bits(*imaginary),
-            )]));
-        }
-        InlineValue::Dense(dense) => (&dense.shape, decode_dense(dense)?),
+        InlineValue::ComplexF64Bits { real, imaginary } => (
+            Vec::new(),
+            NumericValues::Complex(vec![(f64::from_bits(*real), f64::from_bits(*imaginary))]),
+        ),
+        InlineValue::Dense(dense) => (dense.shape.clone(), decode_dense(dense)?),
         _ => {
             return Err(AnalysisBridgeError::Invalid(
-                "signal generator output must be a dense numeric value".into(),
+                "generator output must be a dense numeric value".into(),
             ))
         }
     };
-    validate_result_shape(dimensions, sample_count, shape, topology_entity_count)?;
-    reorder_sample_major(values, sample_count, component_count)
+    Ok(DecodedNumericOutput { dimensions, values })
 }
 
 fn validate_result_shape(
@@ -589,7 +644,7 @@ fn validate_result_shape(
     Ok(())
 }
 
-fn reorder_sample_major(
+pub(crate) fn reorder_sample_major(
     values: NumericValues,
     sample_count: usize,
     component_count: usize,
@@ -622,7 +677,7 @@ fn reorder_sample_major(
     }
 }
 
-fn decode_dense(value: &DenseValue) -> AnalysisBridgeResult<NumericValues> {
+pub(crate) fn decode_dense(value: &DenseValue) -> AnalysisBridgeResult<NumericValues> {
     let bytes = &value.little_endian_data;
     let real = match value.element_type {
         ElementType::F32 => decode_words::<4>(bytes, |word| {

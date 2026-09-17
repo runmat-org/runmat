@@ -73,7 +73,10 @@ fn spectrum(
         excitation_id: RandomExcitationId("broadband-base".into()),
         frequencies_hz,
         channels,
-        spectral_density: matrices,
+        spectral_density: runmat_analysis_core::NumericalDataSource::authored(
+            matrices,
+            "sha256:test-broadband-base",
+        ),
         convention: SpectralDensityConvention::OneSidedPerHertz,
         interpolation: RandomSpectrumInterpolation::LinearFrequency,
         extrapolation: RandomSpectrumExtrapolation::Reject,
@@ -81,7 +84,6 @@ fn spectrum(
             max_absolute_density_error: Some(0.0),
             equivalent_degrees_of_freedom: None,
         },
-        provenance_digest: "sha256:test-broadband-base".into(),
     }
 }
 
@@ -182,7 +184,7 @@ fn physical_random_response_matches_independent_dense_reference_and_round_trips(
         result
     );
     let mut substituted = excitation.clone();
-    substituted.spectral_density[0].values[0].real *= 2.0;
+    substituted.spectral_density.values_mut().unwrap()[0].values[0].real *= 2.0;
     assert!(result
         .validate_for(&summary, &basis, &substituted)
         .unwrap_err()

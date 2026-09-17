@@ -22,7 +22,6 @@ const FIELDS: &[&str] = &[
     "rigid_response",
     "construction",
     "evidence",
-    "provenance_digest",
 ];
 
 const INPUTS: [BuiltinParamDescriptor; 16] = [
@@ -180,7 +179,10 @@ pub async fn response_spectrum(args: Vec<Value>) -> BuiltinResult<Value> {
     let spectrum = ResponseSpectrum {
         spectrum_id: ResponseSpectrumId(id),
         abscissa,
-        ordinates,
+        ordinates: runmat_analysis_core::NumericalDataSource::authored(
+            ordinates,
+            provenance_digest,
+        ),
         damping: super::response_spectrum_policies::damping(BUILTIN, &damping)?,
         response: super::response_spectrum_policies::response(BUILTIN, &response)?,
         envelope: super::response_spectrum_policies::envelope(BUILTIN, &envelope)?,
@@ -202,7 +204,6 @@ pub async fn response_spectrum(args: Vec<Value>) -> BuiltinResult<Value> {
         )?,
         construction: super::response_spectrum_policies::construction(BUILTIN, &construction)?,
         evidence: super::response_spectrum_policies::evidence(BUILTIN, &evidence)?,
-        provenance_digest,
     };
     spectrum
         .validate_intrinsic()
@@ -375,6 +376,9 @@ mod tests {
         let spectra = response_spectrum_vec_from_value(BUILTIN, &decoded).expect("decode class");
         assert_eq!(spectra.len(), 1);
         assert_eq!(spectra[0].spectrum_id.0, "launch");
-        assert_eq!(spectra[0].ordinates, vec![12.0, 18.0, 9.0]);
+        assert_eq!(
+            spectra[0].resolved_ordinates().expect("authored ordinates"),
+            [12.0, 18.0, 9.0]
+        );
     }
 }

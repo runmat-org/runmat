@@ -349,16 +349,18 @@ fn callable_signal<Q>(
         shape,
         frame,
         representation: SignalRepresentation::Generator(SignalGenerator {
-            callable: GeneratorCallable::BoundFunction {
-                function: bound_function_id(builtin, &callable)?,
-                display_name: callable.qualified_name.clone(),
+            invocation: runmat_analysis_core::GeneratorInvocation {
+                callable: GeneratorCallable::BoundFunction {
+                    function: bound_function_id(builtin, &callable)?,
+                    display_name: callable.qualified_name.clone(),
+                },
+                arguments,
+                effects: GeneratorEffectPolicy::Pure,
             },
-            arguments,
             domain,
             sampling,
             interpolation,
             extrapolation,
-            effects: GeneratorEffectPolicy::Pure,
         }),
         precision: SignalPrecision::Real64,
         evidence: SignalApproximationEvidence {
@@ -580,14 +582,14 @@ mod tests {
         let runtime = runtime_signal_from_value("test", &signal).unwrap();
         let generator = runtime.signal.generator().unwrap();
         assert_eq!(
-            generator.callable,
+            generator.invocation.callable,
             GeneratorCallable::BoundFunction {
                 function: runmat_types::ProgramFunctionId(7),
                 display_name: "anonymous#7".into(),
             }
         );
         assert_eq!(
-            generator.arguments,
+            generator.invocation.arguments,
             vec![
                 GeneratorArgument::UnsignedInteger(u64::MAX),
                 GeneratorArgument::Text("pulse".into())

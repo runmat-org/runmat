@@ -103,6 +103,14 @@ async fn check_fea_file(
                     config,
                 )
                 .await?;
+                crate::commands::fea::callables::validate_numerical_generators(
+                    &path,
+                    &model.response_spectra,
+                    &model.random_excitations,
+                    cli,
+                    config,
+                )
+                .await?;
             }
             if !json {
                 let styles = presentation::stderr();
@@ -159,6 +167,14 @@ async fn check_fea_file(
                     crate::commands::fea::callables::validate_signal_generators(
                         &path,
                         &model.signals,
+                        cli,
+                        config,
+                    )
+                    .await?;
+                    crate::commands::fea::callables::validate_numerical_generators(
+                        &path,
+                        &model.response_spectra,
+                        &model.random_excitations,
                         cli,
                         config,
                     )

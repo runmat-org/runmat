@@ -114,7 +114,7 @@ impl FrozenGeneratorInventory {
                 .validate_identity()
                 .map_err(|error| builtin_error(builtin, &ERROR_INPUT, error.to_string()))?;
             if !binding.callable.owner_identity.starts_with("bound:")
-                || binding.callable.qualified_name != generator.callable.display_name()
+                || binding.callable.qualified_name != generator.invocation.callable.display_name()
             {
                 return Err(builtin_error(
                     builtin,

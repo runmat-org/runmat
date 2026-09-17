@@ -80,7 +80,7 @@ pub(super) async fn execute_for_composition(
     recovery_publisher: Option<&mut dyn StructuralTransientRecoveryPublisher>,
 ) -> NativeExecutionResult<RemoteExactStructuralStudyComposition> {
     let decoded = crate::decode_exact_structural_study_root(request, pool.as_ref())?;
-    let signal_materializations = decoded.signal_materializations.clone();
+    let input_materializations = decoded.input_materializations.clone();
     let artifact_access = decoded.artifact_access.clone();
     let meshing = super::exact_meshing::execute_for_composition(
         Arc::clone(&pool),
@@ -88,13 +88,13 @@ pub(super) async fn execute_for_composition(
         run_id,
         resources,
     );
-    let signals = super::signal_materialization::execute(
+    let inputs = super::input_materialization::execute(
         Arc::clone(&pool),
-        signal_materializations,
+        input_materializations,
         &artifact_access,
         resources,
     );
-    let (meshing, signal_outcomes) = tokio::join!(meshing, signals);
+    let (meshing, input_outcomes) = tokio::join!(meshing, inputs);
     let completed = match meshing? {
         RemoteExactMeshingComposition::Completed(completed) => completed,
         RemoteExactMeshingComposition::Terminal(outcome) => return Ok(composition(outcome)),
@@ -116,7 +116,7 @@ pub(super) async fn execute_for_composition(
         request,
         decoded,
         completed,
-        &signal_outcomes?,
+        &input_outcomes?,
         resources,
         recovery,
     ))
@@ -150,9 +150,9 @@ pub(super) async fn execute_with_completed_meshing(
     request: &ProgramExecutionRequest,
     decoded: crate::DecodedExactStructuralStudyRoot,
     completed: Box<super::exact_meshing::CompletedRemoteExactMeshing>,
-    signal_outcomes: &BTreeMap<
-        runmat_analysis_fea::execution::SignalMaterializationIdentity,
-        super::signal_materialization::RemoteSignalMaterializationOutcome,
+    input_outcomes: &BTreeMap<
+        runmat_execution::Digest,
+        super::input_materialization::RemoteInputMaterializationOutcome,
     >,
     resources: &AllocationResources,
     recovery: StructuralTransientRecoveryAdmission<'_>,
@@ -212,10 +212,10 @@ pub(super) async fn execute_with_completed_meshing(
         )?;
     let mut workloads = decoded.workloads.clone();
     let mut resolved_model = workloads.authored_model().map_err(protocol)?.clone();
-    let completed_signals = match super::signal_materialization::apply_to_model(
+    let completed_inputs = match super::input_materialization::apply_to_model(
         &mut resolved_model,
-        &decoded.signal_materializations,
-        signal_outcomes,
+        &decoded.input_materializations,
+        input_outcomes,
     ) {
         Ok(completed) => completed,
         Err(terminal) => return Ok(signal_composition(terminal)),
@@ -306,7 +306,7 @@ pub(super) async fn execute_with_completed_meshing(
                         &completed.result,
                         &region_resolution_objects,
                         crate::exact_structural_study_root::ExactStructuralAnalysisPublication::StructuralPrestressedModalFrequency {
-                            signals: &completed_signals,
+                            inputs: &completed_inputs,
                             completion: &completion,
                             unresolved_workloads_digest,
                         },
@@ -413,7 +413,7 @@ pub(super) async fn execute_with_completed_meshing(
                             &completed.result,
                             &region_resolution_objects,
                             crate::exact_structural_study_root::ExactStructuralAnalysisPublication::StructuralPrestressedFrequency {
-                                signals: &completed_signals,
+                                inputs: &completed_inputs,
                                 completion: &completion,
                                 unresolved_workloads_digest,
                             },
@@ -455,7 +455,7 @@ pub(super) async fn execute_with_completed_meshing(
                             &completed.result,
                             &region_resolution_objects,
                             crate::exact_structural_study_root::ExactStructuralAnalysisPublication::StructuralPrestressedModal {
-                                signals: &completed_signals,
+                                inputs: &completed_inputs,
                                 completion: &completion,
                                 unresolved_workloads_digest,
                             },
@@ -493,7 +493,7 @@ pub(super) async fn execute_with_completed_meshing(
                     &completed.result,
                     &region_resolution_objects,
                     crate::exact_structural_study_root::ExactStructuralAnalysisPublication::StructuralBuckling {
-                        signals: &completed_signals,
+                        inputs: &completed_inputs,
                         completion: &completion,
                         unresolved_workloads_digest,
                     },
@@ -544,7 +544,7 @@ pub(super) async fn execute_with_completed_meshing(
                     &completed.result,
                     &region_resolution_objects,
                     crate::exact_structural_study_root::ExactStructuralAnalysisPublication::StructuralModalResponseSpectrum {
-                        signals: &completed_signals,
+                        inputs: &completed_inputs,
                         completion: &completion,
                         unresolved_workloads_digest,
                     },
@@ -595,7 +595,7 @@ pub(super) async fn execute_with_completed_meshing(
                         &completed.result,
                         &region_resolution_objects,
                         crate::exact_structural_study_root::ExactStructuralAnalysisPublication::StructuralRandomResponse {
-                            signals: &completed_signals,
+                            inputs: &completed_inputs,
                             completion: &completion,
                             unresolved_workloads_digest,
                         },
@@ -656,7 +656,7 @@ pub(super) async fn execute_with_completed_meshing(
                 &completed.result,
                 &region_resolution_objects,
                 crate::exact_structural_study_root::ExactStructuralAnalysisPublication::StructuralModalTransient {
-                    signals: &completed_signals,
+                    inputs: &completed_inputs,
                     completion: &completion,
                     unresolved_workloads_digest,
                 },
@@ -702,7 +702,7 @@ pub(super) async fn execute_with_completed_meshing(
                 &completed.result,
                 &region_resolution_objects,
                 crate::exact_structural_study_root::ExactStructuralAnalysisPublication::StructuralModal {
-                    signals: &completed_signals,
+                    inputs: &completed_inputs,
                     completion: &completion,
                     unresolved_workloads_digest,
                 },
@@ -747,7 +747,7 @@ pub(super) async fn execute_with_completed_meshing(
                 &completed.result,
                 &region_resolution_objects,
                 crate::exact_structural_study_root::ExactStructuralAnalysisPublication::LinearSequence {
-                    signals: &completed_signals,
+                    inputs: &completed_inputs,
                     sequence: &sequence,
                     unresolved_workloads_digest,
                 },
@@ -811,7 +811,7 @@ pub(super) async fn execute_with_completed_meshing(
                 &completed.result,
                 &region_resolution_objects,
                 crate::exact_structural_study_root::ExactStructuralAnalysisPublication::StructuralTransient {
-                    signals: &completed_signals,
+                    inputs: &completed_inputs,
                     completion: &completion,
                     unresolved_workloads_digest,
                 },
@@ -865,7 +865,7 @@ pub(super) async fn execute_with_completed_meshing(
                 &completed.result,
                 &region_resolution_objects,
                 crate::exact_structural_study_root::ExactStructuralAnalysisPublication::StructuralFrequency {
-                    signals: &completed_signals,
+                    inputs: &completed_inputs,
                     completion: &completion,
                     unresolved_workloads_digest,
                 },
@@ -957,23 +957,23 @@ fn sequence_error_composition(
 }
 
 fn signal_composition(
-    outcome: super::signal_materialization::RemoteSignalMaterializationOutcome,
+    outcome: super::input_materialization::RemoteInputMaterializationOutcome,
 ) -> RemoteExactStructuralStudyComposition {
     match outcome {
-        super::signal_materialization::RemoteSignalMaterializationOutcome::Completed(_) => {
+        super::input_materialization::RemoteInputMaterializationOutcome::Completed(_) => {
             RemoteExactStructuralStudyComposition::Failed(
                 "completed signal materialization was used as a terminal outcome".into(),
             )
         }
-        super::signal_materialization::RemoteSignalMaterializationOutcome::Failed(message) => {
+        super::input_materialization::RemoteInputMaterializationOutcome::Failed(message) => {
             RemoteExactStructuralStudyComposition::Failed(message)
         }
-        super::signal_materialization::RemoteSignalMaterializationOutcome::Cancelled => {
+        super::input_materialization::RemoteInputMaterializationOutcome::Cancelled => {
             RemoteExactStructuralStudyComposition::Cancelled
         }
-        super::signal_materialization::RemoteSignalMaterializationOutcome::Indeterminate(
-            message,
-        ) => RemoteExactStructuralStudyComposition::Indeterminate(message),
+        super::input_materialization::RemoteInputMaterializationOutcome::Indeterminate(message) => {
+            RemoteExactStructuralStudyComposition::Indeterminate(message)
+        }
     }
 }
 

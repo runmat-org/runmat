@@ -394,7 +394,10 @@ fn random_excitation() -> RandomExcitationSpectrum {
         excitation_id: RandomExcitationId("broadband-base".into()),
         frequencies_hz: vec![1.0e-3, 100.0, 1_000.0, 10_000.0],
         channels: vec![channel],
-        spectral_density: vec![CrossPowerSpectralDensity::diagonal(&[2.5e-4]); 4],
+        spectral_density: runmat_analysis_core::NumericalDataSource::authored(
+            vec![CrossPowerSpectralDensity::diagonal(&[2.5e-4]); 4],
+            "sha256:test-broadband-base",
+        ),
         convention: SpectralDensityConvention::OneSidedPerHertz,
         interpolation: RandomSpectrumInterpolation::LinearFrequency,
         extrapolation: RandomSpectrumExtrapolation::Reject,
@@ -402,6 +405,5 @@ fn random_excitation() -> RandomExcitationSpectrum {
             max_absolute_density_error: Some(0.0),
             equivalent_degrees_of_freedom: None,
         },
-        provenance_digest: "sha256:test-broadband-base".into(),
     }
 }

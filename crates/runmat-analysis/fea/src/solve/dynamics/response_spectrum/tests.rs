@@ -90,7 +90,10 @@ fn spectrum_interpolation_respects_axis_and_extrapolation_policy() {
     assert_eq!(interpolate_spectrum(&spectrum, 0.5).unwrap(), 2.0);
 
     spectrum.abscissa = SpectrumAbscissa::PeriodSeconds(vec![0.1, 1.0]);
-    spectrum.ordinates = vec![20.0, 2.0];
+    spectrum.ordinates = runmat_analysis_core::NumericalDataSource::authored(
+        vec![20.0, 2.0],
+        "sha256:period-design",
+    );
     spectrum.interpolation = SpectrumInterpolation::LinearPeriod;
     assert!((interpolate_spectrum(&spectrum, 2.0).unwrap() - 12.0).abs() <= 1.0e-14);
 }
@@ -642,8 +645,10 @@ fn linear_field_envelope_recovers_signed_mode_before_statistical_combination() {
 
     let mut pseudo_acceleration = spectrum;
     pseudo_acceleration.response = SpectrumResponse::PseudoAcceleration;
-    pseudo_acceleration.ordinates = vec![0.002 * (std::f64::consts::TAU * frequency).powi(2)];
-    pseudo_acceleration.provenance_digest = "sha256:equivalent-pseudo-acceleration".into();
+    pseudo_acceleration.ordinates = runmat_analysis_core::NumericalDataSource::authored(
+        vec![0.002 * (std::f64::consts::TAU * frequency).powi(2)],
+        "sha256:equivalent-pseudo-acceleration",
+    );
     let pseudo_result = solve_modal_response_spectrum_with_operator(
         &summary,
         &run.basis,
@@ -997,7 +1002,7 @@ fn spectrum_fixture(
     ResponseSpectrum {
         spectrum_id: ResponseSpectrumId("design".into()),
         abscissa,
-        ordinates,
+        ordinates: runmat_analysis_core::NumericalDataSource::authored(ordinates, "sha256:design"),
         damping: SpectrumDamping::Ratio(0.05),
         response: SpectrumResponse::RelativeDisplacement,
         envelope: SpectrumEnvelope::Maximax,
@@ -1019,6 +1024,5 @@ fn spectrum_fixture(
             sampling_adequacy_ratio: 1.0,
             max_interpolation_error: None,
         },
-        provenance_digest: "sha256:design".into(),
     }
 }

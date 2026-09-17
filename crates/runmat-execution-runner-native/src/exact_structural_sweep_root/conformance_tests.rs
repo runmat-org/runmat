@@ -166,7 +166,11 @@ async fn run_exact_structural_sweep_conformance() {
             workloads: independent_structural_workloads(&workload),
         },
         analysis_accelerator_requests: Vec::new(),
-        signal_materializations: vec![signal_materialization.clone()],
+        input_materializations: vec![
+            runmat_analysis_execution::PreparedInputMaterialization::Signal(
+                signal_materialization.clone(),
+            ),
+        ],
         exact_meshing: exact_meshing.clone(),
     })
     .unwrap();
@@ -183,7 +187,11 @@ async fn run_exact_structural_sweep_conformance() {
             )]),
         },
         analysis_accelerator_requests: Vec::new(),
-        signal_materializations: vec![signal_materialization.clone()],
+        input_materializations: vec![
+            runmat_analysis_execution::PreparedInputMaterialization::Signal(
+                signal_materialization.clone(),
+            ),
+        ],
         exact_meshing: exact_meshing.clone(),
     })
     .unwrap();
@@ -200,7 +208,7 @@ async fn run_exact_structural_sweep_conformance() {
             block_plan: StructuralTransientBlockPlan::new(1).unwrap(),
         },
         analysis_accelerator_requests: Vec::new(),
-        signal_materializations: Vec::new(),
+        input_materializations: Vec::new(),
         exact_meshing: exact_meshing.clone(),
     })
     .unwrap();
@@ -217,7 +225,7 @@ async fn run_exact_structural_sweep_conformance() {
             workload: Box::new(box_structural_frequency_workload()),
         },
         analysis_accelerator_requests: Vec::new(),
-        signal_materializations: Vec::new(),
+        input_materializations: Vec::new(),
         exact_meshing: exact_meshing.clone(),
     })
     .unwrap();
@@ -234,7 +242,7 @@ async fn run_exact_structural_sweep_conformance() {
             workload: Box::new(box_structural_modal_workload()),
         },
         analysis_accelerator_requests: Vec::new(),
-        signal_materializations: Vec::new(),
+        input_materializations: Vec::new(),
         exact_meshing: exact_meshing.clone(),
     })
     .unwrap();
@@ -250,7 +258,7 @@ async fn run_exact_structural_sweep_conformance() {
             geometry_source_digest: source_digest,
             workloads: box_modal_transient_workloads(),
             analysis_accelerator_requests: Vec::new(),
-            signal_materializations: Vec::new(),
+            input_materializations: Vec::new(),
             exact_meshing: exact_meshing.clone(),
         })
         .unwrap();
@@ -266,7 +274,7 @@ async fn run_exact_structural_sweep_conformance() {
             geometry_source_digest: source_digest,
             workloads: box_buckling_workloads(),
             analysis_accelerator_requests: Vec::new(),
-            signal_materializations: Vec::new(),
+            input_materializations: Vec::new(),
             exact_meshing: exact_meshing.clone(),
         })
         .unwrap(),
@@ -289,7 +297,9 @@ async fn run_exact_structural_sweep_conformance() {
             )]),
         },
         analysis_accelerator_requests: Vec::new(),
-        signal_materializations: vec![signal_materialization],
+        input_materializations: vec![
+            runmat_analysis_execution::PreparedInputMaterialization::Signal(signal_materialization),
+        ],
         exact_meshing: exact_meshing.clone(),
     })
     .unwrap();
@@ -504,9 +514,12 @@ async fn run_exact_structural_sweep_conformance() {
         )
         .is_err());
         let mut wrong_signal = expectation.clone();
-        wrong_signal.studies[0].signal_materializations[0]
-            .admitted
-            .materialization_identity = SignalMaterializationIdentity::new(
+        let runmat_analysis_execution::InputMaterializationExpectation::Signal(signal) =
+            &mut wrong_signal.studies[0].input_materializations[0]
+        else {
+            panic!("expected signal materialization");
+        };
+        signal.admitted.materialization_identity = SignalMaterializationIdentity::new(
             Digest::sha256(b"substituted signal"),
             None,
             Digest::sha256(b"substituted sampling"),
@@ -1101,19 +1114,22 @@ async fn generated_box_workload(
     )
     .unwrap();
     force.representation = SignalRepresentation::Generator(SignalGenerator {
-        callable: runmat_analysis_core::GeneratorCallable::ProjectFunction {
-            qualified_name: "loads.pulse".into(),
-        },
-        arguments: vec![runmat_analysis_core::GeneratorArgument::Artifact(
-            runmat_analysis_core::SignalArtifactRef {
-                artifact_id: "magnitude".into(),
-                content_digest: immutable_object.reference.logical_digest.to_string(),
-                schema: "runmat-value-payload-v1".into(),
-                domain: runmat_analysis_core::SignalArtifactDomain::Constant,
-                topology_digest: None,
-                sample_count: 1,
+        invocation: runmat_analysis_core::GeneratorInvocation {
+            callable: runmat_analysis_core::GeneratorCallable::ProjectFunction {
+                qualified_name: "loads.pulse".into(),
             },
-        )],
+            arguments: vec![runmat_analysis_core::GeneratorArgument::Artifact(
+                runmat_analysis_core::SignalArtifactRef {
+                    artifact_id: "magnitude".into(),
+                    content_digest: immutable_object.reference.logical_digest.to_string(),
+                    schema: "runmat-value-payload-v1".into(),
+                    domain: runmat_analysis_core::SignalArtifactDomain::Constant,
+                    topology_digest: None,
+                    sample_count: 1,
+                },
+            )],
+            effects: GeneratorEffectPolicy::DeclaredImmutableArtifacts,
+        },
         domain: GeneratorDomain::TimeSeconds,
         sampling: SignalSamplingPolicy::Uniform {
             start: 0.0,
@@ -1122,7 +1138,6 @@ async fn generated_box_workload(
         },
         interpolation: SignalInterpolation::Linear,
         extrapolation: SignalExtrapolation::Reject,
-        effects: GeneratorEffectPolicy::DeclaredImmutableArtifacts,
     });
     force.evidence.sample_count = 0;
     // The executable envelope is currently a static structural solve. Keep its referenced force
@@ -1380,7 +1395,10 @@ pub(crate) fn box_modal_response_spectrum_workloads(
     let spectrum = ResponseSpectrum {
         spectrum_id: ResponseSpectrumId("box-global-x".into()),
         abscissa: SpectrumAbscissa::FrequencyHertz(vec![1.0e-3, 1.0e8]),
-        ordinates: vec![1.0e-3, 1.0e-3],
+        ordinates: runmat_analysis_core::NumericalDataSource::authored(
+            vec![1.0e-3, 1.0e-3],
+            "sha256:box-global-x",
+        ),
         damping: SpectrumDamping::Ratio(0.05),
         response: SpectrumResponse::RelativeDisplacement,
         envelope: SpectrumEnvelope::Maximax,
@@ -1402,7 +1420,6 @@ pub(crate) fn box_modal_response_spectrum_workloads(
             sampling_adequacy_ratio: 1.0,
             max_interpolation_error: None,
         },
-        provenance_digest: "sha256:box-global-x".into(),
     };
     let response_step = ProcedureStep::structural_modal_response_spectrum(
         "spectrum",
@@ -1482,10 +1499,10 @@ pub(crate) fn box_random_response_workloads() -> runmat_analysis_execution::Stru
                 vector: [1.0, 0.0, 0.0],
             },
         }],
-        spectral_density: vec![
-            runmat_analysis_core::CrossPowerSpectralDensity::diagonal(&[2.5e-4]);
-            4
-        ],
+        spectral_density: runmat_analysis_core::NumericalDataSource::authored(
+            vec![runmat_analysis_core::CrossPowerSpectralDensity::diagonal(&[2.5e-4]); 4],
+            "sha256:box-broadband-x",
+        ),
         convention: runmat_analysis_core::SpectralDensityConvention::OneSidedPerHertz,
         interpolation: runmat_analysis_core::RandomSpectrumInterpolation::LinearFrequency,
         extrapolation: runmat_analysis_core::RandomSpectrumExtrapolation::Reject,
@@ -1493,7 +1510,6 @@ pub(crate) fn box_random_response_workloads() -> runmat_analysis_execution::Stru
             max_absolute_density_error: Some(0.0),
             equivalent_degrees_of_freedom: None,
         },
-        provenance_digest: "sha256:box-broadband-x".into(),
     };
     let response_step = ProcedureStep::structural_random_response(
         "random",

@@ -1490,7 +1490,10 @@ fn sample_response_spectrum_study_spec(geometry_sha256: String) -> AnalysisStudy
     let spectrum = runmat_analysis_core::ResponseSpectrum {
         spectrum_id: runmat_analysis_core::ResponseSpectrumId("spectrum_x".into()),
         abscissa: runmat_analysis_core::SpectrumAbscissa::FrequencyHertz(vec![0.1, 100.0]),
-        ordinates: vec![1.0, 1.0],
+        ordinates: runmat_analysis_core::NumericalDataSource::authored(
+            vec![1.0, 1.0],
+            "sha256:response-spectrum-intent",
+        ),
         damping: runmat_analysis_core::SpectrumDamping::Ratio(0.05),
         response: runmat_analysis_core::SpectrumResponse::RelativeDisplacement,
         envelope: runmat_analysis_core::SpectrumEnvelope::Maximax,
@@ -1512,7 +1515,6 @@ fn sample_response_spectrum_study_spec(geometry_sha256: String) -> AnalysisStudy
             sampling_adequacy_ratio: 1.0,
             max_interpolation_error: None,
         },
-        provenance_digest: "sha256:response-spectrum-intent".into(),
     };
     let response = ProcedureStep::structural_modal_response_spectrum(
         "step_response",
@@ -1588,10 +1590,10 @@ fn sample_random_response_study_spec(geometry_sha256: String) -> AnalysisStudySp
                 vector: [1.0, 0.0, 0.0],
             },
         }],
-        spectral_density: vec![
-            runmat_analysis_core::CrossPowerSpectralDensity::diagonal(&[1.0e-4]);
-            3
-        ],
+        spectral_density: runmat_analysis_core::NumericalDataSource::authored(
+            vec![runmat_analysis_core::CrossPowerSpectralDensity::diagonal(&[1.0e-4]); 3],
+            "sha256:random-response-intent",
+        ),
         convention: runmat_analysis_core::SpectralDensityConvention::OneSidedPerHertz,
         interpolation: runmat_analysis_core::RandomSpectrumInterpolation::LinearFrequency,
         extrapolation: runmat_analysis_core::RandomSpectrumExtrapolation::Reject,
@@ -1599,7 +1601,6 @@ fn sample_random_response_study_spec(geometry_sha256: String) -> AnalysisStudySp
             max_absolute_density_error: Some(0.0),
             equivalent_degrees_of_freedom: None,
         },
-        provenance_digest: "sha256:random-response-intent".into(),
     };
     let response = ProcedureStep::structural_random_response(
         "step_response",

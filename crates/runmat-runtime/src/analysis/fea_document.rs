@@ -1111,7 +1111,45 @@ fn resolve_model(
     if data.domains.cfd.is_some() {
         model.cfd = data.domains.cfd.clone();
     }
+    validate_document_numerical_sources(&model)?;
     Ok(Some(model))
+}
+
+fn validate_document_numerical_sources(model: &AnalysisModel) -> Result<(), String> {
+    for spectrum in &model.response_spectra {
+        validate_document_numerical_source(
+            &spectrum.ordinates,
+            &format!("response spectrum `{}`", spectrum.spectrum_id.0),
+        )?;
+    }
+    for spectrum in &model.random_excitations {
+        validate_document_numerical_source(
+            &spectrum.spectral_density,
+            &format!("random excitation `{}`", spectrum.excitation_id.0),
+        )?;
+    }
+    Ok(())
+}
+
+fn validate_document_numerical_source<T>(
+    source: &runmat_analysis_core::NumericalDataSource<T>,
+    label: &str,
+) -> Result<(), String> {
+    match source {
+        runmat_analysis_core::NumericalDataSource::Authored { .. }
+        | runmat_analysis_core::NumericalDataSource::Imported { .. } => Ok(()),
+        runmat_analysis_core::NumericalDataSource::Generator(invocation)
+            if matches!(
+                &invocation.callable,
+                runmat_analysis_core::GeneratorCallable::ProjectFunction { .. }
+            ) => Ok(()),
+        runmat_analysis_core::NumericalDataSource::Generator(_) => Err(format!(
+            "{label} uses a runtime-bound callable; .fea generators must name a project function"
+        )),
+        runmat_analysis_core::NumericalDataSource::Materialized { .. } => Err(format!(
+            "{label} contains a materialized generator result; .fea documents may author or import values, or declare a project-function generator"
+        )),
+    }
 }
 
 fn resolve_material(id: &str, material: &FeaMaterialDocument) -> MaterialModel {
@@ -1937,17 +1975,20 @@ mod tests {
             shape: SignalShape::Scalar,
             frame: Some(CoordinateFrame::Global),
             representation: SignalRepresentation::Generator(SignalGenerator {
-                callable: runmat_analysis_core::GeneratorCallable::ProjectFunction {
-                    qualified_name: "loads.scaled_force".into(),
+                invocation: runmat_analysis_core::GeneratorInvocation {
+                    callable: runmat_analysis_core::GeneratorCallable::ProjectFunction {
+                        qualified_name: "loads.scaled_force".into(),
+                    },
+                    arguments: vec![GeneratorArgument::Artifact(SignalArtifactRef {
+                        artifact_id: "magnitudes".into(),
+                        content_digest: logical_digest.to_string(),
+                        schema: runmat_execution::value::EXTERNALIZED_VALUE_SCHEMA.into(),
+                        domain: SignalArtifactDomain::Constant,
+                        topology_digest: None,
+                        sample_count: 2,
+                    })],
+                    effects: GeneratorEffectPolicy::DeclaredImmutableArtifacts,
                 },
-                arguments: vec![GeneratorArgument::Artifact(SignalArtifactRef {
-                    artifact_id: "magnitudes".into(),
-                    content_digest: logical_digest.to_string(),
-                    schema: runmat_execution::value::EXTERNALIZED_VALUE_SCHEMA.into(),
-                    domain: SignalArtifactDomain::Constant,
-                    topology_digest: None,
-                    sample_count: 2,
-                })],
                 domain: GeneratorDomain::TimeSeconds,
                 sampling: SignalSamplingPolicy::Uniform {
                     start: 0.0,
@@ -1956,7 +1997,6 @@ mod tests {
                 },
                 interpolation: SignalInterpolation::Linear,
                 extrapolation: SignalExtrapolation::Reject,
-                effects: GeneratorEffectPolicy::DeclaredImmutableArtifacts,
             }),
             precision: SignalPrecision::Real64,
             evidence: SignalApproximationEvidence {
@@ -2019,7 +2059,7 @@ mod tests {
         let SignalRepresentation::Generator(generator) = &mut signal.representation else {
             panic!("expected generated signal")
         };
-        let GeneratorArgument::Artifact(artifact) = &mut generator.arguments[0] else {
+        let GeneratorArgument::Artifact(artifact) = &mut generator.invocation.arguments[0] else {
             panic!("expected immutable artifact argument")
         };
         artifact.schema = "application-specific-value".into();
@@ -2035,7 +2075,7 @@ mod tests {
         let SignalRepresentation::Generator(generator) = &mut signal.representation else {
             unreachable!()
         };
-        let GeneratorArgument::Artifact(artifact) = &mut generator.arguments[0] else {
+        let GeneratorArgument::Artifact(artifact) = &mut generator.invocation.arguments[0] else {
             unreachable!()
         };
         artifact.schema = runmat_execution::value::EXTERNALIZED_VALUE_SCHEMA.into();
@@ -2166,6 +2206,54 @@ mod tests {
         assert!(parse_raw_fea_value(document)
             .expect_err("hidden scaffold switch must be rejected")
             .contains("unknown field `defaults`"));
+    }
+
+    #[test]
+    fn fea_numerical_generators_require_inspectable_project_functions() {
+        let invocation = runmat_analysis_core::GeneratorInvocation {
+            callable: runmat_analysis_core::GeneratorCallable::ProjectFunction {
+                qualified_name: "spectra.design_input".into(),
+            },
+            arguments: Vec::new(),
+            effects: GeneratorEffectPolicy::Pure,
+        };
+        let source = runmat_analysis_core::NumericalDataSource::<Vec<f64>>::Generator(invocation);
+        validate_document_numerical_source(&source, "response spectrum `design`")
+            .expect("named project functions are portable .fea sources");
+
+        let bound = runmat_analysis_core::NumericalDataSource::<Vec<f64>>::Generator(
+            runmat_analysis_core::GeneratorInvocation {
+                callable: runmat_analysis_core::GeneratorCallable::BoundFunction {
+                    function: runmat_types::ProgramFunctionId(7),
+                    display_name: "anonymous spectrum closure".into(),
+                },
+                arguments: Vec::new(),
+                effects: GeneratorEffectPolicy::Pure,
+            },
+        );
+        assert!(
+            validate_document_numerical_source(&bound, "response spectrum `design`")
+                .expect_err("runtime-only closure identities cannot be serialized into .fea")
+                .contains("must name a project function")
+        );
+    }
+
+    #[test]
+    fn fea_documents_cannot_claim_pre_materialized_generator_results() {
+        let source = runmat_analysis_core::NumericalDataSource::Materialized {
+            values: vec![1.0_f64],
+            provenance: runmat_analysis_core::GeneratorProvenance {
+                project_revision: "revision".into(),
+                callable_id: "spectra.design_input".into(),
+                frozen_input_digest: "sha256:inputs".into(),
+            },
+            content_digest: "sha256:values".into(),
+        };
+        assert!(
+            validate_document_numerical_source(&source, "response spectrum `design`")
+                .expect_err("materialized values are execution evidence, not authored input")
+                .contains("contains a materialized generator result")
+        );
     }
 
     #[test]

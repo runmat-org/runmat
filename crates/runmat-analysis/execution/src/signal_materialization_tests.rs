@@ -36,10 +36,13 @@ fn signal(shape: SignalShape, precision: SignalPrecision) -> PhysicalSignal {
         shape,
         frame: None,
         representation: SignalRepresentation::Generator(SignalGenerator {
-            callable: runmat_analysis_core::GeneratorCallable::ProjectFunction {
-                qualified_name: "loads.pulse".into(),
+            invocation: runmat_analysis_core::GeneratorInvocation {
+                callable: runmat_analysis_core::GeneratorCallable::ProjectFunction {
+                    qualified_name: "loads.pulse".into(),
+                },
+                arguments: vec![GeneratorArgument::Real(2.0)],
+                effects: GeneratorEffectPolicy::Pure,
             },
-            arguments: vec![GeneratorArgument::Real(2.0)],
             domain: GeneratorDomain::TimeSeconds,
             sampling: SignalSamplingPolicy::Uniform {
                 start: 0.0,
@@ -48,7 +51,6 @@ fn signal(shape: SignalShape, precision: SignalPrecision) -> PhysicalSignal {
             },
             interpolation: SignalInterpolation::Linear,
             extrapolation: SignalExtrapolation::Reject,
-            effects: GeneratorEffectPolicy::Pure,
         }),
         precision,
         evidence: SignalApproximationEvidence {
@@ -132,8 +134,8 @@ fn moved_real64_receipt(shape: Vec<Option<usize>>) -> ValueAdmissionReceipt {
     }
 }
 
-fn output(chunk: &SignalGeneratorChunk, value: ValuePayload) -> SignalGeneratorChunkOutput {
-    SignalGeneratorChunkOutput {
+fn output(chunk: &GeneratorChunk, value: ValuePayload) -> GeneratorChunkOutput {
+    GeneratorChunkOutput {
         chunk_identity: chunk.identity,
         value,
     }
@@ -368,7 +370,7 @@ fn artifact_authority_does_not_change_logical_chunk_identity() {
         },
         _ => unreachable!(),
     };
-    generator.arguments = vec![GeneratorArgument::Artifact(SignalArtifactRef {
+    generator.invocation.arguments = vec![GeneratorArgument::Artifact(SignalArtifactRef {
         artifact_id: "immutable-vector".into(),
         content_digest: first.reference.logical_digest.to_string(),
         schema: "runmat-value-payload-v1".into(),
@@ -376,7 +378,7 @@ fn artifact_authority_does_not_change_logical_chunk_identity() {
         topology_digest: None,
         sample_count: 1,
     })];
-    generator.effects = GeneratorEffectPolicy::DeclaredImmutableArtifacts;
+    generator.invocation.effects = GeneratorEffectPolicy::DeclaredImmutableArtifacts;
 
     let first_chunks = plan_signal_generator_chunks(
         &signal,

@@ -481,7 +481,10 @@ fn random_excitation() -> RandomExcitationSpectrum {
                 vector: [1.0, 0.0, 0.0],
             },
         }],
-        spectral_density: vec![CrossPowerSpectralDensity::diagonal(&[2.5e-4]); 4],
+        spectral_density: runmat_analysis_core::NumericalDataSource::authored(
+            vec![CrossPowerSpectralDensity::diagonal(&[2.5e-4]); 4],
+            "sha256:native-broadband-base",
+        ),
         convention: SpectralDensityConvention::OneSidedPerHertz,
         interpolation: RandomSpectrumInterpolation::LinearFrequency,
         extrapolation: RandomSpectrumExtrapolation::Reject,
@@ -489,7 +492,6 @@ fn random_excitation() -> RandomExcitationSpectrum {
             max_absolute_density_error: Some(0.0),
             equivalent_degrees_of_freedom: None,
         },
-        provenance_digest: "sha256:native-broadband-base".into(),
     }
 }
 

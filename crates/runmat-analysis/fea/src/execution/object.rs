@@ -22,6 +22,7 @@ pub enum AnalysisNumericalObjectKind {
     Mesh,
     Signal,
     ResponseSpectrum,
+    RandomSpectrum,
     RealizedExcitation,
     TopologyResolution,
     SolverInvocation,

@@ -576,13 +576,130 @@ pub struct GeneratorProvenance {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SignalGenerator {
-    pub callable: GeneratorCallable,
-    pub arguments: Vec<GeneratorArgument>,
+    pub invocation: GeneratorInvocation,
     pub domain: GeneratorDomain,
     pub sampling: SignalSamplingPolicy,
     pub interpolation: SignalInterpolation,
     pub extrapolation: SignalExtrapolation,
+}
+
+/// A portable invocation of one frozen RunMat function.
+///
+/// The invocation is independent of the numerical object that consumes its output. Signal,
+/// response-spectrum, and random-spectrum authoring add their own domain, shape, interpolation,
+/// and evidence contracts around this shared callable boundary.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GeneratorInvocation {
+    pub callable: GeneratorCallable,
+    pub arguments: Vec<GeneratorArgument>,
     pub effects: GeneratorEffectPolicy,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NumericalDataSource<T> {
+    Authored {
+        values: T,
+        provenance_digest: String,
+    },
+    Imported {
+        values: T,
+        source_digest: String,
+    },
+    Generator(GeneratorInvocation),
+    Materialized {
+        values: T,
+        provenance: GeneratorProvenance,
+        content_digest: String,
+    },
+}
+
+impl<T> NumericalDataSource<T> {
+    pub fn authored(values: T, provenance_digest: impl Into<String>) -> Self {
+        Self::Authored {
+            values,
+            provenance_digest: provenance_digest.into(),
+        }
+    }
+
+    pub fn imported(values: T, source_digest: impl Into<String>) -> Self {
+        Self::Imported {
+            values,
+            source_digest: source_digest.into(),
+        }
+    }
+
+    pub fn values(&self) -> Option<&T> {
+        match self {
+            Self::Authored { values, .. }
+            | Self::Imported { values, .. }
+            | Self::Materialized { values, .. } => Some(values),
+            Self::Generator(_) => None,
+        }
+    }
+
+    pub fn values_mut(&mut self) -> Option<&mut T> {
+        match self {
+            Self::Authored { values, .. }
+            | Self::Imported { values, .. }
+            | Self::Materialized { values, .. } => Some(values),
+            Self::Generator(_) => None,
+        }
+    }
+
+    pub fn generator(&self) -> Option<&GeneratorInvocation> {
+        match self {
+            Self::Generator(generator) => Some(generator),
+            Self::Authored { .. } | Self::Imported { .. } | Self::Materialized { .. } => None,
+        }
+    }
+
+    /// Stable identity admitted for this numerical realization.
+    ///
+    /// Authored and imported sources retain their admitted provenance/source digest. Generator
+    /// declarations have no realization identity until execution has produced and validated their
+    /// values; materialized generators use the digest of their canonical numerical content rather
+    /// than the identity of the callable that happened to produce it.
+    pub fn numerical_digest(&self) -> Result<&str, String> {
+        match self {
+            Self::Authored {
+                provenance_digest, ..
+            } => Ok(provenance_digest),
+            Self::Imported { source_digest, .. } => Ok(source_digest),
+            Self::Materialized { content_digest, .. } => Ok(content_digest),
+            Self::Generator(_) => Err(
+                "generated numerical data must be materialized before its values have an identity"
+                    .into(),
+            ),
+        }
+    }
+
+    pub fn validate_provenance(&self) -> Result<(), String> {
+        if let Self::Generator(generator) = self {
+            return crate::validate_signals::validate_generator_invocation(generator);
+        }
+        let valid = match self {
+            Self::Authored {
+                provenance_digest, ..
+            } => !provenance_digest.trim().is_empty(),
+            Self::Imported { source_digest, .. } => !source_digest.trim().is_empty(),
+            Self::Generator(_) => unreachable!("generator returned before provenance validation"),
+            Self::Materialized {
+                provenance,
+                content_digest,
+                ..
+            } => {
+                !provenance.project_revision.trim().is_empty()
+                    && !provenance.callable_id.trim().is_empty()
+                    && !provenance.frozen_input_digest.trim().is_empty()
+                    && !content_digest.trim().is_empty()
+            }
+        };
+        valid
+            .then_some(())
+            .ok_or_else(|| "numerical data-source provenance must be non-empty".into())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

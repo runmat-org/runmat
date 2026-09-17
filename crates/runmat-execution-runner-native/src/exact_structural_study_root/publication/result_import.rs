@@ -54,7 +54,7 @@ pub fn import_exact_structural_study_result(
         .meshing_objects
         .iter()
         .chain(&publication.region_resolution_objects)
-        .chain(&publication.signal_objects)
+        .chain(&publication.input_objects)
         .chain(publication.analysis.objects())
         .cloned()
         .chain(std::iter::once((**root).clone()))
@@ -121,27 +121,44 @@ pub fn import_exact_structural_study_result(
             "topology-region resolution differs from the returned geometry or mesh",
         ));
     }
-    if publication.signal_roots.len() != expected.signal_materializations.len() {
+    if publication.input_roots.len() != expected.input_materializations.len() {
         return Err(protocol(
-            "whole-study signal result roots differ from the expected materializations",
+            "whole-study input result roots differ from the expected materializations",
         ));
     }
     let mut materialized_signals = BTreeMap::new();
-    let mut admitted_signal_objects = Vec::new();
+    let mut materialized_responses = BTreeMap::new();
+    let mut materialized_random = BTreeMap::new();
+    let mut admitted_input_objects = Vec::new();
     for (root, prepared) in publication
-        .signal_roots
+        .input_roots
         .iter()
-        .zip(&expected.signal_materializations)
+        .zip(&expected.input_materializations)
     {
         let manifest =
             runmat_analysis_fea::execution::AnalysisObjectManifest::from_canonical_bytes(&read(
                 source, root,
             )?)
             .map_err(protocol)?;
+        let kind = match prepared {
+            runmat_analysis_execution::InputMaterializationExpectation::Signal(_) => {
+                AnalysisNumericalObjectKind::Signal
+            }
+            runmat_analysis_execution::InputMaterializationExpectation::Numerical(expected) => {
+                match &expected.authored {
+                    runmat_analysis_execution::NumericalGeneratorSource::ResponseSpectrum(_) => {
+                        AnalysisNumericalObjectKind::ResponseSpectrum
+                    }
+                    runmat_analysis_execution::NumericalGeneratorSource::RandomSpectrum(_) => {
+                        AnalysisNumericalObjectKind::RandomSpectrum
+                    }
+                }
+            }
+        };
         let objects = runmat_analysis_execution::import_analysis_objects(
             source,
             root,
-            AnalysisNumericalObjectKind::Signal,
+            kind,
             manifest.logical_identity,
             manifest.payload_digest,
             &expected.artifact_access,
@@ -152,32 +169,94 @@ pub fn import_exact_structural_study_result(
             .references(&expected.artifact_access, ValueRefKind::ResultObject)
             .map_err(protocol)?;
         for reference in references {
-            if !publication.signal_objects.contains(&reference) {
+            if !publication.input_objects.contains(&reference) {
                 return Err(protocol(
-                    "signal realization closure contains an undeclared object",
+                    "input materialization closure contains an undeclared object",
                 ));
             }
-            admitted_signal_objects.push(reference);
+            admitted_input_objects.push(reference);
         }
-        let realization =
-            runmat_analysis_fea::execution::CanonicalSignalRealization::from_canonical_bytes(
-                &objects.payload(),
-            )
-            .map_err(protocol)?;
-        let signal = runmat_analysis_execution::materialize_signal_for_solver(
-            &prepared.authored,
-            &prepared.admitted,
-            &realization,
-        )
-        .map_err(protocol)?;
-        materialized_signals.insert(prepared.authored.signal_id().clone(), signal);
+        match prepared {
+            runmat_analysis_execution::InputMaterializationExpectation::Signal(prepared) => {
+                let realization =
+                    runmat_analysis_fea::execution::CanonicalSignalRealization::from_canonical_bytes(
+                        &objects.payload(),
+                    )
+                    .map_err(protocol)?;
+                let signal = runmat_analysis_execution::materialize_signal_for_solver(
+                    &prepared.authored,
+                    &prepared.admitted,
+                    &realization,
+                )
+                .map_err(protocol)?;
+                materialized_signals.insert(prepared.authored.signal_id().clone(), signal);
+            }
+            runmat_analysis_execution::InputMaterializationExpectation::Numerical(prepared) => {
+                match &prepared.authored {
+                    runmat_analysis_execution::NumericalGeneratorSource::ResponseSpectrum(
+                        authored,
+                    ) => {
+                        let spectrum =
+                            runmat_analysis_execution::decode_materialized_response_spectrum(
+                                &objects.payload(),
+                            )
+                            .map_err(protocol)?;
+                        let mut expected_spectrum = authored.clone();
+                        expected_spectrum.ordinates = spectrum.ordinates.clone();
+                        if spectrum != expected_spectrum
+                            || !matches!(
+                                &spectrum.ordinates,
+                                runmat_analysis_core::NumericalDataSource::Materialized {
+                                    provenance,
+                                    content_digest,
+                                    ..
+                                } if provenance == &prepared.admitted.invocation.provenance
+                                    && content_digest == &manifest.logical_identity.to_string()
+                            )
+                        {
+                            return Err(protocol(
+                                "materialized response spectrum differs from its admission",
+                            ));
+                        }
+                        materialized_responses.insert(spectrum.spectrum_id.clone(), spectrum);
+                    }
+                    runmat_analysis_execution::NumericalGeneratorSource::RandomSpectrum(
+                        authored,
+                    ) => {
+                        let spectrum =
+                            runmat_analysis_execution::decode_materialized_random_spectrum(
+                                &objects.payload(),
+                            )
+                            .map_err(protocol)?;
+                        let mut expected_spectrum = authored.clone();
+                        expected_spectrum.spectral_density = spectrum.spectral_density.clone();
+                        if spectrum != expected_spectrum
+                            || !matches!(
+                                &spectrum.spectral_density,
+                                runmat_analysis_core::NumericalDataSource::Materialized {
+                                    provenance,
+                                    content_digest,
+                                    ..
+                                } if provenance == &prepared.admitted.invocation.provenance
+                                    && content_digest == &manifest.logical_identity.to_string()
+                            )
+                        {
+                            return Err(protocol(
+                                "materialized random spectrum differs from its admission",
+                            ));
+                        }
+                        materialized_random.insert(spectrum.excitation_id.clone(), spectrum);
+                    }
+                }
+            }
+        }
     }
-    let admitted_signal_objects = unique_references(admitted_signal_objects)?;
-    if reference_inventory(&admitted_signal_objects)?
-        != reference_inventory(&publication.signal_objects)?
+    let admitted_input_objects = unique_references(admitted_input_objects)?;
+    if reference_inventory(&admitted_input_objects)?
+        != reference_inventory(&publication.input_objects)?
     {
         return Err(protocol(
-            "signal realization inventory contains unreferenced objects",
+            "input materialization inventory contains unreferenced objects",
         ));
     }
     let aliases =
@@ -205,6 +284,29 @@ pub fn import_exact_structural_study_result(
     {
         return Err(protocol(
             "whole-study result retained an unmaterialized signal generator",
+        ));
+    }
+    for spectrum in &mut resolved_model.response_spectra {
+        if let Some(materialized) = materialized_responses.get(&spectrum.spectrum_id) {
+            *spectrum = materialized.clone();
+        }
+    }
+    for spectrum in &mut resolved_model.random_excitations {
+        if let Some(materialized) = materialized_random.get(&spectrum.excitation_id) {
+            *spectrum = materialized.clone();
+        }
+    }
+    if resolved_model
+        .response_spectra
+        .iter()
+        .any(|spectrum| spectrum.ordinates.generator().is_some())
+        || resolved_model
+            .random_excitations
+            .iter()
+            .any(|spectrum| spectrum.spectral_density.generator().is_some())
+    {
+        return Err(protocol(
+            "whole-study result retained an unmaterialized spectral generator",
         ));
     }
     resolved_model =

@@ -10,10 +10,10 @@ use runmat_analysis_core::{
     SignalSamplingPolicy, SignalShape, SignalValue, TabulatedSignal,
 };
 use runmat_analysis_execution::{
-    admit_callable_signal_generator, build_signal_generator_task_submission,
+    admit_callable_signal_generator, build_generator_task_submission,
     canonical_tabulated_signal_content_digest, canonicalize_signal_generator_outputs,
     materialize_signal_for_solver, plan_signal_generator_chunks, prepare_signal_materialization,
-    PreparedSignalMaterialization, SignalGeneratorChunkOutput, SignalGeneratorExecutionContext,
+    GeneratorChunkOutput, GeneratorExecutionContext, PreparedSignalMaterialization,
 };
 use runmat_analysis_fea::execution::CanonicalSignalRealization;
 use runmat_execution::resource::{Capability, ResourceInventory, ResourceRequest};
@@ -124,7 +124,7 @@ impl SignalFixture {
         let SignalRepresentation::Generator(generator) = &mut signal.representation else {
             unreachable!("the conformance fixture authors a generated signal")
         };
-        generator.callable = runmat_analysis_core::GeneratorCallable::BoundFunction {
+        generator.invocation.callable = runmat_analysis_core::GeneratorCallable::BoundFunction {
             function: function.function,
             display_name: "loads.pulse".into(),
         };
@@ -219,7 +219,7 @@ impl SignalFixture {
             let success = super::wait_for_native_task(task).await;
             assert!(success.result_objects.is_empty());
             assert_eq!(success.outputs.len(), 1);
-            outputs.push(SignalGeneratorChunkOutput {
+            outputs.push(GeneratorChunkOutput {
                 chunk_identity: chunk.plan.identity,
                 value: success.outputs[0].clone(),
             });
@@ -388,7 +388,7 @@ impl SignalFixture {
                     .unwrap();
                 assert!(success.result_objects.is_empty());
                 assert_eq!(success.outputs.len(), 1);
-                outputs.push(SignalGeneratorChunkOutput {
+                outputs.push(GeneratorChunkOutput {
                     chunk_identity: chunk.plan.identity,
                     value: success.outputs[0].clone(),
                 });
@@ -401,7 +401,7 @@ impl SignalFixture {
         self.canonicalize(outputs)
     }
 
-    fn canonicalize(&self, outputs: Vec<SignalGeneratorChunkOutput>) -> CanonicalSignalRealization {
+    fn canonicalize(&self, outputs: Vec<GeneratorChunkOutput>) -> CanonicalSignalRealization {
         canonicalize_signal_generator_outputs(
             &self.prepared.authored,
             &self.prepared.admitted,
@@ -422,15 +422,15 @@ impl SignalFixture {
 
 fn signal_submission(
     prepared: &PreparedSignalMaterialization,
-    chunk: &runmat_analysis_execution::PreparedSignalGeneratorChunk,
+    chunk: &runmat_analysis_execution::PreparedGeneratorChunk,
     scope_id: runmat_execution::ExecutionScopeId,
     pool_id: runmat_execution::PoolId,
 ) -> runmat_execution_runner::TaskSubmission {
-    build_signal_generator_task_submission(
+    build_generator_task_submission(
         &prepared.admitted,
         chunk,
         BTreeSet::new(),
-        SignalGeneratorExecutionContext {
+        GeneratorExecutionContext {
             scope_id,
             pool_id,
             resources: ResourceRequest {
@@ -452,14 +452,11 @@ fn signal_submission(
     .unwrap()
 }
 
-fn response_output(
-    identity: Digest,
-    response: ProgramExecutionResponse,
-) -> SignalGeneratorChunkOutput {
+fn response_output(identity: Digest, response: ProgramExecutionResponse) -> GeneratorChunkOutput {
     let ProgramExecutionResponse::Success { value } = response else {
         panic!("signal generator did not return an inline value: {response:?}")
     };
-    SignalGeneratorChunkOutput {
+    GeneratorChunkOutput {
         chunk_identity: identity,
         value,
     }
@@ -495,10 +492,13 @@ fn generated_signal() -> PhysicalSignal {
         shape: SignalShape::Vector3,
         frame: Some(CoordinateFrame::Global),
         representation: SignalRepresentation::Generator(SignalGenerator {
-            callable: runmat_analysis_core::GeneratorCallable::ProjectFunction {
-                qualified_name: "loads.pulse".into(),
+            invocation: runmat_analysis_core::GeneratorInvocation {
+                callable: runmat_analysis_core::GeneratorCallable::ProjectFunction {
+                    qualified_name: "loads.pulse".into(),
+                },
+                arguments: Vec::new(),
+                effects: GeneratorEffectPolicy::Pure,
             },
-            arguments: Vec::new(),
             domain: GeneratorDomain::TimeSeconds,
             sampling: SignalSamplingPolicy::Uniform {
                 start: 0.0,
@@ -507,7 +507,6 @@ fn generated_signal() -> PhysicalSignal {
             },
             interpolation: SignalInterpolation::Linear,
             extrapolation: SignalExtrapolation::Reject,
-            effects: GeneratorEffectPolicy::Pure,
         }),
         precision: SignalPrecision::Real64,
         evidence: SignalApproximationEvidence {

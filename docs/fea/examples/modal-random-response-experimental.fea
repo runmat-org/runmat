@@ -47,16 +47,18 @@ model:
                 frame: global
                 vector: [1.0, 0.0, 0.0]
           spectral_density:
-            - values: [{ real: 0.0001, imaginary: 0.0 }]
-            - values: [{ real: 0.0002, imaginary: 0.0 }]
-            - values: [{ real: 0.0001, imaginary: 0.0 }]
+            authored:
+              values:
+                - values: [{ real: 0.0001, imaginary: 0.0 }]
+                - values: [{ real: 0.0002, imaginary: 0.0 }]
+                - values: [{ real: 0.0001, imaginary: 0.0 }]
+              provenance_digest: sha256:documented-broadband-base
           convention: one_sided_per_hertz
           interpolation: linear_frequency
           extrapolation: reject
           evidence:
             max_absolute_density_error: 0.0
             equivalent_degrees_of_freedom: null
-          provenance_digest: sha256:documented-broadband-base
 
 mesh:
   target_edge_length_m: 10.0

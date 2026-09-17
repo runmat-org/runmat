@@ -17,8 +17,8 @@ use crate::presentation;
 use crate::AlreadyReportedCliError;
 
 pub(super) mod callables;
+mod input_materialization;
 pub(crate) mod remote;
-mod signal_materialization;
 
 #[derive(Debug)]
 pub(crate) struct NativeAnalysisService {
@@ -39,7 +39,7 @@ impl runmat_runtime::context::RuntimeAnalysisService for NativeAnalysisService {
         Result<runmat_analysis_core::PhysicalSignal, runmat_runtime::RuntimeError>,
     > {
         Box::pin(async move {
-            signal_materialization::materialize_runtime_signal(request).map_err(|error| {
+            input_materialization::materialize_runtime_signal(request).map_err(|error| {
                 runmat_runtime::build_runtime_error(error.to_string())
                     .with_identifier("RunMat:FEA:SignalMaterialization")
                     .build()
@@ -149,8 +149,7 @@ pub async fn execute_fea_path(
             }
             let envelope = match execution {
                 ExecutionTarget::Local => {
-                    signal_materialization::materialize_study(&path, &mut spec, cli, config)
-                        .await?;
+                    input_materialization::materialize_study(&path, &mut spec, cli, config).await?;
                     let placement = NativeStructuralStudyPlacement::for_current_executable(
                         crate::diagnostics::parser_compat(config.language.compat),
                     )?;
@@ -193,8 +192,7 @@ pub async fn execute_fea_path(
             }
             let envelope = match execution {
                 ExecutionTarget::Local => {
-                    signal_materialization::materialize_sweep(&path, &mut spec, cli, config)
-                        .await?;
+                    input_materialization::materialize_sweep(&path, &mut spec, cli, config).await?;
                     let placement = NativeStructuralStudyPlacement::for_current_executable(
                         crate::diagnostics::parser_compat(config.language.compat),
                     )?;

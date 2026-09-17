@@ -141,7 +141,7 @@ fn modal_response_requires_typed_existing_spectrum_ids() {
     model.response_spectra.push(ResponseSpectrum {
         spectrum_id: ResponseSpectrumId("design".into()),
         abscissa: SpectrumAbscissa::FrequencyHertz(vec![1.0, 10.0]),
-        ordinates: vec![1.0, 1.0],
+        ordinates: crate::NumericalDataSource::authored(vec![1.0, 1.0], "sha256:design"),
         damping: SpectrumDamping::Ratio(0.05),
         response: SpectrumResponse::RelativeDisplacement,
         envelope: SpectrumEnvelope::Maximax,
@@ -163,7 +163,6 @@ fn modal_response_requires_typed_existing_spectrum_ids() {
             sampling_adequacy_ratio: 1.0,
             max_interpolation_error: None,
         },
-        provenance_digest: "sha256:design".into(),
     });
     assert!(matches!(
         super::activation::validate_objects(&model, &step),

@@ -95,7 +95,10 @@ pub fn construct_shock_response_spectrum(
     let spectrum = ResponseSpectrum {
         spectrum_id: request.spectrum_id,
         abscissa: request.abscissa,
-        ordinates,
+        ordinates: runmat_analysis_core::NumericalDataSource::Authored {
+            values: ordinates,
+            provenance_digest,
+        },
         damping: request.damping,
         response: request.response,
         envelope: request.envelope,
@@ -114,7 +117,6 @@ pub fn construct_shock_response_spectrum(
             sampling_adequacy_ratio,
             max_interpolation_error,
         },
-        provenance_digest,
     };
     spectrum.validate_intrinsic().map_err(invalid)?;
     Ok(spectrum)

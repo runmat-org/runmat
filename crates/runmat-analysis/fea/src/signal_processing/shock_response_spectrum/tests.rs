@@ -84,7 +84,7 @@ fn exact_piecewise_linear_step_matches_undamped_closed_form() {
     )
     .unwrap();
     let expected = 2.0 / (2.0 * std::f64::consts::PI).powi(2);
-    assert!((displacement.ordinates[0] - expected).abs() <= 1.0e-11);
+    assert!((displacement.resolved_ordinates().unwrap()[0] - expected).abs() <= 1.0e-11);
 
     let acceleration = construct_shock_response_spectrum(
         &source,
@@ -94,7 +94,7 @@ fn exact_piecewise_linear_step_matches_undamped_closed_form() {
         ),
     )
     .unwrap();
-    assert!((acceleration.ordinates[0] - 2.0).abs() <= 1.0e-10);
+    assert!((acceleration.resolved_ordinates().unwrap()[0] - 2.0).abs() <= 1.0e-10);
     assert_eq!(
         acceleration.construction,
         SpectrumConstruction::DerivedFromAccelerationHistory {
@@ -102,7 +102,11 @@ fn exact_piecewise_linear_step_matches_undamped_closed_form() {
             method: ShockResponseSpectrumMethod::ExactPiecewiseLinear,
         }
     );
-    assert!(acceleration.provenance_digest.starts_with("sha256:"));
+    assert!(acceleration
+        .ordinates
+        .numerical_digest()
+        .unwrap()
+        .starts_with("sha256:"));
 }
 
 #[test]
@@ -121,7 +125,7 @@ fn zero_history_produces_zero_spectrum_for_every_response_quantity() {
             request(response, SpectrumEnvelope::Maximax),
         )
         .unwrap();
-        assert_eq!(spectrum.ordinates, vec![0.0]);
+        assert_eq!(spectrum.resolved_ordinates().unwrap(), &[0.0]);
     }
 }
 
@@ -151,7 +155,7 @@ fn damped_step_peak_matches_closed_form_overshoot() {
     let omega = 2.0 * std::f64::consts::PI;
     let overshoot = (-damping * std::f64::consts::PI / (1.0 - damping * damping).sqrt()).exp();
     let expected = (1.0 + overshoot) / omega.powi(2);
-    assert!((spectrum.ordinates[0] - expected).abs() <= 1.0e-11);
+    assert!((spectrum.resolved_ordinates().unwrap()[0] - expected).abs() <= 1.0e-11);
 }
 
 #[test]

@@ -19,7 +19,9 @@ use crate::commands::job::submit::RemoteSubmissionOptions;
 mod materialization;
 mod preparation;
 
-use super::signal_materialization::prepare_signal_materializations_in_frozen;
+use super::input_materialization::{
+    prepare_numerical_materializations_in_frozen, prepare_signal_materializations_in_frozen,
+};
 pub(crate) use materialization::{materialize_remote_outputs, materialize_remote_sweep_outputs};
 use preparation::{
     prepare_remote_execution, prepare_remote_sweep_execution, prepare_root, prepare_study_source,
@@ -50,11 +52,36 @@ pub(super) async fn execute_study(
         config,
     )
     .await?;
-    let signal_expectations = signal_materializations
+    let (response_spectra, random_spectra) =
+        spec.model.as_ref().map_or((&[][..], &[][..]), |model| {
+            (
+                model.response_spectra.as_slice(),
+                model.random_excitations.as_slice(),
+            )
+        });
+    let numerical_materializations = prepare_numerical_materializations_in_frozen(
+        source,
+        response_spectra,
+        random_spectra,
+        &spec.immutable_values,
+        &resolved.resolved.frozen,
+        config,
+    )
+    .await?;
+    let input_materializations = signal_materializations
+        .into_iter()
+        .map(runmat_analysis_execution::PreparedInputMaterialization::Signal)
+        .chain(
+            numerical_materializations
+                .into_iter()
+                .map(runmat_analysis_execution::PreparedInputMaterialization::Numerical),
+        )
+        .collect::<Vec<_>>();
+    let input_expectations = input_materializations
         .iter()
-        .map(runmat_analysis_execution::PreparedSignalMaterialization::expectation)
+        .map(runmat_analysis_execution::PreparedInputMaterialization::expectation)
         .collect::<std::result::Result<Vec<_>, _>>()?;
-    let source_study = prepare_study_source(&spec, context, signal_materializations)?;
+    let source_study = prepare_study_source(&spec, context, input_materializations)?;
     let study = &source_study.intent;
     let continuation = base64::engine::general_purpose::URL_SAFE_NO_PAD
         .encode(study.continuation_bytes().map_err(anyhow::Error::msg)?);
@@ -70,7 +97,7 @@ pub(super) async fn execute_study(
         "bundle-sizing-authority",
         &source_study.geometry_name,
         &source_study.geometry_bytes,
-        source_study.signal_materializations.clone(),
+        source_study.input_materializations.clone(),
     )?;
     let mut bundle_builder =
         ExecutionBundleBuilder::native(&resolved.resolved.frozen, revision.clone())?
@@ -97,7 +124,7 @@ pub(super) async fn execute_study(
                 run_id,
                 &source_study.geometry_name,
                 &source_study.geometry_bytes,
-                source_study.signal_materializations.clone(),
+                source_study.input_materializations.clone(),
             )?;
             prepare_remote_execution(prepared, revision.clone(), bundle_archive)
         },
@@ -111,7 +138,7 @@ pub(super) async fn execute_study(
             on_run_created: None,
             output_intent: SavedOutputIntent::StructuralStudy {
                 continuation: continuation.clone(),
-                signal_materializations: signal_expectations.clone(),
+                input_materializations: input_expectations.clone(),
                 revision: revision.clone(),
                 materialization: crate::commands::job::secret::OutputMaterialization::Pending,
                 result: None,
@@ -145,7 +172,7 @@ pub(super) async fn execute_study(
         outputs.response,
         objects,
         &continuation,
-        &signal_expectations,
+        &input_expectations,
         revision,
     )?;
     crate::commands::job::secret::mark_structural_study_materialized(
@@ -202,18 +229,36 @@ pub(super) async fn execute_sweep(
     )
     .await?
     .into_iter();
-    let studies = spec
-        .studies
-        .iter()
-        .zip(signal_counts)
-        .map(|(study, count)| {
-            prepare_study_source(
-                study,
-                context.clone(),
-                materializations.by_ref().take(count).collect(),
-            )
-        })
-        .collect::<Result<Vec<_>>>()?;
+    let mut studies = Vec::with_capacity(spec.studies.len());
+    for (study, count) in spec.studies.iter().zip(signal_counts) {
+        let signal_inputs = materializations
+            .by_ref()
+            .take(count)
+            .map(runmat_analysis_execution::PreparedInputMaterialization::Signal);
+        let (response_spectra, random_spectra) =
+            study.model.as_ref().map_or((&[][..], &[][..]), |model| {
+                (
+                    model.response_spectra.as_slice(),
+                    model.random_excitations.as_slice(),
+                )
+            });
+        let numerical_inputs = prepare_numerical_materializations_in_frozen(
+            source,
+            response_spectra,
+            random_spectra,
+            &study.immutable_values,
+            &resolved.resolved.frozen,
+            config,
+        )
+        .await?
+        .into_iter()
+        .map(runmat_analysis_execution::PreparedInputMaterialization::Numerical);
+        studies.push(prepare_study_source(
+            study,
+            context.clone(),
+            signal_inputs.chain(numerical_inputs).collect(),
+        )?);
+    }
     if materializations.next().is_some() {
         anyhow::bail!("remote sweep signal materialization inventory is oversized");
     }
@@ -227,13 +272,13 @@ pub(super) async fn execute_sweep(
                 .map_err(anyhow::Error::msg)
         })
         .collect::<Result<Vec<_>>>()?;
-    let signal_expectations = studies
+    let input_expectations = studies
         .iter()
         .map(|study| {
             study
-                .signal_materializations
+                .input_materializations
                 .iter()
-                .map(runmat_analysis_execution::PreparedSignalMaterialization::expectation)
+                .map(runmat_analysis_execution::PreparedInputMaterialization::expectation)
                 .collect::<std::result::Result<Vec<_>, _>>()
         })
         .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -282,7 +327,7 @@ pub(super) async fn execute_sweep(
             output_intent: SavedOutputIntent::StructuralSweep {
                 spec: Box::new(spec.clone()),
                 continuations: continuations.clone(),
-                signal_materializations: signal_expectations.clone(),
+                input_materializations: input_expectations.clone(),
                 revision: revision.clone(),
                 materialization: crate::commands::job::secret::OutputMaterialization::Pending,
                 result: None,
@@ -317,7 +362,7 @@ pub(super) async fn execute_sweep(
         objects,
         &spec,
         &continuations,
-        &signal_expectations,
+        &input_expectations,
         revision,
     )?;
     crate::commands::job::secret::mark_structural_sweep_materialized(

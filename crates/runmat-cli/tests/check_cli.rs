@@ -146,6 +146,63 @@ fn response_spectrum_documentation_example_runs_its_two_step_study() {
 }
 
 #[test]
+fn named_response_spectrum_generator_materializes_before_the_solve() {
+    let temp = TempDir::new().unwrap();
+    let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    fs::create_dir_all(temp.path().join("src/+spectra")).unwrap();
+    fs::write(
+        temp.path().join("runmat.toml"),
+        "[package]\nname = \"fea-spectrum-generator\"\n\n[sources]\nroots = [\"src\"]\n",
+    )
+    .unwrap();
+    fs::write(
+        temp.path().join("src/+spectra/design_input.m"),
+        "function y = design_input(frequency, scale)\narguments\n    frequency (:,1) double\n    scale (1,1) double\nend\ny = scale .* (1 + 0 .* frequency);\nend\n",
+    )
+    .unwrap();
+    let source = repository.join("docs/fea/examples/modal-response-spectrum-experimental.fea");
+    let geometry = repository.join("crates/runmat-geometry/io/tests/fixtures/box.brep");
+    let document = fs::read_to_string(source)
+        .unwrap()
+        .replace(
+            "../../../crates/runmat-geometry/io/tests/fixtures/box.brep",
+            &geometry.display().to_string(),
+        )
+        .replace(
+            "            authored:\n              values: [1.2, 2.5, 1.8, 0.7]\n              provenance_digest: sha256:documented-design-spectrum",
+            "            generator:\n              callable:\n                project_function: { qualified_name: spectra.design_input }\n              arguments:\n                - real: 1.5\n              effects: pure",
+        );
+    fs::write(temp.path().join("study.fea"), document).unwrap();
+
+    let checked = runmat(&temp, &["check", "study.fea", "--json"]);
+    assert!(
+        checked.status.success(),
+        "generated response spectrum failed check:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&checked.stdout),
+        String::from_utf8_lossy(&checked.stderr)
+    );
+
+    let run = runmat(&temp, &["run", "study.fea", "--json"]);
+    assert!(
+        run.status.success(),
+        "generated response spectrum failed run:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&run.stdout),
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(
+        serde_json::from_slice::<Value>(&run.stdout).unwrap()["study_id"],
+        "modal_response_spectrum_experimental"
+    );
+    assert!(
+        fs::read_dir(temp.path().join("artifacts/generated-inputs/objects"))
+            .unwrap()
+            .count()
+            >= 2,
+        "expected a numerical-input manifest and data chunk"
+    );
+}
+
+#[test]
 fn random_response_documentation_example_exposes_paged_statistical_fields() {
     let temp = TempDir::new().unwrap();
     let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
@@ -225,7 +282,7 @@ fn fea_check_and_run_materialize_a_named_project_signal_generator() {
     );
     let payload: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(payload["study_id"], "canonical_box_static");
-    let objects = fs::read_dir(temp.path().join("artifacts/generated-signals/objects"))
+    let objects = fs::read_dir(temp.path().join("artifacts/generated-inputs/objects"))
         .unwrap()
         .count();
     assert!(objects >= 2, "expected a signal manifest and data chunk");
@@ -238,7 +295,7 @@ fn fea_check_and_run_materialize_a_named_project_signal_generator() {
         String::from_utf8_lossy(&repeated.stderr)
     );
     assert_eq!(
-        fs::read_dir(temp.path().join("artifacts/generated-signals/objects"))
+        fs::read_dir(temp.path().join("artifacts/generated-inputs/objects"))
             .unwrap()
             .count(),
         objects,

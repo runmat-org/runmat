@@ -22,16 +22,19 @@ pub(super) fn interpolate_spectrum(
             values
         }
     };
+    let ordinates = spectrum.resolved_ordinates().map_err(FeaRunError::Solve)?;
     let index = match axis.binary_search_by(|value| value.total_cmp(&query)) {
-        Ok(index) => return Ok(spectrum.ordinates[index]),
-        Err(0) => return extrapolate(spectrum, 0),
-        Err(index) if index == axis.len() => return extrapolate(spectrum, axis.len() - 1),
+        Ok(index) => return Ok(ordinates[index]),
+        Err(0) => return extrapolate(spectrum, ordinates, 0),
+        Err(index) if index == axis.len() => {
+            return extrapolate(spectrum, ordinates, axis.len() - 1)
+        }
         Err(index) => index,
     };
     let x0 = axis[index - 1];
     let x1 = axis[index];
-    let y0 = spectrum.ordinates[index - 1];
-    let y1 = spectrum.ordinates[index];
+    let y0 = ordinates[index - 1];
+    let y1 = ordinates[index];
     let value = match spectrum.interpolation {
         SpectrumInterpolation::LinearFrequency | SpectrumInterpolation::LinearPeriod => {
             y0 + (query - x0) * (y1 - y0) / (x1 - x0)
@@ -49,11 +52,15 @@ pub(super) fn interpolate_spectrum(
     Ok(value)
 }
 
-fn extrapolate(spectrum: &ResponseSpectrum, endpoint: usize) -> Result<f64, FeaRunError> {
+fn extrapolate(
+    spectrum: &ResponseSpectrum,
+    ordinates: &[f64],
+    endpoint: usize,
+) -> Result<f64, FeaRunError> {
     match spectrum.extrapolation {
         SpectrumExtrapolation::Reject => Err(FeaRunError::Solve(
             "modal frequency lies outside the response-spectrum domain".into(),
         )),
-        SpectrumExtrapolation::HoldEndpoint => Ok(spectrum.ordinates[endpoint]),
+        SpectrumExtrapolation::HoldEndpoint => Ok(ordinates[endpoint]),
     }
 }

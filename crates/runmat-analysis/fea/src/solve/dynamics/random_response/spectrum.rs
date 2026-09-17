@@ -16,6 +16,9 @@ pub(super) fn interpolate_spectral_matrix(
         ));
     }
     let frequencies = &spectrum.frequencies_hz;
+    let spectral_density = spectrum
+        .resolved_spectral_density()
+        .map_err(FeaRunError::Solve)?;
     let last = frequencies.len() - 1;
     let (lower, upper, fraction) =
         match frequencies.binary_search_by(|sample| sample.total_cmp(&frequency_hz)) {
@@ -30,13 +33,13 @@ pub(super) fn interpolate_spectral_matrix(
             }
         };
     if lower == upper {
-        return Ok(matrix_values(&spectrum.spectral_density[lower].values));
+        return Ok(matrix_values(&spectral_density[lower].values));
     }
     match spectrum.interpolation {
-        RandomSpectrumInterpolation::LinearFrequency => Ok(spectrum.spectral_density[lower]
+        RandomSpectrumInterpolation::LinearFrequency => Ok(spectral_density[lower]
             .values
             .iter()
-            .zip(&spectrum.spectral_density[upper].values)
+            .zip(&spectral_density[upper].values)
             .map(|(left, right)| {
                 Complex::new(
                     left.real + fraction * (right.real - left.real),
@@ -59,7 +62,10 @@ fn extrapolated_matrix(
             "frequency {frequency_hz} Hz is outside random-spectrum support"
         ))),
         RandomSpectrumExtrapolation::HoldEndpoint => {
-            Ok(matrix_values(&spectrum.spectral_density[endpoint].values))
+            let spectral_density = spectrum
+                .resolved_spectral_density()
+                .map_err(FeaRunError::Solve)?;
+            Ok(matrix_values(&spectral_density[endpoint].values))
         }
     }
 }

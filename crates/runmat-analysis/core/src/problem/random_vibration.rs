@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::response_spectrum::SpectrumDirection;
+use super::{response_spectrum::SpectrumDirection, signal::NumericalDataSource};
 
 const HERMITIAN_TOLERANCE_FACTOR: f64 = 128.0;
 const POSITIVE_SEMIDEFINITE_TOLERANCE_FACTOR: f64 = 512.0;
@@ -106,15 +106,26 @@ pub struct RandomExcitationSpectrum {
     pub excitation_id: RandomExcitationId,
     pub frequencies_hz: Vec<f64>,
     pub channels: Vec<RandomExcitationChannel>,
-    pub spectral_density: Vec<CrossPowerSpectralDensity>,
+    pub spectral_density: NumericalDataSource<Vec<CrossPowerSpectralDensity>>,
     pub convention: SpectralDensityConvention,
     pub interpolation: RandomSpectrumInterpolation,
     pub extrapolation: RandomSpectrumExtrapolation,
     pub evidence: RandomSpectrumEvidence,
-    pub provenance_digest: String,
 }
 
 impl RandomExcitationSpectrum {
+    pub fn resolved_spectral_density(&self) -> Result<&[CrossPowerSpectralDensity], String> {
+        self.spectral_density
+            .values()
+            .map(Vec::as_slice)
+            .ok_or_else(|| {
+                format!(
+                    "random excitation `{}` must be materialized before numerical use",
+                    self.excitation_id.0
+                )
+            })
+    }
+
     pub fn validate_intrinsic(&self) -> Result<(), String> {
         if self.excitation_id.0.trim().is_empty() {
             return Err("random-excitation id must be non-empty".into());
@@ -162,13 +173,15 @@ impl RandomExcitationSpectrum {
                 return Err("random-excitation directions must be finite and nonzero".into());
             }
         }
-        if self.spectral_density.len() != self.frequencies_hz.len() {
-            return Err("random-excitation frequency and matrix counts differ".into());
-        }
-        for (sample_index, matrix) in self.spectral_density.iter().enumerate() {
-            validate_spectral_matrix(matrix, self.channels.len()).map_err(|detail| {
-                format!("random-excitation spectral matrix {sample_index} is invalid: {detail}")
-            })?;
+        if let Some(spectral_density) = self.spectral_density.values() {
+            if spectral_density.len() != self.frequencies_hz.len() {
+                return Err("random-excitation frequency and matrix counts differ".into());
+            }
+            for (sample_index, matrix) in spectral_density.iter().enumerate() {
+                validate_spectral_matrix(matrix, self.channels.len()).map_err(|detail| {
+                    format!("random-excitation spectral matrix {sample_index} is invalid: {detail}")
+                })?;
+            }
         }
         if self
             .evidence
@@ -181,9 +194,7 @@ impl RandomExcitationSpectrum {
         {
             return Err("random-spectrum evidence must be finite and physically bounded".into());
         }
-        if self.provenance_digest.trim().is_empty() {
-            return Err("random-excitation provenance digest must be non-empty".into());
-        }
+        self.spectral_density.validate_provenance()?;
         Ok(())
     }
 }
@@ -316,7 +327,10 @@ mod tests {
             excitation_id: RandomExcitationId("launch-random".into()),
             frequencies_hz: vec![10.0, 20.0],
             channels: vec![channel("x", [1.0, 0.0, 0.0]), channel("y", [0.0, 1.0, 0.0])],
-            spectral_density: vec![matrix.clone(), matrix],
+            spectral_density: NumericalDataSource::authored(
+                vec![matrix.clone(), matrix],
+                "sha256:launch-random",
+            ),
             convention: SpectralDensityConvention::OneSidedPerHertz,
             interpolation: RandomSpectrumInterpolation::LinearFrequency,
             extrapolation: RandomSpectrumExtrapolation::Reject,
@@ -324,7 +338,6 @@ mod tests {
                 max_absolute_density_error: Some(0.0),
                 equivalent_degrees_of_freedom: None,
             },
-            provenance_digest: "sha256:launch-random".into(),
         }
     }
 

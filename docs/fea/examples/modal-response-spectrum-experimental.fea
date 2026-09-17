@@ -41,7 +41,10 @@ model:
         - spectrum_id: design_spectrum
           abscissa:
             frequency_hertz: [5.0, 10.0, 20.0, 40.0]
-          ordinates: [1.2, 2.5, 1.8, 0.7]
+          ordinates:
+            authored:
+              values: [1.2, 2.5, 1.8, 0.7]
+              provenance_digest: sha256:documented-design-spectrum
           damping: { ratio: 0.05 }
           response: absolute_acceleration
           envelope: maximax
@@ -60,7 +63,6 @@ model:
           evidence:
             sampling_adequacy_ratio: 0.95
             max_interpolation_error: 0.02
-          provenance_digest: sha256:documented-design-spectrum
 
 mesh:
   target_edge_length_m: 10.0

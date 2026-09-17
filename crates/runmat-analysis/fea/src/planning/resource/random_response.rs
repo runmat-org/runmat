@@ -167,11 +167,11 @@ impl StructuralRandomResponseResourceProjection {
             "random-response channels",
         )?;
         let spectrum = self.workload.excitation().map_err(invalid_error)?;
+        let spectral_density = spectrum
+            .resolved_spectral_density()
+            .map_err(invalid_error)?;
         let spectral_matrix_complex_value_count = multiply(
-            count(
-                spectrum.spectral_density.len(),
-                "random-response spectral samples",
-            )?,
+            count(spectral_density.len(), "random-response spectral samples")?,
             multiply(
                 channel_count,
                 channel_count,

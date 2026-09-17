@@ -370,39 +370,12 @@ fn validate_artifact(artifact: &SignalArtifactRef) -> Result<(), String> {
 }
 
 fn validate_generator(generator: &SignalGenerator) -> Result<(), String> {
-    match &generator.callable {
-        crate::GeneratorCallable::ProjectFunction { qualified_name } => {
-            let parts = qualified_name.split('.').collect::<Vec<_>>();
-            if parts.len() < 2 || !parts.iter().all(|part| is_identifier(part)) {
-                return Err("project generator requires a qualified function name".to_string());
-            }
-        }
-        crate::GeneratorCallable::BoundFunction { display_name, .. }
-            if display_name.trim().is_empty() =>
-        {
-            return Err("bound generator requires a display name".to_string())
-        }
-        crate::GeneratorCallable::BoundFunction { .. } => {}
-    }
+    validate_generator_invocation(&generator.invocation)?;
     if matches!(
         &generator.domain,
         GeneratorDomain::StudyParameter { parameter_id } if parameter_id.trim().is_empty()
     ) {
         return Err("study-parameter generators require a parameter id".to_string());
-    }
-    for argument in &generator.arguments {
-        match argument {
-            GeneratorArgument::Real(value) if !value.is_finite() => {
-                return Err("generator real arguments must be finite".to_string())
-            }
-            GeneratorArgument::RealVector(values)
-                if values.is_empty() || values.iter().any(|value| !value.is_finite()) =>
-            {
-                return Err("generator vector arguments must be non-empty and finite".to_string())
-            }
-            GeneratorArgument::Artifact(artifact) => validate_artifact(artifact)?,
-            _ => {}
-        }
     }
     let result = match &generator.sampling {
         SignalSamplingPolicy::Uniform {
@@ -447,6 +420,40 @@ fn validate_generator(generator: &SignalGenerator) -> Result<(), String> {
     Ok(())
 }
 
+pub(crate) fn validate_generator_invocation(
+    invocation: &crate::GeneratorInvocation,
+) -> Result<(), String> {
+    match &invocation.callable {
+        crate::GeneratorCallable::ProjectFunction { qualified_name } => {
+            let parts = qualified_name.split('.').collect::<Vec<_>>();
+            if parts.len() < 2 || !parts.iter().all(|part| is_identifier(part)) {
+                return Err("project generator requires a qualified function name".to_string());
+            }
+        }
+        crate::GeneratorCallable::BoundFunction { display_name, .. }
+            if display_name.trim().is_empty() =>
+        {
+            return Err("bound generator requires a display name".to_string())
+        }
+        crate::GeneratorCallable::BoundFunction { .. } => {}
+    }
+    for argument in &invocation.arguments {
+        match argument {
+            GeneratorArgument::Real(value) if !value.is_finite() => {
+                return Err("generator real arguments must be finite".to_string())
+            }
+            GeneratorArgument::RealVector(values)
+                if values.is_empty() || values.iter().any(|value| !value.is_finite()) =>
+            {
+                return Err("generator vector arguments must be non-empty and finite".to_string())
+            }
+            GeneratorArgument::Artifact(artifact) => validate_artifact(artifact)?,
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 fn is_identifier(value: &str) -> bool {
     let mut characters = value.chars();
     let Some(first) = characters.next() else {
@@ -474,10 +481,13 @@ mod tests {
             shape: SignalShape::Scalar,
             frame: None,
             representation: SignalRepresentation::Generator(SignalGenerator {
-                callable: crate::GeneratorCallable::ProjectFunction {
-                    qualified_name: "loads.launch_force".to_string(),
+                invocation: crate::GeneratorInvocation {
+                    callable: crate::GeneratorCallable::ProjectFunction {
+                        qualified_name: "loads.launch_force".to_string(),
+                    },
+                    arguments: Vec::new(),
+                    effects: GeneratorEffectPolicy::Pure,
                 },
-                arguments: Vec::new(),
                 domain: GeneratorDomain::TimeSeconds,
                 sampling: SignalSamplingPolicy::Uniform {
                     start: 0.0,
@@ -486,7 +496,6 @@ mod tests {
                 },
                 interpolation: SignalInterpolation::Linear,
                 extrapolation: SignalExtrapolation::Reject,
-                effects: GeneratorEffectPolicy::Pure,
             }),
             precision: SignalPrecision::Real64,
             evidence: SignalApproximationEvidence {
@@ -523,7 +532,7 @@ mod tests {
         let SignalRepresentation::Generator(generator) = &mut signal.representation else {
             unreachable!()
         };
-        generator.callable = crate::GeneratorCallable::BoundFunction {
+        generator.invocation.callable = crate::GeneratorCallable::BoundFunction {
             function: runmat_types::ProgramFunctionId(function),
             display_name: display_name.into(),
         };

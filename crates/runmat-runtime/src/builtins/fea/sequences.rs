@@ -1126,7 +1126,10 @@ mod tests {
         let spectrum = runmat_analysis_core::ResponseSpectrum {
             spectrum_id: runmat_analysis_core::ResponseSpectrumId("launch".into()),
             abscissa: runmat_analysis_core::SpectrumAbscissa::FrequencyHertz(vec![10.0, 20.0]),
-            ordinates: vec![1.0, 2.0],
+            ordinates: runmat_analysis_core::NumericalDataSource::authored(
+                vec![1.0, 2.0],
+                "sha256:launch",
+            ),
             damping: runmat_analysis_core::SpectrumDamping::Ratio(0.05),
             response: runmat_analysis_core::SpectrumResponse::AbsoluteAcceleration,
             envelope: runmat_analysis_core::SpectrumEnvelope::Maximax,
@@ -1150,7 +1153,6 @@ mod tests {
                 sampling_adequacy_ratio: 1.0,
                 max_interpolation_error: None,
             },
-            provenance_digest: "sha256:launch".into(),
         };
         let typed = super::super::serializable_to_object(
             "test",

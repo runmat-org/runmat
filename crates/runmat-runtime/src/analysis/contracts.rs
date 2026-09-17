@@ -2715,7 +2715,7 @@ pub(crate) fn validate_immutable_value_inventory(
     for artifact in signals
         .iter()
         .filter_map(PhysicalSignal::generator)
-        .flat_map(|generator| generator.arguments.iter())
+        .flat_map(|generator| generator.invocation.arguments.iter())
         .filter_map(|argument| match argument {
             runmat_analysis_core::GeneratorArgument::Artifact(artifact) => Some(artifact),
             _ => None,

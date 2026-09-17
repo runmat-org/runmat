@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-use super::{coordinate_frame::CoordinateFrame, signal::SignalId};
+use super::{
+    coordinate_frame::CoordinateFrame,
+    signal::{NumericalDataSource, SignalId},
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct ResponseSpectrumId(pub String);
@@ -10,7 +13,7 @@ pub struct ResponseSpectrumId(pub String);
 pub struct ResponseSpectrum {
     pub spectrum_id: ResponseSpectrumId,
     pub abscissa: SpectrumAbscissa,
-    pub ordinates: Vec<f64>,
+    pub ordinates: NumericalDataSource<Vec<f64>>,
     pub damping: SpectrumDamping,
     pub response: SpectrumResponse,
     pub envelope: SpectrumEnvelope,
@@ -23,10 +26,18 @@ pub struct ResponseSpectrum {
     pub rigid_response: RigidResponsePolicy,
     pub construction: SpectrumConstruction,
     pub evidence: SpectrumEvidence,
-    pub provenance_digest: String,
 }
 
 impl ResponseSpectrum {
+    pub fn resolved_ordinates(&self) -> Result<&[f64], String> {
+        self.ordinates.values().map(Vec::as_slice).ok_or_else(|| {
+            format!(
+                "response spectrum `{}` must be materialized before numerical use",
+                self.spectrum_id.0
+            )
+        })
+    }
+
     pub fn validate_intrinsic(&self) -> Result<(), String> {
         if self.spectrum_id.0.trim().is_empty() {
             return Err("response-spectrum id must not be empty".to_string());
@@ -44,13 +55,17 @@ impl ResponseSpectrum {
             return Err("spectrum interpolation must match its abscissa".to_string());
         }
         if axis.is_empty()
-            || axis.len() != self.ordinates.len()
-            || axis.iter().any(|value| !value.is_finite() || *value <= 0.0)
-            || axis.windows(2).any(|pair| pair[0] >= pair[1])
             || self
                 .ordinates
-                .iter()
-                .any(|value| !value.is_finite() || *value < 0.0)
+                .values()
+                .is_some_and(|ordinates| axis.len() != ordinates.len())
+            || axis.iter().any(|value| !value.is_finite() || *value <= 0.0)
+            || axis.windows(2).any(|pair| pair[0] >= pair[1])
+            || self.ordinates.values().is_some_and(|ordinates| {
+                ordinates
+                    .iter()
+                    .any(|value| !value.is_finite() || *value < 0.0)
+            })
         {
             return Err(
                 "spectrum axes and ordinates must be aligned, positive, and increasing".to_string(),
@@ -81,7 +96,10 @@ impl ResponseSpectrum {
             }
         }
         if self.interpolation == SpectrumInterpolation::LogLog
-            && self.ordinates.iter().any(|value| *value <= 0.0)
+            && self
+                .ordinates
+                .values()
+                .is_some_and(|ordinates| ordinates.iter().any(|value| *value <= 0.0))
         {
             return Err("log-log spectra require positive ordinates".to_string());
         }
@@ -106,10 +124,10 @@ impl ResponseSpectrum {
                 .evidence
                 .max_interpolation_error
                 .is_some_and(|value| !value.is_finite() || value < 0.0)
-            || self.provenance_digest.trim().is_empty()
         {
             return Err("spectrum policy, evidence, and provenance must be valid".to_string());
         }
+        self.ordinates.validate_provenance()?;
         match self.truncation.correction {
             ModalTruncationCorrection::None | ModalTruncationCorrection::ResidualMode => {}
             ModalTruncationCorrection::MissingMass {
@@ -304,7 +322,7 @@ mod tests {
         ResponseSpectrum {
             spectrum_id: ResponseSpectrumId("design".into()),
             abscissa: SpectrumAbscissa::FrequencyHertz(vec![1.0, 10.0]),
-            ordinates: vec![2.0, 1.0],
+            ordinates: NumericalDataSource::authored(vec![2.0, 1.0], "sha256:design"),
             damping: SpectrumDamping::Ratio(0.05),
             response: SpectrumResponse::AbsoluteAcceleration,
             envelope: SpectrumEnvelope::Maximax,
@@ -330,7 +348,6 @@ mod tests {
                 sampling_adequacy_ratio: 1.0,
                 max_interpolation_error: None,
             },
-            provenance_digest: "sha256:design".into(),
         }
     }
 

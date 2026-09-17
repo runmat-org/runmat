@@ -66,8 +66,8 @@ struct ExactStructuralStudyPublication {
     meshing_objects: Vec<ValueRef>,
     region_resolution_root: ValueRef,
     region_resolution_objects: Vec<ValueRef>,
-    signal_roots: Vec<ValueRef>,
-    signal_objects: Vec<ValueRef>,
+    input_roots: Vec<ValueRef>,
+    input_objects: Vec<ValueRef>,
     analysis: ExactStructuralStudyAnalysisClosure,
 }
 
@@ -476,11 +476,11 @@ impl ExactStructuralStudyPublication {
             || self.meshing_objects.is_empty()
             || self.region_resolution_objects.is_empty()
             || self.analysis.objects().is_empty()
-            || self.signal_roots.len() > self.signal_objects.len()
+            || self.input_roots.len() > self.input_objects.len()
             || self
-                .signal_roots
+                .input_roots
                 .iter()
-                .any(|root| !self.signal_objects.contains(root))
+                .any(|root| !self.input_objects.contains(root))
         {
             return Err(protocol("exact structural study publication is invalid"));
         }
@@ -488,7 +488,7 @@ impl ExactStructuralStudyPublication {
             .meshing_objects
             .iter()
             .chain(&self.region_resolution_objects)
-            .chain(&self.signal_objects)
+            .chain(&self.input_objects)
             .chain(self.analysis.objects())
         {
             if reference.kind != ValueRefKind::ResultObject
@@ -515,7 +515,7 @@ impl ExactStructuralStudyPublication {
             reference_inventory(inventory)?;
         }
         self.analysis.validate()?;
-        reference_inventory(&self.signal_objects)?;
+        reference_inventory(&self.input_objects)?;
         Ok(())
     }
 
@@ -706,89 +706,78 @@ pub struct ExactStructuralFrequencyHistoryResult {
 
 pub(crate) enum ExactStructuralAnalysisPublication<'a> {
     LinearSequence {
-        signals:
-            &'a [crate::remote::signal_materialization::CompletedRemoteSignalMaterialization],
+        inputs: &'a [crate::remote::input_materialization::CompletedRemoteInputMaterialization],
         sequence: &'a CompletedStructuralSequence,
         unresolved_workloads_digest: Digest,
     },
     StructuralTransient {
-        signals:
-            &'a [crate::remote::signal_materialization::CompletedRemoteSignalMaterialization],
+        inputs: &'a [crate::remote::input_materialization::CompletedRemoteInputMaterialization],
         completion: &'a CompletedStructuralTransientSequence,
         unresolved_workloads_digest: Digest,
     },
     StructuralModal {
-        signals:
-            &'a [crate::remote::signal_materialization::CompletedRemoteSignalMaterialization],
+        inputs: &'a [crate::remote::input_materialization::CompletedRemoteInputMaterialization],
         completion: &'a crate::CompletedStructuralModalStudy,
         unresolved_workloads_digest: Digest,
     },
     StructuralModalTransient {
-        signals:
-            &'a [crate::remote::signal_materialization::CompletedRemoteSignalMaterialization],
+        inputs: &'a [crate::remote::input_materialization::CompletedRemoteInputMaterialization],
         completion: &'a crate::CompletedStructuralModalTransientStudy,
         unresolved_workloads_digest: Digest,
     },
     StructuralModalResponseSpectrum {
-        signals:
-            &'a [crate::remote::signal_materialization::CompletedRemoteSignalMaterialization],
+        inputs: &'a [crate::remote::input_materialization::CompletedRemoteInputMaterialization],
         completion: &'a crate::CompletedStructuralModalResponseSpectrumStudy,
         unresolved_workloads_digest: Digest,
     },
     StructuralRandomResponse {
-        signals:
-            &'a [crate::remote::signal_materialization::CompletedRemoteSignalMaterialization],
+        inputs: &'a [crate::remote::input_materialization::CompletedRemoteInputMaterialization],
         completion: &'a crate::CompletedStructuralRandomResponseStudy,
         unresolved_workloads_digest: Digest,
     },
     StructuralBuckling {
-        signals:
-            &'a [crate::remote::signal_materialization::CompletedRemoteSignalMaterialization],
+        inputs: &'a [crate::remote::input_materialization::CompletedRemoteInputMaterialization],
         completion: &'a crate::CompletedStructuralBucklingSequenceStudy,
         unresolved_workloads_digest: Digest,
     },
     StructuralPrestressedModal {
-        signals:
-            &'a [crate::remote::signal_materialization::CompletedRemoteSignalMaterialization],
+        inputs: &'a [crate::remote::input_materialization::CompletedRemoteInputMaterialization],
         completion: &'a crate::CompletedStructuralPrestressedModalStudy,
         unresolved_workloads_digest: Digest,
     },
     StructuralPrestressedFrequency {
-        signals:
-            &'a [crate::remote::signal_materialization::CompletedRemoteSignalMaterialization],
+        inputs: &'a [crate::remote::input_materialization::CompletedRemoteInputMaterialization],
         completion: &'a crate::CompletedStructuralPrestressedFrequencyStudy,
         unresolved_workloads_digest: Digest,
     },
     StructuralPrestressedModalFrequency {
-        signals:
-            &'a [crate::remote::signal_materialization::CompletedRemoteSignalMaterialization],
+        inputs: &'a [crate::remote::input_materialization::CompletedRemoteInputMaterialization],
         completion: &'a crate::CompletedStructuralPrestressedModalFrequencyStudy,
         unresolved_workloads_digest: Digest,
     },
     StructuralFrequency {
-        signals:
-            &'a [crate::remote::signal_materialization::CompletedRemoteSignalMaterialization],
+        inputs: &'a [crate::remote::input_materialization::CompletedRemoteInputMaterialization],
         completion: &'a crate::CompletedStructuralFrequencyStudy,
         unresolved_workloads_digest: Digest,
     },
 }
 
 impl ExactStructuralAnalysisPublication<'_> {
-    fn signals(
+    fn inputs(
         &self,
-    ) -> &[crate::remote::signal_materialization::CompletedRemoteSignalMaterialization] {
+    ) -> &[crate::remote::input_materialization::CompletedRemoteInputMaterialization] {
         match self {
-            Self::LinearSequence { signals, .. }
-            | Self::StructuralTransient { signals, .. }
-            | Self::StructuralModal { signals, .. }
-            | Self::StructuralModalTransient { signals, .. }
-            | Self::StructuralModalResponseSpectrum { signals, .. }
-            | Self::StructuralRandomResponse { signals, .. }
-            | Self::StructuralBuckling { signals, .. }
-            | Self::StructuralPrestressedModal { signals, .. }
-            | Self::StructuralPrestressedFrequency { signals, .. }
-            | Self::StructuralPrestressedModalFrequency { signals, .. }
-            | Self::StructuralFrequency { signals, .. } => signals,
+            Self::LinearSequence { inputs, .. }
+            | Self::StructuralTransient { inputs, .. }
+            | Self::StructuralModal { inputs, .. }
+            | Self::StructuralModalTransient { inputs, .. }
+            | Self::StructuralModalResponseSpectrum { inputs, .. }
+            | Self::StructuralRandomResponse { inputs, .. }
+            | Self::StructuralBuckling { inputs, .. }
+            | Self::StructuralPrestressedModal { inputs, .. }
+            | Self::StructuralPrestressedFrequency { inputs, .. }
+            | Self::StructuralPrestressedModalFrequency { inputs, .. }
+            | Self::StructuralFrequency { inputs, .. } => inputs,
         }
     }
 
@@ -866,7 +855,7 @@ pub struct ExactStructuralStudyResultExpectation {
     pub geometry_source_digest: Digest,
     pub workloads: StructuralStudyWorkloads,
     pub analysis_accelerator_requests: Vec<runmat_execution::resource::AcceleratorRequest>,
-    pub signal_materializations: Vec<runmat_analysis_execution::SignalMaterializationExpectation>,
+    pub input_materializations: Vec<runmat_analysis_execution::InputMaterializationExpectation>,
     pub expected_meshing_request: MeshingRequest,
 }
 
@@ -883,29 +872,54 @@ impl ExactStructuralStudyResultExpectation {
             &self.analysis_accelerator_requests,
         )?;
         self.expected_meshing_request.validate().map_err(protocol)?;
-        let authored_signals = self
-            .workloads
-            .authored_model()
-            .map_err(protocol)?
+        let model = self.workloads.authored_model().map_err(protocol)?;
+        let authored_signals = model
             .signals
             .iter()
             .filter(|signal| signal.generator().is_some())
             .collect::<Vec<_>>();
-        if authored_signals.len() != self.signal_materializations.len()
-            || authored_signals
-                .iter()
-                .zip(&self.signal_materializations)
-                .any(|(signal, expected)| *signal != &expected.authored)
+        let authored_responses = model
+            .response_spectra
+            .iter()
+            .filter(|spectrum| spectrum.ordinates.generator().is_some())
+            .collect::<Vec<_>>();
+        let authored_random = model
+            .random_excitations
+            .iter()
+            .filter(|spectrum| spectrum.spectral_density.generator().is_some())
+            .collect::<Vec<_>>();
+        if authored_signals.len() + authored_responses.len() + authored_random.len()
+            != self.input_materializations.len()
         {
             return Err(protocol(
-                "whole-study signal expectations differ from its authored workload",
+                "whole-study input expectations differ from its authored workload",
             ));
         }
-        for materialization in &self.signal_materializations {
+        let mut signals = authored_signals.into_iter();
+        let mut responses = authored_responses.into_iter();
+        let mut random = authored_random.into_iter();
+        for materialization in &self.input_materializations {
             materialization.validate().map_err(protocol)?;
-            if materialization.admitted.program_revision != self.program_revision {
+            let (revision, matches) = match materialization {
+                runmat_analysis_execution::InputMaterializationExpectation::Signal(expected) => (
+                    &expected.admitted.program_revision,
+                    signals.next() == Some(&expected.authored),
+                ),
+                runmat_analysis_execution::InputMaterializationExpectation::Numerical(expected) => {
+                    let matches = match &expected.authored {
+                        runmat_analysis_execution::NumericalGeneratorSource::ResponseSpectrum(
+                            spectrum,
+                        ) => responses.next() == Some(spectrum),
+                        runmat_analysis_execution::NumericalGeneratorSource::RandomSpectrum(
+                            spectrum,
+                        ) => random.next() == Some(spectrum),
+                    };
+                    (&expected.admitted.invocation.program_revision, matches)
+                }
+            };
+            if revision != &self.program_revision || !matches {
                 return Err(protocol(
-                    "whole-study signal expectation uses another program revision",
+                    "whole-study input expectation differs from its workload or program revision",
                 ));
             }
         }

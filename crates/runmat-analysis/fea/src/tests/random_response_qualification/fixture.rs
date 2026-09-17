@@ -77,7 +77,10 @@ pub(super) fn constant_spectrum(
         excitation_id: RandomExcitationId("qualification-spectrum".into()),
         frequencies_hz: bounds_hz.to_vec(),
         channels,
-        spectral_density: vec![matrix.clone(), matrix],
+        spectral_density: runmat_analysis_core::NumericalDataSource::authored(
+            vec![matrix.clone(), matrix],
+            "sha256:random-response-qualification",
+        ),
         convention: SpectralDensityConvention::OneSidedPerHertz,
         interpolation: RandomSpectrumInterpolation::LinearFrequency,
         extrapolation: RandomSpectrumExtrapolation::Reject,
@@ -85,7 +88,6 @@ pub(super) fn constant_spectrum(
             max_absolute_density_error: Some(0.0),
             equivalent_degrees_of_freedom: None,
         },
-        provenance_digest: "sha256:random-response-qualification".into(),
     }
 }
 

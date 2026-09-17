@@ -247,7 +247,7 @@ async fn print_terminal(
         }
         if let secret::SavedOutputIntent::StructuralStudy {
             continuation,
-            signal_materializations,
+            input_materializations,
             revision,
             materialization,
             result,
@@ -270,7 +270,7 @@ async fn print_terminal(
                 outputs.response,
                 objects,
                 continuation,
-                signal_materializations,
+                input_materializations,
                 revision.clone(),
             )?;
             secret::mark_structural_study_materialized(&run.id, envelope.clone())?;
@@ -284,7 +284,7 @@ async fn print_terminal(
         if let secret::SavedOutputIntent::StructuralSweep {
             spec,
             continuations,
-            signal_materializations,
+            input_materializations,
             revision,
             materialization,
             result,
@@ -308,7 +308,7 @@ async fn print_terminal(
                 objects,
                 spec,
                 continuations,
-                signal_materializations,
+                input_materializations,
                 revision.clone(),
             )?;
             secret::mark_structural_sweep_materialized(&run.id, envelope.clone())?;

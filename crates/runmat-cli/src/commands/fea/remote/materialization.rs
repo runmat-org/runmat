@@ -35,7 +35,7 @@ pub(crate) fn materialize_remote_outputs(
     response: ProgramExecutionResponse,
     objects: Vec<ProgramExecutionObject>,
     continuation: &str,
-    signal_materializations: &[runmat_analysis_execution::SignalMaterializationExpectation],
+    input_materializations: &[runmat_analysis_execution::InputMaterializationExpectation],
     revision: ProgramRevision,
 ) -> Result<OperationEnvelope<AnalysisStudyRunData>> {
     let continuation = base64::engine::general_purpose::URL_SAFE_NO_PAD
@@ -43,7 +43,7 @@ pub(crate) fn materialize_remote_outputs(
         .context("saved structural study continuation is malformed")?;
     let study = PreparedStructuralStudyIntent::from_continuation_bytes(&continuation)
         .map_err(anyhow::Error::msg)?;
-    let expectation = result_expectation(&study, signal_materializations, revision, run_id)?;
+    let expectation = result_expectation(&study, input_materializations, revision, run_id)?;
     let cache = DownloadedResultCache::from_objects(objects);
     let result = import_exact_structural_study_result(
         &cache,
@@ -72,7 +72,7 @@ pub(crate) fn materialize_remote_sweep_outputs(
     objects: Vec<ProgramExecutionObject>,
     spec: &AnalysisStudySweepSpec,
     continuations: &[String],
-    signal_materializations: &[Vec<runmat_analysis_execution::SignalMaterializationExpectation>],
+    input_materializations: &[Vec<runmat_analysis_execution::InputMaterializationExpectation>],
     revision: ProgramRevision,
 ) -> Result<OperationEnvelope<AnalysisStudySweepData>> {
     let intents = continuations
@@ -86,8 +86,8 @@ pub(crate) fn materialize_remote_sweep_outputs(
         })
         .collect::<Result<Vec<_>>>()?;
     validate_continuations(spec, &intents)?;
-    if signal_materializations.len() != intents.len() {
-        anyhow::bail!("saved signal expectation count differs from the structural sweep");
+    if input_materializations.len() != intents.len() {
+        anyhow::bail!("saved input expectation count differs from the structural sweep");
     }
     let context = intents
         .first()
@@ -101,7 +101,7 @@ pub(crate) fn materialize_remote_sweep_outputs(
         definition,
         studies: intents
             .iter()
-            .zip(signal_materializations)
+            .zip(input_materializations)
             .map(|(intent, signals)| result_expectation(intent, signals, revision.clone(), run_id))
             .collect::<Result<Vec<_>>>()?,
     };
@@ -181,7 +181,7 @@ fn validate_continuations(
 
 fn result_expectation(
     study: &PreparedStructuralStudyIntent,
-    signal_materializations: &[runmat_analysis_execution::SignalMaterializationExpectation],
+    input_materializations: &[runmat_analysis_execution::InputMaterializationExpectation],
     revision: ProgramRevision,
     authority: &str,
 ) -> Result<ExactStructuralStudyResultExpectation> {
@@ -193,7 +193,7 @@ fn result_expectation(
         geometry_source_digest: study.geometry_source_digest(),
         workloads: study.workloads(),
         analysis_accelerator_requests: Vec::new(),
-        signal_materializations: signal_materializations.to_vec(),
+        input_materializations: input_materializations.to_vec(),
         expected_meshing_request: authored_meshing_request(study)?,
     };
     expectation.validate()?;

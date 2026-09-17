@@ -30,7 +30,7 @@ pub enum SavedOutputIntent {
     },
     StructuralStudy {
         continuation: String,
-        signal_materializations: Vec<runmat_analysis_execution::SignalMaterializationExpectation>,
+        input_materializations: Vec<runmat_analysis_execution::InputMaterializationExpectation>,
         revision: runmat_execution::ProgramRevision,
         materialization: OutputMaterialization,
         result: Option<
@@ -44,8 +44,8 @@ pub enum SavedOutputIntent {
     StructuralSweep {
         spec: Box<runmat_runtime::analysis::AnalysisStudySweepSpec>,
         continuations: Vec<String>,
-        signal_materializations:
-            Vec<Vec<runmat_analysis_execution::SignalMaterializationExpectation>>,
+        input_materializations:
+            Vec<Vec<runmat_analysis_execution::InputMaterializationExpectation>>,
         revision: runmat_execution::ProgramRevision,
         materialization: OutputMaterialization,
         result: Option<
@@ -113,7 +113,7 @@ impl SavedRemoteRun {
         }
         if let SavedOutputIntent::StructuralStudy {
             continuation,
-            signal_materializations,
+            input_materializations,
             revision,
             materialization,
             result,
@@ -129,7 +129,7 @@ impl SavedRemoteRun {
                 )
                 .map_err(anyhow::Error::msg)
                 .context("saved structural study continuation is invalid")?;
-            validate_signal_expectations(&intent, signal_materializations, revision)?;
+            validate_input_expectations(&intent, input_materializations, revision)?;
             if (*materialization == OutputMaterialization::Materialized) != result.is_some() {
                 anyhow::bail!("saved structural study materialization state is inconsistent");
             }
@@ -137,7 +137,7 @@ impl SavedRemoteRun {
         if let SavedOutputIntent::StructuralSweep {
             spec,
             continuations,
-            signal_materializations,
+            input_materializations,
             revision,
             materialization,
             result,
@@ -150,14 +150,14 @@ impl SavedRemoteRun {
             )
             .map_err(|error| anyhow::anyhow!(error.message))?;
             if continuations.len() != spec.studies.len()
-                || signal_materializations.len() != spec.studies.len()
+                || input_materializations.len() != spec.studies.len()
             {
                 anyhow::bail!("saved structural sweep continuation count is invalid");
             }
             for ((continuation, authored), signals) in continuations
                 .iter()
                 .zip(&spec.studies)
-                .zip(signal_materializations)
+                .zip(input_materializations)
             {
                 let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
                     .decode(continuation)
@@ -173,7 +173,7 @@ impl SavedRemoteRun {
                         "saved structural sweep continuation differs from its authored study"
                     );
                 }
-                validate_signal_expectations(&intent, signals, revision)?;
+                validate_input_expectations(&intent, signals, revision)?;
             }
             if (*materialization == OutputMaterialization::Materialized) != result.is_some() {
                 anyhow::bail!("saved structural sweep materialization state is inconsistent");
@@ -232,29 +232,72 @@ impl SavedRemoteRun {
     }
 }
 
-fn validate_signal_expectations(
+fn validate_input_expectations(
     intent: &runmat_runtime::analysis::PreparedStructuralStudyIntent,
-    expectations: &[runmat_analysis_execution::SignalMaterializationExpectation],
+    expectations: &[runmat_analysis_execution::InputMaterializationExpectation],
     revision: &runmat_execution::ProgramRevision,
 ) -> Result<()> {
-    let authored = intent
-        .model()
+    let model = intent.model();
+    let authored_signals = model
         .signals
         .iter()
         .filter(|signal| signal.generator().is_some())
         .collect::<Vec<_>>();
-    if authored.len() != expectations.len()
-        || authored
-            .iter()
-            .zip(expectations)
-            .any(|(signal, expectation)| *signal != &expectation.authored)
+    let authored_responses = model
+        .response_spectra
+        .iter()
+        .filter(|spectrum| spectrum.ordinates.generator().is_some())
+        .collect::<Vec<_>>();
+    let authored_random = model
+        .random_excitations
+        .iter()
+        .filter(|spectrum| spectrum.spectral_density.generator().is_some())
+        .collect::<Vec<_>>();
+    if authored_signals.len() + authored_responses.len() + authored_random.len()
+        != expectations.len()
     {
-        anyhow::bail!("saved signal expectations differ from the authored study");
+        anyhow::bail!("saved input expectations differ from the authored study");
     }
-    for expectation in expectations {
+    for (index, expectation) in expectations.iter().enumerate() {
         expectation.validate().map_err(anyhow::Error::msg)?;
-        if &expectation.admitted.program_revision != revision {
-            anyhow::bail!("saved signal expectation differs from the remote program revision");
+        let authored_matches = match expectation {
+            runmat_analysis_execution::InputMaterializationExpectation::Signal(value) => {
+                authored_signals
+                    .get(index)
+                    .is_some_and(|signal| *signal == &value.authored)
+            }
+            runmat_analysis_execution::InputMaterializationExpectation::Numerical(value) => {
+                let numerical_index = index.saturating_sub(authored_signals.len());
+                match &value.authored {
+                    runmat_analysis_execution::NumericalGeneratorSource::ResponseSpectrum(
+                        spectrum,
+                    ) => authored_responses
+                        .get(numerical_index)
+                        .is_some_and(|authored| *authored == spectrum),
+                    runmat_analysis_execution::NumericalGeneratorSource::RandomSpectrum(
+                        spectrum,
+                    ) => {
+                        let random_index = numerical_index.saturating_sub(authored_responses.len());
+                        authored_random
+                            .get(random_index)
+                            .is_some_and(|authored| *authored == spectrum)
+                    }
+                }
+            }
+        };
+        if !authored_matches {
+            anyhow::bail!("saved input expectations differ from the authored study");
+        }
+        let admitted_revision = match expectation {
+            runmat_analysis_execution::InputMaterializationExpectation::Signal(value) => {
+                &value.admitted.program_revision
+            }
+            runmat_analysis_execution::InputMaterializationExpectation::Numerical(value) => {
+                &value.admitted.invocation.program_revision
+            }
+        };
+        if admitted_revision != revision {
+            anyhow::bail!("saved input expectation differs from the remote program revision");
         }
     }
     Ok(())
@@ -501,7 +544,7 @@ mod tests {
             &key,
             SavedOutputIntent::StructuralStudy {
                 continuation,
-                signal_materializations: Vec::new(),
+                input_materializations: Vec::new(),
                 revision: revision(),
                 materialization: OutputMaterialization::Pending,
                 result: None,
@@ -553,7 +596,7 @@ mod tests {
             SavedOutputIntent::StructuralSweep {
                 spec: Box::new(spec.clone()),
                 continuations: continuations.clone(),
-                signal_materializations: vec![Vec::new(), Vec::new()],
+                input_materializations: vec![Vec::new(), Vec::new()],
                 revision: revision(),
                 materialization: OutputMaterialization::Pending,
                 result: None,

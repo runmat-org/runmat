@@ -5,10 +5,12 @@ mod capture;
 use capture::validate_capture_contract;
 
 use runmat_analysis_core::{
-    GeneratorArgument, GeneratorEffectPolicy, GeneratorProvenance, PhysicalSignal,
-    SignalSamplingPolicy,
+    GeneratorArgument, GeneratorEffectPolicy, GeneratorInvocation, GeneratorProvenance,
+    PhysicalSignal, RandomExcitationSpectrum, ResponseSpectrum, SignalSamplingPolicy,
 };
-use runmat_analysis_fea::execution::{GeneratorIdentity, SignalMaterializationIdentity};
+use runmat_analysis_fea::execution::{
+    GeneratorIdentity, NumericalMaterializationIdentity, SignalMaterializationIdentity,
+};
 use runmat_canonical_codec::{encode_contract, CanonicalLimits};
 use runmat_execution::value::{CallableValue, ValueLimits, ValuePayload};
 use runmat_execution::{Digest, ProgramRevision};
@@ -39,6 +41,59 @@ pub struct AdmittedSignalGenerator {
     pub provenance: GeneratorProvenance,
 }
 
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdmittedGeneratorInvocation {
+    pub program_revision: ProgramRevision,
+    pub callable: BundleCallable,
+    pub executable_source_digest: Digest,
+    pub function: runmat_types::ProgramFunctionId,
+    pub captures: Vec<ValuePayload>,
+    pub generator_identity: GeneratorIdentity,
+    pub required_capabilities: BTreeSet<CapabilityRequirement>,
+    pub provenance: GeneratorProvenance,
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NumericalGeneratorKind {
+    ResponseSpectrum {
+        spectrum_id: runmat_analysis_core::ResponseSpectrumId,
+    },
+    RandomSpectrum {
+        excitation_id: runmat_analysis_core::RandomExcitationId,
+        channel_count: usize,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdmittedNumericalGenerator {
+    pub invocation: AdmittedGeneratorInvocation,
+    pub materialization_identity: NumericalMaterializationIdentity,
+    pub kind: NumericalGeneratorKind,
+    pub sample_points: Vec<f64>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GeneratorOutputDomain {
+    Real,
+    RealOrComplex,
+}
+
+impl GeneratorOutputDomain {
+    fn accepts(self, kind: &ValueKindFact) -> bool {
+        match kind {
+            ValueKindFact::Unknown => true,
+            ValueKindFact::Numeric(numeric) => match self {
+                Self::Real => numeric.domain == NumericDomain::Real,
+                Self::RealOrComplex => true,
+            },
+            _ => false,
+        }
+    }
+}
+
 #[derive(Default)]
 struct FrozenCallableBinding {
     captures: Vec<ValuePayload>,
@@ -61,7 +116,7 @@ pub fn admit_named_signal_generator(
         AnalysisBridgeError::Invalid("signal is not backed by a callable generator".into())
     })?;
     if !matches!(
-        &generator.callable,
+        &generator.invocation.callable,
         runmat_analysis_core::GeneratorCallable::ProjectFunction { .. }
     ) {
         return Err(AnalysisBridgeError::Identity(
@@ -98,7 +153,7 @@ pub fn admit_callable_signal_generator(
         AnalysisBridgeError::Invalid("signal is not backed by a callable generator".into())
     })?;
     if !matches!(
-        &generator.callable,
+        &generator.invocation.callable,
         runmat_analysis_core::GeneratorCallable::BoundFunction { function: bound, .. }
             if *bound == function.function
     ) {
@@ -132,6 +187,152 @@ pub fn admit_callable_signal_generator(
     )
 }
 
+pub fn admit_named_response_spectrum_generator(
+    spectrum: &ResponseSpectrum,
+    program_revision: ProgramRevision,
+    callable: BundleCallable,
+    executable_source_digest: Digest,
+    function: &FunctionAnalysis,
+    available_capabilities: &BTreeSet<CapabilityRequirement>,
+) -> AnalysisBridgeResult<AdmittedNumericalGenerator> {
+    let invocation = spectrum.ordinates.generator().ok_or_else(|| {
+        AnalysisBridgeError::Invalid("response spectrum is not callable-backed".into())
+    })?;
+    admit_named_numerical_generator(
+        invocation,
+        program_revision,
+        callable,
+        executable_source_digest,
+        function,
+        GeneratorOutputDomain::Real,
+        spectrum_axis(&spectrum.abscissa),
+        NumericalGeneratorKind::ResponseSpectrum {
+            spectrum_id: spectrum.spectrum_id.clone(),
+        },
+        contract_digest(
+            "response-spectrum-materialization-contract",
+            &(
+                &spectrum.spectrum_id,
+                &spectrum.abscissa,
+                spectrum.damping,
+                spectrum.response,
+                spectrum.envelope,
+                spectrum.interpolation,
+                spectrum.extrapolation,
+                &spectrum.direction,
+                spectrum.modal_combination,
+                spectrum.directional_combination,
+                spectrum.truncation,
+                spectrum.rigid_response,
+                &spectrum.construction,
+                &spectrum.evidence,
+            ),
+        )?,
+        available_capabilities,
+    )
+}
+
+pub fn admit_named_random_spectrum_generator(
+    spectrum: &RandomExcitationSpectrum,
+    program_revision: ProgramRevision,
+    callable: BundleCallable,
+    executable_source_digest: Digest,
+    function: &FunctionAnalysis,
+    available_capabilities: &BTreeSet<CapabilityRequirement>,
+) -> AnalysisBridgeResult<AdmittedNumericalGenerator> {
+    let invocation = spectrum.spectral_density.generator().ok_or_else(|| {
+        AnalysisBridgeError::Invalid("random spectrum is not callable-backed".into())
+    })?;
+    admit_named_numerical_generator(
+        invocation,
+        program_revision,
+        callable,
+        executable_source_digest,
+        function,
+        GeneratorOutputDomain::RealOrComplex,
+        &spectrum.frequencies_hz,
+        NumericalGeneratorKind::RandomSpectrum {
+            excitation_id: spectrum.excitation_id.clone(),
+            channel_count: spectrum.channels.len(),
+        },
+        contract_digest(
+            "random-spectrum-materialization-contract",
+            &(
+                &spectrum.excitation_id,
+                &spectrum.frequencies_hz,
+                &spectrum.channels,
+                spectrum.convention,
+                spectrum.interpolation,
+                spectrum.extrapolation,
+                &spectrum.evidence,
+            ),
+        )?,
+        available_capabilities,
+    )
+}
+
+fn admit_named_numerical_generator(
+    invocation: &GeneratorInvocation,
+    program_revision: ProgramRevision,
+    callable: BundleCallable,
+    executable_source_digest: Digest,
+    function: &FunctionAnalysis,
+    output_domain: GeneratorOutputDomain,
+    sample_points: &[f64],
+    kind: NumericalGeneratorKind,
+    authored_contract_digest: Digest,
+    available_capabilities: &BTreeSet<CapabilityRequirement>,
+) -> AnalysisBridgeResult<AdmittedNumericalGenerator> {
+    if !matches!(
+        invocation.callable,
+        runmat_analysis_core::GeneratorCallable::ProjectFunction { .. }
+    ) {
+        return Err(AnalysisBridgeError::Identity(
+            "named project admission requires a project-function generator identity",
+        ));
+    }
+    validate_canonical_points(sample_points)?;
+    let invocation = admit_generator_invocation(
+        invocation,
+        program_revision,
+        callable,
+        executable_source_digest,
+        function,
+        FrozenCallableBinding::default(),
+        output_domain,
+        available_capabilities,
+    )?;
+    let materialization_identity = NumericalMaterializationIdentity::new(
+        authored_contract_digest,
+        invocation.generator_identity,
+    )?;
+    Ok(AdmittedNumericalGenerator {
+        invocation,
+        materialization_identity,
+        kind,
+        sample_points: sample_points.to_vec(),
+    })
+}
+
+fn spectrum_axis(axis: &runmat_analysis_core::SpectrumAbscissa) -> &[f64] {
+    match axis {
+        runmat_analysis_core::SpectrumAbscissa::FrequencyHertz(values)
+        | runmat_analysis_core::SpectrumAbscissa::PeriodSeconds(values) => values,
+    }
+}
+
+fn validate_canonical_points(points: &[f64]) -> AnalysisBridgeResult<()> {
+    if points.len() < 2
+        || points.iter().any(|point| !point.is_finite())
+        || points.windows(2).any(|pair| pair[0] >= pair[1])
+    {
+        return Err(AnalysisBridgeError::Invalid(
+            "generator axis must contain at least two finite, strictly increasing points".into(),
+        ));
+    }
+    Ok(())
+}
+
 fn admit_signal_generator(
     signal: &PhysicalSignal,
     program_revision: ProgramRevision,
@@ -141,24 +342,88 @@ fn admit_signal_generator(
     binding: FrozenCallableBinding,
     available_capabilities: &BTreeSet<CapabilityRequirement>,
 ) -> AnalysisBridgeResult<AdmittedSignalGenerator> {
+    let generator = signal.generator().ok_or_else(|| {
+        AnalysisBridgeError::Invalid("signal is not backed by a callable generator".into())
+    })?;
+    let admitted = admit_generator_invocation(
+        &generator.invocation,
+        program_revision,
+        callable,
+        executable_source_digest,
+        function,
+        binding,
+        GeneratorOutputDomain::RealOrComplex,
+        available_capabilities,
+    )?;
+    let authored_signal_digest = contract_digest(
+        "authored-signal-contract",
+        &(
+            signal.signal_id(),
+            signal.quantity(),
+            signal.shape(),
+            signal.frame(),
+            signal.precision(),
+        ),
+    )?;
+    let realization_policy_digest = contract_digest(
+        "realization-policy",
+        &(
+            &generator.domain,
+            &generator.sampling,
+            generator.interpolation,
+            generator.extrapolation,
+        ),
+    )?;
+    let materialization_identity = SignalMaterializationIdentity::new(
+        authored_signal_digest,
+        Some(admitted.generator_identity),
+        realization_policy_digest,
+    )?;
+    Ok(AdmittedSignalGenerator {
+        program_revision: admitted.program_revision,
+        callable: admitted.callable,
+        executable_source_digest: admitted.executable_source_digest,
+        function: admitted.function,
+        captures: admitted.captures,
+        generator_identity: admitted.generator_identity,
+        materialization_identity,
+        sample_points: sample_points(&generator.sampling)?,
+        required_capabilities: admitted.required_capabilities,
+        provenance: admitted.provenance,
+    })
+}
+
+fn admit_generator_invocation(
+    invocation: &GeneratorInvocation,
+    program_revision: ProgramRevision,
+    callable: BundleCallable,
+    executable_source_digest: Digest,
+    function: &FunctionAnalysis,
+    binding: FrozenCallableBinding,
+    output_domain: GeneratorOutputDomain,
+    available_capabilities: &BTreeSet<CapabilityRequirement>,
+) -> AnalysisBridgeResult<AdmittedGeneratorInvocation> {
     let FrozenCallableBinding {
         captures,
         callable_value_digest,
     } = binding;
     program_revision.validate()?;
-    let generator = signal.generator().ok_or_else(|| {
-        AnalysisBridgeError::Invalid("signal is not backed by a callable generator".into())
-    })?;
     if callable.owner_identity.trim().is_empty()
-        || callable.qualified_name != generator.callable.display_name()
+        || callable.qualified_name != invocation.callable.display_name()
     {
         return Err(AnalysisBridgeError::Identity(
             "resolved callable differs from the authored generator",
         ));
     }
-    validate_static_contract(generator, function, captures.len(), available_capabilities)?;
+    validate_static_contract(
+        invocation,
+        function,
+        captures.len(),
+        output_domain,
+        available_capabilities,
+    )?;
     validate_capture_contract(&captures, &function.callable.captures)?;
-    for argument in &generator.arguments {
+    for argument in &invocation.arguments {
         if let GeneratorArgument::Artifact(artifact) = argument {
             artifact
                 .content_digest
@@ -180,53 +445,19 @@ fn admit_signal_generator(
         ),
     )?;
     let capture_digest = contract_digest("captures", &captures)?;
-    // Generator provenance identifies the executable calculation and every immutable value it
-    // closes over. Sampling and interpolation describe a requested realization, not the callable.
-    let generator_contract_digest = contract_digest(
-        "generator-invocation",
-        &(
-            generator.callable.display_name(),
-            &generator.arguments,
-            &generator.domain,
-            &generator.effects,
-        ),
-    )?;
+    let invocation_digest = contract_digest("generator-invocation", invocation)?;
     let generator_identity =
-        GeneratorIdentity::new(callable_digest, capture_digest, generator_contract_digest)?;
-    let authored_signal_digest = contract_digest(
-        "authored-signal-contract",
-        &(
-            signal.signal_id(),
-            signal.quantity(),
-            signal.shape(),
-            signal.frame(),
-            signal.precision(),
-        ),
-    )?;
-    let realization_policy_digest = contract_digest(
-        "realization-policy",
-        &(
-            &generator.sampling,
-            generator.interpolation,
-            generator.extrapolation,
-        ),
-    )?;
-    let materialization_identity = SignalMaterializationIdentity::new(
-        authored_signal_digest,
-        Some(generator_identity),
-        realization_policy_digest,
-    )?;
-    let frozen_input_digest = contract_digest("frozen-inputs", &(&captures, &generator.arguments))?;
+        GeneratorIdentity::new(callable_digest, capture_digest, invocation_digest)?;
+    let frozen_input_digest =
+        contract_digest("frozen-inputs", &(&captures, &invocation.arguments))?;
 
-    Ok(AdmittedSignalGenerator {
+    Ok(AdmittedGeneratorInvocation {
         program_revision: program_revision.clone(),
         callable,
         executable_source_digest,
         function: function.function,
         captures,
         generator_identity,
-        materialization_identity,
-        sample_points: sample_points(&generator.sampling)?,
         required_capabilities: function.capabilities.0.clone(),
         provenance: GeneratorProvenance {
             project_revision: program_revision.canonical_identity(),
@@ -237,14 +468,15 @@ fn admit_signal_generator(
 }
 
 fn validate_static_contract(
-    generator: &runmat_analysis_core::SignalGenerator,
+    invocation: &GeneratorInvocation,
     function: &FunctionAnalysis,
     capture_count: usize,
+    output_domain: GeneratorOutputDomain,
     available_capabilities: &BTreeSet<CapabilityRequirement>,
 ) -> AnalysisBridgeResult<()> {
     let callable = &function.callable;
     let expected_inputs =
-        generator
+        invocation
             .arguments
             .len()
             .checked_add(1)
@@ -262,7 +494,7 @@ fn validate_static_contract(
     {
         return Err(AnalysisBridgeError::Invalid(format!(
             "generator `{}` requires an exact, non-variadic ({expected_inputs} inputs, 1 output) static signature",
-            generator.callable.display_name()
+            invocation.callable.display_name()
         )));
     }
     if !callable.captures_complete || callable.captures.len() != capture_count {
@@ -270,18 +502,18 @@ fn validate_static_contract(
             "frozen callable capture values do not match its exact static capture contract".into(),
         ));
     }
-    if !matches!(function.outputs[0].kind, ValueKindFact::Numeric(_)) {
+    if !output_domain.accepts(&function.outputs[0].kind) {
         return Err(AnalysisBridgeError::Invalid(
-            "signal generator output must be statically numeric".into(),
+            "generator output has an incompatible static numeric domain".into(),
         ));
     }
     validate_axis_parameter(&callable.parameters[0])?;
-    for (argument, parameter) in generator.arguments.iter().zip(&callable.parameters[1..]) {
+    for (argument, parameter) in invocation.arguments.iter().zip(&callable.parameters[1..]) {
         validate_authored_parameter(argument, parameter)?;
     }
 
     if matches!(
-        generator.effects,
+        invocation.effects,
         GeneratorEffectPolicy::SeededRandom { .. }
     ) {
         return Err(AnalysisBridgeError::Invalid(
@@ -297,13 +529,13 @@ fn validate_static_contract(
             .copied()
             .collect::<Vec<_>>();
         return Err(AnalysisBridgeError::Invalid(format!(
-            "signal generator has effects forbidden by its policy: {forbidden:?}"
+            "analysis generator has effects forbidden by its policy: {forbidden:?}"
         )));
     }
     if matches!(
-        generator.effects,
+        invocation.effects,
         GeneratorEffectPolicy::DeclaredImmutableArtifacts
-    ) && !generator
+    ) && !invocation
         .arguments
         .iter()
         .any(|argument| matches!(argument, GeneratorArgument::Artifact(_)))
@@ -320,7 +552,7 @@ fn validate_static_contract(
             .copied()
             .collect::<Vec<_>>();
         return Err(AnalysisBridgeError::Invalid(format!(
-            "signal generator requires unavailable capabilities: {unavailable:?}"
+            "analysis generator requires unavailable capabilities: {unavailable:?}"
         )));
     }
     Ok(())
@@ -329,7 +561,7 @@ fn validate_static_contract(
 fn validate_axis_parameter(parameter: &ValueFact) -> AnalysisBridgeResult<()> {
     if !accepts_f64(parameter) || !accepts_column(&parameter.shape) {
         return Err(AnalysisBridgeError::Invalid(
-            "signal generator axis parameter must accept an N-by-1 real double array".into(),
+            "analysis generator axis parameter must accept an N-by-1 real double array".into(),
         ));
     }
     Ok(())
@@ -364,7 +596,8 @@ fn validate_authored_parameter(
     };
     if !valid {
         return Err(AnalysisBridgeError::Invalid(
-            "signal generator parameter does not accept its frozen argument representation".into(),
+            "analysis generator parameter does not accept its frozen argument representation"
+                .into(),
         ));
     }
     Ok(())
@@ -506,10 +739,13 @@ mod tests {
             shape: SignalShape::Scalar,
             frame: None,
             representation: SignalRepresentation::Generator(SignalGenerator {
-                callable: runmat_analysis_core::GeneratorCallable::ProjectFunction {
-                    qualified_name: "loads.pulse".into(),
+                invocation: runmat_analysis_core::GeneratorInvocation {
+                    callable: runmat_analysis_core::GeneratorCallable::ProjectFunction {
+                        qualified_name: "loads.pulse".into(),
+                    },
+                    arguments: vec![GeneratorArgument::Real(4.0)],
+                    effects: GeneratorEffectPolicy::Pure,
                 },
-                arguments: vec![GeneratorArgument::Real(4.0)],
                 domain: GeneratorDomain::TimeSeconds,
                 sampling: SignalSamplingPolicy::Uniform {
                     start: 0.0,
@@ -518,7 +754,6 @@ mod tests {
                 },
                 interpolation: SignalInterpolation::Linear,
                 extrapolation: SignalExtrapolation::Reject,
-                effects: GeneratorEffectPolicy::Pure,
             }),
             precision: SignalPrecision::Real64,
             evidence: SignalApproximationEvidence {
@@ -615,7 +850,7 @@ mod tests {
         let SignalRepresentation::Generator(generator) = &mut value.representation else {
             unreachable!()
         };
-        generator.arguments[0] = GeneratorArgument::Real(8.0);
+        generator.invocation.arguments[0] = GeneratorArgument::Real(8.0);
         let changed_argument = admit_named_signal_generator(
             &changed_signal,
             revision(),
@@ -705,7 +940,7 @@ mod tests {
         let SignalRepresentation::Generator(generator) = &mut signal.representation else {
             unreachable!()
         };
-        generator.callable = runmat_analysis_core::GeneratorCallable::BoundFunction {
+        generator.invocation.callable = runmat_analysis_core::GeneratorCallable::BoundFunction {
             function: runmat_types::ProgramFunctionId(7),
             display_name: "loads.pulse".into(),
         };
@@ -844,7 +1079,7 @@ mod tests {
             let SignalRepresentation::Generator(generator) = &mut value.representation else {
                 unreachable!()
             };
-            generator.effects = GeneratorEffectPolicy::SeededRandom {
+            generator.invocation.effects = GeneratorEffectPolicy::SeededRandom {
                 seed: 42,
                 distribution: runmat_analysis_core::RandomDistribution::Normal,
             };

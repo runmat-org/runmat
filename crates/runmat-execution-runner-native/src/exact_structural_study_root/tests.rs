@@ -114,7 +114,7 @@ fn preparation(
             workloads: workloads(),
         },
         analysis_accelerator_requests: Vec::new(),
-        signal_materializations: Vec::new(),
+        input_materializations: Vec::new(),
         exact_meshing,
     }
 }

@@ -11,6 +11,7 @@ mod frequency_object_access;
 mod frequency_task;
 mod graph;
 mod host;
+mod input_materialization;
 mod materialized_signal;
 mod modal_object_access;
 mod modal_task;
@@ -36,6 +37,7 @@ mod serial;
 mod signal_input;
 mod signal_materialization;
 mod signal_program;
+mod spectral_materialization;
 mod state_publication;
 mod state_transition;
 mod structural;
@@ -72,7 +74,10 @@ pub use buckling_task::{
     StructuralBucklingTaskPreparation,
 };
 pub use callable::{
-    admit_callable_signal_generator, admit_named_signal_generator, AdmittedSignalGenerator,
+    admit_callable_signal_generator, admit_named_random_spectrum_generator,
+    admit_named_response_spectrum_generator, admit_named_signal_generator,
+    AdmittedGeneratorInvocation, AdmittedNumericalGenerator, AdmittedSignalGenerator,
+    NumericalGeneratorKind,
 };
 pub use error::{AnalysisBridgeError, AnalysisBridgeResult};
 pub use field_recovery::{
@@ -116,6 +121,7 @@ pub use host::{
     ANALYSIS_HOST_INVOCATION_MEDIA_TYPE, ANALYSIS_HOST_INVOCATION_VALUE_SCHEMA,
     ANALYSIS_HOST_TARGET_PROFILE,
 };
+pub use input_materialization::{InputMaterializationExpectation, PreparedInputMaterialization};
 pub use materialized_signal::{
     canonical_tabulated_signal_content_digest, materialize_signal_for_solver,
 };
@@ -237,16 +243,23 @@ pub use serial::{
 };
 pub use signal_input::{validate_signal_input_payload, ResolvedSignalArtifact};
 pub use signal_materialization::{
-    canonicalize_signal_generator_outputs, plan_signal_generator_chunks,
-    validate_signal_generator_chunks, PlannedSignalGenerator, SignalGeneratorChunk,
-    SignalGeneratorChunkOutput,
+    canonicalize_signal_generator_outputs, plan_generator_chunks, plan_signal_generator_chunks,
+    validate_generator_chunks, validate_signal_generator_chunks, GeneratorChunk,
+    GeneratorChunkOutput, PlannedGenerator,
 };
 pub use signal_program::{
-    build_signal_generator_task_submission, prepare_signal_generator_program,
-    prepare_signal_materialization, PreparedSignalGeneratorChunk, PreparedSignalGeneratorProgram,
-    PreparedSignalMaterialization, SignalGeneratorExecutionContext,
-    SignalMaterializationExpectation, SIGNAL_GENERATOR_EXECUTION_MODE,
-    SIGNAL_GENERATOR_TARGET_PROFILE,
+    build_generator_task_submission, prepare_generator_program, prepare_signal_materialization,
+    GeneratorExecutionContext, GeneratorProgramAdmission, GeneratorProgramAdmissionRef,
+    PreparedGeneratorChunk, PreparedGeneratorProgram, PreparedSignalMaterialization,
+    SignalMaterializationExpectation, GENERATOR_EXECUTION_MODE, GENERATOR_TARGET_PROFILE,
+};
+pub use spectral_materialization::{
+    canonical_materialized_random_spectrum_bytes, canonical_materialized_response_spectrum_bytes,
+    decode_materialized_random_spectrum, decode_materialized_response_spectrum,
+    materialize_random_spectrum, materialize_response_spectrum,
+    plan_random_spectrum_generator_chunks, plan_response_spectrum_generator_chunks,
+    prepare_numerical_materialization, NumericalGeneratorSource,
+    NumericalMaterializationExpectation, PreparedNumericalMaterialization,
 };
 pub use state_publication::{
     import_semantic_state, import_semantic_state_completion, prepare_semantic_state_publication,

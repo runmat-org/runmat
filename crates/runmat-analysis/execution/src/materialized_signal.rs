@@ -221,7 +221,7 @@ pub fn materialize_signal_for_solver(
         || realization.materialization != admitted.materialization_identity
         || authored
             .generator()
-            .map(|value| value.callable.display_name())
+            .map(|value| value.invocation.callable.display_name())
             != Some(admitted.callable.qualified_name.as_str())
         || realization.sample_points().map(f64::to_bits).ne(admitted
             .sample_points

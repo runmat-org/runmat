@@ -112,12 +112,13 @@ pub use problem::response_spectrum::{
 };
 pub use problem::signal::{
     GeneratorArgument, GeneratorCallable, GeneratorDomain, GeneratorEffectPolicy,
-    GeneratorProvenance, PhysicalQuantityKind, PhysicalSignal, RandomDistribution, Signal,
-    SignalApproximationEvidence, SignalArtifactDomain, SignalArtifactRef, SignalDomainKind,
-    SignalExtrapolation, SignalGenerator, SignalId, SignalInterpolation, SignalKnot,
-    SignalKnotValue, SignalOrdinate, SignalPointContinuity, SignalPrecision, SignalProvenance,
-    SignalRepresentation, SignalSampleApproach, SignalSamplingPolicy, SignalShape, SignalValue,
-    StandardWaveform, StandardWaveformKind, TabulatedSignal, TabulatedSignalDomain,
+    GeneratorInvocation, GeneratorProvenance, NumericalDataSource, PhysicalQuantityKind,
+    PhysicalSignal, RandomDistribution, Signal, SignalApproximationEvidence, SignalArtifactDomain,
+    SignalArtifactRef, SignalDomainKind, SignalExtrapolation, SignalGenerator, SignalId,
+    SignalInterpolation, SignalKnot, SignalKnotValue, SignalOrdinate, SignalPointContinuity,
+    SignalPrecision, SignalProvenance, SignalRepresentation, SignalSampleApproach,
+    SignalSamplingPolicy, SignalShape, SignalValue, StandardWaveform, StandardWaveformKind,
+    TabulatedSignal, TabulatedSignalDomain,
 };
 pub use problem::structure::{
     BeamElementModel, BeamSectionModel, ConformalSolidAttachment, ShellElementModel,
@@ -588,10 +589,13 @@ mod tests {
         model.signals = vec![force_signal(
             "generated_force",
             SignalRepresentation::Generator(SignalGenerator {
-                callable: GeneratorCallable::ProjectFunction {
-                    qualified_name: "anonymousScript".to_string(),
+                invocation: GeneratorInvocation {
+                    callable: GeneratorCallable::ProjectFunction {
+                        qualified_name: "anonymousScript".to_string(),
+                    },
+                    arguments: Vec::new(),
+                    effects: GeneratorEffectPolicy::Pure,
                 },
-                arguments: Vec::new(),
                 domain: GeneratorDomain::TimeSeconds,
                 sampling: SignalSamplingPolicy::Uniform {
                     start: 0.0,
@@ -600,7 +604,6 @@ mod tests {
                 },
                 interpolation: SignalInterpolation::Linear,
                 extrapolation: SignalExtrapolation::Reject,
-                effects: GeneratorEffectPolicy::Pure,
             }),
         )];
         assert!(matches!(
@@ -803,7 +806,7 @@ mod tests {
         model.response_spectra = vec![ResponseSpectrum {
             spectrum_id: ResponseSpectrumId("launch_srs".to_string()),
             abscissa: SpectrumAbscissa::FrequencyHertz(vec![10.0, 100.0]),
-            ordinates: vec![5.0, 20.0],
+            ordinates: NumericalDataSource::authored(vec![5.0, 20.0], "sha256:spectrum"),
             damping: SpectrumDamping::Ratio(1.2),
             response: SpectrumResponse::AbsoluteAcceleration,
             envelope: SpectrumEnvelope::Maximax,
@@ -829,7 +832,6 @@ mod tests {
                 sampling_adequacy_ratio: 1.0,
                 max_interpolation_error: Some(0.01),
             },
-            provenance_digest: "sha256:spectrum".to_string(),
         }];
         assert!(matches!(
             validate_model(&model),

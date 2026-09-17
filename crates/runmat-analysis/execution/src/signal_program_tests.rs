@@ -115,8 +115,8 @@ fn executable(admitted: &AdmittedSignalGenerator) -> ExecutableUnitEnvelope {
     .unwrap()
 }
 
-fn chunks() -> Vec<SignalGeneratorChunk> {
-    vec![SignalGeneratorChunk {
+fn chunks() -> Vec<GeneratorChunk> {
+    vec![GeneratorChunk {
         ordinal: 0,
         first_sample: 0,
         sample_points: vec![0.0_f64.to_bits(), 1.0_f64.to_bits()],
@@ -139,8 +139,8 @@ fn external_input(scope: &str) -> ProgramExecutionObject {
     .unwrap()
 }
 
-fn task_context(scope: &[u8], pool: &[u8]) -> SignalGeneratorExecutionContext {
-    SignalGeneratorExecutionContext {
+fn task_context(scope: &[u8], pool: &[u8]) -> GeneratorExecutionContext {
+    GeneratorExecutionContext {
         scope_id: ExecutionScopeId::derive(&[scope]),
         pool_id: PoolId::derive(&[pool]),
         resources: ResourceRequest {
@@ -164,7 +164,7 @@ fn task_context(scope: &[u8], pool: &[u8]) -> SignalGeneratorExecutionContext {
 fn portable_program_binds_exact_callable_revision_and_chunk_arguments() {
     let admitted = admitted();
     let prepared =
-        prepare_signal_generator_program(&admitted, executable(&admitted), chunks(), &[]).unwrap();
+        prepare_generator_program(&admitted, executable(&admitted), chunks(), &[]).unwrap();
     assert_eq!(prepared.chunks.len(), 1);
     assert_eq!(prepared.chunks[0].request.function, 3);
     assert_eq!(
@@ -178,7 +178,7 @@ fn portable_program_binds_exact_callable_revision_and_chunk_arguments() {
 
     let mut substituted = executable(&admitted);
     substituted.manifest.identity.source_digest = digest("different source");
-    assert!(prepare_signal_generator_program(&admitted, substituted, chunks(), &[]).is_err());
+    assert!(prepare_generator_program(&admitted, substituted, chunks(), &[]).is_err());
 }
 
 #[test]
@@ -188,7 +188,7 @@ fn portable_program_requires_an_exact_immutable_input_inventory() {
     let mut referenced_chunks = chunks();
     referenced_chunks[0].arguments = vec![ValuePayload::Object(Box::new(input.reference.clone()))];
 
-    assert!(prepare_signal_generator_program(
+    assert!(prepare_generator_program(
         &admitted,
         executable(&admitted),
         referenced_chunks.clone(),
@@ -196,7 +196,7 @@ fn portable_program_requires_an_exact_immutable_input_inventory() {
     )
     .is_err());
 
-    let prepared = prepare_signal_generator_program(
+    let prepared = prepare_generator_program(
         &admitted,
         executable(&admitted),
         referenced_chunks,
@@ -206,8 +206,7 @@ fn portable_program_requires_an_exact_immutable_input_inventory() {
     assert_eq!(prepared.input_references, vec![input.reference.clone()]);
 
     assert!(
-        prepare_signal_generator_program(&admitted, executable(&admitted), chunks(), &[input],)
-            .is_err()
+        prepare_generator_program(&admitted, executable(&admitted), chunks(), &[input],).is_err()
     );
 }
 
@@ -215,8 +214,8 @@ fn portable_program_requires_an_exact_immutable_input_inventory() {
 fn task_identity_is_logical_and_independent_of_pool_placement() {
     let admitted = admitted();
     let prepared =
-        prepare_signal_generator_program(&admitted, executable(&admitted), chunks(), &[]).unwrap();
-    let first = build_signal_generator_task_submission(
+        prepare_generator_program(&admitted, executable(&admitted), chunks(), &[]).unwrap();
+    let first = build_generator_task_submission(
         &admitted,
         &prepared.chunks[0],
         BTreeSet::new(),
@@ -224,7 +223,7 @@ fn task_identity_is_logical_and_independent_of_pool_placement() {
     )
     .unwrap();
     assert_eq!(first.request.callable.qualified_name, "loads.pulse");
-    let second = build_signal_generator_task_submission(
+    let second = build_generator_task_submission(
         &admitted,
         &prepared.chunks[0],
         BTreeSet::new(),
@@ -240,9 +239,9 @@ fn task_identity_is_logical_and_independent_of_pool_placement() {
 fn task_identity_tracks_materialization_while_entrypoint_tracks_generator() {
     let baseline = admitted();
     let prepared =
-        prepare_signal_generator_program(&baseline, executable(&baseline), chunks(), &[]).unwrap();
+        prepare_generator_program(&baseline, executable(&baseline), chunks(), &[]).unwrap();
     let submit = |admitted: &AdmittedSignalGenerator| {
-        build_signal_generator_task_submission(
+        build_generator_task_submission(
             admitted,
             &prepared.chunks[0],
             BTreeSet::new(),

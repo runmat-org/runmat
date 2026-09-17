@@ -35,9 +35,9 @@ pub(super) fn rigid_coefficients(
         RigidResponsePolicy::LindleyYow {
             zero_period_acceleration,
         } => {
-            let maximum = spectrum.ordinates.iter().copied().fold(0.0_f64, f64::max);
-            let peak_onset_hz = spectrum
-                .ordinates
+            let ordinates = spectrum.resolved_ordinates().map_err(FeaRunError::Solve)?;
+            let maximum = ordinates.iter().copied().fold(0.0_f64, f64::max);
+            let peak_onset_hz = ordinates
                 .iter()
                 .enumerate()
                 .filter(|(_, ordinate)| **ordinate == maximum)

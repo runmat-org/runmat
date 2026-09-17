@@ -405,7 +405,10 @@ fn spectrum(id: &str, direction: [f64; 3]) -> ResponseSpectrum {
     ResponseSpectrum {
         spectrum_id: ResponseSpectrumId(id.into()),
         abscissa: SpectrumAbscissa::FrequencyHertz(vec![1.0e-3, 1.0e8]),
-        ordinates: vec![1.0e-3, 1.0e-3],
+        ordinates: runmat_analysis_core::NumericalDataSource::authored(
+            vec![1.0e-3, 1.0e-3],
+            format!("sha256:{id}"),
+        ),
         damping: SpectrumDamping::Ratio(0.05),
         response: SpectrumResponse::RelativeDisplacement,
         envelope: SpectrumEnvelope::Maximax,
@@ -427,6 +430,5 @@ fn spectrum(id: &str, direction: [f64; 3]) -> ResponseSpectrum {
             sampling_adequacy_ratio: 1.0,
             max_interpolation_error: None,
         },
-        provenance_digest: format!("sha256:{id}"),
     }
 }

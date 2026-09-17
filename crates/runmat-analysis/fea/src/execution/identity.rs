@@ -39,6 +39,7 @@ identity_type!(StateIdentity);
 identity_type!(StateTransitionIdentity);
 identity_type!(ConstraintPlanIdentity);
 identity_type!(GeneratorIdentity);
+identity_type!(NumericalMaterializationIdentity);
 identity_type!(SignalMaterializationIdentity);
 identity_type!(SignalRealizationIdentity);
 identity_type!(SolverExcitationIdentity);
@@ -259,6 +260,18 @@ impl GeneratorIdentity {
         Self::derive(
             "generator",
             &(callable_digest, capture_digest, generator_contract_digest),
+        )
+    }
+}
+
+impl NumericalMaterializationIdentity {
+    pub fn new(
+        authored_contract_digest: Digest,
+        generator: GeneratorIdentity,
+    ) -> AnalysisExecutionResult<Self> {
+        Self::derive(
+            "numerical-materialization",
+            &(authored_contract_digest, generator),
         )
     }
 }

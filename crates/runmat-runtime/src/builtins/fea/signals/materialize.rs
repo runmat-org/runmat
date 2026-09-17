@@ -83,7 +83,7 @@ async fn materialize_signals(
                 "signal materialization exceeded its {maximum_wall_millis} ms wall-time limit"
             )));
         }
-        let (function, display_name) = match &generator.callable {
+        let (function, display_name) = match &generator.invocation.callable {
             GeneratorCallable::BoundFunction {
                 function,
                 display_name,

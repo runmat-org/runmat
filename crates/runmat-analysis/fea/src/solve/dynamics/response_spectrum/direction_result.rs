@@ -150,8 +150,13 @@ impl ModalResponseSpectrumDirectionResult {
         self.spectrum
             .validate_intrinsic()
             .map_err(FeaRunError::Solve)?;
+        let spectrum_digest = self
+            .spectrum
+            .ordinates
+            .numerical_digest()
+            .map_err(FeaRunError::Solve)?;
         if self.contribution.spectrum_id != self.spectrum.spectrum_id
-            || self.contribution.spectrum_provenance_digest != self.spectrum.provenance_digest
+            || self.contribution.spectrum_provenance_digest != spectrum_digest
             || self.contribution.modal_combination != self.spectrum.modal_combination
             || self.contribution.rigid_response_policy != self.spectrum.rigid_response
             || !contribution_is_valid(

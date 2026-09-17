@@ -90,7 +90,7 @@ pub(super) fn exact_study_fixture(family: ExactStudyFamily) -> ExactStudyFixture
         geometry_source_digest: Digest::sha256(BOX),
         workloads: family.workloads(),
         analysis_accelerator_requests: Vec::new(),
-        signal_materializations: Vec::new(),
+        input_materializations: Vec::new(),
         exact_meshing,
     })
     .unwrap();

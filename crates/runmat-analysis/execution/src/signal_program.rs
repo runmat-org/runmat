@@ -17,23 +17,79 @@ use runmat_execution_runner::TaskSubmission;
 
 use crate::signal_input::validate_signal_input_payload;
 use crate::{
-    validate_signal_generator_chunks, AdmittedSignalGenerator, AnalysisBridgeError,
-    AnalysisBridgeResult, SignalGeneratorChunk, SignalInputAdmission,
+    validate_signal_generator_chunks, AdmittedGeneratorInvocation, AdmittedNumericalGenerator,
+    AdmittedSignalGenerator, AnalysisBridgeError, AnalysisBridgeResult, GeneratorChunk,
+    SignalInputAdmission,
 };
 
-pub const SIGNAL_GENERATOR_EXECUTION_MODE: &str = "analysis-signal-generator";
-pub const SIGNAL_GENERATOR_TARGET_PROFILE: &str = "portable-executable-unit-v3";
+pub const GENERATOR_EXECUTION_MODE: &str = "analysis-generator";
+pub const GENERATOR_TARGET_PROFILE: &str = "portable-executable-unit-v3";
+
+pub trait GeneratorProgramAdmission {
+    fn invocation_admission(&self) -> GeneratorProgramAdmissionRef<'_>;
+    fn materialization_digest(&self) -> Digest;
+}
+
+#[derive(Clone, Copy)]
+pub struct GeneratorProgramAdmissionRef<'a> {
+    pub program_revision: &'a runmat_execution::ProgramRevision,
+    pub callable: &'a runmat_execution_artifact::BundleCallable,
+    pub executable_source_digest: Digest,
+    pub function: runmat_types::ProgramFunctionId,
+    pub generator_identity: runmat_analysis_fea::execution::GeneratorIdentity,
+    pub required_capabilities: &'a BTreeSet<runmat_types::CapabilityRequirement>,
+}
+
+impl GeneratorProgramAdmission for AdmittedSignalGenerator {
+    fn invocation_admission(&self) -> GeneratorProgramAdmissionRef<'_> {
+        GeneratorProgramAdmissionRef {
+            program_revision: &self.program_revision,
+            callable: &self.callable,
+            executable_source_digest: self.executable_source_digest,
+            function: self.function,
+            generator_identity: self.generator_identity,
+            required_capabilities: &self.required_capabilities,
+        }
+    }
+
+    fn materialization_digest(&self) -> Digest {
+        self.materialization_identity.digest()
+    }
+}
+
+impl GeneratorProgramAdmission for AdmittedNumericalGenerator {
+    fn invocation_admission(&self) -> GeneratorProgramAdmissionRef<'_> {
+        invocation_admission_ref(&self.invocation)
+    }
+
+    fn materialization_digest(&self) -> Digest {
+        self.materialization_identity.digest()
+    }
+}
+
+fn invocation_admission_ref(
+    admitted: &AdmittedGeneratorInvocation,
+) -> GeneratorProgramAdmissionRef<'_> {
+    GeneratorProgramAdmissionRef {
+        program_revision: &admitted.program_revision,
+        callable: &admitted.callable,
+        executable_source_digest: admitted.executable_source_digest,
+        function: admitted.function,
+        generator_identity: admitted.generator_identity,
+        required_capabilities: &admitted.required_capabilities,
+    }
+}
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct PreparedSignalGeneratorProgram {
+pub struct PreparedGeneratorProgram {
     pub descriptor: ProgramExecutionDescriptor,
-    pub chunks: Vec<PreparedSignalGeneratorChunk>,
+    pub chunks: Vec<PreparedGeneratorChunk>,
     pub input_references: Vec<runmat_execution::value::ValueRef>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct PreparedSignalGeneratorChunk {
-    pub plan: SignalGeneratorChunk,
+pub struct PreparedGeneratorChunk {
+    pub plan: GeneratorChunk,
     pub request: ProgramExecutionRequest,
 }
 
@@ -41,7 +97,7 @@ pub struct PreparedSignalGeneratorChunk {
 pub struct PreparedSignalMaterialization {
     pub authored: runmat_analysis_core::PhysicalSignal,
     pub admitted: AdmittedSignalGenerator,
-    pub program: PreparedSignalGeneratorProgram,
+    pub program: PreparedGeneratorProgram,
     pub input_objects: Vec<ProgramExecutionObject>,
     pub input_admissions: Vec<SignalInputAdmission>,
 }
@@ -61,7 +117,7 @@ impl SignalMaterializationExpectation {
                 "signal materialization expectation is not callable-backed".into(),
             )
         })?;
-        if generator.callable.display_name() != self.admitted.callable.qualified_name
+        if generator.invocation.callable.display_name() != self.admitted.callable.qualified_name
             || self.admitted.sample_points.len() < 2
             || self
                 .admitted
@@ -95,36 +151,7 @@ impl PreparedSignalMaterialization {
                 .map(|chunk| chunk.plan.clone())
                 .collect::<Vec<_>>(),
         )?;
-        if self.program.descriptor.recipe.program_revision != self.admitted.program_revision
-            || self.program.descriptor.function
-                != usize::try_from(self.admitted.function.0).unwrap_or(usize::MAX)
-            || self.program.descriptor.requested_outputs != 1
-            || self.program.descriptor.recipe.execution_mode != SIGNAL_GENERATOR_EXECUTION_MODE
-            || self.program.descriptor.artifact.form != ExecutableForm::ExecutableUnitV3
-        {
-            return Err(AnalysisBridgeError::Identity(
-                "prepared signal program differs from its admitted callable",
-            ));
-        }
-        for chunk in &self.program.chunks {
-            chunk.request.validate_for_portable_host()?;
-            ProgramExecutionInputs {
-                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
-                arguments: chunk.request.arguments.clone(),
-                objects: input_locations(&self.program.input_references),
-            }
-            .validate()?;
-            if chunk.request.recipe != self.program.descriptor.recipe
-                || chunk.request.artifact != self.program.descriptor.artifact
-                || chunk.request.function != self.program.descriptor.function
-                || chunk.request.requested_outputs != self.program.descriptor.requested_outputs
-                || chunk.request.arguments != chunk.plan.arguments
-            {
-                return Err(AnalysisBridgeError::Identity(
-                    "prepared signal chunk differs from its exact program descriptor",
-                ));
-            }
-        }
+        validate_prepared_generator_program(&self.admitted, &self.program)?;
         self.validate_input_admissions()?;
         Ok(())
     }
@@ -134,7 +161,7 @@ impl PreparedSignalMaterialization {
             .authored
             .generator()
             .into_iter()
-            .flat_map(|generator| generator.arguments.iter())
+            .flat_map(|generator| generator.invocation.arguments.iter())
             .filter_map(|argument| match argument {
                 runmat_analysis_core::GeneratorArgument::Artifact(artifact) => Some(
                     artifact
@@ -166,67 +193,14 @@ impl PreparedSignalMaterialization {
 
     pub fn validate_closed(&self) -> AnalysisBridgeResult<()> {
         self.validate()?;
-        if self.input_objects.len() != self.program.input_references.len() {
-            return Err(AnalysisBridgeError::Identity(
-                "signal input object closure differs from its reference inventory",
-            ));
-        }
-        for (object, reference) in self
-            .input_objects
-            .iter()
-            .zip(&self.program.input_references)
-        {
-            object.validate()?;
-            if &object.reference != reference || !object.is_externalized_value() {
-                return Err(AnalysisBridgeError::Identity(
-                    "signal input object differs from its immutable value reference",
-                ));
-            }
-        }
-        let objects = self
-            .input_objects
-            .iter()
-            .map(|object| (object.reference.logical_digest, object))
-            .collect::<BTreeMap<_, _>>();
-        for admission in &self.input_admissions {
-            let object =
-                objects
-                    .get(&admission.logical_digest)
-                    .ok_or(AnalysisBridgeError::Identity(
-                        "signal input admission has no immutable value object",
-                    ))?;
-            let value =
-                object
-                    .decode_externalized_value()?
-                    .ok_or(AnalysisBridgeError::Identity(
-                        "signal input admission refers to a non-value object",
-                    ))?;
-            validate_signal_input_payload(admission, &value)?;
-        }
-        Ok(())
+        validate_closed_generator_inputs(&self.program, &self.input_objects, &self.input_admissions)
     }
 
     pub fn rebind(
         mut self,
         access: &runmat_execution_artifact::ArtifactAccess,
     ) -> AnalysisBridgeResult<Self> {
-        let mut replacements = BTreeMap::new();
-        for object in &self.input_objects {
-            let rebound = object.rebind_externalized_value(access)?;
-            replacements.insert(object.reference.logical_digest, rebound);
-        }
-        for chunk in &mut self.program.chunks {
-            for argument in &mut chunk.plan.arguments {
-                rebind_value(argument, &replacements)?;
-            }
-            chunk.request.arguments = chunk.plan.arguments.clone();
-        }
-        self.input_objects = replacements.into_values().collect();
-        self.program.input_references = self
-            .input_objects
-            .iter()
-            .map(|object| object.reference.clone())
-            .collect();
+        rebind_generator_inputs(&mut self.program, &mut self.input_objects, access)?;
         self.validate_closed()?;
         Ok(self)
     }
@@ -240,8 +214,109 @@ impl PreparedSignalMaterialization {
     }
 }
 
+pub(crate) fn validate_prepared_generator_program(
+    admitted: &impl GeneratorProgramAdmission,
+    program: &PreparedGeneratorProgram,
+) -> AnalysisBridgeResult<()> {
+    let admission = admitted.invocation_admission();
+    if &program.descriptor.recipe.program_revision != admission.program_revision
+        || program.descriptor.function
+            != usize::try_from(admission.function.0).unwrap_or(usize::MAX)
+        || program.descriptor.requested_outputs != 1
+        || program.descriptor.recipe.execution_mode != GENERATOR_EXECUTION_MODE
+        || program.descriptor.artifact.form != ExecutableForm::ExecutableUnitV3
+    {
+        return Err(AnalysisBridgeError::Identity(
+            "prepared generator program differs from its admitted callable",
+        ));
+    }
+    for chunk in &program.chunks {
+        chunk.request.validate_for_portable_host()?;
+        ProgramExecutionInputs {
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+            arguments: chunk.request.arguments.clone(),
+            objects: input_locations(&program.input_references),
+        }
+        .validate()?;
+        if chunk.request.recipe != program.descriptor.recipe
+            || chunk.request.artifact != program.descriptor.artifact
+            || chunk.request.function != program.descriptor.function
+            || chunk.request.requested_outputs != program.descriptor.requested_outputs
+            || chunk.request.arguments != chunk.plan.arguments
+        {
+            return Err(AnalysisBridgeError::Identity(
+                "prepared generator chunk differs from its exact program descriptor",
+            ));
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_closed_generator_inputs(
+    program: &PreparedGeneratorProgram,
+    input_objects: &[ProgramExecutionObject],
+    input_admissions: &[SignalInputAdmission],
+) -> AnalysisBridgeResult<()> {
+    if input_objects.len() != program.input_references.len() {
+        return Err(AnalysisBridgeError::Identity(
+            "generator input object closure differs from its reference inventory",
+        ));
+    }
+    for (object, reference) in input_objects.iter().zip(&program.input_references) {
+        object.validate()?;
+        if &object.reference != reference || !object.is_externalized_value() {
+            return Err(AnalysisBridgeError::Identity(
+                "generator input object differs from its immutable value reference",
+            ));
+        }
+    }
+    let objects = input_objects
+        .iter()
+        .map(|object| (object.reference.logical_digest, object))
+        .collect::<BTreeMap<_, _>>();
+    for admission in input_admissions {
+        let object =
+            objects
+                .get(&admission.logical_digest)
+                .ok_or(AnalysisBridgeError::Identity(
+                    "generator input admission has no immutable value object",
+                ))?;
+        let value = object
+            .decode_externalized_value()?
+            .ok_or(AnalysisBridgeError::Identity(
+                "generator input admission refers to a non-value object",
+            ))?;
+        validate_signal_input_payload(admission, &value)?;
+    }
+    Ok(())
+}
+
+pub(crate) fn rebind_generator_inputs(
+    program: &mut PreparedGeneratorProgram,
+    input_objects: &mut Vec<ProgramExecutionObject>,
+    access: &runmat_execution_artifact::ArtifactAccess,
+) -> AnalysisBridgeResult<()> {
+    let mut replacements = BTreeMap::new();
+    for object in input_objects.iter() {
+        let rebound = object.rebind_externalized_value(access)?;
+        replacements.insert(object.reference.logical_digest, rebound);
+    }
+    for chunk in &mut program.chunks {
+        for argument in &mut chunk.plan.arguments {
+            rebind_value(argument, &replacements)?;
+        }
+        chunk.request.arguments = chunk.plan.arguments.clone();
+    }
+    *input_objects = replacements.into_values().collect();
+    program.input_references = input_objects
+        .iter()
+        .map(|object| object.reference.clone())
+        .collect();
+    Ok(())
+}
+
 #[derive(Clone, Debug)]
-pub struct SignalGeneratorExecutionContext {
+pub struct GeneratorExecutionContext {
     pub scope_id: ExecutionScopeId,
     pub pool_id: PoolId,
     pub resources: ResourceRequest,
@@ -252,25 +327,26 @@ pub struct SignalGeneratorExecutionContext {
 
 /// Bind admitted callable facts to the exact portable executable and produce one request per
 /// deterministic materialization chunk.
-pub fn prepare_signal_generator_program(
-    admitted: &AdmittedSignalGenerator,
+pub fn prepare_generator_program(
+    admitted: &impl GeneratorProgramAdmission,
     executable: ExecutableUnitEnvelope,
-    chunks: Vec<SignalGeneratorChunk>,
+    chunks: Vec<GeneratorChunk>,
     input_objects: &[ProgramExecutionObject],
-) -> AnalysisBridgeResult<PreparedSignalGeneratorProgram> {
+) -> AnalysisBridgeResult<PreparedGeneratorProgram> {
+    let admission = admitted.invocation_admission();
     executable.validate()?;
     let identity = &executable.manifest.identity;
-    if identity.program != admitted.program_revision
-        || identity.root_package != admitted.callable.owner_identity
+    if &identity.program != admission.program_revision
+        || identity.root_package != admission.callable.owner_identity
         || identity.entrypoint_kind != ExecutableEntrypointKind::Function
-        || identity.entrypoint_function != admitted.function
-        || identity.source_digest != admitted.executable_source_digest
+        || identity.entrypoint_function != admission.function
+        || identity.source_digest != admission.executable_source_digest
     {
         return Err(AnalysisBridgeError::Identity(
             "portable executable differs from the admitted frozen callable",
         ));
     }
-    if !admitted
+    if !admission
         .required_capabilities
         .is_subset(&executable.manifest.capabilities.0)
     {
@@ -284,18 +360,18 @@ pub fn prepare_signal_generator_program(
         ));
     }
     let executable_bytes = executable.canonical_bytes()?;
-    let entrypoint = usize::try_from(admitted.function.0).map_err(|_| {
+    let entrypoint = usize::try_from(admission.function.0).map_err(|_| {
         AnalysisBridgeError::Invalid("signal function identity exceeds this host".into())
     })?;
     let recipe = ProgramBuildRecipe {
         schema_version: PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
-        program_revision: admitted.program_revision.clone(),
+        program_revision: admission.program_revision.clone(),
         entrypoint: entrypoint.to_string(),
         outputs: OutputContract {
             requested_outputs: 1,
         },
-        execution_mode: SIGNAL_GENERATOR_EXECUTION_MODE.into(),
-        target: ProgramTarget::portable(SIGNAL_GENERATOR_TARGET_PROFILE),
+        execution_mode: GENERATOR_EXECUTION_MODE.into(),
+        target: ProgramTarget::portable(GENERATOR_TARGET_PROFILE),
         features: BTreeSet::new(),
         compile_options: BTreeSet::new(),
         source_objects: Vec::new(),
@@ -344,7 +420,7 @@ pub fn prepare_signal_generator_program(
             };
             let request = ProgramExecutionRequest::from_parts(descriptor.clone(), inputs)?;
             request.validate_for_portable_host()?;
-            Ok(PreparedSignalGeneratorChunk { plan, request })
+            Ok(PreparedGeneratorChunk { plan, request })
         })
         .collect::<AnalysisBridgeResult<Vec<_>>>()?;
     let referenced_inputs = chunks
@@ -363,7 +439,7 @@ pub fn prepare_signal_generator_program(
             "signal generator input object inventory is not exact".into(),
         ));
     }
-    Ok(PreparedSignalGeneratorProgram {
+    Ok(PreparedGeneratorProgram {
         descriptor,
         chunks,
         input_references,
@@ -374,7 +450,7 @@ pub fn prepare_signal_materialization(
     authored: runmat_analysis_core::PhysicalSignal,
     admitted: AdmittedSignalGenerator,
     executable: ExecutableUnitEnvelope,
-    chunks: Vec<SignalGeneratorChunk>,
+    chunks: Vec<GeneratorChunk>,
     mut input_objects: Vec<ProgramExecutionObject>,
     mut input_admissions: Vec<SignalInputAdmission>,
 ) -> AnalysisBridgeResult<PreparedSignalMaterialization> {
@@ -382,7 +458,7 @@ pub fn prepare_signal_materialization(
     input_admissions.sort_by(|left, right| {
         (&left.artifact_id, left.logical_digest).cmp(&(&right.artifact_id, right.logical_digest))
     });
-    let program = prepare_signal_generator_program(&admitted, executable, chunks, &input_objects)?;
+    let program = prepare_generator_program(&admitted, executable, chunks, &input_objects)?;
     let prepared = PreparedSignalMaterialization {
         authored,
         admitted,
@@ -485,17 +561,18 @@ fn rebind_value(
     Ok(())
 }
 
-pub fn build_signal_generator_task_submission(
-    admitted: &AdmittedSignalGenerator,
-    chunk: &PreparedSignalGeneratorChunk,
+pub fn build_generator_task_submission(
+    admitted: &impl GeneratorProgramAdmission,
+    chunk: &PreparedGeneratorChunk,
     dependencies: BTreeSet<TaskId>,
-    context: SignalGeneratorExecutionContext,
+    context: GeneratorExecutionContext,
 ) -> AnalysisBridgeResult<TaskSubmission> {
+    let admission = admitted.invocation_admission();
     chunk.request.validate_for_portable_host()?;
     context.resources.validate()?;
     let expected_artifact = ArtifactId::derive(&[chunk.request.artifact.id.0.bytes()]);
-    if chunk.request.recipe.program_revision != admitted.program_revision
-        || chunk.request.function != usize::try_from(admitted.function.0).unwrap_or(usize::MAX)
+    if &chunk.request.recipe.program_revision != admission.program_revision
+        || chunk.request.function != usize::try_from(admission.function.0).unwrap_or(usize::MAX)
         || !context
             .resources
             .required_capabilities
@@ -506,7 +583,7 @@ pub fn build_signal_generator_task_submission(
         ));
     }
     let task_id = TaskId::derive(&[
-        admitted.materialization_identity.digest().bytes(),
+        admitted.materialization_digest().bytes(),
         chunk.plan.identity.bytes(),
     ]);
     Ok(TaskSubmission {
@@ -516,11 +593,11 @@ pub fn build_signal_generator_task_submission(
             pool_id: context.pool_id,
             program_artifact_id: expected_artifact,
             callable: Callable {
-                owner_identity: admitted.callable.owner_identity.clone(),
-                qualified_name: admitted.callable.qualified_name.clone(),
+                owner_identity: admission.callable.owner_identity.clone(),
+                qualified_name: admission.callable.qualified_name.clone(),
                 entrypoint_digest: Digest::sha256(
                     [
-                        admitted.generator_identity.digest().bytes().as_slice(),
+                        admission.generator_identity.digest().bytes().as_slice(),
                         chunk.plan.identity.bytes().as_slice(),
                     ]
                     .concat(),
