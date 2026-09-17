@@ -24,6 +24,10 @@ pub enum FeaStatementKind {
         type_syntax: FeaTokenRange,
         default: Option<FeaExpression>,
     },
+    Let {
+        name: FeaName,
+        value: FeaExpression,
+    },
     Assignment {
         target: FeaReference,
         relation: FeaAssignmentRelation,

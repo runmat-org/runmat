@@ -1,0 +1,335 @@
+use super::scope::{
+    declaration_inputs, extend_declaration_signatures, extend_module_scope, local_declaration_key,
+};
+use super::{check_expression, CheckedExpression, ExpressionCheck, ExpressionScope, FeaType};
+use crate::{
+    AnalysisOperationCatalog, BoundFeaProgram, FeaDiagnostic, FeaDiagnosticLocation,
+    FeaDiagnosticPhase, FeaSymbolKey, LogicalSourcePath,
+};
+use runmat_parser::fea::{
+    FeaAssignmentRelation, FeaBlock, FeaDeclaration, FeaModuleItem, FeaStatementKind,
+};
+use runmat_types::Span;
+use std::collections::BTreeMap;
+
+#[derive(Debug)]
+pub struct CheckedFeaProgram {
+    pub bound: BoundFeaProgram,
+    pub declarations: BTreeMap<(LogicalSourcePath, FeaSymbolKey), CheckedFeaDeclaration>,
+    pub diagnostics: Vec<FeaDiagnostic>,
+}
+
+impl CheckedFeaProgram {
+    pub fn is_valid(&self) -> bool {
+        self.bound.is_valid()
+            && !self.diagnostics.iter().any(|diagnostic| {
+                diagnostic.severity == crate::FeaDiagnosticSeverity::Error
+                    && diagnostic.availability == crate::SourceAvailability::Available
+            })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CheckedFeaDeclaration {
+    pub key: FeaSymbolKey,
+    pub module: LogicalSourcePath,
+    pub inputs: BTreeMap<String, CheckedFeaInput>,
+    pub statements: Vec<CheckedFeaStatement>,
+    pub outputs: BTreeMap<String, FeaType>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CheckedFeaInput {
+    pub name: String,
+    pub value_type: FeaType,
+    pub default: Option<CheckedExpression>,
+    pub required: bool,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CheckedFeaStatement {
+    pub kind: CheckedFeaStatementKind,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CheckedFeaStatementKind {
+    Block {
+        header: String,
+        statements: Vec<CheckedFeaStatement>,
+    },
+    Input(String),
+    Let {
+        name: String,
+        value: CheckedExpression,
+    },
+    Assignment {
+        target: Vec<String>,
+        relation: FeaAssignmentRelation,
+        value: CheckedExpression,
+    },
+    MaterialAssignment {
+        material: CheckedExpression,
+        target: CheckedExpression,
+    },
+    Output {
+        name: String,
+        value: CheckedExpression,
+    },
+    Include(CheckedExpression),
+    Retain(CheckedExpression),
+    Command(String),
+}
+
+pub fn check_program<C: AnalysisOperationCatalog + ?Sized>(
+    catalog: &C,
+    bound: BoundFeaProgram,
+) -> CheckedFeaProgram {
+    let mut declarations = BTreeMap::new();
+    let mut diagnostics = Vec::new();
+    for (path, module) in &bound.graph.modules {
+        let Some(syntax) = &module.syntax else {
+            continue;
+        };
+        for item in &syntax.items {
+            let FeaModuleItem::Declaration(declaration) = item else {
+                continue;
+            };
+            let Some(key) = local_declaration_key(&bound, path, &declaration.name.text) else {
+                continue;
+            };
+            let checked = check_declaration(
+                catalog,
+                &bound,
+                path,
+                syntax.source(),
+                declaration,
+                key.clone(),
+                &mut diagnostics,
+            );
+            declarations.insert((path.clone(), key), checked);
+        }
+    }
+    CheckedFeaProgram {
+        bound,
+        declarations,
+        diagnostics,
+    }
+}
+
+fn check_declaration<C: AnalysisOperationCatalog + ?Sized>(
+    catalog: &C,
+    bound: &BoundFeaProgram,
+    path: &LogicalSourcePath,
+    source: &str,
+    declaration: &FeaDeclaration,
+    key: FeaSymbolKey,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> CheckedFeaDeclaration {
+    let mut scope = ExpressionScope::new();
+    extend_module_scope(&mut scope, bound, path);
+    extend_declaration_signatures(&mut scope, bound, path);
+    let input_syntax = declaration_inputs(source, declaration, diagnostics, path);
+    for input in &input_syntax {
+        scope.insert_reference(
+            ["input".to_string(), input.name.clone()],
+            input.value_type.clone(),
+        );
+    }
+    let mut inputs = BTreeMap::new();
+    for input in input_syntax {
+        let default = input.default.as_ref().map(|expression| {
+            let (checked, mut expression_diagnostics) = check_expression(
+                ExpressionCheck {
+                    path,
+                    source,
+                    scope: &scope,
+                    catalog,
+                },
+                expression,
+            );
+            diagnostics.append(&mut expression_diagnostics);
+            if !input.value_type.accepts(&checked.value_type) {
+                diagnostics.push(FeaDiagnostic::error(
+                    "fea.semantic.input_default_type",
+                    format!(
+                        "default for input `{}` has an incompatible type",
+                        input.name
+                    ),
+                    FeaDiagnosticPhase::Semantic,
+                    Some(FeaDiagnosticLocation {
+                        path: path.clone(),
+                        span: expression.span,
+                    }),
+                ));
+            }
+            checked
+        });
+        let checked = CheckedFeaInput {
+            name: input.name.clone(),
+            value_type: input.value_type,
+            required: default.is_none(),
+            default,
+            span: input.span,
+        };
+        if let Some(existing) = inputs.insert(input.name.clone(), checked) {
+            diagnostics.push(FeaDiagnostic::error(
+                "fea.semantic.duplicate_input",
+                format!("duplicate input `{}`", input.name),
+                FeaDiagnosticPhase::Semantic,
+                Some(FeaDiagnosticLocation {
+                    path: path.clone(),
+                    span: existing.span,
+                }),
+            ));
+        }
+    }
+    let mut outputs = BTreeMap::new();
+    let statements = check_block(
+        catalog,
+        path,
+        source,
+        &declaration.body,
+        &mut scope,
+        &mut outputs,
+        diagnostics,
+    );
+    CheckedFeaDeclaration {
+        key,
+        module: path.clone(),
+        inputs,
+        statements,
+        outputs,
+        span: declaration.span,
+    }
+}
+
+fn check_block<C: AnalysisOperationCatalog + ?Sized>(
+    catalog: &C,
+    path: &LogicalSourcePath,
+    source: &str,
+    block: &FeaBlock,
+    scope: &mut ExpressionScope,
+    outputs: &mut BTreeMap<String, FeaType>,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Vec<CheckedFeaStatement> {
+    block
+        .statements
+        .iter()
+        .map(|statement| {
+            let kind =
+                match &statement.kind {
+                    FeaStatementKind::Block { header, body } => CheckedFeaStatementKind::Block {
+                        header: source[header.span.start..header.span.end].to_string(),
+                        statements: check_block(
+                            catalog,
+                            path,
+                            source,
+                            body,
+                            scope,
+                            outputs,
+                            diagnostics,
+                        ),
+                    },
+                    FeaStatementKind::Input { name, .. } => {
+                        CheckedFeaStatementKind::Input(name.text.clone())
+                    }
+                    FeaStatementKind::Let { name, value } => {
+                        let value = check_value(catalog, path, source, scope, value, diagnostics);
+                        scope.insert_reference([name.text.clone()], value.value_type.clone());
+                        CheckedFeaStatementKind::Let {
+                            name: name.text.clone(),
+                            value,
+                        }
+                    }
+                    FeaStatementKind::Assignment {
+                        target,
+                        relation,
+                        value,
+                    } => CheckedFeaStatementKind::Assignment {
+                        target: target
+                            .segments
+                            .iter()
+                            .map(|segment| segment.text.clone())
+                            .collect(),
+                        relation: *relation,
+                        value: check_value(catalog, path, source, scope, value, diagnostics),
+                    },
+                    FeaStatementKind::MaterialAssignment { material, target } => {
+                        CheckedFeaStatementKind::MaterialAssignment {
+                            material: check_value(
+                                catalog,
+                                path,
+                                source,
+                                scope,
+                                material,
+                                diagnostics,
+                            ),
+                            target: check_value(catalog, path, source, scope, target, diagnostics),
+                        }
+                    }
+                    FeaStatementKind::Output { name, value } => {
+                        let value = check_value(catalog, path, source, scope, value, diagnostics);
+                        if outputs
+                            .insert(name.text.clone(), value.value_type.clone())
+                            .is_some()
+                        {
+                            diagnostics.push(FeaDiagnostic::error(
+                                "fea.semantic.duplicate_output",
+                                format!("duplicate output `{}`", name.text),
+                                FeaDiagnosticPhase::Semantic,
+                                Some(FeaDiagnosticLocation {
+                                    path: path.clone(),
+                                    span: name.span,
+                                }),
+                            ));
+                        }
+                        scope.insert_reference(
+                            ["output".to_string(), name.text.clone()],
+                            value.value_type.clone(),
+                        );
+                        CheckedFeaStatementKind::Output {
+                            name: name.text.clone(),
+                            value,
+                        }
+                    }
+                    FeaStatementKind::Include(value) => CheckedFeaStatementKind::Include(
+                        check_value(catalog, path, source, scope, value, diagnostics),
+                    ),
+                    FeaStatementKind::Retain(value) => CheckedFeaStatementKind::Retain(
+                        check_value(catalog, path, source, scope, value, diagnostics),
+                    ),
+                    FeaStatementKind::Command { syntax } => CheckedFeaStatementKind::Command(
+                        source[syntax.span.start..syntax.span.end].to_string(),
+                    ),
+                };
+            CheckedFeaStatement {
+                kind,
+                span: statement.span,
+            }
+        })
+        .collect()
+}
+
+fn check_value<C: AnalysisOperationCatalog + ?Sized>(
+    catalog: &C,
+    path: &LogicalSourcePath,
+    source: &str,
+    scope: &ExpressionScope,
+    value: &runmat_parser::fea::FeaExpression,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> CheckedExpression {
+    let (checked, mut found) = check_expression(
+        ExpressionCheck {
+            path,
+            source,
+            scope,
+            catalog,
+        },
+        value,
+    );
+    diagnostics.append(&mut found);
+    checked
+}

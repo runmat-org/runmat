@@ -45,6 +45,11 @@ impl<'a, H: FeaCompilerHost + ?Sized> FeaCompiler<'a, H> {
         let graph = self.build_module_graph(request.modules);
         bind_program(self.host, graph)
     }
+
+    pub fn check(&self, request: CheckRequest) -> crate::CheckedFeaProgram {
+        let bound = self.check_bindings(request);
+        crate::check_program(self.host, bound)
+    }
 }
 
 impl ParsedFeaModule {

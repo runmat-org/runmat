@@ -331,6 +331,9 @@ impl FeaParser {
             Some(FeaTokenKind::Keyword(FeaKeyword::Input)) => {
                 self.parse_input_statement(&significant, range)
             }
+            Some(FeaTokenKind::Keyword(FeaKeyword::Let)) => {
+                self.parse_let_statement(&significant, range)
+            }
             Some(FeaTokenKind::Keyword(FeaKeyword::Assign)) => {
                 self.parse_material_assignment(&significant, range)
             }
@@ -381,6 +384,26 @@ impl FeaParser {
             type_syntax: self.token_range(type_start, type_end),
             default,
         }
+    }
+
+    fn parse_let_statement(
+        &mut self,
+        significant: &[usize],
+        range: FeaTokenRange,
+    ) -> FeaStatementKind {
+        let name = significant
+            .get(1)
+            .and_then(|index| self.name(*index, FeaSyntaxDiagnosticKind::ExpectedIdentifier))
+            .unwrap_or_else(|| missing_name(range.span));
+        let equal = significant
+            .iter()
+            .position(|index| self.at(*index, FeaTokenKind::Equal));
+        let value = if let Some(position) = equal {
+            self.parse_expression_indices(&significant[position + 1..], range.span)
+        } else {
+            self.missing_expression(range.span, "expected `=` and a binding expression")
+        };
+        FeaStatementKind::Let { name, value }
     }
 
     fn parse_material_assignment(

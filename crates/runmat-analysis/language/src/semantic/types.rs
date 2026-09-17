@@ -153,6 +153,16 @@ impl FeaType {
             Self::Integer | Self::Real | Self::Complex | Self::Quantity(_)
         )
     }
+
+    pub fn accepts(&self, value: &Self) -> bool {
+        self == value
+            || matches!(
+                (self, value),
+                (Self::Real, Self::Integer) | (Self::Complex, Self::Integer | Self::Real)
+            )
+            || matches!(self, Self::Unknown | Self::Error)
+            || matches!(value, Self::Unknown | Self::Error)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

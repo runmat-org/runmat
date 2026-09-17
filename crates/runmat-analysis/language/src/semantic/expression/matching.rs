@@ -1,4 +1,4 @@
-use super::{CheckedCallArgument, CheckedExpression};
+use super::{CheckedCallArgument, CheckedExpression, DeclarationSignature};
 use crate::{
     FeaDiagnostic, FeaDiagnosticLocation, FeaDiagnosticPhase, FeaSymbolKind, FeaType,
     LogicalSourcePath,
@@ -60,6 +60,37 @@ pub(super) fn arguments_match(
     parameters.iter().enumerate().all(|(index, parameter)| {
         parameter.arity != OperationParameterArity::Required || assigned.contains(&index)
     })
+}
+
+pub(super) fn declaration_arguments_match(
+    signature: &DeclarationSignature,
+    arguments: &[CheckedCallArgument],
+) -> bool {
+    let ordered = signature.inputs.iter().collect::<Vec<_>>();
+    let mut assigned = std::collections::BTreeMap::<String, &CheckedExpression>::new();
+    let mut positional = 0usize;
+    for argument in arguments {
+        let (name, value) = match argument {
+            CheckedCallArgument::Positional(value) => {
+                let Some((name, _)) = ordered.get(positional) else {
+                    return false;
+                };
+                positional += 1;
+                ((*name).clone(), value)
+            }
+            CheckedCallArgument::Named { name, value } => (name.clone(), value),
+        };
+        let Some(input) = signature.inputs.get(&name) else {
+            return false;
+        };
+        if assigned.insert(name, value).is_some() || !input.value_type.accepts(&value.value_type) {
+            return false;
+        }
+    }
+    signature
+        .inputs
+        .iter()
+        .all(|(name, input)| !input.required || assigned.contains_key(name))
 }
 
 fn pattern_matches(pattern: &OperationTypePattern, value: &FeaType) -> bool {

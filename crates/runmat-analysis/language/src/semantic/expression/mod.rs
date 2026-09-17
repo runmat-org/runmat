@@ -7,64 +7,16 @@ use runmat_parser::fea::{
     FeaBinaryOperator, FeaCallArgument, FeaExpression, FeaExpressionKind, FeaReference,
     FeaUnaryOperator,
 };
-use runmat_types::{
-    OperationFrontend, OperationLoweringId, OperationOverloadIdentity, OperationParameter,
-    OperationTypePattern, Span,
-};
+use runmat_types::{OperationFrontend, OperationLoweringId, OperationOverloadIdentity, Span};
 use std::collections::BTreeMap;
 
 mod matching;
+mod scope;
 mod type_rules;
 
-use matching::{arguments_match, operation_output_type, outputs_type};
+use matching::{arguments_match, declaration_arguments_match, operation_output_type, outputs_type};
+pub use scope::{DeclarationInput, DeclarationSignature, ExpressionScope, FunctionSignature};
 use type_rules::{divide_type, multiply_type, numeric_join, types_compatible};
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExpressionScope {
-    references: BTreeMap<Vec<String>, FeaType>,
-    functions: BTreeMap<Vec<String>, FunctionSignature>,
-}
-
-impl ExpressionScope {
-    pub fn new() -> Self {
-        Self {
-            references: BTreeMap::new(),
-            functions: BTreeMap::new(),
-        }
-    }
-
-    pub fn insert_reference(&mut self, path: impl IntoIterator<Item = String>, value: FeaType) {
-        self.references.insert(path.into_iter().collect(), value);
-    }
-
-    pub fn insert_function(
-        &mut self,
-        path: impl IntoIterator<Item = String>,
-        signature: FunctionSignature,
-    ) {
-        self.functions.insert(path.into_iter().collect(), signature);
-    }
-
-    fn reference(&self, reference: &FeaReference) -> Option<&FeaType> {
-        self.references.get(&reference_path(reference))
-    }
-
-    fn function(&self, reference: &FeaReference) -> Option<&FunctionSignature> {
-        self.functions.get(&reference_path(reference))
-    }
-}
-
-impl Default for ExpressionScope {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FunctionSignature {
-    pub inputs: Vec<OperationParameter>,
-    pub outputs: Vec<OperationTypePattern>,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CheckedExpression {
@@ -378,6 +330,24 @@ impl<C: AnalysisOperationCatalog + ?Sized> ExpressionChecker<'_, C> {
                     arguments: checked_arguments,
                 },
                 value_type: outputs_type(&signature.outputs),
+                span,
+            };
+        }
+        if let Some(signature) = self.check.scope.declaration(reference) {
+            let signature = signature.clone();
+            if !declaration_arguments_match(&signature, &checked_arguments) {
+                self.error(
+                    "fea.semantic.declaration_arguments",
+                    "declaration arguments are missing, unknown, duplicated, or have incompatible types",
+                    span,
+                );
+            }
+            return CheckedExpression {
+                kind: CheckedExpressionKind::FunctionCall {
+                    function: reference_path(reference),
+                    arguments: checked_arguments,
+                },
+                value_type: signature.result,
                 span,
             };
         }
