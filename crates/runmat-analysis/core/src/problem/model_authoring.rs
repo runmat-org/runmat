@@ -11,6 +11,7 @@ use super::authored_inputs::{AuthoredInputDefinition, AuthoredInputType};
 use super::authored_model_physics::{
     validate_unique, AuthoredBoundary, AuthoredConnector, AuthoredInterface,
 };
+use super::authored_parameterized_signals::AuthoredParameterizedSignal;
 use super::authored_properties::{
     AuthoredLayupDefinition, AuthoredLayupSource, AuthoredOrientationDefinition,
     AuthoredOrientationSource, AuthoredPropertyAssignment, AuthoredSectionDefinition,
@@ -100,12 +101,20 @@ pub struct AuthoredModel {
     pub connectors: Vec<AuthoredConnector>,
     pub interfaces: Vec<AuthoredInterface>,
     pub signals: Vec<super::signal::PhysicalSignal>,
+    pub parameterized_signals: Vec<AuthoredParameterizedSignal>,
     pub excitations: Vec<super::authored_excitations::AuthoredExcitation>,
     pub excitation_cases: Vec<super::authored_excitations::AuthoredExcitationCase>,
     pub initial_conditions: Vec<AuthoredInitialCondition>,
 }
 
 impl AuthoredModel {
+    pub fn reference(&self) -> AuthoredModelRef {
+        AuthoredModelRef {
+            module_path: self.module_path.clone(),
+            model_id: self.model_id.clone(),
+        }
+    }
+
     pub fn validate(&self) -> Result<(), AuthoredModelError> {
         token("model module path", &self.module_path)?;
         token("model id", &self.model_id)?;
@@ -288,6 +297,26 @@ impl AuthoredModel {
                 detail: error.to_string(),
             }
         })?;
+        let mut parameterized_signal_ids = BTreeSet::new();
+        for signal in &self.parameterized_signals {
+            signal
+                .validate(&self.inputs)
+                .map_err(|error| AuthoredModelError::InvalidPhysics {
+                    kind: "parameterized signal",
+                    detail: error.to_string(),
+                })?;
+            if !parameterized_signal_ids.insert(signal.signal_id.0.as_str())
+                || self
+                    .signals
+                    .iter()
+                    .any(|existing| existing.signal_id() == &signal.signal_id)
+            {
+                return Err(AuthoredModelError::DuplicatePhysics {
+                    kind: "signal",
+                    id: signal.signal_id.0.clone(),
+                });
+            }
+        }
         for constraint in &self.constraints {
             constraint
                 .validate_signal_references(&self.signals)
@@ -297,6 +326,7 @@ impl AuthoredModel {
             &self.excitations,
             &self.excitation_cases,
             &self.signals,
+            &self.parameterized_signals,
         )
         .map_err(|detail| AuthoredModelError::InvalidPhysics {
             kind: "excitation",

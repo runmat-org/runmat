@@ -9,6 +9,7 @@ use runmat_analysis_core::{
 };
 
 mod generated;
+mod parameterized;
 mod policy;
 mod tabulated;
 mod waveform;
@@ -254,6 +255,22 @@ pub(super) fn constant_from_expression(
         frame,
         SignalRepresentation::Constant,
     )))
+}
+
+pub(super) fn parameterized_from_expression(
+    declaration: &CheckedFeaDeclaration,
+    id: &str,
+    quantity: runmat_analysis_core::PhysicalQuantityKind,
+    quantity_name: &str,
+    value: &CheckedExpression,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Option<runmat_analysis_core::AuthoredParameterizedSignal> {
+    let (dimension, _) = signal_kind(declaration, quantity_name, diagnostics)?;
+    parameterized::lower(declaration, id, quantity, dimension, value, diagnostics)
+}
+
+pub(super) fn depends_on_model_input(value: &CheckedExpression) -> bool {
+    parameterized::depends_on_model_input(value)
 }
 
 fn signal_contract(

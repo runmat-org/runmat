@@ -5,14 +5,15 @@ use crate::{
 };
 use runmat_analysis_core::{
     AuthoredExcitation, AuthoredExcitationCase, AuthoredExcitationKind, AuthoredExcitationTarget,
-    CoordinateFrame, ExcitationCaseActivation, ExcitationKinematics, PhysicalSignal,
-    ProjectionRequirement, SignalId,
+    AuthoredParameterizedSignal, CoordinateFrame, ExcitationCaseActivation, ExcitationKinematics,
+    PhysicalSignal, ProjectionRequirement, SignalId,
 };
 use runmat_parser::fea::FeaModelDefinitionKind;
 use std::collections::BTreeSet;
 
 pub(super) struct LoweredExcitations {
     pub signals: Vec<PhysicalSignal>,
+    pub parameterized_signals: Vec<AuthoredParameterizedSignal>,
     pub excitations: Vec<AuthoredExcitation>,
     pub cases: Vec<AuthoredExcitationCase>,
 }
@@ -24,6 +25,7 @@ pub(super) fn lower(
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> LoweredExcitations {
     let mut signals = Vec::new();
+    let mut parameterized_signals = Vec::new();
     let mut excitations = Vec::new();
     let mut cases = Vec::new();
     for statement in &declaration.statements {
@@ -41,7 +43,12 @@ pub(super) fn lower(
                     if let Some((signal, excitation)) =
                         load(declaration, bound, name, statements, diagnostics)
                     {
-                        signals.push(signal);
+                        match signal {
+                            LoweredLoadSignal::Concrete(signal) => signals.push(*signal),
+                            LoweredLoadSignal::Parameterized(signal) => {
+                                parameterized_signals.push(*signal)
+                            }
+                        }
                         excitations.push(excitation);
                     }
                 }
@@ -68,6 +75,7 @@ pub(super) fn lower(
     }
     LoweredExcitations {
         signals,
+        parameterized_signals,
         excitations,
         cases,
     }
@@ -290,7 +298,7 @@ fn load(
     name: &str,
     statements: &[crate::CheckedFeaStatement],
     diagnostics: &mut Vec<FeaDiagnostic>,
-) -> Option<(PhysicalSignal, AuthoredExcitation)> {
+) -> Option<(LoweredLoadSignal, AuthoredExcitation)> {
     let [statement] = statements else {
         diagnostic(
             declaration,
@@ -316,11 +324,31 @@ fn load(
     };
     let (kind, quantity) = kind_policy(declaration, kind, statement.span, diagnostics)?;
     let signal_id = format!("load.{name}.value");
-    let signal =
-        signals::constant_from_expression(declaration, &signal_id, quantity, value, diagnostics)?;
+    let signal = if signals::depends_on_model_input(value) {
+        LoweredLoadSignal::Parameterized(Box::new(signals::parameterized_from_expression(
+            declaration,
+            &signal_id,
+            kind.quantity(),
+            quantity,
+            value,
+            diagnostics,
+        )?))
+    } else {
+        LoweredLoadSignal::Concrete(Box::new(signals::constant_from_expression(
+            declaration,
+            &signal_id,
+            quantity,
+            value,
+            diagnostics,
+        )?))
+    };
     let target =
         AuthoredExcitationTarget::Region(region_source(bound, declaration, target, diagnostics)?);
-    let frame = signal.frame().cloned().unwrap_or(CoordinateFrame::Global);
+    let frame = match &signal {
+        LoweredLoadSignal::Concrete(signal) => signal.frame().cloned(),
+        LoweredLoadSignal::Parameterized(signal) => signal.frame.clone(),
+    }
+    .unwrap_or(CoordinateFrame::Global);
     Some((
         signal,
         AuthoredExcitation {
@@ -341,6 +369,11 @@ fn load(
             },
         },
     ))
+}
+
+enum LoweredLoadSignal {
+    Concrete(Box<PhysicalSignal>),
+    Parameterized(Box<AuthoredParameterizedSignal>),
 }
 
 fn load_case(

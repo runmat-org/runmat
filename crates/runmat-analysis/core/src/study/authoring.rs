@@ -231,6 +231,7 @@ mod tests {
             connectors: Vec::new(),
             interfaces: Vec::new(),
             signals: Vec::new(),
+            parameterized_signals: Vec::new(),
             excitations: Vec::new(),
             excitation_cases: Vec::new(),
             initial_conditions: Vec::new(),

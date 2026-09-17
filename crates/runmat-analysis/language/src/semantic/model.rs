@@ -107,6 +107,7 @@ fn model(
         connectors: lowered_physics.connectors,
         interfaces: lowered_physics.interfaces,
         signals,
+        parameterized_signals: lowered_excitations.parameterized_signals,
         excitations: lowered_excitations.excitations,
         excitation_cases: lowered_excitations.cases,
         initial_conditions,

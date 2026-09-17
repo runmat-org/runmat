@@ -6,6 +6,7 @@ mod compatibility;
 mod formulation;
 mod identity;
 pub mod output;
+mod realization;
 pub mod sequence;
 
 pub use authoring::{
@@ -25,3 +26,4 @@ pub use identity::{
     AnalysisProcedure, CoupledPhysicsFamily, ExecutionFallbackPolicy, FormulationMaturity,
     PhysicsFamily, SolutionSpace,
 };
+pub use realization::{AuthoredStudyInputBinding, AuthoredStudyRealizationError, RealizedStudy};

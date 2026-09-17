@@ -288,6 +288,63 @@ impl AuthoredConstraintKind {
         }
     }
 
+    pub fn visit_targets_mut(&mut self, mut visit: impl FnMut(&mut AuthoredConstraintTarget)) {
+        match self {
+            Self::StructuralFixed { target }
+            | Self::StructuralSymmetry { target }
+            | Self::StructuralAntisymmetry { target }
+            | Self::ThermalTemperature { target, .. }
+            | Self::ElectricalPotential { target, .. }
+            | Self::ElectricalEquipotential { target }
+            | Self::ElectricalFloatingConductor { target }
+            | Self::ElectricalIntegralCurrent { target, .. }
+            | Self::ElectricalPotentialReference { target }
+            | Self::MagneticVectorPotential { target, .. }
+            | Self::MagneticVectorPotentialGround { target }
+            | Self::MagneticCoulombGauge { target }
+            | Self::AcousticPressure { target, .. }
+            | Self::FluidVelocity { target, .. }
+            | Self::FluidMovingWall { target, .. }
+            | Self::FluidNoSlipWall { target }
+            | Self::FluidSlipWall { target }
+            | Self::FluidSymmetry { target }
+            | Self::FluidPressureReference { target, .. } => visit(target),
+            Self::StructuralPrescribed(value) => visit(&mut value.target),
+            Self::StructuralPrescribedMotion(value) => visit(&mut value.target),
+            Self::StructuralNormalDisplacement { target, .. } => visit(target),
+            Self::StructuralRigidCoupling(value) | Self::StructuralDistributingCoupling(value) => {
+                visit(&mut value.target)
+            }
+            Self::StructuralTie(pair) | Self::ThermalTie(pair) => {
+                visit(&mut pair.primary);
+                visit(&mut pair.secondary);
+            }
+            Self::StructuralPeriodic(periodic)
+            | Self::ThermalPeriodic(periodic)
+            | Self::ElectricalPeriodic(periodic)
+            | Self::MagneticPeriodic(periodic)
+            | Self::AcousticPeriodic(periodic)
+            | Self::FluidPeriodic(periodic) => {
+                visit(&mut periodic.pair.primary);
+                visit(&mut periodic.pair.secondary);
+            }
+            Self::ThermalAffineJump(value) => {
+                visit(&mut value.periodic.pair.primary);
+                visit(&mut value.periodic.pair.secondary);
+            }
+            Self::MagneticPhaseShiftedPeriodic(value)
+            | Self::AcousticPhaseShiftedPeriodic(value) => {
+                visit(&mut value.periodic.pair.primary);
+                visit(&mut value.periodic.pair.secondary);
+            }
+            Self::StructuralEquation(equation) => {
+                for term in &mut equation.terms {
+                    visit(&mut term.target);
+                }
+            }
+        }
+    }
+
     fn validate_value(&self) -> Result<(), AuthoredConstraintError> {
         let finite = match self {
             Self::ThermalTemperature {

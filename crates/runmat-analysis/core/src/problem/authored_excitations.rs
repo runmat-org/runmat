@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::{
+    authored_parameterized_signals::AuthoredParameterizedSignal,
     coordinate_frame::CoordinateFrame,
     excitation::{
         Direction, ExcitationCaseActivation, ExcitationDistribution, ExcitationKinematics,
@@ -132,6 +133,7 @@ pub fn validate_authored_excitations(
     excitations: &[AuthoredExcitation],
     cases: &[AuthoredExcitationCase],
     signals: &[PhysicalSignal],
+    parameterized_signals: &[AuthoredParameterizedSignal],
 ) -> Result<(), String> {
     let signals = signals
         .iter()
@@ -144,7 +146,7 @@ pub fn validate_authored_excitations(
         {
             return Err("excitation ids must be non-empty and unique".into());
         }
-        validate_excitation(excitation, &signals)?;
+        validate_excitation(excitation, &signals, parameterized_signals)?;
     }
     let mut case_ids = BTreeSet::new();
     let mut membership = BTreeSet::new();
@@ -187,18 +189,24 @@ pub fn validate_authored_excitations(
 fn validate_excitation(
     excitation: &AuthoredExcitation,
     signals: &BTreeMap<&str, &PhysicalSignal>,
+    parameterized_signals: &[AuthoredParameterizedSignal],
 ) -> Result<(), String> {
-    let signal = signals
-        .get(excitation.signal_id.0.as_str())
+    let signal = signals.get(excitation.signal_id.0.as_str());
+    let parameterized = parameterized_signals
+        .iter()
+        .find(|signal| signal.signal_id == excitation.signal_id);
+    let quantity = signal
+        .map(|signal| signal.quantity())
+        .or_else(|| parameterized.map(|signal| signal.quantity))
         .ok_or_else(|| "excitation references an unknown signal".to_string())?;
-    if signal.quantity() != excitation.kind.quantity() {
+    let shape = signal
+        .map(|signal| signal.shape().clone())
+        .or_else(|| parameterized.map(AuthoredParameterizedSignal::shape))
+        .ok_or_else(|| "excitation references an unknown signal".to_string())?;
+    if quantity != excitation.kind.quantity() {
         return Err("excitation signal has the wrong physical quantity".into());
     }
-    if !valid_shape_and_direction(
-        excitation.kind,
-        signal.shape(),
-        excitation.direction.is_some(),
-    ) {
+    if !valid_shape_and_direction(excitation.kind, &shape, excitation.direction.is_some()) {
         return Err("excitation direction is incompatible with its kind and signal shape".into());
     }
     if let Some(direction) = excitation.direction {

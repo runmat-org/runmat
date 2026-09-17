@@ -3,9 +3,11 @@
 pub mod problem {
     pub mod authored_constraints;
     pub mod authored_excitations;
+    pub mod authored_expressions;
     pub mod authored_initial_conditions;
     pub mod authored_inputs;
     pub mod authored_model_physics;
+    pub mod authored_parameterized_signals;
     pub mod authored_properties;
     pub mod boundary;
     pub mod connector;
@@ -43,7 +45,8 @@ mod validate_signals;
 
 pub use study::{
     AuthoredMeshRef, AuthoredModelArgument, AuthoredModelArgumentValue, AuthoredModelInstance,
-    AuthoredStudy, AuthoredStudyError, AuthoredStudyInputRef,
+    AuthoredStudy, AuthoredStudyError, AuthoredStudyInputBinding, AuthoredStudyInputRef,
+    AuthoredStudyRealizationError, RealizedStudy,
 };
 pub use validate::physics_family_can_consume_state;
 pub use validate_authored::validate_coordinate_frame;
@@ -66,6 +69,10 @@ pub use problem::authored_excitations::{
     validate_authored_excitations, AuthoredExcitation, AuthoredExcitationCase,
     AuthoredExcitationKind, AuthoredExcitationTarget,
 };
+pub use problem::authored_expressions::{
+    AuthoredExpressionError, AuthoredNumericExpression, AuthoredNumericExpressionKind,
+    AuthoredNumericOperator,
+};
 pub use problem::authored_initial_conditions::{
     AuthoredInitialCondition, AuthoredInitialConditionError, AuthoredInitialConditionKind,
     AuthoredInitialConditionTarget,
@@ -76,6 +83,9 @@ pub use problem::authored_inputs::{
 pub use problem::authored_model_physics::{
     AuthoredBoundary, AuthoredBoundaryKind, AuthoredConnector, AuthoredConnectorKind,
     AuthoredInterface, AuthoredInterfaceKind, AuthoredModelPhysicsError,
+};
+pub use problem::authored_parameterized_signals::{
+    AuthoredParameterizedSignal, AuthoredParameterizedSignalError, AuthoredSignalExpression,
 };
 pub use problem::authored_properties::{
     AuthoredLayupDefinition, AuthoredLayupSource, AuthoredOrientationDefinition,

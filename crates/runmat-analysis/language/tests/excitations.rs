@@ -1,8 +1,9 @@
 pub mod support;
 
 use runmat_analysis_core::{
-    AuthoredExcitationKind, AuthoredExcitationTarget, CoordinateFrame, Direction, Force,
-    PhysicalQuantityKind, SignalId, SignalRepresentation, SignalShape, SignalValue,
+    AuthoredExcitationKind, AuthoredExcitationTarget, AuthoredNumericExpressionKind,
+    AuthoredSignalExpression, CoordinateFrame, Direction, Force, PhysicalQuantityKind, SignalId,
+    SignalRepresentation, SignalShape, SignalValue,
 };
 use runmat_analysis_language::*;
 use support::{source_module, TestHost};
@@ -69,6 +70,49 @@ model loaded_bracket {
         .excitation_cases
         .iter()
         .all(|case| case.excitation_ids == ["load.downward"]));
+}
+
+#[test]
+fn model_input_loads_retain_a_typed_parameter_dependency_graph() {
+    let source = r#"
+model loaded(region pad : region<face>) {
+    input service_load : force
+    load downward {
+        force on input.pad = [0, -input.service_load * 2, 0]
+    }
+    load_case service { include load.downward }
+}
+"#;
+    let program = FeaCompiler::new(&TestHost::default()).check(CheckRequest {
+        modules: ModuleGraphRequest {
+            source_root: LogicalSourcePath::new("project").unwrap(),
+            root: source_module("project/main.fea", source, 1),
+        },
+    });
+    assert!(program.is_valid(), "{:#?}", program.diagnostics);
+    let model = program.models.values().next().unwrap();
+    assert!(model.signals.is_empty());
+    assert_eq!(model.parameterized_signals.len(), 1);
+    let signal = &model.parameterized_signals[0];
+    assert_eq!(signal.quantity, PhysicalQuantityKind::Force);
+    let AuthoredSignalExpression::Vector3(values) = &signal.value else {
+        panic!("force vector must retain three typed expressions");
+    };
+    let AuthoredNumericExpressionKind::Binary { left, right, .. } = &values[1].kind else {
+        panic!("second component must retain the typed scaling");
+    };
+    let AuthoredNumericExpressionKind::Negate { value } = &left.kind else {
+        panic!("left operand must retain the authored negation");
+    };
+    assert!(matches!(
+        &value.kind,
+        AuthoredNumericExpressionKind::ModelInput { input }
+            if input.input_id == "service_load"
+    ));
+    assert!(matches!(
+        right.kind,
+        AuthoredNumericExpressionKind::Literal { value } if value == 2.0
+    ));
 }
 
 #[test]
