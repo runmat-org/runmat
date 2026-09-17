@@ -7,14 +7,15 @@ use crate::{
     FeaSymbolKind, FeaSymbolOrigin, LogicalSourcePath,
 };
 use runmat_analysis_core::{
-    AuthoredLayupSource, AuthoredMaterialAssignment, AuthoredMaterialRef, AuthoredMaterialSource,
-    AuthoredModel, AuthoredModelInclude, AuthoredModelInputKind, AuthoredModelInputRef,
-    AuthoredModelRef, AuthoredOrientationSource, AuthoredPropertyAssignment,
-    AuthoredPropertyRegionSource, AuthoredPropertyTarget, AuthoredSectionSource,
+    AuthoredMaterialAssignment, AuthoredMaterialRef, AuthoredMaterialSource, AuthoredModel,
+    AuthoredModelInclude, AuthoredModelInputKind, AuthoredModelInputRef, AuthoredModelRef,
+    AuthoredPropertyTarget, AuthoredRegionSource,
 };
 use runmat_geometry_core::{GeometryRegionRef, GeometryRegionRole};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
+mod composition;
+mod constraints;
 mod properties;
 
 pub fn lower_models(
@@ -44,156 +45,8 @@ pub fn lower_models(
             ),
         }
     }
-    validate_composition(&mut result, declarations, diagnostics);
+    composition::validate(&mut result, declarations, diagnostics);
     result
-}
-
-fn validate_composition(
-    models: &mut BTreeMap<(LogicalSourcePath, FeaSymbolKey), AuthoredModel>,
-    declarations: &BTreeMap<(LogicalSourcePath, FeaSymbolKey), CheckedFeaDeclaration>,
-    diagnostics: &mut Vec<FeaDiagnostic>,
-) {
-    let inventory = models
-        .iter()
-        .map(|(key, model)| {
-            (
-                AuthoredModelRef {
-                    module_path: model.module_path.clone(),
-                    model_id: model.model_id.clone(),
-                },
-                key.clone(),
-            )
-        })
-        .collect::<BTreeMap<_, _>>();
-    let keys = models.keys().cloned().collect::<Vec<_>>();
-    let mut invalid = BTreeSet::new();
-    for key in keys {
-        let mut stack = BTreeSet::new();
-        let mut assignments = CompositionAssignments::default();
-        if let Err(message) =
-            collect_composition(&key, models, &inventory, &mut stack, &mut assignments)
-        {
-            invalid.insert(key.clone());
-            if let Some(declaration) = declarations.get(&key) {
-                diagnostic(declaration, declaration.span, message, diagnostics);
-            }
-        }
-    }
-    models.retain(|key, _| !invalid.contains(key));
-}
-
-fn collect_composition(
-    key: &(LogicalSourcePath, FeaSymbolKey),
-    models: &BTreeMap<(LogicalSourcePath, FeaSymbolKey), AuthoredModel>,
-    inventory: &BTreeMap<AuthoredModelRef, (LogicalSourcePath, FeaSymbolKey)>,
-    stack: &mut BTreeSet<(LogicalSourcePath, FeaSymbolKey)>,
-    assignments: &mut CompositionAssignments,
-) -> Result<(), String> {
-    if !stack.insert(key.clone()) {
-        return Err("model composition contains an include cycle".into());
-    }
-    let model = models
-        .get(key)
-        .ok_or_else(|| "included model is not available for composition".to_string())?;
-    for include in &model.includes {
-        let target = inventory.get(&include.model).ok_or_else(|| {
-            format!(
-                "included model `{}::{}` is not available",
-                include.model.module_path, include.model.model_id
-            )
-        })?;
-        let included = models
-            .get(target)
-            .ok_or_else(|| "included model is not available for composition".to_string())?;
-        if !included.property_inputs.is_empty() {
-            return Err(format!(
-                "included model `{}` requires explicit input binding",
-                included.model_id
-            ));
-        }
-        collect_composition(target, models, inventory, stack, assignments)?;
-    }
-    for assignment in &model.material_assignments {
-        if let Some(existing) = assignments.materials.get(&assignment.target) {
-            if existing != &assignment.material {
-                return Err("model composition assigns conflicting materials to one target".into());
-            }
-        } else {
-            assignments
-                .materials
-                .insert(assignment.target.clone(), assignment.material.clone());
-        }
-        if let AuthoredPropertyTarget::Shell(source) = &assignment.target {
-            if assignments.layups.contains_key(source) {
-                return Err(
-                    "model composition gives a shell both homogeneous and laminate ownership"
-                        .into(),
-                );
-            }
-        }
-    }
-    for assignment in &model.property_assignments {
-        match assignment {
-            AuthoredPropertyAssignment::Section { section, target } => {
-                insert_property(&mut assignments.sections, target, section, "section")?;
-            }
-            AuthoredPropertyAssignment::Layup { layup, target } => {
-                insert_property(&mut assignments.layups, target, layup, "layup")?;
-                if assignments
-                    .materials
-                    .contains_key(&AuthoredPropertyTarget::Shell(target.clone()))
-                {
-                    return Err(
-                        "model composition gives a shell both homogeneous and laminate ownership"
-                            .into(),
-                    );
-                }
-            }
-            AuthoredPropertyAssignment::Orientation {
-                orientation,
-                target,
-            } => {
-                insert_property(
-                    &mut assignments.orientations,
-                    target,
-                    orientation,
-                    "orientation",
-                )?;
-            }
-        }
-    }
-    stack.remove(key);
-    Ok(())
-}
-
-#[derive(Default)]
-struct CompositionAssignments {
-    materials: BTreeMap<AuthoredPropertyTarget, AuthoredMaterialSource>,
-    sections: BTreeMap<AuthoredPropertyTarget, AuthoredSectionSource>,
-    layups: BTreeMap<AuthoredPropertyRegionSource, AuthoredLayupSource>,
-    orientations: BTreeMap<AuthoredPropertyTarget, AuthoredOrientationSource>,
-}
-
-fn insert_property<K, V>(
-    assignments: &mut BTreeMap<K, V>,
-    target: &K,
-    value: &V,
-    label: &str,
-) -> Result<(), String>
-where
-    K: Ord + Clone,
-    V: PartialEq + Clone,
-{
-    if let Some(existing) = assignments.get(target) {
-        if existing != value {
-            return Err(format!(
-                "model composition assigns conflicting {label} definitions to one target"
-            ));
-        }
-    } else {
-        assignments.insert(target.clone(), value.clone());
-    }
-    Ok(())
 }
 
 fn model(
@@ -243,6 +96,7 @@ fn model(
         })
         .collect();
     let lowered_properties = properties::lower(declaration, bound, diagnostics);
+    let constraints = constraints::lower(declaration, bound, diagnostics);
     AuthoredModel {
         module_path: declaration.module.as_str().to_string(),
         model_id: declaration.key.name.clone(),
@@ -253,6 +107,7 @@ fn model(
         orientations: lowered_properties.orientations,
         material_assignments,
         property_assignments: lowered_properties.assignments,
+        constraints,
     }
 }
 
@@ -349,6 +204,17 @@ pub(super) fn property_target(
     expression: &CheckedExpression,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<AuthoredPropertyTarget> {
+    let source = region_source(bound, declaration, expression, diagnostics)?;
+    let role = region_source_role(&source)?;
+    property_target_for_role(role, source, declaration, expression, diagnostics)
+}
+
+pub(super) fn region_source(
+    bound: &BoundFeaProgram,
+    declaration: &CheckedFeaDeclaration,
+    expression: &CheckedExpression,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Option<AuthoredRegionSource> {
     let CheckedExpressionKind::Reference(path) = &expression.kind else {
         invalid_assignment(declaration, expression, "region target", diagnostics);
         return None;
@@ -360,16 +226,10 @@ pub(super) fn property_target(
                 invalid_assignment(declaration, expression, "region-typed input", diagnostics);
                 return None;
             };
-            property_target_for_role(
-                *role,
-                AuthoredPropertyRegionSource::ModelInput(AuthoredModelInputRef {
-                    input_id: name.clone(),
-                    kind: AuthoredModelInputKind::Region(geometry_role(*role)),
-                }),
-                declaration,
-                expression,
-                diagnostics,
-            )
+            Some(AuthoredRegionSource::ModelInput(AuthoredModelInputRef {
+                input_id: name.clone(),
+                kind: AuthoredModelInputKind::Region(geometry_role(*role)),
+            }))
         }
         [namespace, geometry, region_namespace, region]
             if namespace == "geometry" && region_namespace == "region" =>
@@ -386,18 +246,12 @@ pub(super) fn property_target(
                 expression.span,
                 diagnostics,
             )?;
-            property_target_for_role(
-                *role,
-                AuthoredPropertyRegionSource::Geometry(GeometryRegionRef {
-                    module_path: reference.0,
-                    geometry_id: reference.1,
-                    region_id: region.clone(),
-                    role: geometry_role(*role),
-                }),
-                declaration,
-                expression,
-                diagnostics,
-            )
+            Some(AuthoredRegionSource::Geometry(GeometryRegionRef {
+                module_path: reference.0,
+                geometry_id: reference.1,
+                region_id: region.clone(),
+                role: geometry_role(*role),
+            }))
         }
         _ => {
             invalid_assignment(
@@ -416,7 +270,7 @@ pub(super) fn property_region_source(
     declaration: &CheckedFeaDeclaration,
     expression: &CheckedExpression,
     diagnostics: &mut Vec<FeaDiagnostic>,
-) -> Option<AuthoredPropertyRegionSource> {
+) -> Option<AuthoredRegionSource> {
     match property_target(bound, declaration, expression, diagnostics)? {
         AuthoredPropertyTarget::Beam(source)
         | AuthoredPropertyTarget::Shell(source)
@@ -425,9 +279,26 @@ pub(super) fn property_region_source(
     }
 }
 
+fn region_source_role(source: &AuthoredRegionSource) -> Option<FeaTopologyRole> {
+    let role = match source {
+        AuthoredRegionSource::Geometry(region) => region.role,
+        AuthoredRegionSource::ModelInput(input) => match input.kind {
+            AuthoredModelInputKind::Region(role) => role,
+            AuthoredModelInputKind::Material => return None,
+        },
+    };
+    Some(match role {
+        GeometryRegionRole::Vertex => FeaTopologyRole::Vertex,
+        GeometryRegionRole::Edge => FeaTopologyRole::Edge,
+        GeometryRegionRole::Face => FeaTopologyRole::Face,
+        GeometryRegionRole::Solid => FeaTopologyRole::Solid,
+        GeometryRegionRole::Cell => FeaTopologyRole::Cell,
+    })
+}
+
 fn property_target_for_role(
     role: FeaTopologyRole,
-    source: AuthoredPropertyRegionSource,
+    source: AuthoredRegionSource,
     declaration: &CheckedFeaDeclaration,
     expression: &CheckedExpression,
     diagnostics: &mut Vec<FeaDiagnostic>,
@@ -529,7 +400,7 @@ fn invalid_assignment(
     diagnostic(
         declaration,
         expression.span,
-        format!("material assignment requires a {expected}"),
+        format!("model definition requires a {expected}"),
         diagnostics,
     );
 }

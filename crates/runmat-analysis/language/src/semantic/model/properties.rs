@@ -10,10 +10,10 @@ use runmat_analysis_core::{
     AxisOrientation, CartesianOrientation, CircularBeamSection, GeneralBeamSection,
     HomogeneousShellSection, RectangularBeamSection, TubularBeamSection,
 };
-use runmat_parser::fea::FeaPropertyDefinitionKind;
+use runmat_parser::fea::FeaModelDefinitionKind;
 
 mod values;
-use values::*;
+pub(super) use values::*;
 
 pub(super) struct LoweredProperties {
     pub sections: Vec<AuthoredSectionDefinition>,
@@ -31,7 +31,7 @@ pub(super) fn lower(
     let mut layups = Vec::new();
     let mut orientations = Vec::new();
     for statement in &declaration.statements {
-        let CheckedFeaStatementKind::PropertyDefinition {
+        let CheckedFeaStatementKind::ModelDefinition {
             kind,
             name,
             statements,
@@ -40,21 +40,22 @@ pub(super) fn lower(
             continue;
         };
         match kind {
-            FeaPropertyDefinitionKind::Section => {
+            FeaModelDefinitionKind::Section => {
                 if let Some(value) = section(declaration, name, statements, diagnostics) {
                     sections.push(value);
                 }
             }
-            FeaPropertyDefinitionKind::Layup => {
+            FeaModelDefinitionKind::Layup => {
                 if let Some(value) = layup(declaration, bound, name, statements, diagnostics) {
                     layups.push(value);
                 }
             }
-            FeaPropertyDefinitionKind::Orientation => {
+            FeaModelDefinitionKind::Orientation => {
                 if let Some(value) = orientation(declaration, name, statements, diagnostics) {
                     orientations.push(value);
                 }
             }
+            _ => {}
         }
     }
     let assignments = declaration

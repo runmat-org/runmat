@@ -6,7 +6,7 @@ use crate::{
 use runmat_parser::fea::FeaAssignmentRelation;
 use std::collections::BTreeSet;
 
-pub(super) fn sole_kind_block<'a>(
+pub(in crate::semantic::model) fn sole_kind_block<'a>(
     declaration: &CheckedFeaDeclaration,
     statements: &'a [CheckedFeaStatement],
     label: &str,
@@ -37,7 +37,7 @@ pub(super) fn sole_kind_block<'a>(
     }
 }
 
-pub(super) fn validate_assignments(
+pub(in crate::semantic::model) fn validate_assignments(
     declaration: &CheckedFeaDeclaration,
     statements: &[CheckedFeaStatement],
     supported: &[&str],
@@ -91,7 +91,7 @@ pub(super) fn validate_assignments(
     }
 }
 
-pub(super) fn reference_name(
+pub(in crate::semantic::model) fn reference_name(
     declaration: &CheckedFeaDeclaration,
     value: &CheckedExpression,
     namespace: &str,
@@ -116,7 +116,7 @@ pub(super) fn reference_name(
     }
 }
 
-pub(super) fn required_assignment<'a>(
+pub(in crate::semantic::model) fn required_assignment<'a>(
     declaration: &CheckedFeaDeclaration,
     statements: &'a [CheckedFeaStatement],
     name: &str,
@@ -139,7 +139,7 @@ pub(super) fn required_assignment<'a>(
     value
 }
 
-pub(super) fn required_quantity(
+pub(in crate::semantic::model) fn required_quantity(
     declaration: &CheckedFeaDeclaration,
     statements: &[CheckedFeaStatement],
     name: &str,
@@ -163,7 +163,7 @@ pub(super) fn required_quantity(
     })
 }
 
-pub(super) fn required_length(
+pub(in crate::semantic::model) fn required_length(
     declaration: &CheckedFeaDeclaration,
     statements: &[CheckedFeaStatement],
     name: &str,
@@ -178,7 +178,7 @@ pub(super) fn required_length(
     )
 }
 
-pub(super) fn required_fourth_length(
+pub(in crate::semantic::model) fn required_fourth_length(
     declaration: &CheckedFeaDeclaration,
     statements: &[CheckedFeaStatement],
     name: &str,
@@ -193,7 +193,7 @@ pub(super) fn required_fourth_length(
     )
 }
 
-pub(super) fn required_scalar(
+pub(in crate::semantic::model) fn required_scalar(
     declaration: &CheckedFeaDeclaration,
     statements: &[CheckedFeaStatement],
     name: &str,
@@ -213,7 +213,7 @@ pub(super) fn required_scalar(
     scalar(value)
 }
 
-pub(super) fn required_u32(
+pub(in crate::semantic::model) fn required_u32(
     declaration: &CheckedFeaDeclaration,
     statements: &[CheckedFeaStatement],
     name: &str,
@@ -236,7 +236,7 @@ pub(super) fn required_u32(
     })
 }
 
-pub(super) fn required_i8(
+pub(in crate::semantic::model) fn required_i8(
     declaration: &CheckedFeaDeclaration,
     statements: &[CheckedFeaStatement],
     name: &str,
@@ -253,7 +253,7 @@ pub(super) fn required_i8(
     })
 }
 
-pub(super) fn required_vector(
+pub(in crate::semantic::model) fn required_vector(
     declaration: &CheckedFeaDeclaration,
     statements: &[CheckedFeaStatement],
     name: &str,

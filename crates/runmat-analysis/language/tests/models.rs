@@ -61,7 +61,7 @@ model bracket {
     assert_eq!(material.module_path, "project/library.fea");
     assert_eq!(material.material_id, "steel");
     let runmat_analysis_core::AuthoredPropertyTarget::Solid(
-        runmat_analysis_core::AuthoredPropertyRegionSource::Geometry(region),
+        runmat_analysis_core::AuthoredRegionSource::Geometry(region),
     ) = &assignment.target
     else {
         panic!("expected solid geometry region");
@@ -97,7 +97,7 @@ model reusable(region body : region<solid>) {
     assert!(matches!(
         assignment.target,
         runmat_analysis_core::AuthoredPropertyTarget::Solid(
-            runmat_analysis_core::AuthoredPropertyRegionSource::ModelInput(_)
+            runmat_analysis_core::AuthoredRegionSource::ModelInput(_)
         )
     ));
 }
@@ -245,6 +245,7 @@ geometry part {
         expect exactly_one
     }
 }
+
 material carbon { mass_density = 1600 kg/m^3 }
 model invalid {
     orientation axes {
@@ -283,5 +284,134 @@ model invalid {
         diagnostic.code == "fea.semantic.model"
             && (diagnostic.message.contains("section assignments")
                 || diagnostic.message.contains("laminate ownership"))
+    }));
+}
+
+#[test]
+fn essential_constraints_lower_across_physics_with_exact_regions_and_units() {
+    let source = r#"
+geometry part {
+    construct {
+        feature body = box(width = 1 m, depth = 1 m, height = 1 m)
+        result = feature.body
+    }
+    region wall : face {
+        select result
+        expect one_or_more
+    }
+    region volume : solid {
+        select result
+        expect exactly_one
+    }
+}
+model multiphysics {
+    constraint support {
+        structural.fixed { target = geometry.part.region.wall }
+    }
+    constraint temperature {
+        thermal.temperature {
+            target = geometry.part.region.wall
+            value = 20 degC
+        }
+    }
+    constraint voltage {
+        electrical.potential {
+            target = geometry.part.region.wall
+            value = 12 V
+        }
+    }
+    constraint terminal_current {
+        electrical.integral_current {
+            target = geometry.part.region.wall
+            value = 2 A
+        }
+    }
+    constraint magnetic_ground {
+        magnetic.vector_potential_ground { target = geometry.part.region.wall }
+    }
+    constraint magnetic_value {
+        magnetic.vector_potential {
+            target = geometry.part.region.wall
+            value = 0 T*m
+        }
+    }
+    constraint magnetic_gauge {
+        magnetic.coulomb_gauge { target = geometry.part.region.volume }
+    }
+    constraint sound_source {
+        acoustic.pressure {
+            target = geometry.part.region.wall
+            value = 1 Pa
+        }
+    }
+    constraint inlet {
+        fluid.velocity {
+            target = geometry.part.region.wall
+            value = 3 m/s
+        }
+    }
+}
+"#;
+    let program = FeaCompiler::new(&TestHost::default()).check(CheckRequest {
+        modules: ModuleGraphRequest {
+            source_root: LogicalSourcePath::new("project").unwrap(),
+            root: source_module("project/main.fea", source, 1),
+        },
+    });
+    assert!(program.is_valid(), "{:#?}", program.diagnostics);
+    let model = program.models.values().next().unwrap();
+    assert_eq!(model.constraints.len(), 9);
+    let temperature = model
+        .constraints
+        .iter()
+        .find(|constraint| constraint.constraint_id == "temperature")
+        .unwrap();
+    let runmat_analysis_core::AuthoredConstraintKind::ThermalTemperature {
+        value: runmat_analysis_core::PrescribedValue::Constant(value),
+        ..
+    } = &temperature.kind
+    else {
+        panic!("expected thermal constraint");
+    };
+    assert_eq!(value.kelvin, 293.15);
+}
+
+#[test]
+fn essential_constraints_reject_wrong_topology_and_dimensions() {
+    let source = r#"
+geometry part {
+    construct {
+        feature body = box(width = 1 m, depth = 1 m, height = 1 m)
+        result = feature.body
+    }
+    region volume : solid {
+        select result
+        expect exactly_one
+    }
+}
+model invalid {
+    constraint support {
+        structural.fixed { target = geometry.part.region.volume }
+    }
+    constraint temperature {
+        thermal.temperature {
+            target = geometry.part.region.volume
+            value = 4 Pa
+        }
+    }
+}
+"#;
+    let program = FeaCompiler::new(&TestHost::default()).check(CheckRequest {
+        modules: ModuleGraphRequest {
+            source_root: LogicalSourcePath::new("project").unwrap(),
+            root: source_module("project/main.fea", source, 1),
+        },
+    });
+    assert!(!program.is_valid());
+    assert!(program.models.is_empty());
+    assert!(program.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "fea.semantic.model"
+            && (diagnostic.message.contains("boundary topology")
+                || diagnostic.message.contains("required dimension"))
     }));
 }

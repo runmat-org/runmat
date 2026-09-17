@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use runmat_geometry_core::{GeometryRegionRef, GeometryRegionRole};
 use serde::{Deserialize, Serialize};
 
+use super::authored_constraints::AuthoredConstraint;
 use super::authored_properties::{
     AuthoredLayupDefinition, AuthoredLayupSource, AuthoredOrientationDefinition,
     AuthoredOrientationSource, AuthoredPropertyAssignment, AuthoredSectionDefinition,
@@ -48,7 +49,7 @@ pub enum AuthoredMaterialSource {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "source")]
-pub enum AuthoredPropertyRegionSource {
+pub enum AuthoredRegionSource {
     Geometry(GeometryRegionRef),
     ModelInput(AuthoredModelInputRef),
 }
@@ -57,10 +58,10 @@ pub enum AuthoredPropertyRegionSource {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "role", content = "region")]
 pub enum AuthoredPropertyTarget {
-    Beam(AuthoredPropertyRegionSource),
-    Shell(AuthoredPropertyRegionSource),
-    Solid(AuthoredPropertyRegionSource),
-    Cell(AuthoredPropertyRegionSource),
+    Beam(AuthoredRegionSource),
+    Shell(AuthoredRegionSource),
+    Solid(AuthoredRegionSource),
+    Cell(AuthoredRegionSource),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -89,6 +90,7 @@ pub struct AuthoredModel {
     pub orientations: Vec<AuthoredOrientationDefinition>,
     pub material_assignments: Vec<AuthoredMaterialAssignment>,
     pub property_assignments: Vec<AuthoredPropertyAssignment>,
+    pub constraints: Vec<AuthoredConstraint>,
 }
 
 impl AuthoredModel {
@@ -206,6 +208,20 @@ impl AuthoredModel {
                 }
             }
         }
+        let mut constraint_ids = BTreeSet::new();
+        for constraint in &self.constraints {
+            constraint
+                .validate()
+                .map_err(|error| AuthoredModelError::InvalidConstraint(error.to_string()))?;
+            if let AuthoredRegionSource::ModelInput(input) = &constraint.kind.target().region {
+                require_input(input, &inputs)?;
+            }
+            if !constraint_ids.insert(constraint.constraint_id.as_str()) {
+                return Err(AuthoredModelError::DuplicateConstraint(
+                    constraint.constraint_id.clone(),
+                ));
+            }
+        }
         Ok(())
     }
 }
@@ -233,13 +249,13 @@ impl AuthoredMaterialAssignment {
             AuthoredPropertyTarget::Cell(source) => (source, GeometryRegionRole::Cell),
         };
         let actual_role = match source {
-            AuthoredPropertyRegionSource::Geometry(region) => {
+            AuthoredRegionSource::Geometry(region) => {
                 token("region module path", &region.module_path)?;
                 token("region geometry id", &region.geometry_id)?;
                 token("region id", &region.region_id)?;
                 region.role
             }
-            AuthoredPropertyRegionSource::ModelInput(input) => {
+            AuthoredRegionSource::ModelInput(input) => {
                 input.validate()?;
                 require_input(input, inputs)?;
                 let AuthoredModelInputKind::Region(role) = input.kind else {
@@ -345,10 +361,10 @@ fn validate_local_property_ref(
     Ok(())
 }
 
-fn property_source_role(source: &AuthoredPropertyRegionSource) -> GeometryRegionRole {
+fn property_source_role(source: &AuthoredRegionSource) -> GeometryRegionRole {
     match source {
-        AuthoredPropertyRegionSource::Geometry(region) => region.role,
-        AuthoredPropertyRegionSource::ModelInput(input) => match input.kind {
+        AuthoredRegionSource::Geometry(region) => region.role,
+        AuthoredRegionSource::ModelInput(input) => match input.kind {
             AuthoredModelInputKind::Region(role) => role,
             AuthoredModelInputKind::Material => GeometryRegionRole::Vertex,
         },
@@ -404,6 +420,10 @@ pub enum AuthoredModelError {
     ConflictingOrientationAssignment,
     #[error("a shell target cannot have both homogeneous material and laminate ownership")]
     CompositeAndHomogeneousOwnership,
+    #[error("constraint `{0}` is duplicated")]
+    DuplicateConstraint(String),
+    #[error("constraint is invalid: {0}")]
+    InvalidConstraint(String),
     #[error("unknown section `{0}`")]
     UnknownSection(String),
     #[error("unknown layup `{0}`")]
@@ -455,11 +475,10 @@ mod tests {
             orientations: Vec::new(),
             material_assignments: vec![AuthoredMaterialAssignment {
                 material: AuthoredMaterialSource::ModelInput(material),
-                target: AuthoredPropertyTarget::Solid(AuthoredPropertyRegionSource::ModelInput(
-                    body,
-                )),
+                target: AuthoredPropertyTarget::Solid(AuthoredRegionSource::ModelInput(body)),
             }],
             property_assignments: Vec::new(),
+            constraints: Vec::new(),
         }
         .validate()
         .unwrap();
@@ -480,7 +499,7 @@ mod tests {
                     module_path: "project/main.fea".into(),
                     material_id: "steel".into(),
                 }),
-                target: AuthoredPropertyTarget::Solid(AuthoredPropertyRegionSource::Geometry(
+                target: AuthoredPropertyTarget::Solid(AuthoredRegionSource::Geometry(
                     GeometryRegionRef {
                         module_path: "project/main.fea".into(),
                         geometry_id: "part".into(),
@@ -490,6 +509,7 @@ mod tests {
                 )),
             }],
             property_assignments: Vec::new(),
+            constraints: Vec::new(),
         };
         assert_eq!(
             model.validate(),

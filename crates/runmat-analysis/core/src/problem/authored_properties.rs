@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use serde::{Deserialize, Serialize};
 
 use super::model_authoring::{
-    AuthoredMaterialSource, AuthoredPropertyRegionSource, AuthoredPropertyTarget,
+    AuthoredMaterialSource, AuthoredPropertyTarget, AuthoredRegionSource,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -144,7 +144,7 @@ pub enum AuthoredPropertyAssignment {
     },
     Layup {
         layup: AuthoredLayupSource,
-        target: AuthoredPropertyRegionSource,
+        target: AuthoredRegionSource,
     },
     Orientation {
         orientation: AuthoredOrientationSource,

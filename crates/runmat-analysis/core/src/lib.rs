@@ -1,6 +1,7 @@
 //! Solver-agnostic analysis problem model and validation contracts.
 
 pub mod problem {
+    pub mod authored_constraints;
     pub mod authored_properties;
     pub mod boundary;
     pub mod connector;
@@ -41,6 +42,10 @@ pub use validate_outputs::spec::quantity_supported as procedure_produces_observa
 pub use validate_outputs::{observation_sampling_matches_domain, validate_observation_sampling};
 
 pub use field::{AnalysisField, AnalysisFieldValues, DeviceFieldRef};
+pub use problem::authored_constraints::{
+    AuthoredConstraint, AuthoredConstraintError, AuthoredConstraintKind, AuthoredConstraintTarget,
+    AuthoredTargetCardinality,
+};
 pub use problem::authored_properties::{
     AuthoredLayupDefinition, AuthoredLayupSource, AuthoredOrientationDefinition,
     AuthoredOrientationSource, AuthoredPly, AuthoredPropertyAssignment,
@@ -95,7 +100,7 @@ pub use problem::model::{
 pub use problem::model_authoring::{
     AuthoredMaterialAssignment, AuthoredMaterialRef, AuthoredMaterialSource, AuthoredModel,
     AuthoredModelError, AuthoredModelInclude, AuthoredModelInputKind, AuthoredModelInputRef,
-    AuthoredModelRef, AuthoredPropertyRegionSource, AuthoredPropertyTarget,
+    AuthoredModelRef, AuthoredPropertyTarget, AuthoredRegionSource,
 };
 pub use problem::prescribed_value::{PrescribedQuantity, PrescribedValue};
 pub use problem::quantity::{

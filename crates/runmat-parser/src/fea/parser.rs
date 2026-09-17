@@ -142,7 +142,7 @@ impl FeaParser {
                     };
                     statements.push(FeaStatement {
                         kind: self
-                            .parse_property_definition(start, open_block, body.clone())
+                            .parse_model_definition(start, open_block, body.clone())
                             .unwrap_or(FeaStatementKind::Block { header, body }),
                         span,
                     });
@@ -339,7 +339,7 @@ impl FeaParser {
         }
     }
 
-    fn parse_property_definition(
+    fn parse_model_definition(
         &mut self,
         start: usize,
         open: usize,
@@ -347,11 +347,16 @@ impl FeaParser {
     ) -> Option<FeaStatementKind> {
         let significant = self.significant(start, open);
         let kind = match self.kind(*significant.first()?)? {
-            FeaTokenKind::Keyword(FeaKeyword::Section) => FeaPropertyDefinitionKind::Section,
-            FeaTokenKind::Keyword(FeaKeyword::Layup) => FeaPropertyDefinitionKind::Layup,
-            FeaTokenKind::Keyword(FeaKeyword::Orientation) => {
-                FeaPropertyDefinitionKind::Orientation
-            }
+            FeaTokenKind::Keyword(FeaKeyword::Section) => FeaModelDefinitionKind::Section,
+            FeaTokenKind::Keyword(FeaKeyword::Layup) => FeaModelDefinitionKind::Layup,
+            FeaTokenKind::Keyword(FeaKeyword::Orientation) => FeaModelDefinitionKind::Orientation,
+            FeaTokenKind::Keyword(FeaKeyword::Constraint) => FeaModelDefinitionKind::Constraint,
+            FeaTokenKind::Keyword(FeaKeyword::Load) => FeaModelDefinitionKind::Load,
+            FeaTokenKind::Keyword(FeaKeyword::LoadCase) => FeaModelDefinitionKind::LoadCase,
+            FeaTokenKind::Keyword(FeaKeyword::Interface) => FeaModelDefinitionKind::Interface,
+            FeaTokenKind::Keyword(FeaKeyword::Connector) => FeaModelDefinitionKind::Connector,
+            FeaTokenKind::Keyword(FeaKeyword::Excitation) => FeaModelDefinitionKind::Excitation,
+            FeaTokenKind::Keyword(FeaKeyword::Initial) => FeaModelDefinitionKind::Initial,
             _ => return None,
         };
         let name = significant
@@ -365,10 +370,10 @@ impl FeaParser {
             self.diagnostics.push(FeaSyntaxDiagnostic {
                 kind: FeaSyntaxDiagnosticKind::ExpectedToken,
                 span,
-                message: "property definitions require exactly one name".to_string(),
+                message: "model definitions require exactly one name".to_string(),
             });
         }
-        Some(FeaStatementKind::PropertyDefinition { kind, name, body })
+        Some(FeaStatementKind::ModelDefinition { kind, name, body })
     }
 
     fn parse_output_statement(

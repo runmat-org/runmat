@@ -7,7 +7,7 @@ use crate::{
     FeaDiagnosticPhase, FeaSymbolKey, GeometryInspectionSource, LogicalSourcePath,
 };
 use runmat_parser::fea::{
-    FeaAssignmentRelation, FeaBlock, FeaDeclaration, FeaModuleItem, FeaPropertyDefinitionKind,
+    FeaAssignmentRelation, FeaBlock, FeaDeclaration, FeaModelDefinitionKind, FeaModuleItem,
     FeaStatementKind,
 };
 use runmat_types::Span;
@@ -68,8 +68,8 @@ pub struct CheckedFeaStatement {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CheckedFeaStatementKind {
-    PropertyDefinition {
-        kind: FeaPropertyDefinitionKind,
+    ModelDefinition {
+        kind: FeaModelDefinitionKind,
         name: String,
         statements: Vec<CheckedFeaStatement>,
     },
@@ -278,13 +278,21 @@ fn check_block<C: AnalysisOperationCatalog + ?Sized>(
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Vec<CheckedFeaStatement> {
     for statement in &block.statements {
-        let FeaStatementKind::PropertyDefinition { kind, name, .. } = &statement.kind else {
+        let FeaStatementKind::ModelDefinition { kind, name, .. } = &statement.kind else {
             continue;
         };
         let (namespace, value_type) = match kind {
-            FeaPropertyDefinitionKind::Section => ("section", FeaType::Section),
-            FeaPropertyDefinitionKind::Layup => ("layup", FeaType::Layup),
-            FeaPropertyDefinitionKind::Orientation => ("orientation", FeaType::Orientation),
+            FeaModelDefinitionKind::Section => ("section", FeaType::Section),
+            FeaModelDefinitionKind::Layup => ("layup", FeaType::Layup),
+            FeaModelDefinitionKind::Orientation => ("orientation", FeaType::Orientation),
+            FeaModelDefinitionKind::Constraint => ("constraint", FeaType::Constraint),
+            FeaModelDefinitionKind::Load => ("load", FeaType::Load),
+            FeaModelDefinitionKind::LoadCase => ("load_case", FeaType::LoadCase),
+            FeaModelDefinitionKind::Interface => ("interface", FeaType::Interface),
+            FeaModelDefinitionKind::Connector => ("connector", FeaType::Connector),
+            FeaModelDefinitionKind::Signal => ("signal", FeaType::Signal),
+            FeaModelDefinitionKind::Excitation => ("excitation", FeaType::Excitation),
+            FeaModelDefinitionKind::Initial => ("initial", FeaType::InitialCondition),
         };
         scope.insert_reference([namespace.to_string(), name.text.clone()], value_type);
     }
@@ -294,8 +302,8 @@ fn check_block<C: AnalysisOperationCatalog + ?Sized>(
         .map(|statement| {
             let kind =
                 match &statement.kind {
-                    FeaStatementKind::PropertyDefinition { kind, name, body } => {
-                        CheckedFeaStatementKind::PropertyDefinition {
+                    FeaStatementKind::ModelDefinition { kind, name, body } => {
+                        CheckedFeaStatementKind::ModelDefinition {
                             kind: *kind,
                             name: name.text.clone(),
                             statements: check_block(

@@ -14,16 +14,24 @@ pub struct FeaStatement {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FeaPropertyDefinitionKind {
+pub enum FeaModelDefinitionKind {
     Section,
     Layup,
     Orientation,
+    Constraint,
+    Load,
+    LoadCase,
+    Interface,
+    Connector,
+    Signal,
+    Excitation,
+    Initial,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FeaStatementKind {
-    PropertyDefinition {
-        kind: FeaPropertyDefinitionKind,
+    ModelDefinition {
+        kind: FeaModelDefinitionKind,
         name: FeaName,
         body: FeaBlock,
     },

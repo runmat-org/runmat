@@ -1,0 +1,180 @@
+use super::diagnostic;
+use crate::{CheckedFeaDeclaration, FeaDiagnostic, FeaSymbolKey, LogicalSourcePath};
+use runmat_analysis_core::{
+    AuthoredConstraint, AuthoredLayupSource, AuthoredMaterialSource, AuthoredModel,
+    AuthoredModelRef, AuthoredOrientationSource, AuthoredPropertyAssignment,
+    AuthoredPropertyTarget, AuthoredRegionSource, AuthoredSectionSource,
+};
+use std::collections::{BTreeMap, BTreeSet};
+
+pub(super) fn validate(
+    models: &mut BTreeMap<(LogicalSourcePath, FeaSymbolKey), AuthoredModel>,
+    declarations: &BTreeMap<(LogicalSourcePath, FeaSymbolKey), CheckedFeaDeclaration>,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) {
+    let inventory = models
+        .iter()
+        .map(|(key, model)| {
+            (
+                AuthoredModelRef {
+                    module_path: model.module_path.clone(),
+                    model_id: model.model_id.clone(),
+                },
+                key.clone(),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let keys = models.keys().cloned().collect::<Vec<_>>();
+    let mut invalid = BTreeSet::new();
+    for key in keys {
+        let mut stack = BTreeSet::new();
+        let mut assignments = CompositionAssignments::default();
+        if let Err(message) = collect(&key, models, &inventory, &mut stack, &mut assignments) {
+            invalid.insert(key.clone());
+            if let Some(declaration) = declarations.get(&key) {
+                diagnostic(declaration, declaration.span, message, diagnostics);
+            }
+        }
+    }
+    models.retain(|key, _| !invalid.contains(key));
+}
+
+fn collect(
+    key: &(LogicalSourcePath, FeaSymbolKey),
+    models: &BTreeMap<(LogicalSourcePath, FeaSymbolKey), AuthoredModel>,
+    inventory: &BTreeMap<AuthoredModelRef, (LogicalSourcePath, FeaSymbolKey)>,
+    stack: &mut BTreeSet<(LogicalSourcePath, FeaSymbolKey)>,
+    assignments: &mut CompositionAssignments,
+) -> Result<(), String> {
+    if !stack.insert(key.clone()) {
+        return Err("model composition contains an include cycle".into());
+    }
+    let model = models
+        .get(key)
+        .ok_or_else(|| "included model is not available for composition".to_string())?;
+    for include in &model.includes {
+        let target = inventory.get(&include.model).ok_or_else(|| {
+            format!(
+                "included model `{}::{}` is not available",
+                include.model.module_path, include.model.model_id
+            )
+        })?;
+        let included = models
+            .get(target)
+            .ok_or_else(|| "included model is not available for composition".to_string())?;
+        if !included.property_inputs.is_empty() {
+            return Err(format!(
+                "included model `{}` requires explicit input binding",
+                included.model_id
+            ));
+        }
+        collect(target, models, inventory, stack, assignments)?;
+    }
+    collect_materials(model, assignments)?;
+    collect_properties(model, assignments)?;
+    for constraint in &model.constraints {
+        if let Some(existing) = assignments.constraints.get(&constraint.constraint_id) {
+            if existing != constraint {
+                return Err(format!(
+                    "model composition defines conflicting constraint `{}`",
+                    constraint.constraint_id
+                ));
+            }
+        } else {
+            assignments
+                .constraints
+                .insert(constraint.constraint_id.clone(), constraint.clone());
+        }
+    }
+    stack.remove(key);
+    Ok(())
+}
+
+fn collect_materials(
+    model: &AuthoredModel,
+    assignments: &mut CompositionAssignments,
+) -> Result<(), String> {
+    for assignment in &model.material_assignments {
+        insert_property(
+            &mut assignments.materials,
+            &assignment.target,
+            &assignment.material,
+            "material",
+        )?;
+        if let AuthoredPropertyTarget::Shell(source) = &assignment.target {
+            if assignments.layups.contains_key(source) {
+                return Err(
+                    "model composition gives a shell both homogeneous and laminate ownership"
+                        .into(),
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+fn collect_properties(
+    model: &AuthoredModel,
+    assignments: &mut CompositionAssignments,
+) -> Result<(), String> {
+    for assignment in &model.property_assignments {
+        match assignment {
+            AuthoredPropertyAssignment::Section { section, target } => {
+                insert_property(&mut assignments.sections, target, section, "section")?;
+            }
+            AuthoredPropertyAssignment::Layup { layup, target } => {
+                insert_property(&mut assignments.layups, target, layup, "layup")?;
+                if assignments
+                    .materials
+                    .contains_key(&AuthoredPropertyTarget::Shell(target.clone()))
+                {
+                    return Err(
+                        "model composition gives a shell both homogeneous and laminate ownership"
+                            .into(),
+                    );
+                }
+            }
+            AuthoredPropertyAssignment::Orientation {
+                orientation,
+                target,
+            } => insert_property(
+                &mut assignments.orientations,
+                target,
+                orientation,
+                "orientation",
+            )?,
+        }
+    }
+    Ok(())
+}
+
+#[derive(Default)]
+struct CompositionAssignments {
+    materials: BTreeMap<AuthoredPropertyTarget, AuthoredMaterialSource>,
+    sections: BTreeMap<AuthoredPropertyTarget, AuthoredSectionSource>,
+    layups: BTreeMap<AuthoredRegionSource, AuthoredLayupSource>,
+    orientations: BTreeMap<AuthoredPropertyTarget, AuthoredOrientationSource>,
+    constraints: BTreeMap<String, AuthoredConstraint>,
+}
+
+fn insert_property<K, V>(
+    assignments: &mut BTreeMap<K, V>,
+    target: &K,
+    value: &V,
+    label: &str,
+) -> Result<(), String>
+where
+    K: Ord + Clone,
+    V: PartialEq + Clone,
+{
+    if let Some(existing) = assignments.get(target) {
+        if existing != value {
+            return Err(format!(
+                "model composition assigns conflicting {label} definitions to one target"
+            ));
+        }
+    } else {
+        assignments.insert(target.clone(), value.clone());
+    }
+    Ok(())
+}
