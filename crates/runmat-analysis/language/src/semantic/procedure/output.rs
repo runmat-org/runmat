@@ -158,6 +158,10 @@ fn lower_expression(
                     ties: AuthoredExtremaTiePolicy::FirstCanonical,
                 })
             }
+            OutputOperation::CollectCases
+            | OutputOperation::RetainEachCase
+            | OutputOperation::MinimumCase
+            | OutputOperation::MaximumCase => invalid(declaration, expression, diagnostics),
         },
         _ => invalid(declaration, expression, diagnostics),
     }

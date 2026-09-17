@@ -96,7 +96,7 @@ impl FeaParser {
         let header_start = name_index.map_or(start + 1, |index| index + 1);
         let header = self.token_range(header_start, open);
         let header_significant = self.significant(header_start, open);
-        let source = self.geometry_source(kind, &header_significant, header.span);
+        let source = self.declaration_source(kind, &header_significant, header.span);
         let target = self.mesh_target(kind, &header_significant, header.span);
         let span = Span {
             start: self.token(start).span.start,
@@ -116,17 +116,22 @@ impl FeaParser {
         )
     }
 
-    fn geometry_source(
+    fn declaration_source(
         &mut self,
         kind: FeaDeclarationKind,
         header: &[usize],
         span: Span,
     ) -> Option<FeaReference> {
-        if kind != FeaDeclarationKind::Geometry
-            || !header
+        let prefix_matches = match kind {
+            FeaDeclarationKind::Geometry => header
                 .first()
-                .is_some_and(|index| self.at(*index, FeaTokenKind::Keyword(FeaKeyword::From)))
-        {
+                .is_some_and(|index| self.at(*index, FeaTokenKind::Keyword(FeaKeyword::From))),
+            FeaDeclarationKind::Sweep => header
+                .first()
+                .is_some_and(|index| self.at(*index, FeaTokenKind::Colon)),
+            _ => false,
+        };
+        if !prefix_matches {
             return None;
         }
         let reference = self.parse_reference_indices(&header[1..]);
@@ -134,7 +139,13 @@ impl FeaParser {
             self.diagnostics.push(FeaSyntaxDiagnostic {
                 kind: FeaSyntaxDiagnosticKind::InvalidExpression,
                 span,
-                message: "expected a geometry reference after `from`".to_string(),
+                message: match kind {
+                    FeaDeclarationKind::Geometry => {
+                        "expected a geometry reference after `from`".to_string()
+                    }
+                    FeaDeclarationKind::Sweep => "expected a study reference after `:`".to_string(),
+                    _ => unreachable!(),
+                },
             });
         }
         reference

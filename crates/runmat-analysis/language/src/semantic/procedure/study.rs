@@ -146,7 +146,7 @@ fn model_binding<'a>(
     Some((key, expression))
 }
 
-fn symbol_key(
+pub(crate) fn symbol_key(
     bound: &BoundFeaProgram,
     declaration: &CheckedFeaDeclaration,
     path: &[String],
@@ -277,7 +277,11 @@ fn namespace_for(kind: FeaSymbolKind) -> &'static str {
     match kind {
         FeaSymbolKind::Geometry => "geometry",
         FeaSymbolKind::Mesh => "mesh",
+        FeaSymbolKind::Material => "material",
         FeaSymbolKind::Model => "model",
-        _ => "",
+        FeaSymbolKind::Study => "study",
+        FeaSymbolKind::Sweep => "sweep",
+        FeaSymbolKind::Execution => "execution",
+        FeaSymbolKind::Function => "function",
     }
 }

@@ -20,6 +20,8 @@ pub fn output_operation_extension() -> OperationCatalogExtension {
             projection("von_mises"),
             extremum("min"),
             extremum("max"),
+            case_operation("collect", "fea.output.case.collect"),
+            case_operation("retain_each", "fea.output.case.retain_each"),
         ],
     }
 }
@@ -34,6 +36,10 @@ pub(crate) enum OutputOperation {
     VonMises,
     Minimum,
     Maximum,
+    CollectCases,
+    RetainEachCase,
+    MinimumCase,
+    MaximumCase,
 }
 
 impl OutputOperation {
@@ -47,6 +53,10 @@ impl OutputOperation {
             "fea.output.von_mises" => Some(Self::VonMises),
             "fea.output.min" => Some(Self::Minimum),
             "fea.output.max" => Some(Self::Maximum),
+            "fea.output.case.collect" => Some(Self::CollectCases),
+            "fea.output.case.retain_each" => Some(Self::RetainEachCase),
+            "fea.output.case.min" => Some(Self::MinimumCase),
+            "fea.output.case.max" => Some(Self::MaximumCase),
             _ => None,
         }
     }
@@ -95,6 +105,15 @@ impl OutputOperation {
             }
             (Self::Minimum | Self::Maximum, Some(FeaType::Field(_))) => {
                 Err("spatial extrema require an explicit scalar field projection")
+            }
+            (Self::CollectCases, Some(value)) if value.is_numeric() => {
+                Ok(FeaType::CaseTable(Box::new(value.clone())))
+            }
+            (Self::RetainEachCase, Some(FeaType::Field(value))) => {
+                Ok(FeaType::CaseTable(Box::new(FeaType::Field(value.clone()))))
+            }
+            (Self::MinimumCase | Self::MaximumCase, Some(value)) if value.is_numeric() => {
+                Ok(FeaType::AttributedExtremum(Box::new(value.clone())))
             }
             _ => Err("output operation requires an analysis field"),
         }
@@ -163,7 +182,7 @@ fn component() -> OperationFacts {
 }
 
 fn extremum(name: &str) -> OperationFacts {
-    operation(
+    let mut facts = operation(
         name,
         &format!("Find the attributed spatial {name}imum of a scalar analysis field."),
         vec![
@@ -174,6 +193,51 @@ fn extremum(name: &str) -> OperationFacts {
         OperationDistribution::DeterministicReduction,
         TopologyApplicability::Region,
         &format!("fea.output.{name}"),
+    );
+    facts.overloads.push(OperationOverloadFacts {
+        identity: id::<OperationOverloadIdentity>(format!("{name}:fea-cases")),
+        frontends: vec![OperationFrontend::Fea],
+        signature: OperationSignature {
+            inputs: vec![
+                parameter(
+                    "value",
+                    OperationTypePattern::NumericScalar,
+                    OperationParameterArity::Required,
+                ),
+                parameter(
+                    "over",
+                    OperationTypePattern::Any,
+                    OperationParameterArity::Required,
+                ),
+            ],
+            outputs: vec![parameter(
+                "result",
+                OperationTypePattern::Analysis(AnalysisValueType::AttributedExtremum),
+                OperationParameterArity::Required,
+            )],
+        },
+        quantity: OperationQuantityRule::CheckedByLowering,
+        topology: TopologyApplicability::AnyGeometry,
+        effects: OperationEffectFacts::default(),
+        distribution: OperationDistribution::DeterministicReduction,
+        lowering: id::<OperationLoweringId>(format!("fea.output.case.{name}")),
+    });
+    facts
+}
+
+fn case_operation(name: &str, lowering: &str) -> OperationFacts {
+    operation(
+        name,
+        "Collect one typed result from every independently schedulable sweep case.",
+        vec![parameter(
+            "value",
+            OperationTypePattern::Any,
+            OperationParameterArity::Required,
+        )],
+        OperationTypePattern::Analysis(AnalysisValueType::CaseTable),
+        OperationDistribution::CheckedByLowering,
+        TopologyApplicability::AnyGeometry,
+        lowering,
     )
 }
 
@@ -261,7 +325,7 @@ mod tests {
     #[test]
     fn output_operations_are_one_shared_public_identity_with_fea_overloads() {
         let extension = output_operation_extension();
-        assert_eq!(extension.operations.len(), 8);
+        assert_eq!(extension.operations.len(), 10);
         assert_eq!(extension.operations[6].identity.as_str(), "min");
         assert_eq!(extension.operations[7].identity.as_str(), "max");
         assert!(extension.operations.iter().all(|operation| operation

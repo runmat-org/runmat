@@ -9,11 +9,13 @@ mod identity;
 pub mod output;
 mod realization;
 pub mod sequence;
+mod sweep;
 
 pub use authored_output::{
-    validate_authored_outputs, AuthoredExtremaTiePolicy, AuthoredFieldDomain,
-    AuthoredFieldProjection, AuthoredOutput, AuthoredOutputError, AuthoredOutputExpression,
-    AuthoredOutputType, AuthoredOutputValue, AuthoredSpatialReduction, AuthoredVectorComponent,
+    authored_output_types, validate_authored_outputs, AuthoredExtremaTiePolicy,
+    AuthoredFieldDomain, AuthoredFieldProjection, AuthoredOutput, AuthoredOutputError,
+    AuthoredOutputExpression, AuthoredOutputType, AuthoredOutputValue, AuthoredSpatialReduction,
+    AuthoredVectorComponent,
 };
 pub use authoring::{
     AuthoredMeshRef, AuthoredModelArgument, AuthoredModelArgumentValue, AuthoredModelInstance,
@@ -33,3 +35,9 @@ pub use identity::{
     PhysicsFamily, SolutionSpace,
 };
 pub use realization::{AuthoredStudyInputBinding, AuthoredStudyRealizationError, RealizedStudy};
+pub use sweep::{
+    AuthoredCaseOutputRef, AuthoredStudyRef, AuthoredSweep, AuthoredSweepAxis,
+    AuthoredSweepAxisValue, AuthoredSweepBinding, AuthoredSweepCase, AuthoredSweepDefinition,
+    AuthoredSweepError, AuthoredSweepOutput, AuthoredSweepOutputExpression, CaseOutputProjection,
+    SweepAxisCombination, SweepExtremum,
+};

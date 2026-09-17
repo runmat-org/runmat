@@ -21,6 +21,7 @@ pub struct CheckedFeaProgram {
     pub geometry_inspections:
         BTreeMap<(LogicalSourcePath, String), super::CheckedGeometryInspection>,
     pub studies: BTreeMap<(LogicalSourcePath, FeaSymbolKey), runmat_analysis_core::AuthoredStudy>,
+    pub sweeps: BTreeMap<(LogicalSourcePath, FeaSymbolKey), runmat_analysis_core::AuthoredSweep>,
     pub materials: BTreeMap<(LogicalSourcePath, FeaSymbolKey), runmat_analysis_core::MaterialModel>,
     pub geometries:
         BTreeMap<(LogicalSourcePath, FeaSymbolKey), runmat_geometry_core::GeometryDefinition>,
@@ -132,29 +133,39 @@ pub fn check_program<C: AnalysisOperationCatalog + GeometryInspectionSource + ?S
 ) -> CheckedFeaProgram {
     let mut declarations = BTreeMap::new();
     let mut diagnostics = Vec::new();
-    for (path, module) in &bound.graph.modules {
-        let Some(syntax) = &module.syntax else {
-            continue;
-        };
-        for item in &syntax.items {
-            let FeaModuleItem::Declaration(declaration) = item else {
+    for checking_sweeps in [false, true] {
+        for (path, module) in &bound.graph.modules {
+            let Some(syntax) = &module.syntax else {
                 continue;
             };
-            let Some(key) =
-                local_declaration_key(&bound, path, declaration.kind, &declaration.name.text)
-            else {
-                continue;
-            };
-            let checked = check_declaration(
-                catalog,
-                &bound,
-                path,
-                syntax.source(),
-                declaration,
-                key.clone(),
-                &mut diagnostics,
-            );
-            declarations.insert((path.clone(), key), checked);
+            for item in &syntax.items {
+                let FeaModuleItem::Declaration(declaration) = item else {
+                    continue;
+                };
+                if (declaration.kind == runmat_parser::fea::FeaDeclarationKind::Sweep)
+                    != checking_sweeps
+                {
+                    continue;
+                }
+                let Some(key) =
+                    local_declaration_key(&bound, path, declaration.kind, &declaration.name.text)
+                else {
+                    continue;
+                };
+                let checked = check_declaration(
+                    DeclarationCheck {
+                        catalog,
+                        bound: &bound,
+                        known: &declarations,
+                        path,
+                        source: syntax.source(),
+                    },
+                    declaration,
+                    key.clone(),
+                    &mut diagnostics,
+                );
+                declarations.insert((path.clone(), key), checked);
+            }
         }
     }
     let geometry_inspections =
@@ -176,12 +187,14 @@ pub fn check_program<C: AnalysisOperationCatalog + GeometryInspectionSource + ?S
         &meshes,
         &mut diagnostics,
     );
+    let sweeps = super::lower_sweeps(&bound, &declarations, &studies, &mut diagnostics);
     CheckedFeaProgram {
         bound,
         declarations,
         diagnostics,
         geometry_inspections,
         studies,
+        sweeps,
         materials,
         geometries,
         meshes,
@@ -189,18 +202,31 @@ pub fn check_program<C: AnalysisOperationCatalog + GeometryInspectionSource + ?S
     }
 }
 
+struct DeclarationCheck<'a, C: AnalysisOperationCatalog + ?Sized> {
+    catalog: &'a C,
+    bound: &'a BoundFeaProgram,
+    known: &'a BTreeMap<(LogicalSourcePath, FeaSymbolKey), CheckedFeaDeclaration>,
+    path: &'a LogicalSourcePath,
+    source: &'a str,
+}
+
 fn check_declaration<C: AnalysisOperationCatalog + ?Sized>(
-    catalog: &C,
-    bound: &BoundFeaProgram,
-    path: &LogicalSourcePath,
-    source: &str,
+    check: DeclarationCheck<'_, C>,
     declaration: &FeaDeclaration,
     key: FeaSymbolKey,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> CheckedFeaDeclaration {
+    let DeclarationCheck {
+        catalog,
+        bound,
+        known,
+        path,
+        source,
+    } = check;
     let mut scope = ExpressionScope::new();
     extend_module_scope(&mut scope, bound, path);
     extend_declaration_signatures(&mut scope, bound, path);
+    super::sweep::extend_output_scope(&mut scope, bound, path, declaration, known);
     let source_reference = declaration.source.as_ref().map(|reference| {
         reference
             .segments
@@ -215,7 +241,7 @@ fn check_declaration<C: AnalysisOperationCatalog + ?Sized>(
             .map(|segment| segment.text.clone())
             .collect::<Vec<_>>()
     });
-    if source_reference.is_some() {
+    if key.kind == crate::FeaSymbolKind::Geometry && source_reference.is_some() {
         scope.insert_reference(
             ["source".to_string(), "result".to_string()],
             FeaType::GeometryFeature,

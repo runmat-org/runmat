@@ -44,12 +44,16 @@ mod validate_sequence;
 mod validate_signals;
 
 pub use study::{
-    validate_authored_outputs, AuthoredExtremaTiePolicy, AuthoredFieldDomain,
-    AuthoredFieldProjection, AuthoredMeshRef, AuthoredModelArgument, AuthoredModelArgumentValue,
-    AuthoredModelInstance, AuthoredOutput, AuthoredOutputError, AuthoredOutputExpression,
-    AuthoredOutputType, AuthoredOutputValue, AuthoredSpatialReduction, AuthoredStudy,
-    AuthoredStudyError, AuthoredStudyInputBinding, AuthoredStudyInputRef,
-    AuthoredStudyRealizationError, AuthoredVectorComponent, RealizedStudy,
+    authored_output_types, validate_authored_outputs, AuthoredCaseOutputRef,
+    AuthoredExtremaTiePolicy, AuthoredFieldDomain, AuthoredFieldProjection, AuthoredMeshRef,
+    AuthoredModelArgument, AuthoredModelArgumentValue, AuthoredModelInstance, AuthoredOutput,
+    AuthoredOutputError, AuthoredOutputExpression, AuthoredOutputType, AuthoredOutputValue,
+    AuthoredSpatialReduction, AuthoredStudy, AuthoredStudyError, AuthoredStudyInputBinding,
+    AuthoredStudyInputRef, AuthoredStudyRealizationError, AuthoredStudyRef, AuthoredSweep,
+    AuthoredSweepAxis, AuthoredSweepAxisValue, AuthoredSweepBinding, AuthoredSweepCase,
+    AuthoredSweepDefinition, AuthoredSweepError, AuthoredSweepOutput,
+    AuthoredSweepOutputExpression, AuthoredVectorComponent, CaseOutputProjection, RealizedStudy,
+    SweepAxisCombination, SweepExtremum,
 };
 pub use validate::physics_family_can_consume_state;
 pub use validate_authored::validate_coordinate_frame;

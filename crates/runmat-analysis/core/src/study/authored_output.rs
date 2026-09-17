@@ -101,11 +101,18 @@ pub fn validate_authored_outputs(
     outputs: &[AuthoredOutput],
     steps: &[ProcedureStep],
 ) -> Result<(), AuthoredOutputError> {
+    authored_output_types(outputs, steps).map(|_| ())
+}
+
+pub fn authored_output_types(
+    outputs: &[AuthoredOutput],
+    steps: &[ProcedureStep],
+) -> Result<BTreeMap<String, AuthoredOutputType>, AuthoredOutputError> {
     let steps = steps
         .iter()
         .map(|step| (step.step_id.0.as_str(), step))
         .collect::<BTreeMap<_, _>>();
-    let mut types = BTreeMap::new();
+    let mut types = BTreeMap::<String, AuthoredOutputType>::new();
     let mut ids = BTreeSet::new();
     for output in outputs {
         if output.output_id.trim().is_empty() {
@@ -114,10 +121,14 @@ pub fn validate_authored_outputs(
         if !ids.insert(output.output_id.as_str()) {
             return Err(AuthoredOutputError::DuplicateId(output.output_id.clone()));
         }
-        let value_type = output.expression.validate(&steps, &types)?;
-        types.insert(output.output_id.as_str(), value_type);
+        let borrowed = types
+            .iter()
+            .map(|(id, value_type)| (id.as_str(), value_type.clone()))
+            .collect::<BTreeMap<_, _>>();
+        let value_type = output.expression.validate(&steps, &borrowed)?;
+        types.insert(output.output_id.clone(), value_type);
     }
-    Ok(())
+    Ok(types)
 }
 
 impl AuthoredOutputExpression {

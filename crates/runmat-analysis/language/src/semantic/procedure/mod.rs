@@ -14,6 +14,7 @@ use runmat_meshing_core::MeshDefinition;
 use std::collections::BTreeMap;
 
 pub(crate) use output::field_reference_type;
+pub(crate) use study::symbol_key as resolve_symbol_key;
 
 pub fn lower_studies(
     bound: &BoundFeaProgram,
