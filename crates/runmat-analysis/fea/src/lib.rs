@@ -17,6 +17,7 @@ pub mod pipeline;
 pub mod planning;
 pub mod post;
 pub mod progress;
+pub mod properties;
 pub mod results;
 pub mod signal_processing;
 pub mod solve;

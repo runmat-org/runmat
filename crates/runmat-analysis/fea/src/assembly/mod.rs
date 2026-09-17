@@ -41,7 +41,9 @@ use self::{
         shell::{ShellElementError, ShellElementGeometry, ShellMaterial, ShellSection},
     },
     explicit_connectors::assemble_explicit_connectors,
-    explicit_elements::{assemble_explicit_elements, ExplicitElementAssembly},
+    explicit_elements::{
+        assemble_explicit_elements, validate_explicit_topology, ExplicitElementAssembly,
+    },
     explicit_loads::apply_explicit_structural_loads,
     solver_solid::{
         assemble_solver_solid_operators, resolve_element_material, solver_solid_topology,
@@ -54,7 +56,6 @@ use self::{
         validate_structural_inputs, StructuralProjectionBasis,
     },
 };
-use crate::physics::structural::material::StructuralMaterialInventory;
 use crate::physics::structural::topology::explicit_target_node_indices as structural_target_nodes;
 use moment_projection::project_moment;
 use reduced_rhs::apply_reduced_multiphysics_rhs;
@@ -1186,18 +1187,29 @@ fn assemble_linear_system_impl(
         });
     }
 
-    let structural_materials = StructuralMaterialInventory::from_model(model);
+    let solid_properties = solver_mesh
+        .as_ref()
+        .filter(|_| structural_requirement.is_some())
+        .map(|mesh| crate::properties::compile_solid_property_map(model, mesh))
+        .transpose()
+        .map_err(|error| {
+            LinearAssemblyError::SolidOperator(SolverSolidAssemblyError::InvalidMaterialCoverage(
+                error.to_string(),
+            ))
+        })?;
     let structural_solid_recovery = solver_mesh
         .as_ref()
         .filter(|_| structural_requirement.is_some())
-        .map(|mesh| solid_recovery_from_solver_mesh(mesh, &structural_materials))
+        .zip(solid_properties.as_ref())
+        .map(|(mesh, properties)| solid_recovery_from_solver_mesh(mesh, properties))
         .transpose()
         .map_err(LinearAssemblyError::SolidOperator)?
         .unwrap_or_default();
     let solid_operators = solver_mesh
         .as_ref()
         .filter(|_| structural_requirement.is_some())
-        .map(|mesh| assemble_solver_solid_operators(mesh, &structural_materials))
+        .zip(solid_properties.as_ref())
+        .map(|(mesh, properties)| assemble_solver_solid_operators(mesh, properties))
         .transpose()
         .map_err(LinearAssemblyError::SolidOperator)?;
     let structural_solid_total_mass_kg = solid_operators
@@ -1432,7 +1444,7 @@ fn assemble_linear_system_impl(
 
 fn solid_recovery_from_solver_mesh(
     mesh: &SolverMeshArtifact,
-    materials: &StructuralMaterialInventory,
+    properties: &crate::properties::CompiledPropertyMap,
 ) -> Result<Vec<SolidRecoveryElementSummary>, SolverSolidAssemblyError> {
     let node_indices = mesh
         .topology
@@ -1446,7 +1458,7 @@ fn solid_recovery_from_solver_mesh(
         .volume_elements
         .iter()
         .map(|element| {
-            let material = resolve_element_material(element, materials)?;
+            let material = resolve_element_material(element, properties)?;
             let geometry = match element.order {
                 ElementOrder::Tet4 => {
                     let (node_indices, coordinates_m) = recovery_geometry::<4>(
@@ -1553,7 +1565,6 @@ fn assemble_explicit_structural_system(
         StructuralProjectionBasis::ExplicitConnectivity,
     )?;
     let structural_material = structural_material_summary(model);
-    let materials = StructuralMaterialInventory::from_model(model);
     let node_count = structural.nodes.len();
     let structural_dof_layout = StructuralDofLayout::from_node_sets(vec![
         StructuralNodeDofSet::translational_rotational();
@@ -1561,6 +1572,9 @@ fn assemble_explicit_structural_system(
     ]);
     let dof_count = structural_dof_layout.total_dof_count();
     let canonical_node_indices = (0..node_count).collect::<Vec<_>>();
+    validate_explicit_topology(structural, &canonical_node_indices)?;
+    let properties = crate::properties::compile_property_map(model, None)
+        .map_err(|error| StructuralAssemblyError::InvalidMaterialCoverage(error.to_string()))?;
     let ExplicitElementAssembly {
         stiffness: element_stiffness,
         damping: element_damping,
@@ -1572,7 +1586,7 @@ fn assemble_explicit_structural_system(
         shell_count,
     } = assemble_explicit_elements(
         structural,
-        &materials,
+        &properties,
         &structural_dof_layout,
         &canonical_node_indices,
     )?;
@@ -2377,8 +2391,9 @@ mod tests {
         set_boundary_regions(&mut mesh, 1, &["solid_load"]);
         reseal(&mut mesh);
         let model = mixed_solid_beam_model(attached_coordinates);
-        let materials = StructuralMaterialInventory::from_model(&model);
-        let solid = assemble_solver_solid_operators(&mesh, &materials).expect("solid operator");
+        let properties = crate::properties::compile_solid_property_map(&model, &mesh)
+            .expect("compiled solid properties");
+        let solid = assemble_solver_solid_operators(&mesh, &properties).expect("solid operator");
 
         let summary = assemble_structural_system(
             &model,

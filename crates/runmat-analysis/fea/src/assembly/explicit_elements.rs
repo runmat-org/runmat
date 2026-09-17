@@ -25,7 +25,10 @@ use crate::{
         ContributionDomain, ContributionId, ContributionProvenance, MatrixProperties, OperatorRole,
         RealSparseAssembler, RealSparseMatrix,
     },
-    physics::structural::material::StructuralMaterialInventory,
+    physics::structural::{
+        material::StructuralElementMaterial, topology::explicit_element_identity,
+    },
+    properties::CompiledPropertyMap,
 };
 
 pub(super) struct ExplicitElementAssembly {
@@ -41,11 +44,11 @@ pub(super) struct ExplicitElementAssembly {
 
 pub(super) fn assemble_explicit_elements(
     structural: &StructuralModel,
-    materials: &StructuralMaterialInventory,
+    properties: &CompiledPropertyMap,
     layout: &StructuralDofLayout,
     canonical_node_indices: &[usize],
 ) -> Result<ExplicitElementAssembly, StructuralAssemblyError> {
-    validate_topology(structural, canonical_node_indices)?;
+    validate_explicit_topology(structural, canonical_node_indices)?;
     let beam_count = structural
         .elements
         .iter()
@@ -59,9 +62,14 @@ pub(super) fn assemble_explicit_elements(
     if beam_count == 0 && shell_count == 0 {
         return Err(StructuralAssemblyError::MissingDiscretization);
     }
-    materials
-        .validate_explicit_coverage(structural)
-        .map_err(StructuralAssemblyError::InvalidMaterialCoverage)?;
+    let topology_digest = properties
+        .identity
+        .explicit_topology_digest
+        .ok_or_else(|| {
+            StructuralAssemblyError::InvalidMaterialCoverage(
+                "compiled property map has no explicit structural topology".into(),
+            )
+        })?;
 
     let dof_count = layout.total_dof_count();
     let mut stiffness = RealSparseAssembler::square(
@@ -97,12 +105,22 @@ pub(super) fn assemble_explicit_elements(
                             section_id: beam.section_id.clone(),
                         }
                     })?;
-                let material = materials.resolve_beam(&element.region_id).ok_or_else(|| {
-                    StructuralAssemblyError::UnassignedExplicitRegion {
+                let element_identity = explicit_element_identity(
+                    topology_digest,
+                    &element.element_id,
+                    &element.region_id,
+                    &element.kind,
+                )
+                .map_err(|error| {
+                    StructuralAssemblyError::InvalidMaterialCoverage(error.to_string())
+                })?;
+                let material = properties
+                    .beam_material(element_identity)
+                    .map(|entry| StructuralElementMaterial::from_model(&entry.material))
+                    .ok_or_else(|| StructuralAssemblyError::UnassignedExplicitRegion {
                         element_id: element.element_id.clone(),
                         region_id: element.region_id.clone(),
-                    }
-                })?;
+                    })?;
                 let beam_material = BeamMaterial {
                     youngs_modulus_pa: material.youngs_modulus_pa,
                     shear_modulus_pa: material.shear_modulus_pa(),
@@ -171,12 +189,22 @@ pub(super) fn assemble_explicit_elements(
                             section_id: shell.section_id.clone(),
                         }
                     })?;
-                let material = materials.resolve_shell(&element.region_id).ok_or_else(|| {
-                    StructuralAssemblyError::UnassignedExplicitRegion {
+                let element_identity = explicit_element_identity(
+                    topology_digest,
+                    &element.element_id,
+                    &element.region_id,
+                    &element.kind,
+                )
+                .map_err(|error| {
+                    StructuralAssemblyError::InvalidMaterialCoverage(error.to_string())
+                })?;
+                let material = properties
+                    .shell_material(element_identity)
+                    .map(|entry| StructuralElementMaterial::from_model(&entry.material))
+                    .ok_or_else(|| StructuralAssemblyError::UnassignedExplicitRegion {
                         element_id: element.element_id.clone(),
                         region_id: element.region_id.clone(),
-                    }
-                })?;
+                    })?;
                 let shell_material = ShellMaterial {
                     youngs_modulus_pa: material.youngs_modulus_pa,
                     poisson_ratio: material.poisson_ratio,
@@ -261,7 +289,7 @@ pub(super) fn assemble_explicit_elements(
     })
 }
 
-fn validate_topology(
+pub(super) fn validate_explicit_topology(
     structural: &StructuralModel,
     canonical_node_indices: &[usize],
 ) -> Result<(), StructuralAssemblyError> {
@@ -287,6 +315,19 @@ fn validate_topology(
         if !element_ids.insert(element.element_id.as_str()) {
             return Err(StructuralAssemblyError::DuplicateElementId {
                 element_id: element.element_id.clone(),
+            });
+        }
+        let referenced_node_ids: &[u32] = match &element.kind {
+            StructuralElementKind::Beam(beam) => &beam.node_ids,
+            StructuralElementKind::Shell(shell) => &shell.node_ids,
+        };
+        if let Some(node_id) = referenced_node_ids
+            .iter()
+            .find(|node_id| !node_ids.contains(node_id))
+        {
+            return Err(StructuralAssemblyError::UnknownNode {
+                element_id: element.element_id.clone(),
+                node_id: *node_id,
             });
         }
     }

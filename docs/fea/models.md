@@ -97,6 +97,18 @@ match exactly one compatible assignment. A CAD face used as a volume boundary is
 material domain. Beam and shell sections, laminate layups, contact/interface laws, and material
 orientation are separate model properties rather than material-assignment options.
 
+Before assembly, RunMat compiles those authored assignments into one immutable property map keyed
+by canonical element identities. The compiler projects solid, beam, and shell scopes separately;
+requires exactly one compatible assignment for every material-bearing element; and rejects gaps,
+overlaps, stale regions, wrong-dimensional targets, duplicate material ids, and geometry or mesh
+revision mismatches. Structural, thermal, recovery, and coupled assembly consume this same map, so
+no solver is allowed to repeat region lookup or choose a fallback material independently.
+
+The map has two identities. Its semantic digest covers the exact discretization and effective
+material on every element, and is suitable for cache and distributed-task identity. Its audit
+digest additionally covers authored assignment indices and evidence confidence. Confidence is
+provenance only: it never scales a modulus, density, conductivity, or any other physical value.
+
 Direct moment excitations use a typed moment signal and coordinate frame. They require
 rotational-DOF structural elements. Beam nodes and shell/plate nodes can own `rx`, `ry`, and `rz`;
 displacement-only solid regions reject moments with an invalid-model error instead of silently
@@ -123,10 +135,11 @@ Validation checks the model and study shape before a run starts. It catches prob
 
 `runmat check model.fea` is the usual CLI path. Host integrations can call `fea.validate_study/v1` or lower-level model validation operations.
 
-## Scaffolds And Engineering Data
+## Engineering Data
 
-Template scaffolds are useful for tests, examples, early integration, and simple exploratory runs.
-Engineering runs should explicitly review or provide the materials, assignments, excitations,
-constraints, domains, and assumptions that matter for the result.
+Examples and test fixtures may use deliberately small authored models. Engineering studies should
+explicitly provide and review the materials, assignments, excitations, constraints, domains, and
+assumptions that matter for the result. Referenced and composed model files remain ordinary,
+inspectable `.fea` sources; they do not activate hidden template defaults.
 
 Validation proves the model is shaped correctly enough to run. Verification and validation evidence is still required before treating a result as production-grade physics. See [Verification & Validation](/docs/fea/validation).

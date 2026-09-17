@@ -1,8 +1,5 @@
-use std::collections::BTreeMap;
-
 use runmat_analysis_core::{
-    AnalysisConstraint, AnalysisModel, BoundaryOperator, MaterialModel, PropertyRegionScope,
-    ThermalConstraintKind,
+    AnalysisConstraint, AnalysisModel, BoundaryOperator, ThermalConstraintKind,
 };
 use thiserror::Error;
 
@@ -174,8 +171,8 @@ pub(crate) fn assemble(
 ) -> Result<ThermalOperatorAssembly, ThermalAssemblyError> {
     let projection = AnalysisProjection::derive(mesh)
         .map_err(|error| ThermalAssemblyError::InvalidProjection(error.to_string()))?;
-    let materials = thermal_materials(model);
-    validate_thermal_material_coverage(&projection, &materials)?;
+    let properties = crate::properties::compile_solid_property_map(model, mesh)
+        .map_err(|error| ThermalAssemblyError::InvalidMaterialCoverage(error.to_string()))?;
     let mut conductivity = RealSparseAssembler::square(
         projection.nodes.len(),
         OperatorRole::Conductivity,
@@ -198,7 +195,12 @@ pub(crate) fn assemble(
     let mut element_volumetric_capacity_j_per_m3k = Vec::with_capacity(projection.elements.len());
 
     for element in &projection.elements {
-        let material = material_for_element(element, &materials)?;
+        let material = &properties
+            .solid_material(element.stable_identity)
+            .ok_or_else(|| ThermalAssemblyError::MissingMaterial {
+                region_id: element.region_id.source_topology_id.clone(),
+            })?
+            .material;
         element_conductivity_w_per_mk.push(material.thermal.conductivity_w_per_mk);
         element_volumetric_capacity_j_per_m3k
             .push(material.mechanical.density_kg_per_m3 * material.thermal.specific_heat_j_per_kgk);
@@ -487,81 +489,6 @@ pub(crate) fn assemble(
     })
 }
 
-fn thermal_materials(model: &AnalysisModel) -> Vec<(&PropertyRegionScope, &MaterialModel)> {
-    let materials = model
-        .materials
-        .iter()
-        .map(|material| (material.material_id.as_str(), material))
-        .collect::<BTreeMap<_, _>>();
-    model
-        .material_assignments
-        .iter()
-        .filter_map(|assignment| {
-            let runmat_analysis_core::PropertyRegionTarget::Solid(scope) = &assignment.target
-            else {
-                return None;
-            };
-            materials
-                .get(assignment.assigned_material_id.as_str())
-                .copied()
-                .map(|material| (scope, material))
-        })
-        .collect()
-}
-
-fn validate_thermal_material_coverage(
-    projection: &AnalysisProjection,
-    assigned: &[(&PropertyRegionScope, &MaterialModel)],
-) -> Result<(), ThermalAssemblyError> {
-    let mut matched = vec![false; assigned.len()];
-    for element in &projection.elements {
-        let matching = assigned
-            .iter()
-            .enumerate()
-            .filter_map(|(index, (scope, _))| {
-                property_scope_matches(scope, element).then_some(index)
-            })
-            .collect::<Vec<_>>();
-        if matching.len() != 1 {
-            return Err(ThermalAssemblyError::InvalidMaterialCoverage(format!(
-                "element {} in region `{}` requires exactly one solid material assignment; found {}",
-                element.element_id,
-                element.region_id.source_topology_id,
-                matching.len()
-            )));
-        }
-        matched[matching[0]] = true;
-    }
-    if let Some((index, _)) = matched.iter().enumerate().find(|(_, found)| !**found) {
-        return Err(ThermalAssemblyError::InvalidMaterialCoverage(format!(
-            "solid material assignment for `{}` selects no thermal element",
-            assigned[index].0.selected_region_id().unwrap_or("<all>")
-        )));
-    }
-    Ok(())
-}
-
-fn material_for_element<'a>(
-    element: &ProjectedElement,
-    assigned: &[(&PropertyRegionScope, &'a MaterialModel)],
-) -> Result<&'a MaterialModel, ThermalAssemblyError> {
-    assigned
-        .iter()
-        .find_map(|(scope, material)| property_scope_matches(scope, element).then_some(*material))
-        .ok_or_else(|| ThermalAssemblyError::MissingMaterial {
-            region_id: element.region_id.source_topology_id.clone(),
-        })
-}
-
-fn property_scope_matches(scope: &PropertyRegionScope, element: &ProjectedElement) -> bool {
-    match scope {
-        PropertyRegionScope::All => true,
-        PropertyRegionScope::Region(selection) => element
-            .region_id
-            .matches_analysis_selection(selection.region_id()),
-    }
-}
-
 fn volume_matches(element: &ProjectedElement, target: &RealizedExcitationTarget) -> bool {
     match target {
         RealizedExcitationTarget::WholeModel => true,
@@ -598,6 +525,8 @@ fn apply_prescribed_values(prescribed: &[Option<f64>], rhs: &mut [f64]) {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use runmat_analysis_core::{
         AnalysisBoundary, AnalysisConstraint, CoordinateFrame, ExcitationCaseId,
         ExcitationDistribution, ExcitationId, ExcitationKinematics, HeatFlux,

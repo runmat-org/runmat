@@ -27,14 +27,11 @@ use crate::{
     },
     constraints::CanonicalStructuralConstraintPlan,
     excitation::{RealizedExcitationKind, RealizedExcitations},
-    physics::structural::{
-        material::StructuralMaterialInventory,
-        topology::{
-            node_space::CanonicalStructuralNodeSpace,
-            target::{
-                resolve_mixed_structural_target, MixedStructuralTargetError,
-                MixedStructuralTargetOwnership,
-            },
+    physics::structural::topology::{
+        node_space::CanonicalStructuralNodeSpace,
+        target::{
+            resolve_mixed_structural_target, MixedStructuralTargetError,
+            MixedStructuralTargetOwnership,
         },
     },
 };
@@ -68,8 +65,15 @@ pub(super) fn assemble_mixed_structural_system(
         LinearAssemblyError::Structural(StructuralAssemblyError::MixedTopology(error.to_string()))
     })?;
     let layout = mixed_dof_layout(&topology);
-    let materials = StructuralMaterialInventory::from_model(model);
-    let solid = assemble_solver_solid_operators(mesh, &materials)
+    let solid_properties =
+        crate::properties::compile_solid_property_map(model, mesh).map_err(|error| {
+            LinearAssemblyError::SolidOperator(
+                super::solver_solid::SolverSolidAssemblyError::InvalidMaterialCoverage(
+                    error.to_string(),
+                ),
+            )
+        })?;
+    let solid = assemble_solver_solid_operators(mesh, &solid_properties)
         .map_err(LinearAssemblyError::SolidOperator)?;
     let ExplicitElementAssembly {
         stiffness: explicit_stiffness,
@@ -82,7 +86,7 @@ pub(super) fn assemble_mixed_structural_system(
         shell_count,
     } = assemble_explicit_elements(
         structural,
-        &materials,
+        &solid_properties,
         &layout,
         &topology.explicit_node_indices,
     )
@@ -403,7 +407,7 @@ pub(super) fn assemble_mixed_structural_system(
         structural_connector_damping_count: connector_summary.damping_count,
         structural_solid_element_count: mesh.topology.volume_elements.len(),
         structural_solid_total_mass_kg: solid.total_mass_kg,
-        structural_solid_recovery: super::solid_recovery_from_solver_mesh(mesh, &materials)
+        structural_solid_recovery: super::solid_recovery_from_solver_mesh(mesh, &solid_properties)
             .map_err(LinearAssemblyError::SolidOperator)?,
         structural_dof_layout: layout,
         structural_beam_recovery: beam_recovery,

@@ -13,9 +13,11 @@ fn canonical_tet4_and_tet10_artifacts_assemble_into_solver_csr() {
         let topology = solver_solid_topology(&artifact).unwrap();
         assert_eq!(topology.order, order);
         assert_eq!(topology.dof_count, topology.node_count * 3);
-        let operators =
-            assemble_solver_solid_operators(&artifact, &inventory(material(200.0e9, 1_000.0)))
-                .unwrap();
+        let operators = assemble_solver_solid_operators(
+            &artifact,
+            &inventory(&artifact, material(200.0e9, 1_000.0)),
+        )
+        .unwrap();
         let csr = operators.stiffness;
         assert_eq!(csr.pattern().row_offsets().len(), topology.dof_count + 1);
         assert_eq!(csr.pattern().column_indices().len(), csr.values().len());
@@ -27,10 +29,12 @@ fn canonical_tet4_and_tet10_artifacts_assemble_into_solver_csr() {
 fn canonical_solver_assembly_revalidates_digest_and_uses_region_assignment() {
     let artifact = artifact(ElementOrder::Tet10);
     let default =
-        assemble_solver_solid_operators(&artifact, &inventory(material(1.0e6, 1_000.0))).unwrap();
+        assemble_solver_solid_operators(&artifact, &inventory(&artifact, material(1.0e6, 1_000.0)))
+            .unwrap();
     let selected = assemble_solver_solid_operators(
         &artifact,
         &assigned_inventory(
+            &artifact,
             artifact.topology.volume_elements[0]
                 .region_id
                 .source_topology_id
@@ -50,10 +54,11 @@ fn canonical_solver_assembly_revalidates_digest_and_uses_region_assignment() {
         assert!((*selected - 2.0 * default).abs() <= default.abs().max(1.0) * 1.0e-12);
     }
 
+    let properties = inventory(&artifact, material(1.0e6, 1_000.0));
     let mut tampered = artifact;
     tampered.topology.nodes[0].coordinates_m[0] = 0.25;
     assert!(matches!(
-        assemble_solver_solid_operators(&tampered, &inventory(material(1.0e6, 1_000.0))),
+        assemble_solver_solid_operators(&tampered, &properties),
         Err(SolverSolidAssemblyError::InvalidArtifact(_))
     ));
 }
@@ -62,9 +67,13 @@ fn canonical_solver_assembly_revalidates_digest_and_uses_region_assignment() {
 fn multi_material_assembly_rejects_an_unassigned_mesh_region() {
     let artifact = artifact(ElementOrder::Tet4);
     assert!(matches!(
-        assemble_solver_solid_operators(&artifact, &empty_inventory()),
-        Err(SolverSolidAssemblyError::InvalidMaterialCoverage(message))
-            if message.contains("element 1") && message.contains("found 0")
+        empty_inventory(&artifact),
+        Err(
+            crate::properties::PropertyCompilationError::InvalidCoverage {
+                assignment_count: 0,
+                ..
+            }
+        )
     ));
 }
 
@@ -80,32 +89,36 @@ fn solid_material_coverage_rejects_overlap_stale_and_wrong_role() {
     let mut overlap = model.material_assignments[0].clone();
     overlap.target = runmat_analysis_core::PropertyRegionTarget::solid(exact_selector);
     model.material_assignments.push(overlap);
-    let overlapping = StructuralMaterialInventory::from_model(&model);
     assert!(matches!(
-        assemble_solver_solid_operators(&artifact, &overlapping),
-        Err(SolverSolidAssemblyError::InvalidMaterialCoverage(message))
-            if message.contains("element 1") && message.contains("found 2")
+        crate::properties::compile_solid_property_map(&model, &artifact),
+        Err(
+            crate::properties::PropertyCompilationError::InvalidCoverage {
+                assignment_count: 2,
+                ..
+            }
+        )
     ));
 
     model.material_assignments.pop();
     let mut stale = model.material_assignments[0].clone();
     stale.target = runmat_analysis_core::PropertyRegionTarget::solid("stale-region");
     model.material_assignments.push(stale);
-    let stale = StructuralMaterialInventory::from_model(&model);
     assert!(matches!(
-        assemble_solver_solid_operators(&artifact, &stale),
-        Err(SolverSolidAssemblyError::InvalidMaterialCoverage(message))
-            if message.contains("selects no solver element")
+        crate::properties::compile_solid_property_map(&model, &artifact),
+        Err(crate::properties::PropertyCompilationError::UnusedAssignment { .. })
     ));
 
     model.material_assignments.truncate(1);
     model.material_assignments[0].target =
         runmat_analysis_core::PropertyRegionTarget::cell("region");
-    let wrong_role = StructuralMaterialInventory::from_model(&model);
     assert!(matches!(
-        assemble_solver_solid_operators(&artifact, &wrong_role),
-        Err(SolverSolidAssemblyError::InvalidMaterialCoverage(message))
-            if message.contains("element 1") && message.contains("found 0")
+        crate::properties::compile_solid_property_map(&model, &artifact),
+        Err(
+            crate::properties::PropertyCompilationError::InvalidCoverage {
+                assignment_count: 0,
+                ..
+            }
+        )
     ));
 }
 
@@ -115,18 +128,21 @@ fn explicit_all_solids_scope_covers_every_solid_and_overlaps_fail_closed() {
     let mut model =
         crate::fixtures::fixture_model(crate::fixtures::FixtureId::CantileverLinearStatic);
     model.material_assignments[0].target = runmat_analysis_core::PropertyRegionTarget::all_solids();
-    let all_solids = StructuralMaterialInventory::from_model(&model);
+    let all_solids = crate::properties::compile_solid_property_map(&model, &artifact).unwrap();
     assemble_solver_solid_operators(&artifact, &all_solids)
         .expect("an explicit all-solids scope should cover the canonical solid mesh");
 
     let mut selected = model.material_assignments[0].clone();
     selected.target = runmat_analysis_core::PropertyRegionTarget::solid("region");
     model.material_assignments.push(selected);
-    let overlap = StructuralMaterialInventory::from_model(&model);
     assert!(matches!(
-        assemble_solver_solid_operators(&artifact, &overlap),
-        Err(SolverSolidAssemblyError::InvalidMaterialCoverage(message))
-            if message.contains("element 1") && message.contains("found 2")
+        crate::properties::compile_solid_property_map(&model, &artifact),
+        Err(
+            crate::properties::PropertyCompilationError::InvalidCoverage {
+                assignment_count: 2,
+                ..
+            }
+        )
     ));
 }
 
@@ -135,7 +151,8 @@ fn tet4_and_tet10_mass_preserve_physical_total_and_rigid_translation() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
         let artifact = artifact(order);
         let material = material(70.0e9, 2_700.0);
-        let assembled = assemble_solver_solid_operators(&artifact, &inventory(material)).unwrap();
+        let assembled =
+            assemble_solver_solid_operators(&artifact, &inventory(&artifact, material)).unwrap();
         let expected_mass = material.density_kg_per_m3 / 6.0;
         assert_relative(assembled.total_mass_kg, expected_mass, 2.0e-12);
         assert!(assembled.lumped_mass_diag.iter().all(|value| *value > 0.0));
@@ -166,11 +183,15 @@ fn region_density_controls_mass_without_changing_topology() {
         .region_id
         .source_topology_id
         .clone();
-    let baseline =
-        assemble_solver_solid_operators(&artifact, &inventory(material(70.0e9, 1_000.0))).unwrap();
+    let baseline = assemble_solver_solid_operators(
+        &artifact,
+        &inventory(&artifact, material(70.0e9, 1_000.0)),
+    )
+    .unwrap();
     let selected = assemble_solver_solid_operators(
         &artifact,
         &assigned_inventory(
+            &artifact,
             &region,
             material(70.0e9, 1_000.0),
             material(70.0e9, 2_500.0),
@@ -199,7 +220,8 @@ fn rayleigh_damping_is_the_exact_element_mass_and_stiffness_sum() {
         stiffness_coefficient: RayleighStiffnessCoefficient::new(beta),
     };
 
-    let assembled = assemble_solver_solid_operators(&artifact, &inventory(material)).unwrap();
+    let assembled =
+        assemble_solver_solid_operators(&artifact, &inventory(&artifact, material)).unwrap();
 
     for row in 0..assembled.stiffness.rows() {
         for column in 0..assembled.stiffness.columns() {
@@ -223,7 +245,10 @@ fn material(youngs_modulus_pa: f64, density_kg_per_m3: f64) -> StructuralElement
     }
 }
 
-fn inventory(material: StructuralElementMaterial) -> StructuralMaterialInventory {
+fn inventory(
+    artifact: &SolverMeshArtifact,
+    material: StructuralElementMaterial,
+) -> crate::properties::CompiledPropertyMap {
     let mut model =
         crate::fixtures::fixture_model(crate::fixtures::FixtureId::CantileverLinearStatic);
     model.materials.truncate(1);
@@ -231,14 +256,17 @@ fn inventory(material: StructuralElementMaterial) -> StructuralMaterialInventory
     model.materials[0].mechanical.poisson_ratio = material.poisson_ratio;
     model.materials[0].mechanical.density_kg_per_m3 = material.density_kg_per_m3;
     model.materials[0].mechanical.damping = material.damping;
-    StructuralMaterialInventory::from_model(&model)
+    model.geometry_revision = u32::try_from(artifact.geometry.geometry_revision).unwrap();
+    model.material_assignments[0].target = runmat_analysis_core::PropertyRegionTarget::all_solids();
+    crate::properties::compile_solid_property_map(&model, artifact).unwrap()
 }
 
 fn assigned_inventory(
+    artifact: &SolverMeshArtifact,
     region_id: &str,
     default: StructuralElementMaterial,
     assigned: StructuralElementMaterial,
-) -> StructuralMaterialInventory {
+) -> crate::properties::CompiledPropertyMap {
     let mut model =
         crate::fixtures::fixture_model(crate::fixtures::FixtureId::CantileverLinearStatic);
     model.materials.truncate(1);
@@ -259,15 +287,19 @@ fn assigned_inventory(
         .expect("fixture uses selected material region") = region_id.into();
     model.material_assignments[0].expected_material_id = "selected".into();
     model.material_assignments[0].assigned_material_id = "selected".into();
-    StructuralMaterialInventory::from_model(&model)
+    model.geometry_revision = u32::try_from(artifact.geometry.geometry_revision).unwrap();
+    crate::properties::compile_solid_property_map(&model, artifact).unwrap()
 }
 
-fn empty_inventory() -> StructuralMaterialInventory {
+fn empty_inventory(
+    artifact: &SolverMeshArtifact,
+) -> Result<crate::properties::CompiledPropertyMap, crate::properties::PropertyCompilationError> {
     let mut model =
         crate::fixtures::fixture_model(crate::fixtures::FixtureId::CantileverLinearStatic);
     model.materials.clear();
     model.material_assignments.clear();
-    StructuralMaterialInventory::from_model(&model)
+    model.geometry_revision = u32::try_from(artifact.geometry.geometry_revision).unwrap();
+    crate::properties::compile_solid_property_map(&model, artifact)
 }
 
 fn assert_relative(actual: f64, expected: f64, tolerance: f64) {

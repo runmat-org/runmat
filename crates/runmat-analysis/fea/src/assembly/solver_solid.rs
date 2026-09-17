@@ -4,8 +4,8 @@ use runmat_analysis_core::MechanicalDampingModel;
 use runmat_meshing_core::{ElementOrder, SolverMeshArtifact, SolverVolumeElement};
 
 use crate::algebra::{OperatorRole, RealSparseMatrix};
-use crate::physics::structural::material::{
-    StructuralElementMaterial, StructuralMaterialInventory,
+use crate::{
+    physics::structural::material::StructuralElementMaterial, properties::CompiledPropertyMap,
 };
 
 use super::{
@@ -135,12 +135,14 @@ pub fn solver_solid_topology(
 
 pub fn assemble_solver_solid_operators(
     artifact: &SolverMeshArtifact,
-    materials: &StructuralMaterialInventory,
+    properties: &CompiledPropertyMap,
 ) -> Result<SolverSolidOperators, SolverSolidAssemblyError> {
     let topology = solver_solid_topology(artifact)?;
-    materials
-        .validate_solid_coverage(artifact)
-        .map_err(SolverSolidAssemblyError::InvalidMaterialCoverage)?;
+    if properties.identity.mesh_digest != Some(artifact.canonical_digest) {
+        return Err(SolverSolidAssemblyError::InvalidMaterialCoverage(
+            "compiled property map belongs to a different solver mesh".into(),
+        ));
+    }
     let nodes = artifact
         .topology
         .nodes
@@ -150,7 +152,7 @@ pub fn assemble_solver_solid_operators(
         .collect::<BTreeMap<_, _>>();
     let mut rows = SolidOperatorRows::new(topology.dof_count);
     for element in &artifact.topology.volume_elements {
-        let material = resolve_element_material(element, materials)?;
+        let material = resolve_element_material(element, properties)?;
         let elasticity = solid_material(material);
         match element.order {
             ElementOrder::Tet4 => {
@@ -204,17 +206,11 @@ pub fn assemble_solver_solid_operators(
 
 pub(super) fn resolve_element_material(
     element: &SolverVolumeElement,
-    materials: &StructuralMaterialInventory,
+    properties: &CompiledPropertyMap,
 ) -> Result<StructuralElementMaterial, SolverSolidAssemblyError> {
-    materials
-        .resolve_solid(&element.region_id)
-        .map_err(
-            |assignment_count| SolverSolidAssemblyError::AmbiguousRegion {
-                element_id: element.element_id,
-                region_id: element.region_id.source_topology_id.clone(),
-                assignment_count,
-            },
-        )?
+    properties
+        .solid_material(element.stable_identity)
+        .map(|entry| StructuralElementMaterial::from_model(&entry.material))
         .ok_or_else(|| SolverSolidAssemblyError::UnassignedRegion {
             element_id: element.element_id,
             region_id: element.region_id.source_topology_id.clone(),
