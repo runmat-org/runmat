@@ -92,6 +92,19 @@ test("prepare v3 is source-neutral and inventories every legacy JSON leaf", () =
   assert.throws(() => parseCompletedSourceDisposition(checklist, "foo", result.checklist_baseline_digest), /not reviewed/);
 });
 
+test("source-field preparation uses the completion parser's canonical pointer order", () => {
+  const document = { links: Array.from({ length: 12 }, (_, index) => ({ label: `link-${index}` })) };
+  const baseline = sourceFieldBaselineSource("docs/builtins/reference/foo.json", Buffer.from(JSON.stringify(document)));
+  const pointers = baseline.leaves.map((leaf) => leaf.pointer);
+  assert.deepEqual(pointers.slice(0, 4), [
+    "/links/0/label",
+    "/links/1/label",
+    "/links/10/label",
+    "/links/11/label",
+  ]);
+  assert.deepEqual(pointers, [...pointers].sort());
+});
+
 test("completed field dispositions require exact prepared leaves and review evidence", () => {
   const fixture = controlledFixture({ sidecar: true });
   const output = createTemporaryDirectory("runmat-review-");

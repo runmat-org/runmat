@@ -12,7 +12,7 @@ export function buildSourceFieldDisposition(repository, row) {
     return {
       path: sourcePath,
       digest: contentDigest(bytes),
-      leaves: enumerateLeaves(value).map((leaf) => ({
+      leaves: canonicalLeaves(value).map((leaf) => ({
         pointer: leaf.pointer,
         value_digest: evidenceDigest(leaf.value),
         disposition: "pending",
@@ -54,7 +54,7 @@ export function sourceFieldBaselineSource(sourcePath, bytes, expectedDigest = nu
   return {
     path: sourcePath,
     digest: observedDigest,
-    leaves: enumerateLeaves(value).map((leaf) => ({ pointer: leaf.pointer, value_digest: evidenceDigest(leaf.value) })),
+    leaves: canonicalLeaves(value).map((leaf) => ({ pointer: leaf.pointer, value_digest: evidenceDigest(leaf.value) })),
   };
 }
 
@@ -121,6 +121,10 @@ function enumerateLeaves(value, pointer = "") {
     return keys.flatMap((key) => enumerateLeaves(value[key], `${pointer}/${escapePointer(key)}`));
   }
   return [{ pointer, value }];
+}
+
+function canonicalLeaves(value) {
+  return enumerateLeaves(value).sort((left, right) => compareCodePoint(left.pointer, right.pointer));
 }
 
 function escapePointer(value) { return value.replaceAll("~", "~0").replaceAll("/", "~1"); }
