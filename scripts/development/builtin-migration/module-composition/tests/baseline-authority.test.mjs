@@ -26,7 +26,7 @@ test("candidate deterministically observes fixed products and leaves semantic ro
   const first = candidate(root);
   const second = candidate(root);
   assert.deepEqual(first, second);
-  assert.equal(first.products.length, 158);
+  assert.equal(first.products.length, 162);
   const math = first.products.find((entry) => entry.product_id === "runtime-math");
   assert.equal(math.parent_evidence.path, "crates/runmat-runtime/src/builtins/math/mod.rs");
   assert.deepEqual(math.children.map((entry) => [entry.module, entry.source_kind, entry.role]), [["alpha", "file", null]]);
@@ -153,7 +153,7 @@ test("reviewed baseline reconstructs exactly and rejects every stale trust bound
   const parsed = validateReviewedModuleCompositionBaseline(
     structuredClone(baseline), baseline.digest, root, SIGNER, sourceOptions(),
   );
-  assert.equal(parsed.projection.products.length, 158);
+  assert.equal(parsed.projection.products.length, 162);
 
   const wrongTrust = `sha256:${"0".repeat(64)}`;
   assert.throws(() => validateReviewedModuleCompositionBaseline(baseline, wrongTrust, root, SIGNER, sourceOptions()), /trusted digest/);
