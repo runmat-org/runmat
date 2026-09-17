@@ -10,6 +10,9 @@ use runmat_analysis_core::{
 };
 use runmat_parser::fea::FeaModelDefinitionKind;
 
+mod relational;
+mod values;
+
 pub(super) fn lower(
     declaration: &CheckedFeaDeclaration,
     bound: &BoundFeaProgram,
@@ -40,6 +43,10 @@ fn constraint(
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<AuthoredConstraint> {
     let (kind, body) = sole_kind_block(declaration, statements, "constraint", diagnostics)?;
+    if relational::recognizes(kind) {
+        let kind = relational::lower(declaration, bound, kind, body, diagnostics)?;
+        return finish(declaration, id, kind, diagnostics);
+    }
     let target_expression = required_assignment(declaration, body, "target", diagnostics)?;
     let target = AuthoredConstraintTarget {
         region: region_source(bound, declaration, target_expression, diagnostics)?,
@@ -159,6 +166,15 @@ fn constraint(
             return None;
         }
     };
+    finish(declaration, id, kind, diagnostics)
+}
+
+fn finish(
+    declaration: &CheckedFeaDeclaration,
+    id: &str,
+    kind: AuthoredConstraintKind,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Option<AuthoredConstraint> {
     let constraint = AuthoredConstraint {
         constraint_id: id.into(),
         kind,

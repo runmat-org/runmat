@@ -45,7 +45,11 @@ pub use validate_outputs::{observation_sampling_matches_domain, validate_observa
 pub use field::{AnalysisField, AnalysisFieldValues, DeviceFieldRef};
 pub use problem::authored_constraints::{
     AuthoredConstraint, AuthoredConstraintError, AuthoredConstraintKind, AuthoredConstraintTarget,
-    AuthoredTargetCardinality,
+    AuthoredPairedConstraint, AuthoredPairingPolicy, AuthoredPeriodicConstraint,
+    AuthoredPeriodicTransform, AuthoredPhaseShiftedPeriodicConstraint,
+    AuthoredReferencePointCoupling, AuthoredRotationDofValue, AuthoredStructuralConstraintEquation,
+    AuthoredStructuralConstraintEquationTerm, AuthoredStructuralDofs, AuthoredTargetCardinality,
+    AuthoredThermalJump, AuthoredTranslationDofValue,
 };
 pub use problem::authored_model_physics::{
     AuthoredBoundary, AuthoredBoundaryKind, AuthoredConnector, AuthoredConnectorKind,

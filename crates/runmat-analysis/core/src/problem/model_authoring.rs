@@ -221,8 +221,16 @@ impl AuthoredModel {
             constraint
                 .validate()
                 .map_err(|error| AuthoredModelError::InvalidConstraint(error.to_string()))?;
-            if let AuthoredRegionSource::ModelInput(input) = &constraint.kind.target().region {
-                require_input(input, &inputs)?;
+            let mut input_error = None;
+            constraint.kind.visit_targets(|target| {
+                if input_error.is_none() {
+                    if let AuthoredRegionSource::ModelInput(input) = &target.region {
+                        input_error = require_input(input, &inputs).err();
+                    }
+                }
+            });
+            if let Some(error) = input_error {
+                return Err(error);
             }
             if !constraint_ids.insert(constraint.constraint_id.as_str()) {
                 return Err(AuthoredModelError::DuplicateConstraint(

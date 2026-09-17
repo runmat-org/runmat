@@ -303,7 +303,7 @@ pub(in crate::semantic::model) fn required_vector(
     Some(result)
 }
 
-fn scalar(value: &CheckedExpression) -> Option<f64> {
+pub(in crate::semantic::model) fn scalar(value: &CheckedExpression) -> Option<f64> {
     match &value.kind {
         CheckedExpressionKind::Number(source) => source.parse().ok(),
         CheckedExpressionKind::Quantity {
