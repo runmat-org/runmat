@@ -14,13 +14,11 @@ pub use bitshift::*;
 pub use support::*;
 pub use swapbytes::*;
 
-pub(super) const ENTRIES: &[&crate::BuiltinCatalogEntry] = &[
-    &BITAND_CATALOG_ENTRY,
-    &BITCMP_CATALOG_ENTRY,
-    &BITGET_CATALOG_ENTRY,
-    &BITOR_CATALOG_ENTRY,
-    &BITSET_CATALOG_ENTRY,
-    &BITSHIFT_CATALOG_ENTRY,
-    &BITXOR_CATALOG_ENTRY,
-    &SWAPBYTES_CATALOG_ENTRY,
-];
+pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
+    binary::extend_entries(values);
+    bitcmp::extend_entries(values);
+    bitget::extend_entries(values);
+    bitset::extend_entries(values);
+    bitshift::extend_entries(values);
+    swapbytes::extend_entries(values);
+}

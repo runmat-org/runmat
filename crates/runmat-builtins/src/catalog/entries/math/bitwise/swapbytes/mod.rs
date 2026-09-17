@@ -121,3 +121,7 @@ pub const SWAPBYTES_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     integer_audit: None,
     suppress_auto_output: false,
 };
+
+pub(super) fn extend_entries(values: &mut Vec<&'static BuiltinCatalogEntry>) {
+    values.push(&SWAPBYTES_CATALOG_ENTRY);
+}
