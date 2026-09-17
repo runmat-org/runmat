@@ -23,13 +23,18 @@ pub enum FeaModelDefinitionKind {
     LoadCase,
     Interface,
     Connector,
-    Signal,
     Excitation,
     Initial,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FeaStatementKind {
+    SignalDefinition {
+        name: FeaName,
+        quantity: FeaName,
+        domain: FeaName,
+        body: FeaBlock,
+    },
     ModelDefinition {
         kind: FeaModelDefinitionKind,
         name: FeaName,

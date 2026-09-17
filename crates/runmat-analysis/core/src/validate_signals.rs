@@ -43,6 +43,12 @@ pub(crate) fn validate_signals(signals: &[PhysicalSignal]) -> Result<(), Analysi
     Ok(())
 }
 
+pub fn validate_physical_signals(
+    signals: &[PhysicalSignal],
+) -> Result<(), AnalysisValidationError> {
+    validate_signals(signals)
+}
+
 fn invalid<T>(signal_id: &str, detail: impl Into<String>) -> Result<T, AnalysisValidationError> {
     Err(AnalysisValidationError::InvalidSignal {
         signal_id: signal_id.to_string(),

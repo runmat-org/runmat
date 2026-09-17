@@ -68,6 +68,12 @@ pub struct CheckedFeaStatement {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CheckedFeaStatementKind {
+    SignalDefinition {
+        name: String,
+        quantity: String,
+        domain: String,
+        statements: Vec<CheckedFeaStatement>,
+    },
     ModelDefinition {
         kind: FeaModelDefinitionKind,
         name: String,
@@ -278,6 +284,10 @@ fn check_block<C: AnalysisOperationCatalog + ?Sized>(
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Vec<CheckedFeaStatement> {
     for statement in &block.statements {
+        if let FeaStatementKind::SignalDefinition { name, .. } = &statement.kind {
+            scope.insert_reference(["signal".to_string(), name.text.clone()], FeaType::Signal);
+            continue;
+        }
         let FeaStatementKind::ModelDefinition { kind, name, .. } = &statement.kind else {
             continue;
         };
@@ -290,7 +300,6 @@ fn check_block<C: AnalysisOperationCatalog + ?Sized>(
             FeaModelDefinitionKind::LoadCase => ("load_case", FeaType::LoadCase),
             FeaModelDefinitionKind::Interface => ("interface", FeaType::Interface),
             FeaModelDefinitionKind::Connector => ("connector", FeaType::Connector),
-            FeaModelDefinitionKind::Signal => ("signal", FeaType::Signal),
             FeaModelDefinitionKind::Excitation => ("excitation", FeaType::Excitation),
             FeaModelDefinitionKind::Initial => ("initial", FeaType::InitialCondition),
         };
@@ -302,6 +311,25 @@ fn check_block<C: AnalysisOperationCatalog + ?Sized>(
         .map(|statement| {
             let kind =
                 match &statement.kind {
+                    FeaStatementKind::SignalDefinition {
+                        name,
+                        quantity,
+                        domain,
+                        body,
+                    } => CheckedFeaStatementKind::SignalDefinition {
+                        name: name.text.clone(),
+                        quantity: quantity.text.clone(),
+                        domain: domain.text.clone(),
+                        statements: check_block(
+                            catalog,
+                            path,
+                            source,
+                            body,
+                            scope,
+                            outputs,
+                            diagnostics,
+                        ),
+                    },
                     FeaStatementKind::ModelDefinition { kind, name, body } => {
                         CheckedFeaStatementKind::ModelDefinition {
                             kind: *kind,

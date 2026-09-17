@@ -18,6 +18,7 @@ mod composition;
 mod constraints;
 mod physics;
 mod properties;
+mod signals;
 
 pub fn lower_models(
     bound: &BoundFeaProgram,
@@ -99,6 +100,7 @@ fn model(
     let lowered_properties = properties::lower(declaration, bound, diagnostics);
     let constraints = constraints::lower(declaration, bound, diagnostics);
     let lowered_physics = physics::lower(declaration, bound, diagnostics);
+    let signals = signals::lower(declaration, diagnostics);
     AuthoredModel {
         module_path: declaration.module.as_str().to_string(),
         model_id: declaration.key.name.clone(),
@@ -113,6 +115,7 @@ fn model(
         boundaries: lowered_physics.boundaries,
         connectors: lowered_physics.connectors,
         interfaces: lowered_physics.interfaces,
+        signals,
     }
 }
 

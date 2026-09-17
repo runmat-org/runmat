@@ -15,6 +15,9 @@ use super::authored_properties::{
 
 mod region;
 
+#[cfg(test)]
+mod tests;
+
 /// Stable source identity of a reusable authored model.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -99,6 +102,7 @@ pub struct AuthoredModel {
     pub boundaries: Vec<AuthoredBoundary>,
     pub connectors: Vec<AuthoredConnector>,
     pub interfaces: Vec<AuthoredInterface>,
+    pub signals: Vec<super::signal::PhysicalSignal>,
 }
 
 impl AuthoredModel {
@@ -273,6 +277,12 @@ impl AuthoredModel {
                 require_input(input, &inputs)?;
             }
         }
+        crate::validate_physical_signals(&self.signals).map_err(|error| {
+            AuthoredModelError::InvalidPhysics {
+                kind: "signal",
+                detail: error.to_string(),
+            }
+        })?;
         Ok(())
     }
 }
@@ -513,80 +523,4 @@ pub enum AuthoredModelError {
         expected: GeometryRegionRole,
         actual: GeometryRegionRole,
     },
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn material_assignment_requires_declared_strongly_typed_inputs() {
-        let material = AuthoredModelInputRef {
-            input_id: "material".into(),
-            kind: AuthoredModelInputKind::Material,
-        };
-        let body = AuthoredModelInputRef {
-            input_id: "body".into(),
-            kind: AuthoredModelInputKind::Region(GeometryRegionRole::Solid),
-        };
-        AuthoredModel {
-            module_path: "project/main.fea".into(),
-            model_id: "bracket".into(),
-            property_inputs: vec![material.clone(), body.clone()],
-            includes: Vec::new(),
-            sections: Vec::new(),
-            layups: Vec::new(),
-            orientations: Vec::new(),
-            material_assignments: vec![AuthoredMaterialAssignment {
-                material: AuthoredMaterialSource::ModelInput(material),
-                target: AuthoredPropertyTarget::Solid(AuthoredRegionSource::ModelInput(body)),
-            }],
-            property_assignments: Vec::new(),
-            constraints: Vec::new(),
-            boundaries: Vec::new(),
-            connectors: Vec::new(),
-            interfaces: Vec::new(),
-        }
-        .validate()
-        .unwrap();
-    }
-
-    #[test]
-    fn boundary_vertices_are_not_material_domains() {
-        let model = AuthoredModel {
-            module_path: "project/main.fea".into(),
-            model_id: "invalid".into(),
-            property_inputs: Vec::new(),
-            includes: Vec::new(),
-            sections: Vec::new(),
-            layups: Vec::new(),
-            orientations: Vec::new(),
-            material_assignments: vec![AuthoredMaterialAssignment {
-                material: AuthoredMaterialSource::Declaration(AuthoredMaterialRef {
-                    module_path: "project/main.fea".into(),
-                    material_id: "steel".into(),
-                }),
-                target: AuthoredPropertyTarget::Solid(AuthoredRegionSource::Geometry(
-                    GeometryRegionRef {
-                        module_path: "project/main.fea".into(),
-                        geometry_id: "part".into(),
-                        region_id: "point".into(),
-                        role: GeometryRegionRole::Vertex,
-                    },
-                )),
-            }],
-            property_assignments: Vec::new(),
-            constraints: Vec::new(),
-            boundaries: Vec::new(),
-            connectors: Vec::new(),
-            interfaces: Vec::new(),
-        };
-        assert_eq!(
-            model.validate(),
-            Err(AuthoredModelError::WrongPropertyTargetRole {
-                expected: GeometryRegionRole::Solid,
-                actual: GeometryRegionRole::Vertex,
-            })
-        );
-    }
 }

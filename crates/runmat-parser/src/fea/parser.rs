@@ -346,6 +346,12 @@ impl FeaParser {
         body: FeaBlock,
     ) -> Option<FeaStatementKind> {
         let significant = self.significant(start, open);
+        if matches!(
+            self.kind(*significant.first()?),
+            Some(FeaTokenKind::Keyword(FeaKeyword::Signal))
+        ) {
+            return self.parse_signal_definition(&significant, body);
+        }
         let kind = match self.kind(*significant.first()?)? {
             FeaTokenKind::Keyword(FeaKeyword::Section) => FeaModelDefinitionKind::Section,
             FeaTokenKind::Keyword(FeaKeyword::Layup) => FeaModelDefinitionKind::Layup,
@@ -374,6 +380,43 @@ impl FeaParser {
             });
         }
         Some(FeaStatementKind::ModelDefinition { kind, name, body })
+    }
+
+    fn parse_signal_definition(
+        &mut self,
+        significant: &[usize],
+        body: FeaBlock,
+    ) -> Option<FeaStatementKind> {
+        let valid = significant.len() == 6
+            && self.kind(significant[2]) == Some(FeaTokenKind::Colon)
+            && self.lexeme(significant[4]) == "over";
+        if !valid {
+            self.diagnostics.push(FeaSyntaxDiagnostic {
+                kind: FeaSyntaxDiagnosticKind::ExpectedToken,
+                span: self.token(significant[0]).span,
+                message: "signal header requires `signal <name> : <quantity> over <domain>`"
+                    .to_string(),
+            });
+        }
+        let fallback = significant[0];
+        let name = self.name(
+            *significant.get(1).unwrap_or(&fallback),
+            FeaSyntaxDiagnosticKind::ExpectedIdentifier,
+        )?;
+        let quantity = self.name(
+            *significant.get(3).unwrap_or(&fallback),
+            FeaSyntaxDiagnosticKind::ExpectedIdentifier,
+        )?;
+        let domain = self.name(
+            *significant.get(5).unwrap_or(&fallback),
+            FeaSyntaxDiagnosticKind::ExpectedIdentifier,
+        )?;
+        Some(FeaStatementKind::SignalDefinition {
+            name,
+            quantity,
+            domain,
+            body,
+        })
     }
 
     fn parse_output_statement(

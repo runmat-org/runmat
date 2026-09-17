@@ -4,7 +4,7 @@ use runmat_analysis_core::{
     AuthoredBoundary, AuthoredConnector, AuthoredConstraint, AuthoredInterface,
     AuthoredLayupSource, AuthoredMaterialSource, AuthoredModel, AuthoredModelRef,
     AuthoredOrientationSource, AuthoredPropertyAssignment, AuthoredPropertyTarget,
-    AuthoredRegionSource, AuthoredSectionSource,
+    AuthoredRegionSource, AuthoredSectionSource, PhysicalSignal,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -105,6 +105,12 @@ fn collect(
         |value| &value.interface_id,
         "interface",
     )?;
+    collect_named(
+        &model.signals,
+        &mut assignments.signals,
+        |value| value.signal_id().0.as_str(),
+        "signal",
+    )?;
     stack.remove(key);
     Ok(())
 }
@@ -177,6 +183,7 @@ struct CompositionAssignments {
     boundaries: BTreeMap<String, AuthoredBoundary>,
     connectors: BTreeMap<String, AuthoredConnector>,
     interfaces: BTreeMap<String, AuthoredInterface>,
+    signals: BTreeMap<String, PhysicalSignal>,
 }
 
 fn collect_named<T: Clone + PartialEq>(
