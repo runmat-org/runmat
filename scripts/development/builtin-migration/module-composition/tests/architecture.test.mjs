@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const productionFiles = [
   "authority.mjs", "baseline-authority.mjs", "baseline-candidate.mjs", "baseline-observation.mjs",
-  "baseline-review.mjs", "baseline-schema.mjs", "baseline-source-head.mjs", "binding.mjs", "bootstrap.mjs", "child-state.mjs", "condition.mjs", "control.mjs", "durability.mjs",
+  "baseline-review.mjs", "baseline-schema.mjs", "baseline-source-head.mjs", "binding.mjs", "bootstrap.mjs", "child-state.mjs", "condition.mjs", "control-child-overlap.mjs", "control.mjs", "durability.mjs",
   "effective-state.mjs", "generate.mjs", "handwritten-aggregation.mjs", "handwritten-parser.mjs", "handwritten.mjs", "index.mjs", "materialize.mjs",
   "prior-state.mjs", "projection.mjs", "registry.mjs", "repository-state.mjs", "rust-schema.mjs", "schema.mjs", "surface.mjs",
   "transaction-journal-schema.mjs", "transaction-journal.mjs", "transaction-lock-fence-worker.mjs", "transaction-lock-fence.mjs", "transaction-lock-recovery.mjs", "transaction-recovery-reservation.mjs",
