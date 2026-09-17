@@ -132,6 +132,25 @@ fn declaration_names_reject_reserved_keywords() {
 }
 
 #[test]
+fn mesh_target_is_a_typed_geometry_reference() {
+    let module =
+        parse_fea("mesh bracket on geometry.bracket_geometry {\n    tetrahedra {\n    }\n}\n");
+    assert!(module.diagnostics.is_empty(), "{:#?}", module.diagnostics);
+    let FeaModuleItem::Declaration(declaration) = &module.items[0] else {
+        panic!("expected mesh declaration");
+    };
+    let target = declaration.target.as_ref().expect("mesh target");
+    assert_eq!(
+        target
+            .segments
+            .iter()
+            .map(|segment| segment.text.as_str())
+            .collect::<Vec<_>>(),
+        ["geometry", "bracket_geometry"]
+    );
+}
+
+#[test]
 fn imports_after_declarations_are_diagnosed_but_retained() {
     let module =
         parse_fea("material steel {\n}\nimport geometry bracket from \"./bracket.step\"\n");

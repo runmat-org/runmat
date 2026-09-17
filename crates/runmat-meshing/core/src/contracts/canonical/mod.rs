@@ -4,6 +4,7 @@ mod artifact_identity;
 mod artifact_order;
 mod artifact_parameters;
 mod artifact_types;
+mod authoring;
 mod cancellation;
 mod chunk;
 mod codec;
@@ -35,6 +36,7 @@ pub use artifact_types::{
     SolverNodeExactParameter, SolverVolumeElement, SOLVER_MESH_ARTIFACT_SCHEMA_VERSION,
     TETRAHEDRON_MIDSIDE_EDGE_CORNERS,
 };
+pub use authoring::MeshDefinition;
 pub use cancellation::{CancellationPolicy, MeshingCancellationSignal, NeverCancelled};
 pub use chunk::{
     build_chunked_stage_payload, build_closed_stage_manifest, decode_stage_manifest_streams,

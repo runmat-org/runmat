@@ -49,6 +49,37 @@ impl Default for MeshingRequestSettings {
     }
 }
 
+impl MeshingRequestSettings {
+    pub fn validate(&self) -> Result<(), MeshingContractError> {
+        for (field, value) in [
+            ("target edge length", self.target_edge_length_m),
+            (
+                "maximum chordal deviation",
+                self.maximum_chordal_deviation_m,
+            ),
+            ("maximum grading ratio", self.maximum_grading_ratio),
+        ] {
+            if !value.is_finite() {
+                return Err(MeshingContractError::invalid(field, "must be finite"));
+            }
+        }
+        if self.target_edge_length_m <= 0.0 || self.maximum_chordal_deviation_m <= 0.0 {
+            return Err(MeshingContractError::invalid(
+                "meshing length settings",
+                "target edge length and chordal deviation must be positive",
+            ));
+        }
+        if self.maximum_grading_ratio < 1.0 {
+            return Err(MeshingContractError::invalid(
+                "maximum grading ratio",
+                "must be at least one",
+            ));
+        }
+        self.resources.validate()?;
+        self.cancellation.validate()
+    }
+}
+
 /// Algorithm identities implemented by the production meshing host.
 ///
 /// Worker capability admission and workload construction share this authority so an algorithm
@@ -72,6 +103,7 @@ pub fn resolve_meshing_request(
     tolerance: GeometryTolerancePolicy,
     settings: MeshingRequestSettings,
 ) -> Result<MeshingRequest, MeshingContractError> {
+    settings.validate()?;
     let metric = MetricTensor3::isotropic_length_m(settings.target_edge_length_m)
         .map_err(|error| MeshingContractError::invalid("target edge length", error.to_string()))?;
     let request = MeshingRequest {
@@ -154,6 +186,15 @@ mod tests {
             ..MeshingRequestSettings::default()
         };
         assert!(resolve_meshing_request(tolerance(), settings).is_err());
+    }
+
+    #[test]
+    fn authored_settings_reject_invalid_grading_before_geometry_resolution() {
+        let settings = MeshingRequestSettings {
+            maximum_grading_ratio: 0.99,
+            ..MeshingRequestSettings::default()
+        };
+        assert!(settings.validate().is_err());
     }
 
     #[test]

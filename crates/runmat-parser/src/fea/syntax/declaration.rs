@@ -37,6 +37,7 @@ pub struct FeaDeclaration {
     pub kind: FeaDeclarationKind,
     pub name: FeaName,
     pub source: Option<FeaReference>,
+    pub target: Option<FeaReference>,
     pub header: FeaTokenRange,
     pub body: FeaBlock,
     pub span: Span,

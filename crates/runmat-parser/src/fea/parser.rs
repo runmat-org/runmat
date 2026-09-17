@@ -4,6 +4,7 @@ use runmat_lexer::fea::{tokenize_fea, FeaKeyword, FeaTokenKind, FeaTokenStream, 
 use runmat_types::{merge_span, Span};
 
 mod cursor;
+mod declaration;
 mod expression;
 mod grammar;
 
@@ -91,135 +92,6 @@ impl FeaParser {
             items,
             diagnostics: self.diagnostics,
         }
-    }
-
-    fn parse_import(&mut self, start: usize, end: usize) -> Option<FeaImport> {
-        let significant = self.significant(start, end);
-        let fallback = self.range_span(start, end);
-        let kind = significant
-            .get(1)
-            .and_then(|index| import_kind(self.kind(*index)?));
-        if kind.is_none() {
-            self.diagnostics.push(FeaSyntaxDiagnostic {
-                kind: FeaSyntaxDiagnosticKind::ExpectedImportKind,
-                span: significant
-                    .get(1)
-                    .map_or(fallback, |index| self.token(*index).span),
-                message: "expected geometry, mesh, material, model, study, sweep, execution, or function after `import`".to_string(),
-            });
-        }
-        let name = significant
-            .get(2)
-            .and_then(|index| self.name(*index, FeaSyntaxDiagnosticKind::ExpectedIdentifier));
-        let from = significant
-            .get(3)
-            .is_some_and(|index| self.at(*index, FeaTokenKind::Keyword(FeaKeyword::From)));
-        if !from {
-            self.diagnostics.push(FeaSyntaxDiagnostic {
-                kind: FeaSyntaxDiagnosticKind::ExpectedToken,
-                span: significant
-                    .get(3)
-                    .map_or(fallback, |index| self.token(*index).span),
-                message: "expected `from` in FEA import".to_string(),
-            });
-        }
-        let source = significant.get(4).and_then(|index| {
-            if self.at(*index, FeaTokenKind::String) {
-                Some(decode_string(self.lexeme(*index)))
-            } else {
-                self.diagnostics.push(FeaSyntaxDiagnostic {
-                    kind: FeaSyntaxDiagnosticKind::ExpectedString,
-                    span: self.token(*index).span,
-                    message: "expected a quoted source path in FEA import".to_string(),
-                });
-                None
-            }
-        });
-        if significant.len() > 5 {
-            let index = significant[5];
-            self.diagnostics.push(FeaSyntaxDiagnostic {
-                kind: FeaSyntaxDiagnosticKind::ExpectedToken,
-                span: self.token(index).span,
-                message: "unexpected token after FEA import source".to_string(),
-            });
-        }
-        match (kind, name, source) {
-            (Some(kind), Some(name), Some(source)) => Some(FeaImport {
-                kind,
-                name,
-                source,
-                span: fallback,
-            }),
-            _ => None,
-        }
-    }
-
-    fn parse_declaration(&mut self, start: usize) -> (Option<FeaDeclaration>, usize) {
-        let Some(FeaTokenKind::Keyword(keyword)) = self.kind(start) else {
-            return (None, start + 1);
-        };
-        let Some(kind) = declaration_kind(keyword) else {
-            return (None, start + 1);
-        };
-        let name_index = self.next_significant(start + 1);
-        let name = name_index
-            .and_then(|index| self.name(index, FeaSyntaxDiagnosticKind::ExpectedIdentifier));
-        let mut cursor = name_index.map_or(start + 1, |index| index + 1);
-        let mut open = None;
-        while !self.at(cursor, FeaTokenKind::EndOfFile) {
-            if self.at(cursor, FeaTokenKind::LeftBrace) {
-                open = Some(cursor);
-                break;
-            }
-            if self.is_newline(cursor) || self.at(cursor, FeaTokenKind::Semicolon) {
-                break;
-            }
-            cursor += 1;
-        }
-        let Some(open) = open else {
-            self.diagnostics.push(FeaSyntaxDiagnostic {
-                kind: FeaSyntaxDiagnosticKind::ExpectedToken,
-                span: self.token(cursor.min(self.stream.tokens.len() - 1)).span,
-                message: "expected `{` to begin FEA declaration".to_string(),
-            });
-            return (None, self.consume_terminator(self.statement_end(start)));
-        };
-        let (body, next) = self.parse_block(open);
-        let header_start = name_index.map_or(start + 1, |index| index + 1);
-        let header = self.token_range(header_start, open);
-        let header_significant = self.significant(header_start, open);
-        let source = if kind == FeaDeclarationKind::Geometry
-            && header_significant
-                .first()
-                .is_some_and(|index| self.at(*index, FeaTokenKind::Keyword(FeaKeyword::From)))
-        {
-            let reference = self.parse_reference_indices(&header_significant[1..]);
-            if reference.is_none() {
-                self.diagnostics.push(FeaSyntaxDiagnostic {
-                    kind: FeaSyntaxDiagnosticKind::InvalidExpression,
-                    span: header.span,
-                    message: "expected a geometry reference after `from`".to_string(),
-                });
-            }
-            reference
-        } else {
-            None
-        };
-        let span = Span {
-            start: self.token(start).span.start,
-            end: body.span.end,
-        };
-        (
-            name.map(|name| FeaDeclaration {
-                kind,
-                name,
-                source,
-                header,
-                body,
-                span,
-            }),
-            next,
-        )
     }
 
     fn parse_block(&mut self, open: usize) -> (FeaBlock, usize) {

@@ -251,6 +251,89 @@ material steel {
 }
 
 #[test]
+fn mesh_request_binds_geometry_and_lowers_units_into_canonical_settings() {
+    let source = r#"
+geometry bracket_geometry {
+    construct {
+        feature body = box(width = 1 m, depth = 1 m, height = 1 m)
+        result = feature.body
+    }
+}
+mesh bracket_mesh on geometry.bracket_geometry {
+    tetrahedra {
+        order = quadratic
+        target_size = 5 mm
+        maximum_deviation = 0.05 mm
+        maximum_grading_ratio = 1.4
+        deterministic_seed = 17
+    }
+}
+"#;
+    let program = FeaCompiler::new(&TestHost::default()).check(CheckRequest {
+        modules: ModuleGraphRequest {
+            source_root: LogicalSourcePath::new("project").unwrap(),
+            root: source_module("project/main.fea", source, 1),
+        },
+    });
+    assert!(program.is_valid(), "{:#?}", program.diagnostics);
+    let mesh = program.meshes.values().next().unwrap();
+    assert_eq!(mesh.mesh_id, "bracket_mesh");
+    assert_eq!(mesh.geometry.module_path, "project/main.fea");
+    assert_eq!(mesh.geometry.geometry_id, "bracket_geometry");
+    assert_eq!(
+        mesh.settings.element_order,
+        runmat_meshing_core::ElementOrder::Tet10
+    );
+    assert_eq!(mesh.settings.target_edge_length_m, 0.005);
+    assert_eq!(mesh.settings.maximum_chordal_deviation_m, 0.00005);
+    assert_eq!(mesh.settings.maximum_grading_ratio, 1.4);
+    assert_eq!(mesh.settings.deterministic_seed, 17);
+}
+
+#[test]
+fn mesh_request_rejects_missing_physical_settings_and_wrong_target_namespace() {
+    let source = r#"
+geometry part {
+    construct {
+        feature body = box(width = 1 m, depth = 1 m, height = 1 m)
+        result = feature.body
+    }
+}
+material steel { mass_density = 1 kg/m^3 }
+mesh wrong_target on material.steel {
+    tetrahedra {
+        order = linear
+        target_size = 5 mm
+        maximum_deviation = 0.05 mm
+    }
+}
+mesh incomplete on geometry.part {
+    tetrahedra {
+        order = linear
+        target_size = 5 s
+    }
+}
+"#;
+    let program = FeaCompiler::new(&TestHost::default()).check(CheckRequest {
+        modules: ModuleGraphRequest {
+            source_root: LogicalSourcePath::new("project").unwrap(),
+            root: source_module("project/main.fea", source, 1),
+        },
+    });
+    assert!(!program.is_valid());
+    assert!(program.meshes.is_empty());
+    assert!(program.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "fea.semantic.mesh" && diagnostic.message.contains("geometry` namespace")
+    }));
+    assert!(program.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "fea.semantic.mesh" && diagnostic.message.contains("maximum_deviation")
+    }));
+    assert!(program.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "fea.semantic.mesh" && diagnostic.message.contains("length quantity")
+    }));
+}
+
+#[test]
 fn material_lowering_rejects_empty_and_dimensionally_wrong_capabilities() {
     let source = r#"
 material empty {

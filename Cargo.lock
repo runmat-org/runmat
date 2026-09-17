@@ -6372,6 +6372,7 @@ version = "0.6.2"
 dependencies = [
  "runmat-analysis-core",
  "runmat-geometry-core",
+ "runmat-meshing-core",
  "runmat-parser",
  "runmat-types",
  "serde",

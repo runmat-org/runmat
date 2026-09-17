@@ -24,6 +24,7 @@ pub struct CheckedFeaProgram {
     pub materials: BTreeMap<(LogicalSourcePath, FeaSymbolKey), runmat_analysis_core::MaterialModel>,
     pub geometries:
         BTreeMap<(LogicalSourcePath, FeaSymbolKey), runmat_geometry_core::GeometryDefinition>,
+    pub meshes: BTreeMap<(LogicalSourcePath, FeaSymbolKey), runmat_meshing_core::MeshDefinition>,
 }
 
 impl CheckedFeaProgram {
@@ -42,6 +43,7 @@ pub struct CheckedFeaDeclaration {
     pub module: LogicalSourcePath,
     pub inputs: BTreeMap<String, CheckedFeaInput>,
     pub source: Option<Vec<String>>,
+    pub target: Option<Vec<String>>,
     pub statements: Vec<CheckedFeaStatement>,
     pub outputs: BTreeMap<String, FeaType>,
     pub span: Span,
@@ -135,6 +137,7 @@ pub fn check_program<C: AnalysisOperationCatalog + GeometryInspectionSource + ?S
         &geometry_inspections,
         &mut diagnostics,
     );
+    let meshes = super::lower_mesh_definitions(&bound, &declarations, &mut diagnostics);
     CheckedFeaProgram {
         bound,
         declarations,
@@ -143,6 +146,7 @@ pub fn check_program<C: AnalysisOperationCatalog + GeometryInspectionSource + ?S
         analysis_sequences,
         materials,
         geometries,
+        meshes,
     }
 }
 
@@ -159,6 +163,13 @@ fn check_declaration<C: AnalysisOperationCatalog + ?Sized>(
     extend_module_scope(&mut scope, bound, path);
     extend_declaration_signatures(&mut scope, bound, path);
     let source_reference = declaration.source.as_ref().map(|reference| {
+        reference
+            .segments
+            .iter()
+            .map(|segment| segment.text.clone())
+            .collect::<Vec<_>>()
+    });
+    let target_reference = declaration.target.as_ref().map(|reference| {
         reference
             .segments
             .iter()
@@ -241,6 +252,7 @@ fn check_declaration<C: AnalysisOperationCatalog + ?Sized>(
         module: path.clone(),
         inputs,
         source: source_reference,
+        target: target_reference,
         statements,
         outputs,
         span: declaration.span,
