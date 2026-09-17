@@ -28,6 +28,10 @@ pub enum FeaStatementKind {
         name: FeaName,
         value: FeaExpression,
     },
+    Feature {
+        name: FeaName,
+        value: FeaExpression,
+    },
     Assignment {
         target: FeaReference,
         relation: FeaAssignmentRelation,

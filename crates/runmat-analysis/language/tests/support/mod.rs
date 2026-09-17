@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 pub struct TestHost {
     modules: BTreeMap<String, SourceModule>,
     geometries: BTreeMap<String, GeometryInspection>,
+    functions: BTreeMap<(String, String), FunctionFacts>,
 }
 
 impl TestHost {
@@ -29,6 +30,28 @@ impl TestHost {
         );
         self
     }
+
+    pub fn with_function(
+        mut self,
+        path: &str,
+        symbol: &str,
+        inputs: Vec<runmat_types::OperationParameter>,
+        outputs: Vec<runmat_types::OperationTypePattern>,
+    ) -> Self {
+        self.functions.insert(
+            (path.to_string(), symbol.to_string()),
+            FunctionFacts {
+                module_path: LogicalSourcePath::new(path).unwrap(),
+                symbol: SourceSymbol::new(symbol).unwrap(),
+                source_digest: SourceDigest([9; 32]),
+                inputs,
+                outputs,
+                effects: EffectSet::default(),
+                capabilities: CapabilitySet::default(),
+            },
+        );
+        self
+    }
 }
 
 impl FeaModuleSource for TestHost {
@@ -46,6 +69,12 @@ impl FeaModuleSource for TestHost {
 
 impl RunMatFunctionSource for TestHost {
     fn resolve(&self, request: &FunctionRequest) -> Result<FunctionFacts, SourceDiagnostic> {
+        if let Some(facts) = self.functions.get(&(
+            request.module_path.as_str().to_string(),
+            request.symbol.as_str().to_string(),
+        )) {
+            return Ok(facts.clone());
+        }
         Ok(FunctionFacts {
             module_path: request.module_path.clone(),
             symbol: request.symbol.clone(),
@@ -92,6 +121,13 @@ impl AnalysisOperationCatalog for TestHost {
         &self,
         request: &OperationResolutionRequest,
     ) -> Result<ResolvedOperationFacts, OperationDiagnostic> {
+        if let Some(operation) = geometry_operation_extension()
+            .operations
+            .into_iter()
+            .find(|operation| operation.identity == request.operation)
+        {
+            return Ok(ResolvedOperationFacts { operation });
+        }
         Err(OperationDiagnostic {
             code: "fea.test.operation_missing".to_string(),
             message: format!("missing `{}`", request.operation),

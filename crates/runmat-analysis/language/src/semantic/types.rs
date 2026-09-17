@@ -140,6 +140,7 @@ pub enum FeaType {
     },
     List(Box<FeaType>),
     Record(BTreeMap<String, FeaType>),
+    GeometryFeature,
     Region(FeaTopologyRole),
     Declaration(FeaSymbolKind),
     Field(Box<FeaType>),

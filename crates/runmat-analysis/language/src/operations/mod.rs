@@ -1,6 +1,10 @@
 use crate::OperationDiagnostic;
 use runmat_types::{OperationFacts, OperationIdentity, OperationOverloadFacts};
 
+mod geometry;
+
+pub use geometry::geometry_operation_extension;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OperationResolutionRequest {
     pub operation: OperationIdentity,

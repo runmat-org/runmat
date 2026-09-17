@@ -41,6 +41,7 @@ pub struct CheckedFeaDeclaration {
     pub key: FeaSymbolKey,
     pub module: LogicalSourcePath,
     pub inputs: BTreeMap<String, CheckedFeaInput>,
+    pub source: Option<Vec<String>>,
     pub statements: Vec<CheckedFeaStatement>,
     pub outputs: BTreeMap<String, FeaType>,
     pub span: Span,
@@ -70,6 +71,10 @@ pub enum CheckedFeaStatementKind {
     },
     Input(String),
     Let {
+        name: String,
+        value: CheckedExpression,
+    },
+    Feature {
         name: String,
         value: CheckedExpression,
     },
@@ -124,8 +129,12 @@ pub fn check_program<C: AnalysisOperationCatalog + GeometryInspectionSource + ?S
         super::inspect_geometry_declarations(catalog, &bound, &mut diagnostics);
     let analysis_sequences = super::lower_analysis_sequences(&declarations, &mut diagnostics);
     let materials = super::lower_materials(&declarations, &mut diagnostics);
-    let geometries =
-        super::lower_geometry_definitions(&declarations, &geometry_inspections, &mut diagnostics);
+    let geometries = super::lower_geometry_definitions(
+        &bound,
+        &declarations,
+        &geometry_inspections,
+        &mut diagnostics,
+    );
     CheckedFeaProgram {
         bound,
         declarations,
@@ -149,6 +158,19 @@ fn check_declaration<C: AnalysisOperationCatalog + ?Sized>(
     let mut scope = ExpressionScope::new();
     extend_module_scope(&mut scope, bound, path);
     extend_declaration_signatures(&mut scope, bound, path);
+    let source_reference = declaration.source.as_ref().map(|reference| {
+        reference
+            .segments
+            .iter()
+            .map(|segment| segment.text.clone())
+            .collect::<Vec<_>>()
+    });
+    if source_reference.is_some() {
+        scope.insert_reference(
+            ["source".to_string(), "result".to_string()],
+            FeaType::GeometryFeature,
+        );
+    }
     let input_syntax = declaration_inputs(source, declaration, diagnostics, path);
     for input in &input_syntax {
         scope.insert_reference(
@@ -218,6 +240,7 @@ fn check_declaration<C: AnalysisOperationCatalog + ?Sized>(
         key,
         module: path.clone(),
         inputs,
+        source: source_reference,
         statements,
         outputs,
         span: declaration.span,
@@ -259,6 +282,33 @@ fn check_block<C: AnalysisOperationCatalog + ?Sized>(
                         let value = check_value(catalog, path, source, scope, value, diagnostics);
                         scope.insert_reference([name.text.clone()], value.value_type.clone());
                         CheckedFeaStatementKind::Let {
+                            name: name.text.clone(),
+                            value,
+                        }
+                    }
+                    FeaStatementKind::Feature { name, value } => {
+                        let value = check_value(catalog, path, source, scope, value, diagnostics);
+                        if value.value_type != FeaType::GeometryFeature
+                            && value.value_type != FeaType::Error
+                        {
+                            diagnostics.push(FeaDiagnostic::error(
+                                "fea.semantic.feature_type",
+                                format!(
+                                    "feature `{}` requires a geometry feature operation",
+                                    name.text
+                                ),
+                                FeaDiagnosticPhase::Semantic,
+                                Some(FeaDiagnosticLocation {
+                                    path: path.clone(),
+                                    span: value.span,
+                                }),
+                            ));
+                        }
+                        scope.insert_reference(
+                            ["feature".to_string(), name.text.clone()],
+                            FeaType::GeometryFeature,
+                        );
+                        CheckedFeaStatementKind::Feature {
                             name: name.text.clone(),
                             value,
                         }

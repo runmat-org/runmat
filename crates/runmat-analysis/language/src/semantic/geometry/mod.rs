@@ -1,22 +1,27 @@
 mod command;
+mod feature;
+mod generated;
+mod value;
 
 use super::{
     CheckedExpression, CheckedExpressionKind, CheckedFeaDeclaration, CheckedFeaStatement,
     CheckedFeaStatementKind, CheckedGeometryInspection,
 };
 use crate::{
-    FeaDiagnostic, FeaDiagnosticLocation, FeaDiagnosticPhase, FeaSymbolKey, FeaSymbolKind,
-    GeometryInspectionCapability, LogicalSourcePath,
+    BoundFeaProgram, FeaDiagnostic, FeaDiagnosticLocation, FeaDiagnosticPhase, FeaSymbolKey,
+    FeaSymbolKind, FeaSymbolOrigin, GeometryInspectionCapability, LogicalSourcePath,
 };
 use runmat_geometry_core::{
     CadParameterAccess, CadParameterDefinition, CadParameterPhysicalType, CadParameterSelector,
-    GeometryAuthoringCapabilities, GeometryDefinition, GeometryDefinitionSource, GeometryDigest,
-    GeometryRegionCardinality, GeometryRegionDefinition, GeometryRegionRole,
-    GeometryRegionSelector, GeometrySourceFormat, ImportedGeometryDefinition, UnitSystem,
+    DerivedGeometryDefinition, GeometryAuthoringCapabilities, GeometryDefinition,
+    GeometryDefinitionRef, GeometryDefinitionSource, GeometryDigest, GeometryRegionCardinality,
+    GeometryRegionDefinition, GeometryRegionRole, GeometryRegionSelector, GeometrySourceFormat,
+    ImportedGeometryDefinition, UnitSystem,
 };
 use std::collections::BTreeMap;
 
 pub fn lower_geometry_definitions(
+    bound: &BoundFeaProgram,
     declarations: &BTreeMap<(LogicalSourcePath, FeaSymbolKey), CheckedFeaDeclaration>,
     inspections: &BTreeMap<(LogicalSourcePath, String), CheckedGeometryInspection>,
     diagnostics: &mut Vec<FeaDiagnostic>,
@@ -26,21 +31,17 @@ pub fn lower_geometry_definitions(
         if identity.1.kind != FeaSymbolKind::Geometry {
             continue;
         }
-        let Some(inspection) = inspections.get(&(identity.0.clone(), identity.1.name.clone()))
-        else {
-            if imported_file(&declaration.statements).is_some() {
-                error(
-                    declaration,
-                    declaration.span,
-                    "imported geometry has no inspection facts",
-                    diagnostics,
-                );
-            }
-            continue;
-        };
         let initial_errors = diagnostics.len();
-        let definition = imported_definition(declaration, inspection, diagnostics);
+        let definition = definition(
+            bound,
+            declaration,
+            inspections.get(&(identity.0.clone(), identity.1.name.clone())),
+            diagnostics,
+        );
         if diagnostics.len() == initial_errors {
+            let Some(definition) = definition else {
+                continue;
+            };
             match definition.validate() {
                 Ok(()) => {
                     result.insert(identity.clone(), definition);
@@ -57,11 +58,103 @@ pub fn lower_geometry_definitions(
     result
 }
 
-fn imported_definition(
+fn definition(
+    bound: &BoundFeaProgram,
+    declaration: &CheckedFeaDeclaration,
+    inspection: Option<&CheckedGeometryInspection>,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Option<GeometryDefinition> {
+    let imported = imported_file(&declaration.statements).is_some();
+    let construct = named_block(&declaration.statements, "construct");
+    let derive = named_block(&declaration.statements, "derive");
+    let generated = generated::block(&declaration.statements);
+    let source_count = usize::from(imported)
+        + usize::from(construct.is_some())
+        + usize::from(derive.is_some())
+        + usize::from(generated.is_some());
+    if source_count != 1 {
+        error(
+            declaration,
+            declaration.span,
+            "geometry requires exactly one imported, constructed, derived, or generated source",
+            diagnostics,
+        );
+        return None;
+    }
+    let source = if imported {
+        if declaration.source.is_some() {
+            error(
+                declaration,
+                declaration.span,
+                "imported geometry cannot declare a `from` source",
+                diagnostics,
+            );
+        }
+        let Some(inspection) = inspection else {
+            error(
+                declaration,
+                declaration.span,
+                "imported geometry has no inspection facts",
+                diagnostics,
+            );
+            return None;
+        };
+        imported_source(declaration, inspection, diagnostics)
+    } else if let Some(statements) = construct {
+        if declaration.source.is_some() {
+            error(
+                declaration,
+                declaration.span,
+                "constructed geometry cannot declare a `from` source",
+                diagnostics,
+            );
+        }
+        GeometryDefinitionSource::Constructed(feature::graph(declaration, statements, diagnostics)?)
+    } else if let Some(statements) = derive {
+        let source = derived_source(bound, declaration, diagnostics)?;
+        GeometryDefinitionSource::Derived(DerivedGeometryDefinition {
+            source,
+            graph: feature::graph(declaration, statements, diagnostics)?,
+        })
+    } else {
+        if declaration.source.is_some() {
+            error(
+                declaration,
+                declaration.span,
+                "generated geometry cannot declare a `from` source",
+                diagnostics,
+            );
+        }
+        generated::source(
+            bound,
+            declaration,
+            generated.expect("source count establishes generated block"),
+            diagnostics,
+        )?
+    };
+    Some(GeometryDefinition {
+        module_path: declaration.module.as_str().to_string(),
+        geometry_id: declaration.key.name.clone(),
+        parameters: value::parameters(declaration, diagnostics),
+        source,
+        regions: declaration
+            .statements
+            .iter()
+            .filter_map(|statement| lower_region(declaration, statement, diagnostics))
+            .collect(),
+        cad_parameters: declaration
+            .statements
+            .iter()
+            .filter_map(|statement| lower_cad_parameter(declaration, statement, diagnostics))
+            .collect(),
+    })
+}
+
+fn imported_source(
     declaration: &CheckedFeaDeclaration,
     inspection: &CheckedGeometryInspection,
     diagnostics: &mut Vec<FeaDiagnostic>,
-) -> GeometryDefinition {
+) -> GeometryDefinitionSource {
     let units = imported_units(declaration, diagnostics).unwrap_or(UnitSystem::Unspecified);
     let format = source_format(inspection.source_path.as_str()).unwrap_or_else(|| {
         error(
@@ -72,29 +165,93 @@ fn imported_definition(
         );
         GeometrySourceFormat::Step
     });
-    let regions = declaration
-        .statements
-        .iter()
-        .filter_map(|statement| lower_region(declaration, statement, diagnostics))
-        .collect();
-    let cad_parameters = declaration
-        .statements
-        .iter()
-        .filter_map(|statement| lower_cad_parameter(declaration, statement, diagnostics))
-        .collect();
-    GeometryDefinition {
-        geometry_id: declaration.key.name.clone(),
-        source: GeometryDefinitionSource::Imported(ImportedGeometryDefinition {
-            logical_path: inspection.source_path.as_str().to_string(),
-            format,
-            units,
-            content_digest: GeometryDigest::from_bytes(inspection.facts.content_digest.0),
-            topology_digest: GeometryDigest::from_bytes(inspection.facts.topology_digest.0),
-            capabilities: capabilities(inspection),
-        }),
-        regions,
-        cad_parameters,
+    GeometryDefinitionSource::Imported(ImportedGeometryDefinition {
+        logical_path: inspection.source_path.as_str().to_string(),
+        format,
+        units,
+        content_digest: GeometryDigest::from_bytes(inspection.facts.content_digest.0),
+        topology_digest: GeometryDigest::from_bytes(inspection.facts.topology_digest.0),
+        capabilities: capabilities(inspection),
+    })
+}
+
+fn named_block<'a>(
+    statements: &'a [CheckedFeaStatement],
+    name: &str,
+) -> Option<&'a [CheckedFeaStatement]> {
+    statements.iter().find_map(|statement| {
+        let CheckedFeaStatementKind::Block {
+            header, statements, ..
+        } = &statement.kind
+        else {
+            return None;
+        };
+        (header.trim() == name).then_some(statements.as_slice())
+    })
+}
+
+fn derived_source(
+    bound: &BoundFeaProgram,
+    declaration: &CheckedFeaDeclaration,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Option<GeometryDefinitionRef> {
+    let Some([namespace, name]) = declaration.source.as_deref() else {
+        error(
+            declaration,
+            declaration.span,
+            "derived geometry requires `from geometry.<name>`",
+            diagnostics,
+        );
+        return None;
+    };
+    if namespace != "geometry" {
+        error(
+            declaration,
+            declaration.span,
+            "derived geometry source must use the `geometry` namespace",
+            diagnostics,
+        );
+        return None;
     }
+    let key = FeaSymbolKey {
+        kind: FeaSymbolKind::Geometry,
+        name: name.clone(),
+    };
+    let Some(symbol) = bound
+        .symbols
+        .get(&declaration.module)
+        .and_then(|symbols| symbols.get(&key))
+    else {
+        error(
+            declaration,
+            declaration.span,
+            format!("derived geometry references unknown geometry `{name}`"),
+            diagnostics,
+        );
+        return None;
+    };
+    Some(match &symbol.origin {
+        FeaSymbolOrigin::Local => GeometryDefinitionRef {
+            module_path: declaration.module.as_str().to_string(),
+            geometry_id: name.clone(),
+        },
+        FeaSymbolOrigin::Import {
+            target_module,
+            target,
+        } => GeometryDefinitionRef {
+            module_path: target_module.as_str().to_string(),
+            geometry_id: target.name.clone(),
+        },
+        FeaSymbolOrigin::Function => {
+            error(
+                declaration,
+                declaration.span,
+                "derived geometry source resolved to a function",
+                diagnostics,
+            );
+            return None;
+        }
+    })
 }
 
 fn imported_units(

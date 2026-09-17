@@ -14,6 +14,7 @@ mod matching;
 mod scope;
 mod type_rules;
 
+pub(crate) use matching::pattern_matches as operation_pattern_matches;
 use matching::{arguments_match, declaration_arguments_match, operation_output_type, outputs_type};
 pub use scope::{DeclarationInput, DeclarationSignature, ExpressionScope, FunctionSignature};
 use type_rules::{divide_type, multiply_type, numeric_join, types_compatible};

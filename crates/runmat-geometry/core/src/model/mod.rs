@@ -1,8 +1,10 @@
 mod analysis_identity;
 mod assembly;
 mod authoring;
+mod authoring_feature_validation;
 #[cfg(test)]
 mod authoring_tests;
+mod authoring_value;
 mod canonical;
 mod document;
 mod exact_artifact;
@@ -32,6 +34,7 @@ pub use analysis_identity::{
 };
 pub use assembly::AssemblyNode;
 pub use authoring::*;
+pub use authoring_value::*;
 pub use document::*;
 pub use exact_artifact::*;
 pub use exact_contacts::*;

@@ -68,6 +68,26 @@ fn parses_representative_language_surface() {
 }
 
 #[test]
+fn parses_typed_geometry_features_and_derived_lineage() {
+    let module = parse_fea(
+        "geometry base {\nconstruct {\nfeature stock = box(width = 1 m, depth = 1 m, height = 1 m)\nresult = feature.stock\n}\n}\ngeometry derived from geometry.base {\nderive {\nfeature cut = cylinder(radius = 1 mm, height = 1 m, axis = global([0, 0, 1]), origin = [0, 0, 0] m)\nresult = subtract(source.result, feature.cut)\n}\n}\n",
+    );
+    assert!(module.diagnostics.is_empty(), "{:#?}", module.diagnostics);
+    let FeaModuleItem::Declaration(derived) = &module.items[1] else {
+        panic!("expected derived geometry");
+    };
+    let source = derived.source.as_ref().expect("typed source lineage");
+    assert_eq!(source.segments[1].text, "base");
+    let FeaStatementKind::Block { body, .. } = &derived.body.statements[0].kind else {
+        panic!("expected derive block");
+    };
+    assert!(matches!(
+        body.statements[0].kind,
+        FeaStatementKind::Feature { .. }
+    ));
+}
+
+#[test]
 fn parses_typed_output_call_and_attributed_region() {
     let module = parse_fea(
         "study s {\noutput peak = max(output.stress, over = geometry.g.region.body)\n}\n",

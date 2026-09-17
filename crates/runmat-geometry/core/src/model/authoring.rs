@@ -1,12 +1,18 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-use super::{GeometryContractError, GeometryDigest, GeometrySourceFormat, UnitSystem};
+use super::{
+    GeometryAuthoringValue, GeometryContractError, GeometryDigest, GeometryScalarExpression,
+    GeometrySourceFormat, UnitSystem,
+};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GeometryDefinition {
+    pub module_path: String,
     pub geometry_id: String,
+    #[serde(default)]
+    pub parameters: Vec<GeometryParameterDefinition>,
     pub source: GeometryDefinitionSource,
     #[serde(default)]
     pub regions: Vec<GeometryRegionDefinition>,
@@ -48,8 +54,15 @@ pub struct GeometryAuthoringCapabilities {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DerivedGeometryDefinition {
-    pub source_geometry_id: String,
+    pub source: GeometryDefinitionRef,
     pub graph: GeometryFeatureGraph,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GeometryDefinitionRef {
+    pub module_path: String,
+    pub geometry_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -76,41 +89,61 @@ pub struct GeometryFeature {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GeometryParameterDefinition {
+    pub parameter_id: String,
+    pub parameter_type: GeometryParameterType,
+    pub required: bool,
+    pub default: Option<GeometryAuthoringValue>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GeometryParameterType {
+    Boolean,
+    Scalar,
+    Length,
+    Angle,
+    Vector3,
+    Text,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind")]
 pub enum GeometryFeatureOperation {
     Box {
-        width_m: f64,
-        depth_m: f64,
-        height_m: f64,
+        width_m: GeometryScalarExpression,
+        depth_m: GeometryScalarExpression,
+        height_m: GeometryScalarExpression,
     },
     Cylinder {
-        radius_m: f64,
-        height_m: f64,
-        axis: [f64; 3],
-        origin_m: [f64; 3],
+        radius_m: GeometryScalarExpression,
+        height_m: GeometryScalarExpression,
+        axis: [GeometryScalarExpression; 3],
+        origin_m: [GeometryScalarExpression; 3],
     },
     Sphere {
-        radius_m: f64,
-        center_m: [f64; 3],
+        radius_m: GeometryScalarExpression,
+        center_m: [GeometryScalarExpression; 3],
     },
     Transform {
         source: GeometryFeatureRef,
-        matrix: [f64; 16],
+        matrix: Vec<GeometryScalarExpression>,
     },
     Instance {
         source: GeometryFeatureRef,
-        transforms: Vec<[f64; 16]>,
+        transforms: Vec<Vec<GeometryScalarExpression>>,
     },
     Extrude {
         profile: GeometryFeatureRef,
-        distance_m: f64,
-        direction: [f64; 3],
+        distance_m: GeometryScalarExpression,
+        direction: [GeometryScalarExpression; 3],
     },
     Revolve {
         profile: GeometryFeatureRef,
-        axis: [f64; 3],
-        origin_m: [f64; 3],
-        angle_rad: f64,
+        axis: [GeometryScalarExpression; 3],
+        origin_m: [GeometryScalarExpression; 3],
+        angle_rad: GeometryScalarExpression,
     },
     Union {
         operands: Vec<GeometryFeatureRef>,
@@ -124,25 +157,25 @@ pub enum GeometryFeatureOperation {
     },
     Hole {
         target: GeometryFeatureRef,
-        radius_m: f64,
-        depth_m: f64,
-        axis: [f64; 3],
-        origin_m: [f64; 3],
+        radius_m: GeometryScalarExpression,
+        depth_m: GeometryScalarExpression,
+        axis: [GeometryScalarExpression; 3],
+        origin_m: [GeometryScalarExpression; 3],
     },
     Pocket {
         target: GeometryFeatureRef,
         profile: GeometryFeatureRef,
-        depth_m: f64,
+        depth_m: GeometryScalarExpression,
     },
     Fillet {
         target: GeometryFeatureRef,
         edges: GeometryRegionRef,
-        radius_m: f64,
+        radius_m: GeometryScalarExpression,
     },
     Chamfer {
         target: GeometryFeatureRef,
         edges: GeometryRegionRef,
-        distance_m: f64,
+        distance_m: GeometryScalarExpression,
     },
     RegenerateSource {
         parameters: BTreeMap<String, GeometryAuthoringValue>,
@@ -153,20 +186,10 @@ pub enum GeometryFeatureOperation {
 #[serde(transparent)]
 pub struct GeometryFeatureRef(pub String);
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", tag = "kind", content = "value")]
-pub enum GeometryAuthoringValue {
-    Scalar(f64),
-    Vector([f64; 3]),
-    Text(String),
-    Boolean(bool),
-    Feature(GeometryFeatureRef),
-    Region(GeometryRegionRef),
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GeometryRegionRef {
+    pub module_path: String,
     pub geometry_id: String,
     pub region_id: String,
     pub role: GeometryRegionRole,
@@ -247,16 +270,39 @@ pub enum CadParameterAccess {
 
 impl GeometryDefinition {
     pub fn validate(&self) -> Result<(), GeometryContractError> {
+        token("geometry module path", &self.module_path)?;
         token("geometry id", &self.geometry_id)?;
+        let mut parameters = std::collections::BTreeSet::new();
+        for parameter in &self.parameters {
+            token("geometry parameter id", &parameter.parameter_id)?;
+            if parameters.contains(parameter.parameter_id.as_str()) {
+                return Err(GeometryContractError::invalid(
+                    "geometry parameters",
+                    "parameter ids must be unique",
+                ));
+            }
+            if parameter.required == parameter.default.is_some() {
+                return Err(GeometryContractError::invalid(
+                    "geometry parameter",
+                    "required parameters cannot have defaults and optional parameters require defaults",
+                ));
+            }
+            if let Some(default) = &parameter.default {
+                default.validate(&parameters)?;
+            }
+            parameters.insert(parameter.parameter_id.as_str());
+        }
         match &self.source {
             GeometryDefinitionSource::Imported(source) => source.validate()?,
-            GeometryDefinitionSource::Constructed(graph) => graph.validate(None)?,
+            GeometryDefinitionSource::Constructed(graph) => graph.validate(None, &parameters)?,
             GeometryDefinitionSource::Derived(source) => {
-                token("derived source geometry id", &source.source_geometry_id)?;
-                graph_source_must_differ(&self.geometry_id, &source.source_geometry_id)?;
-                source.graph.validate(Some(&source.source_geometry_id))?;
+                source.source.validate()?;
+                graph_source_must_differ(self, &source.source)?;
+                source
+                    .graph
+                    .validate(Some(&source.source.geometry_id), &parameters)?;
             }
-            GeometryDefinitionSource::Generated(source) => source.validate()?,
+            GeometryDefinitionSource::Generated(source) => source.validate(&parameters)?,
         }
         let mut regions = std::collections::BTreeSet::new();
         for region in &self.regions {
@@ -268,6 +314,7 @@ impl GeometryDefinition {
                 ));
             }
             region.selector.validate()?;
+            region.selector.validate_against_source(&self.source)?;
         }
         let mut parameters = std::collections::BTreeSet::new();
         for parameter in &self.cad_parameters {
@@ -313,169 +360,16 @@ impl ImportedGeometryDefinition {
 }
 
 impl GeneratedGeometryDefinition {
-    fn validate(&self) -> Result<(), GeometryContractError> {
+    fn validate(
+        &self,
+        parameters: &std::collections::BTreeSet<&str>,
+    ) -> Result<(), GeometryContractError> {
         token("generator module path", &self.module_path)?;
         token("generator function", &self.function)?;
         self.source_digest
-            .validate_nonzero("generator source digest")
-    }
-}
-
-impl GeometryFeatureGraph {
-    pub(crate) fn validate(
-        &self,
-        source_geometry: Option<&str>,
-    ) -> Result<(), GeometryContractError> {
-        if self.features.is_empty() {
-            return Err(GeometryContractError::invalid(
-                "feature graph",
-                "requires at least one feature",
-            ));
-        }
-        let mut prior = std::collections::BTreeSet::new();
-        for feature in &self.features {
-            token("feature id", &feature.feature_id)?;
-            if !prior.insert(feature.feature_id.as_str()) {
-                return Err(GeometryContractError::invalid(
-                    "feature graph",
-                    "feature ids must be unique",
-                ));
-            }
-            feature.operation.validate(&prior, source_geometry)?;
-        }
-        if !prior.contains(self.result.0.as_str()) {
-            return Err(GeometryContractError::invalid(
-                "feature graph result",
-                "must reference a declared feature",
-            ));
-        }
-        Ok(())
-    }
-}
-
-impl GeometryFeatureOperation {
-    fn validate(
-        &self,
-        prior: &std::collections::BTreeSet<&str>,
-        source: Option<&str>,
-    ) -> Result<(), GeometryContractError> {
-        let mut references = Vec::new();
-        match self {
-            Self::Transform { source, .. } | Self::Instance { source, .. } => {
-                references.push(source)
-            }
-            Self::Extrude { profile, .. } | Self::Revolve { profile, .. } => {
-                references.push(profile)
-            }
-            Self::Union { operands } | Self::Intersect { operands } => references.extend(operands),
-            Self::Subtract { base, tools } => {
-                references.push(base);
-                references.extend(tools);
-            }
-            Self::Hole { target, .. } => references.push(target),
-            Self::Pocket {
-                target, profile, ..
-            } => {
-                references.push(target);
-                references.push(profile);
-            }
-            Self::Fillet { target, .. } | Self::Chamfer { target, .. } => references.push(target),
-            Self::RegenerateSource { .. } if source.is_none() => {
-                return Err(GeometryContractError::invalid(
-                    "regenerate source",
-                    "is valid only in derived geometry",
-                ))
-            }
-            _ => {}
-        }
-        if references
-            .iter()
-            .any(|reference| !prior.contains(reference.0.as_str()))
-        {
-            return Err(GeometryContractError::invalid(
-                "feature dependency",
-                "must reference an earlier feature",
-            ));
-        }
-        match self {
-            Self::Box {
-                width_m,
-                depth_m,
-                height_m,
-            } => positive_values("box dimensions", &[*width_m, *depth_m, *height_m])?,
-            Self::Cylinder {
-                radius_m,
-                height_m,
-                axis,
-                origin_m,
-            } => {
-                positive_values("cylinder dimensions", &[*radius_m, *height_m])?;
-                direction("cylinder axis", axis)?;
-                finite_values("cylinder origin", origin_m)?;
-            }
-            Self::Sphere { radius_m, center_m } => {
-                positive_values("sphere radius", &[*radius_m])?;
-                finite_values("sphere center", center_m)?;
-            }
-            Self::Transform { matrix, .. } => finite_values("transform matrix", matrix)?,
-            Self::Instance { transforms, .. } => {
-                if transforms.is_empty() {
-                    return Err(GeometryContractError::invalid(
-                        "instances",
-                        "requires at least one transform",
-                    ));
-                }
-                for transform in transforms {
-                    finite_values("instance transform", transform)?;
-                }
-            }
-            Self::Extrude {
-                distance_m,
-                direction: axis,
-                ..
-            } => {
-                positive_values("extrusion distance", &[*distance_m])?;
-                direction("extrusion direction", axis)?;
-            }
-            Self::Revolve {
-                axis,
-                origin_m,
-                angle_rad,
-                ..
-            } => {
-                direction("revolution axis", axis)?;
-                finite_values("revolution origin", origin_m)?;
-                positive_values("revolution angle", &[*angle_rad])?;
-            }
-            Self::Union { operands } | Self::Intersect { operands } if operands.len() < 2 => {
-                return Err(GeometryContractError::invalid(
-                    "boolean operands",
-                    "requires at least two operands",
-                ))
-            }
-            Self::Subtract { tools, .. } if tools.is_empty() => {
-                return Err(GeometryContractError::invalid(
-                    "subtraction tools",
-                    "requires at least one tool",
-                ))
-            }
-            Self::Hole {
-                radius_m,
-                depth_m,
-                axis,
-                origin_m,
-                ..
-            } => {
-                positive_values("hole dimensions", &[*radius_m, *depth_m])?;
-                direction("hole axis", axis)?;
-                finite_values("hole origin", origin_m)?;
-            }
-            Self::Pocket { depth_m, .. } => positive_values("pocket depth", &[*depth_m])?,
-            Self::Fillet { radius_m, .. } => positive_values("fillet radius", &[*radius_m])?,
-            Self::Chamfer { distance_m, .. } => {
-                positive_values("chamfer distance", &[*distance_m])?
-            }
-            _ => {}
+            .validate_nonzero("generator source digest")?;
+        for value in self.arguments.values() {
+            value.validate(parameters)?;
         }
         Ok(())
     }
@@ -494,10 +388,53 @@ impl GeometryRegionSelector {
             Self::Result => Ok(()),
         }
     }
+
+    fn validate_against_source(
+        &self,
+        source: &GeometryDefinitionSource,
+    ) -> Result<(), GeometryContractError> {
+        let reference = match self {
+            Self::FeatureResult(reference) | Self::BoundaryIntroducedBy(reference) => reference,
+            _ => return Ok(()),
+        };
+        let graph = match source {
+            GeometryDefinitionSource::Constructed(graph) => graph,
+            GeometryDefinitionSource::Derived(derived) => &derived.graph,
+            _ => {
+                return Err(GeometryContractError::invalid(
+                    "region feature selector",
+                    "requires constructed or derived geometry",
+                ))
+            }
+        };
+        if graph
+            .features
+            .iter()
+            .any(|feature| feature.feature_id == reference.0)
+        {
+            Ok(())
+        } else {
+            Err(GeometryContractError::invalid(
+                "region feature selector",
+                "must reference a declared feature",
+            ))
+        }
+    }
 }
 
-fn graph_source_must_differ(id: &str, source: &str) -> Result<(), GeometryContractError> {
-    if id == source {
+impl GeometryDefinitionRef {
+    fn validate(&self) -> Result<(), GeometryContractError> {
+        token("geometry reference module path", &self.module_path)?;
+        token("geometry reference id", &self.geometry_id)
+    }
+}
+
+fn graph_source_must_differ(
+    definition: &GeometryDefinition,
+    source: &GeometryDefinitionRef,
+) -> Result<(), GeometryContractError> {
+    if definition.module_path == source.module_path && definition.geometry_id == source.geometry_id
+    {
         Err(GeometryContractError::invalid(
             "derived geometry",
             "cannot derive from itself",
@@ -507,49 +444,10 @@ fn graph_source_must_differ(id: &str, source: &str) -> Result<(), GeometryContra
     }
 }
 
-fn token(field: &str, value: &str) -> Result<(), GeometryContractError> {
+pub(super) fn token(field: &str, value: &str) -> Result<(), GeometryContractError> {
     if value.trim().is_empty() {
         Err(GeometryContractError::invalid(field, "must not be empty"))
     } else {
         Ok(())
-    }
-}
-
-fn finite_values(field: &str, values: &[f64]) -> Result<(), GeometryContractError> {
-    if values.iter().all(|value| value.is_finite()) {
-        Ok(())
-    } else {
-        Err(GeometryContractError::invalid(
-            field,
-            "values must be finite",
-        ))
-    }
-}
-
-fn positive_values(field: &str, values: &[f64]) -> Result<(), GeometryContractError> {
-    if values.iter().all(|value| value.is_finite() && *value > 0.0) {
-        Ok(())
-    } else {
-        Err(GeometryContractError::invalid(
-            field,
-            "values must be finite and positive",
-        ))
-    }
-}
-
-fn direction(field: &str, value: &[f64; 3]) -> Result<(), GeometryContractError> {
-    finite_values(field, value)?;
-    if value
-        .iter()
-        .map(|component| component * component)
-        .sum::<f64>()
-        > 0.0
-    {
-        Ok(())
-    } else {
-        Err(GeometryContractError::invalid(
-            field,
-            "direction must be nonzero",
-        ))
     }
 }

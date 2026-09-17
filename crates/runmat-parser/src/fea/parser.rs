@@ -187,6 +187,24 @@ impl FeaParser {
         let (body, next) = self.parse_block(open);
         let header_start = name_index.map_or(start + 1, |index| index + 1);
         let header = self.token_range(header_start, open);
+        let header_significant = self.significant(header_start, open);
+        let source = if kind == FeaDeclarationKind::Geometry
+            && header_significant
+                .first()
+                .is_some_and(|index| self.at(*index, FeaTokenKind::Keyword(FeaKeyword::From)))
+        {
+            let reference = self.parse_reference_indices(&header_significant[1..]);
+            if reference.is_none() {
+                self.diagnostics.push(FeaSyntaxDiagnostic {
+                    kind: FeaSyntaxDiagnosticKind::InvalidExpression,
+                    span: header.span,
+                    message: "expected a geometry reference after `from`".to_string(),
+                });
+            }
+            reference
+        } else {
+            None
+        };
         let span = Span {
             start: self.token(start).span.start,
             end: body.span.end,
@@ -195,6 +213,7 @@ impl FeaParser {
             name.map(|name| FeaDeclaration {
                 kind,
                 name,
+                source,
                 header,
                 body,
                 span,
@@ -334,6 +353,9 @@ impl FeaParser {
             Some(FeaTokenKind::Keyword(FeaKeyword::Let)) => {
                 self.parse_let_statement(&significant, range)
             }
+            Some(FeaTokenKind::Keyword(FeaKeyword::Feature)) => {
+                self.parse_feature_statement(&significant, range)
+            }
             Some(FeaTokenKind::Keyword(FeaKeyword::Assign)) => {
                 self.parse_material_assignment(&significant, range)
             }
@@ -404,6 +426,26 @@ impl FeaParser {
             self.missing_expression(range.span, "expected `=` and a binding expression")
         };
         FeaStatementKind::Let { name, value }
+    }
+
+    fn parse_feature_statement(
+        &mut self,
+        significant: &[usize],
+        range: FeaTokenRange,
+    ) -> FeaStatementKind {
+        let name = significant
+            .get(1)
+            .and_then(|index| self.name(*index, FeaSyntaxDiagnosticKind::ExpectedIdentifier))
+            .unwrap_or_else(|| missing_name(range.span));
+        let equal = significant
+            .iter()
+            .position(|index| self.at(*index, FeaTokenKind::Equal));
+        let value = if let Some(position) = equal {
+            self.parse_expression_indices(&significant[position + 1..], range.span)
+        } else {
+            self.missing_expression(range.span, "expected `=` and a feature operation")
+        };
+        FeaStatementKind::Feature { name, value }
     }
 
     fn parse_material_assignment(

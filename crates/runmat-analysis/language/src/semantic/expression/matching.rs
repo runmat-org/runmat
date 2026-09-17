@@ -93,10 +93,21 @@ pub(super) fn declaration_arguments_match(
         .all(|(name, input)| !input.required || assigned.contains_key(name))
 }
 
-fn pattern_matches(pattern: &OperationTypePattern, value: &FeaType) -> bool {
+pub(crate) fn pattern_matches(pattern: &OperationTypePattern, value: &FeaType) -> bool {
     match pattern {
         OperationTypePattern::Any => true,
         OperationTypePattern::NumericScalar => value.is_numeric(),
+        OperationTypePattern::Quantity(dimension) => {
+            *value == FeaType::Quantity((*dimension).into())
+        }
+        OperationTypePattern::VectorQuantity { dimension, length } => matches!(
+            value,
+            FeaType::Vector {
+                element,
+                length: value_length,
+            } if element.as_ref() == &FeaType::Quantity((*dimension).into())
+                && length.is_none_or(|expected| *value_length == Some(expected))
+        ),
         OperationTypePattern::IntegerScalar | OperationTypePattern::Size => {
             matches!(value, FeaType::Integer)
         }
@@ -198,6 +209,11 @@ fn pattern_type(pattern: &OperationTypePattern) -> FeaType {
         | OperationTypePattern::Prototype
         | OperationTypePattern::PropertyValue => FeaType::Unknown,
         OperationTypePattern::NumericScalar => FeaType::Real,
+        OperationTypePattern::Quantity(dimension) => FeaType::Quantity((*dimension).into()),
+        OperationTypePattern::VectorQuantity { dimension, length } => FeaType::Vector {
+            element: Box::new(FeaType::Quantity((*dimension).into())),
+            length: *length,
+        },
         OperationTypePattern::IntegerScalar | OperationTypePattern::Size => FeaType::Integer,
         OperationTypePattern::StringScalar
         | OperationTypePattern::Style
@@ -218,6 +234,7 @@ fn pattern_type(pattern: &OperationTypePattern) -> FeaType {
 fn analysis_type(value: AnalysisValueType) -> FeaType {
     match value {
         AnalysisValueType::Geometry => FeaType::Declaration(FeaSymbolKind::Geometry),
+        AnalysisValueType::GeometryFeature => FeaType::GeometryFeature,
         AnalysisValueType::Region => FeaType::Unknown,
         AnalysisValueType::Material => FeaType::Declaration(FeaSymbolKind::Material),
         AnalysisValueType::Model => FeaType::Declaration(FeaSymbolKind::Model),
@@ -236,6 +253,7 @@ fn analysis_type(value: AnalysisValueType) -> FeaType {
 fn analysis_pattern_matches(expected: AnalysisValueType, value: &FeaType) -> bool {
     match expected {
         AnalysisValueType::Region => matches!(value, FeaType::Region(_)),
+        AnalysisValueType::GeometryFeature => matches!(value, FeaType::GeometryFeature),
         AnalysisValueType::Field => matches!(value, FeaType::Field(_)),
         AnalysisValueType::History => matches!(value, FeaType::History(_)),
         AnalysisValueType::AttributedExtremum => {

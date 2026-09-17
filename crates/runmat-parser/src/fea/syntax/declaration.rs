@@ -1,4 +1,4 @@
-use super::{FeaBlock, FeaName, FeaTokenRange};
+use super::{FeaBlock, FeaName, FeaReference, FeaTokenRange};
 use runmat_types::Span;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -36,6 +36,7 @@ pub enum FeaDeclarationKind {
 pub struct FeaDeclaration {
     pub kind: FeaDeclarationKind,
     pub name: FeaName,
+    pub source: Option<FeaReference>,
     pub header: FeaTokenRange,
     pub body: FeaBlock,
     pub span: Span,
