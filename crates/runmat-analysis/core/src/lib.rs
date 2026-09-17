@@ -3,6 +3,7 @@
 pub mod problem {
     pub mod authored_constraints;
     pub mod authored_excitations;
+    pub mod authored_initial_conditions;
     pub mod authored_model_physics;
     pub mod authored_properties;
     pub mod boundary;
@@ -58,6 +59,10 @@ pub use problem::authored_constraints::{
 pub use problem::authored_excitations::{
     validate_authored_excitations, AuthoredExcitation, AuthoredExcitationCase,
     AuthoredExcitationKind, AuthoredExcitationTarget,
+};
+pub use problem::authored_initial_conditions::{
+    AuthoredInitialCondition, AuthoredInitialConditionError, AuthoredInitialConditionKind,
+    AuthoredInitialConditionTarget,
 };
 pub use problem::authored_model_physics::{
     AuthoredBoundary, AuthoredBoundaryKind, AuthoredConnector, AuthoredConnectorKind,

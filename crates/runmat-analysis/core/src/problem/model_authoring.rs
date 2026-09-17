@@ -4,6 +4,9 @@ use runmat_geometry_core::{GeometryRegionRef, GeometryRegionRole};
 use serde::{Deserialize, Serialize};
 
 use super::authored_constraints::AuthoredConstraint;
+use super::authored_initial_conditions::{
+    AuthoredInitialCondition, AuthoredInitialConditionTarget,
+};
 use super::authored_model_physics::{
     validate_unique, AuthoredBoundary, AuthoredConnector, AuthoredInterface,
 };
@@ -105,6 +108,7 @@ pub struct AuthoredModel {
     pub signals: Vec<super::signal::PhysicalSignal>,
     pub excitations: Vec<super::authored_excitations::AuthoredExcitation>,
     pub excitation_cases: Vec<super::authored_excitations::AuthoredExcitationCase>,
+    pub initial_conditions: Vec<AuthoredInitialCondition>,
 }
 
 impl AuthoredModel {
@@ -299,6 +303,26 @@ impl AuthoredModel {
             kind: "excitation",
             detail,
         })?;
+        let mut initial_condition_ids = BTreeSet::new();
+        for condition in &self.initial_conditions {
+            condition.validate(&self.signals).map_err(|error| {
+                AuthoredModelError::InvalidPhysics {
+                    kind: "initial condition",
+                    detail: error.to_string(),
+                }
+            })?;
+            if !initial_condition_ids.insert(condition.initial_condition_id.as_str()) {
+                return Err(AuthoredModelError::DuplicatePhysics {
+                    kind: "initial condition",
+                    id: condition.initial_condition_id.clone(),
+                });
+            }
+            if let AuthoredInitialConditionTarget::Region(AuthoredRegionSource::ModelInput(input)) =
+                &condition.target
+            {
+                require_input(input, &inputs)?;
+            }
+        }
         for excitation in &self.excitations {
             if let super::authored_excitations::AuthoredExcitationTarget::Region(
                 AuthoredRegionSource::ModelInput(input),

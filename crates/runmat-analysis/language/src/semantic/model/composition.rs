@@ -2,9 +2,10 @@ use super::diagnostic;
 use crate::{CheckedFeaDeclaration, FeaDiagnostic, FeaSymbolKey, LogicalSourcePath};
 use runmat_analysis_core::{
     AuthoredBoundary, AuthoredConnector, AuthoredConstraint, AuthoredExcitation,
-    AuthoredExcitationCase, AuthoredInterface, AuthoredLayupSource, AuthoredMaterialSource,
-    AuthoredModel, AuthoredModelRef, AuthoredOrientationSource, AuthoredPropertyAssignment,
-    AuthoredPropertyTarget, AuthoredRegionSource, AuthoredSectionSource, PhysicalSignal,
+    AuthoredExcitationCase, AuthoredInitialCondition, AuthoredInterface, AuthoredLayupSource,
+    AuthoredMaterialSource, AuthoredModel, AuthoredModelRef, AuthoredOrientationSource,
+    AuthoredPropertyAssignment, AuthoredPropertyTarget, AuthoredRegionSource,
+    AuthoredSectionSource, PhysicalSignal,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -123,6 +124,12 @@ fn collect(
         |value| value.case_id.as_str(),
         "excitation case",
     )?;
+    collect_named(
+        &model.initial_conditions,
+        &mut assignments.initial_conditions,
+        |value| value.initial_condition_id.as_str(),
+        "initial condition",
+    )?;
     stack.remove(key);
     Ok(())
 }
@@ -198,6 +205,7 @@ struct CompositionAssignments {
     signals: BTreeMap<String, PhysicalSignal>,
     excitations: BTreeMap<String, AuthoredExcitation>,
     excitation_cases: BTreeMap<String, AuthoredExcitationCase>,
+    initial_conditions: BTreeMap<String, AuthoredInitialCondition>,
 }
 
 fn collect_named<T: Clone + PartialEq>(

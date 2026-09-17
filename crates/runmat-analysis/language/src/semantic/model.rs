@@ -17,6 +17,7 @@ use std::collections::BTreeMap;
 mod composition;
 mod constraints;
 mod excitations;
+mod initial_conditions;
 mod physics;
 mod properties;
 mod signals;
@@ -103,6 +104,7 @@ fn model(
     let mut signals = signals::lower(declaration, bound, diagnostics);
     let constraints = constraints::lower(declaration, bound, &signals, diagnostics);
     let lowered_excitations = excitations::lower(declaration, bound, &signals, diagnostics);
+    let initial_conditions = initial_conditions::lower(declaration, bound, &signals, diagnostics);
     signals.extend(lowered_excitations.signals);
     AuthoredModel {
         module_path: declaration.module.as_str().to_string(),
@@ -121,6 +123,7 @@ fn model(
         signals,
         excitations: lowered_excitations.excitations,
         excitation_cases: lowered_excitations.cases,
+        initial_conditions,
     }
 }
 
