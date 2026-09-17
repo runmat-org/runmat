@@ -6778,6 +6778,8 @@ name = "runmat-lexer"
 version = "0.6.2"
 dependencies = [
  "logos",
+ "runmat-types",
+ "serde",
 ]
 
 [[package]]

@@ -126,12 +126,21 @@ for (const { path: sourcePath, text } of allRust) {
   ) {
     fail(`${sourcePath} imports FEA source-language machinery below the canonical contract boundary`);
   }
+  if (
+    (sourcePath.startsWith("crates/runmat-lexer/src/fea/") ||
+      sourcePath.startsWith("crates/runmat-parser/src/fea/")) &&
+    /\brunmat_(?:analysis|geometry|runtime|builtins|value|execution)\b/.test(text)
+  ) {
+    fail(`${sourcePath} imports domain or runtime behavior into the FEA syntax frontend`);
+  }
 }
 
 const newFeaBoundarySources = allRust.filter(
   ({ path: sourcePath }) =>
     sourcePath.startsWith("crates/runmat-analysis/language/") ||
-    sourcePath.startsWith("crates/runmat-types/src/operation/"),
+    sourcePath.startsWith("crates/runmat-types/src/operation/") ||
+    sourcePath.startsWith("crates/runmat-lexer/src/fea/") ||
+    sourcePath.startsWith("crates/runmat-parser/src/fea/"),
 );
 for (const { path: sourcePath, text } of newFeaBoundarySources) {
   if (/#\s*!?\s*\[\s*allow\b/.test(text)) {
@@ -139,6 +148,9 @@ for (const { path: sourcePath, text } of newFeaBoundarySources) {
   }
   if (/\b[A-Za-z_][A-Za-z0-9_]*[Vv]2\b/.test(text)) {
     fail(`${sourcePath} adds a version-suffixed FEA language identifier`);
+  }
+  if (text.split("\n").length > 600) {
+    fail(`${sourcePath} exceeds the 600-line FEA module concentration limit`);
   }
 }
 
