@@ -12,7 +12,8 @@ export function validateModuleCompositionControl(
   const products = [...integrationProducts.values()];
   const baseline = bindModuleCompositionProjection(products, baselineValue);
   const transitions = new Map();
-  const changedKeys = new Map();
+  const childChanges = new Map();
+  const productStateOwners = new Map();
   for (const [bundleId, bundle] of bundles) {
     const productIds = bundle.integration_product_refs.filter((productId) => {
       const product = integrationProducts.get(productId);
@@ -47,11 +48,27 @@ export function validateModuleCompositionControl(
     );
     for (const change of transition.changes) {
       const key = `${change.product_id}\0${(change.after ?? change.before).module}`;
-      const priorBundle = changedKeys.get(key);
-      if (priorBundle) {
-        throw new Error(`${bundleId}: composition child is also changed by ${priorBundle}`);
+      const currentChange = {
+        bundle_id: bundleId,
+        semantic: !isParentMetadataOnlyReplacement(change),
+      };
+      const priorChanges = childChanges.get(key) ?? [];
+      for (const priorChange of priorChanges) {
+        const prerequisiteOrdered = dependsOn(bundles, bundleId, priorChange.bundle_id)
+          || dependsOn(bundles, priorChange.bundle_id, bundleId);
+        if (!prerequisiteOrdered) {
+          throw new Error(
+            `${bundleId}: composition child is also changed by ${priorChange.bundle_id} and is not prerequisite-ordered`,
+          );
+        }
+        if (currentChange.semantic && priorChange.semantic) {
+          throw new Error(
+            `${bundleId}: composition child is also semantically changed by ${priorChange.bundle_id}`,
+          );
+        }
       }
-      changedKeys.set(key, bundleId);
+      priorChanges.push(currentChange);
+      childChanges.set(key, priorChanges);
       const parentMetadataOnly = isParentMetadataOnlyReplacement(change);
       for (const child of [change.before, change.after].filter(Boolean)) {
         if (!parentMetadataOnly
@@ -64,9 +81,9 @@ export function validateModuleCompositionControl(
     for (const state of transition.product_states.filter((entry) =>
       entry.before_state !== entry.after_state)) {
       const key = `${state.product_id}\0@state`;
-      const priorBundle = changedKeys.get(key);
+      const priorBundle = productStateOwners.get(key);
       if (priorBundle) throw new Error(`${bundleId}: composition product state is also changed by ${priorBundle}`);
-      changedKeys.set(key, bundleId);
+      productStateOwners.set(key, bundleId);
     }
     transitions.set(bundleId, transition);
   }
