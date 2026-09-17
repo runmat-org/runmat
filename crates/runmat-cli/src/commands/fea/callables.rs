@@ -359,6 +359,7 @@ fn project_function_name<'a>(
     object: &str,
 ) -> Result<&'a str> {
     match &invocation.callable {
+        GeneratorCallable::ImportedFunction(identity) => Ok(&identity.symbol),
         GeneratorCallable::ProjectFunction { qualified_name } => Ok(qualified_name),
         GeneratorCallable::BoundFunction { .. } => bail!(
             "{object} contains a runtime-bound callable that cannot be loaded from a .fea document"
@@ -373,6 +374,9 @@ fn project_generators(signals: &[PhysicalSignal]) -> Result<Vec<(&PhysicalSignal
             continue;
         };
         match &generator.invocation.callable {
+            GeneratorCallable::ImportedFunction(identity) => {
+                requested.push((signal, identity.symbol.as_str()));
+            }
             GeneratorCallable::ProjectFunction { qualified_name } => {
                 requested.push((signal, qualified_name.as_str()));
             }

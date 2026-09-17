@@ -68,6 +68,15 @@ pub struct CheckedFeaStatement {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CheckedFeaStatementKind {
+    GeneratedByFunction {
+        function: Vec<String>,
+        statements: Vec<CheckedFeaStatement>,
+    },
+    UniformSample {
+        start: CheckedExpression,
+        end: CheckedExpression,
+        rate: CheckedExpression,
+    },
     SignalDefinition {
         name: String,
         quantity: String,
@@ -311,6 +320,31 @@ fn check_block<C: AnalysisOperationCatalog + ?Sized>(
         .map(|statement| {
             let kind =
                 match &statement.kind {
+                    FeaStatementKind::GeneratedByFunction { function, body } => {
+                        CheckedFeaStatementKind::GeneratedByFunction {
+                            function: function
+                                .segments
+                                .iter()
+                                .map(|segment| segment.text.clone())
+                                .collect(),
+                            statements: check_block(
+                                catalog,
+                                path,
+                                source,
+                                body,
+                                scope,
+                                outputs,
+                                diagnostics,
+                            ),
+                        }
+                    }
+                    FeaStatementKind::UniformSample { start, end, rate } => {
+                        CheckedFeaStatementKind::UniformSample {
+                            start: check_value(catalog, path, source, scope, start, diagnostics),
+                            end: check_value(catalog, path, source, scope, end, diagnostics),
+                            rate: check_value(catalog, path, source, scope, rate, diagnostics),
+                        }
+                    }
                     FeaStatementKind::SignalDefinition {
                         name,
                         quantity,

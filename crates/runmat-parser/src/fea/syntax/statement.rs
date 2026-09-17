@@ -29,6 +29,15 @@ pub enum FeaModelDefinitionKind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FeaStatementKind {
+    GeneratedByFunction {
+        function: FeaReference,
+        body: FeaBlock,
+    },
+    UniformSample {
+        start: FeaExpression,
+        end: FeaExpression,
+        rate: FeaExpression,
+    },
     SignalDefinition {
         name: FeaName,
         quantity: FeaName,

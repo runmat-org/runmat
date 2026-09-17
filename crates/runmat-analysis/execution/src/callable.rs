@@ -118,6 +118,7 @@ pub fn admit_named_signal_generator(
     if !matches!(
         &generator.invocation.callable,
         runmat_analysis_core::GeneratorCallable::ProjectFunction { .. }
+            | runmat_analysis_core::GeneratorCallable::ImportedFunction(_)
     ) {
         return Err(AnalysisBridgeError::Identity(
             "named project admission requires a project-function generator identity",
@@ -286,6 +287,7 @@ fn admit_named_numerical_generator(
     if !matches!(
         invocation.callable,
         runmat_analysis_core::GeneratorCallable::ProjectFunction { .. }
+            | runmat_analysis_core::GeneratorCallable::ImportedFunction(_)
     ) {
         return Err(AnalysisBridgeError::Identity(
             "named project admission requires a project-function generator identity",

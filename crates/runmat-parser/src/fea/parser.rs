@@ -7,6 +7,7 @@ mod cursor;
 mod declaration;
 mod expression;
 mod grammar;
+mod signal;
 
 use grammar::*;
 
@@ -143,6 +144,9 @@ impl FeaParser {
                     statements.push(FeaStatement {
                         kind: self
                             .parse_model_definition(start, open_block, body.clone())
+                            .or_else(|| {
+                                self.parse_generated_function(start, open_block, body.clone())
+                            })
                             .unwrap_or(FeaStatementKind::Block { header, body }),
                         span,
                     });
@@ -221,6 +225,7 @@ impl FeaParser {
         let first = *significant.first()?;
         let span = range.span;
         let kind = match self.kind(first) {
+            _ if self.lexeme(first) == "sample" => self.parse_uniform_sample(&significant, range),
             Some(FeaTokenKind::Keyword(FeaKeyword::Input)) => {
                 self.parse_input_statement(&significant, range)
             }
@@ -380,43 +385,6 @@ impl FeaParser {
             });
         }
         Some(FeaStatementKind::ModelDefinition { kind, name, body })
-    }
-
-    fn parse_signal_definition(
-        &mut self,
-        significant: &[usize],
-        body: FeaBlock,
-    ) -> Option<FeaStatementKind> {
-        let valid = significant.len() == 6
-            && self.kind(significant[2]) == Some(FeaTokenKind::Colon)
-            && self.lexeme(significant[4]) == "over";
-        if !valid {
-            self.diagnostics.push(FeaSyntaxDiagnostic {
-                kind: FeaSyntaxDiagnosticKind::ExpectedToken,
-                span: self.token(significant[0]).span,
-                message: "signal header requires `signal <name> : <quantity> over <domain>`"
-                    .to_string(),
-            });
-        }
-        let fallback = significant[0];
-        let name = self.name(
-            *significant.get(1).unwrap_or(&fallback),
-            FeaSyntaxDiagnosticKind::ExpectedIdentifier,
-        )?;
-        let quantity = self.name(
-            *significant.get(3).unwrap_or(&fallback),
-            FeaSyntaxDiagnosticKind::ExpectedIdentifier,
-        )?;
-        let domain = self.name(
-            *significant.get(5).unwrap_or(&fallback),
-            FeaSyntaxDiagnosticKind::ExpectedIdentifier,
-        )?;
-        Some(FeaStatementKind::SignalDefinition {
-            name,
-            quantity,
-            domain,
-            body,
-        })
     }
 
     fn parse_output_statement(

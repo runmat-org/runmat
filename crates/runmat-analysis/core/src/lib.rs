@@ -141,7 +141,8 @@ pub use problem::response_spectrum::{
 };
 pub use problem::signal::{
     GeneratorArgument, GeneratorCallable, GeneratorDomain, GeneratorEffectPolicy,
-    GeneratorInvocation, GeneratorProvenance, NumericalDataSource, PhysicalQuantityKind,
+    GeneratorInvocation, GeneratorProvenance, ImportedFunctionIdentity, NumericalDataSource,
+    PhysicalQuantityKind,
     PhysicalSignal, RandomDistribution, Signal, SignalApproximationEvidence, SignalArtifactDomain,
     SignalArtifactRef, SignalDomainKind, SignalExtrapolation, SignalGenerator, SignalId,
     SignalInterpolation, SignalKnot, SignalKnotValue, SignalOrdinate, SignalPointContinuity,

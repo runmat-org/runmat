@@ -705,6 +705,7 @@ impl<T> NumericalDataSource<T> {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GeneratorCallable {
+    ImportedFunction(Box<ImportedFunctionIdentity>),
     ProjectFunction {
         qualified_name: String,
     },
@@ -717,10 +718,19 @@ pub enum GeneratorCallable {
 impl GeneratorCallable {
     pub fn display_name(&self) -> &str {
         match self {
+            Self::ImportedFunction(identity) => &identity.symbol,
             Self::ProjectFunction { qualified_name } => qualified_name,
             Self::BoundFunction { display_name, .. } => display_name,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ImportedFunctionIdentity {
+    pub module_path: String,
+    pub symbol: String,
+    pub source_digest: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

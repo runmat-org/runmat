@@ -430,6 +430,21 @@ pub(crate) fn validate_generator_invocation(
     invocation: &crate::GeneratorInvocation,
 ) -> Result<(), String> {
     match &invocation.callable {
+        crate::GeneratorCallable::ImportedFunction(identity) => {
+            if identity.module_path.trim().is_empty()
+                || !is_identifier(&identity.symbol)
+                || identity.source_digest.len() != 64
+                || !identity
+                    .source_digest
+                    .bytes()
+                    .all(|byte| byte.is_ascii_hexdigit())
+            {
+                return Err(
+                    "imported generator requires a module path, function symbol, and SHA-256 source digest"
+                        .to_string(),
+                );
+            }
+        }
         crate::GeneratorCallable::ProjectFunction { qualified_name } => {
             let parts = qualified_name.split('.').collect::<Vec<_>>();
             if parts.len() < 2 || !parts.iter().all(|part| is_identifier(part)) {

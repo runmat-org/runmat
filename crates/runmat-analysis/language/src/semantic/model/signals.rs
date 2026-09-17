@@ -8,8 +8,13 @@ use runmat_analysis_core::{
     SignalId, SignalPrecision, SignalProvenance, SignalRepresentation, SignalShape, SignalValue,
 };
 
+mod generated;
+
+type SignalWrapper = fn(Signal<f64>) -> PhysicalSignal;
+
 pub(super) fn lower(
     declaration: &CheckedFeaDeclaration,
+    bound: &crate::BoundFeaProgram,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Vec<PhysicalSignal> {
     declaration
@@ -25,17 +30,58 @@ pub(super) fn lower(
             else {
                 return None;
             };
-            constant_signal(declaration, name, quantity, domain, statements, diagnostics)
+            signal(
+                declaration,
+                bound,
+                name,
+                quantity,
+                domain,
+                statements,
+                diagnostics,
+            )
         })
         .collect()
+}
+
+fn signal(
+    declaration: &CheckedFeaDeclaration,
+    bound: &crate::BoundFeaProgram,
+    id: &str,
+    quantity: &str,
+    domain: &str,
+    body: &[CheckedFeaStatement],
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Option<PhysicalSignal> {
+    let (dimension, wrap) = signal_kind(declaration, quantity, diagnostics)?;
+    if body.iter().any(|statement| {
+        matches!(
+            statement.kind,
+            CheckedFeaStatementKind::GeneratedByFunction { .. }
+        )
+    }) {
+        return generated::lower(
+            generated::LowerSignal {
+                declaration,
+                bound,
+                quantity_dimension: dimension,
+                wrap,
+                diagnostics,
+            },
+            id,
+            domain,
+            body,
+        );
+    }
+    constant_signal(declaration, id, domain, body, dimension, wrap, diagnostics)
 }
 
 fn constant_signal(
     declaration: &CheckedFeaDeclaration,
     id: &str,
-    quantity: &str,
     domain: &str,
     body: &[CheckedFeaStatement],
+    dimension: PhysicalDimension,
+    wrap: SignalWrapper,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<PhysicalSignal> {
     if domain != "constant" {
@@ -51,7 +97,22 @@ fn constant_signal(
     }
     validate_assignments(declaration, body, &["value", "frame"], diagnostics);
     let expression = required_assignment(declaration, body, "value", diagnostics)?;
-    let (dimension, wrap): (_, fn(Signal<f64>) -> PhysicalSignal) = match quantity {
+    let raw = signal_value(declaration, expression, dimension, diagnostics)?;
+    let frame = optional_frame(declaration, body, raw.is_vector(), diagnostics)?;
+    Some(wrap(signal_contract(
+        id,
+        raw,
+        frame,
+        SignalRepresentation::Constant,
+    )))
+}
+
+fn signal_kind(
+    declaration: &CheckedFeaDeclaration,
+    quantity: &str,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Option<(PhysicalDimension, SignalWrapper)> {
+    Some(match quantity {
         "displacement" => (PhysicalDimension::LENGTH, |value| {
             convert(value, PhysicalSignal::Displacement)
         }),
@@ -136,18 +197,25 @@ fn constant_signal(
             );
             return None;
         }
-    };
-    let raw = signal_value(declaration, expression, dimension, diagnostics)?;
-    let frame = optional_frame(declaration, body, raw.is_vector(), diagnostics)?;
-    Some(wrap(Signal {
+    })
+}
+
+fn signal_contract(
+    id: &str,
+    shape_source: SignalValue<f64>,
+    frame: Option<CoordinateFrame>,
+    representation: impl FnOnce(SignalValue<f64>) -> SignalRepresentation<f64>,
+) -> Signal<f64> {
+    let is_vector = shape_source.is_vector();
+    Signal {
         signal_id: SignalId(id.into()),
-        shape: if raw.is_vector() {
+        shape: if is_vector {
             SignalShape::Vector3
         } else {
             SignalShape::Scalar
         },
         frame,
-        representation: SignalRepresentation::Constant(raw),
+        representation: representation(shape_source),
         precision: SignalPrecision::Real64,
         evidence: SignalApproximationEvidence {
             max_absolute_error: Some(0.0),
@@ -156,7 +224,7 @@ fn constant_signal(
             sample_count: 1,
         },
         provenance: SignalProvenance::Authored,
-    }))
+    }
 }
 
 trait RawSignalValue {
@@ -295,7 +363,19 @@ fn convert<Q: CanonicalQuantity>(
                     values.map(Q::from_canonical_value),
                 ))
             }
-            _ => unreachable!("constant signal lowering creates only scalar or vector values"),
+            SignalRepresentation::Constant(SignalValue::Tensor { shape, values }) => {
+                SignalRepresentation::Constant(SignalValue::Tensor {
+                    shape,
+                    values: values.into_iter().map(Q::from_canonical_value).collect(),
+                })
+            }
+            SignalRepresentation::Generator(generator) => {
+                SignalRepresentation::Generator(generator)
+            }
+            SignalRepresentation::Artifact(artifact) => SignalRepresentation::Artifact(artifact),
+            SignalRepresentation::Tabulated(_) | SignalRepresentation::Waveform(_) => {
+                unreachable!("source lowering has not constructed tabulated or waveform signals")
+            }
         },
         precision: signal.precision,
         evidence: signal.evidence,

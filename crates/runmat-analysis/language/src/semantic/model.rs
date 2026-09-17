@@ -100,7 +100,7 @@ fn model(
     let lowered_properties = properties::lower(declaration, bound, diagnostics);
     let constraints = constraints::lower(declaration, bound, diagnostics);
     let lowered_physics = physics::lower(declaration, bound, diagnostics);
-    let signals = signals::lower(declaration, diagnostics);
+    let signals = signals::lower(declaration, bound, diagnostics);
     AuthoredModel {
         module_path: declaration.module.as_str().to_string(),
         model_id: declaration.key.name.clone(),
