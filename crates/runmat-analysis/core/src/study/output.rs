@@ -124,6 +124,64 @@ pub enum ObservationQuantity {
 }
 
 impl ObservationQuantity {
+    /// Resolve the stable source-language spelling of an observation quantity.
+    ///
+    /// Keeping this closed mapping beside the canonical enum prevents frontends from growing
+    /// independent string-dispatch tables for the same scientific quantities.
+    pub fn from_source_name(name: &str) -> Option<Self> {
+        Some(match name {
+            "displacement" => Self::Displacement,
+            "rotation" => Self::Rotation,
+            "velocity" => Self::Velocity,
+            "acceleration" => Self::Acceleration,
+            "strain" => Self::Strain,
+            "stress" => Self::Stress,
+            "von_mises_stress" => Self::VonMisesStress,
+            "reaction_force" => Self::ReactionForce,
+            "reaction_moment" => Self::ReactionMoment,
+            "strain_energy" => Self::StrainEnergy,
+            "beam_axial_force" => Self::BeamAxialForce,
+            "beam_shear_force" => Self::BeamShearForce,
+            "beam_torsion_moment" => Self::BeamTorsionMoment,
+            "beam_bending_moment" => Self::BeamBendingMoment,
+            "beam_bending_stress" => Self::BeamBendingStress,
+            "beam_torsion_stress" => Self::BeamTorsionStress,
+            "shell_membrane_force" => Self::ShellMembraneForce,
+            "shell_bending_moment" => Self::ShellBendingMoment,
+            "shell_transverse_shear" => Self::ShellTransverseShear,
+            "shell_von_mises" => Self::ShellVonMises,
+            "temperature" => Self::Temperature,
+            "temperature_gradient" => Self::TemperatureGradient,
+            "heat_flux" => Self::HeatFlux,
+            "heat_rate" => Self::HeatRate,
+            "electric_potential" => Self::ElectricPotential,
+            "electric_field" => Self::ElectricField,
+            "electric_current" => Self::ElectricCurrent,
+            "electric_current_density" => Self::ElectricCurrentDensity,
+            "electric_charge" => Self::ElectricCharge,
+            "magnetic_vector_potential" => Self::MagneticVectorPotential,
+            "magnetic_flux_density" => Self::MagneticFluxDensity,
+            "magnetic_field_intensity" => Self::MagneticFieldIntensity,
+            "acoustic_pressure" => Self::AcousticPressure,
+            "acoustic_particle_velocity" => Self::AcousticParticleVelocity,
+            "sound_pressure_level" => Self::SoundPressureLevel,
+            "fluid_pressure" => Self::FluidPressure,
+            "fluid_velocity" => Self::FluidVelocity,
+            "vorticity" => Self::Vorticity,
+            "mass_flow_rate" => Self::MassFlowRate,
+            "wall_shear_stress" => Self::WallShearStress,
+            "modal_frequency" => Self::ModalFrequency,
+            "modal_participation" => Self::ModalParticipation,
+            "eigenvalue" => Self::Eigenvalue,
+            "residual" => Self::Residual,
+            "balance" => Self::Balance,
+            "constraint_violation" => Self::ConstraintViolation,
+            "contact_gap" => Self::ContactGap,
+            "contact_pressure" => Self::ContactPressure,
+            _ => return None,
+        })
+    }
+
     /// Canonical component shape of this physical quantity.
     ///
     /// This is the shared authority used by authored-output validation, physics recovery, and

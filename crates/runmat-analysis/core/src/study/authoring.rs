@@ -4,8 +4,9 @@ use runmat_geometry_core::{GeometryDefinitionRef, GeometryRegionRef};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    validate_analysis_sequence, AnalysisSequence, AuthoredInputDefinition, AuthoredInputType,
-    AuthoredInputValue, AuthoredModel, AuthoredModelRef,
+    validate_analysis_sequence, validate_authored_outputs, AnalysisSequence,
+    AuthoredInputDefinition, AuthoredInputType, AuthoredInputValue, AuthoredModel,
+    AuthoredModelRef, AuthoredOutput, AuthoredOutputExpression, AuthoredRegionSource,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -53,6 +54,7 @@ pub struct AuthoredStudy {
     pub mesh: AuthoredMeshRef,
     pub model: AuthoredModelInstance,
     pub inputs: Vec<AuthoredInputDefinition>,
+    pub outputs: Vec<AuthoredOutput>,
     pub sequence: AnalysisSequence,
 }
 
@@ -140,7 +142,44 @@ impl AuthoredStudy {
 
         validate_analysis_sequence(&self.sequence)
             .map_err(|error| AuthoredStudyError::InvalidSequence(error.to_string()))?;
+        validate_authored_outputs(&self.outputs, &self.sequence.steps)
+            .map_err(|error| AuthoredStudyError::InvalidOutput(error.to_string()))?;
+        for output in &self.outputs {
+            validate_output_regions(&output.expression, &self.geometry, model)?;
+        }
         Ok(())
+    }
+}
+
+fn validate_output_regions(
+    expression: &AuthoredOutputExpression,
+    geometry: &GeometryDefinitionRef,
+    model: &AuthoredModel,
+) -> Result<(), AuthoredStudyError> {
+    match expression {
+        AuthoredOutputExpression::Projection { source, .. } => {
+            validate_output_regions(source, geometry, model)
+        }
+        AuthoredOutputExpression::SpatialReduction { source, target, .. } => {
+            validate_output_regions(source, geometry, model)?;
+            match target {
+                AuthoredRegionSource::Geometry(region) => validate_region_owner(region, geometry),
+                AuthoredRegionSource::ModelInput(reference)
+                    if model.inputs.iter().any(|input| {
+                        input.input_id == reference.input_id
+                            && input.value_type == reference.value_type
+                            && matches!(input.value_type, AuthoredInputType::Region(_))
+                    }) =>
+                {
+                    Ok(())
+                }
+                AuthoredRegionSource::ModelInput(_) => Err(AuthoredStudyError::InvalidOutput(
+                    "output region references an unavailable model region input".into(),
+                )),
+            }
+        }
+        AuthoredOutputExpression::AnalysisField { .. }
+        | AuthoredOutputExpression::OutputReference { .. } => Ok(()),
     }
 }
 
@@ -201,6 +240,8 @@ pub enum AuthoredStudyError {
     RegionFromWrongGeometry,
     #[error("study procedure sequence is invalid: {0}")]
     InvalidSequence(String),
+    #[error("study output is invalid: {0}")]
+    InvalidOutput(String),
 }
 
 #[cfg(test)]
@@ -275,6 +316,7 @@ mod tests {
                 minimum: None,
                 maximum: None,
             }],
+            outputs: Vec::new(),
             sequence: AnalysisSequence {
                 sequence_id: "response".into(),
                 steps: vec![step],

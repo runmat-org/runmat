@@ -124,6 +124,7 @@ impl AnalysisOperationCatalog for TestHost {
         if let Some(operation) = geometry_operation_extension()
             .operations
             .into_iter()
+            .chain(output_operation_extension().operations)
             .find(|operation| operation.identity == request.operation)
         {
             return Ok(ResolvedOperationFacts { operation });

@@ -73,6 +73,7 @@ pub(super) fn lower(
         diagnostics,
     );
     let sequence = lower::lower_study(declaration, model, diagnostics)?;
+    let outputs = super::output::lower_outputs(context.bound, declaration, diagnostics);
     if diagnostics.len() != initial_errors {
         return None;
     }
@@ -95,6 +96,7 @@ pub(super) fn lower(
             arguments,
         },
         inputs,
+        outputs,
         sequence,
     };
     if let Err(error) = study.validate(model) {

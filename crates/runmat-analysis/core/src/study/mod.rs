@@ -1,6 +1,7 @@
 //! Solver-independent identity for an authored analysis and its realized formulation.
 
 pub mod accuracy;
+mod authored_output;
 pub mod authoring;
 mod compatibility;
 mod formulation;
@@ -9,6 +10,11 @@ pub mod output;
 mod realization;
 pub mod sequence;
 
+pub use authored_output::{
+    validate_authored_outputs, AuthoredExtremaTiePolicy, AuthoredFieldDomain,
+    AuthoredFieldProjection, AuthoredOutput, AuthoredOutputError, AuthoredOutputExpression,
+    AuthoredOutputType, AuthoredOutputValue, AuthoredSpatialReduction, AuthoredVectorComponent,
+};
 pub use authoring::{
     AuthoredMeshRef, AuthoredModelArgument, AuthoredModelArgumentValue, AuthoredModelInstance,
     AuthoredStudy, AuthoredStudyError, AuthoredStudyInputRef,

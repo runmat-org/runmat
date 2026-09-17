@@ -32,6 +32,7 @@ pub struct RealizedStudy {
     /// Transitive included models in dependency-first order. The root model is not repeated here.
     pub included_models: Vec<AuthoredModel>,
     pub study_inputs: Vec<AuthoredStudyInputBinding>,
+    pub outputs: Vec<crate::AuthoredOutput>,
     pub sequence: AnalysisSequence,
 }
 
@@ -63,6 +64,10 @@ impl AuthoredStudy {
         let study_inputs = bind_study_inputs(self, provided_inputs)?;
         let model_inputs = bind_model_inputs(self, model, &study_inputs)?;
         let realized_model = realize_model(model.clone(), &model_inputs)?;
+        let mut outputs = self.outputs.clone();
+        for output in &mut outputs {
+            substitute_output_regions(&mut output.expression, &model_inputs)?;
+        }
         Ok(RealizedStudy {
             module_path: self.module_path.clone(),
             study_id: self.study_id.clone(),
@@ -78,6 +83,7 @@ impl AuthoredStudy {
                     value: study_inputs[&definition.input_id].clone(),
                 })
                 .collect(),
+            outputs,
             sequence: self.sequence.clone(),
         })
     }
@@ -294,6 +300,23 @@ fn substitute_model_inputs(
         }
     }
     Ok(())
+}
+
+fn substitute_output_regions(
+    expression: &mut crate::AuthoredOutputExpression,
+    inputs: &BTreeMap<String, AuthoredInputValue>,
+) -> Result<(), AuthoredStudyRealizationError> {
+    match expression {
+        crate::AuthoredOutputExpression::Projection { source, .. } => {
+            substitute_output_regions(source, inputs)
+        }
+        crate::AuthoredOutputExpression::SpatialReduction { source, target, .. } => {
+            substitute_output_regions(source, inputs)?;
+            substitute_region(target, inputs)
+        }
+        crate::AuthoredOutputExpression::AnalysisField { .. }
+        | crate::AuthoredOutputExpression::OutputReference { .. } => Ok(()),
+    }
 }
 
 fn substitute_material(

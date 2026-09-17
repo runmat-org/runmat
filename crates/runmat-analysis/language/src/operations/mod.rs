@@ -2,8 +2,11 @@ use crate::OperationDiagnostic;
 use runmat_types::{OperationFacts, OperationIdentity, OperationOverloadFacts};
 
 mod geometry;
+mod output;
 
 pub use geometry::geometry_operation_extension;
+pub use output::output_operation_extension;
+pub(crate) use output::OutputOperation;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OperationResolutionRequest {

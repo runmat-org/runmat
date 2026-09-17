@@ -553,8 +553,9 @@ fn contextual_reference_type(path: &[String]) -> Option<FeaType> {
         [analysis, _, state, _] if analysis == "analysis" && state == "state" => {
             Some(FeaType::Unknown)
         }
-        [analysis, _, field, _] if analysis == "analysis" && field == "field" => {
-            Some(FeaType::Field(Box::new(FeaType::Unknown)))
+        [analysis, _, field, quantity] if analysis == "analysis" && field == "field" => {
+            super::procedure::field_reference_type(quantity)
+                .map(|(_, value_type)| FeaType::Field(Box::new(value_type)))
         }
         [model, namespace, _]
             if model == "model"

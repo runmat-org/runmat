@@ -31,11 +31,11 @@ study load_study {
         maximum = 5 kN
     }
     let doubled = 2 * input.load
-    output applied = doubled
     analysis solve {
         structural static {
         }
     }
+    output displacement = analysis.solve.field.displacement
 }
 "#;
     let host = TestHost::default().with_module(
@@ -70,8 +70,11 @@ study load_study {
     );
     assert!(!input.required);
     assert_eq!(
-        declaration.outputs["applied"],
-        FeaType::Quantity(PhysicalDimension::FORCE)
+        declaration.outputs["displacement"],
+        FeaType::Field(Box::new(FeaType::Vector {
+            element: Box::new(FeaType::Quantity(PhysicalDimension::LENGTH)),
+            length: Some(3),
+        }))
     );
 }
 

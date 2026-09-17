@@ -9,6 +9,10 @@ geometry part {
         feature body = box(width = 1 m, depth = 1 m, height = 1 m)
         result = feature.body
     }
+    region body : solid {
+        select result
+        expect exactly_one
+    }
 }
 mesh part on geometry.part {
     tetrahedra {
@@ -148,6 +152,119 @@ study response {{
         runmat_analysis_core::AuthoredModelArgumentValue::StudyInput(reference)
             if reference.input_id == "commanded_load"
     ));
+}
+
+#[test]
+fn study_outputs_lower_fields_projections_and_attributed_spatial_extrema() {
+    let source = r#"
+geometry part {
+    construct {
+        feature body = box(width = 1 m, depth = 1 m, height = 1 m)
+        result = feature.body
+    }
+    region body : solid {
+        select result
+        expect exactly_one
+    }
+}
+mesh part on geometry.part {
+    tetrahedra {
+        order = linear
+        target_size = 0.1 m
+        maximum_deviation = 0.01 m
+    }
+}
+model structure {
+}
+study response {
+    geometry = geometry.part
+    mesh = mesh.part
+    model = model.structure
+    analysis static {
+        structural static {
+        }
+    }
+    output displacement = analysis.static.field.displacement
+    output displacement_magnitude = magnitude(output.displacement)
+    output peak_displacement = max(
+        output.displacement_magnitude,
+        over = geometry.part.region.body,
+    )
+}
+"#;
+    let program = check(source);
+    assert!(program.is_valid(), "{:#?}", program.diagnostics);
+    let study = program.studies.values().next().unwrap();
+    assert_eq!(study.outputs.len(), 3);
+    assert!(matches!(
+        study.outputs[0].expression,
+        runmat_analysis_core::AuthoredOutputExpression::AnalysisField {
+            quantity: runmat_analysis_core::ObservationQuantity::Displacement,
+            ..
+        }
+    ));
+    assert!(matches!(
+        study.outputs[1].expression,
+        runmat_analysis_core::AuthoredOutputExpression::Projection {
+            projection: runmat_analysis_core::AuthoredFieldProjection::Magnitude,
+            ..
+        }
+    ));
+    let runmat_analysis_core::AuthoredOutputExpression::SpatialReduction {
+        reduction,
+        target,
+        ties,
+        ..
+    } = &study.outputs[2].expression
+    else {
+        panic!("peak output must retain its attributed spatial reduction");
+    };
+    assert_eq!(
+        *reduction,
+        runmat_analysis_core::AuthoredSpatialReduction::Maximum
+    );
+    assert_eq!(
+        *ties,
+        runmat_analysis_core::AuthoredExtremaTiePolicy::FirstCanonical
+    );
+    let runmat_analysis_core::AuthoredRegionSource::Geometry(region) = target else {
+        panic!("spatial reduction must retain an exact geometry region");
+    };
+    assert_eq!(region.geometry_id, "part");
+    assert_eq!(region.region_id, "body");
+}
+
+#[test]
+fn study_outputs_reject_vector_extrema_and_fields_the_step_cannot_produce() {
+    let source = format!(
+        r#"{PART_AND_MESH}
+model structure {{
+}}
+study response {{
+    geometry = geometry.part
+    mesh = mesh.part
+    model = model.structure
+    analysis static {{
+        structural static {{
+        }}
+    }}
+    output invalid_temperature = analysis.static.field.temperature
+    output invalid_vector_max = max(
+        analysis.static.field.displacement,
+        over = geometry.part.region.body,
+    )
+}}
+"#
+    );
+    let program = check(&source);
+    assert!(!program.is_valid());
+    assert!(program.diagnostics.iter().any(|diagnostic| diagnostic
+        .message
+        .contains("explicit scalar field projection")));
+    assert!(program.diagnostics.iter().any(|diagnostic| diagnostic
+        .message
+        .contains("does not produce `Temperature`")));
+    assert!(program.studies.is_empty());
 }
 
 #[test]

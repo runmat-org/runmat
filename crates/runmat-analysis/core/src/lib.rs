@@ -44,9 +44,12 @@ mod validate_sequence;
 mod validate_signals;
 
 pub use study::{
-    AuthoredMeshRef, AuthoredModelArgument, AuthoredModelArgumentValue, AuthoredModelInstance,
-    AuthoredStudy, AuthoredStudyError, AuthoredStudyInputBinding, AuthoredStudyInputRef,
-    AuthoredStudyRealizationError, RealizedStudy,
+    validate_authored_outputs, AuthoredExtremaTiePolicy, AuthoredFieldDomain,
+    AuthoredFieldProjection, AuthoredMeshRef, AuthoredModelArgument, AuthoredModelArgumentValue,
+    AuthoredModelInstance, AuthoredOutput, AuthoredOutputError, AuthoredOutputExpression,
+    AuthoredOutputType, AuthoredOutputValue, AuthoredSpatialReduction, AuthoredStudy,
+    AuthoredStudyError, AuthoredStudyInputBinding, AuthoredStudyInputRef,
+    AuthoredStudyRealizationError, AuthoredVectorComponent, RealizedStudy,
 };
 pub use validate::physics_family_can_consume_state;
 pub use validate_authored::validate_coordinate_frame;

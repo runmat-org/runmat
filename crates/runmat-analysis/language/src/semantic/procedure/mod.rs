@@ -1,6 +1,7 @@
 mod header;
 mod initial_conditions;
 mod lower;
+mod output;
 mod requirements;
 mod study;
 mod values;
@@ -11,6 +12,8 @@ use runmat_analysis_core::{AuthoredModel, AuthoredStudy};
 use runmat_geometry_core::GeometryDefinition;
 use runmat_meshing_core::MeshDefinition;
 use std::collections::BTreeMap;
+
+pub(crate) use output::field_reference_type;
 
 pub fn lower_studies(
     bound: &BoundFeaProgram,

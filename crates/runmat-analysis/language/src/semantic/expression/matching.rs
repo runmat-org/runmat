@@ -194,6 +194,23 @@ pub(super) fn operation_output_type(
         }
         OperationQuantityRule::NotApplicable | OperationQuantityRule::CheckedByLowering => {}
     }
+    if let Some(operation) = crate::operations::OutputOperation::from_lowering(&overload.lowering) {
+        match operation.result_type(arguments) {
+            Ok(value_type) => output = value_type,
+            Err(message) => {
+                diagnostics.push(FeaDiagnostic::error(
+                    "fea.semantic.output_operation",
+                    message,
+                    FeaDiagnosticPhase::Semantic,
+                    Some(FeaDiagnosticLocation {
+                        path: path.clone(),
+                        span,
+                    }),
+                ));
+                output = FeaType::Error;
+            }
+        }
+    }
     output
 }
 
