@@ -94,6 +94,7 @@ model impact {
         }
     }
 }
+
 "#;
     let parameter =
         |name: &str, value: runmat_types::OperationTypePattern| runmat_types::OperationParameter {
@@ -145,6 +146,162 @@ model impact {
                 && identity.source_digest == "09".repeat(32)
     ));
     assert_eq!(generator.invocation.arguments.len(), 2);
+}
+
+#[test]
+fn tabulated_and_standard_waveform_signals_lower_without_losing_domain_semantics() {
+    let source = r#"
+model histories {
+    input throttle : real
+
+    signal transient_force : force over time {
+        samples = [
+            { at = 0 s, value = [0 N, 0 N, 0 N] },
+            { at = 2 s, value = [2 N, 0 N, 0 N] },
+        ]
+        jumps = [
+            {
+                at = 1 s,
+                left = [1 N, 0 N, 0 N],
+                right = [1.5 N, 0 N, 0 N],
+                continuity = right,
+            },
+        ]
+        interpolation = linear
+        extrapolation = reject
+        frame = global
+    }
+
+    signal harmonic_force : force over frequency {
+        samples = [
+            {
+                at = 10 Hz,
+                value = {
+                    real = [1 N, 0 N, 0 N],
+                    imaginary = [0 N, 1 N, 0 N],
+                },
+            },
+            {
+                at = 20 Hz,
+                value = {
+                    real = [2 N, 0 N, 0 N],
+                    imaginary = [0 N, 2 N, 0 N],
+                },
+            },
+        ]
+        interpolation = linear
+        extrapolation = reject
+        frame = global
+    }
+
+    signal force_curve : force over parameter {
+        axis = input.throttle
+        samples = [
+            { at = 0, value = 0 N },
+            { at = 1, value = 100 N },
+        ]
+        interpolation = linear
+        extrapolation = hold_endpoint
+    }
+
+    signal pulse : pressure over time {
+        waveform = half_sine_pulse
+        amplitude = 2 kPa
+        offset = 100 kPa
+        start = 5 ms
+        duration = 10 ms
+    }
+}
+"#;
+    let program = FeaCompiler::new(&TestHost::default()).check(CheckRequest {
+        modules: ModuleGraphRequest {
+            source_root: LogicalSourcePath::new("project").unwrap(),
+            root: source_module("project/main.fea", source, 1),
+        },
+    });
+    assert!(program.is_valid(), "{:#?}", program.diagnostics);
+    let signals = &program.models.values().next().unwrap().signals;
+    assert_eq!(signals.len(), 4);
+    assert!(matches!(
+        signals[0],
+        runmat_analysis_core::PhysicalSignal::Force(runmat_analysis_core::Signal {
+            representation: runmat_analysis_core::SignalRepresentation::Tabulated(
+                runmat_analysis_core::TabulatedSignal { ref knots, .. }
+            ),
+            ..
+        }) if knots.len() == 3
+    ));
+    assert_eq!(
+        signals[1].precision(),
+        runmat_analysis_core::SignalPrecision::Complex128
+    );
+    assert!(matches!(
+        signals[2],
+        runmat_analysis_core::PhysicalSignal::Force(runmat_analysis_core::Signal {
+            representation: runmat_analysis_core::SignalRepresentation::Tabulated(
+                runmat_analysis_core::TabulatedSignal {
+                    domain: runmat_analysis_core::TabulatedSignalDomain::StudyParameter {
+                        ref parameter_id
+                    },
+                    ..
+                }
+            ),
+            ..
+        }) if parameter_id == "throttle"
+    ));
+    assert!(matches!(
+        signals[3],
+        runmat_analysis_core::PhysicalSignal::Pressure(runmat_analysis_core::Signal {
+            representation: runmat_analysis_core::SignalRepresentation::Waveform(
+                runmat_analysis_core::StandardWaveform {
+                    kind: runmat_analysis_core::StandardWaveformKind::HalfSinePulse,
+                    ..
+                }
+            ),
+            ..
+        })
+    ));
+}
+
+#[test]
+fn sampled_signals_reject_ambiguous_axes_knots_and_waveform_parameters() {
+    let source = r#"
+model invalid {
+    signal duplicate : force over time {
+        samples = [
+            { at = 0 s, value = 0 N },
+            { at = 0 s, value = 1 N },
+        ]
+        interpolation = linear
+    }
+    signal wrong_axis : force over frequency {
+        samples = [
+            { at = 1 s, value = 0 N },
+            { at = 2 s, value = 1 N },
+        ]
+        interpolation = linear
+    }
+    signal incomplete_sine : pressure over time {
+        waveform = sine
+        amplitude = 1 Pa
+        start = 0 s
+        frequency = 10 Hz
+    }
+}
+"#;
+    let program = FeaCompiler::new(&TestHost::default()).check(CheckRequest {
+        modules: ModuleGraphRequest {
+            source_root: LogicalSourcePath::new("project").unwrap(),
+            root: source_module("project/main.fea", source, 1),
+        },
+    });
+    assert!(!program.is_valid());
+    assert!(program.models.is_empty());
+    assert!(program.diagnostics.iter().any(|diagnostic| {
+        diagnostic.message.contains("unique")
+            || diagnostic.message.contains("physical dimension")
+            || diagnostic.message.contains("missing or inapplicable")
+    }));
 }
 
 #[test]

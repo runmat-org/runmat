@@ -15,7 +15,7 @@ use crate::{
     },
     diagnostics::builders::{extend_common_run_diagnostics, CommonRunDiagnosticInputs},
     excitation::{
-        realize_step_excitations, time_discontinuities, ExcitationSamplePoint, StructuralMotionSet,
+        realize_step_excitations, time_breakpoints, ExcitationSamplePoint, StructuralMotionSet,
     },
     execution::{
         StructuralTransientBlockRequest, StructuralTransientCheckpoint,
@@ -181,7 +181,7 @@ fn prepare_transient_block_basis(
     required_history_samples.sort_by(f64::total_cmp);
     required_history_samples.dedup_by(|left, right| left.to_bits() == right.to_bits());
     let discontinuities =
-        time_discontinuities(&active_model, &execution_step, start_time_s, end_time_s)
+        time_breakpoints(&active_model, &execution_step, start_time_s, end_time_s)
             .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
     let step_boundaries = canonical_transient_step_boundaries(
         &discontinuities,
@@ -493,9 +493,8 @@ pub fn run_transient_with_options(
     );
     required_history_samples.sort_by(f64::total_cmp);
     required_history_samples.dedup_by(|left, right| left.to_bits() == right.to_bits());
-    let discontinuities =
-        time_discontinuities(&active_model, execution_step, start_time_s, end_time_s)
-            .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
+    let discontinuities = time_breakpoints(&active_model, execution_step, start_time_s, end_time_s)
+        .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
     let step_boundaries = canonical_transient_step_boundaries(
         &discontinuities,
         &required_history_samples,

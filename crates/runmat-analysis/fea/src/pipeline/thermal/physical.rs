@@ -13,7 +13,7 @@ use crate::{
     diagnostics::{
         builders::material_assignment_diagnostics, FeaDiagnostic, FeaDiagnosticSeverity,
     },
-    excitation::{realize_step_excitations, time_discontinuities, ExcitationSamplePoint},
+    excitation::{realize_step_excitations, time_breakpoints, ExcitationSamplePoint},
     physics::thermal::{
         assembly::{assemble as assemble_thermal_operator, ThermalEnergyBalance},
         constitutive_stats, initial_state,
@@ -336,7 +336,7 @@ struct TransientSolveInput<'a> {
 }
 
 fn solve_transient(input: TransientSolveInput<'_>) -> Result<ProcedureOutcome, FeaRunError> {
-    let events = time_discontinuities(
+    let events = time_breakpoints(
         input.model,
         input.step,
         input.time_grid.start_s(),

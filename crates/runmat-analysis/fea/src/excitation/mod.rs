@@ -11,6 +11,7 @@ mod realize;
 mod sample;
 mod target;
 mod time_grid;
+mod waveform;
 
 pub(crate) use coupling::realize_coupling_contexts;
 pub use evidence::{
@@ -28,7 +29,7 @@ pub(crate) use projection::{ScalarProjectionAccumulator, SpatialProjectionAccumu
 pub(crate) use realize::realize_step_excitations;
 pub(crate) use sample::{
     expect_scalar, expect_vector3, sample_prescribed_heat_flux, sample_prescribed_temperature,
-    sample_signal, time_discontinuities, ExcitationSamplePoint,
+    sample_signal, time_breakpoints, ExcitationSamplePoint,
 };
 pub(crate) use time_grid::ProcedureTimeGrid;
 

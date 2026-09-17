@@ -206,9 +206,10 @@ fn validate_excitation(
             .vector
             .iter()
             .map(|value| value * value)
-            .sum::<f64>();
-        if !norm.is_finite() || norm <= 0.0 {
-            return Err("excitation direction must be finite and nonzero".into());
+            .sum::<f64>()
+            .sqrt();
+        if !norm.is_finite() || norm <= f64::EPSILON || (norm - 1.0).abs() > 1.0e-10 {
+            return Err("excitation direction must be a finite unit vector".into());
         }
     }
     if excitation
@@ -232,7 +233,6 @@ fn validate_excitation(
                 AuthoredExcitationKind::Force
                     | AuthoredExcitationKind::Traction
                     | AuthoredExcitationKind::Pressure
-                    | AuthoredExcitationKind::BodyForce
             ))
         || excitation.projection.preserve_resultant != excitation.kind.preserves_resultant()
         || excitation.projection.preserve_moment != excitation.kind.preserves_moment()

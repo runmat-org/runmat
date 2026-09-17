@@ -1,7 +1,7 @@
-use super::{diagnostic, region_source, signals};
+use super::{diagnostic, properties::*, region_source, signals};
 use crate::{
-    BoundFeaProgram, CheckedExpressionKind, CheckedFeaDeclaration, CheckedFeaStatementKind,
-    FeaDiagnostic,
+    BoundFeaProgram, CheckedCallArgument, CheckedExpression, CheckedExpressionKind,
+    CheckedFeaDeclaration, CheckedFeaStatementKind, FeaDiagnostic,
 };
 use runmat_analysis_core::{
     AuthoredExcitation, AuthoredExcitationCase, AuthoredExcitationKind, AuthoredExcitationTarget,
@@ -20,6 +20,7 @@ pub(super) struct LoweredExcitations {
 pub(super) fn lower(
     declaration: &CheckedFeaDeclaration,
     bound: &BoundFeaProgram,
+    declared_signals: &[PhysicalSignal],
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> LoweredExcitations {
     let mut signals = Vec::new();
@@ -50,6 +51,18 @@ pub(super) fn lower(
                     cases.push(case);
                 }
             }
+            FeaModelDefinitionKind::Excitation => {
+                if let Some(excitation) = explicit_excitation(
+                    declaration,
+                    bound,
+                    declared_signals,
+                    name,
+                    statements,
+                    diagnostics,
+                ) {
+                    excitations.push(excitation);
+                }
+            }
             _ => {}
         }
     }
@@ -57,6 +70,207 @@ pub(super) fn lower(
         signals,
         excitations,
         cases,
+    }
+}
+
+fn explicit_excitation(
+    declaration: &CheckedFeaDeclaration,
+    bound: &BoundFeaProgram,
+    signals: &[PhysicalSignal],
+    name: &str,
+    statements: &[crate::CheckedFeaStatement],
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Option<AuthoredExcitation> {
+    let (kind_name, body) = sole_kind_block(declaration, statements, "excitation", diagnostics)?;
+    let (kind, _) = kind_policy(declaration, kind_name, declaration.span, diagnostics)?;
+    validate_assignments(
+        declaration,
+        body,
+        &["target", "signal", "direction", "kinematics"],
+        diagnostics,
+    );
+    let signal_expression = required_assignment(declaration, body, "signal", diagnostics)?;
+    let signal_id = signal_reference(declaration, signal_expression, diagnostics)?;
+    let signal = signals
+        .iter()
+        .find(|signal| signal.signal_id() == &signal_id)
+        .or_else(|| {
+            diagnostic(
+                declaration,
+                signal_expression.span,
+                format!("excitation references unknown signal `{}`", signal_id.0),
+                diagnostics,
+            );
+            None
+        })?;
+    let target_expression = required_assignment(declaration, body, "target", diagnostics)?;
+    let target = if matches!(&target_expression.kind, CheckedExpressionKind::Enum(name) if name == "whole_model")
+    {
+        AuthoredExcitationTarget::WholeModel
+    } else {
+        AuthoredExcitationTarget::Region(region_source(
+            bound,
+            declaration,
+            target_expression,
+            diagnostics,
+        )?)
+    };
+    let direction = match assignment(body, "direction") {
+        Some(value) => Some(direction(declaration, value, diagnostics)?),
+        None => None,
+    };
+    let frame = match (&direction, signal.frame()) {
+        (Some((_, frame)), _) => frame.clone(),
+        (None, Some(frame)) => frame.clone(),
+        (None, None) => CoordinateFrame::Global,
+    };
+    let direction = direction.map(|(direction, _)| direction);
+    let kinematics = match assignment(body, "kinematics").and_then(enum_name) {
+        None | Some("fixed") | Some("fixed_frame") => ExcitationKinematics::FixedFrame,
+        Some("follower") => ExcitationKinematics::Follower,
+        Some(_) => {
+            diagnostic(
+                declaration,
+                declaration.span,
+                "excitation kinematics must be `fixed` or `follower`",
+                diagnostics,
+            );
+            return None;
+        }
+    };
+    Some(AuthoredExcitation {
+        excitation_id: format!("excitation.{name}"),
+        kind,
+        target,
+        frame,
+        direction,
+        distribution: kind.default_distribution(),
+        kinematics,
+        signal_id,
+        active_step_ids: Vec::new(),
+        combination_group: None,
+        projection: ProjectionRequirement {
+            preserve_resultant: kind.preserves_resultant(),
+            preserve_moment: kind.preserves_moment(),
+            relative_tolerance: 1.0e-10,
+        },
+    })
+}
+
+fn signal_reference(
+    declaration: &CheckedFeaDeclaration,
+    expression: &CheckedExpression,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Option<SignalId> {
+    let CheckedExpressionKind::Reference(path) = &expression.kind else {
+        diagnostic(
+            declaration,
+            expression.span,
+            "excitation signal must reference `signal.<name>`",
+            diagnostics,
+        );
+        return None;
+    };
+    let [namespace, name] = path.as_slice() else {
+        diagnostic(
+            declaration,
+            expression.span,
+            "excitation signal must reference `signal.<name>`",
+            diagnostics,
+        );
+        return None;
+    };
+    if namespace != "signal" {
+        diagnostic(
+            declaration,
+            expression.span,
+            "excitation signal must reference `signal.<name>`",
+            diagnostics,
+        );
+        return None;
+    }
+    Some(SignalId(name.clone()))
+}
+
+fn direction(
+    declaration: &CheckedFeaDeclaration,
+    expression: &CheckedExpression,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Option<(runmat_analysis_core::Direction, CoordinateFrame)> {
+    let CheckedExpressionKind::OperationCall {
+        lowering,
+        arguments,
+        ..
+    } = &expression.kind
+    else {
+        diagnostic(
+            declaration,
+            expression.span,
+            "excitation direction requires `global([x, y, z])`",
+            diagnostics,
+        );
+        return None;
+    };
+    if lowering.as_str() != "fea.geometry.global" || arguments.len() != 1 {
+        diagnostic(
+            declaration,
+            expression.span,
+            "excitation direction requires `global([x, y, z])`",
+            diagnostics,
+        );
+        return None;
+    }
+    let value = match &arguments[0] {
+        CheckedCallArgument::Positional(value) => value,
+        CheckedCallArgument::Named { value, .. } => value,
+    };
+    let CheckedExpressionKind::List(values) = &value.kind else {
+        diagnostic(
+            declaration,
+            value.span,
+            "excitation direction requires three constant components",
+            diagnostics,
+        );
+        return None;
+    };
+    if values.len() != 3 {
+        diagnostic(
+            declaration,
+            value.span,
+            "excitation direction requires three constant components",
+            diagnostics,
+        );
+        return None;
+    }
+    let vector = [
+        scalar(&values[0])?,
+        scalar(&values[1])?,
+        scalar(&values[2])?,
+    ];
+    Some((
+        runmat_analysis_core::Direction { vector },
+        CoordinateFrame::Global,
+    ))
+}
+
+fn assignment<'a>(
+    body: &'a [crate::CheckedFeaStatement],
+    name: &str,
+) -> Option<&'a CheckedExpression> {
+    body.iter().find_map(|statement| match &statement.kind {
+        CheckedFeaStatementKind::Assignment { target, value, .. }
+            if target.as_slice() == [name] =>
+        {
+            Some(value)
+        }
+        _ => None,
+    })
+}
+
+fn enum_name(expression: &CheckedExpression) -> Option<&str> {
+    match &expression.kind {
+        CheckedExpressionKind::Enum(name) => Some(name),
+        _ => None,
     }
 }
 
@@ -142,7 +356,7 @@ fn load_case(
             diagnostic(
                 declaration,
                 statement.span,
-                "load case accepts only `include load.<name>` members",
+                "load case accepts only `include load.<name>` or `include excitation.<name>` members",
                 diagnostics,
             );
             continue;
@@ -151,7 +365,7 @@ fn load_case(
             diagnostic(
                 declaration,
                 value.span,
-                "load case include requires a load reference",
+                "load case include requires a load or excitation reference",
                 diagnostics,
             );
             continue;
@@ -160,21 +374,23 @@ fn load_case(
             diagnostic(
                 declaration,
                 value.span,
-                "load case include requires `load.<name>`",
+                "load case include requires `load.<name>` or `excitation.<name>`",
                 diagnostics,
             );
             continue;
         };
-        if namespace != "load" || !seen.insert(id.as_str()) {
+        if !matches!(namespace.as_str(), "load" | "excitation")
+            || !seen.insert((namespace.as_str(), id.as_str()))
+        {
             diagnostic(
                 declaration,
                 value.span,
-                "load case members must be unique load references",
+                "load case members must be unique load or excitation references",
                 diagnostics,
             );
             continue;
         }
-        ids.push(format!("load.{id}"));
+        ids.push(format!("{namespace}.{id}"));
     }
     Some(AuthoredExcitationCase {
         case_id: format!("load_case.{name}"),

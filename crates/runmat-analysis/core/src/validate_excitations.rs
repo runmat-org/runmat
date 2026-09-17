@@ -190,7 +190,6 @@ fn validate_action_policy(
         action,
         ExcitationAction::Force(_)
             | ExcitationAction::Moment(_)
-            | ExcitationAction::NormalVelocity(_)
             | ExcitationAction::InletVelocity(_)
             | ExcitationAction::WallMotion(_)
     ) && matches!(signal.shape(), SignalShape::Scalar);

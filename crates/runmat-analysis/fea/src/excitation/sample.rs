@@ -67,7 +67,7 @@ impl From<ExcitationSamplePoint<'_>> for ProjectionSample {
     }
 }
 
-pub(crate) fn time_discontinuities(
+pub(crate) fn time_breakpoints(
     model: &AnalysisModel,
     step: &ProcedureStep,
     start_time_s: f64,
@@ -205,18 +205,22 @@ fn insert_prescribed_id<'a, Q>(
 }
 
 fn extend_time_jumps<Q>(events: &mut Vec<f64>, signal: &Signal<Q>, start: f64, end: f64) {
-    let SignalRepresentation::Tabulated(table) = &signal.representation else {
-        return;
-    };
-    if table.domain != TabulatedSignalDomain::TimeSeconds {
-        return;
+    match &signal.representation {
+        SignalRepresentation::Tabulated(table)
+            if table.domain == TabulatedSignalDomain::TimeSeconds =>
+        {
+            events.extend(table.knots.iter().filter_map(|knot| {
+                (knot.abscissa > start
+                    && knot.abscissa <= end
+                    && matches!(knot.value, SignalKnotValue::Jump { .. }))
+                .then_some(knot.abscissa)
+            }));
+        }
+        SignalRepresentation::Waveform(waveform) => {
+            events.extend(super::waveform::breakpoints(waveform, start, end));
+        }
+        _ => {}
     }
-    events.extend(table.knots.iter().filter_map(|knot| {
-        (knot.abscissa > start
-            && knot.abscissa <= end
-            && matches!(knot.value, SignalKnotValue::Jump { .. }))
-        .then_some(knot.abscissa)
-    }));
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -243,9 +247,14 @@ pub(crate) fn sample_signal<Q>(
                 component,
             )
         }
-        SignalRepresentation::Waveform(_) => Err(RealizationError::new(
-            "waveform signals must be materialized before FEA excitation realization",
-        )),
+        SignalRepresentation::Waveform(waveform) => match sample {
+            ExcitationSamplePoint::TimeSeconds { value, approach } => {
+                super::waveform::sample(waveform, value, approach, component)
+            }
+            _ => Err(RealizationError::new(
+                "waveform signals require a time-domain sample point",
+            )),
+        },
         SignalRepresentation::Artifact(_) | SignalRepresentation::Generator(_) => Err(
             RealizationError::new(
                 "artifact and generator signals must be materialized before FEA excitation realization",

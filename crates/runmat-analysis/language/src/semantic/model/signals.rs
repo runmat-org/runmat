@@ -9,8 +9,11 @@ use runmat_analysis_core::{
 };
 
 mod generated;
+mod policy;
+mod tabulated;
+mod waveform;
 
-type SignalWrapper = fn(Signal<f64>) -> PhysicalSignal;
+pub(super) type SignalWrapper = fn(Signal<f64>) -> PhysicalSignal;
 
 pub(super) fn lower(
     declaration: &CheckedFeaDeclaration,
@@ -53,12 +56,30 @@ fn signal(
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<PhysicalSignal> {
     let (dimension, wrap) = signal_kind(declaration, quantity, diagnostics)?;
-    if body.iter().any(|statement| {
+    let generated = body.iter().any(|statement| {
         matches!(
             statement.kind,
             CheckedFeaStatementKind::GeneratedByFunction { .. }
         )
-    }) {
+    });
+    let tabulated = assignment(body, "samples").is_some() || assignment(body, "jumps").is_some();
+    let waveform = assignment(body, "waveform").is_some();
+    let constant = assignment(body, "value").is_some();
+    if usize::from(generated)
+        + usize::from(tabulated)
+        + usize::from(waveform)
+        + usize::from(constant)
+        != 1
+    {
+        diagnostic(
+            declaration,
+            declaration.span,
+            "signal requires exactly one constant, tabulated, waveform, or generated representation",
+            diagnostics,
+        );
+        return None;
+    }
+    if generated {
         return generated::lower(
             generated::LowerSignal {
                 declaration,
@@ -71,6 +92,12 @@ fn signal(
             domain,
             body,
         );
+    }
+    if tabulated {
+        return tabulated::lower(declaration, id, domain, body, dimension, wrap, diagnostics);
+    }
+    if waveform {
+        return waveform::lower(declaration, id, domain, body, dimension, wrap, diagnostics);
     }
     constant_signal(declaration, id, domain, body, dimension, wrap, diagnostics)
 }
@@ -105,6 +132,17 @@ fn constant_signal(
         frame,
         SignalRepresentation::Constant,
     )))
+}
+
+fn assignment<'a>(body: &'a [CheckedFeaStatement], name: &str) -> Option<&'a CheckedExpression> {
+    body.iter().find_map(|statement| match &statement.kind {
+        CheckedFeaStatementKind::Assignment { target, value, .. }
+            if target.as_slice() == [name] =>
+        {
+            Some(value)
+        }
+        _ => None,
+    })
 }
 
 fn signal_kind(
@@ -255,7 +293,7 @@ impl RawSignalValue for SignalValue<f64> {
     }
 }
 
-fn signal_value(
+pub(super) fn signal_value(
     declaration: &CheckedFeaDeclaration,
     value: &CheckedExpression,
     dimension: PhysicalDimension,
@@ -316,7 +354,7 @@ fn vector_components(value: &CheckedExpression) -> Option<&[CheckedExpression]> 
     }
 }
 
-fn optional_frame(
+pub(super) fn optional_frame(
     declaration: &CheckedFeaDeclaration,
     body: &[CheckedFeaStatement],
     required: bool,
@@ -418,12 +456,82 @@ fn convert<Q: CanonicalQuantity>(
                 SignalRepresentation::Generator(generator)
             }
             SignalRepresentation::Artifact(artifact) => SignalRepresentation::Artifact(artifact),
-            SignalRepresentation::Tabulated(_) | SignalRepresentation::Waveform(_) => {
-                unreachable!("source lowering has not constructed tabulated or waveform signals")
+            SignalRepresentation::Tabulated(table) => {
+                SignalRepresentation::Tabulated(map_table(table))
+            }
+            SignalRepresentation::Waveform(waveform) => {
+                SignalRepresentation::Waveform(runmat_analysis_core::StandardWaveform {
+                    kind: waveform.kind,
+                    amplitude: map_value(waveform.amplitude),
+                    offset: waveform.offset.map(map_value),
+                    start_seconds: waveform.start_seconds,
+                    duration_seconds: waveform.duration_seconds,
+                    frequency_hz: waveform.frequency_hz,
+                    phase_radians: waveform.phase_radians,
+                    duty_cycle: waveform.duty_cycle,
+                })
             }
         },
         precision: signal.precision,
         evidence: signal.evidence,
         provenance: signal.provenance,
     })
+}
+
+fn map_table<Q: CanonicalQuantity>(
+    table: runmat_analysis_core::TabulatedSignal<f64>,
+) -> runmat_analysis_core::TabulatedSignal<Q> {
+    runmat_analysis_core::TabulatedSignal {
+        domain: table.domain,
+        knots: table
+            .knots
+            .into_iter()
+            .map(|knot| runmat_analysis_core::SignalKnot {
+                abscissa: knot.abscissa,
+                value: match knot.value {
+                    runmat_analysis_core::SignalKnotValue::Continuous(value) => {
+                        runmat_analysis_core::SignalKnotValue::Continuous(map_ordinate(value))
+                    }
+                    runmat_analysis_core::SignalKnotValue::Jump {
+                        left_limit,
+                        right_limit,
+                        continuity,
+                    } => runmat_analysis_core::SignalKnotValue::Jump {
+                        left_limit: map_ordinate(left_limit),
+                        right_limit: map_ordinate(right_limit),
+                        continuity,
+                    },
+                },
+            })
+            .collect(),
+        interpolation: table.interpolation,
+        extrapolation: table.extrapolation,
+    }
+}
+
+fn map_ordinate<Q: CanonicalQuantity>(
+    ordinate: runmat_analysis_core::SignalOrdinate<f64>,
+) -> runmat_analysis_core::SignalOrdinate<Q> {
+    match ordinate {
+        runmat_analysis_core::SignalOrdinate::Real(value) => {
+            runmat_analysis_core::SignalOrdinate::Real(map_value(value))
+        }
+        runmat_analysis_core::SignalOrdinate::Complex { real, imaginary } => {
+            runmat_analysis_core::SignalOrdinate::Complex {
+                real: map_value(real),
+                imaginary: map_value(imaginary),
+            }
+        }
+    }
+}
+
+fn map_value<Q: CanonicalQuantity>(value: SignalValue<f64>) -> SignalValue<Q> {
+    match value {
+        SignalValue::Scalar(value) => SignalValue::Scalar(Q::from_canonical_value(value)),
+        SignalValue::Vector3(values) => SignalValue::Vector3(values.map(Q::from_canonical_value)),
+        SignalValue::Tensor { shape, values } => SignalValue::Tensor {
+            shape,
+            values: values.into_iter().map(Q::from_canonical_value).collect(),
+        },
+    }
 }

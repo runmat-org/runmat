@@ -7,9 +7,8 @@ use crate::{
 use runmat_analysis_core::{
     GeneratorArgument, GeneratorCallable, GeneratorDomain, GeneratorEffectPolicy,
     GeneratorInvocation, ImportedFunctionIdentity, PhysicalSignal, Signal,
-    SignalApproximationEvidence, SignalExtrapolation, SignalGenerator, SignalId,
-    SignalInterpolation, SignalPrecision, SignalProvenance, SignalRepresentation,
-    SignalSamplingPolicy, SignalShape,
+    SignalApproximationEvidence, SignalGenerator, SignalId, SignalPrecision, SignalProvenance,
+    SignalRepresentation, SignalSamplingPolicy, SignalShape,
 };
 use runmat_types::{OperationParameterArity, OperationTypePattern};
 use std::collections::BTreeMap;
@@ -109,8 +108,8 @@ pub(super) fn lower(
         diagnostics,
     )?;
     let domain = generator_domain(declaration, domain, diagnostics)?;
-    let interpolation = interpolation(declaration, statements, diagnostics)?;
-    let extrapolation = extrapolation(declaration, statements, diagnostics)?;
+    let interpolation = super::policy::interpolation(declaration, statements, diagnostics)?;
+    let extrapolation = super::policy::extrapolation(declaration, statements, diagnostics)?;
     validate_generator_members(declaration, statements, diagnostics);
 
     let vector = body.iter().any(|statement| {
@@ -419,60 +418,6 @@ fn generator_domain(
     }
 }
 
-fn interpolation(
-    declaration: &CheckedFeaDeclaration,
-    statements: &[CheckedFeaStatement],
-    diagnostics: &mut Vec<FeaDiagnostic>,
-) -> Option<SignalInterpolation> {
-    let Some(value) = assignment(statements, "interpolation") else {
-        error(
-            declaration,
-            declaration.span,
-            "generated signal requires an interpolation policy",
-            diagnostics,
-        );
-        return None;
-    };
-    match enum_name(value) {
-        Some("piecewise_linear" | "linear") => Some(SignalInterpolation::Linear),
-        Some("left_endpoint") => Some(SignalInterpolation::LeftEndpoint),
-        Some("right_endpoint") => Some(SignalInterpolation::RightEndpoint),
-        _ => {
-            error(
-                declaration,
-                value.span,
-                "unsupported signal interpolation policy",
-                diagnostics,
-            );
-            None
-        }
-    }
-}
-
-fn extrapolation(
-    declaration: &CheckedFeaDeclaration,
-    statements: &[CheckedFeaStatement],
-    diagnostics: &mut Vec<FeaDiagnostic>,
-) -> Option<SignalExtrapolation> {
-    let Some(value) = assignment(statements, "extrapolation") else {
-        return Some(SignalExtrapolation::Reject);
-    };
-    match enum_name(value) {
-        Some("reject") => Some(SignalExtrapolation::Reject),
-        Some("hold_endpoint") => Some(SignalExtrapolation::HoldEndpoint),
-        Some("zero") => Some(SignalExtrapolation::Zero),
-        _ => {
-            error(
-                declaration,
-                value.span,
-                "unsupported signal extrapolation policy",
-                diagnostics,
-            );
-            None
-        }
-    }
-}
-
 fn validate_generator_members(
     declaration: &CheckedFeaDeclaration,
     statements: &[CheckedFeaStatement],
@@ -527,13 +472,6 @@ fn assignment<'a>(
             }
             _ => None,
         })
-}
-
-fn enum_name(value: &CheckedExpression) -> Option<&str> {
-    match &value.kind {
-        CheckedExpressionKind::Enum(value) => Some(value),
-        _ => None,
-    }
 }
 
 fn hex_digest(bytes: [u8; 32]) -> String {

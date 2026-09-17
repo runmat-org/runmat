@@ -370,7 +370,7 @@ fn event_inventory_ignores_unreferenced_signal_jumps() {
             },
         ));
 
-    let events = super::time_discontinuities(&model, &model.sequence.steps[0], 0.0, 1.0).unwrap();
+    let events = super::time_breakpoints(&model, &model.sequence.steps[0], 0.0, 1.0).unwrap();
     assert_eq!(events, vec![0.5]);
 }
 
@@ -378,7 +378,7 @@ fn event_inventory_ignores_unreferenced_signal_jumps() {
 fn prescribed_motion_only_marks_actual_acceleration_jumps_as_discontinuities() {
     let mut model = fixture_model(FixtureId::StructuralTransientTet4SupportMotionReference);
     let step = &model.sequence.steps[0];
-    assert!(super::time_discontinuities(&model, step, 0.0, 1.0)
+    assert!(super::time_breakpoints(&model, step, 0.0, 1.0)
         .unwrap()
         .is_empty());
 
@@ -407,7 +407,7 @@ fn prescribed_motion_only_marks_actual_acceleration_jumps_as_discontinuities() {
         runmat_analysis_core::SignalPointContinuity::Right,
     );
 
-    let events = super::time_discontinuities(&model, &model.sequence.steps[0], 0.0, 1.0).unwrap();
+    let events = super::time_breakpoints(&model, &model.sequence.steps[0], 0.0, 1.0).unwrap();
     assert_eq!(events, vec![0.5]);
 }
 

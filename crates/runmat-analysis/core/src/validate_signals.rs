@@ -334,12 +334,37 @@ fn validate_waveform<Q: FiniteQuantity>(
             .is_some_and(|value| !value.is_finite() || value <= 0.0)
         || waveform
             .duty_cycle
-            .is_some_and(|value| !value.is_finite() || !(0.0..=1.0).contains(&value))
+            .is_some_and(|value| !(value.is_finite() && 0.0 < value && value <= 1.0))
     {
         return Err("waveform parameters must be finite and physically valid".to_string());
     }
-    if matches!(waveform.kind, StandardWaveformKind::Sine) && waveform.frequency_hz.is_none() {
-        return Err("sine waveforms require frequency_hz".to_string());
+    let valid_parameters = match waveform.kind {
+        StandardWaveformKind::Step => {
+            waveform.duration_seconds.is_none()
+                && waveform.frequency_hz.is_none()
+                && waveform.phase_radians == 0.0
+                && waveform.duty_cycle.is_none()
+        }
+        StandardWaveformKind::Ramp
+        | StandardWaveformKind::HalfSinePulse
+        | StandardWaveformKind::TriangularPulse => {
+            waveform.duration_seconds.is_some()
+                && waveform.frequency_hz.is_none()
+                && waveform.phase_radians == 0.0
+                && waveform.duty_cycle.is_none()
+        }
+        StandardWaveformKind::Sine => {
+            waveform.frequency_hz.is_some() && waveform.duty_cycle.is_none()
+        }
+        StandardWaveformKind::RectangularPulse => {
+            waveform.duration_seconds.is_some()
+                && waveform.frequency_hz.is_none()
+                && waveform.phase_radians == 0.0
+                && waveform.duty_cycle.is_some()
+        }
+    };
+    if !valid_parameters {
+        return Err("waveform kind has missing or inapplicable parameters".to_string());
     }
     Ok(())
 }
