@@ -20,13 +20,13 @@ const EXPECTED_SUFFIXES = [
   "array/sorting_sets", "cells", "common", "comms", "constants", "containers", "containers/dictionary",
   "control", "datetime", "datetime/arithmetic",
   "datetime/business_calendar", "datetime/calendar_duration", "datetime/components",
-  "datetime/conversion", "datetime/core", "deep_learning", "deep_learning/autodiff", "diagnostics",
+  "datetime/construction", "datetime/conversion", "datetime/core", "deep_learning", "deep_learning/autodiff", "diagnostics",
   "fea", "finance", "function_handles", "geometry", "geometry/triangulation", "graph", "image", "interop",
   "introspection", "io", "io/archive", "io/filetext", "io/repl_fs", "io/tabular_reading", "logical",
   "logical/relational", "math", "math/elementwise", "math/fft", "math/linalg", "math/linalg/factor",
   "math/reduction", "math/signal", "math/symbolic", "math/trigonometry", "objects", "objects/test_support",
   "parallel", "plotting", "plotting/animation", "plotting/axes", "plotting/colormaps",
-  "plotting/figure_lifecycle", "plotting/ui",
+  "plotting/figure_lifecycle", "plotting/properties", "plotting/ui",
   "stats", "stats/hist", "stats/ml", "stats/random", "stats/summary", "strings", "strings/core", "strings/queries",
   "strings/search", "strings/text_analytics", "strings/transform", "structs", "table", "table/timetable", "testing",
   "testing/plugins", "testing/runner", "timing", "timing/timer",
@@ -43,12 +43,12 @@ const REVIEWED_SHARED_TARGET_PACKAGES = [
   "strings/transform", "table/timetable", "testing/plugins", "testing/runner",
 ];
 
-test("registry declares the exact canonical 158-product census", () => {
+test("registry declares the exact canonical 162-product census", () => {
   assert.deepEqual(MODULE_COMPOSITION_SUFFIXES, EXPECTED_SUFFIXES);
   const products = moduleCompositionProductRegistry();
-  assert.equal(products.length, 158);
-  assert.equal(products.filter((entry) => entry.crate_role === "catalog").length, 79);
-  assert.equal(products.filter((entry) => entry.crate_role === "runtime").length, 79);
+  assert.equal(products.length, 162);
+  assert.equal(products.filter((entry) => entry.crate_role === "catalog").length, 81);
+  assert.equal(products.filter((entry) => entry.crate_role === "runtime").length, 81);
 
   const ids = new Set(products.map((entry) => entry.product_id));
   assert.ok(ids.has("catalog-aliases"));
@@ -108,6 +108,32 @@ test("logical transition boundaries retain their exact catalog and runtime ident
   });
 });
 
+test("reviewed file-to-directory promotions have first-class product authority", () => {
+  const products = new Map(moduleCompositionProductRegistry()
+    .map((entry) => [entry.product_id, entry]));
+  for (const [productId, productPath, modulePath] of [
+    [
+      "runtime-datetime-construction",
+      "crates/runmat-runtime/src/builtins/datetime/construction/mod.rs",
+      "crate::builtins::datetime::construction",
+    ],
+    [
+      "runtime-plotting-properties",
+      "crates/runmat-runtime/src/builtins/plotting/properties/mod.rs",
+      "crate::builtins::plotting::properties",
+    ],
+  ]) {
+    assert.deepEqual(products.get(productId), {
+      product_id: productId,
+      crate_role: "runtime",
+      path: productPath,
+      module_path: modulePath,
+      aggregations: [],
+      aggregation_exports: [],
+    });
+  }
+});
+
 test("registry covers every family parent shared by the reviewed pilot and residual topology", () => {
   const paths = new Set(moduleCompositionProductRegistry().map((entry) => entry.path));
   for (const targetPackage of REVIEWED_SHARED_TARGET_PACKAGES) {
@@ -125,8 +151,8 @@ test("registry identifiers and paths are globally unique", () => {
   const products = moduleCompositionProductRegistry();
   for (const field of ["product_id", "path", "module_path"]) {
     const values = products.map((entry) => entry[field]);
-    assert.equal(new Set(values).size, 158, `${field} must be unique`);
-    assert.equal(new Set(values.map((entry) => entry.toLowerCase())).size, 158,
+    assert.equal(new Set(values).size, 162, `${field} must be unique`);
+    assert.equal(new Set(values.map((entry) => entry.toLowerCase())).size, 162,
       `${field} must be case-fold unique`);
   }
   assert.deepEqual(products.map((entry) => entry.product_id),
