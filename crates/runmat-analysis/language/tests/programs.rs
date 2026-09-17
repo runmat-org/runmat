@@ -6,7 +6,10 @@ use support::{source_module, TestHost};
 #[test]
 fn compiler_checks_inputs_defaults_locals_and_outputs_as_one_program() {
     let source = r#"
+model structure {
+}
 study load_study {
+    model = model.structure
     input load : force {
         default = 1 kN
         minimum = 0 N
@@ -39,7 +42,12 @@ study load_study {
         program.bound.diagnostics,
         program.diagnostics
     );
-    let declaration = program.declarations.values().next().unwrap();
+    let declaration = program
+        .declarations
+        .iter()
+        .find(|((_, key), _)| key.kind == FeaSymbolKind::Study)
+        .map(|(_, declaration)| declaration)
+        .unwrap();
     let input = &declaration.inputs["load"];
     assert_eq!(
         input.value_type,
@@ -161,7 +169,10 @@ study solve {
 #[test]
 fn study_lowers_typed_modal_state_flow_into_the_canonical_sequence() {
     let source = r#"
+model structure {
+}
 study response {
+    model = model.structure
     analysis modes {
         structural modal {
             modes = 12
@@ -202,7 +213,10 @@ study response {
 #[test]
 fn procedure_requiredness_rejects_hidden_physical_defaults() {
     let source = r#"
+model structure {
+}
 study response {
+    model = model.structure
     analysis transient {
         structural transient {
         }

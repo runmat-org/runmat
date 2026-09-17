@@ -156,7 +156,6 @@ pub fn check_program<C: AnalysisOperationCatalog + GeometryInspectionSource + ?S
     }
     let geometry_inspections =
         super::inspect_geometry_declarations(catalog, &bound, &mut diagnostics);
-    let analysis_sequences = super::lower_analysis_sequences(&declarations, &mut diagnostics);
     let materials = super::lower_materials(&declarations, &mut diagnostics);
     let geometries = super::lower_geometry_definitions(
         &bound,
@@ -166,6 +165,8 @@ pub fn check_program<C: AnalysisOperationCatalog + GeometryInspectionSource + ?S
     );
     let meshes = super::lower_mesh_definitions(&bound, &declarations, &mut diagnostics);
     let models = super::lower_models(&bound, &declarations, &mut diagnostics);
+    let analysis_sequences =
+        super::lower_analysis_sequences(&bound, &declarations, &models, &mut diagnostics);
     CheckedFeaProgram {
         bound,
         declarations,

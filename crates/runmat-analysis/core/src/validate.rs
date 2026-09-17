@@ -138,6 +138,17 @@ pub fn validate_analysis_sequence(
     crate::validate_sequence::validate_sequence_contract(sequence)
 }
 
+/// Reports whether a physics family can consume a canonical state kind.
+///
+/// Authoring frontends use this before constructing state inputs; complete model validation uses
+/// the same authority again after realization.
+pub fn physics_family_can_consume_state(
+    family: crate::PhysicsFamily,
+    kind: crate::StateKind,
+) -> bool {
+    crate::validate_sequence::family_can_consume_state(family, kind)
+}
+
 /// Validates reusable constitutive declarations before they are assigned to a realized model.
 pub fn validate_material_definitions(
     materials: &[crate::MaterialModel],

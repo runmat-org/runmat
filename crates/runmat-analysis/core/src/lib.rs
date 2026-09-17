@@ -40,6 +40,7 @@ mod validate_outputs;
 mod validate_sequence;
 mod validate_signals;
 
+pub use validate::physics_family_can_consume_state;
 pub use validate_authored::validate_coordinate_frame;
 pub use validate_outputs::spec::quantity_supported as procedure_produces_observation_quantity;
 pub use validate_outputs::{observation_sampling_matches_domain, validate_observation_sampling};

@@ -5,17 +5,18 @@ use crate::{
     FeaDiagnosticLocation, FeaDiagnosticPhase,
 };
 use runmat_analysis_core::{
-    validate_analysis_sequence, AnalysisProcedure, AnalysisSequence, CoupledPhysicsFamily,
-    IndependentDomain, PhysicsFamily, ProcedureStep, ProcedureStepId, RandomExcitationId,
-    ReferenceStatePolicy, ResponseSpectrumId, SequenceDependency, SequenceDependencyReason,
-    SolutionSpace, StateCompleteness, StateId, StateKind, StateOutput, StatePersistence,
-    StateSource, StateTransition, StateTransitionMethod, StateUse, TopologyTransitionPolicy,
-    TransitionId,
+    validate_analysis_sequence, AnalysisProcedure, AnalysisSequence, AuthoredModel,
+    CoupledPhysicsFamily, IndependentDomain, PhysicsFamily, ProcedureStep, ProcedureStepId,
+    RandomExcitationId, ReferenceStatePolicy, ResponseSpectrumId, SequenceDependency,
+    SequenceDependencyReason, SolutionSpace, StateCompleteness, StateId, StateKind, StateOutput,
+    StatePersistence, StateSource, StateTransition, StateTransitionMethod, StateUse,
+    TopologyTransitionPolicy, TransitionId,
 };
 use std::collections::BTreeSet;
 
 pub fn lower_study(
     declaration: &CheckedFeaDeclaration,
+    model: &AuthoredModel,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<AnalysisSequence> {
     let initial_errors = diagnostics.len();
@@ -67,6 +68,7 @@ pub fn lower_study(
             &analysis,
             &procedure.0,
             procedure.1,
+            model,
             diagnostics,
         ) else {
             continue;
@@ -168,6 +170,7 @@ fn lower_procedure(
     analysis: &AnalysisHeader,
     procedure: &ProcedureHeader,
     statements: &[CheckedFeaStatement],
+    model: &AuthoredModel,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<ProcedureStep> {
     let id = analysis.name.clone();
@@ -305,7 +308,7 @@ fn lower_procedure(
             diagnostics,
         )?,
     };
-    Some(step)
+    super::initial_conditions::bind(declaration, procedure, statements, model, step, diagnostics)
 }
 
 fn generic_procedure(

@@ -7,9 +7,13 @@ mod step;
 mod tests;
 
 use crate::{
-    AnalysisModel, AnalysisSequence, AnalysisValidationError, ProcedureStep, StateTransition,
-    ValidatedAnalysisSequence,
+    AnalysisModel, AnalysisSequence, AnalysisValidationError, PhysicsFamily, ProcedureStep,
+    StateKind, StateTransition, ValidatedAnalysisSequence,
 };
+
+pub(crate) fn family_can_consume_state(family: PhysicsFamily, kind: StateKind) -> bool {
+    step::family_can_consume_state(family, kind)
+}
 
 pub(crate) fn validate_sequence(
     model: &AnalysisModel,

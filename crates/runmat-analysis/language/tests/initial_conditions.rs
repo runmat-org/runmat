@@ -54,6 +54,19 @@ model prepared {
         }
     }
 }
+study response {
+    model = model.prepared
+    analysis transient {
+        thermomechanical transient {
+            start_time = 0 s
+            end_time = 1 s
+            initial_conditions = [
+                model.initial.at_rest,
+                model.initial.warm_start,
+            ]
+        }
+    }
+}
 "#;
     let program = FeaCompiler::new(&TestHost::default()).check(CheckRequest {
         modules: ModuleGraphRequest {
@@ -86,6 +99,20 @@ model prepared {
             runmat_analysis_core::InitialValue::FieldArtifact(artifact)
         ) if artifact.artifact_id == "state-42"
     ));
+    let sequence = program.analysis_sequences.values().next().unwrap();
+    let step = &sequence.steps[0];
+    assert_eq!(step.activations.len(), 2);
+    assert_eq!(step.state_inputs.len(), 2);
+    assert!(step.state_inputs.iter().any(|input| {
+        input.input_id == "initial_structural_kinematics"
+            && input.required_kind == runmat_analysis_core::StateKind::StructuralKinematics
+            && input.source == runmat_analysis_core::StateSource::InitialConditions
+    }));
+    assert!(step.state_inputs.iter().any(|input| {
+        input.input_id == "initial_thermal"
+            && input.required_kind == runmat_analysis_core::StateKind::Thermal
+            && input.source == runmat_analysis_core::StateSource::InitialConditions
+    }));
 }
 
 #[test]
@@ -112,6 +139,7 @@ model invalid_shape {
         }
     }
 }
+
 model invalid_frequency {
     signal pressure_spectrum : pressure over frequency {
         samples = [
@@ -174,4 +202,49 @@ model invalid_temperature {
         .diagnostics
         .iter()
         .any(|diagnostic| diagnostic.message.contains("zero kelvin")));
+}
+
+#[test]
+fn studies_reject_unknown_or_physics_incompatible_initial_state() {
+    let source = r#"
+model prepared {
+    initial pressure {
+        acoustic.pressure {
+            target = whole_model
+            uniform = 0 Pa
+        }
+    }
+}
+study wrong_family {
+    model = model.prepared
+    analysis static_case {
+        structural static {
+            initial_conditions = [model.initial.pressure]
+        }
+    }
+}
+study unknown_condition {
+    model = model.prepared
+    analysis acoustic_case {
+        acoustic static {
+            initial_conditions = [model.initial.missing]
+        }
+    }
+}
+"#;
+    let program = FeaCompiler::new(&TestHost::default()).check(CheckRequest {
+        modules: ModuleGraphRequest {
+            source_root: LogicalSourcePath::new("project").unwrap(),
+            root: source_module("project/main.fea", source, 1),
+        },
+    });
+    assert!(!program.is_valid());
+    assert!(program.analysis_sequences.is_empty());
+    assert!(program
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.message.contains("cannot consume initial state")));
+    assert!(program.diagnostics.iter().any(|diagnostic| diagnostic
+        .message
+        .contains("no initial condition `missing`")));
 }

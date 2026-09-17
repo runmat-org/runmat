@@ -568,6 +568,7 @@ fn contextual_reference_type(path: &[String]) -> Option<FeaType> {
                         | "load"
                         | "load_case"
                         | "signal"
+                        | "initial"
                 ) =>
         {
             Some(FeaType::Unknown)
