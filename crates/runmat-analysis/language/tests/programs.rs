@@ -22,7 +22,7 @@ study load_study {
 "#;
     let host = TestHost::default().with_module(
         "project/library.fea",
-        "material library_material {\n}\n",
+        "material library_material {\nmass_density = 1 kg/m^3\n}\n",
         2,
     );
     let program = FeaCompiler::new(&host).check(CheckRequest {
@@ -216,6 +216,60 @@ study response {
         diagnostic.code == "fea.semantic.procedure" && diagnostic.message.contains("start_time")
     }));
     assert!(program.analysis_sequences.is_empty());
+}
+
+#[test]
+fn material_capabilities_lower_with_canonical_si_values() {
+    let source = r#"
+material steel {
+    name = "Structural steel"
+    mass_density = 7850 kg/m^3
+    elastic {
+        youngs_modulus = 200 GPa
+        poisson_ratio = 0.3
+    }
+}
+"#;
+    let host = TestHost::default();
+    let program = FeaCompiler::new(&host).check(CheckRequest {
+        modules: ModuleGraphRequest {
+            source_root: LogicalSourcePath::new("project").unwrap(),
+            root: source_module("project/main.fea", source, 1),
+        },
+    });
+    assert!(program.is_valid(), "{:#?}", program.diagnostics);
+    let material = program.materials.values().next().unwrap();
+    assert_eq!(material.mass_density_kg_per_m3, Some(7850.0));
+    let mechanical = material.mechanical.as_ref().unwrap();
+    assert_eq!(mechanical.youngs_modulus_pa, 200.0e9);
+    assert_eq!(mechanical.poisson_ratio, 0.3);
+}
+
+#[test]
+fn material_lowering_rejects_empty_and_dimensionally_wrong_capabilities() {
+    let source = r#"
+material empty {
+}
+material invalid {
+    elastic {
+        youngs_modulus = 200 m
+        poisson_ratio = 0.3
+    }
+}
+"#;
+    let host = TestHost::default();
+    let program = FeaCompiler::new(&host).check(CheckRequest {
+        modules: ModuleGraphRequest {
+            source_root: LogicalSourcePath::new("project").unwrap(),
+            root: source_module("project/main.fea", source, 1),
+        },
+    });
+    assert!(!program.is_valid());
+    assert!(program
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "fea.semantic.material"));
+    assert!(program.materials.is_empty());
 }
 
 #[test]

@@ -138,6 +138,13 @@ pub fn validate_analysis_sequence(
     crate::validate_sequence::validate_sequence_contract(sequence)
 }
 
+/// Validates reusable constitutive declarations before they are assigned to a realized model.
+pub fn validate_material_definitions(
+    materials: &[crate::MaterialModel],
+) -> Result<(), AnalysisValidationError> {
+    crate::validate_materials::validate_material_definitions(materials)
+}
+
 /// Validates the complete authored model and returns its immutable semantic
 /// sequence topology for execution planning.
 pub fn validate_model_sequence(

@@ -1,5 +1,6 @@
 mod expression;
 mod inspection;
+mod material;
 mod procedure;
 mod program;
 mod scope;
@@ -9,6 +10,7 @@ mod units;
 
 pub use expression::*;
 pub use inspection::*;
+pub use material::*;
 pub use procedure::*;
 pub use program::*;
 pub use type_syntax::{parse_type_syntax, TypeSyntaxError};

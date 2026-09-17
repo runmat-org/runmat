@@ -70,6 +70,12 @@ pub(crate) fn validate_materials(
     Ok(())
 }
 
+pub(crate) fn validate_material_definitions(
+    materials: &[MaterialModel],
+) -> Result<(), AnalysisValidationError> {
+    validate_materials(materials, &[])
+}
+
 fn validate_material(material: &MaterialModel) -> Result<(), AnalysisValidationError> {
     if material.name.trim().is_empty() {
         return Err(invalid_material(material, "name must be non-empty"));

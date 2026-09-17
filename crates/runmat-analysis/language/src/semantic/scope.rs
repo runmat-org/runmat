@@ -296,11 +296,11 @@ fn extend_geometry_members(
 
 fn topology_role(source: &str) -> Option<FeaTopologyRole> {
     Some(match source {
-        "vertex" => FeaTopologyRole::Vertex,
-        "edge" => FeaTopologyRole::Edge,
-        "face" => FeaTopologyRole::Face,
-        "solid" => FeaTopologyRole::Solid,
-        "cell" => FeaTopologyRole::Cell,
+        "vertex" | "vertices" => FeaTopologyRole::Vertex,
+        "edge" | "edges" => FeaTopologyRole::Edge,
+        "face" | "faces" => FeaTopologyRole::Face,
+        "solid" | "solids" => FeaTopologyRole::Solid,
+        "cell" | "cells" => FeaTopologyRole::Cell,
         _ => return None,
     })
 }

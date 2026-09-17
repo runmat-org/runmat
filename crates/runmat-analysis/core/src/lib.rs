@@ -161,8 +161,8 @@ pub use study::{
     StructuralRecoveryImplementation, TemporalImplementation, TopologyImplementation,
 };
 pub use validate::{
-    validate_analysis_sequence, validate_model, validate_model_against_geometry,
-    validate_model_sequence, AnalysisValidationError,
+    validate_analysis_sequence, validate_material_definitions, validate_model,
+    validate_model_against_geometry, validate_model_sequence, AnalysisValidationError,
 };
 
 #[cfg(test)]

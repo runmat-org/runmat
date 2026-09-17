@@ -21,6 +21,7 @@ pub struct CheckedFeaProgram {
         BTreeMap<(LogicalSourcePath, String), super::CheckedGeometryInspection>,
     pub analysis_sequences:
         BTreeMap<(LogicalSourcePath, FeaSymbolKey), runmat_analysis_core::AnalysisSequence>,
+    pub materials: BTreeMap<(LogicalSourcePath, FeaSymbolKey), runmat_analysis_core::MaterialModel>,
 }
 
 impl CheckedFeaProgram {
@@ -120,12 +121,14 @@ pub fn check_program<C: AnalysisOperationCatalog + GeometryInspectionSource + ?S
     let geometry_inspections =
         super::inspect_geometry_declarations(catalog, &bound, &mut diagnostics);
     let analysis_sequences = super::lower_analysis_sequences(&declarations, &mut diagnostics);
+    let materials = super::lower_materials(&declarations, &mut diagnostics);
     CheckedFeaProgram {
         bound,
         declarations,
         diagnostics,
         geometry_inspections,
         analysis_sequences,
+        materials,
     }
 }
 
