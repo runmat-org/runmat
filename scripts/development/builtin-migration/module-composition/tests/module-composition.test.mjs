@@ -506,6 +506,44 @@ test("reviewed bundle transitions exactly cover products, scopes, and disjoint c
       ...bundle("bundle-one"), authored_write_set: [{ kind: "file", path: "elsewhere.rs" }],
     }]]),
   ), /outside its authored scope/);
+
+  const parentOrderOnly = structuredClone(arithmetic);
+  parentOrderOnly.declaration_order += 1;
+  parentOrderOnly.aggregation_sources = parentOrderOnly.aggregation_sources.map((source) => ({
+    ...source, order: source.order + 1,
+  }));
+  assert.doesNotThrow(() => validateModuleCompositionControl(
+    baseline,
+    products,
+    new Map([["bundle-order", {
+      ...bundle("bundle-order", parentOrderOnly),
+      module_composition_transition: transition("bundle-order", [{
+        product_id: "catalog-math",
+        operation: "replace",
+        before: arithmetic,
+        after: parentOrderOnly,
+      }]),
+      authored_write_set: [],
+    }]]),
+    { deferEffectiveSequence: true },
+  ));
+  const childMetadataChange = structuredClone(parentOrderOnly);
+  childMetadataChange.visibility = childMetadataChange.visibility === "public" ? "private" : "public";
+  assert.throws(() => validateModuleCompositionControl(
+    baseline,
+    products,
+    new Map([["bundle-child-metadata", {
+      ...bundle("bundle-child-metadata", childMetadataChange),
+      module_composition_transition: transition("bundle-child-metadata", [{
+        product_id: "catalog-math",
+        operation: "replace",
+        before: arithmetic,
+        after: childMetadataChange,
+      }]),
+      authored_write_set: [],
+    }]]),
+    { deferEffectiveSequence: true },
+  ), /outside its authored scope/);
   assert.throws(() => validateModuleCompositionControl(
     baseline, products, new Map([
       ["bundle-one", bundle("bundle-one")],
