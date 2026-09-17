@@ -44,6 +44,7 @@ const PAIRED_PRODUCT_CONFIGURATIONS = deepImmutable(validatePairedConfigurations
   paired("logical"),
   paired("logical/relational"),
   paired("math"),
+  paired("math/bitwise", ["entries"]),
   paired("math/elementwise"),
   paired("math/fft"),
   paired("math/linalg"),
@@ -82,6 +83,7 @@ const PAIRED_PRODUCT_CONFIGURATIONS = deepImmutable(validatePairedConfigurations
   paired("testing/runner"),
   paired("timing"),
   paired("timing/timer"),
+  paired("workspace"),
 ]));
 
 export const MODULE_COMPOSITION_SUFFIXES = Object.freeze(

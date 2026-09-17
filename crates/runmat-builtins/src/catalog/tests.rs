@@ -535,6 +535,30 @@ fn catalog_entry_families_own_registration_without_domain_builtin_lists() {
                     std::fs::read_to_string(&family_module_path).unwrap_or_else(|error| {
                         panic!("read {}: {error}", family_module_path.display())
                     });
+                let local_extension = source.contains(
+                    "pub(super) fn extend_entries(values: &mut Vec<&'static BuiltinCatalogEntry>)",
+                );
+                if local_extension {
+                    let module = path.file_stem().and_then(|name| name.to_str()).expect("module");
+                    assert!(
+                        family_module.contains(&format!("{module}::extend_entries(values);")),
+                        "{} does not compose the typed local entry extension from {}",
+                        family_module_path.display(),
+                        path.display()
+                    );
+                    for declaration in source.lines().filter_map(|line| {
+                        line.strip_prefix("pub const ")
+                            .and_then(|rest| rest.split_once("_CATALOG_ENTRY:"))
+                            .map(|(prefix, _)| format!("values.push(&{prefix}_CATALOG_ENTRY);"))
+                    }) {
+                        assert!(
+                            source.contains(&declaration),
+                            "{} does not register its local entry with {declaration}",
+                            path.display()
+                        );
+                    }
+                    continue;
+                }
                 assert!(
                     family_module.contains("const ENTRIES"),
                     "grouped catalog family must own one local entry slice: {}",

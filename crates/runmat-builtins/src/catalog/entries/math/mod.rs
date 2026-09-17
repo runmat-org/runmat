@@ -21,7 +21,7 @@ pub use trigonometry::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     elementwise::extend_entries(values);
-    values.extend(bitwise::ENTRIES.iter().copied());
+    bitwise::extend_entries(values);
     values.extend(discrete::ENTRIES.iter().copied());
     values.extend(integer_division::ENTRIES.iter().copied());
     linalg::extend_entries(values);

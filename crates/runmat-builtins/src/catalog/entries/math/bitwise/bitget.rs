@@ -206,3 +206,7 @@ pub const BITGET_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     integer_audit: None,
     suppress_auto_output: false,
 };
+
+pub(super) fn extend_entries(values: &mut Vec<&'static BuiltinCatalogEntry>) {
+    values.push(&BITGET_CATALOG_ENTRY);
+}
