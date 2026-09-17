@@ -3,7 +3,10 @@ use crate::{
     CheckedExpression, CheckedExpressionKind, CheckedFeaDeclaration, CheckedFeaStatement,
     CheckedFeaStatementKind, FeaDiagnostic, FeaType, PhysicalDimension,
 };
-use runmat_analysis_core::{CoordinateFrame, StructuralTranslationDof};
+use runmat_analysis_core::{
+    CoordinateFrame, PhysicalQuantityKind, PhysicalSignal, PrescribedValue, SignalId, SignalShape,
+    StructuralTranslationDof,
+};
 
 pub(super) fn optional_assignment<'a>(
     body: &'a [CheckedFeaStatement],
@@ -30,7 +33,7 @@ pub(super) fn optional_quantity(
     }
 }
 
-fn quantity(
+pub(super) fn quantity(
     declaration: &CheckedFeaDeclaration,
     value: &CheckedExpression,
     name: &str,
@@ -57,6 +60,60 @@ fn quantity(
         invalid(declaration, value, name, "constant quantity", diagnostics);
         None
     })
+}
+
+pub(super) fn prescribed_value<Q>(
+    declaration: &CheckedFeaDeclaration,
+    body: &[CheckedFeaStatement],
+    name: &str,
+    expected: (PhysicalDimension, PhysicalQuantityKind),
+    signals: &[PhysicalSignal],
+    constant: impl FnOnce(f64) -> Q,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Option<PrescribedValue<Q>> {
+    let (dimension, quantity_kind) = expected;
+    let value = required_assignment(declaration, body, name, diagnostics)?;
+    if let CheckedExpressionKind::Reference(path) = &value.kind {
+        let [namespace, signal_name] = path.as_slice() else {
+            invalid(
+                declaration,
+                value,
+                name,
+                "a constant quantity or `signal.<name>`",
+                diagnostics,
+            );
+            return None;
+        };
+        if namespace != "signal" {
+            invalid(
+                declaration,
+                value,
+                name,
+                "a constant quantity or `signal.<name>`",
+                diagnostics,
+            );
+            return None;
+        }
+        let id = SignalId(signal_name.clone());
+        if !signals.iter().any(|signal| {
+            signal.signal_id() == &id
+                && signal.quantity() == quantity_kind
+                && signal.shape() == &SignalShape::Scalar
+        }) {
+            invalid(
+                declaration,
+                value,
+                name,
+                "a declared scalar signal with the required physical quantity",
+                diagnostics,
+            );
+            return None;
+        }
+        return Some(PrescribedValue::Signal(id));
+    }
+    quantity(declaration, value, name, dimension, diagnostics)
+        .map(constant)
+        .map(PrescribedValue::Constant)
 }
 
 pub(super) fn optional_vector(

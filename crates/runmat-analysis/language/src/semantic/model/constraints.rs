@@ -6,16 +6,20 @@ use crate::{
 use runmat_analysis_core::{
     AuthoredConstraint, AuthoredConstraintKind, AuthoredConstraintTarget,
     AuthoredTargetCardinality, ElectricCurrent, ElectricPotential, MagneticVectorPotential,
-    PrescribedValue, Pressure, Temperature, Velocity,
+    PhysicalQuantityKind, PhysicalSignal, Pressure, Temperature, Velocity,
 };
 use runmat_parser::fea::FeaModelDefinitionKind;
 
+mod motion;
 mod relational;
 mod values;
+
+use values::prescribed_value;
 
 pub(super) fn lower(
     declaration: &CheckedFeaDeclaration,
     bound: &BoundFeaProgram,
+    signals: &[PhysicalSignal],
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Vec<AuthoredConstraint> {
     declaration
@@ -30,7 +34,7 @@ pub(super) fn lower(
             else {
                 return None;
             };
-            constraint(declaration, bound, name, statements, diagnostics)
+            constraint(declaration, bound, signals, name, statements, diagnostics)
         })
         .collect()
 }
@@ -38,13 +42,14 @@ pub(super) fn lower(
 fn constraint(
     declaration: &CheckedFeaDeclaration,
     bound: &BoundFeaProgram,
+    signals: &[PhysicalSignal],
     id: &str,
     statements: &[CheckedFeaStatement],
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<AuthoredConstraint> {
     let (kind, body) = sole_kind_block(declaration, statements, "constraint", diagnostics)?;
     if relational::recognizes(kind) {
-        let kind = relational::lower(declaration, bound, kind, body, diagnostics)?;
+        let kind = relational::lower(declaration, bound, signals, kind, body, diagnostics)?;
         return finish(declaration, id, kind, diagnostics);
     }
     let target_expression = required_assignment(declaration, body, "target", diagnostics)?;
@@ -64,23 +69,33 @@ fn constraint(
         "structural.antisymmetry" => AuthoredConstraintKind::StructuralAntisymmetry { target },
         "thermal.temperature" => AuthoredConstraintKind::ThermalTemperature {
             target,
-            value: PrescribedValue::Constant(Temperature::new(required_quantity(
+            value: prescribed_value(
                 declaration,
                 body,
                 "value",
-                PhysicalDimension::TEMPERATURE,
+                (
+                    PhysicalDimension::TEMPERATURE,
+                    PhysicalQuantityKind::Temperature,
+                ),
+                signals,
+                Temperature::new,
                 diagnostics,
-            )?)),
+            )?,
         },
         "electrical.potential" => AuthoredConstraintKind::ElectricalPotential {
             target,
-            value: PrescribedValue::Constant(ElectricPotential::new(required_quantity(
+            value: prescribed_value(
                 declaration,
                 body,
                 "value",
-                PhysicalDimension::ELECTRIC_POTENTIAL,
+                (
+                    PhysicalDimension::ELECTRIC_POTENTIAL,
+                    PhysicalQuantityKind::ElectricPotential,
+                ),
+                signals,
+                ElectricPotential::new,
                 diagnostics,
-            )?)),
+            )?,
         },
         "electrical.equipotential" => AuthoredConstraintKind::ElectricalEquipotential { target },
         "electrical.floating_conductor" => {
@@ -88,13 +103,18 @@ fn constraint(
         }
         "electrical.integral_current" => AuthoredConstraintKind::ElectricalIntegralCurrent {
             target,
-            value: PrescribedValue::Constant(ElectricCurrent::new(required_quantity(
+            value: prescribed_value(
                 declaration,
                 body,
                 "value",
-                PhysicalDimension::ELECTRIC_CURRENT,
+                (
+                    PhysicalDimension::ELECTRIC_CURRENT,
+                    PhysicalQuantityKind::ElectricCurrent,
+                ),
+                signals,
+                ElectricCurrent::new,
                 diagnostics,
-            )?)),
+            )?,
         },
         "electrical.potential_reference" => {
             AuthoredConstraintKind::ElectricalPotentialReference { target }
@@ -105,56 +125,69 @@ fn constraint(
         "magnetic.coulomb_gauge" => AuthoredConstraintKind::MagneticCoulombGauge { target },
         "acoustic.pressure" => AuthoredConstraintKind::AcousticPressure {
             target,
-            value: PrescribedValue::Constant(Pressure::new(required_quantity(
+            value: prescribed_value(
                 declaration,
                 body,
                 "value",
-                PhysicalDimension::PRESSURE,
+                (PhysicalDimension::PRESSURE, PhysicalQuantityKind::Pressure),
+                signals,
+                Pressure::new,
                 diagnostics,
-            )?)),
+            )?,
         },
         "fluid.velocity" => AuthoredConstraintKind::FluidVelocity {
             target,
-            value: PrescribedValue::Constant(Velocity::new(required_quantity(
+            value: prescribed_value(
                 declaration,
                 body,
                 "value",
-                PhysicalDimension::VELOCITY,
+                (PhysicalDimension::VELOCITY, PhysicalQuantityKind::Velocity),
+                signals,
+                Velocity::new,
                 diagnostics,
-            )?)),
+            )?,
         },
         "fluid.moving_wall" => AuthoredConstraintKind::FluidMovingWall {
             target,
-            velocity: PrescribedValue::Constant(Velocity::new(required_quantity(
+            velocity: prescribed_value(
                 declaration,
                 body,
                 "value",
-                PhysicalDimension::VELOCITY,
+                (PhysicalDimension::VELOCITY, PhysicalQuantityKind::Velocity),
+                signals,
+                Velocity::new,
                 diagnostics,
-            )?)),
+            )?,
         },
         "fluid.no_slip_wall" => AuthoredConstraintKind::FluidNoSlipWall { target },
         "fluid.slip_wall" => AuthoredConstraintKind::FluidSlipWall { target },
         "fluid.symmetry" => AuthoredConstraintKind::FluidSymmetry { target },
         "fluid.pressure_reference" => AuthoredConstraintKind::FluidPressureReference {
             target,
-            value: PrescribedValue::Constant(Pressure::new(required_quantity(
+            value: prescribed_value(
                 declaration,
                 body,
                 "value",
-                PhysicalDimension::PRESSURE,
+                (PhysicalDimension::PRESSURE, PhysicalQuantityKind::Pressure),
+                signals,
+                Pressure::new,
                 diagnostics,
-            )?)),
+            )?,
         },
         "magnetic.vector_potential" => AuthoredConstraintKind::MagneticVectorPotential {
             target,
-            value: PrescribedValue::Constant(MagneticVectorPotential::new(required_quantity(
+            value: prescribed_value(
                 declaration,
                 body,
                 "value",
-                PhysicalDimension::MAGNETIC_FLUX_DENSITY.multiply(PhysicalDimension::LENGTH)?,
+                (
+                    PhysicalDimension::MAGNETIC_FLUX_DENSITY.multiply(PhysicalDimension::LENGTH)?,
+                    PhysicalQuantityKind::MagneticVectorPotential,
+                ),
+                signals,
+                MagneticVectorPotential::new,
                 diagnostics,
-            )?)),
+            )?,
         },
         _ => {
             diagnostic(

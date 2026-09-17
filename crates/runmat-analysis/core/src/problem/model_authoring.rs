@@ -285,6 +285,11 @@ impl AuthoredModel {
                 detail: error.to_string(),
             }
         })?;
+        for constraint in &self.constraints {
+            constraint
+                .validate_signal_references(&self.signals)
+                .map_err(|error| AuthoredModelError::InvalidConstraint(error.to_string()))?;
+        }
         crate::validate_authored_excitations(
             &self.excitations,
             &self.excitation_cases,

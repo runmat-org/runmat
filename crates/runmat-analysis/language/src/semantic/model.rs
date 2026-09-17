@@ -99,9 +99,9 @@ fn model(
         })
         .collect();
     let lowered_properties = properties::lower(declaration, bound, diagnostics);
-    let constraints = constraints::lower(declaration, bound, diagnostics);
     let lowered_physics = physics::lower(declaration, bound, diagnostics);
     let mut signals = signals::lower(declaration, bound, diagnostics);
+    let constraints = constraints::lower(declaration, bound, &signals, diagnostics);
     let lowered_excitations = excitations::lower(declaration, bound, &signals, diagnostics);
     signals.extend(lowered_excitations.signals);
     AuthoredModel {

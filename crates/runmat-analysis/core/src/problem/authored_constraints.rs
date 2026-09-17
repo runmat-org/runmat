@@ -7,11 +7,17 @@ use super::{
         ElectricCurrent, ElectricPotential, MagneticVectorPotential, Pressure, Temperature,
         Velocity,
     },
+    signal::PhysicalSignal,
 };
 use runmat_geometry_core::GeometryRegionRole;
 
+mod motion;
 mod relational;
 
+pub use motion::{
+    authored_motion_acceleration_is_compatible, materialized_motion_acceleration_is_compatible,
+    AuthoredPrescribedStructuralMotion,
+};
 pub use relational::{
     AuthoredPairedConstraint, AuthoredPairingPolicy, AuthoredPeriodicConstraint,
     AuthoredPeriodicTransform, AuthoredPhaseShiftedPeriodicConstraint,
@@ -40,6 +46,7 @@ pub enum AuthoredConstraintKind {
         target: AuthoredConstraintTarget,
     },
     StructuralPrescribed(AuthoredStructuralDofs),
+    StructuralPrescribedMotion(AuthoredPrescribedStructuralMotion),
     StructuralNormalDisplacement {
         target: AuthoredConstraintTarget,
         value: PrescribedValue<super::quantity::Displacement>,
@@ -160,6 +167,66 @@ impl AuthoredConstraint {
         self.kind.validate_value()?;
         relational::validate(self)
     }
+
+    pub fn validate_signal_references(
+        &self,
+        signals: &[PhysicalSignal],
+    ) -> Result<(), AuthoredConstraintError> {
+        let valid = match &self.kind {
+            AuthoredConstraintKind::StructuralPrescribed(values) => {
+                values
+                    .translations
+                    .iter()
+                    .all(|entry| entry.value.is_well_formed(signals))
+                    && values
+                        .rotations
+                        .iter()
+                        .all(|entry| entry.value.is_well_formed(signals))
+            }
+            AuthoredConstraintKind::StructuralPrescribedMotion(motion) => {
+                motion.translations.iter().all(|translation| {
+                    let super::constraint::StructuralKinematicHistory::AccelerationDriven {
+                        acceleration,
+                        ..
+                    } = &translation.history;
+                    signals.iter().any(|signal| {
+                        signal.signal_id() == &acceleration.0
+                            && authored_motion_acceleration_is_compatible(signal)
+                    })
+                })
+            }
+            AuthoredConstraintKind::StructuralNormalDisplacement { value, .. } => {
+                value.is_well_formed(signals)
+            }
+            AuthoredConstraintKind::ThermalTemperature { value, .. } => {
+                value.is_well_formed(signals)
+            }
+            AuthoredConstraintKind::ElectricalPotential { value, .. } => {
+                value.is_well_formed(signals)
+            }
+            AuthoredConstraintKind::ElectricalIntegralCurrent { value, .. } => {
+                value.is_well_formed(signals)
+            }
+            AuthoredConstraintKind::MagneticVectorPotential { value, .. } => {
+                value.is_well_formed(signals)
+            }
+            AuthoredConstraintKind::AcousticPressure { value, .. }
+            | AuthoredConstraintKind::FluidPressureReference { value, .. } => {
+                value.is_well_formed(signals)
+            }
+            AuthoredConstraintKind::FluidVelocity { value, .. } => value.is_well_formed(signals),
+            AuthoredConstraintKind::FluidMovingWall { velocity, .. } => {
+                velocity.is_well_formed(signals)
+            }
+            AuthoredConstraintKind::ThermalAffineJump(value) => {
+                value.temperature_jump.is_well_formed(signals)
+            }
+            _ => true,
+        };
+        valid
+            .then_some(())
+            .ok_or(AuthoredConstraintError::InvalidSignalReference)
+    }
 }
 
 impl AuthoredConstraintKind {
@@ -185,6 +252,7 @@ impl AuthoredConstraintKind {
             | Self::FluidSymmetry { target }
             | Self::FluidPressureReference { target, .. } => visit(target),
             Self::StructuralPrescribed(value) => visit(&value.target),
+            Self::StructuralPrescribedMotion(value) => visit(&value.target),
             Self::StructuralNormalDisplacement { target, .. } => visit(target),
             Self::StructuralRigidCoupling(value) | Self::StructuralDistributingCoupling(value) => {
                 visit(&value.target)
@@ -316,6 +384,8 @@ pub enum AuthoredConstraintError {
     UnsupportedCellTarget,
     #[error("constraint value is non-finite or outside its physical domain")]
     InvalidValue,
+    #[error("constraint references an incompatible or unknown physical signal")]
+    InvalidSignalReference,
     #[error("constraint frame is invalid")]
     InvalidFrame,
     #[error("prescribed constraint requires at least one degree of freedom")]

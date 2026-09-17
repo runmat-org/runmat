@@ -110,6 +110,9 @@ pub struct AuthoredThermalJump {
 pub(super) fn validate(value: &AuthoredConstraint) -> Result<(), AuthoredConstraintError> {
     match &value.kind {
         AuthoredConstraintKind::StructuralPrescribed(dofs) => validate_dofs(dofs),
+        AuthoredConstraintKind::StructuralPrescribedMotion(motion) => {
+            super::motion::validate(motion)
+        }
         AuthoredConstraintKind::StructuralRigidCoupling(coupling)
         | AuthoredConstraintKind::StructuralDistributingCoupling(coupling) => {
             if coupling

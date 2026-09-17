@@ -10,13 +10,14 @@ use runmat_analysis_core::{
     AuthoredPhaseShiftedPeriodicConstraint, AuthoredReferencePointCoupling,
     AuthoredRotationDofValue, AuthoredStructuralConstraintEquation,
     AuthoredStructuralConstraintEquationTerm, AuthoredStructuralDofs, AuthoredTargetCardinality,
-    AuthoredThermalJump, AuthoredTranslationDofValue, ComplexPhase, Displacement, Length, Position,
-    PrescribedValue, ReferencePoint, Rotation, StructuralRotationDof, StructuralTranslationDof,
-    TemperatureDifference, Translation,
+    AuthoredThermalJump, AuthoredTranslationDofValue, ComplexPhase, Displacement, Length,
+    PhysicalQuantityKind, PhysicalSignal, Position, ReferencePoint, Rotation,
+    StructuralRotationDof, StructuralTranslationDof, TemperatureDifference, Translation,
 };
 
 const KINDS: &[&str] = &[
     "structural.prescribed",
+    "structural.prescribed_motion",
     "structural.normal_displacement",
     "structural.rigid_coupling",
     "structural.distributing_coupling",
@@ -41,23 +42,32 @@ pub(super) fn recognizes(kind: &str) -> bool {
 pub(super) fn lower(
     declaration: &CheckedFeaDeclaration,
     bound: &BoundFeaProgram,
+    signals: &[PhysicalSignal],
     kind: &str,
     body: &[CheckedFeaStatement],
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<AuthoredConstraintKind> {
     match kind {
-        "structural.prescribed" => prescribed(declaration, bound, body, diagnostics),
+        "structural.prescribed" => prescribed(declaration, bound, signals, body, diagnostics),
+        "structural.prescribed_motion" => {
+            super::motion::lower(declaration, bound, signals, body, diagnostics)
+        }
         "structural.normal_displacement" => {
             validate_assignments(declaration, body, &["target", "value"], diagnostics);
             Some(AuthoredConstraintKind::StructuralNormalDisplacement {
                 target: target(declaration, bound, body, "target", diagnostics)?,
-                value: PrescribedValue::Constant(Displacement::new(required_quantity(
+                value: prescribed_value(
                     declaration,
                     body,
                     "value",
-                    PhysicalDimension::LENGTH,
+                    (
+                        PhysicalDimension::LENGTH,
+                        PhysicalQuantityKind::Displacement,
+                    ),
+                    signals,
+                    Displacement::new,
                     diagnostics,
-                )?)),
+                )?,
             })
         }
         "structural.rigid_coupling" | "structural.distributing_coupling" => {
@@ -78,13 +88,14 @@ pub(super) fn lower(
             })
         }
         "structural.equation" => equation(declaration, bound, body, diagnostics),
-        _ => periodic(declaration, bound, kind, body, diagnostics),
+        _ => periodic(declaration, bound, signals, kind, body, diagnostics),
     }
 }
 
 fn prescribed(
     declaration: &CheckedFeaDeclaration,
     bound: &BoundFeaProgram,
+    signals: &[PhysicalSignal],
     body: &[CheckedFeaStatement],
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<AuthoredConstraintKind> {
@@ -100,16 +111,21 @@ fn prescribed(
         ("uy", StructuralTranslationDof::Uy),
         ("uz", StructuralTranslationDof::Uz),
     ] {
-        if let Some(value) = optional_quantity(
-            declaration,
-            body,
-            name,
-            PhysicalDimension::LENGTH,
-            diagnostics,
-        )? {
+        if optional_assignment(body, name).is_some() {
             translations.push(AuthoredTranslationDofValue {
                 dof,
-                value: PrescribedValue::Constant(Displacement::new(value)),
+                value: prescribed_value(
+                    declaration,
+                    body,
+                    name,
+                    (
+                        PhysicalDimension::LENGTH,
+                        PhysicalQuantityKind::Displacement,
+                    ),
+                    signals,
+                    Displacement::new,
+                    diagnostics,
+                )?,
             });
         }
     }
@@ -119,16 +135,21 @@ fn prescribed(
         ("ry", StructuralRotationDof::Ry),
         ("rz", StructuralRotationDof::Rz),
     ] {
-        if let Some(value) = optional_quantity(
-            declaration,
-            body,
-            name,
-            PhysicalDimension::DIMENSIONLESS,
-            diagnostics,
-        )? {
+        if optional_assignment(body, name).is_some() {
             rotations.push(AuthoredRotationDofValue {
                 dof,
-                value: PrescribedValue::Constant(Rotation::new(value)),
+                value: prescribed_value(
+                    declaration,
+                    body,
+                    name,
+                    (
+                        PhysicalDimension::DIMENSIONLESS,
+                        PhysicalQuantityKind::Rotation,
+                    ),
+                    signals,
+                    Rotation::new,
+                    diagnostics,
+                )?,
             });
         }
     }
@@ -187,6 +208,7 @@ fn coupling(
 fn periodic(
     declaration: &CheckedFeaDeclaration,
     bound: &BoundFeaProgram,
+    signals: &[PhysicalSignal],
     kind: &str,
     body: &[CheckedFeaStatement],
     diagnostics: &mut Vec<FeaDiagnostic>,
@@ -219,15 +241,18 @@ fn periodic(
         "thermal.periodic" => AuthoredConstraintKind::ThermalPeriodic(periodic),
         "thermal.affine_jump" => AuthoredConstraintKind::ThermalAffineJump(AuthoredThermalJump {
             periodic,
-            temperature_jump: PrescribedValue::Constant(TemperatureDifference::new(
-                required_quantity(
-                    declaration,
-                    body,
-                    "jump",
+            temperature_jump: prescribed_value(
+                declaration,
+                body,
+                "jump",
+                (
                     PhysicalDimension::TEMPERATURE,
-                    diagnostics,
-                )?,
-            )),
+                    PhysicalQuantityKind::TemperatureDifference,
+                ),
+                signals,
+                TemperatureDifference::new,
+                diagnostics,
+            )?,
         }),
         "electrical.periodic" => AuthoredConstraintKind::ElectricalPeriodic(periodic),
         "magnetic.periodic" => AuthoredConstraintKind::MagneticPeriodic(periodic),

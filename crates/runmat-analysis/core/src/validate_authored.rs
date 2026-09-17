@@ -1,13 +1,13 @@
 use std::collections::HashSet;
 
 use crate::{
-    AnalysisBoundary, AnalysisConnector, AnalysisConstraint, AnalysisInterface,
-    AnalysisInterfaceKind, AnalysisModel, AnalysisValidationError, BoundaryOperator, ConnectorKind,
-    CoordinateFrame, EntityDimension, ExpectedTopology, FluidConstraintKind,
-    MagneticConstraintKind, PairingPolicy, PeriodicConstraint, PeriodicTransform,
-    PhysicalQuantityKind, PhysicalSignal, SignalDomainKind, SignalPrecision, SignalShape,
-    StructuralConstraintKind, StructuralKinematicHistory, StructuralMotionReconstruction,
-    ThermalConstraintKind, ValidatedAnalysisSequence,
+    materialized_motion_acceleration_is_compatible, AnalysisBoundary, AnalysisConnector,
+    AnalysisConstraint, AnalysisInterface, AnalysisInterfaceKind, AnalysisModel,
+    AnalysisValidationError, BoundaryOperator, ConnectorKind, CoordinateFrame, EntityDimension,
+    ExpectedTopology, FluidConstraintKind, MagneticConstraintKind, PairingPolicy,
+    PeriodicConstraint, PeriodicTransform, PhysicalSignal, StructuralConstraintKind,
+    StructuralKinematicHistory, StructuralMotionReconstruction, ThermalConstraintKind,
+    ValidatedAnalysisSequence,
 };
 
 pub(crate) fn validate_authored_model(
@@ -177,11 +177,7 @@ fn validate_constraint_values(
                             || !initial_velocity.is_finite()
                             || !signals.iter().any(|signal| {
                                 signal.signal_id() == &acceleration.0
-                                    && signal.quantity() == PhysicalQuantityKind::Acceleration
-                                    && signal.shape() == &SignalShape::Vector3
-                                    && signal.frame() == Some(&CoordinateFrame::Global)
-                                    && signal.domain() == SignalDomainKind::Time
-                                    && signal.precision() == SignalPrecision::Real64
+                                    && materialized_motion_acceleration_is_compatible(signal)
                             })
                     })
             }
@@ -445,10 +441,10 @@ mod prescribed_motion_tests {
     use crate::{
         Acceleration, AccelerationSignalId, Displacement, PrescribedStructuralMotion, RegionTarget,
         Signal, SignalApproximationEvidence, SignalExtrapolation, SignalId, SignalInterpolation,
-        SignalKnot, SignalOrdinate, SignalProvenance, SignalRepresentation, SignalValue,
-        StructuralConstraint, StructuralKinematicHistory, StructuralMotionReconstruction,
-        StructuralTranslationDof, TabulatedSignal, TabulatedSignalDomain, TranslationDofMotion,
-        Velocity,
+        SignalKnot, SignalOrdinate, SignalPrecision, SignalProvenance, SignalRepresentation,
+        SignalShape, SignalValue, StructuralConstraint, StructuralKinematicHistory,
+        StructuralMotionReconstruction, StructuralTranslationDof, TabulatedSignal,
+        TabulatedSignalDomain, TranslationDofMotion, Velocity,
     };
 
     fn acceleration(shape: SignalShape) -> PhysicalSignal {

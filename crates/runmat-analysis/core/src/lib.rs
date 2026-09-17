@@ -46,12 +46,14 @@ pub use validate_signals::validate_physical_signals;
 
 pub use field::{AnalysisField, AnalysisFieldValues, DeviceFieldRef};
 pub use problem::authored_constraints::{
+    authored_motion_acceleration_is_compatible, materialized_motion_acceleration_is_compatible,
     AuthoredConstraint, AuthoredConstraintError, AuthoredConstraintKind, AuthoredConstraintTarget,
     AuthoredPairedConstraint, AuthoredPairingPolicy, AuthoredPeriodicConstraint,
     AuthoredPeriodicTransform, AuthoredPhaseShiftedPeriodicConstraint,
-    AuthoredReferencePointCoupling, AuthoredRotationDofValue, AuthoredStructuralConstraintEquation,
-    AuthoredStructuralConstraintEquationTerm, AuthoredStructuralDofs, AuthoredTargetCardinality,
-    AuthoredThermalJump, AuthoredTranslationDofValue,
+    AuthoredPrescribedStructuralMotion, AuthoredReferencePointCoupling, AuthoredRotationDofValue,
+    AuthoredStructuralConstraintEquation, AuthoredStructuralConstraintEquationTerm,
+    AuthoredStructuralDofs, AuthoredTargetCardinality, AuthoredThermalJump,
+    AuthoredTranslationDofValue,
 };
 pub use problem::authored_excitations::{
     validate_authored_excitations, AuthoredExcitation, AuthoredExcitationCase,
