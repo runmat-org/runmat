@@ -107,6 +107,36 @@ model bracket(region body : region<solid>, region pad : region<face>) {
     include model.mounting
     assign input.body_material to input.body
 
+    orientation laminate_axes {
+        cartesian {
+            origin = [0 m, 0 m, 0 m]
+            x_axis = [1, 0, 0]
+            y_axis = [0, 1, 0]
+        }
+    }
+
+    section rail {
+        rectangular_beam {
+            width = 20 mm
+            height = 40 mm
+        }
+    }
+
+    layup skin {
+        reference_orientation = orientation.laminate_axes
+        stacking_direction = 1
+        ply outer {
+            material = input.body_material
+            thickness = 0.2 mm
+            angle = 0 deg
+            integration_points = 3
+        }
+    }
+
+    assign section.rail to geometry.imported_bracket.region.frame_edge
+    assign layup.skin to geometry.imported_bracket.region.outer_skin
+    assign orientation.laminate_axes to geometry.imported_bracket.region.outer_skin
+
     let overload = 1.5 * input.service_load
 
     constraint fixed_support {

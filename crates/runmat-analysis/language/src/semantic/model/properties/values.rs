@@ -1,0 +1,338 @@
+use super::super::diagnostic;
+use crate::{
+    CheckedExpression, CheckedExpressionKind, CheckedFeaDeclaration, CheckedFeaStatement,
+    CheckedFeaStatementKind, FeaDiagnostic, FeaType, PhysicalDimension,
+};
+use runmat_parser::fea::FeaAssignmentRelation;
+use std::collections::BTreeSet;
+
+pub(super) fn sole_kind_block<'a>(
+    declaration: &CheckedFeaDeclaration,
+    statements: &'a [CheckedFeaStatement],
+    label: &str,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Option<(&'a str, &'a [CheckedFeaStatement])> {
+    let blocks = statements
+        .iter()
+        .filter_map(|statement| {
+            let CheckedFeaStatementKind::Block {
+                header, statements, ..
+            } = &statement.kind
+            else {
+                return None;
+            };
+            Some((header.trim(), statements.as_slice()))
+        })
+        .collect::<Vec<_>>();
+    if blocks.len() != 1 || statements.len() != 1 {
+        diagnostic(
+            declaration,
+            declaration.span,
+            format!("{label} requires exactly one formulation block"),
+            diagnostics,
+        );
+        None
+    } else {
+        blocks.into_iter().next()
+    }
+}
+
+pub(super) fn validate_assignments(
+    declaration: &CheckedFeaDeclaration,
+    statements: &[CheckedFeaStatement],
+    supported: &[&str],
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) {
+    let mut seen = BTreeSet::new();
+    for statement in statements {
+        let CheckedFeaStatementKind::Assignment {
+            target, relation, ..
+        } = &statement.kind
+        else {
+            diagnostic(
+                declaration,
+                statement.span,
+                "property definitions accept only declared assignments",
+                diagnostics,
+            );
+            continue;
+        };
+        let Some(name) = target.first().filter(|_| target.len() == 1) else {
+            diagnostic(
+                declaration,
+                statement.span,
+                "property member names cannot be qualified",
+                diagnostics,
+            );
+            continue;
+        };
+        if *relation != FeaAssignmentRelation::Equal {
+            diagnostic(
+                declaration,
+                statement.span,
+                "property members require `=`",
+                diagnostics,
+            );
+        } else if !supported.contains(&name.as_str()) {
+            diagnostic(
+                declaration,
+                statement.span,
+                format!("unsupported property member `{name}`"),
+                diagnostics,
+            );
+        } else if !seen.insert(name) {
+            diagnostic(
+                declaration,
+                statement.span,
+                format!("duplicate property member `{name}`"),
+                diagnostics,
+            );
+        }
+    }
+}
+
+pub(super) fn reference_name(
+    declaration: &CheckedFeaDeclaration,
+    value: &CheckedExpression,
+    namespace: &str,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Option<String> {
+    let CheckedExpressionKind::Reference(path) = &value.kind else {
+        invalid(declaration, value, namespace, "reference", diagnostics);
+        return None;
+    };
+    match path.as_slice() {
+        [actual, name] if actual == namespace => Some(name.clone()),
+        _ => {
+            invalid(
+                declaration,
+                value,
+                namespace,
+                "qualified reference",
+                diagnostics,
+            );
+            None
+        }
+    }
+}
+
+pub(super) fn required_assignment<'a>(
+    declaration: &CheckedFeaDeclaration,
+    statements: &'a [CheckedFeaStatement],
+    name: &str,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Option<&'a CheckedExpression> {
+    let value = statements.iter().find_map(|statement| {
+        let CheckedFeaStatementKind::Assignment { target, value, .. } = &statement.kind else {
+            return None;
+        };
+        (target.as_slice() == [name]).then_some(value)
+    });
+    if value.is_none() {
+        diagnostic(
+            declaration,
+            declaration.span,
+            format!("property definition requires `{name}`"),
+            diagnostics,
+        );
+    }
+    value
+}
+
+pub(super) fn required_quantity(
+    declaration: &CheckedFeaDeclaration,
+    statements: &[CheckedFeaStatement],
+    name: &str,
+    dimension: PhysicalDimension,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Option<f64> {
+    let value = required_assignment(declaration, statements, name, diagnostics)?;
+    if value.value_type != FeaType::Quantity(dimension) {
+        invalid(
+            declaration,
+            value,
+            name,
+            "quantity of the required dimension",
+            diagnostics,
+        );
+        return None;
+    }
+    scalar(value).or_else(|| {
+        invalid(declaration, value, name, "constant quantity", diagnostics);
+        None
+    })
+}
+
+pub(super) fn required_length(
+    declaration: &CheckedFeaDeclaration,
+    statements: &[CheckedFeaStatement],
+    name: &str,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Option<f64> {
+    required_quantity(
+        declaration,
+        statements,
+        name,
+        PhysicalDimension::LENGTH,
+        diagnostics,
+    )
+}
+
+pub(super) fn required_fourth_length(
+    declaration: &CheckedFeaDeclaration,
+    statements: &[CheckedFeaStatement],
+    name: &str,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Option<f64> {
+    required_quantity(
+        declaration,
+        statements,
+        name,
+        PhysicalDimension::LENGTH.power(4)?,
+        diagnostics,
+    )
+}
+
+pub(super) fn required_scalar(
+    declaration: &CheckedFeaDeclaration,
+    statements: &[CheckedFeaStatement],
+    name: &str,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Option<f64> {
+    let value = required_assignment(declaration, statements, name, diagnostics)?;
+    if !matches!(value.value_type, FeaType::Integer | FeaType::Real) {
+        invalid(
+            declaration,
+            value,
+            name,
+            "dimensionless scalar",
+            diagnostics,
+        );
+        return None;
+    }
+    scalar(value)
+}
+
+pub(super) fn required_u32(
+    declaration: &CheckedFeaDeclaration,
+    statements: &[CheckedFeaStatement],
+    name: &str,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Option<u32> {
+    let value = required_assignment(declaration, statements, name, diagnostics)?;
+    let CheckedExpressionKind::Number(source) = &value.kind else {
+        invalid(declaration, value, name, "positive integer", diagnostics);
+        return None;
+    };
+    source.parse().ok().or_else(|| {
+        invalid(
+            declaration,
+            value,
+            name,
+            "32-bit positive integer",
+            diagnostics,
+        );
+        None
+    })
+}
+
+pub(super) fn required_i8(
+    declaration: &CheckedFeaDeclaration,
+    statements: &[CheckedFeaStatement],
+    name: &str,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Option<i8> {
+    let value = required_assignment(declaration, statements, name, diagnostics)?;
+    scalar(value).and_then(|scalar| {
+        if scalar.fract() == 0.0 && scalar >= i8::MIN as f64 && scalar <= i8::MAX as f64 {
+            Some(scalar as i8)
+        } else {
+            invalid(declaration, value, name, "small integer", diagnostics);
+            None
+        }
+    })
+}
+
+pub(super) fn required_vector(
+    declaration: &CheckedFeaDeclaration,
+    statements: &[CheckedFeaStatement],
+    name: &str,
+    dimension: PhysicalDimension,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Option<[f64; 3]> {
+    let value = required_assignment(declaration, statements, name, diagnostics)?;
+    let CheckedExpressionKind::List(values) = &value.kind else {
+        invalid(
+            declaration,
+            value,
+            name,
+            "three-component vector",
+            diagnostics,
+        );
+        return None;
+    };
+    if values.len() != 3 {
+        invalid(
+            declaration,
+            value,
+            name,
+            "three-component vector",
+            diagnostics,
+        );
+        return None;
+    }
+    let mut result = [0.0; 3];
+    for (index, component) in values.iter().enumerate() {
+        let expected = if dimension == PhysicalDimension::DIMENSIONLESS {
+            matches!(component.value_type, FeaType::Integer | FeaType::Real)
+        } else {
+            component.value_type == FeaType::Quantity(dimension)
+        };
+        if !expected {
+            invalid(
+                declaration,
+                component,
+                name,
+                "vector with compatible units",
+                diagnostics,
+            );
+            return None;
+        }
+        result[index] = scalar(component)?;
+    }
+    Some(result)
+}
+
+fn scalar(value: &CheckedExpression) -> Option<f64> {
+    match &value.kind {
+        CheckedExpressionKind::Number(source) => source.parse().ok(),
+        CheckedExpressionKind::Quantity {
+            value,
+            scale_bits,
+            offset_bits,
+        } => Some(scalar(value)? * f64::from_bits(*scale_bits) + f64::from_bits(*offset_bits)),
+        CheckedExpressionKind::Unary { operator, operand } => {
+            let value = scalar(operand)?;
+            Some(match operator {
+                runmat_parser::fea::FeaUnaryOperator::Positive => value,
+                runmat_parser::fea::FeaUnaryOperator::Negative => -value,
+            })
+        }
+        _ => None,
+    }
+}
+
+fn invalid(
+    declaration: &CheckedFeaDeclaration,
+    value: &CheckedExpression,
+    name: &str,
+    expected: &str,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) {
+    diagnostic(
+        declaration,
+        value.span,
+        format!("property `{name}` requires a {expected}"),
+        diagnostics,
+    );
+}

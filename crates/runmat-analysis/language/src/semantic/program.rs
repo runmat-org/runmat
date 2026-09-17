@@ -7,7 +7,8 @@ use crate::{
     FeaDiagnosticPhase, FeaSymbolKey, GeometryInspectionSource, LogicalSourcePath,
 };
 use runmat_parser::fea::{
-    FeaAssignmentRelation, FeaBlock, FeaDeclaration, FeaModuleItem, FeaStatementKind,
+    FeaAssignmentRelation, FeaBlock, FeaDeclaration, FeaModuleItem, FeaPropertyDefinitionKind,
+    FeaStatementKind,
 };
 use runmat_types::Span;
 use std::collections::BTreeMap;
@@ -67,6 +68,11 @@ pub struct CheckedFeaStatement {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CheckedFeaStatementKind {
+    PropertyDefinition {
+        kind: FeaPropertyDefinitionKind,
+        name: String,
+        statements: Vec<CheckedFeaStatement>,
+    },
     Block {
         header: String,
         header_span: Span,
@@ -86,8 +92,8 @@ pub enum CheckedFeaStatementKind {
         relation: FeaAssignmentRelation,
         value: CheckedExpression,
     },
-    MaterialAssignment {
-        material: CheckedExpression,
+    PropertyAssignment {
+        property: CheckedExpression,
         target: CheckedExpression,
     },
     Output {
@@ -271,12 +277,38 @@ fn check_block<C: AnalysisOperationCatalog + ?Sized>(
     outputs: &mut BTreeMap<String, FeaType>,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Vec<CheckedFeaStatement> {
+    for statement in &block.statements {
+        let FeaStatementKind::PropertyDefinition { kind, name, .. } = &statement.kind else {
+            continue;
+        };
+        let (namespace, value_type) = match kind {
+            FeaPropertyDefinitionKind::Section => ("section", FeaType::Section),
+            FeaPropertyDefinitionKind::Layup => ("layup", FeaType::Layup),
+            FeaPropertyDefinitionKind::Orientation => ("orientation", FeaType::Orientation),
+        };
+        scope.insert_reference([namespace.to_string(), name.text.clone()], value_type);
+    }
     block
         .statements
         .iter()
         .map(|statement| {
             let kind =
                 match &statement.kind {
+                    FeaStatementKind::PropertyDefinition { kind, name, body } => {
+                        CheckedFeaStatementKind::PropertyDefinition {
+                            kind: *kind,
+                            name: name.text.clone(),
+                            statements: check_block(
+                                catalog,
+                                path,
+                                source,
+                                body,
+                                scope,
+                                outputs,
+                                diagnostics,
+                            ),
+                        }
+                    }
                     FeaStatementKind::Block { header, body } => CheckedFeaStatementKind::Block {
                         header: source[header.span.start..header.span.end].to_string(),
                         header_span: header.span,
@@ -341,14 +373,14 @@ fn check_block<C: AnalysisOperationCatalog + ?Sized>(
                         relation: *relation,
                         value: check_value(catalog, path, source, scope, value, diagnostics),
                     },
-                    FeaStatementKind::MaterialAssignment { material, target } => {
-                        CheckedFeaStatementKind::MaterialAssignment {
-                            material: check_value(
+                    FeaStatementKind::PropertyAssignment { property, target } => {
+                        CheckedFeaStatementKind::PropertyAssignment {
+                            property: check_value(
                                 catalog,
                                 path,
                                 source,
                                 scope,
-                                material,
+                                property,
                                 diagnostics,
                             ),
                             target: check_value(catalog, path, source, scope, target, diagnostics),

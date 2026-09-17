@@ -141,7 +141,9 @@ impl FeaParser {
                         end: body.span.end,
                     };
                     statements.push(FeaStatement {
-                        kind: FeaStatementKind::Block { header, body },
+                        kind: self
+                            .parse_property_definition(start, open_block, body.clone())
+                            .unwrap_or(FeaStatementKind::Block { header, body }),
                         span,
                     });
                     cursor = next;
@@ -331,10 +333,42 @@ impl FeaParser {
         let Some(to) = to else {
             return FeaStatementKind::Command { syntax: range };
         };
-        FeaStatementKind::MaterialAssignment {
-            material: self.parse_expression_indices(&significant[1..to], range.span),
+        FeaStatementKind::PropertyAssignment {
+            property: self.parse_expression_indices(&significant[1..to], range.span),
             target: self.parse_expression_indices(&significant[to + 1..], range.span),
         }
+    }
+
+    fn parse_property_definition(
+        &mut self,
+        start: usize,
+        open: usize,
+        body: FeaBlock,
+    ) -> Option<FeaStatementKind> {
+        let significant = self.significant(start, open);
+        let kind = match self.kind(*significant.first()?)? {
+            FeaTokenKind::Keyword(FeaKeyword::Section) => FeaPropertyDefinitionKind::Section,
+            FeaTokenKind::Keyword(FeaKeyword::Layup) => FeaPropertyDefinitionKind::Layup,
+            FeaTokenKind::Keyword(FeaKeyword::Orientation) => {
+                FeaPropertyDefinitionKind::Orientation
+            }
+            _ => return None,
+        };
+        let name = significant
+            .get(1)
+            .and_then(|index| self.name(*index, FeaSyntaxDiagnosticKind::ExpectedIdentifier))
+            .unwrap_or_else(|| missing_name(self.token(start).span));
+        if significant.len() != 2 {
+            let span = significant
+                .get(2)
+                .map_or(self.token(start).span, |index| self.token(*index).span);
+            self.diagnostics.push(FeaSyntaxDiagnostic {
+                kind: FeaSyntaxDiagnosticKind::ExpectedToken,
+                span,
+                message: "property definitions require exactly one name".to_string(),
+            });
+        }
+        Some(FeaStatementKind::PropertyDefinition { kind, name, body })
     }
 
     fn parse_output_statement(

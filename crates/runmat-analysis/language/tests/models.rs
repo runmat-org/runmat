@@ -153,3 +153,135 @@ model cycle_b {
         diagnostic.code == "fea.semantic.model" && diagnostic.message.contains("cycle")
     }));
 }
+
+#[test]
+fn sections_layups_and_orientations_lower_as_distinct_typed_properties() {
+    let source = r#"
+geometry part {
+    construct {
+        feature body = box(width = 1 m, depth = 1 m, height = 1 m)
+        result = feature.body
+    }
+    region rail : edge {
+        select result
+        expect exactly_one
+    }
+    region skin : face {
+        select result
+        expect exactly_one
+    }
+}
+material aluminum { mass_density = 2700 kg/m^3 }
+material carbon { mass_density = 1600 kg/m^3 }
+model airframe {
+    orientation laminate_axes {
+        cartesian {
+            origin = [0 m, 0 m, 0 m]
+            x_axis = [1, 0, 0]
+            y_axis = [0, 1, 0]
+        }
+    }
+    section rail_section {
+        rectangular_beam {
+            width = 20 mm
+            height = 40 mm
+        }
+    }
+    layup skin_laminate {
+        reference_orientation = orientation.laminate_axes
+        stacking_direction = 1
+        ply zero {
+            material = material.carbon
+            thickness = 0.2 mm
+            angle = 0 deg
+            integration_points = 3
+        }
+        ply ninety {
+            material = material.carbon
+            thickness = 0.2 mm
+            angle = 90 deg
+            integration_points = 3
+        }
+    }
+    assign material.aluminum to geometry.part.region.rail
+    assign section.rail_section to geometry.part.region.rail
+    assign layup.skin_laminate to geometry.part.region.skin
+    assign orientation.laminate_axes to geometry.part.region.skin
+}
+"#;
+    let program = FeaCompiler::new(&TestHost::default()).check(CheckRequest {
+        modules: ModuleGraphRequest {
+            source_root: LogicalSourcePath::new("project").unwrap(),
+            root: source_module("project/main.fea", source, 1),
+        },
+    });
+    assert!(program.is_valid(), "{:#?}", program.diagnostics);
+    let model = program.models.values().next().unwrap();
+    assert_eq!(model.sections.len(), 1);
+    assert_eq!(model.orientations.len(), 1);
+    assert_eq!(model.layups.len(), 1);
+    assert_eq!(model.layups[0].plies.len(), 2);
+    assert_eq!(
+        model.layups[0].plies[1].angle_rad,
+        std::f64::consts::FRAC_PI_2
+    );
+    assert_eq!(model.property_assignments.len(), 3);
+    assert!(matches!(
+        model.sections[0],
+        runmat_analysis_core::AuthoredSectionDefinition::RectangularBeam(_)
+    ));
+}
+
+#[test]
+fn property_roles_and_composite_ownership_fail_closed() {
+    let source = r#"
+geometry part {
+    construct {
+        feature body = box(width = 1 m, depth = 1 m, height = 1 m)
+        result = feature.body
+    }
+    region skin : face {
+        select result
+        expect exactly_one
+    }
+}
+material carbon { mass_density = 1600 kg/m^3 }
+model invalid {
+    orientation axes {
+        global_cartesian {}
+    }
+    section rail {
+        rectangular_beam {
+            width = 1 mm
+            height = 1 mm
+        }
+    }
+    layup skin_laminate {
+        reference_orientation = orientation.axes
+        stacking_direction = 1
+        ply one {
+            material = material.carbon
+            thickness = 0.1 mm
+            angle = 0 deg
+            integration_points = 1
+        }
+    }
+    assign material.carbon to geometry.part.region.skin
+    assign section.rail to geometry.part.region.skin
+    assign layup.skin_laminate to geometry.part.region.skin
+}
+"#;
+    let program = FeaCompiler::new(&TestHost::default()).check(CheckRequest {
+        modules: ModuleGraphRequest {
+            source_root: LogicalSourcePath::new("project").unwrap(),
+            root: source_module("project/main.fea", source, 1),
+        },
+    });
+    assert!(!program.is_valid());
+    assert!(program.models.is_empty());
+    assert!(program.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "fea.semantic.model"
+            && (diagnostic.message.contains("section assignments")
+                || diagnostic.message.contains("laminate ownership"))
+    }));
+}

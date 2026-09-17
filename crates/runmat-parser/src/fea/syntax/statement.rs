@@ -13,8 +13,20 @@ pub struct FeaStatement {
     pub span: Span,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FeaPropertyDefinitionKind {
+    Section,
+    Layup,
+    Orientation,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FeaStatementKind {
+    PropertyDefinition {
+        kind: FeaPropertyDefinitionKind,
+        name: FeaName,
+        body: FeaBlock,
+    },
     Block {
         header: FeaTokenRange,
         body: FeaBlock,
@@ -37,8 +49,8 @@ pub enum FeaStatementKind {
         relation: FeaAssignmentRelation,
         value: FeaExpression,
     },
-    MaterialAssignment {
-        material: FeaExpression,
+    PropertyAssignment {
+        property: FeaExpression,
         target: FeaExpression,
     },
     Output {
