@@ -12,6 +12,7 @@ pub mod problem {
     pub mod material_assignment;
     pub mod materials;
     pub mod model;
+    pub mod model_authoring;
     pub mod prescribed_value;
     pub mod quantity;
     pub mod random_vibration;
@@ -82,6 +83,11 @@ pub use problem::materials::{
 pub use problem::model::{
     AnalysisModel, AnalysisModelId, SolverAnalysisModel, SolverAnalysisSequence,
     SolverProcedureStep,
+};
+pub use problem::model_authoring::{
+    AuthoredMaterialAssignment, AuthoredMaterialRef, AuthoredMaterialSource, AuthoredModel,
+    AuthoredModelError, AuthoredModelInclude, AuthoredModelInputKind, AuthoredModelInputRef,
+    AuthoredModelRef, AuthoredPropertyRegionSource, AuthoredPropertyTarget,
 };
 pub use problem::prescribed_value::{PrescribedQuantity, PrescribedValue};
 pub use problem::quantity::{

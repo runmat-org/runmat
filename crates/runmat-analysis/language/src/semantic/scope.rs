@@ -32,6 +32,39 @@ pub(super) fn extend_module_scope(
                 ],
                 FeaType::Declaration(symbol.key.kind),
             );
+            if symbol.key.kind == FeaSymbolKind::Geometry {
+                let FeaSymbolOrigin::Import {
+                    target_module,
+                    target,
+                } = &symbol.origin
+                else {
+                    continue;
+                };
+                let Some(target_syntax) = bound
+                    .graph
+                    .modules
+                    .get(target_module)
+                    .and_then(|module| module.syntax.as_ref())
+                else {
+                    continue;
+                };
+                let Some(target_declaration) = target_syntax.items.iter().find_map(|item| {
+                    let runmat_parser::fea::FeaModuleItem::Declaration(declaration) = item else {
+                        return None;
+                    };
+                    (declaration.kind == runmat_parser::fea::FeaDeclarationKind::Geometry
+                        && declaration.name.text == target.name)
+                        .then_some(declaration)
+                }) else {
+                    continue;
+                };
+                extend_geometry_members(
+                    scope,
+                    target_syntax.source(),
+                    target_declaration,
+                    &symbol.key.name,
+                );
+            }
         }
     }
     for ((module, name), facts) in &bound.functions {
@@ -58,7 +91,7 @@ pub(super) fn extend_module_scope(
         if declaration.kind != runmat_parser::fea::FeaDeclarationKind::Geometry {
             continue;
         }
-        extend_geometry_members(scope, syntax.source(), declaration);
+        extend_geometry_members(scope, syntax.source(), declaration, &declaration.name.text);
     }
 }
 
@@ -256,6 +289,7 @@ fn extend_geometry_members(
     scope: &mut ExpressionScope,
     source: &str,
     declaration: &FeaDeclaration,
+    exposed_name: &str,
 ) {
     for statement in &declaration.body.statements {
         let FeaStatementKind::Block { header, .. } = &statement.kind else {
@@ -268,7 +302,7 @@ fn extend_geometry_members(
                     scope.insert_reference(
                         [
                             "geometry".to_string(),
-                            declaration.name.text.clone(),
+                            exposed_name.to_string(),
                             "region".to_string(),
                             name.trim().to_string(),
                         ],

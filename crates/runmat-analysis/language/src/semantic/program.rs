@@ -25,6 +25,7 @@ pub struct CheckedFeaProgram {
     pub geometries:
         BTreeMap<(LogicalSourcePath, FeaSymbolKey), runmat_geometry_core::GeometryDefinition>,
     pub meshes: BTreeMap<(LogicalSourcePath, FeaSymbolKey), runmat_meshing_core::MeshDefinition>,
+    pub models: BTreeMap<(LogicalSourcePath, FeaSymbolKey), runmat_analysis_core::AuthoredModel>,
 }
 
 impl CheckedFeaProgram {
@@ -138,6 +139,7 @@ pub fn check_program<C: AnalysisOperationCatalog + GeometryInspectionSource + ?S
         &mut diagnostics,
     );
     let meshes = super::lower_mesh_definitions(&bound, &declarations, &mut diagnostics);
+    let models = super::lower_models(&bound, &declarations, &mut diagnostics);
     CheckedFeaProgram {
         bound,
         declarations,
@@ -147,6 +149,7 @@ pub fn check_program<C: AnalysisOperationCatalog + GeometryInspectionSource + ?S
         materials,
         geometries,
         meshes,
+        models,
     }
 }
 
