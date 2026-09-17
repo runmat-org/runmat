@@ -88,7 +88,7 @@ model reusable(region body : region<solid>) {
     });
     assert!(program.is_valid(), "{:#?}", program.diagnostics);
     let model = program.models.values().next().unwrap();
-    assert_eq!(model.property_inputs.len(), 2);
+    assert_eq!(model.inputs.len(), 2);
     let assignment = &model.material_assignments[0];
     assert!(matches!(
         assignment.material,

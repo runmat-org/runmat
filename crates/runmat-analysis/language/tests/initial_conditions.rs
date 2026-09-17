@@ -16,6 +16,13 @@ geometry part {
         expect exactly_one
     }
 }
+mesh part on geometry.part {
+    tetrahedra {
+        order = linear
+        target_size = 0.1 m
+        maximum_deviation = 0.01 m
+    }
+}
 model prepared {
     signal thermal_history : temperature over time {
         samples = [
@@ -55,6 +62,8 @@ model prepared {
     }
 }
 study response {
+    geometry = geometry.part
+    mesh = mesh.part
     model = model.prepared
     analysis transient {
         thermomechanical transient {
@@ -99,7 +108,7 @@ study response {
             runmat_analysis_core::InitialValue::FieldArtifact(artifact)
         ) if artifact.artifact_id == "state-42"
     ));
-    let sequence = program.analysis_sequences.values().next().unwrap();
+    let sequence = &program.studies.values().next().unwrap().sequence;
     let step = &sequence.steps[0];
     assert_eq!(step.activations.len(), 2);
     assert_eq!(step.state_inputs.len(), 2);
@@ -207,6 +216,19 @@ model invalid_temperature {
 #[test]
 fn studies_reject_unknown_or_physics_incompatible_initial_state() {
     let source = r#"
+geometry part {
+    construct {
+        feature body = box(width = 1 m, depth = 1 m, height = 1 m)
+        result = feature.body
+    }
+}
+mesh part on geometry.part {
+    tetrahedra {
+        order = linear
+        target_size = 0.1 m
+        maximum_deviation = 0.01 m
+    }
+}
 model prepared {
     initial pressure {
         acoustic.pressure {
@@ -216,6 +238,8 @@ model prepared {
     }
 }
 study wrong_family {
+    geometry = geometry.part
+    mesh = mesh.part
     model = model.prepared
     analysis static_case {
         structural static {
@@ -224,6 +248,8 @@ study wrong_family {
     }
 }
 study unknown_condition {
+    geometry = geometry.part
+    mesh = mesh.part
     model = model.prepared
     analysis acoustic_case {
         acoustic static {
@@ -239,7 +265,7 @@ study unknown_condition {
         },
     });
     assert!(!program.is_valid());
-    assert!(program.analysis_sequences.is_empty());
+    assert!(program.studies.is_empty());
     assert!(program
         .diagnostics
         .iter()

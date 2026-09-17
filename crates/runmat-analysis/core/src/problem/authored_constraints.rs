@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 use super::{
-    model_authoring::{AuthoredModelInputKind, AuthoredRegionSource},
+    authored_inputs::AuthoredInputType,
+    model_authoring::AuthoredRegionSource,
     prescribed_value::PrescribedValue,
     quantity::{
         ElectricCurrent, ElectricPotential, MagneticVectorPotential, Pressure, Temperature,
@@ -343,9 +344,9 @@ impl AuthoredConstraintTarget {
     pub fn role(&self) -> GeometryRegionRole {
         match &self.region {
             AuthoredRegionSource::Geometry(region) => region.role,
-            AuthoredRegionSource::ModelInput(input) => match input.kind {
-                AuthoredModelInputKind::Region(role) => role,
-                AuthoredModelInputKind::Material => GeometryRegionRole::Vertex,
+            AuthoredRegionSource::ModelInput(input) => match input.value_type {
+                AuthoredInputType::Region(role) => role,
+                _ => GeometryRegionRole::Vertex,
             },
         }
     }
@@ -362,7 +363,7 @@ impl AuthoredConstraintTarget {
             }
             AuthoredRegionSource::ModelInput(input) => {
                 if input.input_id.trim().is_empty()
-                    || !matches!(input.kind, AuthoredModelInputKind::Region(_))
+                    || !matches!(input.value_type, AuthoredInputType::Region(_))
                 {
                     return Err(AuthoredConstraintError::InvalidTarget);
                 }

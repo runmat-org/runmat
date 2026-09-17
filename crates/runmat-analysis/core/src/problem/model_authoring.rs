@@ -7,6 +7,7 @@ use super::authored_constraints::AuthoredConstraint;
 use super::authored_initial_conditions::{
     AuthoredInitialCondition, AuthoredInitialConditionTarget,
 };
+use super::authored_inputs::{AuthoredInputDefinition, AuthoredInputType};
 use super::authored_model_physics::{
     validate_unique, AuthoredBoundary, AuthoredConnector, AuthoredInterface,
 };
@@ -37,18 +38,11 @@ pub struct AuthoredMaterialRef {
     pub material_id: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AuthoredModelInputKind {
-    Material,
-    Region(GeometryRegionRole),
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AuthoredModelInputRef {
     pub input_id: String,
-    pub kind: AuthoredModelInputKind,
+    pub value_type: AuthoredInputType,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -94,7 +88,7 @@ pub struct AuthoredModelInclude {
 pub struct AuthoredModel {
     pub module_path: String,
     pub model_id: String,
-    pub property_inputs: Vec<AuthoredModelInputRef>,
+    pub inputs: Vec<AuthoredInputDefinition>,
     pub includes: Vec<AuthoredModelInclude>,
     pub sections: Vec<AuthoredSectionDefinition>,
     pub layups: Vec<AuthoredLayupDefinition>,
@@ -116,9 +110,14 @@ impl AuthoredModel {
         token("model module path", &self.module_path)?;
         token("model id", &self.model_id)?;
         let mut inputs = BTreeMap::new();
-        for input in &self.property_inputs {
-            input.validate()?;
-            if inputs.insert(input.input_id.as_str(), input.kind).is_some() {
+        for input in &self.inputs {
+            input
+                .validate()
+                .map_err(|error| AuthoredModelError::InvalidInput(error.to_string()))?;
+            if inputs
+                .insert(input.input_id.as_str(), input.value_type)
+                .is_some()
+            {
                 return Err(AuthoredModelError::DuplicateInput(input.input_id.clone()));
             }
         }
@@ -351,7 +350,7 @@ impl AuthoredModelInputRef {
 impl AuthoredMaterialAssignment {
     fn validate(
         &self,
-        inputs: &BTreeMap<&str, AuthoredModelInputKind>,
+        inputs: &BTreeMap<&str, AuthoredInputType>,
     ) -> Result<(), AuthoredModelError> {
         validate_material_source(&self.material, inputs)?;
         let (source, expected_role) = match &self.target {
@@ -370,7 +369,7 @@ impl AuthoredMaterialAssignment {
             AuthoredRegionSource::ModelInput(input) => {
                 input.validate()?;
                 require_input(input, inputs)?;
-                let AuthoredModelInputKind::Region(role) = input.kind else {
+                let AuthoredInputType::Region(role) = input.value_type else {
                     return Err(AuthoredModelError::WrongRegionInputKind);
                 };
                 role
@@ -388,7 +387,7 @@ impl AuthoredMaterialAssignment {
 
 fn validate_material_source(
     source: &AuthoredMaterialSource,
-    inputs: &BTreeMap<&str, AuthoredModelInputKind>,
+    inputs: &BTreeMap<&str, AuthoredInputType>,
 ) -> Result<(), AuthoredModelError> {
     match source {
         AuthoredMaterialSource::Declaration(material) => {
@@ -397,7 +396,7 @@ fn validate_material_source(
         }
         AuthoredMaterialSource::ModelInput(input) => {
             input.validate()?;
-            if input.kind != AuthoredModelInputKind::Material {
+            if input.value_type != AuthoredInputType::Material {
                 return Err(AuthoredModelError::WrongMaterialInputKind);
             }
             require_input(input, inputs)
@@ -476,19 +475,19 @@ fn validate_local_property_ref(
 fn property_source_role(source: &AuthoredRegionSource) -> GeometryRegionRole {
     match source {
         AuthoredRegionSource::Geometry(region) => region.role,
-        AuthoredRegionSource::ModelInput(input) => match input.kind {
-            AuthoredModelInputKind::Region(role) => role,
-            AuthoredModelInputKind::Material => GeometryRegionRole::Vertex,
+        AuthoredRegionSource::ModelInput(input) => match input.value_type {
+            AuthoredInputType::Region(role) => role,
+            _ => GeometryRegionRole::Vertex,
         },
     }
 }
 
 fn require_input(
     input: &AuthoredModelInputRef,
-    inputs: &BTreeMap<&str, AuthoredModelInputKind>,
+    inputs: &BTreeMap<&str, AuthoredInputType>,
 ) -> Result<(), AuthoredModelError> {
     match inputs.get(input.input_id.as_str()) {
-        Some(kind) if *kind == input.kind => Ok(()),
+        Some(value_type) if *value_type == input.value_type => Ok(()),
         Some(_) => Err(AuthoredModelError::InputKindMismatch(
             input.input_id.clone(),
         )),
@@ -510,6 +509,8 @@ pub enum AuthoredModelError {
     InvalidToken(&'static str),
     #[error("model input `{0}` is duplicated")]
     DuplicateInput(String),
+    #[error("model input is invalid: {0}")]
+    InvalidInput(String),
     #[error("model cannot include itself")]
     SelfInclude,
     #[error("model include is duplicated")]

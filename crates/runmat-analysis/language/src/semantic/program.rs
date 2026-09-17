@@ -20,8 +20,7 @@ pub struct CheckedFeaProgram {
     pub diagnostics: Vec<FeaDiagnostic>,
     pub geometry_inspections:
         BTreeMap<(LogicalSourcePath, String), super::CheckedGeometryInspection>,
-    pub analysis_sequences:
-        BTreeMap<(LogicalSourcePath, FeaSymbolKey), runmat_analysis_core::AnalysisSequence>,
+    pub studies: BTreeMap<(LogicalSourcePath, FeaSymbolKey), runmat_analysis_core::AuthoredStudy>,
     pub materials: BTreeMap<(LogicalSourcePath, FeaSymbolKey), runmat_analysis_core::MaterialModel>,
     pub geometries:
         BTreeMap<(LogicalSourcePath, FeaSymbolKey), runmat_geometry_core::GeometryDefinition>,
@@ -56,6 +55,8 @@ pub struct CheckedFeaInput {
     pub name: String,
     pub value_type: FeaType,
     pub default: Option<CheckedExpression>,
+    pub minimum: Option<CheckedExpression>,
+    pub maximum: Option<CheckedExpression>,
     pub required: bool,
     pub span: Span,
 }
@@ -139,7 +140,9 @@ pub fn check_program<C: AnalysisOperationCatalog + GeometryInspectionSource + ?S
             let FeaModuleItem::Declaration(declaration) = item else {
                 continue;
             };
-            let Some(key) = local_declaration_key(&bound, path, &declaration.name.text) else {
+            let Some(key) =
+                local_declaration_key(&bound, path, declaration.kind, &declaration.name.text)
+            else {
                 continue;
             };
             let checked = check_declaration(
@@ -165,14 +168,20 @@ pub fn check_program<C: AnalysisOperationCatalog + GeometryInspectionSource + ?S
     );
     let meshes = super::lower_mesh_definitions(&bound, &declarations, &mut diagnostics);
     let models = super::lower_models(&bound, &declarations, &mut diagnostics);
-    let analysis_sequences =
-        super::lower_analysis_sequences(&bound, &declarations, &models, &mut diagnostics);
+    let studies = super::lower_studies(
+        &bound,
+        &declarations,
+        &models,
+        &geometries,
+        &meshes,
+        &mut diagnostics,
+    );
     CheckedFeaProgram {
         bound,
         declarations,
         diagnostics,
         geometry_inspections,
-        analysis_sequences,
+        studies,
         materials,
         geometries,
         meshes,
@@ -221,38 +230,22 @@ fn check_declaration<C: AnalysisOperationCatalog + ?Sized>(
     }
     let mut inputs = BTreeMap::new();
     for input in input_syntax {
-        let default = input.default.as_ref().map(|expression| {
-            let (checked, mut expression_diagnostics) = check_expression(
-                ExpressionCheck {
-                    path,
-                    source,
-                    scope: &scope,
-                    catalog,
-                },
-                expression,
-            );
-            diagnostics.append(&mut expression_diagnostics);
-            if !input.value_type.accepts(&checked.value_type) {
-                diagnostics.push(FeaDiagnostic::error(
-                    "fea.semantic.input_default_type",
-                    format!(
-                        "default for input `{}` has an incompatible type",
-                        input.name
-                    ),
-                    FeaDiagnosticPhase::Semantic,
-                    Some(FeaDiagnosticLocation {
-                        path: path.clone(),
-                        span: expression.span,
-                    }),
-                ));
-            }
-            checked
-        });
+        let input_check = InputCheck {
+            catalog,
+            path,
+            source,
+            scope: &scope,
+        };
+        let default = input_check.check(&input, input.default.as_ref(), "default", diagnostics);
+        let minimum = input_check.check(&input, input.minimum.as_ref(), "minimum", diagnostics);
+        let maximum = input_check.check(&input, input.maximum.as_ref(), "maximum", diagnostics);
         let checked = CheckedFeaInput {
             name: input.name.clone(),
             value_type: input.value_type,
             required: default.is_none(),
             default,
+            minimum,
+            maximum,
             span: input.span,
         };
         if let Some(existing) = inputs.insert(input.name.clone(), checked) {
@@ -286,6 +279,50 @@ fn check_declaration<C: AnalysisOperationCatalog + ?Sized>(
         statements,
         outputs,
         span: declaration.span,
+    }
+}
+
+struct InputCheck<'a, C: AnalysisOperationCatalog + ?Sized> {
+    catalog: &'a C,
+    path: &'a LogicalSourcePath,
+    source: &'a str,
+    scope: &'a ExpressionScope,
+}
+
+impl<C: AnalysisOperationCatalog + ?Sized> InputCheck<'_, C> {
+    fn check(
+        &self,
+        input: &super::scope::InputSyntax,
+        expression: Option<&runmat_parser::fea::FeaExpression>,
+        member: &'static str,
+        diagnostics: &mut Vec<FeaDiagnostic>,
+    ) -> Option<CheckedExpression> {
+        let expression = expression?;
+        let (checked, mut expression_diagnostics) = check_expression(
+            ExpressionCheck {
+                path: self.path,
+                source: self.source,
+                scope: self.scope,
+                catalog: self.catalog,
+            },
+            expression,
+        );
+        diagnostics.append(&mut expression_diagnostics);
+        if !input.value_type.accepts(&checked.value_type) {
+            diagnostics.push(FeaDiagnostic::error(
+                "fea.semantic.input_value_type",
+                format!(
+                    "{member} for input `{}` has an incompatible type",
+                    input.name
+                ),
+                FeaDiagnosticPhase::Semantic,
+                Some(FeaDiagnosticLocation {
+                    path: self.path.clone(),
+                    span: expression.span,
+                }),
+            ));
+        }
+        Some(checked)
     }
 }
 

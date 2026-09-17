@@ -50,6 +50,7 @@ pub fn parse_type_syntax(source: &str) -> Result<FeaType, TypeSyntaxError> {
         "real" | "scalar" => FeaType::Real,
         "complex" => FeaType::Complex,
         "string" => FeaType::String,
+        "dimensionless" => FeaType::Quantity(PhysicalDimension::DIMENSIONLESS),
         "length" => FeaType::Quantity(PhysicalDimension::LENGTH),
         "area" => FeaType::Quantity(PhysicalDimension::AREA),
         "volume" => FeaType::Quantity(PhysicalDimension::VOLUME),

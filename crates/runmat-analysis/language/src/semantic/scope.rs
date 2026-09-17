@@ -15,6 +15,8 @@ pub(super) struct InputSyntax {
     pub name: String,
     pub value_type: FeaType,
     pub default: Option<FeaExpression>,
+    pub minimum: Option<FeaExpression>,
+    pub maximum: Option<FeaExpression>,
     pub span: Span,
 }
 
@@ -115,6 +117,8 @@ pub(super) fn declaration_inputs(
                         name: name.text.clone(),
                         value_type,
                         default: default.clone(),
+                        minimum: None,
+                        maximum: None,
                         span: statement.span,
                     });
                 }
@@ -126,10 +130,13 @@ pub(super) fn declaration_inputs(
                     header.span,
                     diagnostics,
                 ) {
+                    let members = input_members(body, path, diagnostics);
                     inputs.push(InputSyntax {
                         name,
                         value_type,
-                        default: block_default(body),
+                        default: members.default,
+                        minimum: members.minimum,
+                        maximum: members.maximum,
                         span: statement.span,
                     });
                 }
@@ -206,6 +213,8 @@ fn model_header_inputs(
                     name,
                     value_type,
                     default: None,
+                    minimum: None,
+                    maximum: None,
                     span: declaration.header.span,
                 }),
                 Err(error) => {
@@ -276,13 +285,68 @@ fn type_diagnostic(
     )
 }
 
-fn block_default(block: &FeaBlock) -> Option<FeaExpression> {
-    block.statements.iter().find_map(|statement| {
+#[derive(Default)]
+struct InputMembers {
+    default: Option<FeaExpression>,
+    minimum: Option<FeaExpression>,
+    maximum: Option<FeaExpression>,
+}
+
+fn input_members(
+    block: &FeaBlock,
+    path: &LogicalSourcePath,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> InputMembers {
+    let mut members = InputMembers::default();
+    for statement in &block.statements {
         let FeaStatementKind::Assignment { target, value, .. } = &statement.kind else {
-            return None;
+            diagnostics.push(FeaDiagnostic::error(
+                "fea.semantic.input_member",
+                "input blocks accept only `default`, `minimum`, and `maximum` assignments",
+                FeaDiagnosticPhase::Semantic,
+                Some(FeaDiagnosticLocation {
+                    path: path.clone(),
+                    span: statement.span,
+                }),
+            ));
+            continue;
         };
-        (target.segments.len() == 1 && target.segments[0].text == "default").then(|| value.clone())
-    })
+        let Some(name) = (target.segments.len() == 1).then(|| target.segments[0].text.as_str())
+        else {
+            input_member_error(path, statement.span, "invalid input member", diagnostics);
+            continue;
+        };
+        let slot = match name {
+            "default" => &mut members.default,
+            "minimum" => &mut members.minimum,
+            "maximum" => &mut members.maximum,
+            _ => {
+                input_member_error(path, statement.span, "unknown input member", diagnostics);
+                continue;
+            }
+        };
+        if slot.replace(value.clone()).is_some() {
+            input_member_error(path, statement.span, "duplicate input member", diagnostics);
+        }
+    }
+    members
+}
+
+fn input_member_error(
+    path: &LogicalSourcePath,
+    span: Span,
+    message: &'static str,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) {
+    diagnostics.push(FeaDiagnostic::error(
+        "fea.semantic.input_member",
+        message,
+        FeaDiagnosticPhase::Semantic,
+        Some(FeaDiagnosticLocation {
+            path: path.clone(),
+            span,
+        }),
+    ));
 }
 
 fn extend_geometry_members(
@@ -389,10 +453,14 @@ fn declaration_kind(kind: runmat_parser::fea::FeaDeclarationKind) -> FeaSymbolKi
 pub(super) fn local_declaration_key(
     bound: &BoundFeaProgram,
     path: &LogicalSourcePath,
+    kind: runmat_parser::fea::FeaDeclarationKind,
     name: &str,
 ) -> Option<crate::FeaSymbolKey> {
+    let kind = declaration_kind(kind);
     bound.symbols.get(path)?.values().find_map(|symbol| {
-        (symbol.key.name == name && symbol.origin == FeaSymbolOrigin::Local)
+        (symbol.key.kind == kind
+            && symbol.key.name == name
+            && symbol.origin == FeaSymbolOrigin::Local)
             .then(|| symbol.key.clone())
     })
 }

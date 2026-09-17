@@ -7,8 +7,8 @@ use crate::{
     FeaSymbolKind, FeaSymbolOrigin, LogicalSourcePath,
 };
 use runmat_analysis_core::{
-    AuthoredMaterialAssignment, AuthoredMaterialRef, AuthoredMaterialSource, AuthoredModel,
-    AuthoredModelInclude, AuthoredModelInputKind, AuthoredModelInputRef, AuthoredModelRef,
+    AuthoredInputType, AuthoredMaterialAssignment, AuthoredMaterialRef, AuthoredMaterialSource,
+    AuthoredModel, AuthoredModelInclude, AuthoredModelInputRef, AuthoredModelRef,
     AuthoredPropertyTarget, AuthoredRegionSource,
 };
 use runmat_geometry_core::{GeometryRegionRef, GeometryRegionRole};
@@ -58,21 +58,7 @@ fn model(
     declaration: &CheckedFeaDeclaration,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> AuthoredModel {
-    let property_inputs = declaration
-        .inputs
-        .values()
-        .filter_map(|input| {
-            let kind = match &input.value_type {
-                FeaType::Declaration(FeaSymbolKind::Material) => AuthoredModelInputKind::Material,
-                FeaType::Region(role) => AuthoredModelInputKind::Region(geometry_role(*role)),
-                _ => return None,
-            };
-            Some(AuthoredModelInputRef {
-                input_id: input.name.clone(),
-                kind,
-            })
-        })
-        .collect();
+    let inputs = super::input::lower_definitions(bound, declaration, diagnostics);
     let includes = declaration
         .statements
         .iter()
@@ -109,7 +95,7 @@ fn model(
     AuthoredModel {
         module_path: declaration.module.as_str().to_string(),
         model_id: declaration.key.name.clone(),
-        property_inputs,
+        inputs,
         includes,
         sections: lowered_properties.sections,
         layups: lowered_properties.layups,
@@ -204,7 +190,7 @@ pub(super) fn material_source(
             }
             Some(AuthoredMaterialSource::ModelInput(AuthoredModelInputRef {
                 input_id: name.clone(),
-                kind: AuthoredModelInputKind::Material,
+                value_type: AuthoredInputType::Material,
             }))
         }
         _ => {
@@ -244,7 +230,7 @@ pub(super) fn region_source(
             };
             Some(AuthoredRegionSource::ModelInput(AuthoredModelInputRef {
                 input_id: name.clone(),
-                kind: AuthoredModelInputKind::Region(geometry_role(*role)),
+                value_type: AuthoredInputType::Region(geometry_role(*role)),
             }))
         }
         [namespace, geometry, region_namespace, region]
@@ -298,9 +284,9 @@ pub(super) fn property_region_source(
 fn region_source_role(source: &AuthoredRegionSource) -> Option<FeaTopologyRole> {
     let role = match source {
         AuthoredRegionSource::Geometry(region) => region.role,
-        AuthoredRegionSource::ModelInput(input) => match input.kind {
-            AuthoredModelInputKind::Region(role) => role,
-            AuthoredModelInputKind::Material => return None,
+        AuthoredRegionSource::ModelInput(input) => match input.value_type {
+            AuthoredInputType::Region(role) => role,
+            _ => return None,
         },
     };
     Some(match role {

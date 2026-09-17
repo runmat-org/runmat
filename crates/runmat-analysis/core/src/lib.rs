@@ -4,6 +4,7 @@ pub mod problem {
     pub mod authored_constraints;
     pub mod authored_excitations;
     pub mod authored_initial_conditions;
+    pub mod authored_inputs;
     pub mod authored_model_physics;
     pub mod authored_properties;
     pub mod boundary;
@@ -40,6 +41,10 @@ mod validate_outputs;
 mod validate_sequence;
 mod validate_signals;
 
+pub use study::{
+    AuthoredMeshRef, AuthoredModelArgument, AuthoredModelArgumentValue, AuthoredModelInstance,
+    AuthoredStudy, AuthoredStudyError, AuthoredStudyInputRef,
+};
 pub use validate::physics_family_can_consume_state;
 pub use validate_authored::validate_coordinate_frame;
 pub use validate_outputs::spec::quantity_supported as procedure_produces_observation_quantity;
@@ -64,6 +69,9 @@ pub use problem::authored_excitations::{
 pub use problem::authored_initial_conditions::{
     AuthoredInitialCondition, AuthoredInitialConditionError, AuthoredInitialConditionKind,
     AuthoredInitialConditionTarget,
+};
+pub use problem::authored_inputs::{
+    AuthoredInputDefinition, AuthoredInputError, AuthoredInputType, AuthoredInputValue,
 };
 pub use problem::authored_model_physics::{
     AuthoredBoundary, AuthoredBoundaryKind, AuthoredConnector, AuthoredConnectorKind,
@@ -122,8 +130,8 @@ pub use problem::model::{
 };
 pub use problem::model_authoring::{
     AuthoredMaterialAssignment, AuthoredMaterialRef, AuthoredMaterialSource, AuthoredModel,
-    AuthoredModelError, AuthoredModelInclude, AuthoredModelInputKind, AuthoredModelInputRef,
-    AuthoredModelRef, AuthoredPropertyTarget, AuthoredRegionSource,
+    AuthoredModelError, AuthoredModelInclude, AuthoredModelInputRef, AuthoredModelRef,
+    AuthoredPropertyTarget, AuthoredRegionSource,
 };
 pub use problem::prescribed_value::{PrescribedQuantity, PrescribedValue};
 pub use problem::quantity::{

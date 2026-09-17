@@ -1,13 +1,14 @@
-use super::{AuthoredModelError, AuthoredModelInputKind, AuthoredRegionSource};
+use super::{AuthoredModelError, AuthoredRegionSource};
+use crate::AuthoredInputType;
 use runmat_geometry_core::GeometryRegionRole;
 
 impl AuthoredRegionSource {
     pub fn role(&self) -> GeometryRegionRole {
         match self {
             Self::Geometry(region) => region.role,
-            Self::ModelInput(input) => match input.kind {
-                AuthoredModelInputKind::Region(role) => role,
-                AuthoredModelInputKind::Material => GeometryRegionRole::Vertex,
+            Self::ModelInput(input) => match input.value_type {
+                AuthoredInputType::Region(role) => role,
+                _ => GeometryRegionRole::Vertex,
             },
         }
     }
@@ -21,7 +22,7 @@ impl AuthoredRegionSource {
             }
             Self::ModelInput(input) => {
                 required("model input id", &input.input_id)?;
-                if matches!(input.kind, AuthoredModelInputKind::Material) {
+                if !matches!(input.value_type, AuthoredInputType::Region(_)) {
                     Err(AuthoredModelError::RegionInputRequired)
                 } else {
                     Ok(())

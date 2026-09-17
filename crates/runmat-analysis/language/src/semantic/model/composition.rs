@@ -64,7 +64,7 @@ fn collect(
         let included = models
             .get(target)
             .ok_or_else(|| "included model is not available for composition".to_string())?;
-        if !included.property_inputs.is_empty() {
+        if !included.inputs.is_empty() {
             return Err(format!(
                 "included model `{}` requires explicit input binding",
                 included.model_id

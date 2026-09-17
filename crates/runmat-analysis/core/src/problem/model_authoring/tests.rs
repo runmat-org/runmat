@@ -4,16 +4,31 @@ use super::*;
 fn material_assignment_requires_declared_strongly_typed_inputs() {
     let material = AuthoredModelInputRef {
         input_id: "material".into(),
-        kind: AuthoredModelInputKind::Material,
+        value_type: AuthoredInputType::Material,
     };
     let body = AuthoredModelInputRef {
         input_id: "body".into(),
-        kind: AuthoredModelInputKind::Region(GeometryRegionRole::Solid),
+        value_type: AuthoredInputType::Region(GeometryRegionRole::Solid),
     };
     AuthoredModel {
         module_path: "project/main.fea".into(),
         model_id: "bracket".into(),
-        property_inputs: vec![material.clone(), body.clone()],
+        inputs: vec![
+            AuthoredInputDefinition {
+                input_id: material.input_id.clone(),
+                value_type: material.value_type,
+                default: None,
+                minimum: None,
+                maximum: None,
+            },
+            AuthoredInputDefinition {
+                input_id: body.input_id.clone(),
+                value_type: body.value_type,
+                default: None,
+                minimum: None,
+                maximum: None,
+            },
+        ],
         includes: Vec::new(),
         sections: Vec::new(),
         layups: Vec::new(),
@@ -41,7 +56,7 @@ fn boundary_vertices_are_not_material_domains() {
     let model = AuthoredModel {
         module_path: "project/main.fea".into(),
         model_id: "invalid".into(),
-        property_inputs: Vec::new(),
+        inputs: Vec::new(),
         includes: Vec::new(),
         sections: Vec::new(),
         layups: Vec::new(),
