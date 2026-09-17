@@ -4,6 +4,7 @@ pub mod declaration;
 pub mod fact;
 pub mod identity;
 pub mod integer_literal;
+pub mod operation;
 pub mod rules;
 pub mod source;
 pub mod symbolic;
@@ -21,6 +22,7 @@ pub use declaration::{
 pub use fact::*;
 pub use identity::*;
 pub use integer_literal::{IntegerLiteral, IntegerLiteralClass};
+pub use operation::*;
 pub use rules::*;
 pub use source::{merge_span, Span};
 pub use symbolic::{

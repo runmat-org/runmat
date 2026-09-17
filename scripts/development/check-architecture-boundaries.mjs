@@ -64,6 +64,25 @@ const upwardValueDependencies = [
 forbidDependencies("runmat-value", upwardValueDependencies);
 forbidDependencies("runmat-runtime", ["runmat-hir"]);
 forbidDependencies("runmat-hir", ["runmat-runtime", "runmat-value"]);
+forbidDependencies("runmat-analysis/core", [
+  "runmat-lexer",
+  "runmat-parser",
+  "runmat-analysis-language",
+  "runmat-builtins",
+  "runmat-value",
+  "runmat-runtime",
+  "runmat-lsp",
+  "runmat-filesystem",
+]);
+forbidDependencies("runmat-analysis/language", [
+  "runmat-builtins",
+  "runmat-value",
+  "runmat-runtime",
+  "runmat-lsp",
+  "runmat-filesystem",
+  "runmat-execution",
+  "runmat-analysis-execution",
+]);
 
 const typesManifest = read("crates/runmat-types/Cargo.toml");
 for (const dependency of typesManifest.matchAll(/^(runmat-[\w-]+)\s*=/gm)) {
@@ -87,6 +106,39 @@ for (const { path: sourcePath, text } of allRust) {
   }
   if (/\brunmat_builtins::(?:Value|Tensor|NumericScalar|IntValue)\b/.test(text)) {
     fail(`${sourcePath} addresses live value data through runmat-builtins`);
+  }
+  if (
+    sourcePath.startsWith("crates/runmat-analysis/language/") &&
+    /\brunmat_(?:builtins|value|runtime|lsp|filesystem|execution|analysis_execution)\b/.test(text)
+  ) {
+    fail(`${sourcePath} crosses the source-to-domain compiler dependency boundary`);
+  }
+  if (
+    sourcePath.startsWith("crates/runmat-analysis/core/") &&
+    /\brunmat_(?:lexer|parser|analysis_language|builtins|value|runtime|lsp|filesystem)\b/.test(text)
+  ) {
+    fail(`${sourcePath} crosses the canonical analysis-core dependency boundary`);
+  }
+  if (
+    (sourcePath.startsWith("crates/runmat-analysis/fea/") ||
+      sourcePath.startsWith("crates/runmat-analysis/execution/")) &&
+    /\brunmat_(?:lexer|parser|analysis_language)\b/.test(text)
+  ) {
+    fail(`${sourcePath} imports FEA source-language machinery below the canonical contract boundary`);
+  }
+}
+
+const newFeaBoundarySources = allRust.filter(
+  ({ path: sourcePath }) =>
+    sourcePath.startsWith("crates/runmat-analysis/language/") ||
+    sourcePath.startsWith("crates/runmat-types/src/operation/"),
+);
+for (const { path: sourcePath, text } of newFeaBoundarySources) {
+  if (/#\s*!?\s*\[\s*allow\b/.test(text)) {
+    fail(`${sourcePath} adds an allow suppression to the FEA language boundary`);
+  }
+  if (/\b[A-Za-z_][A-Za-z0-9_]*[Vv]2\b/.test(text)) {
+    fail(`${sourcePath} adds a version-suffixed FEA language identifier`);
   }
 }
 

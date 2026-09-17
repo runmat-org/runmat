@@ -6367,6 +6367,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "runmat-analysis-language"
+version = "0.6.2"
+dependencies = [
+ "runmat-analysis-core",
+ "runmat-geometry-core",
+ "runmat-parser",
+ "runmat-types",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "runmat-aot"
 version = "0.6.2"
 dependencies = [
@@ -6423,6 +6436,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "thiserror 1.0.69",
 ]
 
 [[package]]

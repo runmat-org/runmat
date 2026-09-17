@@ -1,0 +1,1084 @@
+{
+  "schema": 1,
+  "scope": "Current YAML document surface to the version-free typed FEA language",
+  "surfaces": [
+    {
+      "source": "crates/runmat-runtime/src/analysis/fea_document.rs",
+      "kind": "enum",
+      "name": "RawFeaDocument",
+      "defaults": {
+        "disposition": "authored_dsl",
+        "cardinality": "exactly_one_root",
+        "default": "none",
+        "target": "one named top-level declaration",
+        "identity": "authored declaration identity",
+        "validation": "root kind and declaration name are statically bound",
+        "positive_coverage": "language.root.accepts",
+        "negative_coverage": "language.root.rejects"
+      },
+      "members": {
+        "Study": { "target": "study declaration" },
+        "Sweep": { "target": "sweep declaration" },
+        "Model": { "target": "model declaration" }
+      }
+    },
+    {
+      "source": "crates/runmat-runtime/src/analysis/fea_document.rs",
+      "kind": "struct",
+      "name": "FeaSweepDocument",
+      "defaults": {
+        "disposition": "authored_dsl",
+        "cardinality": "required_once",
+        "default": "none",
+        "target": "sweep declaration member",
+        "identity": "scientific sweep identity unless marked policy",
+        "validation": "bound and type checked by sweep semantics",
+        "positive_coverage": "language.sweep.accepts",
+        "negative_coverage": "language.sweep.rejects"
+      },
+      "members": {
+        "version": {
+          "disposition": "removed",
+          "target": "no source version; a future edition is project configuration",
+          "identity": "none",
+          "validation": "token is rejected"
+        },
+        "id": { "target": "sweep symbol name" },
+        "fail_fast": {
+          "disposition": "execution_policy",
+          "cardinality": "optional_once",
+          "default": "false",
+          "target": "execution { failure = continue | fail_fast }",
+          "identity": "logical execution identity only"
+        },
+        "studies": {
+          "cardinality": "one_or_more",
+          "target": "study references plus typed sweep axes/cases"
+        }
+      }
+    },
+    {
+      "source": "crates/runmat-runtime/src/analysis/fea_document.rs",
+      "kind": "struct",
+      "name": "FeaStudyDocument",
+      "defaults": {
+        "disposition": "authored_dsl",
+        "cardinality": "required_once",
+        "default": "none",
+        "target": "study declaration member",
+        "identity": "scientific study identity",
+        "validation": "bound and type checked against model and procedure",
+        "positive_coverage": "language.study.accepts",
+        "negative_coverage": "language.study.rejects"
+      },
+      "members": {
+        "version": {
+          "disposition": "removed",
+          "target": "version-free source",
+          "identity": "none",
+          "validation": "token is rejected"
+        },
+        "id": { "target": "study symbol name" },
+        "geometry": { "target": "geometry symbol reference" },
+        "model": { "target": "model symbol reference with typed bindings" },
+        "execution": {
+          "disposition": "execution_policy",
+          "cardinality": "optional_once",
+          "default": "project and CLI policy",
+          "target": "optional execution block",
+          "identity": "logical execution identity only"
+        },
+        "mesh": {
+          "cardinality": "optional_once",
+          "default": "required only by formulations that need a mesh",
+          "target": "mesh declaration or reference"
+        },
+        "immutable_values": {
+          "disposition": "compiler_derived",
+          "cardinality": "zero_or_more",
+          "default": "empty",
+          "target": "frozen values derived from imported functions and arguments",
+          "identity": "generator and scientific identity",
+          "validation": "compiler verifies portability and capture closure"
+        },
+        "sequence": { "target": "typed steps and explicit state edges inside study" }
+      }
+    },
+    {
+      "source": "crates/runmat-runtime/src/analysis/fea_document.rs",
+      "kind": "struct",
+      "name": "FeaGeometryDocument",
+      "defaults": {
+        "disposition": "authored_dsl",
+        "cardinality": "required_once",
+        "default": "none",
+        "target": "imported geometry declaration member",
+        "identity": "geometry definition identity",
+        "validation": "source confinement, unit, provider, and capability checks",
+        "positive_coverage": "language.geometry.import.accepts",
+        "negative_coverage": "language.geometry.import.rejects"
+      },
+      "members": {
+        "path": { "target": "geometry file = project-relative path" },
+        "units": {
+          "cardinality": "optional_once",
+          "default": "file-declared units or an explicit diagnostic",
+          "target": "geometry units"
+        },
+        "import": {
+          "disposition": "execution_policy",
+          "cardinality": "optional_once",
+          "default": "provider policy",
+          "target": "geometry inspection/materialization policy",
+          "identity": "physical attempt identity unless result-affecting"
+        }
+      }
+    },
+    {
+      "source": "crates/runmat-runtime/src/analysis/fea_document.rs",
+      "kind": "struct",
+      "name": "FeaGeometryImportDocument",
+      "defaults": {
+        "disposition": "removed",
+        "cardinality": "optional_once",
+        "default": "none",
+        "target": "render tessellation policy outside scientific geometry definition",
+        "identity": "render or attempt identity only",
+        "validation": "retired field is rejected by the language",
+        "positive_coverage": "language.geometry.render_policy.accepts",
+        "negative_coverage": "language.geometry.retired_import.rejects"
+      },
+      "members": {
+        "max_triangles": {}
+      }
+    },
+    {
+      "source": "crates/runmat-runtime/src/analysis/fea_document.rs",
+      "kind": "struct",
+      "name": "FeaModelDocument",
+      "defaults": {
+        "disposition": "authored_dsl",
+        "cardinality": "required_once",
+        "default": "none",
+        "target": "model declaration",
+        "identity": "authored model identity",
+        "validation": "module binding and model semantic checks",
+        "positive_coverage": "language.model.accepts",
+        "negative_coverage": "language.model.rejects"
+      },
+      "members": {
+        "id": {
+          "disposition": "compiler_derived",
+          "cardinality": "exactly_once",
+          "default": "declaration symbol",
+          "target": "model symbol name",
+          "identity": "authored declaration identity"
+        },
+        "frame": {
+          "cardinality": "optional_once",
+          "default": "global",
+          "target": "model frame"
+        },
+        "source": {
+          "disposition": "removed",
+          "target": "ordinary explicit imports and declarations",
+          "identity": "module graph identity",
+          "validation": "inline/file/compose wrapper syntax is rejected"
+        }
+      }
+    },
+    {
+      "source": "crates/runmat-runtime/src/analysis/fea_document.rs",
+      "kind": "struct",
+      "name": "FeaStandaloneModelDocument",
+      "defaults": {
+        "disposition": "removed",
+        "cardinality": "required_once",
+        "default": "none",
+        "target": "ordinary model declaration in any module",
+        "identity": "module and declaration identity",
+        "validation": "legacy wrapper is rejected",
+        "positive_coverage": "language.model_module.accepts",
+        "negative_coverage": "language.model_wrapper.rejects"
+      },
+      "members": {
+        "version": {},
+        "source": {}
+      }
+    },
+    {
+      "source": "crates/runmat-runtime/src/analysis/fea_document.rs",
+      "kind": "enum",
+      "name": "FeaModelSourceDocument",
+      "defaults": {
+        "disposition": "removed",
+        "cardinality": "exactly_one",
+        "default": "none",
+        "target": "explicit module imports and declarations",
+        "identity": "module graph identity",
+        "validation": "legacy source wrapper is rejected",
+        "positive_coverage": "language.import.accepts",
+        "negative_coverage": "language.source_wrapper.rejects"
+      },
+      "members": {
+        "Inline": {},
+        "File": {},
+        "Compose": {}
+      }
+    },
+    {
+      "source": "crates/runmat-runtime/src/analysis/fea_document.rs",
+      "kind": "struct",
+      "name": "FeaModelFileSourceDocument",
+      "defaults": {
+        "disposition": "removed",
+        "cardinality": "required_once",
+        "default": "none",
+        "target": "import model name from project-relative .fea path",
+        "identity": "module graph identity",
+        "validation": "source-root confinement and cycle checks",
+        "positive_coverage": "language.import.model.accepts",
+        "negative_coverage": "language.import.model.rejects"
+      },
+      "members": {
+        "path": {}
+      }
+    },
+    {
+      "source": "crates/runmat-runtime/src/analysis/fea_document.rs",
+      "kind": "struct",
+      "name": "FeaModelDataDocument",
+      "defaults": {
+        "disposition": "authored_dsl",
+        "cardinality": "zero_or_more",
+        "default": "empty",
+        "target": "typed model declaration collection",
+        "identity": "scientific model identity",
+        "validation": "unique symbols, typed references, topology compatibility",
+        "positive_coverage": "language.model_members.accepts",
+        "negative_coverage": "language.model_members.rejects"
+      },
+      "members": {
+        "regions": { "target": "region declarations" },
+        "materials": { "target": "material declarations" },
+        "material_assignments": { "target": "typed property assignments" },
+        "structural": { "target": "explicit beam/shell topology declarations" },
+        "constraints": { "target": "typed constraint declarations" },
+        "boundaries": { "target": "typed boundary declarations" },
+        "connectors": { "target": "typed connector declarations" },
+        "interfaces": { "target": "typed interface declarations" },
+        "signals": { "target": "signal declarations" },
+        "excitation_cases": { "target": "excitation case declarations" },
+        "excitations": { "target": "typed excitation declarations" },
+        "initial_conditions": { "target": "typed initial-condition declarations" },
+        "response_spectra": { "target": "response-spectrum declarations" },
+        "random_excitations": { "target": "random-excitation declarations" },
+        "domains": {
+          "disposition": "removed",
+          "target": "procedure-specific typed settings owned by model/study declarations",
+          "validation": "opaque domains container is rejected"
+        }
+      }
+    },
+    {
+      "source": "crates/runmat-runtime/src/analysis/fea_document.rs",
+      "kind": "struct",
+      "name": "FeaMeshDocument",
+      "defaults": {
+        "disposition": "authored_dsl",
+        "cardinality": "optional_once",
+        "default": "procedure-aware requiredness; no hidden mesh object",
+        "target": "mesh declaration member",
+        "identity": "mesh request identity",
+        "validation": "dimension, positivity, order, grading, and resource bounds",
+        "positive_coverage": "language.mesh.accepts",
+        "negative_coverage": "language.mesh.rejects"
+      },
+      "members": {
+        "element_order": { "target": "order" },
+        "maximum_elements": {
+          "disposition": "execution_policy",
+          "default": "project resource policy",
+          "target": "execution mesh resource ceiling",
+          "identity": "logical execution identity"
+        },
+        "target_edge_length_m": { "target": "size" },
+        "maximum_chordal_deviation_m": { "target": "deviation" },
+        "maximum_grading_ratio": { "target": "grading" },
+        "deterministic_seed": {
+          "cardinality": "optional_once",
+          "default": "canonical deterministic seed derived from request identity",
+          "target": "seed only when explicitly overriding a stochastic algorithm"
+        }
+      }
+    },
+    {
+      "source": "crates/runmat-runtime/src/analysis/fea_document.rs",
+      "kind": "struct",
+      "name": "FeaRegionDocument",
+      "defaults": {
+        "disposition": "authored_dsl",
+        "cardinality": "required_once",
+        "default": "none",
+        "target": "region declaration selector",
+        "identity": "geometry revision plus selected persistent identities",
+        "validation": "dimension, topology, cardinality, and ambiguity checks",
+        "positive_coverage": "language.region.accepts",
+        "negative_coverage": "language.region.rejects"
+      },
+      "members": {
+        "selector": {}
+      }
+    },
+    {
+      "source": "crates/runmat-runtime/src/analysis/fea_document.rs",
+      "kind": "enum",
+      "name": "FeaRegionSelector",
+      "defaults": {
+        "disposition": "authored_dsl",
+        "cardinality": "exactly_one",
+        "default": "none",
+        "target": "typed geometry selector expression",
+        "identity": "selected persistent identities, not selector spelling",
+        "validation": "exact match and declared cardinality",
+        "positive_coverage": "language.region.selector.accepts",
+        "negative_coverage": "language.region.selector.rejects"
+      },
+      "members": {
+        "Id": { "target": "persistent entity id selector" },
+        "Tag": { "target": "AP242 or authored tag selector" },
+        "Name": { "target": "exact imported name selector" }
+      }
+    },
+    {
+      "source": "crates/runmat-runtime/src/analysis/fea_document.rs",
+      "kind": "struct",
+      "name": "FeaRegionSelectorRepresentation",
+      "defaults": {
+        "disposition": "removed",
+        "cardinality": "optional_once",
+        "default": "none",
+        "target": "direct typed selector syntax",
+        "identity": "none",
+        "validation": "legacy mapping representation is rejected",
+        "positive_coverage": "language.region.direct_selector.accepts",
+        "negative_coverage": "language.region.mapping_selector.rejects"
+      },
+      "members": {
+        "id": {},
+        "tag": {},
+        "name": {}
+      }
+    },
+    {
+      "source": "crates/runmat-runtime/src/analysis/fea_document.rs",
+      "kind": "struct",
+      "name": "FeaMaterialDocument",
+      "defaults": {
+        "disposition": "authored_dsl",
+        "cardinality": "optional_once",
+        "default": "absent capability; no physical default",
+        "target": "material capability member",
+        "identity": "material constitutive identity",
+        "validation": "capability-specific units and physical ranges",
+        "positive_coverage": "language.material.capability.accepts",
+        "negative_coverage": "language.material.capability.rejects"
+      },
+      "members": {
+        "name": { "target": "display name" },
+        "mass_density_kg_per_m3": { "target": "density dimensioned literal" },
+        "mechanical": { "target": "linear_elastic capability" },
+        "damping": { "target": "mechanical_damping capability" },
+        "thermal": { "target": "thermal capability" },
+        "acoustic": { "target": "acoustic capability" },
+        "electrical": { "target": "electrical capability" },
+        "plastic": { "target": "plasticity capability" }
+      }
+    },
+    {
+      "source": "crates/runmat-runtime/src/analysis/fea_document.rs",
+      "kind": "struct",
+      "name": "FeaMaterialAssignmentDocument",
+      "defaults": {
+        "disposition": "authored_dsl",
+        "cardinality": "required_once",
+        "default": "none",
+        "target": "typed property assignment member",
+        "identity": "scientific assignment identity unless marked audit",
+        "validation": "target role, exact coverage, and capability compatibility",
+        "positive_coverage": "language.assignment.accepts",
+        "negative_coverage": "language.assignment.rejects"
+      },
+      "members": {
+        "target": { "target": "region or typed all-domain target" },
+        "material": { "target": "material symbol reference" },
+        "expected_material": {
+          "disposition": "compiler_derived",
+          "cardinality": "optional_once",
+          "default": "none",
+          "target": "imported-property comparison evidence",
+          "identity": "audit identity only"
+        },
+        "confidence": {
+          "disposition": "compiler_derived",
+          "cardinality": "required_once",
+          "default": "derived from evidence provenance",
+          "target": "assignment evidence",
+          "identity": "audit identity only",
+          "validation": "must never change constitutive coefficients"
+        }
+      }
+    },
+    {
+      "source": "crates/runmat-runtime/src/analysis/fea_document.rs",
+      "kind": "enum",
+      "name": "FeaPropertyRegionTargetDocument",
+      "defaults": {
+        "disposition": "authored_dsl",
+        "cardinality": "exactly_one",
+        "default": "none",
+        "target": "typed property-domain target",
+        "identity": "assignment semantic identity",
+        "validation": "role-compatible topology and exact coverage",
+        "positive_coverage": "language.assignment.target.accepts",
+        "negative_coverage": "language.assignment.target.rejects"
+      },
+      "members": {
+        "Beam": {},
+        "Shell": {},
+        "Solid": {},
+        "Cell": {},
+        "AllBeams": {},
+        "AllShells": {},
+        "AllSolids": {},
+        "AllCells": {}
+      }
+    },
+    {
+      "source": "crates/runmat-runtime/src/analysis/fea_document.rs",
+      "kind": "struct",
+      "name": "FeaPropertyRegionSelectionDocument",
+      "defaults": {
+        "disposition": "authored_dsl",
+        "cardinality": "required_once",
+        "default": "none",
+        "target": "region symbol reference",
+        "identity": "resolved persistent topology identity",
+        "validation": "region role and cardinality",
+        "positive_coverage": "language.assignment.region.accepts",
+        "negative_coverage": "language.assignment.region.rejects"
+      },
+      "members": {
+        "region": {}
+      }
+    },
+    {
+      "source": "crates/runmat-runtime/src/analysis/fea_document.rs",
+      "kind": "struct",
+      "name": "FeaStructuralDocument",
+      "defaults": {
+        "disposition": "authored_dsl",
+        "cardinality": "zero_or_more",
+        "default": "empty",
+        "target": "explicit structural topology declarations",
+        "identity": "structural topology identity",
+        "validation": "connectivity, geometry binding, section role, and uniqueness",
+        "positive_coverage": "language.structural_topology.accepts",
+        "negative_coverage": "language.structural_topology.rejects"
+      },
+      "members": {
+        "nodes": { "target": "node declarations" },
+        "elements": { "target": "beam and shell element declarations" },
+        "sections": { "target": "section declarations and assignments" }
+      }
+    },
+    {
+      "source": "crates/runmat-runtime/src/analysis/fea_document.rs",
+      "kind": "struct",
+      "name": "FeaStructuralNodeDocument",
+      "defaults": {
+        "disposition": "authored_dsl",
+        "cardinality": "required_once",
+        "default": "none",
+        "target": "structural node member",
+        "identity": "explicit structural topology identity",
+        "validation": "finite coordinates and unique id",
+        "positive_coverage": "language.structural_node.accepts",
+        "negative_coverage": "language.structural_node.rejects"
+      },
+      "members": {
+        "id": { "target": "node symbol" },
+        "coordinates_m": { "target": "position with length units" },
+        "solid_attachment": {
+          "cardinality": "optional_once",
+          "default": "none",
+          "target": "conformal geometry vertex attachment"
+        }
+      }
+    },
+    {
+      "source": "crates/runmat-runtime/src/analysis/fea_document.rs",
+      "kind": "struct",
+      "name": "FeaConformalSolidAttachmentDocument",
+      "defaults": {
+        "disposition": "authored_dsl",
+        "cardinality": "required_once",
+        "default": "none",
+        "target": "geometry vertex reference",
+        "identity": "geometry revision plus persistent vertex identity",
+        "validation": "exact vertex resolution",
+        "positive_coverage": "language.node_attachment.accepts",
+        "negative_coverage": "language.node_attachment.rejects"
+      },
+      "members": {
+        "geometry_vertex": {}
+      }
+    },
+    {
+      "source": "crates/runmat-runtime/src/analysis/fea_document.rs",
+      "kind": "struct",
+      "name": "FeaStructuralElementDocument",
+      "defaults": {
+        "disposition": "authored_dsl",
+        "cardinality": "required_once",
+        "default": "none",
+        "target": "explicit structural element member",
+        "identity": "explicit structural topology identity",
+        "validation": "kind-specific node count, region, section, and frame checks",
+        "positive_coverage": "language.structural_element.accepts",
+        "negative_coverage": "language.structural_element.rejects"
+      },
+      "members": {
+        "id": { "target": "element symbol" },
+        "region": { "target": "region symbol reference" },
+        "element_type": { "target": "beam or shell declaration kind" },
+        "nodes": { "target": "ordered node references" },
+        "section": { "target": "section symbol reference" },
+        "reference_axis": {
+          "cardinality": "optional_once",
+          "default": "deterministic geometry-derived frame when unambiguous",
+          "target": "typed orientation vector or frame reference"
+        }
+      }
+    },
+    {
+      "source": "crates/runmat-runtime/src/analysis/fea_document.rs",
+      "kind": "enum",
+      "name": "FeaStructuralElementType",
+      "defaults": {
+        "disposition": "authored_dsl",
+        "cardinality": "exactly_one",
+        "default": "none",
+        "target": "element declaration kind",
+        "identity": "structural topology identity",
+        "validation": "kind-specific topology checks",
+        "positive_coverage": "language.element_kind.accepts",
+        "negative_coverage": "language.element_kind.rejects"
+      },
+      "members": {
+        "Beam": {},
+        "Shell": {}
+      }
+    },
+    {
+      "source": "crates/runmat-runtime/src/analysis/fea_document.rs",
+      "kind": "struct",
+      "name": "FeaStructuralSectionDocument",
+      "defaults": {
+        "disposition": "authored_dsl",
+        "cardinality": "required_once",
+        "default": "none",
+        "target": "typed beam or shell section member",
+        "identity": "section property identity",
+        "validation": "kind-specific units, positivity, and completeness",
+        "positive_coverage": "language.section.accepts",
+        "negative_coverage": "language.section.rejects"
+      },
+      "members": {
+        "id": { "target": "section symbol" },
+        "section_type": { "target": "beam or shell section kind" },
+        "area_m2": { "target": "beam area with area units" },
+        "iy_m4": { "target": "beam local-y second moment" },
+        "iz_m4": { "target": "beam local-z second moment" },
+        "torsion_j_m4": { "target": "beam torsion constant" },
+        "thickness_m": { "target": "shell thickness" },
+        "shear_correction": { "target": "section shear correction" },
+        "drilling_stiffness_scale": { "target": "shell drilling stabilization policy" },
+        "outer_fiber_y_m": {
+          "disposition": "compiler_derived",
+          "default": "derived from section shape",
+          "target": "section recovery geometry",
+          "identity": "section property identity"
+        },
+        "outer_fiber_z_m": {
+          "disposition": "compiler_derived",
+          "default": "derived from section shape",
+          "target": "section recovery geometry",
+          "identity": "section property identity"
+        },
+        "torsion_outer_radius_m": {
+          "disposition": "compiler_derived",
+          "default": "derived from section shape",
+          "target": "section recovery geometry",
+          "identity": "section property identity"
+        }
+      }
+    },
+    {
+      "source": "crates/runmat-runtime/src/analysis/fea_document.rs",
+      "kind": "enum",
+      "name": "FeaStructuralSectionType",
+      "defaults": {
+        "disposition": "authored_dsl",
+        "cardinality": "exactly_one",
+        "default": "none",
+        "target": "section declaration kind",
+        "identity": "section property identity",
+        "validation": "section member compatibility",
+        "positive_coverage": "language.section_kind.accepts",
+        "negative_coverage": "language.section_kind.rejects"
+      },
+      "members": {
+        "Beam": {},
+        "Shell": {}
+      }
+    },
+    {
+      "source": "crates/runmat-runtime/src/analysis/fea_document.rs",
+      "kind": "struct",
+      "name": "FeaDomainsDocument",
+      "defaults": {
+        "disposition": "removed",
+        "cardinality": "optional_once",
+        "default": "none",
+        "target": "procedure-specific typed model/study settings",
+        "identity": "scientific study identity",
+        "validation": "family/procedure compatibility and typed physical values",
+        "positive_coverage": "language.procedure_settings.accepts",
+        "negative_coverage": "language.domains_container.rejects"
+      },
+      "members": {
+        "thermal": { "target": "thermal procedure settings" },
+        "thermo_mechanical": { "target": "thermomechanical coupling settings" },
+        "electro_thermal": { "target": "electrothermal coupling settings" },
+        "electromagnetic": { "target": "electromagnetic procedure settings" },
+        "cfd": { "target": "fluid procedure settings" }
+      }
+    },
+    {
+      "source": "crates/runmat-runtime/src/analysis/fea_document.rs",
+      "kind": "struct",
+      "name": "FeaExecutionDocument",
+      "defaults": {
+        "disposition": "internal_only",
+        "cardinality": "required_once",
+        "default": "none",
+        "target": "lowered execution policy entry",
+        "identity": "logical execution identity",
+        "validation": "procedure-specific policy admission",
+        "positive_coverage": "language.execution.lowering.accepts",
+        "negative_coverage": "language.execution.lowering.rejects"
+      },
+      "members": {
+        "step": { "target": "resolved step symbol" },
+        "backend": { "target": "merged backend preference" },
+        "requirement": {
+          "disposition": "compiler_derived",
+          "default": "production qualification required for production publication",
+          "target": "formulation admission requirement"
+        },
+        "solver_options": {
+          "disposition": "execution_policy",
+          "cardinality": "optional_once",
+          "default": "procedure preset",
+          "target": "typed procedure solver options"
+        }
+      }
+    },
+    {
+      "source": "crates/runmat-runtime/src/analysis/fea_document.rs",
+      "kind": "struct",
+      "name": "FeaExecutionDocumentFields",
+      "defaults": {
+        "disposition": "removed",
+        "cardinality": "required_once",
+        "default": "none",
+        "target": "direct semantic execution block lowering",
+        "identity": "logical execution identity",
+        "validation": "typed policy semantics",
+        "positive_coverage": "language.execution.accepts",
+        "negative_coverage": "language.execution_legacy_fields.rejects"
+      },
+      "members": {
+        "step": {},
+        "backend": {},
+        "requirement": {}
+      }
+    },
+    {
+      "source": "crates/runmat-analysis/core/src/problem/model.rs",
+      "kind": "struct",
+      "name": "AnalysisModel",
+      "defaults": {
+        "disposition": "compiler_derived",
+        "cardinality": "required_once",
+        "default": "none",
+        "target": "lowered canonical model contract",
+        "identity": "scientific model identity",
+        "validation": "analysis-core validates the complete typed model",
+        "positive_coverage": "language.lowering.model.accepts",
+        "negative_coverage": "language.lowering.model.rejects"
+      },
+      "members": {
+        "model_id": {},
+        "geometry_id": {},
+        "geometry_revision": {},
+        "units": {},
+        "frame": {},
+        "materials": {},
+        "material_assignments": {},
+        "structural": {},
+        "thermal": {},
+        "thermo_mechanical": {},
+        "electro_thermal": {},
+        "electromagnetic": {},
+        "cfd": {},
+        "interfaces": {},
+        "constraints": {},
+        "boundaries": {},
+        "connectors": {},
+        "signals": {},
+        "excitations": {},
+        "excitation_cases": {},
+        "initial_conditions": {},
+        "response_spectra": {},
+        "random_excitations": {},
+        "sequence": {}
+      }
+    },
+    {
+      "source": "crates/runmat-runtime/src/analysis/contracts.rs",
+      "kind": "enum",
+      "name": "AnalysisSolverOptions",
+      "defaults": {
+        "disposition": "execution_policy",
+        "cardinality": "optional_once_per_step",
+        "default": "typed procedure preset",
+        "target": "procedure-specific execution solver block",
+        "identity": "logical execution identity",
+        "validation": "variant must exactly match family, procedure, and solution space",
+        "positive_coverage": "language.execution.solver.accepts",
+        "negative_coverage": "language.execution.solver.rejects"
+      },
+      "members": {
+        "StructuralLinear": {},
+        "StructuralFrequency": {},
+        "StructuralModes": {},
+        "StructuralResponseSpectrum": {},
+        "StructuralRandomResponse": {},
+        "StructuralBuckling": {},
+        "AcousticHelmholtz": {},
+        "ThermalDiffusion": {},
+        "StructuralTransient": {},
+        "IncompressibleFlow": {},
+        "ConjugateHeatTransfer": {},
+        "FluidStructureInteraction": {},
+        "StructuralNonlinear": {},
+        "ElectromagneticPotential": {}
+      }
+    },
+    {
+      "source": "crates/runmat-runtime/src/analysis/contracts.rs",
+      "kind": "struct",
+      "name": "AnalysisExecutionStep",
+      "defaults": {
+        "disposition": "compiler_derived",
+        "cardinality": "required_once_per_step",
+        "default": "none",
+        "target": "lowered execution plan step",
+        "identity": "logical execution identity",
+        "validation": "step and solver option compatibility",
+        "positive_coverage": "language.lowering.execution_step.accepts",
+        "negative_coverage": "language.lowering.execution_step.rejects"
+      },
+      "members": {
+        "step_id": {},
+        "backend": { "disposition": "execution_policy", "default": "merged project and CLI policy" },
+        "requirement": { "default": "production publication requires production qualification" },
+        "solver_options": { "disposition": "execution_policy", "default": "typed procedure preset" }
+      }
+    },
+    {
+      "source": "crates/runmat-runtime/src/analysis/contracts.rs",
+      "kind": "struct",
+      "name": "AnalysisExecutionPlan",
+      "defaults": {
+        "disposition": "compiler_derived",
+        "cardinality": "exactly_once",
+        "default": "derived from sequence plus merged policy",
+        "target": "lowered execution plan",
+        "identity": "logical execution identity",
+        "validation": "one compatible entry for every executable step",
+        "positive_coverage": "language.lowering.execution_plan.accepts",
+        "negative_coverage": "language.lowering.execution_plan.rejects"
+      },
+      "members": {
+        "steps": {}
+      }
+    },
+    {
+      "source": "crates/runmat-runtime/src/analysis/contracts.rs",
+      "kind": "struct",
+      "name": "AnalysisStudySpec",
+      "defaults": {
+        "disposition": "compiler_derived",
+        "cardinality": "required_once",
+        "default": "none",
+        "target": "lowered canonical study contract",
+        "identity": "scientific or logical identity according to member role",
+        "validation": "runtime revalidates all lowered typed contracts",
+        "positive_coverage": "language.lowering.study.accepts",
+        "negative_coverage": "language.lowering.study.rejects"
+      },
+      "members": {
+        "study_id": {},
+        "geometry": {},
+        "create_model_intent": { "disposition": "removed", "target": "explicit lowered model; no template intent", "identity": "none" },
+        "model_source_evidence": { "target": "module graph evidence", "identity": "source and audit identity" },
+        "model": {},
+        "execution": { "identity": "logical execution identity" },
+        "meshing_settings": {},
+        "immutable_values": {},
+        "solver_mesh_artifact_path": { "disposition": "internal_only", "target": "content-addressed mesh reference", "identity": "attempt transport only" },
+        "meshing_evidence_artifact_path": { "disposition": "internal_only", "target": "content-addressed evidence reference", "identity": "attempt transport only" }
+      }
+    },
+    {
+      "source": "crates/runmat-runtime/src/analysis/contracts.rs",
+      "kind": "struct",
+      "name": "AnalysisStudySweepSpec",
+      "defaults": {
+        "disposition": "compiler_derived",
+        "cardinality": "required_once",
+        "default": "none",
+        "target": "lowered canonical sweep contract",
+        "identity": "scientific sweep identity unless policy",
+        "validation": "ordered unique expanded study identities",
+        "positive_coverage": "language.lowering.sweep.accepts",
+        "negative_coverage": "language.lowering.sweep.rejects"
+      },
+      "members": {
+        "sweep_id": {},
+        "studies": {},
+        "fail_fast": { "disposition": "execution_policy", "default": "false", "identity": "logical execution identity" }
+      }
+    },
+    {
+      "source": "crates/runmat-analysis/execution/src/workload.rs",
+      "kind": "struct",
+      "name": "AnalysisWorkloadInput",
+      "defaults": {
+        "disposition": "internal_only",
+        "cardinality": "required_once_per_input",
+        "default": "none",
+        "target": "canonical worker numerical-object reference",
+        "identity": "logical workload identity",
+        "validation": "manifest, payload, kind, length, and reference-kind closure",
+        "positive_coverage": "execution.workload_input.accepts",
+        "negative_coverage": "execution.workload_input.rejects"
+      },
+      "members": {
+        "kind": {},
+        "logical_identity": {},
+        "payload_digest": {},
+        "manifest_digest": {},
+        "manifest_encoded_length": {},
+        "reference_kind": {}
+      }
+    },
+    {
+      "source": "crates/runmat-analysis/execution/src/workload.rs",
+      "kind": "struct",
+      "name": "AnalysisWorkloadRequest",
+      "defaults": {
+        "disposition": "internal_only",
+        "cardinality": "required_once_per_task",
+        "default": "none",
+        "target": "canonical placement-neutral worker request",
+        "identity": "logical workload identity; placement excluded",
+        "validation": "schema, identity rederivation, input/output closure, and capabilities",
+        "positive_coverage": "execution.workload_request.accepts",
+        "negative_coverage": "execution.workload_request.rejects"
+      },
+      "members": {
+        "schema_version": {},
+        "study": {},
+        "step": {},
+        "execution_plan": {},
+        "identity": {},
+        "kind": {},
+        "inputs": {},
+        "outputs": {},
+        "required_capabilities": {}
+      }
+    },
+    {
+      "source": "crates/runmat-meshing/core/src/contracts/canonical/settings.rs",
+      "kind": "struct",
+      "name": "MeshingRequestSettings",
+      "defaults": {
+        "disposition": "compiler_derived",
+        "cardinality": "required_once_when_meshing",
+        "default": "explicit language values merged with project resource policy",
+        "target": "lowered canonical mesh request settings",
+        "identity": "mesh request identity except attempt-only cancellation bounds",
+        "validation": "canonical meshing request validation",
+        "positive_coverage": "language.lowering.mesh.accepts",
+        "negative_coverage": "language.lowering.mesh.rejects"
+      },
+      "members": {
+        "element_order": {},
+        "deterministic_seed": {},
+        "target_edge_length_m": {},
+        "maximum_chordal_deviation_m": {},
+        "maximum_grading_ratio": {},
+        "resources": { "disposition": "execution_policy", "identity": "logical execution identity" },
+        "cancellation": { "disposition": "execution_policy", "identity": "physical attempt identity" }
+      }
+    },
+    {
+      "source": "crates/runmat-geometry/io/src/import/mod.rs",
+      "kind": "struct",
+      "name": "GeometryImportOptions",
+      "defaults": {
+        "disposition": "internal_only",
+        "cardinality": "required_once_per_import",
+        "default": "provider policy",
+        "target": "geometry provider request",
+        "identity": "geometry realization or render identity according to member",
+        "validation": "provider capability and resource admission",
+        "positive_coverage": "geometry.import_options.accepts",
+        "negative_coverage": "geometry.import_options.rejects"
+      },
+      "members": {
+        "max_triangles": { "identity": "render identity" },
+        "budget_policy": { "identity": "physical attempt identity" },
+        "units": { "identity": "geometry definition identity" },
+        "tessellation_profile": { "identity": "render identity" },
+        "relative_deflection": { "identity": "render identity" }
+      }
+    },
+    {
+      "source": "crates/runmat-analysis/fea/src/contracts/mod.rs",
+      "kind": "struct",
+      "name": "FeaRunResult",
+      "defaults": {
+        "disposition": "internal_only",
+        "cardinality": "required_once_per_solve",
+        "default": "none",
+        "target": "canonical family-neutral solver result",
+        "identity": "scientific result or attempt evidence according to member",
+        "validation": "result identity, field shapes, evidence, and convergence closure",
+        "positive_coverage": "results.fea_run.accepts",
+        "negative_coverage": "results.fea_run.rejects"
+      },
+      "members": {
+        "identity": {},
+        "requested_backend": { "identity": "logical execution identity" },
+        "execution_backend": { "identity": "physical attempt identity" },
+        "solver_backend": { "identity": "physical attempt identity" },
+        "solver_device_apply_k_ratio": { "identity": "physical attempt evidence" },
+        "solver_method": { "identity": "logical execution identity" },
+        "preconditioner": { "identity": "logical execution identity" },
+        "solver_host_sync_count": { "identity": "physical attempt evidence" },
+        "accelerator_evidence": { "identity": "physical attempt evidence" },
+        "diagnostics": { "identity": "result evidence" },
+        "spatial_projection_evidence": { "identity": "scientific result evidence" },
+        "observations": { "identity": "scientific result identity" },
+        "observation_histories": { "identity": "scientific result identity" },
+        "series_reductions": { "identity": "scientific result identity" },
+        "fields": { "identity": "scientific result identity" }
+      }
+    },
+    {
+      "source": "crates/runmat-runtime/src/analysis/contracts.rs",
+      "kind": "struct",
+      "name": "AnalysisRunResult",
+      "defaults": {
+        "disposition": "internal_only",
+        "cardinality": "required_once_per_run",
+        "default": "none",
+        "target": "canonical persisted public run result",
+        "identity": "result, quality, or attempt identity according to member",
+        "validation": "publication validates source closure, quality, and artifact schema",
+        "positive_coverage": "results.analysis_run.accepts",
+        "negative_coverage": "results.analysis_run.rejects"
+      },
+      "members": {
+        "run_id": { "identity": "result publication identity" },
+        "run": { "identity": "scientific result identity" },
+        "render_topology": { "identity": "render identity" },
+        "modal_results": { "identity": "scientific result identity" },
+        "buckling_results": { "identity": "scientific result identity" },
+        "thermal_results": { "identity": "scientific result identity" },
+        "transient_results": { "identity": "scientific result identity" },
+        "nonlinear_results": { "identity": "scientific result identity" },
+        "electromagnetic_results": { "identity": "scientific result identity" },
+        "model_validity": { "identity": "quality evidence" },
+        "solver_convergence": { "identity": "quality evidence" },
+        "result_quality": { "identity": "quality evidence" },
+        "run_status": { "identity": "publication state" },
+        "numerically_acceptable": { "identity": "quality evidence" },
+        "production_publishable": { "identity": "publication evidence" },
+        "quality_reasons": { "identity": "quality evidence" },
+        "production_publication_reasons": { "identity": "publication evidence" },
+        "provenance": { "identity": "physical attempt evidence" }
+      }
+    },
+    {
+      "source": "crates/runmat-runtime/src/analysis/contracts.rs",
+      "kind": "struct",
+      "name": "AnalysisResultsQuery",
+      "defaults": {
+        "disposition": "internal_only",
+        "cardinality": "optional_once_per_read",
+        "default": "all result categories with values and diagnostics",
+        "target": "typed result accessor and paging request",
+        "identity": "read request only; never scientific identity",
+        "validation": "field, mode, snapshot, and payload selection bounds",
+        "positive_coverage": "results.query.accepts",
+        "negative_coverage": "results.query.rejects"
+      },
+      "members": {
+        "include_fields": {},
+        "include_field_values": {},
+        "include_diagnostics": {},
+        "diagnostic_codes": {},
+        "include_modal_results": {},
+        "include_buckling_results": {},
+        "mode_indices": {},
+        "include_transient_results": {},
+        "transient_snapshot_indices": {},
+        "include_nonlinear_results": {},
+        "include_electromagnetic_results": {}
+      }
+    }
+  ],
+  "concentration_limits": [
+    {
+      "source": "crates/runmat-runtime/src/analysis/fea_document.rs",
+      "maximum_lines": 2861,
+      "rationale": "migration source only; delete at cutover"
+    },
+    {
+      "source": "crates/runmat-runtime/src/analysis/mod.rs",
+      "maximum_lines": 8579,
+      "rationale": "no new FEA language or numerical ownership"
+    },
+    {
+      "source": "crates/runmat-runtime/src/builtins/fea/mod.rs",
+      "maximum_lines": 4963,
+      "rationale": "new language and catalog behavior belongs in focused modules"
+    }
+  ]
+}
