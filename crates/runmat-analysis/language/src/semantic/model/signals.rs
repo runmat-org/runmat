@@ -200,6 +200,24 @@ fn signal_kind(
     })
 }
 
+pub(super) fn constant_from_expression(
+    declaration: &CheckedFeaDeclaration,
+    id: &str,
+    quantity: &str,
+    value: &CheckedExpression,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Option<PhysicalSignal> {
+    let (dimension, wrap) = signal_kind(declaration, quantity, diagnostics)?;
+    let raw = signal_value(declaration, value, dimension, diagnostics)?;
+    let frame = raw.is_vector().then_some(CoordinateFrame::Global);
+    Some(wrap(signal_contract(
+        id,
+        raw,
+        frame,
+        SignalRepresentation::Constant,
+    )))
+}
+
 fn signal_contract(
     id: &str,
     shape_source: SignalValue<f64>,
@@ -248,6 +266,32 @@ fn signal_value(
             return Some(SignalValue::Scalar(value));
         }
     }
+    if matches!(
+        &value.value_type,
+        FeaType::Vector { element, length: Some(3) }
+            if element.as_ref() == &FeaType::Quantity(dimension)
+    ) {
+        if let CheckedExpressionKind::Quantity {
+            value: components,
+            scale_bits,
+            offset_bits,
+        } = &value.kind
+        {
+            if let CheckedExpressionKind::List(values) = &components.kind {
+                if values.len() != 3 {
+                    invalid_signal_value(declaration, value, diagnostics);
+                    return None;
+                }
+                let scale = f64::from_bits(*scale_bits);
+                let offset = f64::from_bits(*offset_bits);
+                let mut result = [0.0; 3];
+                for (index, component) in values.iter().enumerate() {
+                    result[index] = scalar(component)? * scale + offset;
+                }
+                return Some(SignalValue::Vector3(result));
+            }
+        }
+    }
     let values = vector_components(value)?;
     if values.len() != 3 {
         invalid_signal_value(declaration, value, diagnostics);
@@ -267,6 +311,7 @@ fn signal_value(
 fn vector_components(value: &CheckedExpression) -> Option<&[CheckedExpression]> {
     match &value.kind {
         CheckedExpressionKind::List(values) => Some(values),
+        CheckedExpressionKind::Quantity { value, .. } => vector_components(value),
         _ => None,
     }
 }

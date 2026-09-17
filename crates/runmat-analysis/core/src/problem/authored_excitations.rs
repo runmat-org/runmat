@@ -1,0 +1,324 @@
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, BTreeSet};
+
+use super::{
+    coordinate_frame::CoordinateFrame,
+    excitation::{
+        Direction, ExcitationCaseActivation, ExcitationDistribution, ExcitationKinematics,
+        ProjectionRequirement,
+    },
+    model_authoring::AuthoredRegionSource,
+    signal::{PhysicalQuantityKind, PhysicalSignal, SignalId, SignalShape},
+};
+use runmat_geometry_core::GeometryRegionRole;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AuthoredExcitation {
+    pub excitation_id: String,
+    pub kind: AuthoredExcitationKind,
+    pub target: AuthoredExcitationTarget,
+    pub frame: CoordinateFrame,
+    pub direction: Option<Direction>,
+    pub distribution: ExcitationDistribution,
+    pub kinematics: ExcitationKinematics,
+    pub signal_id: SignalId,
+    pub active_step_ids: Vec<String>,
+    pub combination_group: Option<String>,
+    pub projection: ProjectionRequirement,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthoredExcitationKind {
+    Force,
+    Moment,
+    Traction,
+    Pressure,
+    BodyForce,
+    HeatGeneration,
+    HeatFlux,
+    TemperatureField,
+    AmbientTemperature,
+    TerminalVoltage,
+    ElectricCurrent,
+    ElectricCharge,
+    CurrentDensity,
+    MagneticVectorPotential,
+    AcousticPressure,
+    NormalVelocity,
+    InletVelocity,
+    MassFlow,
+    WallMotion,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthoredExcitationTarget {
+    Region(AuthoredRegionSource),
+    WholeModel,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AuthoredExcitationCase {
+    pub case_id: String,
+    pub excitation_ids: Vec<String>,
+    pub activation: ExcitationCaseActivation,
+}
+
+impl AuthoredExcitationKind {
+    pub fn quantity(self) -> PhysicalQuantityKind {
+        match self {
+            Self::Force => PhysicalQuantityKind::Force,
+            Self::Moment => PhysicalQuantityKind::Moment,
+            Self::Traction => PhysicalQuantityKind::Traction,
+            Self::Pressure | Self::AcousticPressure => PhysicalQuantityKind::Pressure,
+            Self::BodyForce => PhysicalQuantityKind::BodyForceDensity,
+            Self::HeatGeneration => PhysicalQuantityKind::HeatGenerationDensity,
+            Self::HeatFlux => PhysicalQuantityKind::HeatFlux,
+            Self::TemperatureField | Self::AmbientTemperature => PhysicalQuantityKind::Temperature,
+            Self::TerminalVoltage => PhysicalQuantityKind::ElectricPotential,
+            Self::ElectricCurrent => PhysicalQuantityKind::ElectricCurrent,
+            Self::ElectricCharge => PhysicalQuantityKind::ElectricCharge,
+            Self::CurrentDensity => PhysicalQuantityKind::ElectricCurrentDensity,
+            Self::MagneticVectorPotential => PhysicalQuantityKind::MagneticVectorPotential,
+            Self::NormalVelocity | Self::InletVelocity | Self::WallMotion => {
+                PhysicalQuantityKind::Velocity
+            }
+            Self::MassFlow => PhysicalQuantityKind::MassFlowRate,
+        }
+    }
+
+    pub fn default_distribution(self) -> ExcitationDistribution {
+        match self {
+            Self::Force
+            | Self::Moment
+            | Self::ElectricCurrent
+            | Self::ElectricCharge
+            | Self::MassFlow => ExcitationDistribution::PreserveResultant,
+            Self::Traction | Self::Pressure | Self::HeatFlux | Self::CurrentDensity => {
+                ExcitationDistribution::IntensityPerArea
+            }
+            Self::BodyForce | Self::HeatGeneration => ExcitationDistribution::IntensityPerVolume,
+            Self::TemperatureField
+            | Self::AmbientTemperature
+            | Self::TerminalVoltage
+            | Self::MagneticVectorPotential
+            | Self::AcousticPressure
+            | Self::NormalVelocity
+            | Self::InletVelocity
+            | Self::WallMotion => ExcitationDistribution::UniformKinematic,
+        }
+    }
+
+    pub fn preserves_resultant(self) -> bool {
+        matches!(
+            self,
+            Self::Force
+                | Self::Moment
+                | Self::ElectricCurrent
+                | Self::ElectricCharge
+                | Self::MassFlow
+        )
+    }
+
+    pub fn preserves_moment(self) -> bool {
+        matches!(self, Self::Moment)
+    }
+}
+
+pub fn validate_authored_excitations(
+    excitations: &[AuthoredExcitation],
+    cases: &[AuthoredExcitationCase],
+    signals: &[PhysicalSignal],
+) -> Result<(), String> {
+    let signals = signals
+        .iter()
+        .map(|signal| (signal.signal_id().0.as_str(), signal))
+        .collect::<BTreeMap<_, _>>();
+    let mut ids = BTreeSet::new();
+    for excitation in excitations {
+        if excitation.excitation_id.trim().is_empty()
+            || !ids.insert(excitation.excitation_id.as_str())
+        {
+            return Err("excitation ids must be non-empty and unique".into());
+        }
+        validate_excitation(excitation, &signals)?;
+    }
+    let mut case_ids = BTreeSet::new();
+    let mut membership = BTreeSet::new();
+    for case in cases {
+        if case.case_id.trim().is_empty()
+            || !case_ids.insert(case.case_id.as_str())
+            || case.excitation_ids.is_empty()
+        {
+            return Err("excitation-case ids and membership must be non-empty and unique".into());
+        }
+        let mut local = BTreeSet::new();
+        for excitation_id in &case.excitation_ids {
+            if !ids.contains(excitation_id.as_str()) || !local.insert(excitation_id.as_str()) {
+                return Err("excitation cases must reference unique declared excitations".into());
+            }
+            membership.insert(excitation_id.as_str());
+        }
+        match &case.activation {
+            ExcitationCaseActivation::Steps(steps)
+                if steps.is_empty()
+                    || steps.iter().any(|step| step.trim().is_empty())
+                    || steps.iter().collect::<BTreeSet<_>>().len() != steps.len() =>
+            {
+                return Err("step-activated excitation cases require unique step ids".into())
+            }
+            ExcitationCaseActivation::MutuallyExclusiveGroup { group_id }
+                if group_id.trim().is_empty() =>
+            {
+                return Err("mutually exclusive excitation cases require a group id".into())
+            }
+            _ => {}
+        }
+    }
+    if membership.len() != excitations.len() {
+        return Err("every excitation must belong to at least one declared case".into());
+    }
+    Ok(())
+}
+
+fn validate_excitation(
+    excitation: &AuthoredExcitation,
+    signals: &BTreeMap<&str, &PhysicalSignal>,
+) -> Result<(), String> {
+    let signal = signals
+        .get(excitation.signal_id.0.as_str())
+        .ok_or_else(|| "excitation references an unknown signal".to_string())?;
+    if signal.quantity() != excitation.kind.quantity() {
+        return Err("excitation signal has the wrong physical quantity".into());
+    }
+    if !valid_shape_and_direction(
+        excitation.kind,
+        signal.shape(),
+        excitation.direction.is_some(),
+    ) {
+        return Err("excitation direction is incompatible with its kind and signal shape".into());
+    }
+    if let Some(direction) = excitation.direction {
+        let norm = direction
+            .vector
+            .iter()
+            .map(|value| value * value)
+            .sum::<f64>();
+        if !norm.is_finite() || norm <= 0.0 {
+            return Err("excitation direction must be finite and nonzero".into());
+        }
+    }
+    if excitation
+        .active_step_ids
+        .iter()
+        .any(|step| step.trim().is_empty())
+        || excitation
+            .active_step_ids
+            .iter()
+            .collect::<BTreeSet<_>>()
+            .len()
+            != excitation.active_step_ids.len()
+        || excitation
+            .combination_group
+            .as_ref()
+            .is_some_and(|group| group.trim().is_empty())
+        || !valid_distribution(excitation.kind, excitation.distribution)
+        || (excitation.kinematics == ExcitationKinematics::Follower
+            && !matches!(
+                excitation.kind,
+                AuthoredExcitationKind::Force
+                    | AuthoredExcitationKind::Traction
+                    | AuthoredExcitationKind::Pressure
+                    | AuthoredExcitationKind::BodyForce
+            ))
+        || excitation.projection.preserve_resultant != excitation.kind.preserves_resultant()
+        || excitation.projection.preserve_moment != excitation.kind.preserves_moment()
+        || !excitation.projection.relative_tolerance.is_finite()
+        || excitation.projection.relative_tolerance <= 0.0
+    {
+        return Err("excitation activation, grouping, and projection policy must be valid".into());
+    }
+    let role = match &excitation.target {
+        AuthoredExcitationTarget::Region(source) => Some(source.role()),
+        AuthoredExcitationTarget::WholeModel => None,
+    };
+    let surface = matches!(role, Some(GeometryRegionRole::Face));
+    let volume = matches!(role, Some(GeometryRegionRole::Solid));
+    let attachment = matches!(
+        role,
+        Some(GeometryRegionRole::Vertex | GeometryRegionRole::Edge | GeometryRegionRole::Face)
+    );
+    let valid_target = match excitation.kind {
+        AuthoredExcitationKind::Force | AuthoredExcitationKind::Moment => attachment,
+        AuthoredExcitationKind::BodyForce | AuthoredExcitationKind::HeatGeneration => {
+            volume || role.is_none()
+        }
+        AuthoredExcitationKind::TemperatureField => volume,
+        _ => surface,
+    };
+    valid_target
+        .then_some(())
+        .ok_or_else(|| "excitation target topology is incompatible with its physical kind".into())
+}
+
+fn valid_shape_and_direction(
+    kind: AuthoredExcitationKind,
+    shape: &SignalShape,
+    has_direction: bool,
+) -> bool {
+    let scalar = shape == &SignalShape::Scalar;
+    let vector = shape == &SignalShape::Vector3;
+    match kind {
+        AuthoredExcitationKind::Force
+        | AuthoredExcitationKind::Moment
+        | AuthoredExcitationKind::InletVelocity
+        | AuthoredExcitationKind::WallMotion => {
+            (scalar && has_direction) || (vector && !has_direction)
+        }
+        AuthoredExcitationKind::Traction
+        | AuthoredExcitationKind::BodyForce
+        | AuthoredExcitationKind::CurrentDensity
+        | AuthoredExcitationKind::MagneticVectorPotential => vector && !has_direction,
+        AuthoredExcitationKind::Pressure
+        | AuthoredExcitationKind::HeatGeneration
+        | AuthoredExcitationKind::HeatFlux
+        | AuthoredExcitationKind::TemperatureField
+        | AuthoredExcitationKind::AmbientTemperature
+        | AuthoredExcitationKind::TerminalVoltage
+        | AuthoredExcitationKind::ElectricCurrent
+        | AuthoredExcitationKind::ElectricCharge
+        | AuthoredExcitationKind::AcousticPressure
+        | AuthoredExcitationKind::NormalVelocity
+        | AuthoredExcitationKind::MassFlow => scalar && !has_direction,
+    }
+}
+
+fn valid_distribution(kind: AuthoredExcitationKind, distribution: ExcitationDistribution) -> bool {
+    distribution == kind.default_distribution()
+        || matches!(
+            (kind, distribution),
+            (
+                AuthoredExcitationKind::Force | AuthoredExcitationKind::Moment,
+                ExcitationDistribution::Concentrated
+            ) | (
+                AuthoredExcitationKind::Traction
+                    | AuthoredExcitationKind::Pressure
+                    | AuthoredExcitationKind::BodyForce
+                    | AuthoredExcitationKind::HeatGeneration
+                    | AuthoredExcitationKind::HeatFlux
+                    | AuthoredExcitationKind::TemperatureField
+                    | AuthoredExcitationKind::AmbientTemperature
+                    | AuthoredExcitationKind::TerminalVoltage
+                    | AuthoredExcitationKind::CurrentDensity
+                    | AuthoredExcitationKind::MagneticVectorPotential
+                    | AuthoredExcitationKind::AcousticPressure
+                    | AuthoredExcitationKind::NormalVelocity
+                    | AuthoredExcitationKind::InletVelocity
+                    | AuthoredExcitationKind::WallMotion,
+                ExcitationDistribution::TopologyField
+            )
+        )
+}

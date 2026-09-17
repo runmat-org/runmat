@@ -28,6 +28,8 @@ fn material_assignment_requires_declared_strongly_typed_inputs() {
         connectors: Vec::new(),
         interfaces: Vec::new(),
         signals: Vec::new(),
+        excitations: Vec::new(),
+        excitation_cases: Vec::new(),
     }
     .validate()
     .unwrap();
@@ -63,6 +65,8 @@ fn boundary_vertices_are_not_material_domains() {
         connectors: Vec::new(),
         interfaces: Vec::new(),
         signals: Vec::new(),
+        excitations: Vec::new(),
+        excitation_cases: Vec::new(),
     };
     assert_eq!(
         model.validate(),

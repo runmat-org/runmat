@@ -1,10 +1,10 @@
 use super::diagnostic;
 use crate::{CheckedFeaDeclaration, FeaDiagnostic, FeaSymbolKey, LogicalSourcePath};
 use runmat_analysis_core::{
-    AuthoredBoundary, AuthoredConnector, AuthoredConstraint, AuthoredInterface,
-    AuthoredLayupSource, AuthoredMaterialSource, AuthoredModel, AuthoredModelRef,
-    AuthoredOrientationSource, AuthoredPropertyAssignment, AuthoredPropertyTarget,
-    AuthoredRegionSource, AuthoredSectionSource, PhysicalSignal,
+    AuthoredBoundary, AuthoredConnector, AuthoredConstraint, AuthoredExcitation,
+    AuthoredExcitationCase, AuthoredInterface, AuthoredLayupSource, AuthoredMaterialSource,
+    AuthoredModel, AuthoredModelRef, AuthoredOrientationSource, AuthoredPropertyAssignment,
+    AuthoredPropertyTarget, AuthoredRegionSource, AuthoredSectionSource, PhysicalSignal,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -111,6 +111,18 @@ fn collect(
         |value| value.signal_id().0.as_str(),
         "signal",
     )?;
+    collect_named(
+        &model.excitations,
+        &mut assignments.excitations,
+        |value| value.excitation_id.as_str(),
+        "excitation",
+    )?;
+    collect_named(
+        &model.excitation_cases,
+        &mut assignments.excitation_cases,
+        |value| value.case_id.as_str(),
+        "excitation case",
+    )?;
     stack.remove(key);
     Ok(())
 }
@@ -184,6 +196,8 @@ struct CompositionAssignments {
     connectors: BTreeMap<String, AuthoredConnector>,
     interfaces: BTreeMap<String, AuthoredInterface>,
     signals: BTreeMap<String, PhysicalSignal>,
+    excitations: BTreeMap<String, AuthoredExcitation>,
+    excitation_cases: BTreeMap<String, AuthoredExcitationCase>,
 }
 
 fn collect_named<T: Clone + PartialEq>(

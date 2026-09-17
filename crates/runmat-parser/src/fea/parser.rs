@@ -7,6 +7,7 @@ mod cursor;
 mod declaration;
 mod expression;
 mod grammar;
+mod model;
 mod signal;
 
 use grammar::*;
@@ -226,6 +227,15 @@ impl FeaParser {
         let span = range.span;
         let kind = match self.kind(first) {
             _ if self.lexeme(first) == "sample" => self.parse_uniform_sample(&significant, range),
+            _ if significant
+                .get(1)
+                .is_some_and(|index| self.lexeme(*index) == "on")
+                && significant
+                    .iter()
+                    .any(|index| self.kind(*index) == Some(FeaTokenKind::Equal)) =>
+            {
+                self.parse_applied_load(&significant, range)
+            }
             Some(FeaTokenKind::Keyword(FeaKeyword::Input)) => {
                 self.parse_input_statement(&significant, range)
             }

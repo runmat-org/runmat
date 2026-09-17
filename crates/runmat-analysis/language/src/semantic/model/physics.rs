@@ -36,8 +36,11 @@ pub(super) fn lower(
         };
         match kind {
             FeaModelDefinitionKind::Load => {
-                if let Some(value) = boundary(declaration, bound, name, statements, diagnostics) {
-                    boundaries.push(value);
+                if !is_applied_excitation(statements) {
+                    if let Some(value) = boundary(declaration, bound, name, statements, diagnostics)
+                    {
+                        boundaries.push(value);
+                    }
                 }
             }
             FeaModelDefinitionKind::Connector => {
@@ -58,6 +61,16 @@ pub(super) fn lower(
         connectors,
         interfaces,
     }
+}
+
+fn is_applied_excitation(statements: &[CheckedFeaStatement]) -> bool {
+    matches!(
+        statements,
+        [CheckedFeaStatement {
+            kind: CheckedFeaStatementKind::AppliedLoad { .. },
+            ..
+        }]
+    )
 }
 
 fn boundary(

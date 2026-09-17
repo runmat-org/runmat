@@ -103,6 +103,8 @@ pub struct AuthoredModel {
     pub connectors: Vec<AuthoredConnector>,
     pub interfaces: Vec<AuthoredInterface>,
     pub signals: Vec<super::signal::PhysicalSignal>,
+    pub excitations: Vec<super::authored_excitations::AuthoredExcitation>,
+    pub excitation_cases: Vec<super::authored_excitations::AuthoredExcitationCase>,
 }
 
 impl AuthoredModel {
@@ -283,6 +285,23 @@ impl AuthoredModel {
                 detail: error.to_string(),
             }
         })?;
+        crate::validate_authored_excitations(
+            &self.excitations,
+            &self.excitation_cases,
+            &self.signals,
+        )
+        .map_err(|detail| AuthoredModelError::InvalidPhysics {
+            kind: "excitation",
+            detail,
+        })?;
+        for excitation in &self.excitations {
+            if let super::authored_excitations::AuthoredExcitationTarget::Region(
+                AuthoredRegionSource::ModelInput(input),
+            ) = &excitation.target
+            {
+                require_input(input, &inputs)?;
+            }
+        }
         Ok(())
     }
 }

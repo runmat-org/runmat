@@ -77,6 +77,11 @@ pub enum CheckedFeaStatementKind {
         end: CheckedExpression,
         rate: CheckedExpression,
     },
+    AppliedLoad {
+        kind: String,
+        target: CheckedExpression,
+        value: CheckedExpression,
+    },
     SignalDefinition {
         name: String,
         quantity: String,
@@ -345,6 +350,15 @@ fn check_block<C: AnalysisOperationCatalog + ?Sized>(
                             rate: check_value(catalog, path, source, scope, rate, diagnostics),
                         }
                     }
+                    FeaStatementKind::AppliedLoad {
+                        kind,
+                        target,
+                        value,
+                    } => CheckedFeaStatementKind::AppliedLoad {
+                        kind: kind.text.clone(),
+                        target: check_value(catalog, path, source, scope, target, diagnostics),
+                        value: check_value(catalog, path, source, scope, value, diagnostics),
+                    },
                     FeaStatementKind::SignalDefinition {
                         name,
                         quantity,

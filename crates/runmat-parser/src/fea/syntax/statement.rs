@@ -38,6 +38,11 @@ pub enum FeaStatementKind {
         end: FeaExpression,
         rate: FeaExpression,
     },
+    AppliedLoad {
+        kind: FeaName,
+        target: FeaExpression,
+        value: FeaExpression,
+    },
     SignalDefinition {
         name: FeaName,
         quantity: FeaName,

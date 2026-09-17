@@ -2,6 +2,7 @@
 
 pub mod problem {
     pub mod authored_constraints;
+    pub mod authored_excitations;
     pub mod authored_model_physics;
     pub mod authored_properties;
     pub mod boundary;
@@ -51,6 +52,10 @@ pub use problem::authored_constraints::{
     AuthoredReferencePointCoupling, AuthoredRotationDofValue, AuthoredStructuralConstraintEquation,
     AuthoredStructuralConstraintEquationTerm, AuthoredStructuralDofs, AuthoredTargetCardinality,
     AuthoredThermalJump, AuthoredTranslationDofValue,
+};
+pub use problem::authored_excitations::{
+    validate_authored_excitations, AuthoredExcitation, AuthoredExcitationCase,
+    AuthoredExcitationKind, AuthoredExcitationTarget,
 };
 pub use problem::authored_model_physics::{
     AuthoredBoundary, AuthoredBoundaryKind, AuthoredConnector, AuthoredConnectorKind,
@@ -142,13 +147,12 @@ pub use problem::response_spectrum::{
 pub use problem::signal::{
     GeneratorArgument, GeneratorCallable, GeneratorDomain, GeneratorEffectPolicy,
     GeneratorInvocation, GeneratorProvenance, ImportedFunctionIdentity, NumericalDataSource,
-    PhysicalQuantityKind,
-    PhysicalSignal, RandomDistribution, Signal, SignalApproximationEvidence, SignalArtifactDomain,
-    SignalArtifactRef, SignalDomainKind, SignalExtrapolation, SignalGenerator, SignalId,
-    SignalInterpolation, SignalKnot, SignalKnotValue, SignalOrdinate, SignalPointContinuity,
-    SignalPrecision, SignalProvenance, SignalRepresentation, SignalSampleApproach,
-    SignalSamplingPolicy, SignalShape, SignalValue, StandardWaveform, StandardWaveformKind,
-    TabulatedSignal, TabulatedSignalDomain,
+    PhysicalQuantityKind, PhysicalSignal, RandomDistribution, Signal, SignalApproximationEvidence,
+    SignalArtifactDomain, SignalArtifactRef, SignalDomainKind, SignalExtrapolation,
+    SignalGenerator, SignalId, SignalInterpolation, SignalKnot, SignalKnotValue, SignalOrdinate,
+    SignalPointContinuity, SignalPrecision, SignalProvenance, SignalRepresentation,
+    SignalSampleApproach, SignalSamplingPolicy, SignalShape, SignalValue, StandardWaveform,
+    StandardWaveformKind, TabulatedSignal, TabulatedSignalDomain,
 };
 pub use problem::structure::{
     BeamElementModel, BeamSectionModel, ConformalSolidAttachment, ShellElementModel,

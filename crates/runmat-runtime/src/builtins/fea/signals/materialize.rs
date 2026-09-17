@@ -88,8 +88,7 @@ async fn materialize_signals(
                 function,
                 display_name,
             } => (*function, display_name.as_str()),
-            GeneratorCallable::ProjectFunction { .. }
-            | GeneratorCallable::ImportedFunction(_) => {
+            GeneratorCallable::ProjectFunction { .. } | GeneratorCallable::ImportedFunction(_) => {
                 return Err(materialization_error(
                     "named .fea generators must be run through the FEA command host",
                 ))
