@@ -581,6 +581,100 @@ test("reviewed bundle transitions exactly cover products, scopes, and disjoint c
   );
 });
 
+test("prerequisite-ordered parent metadata changes may accompany one semantic child change", () => {
+  const baseline = fixtureProjection();
+  const products = new Map(baseline.products.map((product) => [product.product_id, {
+    product_id: product.product_id,
+    path: product.path,
+    lifecycle: { kind: "bundle-referenced" },
+    verification: {
+      kind: "rust_module_composition",
+      crate_role: product.crate_role,
+      module_path: product.module_path,
+    },
+  }]));
+  const arithmetic = baseline.products[0].children[0];
+  const plotting = baseline.products[0].children[1];
+  const reordered = structuredClone(plotting);
+  reordered.declaration_order -= 1;
+  reordered.aggregation_sources = reordered.aggregation_sources.map((source) => ({
+    ...source, order: source.order,
+  }));
+  const revised = structuredClone(reordered);
+  revised.visibility = revised.visibility === "public" ? "private" : "public";
+  const bundle = (id, before, after, prerequisites, authoredWriteSet) => ({
+    prerequisites,
+    integration_product_refs: ["catalog-math"],
+    module_composition_transition: transition(id, [{
+      product_id: "catalog-math", operation: "replace", before, after,
+    }]),
+    authored_write_set: authoredWriteSet,
+  });
+  const reorderBundle = {
+    prerequisites: [],
+    integration_product_refs: ["catalog-math"],
+    module_composition_transition: transition("bundle-order", [
+      { product_id: "catalog-math", operation: "remove", before: arithmetic, after: null },
+      { product_id: "catalog-math", operation: "replace", before: plotting, after: reordered },
+    ]),
+    authored_write_set: [{ kind: "file", path: arithmetic.source_path }],
+  };
+  const semanticBundle = bundle(
+    "bundle-semantic",
+    reordered,
+    revised,
+    [{ bundle_id: "bundle-order", kind: "infrastructure" }],
+    [{ kind: "file", path: plotting.source_path }],
+  );
+  const accepted = validateModuleCompositionControl(
+    baseline,
+    products,
+    new Map([["bundle-order", reorderBundle], ["bundle-semantic", semanticBundle]]),
+  );
+  assert.deepEqual(accepted.effective.products[0].children, [revised]);
+
+  const unorderedSemantic = structuredClone(semanticBundle);
+  unorderedSemantic.prerequisites = [];
+  assert.throws(
+    () => validateModuleCompositionControl(
+      baseline,
+      products,
+      new Map([["bundle-order", reorderBundle], ["bundle-semantic", unorderedSemantic]]),
+    ),
+    /also changed by bundle-order and is not prerequisite-ordered/,
+  );
+
+  const firstSemantic = structuredClone(arithmetic);
+  firstSemantic.visibility = firstSemantic.visibility === "public" ? "private" : "public";
+  const secondSemantic = structuredClone(firstSemantic);
+  secondSemantic.role = secondSemantic.role === "group" ? "identity" : "group";
+  const semanticOne = bundle(
+    "bundle-semantic-one",
+    arithmetic,
+    firstSemantic,
+    [],
+    [{ kind: "file", path: arithmetic.source_path }],
+  );
+  const semanticTwo = bundle(
+    "bundle-semantic-two",
+    firstSemantic,
+    secondSemantic,
+    [{ bundle_id: "bundle-semantic-one", kind: "infrastructure" }],
+    [{ kind: "file", path: arithmetic.source_path }],
+  );
+  assert.throws(
+    () => validateModuleCompositionControl(
+      baseline,
+      products,
+      new Map([
+        ["bundle-semantic-one", semanticOne],
+        ["bundle-semantic-two", semanticTwo],
+      ]),
+    ),
+    /also semantically changed by bundle-semantic-one/,
+  );
+});
+
 test("reviewed baseline-only composition products require no bundle transition", () => {
   const baseline = fixtureProjection();
   const products = new Map(baseline.products.map((product) => [product.product_id, {
