@@ -52,7 +52,7 @@ pub(in crate::semantic::model) fn validate_assignments(
             diagnostic(
                 declaration,
                 statement.span,
-                "property definitions accept only declared assignments",
+                "model definitions accept only declared assignments",
                 diagnostics,
             );
             continue;
@@ -61,7 +61,7 @@ pub(in crate::semantic::model) fn validate_assignments(
             diagnostic(
                 declaration,
                 statement.span,
-                "property member names cannot be qualified",
+                "definition member names cannot be qualified",
                 diagnostics,
             );
             continue;
@@ -70,21 +70,21 @@ pub(in crate::semantic::model) fn validate_assignments(
             diagnostic(
                 declaration,
                 statement.span,
-                "property members require `=`",
+                "definition members require `=`",
                 diagnostics,
             );
         } else if !supported.contains(&name.as_str()) {
             diagnostic(
                 declaration,
                 statement.span,
-                format!("unsupported property member `{name}`"),
+                format!("unsupported definition member `{name}`"),
                 diagnostics,
             );
         } else if !seen.insert(name) {
             diagnostic(
                 declaration,
                 statement.span,
-                format!("duplicate property member `{name}`"),
+                format!("duplicate definition member `{name}`"),
                 diagnostics,
             );
         }
@@ -132,7 +132,7 @@ pub(in crate::semantic::model) fn required_assignment<'a>(
         diagnostic(
             declaration,
             declaration.span,
-            format!("property definition requires `{name}`"),
+            format!("model definition requires `{name}`"),
             diagnostics,
         );
     }
@@ -332,7 +332,7 @@ fn invalid(
     diagnostic(
         declaration,
         value.span,
-        format!("property `{name}` requires a {expected}"),
+        format!("definition member `{name}` requires a {expected}"),
         diagnostics,
     );
 }

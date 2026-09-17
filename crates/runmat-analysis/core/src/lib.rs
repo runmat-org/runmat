@@ -2,6 +2,7 @@
 
 pub mod problem {
     pub mod authored_constraints;
+    pub mod authored_model_physics;
     pub mod authored_properties;
     pub mod boundary;
     pub mod connector;
@@ -45,6 +46,10 @@ pub use field::{AnalysisField, AnalysisFieldValues, DeviceFieldRef};
 pub use problem::authored_constraints::{
     AuthoredConstraint, AuthoredConstraintError, AuthoredConstraintKind, AuthoredConstraintTarget,
     AuthoredTargetCardinality,
+};
+pub use problem::authored_model_physics::{
+    AuthoredBoundary, AuthoredBoundaryKind, AuthoredConnector, AuthoredConnectorKind,
+    AuthoredInterface, AuthoredInterfaceKind, AuthoredModelPhysicsError,
 };
 pub use problem::authored_properties::{
     AuthoredLayupDefinition, AuthoredLayupSource, AuthoredOrientationDefinition,

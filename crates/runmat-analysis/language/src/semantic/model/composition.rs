@@ -1,9 +1,10 @@
 use super::diagnostic;
 use crate::{CheckedFeaDeclaration, FeaDiagnostic, FeaSymbolKey, LogicalSourcePath};
 use runmat_analysis_core::{
-    AuthoredConstraint, AuthoredLayupSource, AuthoredMaterialSource, AuthoredModel,
-    AuthoredModelRef, AuthoredOrientationSource, AuthoredPropertyAssignment,
-    AuthoredPropertyTarget, AuthoredRegionSource, AuthoredSectionSource,
+    AuthoredBoundary, AuthoredConnector, AuthoredConstraint, AuthoredInterface,
+    AuthoredLayupSource, AuthoredMaterialSource, AuthoredModel, AuthoredModelRef,
+    AuthoredOrientationSource, AuthoredPropertyAssignment, AuthoredPropertyTarget,
+    AuthoredRegionSource, AuthoredSectionSource,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -86,6 +87,24 @@ fn collect(
                 .insert(constraint.constraint_id.clone(), constraint.clone());
         }
     }
+    collect_named(
+        &model.boundaries,
+        &mut assignments.boundaries,
+        |value| &value.boundary_id,
+        "boundary",
+    )?;
+    collect_named(
+        &model.connectors,
+        &mut assignments.connectors,
+        |value| &value.connector_id,
+        "connector",
+    )?;
+    collect_named(
+        &model.interfaces,
+        &mut assignments.interfaces,
+        |value| &value.interface_id,
+        "interface",
+    )?;
     stack.remove(key);
     Ok(())
 }
@@ -155,6 +174,30 @@ struct CompositionAssignments {
     layups: BTreeMap<AuthoredRegionSource, AuthoredLayupSource>,
     orientations: BTreeMap<AuthoredPropertyTarget, AuthoredOrientationSource>,
     constraints: BTreeMap<String, AuthoredConstraint>,
+    boundaries: BTreeMap<String, AuthoredBoundary>,
+    connectors: BTreeMap<String, AuthoredConnector>,
+    interfaces: BTreeMap<String, AuthoredInterface>,
+}
+
+fn collect_named<T: Clone + PartialEq>(
+    values: &[T],
+    collected: &mut BTreeMap<String, T>,
+    identity: impl Fn(&T) -> &str,
+    label: &str,
+) -> Result<(), String> {
+    for value in values {
+        let id = identity(value);
+        if let Some(existing) = collected.get(id) {
+            if existing != value {
+                return Err(format!(
+                    "model composition defines conflicting {label} `{id}`"
+                ));
+            }
+        } else {
+            collected.insert(id.to_string(), value.clone());
+        }
+    }
+    Ok(())
 }
 
 fn insert_property<K, V>(

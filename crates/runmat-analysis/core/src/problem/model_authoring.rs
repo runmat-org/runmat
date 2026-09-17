@@ -4,11 +4,16 @@ use runmat_geometry_core::{GeometryRegionRef, GeometryRegionRole};
 use serde::{Deserialize, Serialize};
 
 use super::authored_constraints::AuthoredConstraint;
+use super::authored_model_physics::{
+    validate_unique, AuthoredBoundary, AuthoredConnector, AuthoredInterface,
+};
 use super::authored_properties::{
     AuthoredLayupDefinition, AuthoredLayupSource, AuthoredOrientationDefinition,
     AuthoredOrientationSource, AuthoredPropertyAssignment, AuthoredSectionDefinition,
     AuthoredSectionSource,
 };
+
+mod region;
 
 /// Stable source identity of a reusable authored model.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -91,16 +96,19 @@ pub struct AuthoredModel {
     pub material_assignments: Vec<AuthoredMaterialAssignment>,
     pub property_assignments: Vec<AuthoredPropertyAssignment>,
     pub constraints: Vec<AuthoredConstraint>,
+    pub boundaries: Vec<AuthoredBoundary>,
+    pub connectors: Vec<AuthoredConnector>,
+    pub interfaces: Vec<AuthoredInterface>,
 }
 
 impl AuthoredModel {
     pub fn validate(&self) -> Result<(), AuthoredModelError> {
         token("model module path", &self.module_path)?;
         token("model id", &self.model_id)?;
-        let mut inputs = BTreeSet::new();
+        let mut inputs = BTreeMap::new();
         for input in &self.property_inputs {
             input.validate()?;
-            if !inputs.insert(input.input_id.as_str()) {
+            if inputs.insert(input.input_id.as_str(), input.kind).is_some() {
                 return Err(AuthoredModelError::DuplicateInput(input.input_id.clone()));
             }
         }
@@ -222,6 +230,41 @@ impl AuthoredModel {
                 ));
             }
         }
+        validate_unique(
+            &self.boundaries,
+            |value| &value.boundary_id,
+            |value| value.validate(),
+            "boundary",
+        )?;
+        validate_unique(
+            &self.connectors,
+            |value| &value.connector_id,
+            |value| value.validate(),
+            "connector",
+        )?;
+        validate_unique(
+            &self.interfaces,
+            |value| &value.interface_id,
+            |value| value.validate(),
+            "interface",
+        )?;
+        for source in
+            self.boundaries
+                .iter()
+                .map(|value| &value.target)
+                .chain(self.connectors.iter().flat_map(|value| {
+                    std::iter::once(&value.primary).chain(value.secondary.iter())
+                }))
+                .chain(
+                    self.interfaces
+                        .iter()
+                        .flat_map(|value| [&value.primary, &value.secondary]),
+                )
+        {
+            if let AuthoredRegionSource::ModelInput(input) = source {
+                require_input(input, &inputs)?;
+            }
+        }
         Ok(())
     }
 }
@@ -240,7 +283,10 @@ impl AuthoredModelInputRef {
 }
 
 impl AuthoredMaterialAssignment {
-    fn validate(&self, inputs: &BTreeSet<&str>) -> Result<(), AuthoredModelError> {
+    fn validate(
+        &self,
+        inputs: &BTreeMap<&str, AuthoredModelInputKind>,
+    ) -> Result<(), AuthoredModelError> {
         validate_material_source(&self.material, inputs)?;
         let (source, expected_role) = match &self.target {
             AuthoredPropertyTarget::Beam(source) => (source, GeometryRegionRole::Edge),
@@ -276,7 +322,7 @@ impl AuthoredMaterialAssignment {
 
 fn validate_material_source(
     source: &AuthoredMaterialSource,
-    inputs: &BTreeSet<&str>,
+    inputs: &BTreeMap<&str, AuthoredModelInputKind>,
 ) -> Result<(), AuthoredModelError> {
     match source {
         AuthoredMaterialSource::Declaration(material) => {
@@ -373,12 +419,14 @@ fn property_source_role(source: &AuthoredRegionSource) -> GeometryRegionRole {
 
 fn require_input(
     input: &AuthoredModelInputRef,
-    inputs: &BTreeSet<&str>,
+    inputs: &BTreeMap<&str, AuthoredModelInputKind>,
 ) -> Result<(), AuthoredModelError> {
-    if inputs.contains(input.input_id.as_str()) {
-        Ok(())
-    } else {
-        Err(AuthoredModelError::UnknownInput(input.input_id.clone()))
+    match inputs.get(input.input_id.as_str()) {
+        Some(kind) if *kind == input.kind => Ok(()),
+        Some(_) => Err(AuthoredModelError::InputKindMismatch(
+            input.input_id.clone(),
+        )),
+        None => Err(AuthoredModelError::UnknownInput(input.input_id.clone())),
     }
 }
 
@@ -424,6 +472,14 @@ pub enum AuthoredModelError {
     DuplicateConstraint(String),
     #[error("constraint is invalid: {0}")]
     InvalidConstraint(String),
+    #[error("{kind} `{id}` is duplicated")]
+    DuplicatePhysics { kind: &'static str, id: String },
+    #[error("{kind} definition is invalid: {detail}")]
+    InvalidPhysics { kind: &'static str, detail: String },
+    #[error("a region-typed model input is required")]
+    RegionInputRequired,
+    #[error("model input `{0}` is referenced with a different kind")]
+    InputKindMismatch(String),
     #[error("unknown section `{0}`")]
     UnknownSection(String),
     #[error("unknown layup `{0}`")]
@@ -479,6 +535,9 @@ mod tests {
             }],
             property_assignments: Vec::new(),
             constraints: Vec::new(),
+            boundaries: Vec::new(),
+            connectors: Vec::new(),
+            interfaces: Vec::new(),
         }
         .validate()
         .unwrap();
@@ -510,6 +569,9 @@ mod tests {
             }],
             property_assignments: Vec::new(),
             constraints: Vec::new(),
+            boundaries: Vec::new(),
+            connectors: Vec::new(),
+            interfaces: Vec::new(),
         };
         assert_eq!(
             model.validate(),

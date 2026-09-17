@@ -16,6 +16,7 @@ use std::collections::BTreeMap;
 
 mod composition;
 mod constraints;
+mod physics;
 mod properties;
 
 pub fn lower_models(
@@ -97,6 +98,7 @@ fn model(
         .collect();
     let lowered_properties = properties::lower(declaration, bound, diagnostics);
     let constraints = constraints::lower(declaration, bound, diagnostics);
+    let lowered_physics = physics::lower(declaration, bound, diagnostics);
     AuthoredModel {
         module_path: declaration.module.as_str().to_string(),
         model_id: declaration.key.name.clone(),
@@ -108,6 +110,9 @@ fn model(
         material_assignments,
         property_assignments: lowered_properties.assignments,
         constraints,
+        boundaries: lowered_physics.boundaries,
+        connectors: lowered_physics.connectors,
+        interfaces: lowered_physics.interfaces,
     }
 }
 

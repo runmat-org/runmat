@@ -415,3 +415,118 @@ model invalid {
                 || diagnostic.message.contains("required dimension"))
     }));
 }
+
+#[test]
+fn natural_boundaries_connectors_and_interfaces_lower_with_typed_physics() {
+    let source = r#"
+geometry part {
+    construct {
+        feature body = box(width = 1 m, depth = 1 m, height = 1 m)
+        result = feature.body
+    }
+    region wall : face {
+        select result
+        expect one_or_more
+    }
+    region opposite : face {
+        select result
+        expect one_or_more
+    }
+    region anchor : vertex {
+        select result
+        expect exactly_one
+    }
+    region attachment : vertex {
+        select result
+        expect exactly_one
+    }
+}
+model coupled {
+    load pressure {
+        structural.pressure {
+            target = geometry.part.region.wall
+            value = 2 MPa
+        }
+    }
+    load heat {
+        thermal.heat_flux {
+            target = geometry.part.region.wall
+            value = 5 W/m^2
+        }
+    }
+    load convection {
+        thermal.convection {
+            target = geometry.part.region.wall
+            ambient_temperature = 20 degC
+            coefficient = 10 W/m^2/K
+        }
+    }
+    load insulation {
+        magnetic.insulation { target = geometry.part.region.wall }
+    }
+    load radiation {
+        acoustic.radiation { target = geometry.part.region.wall }
+    }
+    load impedance {
+        acoustic.impedance {
+            target = geometry.part.region.wall
+            impedance = 400 Pa*s/m
+        }
+    }
+    load outlet {
+        fluid.outlet_pressure {
+            target = geometry.part.region.wall
+            value = 101.325 kPa
+        }
+    }
+    connector spring {
+        translational_spring {
+            primary = geometry.part.region.anchor
+            secondary = geometry.part.region.attachment
+            stiffness = 4 kN/m
+        }
+    }
+    connector foundation {
+        elastic_foundation {
+            primary = geometry.part.region.anchor
+            stiffness = 8 kN/m
+        }
+    }
+    interface contact {
+        contact.coulomb {
+            primary = geometry.part.region.wall
+            secondary = geometry.part.region.opposite
+            coefficient = 0.3
+        }
+    }
+    interface fluid_structure {
+        fluid_structure.no_slip {
+            primary = geometry.part.region.wall
+            secondary = geometry.part.region.opposite
+        }
+    }
+    interface heat_transfer {
+        conjugate_heat_transfer.resistance {
+            primary = geometry.part.region.wall
+            secondary = geometry.part.region.opposite
+            resistance = 0.01 m^2*K/W
+        }
+    }
+}
+"#;
+    let program = FeaCompiler::new(&TestHost::default()).check(CheckRequest {
+        modules: ModuleGraphRequest {
+            source_root: LogicalSourcePath::new("project").unwrap(),
+            root: source_module("project/main.fea", source, 1),
+        },
+    });
+    assert!(program.is_valid(), "{:#?}", program.diagnostics);
+    let model = program.models.values().next().unwrap();
+    assert_eq!(model.boundaries.len(), 7);
+    assert_eq!(model.connectors.len(), 2);
+    assert_eq!(model.interfaces.len(), 3);
+    assert!(matches!(
+        model.interfaces[0].kind,
+        runmat_analysis_core::AuthoredInterfaceKind::ContactCoulomb { .. }
+    ));
+}
