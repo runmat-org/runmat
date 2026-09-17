@@ -26,7 +26,7 @@ const EXPECTED_SUFFIXES = [
   "logical/relational", "math", "math/elementwise", "math/fft", "math/linalg", "math/linalg/factor",
   "math/reduction", "math/signal", "math/symbolic", "math/trigonometry", "objects", "objects/test_support",
   "parallel", "plotting", "plotting/animation", "plotting/axes", "plotting/colormaps",
-  "plotting/figures", "plotting/properties", "plotting/ui",
+  "plotting/figures", "plotting/graphics_objects", "plotting/properties", "plotting/ui",
   "stats", "stats/hist", "stats/ml", "stats/random", "stats/summary", "strings", "strings/core", "strings/queries",
   "strings/search", "strings/text_analytics", "strings/transform", "structs", "table", "table/timetable", "testing",
   "testing/plugins", "testing/runner", "timing", "timing/timer",
@@ -38,17 +38,17 @@ const REVIEWED_SHARED_TARGET_PACKAGES = [
   "datetime/components", "datetime/core", "io/archive", "io/filetext", "io/repl_fs",
   "io/tabular_reading", "logical/relational", "math/fft", "math/linalg/factor", "math/reduction", "math/signal",
   "math/symbolic", "objects/test_support", "plotting/animation", "plotting/axes", "plotting/colormaps",
-  "plotting/figures", "plotting/ui", "stats/hist", "stats/ml", "stats/random", "stats/summary",
+  "plotting/figures", "plotting/graphics_objects", "plotting/ui", "stats/hist", "stats/ml", "stats/random", "stats/summary",
   "strings/core", "strings/queries", "strings/search", "strings/text_analytics",
   "strings/transform", "table/timetable", "testing/plugins", "testing/runner",
 ];
 
-test("registry declares the exact canonical 162-product census", () => {
+test("registry declares the exact canonical 164-product census", () => {
   assert.deepEqual(MODULE_COMPOSITION_SUFFIXES, EXPECTED_SUFFIXES);
   const products = moduleCompositionProductRegistry();
-  assert.equal(products.length, 162);
-  assert.equal(products.filter((entry) => entry.crate_role === "catalog").length, 81);
-  assert.equal(products.filter((entry) => entry.crate_role === "runtime").length, 81);
+  assert.equal(products.length, 164);
+  assert.equal(products.filter((entry) => entry.crate_role === "catalog").length, 82);
+  assert.equal(products.filter((entry) => entry.crate_role === "runtime").length, 82);
 
   const ids = new Set(products.map((entry) => entry.product_id));
   assert.ok(ids.has("catalog-aliases"));
@@ -151,8 +151,8 @@ test("registry identifiers and paths are globally unique", () => {
   const products = moduleCompositionProductRegistry();
   for (const field of ["product_id", "path", "module_path"]) {
     const values = products.map((entry) => entry[field]);
-    assert.equal(new Set(values).size, 162, `${field} must be unique`);
-    assert.equal(new Set(values.map((entry) => entry.toLowerCase())).size, 162,
+    assert.equal(new Set(values).size, 164, `${field} must be unique`);
+    assert.equal(new Set(values.map((entry) => entry.toLowerCase())).size, 164,
       `${field} must be case-fold unique`);
   }
   assert.deepEqual(products.map((entry) => entry.product_id),
