@@ -1,0 +1,232 @@
+use super::header::ProcedureHeader;
+use super::lower::error;
+use super::values;
+use crate::{
+    CheckedExpression, CheckedExpressionKind, CheckedFeaDeclaration, CheckedFeaStatement,
+    FeaDiagnostic,
+};
+use runmat_analysis_core::IndependentDomain;
+
+pub fn count(
+    declaration: &CheckedFeaDeclaration,
+    header: &ProcedureHeader,
+    statements: &[CheckedFeaStatement],
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Option<usize> {
+    values::assignment(statements, "modes")
+        .and_then(values::positive_usize)
+        .or_else(|| missing(declaration, header, "positive integer `modes`", diagnostics))
+}
+
+pub fn time(
+    declaration: &CheckedFeaDeclaration,
+    header: &ProcedureHeader,
+    statements: &[CheckedFeaStatement],
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Option<IndependentDomain> {
+    let start = scalar(declaration, header, statements, "start_time", diagnostics)?;
+    let end = scalar(declaration, header, statements, "end_time", diagnostics)?;
+    (start >= 0.0 && end > start)
+        .then_some(IndependentDomain::TimeSeconds {
+            origin: 0.0,
+            start,
+            end,
+        })
+        .or_else(|| {
+            invalid(
+                declaration,
+                header,
+                "time range must satisfy 0 <= start_time < end_time",
+                diagnostics,
+            )
+        })
+}
+
+pub fn frequencies(
+    declaration: &CheckedFeaDeclaration,
+    header: &ProcedureHeader,
+    statements: &[CheckedFeaStatement],
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Option<IndependentDomain> {
+    let values = values::assignment(statements, "frequencies")
+        .and_then(values::canonical_list)
+        .or_else(|| {
+            missing(
+                declaration,
+                header,
+                "non-empty quantity list `frequencies`",
+                diagnostics,
+            )
+        })?;
+    let valid = !values.is_empty()
+        && values
+            .iter()
+            .all(|value| value.is_finite() && *value >= 0.0)
+        && values.windows(2).all(|pair| pair[0] < pair[1]);
+    valid
+        .then_some(IndependentDomain::FrequencyHertz(values))
+        .or_else(|| {
+            invalid(
+                declaration,
+                header,
+                "frequencies must be finite, nonnegative, and strictly increasing",
+                diagnostics,
+            )
+        })
+}
+
+pub fn load_factor(
+    declaration: &CheckedFeaDeclaration,
+    header: &ProcedureHeader,
+    statements: &[CheckedFeaStatement],
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Option<IndependentDomain> {
+    let start = scalar(
+        declaration,
+        header,
+        statements,
+        "start_load_factor",
+        diagnostics,
+    )?;
+    let end = scalar(
+        declaration,
+        header,
+        statements,
+        "end_load_factor",
+        diagnostics,
+    )?;
+    (start.is_finite() && end > start)
+        .then_some(IndependentDomain::LoadFactor { start, end })
+        .or_else(|| {
+            invalid(
+                declaration,
+                header,
+                "load-factor range requires finite start_load_factor < end_load_factor",
+                diagnostics,
+            )
+        })
+}
+
+pub fn state(
+    declaration: &CheckedFeaDeclaration,
+    header: &ProcedureHeader,
+    statements: &[CheckedFeaStatement],
+    name: &str,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Option<(String, String)> {
+    let path = values::assignment(statements, name).and_then(values::reference);
+    match path {
+        Some([analysis, producer, state, state_id])
+            if analysis == "analysis" && state == "state" =>
+        {
+            Some((producer.clone(), state_id.clone()))
+        }
+        _ => missing(
+            declaration,
+            header,
+            &format!("`{name} = analysis.<name>.state.<name>`"),
+            diagnostics,
+        ),
+    }
+}
+
+pub fn reference(
+    declaration: &CheckedFeaDeclaration,
+    header: &ProcedureHeader,
+    statements: &[CheckedFeaStatement],
+    name: &str,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Option<String> {
+    values::assignment(statements, name)
+        .and_then(values::reference)
+        .and_then(|path| path.last().cloned())
+        .or_else(|| {
+            missing(
+                declaration,
+                header,
+                &format!("reference `{name}`"),
+                diagnostics,
+            )
+        })
+}
+
+pub fn references(
+    declaration: &CheckedFeaDeclaration,
+    header: &ProcedureHeader,
+    statements: &[CheckedFeaStatement],
+    name: &str,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Option<Vec<String>> {
+    let expression = values::assignment(statements, name)?;
+    let CheckedExpressionKind::List(items) = &expression.kind else {
+        return missing(
+            declaration,
+            header,
+            &format!("reference list `{name}`"),
+            diagnostics,
+        );
+    };
+    let result = items
+        .iter()
+        .map(reference_identity)
+        .collect::<Option<Vec<_>>>()?;
+    (!result.is_empty()).then_some(result).or_else(|| {
+        missing(
+            declaration,
+            header,
+            &format!("non-empty reference list `{name}`"),
+            diagnostics,
+        )
+    })
+}
+
+fn scalar(
+    declaration: &CheckedFeaDeclaration,
+    header: &ProcedureHeader,
+    statements: &[CheckedFeaStatement],
+    name: &str,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Option<f64> {
+    values::assignment(statements, name)
+        .and_then(values::canonical_scalar)
+        .or_else(|| {
+            missing(
+                declaration,
+                header,
+                &format!("scalar `{name}`"),
+                diagnostics,
+            )
+        })
+}
+
+fn reference_identity(value: &CheckedExpression) -> Option<String> {
+    values::reference(value)?.last().cloned()
+}
+
+fn missing<T>(
+    declaration: &CheckedFeaDeclaration,
+    header: &ProcedureHeader,
+    requirement: &str,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Option<T> {
+    error(
+        declaration,
+        header.span,
+        format!(
+            "procedure `{} {}` requires {requirement}",
+            header.family, header.procedure
+        ),
+        diagnostics,
+    );
+    None
+}
+
+fn invalid<T>(
+    declaration: &CheckedFeaDeclaration,
+    header: &ProcedureHeader,
+    message: &str,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Option<T> {
+    error(declaration, header.span, message, diagnostics);
+    None
+}

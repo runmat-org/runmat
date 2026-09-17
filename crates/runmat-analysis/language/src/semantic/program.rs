@@ -19,6 +19,8 @@ pub struct CheckedFeaProgram {
     pub diagnostics: Vec<FeaDiagnostic>,
     pub geometry_inspections:
         BTreeMap<(LogicalSourcePath, String), super::CheckedGeometryInspection>,
+    pub analysis_sequences:
+        BTreeMap<(LogicalSourcePath, FeaSymbolKey), runmat_analysis_core::AnalysisSequence>,
 }
 
 impl CheckedFeaProgram {
@@ -60,6 +62,7 @@ pub struct CheckedFeaStatement {
 pub enum CheckedFeaStatementKind {
     Block {
         header: String,
+        header_span: Span,
         statements: Vec<CheckedFeaStatement>,
     },
     Input(String),
@@ -116,11 +119,13 @@ pub fn check_program<C: AnalysisOperationCatalog + GeometryInspectionSource + ?S
     }
     let geometry_inspections =
         super::inspect_geometry_declarations(catalog, &bound, &mut diagnostics);
+    let analysis_sequences = super::lower_analysis_sequences(&declarations, &mut diagnostics);
     CheckedFeaProgram {
         bound,
         declarations,
         diagnostics,
         geometry_inspections,
+        analysis_sequences,
     }
 }
 
@@ -228,6 +233,7 @@ fn check_block<C: AnalysisOperationCatalog + ?Sized>(
                 match &statement.kind {
                     FeaStatementKind::Block { header, body } => CheckedFeaStatementKind::Block {
                         header: source[header.span.start..header.span.end].to_string(),
+                        header_span: header.span,
                         statements: check_block(
                             catalog,
                             path,

@@ -129,6 +129,15 @@ pub fn validate_model(model: &AnalysisModel) -> Result<(), AnalysisValidationErr
     validate_model_sequence(model).map(drop)
 }
 
+/// Validates solver-independent procedure, dependency, and state-transfer semantics before an
+/// authored model has been realized. Model-object existence and initial-condition coverage are
+/// deliberately checked later by [`validate_model_sequence`].
+pub fn validate_analysis_sequence(
+    sequence: &crate::AnalysisSequence,
+) -> Result<ValidatedAnalysisSequence, AnalysisValidationError> {
+    crate::validate_sequence::validate_sequence_contract(sequence)
+}
+
 /// Validates the complete authored model and returns its immutable semantic
 /// sequence topology for execution planning.
 pub fn validate_model_sequence(

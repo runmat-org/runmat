@@ -14,6 +14,10 @@ study load_study {
     }
     let doubled = 2 * input.load
     output applied = doubled
+    analysis solve {
+        structural static {
+        }
+    }
 }
 "#;
     let host = TestHost::default().with_module(
@@ -55,6 +59,10 @@ study invalid {
     input load : force = 1 s
     output result = input.load
     output result = 2 s
+    analysis solve {
+        structural static {
+        }
+    }
 }
 "#;
     let host = TestHost::default();
@@ -116,6 +124,10 @@ study solve {
         body = geometry.part.region.body,
         body_material = material.steel,
     )
+    analysis static_case {
+        structural static {
+        }
+    }
 }
 "#;
     let host = TestHost::default();
@@ -139,6 +151,71 @@ study solve {
         .iter()
         .any(|diagnostic| { diagnostic.code == "fea.semantic.declaration_arguments" }));
     assert!(!program.is_valid());
+}
+
+#[test]
+fn study_lowers_typed_modal_state_flow_into_the_canonical_sequence() {
+    let source = r#"
+study response {
+    analysis modes {
+        structural modal {
+            modes = 12
+        }
+        retain basis
+    }
+    analysis ringdown after analysis.modes {
+        structural modal_transient {
+            basis = analysis.modes.state.basis
+            start_time = 0 s
+            end_time = 2 s
+        }
+    }
+}
+"#;
+    let host = TestHost::default();
+    let program = FeaCompiler::new(&host).check(CheckRequest {
+        modules: ModuleGraphRequest {
+            source_root: LogicalSourcePath::new("project").unwrap(),
+            root: source_module("project/main.fea", source, 1),
+        },
+    });
+    assert!(program.is_valid(), "{:#?}", program.diagnostics);
+    let sequence = program.analysis_sequences.values().next().unwrap();
+    assert_eq!(sequence.steps.len(), 2);
+    assert_eq!(sequence.steps[0].state_outputs[0].state_id.0, "basis");
+    assert_eq!(
+        sequence.steps[1].solution_space,
+        runmat_analysis_core::SolutionSpace::ModalReduced
+    );
+    assert_eq!(
+        sequence.dependencies[0].reason,
+        runmat_analysis_core::SequenceDependencyReason::StateTransfer
+    );
+    assert_eq!(sequence.transitions[0].state_id.0, "basis");
+}
+
+#[test]
+fn procedure_requiredness_rejects_hidden_physical_defaults() {
+    let source = r#"
+study response {
+    analysis transient {
+        structural transient {
+        }
+    }
+}
+"#;
+    let host = TestHost::default();
+    let program = FeaCompiler::new(&host).check(CheckRequest {
+        modules: ModuleGraphRequest {
+            source_root: LogicalSourcePath::new("project").unwrap(),
+            root: source_module("project/main.fea", source, 1),
+        },
+    });
+    assert!(!program.is_valid());
+    assert!(program.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "fea.semantic.procedure" && diagnostic.message.contains("start_time")
+    }));
+    assert!(program.analysis_sequences.is_empty());
 }
 
 #[test]

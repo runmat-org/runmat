@@ -14,87 +14,96 @@ pub(super) fn validate_inputs<'a>(
     model: &AnalysisModel,
     graph: &ValidatedGraph<'a>,
 ) -> Result<(), AnalysisValidationError> {
+    validate_input_contracts(step, graph)?;
     for input in &step.state_inputs {
-        match &input.source {
-            StateSource::InitialConditions => {
-                if !model.initial_conditions.iter().any(|condition| {
-                    condition.applies_to_step(step)
-                        && initial_condition_supplies(condition, input.required_kind)
-                }) {
-                    return Err(step_error(
-                        step,
-                        format!(
-                            "state input `{}` has no compatible authored initial condition",
-                            input.input_id,
-                        ),
-                    ));
-                }
+        if matches!(input.source, StateSource::InitialConditions)
+            && !model.initial_conditions.iter().any(|condition| {
+                condition.applies_to_step(step)
+                    && initial_condition_supplies(condition, input.required_kind)
+            })
+        {
+            return Err(step_error(
+                step,
+                format!(
+                    "state input `{}` has no compatible authored initial condition",
+                    input.input_id,
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn validate_input_contracts<'a>(
+    step: &'a crate::ProcedureStep,
+    graph: &ValidatedGraph<'a>,
+) -> Result<(), AnalysisValidationError> {
+    for input in &step.state_inputs {
+        if let StateSource::Upstream {
+            producer_step,
+            state_id,
+        } = &input.source
+        {
+            let Some(producer) = graph.steps.get(producer_step.as_str()) else {
+                return Err(step_error(
+                    step,
+                    format!(
+                        "state input `{}` references unknown producer",
+                        input.input_id
+                    ),
+                ));
+            };
+            if !graph.is_ancestor(producer_step.as_str(), step.step_id.as_str()) {
+                return Err(step_error(
+                    step,
+                    format!(
+                        "state producer `{}` is not upstream",
+                        producer_step.as_str()
+                    ),
+                ));
             }
-            StateSource::Upstream {
-                producer_step,
-                state_id,
-            } => {
-                let Some(producer) = graph.steps.get(producer_step.as_str()) else {
-                    return Err(step_error(
-                        step,
-                        format!(
-                            "state input `{}` references unknown producer",
-                            input.input_id
-                        ),
-                    ));
-                };
-                if !graph.is_ancestor(producer_step.as_str(), step.step_id.as_str()) {
-                    return Err(step_error(
-                        step,
-                        format!(
-                            "state producer `{}` is not upstream",
-                            producer_step.as_str()
-                        ),
-                    ));
-                }
-                let Some(output) = producer
-                    .state_outputs
-                    .iter()
-                    .find(|value| value.state_id == *state_id)
-                else {
-                    return Err(step_error(
-                        step,
-                        format!(
-                            "producer `{}` does not publish state `{}`",
-                            producer_step.as_str(),
-                            state_id.0
-                        ),
-                    ));
-                };
-                if output.kind != input.required_kind {
-                    return Err(step_error(
-                        step,
-                        format!(
-                            "state input `{}` requires {:?}, but producer publishes {:?}",
-                            input.input_id, input.required_kind, output.kind
-                        ),
-                    ));
-                }
-                if !family_can_consume_state(step.family, input.required_kind) {
-                    return Err(step_error(
-                        step,
-                        format!(
-                            "physics family {:?} cannot consume {:?} state",
-                            step.family, input.required_kind
-                        ),
-                    ));
-                }
-                if output.completeness != StateCompleteness::Complete
-                    || output.persistence == StatePersistence::CheckpointOnly
-                {
-                    return Err(step_error(
-                        step,
-                        format!(
-                            "state input `{}` requires a complete persisted state",
-                            input.input_id
-                        ),
-                    ));
-                }
+            let Some(output) = producer
+                .state_outputs
+                .iter()
+                .find(|value| value.state_id == *state_id)
+            else {
+                return Err(step_error(
+                    step,
+                    format!(
+                        "producer `{}` does not publish state `{}`",
+                        producer_step.as_str(),
+                        state_id.0
+                    ),
+                ));
+            };
+            if output.kind != input.required_kind {
+                return Err(step_error(
+                    step,
+                    format!(
+                        "state input `{}` requires {:?}, but producer publishes {:?}",
+                        input.input_id, input.required_kind, output.kind
+                    ),
+                ));
+            }
+            if !family_can_consume_state(step.family, input.required_kind) {
+                return Err(step_error(
+                    step,
+                    format!(
+                        "physics family {:?} cannot consume {:?} state",
+                        step.family, input.required_kind
+                    ),
+                ));
+            }
+            if output.completeness != StateCompleteness::Complete
+                || output.persistence == StatePersistence::CheckpointOnly
+            {
+                return Err(step_error(
+                    step,
+                    format!(
+                        "state input `{}` requires a complete persisted state",
+                        input.input_id
+                    ),
+                ));
             }
         }
     }

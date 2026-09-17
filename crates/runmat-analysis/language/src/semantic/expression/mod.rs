@@ -239,6 +239,9 @@ impl<C: AnalysisOperationCatalog + ?Sized> ExpressionChecker<'_, C> {
         if let Some(value_type) = self.check.scope.reference(reference) {
             return (CheckedExpressionKind::Reference(path), value_type.clone());
         }
+        if let Some(value_type) = contextual_reference_type(&path) {
+            return (CheckedExpressionKind::Reference(path), value_type);
+        }
         if path.len() == 1 {
             return (CheckedExpressionKind::Enum(path[0].clone()), FeaType::Enum);
         }
@@ -541,6 +544,35 @@ impl<C: AnalysisOperationCatalog + ?Sized> ExpressionChecker<'_, C> {
                 span,
             }),
         ));
+    }
+}
+
+fn contextual_reference_type(path: &[String]) -> Option<FeaType> {
+    match path {
+        [analysis, _, state, _] if analysis == "analysis" && state == "state" => {
+            Some(FeaType::Unknown)
+        }
+        [analysis, _, field, _] if analysis == "analysis" && field == "field" => {
+            Some(FeaType::Field(Box::new(FeaType::Unknown)))
+        }
+        [model, namespace, _]
+            if model == "model"
+                && matches!(
+                    namespace.as_str(),
+                    "constraint"
+                        | "boundary"
+                        | "connector"
+                        | "interface"
+                        | "excitation"
+                        | "load"
+                        | "load_case"
+                        | "signal"
+                ) =>
+        {
+            Some(FeaType::Unknown)
+        }
+        [case, ..] if case == "case" => Some(FeaType::Unknown),
+        _ => None,
     }
 }
 
