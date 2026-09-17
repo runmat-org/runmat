@@ -52,8 +52,10 @@ export function validateModuleCompositionControl(
         throw new Error(`${bundleId}: composition child is also changed by ${priorBundle}`);
       }
       changedKeys.set(key, bundleId);
+      const parentMetadataOnly = isParentMetadataOnlyReplacement(change);
       for (const child of [change.before, change.after].filter(Boolean)) {
-        if (!pathAllowed(bundle.authored_write_set, child.source_path)
+        if (!parentMetadataOnly
+            && !pathAllowed(bundle.authored_write_set, child.source_path)
             && !referencedProductPaths.has(child.source_path)) {
           throw new Error(`${bundleId}: composition child ${child.source_path} is outside its authored scope`);
         }
@@ -76,6 +78,22 @@ export function validateModuleCompositionControl(
     effective,
     transitions: new Map([...transitions].sort(([left], [right]) => compareCodePoint(left, right))),
   };
+}
+
+// Declaration and aggregation order live in the parent module's composition
+// metadata. Reordering an otherwise byte-identical child does not authorize or
+// require writing that child's source file; the transition's reviewed parent
+// product reference is the relevant authority boundary.
+function isParentMetadataOnlyReplacement(change) {
+  if (change.operation !== "replace" || change.before === null || change.after === null
+      || change.before.source_path !== change.after.source_path) return false;
+  const withoutParentOrder = (child) => ({
+    ...child,
+    declaration_order: 0,
+    aggregation_sources: child.aggregation_sources.map((source) => ({ ...source, order: 0 })),
+  });
+  return JSON.stringify(withoutParentOrder(change.before))
+    === JSON.stringify(withoutParentOrder(change.after));
 }
 
 function validateEffectiveSequence(baseline, transitions, bundles) {
