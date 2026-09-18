@@ -1,20 +1,23 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_analysis_execution::{
-    build_geometry_task_submission, import_geometry_materialization_output,
-    prepare_geometry_materialization_program, GeometryExecutionContext,
-    GeometryMaterializationRequest, GeometryMaterializationSource, GeometrySourceChunk,
-    DEFAULT_GEOMETRY_MAXIMUM_ATTEMPTS,
+    admit_named_geometry_generator, build_geometry_task_submission,
+    import_geometry_materialization_output, prepare_geometry_materialization_program,
+    GeneratedGeometryExecutionReceipt, GeometryExecutionContext, GeometryMaterializationRequest,
+    GeometryMaterializationSource, GeometrySourceChunk, DEFAULT_GEOMETRY_MAXIMUM_ATTEMPTS,
+    GENERATED_GEOMETRY_PRODUCT_MEDIA_TYPE, GENERATED_GEOMETRY_PRODUCT_VALUE_SCHEMA,
 };
 use runmat_execution::identity::ArtifactId;
 use runmat_execution::value::ValuePayload;
 use runmat_execution::{Digest, ExecutionScopeId, PoolId, ProgramEnvironment, ProgramRevision};
 use runmat_execution_artifact::cache::{CacheExport, CacheImport};
 use runmat_execution_artifact::{
-    ArtifactAccess, ArtifactResult, LogicalObject, ObjectNamespace, ProgramExecutionResponse,
+    ArtifactAccess, ArtifactResult, BundleCallable, LogicalObject, ObjectNamespace,
+    ProgramExecutionResponse,
 };
 use runmat_geometry_core::{
-    DerivedGeometryDefinition, GeometryAuthoringCapabilities, GeometryDefinition,
+    DerivedGeometryDefinition, GeneratedGeometryDefinition, GeneratedGeometryProduct,
+    GeneratedGeometryRegionOutput, GeometryAuthoringCapabilities, GeometryDefinition,
     GeometryDefinitionRef, GeometryDefinitionSource, GeometryDigest, GeometryFeature,
     GeometryFeatureGraph, GeometryFeatureOperation, GeometryFeatureRef, GeometryRegionCardinality,
     GeometryRegionDefinition, GeometryRegionRole, GeometryRegionSelector, GeometryScalarExpression,
@@ -22,6 +25,11 @@ use runmat_geometry_core::{
 };
 use runmat_geometry_io::ExactCadImportOptions;
 use runmat_geometry_ops::GeometryFeaturePlanLimits;
+use runmat_mir::analysis::{FunctionAnalysis, FunctionConvergence};
+use runmat_types::{
+    CallableFact, CapabilitySet, EffectKind, EffectSet, ObjectFact, ProgramFunctionId,
+    QualifiedName, ShapeFact, StorageFact, SymbolName, ValueFact, ValueKindFact,
+};
 
 use super::*;
 
@@ -192,6 +200,162 @@ fn imported_brep_is_verified_against_source_and_topology_identity() {
     let output = import_geometry_materialization_output(&store, output_root, &access).unwrap();
     output.validate_against(&request).unwrap();
     assert_eq!(output.regions["body"].entity_ids.len(), 1);
+}
+
+#[test]
+fn generated_geometry_requires_and_materializes_its_frozen_product_receipt() {
+    let product = GeneratedGeometryProduct {
+        graph: GeometryFeatureGraph {
+            features: vec![GeometryFeature {
+                feature_id: "stock".into(),
+                operation: GeometryFeatureOperation::Box {
+                    width_m: scalar(1.0),
+                    depth_m: scalar(2.0),
+                    height_m: scalar(3.0),
+                },
+            }],
+            result: GeometryFeatureRef("stock".into()),
+        },
+        region_outputs: BTreeMap::from([(
+            "body".into(),
+            GeneratedGeometryRegionOutput {
+                role: GeometryRegionRole::Solid,
+                selector: GeometryRegionSelector::FeatureResult(GeometryFeatureRef("stock".into())),
+                cardinality: GeometryRegionCardinality::ExactlyOne,
+            },
+        )]),
+    };
+    let object = LogicalObject::new(
+        ObjectNamespace::ResultValue,
+        "geometry/generated/test",
+        GENERATED_GEOMETRY_PRODUCT_MEDIA_TYPE,
+        product.canonical_bytes().unwrap(),
+    )
+    .unwrap();
+    let access = access("geometry:generated-test", b"geometry-generated-test-key");
+    let product_root = access
+        .reference(
+            &object,
+            runmat_execution::value::ValueRefKind::ResultObject,
+            GENERATED_GEOMETRY_PRODUCT_VALUE_SCHEMA,
+        )
+        .unwrap();
+    let source_digest = Digest::sha256(b"make-box-source");
+    let generated = GeneratedGeometryDefinition {
+        module_path: "examples/makeBox.m".into(),
+        function: "makeBox".into(),
+        source_digest: GeometryDigest::from_bytes(*source_digest.bytes()),
+        arguments: Vec::new(),
+    };
+    let callable = BundleCallable {
+        owner_identity: "examples".into(),
+        qualified_name: "makeBox".into(),
+        source_digest,
+    };
+    let output = ValueFact::proven(
+        ValueKindFact::Object(ObjectFact {
+            class: None,
+            runtime_class: Some(QualifiedName(vec![
+                SymbolName("geometry".into()),
+                SymbolName("Generated".into()),
+            ])),
+            properties: BTreeMap::new(),
+            properties_complete: false,
+            handle_semantics: Some(false),
+        }),
+        ShapeFact::Scalar,
+        StorageFact::Opaque,
+    );
+    let function = FunctionAnalysis {
+        function: ProgramFunctionId(4),
+        callable: CallableFact {
+            identity: None,
+            parameters: Vec::new(),
+            parameters_complete: true,
+            outputs: vec![output.clone()],
+            outputs_complete: true,
+            variadic_inputs: false,
+            variadic_outputs: false,
+            captures: Vec::new(),
+            captures_complete: true,
+        },
+        outputs: vec![output],
+        effects: EffectSet(BTreeSet::from([EffectKind::MayThrow])),
+        capabilities: CapabilitySet::default(),
+        convergence: FunctionConvergence::Exact,
+    };
+    let admission = admit_named_geometry_generator(
+        runmat_geometry_ops::ResolvedGeneratedGeometryRequest {
+            module_path: generated.module_path.clone(),
+            function: generated.function.clone(),
+            source_digest: generated.source_digest,
+            arguments: Vec::new(),
+        },
+        revision(),
+        callable,
+        Digest::sha256(b"executable"),
+        &function,
+        &BTreeSet::new(),
+    )
+    .unwrap();
+    let receipt = GeneratedGeometryExecutionReceipt {
+        schema_version: 1,
+        admission,
+        product_digest: product_root.logical_digest,
+        product_encoded_length: product_root.encoded_length,
+    };
+    let request = GeometryMaterializationRequest {
+        schema_version: 1,
+        definition: GeometryDefinition {
+            module_path: "examples/generated.fea".into(),
+            geometry_id: "generated_box".into(),
+            parameters: Vec::new(),
+            source: GeometryDefinitionSource::Generated(generated),
+            regions: vec![GeometryRegionDefinition {
+                region_id: "body".into(),
+                role: GeometryRegionRole::Solid,
+                selector: GeometryRegionSelector::GeneratedOutput("body".into()),
+                cardinality: GeometryRegionCardinality::ExactlyOne,
+            }],
+            cad_parameters: Vec::new(),
+        },
+        bindings: BTreeMap::new(),
+        source: GeometryMaterializationSource::Generated {
+            receipt: Box::new(receipt),
+        },
+        import_options: ExactCadImportOptions::default(),
+        provider: native_geometry_provider_profile().unwrap(),
+        plan_limits: GeometryFeaturePlanLimits::default(),
+        resources: Default::default(),
+    };
+    let prepared = prepare_geometry_materialization_program(
+        request.clone(),
+        revision(),
+        &access,
+        std::slice::from_ref(&product_root),
+    )
+    .unwrap();
+    let mut store = MemoryStore::default();
+    store.write_verified(&object).unwrap();
+    prepared.write_to(&mut store).unwrap();
+    let response = execute_geometry_materialization_program_request(
+        &prepared.program,
+        &mut store,
+        NativeGeometryMaterializationLimits::default(),
+    );
+    let ProgramExecutionResponse::ExternalizedSuccess { outputs, .. } = response else {
+        panic!("generated geometry materialization failed: {response:?}");
+    };
+    let ValuePayload::Object(output_root) = &outputs[0] else {
+        panic!("generated output must be externalized");
+    };
+    let output = import_geometry_materialization_output(&store, output_root, &access).unwrap();
+    output.validate_against(&request).unwrap();
+    assert_eq!(output.regions["body"].entity_ids.len(), 1);
+    assert_eq!(
+        output.materialization_kind,
+        runmat_geometry_ops::GeometryMaterializationKind::Generated
+    );
 }
 
 fn constructed_request(

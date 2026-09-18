@@ -356,7 +356,7 @@ pub fn prepare_generator_program(
     }
     if chunks.is_empty() {
         return Err(AnalysisBridgeError::Invalid(
-            "signal generator program requires at least one chunk".into(),
+            "generator program requires at least one chunk".into(),
         ));
     }
     let executable_bytes = executable.canonical_bytes()?;
@@ -396,7 +396,7 @@ pub fn prepare_generator_program(
                 || !object.is_externalized_value()
             {
                 return Err(AnalysisBridgeError::Invalid(
-                    "signal generator inputs must be externalized immutable values".into(),
+                    "generator inputs must be externalized immutable values".into(),
                 ));
             }
             Ok(object.reference.clone())
@@ -406,7 +406,7 @@ pub fn prepare_generator_program(
     input_references.dedup();
     if input_references.len() != input_objects.len() {
         return Err(AnalysisBridgeError::Invalid(
-            "signal generator input object inventory is duplicated".into(),
+            "generator input object inventory is duplicated".into(),
         ));
     }
 
@@ -436,7 +436,7 @@ pub fn prepare_generator_program(
         .collect::<BTreeSet<_>>();
     if referenced_inputs != supplied_inputs {
         return Err(AnalysisBridgeError::Invalid(
-            "signal generator input object inventory is not exact".into(),
+            "generator input object inventory is not exact".into(),
         ));
     }
     Ok(PreparedGeneratorProgram {

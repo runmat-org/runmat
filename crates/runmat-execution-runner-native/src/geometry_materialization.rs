@@ -58,8 +58,9 @@ where
         + runmat_execution_artifact::cache::CacheExport,
 {
     use runmat_analysis_execution::{
-        decode_geometry_materialization_program, prepare_geometry_materialization_output,
-        GeometryMaterializationOutput, GeometryMaterializationSource,
+        decode_generated_geometry_product, decode_geometry_materialization_program,
+        prepare_geometry_materialization_output, GeometryMaterializationOutput,
+        GeometryMaterializationSource,
     };
     use runmat_execution::value::ValuePayload;
     use runmat_execution::Digest;
@@ -70,9 +71,9 @@ where
         GeometryImportContext, ImportedExactCad,
     };
     use runmat_geometry_ops::{
-        materialize_geometry_definition, resolve_geometry_regions, GeometryDependency,
-        GeometryFeatureProvider, GeometryMaterializationHost, GeometryRegionEvidence,
-        ResolvedGeneratedGeometryRequest,
+        materialize_geometry_definition, resolve_geometry_regions_with_generated_outputs,
+        GeometryDependency, GeometryFeatureProvider, GeometryMaterializationHost,
+        GeometryRegionEvidence, ResolvedGeneratedGeometryRequest,
     };
     use runmat_meshing_execution::{
         import_exact_geometry_input, prepare_exact_geometry_objects, prepare_exact_geometry_result,
@@ -121,6 +122,10 @@ where
 
     struct Host {
         imported: Option<ImportedExactCad>,
+        generated: Option<(
+            ResolvedGeneratedGeometryRequest,
+            runmat_geometry_core::GeneratedGeometryProduct,
+        )>,
     }
     impl GeometryMaterializationHost<ImportedExactCad> for Host {
         type Error = String;
@@ -136,12 +141,22 @@ where
 
         fn generate(
             &self,
-            _request: &ResolvedGeneratedGeometryRequest,
-        ) -> Result<ImportedExactCad, Self::Error> {
-            Err("generated geometry requires a frozen callable execution receipt".into())
+            request: &ResolvedGeneratedGeometryRequest,
+        ) -> Result<runmat_geometry_core::GeneratedGeometryProduct, Self::Error> {
+            let (expected, product) = self
+                .generated
+                .as_ref()
+                .ok_or_else(|| "generated geometry callable result was not admitted".to_string())?;
+            if request != expected {
+                return Err(
+                    "generated geometry arguments differ from their callable receipt".into(),
+                );
+            }
+            Ok(product.clone())
         }
     }
 
+    let mut generated = None;
     let imported = match (&request.source, &request.definition.source) {
         (
             GeometryMaterializationSource::Imported {
@@ -244,6 +259,31 @@ where
             .map_err(|error| error.to_string())?;
             Some(geometry)
         }
+        (
+            GeometryMaterializationSource::Generated { receipt },
+            GeometryDefinitionSource::Generated(_),
+        ) => {
+            let root = source_roots
+                .first()
+                .filter(|root| {
+                    root.logical_digest == receipt.product_digest
+                        && root.encoded_length == receipt.product_encoded_length
+                })
+                .ok_or_else(|| "generated geometry product root is missing".to_string())?;
+            let bytes = store
+                .read_verified(root.logical_digest)
+                .map_err(|error| error.to_string())?
+                .ok_or_else(|| "generated geometry product is missing".to_string())?;
+            if bytes.len() as u64 != root.encoded_length
+                || Digest::sha256(&bytes) != root.logical_digest
+            {
+                return Err("generated geometry product differs from its receipt".into());
+            }
+            let product =
+                decode_generated_geometry_product(&bytes).map_err(|error| error.to_string())?;
+            generated = Some((receipt.admission.request.clone(), product));
+            None
+        }
         _ => return Err("geometry request source and definition do not converge".into()),
     };
     let dependency = match (&request.source, imported.as_ref()) {
@@ -257,6 +297,7 @@ where
     };
     let host = Host {
         imported: imported.clone(),
+        generated,
     };
     let materialized = materialize_geometry_definition(
         &request.definition,
@@ -271,10 +312,11 @@ where
     let document = geometry
         .geometry_document()
         .map_err(|error| error.to_string())?;
-    let regions = resolve_geometry_regions(
+    let regions = resolve_geometry_regions_with_generated_outputs(
         &request.definition,
         &geometry.topology,
         &materialized.feature_history,
+        &materialized.generated_region_outputs,
         &UnavailableRegionEvidence,
     )
     .map_err(|error| error.to_string())?;

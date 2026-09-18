@@ -3,7 +3,10 @@ use crate::{
     BoundFeaProgram, CheckedFeaDeclaration, CheckedFeaStatement, CheckedFeaStatementKind,
     FeaDiagnostic,
 };
-use runmat_geometry_core::{GeneratedGeometryDefinition, GeometryDefinitionSource, GeometryDigest};
+use runmat_geometry_core::{
+    GeneratedGeometryArgument, GeneratedGeometryDefinition, GeometryDefinitionSource,
+    GeometryDigest,
+};
 use std::collections::BTreeMap;
 
 pub(super) fn block(statements: &[CheckedFeaStatement]) -> Option<(&str, &[CheckedFeaStatement])> {
@@ -113,6 +116,18 @@ pub(super) fn source(
         }
     }
     validate_signature(declaration, facts, &checked_arguments, diagnostics);
+    let lowered = facts
+        .inputs
+        .iter()
+        .filter_map(|parameter| {
+            lowered
+                .remove(&parameter.name)
+                .map(|value| GeneratedGeometryArgument {
+                    parameter: parameter.name.clone(),
+                    value,
+                })
+        })
+        .collect();
     Some(GeometryDefinitionSource::Generated(
         GeneratedGeometryDefinition {
             module_path: facts.module_path.as_str().to_string(),

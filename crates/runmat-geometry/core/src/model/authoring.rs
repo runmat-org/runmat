@@ -71,7 +71,34 @@ pub struct GeneratedGeometryDefinition {
     pub module_path: String,
     pub function: String,
     pub source_digest: GeometryDigest,
-    pub arguments: BTreeMap<String, GeometryAuthoringValue>,
+    pub arguments: Vec<GeneratedGeometryArgument>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GeneratedGeometryArgument {
+    pub parameter: String,
+    pub value: GeometryAuthoringValue,
+}
+
+/// Provider-neutral result returned by an admitted RunMat geometry generator.
+///
+/// The generator describes exact construction intent; it never transports a
+/// kernel handle, tessellation, or provider-specific geometry object.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GeneratedGeometryProduct {
+    pub graph: GeometryFeatureGraph,
+    #[serde(default)]
+    pub region_outputs: BTreeMap<String, GeneratedGeometryRegionOutput>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GeneratedGeometryRegionOutput {
+    pub role: GeometryRegionRole,
+    pub selector: GeometryRegionSelector,
+    pub cardinality: GeometryRegionCardinality,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -369,15 +396,23 @@ impl GeneratedGeometryDefinition {
         token("generator function", &self.function)?;
         self.source_digest
             .validate_nonzero("generator source digest")?;
-        for value in self.arguments.values() {
-            value.validate(parameters)?;
+        let mut names = std::collections::BTreeSet::new();
+        for argument in &self.arguments {
+            token("generator parameter", &argument.parameter)?;
+            if !names.insert(argument.parameter.as_str()) {
+                return Err(GeometryContractError::invalid(
+                    "generator arguments",
+                    "parameter names must be unique",
+                ));
+            }
+            argument.value.validate(parameters)?;
         }
         Ok(())
     }
 }
 
 impl GeometryRegionSelector {
-    fn validate(&self) -> Result<(), GeometryContractError> {
+    pub(crate) fn validate(&self) -> Result<(), GeometryContractError> {
         match self {
             Self::Name(value)
             | Self::Tag(value)

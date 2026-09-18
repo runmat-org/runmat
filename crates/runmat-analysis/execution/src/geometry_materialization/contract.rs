@@ -3,8 +3,8 @@ use std::collections::BTreeMap;
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
 use runmat_geometry_core::{
-    GeometryAuthoringValue, GeometryDefinition, GeometryDefinitionRef, GeometryDigest,
-    GeometryDocument, GeometryModel, GeometryObjectRef,
+    GeneratedGeometryDefinition, GeometryAuthoringValue, GeometryDefinition, GeometryDefinitionRef,
+    GeometryDigest, GeometryDocument, GeometryModel, GeometryObjectRef,
 };
 use runmat_geometry_io::ExactCadImportOptions;
 use runmat_geometry_ops::{
@@ -22,6 +22,9 @@ const OUTPUT_DOMAIN: &str = "geometry-materialization-output";
 const CONTRACT_LIMITS: CanonicalLimits =
     CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 100_000, 64);
 const MAX_SOURCE_CHUNKS: usize = 1_000_000;
+pub const GENERATED_GEOMETRY_PRODUCT_MEDIA_TYPE: &str =
+    "application/vnd.runmat.generated-geometry-product+cbor";
+pub const GENERATED_GEOMETRY_PRODUCT_VALUE_SCHEMA: &str = "runmat.geometry.generated-product";
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -46,6 +49,33 @@ pub enum GeometryMaterializationSource {
         document: Box<GeometryDocument>,
         root: GeometryObjectRef,
     },
+    Generated {
+        receipt: Box<GeneratedGeometryExecutionReceipt>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GeneratedGeometryExecutionReceipt {
+    pub schema_version: u16,
+    pub admission: super::AdmittedGeometryGenerator,
+    pub product_digest: Digest,
+    pub product_encoded_length: u64,
+}
+
+impl GeneratedGeometryExecutionReceipt {
+    pub fn validate(&self) -> AnalysisBridgeResult<()> {
+        self.admission.validate()?;
+        if self.schema_version != 1
+            || self.product_encoded_length == 0
+            || self.product_digest.bytes().iter().all(|byte| *byte == 0)
+        {
+            return Err(AnalysisBridgeError::Invalid(
+                "generated geometry execution receipt is malformed".into(),
+            ));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -301,6 +331,18 @@ fn validate_source(request: &GeometryMaterializationRequest) -> AnalysisBridgeRe
                 && definition == &derived.source
                 && root == document.primary_artifact()
         }
+        (
+            Definition::Generated(generated),
+            GeometryMaterializationSource::Generated { receipt },
+        ) => {
+            receipt.validate().is_ok()
+                && generated_matches_receipt(
+                    generated,
+                    &request.definition.parameters,
+                    &request.bindings,
+                    receipt,
+                )
+        }
         _ => false,
     };
     if valid {
@@ -310,6 +352,23 @@ fn validate_source(request: &GeometryMaterializationRequest) -> AnalysisBridgeRe
             "geometry materialization source does not match its definition".into(),
         ))
     }
+}
+
+fn generated_matches_receipt(
+    generated: &GeneratedGeometryDefinition,
+    parameters: &[runmat_geometry_core::GeometryParameterDefinition],
+    bindings: &BTreeMap<String, GeometryAuthoringValue>,
+    receipt: &GeneratedGeometryExecutionReceipt,
+) -> bool {
+    let Ok(expected) =
+        runmat_geometry_ops::resolve_generated_geometry_request(generated, parameters, bindings)
+    else {
+        return false;
+    };
+    generated.module_path == receipt.admission.request.module_path
+        && generated.function == receipt.admission.request.function
+        && generated.source_digest == receipt.admission.request.source_digest
+        && expected == receipt.admission.request
 }
 
 fn valid_chunks(chunks: &[GeometrySourceChunk], encoded_length: u64, digest: Digest) -> bool {

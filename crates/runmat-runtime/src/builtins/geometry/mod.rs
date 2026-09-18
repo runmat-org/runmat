@@ -16,6 +16,7 @@ use crate::builtins::io::json::jsondecode::value_from_json;
 use crate::operations::{OperationContext, OperationEnvelope, OperationErrorEnvelope};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
+pub mod generated;
 pub mod region;
 pub mod triangulation;
 

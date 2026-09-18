@@ -7,7 +7,10 @@ use runmat_execution_artifact::{
     PROGRAM_BUILD_RECIPE_SCHEMA_VERSION, PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
 };
 
-use crate::{AnalysisBridgeError, AnalysisBridgeResult, GeometryMaterializationRequest};
+use crate::{
+    AnalysisBridgeError, AnalysisBridgeResult, GeometryMaterializationRequest,
+    GENERATED_GEOMETRY_PRODUCT_MEDIA_TYPE, GENERATED_GEOMETRY_PRODUCT_VALUE_SCHEMA,
+};
 
 pub const GEOMETRY_MATERIALIZATION_EXECUTION_MODE: &str = "geometry-materialization";
 pub const GEOMETRY_MATERIALIZATION_TARGET_PROFILE: &str = "portable-geometry-host";
@@ -158,6 +161,7 @@ fn validate_source_roots(
         Source::Constructed => 0,
         Source::Imported { chunks, .. } => chunks.len(),
         Source::Derived { .. } => roots.len(),
+        Source::Generated { .. } => 1,
     };
     if roots.len() != expected
         || matches!(request.source, Source::Derived { .. }) && roots.is_empty()
@@ -175,6 +179,13 @@ fn validate_source_roots(
             ),
             Source::Imported { .. } => root.kind == ValueRefKind::DriverObject,
             Source::Constructed => false,
+            Source::Generated { receipt } => {
+                root.kind == ValueRefKind::ResultObject
+                    && root.media_type == GENERATED_GEOMETRY_PRODUCT_MEDIA_TYPE
+                    && root.value_schema == GENERATED_GEOMETRY_PRODUCT_VALUE_SCHEMA
+                    && root.logical_digest == receipt.product_digest
+                    && root.encoded_length == receipt.product_encoded_length
+            }
         };
         if !valid_kind
             || root.authorization_scope != access.authorization_scope

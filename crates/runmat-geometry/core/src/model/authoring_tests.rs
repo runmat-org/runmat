@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use super::authoring::*;
 use super::{GeometryDigest, GeometryScalarExpression, GeometrySourceFormat, UnitSystem};
 
@@ -123,4 +125,42 @@ fn feature_region_selectors_must_resolve_in_the_authored_graph() {
         cad_parameters: Vec::new(),
     };
     assert!(definition.validate().is_err());
+}
+
+#[test]
+fn generated_products_are_closed_canonical_feature_programs() {
+    let mut product = GeneratedGeometryProduct {
+        graph: GeometryFeatureGraph {
+            features: vec![GeometryFeature {
+                feature_id: "stock".into(),
+                operation: GeometryFeatureOperation::Box {
+                    width_m: 1.0.into(),
+                    depth_m: 2.0.into(),
+                    height_m: 3.0.into(),
+                },
+            }],
+            result: GeometryFeatureRef("stock".into()),
+        },
+        region_outputs: BTreeMap::from([(
+            "body".into(),
+            GeneratedGeometryRegionOutput {
+                role: GeometryRegionRole::Solid,
+                selector: GeometryRegionSelector::FeatureResult(GeometryFeatureRef("stock".into())),
+                cardinality: GeometryRegionCardinality::ExactlyOne,
+            },
+        )]),
+    };
+    let bytes = product.canonical_bytes().unwrap();
+    assert_eq!(
+        GeneratedGeometryProduct::from_canonical_bytes(&bytes).unwrap(),
+        product
+    );
+
+    product.region_outputs.get_mut("body").unwrap().selector =
+        GeometryRegionSelector::Name("kernel-specific-name".into());
+    assert!(product.validate().is_err());
+
+    product.region_outputs.get_mut("body").unwrap().selector =
+        GeometryRegionSelector::FeatureResult(GeometryFeatureRef("missing".into()));
+    assert!(product.validate().is_err());
 }

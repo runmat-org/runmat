@@ -2,8 +2,9 @@ use std::collections::BTreeMap;
 use std::fmt::Display;
 
 use runmat_geometry_core::{
-    GeneratedGeometryDefinition, GeometryAuthoringValue, GeometryDefinition, GeometryDefinitionRef,
-    GeometryDefinitionSource, GeometryDigest, ImportedGeometryDefinition,
+    GeneratedGeometryArgument, GeneratedGeometryDefinition, GeneratedGeometryProduct,
+    GeneratedGeometryRegionOutput, GeometryAuthoringValue, GeometryDefinition,
+    GeometryDefinitionRef, GeometryDefinitionSource, GeometryDigest, ImportedGeometryDefinition,
 };
 
 use super::{
@@ -12,12 +13,13 @@ use super::{
     GeometryFeatureProvider, GeometryFeatureResourceBounds, GeometryTopologyHistory,
 };
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ResolvedGeneratedGeometryRequest {
     pub module_path: String,
     pub function: String,
     pub source_digest: GeometryDigest,
-    pub arguments: BTreeMap<String, GeometryAuthoringValue>,
+    pub arguments: Vec<GeneratedGeometryArgument>,
 }
 
 pub trait GeometryMaterializationHost<G> {
@@ -25,7 +27,10 @@ pub trait GeometryMaterializationHost<G> {
 
     fn import_exact(&self, source: &ImportedGeometryDefinition) -> Result<G, Self::Error>;
 
-    fn generate(&self, request: &ResolvedGeneratedGeometryRequest) -> Result<G, Self::Error>;
+    fn generate(
+        &self,
+        request: &ResolvedGeneratedGeometryRequest,
+    ) -> Result<GeneratedGeometryProduct, Self::Error>;
 }
 
 pub struct GeometryDependency<'a, G> {
@@ -48,6 +53,7 @@ pub struct MaterializedGeometry<G> {
     pub geometry: G,
     pub feature_history: BTreeMap<String, GeometryTopologyHistory>,
     pub feature_resources: Option<GeometryFeatureResourceBounds>,
+    pub generated_region_outputs: BTreeMap<String, GeneratedGeometryRegionOutput>,
 }
 
 pub fn materialize_geometry_definition<P, H>(
@@ -86,6 +92,7 @@ where
                 geometry,
                 feature_history: BTreeMap::new(),
                 feature_resources: None,
+                generated_region_outputs: BTreeMap::new(),
             })
         }
         GeometryDefinitionSource::Constructed(graph) => {
@@ -125,20 +132,30 @@ where
         }
         GeometryDefinitionSource::Generated(generated) => {
             reject_dependency(dependency.as_ref(), "generated")?;
-            let request = generated_request(generated, &parameters)?;
-            let geometry =
+            let request =
+                resolve_generated_geometry_request(generated, &definition.parameters, bindings)?;
+            let product =
                 host.generate(&request)
                     .map_err(|error| GeometryFeatureError::Provider {
                         feature_id: definition.geometry_id.clone(),
                         message: error.to_string(),
                     })?;
-            Ok(MaterializedGeometry {
-                definition: identity,
-                kind: GeometryMaterializationKind::Generated,
-                geometry,
-                feature_history: BTreeMap::new(),
-                feature_resources: None,
-            })
+            product
+                .validate()
+                .map_err(|error| GeometryFeatureError::InvalidPlan(error.to_string()))?;
+            let outputs = product.region_outputs;
+            let generated_parameters = resolve_geometry_parameters(&[], &BTreeMap::new())?;
+            let mut materialized = materialize_graph(
+                identity,
+                GeometryMaterializationKind::Generated,
+                &product.graph,
+                &generated_parameters,
+                None,
+                provider,
+                limits,
+            )?;
+            materialized.generated_region_outputs = outputs;
+            Ok(materialized)
         }
     }
 }
@@ -164,17 +181,25 @@ fn materialize_graph<P: GeometryFeatureProvider>(
         geometry,
         feature_history: history_by_feature,
         feature_resources: Some(resources),
+        generated_region_outputs: BTreeMap::new(),
     })
 }
 
-fn generated_request(
+pub fn resolve_generated_geometry_request(
     generated: &GeneratedGeometryDefinition,
-    parameters: &super::ResolvedGeometryParameters,
+    parameter_definitions: &[runmat_geometry_core::GeometryParameterDefinition],
+    bindings: &BTreeMap<String, GeometryAuthoringValue>,
 ) -> Result<ResolvedGeneratedGeometryRequest, GeometryFeatureError> {
+    let parameters = resolve_geometry_parameters(parameter_definitions, bindings)?;
     let arguments = generated
         .arguments
         .iter()
-        .map(|(name, value)| Ok((name.clone(), parameters.resolve_value(value)?)))
+        .map(|argument| {
+            Ok(GeneratedGeometryArgument {
+                parameter: argument.parameter.clone(),
+                value: parameters.resolve_value(&argument.value)?,
+            })
+        })
         .collect::<Result<_, GeometryFeatureError>>()?;
     Ok(ResolvedGeneratedGeometryRequest {
         module_path: generated.module_path.clone(),

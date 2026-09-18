@@ -198,8 +198,24 @@ impl GeometryMaterializationHost<String> for RecordingHost {
         Ok(format!("import({})", source.logical_path))
     }
 
-    fn generate(&self, request: &ResolvedGeneratedGeometryRequest) -> Result<String, Self::Error> {
-        Ok(format!("generate({})", request.function))
+    fn generate(
+        &self,
+        _request: &ResolvedGeneratedGeometryRequest,
+    ) -> Result<runmat_geometry_core::GeneratedGeometryProduct, Self::Error> {
+        Ok(runmat_geometry_core::GeneratedGeometryProduct {
+            graph: GeometryFeatureGraph {
+                features: vec![GeometryFeature {
+                    feature_id: "generated".into(),
+                    operation: GeometryFeatureOperation::Box {
+                        width_m: scalar(1.0),
+                        depth_m: scalar(1.0),
+                        height_m: scalar(1.0),
+                    },
+                }],
+                result: GeometryFeatureRef("generated".into()),
+            },
+            region_outputs: BTreeMap::new(),
+        })
     }
 }
 
@@ -338,10 +354,10 @@ fn generated_geometry_receives_resolved_arguments() {
             module_path: "geometry.m".into(),
             function: "make_part".into(),
             source_digest: GeometryDigest::from_bytes([7; 32]),
-            arguments: BTreeMap::from([(
-                "length".into(),
-                GeometryAuthoringValue::Scalar(parameter("length")),
-            )]),
+            arguments: vec![runmat_geometry_core::GeneratedGeometryArgument {
+                parameter: "length".into(),
+                value: GeometryAuthoringValue::Scalar(parameter("length")),
+            }],
         }),
         regions: Vec::new(),
         cad_parameters: Vec::new(),
@@ -359,5 +375,5 @@ fn generated_geometry_receives_resolved_arguments() {
     )
     .unwrap();
     assert_eq!(materialized.kind, GeometryMaterializationKind::Generated);
-    assert_eq!(materialized.geometry, "generate(make_part)");
+    assert_eq!(materialized.geometry, "generated()");
 }

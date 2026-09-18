@@ -1,6 +1,10 @@
+use runmat_canonical_codec::CanonicalLimits;
 use std::collections::BTreeSet;
 
-use super::authoring::{token, GeometryFeatureGraph, GeometryFeatureOperation};
+use super::authoring::{
+    token, GeneratedGeometryProduct, GeneratedGeometryRegionOutput, GeometryFeatureGraph,
+    GeometryFeatureOperation, GeometryRegionSelector,
+};
 use super::{GeometryContractError, GeometryScalarExpression};
 
 impl GeometryFeatureGraph {
@@ -38,7 +42,83 @@ impl GeometryFeatureGraph {
     }
 }
 
+impl GeneratedGeometryRegionOutput {
+    const CODEC_DOMAIN: &'static str = "generated-geometry-region-output";
+    const CODEC_LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024, 256, 64, 16);
+
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, GeometryContractError> {
+        self.selector.validate()?;
+        super::canonical::encode(Self::CODEC_DOMAIN, self, Self::CODEC_LIMITS)
+    }
+
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, GeometryContractError> {
+        let output = super::canonical::decode(Self::CODEC_DOMAIN, bytes, Self::CODEC_LIMITS)?;
+        Self::canonical_bytes(&output)?;
+        Ok(output)
+    }
+}
+
+impl GeneratedGeometryProduct {
+    const CODEC_DOMAIN: &'static str = "generated-geometry-product";
+    const CODEC_LIMITS: CanonicalLimits = CanonicalLimits::new(1024 * 1024, 100_000, 100_000, 64);
+
+    pub fn validate(&self) -> Result<(), GeometryContractError> {
+        let parameters = BTreeSet::new();
+        self.graph.validate(None, &parameters)?;
+        for (name, output) in &self.region_outputs {
+            token("generated geometry region output", name)?;
+            match &output.selector {
+                GeometryRegionSelector::Result => {}
+                GeometryRegionSelector::FeatureResult(feature)
+                | GeometryRegionSelector::BoundaryIntroducedBy(feature)
+                    if self
+                        .graph
+                        .features
+                        .iter()
+                        .any(|candidate| candidate.feature_id == feature.0) => {}
+                GeometryRegionSelector::FeatureResult(_)
+                | GeometryRegionSelector::BoundaryIntroducedBy(_) => {
+                    return Err(GeometryContractError::invalid(
+                        "generated geometry region output",
+                        "must reference a feature in the returned graph",
+                    ));
+                }
+                GeometryRegionSelector::Name(_)
+                | GeometryRegionSelector::Tag(_)
+                | GeometryRegionSelector::PersistentId(_)
+                | GeometryRegionSelector::GeneratedOutput(_) => {
+                    return Err(GeometryContractError::invalid(
+                        "generated geometry region output",
+                        "must select the result or a typed feature output",
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, GeometryContractError> {
+        self.validate()?;
+        super::canonical::encode(Self::CODEC_DOMAIN, self, Self::CODEC_LIMITS)
+    }
+
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, GeometryContractError> {
+        let product = super::canonical::decode(Self::CODEC_DOMAIN, bytes, Self::CODEC_LIMITS)?;
+        Self::validate(&product)?;
+        Ok(product)
+    }
+}
+
 impl GeometryFeatureOperation {
+    pub fn canonical_digest(&self) -> Result<super::GeometryDigest, GeometryContractError> {
+        let bytes = super::canonical::encode(
+            "geometry-feature-operation",
+            self,
+            CanonicalLimits::new(1024 * 1024, 100_000, 100_000, 64),
+        )?;
+        super::canonical::digest(&bytes)
+    }
+
     fn validate(
         &self,
         prior: &BTreeSet<&str>,

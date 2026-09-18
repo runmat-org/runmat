@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Display;
 
 use runmat_geometry_core::{
-    ExactBRepTopology, GeometryDefinition, GeometryRegionCardinality, GeometryRegionRole,
-    GeometryRegionSelector, PersistentEntityId,
+    ExactBRepTopology, GeneratedGeometryRegionOutput, GeometryDefinition,
+    GeometryRegionCardinality, GeometryRegionRole, GeometryRegionSelector, PersistentEntityId,
 };
 
 use super::{GeometryFeatureError, GeometryTopologyHistory};
@@ -40,6 +40,50 @@ pub struct ResolvedGeometryRegion {
 pub type ResolvedGeometryRegions = BTreeMap<String, ResolvedGeometryRegion>;
 
 pub fn resolve_geometry_regions<E: GeometryRegionEvidence>(
+    definition: &GeometryDefinition,
+    topology: &ExactBRepTopology,
+    history_by_feature: &BTreeMap<String, GeometryTopologyHistory>,
+    evidence: &E,
+) -> Result<ResolvedGeometryRegions, GeometryFeatureError> {
+    resolve_geometry_regions_with_generated_outputs(
+        definition,
+        topology,
+        history_by_feature,
+        &BTreeMap::new(),
+        evidence,
+    )
+}
+
+pub fn resolve_geometry_regions_with_generated_outputs<E: GeometryRegionEvidence>(
+    definition: &GeometryDefinition,
+    topology: &ExactBRepTopology,
+    history_by_feature: &BTreeMap<String, GeometryTopologyHistory>,
+    generated_outputs: &BTreeMap<String, GeneratedGeometryRegionOutput>,
+    evidence: &E,
+) -> Result<ResolvedGeometryRegions, GeometryFeatureError> {
+    let mut definition = definition.clone();
+    for region in &mut definition.regions {
+        let GeometryRegionSelector::GeneratedOutput(output_name) = &region.selector else {
+            continue;
+        };
+        let output = generated_outputs.get(output_name).ok_or_else(|| {
+            GeometryFeatureError::InvalidPlan(format!(
+                "region `{}` requires missing generated output `{output_name}`",
+                region.region_id
+            ))
+        })?;
+        if region.role != output.role || region.cardinality != output.cardinality {
+            return Err(GeometryFeatureError::InvalidPlan(format!(
+                "region `{}` differs from generated output `{output_name}` role or cardinality",
+                region.region_id
+            )));
+        }
+        region.selector = output.selector.clone();
+    }
+    resolve_geometry_regions_inner(&definition, topology, history_by_feature, evidence)
+}
+
+fn resolve_geometry_regions_inner<E: GeometryRegionEvidence>(
     definition: &GeometryDefinition,
     topology: &ExactBRepTopology,
     history_by_feature: &BTreeMap<String, GeometryTopologyHistory>,

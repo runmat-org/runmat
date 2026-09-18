@@ -338,7 +338,7 @@ impl GeometryMaterializationHost<ImportedExactCad> for RejectingSourceHost {
     fn generate(
         &self,
         _request: &ResolvedGeneratedGeometryRequest,
-    ) -> Result<ImportedExactCad, Self::Error> {
+    ) -> Result<runmat_geometry_core::GeneratedGeometryProduct, Self::Error> {
         Err("constructed geometry must not invoke a generator")
     }
 }
