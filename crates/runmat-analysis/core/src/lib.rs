@@ -55,19 +55,22 @@ pub use study::{
     AuthoredCaseOutputRef, AuthoredExtremaTiePolicy, AuthoredFieldDomain, AuthoredFieldProjection,
     AuthoredMeshRef, AuthoredModelArgument, AuthoredModelArgumentValue, AuthoredModelInstance,
     AuthoredObservationError, AuthoredOutput, AuthoredOutputError, AuthoredOutputExpression,
-    AuthoredOutputType, AuthoredOutputValue, AuthoredPrincipalSelection, AuthoredSeriesDomain,
-    AuthoredSeriesReduction, AuthoredSpatialReduction, AuthoredStudy, AuthoredStudyError,
-    AuthoredStudyInputBinding, AuthoredStudyInputRef, AuthoredStudyRealizationError,
-    AuthoredStudyRef, AuthoredSweep, AuthoredSweepAxis, AuthoredSweepAxisValue,
-    AuthoredSweepBinding, AuthoredSweepCase, AuthoredSweepDefinition, AuthoredSweepError,
-    AuthoredSweepOutput, AuthoredSweepOutputExpression, AuthoredVectorComponent,
-    CaseOutputProjection, LoweredAuthoredObservation, RealizedStudy, SweepAxisCombination,
-    SweepExtremum,
+    AuthoredOutputPolicy, AuthoredOutputType, AuthoredOutputValue, AuthoredPrincipalSelection,
+    AuthoredSeriesDomain, AuthoredSeriesReduction, AuthoredSpatialReduction, AuthoredStudy,
+    AuthoredStudyError, AuthoredStudyInputBinding, AuthoredStudyInputRef,
+    AuthoredStudyRealizationError, AuthoredStudyRef, AuthoredSweep, AuthoredSweepAxis,
+    AuthoredSweepAxisValue, AuthoredSweepBinding, AuthoredSweepCase, AuthoredSweepDefinition,
+    AuthoredSweepError, AuthoredSweepOutput, AuthoredSweepOutputExpression,
+    AuthoredVectorComponent, CaseOutputProjection, LoweredAuthoredObservation, RealizedStudy,
+    SweepAxisCombination, SweepExtremum,
 };
 pub use validate::physics_family_can_consume_state;
 pub use validate_authored::validate_coordinate_frame;
 pub use validate_outputs::spec::quantity_supported as procedure_produces_observation_quantity;
-pub use validate_outputs::{observation_sampling_matches_domain, validate_observation_sampling};
+pub use validate_outputs::{
+    observation_sampling_matches_domain, validate_authored_observation_request,
+    validate_observation_sampling,
+};
 pub use validate_signals::validate_physical_signals;
 
 pub use field::{AnalysisField, AnalysisFieldValues, DeviceFieldRef};

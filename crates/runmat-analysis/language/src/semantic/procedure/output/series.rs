@@ -1,6 +1,4 @@
-use runmat_analysis_core::{
-    AuthoredSeriesDomain, Position, SamplingPolicy, SeriesWeighting,
-};
+use runmat_analysis_core::{AuthoredSeriesDomain, Position, SamplingPolicy, SeriesWeighting};
 
 use crate::{CheckedExpression, CheckedExpressionKind, CheckedFeaDeclaration, FeaDiagnostic};
 
@@ -107,9 +105,7 @@ fn series_weighting(value: &CheckedExpression) -> Option<SeriesWeighting> {
     };
     match name.as_str() {
         "uniform_samples" => Some(SeriesWeighting::UniformSamples),
-        "trapezoidal_independent_domain" => {
-            Some(SeriesWeighting::TrapezoidalIndependentDomain)
-        }
+        "trapezoidal_independent_domain" => Some(SeriesWeighting::TrapezoidalIndependentDomain),
         _ => None,
     }
 }

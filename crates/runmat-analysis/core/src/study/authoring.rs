@@ -4,9 +4,10 @@ use runmat_geometry_core::{GeometryDefinitionRef, GeometryRegionRef};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    validate_analysis_sequence, validate_authored_outputs, AnalysisSequence,
-    AuthoredInputDefinition, AuthoredInputType, AuthoredInputValue, AuthoredModel,
-    AuthoredModelRef, AuthoredOutput, AuthoredOutputExpression, AuthoredRegionSource,
+    lower_authored_observations, validate_analysis_sequence, validate_authored_outputs,
+    AnalysisSequence, AuthoredInputDefinition, AuthoredInputType, AuthoredInputValue,
+    AuthoredModel, AuthoredModelRef, AuthoredOutput, AuthoredOutputExpression,
+    AuthoredRegionSource,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -143,6 +144,8 @@ impl AuthoredStudy {
         validate_analysis_sequence(&self.sequence)
             .map_err(|error| AuthoredStudyError::InvalidSequence(error.to_string()))?;
         validate_authored_outputs(&self.outputs, &self.sequence.steps)
+            .map_err(|error| AuthoredStudyError::InvalidOutput(error.to_string()))?;
+        lower_authored_observations(&self.outputs, &self.sequence.steps)
             .map_err(|error| AuthoredStudyError::InvalidOutput(error.to_string()))?;
         for output in &self.outputs {
             validate_output_regions(&output.expression, &self.geometry, model)?;
@@ -283,13 +286,12 @@ mod tests {
         }
     }
 
-    #[test]
-    fn required_model_input_can_bind_one_exact_study_input() {
+    fn study() -> AuthoredStudy {
         let mut step = ProcedureStep::structural_static("static");
         step.family = PhysicsFamily::Structural;
         step.procedure = AnalysisProcedure::Static;
         step.solution_space = SolutionSpace::Direct;
-        let study = AuthoredStudy {
+        AuthoredStudy {
             module_path: "project/main.fea".into(),
             study_id: "response".into(),
             geometry: GeometryDefinitionRef {
@@ -328,7 +330,35 @@ mod tests {
                 transitions: Vec::new(),
                 branches: Vec::new(),
             },
-        };
-        study.validate(&model()).unwrap();
+        }
+    }
+
+    #[test]
+    fn required_model_input_can_bind_one_exact_study_input() {
+        study().validate(&model()).unwrap();
+    }
+
+    #[test]
+    fn direct_authored_studies_reject_invalid_output_storage_policy() {
+        let mut study = study();
+        study.outputs.push(AuthoredOutput {
+            output_id: "displacement".into(),
+            expression: AuthoredOutputExpression::AnalysisField {
+                step_id: "static".into(),
+                quantity: crate::ObservationQuantity::Displacement,
+                location: crate::FieldLocation::Node,
+            },
+            policy: crate::AuthoredOutputPolicy {
+                compression: crate::CompressionPolicy::ErrorBounded {
+                    maximum_relative_error: 1.0e-3,
+                },
+                purpose: crate::ObservationPurpose::SolverControl,
+                ..Default::default()
+            },
+        });
+
+        let error = study.validate(&model()).unwrap_err();
+        assert!(matches!(error, AuthoredStudyError::InvalidOutput(_)));
+        assert!(error.to_string().contains("error-bounded compression"));
     }
 }

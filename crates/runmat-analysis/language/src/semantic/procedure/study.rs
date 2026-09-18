@@ -74,6 +74,15 @@ pub(super) fn lower(
     );
     let mut sequence = lower::lower_study(declaration, model, diagnostics)?;
     let outputs = super::output::lower_outputs(context.bound, declaration, diagnostics);
+    if let Err(error) = runmat_analysis_core::validate_authored_outputs(&outputs, &sequence.steps) {
+        lower::error(
+            declaration,
+            declaration.span,
+            error.to_string(),
+            diagnostics,
+        );
+        return None;
+    }
     match runmat_analysis_core::lower_authored_observations(&outputs, &sequence.steps) {
         Ok(observations) => {
             for observation in observations {

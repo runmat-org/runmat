@@ -40,12 +40,27 @@ pub fn lower_authored_observations(
     for output in outputs {
         let mut draft = lower_expression(&output.expression, &steps, &lowered)?;
         draft.spec.observation_id = ObservationId(output.output_id.clone());
+        draft.spec.storage = ObservationStoragePolicy {
+            precision: output
+                .policy
+                .precision
+                .unwrap_or(draft.spec.storage.precision),
+            compression: output.policy.compression,
+            retention: output.policy.retention.clone(),
+            partial_access: output.policy.partial_access,
+        };
+        draft.spec.purpose = output.policy.purpose;
         let request = match draft.kind {
             ObservationKind::Field => ObservationRequest::Field(draft.spec.clone()),
             ObservationKind::Reduction => ObservationRequest::Reduction(draft.spec.clone()),
             ObservationKind::Probe => ObservationRequest::Probe(draft.spec.clone()),
             ObservationKind::History => ObservationRequest::History(draft.spec.clone()),
         };
+        let step = steps
+            .get(draft.step_id.as_str())
+            .ok_or_else(|| AuthoredObservationError::UnknownStep(draft.step_id.clone()))?;
+        crate::validate_authored_observation_request(step, &request)
+            .map_err(|error| AuthoredObservationError::InvalidRequest(error.to_string()))?;
         requests.push(LoweredAuthoredObservation {
             step_id: ProcedureStepId(draft.step_id.clone()),
             request,
@@ -209,6 +224,10 @@ fn base_spec(
     location: FieldLocation,
     domain: AuthoredFieldDomain,
 ) -> ObservationSpec {
+    let precision = match domain {
+        AuthoredFieldDomain::Complex => SignalPrecision::Complex128,
+        AuthoredFieldDomain::Real | AuthoredFieldDomain::Statistical => SignalPrecision::Real64,
+    };
     ObservationSpec {
         observation_id: ObservationId(String::new()),
         quantity,
@@ -229,7 +248,7 @@ fn base_spec(
         sampling: SamplingPolicy::Final,
         reduction: None,
         storage: ObservationStoragePolicy {
-            precision: SignalPrecision::Real64,
+            precision,
             compression: CompressionPolicy::Lossless,
             retention: RetentionPolicy::Canonical,
             partial_access: PartialAccessPolicy::ManifestAndChunks,
@@ -289,6 +308,11 @@ fn apply_projection(
             spec.component = ObservationComponent::VonMises;
         }
     }
+    spec.storage.precision = if spec.complex_representation == ComplexRepresentation::Complex {
+        SignalPrecision::Complex128
+    } else {
+        SignalPrecision::Real64
+    };
     Ok(())
 }
 
@@ -329,6 +353,8 @@ pub enum AuthoredObservationError {
     UnknownOutput(String),
     #[error("output projection is invalid: {0}")]
     InvalidProjection(String),
+    #[error("output request is invalid: {0}")]
+    InvalidRequest(String),
     #[error("output region model inputs must be realized before observation lowering")]
     UnrealizedRegionInput,
 }

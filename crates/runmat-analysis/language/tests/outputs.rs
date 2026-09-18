@@ -73,8 +73,16 @@ fn complex_outputs_require_explicit_representations_before_physical_reductions()
     assert_eq!(step.observations.len(), 6);
     let projected = step.observations[2].spec().unwrap();
     assert_eq!(
+        step.observations[0].spec().unwrap().storage.precision,
+        runmat_analysis_core::SignalPrecision::Complex128
+    );
+    assert_eq!(
         projected.source_location,
         runmat_analysis_core::FieldLocation::Element
+    );
+    assert_eq!(
+        projected.storage.precision,
+        runmat_analysis_core::SignalPrecision::Real64
     );
     assert_eq!(
         projected.component,

@@ -3,7 +3,8 @@ use std::collections::BTreeSet;
 use runmat_analysis_core::{
     AuthoredExtremaTiePolicy, AuthoredFieldProjection, AuthoredOutput, AuthoredOutputExpression,
     AuthoredPrincipalSelection, AuthoredRegionSource, AuthoredSeriesReduction,
-    AuthoredSpatialReduction, AuthoredVectorComponent, FieldLocation, ObservationQuantity, Position,
+    AuthoredSpatialReduction, AuthoredVectorComponent, FieldLocation, ObservationQuantity,
+    Position,
 };
 
 use crate::{
@@ -14,11 +15,10 @@ use crate::{
 
 use super::lower;
 
+mod policy;
 mod series;
 
-use series::{
-    checked_series_weighting, interpolation_positions, series_domain, series_sampling,
-};
+use series::{checked_series_weighting, interpolation_positions, series_domain, series_sampling};
 
 pub(super) fn lower_outputs(
     bound: &BoundFeaProgram,
@@ -30,14 +30,25 @@ pub(super) fn lower_outputs(
         .statements
         .iter()
         .filter_map(|statement| {
-            let CheckedFeaStatementKind::Output { name, value } = &statement.kind else {
-                return None;
+            let (name, value, policy) = match &statement.kind {
+                CheckedFeaStatementKind::Output { name, value } => (
+                    name,
+                    value,
+                    runmat_analysis_core::AuthoredOutputPolicy::default(),
+                ),
+                CheckedFeaStatementKind::OutputDefinition { name, statements } => {
+                    let (value, policy) =
+                        policy::lower_output_definition(declaration, statements, diagnostics)?;
+                    (name, value, policy)
+                }
+                _ => return None,
             };
             let expression = lower_expression(bound, declaration, value, &available, diagnostics)?;
             available.insert(name.as_str());
             Some(AuthoredOutput {
                 output_id: name.clone(),
                 expression,
+                policy,
             })
         })
         .collect()

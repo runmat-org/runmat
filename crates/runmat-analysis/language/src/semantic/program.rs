@@ -7,11 +7,15 @@ use crate::{
     FeaDiagnosticPhase, FeaSymbolKey, GeometryInspectionSource, LogicalSourcePath,
 };
 use runmat_parser::fea::{
-    FeaAssignmentRelation, FeaBlock, FeaDeclaration, FeaModelDefinitionKind, FeaModuleItem,
-    FeaStatementKind,
+    FeaBlock, FeaDeclaration, FeaModelDefinitionKind, FeaModuleItem, FeaStatementKind,
 };
 use runmat_types::Span;
 use std::collections::BTreeMap;
+
+mod output;
+mod types;
+
+pub use types::{CheckedFeaStatement, CheckedFeaStatementKind};
 
 #[derive(Debug)]
 pub struct CheckedFeaProgram {
@@ -67,71 +71,6 @@ pub struct CheckedFeaInput {
     pub maximum: Option<CheckedExpression>,
     pub required: bool,
     pub span: Span,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CheckedFeaStatement {
-    pub kind: CheckedFeaStatementKind,
-    pub span: Span,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CheckedFeaStatementKind {
-    GeneratedByFunction {
-        function: Vec<String>,
-        statements: Vec<CheckedFeaStatement>,
-    },
-    UniformSample {
-        start: CheckedExpression,
-        end: CheckedExpression,
-        rate: CheckedExpression,
-    },
-    AppliedLoad {
-        kind: String,
-        target: CheckedExpression,
-        value: CheckedExpression,
-    },
-    SignalDefinition {
-        name: String,
-        quantity: String,
-        domain: String,
-        statements: Vec<CheckedFeaStatement>,
-    },
-    ModelDefinition {
-        kind: FeaModelDefinitionKind,
-        name: String,
-        statements: Vec<CheckedFeaStatement>,
-    },
-    Block {
-        header: String,
-        header_span: Span,
-        statements: Vec<CheckedFeaStatement>,
-    },
-    Input(String),
-    Let {
-        name: String,
-        value: CheckedExpression,
-    },
-    Feature {
-        name: String,
-        value: CheckedExpression,
-    },
-    Assignment {
-        target: Vec<String>,
-        relation: FeaAssignmentRelation,
-        value: CheckedExpression,
-    },
-    PropertyAssignment {
-        property: CheckedExpression,
-        target: CheckedExpression,
-    },
-    Output {
-        name: String,
-        value: CheckedExpression,
-    },
-    Include(CheckedExpression),
-    Retain(CheckedExpression),
-    Command(String),
 }
 
 pub fn check_program<C: AnalysisOperationCatalog + GeometryInspectionSource + ?Sized>(
@@ -378,188 +317,210 @@ fn check_block<C: AnalysisOperationCatalog + ?Sized>(
         .statements
         .iter()
         .map(|statement| {
-            let kind =
-                match &statement.kind {
-                    FeaStatementKind::GeneratedByFunction { function, body } => {
-                        CheckedFeaStatementKind::GeneratedByFunction {
-                            function: function
-                                .segments
-                                .iter()
-                                .map(|segment| segment.text.clone())
-                                .collect(),
-                            statements: check_block(
-                                catalog,
-                                path,
-                                source,
-                                body,
-                                scope,
-                                outputs,
-                                diagnostics,
-                            ),
-                        }
-                    }
-                    FeaStatementKind::UniformSample { start, end, rate } => {
-                        CheckedFeaStatementKind::UniformSample {
-                            start: check_value(catalog, path, source, scope, start, diagnostics),
-                            end: check_value(catalog, path, source, scope, end, diagnostics),
-                            rate: check_value(catalog, path, source, scope, rate, diagnostics),
-                        }
-                    }
-                    FeaStatementKind::AppliedLoad {
-                        kind,
-                        target,
-                        value,
-                    } => CheckedFeaStatementKind::AppliedLoad {
-                        kind: kind.text.clone(),
-                        target: check_value(catalog, path, source, scope, target, diagnostics),
-                        value: check_value(catalog, path, source, scope, value, diagnostics),
-                    },
-                    FeaStatementKind::SignalDefinition {
-                        name,
-                        quantity,
-                        domain,
-                        body,
-                    } => CheckedFeaStatementKind::SignalDefinition {
-                        name: name.text.clone(),
-                        quantity: quantity.text.clone(),
-                        domain: domain.text.clone(),
-                        statements: check_block(
-                            catalog,
-                            path,
-                            source,
-                            body,
-                            scope,
-                            outputs,
-                            diagnostics,
-                        ),
-                    },
-                    FeaStatementKind::ModelDefinition { kind, name, body } => {
-                        CheckedFeaStatementKind::ModelDefinition {
-                            kind: *kind,
-                            name: name.text.clone(),
-                            statements: check_block(
-                                catalog,
-                                path,
-                                source,
-                                body,
-                                scope,
-                                outputs,
-                                diagnostics,
-                            ),
-                        }
-                    }
-                    FeaStatementKind::Block { header, body } => CheckedFeaStatementKind::Block {
-                        header: source[header.span.start..header.span.end].to_string(),
-                        header_span: header.span,
-                        statements: check_block(
-                            catalog,
-                            path,
-                            source,
-                            body,
-                            scope,
-                            outputs,
-                            diagnostics,
-                        ),
-                    },
-                    FeaStatementKind::Input { name, .. } => {
-                        CheckedFeaStatementKind::Input(name.text.clone())
-                    }
-                    FeaStatementKind::Let { name, value } => {
-                        let value = check_value(catalog, path, source, scope, value, diagnostics);
-                        scope.insert_reference([name.text.clone()], value.value_type.clone());
-                        CheckedFeaStatementKind::Let {
-                            name: name.text.clone(),
-                            value,
-                        }
-                    }
-                    FeaStatementKind::Feature { name, value } => {
-                        let value = check_value(catalog, path, source, scope, value, diagnostics);
-                        if value.value_type != FeaType::GeometryFeature
-                            && value.value_type != FeaType::Error
-                        {
-                            diagnostics.push(FeaDiagnostic::error(
-                                "fea.semantic.feature_type",
-                                format!(
-                                    "feature `{}` requires a geometry feature operation",
-                                    name.text
-                                ),
-                                FeaDiagnosticPhase::Semantic,
-                                Some(FeaDiagnosticLocation {
-                                    path: path.clone(),
-                                    span: value.span,
-                                }),
-                            ));
-                        }
-                        scope.insert_reference(
-                            ["feature".to_string(), name.text.clone()],
-                            FeaType::GeometryFeature,
-                        );
-                        CheckedFeaStatementKind::Feature {
-                            name: name.text.clone(),
-                            value,
-                        }
-                    }
-                    FeaStatementKind::Assignment {
-                        target,
-                        relation,
-                        value,
-                    } => CheckedFeaStatementKind::Assignment {
-                        target: target
+            let kind = match &statement.kind {
+                FeaStatementKind::GeneratedByFunction { function, body } => {
+                    CheckedFeaStatementKind::GeneratedByFunction {
+                        function: function
                             .segments
                             .iter()
                             .map(|segment| segment.text.clone())
                             .collect(),
-                        relation: *relation,
-                        value: check_value(catalog, path, source, scope, value, diagnostics),
-                    },
-                    FeaStatementKind::PropertyAssignment { property, target } => {
-                        CheckedFeaStatementKind::PropertyAssignment {
-                            property: check_value(
-                                catalog,
-                                path,
-                                source,
-                                scope,
-                                property,
-                                diagnostics,
+                        statements: check_block(
+                            catalog,
+                            path,
+                            source,
+                            body,
+                            scope,
+                            outputs,
+                            diagnostics,
+                        ),
+                    }
+                }
+                FeaStatementKind::UniformSample { start, end, rate } => {
+                    CheckedFeaStatementKind::UniformSample {
+                        start: check_value(catalog, path, source, scope, start, diagnostics),
+                        end: check_value(catalog, path, source, scope, end, diagnostics),
+                        rate: check_value(catalog, path, source, scope, rate, diagnostics),
+                    }
+                }
+                FeaStatementKind::AppliedLoad {
+                    kind,
+                    target,
+                    value,
+                } => CheckedFeaStatementKind::AppliedLoad {
+                    kind: kind.text.clone(),
+                    target: check_value(catalog, path, source, scope, target, diagnostics),
+                    value: check_value(catalog, path, source, scope, value, diagnostics),
+                },
+                FeaStatementKind::SignalDefinition {
+                    name,
+                    quantity,
+                    domain,
+                    body,
+                } => CheckedFeaStatementKind::SignalDefinition {
+                    name: name.text.clone(),
+                    quantity: quantity.text.clone(),
+                    domain: domain.text.clone(),
+                    statements: check_block(
+                        catalog,
+                        path,
+                        source,
+                        body,
+                        scope,
+                        outputs,
+                        diagnostics,
+                    ),
+                },
+                FeaStatementKind::ModelDefinition { kind, name, body } => {
+                    CheckedFeaStatementKind::ModelDefinition {
+                        kind: *kind,
+                        name: name.text.clone(),
+                        statements: check_block(
+                            catalog,
+                            path,
+                            source,
+                            body,
+                            scope,
+                            outputs,
+                            diagnostics,
+                        ),
+                    }
+                }
+                FeaStatementKind::Block { header, body } => CheckedFeaStatementKind::Block {
+                    header: source[header.span.start..header.span.end].to_string(),
+                    header_span: header.span,
+                    statements: check_block(
+                        catalog,
+                        path,
+                        source,
+                        body,
+                        scope,
+                        outputs,
+                        diagnostics,
+                    ),
+                },
+                FeaStatementKind::Input { name, .. } => {
+                    CheckedFeaStatementKind::Input(name.text.clone())
+                }
+                FeaStatementKind::Let { name, value } => {
+                    let value = check_value(catalog, path, source, scope, value, diagnostics);
+                    scope.insert_reference([name.text.clone()], value.value_type.clone());
+                    CheckedFeaStatementKind::Let {
+                        name: name.text.clone(),
+                        value,
+                    }
+                }
+                FeaStatementKind::Feature { name, value } => {
+                    let value = check_value(catalog, path, source, scope, value, diagnostics);
+                    if value.value_type != FeaType::GeometryFeature
+                        && value.value_type != FeaType::Error
+                    {
+                        diagnostics.push(FeaDiagnostic::error(
+                            "fea.semantic.feature_type",
+                            format!(
+                                "feature `{}` requires a geometry feature operation",
+                                name.text
                             ),
-                            target: check_value(catalog, path, source, scope, target, diagnostics),
-                        }
+                            FeaDiagnosticPhase::Semantic,
+                            Some(FeaDiagnosticLocation {
+                                path: path.clone(),
+                                span: value.span,
+                            }),
+                        ));
                     }
-                    FeaStatementKind::Output { name, value } => {
-                        let value = check_value(catalog, path, source, scope, value, diagnostics);
-                        if outputs
-                            .insert(name.text.clone(), value.value_type.clone())
-                            .is_some()
-                        {
-                            diagnostics.push(FeaDiagnostic::error(
-                                "fea.semantic.duplicate_output",
-                                format!("duplicate output `{}`", name.text),
-                                FeaDiagnosticPhase::Semantic,
-                                Some(FeaDiagnosticLocation {
-                                    path: path.clone(),
-                                    span: name.span,
-                                }),
-                            ));
-                        }
-                        scope.insert_reference(
-                            ["output".to_string(), name.text.clone()],
-                            value.value_type.clone(),
-                        );
-                        CheckedFeaStatementKind::Output {
-                            name: name.text.clone(),
-                            value,
-                        }
+                    scope.insert_reference(
+                        ["feature".to_string(), name.text.clone()],
+                        FeaType::GeometryFeature,
+                    );
+                    CheckedFeaStatementKind::Feature {
+                        name: name.text.clone(),
+                        value,
                     }
-                    FeaStatementKind::Include(value) => CheckedFeaStatementKind::Include(
-                        check_value(catalog, path, source, scope, value, diagnostics),
-                    ),
-                    FeaStatementKind::Retain(value) => CheckedFeaStatementKind::Retain(
-                        check_value(catalog, path, source, scope, value, diagnostics),
-                    ),
-                    FeaStatementKind::Command { syntax } => CheckedFeaStatementKind::Command(
-                        source[syntax.span.start..syntax.span.end].to_string(),
-                    ),
-                };
+                }
+                FeaStatementKind::Assignment {
+                    target,
+                    relation,
+                    value,
+                } => CheckedFeaStatementKind::Assignment {
+                    target: target
+                        .segments
+                        .iter()
+                        .map(|segment| segment.text.clone())
+                        .collect(),
+                    relation: *relation,
+                    value: check_value(catalog, path, source, scope, value, diagnostics),
+                },
+                FeaStatementKind::PropertyAssignment { property, target } => {
+                    CheckedFeaStatementKind::PropertyAssignment {
+                        property: check_value(catalog, path, source, scope, property, diagnostics),
+                        target: check_value(catalog, path, source, scope, target, diagnostics),
+                    }
+                }
+                FeaStatementKind::Output { name, value } => {
+                    let value = check_value(catalog, path, source, scope, value, diagnostics);
+                    output::register(
+                        &name.text,
+                        name.span,
+                        value.value_type.clone(),
+                        path,
+                        scope,
+                        outputs,
+                        diagnostics,
+                    );
+                    CheckedFeaStatementKind::Output {
+                        name: name.text.clone(),
+                        value,
+                    }
+                }
+                FeaStatementKind::OutputDefinition { name, body } => {
+                    let mut definition_scope = scope.clone();
+                    let mut definition_outputs = outputs.clone();
+                    let statements = check_block(
+                        catalog,
+                        path,
+                        source,
+                        body,
+                        &mut definition_scope,
+                        &mut definition_outputs,
+                        diagnostics,
+                    );
+                    let value_type =
+                        output::definition_value(&statements, path, statement.span, diagnostics)
+                            .map_or(FeaType::Error, |value| value.value_type.clone());
+                    output::register(
+                        &name.text,
+                        name.span,
+                        value_type,
+                        path,
+                        scope,
+                        outputs,
+                        diagnostics,
+                    );
+                    CheckedFeaStatementKind::OutputDefinition {
+                        name: name.text.clone(),
+                        statements,
+                    }
+                }
+                FeaStatementKind::Include(value) => CheckedFeaStatementKind::Include(check_value(
+                    catalog,
+                    path,
+                    source,
+                    scope,
+                    value,
+                    diagnostics,
+                )),
+                FeaStatementKind::Retain(value) => CheckedFeaStatementKind::Retain(check_value(
+                    catalog,
+                    path,
+                    source,
+                    scope,
+                    value,
+                    diagnostics,
+                )),
+                FeaStatementKind::Command { syntax } => CheckedFeaStatementKind::Command(
+                    source[syntax.span.start..syntax.span.end].to_string(),
+                ),
+            };
             CheckedFeaStatement {
                 kind,
                 span: statement.span,

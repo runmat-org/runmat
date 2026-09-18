@@ -1,8 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    AuthoredRegionSource, FieldLocation, ObservationQuantity, ObservationValueShape, Position,
-    SamplingPolicy, SeriesWeighting,
+    AuthoredRegionSource, CompressionPolicy, FieldLocation, ObservationPurpose,
+    ObservationQuantity, ObservationValueShape, PartialAccessPolicy, Position, RetentionPolicy,
+    SamplingPolicy, SeriesWeighting, SignalPrecision,
 };
 use runmat_types::PhysicalDimension;
 
@@ -11,6 +12,29 @@ use runmat_types::PhysicalDimension;
 pub struct AuthoredOutput {
     pub output_id: String,
     pub expression: AuthoredOutputExpression,
+    pub policy: AuthoredOutputPolicy,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AuthoredOutputPolicy {
+    pub precision: Option<SignalPrecision>,
+    pub compression: CompressionPolicy,
+    pub retention: RetentionPolicy,
+    pub partial_access: PartialAccessPolicy,
+    pub purpose: ObservationPurpose,
+}
+
+impl Default for AuthoredOutputPolicy {
+    fn default() -> Self {
+        Self {
+            precision: None,
+            compression: CompressionPolicy::Lossless,
+            retention: RetentionPolicy::Canonical,
+            partial_access: PartialAccessPolicy::ManifestAndChunks,
+            purpose: ObservationPurpose::Publication,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

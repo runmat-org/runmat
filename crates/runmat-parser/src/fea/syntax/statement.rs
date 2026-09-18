@@ -84,6 +84,10 @@ pub enum FeaStatementKind {
         name: FeaName,
         value: FeaExpression,
     },
+    OutputDefinition {
+        name: FeaName,
+        body: FeaBlock,
+    },
     Include(FeaExpression),
     Retain(FeaExpression),
     Command {

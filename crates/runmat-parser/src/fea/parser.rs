@@ -144,7 +144,10 @@ impl FeaParser {
                     };
                     statements.push(FeaStatement {
                         kind: self
-                            .parse_model_definition(start, open_block, body.clone())
+                            .parse_output_definition(start, open_block, body.clone())
+                            .or_else(|| {
+                                self.parse_model_definition(start, open_block, body.clone())
+                            })
                             .or_else(|| {
                                 self.parse_generated_function(start, open_block, body.clone())
                             })
@@ -415,6 +418,36 @@ impl FeaParser {
             self.missing_expression(range.span, "expected `=` and an output expression")
         };
         FeaStatementKind::Output { name, value }
+    }
+
+    fn parse_output_definition(
+        &mut self,
+        start: usize,
+        open: usize,
+        body: FeaBlock,
+    ) -> Option<FeaStatementKind> {
+        let significant = self.significant(start, open);
+        if !matches!(
+            self.kind(*significant.first()?),
+            Some(FeaTokenKind::Keyword(FeaKeyword::Output))
+        ) {
+            return None;
+        }
+        let name = significant
+            .get(1)
+            .and_then(|index| self.name(*index, FeaSyntaxDiagnosticKind::ExpectedIdentifier))
+            .unwrap_or_else(|| missing_name(self.token(start).span));
+        if significant.len() != 2 {
+            let span = significant
+                .get(2)
+                .map_or(self.token(start).span, |index| self.token(*index).span);
+            self.diagnostics.push(FeaSyntaxDiagnostic {
+                kind: FeaSyntaxDiagnosticKind::ExpectedToken,
+                span,
+                message: "output blocks require exactly one name".to_string(),
+            });
+        }
+        Some(FeaStatementKind::OutputDefinition { name, body })
     }
 
     fn parse_assignment_statement(

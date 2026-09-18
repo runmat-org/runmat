@@ -107,6 +107,26 @@ fn parses_typed_output_call_and_attributed_region() {
 }
 
 #[test]
+fn parses_output_policy_block_without_reclassifying_its_value() {
+    let module = parse_fea(
+        "study s {\noutput history {\nvalue = sample(output.tip, over = time, at = [0 s, 1 s])\nretention = explicit_samples\nmaximum_samples = 2\n}\n}\n",
+    );
+    assert!(module.diagnostics.is_empty(), "{:#?}", module.diagnostics);
+    let FeaModuleItem::Declaration(declaration) = &module.items[0] else {
+        panic!("expected declaration");
+    };
+    let FeaStatementKind::OutputDefinition { body, .. } = &declaration.body.statements[0].kind
+    else {
+        panic!("expected output definition");
+    };
+    assert_eq!(body.statements.len(), 3);
+    assert!(matches!(
+        body.statements[0].kind,
+        FeaStatementKind::Assignment { .. }
+    ));
+}
+
+#[test]
 fn recovers_at_the_next_top_level_declaration() {
     let module = parse_fea("not_a_declaration\nmaterial steel {\nname = \"steel\"\n}\n");
     assert_eq!(module.diagnostics.len(), 1);

@@ -29,6 +29,25 @@ pub(super) fn validate_spec(
     super::sampling::validate_storage(request, spec)
 }
 
+pub(super) fn validate_authored_spec(
+    step: &ProcedureStep,
+    request: &ObservationRequest,
+    spec: &ObservationSpec,
+) -> Result<(), AnalysisValidationError> {
+    validate_quantity_family(step, request, spec.quantity)?;
+    validate_shape(request, spec)?;
+    crate::validate_authored::validate_coordinate_frame(&spec.frame)
+        .map_err(|_| invalid_observation(request, "coordinate frame is invalid"))?;
+    validate_component(request, spec)?;
+    validate_sign(request, spec)?;
+    validate_complex(step, request, spec)?;
+    validate_target_location(request, spec)?;
+    validate_recovery(request, spec)?;
+    super::sampling::validate_sampling(step, request, &spec.sampling)?;
+    super::sampling::validate_reduction(step, request, spec)?;
+    super::sampling::validate_storage(request, spec)
+}
+
 fn validate_target_location(
     request: &ObservationRequest,
     spec: &ObservationSpec,
@@ -64,6 +83,7 @@ fn validate_target_location(
                 "shape-function point interpolation requires point output location",
             )
         }
+        ObservationTarget::Point { .. } => Ok(()),
         _ if spec.output_location == FieldLocation::Point => observation_error(
             request,
             "point output location requires a point or path target",

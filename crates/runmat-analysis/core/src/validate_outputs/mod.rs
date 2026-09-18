@@ -60,6 +60,28 @@ pub fn validate_observation_sampling(
     }
 }
 
+/// Validate the solver-independent portion of one authored observation request.
+///
+/// Exact region/entity existence remains a realized-model responsibility. Quantity, shape,
+/// representation, recovery, sampling, reduction, storage, and purpose contracts are complete
+/// before geometry realization and must fail at authoring time.
+pub fn validate_authored_observation_request(
+    step: &ProcedureStep,
+    request: &ObservationRequest,
+) -> Result<(), AnalysisValidationError> {
+    match request {
+        ObservationRequest::Field(spec)
+        | ObservationRequest::History(spec)
+        | ObservationRequest::Probe(spec)
+        | ObservationRequest::Reduction(spec) => spec::validate_authored_spec(step, request, spec),
+        ObservationRequest::Diagnostic(spec) => {
+            sampling::validate_sampling(step, request, &spec.sampling)?;
+            sampling::validate_retention(request, &spec.retention)
+        }
+        ObservationRequest::Monitor(_) => Ok(()),
+    }
+}
+
 pub(super) fn observation_error<T>(
     request: &ObservationRequest,
     detail: impl Into<String>,
