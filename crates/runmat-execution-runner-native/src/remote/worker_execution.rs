@@ -68,6 +68,18 @@ pub(super) async fn execute(
         .await
         .unwrap_or_else(|error| failure(&error.to_string()));
     }
+    if program.artifact.form == ExecutableForm::GeometryWorkload {
+        drop(progress_sender);
+        return tokio::task::spawn_blocking(move || {
+            crate::execute_geometry_materialization_program_request(
+                &program,
+                &mut objects,
+                crate::NativeGeometryMaterializationLimits::default(),
+            )
+        })
+        .await
+        .unwrap_or_else(|error| failure(&error.to_string()));
+    }
     if program.artifact.form == ExecutableForm::MeshingWorkload {
         let Some(host) = meshing_host else {
             return failure("remote worker has no meshing host capability");

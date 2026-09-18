@@ -274,11 +274,15 @@ pub(super) async fn run_worker_loop(
                 };
                 let externalized = matches!(
                     attempt.program.artifact.form,
-                    ExecutableForm::MeshingWorkload | ExecutableForm::AnalysisWorkload
+                    ExecutableForm::MeshingWorkload
+                        | ExecutableForm::AnalysisWorkload
+                        | ExecutableForm::GeometryWorkload
                 );
                 let cooperative = matches!(
                     attempt.program.artifact.form,
-                    ExecutableForm::MeshingWorkload | ExecutableForm::AnalysisWorkload
+                    ExecutableForm::MeshingWorkload
+                        | ExecutableForm::AnalysisWorkload
+                        | ExecutableForm::GeometryWorkload
                 );
                 let cancellation =
                     Arc::new(super::worker_execution::AttemptCancellation::default());

@@ -289,6 +289,15 @@ pub(super) async fn run_remote_driver(
                     &crate::NativeAnalysisKernel,
                     crate::NativeAnalysisHostLimits::default(),
                 )
+            } else if request.artifact.form
+                == runmat_execution_artifact::ExecutableForm::GeometryWorkload
+            {
+                let mut objects = objects.clone();
+                crate::execute_geometry_materialization_program_request(
+                    &request,
+                    &mut objects,
+                    crate::NativeGeometryMaterializationLimits::default(),
+                )
             } else {
                 request.arguments = request
                     .arguments

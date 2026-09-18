@@ -28,6 +28,7 @@ mod exact_meshing_job;
 mod exact_meshing_root;
 mod exact_structural_study_root;
 mod exact_structural_sweep_root;
+mod geometry_materialization;
 mod local_store;
 mod materialized_project;
 mod meshing_evaluator;
@@ -138,6 +139,10 @@ pub use exact_structural_sweep_root::{
     ExactStructuralSweepResultExpectation, ExactStructuralSweepRootPreparation,
     ExactStructuralSweepTerminal, PreparedExactStructuralSweepRoot,
     EXACT_STRUCTURAL_SWEEP_ROOT_EXECUTION_MODE, EXACT_STRUCTURAL_SWEEP_ROOT_TARGET_PROFILE,
+};
+pub use geometry_materialization::{
+    execute_geometry_materialization_program_request, native_geometry_provider_profile,
+    NativeGeometryMaterializationLimits,
 };
 pub use meshing_evaluator::{native_meshing_kernel_dispatcher, NativeMeshingEvaluatorProvider};
 pub use meshing_host::{

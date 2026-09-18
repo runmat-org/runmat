@@ -24,6 +24,7 @@ runmat-execution-transport-native = { workspace = true }
 runmat-filesystem = { workspace = true }
 runmat-geometry-core = { workspace = true }
 runmat-geometry-io = { workspace = true }
+runmat-geometry-ops = { workspace = true }
 runmat-meshing-core = { workspace = true }
 runmat-meshing-execution = { workspace = true }
 runmat-process-host = { workspace = true }

@@ -134,7 +134,9 @@ impl NativeProgramSession {
             }
             if !matches!(
                 program.artifact.form,
-                ExecutableForm::MeshingWorkload | ExecutableForm::AnalysisWorkload
+                ExecutableForm::MeshingWorkload
+                    | ExecutableForm::AnalysisWorkload
+                    | ExecutableForm::GeometryWorkload
             ) {
                 let arguments = materialize_arguments(&program.arguments, &registered)?;
                 program.arguments = arguments.clone();

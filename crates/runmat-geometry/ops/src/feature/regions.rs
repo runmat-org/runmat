@@ -30,7 +30,8 @@ pub trait GeometryRegionEvidence {
     ) -> Result<Vec<PersistentEntityId>, Self::Error>;
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ResolvedGeometryRegion {
     pub role: GeometryRegionRole,
     pub entity_ids: Vec<PersistentEntityId>,

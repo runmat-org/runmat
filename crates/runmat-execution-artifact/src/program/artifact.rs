@@ -18,6 +18,7 @@ pub enum ExecutableForm {
     NativeObjectV1 = 4,
     MeshingWorkload = 5,
     AnalysisWorkload = 6,
+    GeometryWorkload = 7,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

@@ -43,6 +43,26 @@ pub async fn execute_host_program_request_with_project(
             crate::NativeAnalysisHostLimits::default(),
         );
     }
+    if request.artifact.form == ExecutableForm::GeometryWorkload {
+        let Some(root) = std::env::var_os(crate::NATIVE_OBJECT_STORE_ROOT_ENV) else {
+            return ProgramExecutionResponse::Failure {
+                message: "geometry worker object store is not configured".into(),
+            };
+        };
+        let limits = crate::NativeGeometryMaterializationLimits::default();
+        let mut store =
+            match crate::FilesystemObjectStore::open(root, limits.inventory.max_object_bytes) {
+                Ok(store) => store,
+                Err(error) => {
+                    return ProgramExecutionResponse::Failure {
+                        message: error.to_string(),
+                    }
+                }
+            };
+        return crate::execute_geometry_materialization_program_request(
+            &request, &mut store, limits,
+        );
+    }
     if request.artifact.form != ExecutableForm::TestAttemptV1 {
         return runmat_vm::execute_program_request(request).await;
     }

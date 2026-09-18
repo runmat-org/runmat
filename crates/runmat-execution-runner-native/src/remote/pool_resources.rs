@@ -47,6 +47,11 @@ pub(super) fn native_worker_capabilities(
             )
             .map_err(protocol)?,
         );
+        if let Some(profile) = crate::native_geometry_provider_profile() {
+            capabilities.insert(runmat_analysis_execution::geometry_provider_capability(
+                &profile,
+            ));
+        }
     }
     Ok(capabilities)
 }
@@ -180,6 +185,13 @@ mod tests {
         let has_admission_capability = inventory.contains(&Capability::Custom(
             runmat_meshing_execution::EXACT_CAD_ADMISSION_CAPABILITY.into(),
         ));
+        let has_geometry_capability = crate::native_geometry_provider_profile()
+            .map(|profile| {
+                inventory.contains(&runmat_analysis_execution::geometry_provider_capability(
+                    &profile,
+                ))
+            })
+            .unwrap_or(false);
         let occt_compiled = cfg!(all(feature = "occt-native", not(target_arch = "wasm32")));
 
         assert_eq!(
@@ -189,6 +201,7 @@ mod tests {
         assert_eq!(has_meshing_capability, occt_compiled);
         assert_eq!(has_exact_kernel_capability, occt_compiled);
         assert_eq!(has_admission_capability, occt_compiled);
+        assert_eq!(has_geometry_capability, occt_compiled);
     }
 
     #[test]

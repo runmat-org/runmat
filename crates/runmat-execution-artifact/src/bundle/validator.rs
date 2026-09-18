@@ -177,6 +177,7 @@ fn validate_code_closure(bundle: &ExecutionBundle) -> ArtifactResult<()> {
                             | crate::ExecutableForm::NativeObjectV1
                             | crate::ExecutableForm::MeshingWorkload
                             | crate::ExecutableForm::AnalysisWorkload
+                            | crate::ExecutableForm::GeometryWorkload
                     )
                 })
             {

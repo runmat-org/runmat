@@ -123,6 +123,7 @@ impl<'a, R: SourceReader> ExecutionBundleBuilder<'a, R> {
                             | ExecutableForm::NativeObjectV1
                             | ExecutableForm::MeshingWorkload
                             | ExecutableForm::AnalysisWorkload
+                            | ExecutableForm::GeometryWorkload
                     )
                 }))
         {

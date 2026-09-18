@@ -9,6 +9,7 @@ mod field_recovery;
 mod frequency_field_recovery;
 mod frequency_object_access;
 mod frequency_task;
+mod geometry_materialization;
 mod graph;
 mod host;
 mod input_materialization;
@@ -111,6 +112,7 @@ pub use frequency_task::{
     PreparedStructuralFrequencyResultTask, StructuralFrequencyEntryPreparation,
     StructuralFrequencyFanoutPreparation, StructuralFrequencyResultPreparation,
 };
+pub use geometry_materialization::*;
 pub use graph::{
     compile_analysis_sequence_graph, AnalysisSequenceExecutionGraph, AnalysisSequenceTask,
     PreparedAnalysisStepTask,

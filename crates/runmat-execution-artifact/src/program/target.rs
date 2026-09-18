@@ -91,6 +91,7 @@ impl ProgramTarget {
             | ExecutableForm::TestAttemptV1
             | ExecutableForm::MeshingWorkload
             | ExecutableForm::AnalysisWorkload
+            | ExecutableForm::GeometryWorkload
             | ExecutableForm::ExecutableUnitV3 => self.cohort == ProgramTargetCohort::Portable,
         };
         if compatible {

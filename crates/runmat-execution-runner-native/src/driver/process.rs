@@ -29,7 +29,8 @@ pub(super) fn execute_attempt(
         runmat_execution_artifact::ExecutableForm::InterpreterScriptV1
         | runmat_execution_artifact::ExecutableForm::TestAttemptV1
         | runmat_execution_artifact::ExecutableForm::MeshingWorkload
-        | runmat_execution_artifact::ExecutableForm::AnalysisWorkload => 0,
+        | runmat_execution_artifact::ExecutableForm::AnalysisWorkload
+        | runmat_execution_artifact::ExecutableForm::GeometryWorkload => 0,
         _ => stored.function,
     };
     let worker_request = WorkerRequest {

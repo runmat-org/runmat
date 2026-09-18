@@ -145,7 +145,10 @@ impl RemoteDriverCheckpoint {
 pub(super) const fn execution_start_phase(
     request: &ProgramExecutionRequest,
 ) -> RemoteDriverCheckpointPhase {
-    if matches!(request.artifact.form, ExecutableForm::AnalysisWorkload) {
+    if matches!(
+        request.artifact.form,
+        ExecutableForm::AnalysisWorkload | ExecutableForm::GeometryWorkload
+    ) {
         RemoteDriverCheckpointPhase::ReplayableExecutionStarted
     } else {
         RemoteDriverCheckpointPhase::EffectsMayHaveStarted
@@ -198,6 +201,7 @@ mod tests {
         .unwrap();
         let entrypoint = match form {
             ExecutableForm::AnalysisWorkload => "analysis_workload",
+            ExecutableForm::GeometryWorkload => "geometry_workload",
             _ => "0",
         };
         let recipe = ProgramBuildRecipe {
@@ -274,9 +278,13 @@ mod tests {
     }
 
     #[test]
-    fn execution_start_is_resume_safe_only_for_the_closed_analysis_host() {
+    fn execution_start_is_resume_safe_for_closed_analysis_and_geometry_hosts() {
         assert_eq!(
             execution_start_phase(&request(ExecutableForm::AnalysisWorkload)).disposition(),
+            CheckpointDisposition::ResumeSafe
+        );
+        assert_eq!(
+            execution_start_phase(&request(ExecutableForm::GeometryWorkload)).disposition(),
             CheckpointDisposition::ResumeSafe
         );
         assert_eq!(
