@@ -3,8 +3,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    procedure_produces_observation_quantity, AuthoredRegionSource, ObservationQuantity,
-    ObservationValueShape, ProcedureStep,
+    procedure_produces_observation_quantity, AuthoredRegionSource, FieldLocation,
+    ObservationQuantity, ObservationValueShape, ProcedureStep,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -20,6 +20,7 @@ pub enum AuthoredOutputExpression {
     AnalysisField {
         step_id: String,
         quantity: ObservationQuantity,
+        location: FieldLocation,
     },
     OutputReference {
         output_id: String,
@@ -146,7 +147,11 @@ impl AuthoredOutputExpression {
         outputs: &BTreeMap<&str, AuthoredOutputType>,
     ) -> Result<AuthoredOutputType, AuthoredOutputError> {
         match self {
-            Self::AnalysisField { step_id, quantity } => {
+            Self::AnalysisField {
+                step_id,
+                quantity,
+                location: _,
+            } => {
                 let step = steps
                     .get(step_id.as_str())
                     .ok_or_else(|| AuthoredOutputError::UnknownStep(step_id.clone()))?;
@@ -275,7 +280,7 @@ impl AuthoredOutputExpression {
     }
 }
 
-fn field_domain(procedure: crate::AnalysisProcedure) -> AuthoredFieldDomain {
+pub(super) fn field_domain(procedure: crate::AnalysisProcedure) -> AuthoredFieldDomain {
     match procedure {
         crate::AnalysisProcedure::HarmonicResponse
         | crate::AnalysisProcedure::PrestressedHarmonicResponse => AuthoredFieldDomain::Complex,

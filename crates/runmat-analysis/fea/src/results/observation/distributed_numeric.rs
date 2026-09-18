@@ -232,6 +232,15 @@ fn project_component(
                 .sum::<f64>()
                 .sqrt()])
         }
+        ResolvedComponentProjection::VonMisesSymmetricTensor
+            if !complex_output && value.len() == 6 =>
+        {
+            let [xx, yy, zz, xy, yz, zx] = <[f64; 6]>::try_from(value).map_err(|_| {
+                ObservationError::Identity("symmetric stress projection has the wrong shape")
+            })?;
+            let normal = 0.5 * ((xx - yy).powi(2) + (yy - zz).powi(2) + (zz - xx).powi(2));
+            Ok(vec![(normal + 3.0 * (xy * xy + yz * yz + zx * zx)).sqrt()])
+        }
         _ => Err(ObservationError::Unsupported(
             "component projection is not implemented for this recovered value shape",
         )),

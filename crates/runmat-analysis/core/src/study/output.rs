@@ -220,6 +220,17 @@ impl ObservationQuantity {
 }
 
 impl ObservationSpec {
+    /// Physical meaning of the projected result, distinct from its recovered source quantity.
+    pub fn result_quantity(&self) -> ObservationResultQuantity {
+        if self.component == ObservationComponent::VonMises {
+            ObservationResultQuantity::Physical(ObservationQuantity::VonMisesStress)
+        } else if self.complex_representation == ComplexRepresentation::PhaseRadians {
+            ObservationResultQuantity::Dimensionless
+        } else {
+            ObservationResultQuantity::Physical(self.quantity)
+        }
+    }
+
     /// Canonical value shape after component projection and spatial reduction.
     ///
     /// This is distinct from `value_shape`, which describes the recovered source quantity.
@@ -242,6 +253,13 @@ impl ObservationSpec {
             _ => projected,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind", content = "quantity")]
+pub enum ObservationResultQuantity {
+    Physical(ObservationQuantity),
+    Dimensionless,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

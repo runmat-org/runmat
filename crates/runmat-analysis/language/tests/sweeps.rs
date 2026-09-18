@@ -37,7 +37,7 @@ study response {
         structural static {
         }
     }
-    output displacement = analysis.static.field.displacement
+    output displacement = analysis.static.field.node.displacement
     output displacement_magnitude = magnitude(output.displacement)
     output peak_displacement = max(
         output.displacement_magnitude,

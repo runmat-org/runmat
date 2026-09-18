@@ -421,6 +421,51 @@ fn field_and_exact_probe_use_typed_source_and_canonical_entities() {
 }
 
 #[test]
+fn von_mises_projection_keeps_stress_as_its_source_quantity() {
+    let projection = projection(ElementOrder::Tet4);
+    let definition = RecoveredFieldDefinition::new(
+        "stress.recovered",
+        ObservationQuantity::Stress,
+        FieldLocation::Element,
+        RecoveredFieldEntityDomain::SolidElements,
+        ObservationValueShape::SymmetricTensor3,
+        RecoveredFieldNumericRepresentation::Real,
+    )
+    .unwrap();
+    let mut request = spec("von_mises", ObservationTarget::WholeModel);
+    request.quantity = ObservationQuantity::Stress;
+    request.value_shape = ObservationValueShape::SymmetricTensor3;
+    request.source_location = FieldLocation::Element;
+    request.output_location = FieldLocation::Element;
+    request.component = ObservationComponent::VonMises;
+    request.cost = runmat_analysis_core::ObservationCostPolicy::Automatic;
+    let mut step = ProcedureStep::structural_static("static");
+    step.observations = vec![ObservationRequest::Field(request)];
+    let plan = resolve_observation_plan(
+        &step,
+        &projection,
+        std::slice::from_ref(&definition),
+        ObservationLimits::default(),
+    )
+    .unwrap();
+    let fields = catalog(
+        &projection,
+        &definition,
+        vec![1, 6],
+        vec![100.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    );
+    let result = evaluate_observations(&plan, &projection, &fields).unwrap();
+
+    assert_eq!(result[0].field.as_host_f64().unwrap(), &[100.0]);
+    assert_eq!(
+        plan.observations[0].spec.result_quantity(),
+        runmat_analysis_core::ObservationResultQuantity::Physical(
+            ObservationQuantity::VonMisesStress
+        )
+    );
+}
+
+#[test]
 fn path_interpolation_reproduces_linear_fields_for_tet4_and_tet10() {
     let positions = [[0.1, 0.1, 0.1], [0.2, 0.3, 0.1], [0.05, 0.15, 0.4]];
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {

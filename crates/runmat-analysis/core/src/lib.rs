@@ -51,15 +51,16 @@ pub use execution_policy::{
     ParallelismLimit, PartitionBalance, PlacementPreference, ResiliencePolicy,
 };
 pub use study::{
-    authored_output_types, validate_authored_outputs, AuthoredCaseOutputRef,
-    AuthoredExtremaTiePolicy, AuthoredFieldDomain, AuthoredFieldProjection, AuthoredMeshRef,
-    AuthoredModelArgument, AuthoredModelArgumentValue, AuthoredModelInstance, AuthoredOutput,
-    AuthoredOutputError, AuthoredOutputExpression, AuthoredOutputType, AuthoredOutputValue,
-    AuthoredSpatialReduction, AuthoredStudy, AuthoredStudyError, AuthoredStudyInputBinding,
-    AuthoredStudyInputRef, AuthoredStudyRealizationError, AuthoredStudyRef, AuthoredSweep,
-    AuthoredSweepAxis, AuthoredSweepAxisValue, AuthoredSweepBinding, AuthoredSweepCase,
-    AuthoredSweepDefinition, AuthoredSweepError, AuthoredSweepOutput,
-    AuthoredSweepOutputExpression, AuthoredVectorComponent, CaseOutputProjection, RealizedStudy,
+    authored_output_types, lower_authored_observations, validate_authored_outputs,
+    AuthoredCaseOutputRef, AuthoredExtremaTiePolicy, AuthoredFieldDomain, AuthoredFieldProjection,
+    AuthoredMeshRef, AuthoredModelArgument, AuthoredModelArgumentValue, AuthoredModelInstance,
+    AuthoredObservationError, AuthoredOutput, AuthoredOutputError, AuthoredOutputExpression,
+    AuthoredOutputType, AuthoredOutputValue, AuthoredSpatialReduction, AuthoredStudy,
+    AuthoredStudyError, AuthoredStudyInputBinding, AuthoredStudyInputRef,
+    AuthoredStudyRealizationError, AuthoredStudyRef, AuthoredSweep, AuthoredSweepAxis,
+    AuthoredSweepAxisValue, AuthoredSweepBinding, AuthoredSweepCase, AuthoredSweepDefinition,
+    AuthoredSweepError, AuthoredSweepOutput, AuthoredSweepOutputExpression,
+    AuthoredVectorComponent, CaseOutputProjection, LoweredAuthoredObservation, RealizedStudy,
     SweepAxisCombination, SweepExtremum,
 };
 pub use validate::physics_family_can_consume_state;
@@ -212,10 +213,10 @@ pub use study::output::{
     DiagnosticObservation, ExtremaTiePolicy, FieldLocation, MonitorCadence, MonitorObservation,
     MonitorStopCondition, ObservationComponent, ObservationCostEstimate, ObservationCostPolicy,
     ObservationEvent, ObservationId, ObservationPurpose, ObservationQuantity, ObservationRequest,
-    ObservationSpec, ObservationStoragePolicy, ObservationTarget, ObservationThreshold,
-    ObservationValueShape, PartialAccessPolicy, RecoveryPolicy, ReductionPolicy, RetentionPolicy,
-    SamplingPolicy, SeriesObservationEvent, SeriesReduction, SeriesWeighting, SignConvention,
-    SolverObservationEvent, SpatialReduction,
+    ObservationResultQuantity, ObservationSpec, ObservationStoragePolicy, ObservationTarget,
+    ObservationThreshold, ObservationValueShape, PartialAccessPolicy, RecoveryPolicy,
+    ReductionPolicy, RetentionPolicy, SamplingPolicy, SeriesObservationEvent, SeriesReduction,
+    SeriesWeighting, SignConvention, SolverObservationEvent, SpatialReduction,
 };
 pub use study::sequence::{
     ActivationLifecycle, AnalysisSequence, IndependentDomain, InitialStateConflictPolicy,

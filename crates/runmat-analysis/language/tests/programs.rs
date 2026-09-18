@@ -35,7 +35,7 @@ study load_study {
         structural static {
         }
     }
-    output displacement = analysis.solve.field.displacement
+    output displacement = analysis.solve.field.node.displacement
 }
 "#;
     let host = TestHost::default().with_module(

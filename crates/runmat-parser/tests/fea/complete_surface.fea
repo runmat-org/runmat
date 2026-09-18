@@ -229,7 +229,7 @@ study bracket_response {
         }
     }
 
-    output displacement = analysis.response.field.displacement
+    output displacement = analysis.response.field.node.displacement
     output peak_displacement = max(
         magnitude(output.displacement),
         over = geometry.imported_bracket.region.body,

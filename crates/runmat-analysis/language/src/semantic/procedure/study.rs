@@ -72,8 +72,34 @@ pub(super) fn lower(
         model,
         diagnostics,
     );
-    let sequence = lower::lower_study(declaration, model, diagnostics)?;
+    let mut sequence = lower::lower_study(declaration, model, diagnostics)?;
     let outputs = super::output::lower_outputs(context.bound, declaration, diagnostics);
+    match runmat_analysis_core::lower_authored_observations(&outputs, &sequence.steps) {
+        Ok(observations) => {
+            for observation in observations {
+                let Some(step) = sequence
+                    .steps
+                    .iter_mut()
+                    .find(|step| step.step_id == observation.step_id)
+                else {
+                    lower::error(
+                        declaration,
+                        declaration.span,
+                        "lowered output references an unavailable analysis step",
+                        diagnostics,
+                    );
+                    continue;
+                };
+                step.observations.push(observation.request);
+            }
+        }
+        Err(error) => lower::error(
+            declaration,
+            declaration.span,
+            error.to_string(),
+            diagnostics,
+        ),
+    }
     if diagnostics.len() != initial_errors {
         return None;
     }

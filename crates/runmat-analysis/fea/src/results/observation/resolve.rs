@@ -1124,6 +1124,9 @@ fn resolve_component(
         ObservationComponent::Magnitude if source == 3 => {
             Ok(ResolvedComponentProjection::Magnitude3)
         }
+        ObservationComponent::VonMises if source == 6 => {
+            Ok(ResolvedComponentProjection::VonMisesSymmetricTensor)
+        }
         _ => Err(ObservationError::Unsupported(
             "this evaluator supports scalar/all and vector all, Cartesian, or magnitude components",
         )),

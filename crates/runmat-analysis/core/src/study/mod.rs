@@ -1,6 +1,7 @@
 //! Solver-independent identity for an authored analysis and its realized formulation.
 
 pub mod accuracy;
+mod authored_observation;
 mod authored_output;
 pub mod authoring;
 mod compatibility;
@@ -11,6 +12,9 @@ mod realization;
 pub mod sequence;
 mod sweep;
 
+pub use authored_observation::{
+    lower_authored_observations, AuthoredObservationError, LoweredAuthoredObservation,
+};
 pub use authored_output::{
     authored_output_types, validate_authored_outputs, AuthoredExtremaTiePolicy,
     AuthoredFieldDomain, AuthoredFieldProjection, AuthoredOutput, AuthoredOutputError,

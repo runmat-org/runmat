@@ -184,7 +184,7 @@ study response {
         structural static {
         }
     }
-    output displacement = analysis.static.field.displacement
+    output displacement = analysis.static.field.node.displacement
     output displacement_magnitude = magnitude(output.displacement)
     output peak_displacement = max(
         output.displacement_magnitude,
@@ -248,9 +248,9 @@ study response {{
         structural static {{
         }}
     }}
-    output invalid_temperature = analysis.static.field.temperature
+    output invalid_temperature = analysis.static.field.node.temperature
     output invalid_vector_max = max(
-        analysis.static.field.displacement,
+        analysis.static.field.node.displacement,
         over = geometry.part.region.body,
     )
 }}

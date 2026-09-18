@@ -2,7 +2,8 @@ use std::collections::BTreeSet;
 
 use runmat_analysis_core::{
     AuthoredExtremaTiePolicy, AuthoredFieldProjection, AuthoredOutput, AuthoredOutputExpression,
-    AuthoredRegionSource, AuthoredSpatialReduction, AuthoredVectorComponent, ObservationQuantity,
+    AuthoredRegionSource, AuthoredSpatialReduction, AuthoredVectorComponent, FieldLocation,
+    ObservationQuantity,
 };
 
 use crate::{
@@ -45,13 +46,15 @@ fn lower_expression(
 ) -> Option<AuthoredOutputExpression> {
     match &expression.kind {
         CheckedExpressionKind::Reference(path) => match path.as_slice() {
-            [analysis, step_id, field, quantity_name]
+            [analysis, step_id, field, location_name, quantity_name]
                 if analysis == "analysis" && field == "field" =>
             {
                 let (quantity, _) = field_reference_type(quantity_name)?;
+                let location = field_location(location_name)?;
                 Some(AuthoredOutputExpression::AnalysisField {
                     step_id: step_id.clone(),
                     quantity,
+                    location,
                 })
             }
             [output, output_id] if output == "output" && available.contains(output_id.as_str()) => {
@@ -165,6 +168,24 @@ fn lower_expression(
         },
         _ => invalid(declaration, expression, diagnostics),
     }
+}
+
+fn field_location(name: &str) -> Option<FieldLocation> {
+    Some(match name {
+        "node" => FieldLocation::Node,
+        "cell" => FieldLocation::Cell,
+        "element" => FieldLocation::Element,
+        "integration_point" => FieldLocation::IntegrationPoint,
+        "face" => FieldLocation::Face,
+        "edge" => FieldLocation::Edge,
+        "interface" => FieldLocation::Interface,
+        "connector" => FieldLocation::Connector,
+        "constraint" => FieldLocation::Constraint,
+        "reference_point" => FieldLocation::ReferencePoint,
+        "mode" => FieldLocation::Mode,
+        "global" => FieldLocation::Global,
+        _ => return None,
+    })
 }
 
 fn positional_or_named<'a>(
