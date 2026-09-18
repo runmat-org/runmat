@@ -180,6 +180,8 @@ pub enum ResolvedComponentProjection {
     Cartesian { axis: usize },
     Magnitude3,
     VonMisesSymmetricTensor,
+    MaximumPrincipalSymmetricTensor,
+    MinimumPrincipalSymmetricTensor,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -927,7 +929,9 @@ fn validate_resolved_observation(
         ResolvedComponentProjection::All => true,
         ResolvedComponentProjection::Cartesian { axis } => axis < source_components,
         ResolvedComponentProjection::Magnitude3 => source_components == 3,
-        ResolvedComponentProjection::VonMisesSymmetricTensor => source_components == 6,
+        ResolvedComponentProjection::VonMisesSymmetricTensor
+        | ResolvedComponentProjection::MaximumPrincipalSymmetricTensor
+        | ResolvedComponentProjection::MinimumPrincipalSymmetricTensor => source_components == 6,
     };
     if !component_projection_is_valid
         || observation.result_value_shape != observation.spec.result_value_shape()

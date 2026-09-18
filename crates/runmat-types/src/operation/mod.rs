@@ -1,3 +1,4 @@
+mod dimension;
 mod distribution;
 mod effect;
 mod extension;
@@ -9,6 +10,7 @@ mod signature;
 mod topology;
 mod type_pattern;
 
+pub use dimension::*;
 pub use distribution::*;
 pub use effect::*;
 pub use extension::*;

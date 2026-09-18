@@ -17,9 +17,16 @@ pub fn output_operation_extension() -> OperationCatalogExtension {
             projection("phase"),
             magnitude(),
             component(),
+            principal(),
             projection("von_mises"),
+            spatial_reduction("integral"),
+            spatial_reduction("mean"),
+            spatial_reduction("rms"),
+            spatial_reduction("norm"),
             extremum("min"),
             extremum("max"),
+            spatial_reduction("resultant"),
+            moment(),
             case_operation("collect", "fea.output.case.collect"),
             case_operation("retain_each", "fea.output.case.retain_each"),
         ],
@@ -33,9 +40,16 @@ pub(crate) enum OutputOperation {
     Phase,
     Magnitude,
     Component,
+    Principal,
     VonMises,
+    Integral,
+    Mean,
+    RootMeanSquare,
+    Norm,
     Minimum,
     Maximum,
+    Resultant,
+    Moment,
     CollectCases,
     RetainEachCase,
     MinimumCase,
@@ -50,9 +64,16 @@ impl OutputOperation {
             "fea.output.phase" => Some(Self::Phase),
             "fea.output.magnitude" => Some(Self::Magnitude),
             "fea.output.component" => Some(Self::Component),
+            "fea.output.principal" => Some(Self::Principal),
             "fea.output.von_mises" => Some(Self::VonMises),
+            "fea.output.integral" => Some(Self::Integral),
+            "fea.output.mean" => Some(Self::Mean),
+            "fea.output.rms" => Some(Self::RootMeanSquare),
+            "fea.output.norm" => Some(Self::Norm),
             "fea.output.min" => Some(Self::Minimum),
             "fea.output.max" => Some(Self::Maximum),
+            "fea.output.resultant" => Some(Self::Resultant),
+            "fea.output.moment" => Some(Self::Moment),
             "fea.output.case.collect" => Some(Self::CollectCases),
             "fea.output.case.retain_each" => Some(Self::RetainEachCase),
             "fea.output.case.min" => Some(Self::MinimumCase),
@@ -71,46 +92,92 @@ impl OutputOperation {
             }
         });
         match (self, source) {
-            (Self::Magnitude, Some(FeaType::Field(value))) => match value.as_ref() {
+            (Self::Magnitude, Some(FeaType::Field(field))) => match field.value.as_ref() {
                 FeaType::Vector {
                     element,
                     length: Some(3),
-                } if element.is_numeric() => Ok(FeaType::Field(element.clone())),
+                } if element.is_numeric() => {
+                    Ok(projected_field(field, element.clone(), field.quantity))
+                }
                 _ => Err("magnitude requires a three-component numeric field"),
             },
-            (Self::Component, Some(FeaType::Field(value))) => match value.as_ref() {
+            (Self::Component, Some(FeaType::Field(field))) => match field.value.as_ref() {
                 FeaType::Vector {
                     element,
                     length: Some(3),
-                } if element.is_numeric() => Ok(FeaType::Field(element.clone())),
+                } if element.is_numeric() => {
+                    Ok(projected_field(field, element.clone(), field.quantity))
+                }
                 _ => Err("component requires a three-component numeric field"),
             },
-            (Self::Real | Self::Imaginary, Some(FeaType::Field(value))) => {
-                Ok(FeaType::Field(value.clone()))
+            (Self::Real | Self::Imaginary, Some(FeaType::Field(field))) => {
+                Ok(FeaType::Field(field.clone()))
             }
-            (Self::Phase, Some(FeaType::Field(value))) => {
-                Ok(FeaType::Field(Box::new(dimensionless_shape(value))))
-            }
-            (Self::VonMises, Some(FeaType::Field(value))) => match value.as_ref() {
+            (Self::Phase, Some(FeaType::Field(field))) => Ok(projected_field(
+                field,
+                Box::new(dimensionless_shape(&field.value)),
+                None,
+            )),
+            (Self::VonMises, Some(FeaType::Field(field))) => match field.value.as_ref() {
                 FeaType::Vector {
                     element,
                     length: Some(6),
                 } if element.as_ref() == &FeaType::Quantity(crate::PhysicalDimension::PRESSURE) => {
-                    Ok(FeaType::Field(element.clone()))
+                    Ok(projected_field(
+                        field,
+                        element.clone(),
+                        Some(runmat_analysis_core::ObservationQuantity::VonMisesStress),
+                    ))
                 }
                 _ => Err("von_mises requires a symmetric stress field"),
             },
-            (Self::Minimum | Self::Maximum, Some(FeaType::Field(value))) if value.is_numeric() => {
-                Ok(FeaType::AttributedExtremum(value.clone()))
+            (Self::Principal, Some(FeaType::Field(field))) => match field.value.as_ref() {
+                FeaType::Vector {
+                    element,
+                    length: Some(6),
+                } if element.is_numeric()
+                    && matches!(
+                        field.quantity,
+                        Some(
+                            runmat_analysis_core::ObservationQuantity::Stress
+                                | runmat_analysis_core::ObservationQuantity::Strain
+                        )
+                    ) =>
+                {
+                    Ok(projected_field(field, element.clone(), field.quantity))
+                }
+                _ => Err("principal requires a real symmetric tensor field"),
+            },
+            (Self::Integral, Some(FeaType::Field(field))) => {
+                let measure = region_measure(argument_type(arguments, 1, "over"))
+                    .ok_or("integral requires an edge, face, solid, or cell region")?;
+                scale_numeric_type(&field.value, measure)
+                    .ok_or("integral requires a numeric field with a representable dimension")
+            }
+            (Self::Mean | Self::RootMeanSquare, Some(FeaType::Field(field)))
+                if numeric_shape(&field.value) =>
+            {
+                Ok(field.value.as_ref().clone())
+            }
+            (Self::Norm, Some(FeaType::Field(field))) => scalar_dimension(&field.value)
+                .map(FeaType::Quantity)
+                .ok_or("norm requires a numeric field"),
+            (Self::Minimum | Self::Maximum, Some(FeaType::Field(field)))
+                if field.value.is_numeric() =>
+            {
+                Ok(FeaType::AttributedExtremum(field.value.clone()))
             }
             (Self::Minimum | Self::Maximum, Some(FeaType::Field(_))) => {
                 Err("spatial extrema require an explicit scalar field projection")
             }
+            (Self::Resultant | Self::Moment, Some(FeaType::Field(field))) => {
+                resultant_type(self, field, argument_type(arguments, 1, "over"))
+            }
             (Self::CollectCases, Some(value)) if value.is_numeric() => {
                 Ok(FeaType::CaseTable(Box::new(value.clone())))
             }
-            (Self::RetainEachCase, Some(FeaType::Field(value))) => {
-                Ok(FeaType::CaseTable(Box::new(FeaType::Field(value.clone()))))
+            (Self::RetainEachCase, Some(FeaType::Field(field))) => {
+                Ok(FeaType::CaseTable(Box::new(FeaType::Field(field.clone()))))
             }
             (Self::MinimumCase | Self::MaximumCase, Some(value)) if value.is_numeric() => {
                 Ok(FeaType::AttributedExtremum(Box::new(value.clone())))
@@ -118,6 +185,122 @@ impl OutputOperation {
             _ => Err("output operation requires an analysis field"),
         }
     }
+}
+
+fn argument_type<'a>(
+    arguments: &'a [CheckedCallArgument],
+    position: usize,
+    name: &str,
+) -> Option<&'a FeaType> {
+    arguments
+        .iter()
+        .find_map(|argument| match argument {
+            CheckedCallArgument::Named {
+                name: candidate,
+                value,
+            } if candidate == name => Some(&value.value_type),
+            _ => None,
+        })
+        .or_else(|| {
+            arguments.get(position).map(|argument| match argument {
+                CheckedCallArgument::Positional(value)
+                | CheckedCallArgument::Named { value, .. } => &value.value_type,
+            })
+        })
+}
+
+fn numeric_shape(value: &FeaType) -> bool {
+    value.is_numeric() || matches!(value, FeaType::Vector { element, .. } if element.is_numeric())
+}
+
+fn scalar_dimension(value: &FeaType) -> Option<crate::PhysicalDimension> {
+    match value {
+        FeaType::Quantity(dimension) => Some(*dimension),
+        FeaType::Integer | FeaType::Real | FeaType::Complex => {
+            Some(crate::PhysicalDimension::DIMENSIONLESS)
+        }
+        FeaType::Vector { element, .. } => scalar_dimension(element),
+        _ => None,
+    }
+}
+
+fn scale_numeric_type(value: &FeaType, measure: crate::PhysicalDimension) -> Option<FeaType> {
+    match value {
+        FeaType::Quantity(dimension) => Some(FeaType::Quantity(dimension.multiply(measure)?)),
+        FeaType::Integer | FeaType::Real | FeaType::Complex => Some(FeaType::Quantity(measure)),
+        FeaType::Vector { element, length } => Some(FeaType::Vector {
+            element: Box::new(scale_numeric_type(element, measure)?),
+            length: *length,
+        }),
+        _ => None,
+    }
+}
+
+fn region_measure(value: Option<&FeaType>) -> Option<crate::PhysicalDimension> {
+    Some(match value? {
+        FeaType::Region(crate::FeaTopologyRole::Vertex) => return None,
+        FeaType::Region(crate::FeaTopologyRole::Edge) => crate::PhysicalDimension::LENGTH,
+        FeaType::Region(crate::FeaTopologyRole::Face) => crate::PhysicalDimension::AREA,
+        FeaType::Region(crate::FeaTopologyRole::Solid | crate::FeaTopologyRole::Cell) => {
+            crate::PhysicalDimension::VOLUME
+        }
+        _ => return None,
+    })
+}
+
+fn resultant_type(
+    operation: OutputOperation,
+    field: &crate::FeaFieldType,
+    target: Option<&FeaType>,
+) -> Result<FeaType, &'static str> {
+    use runmat_analysis_core::ObservationQuantity as Q;
+    let quantity = field
+        .quantity
+        .ok_or("resultant requires a known physical field quantity")?;
+    if operation == OutputOperation::Moment && quantity == Q::ReactionMoment {
+        return Err("moment cannot take a second moment of reaction moments");
+    }
+    let compatible = matches!(
+        field.value.as_ref(),
+        FeaType::Vector {
+            length: Some(3),
+            ..
+        }
+    ) || quantity == Q::Stress
+        || matches!(
+            quantity,
+            Q::AcousticPressure | Q::FluidPressure | Q::ContactPressure
+        );
+    if !compatible {
+        return Err("resultant requires a vector field, boundary stress, or boundary pressure");
+    }
+    let mut dimension = quantity.physical_dimension();
+    if !matches!(quantity, Q::ReactionForce | Q::ReactionMoment) {
+        dimension = dimension
+            .multiply(region_measure(target).ok_or("resultant requires a measurable region")?)
+            .ok_or("resultant dimension overflows")?;
+    }
+    if operation == OutputOperation::Moment {
+        dimension = dimension
+            .multiply(crate::PhysicalDimension::LENGTH)
+            .ok_or("moment dimension overflows")?;
+    }
+    Ok(FeaType::Vector {
+        element: Box::new(FeaType::Quantity(dimension)),
+        length: Some(3),
+    })
+}
+
+fn projected_field(
+    field: &crate::FeaFieldType,
+    value: Box<FeaType>,
+    quantity: Option<runmat_analysis_core::ObservationQuantity>,
+) -> FeaType {
+    FeaType::Field(crate::FeaFieldType {
+        value,
+        location: field.location,
+        quantity,
+    })
 }
 
 fn dimensionless_shape(value: &FeaType) -> FeaType {
@@ -178,6 +361,63 @@ fn component() -> OperationFacts {
         OperationDistribution::PartitionLocal,
         TopologyApplicability::AnyGeometry,
         "fea.output.component",
+    )
+}
+
+fn principal() -> OperationFacts {
+    operation(
+        "principal",
+        "Select the maximum or minimum principal value of a symmetric tensor field.",
+        vec![
+            parameter("field", field(), OperationParameterArity::Required),
+            parameter(
+                "which",
+                OperationTypePattern::StringScalar,
+                OperationParameterArity::Required,
+            ),
+        ],
+        field(),
+        OperationDistribution::PartitionLocal,
+        TopologyApplicability::AnyGeometry,
+        "fea.output.principal",
+    )
+}
+
+fn spatial_reduction(name: &str) -> OperationFacts {
+    operation(
+        name,
+        &format!("Apply the typed spatial `{name}` reduction to an analysis field."),
+        vec![
+            parameter("field", field(), OperationParameterArity::Required),
+            parameter("over", region(), OperationParameterArity::Required),
+        ],
+        OperationTypePattern::Any,
+        OperationDistribution::DeterministicReduction,
+        TopologyApplicability::Region,
+        &format!("fea.output.{name}"),
+    )
+}
+
+fn moment() -> OperationFacts {
+    operation(
+        "moment",
+        "Integrate a force resultant moment about an explicit point.",
+        vec![
+            parameter("field", field(), OperationParameterArity::Required),
+            parameter("over", region(), OperationParameterArity::Required),
+            parameter(
+                "about",
+                OperationTypePattern::VectorQuantity {
+                    dimension: runmat_types::QuantityDimension::Length,
+                    length: Some(3),
+                },
+                OperationParameterArity::Required,
+            ),
+        ],
+        OperationTypePattern::Any,
+        OperationDistribution::DeterministicReduction,
+        TopologyApplicability::Region,
+        "fea.output.moment",
     )
 }
 
@@ -325,9 +565,9 @@ mod tests {
     #[test]
     fn output_operations_are_one_shared_public_identity_with_fea_overloads() {
         let extension = output_operation_extension();
-        assert_eq!(extension.operations.len(), 10);
-        assert_eq!(extension.operations[6].identity.as_str(), "min");
-        assert_eq!(extension.operations[7].identity.as_str(), "max");
+        assert_eq!(extension.operations.len(), 17);
+        assert_eq!(extension.operations[11].identity.as_str(), "min");
+        assert_eq!(extension.operations[12].identity.as_str(), "max");
         assert!(extension.operations.iter().all(|operation| operation
             .overloads
             .iter()

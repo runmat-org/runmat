@@ -60,6 +60,32 @@ pub fn canonical_list(value: &CheckedExpression) -> Option<Vec<f64>> {
     values.iter().map(canonical_scalar).collect()
 }
 
+pub fn canonical_vector3(value: &CheckedExpression) -> Option<[f64; 3]> {
+    let values = match &value.kind {
+        CheckedExpressionKind::Quantity {
+            value,
+            scale_bits,
+            offset_bits,
+        } => {
+            let CheckedExpressionKind::List(values) = &value.kind else {
+                return None;
+            };
+            let scale = f64::from_bits(*scale_bits);
+            let offset = f64::from_bits(*offset_bits);
+            values
+                .iter()
+                .map(|component| Some(canonical_scalar(component)? * scale + offset))
+                .collect::<Option<Vec<_>>>()?
+        }
+        CheckedExpressionKind::List(values) => values
+            .iter()
+            .map(canonical_scalar)
+            .collect::<Option<Vec<_>>>()?,
+        _ => return None,
+    };
+    values.try_into().ok()
+}
+
 pub fn reference(value: &CheckedExpression) -> Option<&[String]> {
     match &value.kind {
         CheckedExpressionKind::Reference(path) => Some(path),

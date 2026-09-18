@@ -18,8 +18,8 @@ pub use authored_observation::{
 pub use authored_output::{
     authored_output_types, validate_authored_outputs, AuthoredExtremaTiePolicy,
     AuthoredFieldDomain, AuthoredFieldProjection, AuthoredOutput, AuthoredOutputError,
-    AuthoredOutputExpression, AuthoredOutputType, AuthoredOutputValue, AuthoredSpatialReduction,
-    AuthoredVectorComponent,
+    AuthoredOutputExpression, AuthoredOutputType, AuthoredOutputValue, AuthoredPrincipalSelection,
+    AuthoredSpatialReduction, AuthoredVectorComponent,
 };
 pub use authoring::{
     AuthoredMeshRef, AuthoredModelArgument, AuthoredModelArgumentValue, AuthoredModelInstance,

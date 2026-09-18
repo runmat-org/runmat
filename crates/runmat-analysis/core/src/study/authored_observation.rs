@@ -4,10 +4,10 @@ use runmat_geometry_core::GeometryRegionRole;
 
 use crate::{
     AuthoredExtremaTiePolicy, AuthoredFieldDomain, AuthoredFieldProjection, AuthoredOutput,
-    AuthoredOutputExpression, AuthoredRegionSource, AuthoredSpatialReduction,
-    AuthoredVectorComponent, ComplexRepresentation, CompressionPolicy, CoordinateFrame,
-    EntityDimension, ExcitationTarget, ExpectedTopology, ExtremaTiePolicy, FieldLocation,
-    ObservationComponent, ObservationCostPolicy, ObservationId, ObservationPurpose,
+    AuthoredOutputExpression, AuthoredPrincipalSelection, AuthoredRegionSource,
+    AuthoredSpatialReduction, AuthoredVectorComponent, ComplexRepresentation, CompressionPolicy,
+    CoordinateFrame, EntityDimension, ExcitationTarget, ExpectedTopology, ExtremaTiePolicy,
+    FieldLocation, ObservationComponent, ObservationCostPolicy, ObservationId, ObservationPurpose,
     ObservationQuantity, ObservationRequest, ObservationSpec, ObservationStoragePolicy,
     ObservationTarget, ObservationValueShape, PartialAccessPolicy, ProcedureStep, ProcedureStepId,
     RecoveryPolicy, ReductionPolicy, RegionTarget, RetentionPolicy, SamplingPolicy,
@@ -106,8 +106,16 @@ fn lower_expression(
                 ObservationTarget::Spatial(ExcitationTarget::Region(region_target(target)?));
             draft.spec.reduction = Some(ReductionPolicy {
                 spatial: match reduction {
+                    AuthoredSpatialReduction::Integral => SpatialReduction::Integral,
+                    AuthoredSpatialReduction::Mean => SpatialReduction::Average,
+                    AuthoredSpatialReduction::RootMeanSquare => SpatialReduction::RootMeanSquare,
+                    AuthoredSpatialReduction::EuclideanNorm => SpatialReduction::EuclideanNorm,
                     AuthoredSpatialReduction::Minimum => SpatialReduction::Minimum,
                     AuthoredSpatialReduction::Maximum => SpatialReduction::Maximum,
+                    AuthoredSpatialReduction::Resultant => SpatialReduction::Resultant,
+                    AuthoredSpatialReduction::Moment { about } => {
+                        SpatialReduction::Moment { about: *about }
+                    }
                 },
                 series: SeriesReduction::None,
                 extrema_ties: match ties {
@@ -115,6 +123,12 @@ fn lower_expression(
                     AuthoredExtremaTiePolicy::AllLocations => ExtremaTiePolicy::AllLocations,
                 },
             });
+            if !matches!(
+                reduction,
+                AuthoredSpatialReduction::Minimum | AuthoredSpatialReduction::Maximum
+            ) {
+                draft.spec.output_location = FieldLocation::Global;
+            }
             Ok(draft)
         }
     }
@@ -181,6 +195,20 @@ fn apply_projection(
         }
         AuthoredFieldProjection::Phase => {
             spec.complex_representation = ComplexRepresentation::PhaseRadians;
+        }
+        AuthoredFieldProjection::Principal(which) => {
+            if !matches!(
+                spec.quantity,
+                ObservationQuantity::Stress | ObservationQuantity::Strain
+            ) {
+                return Err(AuthoredObservationError::InvalidProjection(
+                    "principal requires stress or strain".into(),
+                ));
+            }
+            spec.component = match which {
+                AuthoredPrincipalSelection::Maximum => ObservationComponent::MaximumPrincipal,
+                AuthoredPrincipalSelection::Minimum => ObservationComponent::MinimumPrincipal,
+            };
         }
         AuthoredFieldProjection::VonMises => {
             if spec.quantity != ObservationQuantity::Stress {

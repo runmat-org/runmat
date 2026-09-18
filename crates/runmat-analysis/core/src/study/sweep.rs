@@ -178,6 +178,7 @@ fn validate_outputs(
             .ok_or_else(|| AuthoredSweepError::UnknownStudyOutput(source.output_id.clone()))?;
         match (source.projection, source_type, requires_field) {
             (CaseOutputProjection::Value, AuthoredOutputType::SpatialExtremum { .. }, false)
+            | (CaseOutputProjection::Whole, AuthoredOutputType::Reduced { .. }, false)
             | (CaseOutputProjection::Whole, AuthoredOutputType::Field { .. }, true) => {}
             _ => return Err(AuthoredSweepError::InvalidCaseOutputProjection),
         }
@@ -191,6 +192,7 @@ impl AuthoredCaseOutputRef {
             .map_err(|error| AuthoredSweepError::InvalidStudyOutput(error.to_string()))?;
         match (self.projection, outputs.get(&self.output_id)) {
             (CaseOutputProjection::Value, Some(AuthoredOutputType::SpatialExtremum { value }))
+            | (CaseOutputProjection::Whole, Some(AuthoredOutputType::Reduced { value, .. }))
             | (CaseOutputProjection::Whole, Some(AuthoredOutputType::Field { value, .. })) => {
                 Ok(*value)
             }

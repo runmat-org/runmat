@@ -1,3 +1,4 @@
+use runmat_types::PhysicalDimension;
 use serde::{Deserialize, Serialize};
 
 use crate::{CoordinateFrame, ExcitationTarget, Position, SignalPrecision};
@@ -124,6 +125,65 @@ pub enum ObservationQuantity {
 }
 
 impl ObservationQuantity {
+    pub fn physical_dimension(self) -> PhysicalDimension {
+        use PhysicalDimension as D;
+        match self {
+            Self::Displacement | Self::ContactGap => D::LENGTH,
+            Self::Rotation
+            | Self::Strain
+            | Self::ModalParticipation
+            | Self::Eigenvalue
+            | Self::Residual
+            | Self::Balance
+            | Self::ConstraintViolation => D::DIMENSIONLESS,
+            Self::Velocity | Self::AcousticParticleVelocity | Self::FluidVelocity => D::VELOCITY,
+            Self::Acceleration => D::ACCELERATION,
+            Self::Stress
+            | Self::VonMisesStress
+            | Self::BeamBendingStress
+            | Self::BeamTorsionStress
+            | Self::AcousticPressure
+            | Self::FluidPressure
+            | Self::WallShearStress
+            | Self::ContactPressure => D::PRESSURE,
+            Self::ReactionForce | Self::BeamAxialForce | Self::BeamShearForce => D::FORCE,
+            Self::ReactionMoment | Self::BeamTorsionMoment | Self::BeamBendingMoment => D::MOMENT,
+            Self::StrainEnergy => D::ENERGY,
+            Self::ShellMembraneForce | Self::ShellTransverseShear => {
+                D::FORCE.divide(D::LENGTH).expect("static dimension")
+            }
+            Self::ShellBendingMoment => D::MOMENT.divide(D::LENGTH).expect("static dimension"),
+            Self::ShellVonMises => D::FORCE.divide(D::LENGTH).expect("static dimension"),
+            Self::Temperature => D::TEMPERATURE,
+            Self::TemperatureGradient => {
+                D::TEMPERATURE.divide(D::LENGTH).expect("static dimension")
+            }
+            Self::HeatFlux => D::HEAT_FLUX,
+            Self::HeatRate => D::POWER,
+            Self::ElectricPotential => D::ELECTRIC_POTENTIAL,
+            Self::ElectricField => D::ELECTRIC_POTENTIAL
+                .divide(D::LENGTH)
+                .expect("static dimension"),
+            Self::ElectricCurrent => D::ELECTRIC_CURRENT,
+            Self::ElectricCurrentDensity => D::ELECTRIC_CURRENT
+                .divide(D::AREA)
+                .expect("static dimension"),
+            Self::ElectricCharge => D::ELECTRIC_CURRENT
+                .multiply(D::TIME)
+                .expect("static dimension"),
+            Self::MagneticVectorPotential => D::MAGNETIC_FLUX_DENSITY
+                .multiply(D::LENGTH)
+                .expect("static dimension"),
+            Self::MagneticFluxDensity => D::MAGNETIC_FLUX_DENSITY,
+            Self::MagneticFieldIntensity => D::ELECTRIC_CURRENT
+                .divide(D::LENGTH)
+                .expect("static dimension"),
+            Self::SoundPressureLevel => D::DIMENSIONLESS,
+            Self::Vorticity | Self::ModalFrequency => D::FREQUENCY,
+            Self::MassFlowRate => D::MASS.divide(D::TIME).expect("static dimension"),
+        }
+    }
+
     /// Resolve the stable source-language spelling of an observation quantity.
     ///
     /// Keeping this closed mapping beside the canonical enum prevents frontends from growing
@@ -252,6 +312,59 @@ impl ObservationSpec {
             }
             _ => projected,
         }
+    }
+
+    /// SI base dimension after representation and spatial reduction.
+    pub fn result_dimension(&self) -> Option<PhysicalDimension> {
+        if self.complex_representation == ComplexRepresentation::PhaseRadians {
+            return Some(PhysicalDimension::DIMENSIONLESS);
+        }
+        let source = self.quantity.physical_dimension();
+        let Some(spatial) = self.reduction.as_ref().map(|reduction| reduction.spatial) else {
+            return Some(source);
+        };
+        let measure = self.target.measure_dimension();
+        match spatial {
+            SpatialReduction::Integral => source.multiply(measure?),
+            SpatialReduction::Resultant => {
+                if matches!(
+                    self.quantity,
+                    ObservationQuantity::ReactionForce | ObservationQuantity::ReactionMoment
+                ) {
+                    Some(source)
+                } else {
+                    source.multiply(measure?)
+                }
+            }
+            SpatialReduction::Moment { .. } => {
+                let resultant = if self.quantity == ObservationQuantity::ReactionForce {
+                    source
+                } else {
+                    source.multiply(measure?)?
+                };
+                resultant.multiply(PhysicalDimension::LENGTH)
+            }
+            SpatialReduction::None
+            | SpatialReduction::Average
+            | SpatialReduction::RootMeanSquare
+            | SpatialReduction::EuclideanNorm
+            | SpatialReduction::Minimum
+            | SpatialReduction::Maximum => Some(source),
+        }
+    }
+}
+
+impl ObservationTarget {
+    fn measure_dimension(&self) -> Option<PhysicalDimension> {
+        let Self::Spatial(ExcitationTarget::Region(region)) = self else {
+            return None;
+        };
+        Some(match region.entity_dimension {
+            crate::EntityDimension::Point => return None,
+            crate::EntityDimension::Edge => PhysicalDimension::LENGTH,
+            crate::EntityDimension::Face => PhysicalDimension::AREA,
+            crate::EntityDimension::Volume => PhysicalDimension::VOLUME,
+        })
     }
 }
 

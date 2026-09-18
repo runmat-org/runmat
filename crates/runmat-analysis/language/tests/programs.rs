@@ -71,10 +71,14 @@ study load_study {
     assert!(!input.required);
     assert_eq!(
         declaration.outputs["displacement"],
-        FeaType::Field(Box::new(FeaType::Vector {
-            element: Box::new(FeaType::Quantity(PhysicalDimension::LENGTH)),
-            length: Some(3),
-        }))
+        FeaType::Field(FeaFieldType {
+            value: Box::new(FeaType::Vector {
+                element: Box::new(FeaType::Quantity(PhysicalDimension::LENGTH)),
+                length: Some(3),
+            }),
+            location: Some(runmat_analysis_core::FieldLocation::Node),
+            quantity: Some(runmat_analysis_core::ObservationQuantity::Displacement),
+        })
     );
 }
 

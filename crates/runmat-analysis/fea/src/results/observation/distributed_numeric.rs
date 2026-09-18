@@ -241,10 +241,53 @@ fn project_component(
             let normal = 0.5 * ((xx - yy).powi(2) + (yy - zz).powi(2) + (zz - xx).powi(2));
             Ok(vec![(normal + 3.0 * (xy * xy + yz * yz + zx * zx)).sqrt()])
         }
+        ResolvedComponentProjection::MaximumPrincipalSymmetricTensor
+        | ResolvedComponentProjection::MinimumPrincipalSymmetricTensor
+            if !complex_output && value.len() == 6 =>
+        {
+            let tensor = <[f64; 6]>::try_from(value).map_err(|_| {
+                ObservationError::Identity("symmetric tensor projection has the wrong shape")
+            })?;
+            let [minimum, maximum] = principal_extrema(tensor);
+            Ok(vec![match component {
+                ResolvedComponentProjection::MaximumPrincipalSymmetricTensor => maximum,
+                ResolvedComponentProjection::MinimumPrincipalSymmetricTensor => minimum,
+                _ => unreachable!(),
+            }])
+        }
         _ => Err(ObservationError::Unsupported(
             "component projection is not implemented for this recovered value shape",
         )),
     }
+}
+
+fn principal_extrema([xx, yy, zz, xy, yz, zx]: [f64; 6]) -> [f64; 2] {
+    let off_diagonal = xy * xy + yz * yz + zx * zx;
+    if off_diagonal == 0.0 {
+        return [xx.min(yy).min(zz), xx.max(yy).max(zz)];
+    }
+    let mean = (xx + yy + zz) / 3.0;
+    let scale =
+        (((xx - mean).powi(2) + (yy - mean).powi(2) + (zz - mean).powi(2) + 2.0 * off_diagonal)
+            / 6.0)
+            .sqrt();
+    if scale == 0.0 {
+        return [mean, mean];
+    }
+    let bxx = (xx - mean) / scale;
+    let byy = (yy - mean) / scale;
+    let bzz = (zz - mean) / scale;
+    let bxy = xy / scale;
+    let byz = yz / scale;
+    let bzx = zx / scale;
+    let determinant = bxx * byy * bzz + 2.0 * bxy * byz * bzx
+        - bxx * byz * byz
+        - byy * bzx * bzx
+        - bzz * bxy * bxy;
+    let angle = (0.5 * determinant).clamp(-1.0, 1.0).acos() / 3.0;
+    let first = mean + 2.0 * scale * angle.cos();
+    let third = mean + 2.0 * scale * (angle + 2.0 * std::f64::consts::PI / 3.0).cos();
+    [third.min(first), third.max(first)]
 }
 
 fn project_observation_value(
@@ -772,4 +815,20 @@ pub(super) fn reduction_operation(
         .as_ref()
         .map(|reduction| reduction.spatial)
         .ok_or_else(|| ObservationError::Invalid("resolved reduction has no operation".into()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::principal_extrema;
+
+    #[test]
+    fn principal_extrema_match_diagonal_and_rotated_symmetric_tensors() {
+        assert_eq!(
+            principal_extrema([3.0, -2.0, 1.0, 0.0, 0.0, 0.0]),
+            [-2.0, 3.0]
+        );
+        let [minimum, maximum] = principal_extrema([2.0, 2.0, 1.0, 1.0, 0.0, 0.0]);
+        assert!((minimum - 1.0).abs() < 1e-12);
+        assert!((maximum - 3.0).abs() < 1e-12);
+    }
 }

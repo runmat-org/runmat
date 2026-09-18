@@ -2,8 +2,8 @@ use std::collections::BTreeSet;
 
 use runmat_analysis_core::{
     AuthoredExtremaTiePolicy, AuthoredFieldProjection, AuthoredOutput, AuthoredOutputExpression,
-    AuthoredRegionSource, AuthoredSpatialReduction, AuthoredVectorComponent, FieldLocation,
-    ObservationQuantity,
+    AuthoredPrincipalSelection, AuthoredRegionSource, AuthoredSpatialReduction,
+    AuthoredVectorComponent, FieldLocation, ObservationQuantity, Position,
 };
 
 use crate::{
@@ -130,7 +130,50 @@ fn lower_expression(
                     )?),
                 })
             }
-            operation @ (OutputOperation::Minimum | OutputOperation::Maximum) => {
+            OutputOperation::Principal => {
+                let source = positional_or_named(arguments, 0, "field")?;
+                let selector = positional_or_named(arguments, 1, "which")?;
+                let CheckedExpressionKind::Enum(which) = &selector.kind else {
+                    lower::error(
+                        declaration,
+                        selector.span,
+                        "principal selector must be maximum or minimum",
+                        diagnostics,
+                    );
+                    return None;
+                };
+                let which = match which.as_str() {
+                    "maximum" => AuthoredPrincipalSelection::Maximum,
+                    "minimum" => AuthoredPrincipalSelection::Minimum,
+                    _ => {
+                        lower::error(
+                            declaration,
+                            selector.span,
+                            "principal selector must be maximum or minimum",
+                            diagnostics,
+                        );
+                        return None;
+                    }
+                };
+                Some(AuthoredOutputExpression::Projection {
+                    projection: AuthoredFieldProjection::Principal(which),
+                    source: Box::new(lower_expression(
+                        bound,
+                        declaration,
+                        source,
+                        available,
+                        diagnostics,
+                    )?),
+                })
+            }
+            operation @ (OutputOperation::Integral
+            | OutputOperation::Mean
+            | OutputOperation::RootMeanSquare
+            | OutputOperation::Norm
+            | OutputOperation::Minimum
+            | OutputOperation::Maximum
+            | OutputOperation::Resultant
+            | OutputOperation::Moment) => {
                 let source = positional_or_named(arguments, 0, "field")?;
                 let target = positional_or_named(arguments, 1, "over")?;
                 let target =
@@ -146,8 +189,28 @@ fn lower_expression(
                 }
                 Some(AuthoredOutputExpression::SpatialReduction {
                     reduction: match operation {
+                        OutputOperation::Integral => AuthoredSpatialReduction::Integral,
+                        OutputOperation::Mean => AuthoredSpatialReduction::Mean,
+                        OutputOperation::RootMeanSquare => AuthoredSpatialReduction::RootMeanSquare,
+                        OutputOperation::Norm => AuthoredSpatialReduction::EuclideanNorm,
                         OutputOperation::Minimum => AuthoredSpatialReduction::Minimum,
                         OutputOperation::Maximum => AuthoredSpatialReduction::Maximum,
+                        OutputOperation::Resultant => AuthoredSpatialReduction::Resultant,
+                        OutputOperation::Moment => {
+                            let about = positional_or_named(arguments, 2, "about")?;
+                            let meters = super::values::canonical_vector3(about).or_else(|| {
+                                lower::error(
+                                    declaration,
+                                    about.span,
+                                    "moment origin must be a constant three-component length",
+                                    diagnostics,
+                                );
+                                None
+                            })?;
+                            AuthoredSpatialReduction::Moment {
+                                about: Position { meters },
+                            }
+                        }
                         _ => unreachable!(),
                     },
                     source: Box::new(lower_expression(
@@ -170,7 +233,7 @@ fn lower_expression(
     }
 }
 
-fn field_location(name: &str) -> Option<FieldLocation> {
+pub(crate) fn field_location(name: &str) -> Option<FieldLocation> {
     Some(match name {
         "node" => FieldLocation::Node,
         "cell" => FieldLocation::Cell,

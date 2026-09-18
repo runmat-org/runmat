@@ -257,7 +257,11 @@ fn analysis_type(value: AnalysisValueType) -> FeaType {
         AnalysisValueType::Model => FeaType::Declaration(FeaSymbolKind::Model),
         AnalysisValueType::Study => FeaType::Declaration(FeaSymbolKind::Study),
         AnalysisValueType::Sweep => FeaType::Declaration(FeaSymbolKind::Sweep),
-        AnalysisValueType::Field => FeaType::Field(Box::new(FeaType::Unknown)),
+        AnalysisValueType::Field => FeaType::Field(crate::FeaFieldType {
+            value: Box::new(FeaType::Unknown),
+            location: None,
+            quantity: None,
+        }),
         AnalysisValueType::History => FeaType::History(Box::new(FeaType::Unknown)),
         AnalysisValueType::AttributedExtremum => {
             FeaType::AttributedExtremum(Box::new(FeaType::Unknown))

@@ -466,6 +466,52 @@ fn von_mises_projection_keeps_stress_as_its_source_quantity() {
 }
 
 #[test]
+fn principal_projections_execute_through_the_canonical_observation_plan() {
+    let projection = projection(ElementOrder::Tet4);
+    let definition = RecoveredFieldDefinition::new(
+        "stress.recovered",
+        ObservationQuantity::Stress,
+        FieldLocation::Element,
+        RecoveredFieldEntityDomain::SolidElements,
+        ObservationValueShape::SymmetricTensor3,
+        RecoveredFieldNumericRepresentation::Real,
+    )
+    .unwrap();
+    let mut maximum = spec("maximum_principal", ObservationTarget::WholeModel);
+    maximum.quantity = ObservationQuantity::Stress;
+    maximum.value_shape = ObservationValueShape::SymmetricTensor3;
+    maximum.source_location = FieldLocation::Element;
+    maximum.output_location = FieldLocation::Element;
+    maximum.component = ObservationComponent::MaximumPrincipal;
+    maximum.cost = runmat_analysis_core::ObservationCostPolicy::Automatic;
+    let mut minimum = maximum.clone();
+    minimum.observation_id = ObservationId("minimum_principal".into());
+    minimum.component = ObservationComponent::MinimumPrincipal;
+    let mut step = ProcedureStep::structural_static("static");
+    step.observations = vec![
+        ObservationRequest::Field(maximum),
+        ObservationRequest::Field(minimum),
+    ];
+    let plan = resolve_observation_plan(
+        &step,
+        &projection,
+        std::slice::from_ref(&definition),
+        ObservationLimits::default(),
+    )
+    .unwrap();
+    let fields = catalog(
+        &projection,
+        &definition,
+        vec![1, 6],
+        vec![2.0, 2.0, 1.0, 1.0, 0.0, 0.0],
+    );
+    let result = evaluate_observations(&plan, &projection, &fields).unwrap();
+
+    assert!((result[0].field.as_host_f64().unwrap()[0] - 3.0).abs() < 1e-12);
+    assert!((result[1].field.as_host_f64().unwrap()[0] - 1.0).abs() < 1e-12);
+}
+
+#[test]
 fn path_interpolation_reproduces_linear_fields_for_tet4_and_tet10() {
     let positions = [[0.1, 0.1, 0.1], [0.2, 0.3, 0.1], [0.05, 0.15, 0.4]];
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {

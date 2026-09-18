@@ -6,6 +6,7 @@ use crate::{
     procedure_produces_observation_quantity, AuthoredRegionSource, FieldLocation,
     ObservationQuantity, ObservationValueShape, ProcedureStep,
 };
+use runmat_types::PhysicalDimension;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -45,7 +46,15 @@ pub enum AuthoredFieldProjection {
     Real,
     Imaginary,
     Phase,
+    Principal(AuthoredPrincipalSelection),
     VonMises,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthoredPrincipalSelection {
+    Maximum,
+    Minimum,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -56,11 +65,17 @@ pub enum AuthoredVectorComponent {
     Z,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AuthoredSpatialReduction {
+    Integral,
+    Mean,
+    RootMeanSquare,
+    EuclideanNorm,
     Minimum,
     Maximum,
+    Resultant,
+    Moment { about: crate::Position },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -77,9 +92,14 @@ pub enum AuthoredOutputType {
         value: AuthoredOutputValue,
         shape: ObservationValueShape,
         domain: AuthoredFieldDomain,
+        location: FieldLocation,
     },
     SpatialExtremum {
         value: AuthoredOutputValue,
+    },
+    Reduced {
+        value: AuthoredOutputValue,
+        shape: ObservationValueShape,
     },
 }
 
@@ -87,6 +107,7 @@ pub enum AuthoredOutputType {
 #[serde(rename_all = "snake_case")]
 pub enum AuthoredOutputValue {
     Physical(ObservationQuantity),
+    Derived(PhysicalDimension),
     Dimensionless,
 }
 
@@ -150,7 +171,7 @@ impl AuthoredOutputExpression {
             Self::AnalysisField {
                 step_id,
                 quantity,
-                location: _,
+                location,
             } => {
                 let step = steps
                     .get(step_id.as_str())
@@ -165,6 +186,7 @@ impl AuthoredOutputExpression {
                     value: AuthoredOutputValue::Physical(*quantity),
                     shape: quantity.canonical_value_shape(),
                     domain: field_domain(step.procedure),
+                    location: *location,
                 })
             }
             Self::OutputReference { output_id } => outputs
@@ -176,6 +198,7 @@ impl AuthoredOutputExpression {
                     value,
                     shape,
                     domain,
+                    location,
                 } = source.validate(steps, outputs)?
                 else {
                     return Err(AuthoredOutputError::ProjectionRequiresField);
@@ -191,6 +214,7 @@ impl AuthoredOutputExpression {
                                 AuthoredFieldDomain::Complex => AuthoredFieldDomain::Real,
                                 domain => domain,
                             },
+                            location,
                         })
                     }
                     AuthoredFieldProjection::Magnitude
@@ -201,6 +225,7 @@ impl AuthoredOutputExpression {
                             value,
                             shape,
                             domain: AuthoredFieldDomain::Real,
+                            location,
                         })
                     }
                     AuthoredFieldProjection::Magnitude => {
@@ -213,6 +238,7 @@ impl AuthoredOutputExpression {
                             value,
                             shape: ObservationValueShape::Scalar,
                             domain,
+                            location,
                         })
                     }
                     AuthoredFieldProjection::Component(_) => {
@@ -225,6 +251,7 @@ impl AuthoredOutputExpression {
                             value,
                             shape,
                             domain: AuthoredFieldDomain::Real,
+                            location,
                         })
                     }
                     AuthoredFieldProjection::Real | AuthoredFieldProjection::Imaginary => {
@@ -235,10 +262,30 @@ impl AuthoredOutputExpression {
                             value: AuthoredOutputValue::Dimensionless,
                             shape,
                             domain: AuthoredFieldDomain::Real,
+                            location,
                         })
                     }
                     AuthoredFieldProjection::Phase => {
                         Err(AuthoredOutputError::ComplexProjectionRequiresComplex)
+                    }
+                    AuthoredFieldProjection::Principal(_)
+                        if matches!(
+                            value,
+                            AuthoredOutputValue::Physical(
+                                ObservationQuantity::Stress | ObservationQuantity::Strain
+                            )
+                        ) && shape == ObservationValueShape::SymmetricTensor3
+                            && domain == AuthoredFieldDomain::Real =>
+                    {
+                        Ok(AuthoredOutputType::Field {
+                            value,
+                            shape: ObservationValueShape::Scalar,
+                            domain,
+                            location,
+                        })
+                    }
+                    AuthoredFieldProjection::Principal(_) => {
+                        Err(AuthoredOutputError::PrincipalRequiresRealTensor)
                     }
                     AuthoredFieldProjection::VonMises
                         if value == AuthoredOutputValue::Physical(ObservationQuantity::Stress)
@@ -251,6 +298,7 @@ impl AuthoredOutputExpression {
                             ),
                             shape: ObservationValueShape::Scalar,
                             domain,
+                            location,
                         })
                     }
                     AuthoredFieldProjection::VonMises => {
@@ -258,26 +306,115 @@ impl AuthoredOutputExpression {
                     }
                 }
             }
-            Self::SpatialReduction { source, target, .. } => {
+            Self::SpatialReduction {
+                reduction,
+                source,
+                target,
+                ..
+            } => {
                 validate_region(target)?;
                 let AuthoredOutputType::Field {
                     value,
                     shape,
                     domain,
+                    location: _,
                 } = source.validate(steps, outputs)?
                 else {
                     return Err(AuthoredOutputError::SpatialReductionRequiresField);
                 };
-                if shape != ObservationValueShape::Scalar {
-                    return Err(AuthoredOutputError::SpatialReductionRequiresScalar);
-                }
                 if domain == AuthoredFieldDomain::Complex {
                     return Err(AuthoredOutputError::SpatialReductionRequiresReal);
                 }
-                Ok(AuthoredOutputType::SpatialExtremum { value })
+                match reduction {
+                    AuthoredSpatialReduction::Minimum | AuthoredSpatialReduction::Maximum => {
+                        if shape != ObservationValueShape::Scalar {
+                            return Err(AuthoredOutputError::SpatialReductionRequiresScalar);
+                        }
+                        Ok(AuthoredOutputType::SpatialExtremum { value })
+                    }
+                    AuthoredSpatialReduction::Mean | AuthoredSpatialReduction::RootMeanSquare => {
+                        Ok(AuthoredOutputType::Reduced { value, shape })
+                    }
+                    AuthoredSpatialReduction::EuclideanNorm => Ok(AuthoredOutputType::Reduced {
+                        value,
+                        shape: ObservationValueShape::Scalar,
+                    }),
+                    AuthoredSpatialReduction::Integral => Ok(AuthoredOutputType::Reduced {
+                        value: AuthoredOutputValue::Derived(
+                            output_dimension(value)
+                                .multiply(region_measure(target)?)
+                                .ok_or(AuthoredOutputError::DimensionOverflow)?,
+                        ),
+                        shape,
+                    }),
+                    AuthoredSpatialReduction::Resultant
+                    | AuthoredSpatialReduction::Moment { .. } => {
+                        let AuthoredOutputValue::Physical(quantity) = value else {
+                            return Err(AuthoredOutputError::ResultantRequiresPhysicalField);
+                        };
+                        if matches!(reduction, AuthoredSpatialReduction::Moment { .. })
+                            && quantity == ObservationQuantity::ReactionMoment
+                        {
+                            return Err(AuthoredOutputError::SecondMomentOfReactionMoment);
+                        }
+                        let compatible = shape == ObservationValueShape::Vector3
+                            || quantity == ObservationQuantity::Stress
+                            || matches!(
+                                quantity,
+                                ObservationQuantity::AcousticPressure
+                                    | ObservationQuantity::FluidPressure
+                                    | ObservationQuantity::ContactPressure
+                            );
+                        if !compatible {
+                            return Err(AuthoredOutputError::ResultantRequiresVectorOrTraction);
+                        }
+                        let mut dimension = quantity.physical_dimension();
+                        if !matches!(
+                            quantity,
+                            ObservationQuantity::ReactionForce
+                                | ObservationQuantity::ReactionMoment
+                        ) {
+                            dimension = dimension
+                                .multiply(region_measure(target)?)
+                                .ok_or(AuthoredOutputError::DimensionOverflow)?;
+                        }
+                        if matches!(reduction, AuthoredSpatialReduction::Moment { .. }) {
+                            dimension = dimension
+                                .multiply(PhysicalDimension::LENGTH)
+                                .ok_or(AuthoredOutputError::DimensionOverflow)?;
+                        }
+                        Ok(AuthoredOutputType::Reduced {
+                            value: AuthoredOutputValue::Derived(dimension),
+                            shape: ObservationValueShape::Vector3,
+                        })
+                    }
+                }
             }
         }
     }
+}
+
+fn output_dimension(value: AuthoredOutputValue) -> PhysicalDimension {
+    match value {
+        AuthoredOutputValue::Physical(quantity) => quantity.physical_dimension(),
+        AuthoredOutputValue::Derived(dimension) => dimension,
+        AuthoredOutputValue::Dimensionless => PhysicalDimension::DIMENSIONLESS,
+    }
+}
+
+fn region_measure(target: &AuthoredRegionSource) -> Result<PhysicalDimension, AuthoredOutputError> {
+    let AuthoredRegionSource::Geometry(region) = target else {
+        return Err(AuthoredOutputError::InvalidRegion);
+    };
+    Ok(match region.role {
+        runmat_geometry_core::GeometryRegionRole::Vertex => {
+            return Err(AuthoredOutputError::NonMeasurableRegion)
+        }
+        runmat_geometry_core::GeometryRegionRole::Edge => PhysicalDimension::LENGTH,
+        runmat_geometry_core::GeometryRegionRole::Face => PhysicalDimension::AREA,
+        runmat_geometry_core::GeometryRegionRole::Solid
+        | runmat_geometry_core::GeometryRegionRole::Cell => PhysicalDimension::VOLUME,
+    })
 }
 
 pub(super) fn field_domain(procedure: crate::AnalysisProcedure) -> AuthoredFieldDomain {
@@ -329,12 +466,24 @@ pub enum AuthoredOutputError {
     ComplexProjectionRequiresComplex,
     #[error("von_mises requires a real symmetric stress field")]
     VonMisesRequiresRealStress,
+    #[error("principal requires a real symmetric stress or strain field")]
+    PrincipalRequiresRealTensor,
     #[error("spatial reduction requires a field source")]
     SpatialReductionRequiresField,
     #[error("spatial extrema require an explicit scalar projection")]
     SpatialReductionRequiresScalar,
     #[error("spatial extrema require a real or statistical representation")]
     SpatialReductionRequiresReal,
+    #[error("resultant and moment require a physical field")]
+    ResultantRequiresPhysicalField,
+    #[error("resultant and moment require a vector field, boundary stress, or boundary pressure")]
+    ResultantRequiresVectorOrTraction,
+    #[error("moment cannot take a second moment of reaction moments")]
+    SecondMomentOfReactionMoment,
+    #[error("derived output dimension overflows the supported exponent range")]
+    DimensionOverflow,
+    #[error("spatial integration requires an edge, face, solid, or cell region")]
+    NonMeasurableRegion,
     #[error("output region target is invalid")]
     InvalidRegion,
 }

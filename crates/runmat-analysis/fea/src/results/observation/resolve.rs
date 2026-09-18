@@ -1127,8 +1127,14 @@ fn resolve_component(
         ObservationComponent::VonMises if source == 6 => {
             Ok(ResolvedComponentProjection::VonMisesSymmetricTensor)
         }
+        ObservationComponent::MaximumPrincipal if source == 6 => {
+            Ok(ResolvedComponentProjection::MaximumPrincipalSymmetricTensor)
+        }
+        ObservationComponent::MinimumPrincipal if source == 6 => {
+            Ok(ResolvedComponentProjection::MinimumPrincipalSymmetricTensor)
+        }
         _ => Err(ObservationError::Unsupported(
-            "this evaluator supports scalar/all and vector all, Cartesian, or magnitude components",
+            "this evaluator does not support the requested component for the recovered value shape",
         )),
     }
 }
