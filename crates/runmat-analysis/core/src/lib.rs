@@ -31,6 +31,7 @@ pub mod problem {
     pub mod structure;
     pub mod target;
 }
+mod execution_policy;
 pub mod field;
 pub mod study;
 pub mod validate;
@@ -43,6 +44,12 @@ mod validate_outputs;
 mod validate_sequence;
 mod validate_signals;
 
+pub use execution_policy::{
+    AcceleratorPreference, AuthoredExecutionPolicy, AuthoredExecutionPolicyError,
+    AuthoredExecutionPolicyRef, BackendPreference, CheckpointPreference, CooperativePolicy,
+    ExecutionResourceLimits, FanoutPolicy, InclusiveCountRange, OperatorPartitioner,
+    ParallelismLimit, PartitionBalance, PlacementPreference, ResiliencePolicy,
+};
 pub use study::{
     authored_output_types, validate_authored_outputs, AuthoredCaseOutputRef,
     AuthoredExtremaTiePolicy, AuthoredFieldDomain, AuthoredFieldProjection, AuthoredMeshRef,

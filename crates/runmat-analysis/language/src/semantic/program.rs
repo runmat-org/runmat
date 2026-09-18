@@ -22,6 +22,13 @@ pub struct CheckedFeaProgram {
         BTreeMap<(LogicalSourcePath, String), super::CheckedGeometryInspection>,
     pub studies: BTreeMap<(LogicalSourcePath, FeaSymbolKey), runmat_analysis_core::AuthoredStudy>,
     pub sweeps: BTreeMap<(LogicalSourcePath, FeaSymbolKey), runmat_analysis_core::AuthoredSweep>,
+    pub execution_policies:
+        BTreeMap<(LogicalSourcePath, FeaSymbolKey), runmat_analysis_core::AuthoredExecutionPolicy>,
+    /// Launch-policy bindings are intentionally separate from scientific study and sweep contracts.
+    pub execution_bindings: BTreeMap<
+        (LogicalSourcePath, FeaSymbolKey),
+        runmat_analysis_core::AuthoredExecutionPolicyRef,
+    >,
     pub materials: BTreeMap<(LogicalSourcePath, FeaSymbolKey), runmat_analysis_core::MaterialModel>,
     pub geometries:
         BTreeMap<(LogicalSourcePath, FeaSymbolKey), runmat_geometry_core::GeometryDefinition>,
@@ -168,37 +175,21 @@ pub fn check_program<C: AnalysisOperationCatalog + GeometryInspectionSource + ?S
             }
         }
     }
-    let geometry_inspections =
-        super::inspect_geometry_declarations(catalog, &bound, &mut diagnostics);
-    let materials = super::lower_materials(&declarations, &mut diagnostics);
-    let geometries = super::lower_geometry_definitions(
-        &bound,
-        &declarations,
-        &geometry_inspections,
-        &mut diagnostics,
-    );
-    let meshes = super::lower_mesh_definitions(&bound, &declarations, &mut diagnostics);
-    let models = super::lower_models(&bound, &declarations, &mut diagnostics);
-    let studies = super::lower_studies(
-        &bound,
-        &declarations,
-        &models,
-        &geometries,
-        &meshes,
-        &mut diagnostics,
-    );
-    let sweeps = super::lower_sweeps(&bound, &declarations, &studies, &mut diagnostics);
+    let products =
+        super::lowering::lower_products(catalog, &bound, &declarations, &mut diagnostics);
     CheckedFeaProgram {
         bound,
         declarations,
         diagnostics,
-        geometry_inspections,
-        studies,
-        sweeps,
-        materials,
-        geometries,
-        meshes,
-        models,
+        geometry_inspections: products.geometry_inspections,
+        studies: products.studies,
+        sweeps: products.sweeps,
+        execution_policies: products.execution_policies,
+        execution_bindings: products.execution_bindings,
+        materials: products.materials,
+        geometries: products.geometries,
+        meshes: products.meshes,
+        models: products.models,
     }
 }
 

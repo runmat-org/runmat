@@ -575,6 +575,7 @@ fn contextual_reference_type(path: &[String]) -> Option<FeaType> {
             Some(FeaType::Unknown)
         }
         [case, ..] if case == "case" => Some(FeaType::Unknown),
+        [profile, _] if profile == "profile" => Some(FeaType::Enum),
         _ => None,
     }
 }
