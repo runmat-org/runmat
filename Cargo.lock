@@ -6717,6 +6717,7 @@ dependencies = [
  "js-sys",
  "occt-sys",
  "runmat-geometry-core",
+ "runmat-geometry-ops",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -6732,6 +6733,7 @@ dependencies = [
  "delaunator",
  "runmat-geometry-core",
  "serde",
+ "thiserror 1.0.69",
 ]
 
 [[package]]

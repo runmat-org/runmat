@@ -43,6 +43,10 @@ mod exact_projection_interfaces;
 #[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
 mod exact_projection_occurrence;
 #[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+pub(crate) mod feature;
+#[cfg(all(test, not(target_arch = "wasm32"), feature = "occt-native"))]
+mod feature_tests;
+#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
 mod ffi;
 #[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
 mod import_validation;

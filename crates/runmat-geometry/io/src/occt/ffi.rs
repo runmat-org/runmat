@@ -23,6 +23,24 @@ pub(crate) mod bridge {
         Face,
     }
 
+    #[repr(u8)]
+    #[derive(Debug, Clone, Copy)]
+    enum OcctFeatureKind {
+        Box,
+        Cylinder,
+        Sphere,
+        Transform,
+        Instance,
+        Union,
+        Subtract,
+        Intersect,
+    }
+
+    #[derive(Debug, Clone)]
+    struct OcctFeatureOperand {
+        representation: Vec<u8>,
+    }
+
     #[derive(Debug, Clone)]
     struct OcctHealingRelationPayload {
         kind: OcctHealingEntityKind,
@@ -410,6 +428,14 @@ pub(crate) mod bridge {
             format: OcctCadFormat,
             options: OcctImportOptions,
         ) -> Result<OcctExactShapePayload>;
+
+        fn execute_exact_feature(
+            kind: OcctFeatureKind,
+            scalars: &[f64],
+            matrices: &[f64],
+            operands: Vec<OcctFeatureOperand>,
+            max_representation_bytes: u64,
+        ) -> Result<Vec<u8>>;
 
         fn start_exact_evaluator_session(
             representation: &[u8],

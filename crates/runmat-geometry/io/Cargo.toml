@@ -11,6 +11,7 @@ build = "build.rs"
 
 [dependencies]
 runmat-geometry-core = { workspace = true }
+runmat-geometry-ops = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = "0.10"

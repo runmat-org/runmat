@@ -12,3 +12,4 @@ repository = "https://github.com/runmat-org/runmat"
 delaunator = "1"
 runmat-geometry-core = { workspace = true }
 serde = { workspace = true }
+thiserror = { workspace = true }

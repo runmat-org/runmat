@@ -81,6 +81,7 @@ pub fn geometry_operation_extension() -> OperationCatalogExtension {
                     ("target", feature()),
                     ("profile", feature()),
                     ("depth", length()),
+                    ("direction", numeric_array()),
                 ],
             ),
             operation(

@@ -8,6 +8,7 @@ namespace runmat_geometry_io {
 namespace occt_backend {
 
 enum class OcctCadFormat : std::uint8_t;
+enum class OcctFeatureKind : std::uint8_t;
 struct OcctImportOptions;
 struct OcctImportPayload;
 struct OcctExactShapePayload;
@@ -22,6 +23,7 @@ struct OcctMassPropertiesPayload;
 struct OcctPreviewSessionChunkOptions;
 struct OcctPreviewSessionChunkPayload;
 struct OcctPreviewSessionStartPayload;
+struct OcctFeatureOperand;
 
 rust::String exact_kernel_abi();
 
@@ -36,6 +38,12 @@ OcctExactShapePayload import_exact_cad_bytes(
     rust::Str materialized_path,
     OcctCadFormat format,
     OcctImportOptions options);
+rust::Vec<std::uint8_t> execute_exact_feature(
+    OcctFeatureKind kind,
+    rust::Slice<const double> scalars,
+    rust::Slice<const double> matrices,
+    rust::Vec<OcctFeatureOperand> operands,
+    std::uint64_t max_representation_bytes);
 OcctPreviewSessionStartPayload start_cad_preview_session(
     rust::Str path,
     rust::Slice<const std::uint8_t> bytes,

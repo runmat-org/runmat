@@ -121,7 +121,14 @@ impl GeometryFeatureOperation {
                 direction("hole axis", axis, parameters)?;
                 expressions(origin_m, parameters)?;
             }
-            Self::Pocket { depth_m, .. } => positive("pocket depth", [depth_m], parameters)?,
+            Self::Pocket {
+                depth_m,
+                direction: axis,
+                ..
+            } => {
+                positive("pocket depth", [depth_m], parameters)?;
+                direction("pocket direction", axis, parameters)?;
+            }
             Self::Fillet { radius_m, .. } => positive("fillet radius", [radius_m], parameters)?,
             Self::Chamfer { distance_m, .. } => {
                 positive("chamfer distance", [distance_m], parameters)?;

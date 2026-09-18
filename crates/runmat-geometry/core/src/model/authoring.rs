@@ -166,6 +166,7 @@ pub enum GeometryFeatureOperation {
         target: GeometryFeatureRef,
         profile: GeometryFeatureRef,
         depth_m: GeometryScalarExpression,
+        direction: [GeometryScalarExpression; 3],
     },
     Fillet {
         target: GeometryFeatureRef,

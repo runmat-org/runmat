@@ -183,6 +183,7 @@ fn operation_inner(
             target: feature_ref(argument(arguments, 0, "target")?)?,
             profile: feature_ref(argument(arguments, 1, "profile")?)?,
             depth_m: length(argument(arguments, 2, "depth")?)?,
+            direction: value::vector3(argument(arguments, 3, "direction")?)?,
         },
         "fillet" => GeometryFeatureOperation::Fillet {
             target: feature_ref(argument(arguments, 0, "target")?)?,
