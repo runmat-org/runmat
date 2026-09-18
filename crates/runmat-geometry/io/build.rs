@@ -43,6 +43,7 @@ fn build_occt_backend() {
         .file("src/occt/exact_xcaf_subshape_remap.cc")
         .file("src/occt/exact_nesting.cc")
         .file("src/occt/exact_topology.cc")
+        .file("src/occt/exact_wire.cc")
         .file("src/occt/exact_evaluator.cc")
         .file("src/occt/exact_feature.cc")
         .file("src/occt/exact_surface_evaluator.cc")
@@ -105,6 +106,8 @@ fn build_occt_backend() {
     println!("cargo:rerun-if-changed=src/occt/exact_nesting.cc");
     println!("cargo:rerun-if-changed=src/occt/exact_topology.hxx");
     println!("cargo:rerun-if-changed=src/occt/exact_topology.cc");
+    println!("cargo:rerun-if-changed=src/occt/exact_wire.hxx");
+    println!("cargo:rerun-if-changed=src/occt/exact_wire.cc");
     println!("cargo:rerun-if-changed=src/occt/exact_evaluator.cc");
     println!("cargo:rerun-if-changed=src/occt/exact_feature.cc");
     println!("cargo:rerun-if-changed=src/occt/exact_evaluator_internal.hxx");

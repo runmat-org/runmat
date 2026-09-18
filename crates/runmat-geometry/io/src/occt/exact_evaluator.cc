@@ -1,11 +1,11 @@
 #include "runmat-geometry-io/src/occt/ffi.rs.h"
 #include "occt_bridge.hxx"
 #include "exact_evaluator_internal.hxx"
+#include "exact_wire.hxx"
 
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepClass_FaceClassifier.hxx>
 #include <BRepGProp.hxx>
-#include <BRepTools_WireExplorer.hxx>
 #include <BRep_Tool.hxx>
 #include <BRepTools.hxx>
 #include <BRepTools_ShapeSet.hxx>
@@ -38,6 +38,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <vector>
 #include <unordered_map>
 
 namespace runmat_geometry_io {
@@ -143,16 +144,11 @@ PcurveData pcurve(const ExactEvaluatorSession& session,
     throw std::runtime_error("OCCT exact pcurve wire is not owned by its face");
   }
 
-  BRepTools_WireExplorer edge_uses(wire, face_use);
-  std::uint64_t position = 1;
-  while (edge_uses.More() && position < coedge_position) {
-    edge_uses.Next();
-    ++position;
-  }
-  if (!edge_uses.More() || position != coedge_position) {
+  const std::vector<TopoDS_Edge> ordered_edges = exact_wire_edge_uses(wire, face_use);
+  if (coedge_position > ordered_edges.size()) {
     throw std::runtime_error("OCCT exact pcurve coedge position is outside its wire");
   }
-  TopoDS_Edge edge_use = edge_uses.Current();
+  TopoDS_Edge edge_use = ordered_edges[static_cast<std::size_t>(coedge_position - 1)];
   if (seam_image >= 0) {
     TopoDS_Edge local_edge = edge_use;
     if (face_use.Orientation() == TopAbs_REVERSED) {

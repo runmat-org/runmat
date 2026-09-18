@@ -563,7 +563,7 @@ fn ffi_import_options(
     }
 }
 
-fn ffi_exact_import_options(
+pub(super) fn ffi_exact_import_options(
     options: &ExactCadImportOptions,
     cancel_token_id: u64,
     meters_per_source_unit: f64,

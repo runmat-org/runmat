@@ -36,9 +36,50 @@ pub(crate) mod bridge {
         Intersect,
     }
 
+    #[repr(u8)]
+    #[derive(Debug, Clone, Copy)]
+    enum OcctFeatureEntityKind {
+        Vertex,
+        Edge,
+        Face,
+        Solid,
+    }
+
+    #[repr(u8)]
+    #[derive(Debug, Clone, Copy)]
+    enum OcctFeatureRelationKind {
+        Modified,
+        Generated,
+    }
+
     #[derive(Debug, Clone)]
     struct OcctFeatureOperand {
         representation: Vec<u8>,
+    }
+
+    #[derive(Debug, Clone)]
+    struct OcctFeatureSourcePayload {
+        operand_index: u64,
+        kind: OcctFeatureEntityKind,
+        identity_digest: Vec<u8>,
+        deleted: bool,
+    }
+
+    #[derive(Debug, Clone)]
+    struct OcctFeatureRelationPayload {
+        operand_index: u64,
+        source_kind: OcctFeatureEntityKind,
+        source_identity_digest: Vec<u8>,
+        result_kind: OcctFeatureEntityKind,
+        result_identity_digest: Vec<u8>,
+        relation: OcctFeatureRelationKind,
+    }
+
+    #[derive(Debug, Clone)]
+    struct OcctFeatureExecutionPayload {
+        representation: Vec<u8>,
+        sources: Vec<OcctFeatureSourcePayload>,
+        relations: Vec<OcctFeatureRelationPayload>,
     }
 
     #[derive(Debug, Clone)]
@@ -434,8 +475,8 @@ pub(crate) mod bridge {
             scalars: &[f64],
             matrices: &[f64],
             operands: Vec<OcctFeatureOperand>,
-            max_representation_bytes: u64,
-        ) -> Result<Vec<u8>>;
+            options: OcctImportOptions,
+        ) -> Result<OcctFeatureExecutionPayload>;
 
         fn start_exact_evaluator_session(
             representation: &[u8],

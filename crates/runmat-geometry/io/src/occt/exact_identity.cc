@@ -6,6 +6,7 @@
 #include <TopAbs_Orientation.hxx>
 #include <TopoDS_Shape.hxx>
 
+#include <algorithm>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -31,17 +32,10 @@ private:
 
 } // namespace
 
-void ExactIdentityContext::append(rust::Vec<std::uint8_t>& destination,
-                                  const TopoDS_Shape& shape,
-                                  std::uint64_t shape_key,
-                                  const OcctImportOptions& options) {
-  const auto existing = digests_.find(shape_key);
-  if (existing != digests_.end()) {
-    for (const std::uint8_t byte : existing->second) {
-      destination.push_back(byte);
-    }
-    return;
-  }
+std::array<std::uint8_t, 32> exact_identity_digest(
+    const TopoDS_Shape& shape,
+    const OcctImportOptions& options,
+    std::uint64_t& serialized_byte_work) {
   std::ostringstream stream;
   CancelProgress progress(options);
   const TopoDS_Shape canonical = shape.Oriented(TopAbs_FORWARD);
@@ -53,22 +47,38 @@ void ExactIdentityContext::append(rust::Vec<std::uint8_t>& destination,
   if (bytes.empty()) {
     throw std::runtime_error("OCCT exact persistent identity serialization produced no bytes");
   }
-  if (serialized_byte_work_ > options.max_exact_identity_bytes ||
+  if (serialized_byte_work > options.max_exact_identity_bytes ||
       static_cast<std::uint64_t>(bytes.size()) >
-          options.max_exact_identity_bytes - serialized_byte_work_) {
+          options.max_exact_identity_bytes - serialized_byte_work) {
     throw std::runtime_error("OCCT exact persistent identity exceeded its byte-work budget");
   }
-  serialized_byte_work_ += static_cast<std::uint64_t>(bytes.size());
+  serialized_byte_work += static_cast<std::uint64_t>(bytes.size());
   rust::Vec<std::uint8_t> digest = occt_exact_identity_digest(
       rust::Slice<const std::uint8_t>(
           reinterpret_cast<const std::uint8_t*>(bytes.data()), bytes.size()));
   if (digest.size() != 32) {
     throw std::runtime_error("OCCT exact persistent identity digest has an invalid length");
   }
-  std::array<std::uint8_t, 32> cached;
-  for (std::size_t index = 0; index < cached.size(); ++index) {
-    cached[index] = digest[index];
-    destination.push_back(digest[index]);
+  std::array<std::uint8_t, 32> result;
+  std::copy(digest.begin(), digest.end(), result.begin());
+  return result;
+}
+
+void ExactIdentityContext::append(rust::Vec<std::uint8_t>& destination,
+                                  const TopoDS_Shape& shape,
+                                  std::uint64_t shape_key,
+                                  const OcctImportOptions& options) {
+  const auto existing = digests_.find(shape_key);
+  if (existing != digests_.end()) {
+    for (const std::uint8_t byte : existing->second) {
+      destination.push_back(byte);
+    }
+    return;
+  }
+  const std::array<std::uint8_t, 32> cached =
+      exact_identity_digest(shape, options, serialized_byte_work_);
+  for (const std::uint8_t byte : cached) {
+    destination.push_back(byte);
   }
   digests_.emplace(shape_key, cached);
 }

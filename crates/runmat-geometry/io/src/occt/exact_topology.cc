@@ -2,13 +2,13 @@
 #include "exact_identity.hxx"
 #include "exact_nesting.hxx"
 #include "exact_topology.hxx"
+#include "exact_wire.hxx"
 
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepClass3d.hxx>
 #include <BRepTools.hxx>
 #include <BRepTools_ShapeSet.hxx>
-#include <BRepTools_WireExplorer.hxx>
 #include <BRep_Tool.hxx>
 #include <Geom2d_Curve.hxx>
 #include <TopAbs_Orientation.hxx>
@@ -180,9 +180,7 @@ void append_exact_topology(OcctExactShapePayload& result,
       wire_payload.face_key = face_key;
       wire_payload.reversed = reversed_orientation(wire, "wire");
       std::unordered_map<std::uint64_t, std::uint8_t> seam_occurrences;
-      BRepTools_WireExplorer edge_uses(wire, face);
-      for (; edge_uses.More(); edge_uses.Next()) {
-        const TopoDS_Edge edge = edge_uses.Current();
+      for (const TopoDS_Edge& edge : exact_wire_edge_uses(wire, face)) {
         const std::uint64_t edge_key = shape_key(shape_set, edge, "coedge edge");
         Standard_Real first = 0.0;
         Standard_Real last = 0.0;

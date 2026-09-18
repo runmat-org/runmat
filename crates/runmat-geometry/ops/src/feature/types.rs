@@ -167,35 +167,117 @@ pub struct GeometryFeatureResourceBounds {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GeometryTopologyHistory {
-    /// True only when `result_entities`, `created`, and `deleted` are complete identity-set
-    /// inventories for every dependency and the result. Provider-known replacement lineage may
-    /// additionally be reported in `modified`; it is not inferred from geometric proximity.
+    /// True only when the result inventory and every source-to-result relation are complete.
+    /// Providers must report kernel history; geometric proximity is never accepted as lineage.
     pub inventory_complete: bool,
-    /// Complete entity inventory of this feature's result, grouped by authored topology role.
+    /// Complete selectable entity inventory of the feature result, grouped by authored role.
     pub result_entities: BTreeMap<GeometryRegionRole, Vec<PersistentEntityId>>,
-    pub created: Vec<PersistentEntityId>,
-    /// Provider-proven source-to-result replacement lineage. An empty map does not turn
-    /// identity-set deletion and creation into an inferred modification.
-    pub modified: BTreeMap<PersistentEntityId, Vec<PersistentEntityId>>,
-    pub deleted: Vec<PersistentEntityId>,
+    /// Result entities introduced by this feature. This includes provider-reported generated
+    /// topology and result entities with no source predecessor.
+    pub introduced: Vec<PersistentEntityId>,
+    /// Complete provider-proven lineage from every selectable dependency entity to its result
+    /// descendants. An empty value means the source has no surviving descendant. Values may
+    /// cross topology roles only when the kernel explicitly reports generated topology.
+    pub source_lineage: Vec<GeometryEntityLineage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GeometryEntityLineage {
+    pub source: PersistentEntityId,
+    pub descendants: Vec<PersistentEntityId>,
 }
 
 impl GeometryTopologyHistory {
     pub fn validate(&self) -> Result<(), GeometryFeatureError> {
         for entity in self
-            .created
+            .introduced
             .iter()
-            .chain(self.deleted.iter())
-            .chain(self.modified.keys())
-            .chain(self.modified.values().flatten())
+            .chain(self.source_lineage.iter().map(|lineage| &lineage.source))
+            .chain(
+                self.source_lineage
+                    .iter()
+                    .flat_map(|lineage| &lineage.descendants),
+            )
             .chain(self.result_entities.values().flatten())
         {
             entity
                 .validate()
                 .map_err(|error| GeometryFeatureError::InvalidHistory(error.to_string()))?;
         }
+        let mut result = BTreeSet::new();
+        for (role, entities) in &self.result_entities {
+            require_canonical_entities(entities, "result entity inventory")?;
+            for entity in entities {
+                if !role_accepts(*role, entity) {
+                    return Err(GeometryFeatureError::InvalidHistory(format!(
+                        "result entity `{}` has the wrong kind for {role:?}",
+                        entity.source_topology_id
+                    )));
+                }
+                if !result.insert(entity) {
+                    return Err(GeometryFeatureError::InvalidHistory(format!(
+                        "result entity `{}` appears in more than one role inventory",
+                        entity.source_topology_id
+                    )));
+                }
+            }
+        }
+        require_canonical_entities(&self.introduced, "introduced entity inventory")?;
+        for entity in &self.introduced {
+            if !result.contains(entity) {
+                return Err(GeometryFeatureError::InvalidHistory(format!(
+                    "introduced entity `{}` is absent from the result inventory",
+                    entity.source_topology_id
+                )));
+            }
+        }
+        if self
+            .source_lineage
+            .windows(2)
+            .any(|pair| pair[0].source >= pair[1].source)
+        {
+            return Err(GeometryFeatureError::InvalidHistory(
+                "source lineage must be sorted and duplicate-free".into(),
+            ));
+        }
+        for lineage in &self.source_lineage {
+            require_canonical_entities(&lineage.descendants, "source descendant inventory")?;
+            for entity in &lineage.descendants {
+                if !result.contains(entity) {
+                    return Err(GeometryFeatureError::InvalidHistory(format!(
+                        "source descendant `{}` is absent from the result inventory",
+                        entity.source_topology_id
+                    )));
+                }
+            }
+        }
         Ok(())
     }
+}
+
+fn require_canonical_entities(
+    entities: &[PersistentEntityId],
+    field: &str,
+) -> Result<(), GeometryFeatureError> {
+    if entities.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err(GeometryFeatureError::InvalidHistory(format!(
+            "{field} must be sorted and duplicate-free"
+        )));
+    }
+    Ok(())
+}
+
+fn role_accepts(role: GeometryRegionRole, entity: &PersistentEntityId) -> bool {
+    use runmat_geometry_core::PersistentEntityKind as Kind;
+    matches!(
+        (role, entity.kind),
+        (GeometryRegionRole::Vertex, Kind::Vertex)
+            | (GeometryRegionRole::Edge, Kind::Edge)
+            | (GeometryRegionRole::Face, Kind::Face)
+            | (GeometryRegionRole::Solid, Kind::Solid)
+            | (GeometryRegionRole::Cell, Kind::Region)
+    )
 }
 
 pub struct GeometryFeatureProviderOutput<G> {

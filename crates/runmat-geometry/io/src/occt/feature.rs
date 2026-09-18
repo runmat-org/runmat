@@ -1,12 +1,7 @@
-use std::collections::{BTreeMap, BTreeSet};
-
-use runmat_geometry_core::{
-    ExactBRepTopology, GeometryDigest, GeometryRegionRole, GeometryRevisionIdentity,
-    PersistentEntityId, UnitSystem,
-};
+use runmat_geometry_core::{GeometryDigest, GeometryRevisionIdentity, UnitSystem};
 use runmat_geometry_ops::{
     GeometryFeatureCapabilities, GeometryFeatureKind, GeometryFeatureProvider,
-    GeometryFeatureProviderOutput, GeometryTopologyHistory, ResolvedGeometryFeatureOperation,
+    GeometryFeatureProviderOutput, ResolvedGeometryFeatureOperation,
 };
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -17,7 +12,7 @@ use crate::{
     GeometryFormat,
 };
 
-use super::ffi;
+use super::{ffi, native};
 
 #[derive(Debug, Error)]
 pub enum OcctExactFeatureError {
@@ -119,12 +114,13 @@ impl GeometryFeatureProvider for OcctExactFeatureProvider {
                 representation: geometry.representation.clone(),
             })
             .collect();
-        let representation = ffi::bridge::execute_exact_feature(
+        let cancel_token = ffi::OcctCancelTokenRegistration::new(self.context.cancellation_flag());
+        let payload = ffi::bridge::execute_exact_feature(
             encoded.kind,
             &encoded.scalars,
             &encoded.matrices,
             operands,
-            self.options.max_representation_bytes,
+            native::ffi_exact_import_options(&self.options, cancel_token.id(), 1.0),
         )
         .map_err(|error| OcctExactFeatureError::Kernel(error.to_string()))?;
 
@@ -133,12 +129,13 @@ impl GeometryFeatureProvider for OcctExactFeatureProvider {
         options.analysis.revision = derived_revision(dependencies)?;
         let geometry = crate::import_exact_cad(
             &format!("{feature_id}.brep"),
-            &representation,
+            &payload.representation,
             GeometryFormat::Brep,
             &options,
             &self.context,
         )?;
-        let history = topology_history(dependencies, &geometry.topology);
+        let history =
+            super::feature_history::topology_history(dependencies, &geometry.topology, &payload)?;
         Ok(GeometryFeatureProviderOutput { geometry, history })
     }
 }
@@ -281,79 +278,4 @@ fn derived_revision(
         persistent_mapping_version,
         parent_document_digest,
     })
-}
-
-fn topology_history(
-    dependencies: &[(&str, &ImportedExactCad)],
-    output: &ExactBRepTopology,
-) -> GeometryTopologyHistory {
-    let source = dependencies
-        .iter()
-        .flat_map(|(_, geometry)| topology_ids(&geometry.topology))
-        .collect::<BTreeSet<_>>();
-    let result = topology_ids(output).collect::<BTreeSet<_>>();
-    GeometryTopologyHistory {
-        inventory_complete: true,
-        result_entities: BTreeMap::from([
-            (
-                GeometryRegionRole::Vertex,
-                output
-                    .vertices
-                    .iter()
-                    .map(|entity| entity.id.clone())
-                    .collect(),
-            ),
-            (
-                GeometryRegionRole::Edge,
-                output
-                    .edges
-                    .iter()
-                    .map(|entity| entity.id.clone())
-                    .collect(),
-            ),
-            (
-                GeometryRegionRole::Face,
-                output
-                    .faces
-                    .iter()
-                    .map(|entity| entity.id.clone())
-                    .collect(),
-            ),
-            (
-                GeometryRegionRole::Solid,
-                output
-                    .solids
-                    .iter()
-                    .map(|entity| entity.id.clone())
-                    .collect(),
-            ),
-            (
-                GeometryRegionRole::Cell,
-                output
-                    .regions
-                    .iter()
-                    .map(|entity| entity.id.clone())
-                    .collect(),
-            ),
-        ]),
-        created: result.difference(&source).cloned().collect(),
-        modified: BTreeMap::new(),
-        deleted: source.difference(&result).cloned().collect(),
-    }
-}
-
-fn topology_ids(topology: &ExactBRepTopology) -> impl Iterator<Item = PersistentEntityId> + '_ {
-    std::iter::once(topology.root_assembly_id.clone())
-        .chain(topology.assemblies.iter().map(|entity| entity.id.clone()))
-        .chain(topology.instances.iter().map(|entity| entity.id.clone()))
-        .chain(topology.bodies.iter().map(|entity| entity.id.clone()))
-        .chain(topology.lumps.iter().map(|entity| entity.id.clone()))
-        .chain(topology.solids.iter().map(|entity| entity.id.clone()))
-        .chain(topology.regions.iter().map(|entity| entity.id.clone()))
-        .chain(topology.shells.iter().map(|entity| entity.id.clone()))
-        .chain(topology.faces.iter().map(|entity| entity.id.clone()))
-        .chain(topology.wires.iter().map(|entity| entity.id.clone()))
-        .chain(topology.coedges.iter().map(|entity| entity.id.clone()))
-        .chain(topology.edges.iter().map(|entity| entity.id.clone()))
-        .chain(topology.vertices.iter().map(|entity| entity.id.clone()))
 }

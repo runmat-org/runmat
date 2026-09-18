@@ -178,9 +178,8 @@ impl GeometryFeatureProvider for RecordingProvider {
             history: GeometryTopologyHistory {
                 inventory_complete: false,
                 result_entities: BTreeMap::new(),
-                created: Vec::new(),
-                modified: BTreeMap::new(),
-                deleted: Vec::new(),
+                introduced: Vec::new(),
+                source_lineage: Vec::new(),
             },
         })
     }

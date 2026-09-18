@@ -1,9 +1,10 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Display;
 
 use super::{
-    ExecutedGeometryFeaturePlan, GeometryFeatureCapabilities, GeometryFeatureError,
-    GeometryFeaturePlan, GeometryFeatureProviderOutput, ResolvedGeometryFeatureOperation,
+    ExecutedGeometryFeaturePlan, GeometryEntityLineage, GeometryFeatureCapabilities,
+    GeometryFeatureError, GeometryFeaturePlan, GeometryFeatureProviderOutput,
+    GeometryTopologyHistory, ResolvedGeometryFeatureOperation,
 };
 
 pub trait GeometryFeatureProvider {
@@ -28,7 +29,7 @@ pub fn execute_feature_plan<P: GeometryFeatureProvider>(
 ) -> Result<ExecutedGeometryFeaturePlan<P::Geometry>, GeometryFeatureError> {
     let capabilities = provider.capabilities();
     let mut values = BTreeMap::<String, P::Geometry>::new();
-    let mut history_by_feature = BTreeMap::new();
+    let mut lineage_by_value = BTreeMap::<String, BTreeMap<String, GeometryTopologyHistory>>::new();
 
     for step in &plan.steps {
         if !capabilities.supports(step.operation.kind()) {
@@ -70,6 +71,38 @@ pub fn execute_feature_plan<P: GeometryFeatureProvider>(
                 message: error.to_string(),
             })?;
         output.history.validate()?;
+        let mut projected = BTreeMap::new();
+        for dependency in &step.dependency_ids {
+            if dependency.0 == "source.result" {
+                continue;
+            }
+            let dependency_lineage = lineage_by_value.get(&dependency.0).ok_or_else(|| {
+                GeometryFeatureError::InvalidPlan(format!(
+                    "feature `{}` has no lineage for dependency `{}`",
+                    step.feature_id, dependency.0
+                ))
+            })?;
+            for (origin, history) in dependency_lineage {
+                let history = project_history(history, &output.history)?;
+                match projected.entry(origin.clone()) {
+                    std::collections::btree_map::Entry::Vacant(entry) => {
+                        entry.insert(history);
+                    }
+                    std::collections::btree_map::Entry::Occupied(mut entry) => {
+                        merge_projected_history(entry.get_mut(), history)?;
+                    }
+                }
+            }
+        }
+        if projected
+            .insert(step.feature_id.clone(), output.history)
+            .is_some()
+        {
+            return Err(GeometryFeatureError::InvalidPlan(format!(
+                "feature `{}` depends on an identically named prior feature",
+                step.feature_id
+            )));
+        }
         if values
             .insert(step.feature_id.clone(), output.geometry)
             .is_some()
@@ -79,7 +112,7 @@ pub fn execute_feature_plan<P: GeometryFeatureProvider>(
                 step.feature_id
             )));
         }
-        history_by_feature.insert(step.feature_id.clone(), output.history);
+        lineage_by_value.insert(step.feature_id.clone(), projected);
     }
 
     let geometry = values.remove(&plan.result.0).ok_or_else(|| {
@@ -88,8 +121,143 @@ pub fn execute_feature_plan<P: GeometryFeatureProvider>(
             plan.result.0
         ))
     })?;
+    let history_by_feature = lineage_by_value.remove(&plan.result.0).ok_or_else(|| {
+        GeometryFeatureError::InvalidPlan(format!(
+            "result feature `{}` has no projected topology lineage",
+            plan.result.0
+        ))
+    })?;
     Ok(ExecutedGeometryFeaturePlan {
         geometry,
         history_by_feature,
     })
+}
+
+fn project_history(
+    origin: &GeometryTopologyHistory,
+    next: &GeometryTopologyHistory,
+) -> Result<GeometryTopologyHistory, GeometryFeatureError> {
+    if !origin.inventory_complete || !next.inventory_complete {
+        return Ok(GeometryTopologyHistory {
+            inventory_complete: false,
+            result_entities: BTreeMap::new(),
+            introduced: Vec::new(),
+            source_lineage: Vec::new(),
+        });
+    }
+    let result_roles = next
+        .result_entities
+        .iter()
+        .flat_map(|(role, entities)| entities.iter().map(move |entity| (entity.clone(), *role)))
+        .collect::<BTreeMap<_, _>>();
+    let next_lineage = next
+        .source_lineage
+        .iter()
+        .map(|lineage| (&lineage.source, &lineage.descendants))
+        .collect::<BTreeMap<_, _>>();
+    let project = |entities: &[runmat_geometry_core::PersistentEntityId]| {
+        let mut projected = BTreeSet::new();
+        for entity in entities {
+            let descendants = next_lineage.get(entity).ok_or_else(|| {
+                GeometryFeatureError::InvalidHistory(format!(
+                    "complete downstream history omits source entity `{}`",
+                    entity.source_topology_id
+                ))
+            })?;
+            projected.extend(descendants.iter().cloned());
+        }
+        Ok::<Vec<_>, GeometryFeatureError>(projected.into_iter().collect())
+    };
+
+    let mut result_entities = BTreeMap::<_, Vec<_>>::new();
+    for entities in origin.result_entities.values() {
+        for entity in project(entities)? {
+            let role = result_roles.get(&entity).ok_or_else(|| {
+                GeometryFeatureError::InvalidHistory(format!(
+                    "projected entity `{}` is absent from downstream result roles",
+                    entity.source_topology_id
+                ))
+            })?;
+            result_entities.entry(*role).or_default().push(entity);
+        }
+    }
+    canonicalize_role_inventory(&mut result_entities);
+    let introduced = project(&origin.introduced)?;
+    let source_lineage = origin
+        .source_lineage
+        .iter()
+        .map(|lineage| {
+            Ok(GeometryEntityLineage {
+                source: lineage.source.clone(),
+                descendants: project(&lineage.descendants)?,
+            })
+        })
+        .collect::<Result<_, GeometryFeatureError>>()?;
+    let projected = GeometryTopologyHistory {
+        inventory_complete: true,
+        result_entities,
+        introduced,
+        source_lineage,
+    };
+    projected.validate()?;
+    Ok(projected)
+}
+
+fn merge_projected_history(
+    target: &mut GeometryTopologyHistory,
+    incoming: GeometryTopologyHistory,
+) -> Result<(), GeometryFeatureError> {
+    if !target.inventory_complete || !incoming.inventory_complete {
+        target.inventory_complete = false;
+        target.result_entities.clear();
+        target.introduced.clear();
+        target.source_lineage.clear();
+        return Ok(());
+    }
+    for (role, entities) in incoming.result_entities {
+        target
+            .result_entities
+            .entry(role)
+            .or_default()
+            .extend(entities);
+    }
+    target.introduced.extend(incoming.introduced);
+    let mut source_lineage = target
+        .source_lineage
+        .drain(..)
+        .chain(incoming.source_lineage)
+        .fold(BTreeMap::<_, Vec<_>>::new(), |mut merged, lineage| {
+            merged
+                .entry(lineage.source)
+                .or_default()
+                .extend(lineage.descendants);
+            merged
+        });
+    canonicalize_role_inventory(&mut target.result_entities);
+    target.introduced.sort();
+    target.introduced.dedup();
+    for descendants in source_lineage.values_mut() {
+        descendants.sort();
+        descendants.dedup();
+    }
+    target.source_lineage = source_lineage
+        .into_iter()
+        .map(|(source, descendants)| GeometryEntityLineage {
+            source,
+            descendants,
+        })
+        .collect();
+    target.validate()
+}
+
+fn canonicalize_role_inventory(
+    inventory: &mut BTreeMap<
+        runmat_geometry_core::GeometryRegionRole,
+        Vec<runmat_geometry_core::PersistentEntityId>,
+    >,
+) {
+    for entities in inventory.values_mut() {
+        entities.sort();
+        entities.dedup();
+    }
 }

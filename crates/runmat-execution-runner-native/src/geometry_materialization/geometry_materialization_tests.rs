@@ -206,24 +206,56 @@ fn imported_brep_is_verified_against_source_and_topology_identity() {
 fn generated_geometry_requires_and_materializes_its_frozen_product_receipt() {
     let product = GeneratedGeometryProduct {
         graph: GeometryFeatureGraph {
-            features: vec![GeometryFeature {
-                feature_id: "stock".into(),
-                operation: GeometryFeatureOperation::Box {
-                    width_m: scalar(1.0),
-                    depth_m: scalar(2.0),
-                    height_m: scalar(3.0),
+            features: vec![
+                GeometryFeature {
+                    feature_id: "stock".into(),
+                    operation: GeometryFeatureOperation::Box {
+                        width_m: scalar(2.0),
+                        depth_m: scalar(2.0),
+                        height_m: scalar(2.0),
+                    },
                 },
-            }],
-            result: GeometryFeatureRef("stock".into()),
+                GeometryFeature {
+                    feature_id: "bore".into(),
+                    operation: GeometryFeatureOperation::Cylinder {
+                        radius_m: scalar(0.25),
+                        height_m: scalar(4.0),
+                        axis: [scalar(0.0), scalar(0.0), scalar(1.0)],
+                        origin_m: [scalar(1.0), scalar(1.0), scalar(-1.0)],
+                    },
+                },
+                GeometryFeature {
+                    feature_id: "finished".into(),
+                    operation: GeometryFeatureOperation::Subtract {
+                        base: GeometryFeatureRef("stock".into()),
+                        tools: vec![GeometryFeatureRef("bore".into())],
+                    },
+                },
+            ],
+            result: GeometryFeatureRef("finished".into()),
         },
-        region_outputs: BTreeMap::from([(
-            "body".into(),
-            GeneratedGeometryRegionOutput {
-                role: GeometryRegionRole::Solid,
-                selector: GeometryRegionSelector::FeatureResult(GeometryFeatureRef("stock".into())),
-                cardinality: GeometryRegionCardinality::ExactlyOne,
-            },
-        )]),
+        region_outputs: BTreeMap::from([
+            (
+                "body".into(),
+                GeneratedGeometryRegionOutput {
+                    role: GeometryRegionRole::Solid,
+                    selector: GeometryRegionSelector::FeatureResult(GeometryFeatureRef(
+                        "finished".into(),
+                    )),
+                    cardinality: GeometryRegionCardinality::ExactlyOne,
+                },
+            ),
+            (
+                "hole_wall".into(),
+                GeneratedGeometryRegionOutput {
+                    role: GeometryRegionRole::Face,
+                    selector: GeometryRegionSelector::BoundaryIntroducedBy(GeometryFeatureRef(
+                        "bore".into(),
+                    )),
+                    cardinality: GeometryRegionCardinality::ExactlyOne,
+                },
+            ),
+        ]),
     };
     let object = LogicalObject::new(
         ObjectNamespace::ResultValue,
@@ -240,16 +272,16 @@ fn generated_geometry_requires_and_materializes_its_frozen_product_receipt() {
             GENERATED_GEOMETRY_PRODUCT_VALUE_SCHEMA,
         )
         .unwrap();
-    let source_digest = Digest::sha256(b"make-box-source");
+    let source_digest = Digest::sha256(b"make-bored-block-source");
     let generated = GeneratedGeometryDefinition {
-        module_path: "examples/makeBox.m".into(),
-        function: "makeBox".into(),
+        module_path: "examples/makeBoredBlock.m".into(),
+        function: "makeBoredBlock".into(),
         source_digest: GeometryDigest::from_bytes(*source_digest.bytes()),
         arguments: Vec::new(),
     };
     let callable = BundleCallable {
         owner_identity: "examples".into(),
-        qualified_name: "makeBox".into(),
+        qualified_name: "makeBoredBlock".into(),
         source_digest,
     };
     let output = ValueFact::proven(
@@ -308,15 +340,23 @@ fn generated_geometry_requires_and_materializes_its_frozen_product_receipt() {
         schema_version: 1,
         definition: GeometryDefinition {
             module_path: "examples/generated.fea".into(),
-            geometry_id: "generated_box".into(),
+            geometry_id: "generated_bored_block".into(),
             parameters: Vec::new(),
             source: GeometryDefinitionSource::Generated(generated),
-            regions: vec![GeometryRegionDefinition {
-                region_id: "body".into(),
-                role: GeometryRegionRole::Solid,
-                selector: GeometryRegionSelector::GeneratedOutput("body".into()),
-                cardinality: GeometryRegionCardinality::ExactlyOne,
-            }],
+            regions: vec![
+                GeometryRegionDefinition {
+                    region_id: "body".into(),
+                    role: GeometryRegionRole::Solid,
+                    selector: GeometryRegionSelector::GeneratedOutput("body".into()),
+                    cardinality: GeometryRegionCardinality::ExactlyOne,
+                },
+                GeometryRegionDefinition {
+                    region_id: "hole_wall".into(),
+                    role: GeometryRegionRole::Face,
+                    selector: GeometryRegionSelector::GeneratedOutput("hole_wall".into()),
+                    cardinality: GeometryRegionCardinality::ExactlyOne,
+                },
+            ],
             cad_parameters: Vec::new(),
         },
         bindings: BTreeMap::new(),
@@ -352,6 +392,7 @@ fn generated_geometry_requires_and_materializes_its_frozen_product_receipt() {
     let output = import_geometry_materialization_output(&store, output_root, &access).unwrap();
     output.validate_against(&request).unwrap();
     assert_eq!(output.regions["body"].entity_ids.len(), 1);
+    assert_eq!(output.regions["hole_wall"].entity_ids.len(), 1);
     assert_eq!(
         output.materialization_kind,
         runmat_geometry_ops::GeometryMaterializationKind::Generated

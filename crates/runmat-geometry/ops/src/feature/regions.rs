@@ -126,7 +126,7 @@ fn resolve_geometry_regions_inner<E: GeometryRegionEvidence>(
                     )));
                 }
                 history
-                    .created
+                    .introduced
                     .iter()
                     .filter(|entity| available_set.contains(*entity))
                     .cloned()

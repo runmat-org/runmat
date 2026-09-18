@@ -205,6 +205,81 @@ fn constructed_materialization_and_result_regions_share_the_exact_artifact() {
 }
 
 #[test]
+fn boolean_history_projects_authored_regions_to_the_final_exact_topology() {
+    let provider = provider();
+    let definition = bored_block_definition();
+    let materialized = runmat_geometry_ops::materialize_geometry_definition(
+        &definition,
+        &BTreeMap::new(),
+        None,
+        &provider,
+        &RejectingSourceHost,
+        GeometryFeaturePlanLimits::default(),
+    )
+    .unwrap();
+    let regions = runmat_geometry_ops::resolve_geometry_regions(
+        &definition,
+        &materialized.geometry.topology,
+        &materialized.feature_history,
+        &NoRegionEvidence,
+    )
+    .unwrap();
+
+    assert_eq!(regions["body"].role, GeometryRegionRole::Cell);
+    assert_eq!(regions["body"].entity_ids.len(), 1);
+    assert_eq!(regions["hole_wall"].role, GeometryRegionRole::Face);
+    assert_eq!(regions["hole_wall"].entity_ids.len(), 1);
+    assert!(regions["hole_wall"]
+        .entity_ids
+        .iter()
+        .all(|entity| materialized
+            .geometry
+            .topology
+            .faces
+            .iter()
+            .any(|face| face.id == *entity)));
+
+    let bore = &materialized.feature_history["bore"];
+    assert!(bore.inventory_complete);
+    assert_eq!(
+        bore.result_entities[&GeometryRegionRole::Face],
+        regions["hole_wall"].entity_ids
+    );
+    let stock = &materialized.feature_history["stock"];
+    assert_eq!(stock.result_entities[&GeometryRegionRole::Cell].len(), 1);
+    materialized.geometry.build_closure().unwrap();
+}
+
+#[test]
+fn feature_lineage_merges_shared_ancestors_across_boolean_branches() {
+    let provider = provider();
+    let definition = branched_union_definition();
+    let materialized = runmat_geometry_ops::materialize_geometry_definition(
+        &definition,
+        &BTreeMap::new(),
+        None,
+        &provider,
+        &RejectingSourceHost,
+        GeometryFeaturePlanLimits::default(),
+    )
+    .unwrap();
+    let regions = runmat_geometry_ops::resolve_geometry_regions(
+        &definition,
+        &materialized.geometry.topology,
+        &materialized.feature_history,
+        &NoRegionEvidence,
+    )
+    .unwrap();
+
+    assert_eq!(regions["stock_descendants"].role, GeometryRegionRole::Solid);
+    assert_eq!(regions["stock_descendants"].entity_ids.len(), 2);
+    assert_eq!(
+        materialized.feature_history["stock"].result_entities[&GeometryRegionRole::Solid],
+        regions["stock_descendants"].entity_ids
+    );
+}
+
+#[test]
 fn unqualified_profile_operations_fail_even_when_the_provider_is_called_directly() {
     let provider = provider();
     let source = unit_box(&provider, "source");
@@ -318,6 +393,107 @@ fn box_definition() -> GeometryDefinition {
             role: GeometryRegionRole::Solid,
             selector: GeometryRegionSelector::Result,
             cardinality: GeometryRegionCardinality::ExactlyOne,
+        }],
+        cad_parameters: Vec::new(),
+    }
+}
+
+fn bored_block_definition() -> GeometryDefinition {
+    GeometryDefinition {
+        module_path: "main.fea".into(),
+        geometry_id: "bored_block".into(),
+        parameters: Vec::new(),
+        source: GeometryDefinitionSource::Constructed(GeometryFeatureGraph {
+            features: vec![
+                GeometryFeature {
+                    feature_id: "stock".into(),
+                    operation: GeometryFeatureOperation::Box {
+                        width_m: 2.0.into(),
+                        depth_m: 2.0.into(),
+                        height_m: 2.0.into(),
+                    },
+                },
+                GeometryFeature {
+                    feature_id: "bore".into(),
+                    operation: GeometryFeatureOperation::Cylinder {
+                        radius_m: 0.25.into(),
+                        height_m: 4.0.into(),
+                        axis: [0.0.into(), 0.0.into(), 1.0.into()],
+                        origin_m: [1.0.into(), 1.0.into(), (-1.0).into()],
+                    },
+                },
+                GeometryFeature {
+                    feature_id: "cut".into(),
+                    operation: GeometryFeatureOperation::Subtract {
+                        base: GeometryFeatureRef("stock".into()),
+                        tools: vec![GeometryFeatureRef("bore".into())],
+                    },
+                },
+            ],
+            result: GeometryFeatureRef("cut".into()),
+        }),
+        regions: vec![
+            GeometryRegionDefinition {
+                region_id: "body".into(),
+                role: GeometryRegionRole::Cell,
+                selector: GeometryRegionSelector::FeatureResult(GeometryFeatureRef("stock".into())),
+                cardinality: GeometryRegionCardinality::ExactlyOne,
+            },
+            GeometryRegionDefinition {
+                region_id: "hole_wall".into(),
+                role: GeometryRegionRole::Face,
+                selector: GeometryRegionSelector::BoundaryIntroducedBy(GeometryFeatureRef(
+                    "bore".into(),
+                )),
+                cardinality: GeometryRegionCardinality::ExactlyOne,
+            },
+        ],
+        cad_parameters: Vec::new(),
+    }
+}
+
+fn branched_union_definition() -> GeometryDefinition {
+    GeometryDefinition {
+        module_path: "main.fea".into(),
+        geometry_id: "branched_union".into(),
+        parameters: Vec::new(),
+        source: GeometryDefinitionSource::Constructed(GeometryFeatureGraph {
+            features: vec![
+                GeometryFeature {
+                    feature_id: "stock".into(),
+                    operation: GeometryFeatureOperation::Box {
+                        width_m: 1.0.into(),
+                        depth_m: 1.0.into(),
+                        height_m: 1.0.into(),
+                    },
+                },
+                GeometryFeature {
+                    feature_id: "moved".into(),
+                    operation: GeometryFeatureOperation::Transform {
+                        source: GeometryFeatureRef("stock".into()),
+                        matrix: translation(2.0, 0.0, 0.0)
+                            .into_iter()
+                            .map(Into::into)
+                            .collect(),
+                    },
+                },
+                GeometryFeature {
+                    feature_id: "result".into(),
+                    operation: GeometryFeatureOperation::Union {
+                        operands: vec![
+                            GeometryFeatureRef("stock".into()),
+                            GeometryFeatureRef("moved".into()),
+                        ],
+                    },
+                },
+            ],
+            result: GeometryFeatureRef("result".into()),
+        }),
+        regions: vec![GeometryRegionDefinition {
+            region_id: "stock_descendants".into(),
+            role: GeometryRegionRole::Solid,
+            selector: GeometryRegionSelector::FeatureResult(GeometryFeatureRef("stock".into())),
+            cardinality: GeometryRegionCardinality::OneOrMore,
         }],
         cad_parameters: Vec::new(),
     }
