@@ -1,6 +1,8 @@
 use crate::{
-    algebra::CoercivitySymbolicPlan, constraints::CanonicalStructuralConstraintPlan,
-    execution::StructuralLinearWorkload, results::observation::ResolvedObservationPlan,
+    algebra::CoercivitySymbolicPlan,
+    constraints::CanonicalStructuralConstraintPlan,
+    execution::{FieldRecoveryPlan, StructuralLinearWorkload},
+    results::{field::StructuralRecoveredFieldTopology, observation::ResolvedObservationPlan},
     solve::preconditioner::SpdPreconditionerKind,
 };
 use runmat_execution::resource::AcceleratorRequest;
@@ -10,8 +12,8 @@ use super::{
     build_resource_plan, structural_facts::derive_structural_resource_facts,
     AccuracyResourceDemand, AssemblyResourcePolicy, ByteCount, CheckpointArtifactPolicy, Count,
     FeaResourceDemand, FeaResourcePhase, FeaResourcePlan, FeaResourcePlanningInput,
-    NumericalScalar, ObservationResourceFacts, PartitioningPolicy, PhaseResourcePolicy,
-    PreconditionerStorage, ResourcePlanningError, SolveResourcePolicy,
+    FieldRecoveryResourceFacts, NumericalScalar, ObservationResourceFacts, PartitioningPolicy,
+    PhaseResourcePolicy, PreconditionerStorage, ResourcePlanningError, SolveResourcePolicy,
     SolverAdmissionResourcePolicy, StructuralOperatorResourceDemand, WorkerResourcePolicy,
     RESOURCE_ESTIMATION_MODEL_REVISION,
 };
@@ -59,6 +61,15 @@ pub fn build_structural_resource_plan(
             ))?;
     let observations =
         ObservationResourceFacts::from_plan(observations, workload.observation_execution)?;
+    let step = workload
+        .procedure_step()
+        .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+    let recovery_topology = StructuralRecoveredFieldTopology::derive(&workload.model, mesh)
+        .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+    let field_recovery = FieldRecoveryResourceFacts::from_plan(
+        &FieldRecoveryPlan::resolve(step, recovery_topology, constraints.groups.len())
+            .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?,
+    )?;
     let dofs = facts.sparse.rows.0;
     let stiffness_nonzeros = facts.sparse.maximum_nonzeros();
     let admission_pattern = if constraints.rows.iter().any(|row| row.terms.len() > 1) {
@@ -80,9 +91,6 @@ pub fn build_structural_resource_plan(
         stiffness_nonzeros,
         &admission,
     )?;
-    let step = workload
-        .procedure_step()
-        .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
     let publishes_linearization = step
         .state_outputs
         .iter()
@@ -151,6 +159,7 @@ pub fn build_structural_resource_plan(
                 scratch_bytes: ByteCount(recovery_resident),
                 retained_bytes: ByteCount(recovery_bytes),
             },
+            field_recovery,
             observations: observations.clone(),
             publication: CheckpointArtifactPolicy {
                 result_artifact_bytes: ByteCount(recovery_bytes),

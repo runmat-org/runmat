@@ -265,6 +265,7 @@ pub fn build_structural_buckling_resource_plan(
                     scratch_bytes: ByteCount(phase_resident),
                     retained_bytes: ByteCount(output_payload),
                 },
+                field_recovery: Default::default(),
                 observations: observations.clone(),
                 publication: CheckpointArtifactPolicy {
                     result_artifact_bytes: ByteCount(output_payload),

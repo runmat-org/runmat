@@ -331,6 +331,7 @@ pub fn build_structural_modal_resource_plan(
                     scratch_bytes: ByteCount(phase_resident_bytes),
                     retained_bytes: ByteCount(artifact_payload_bytes),
                 },
+                field_recovery: Default::default(),
                 observations: observations.clone(),
                 publication: CheckpointArtifactPolicy {
                     result_artifact_bytes: ByteCount(artifact_payload_bytes),

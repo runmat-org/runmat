@@ -2,6 +2,7 @@ use std::ops::Deref;
 
 use runmat_analysis_core::{
     AnalysisField, AnalysisFieldValues, FieldLocation, ObservationQuantity, ObservationValueShape,
+    RecoveryPolicy,
 };
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
@@ -73,6 +74,17 @@ pub enum RecoveredFieldEntityDomain {
     BeamElements,
     ShellElements,
     ConstraintGroups,
+}
+
+/// Scientific provenance of the values in one published field.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum RecoveredFieldDerivation {
+    Native,
+    LocationTransfer {
+        source_location: FieldLocation,
+        recovery: RecoveryPolicy,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -150,6 +162,7 @@ pub struct RecoveredFieldDefinition {
     entity_domain: RecoveredFieldEntityDomain,
     value_shape: ObservationValueShape,
     numeric_representation: RecoveredFieldNumericRepresentation,
+    derivation: RecoveredFieldDerivation,
 }
 
 #[derive(Deserialize)]
@@ -162,6 +175,7 @@ struct RecoveredFieldDefinitionData {
     entity_domain: RecoveredFieldEntityDomain,
     value_shape: ObservationValueShape,
     numeric_representation: RecoveredFieldNumericRepresentation,
+    derivation: RecoveredFieldDerivation,
 }
 
 impl TryFrom<RecoveredFieldDefinitionData> for RecoveredFieldDefinition {
@@ -176,6 +190,7 @@ impl TryFrom<RecoveredFieldDefinitionData> for RecoveredFieldDefinition {
             entity_domain: data.entity_domain,
             value_shape: data.value_shape,
             numeric_representation: data.numeric_representation,
+            derivation: data.derivation,
         };
         definition.validate()?;
         Ok(definition)
@@ -191,6 +206,26 @@ impl RecoveredFieldDefinition {
         value_shape: ObservationValueShape,
         numeric_representation: RecoveredFieldNumericRepresentation,
     ) -> Result<Self, RecoveredFieldError> {
+        Self::new_derived(
+            field_id,
+            quantity,
+            location,
+            entity_domain,
+            value_shape,
+            numeric_representation,
+            RecoveredFieldDerivation::Native,
+        )
+    }
+
+    pub fn new_derived(
+        field_id: impl Into<String>,
+        quantity: ObservationQuantity,
+        location: FieldLocation,
+        entity_domain: RecoveredFieldEntityDomain,
+        value_shape: ObservationValueShape,
+        numeric_representation: RecoveredFieldNumericRepresentation,
+        derivation: RecoveredFieldDerivation,
+    ) -> Result<Self, RecoveredFieldError> {
         let mut definition = Self {
             identity: RecoveredFieldDefinitionIdentity(Digest::sha256([])),
             field_id: field_id.into(),
@@ -199,6 +234,7 @@ impl RecoveredFieldDefinition {
             entity_domain,
             value_shape,
             numeric_representation,
+            derivation,
         };
         definition.identity = definition.derive_identity()?;
         definition.validate()?;
@@ -231,6 +267,31 @@ impl RecoveredFieldDefinition {
 
     pub const fn numeric_representation(&self) -> RecoveredFieldNumericRepresentation {
         self.numeric_representation
+    }
+
+    pub const fn derivation(&self) -> RecoveredFieldDerivation {
+        self.derivation
+    }
+
+    pub fn satisfies_recovery(
+        &self,
+        source_location: FieldLocation,
+        output_location: FieldLocation,
+        recovery: RecoveryPolicy,
+    ) -> bool {
+        match self.derivation {
+            RecoveredFieldDerivation::Native => {
+                self.location == source_location && recovery == RecoveryPolicy::Native
+            }
+            RecoveredFieldDerivation::LocationTransfer {
+                source_location: actual_source,
+                recovery: actual_recovery,
+            } => {
+                self.location == output_location
+                    && source_location == actual_source
+                    && recovery == actual_recovery
+            }
+        }
     }
 
     pub(crate) fn logical_component_count(&self) -> Result<usize, RecoveredFieldError> {
@@ -276,6 +337,7 @@ impl RecoveredFieldDefinition {
                 self.entity_domain,
                 &self.value_shape,
                 self.numeric_representation,
+                self.derivation,
             ),
             FIELD_LIMITS,
         )
@@ -315,6 +377,18 @@ impl RecoveredFieldDefinition {
                 .is_storage_equivalent_to(&self.quantity.canonical_value_shape())
         {
             return Err(RecoveredFieldError::QuantityShapeMismatch);
+        }
+        match self.derivation {
+            RecoveredFieldDerivation::Native => {}
+            RecoveredFieldDerivation::LocationTransfer {
+                source_location,
+                recovery,
+            } if source_location == FieldLocation::Element
+                && self.location == FieldLocation::Node
+                && recovery == RecoveryPolicy::VolumeWeightedAverage => {}
+            RecoveredFieldDerivation::LocationTransfer { .. } => {
+                return Err(RecoveredFieldError::CatalogUnsupportedLocation)
+            }
         }
         if self.identity != self.derive_identity()? {
             return Err(RecoveredFieldError::IdentityMismatch);

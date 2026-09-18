@@ -3,7 +3,7 @@ use super::*;
 pub(super) fn execute() -> SolvedPipeline {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     let mut producer_step = runmat_analysis_core::ProcedureStep::structural_static("preload");
-    producer_step.observations = vec![structural_displacement_observation()];
+    producer_step.observations = vec![structural_nodal_von_mises_observation()];
     producer_step
         .state_outputs
         .push(runmat_analysis_core::StateOutput {

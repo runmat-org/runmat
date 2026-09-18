@@ -465,6 +465,7 @@ impl StructuralFrequencyEntryResourceProjection {
                             scratch_bytes: ByteCount(0),
                             retained_bytes: ByteCount(result_bytes),
                         },
+                        field_recovery: Default::default(),
                         observations: empty_observations(),
                         publication: CheckpointArtifactPolicy {
                             result_artifact_bytes: ByteCount(result_bytes),
@@ -596,6 +597,9 @@ impl StructuralFrequencyEntryResourceProjection {
                                 "complex recovery retained bytes",
                             )?),
                         },
+                        field_recovery: super::FieldRecoveryResourceFacts::from_plan(
+                            &request.plan,
+                        )?,
                         observations: empty_observations(),
                         publication: CheckpointArtifactPolicy {
                             result_artifact_bytes: ByteCount(output_payload_bytes),

@@ -27,7 +27,7 @@ use crate::{
     planning::resource::{Count, ObservationResourceFacts},
     results::field::{
         RecoveredField, RecoveredFieldArtifact, RecoveredFieldCatalog, RecoveredFieldDefinition,
-        RecoveredFieldEntityCounts, RecoveredFieldEntityDomain,
+        RecoveredFieldDerivation, RecoveredFieldEntityCounts, RecoveredFieldEntityDomain,
         RecoveredFieldNumericRepresentation, RecoveredFieldSample, RecoveredFieldSelection,
     },
     topology::AnalysisProjection,
@@ -375,6 +375,52 @@ fn automatic_cost_policy_is_resolved_before_execution() {
 
     assert!(plan.observations[0].resolved_cost.operation_count > 0);
     assert!(plan.observations[0].resolved_cost.stored_bytes > 0);
+}
+
+#[test]
+fn materialized_volume_weighted_field_binds_by_recovery_provenance() {
+    let projection = projection(ElementOrder::Tet4);
+    let definition = RecoveredFieldDefinition::new_derived(
+        "structural.nodal_von_mises",
+        ObservationQuantity::VonMisesStress,
+        FieldLocation::Node,
+        RecoveredFieldEntityDomain::StructuralNodes,
+        ObservationValueShape::Scalar,
+        RecoveredFieldNumericRepresentation::Real,
+        RecoveredFieldDerivation::LocationTransfer {
+            source_location: FieldLocation::Element,
+            recovery: RecoveryPolicy::VolumeWeightedAverage,
+        },
+    )
+    .unwrap();
+    let mut request = spec("nodal-von-mises", ObservationTarget::WholeModel);
+    request.quantity = ObservationQuantity::VonMisesStress;
+    request.source_location = FieldLocation::Element;
+    request.output_location = FieldLocation::Node;
+    request.recovery = RecoveryPolicy::VolumeWeightedAverage;
+    request.cost = runmat_analysis_core::ObservationCostPolicy::Automatic;
+    let mut step = ProcedureStep::structural_static("static");
+    step.observations = vec![ObservationRequest::Field(request)];
+
+    let plan = resolve_observation_plan(
+        &step,
+        &projection,
+        std::slice::from_ref(&definition),
+        ObservationLimits::default(),
+    )
+    .unwrap();
+    let fields = catalog(
+        &projection,
+        &definition,
+        vec![4],
+        vec![10.0, 20.0, 30.0, 40.0],
+    );
+    let results = evaluate_observations(&plan, &projection, &fields).unwrap();
+
+    assert_eq!(
+        results[0].field.as_host_f64().unwrap(),
+        &[10.0, 20.0, 30.0, 40.0]
+    );
 }
 
 #[test]
@@ -1543,6 +1589,7 @@ fn observation_assembly_requires_the_exact_subset_scheduled_at_one_frequency() {
         producer,
         FieldRecoverySource::SolverResult(source_result),
         topology,
+        crate::execution::FieldRecoveryPlan::default(),
     )
     .unwrap();
     let source_catalog = fields_at(100.0);

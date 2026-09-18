@@ -2158,6 +2158,12 @@ fn structural_frequency_entries_execute_independently_and_assemble_in_plan_order
                 prepared.step,
                 FieldRecoverySource::StructuralFrequencyEntry(entry.identity()),
                 topology.identity,
+                crate::execution::FieldRecoveryPlan::resolve(
+                    workload.procedure_step().unwrap(),
+                    topology,
+                    0,
+                )
+                .unwrap(),
             )
             .unwrap();
             recover_structural_frequency_entry_fields(&workload, &mesh, &recovery_request, entry)

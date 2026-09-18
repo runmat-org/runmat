@@ -440,6 +440,11 @@ fn build_operator_resource_plan(
         phase_resident_bytes,
         phase_scratch_bytes: demand.phase_resources.scratch_bytes,
         phase_retained_bytes: demand.phase_resources.retained_bytes,
+        field_recovery_requirement_count: demand.field_recovery.requirement_count,
+        field_recovery_source_entity_count: demand.field_recovery.source_entity_count,
+        field_recovery_output_entity_count: demand.field_recovery.output_entity_count,
+        field_recovery_topology_incidence_count: demand.field_recovery.topology_incidence_count,
+        field_recovery_arithmetic_operation_count: demand.field_recovery.arithmetic_operation_count,
         result_artifact_bytes: demand.publication.result_artifact_bytes,
         observation_maximum_samples_per_observation: demand
             .observations
@@ -695,6 +700,22 @@ fn validate_operator_demand(
     if demand.phase_resources.resident_bytes_upper_bound.0 < phase_payload_lower_bound {
         return Err(ResourcePlanningError::Invalid(
             "phase resident bound is below its scalar payload".into(),
+        ));
+    }
+    let recovery = &demand.field_recovery;
+    let recovery_is_empty = recovery.requirement_count.0 == 0
+        && recovery.source_entity_count.0 == 0
+        && recovery.output_entity_count.0 == 0
+        && recovery.topology_incidence_count.0 == 0
+        && recovery.arithmetic_operation_count.0 == 0;
+    if !recovery_is_empty
+        && (recovery.requirement_count.0 == 0
+            || recovery.source_entity_count.0 == 0
+            || recovery.output_entity_count.0 == 0
+            || recovery.arithmetic_operation_count.0 == 0)
+    {
+        return Err(ResourcePlanningError::Invalid(
+            "field recovery resource facts are incomplete".into(),
         ));
     }
     if demand.assembly.contribution_nonzero_upper_bound.0 < demand.sparse.maximum_nonzeros()

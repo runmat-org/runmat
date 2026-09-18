@@ -7,8 +7,8 @@ use crate::{
 };
 
 use super::contract::{
-    ObservationError, ObservationResult, ResolvedObservation, ResolvedObservationPlan,
-    ResolvedObservationTarget,
+    materialized_field_location, ObservationError, ObservationResult, ResolvedObservation,
+    ResolvedObservationPlan, ResolvedObservationTarget,
 };
 use super::history::{
     sample_matches_domain, sample_matches_history_policy, ObservationEventAttribution,
@@ -218,7 +218,7 @@ fn evaluate_sample(
             reason: "resolved source field sample was not supplied".into(),
         })?;
     if source.definition().quantity() != observation.spec.quantity
-        || source.definition().location() != observation.spec.source_location
+        || source.definition().location() != materialized_field_location(&observation.spec)
         || source.definition().entity_domain() != observation.source_entity_domain
         || source.definition().value_shape() != &observation.spec.value_shape
     {

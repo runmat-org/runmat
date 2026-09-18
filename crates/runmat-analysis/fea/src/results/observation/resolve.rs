@@ -13,17 +13,18 @@ use runmat_meshing_core::{SolverMeshArtifact, StableDigest};
 use crate::{
     constraints::CanonicalStructuralConstraintPlan,
     results::field::{
-        RecoveredFieldDefinition, RecoveredFieldEntityDomain, RecoveredFieldNumericRepresentation,
+        RecoveredFieldDefinition, RecoveredFieldDerivation, RecoveredFieldEntityDomain,
+        RecoveredFieldNumericRepresentation,
     },
     topology::AnalysisProjection,
 };
 
 use super::contract::{
-    checked_bytes, derive_resolved_point_identity, observation_result_storage_component_count,
-    shape_component_count, validate_output_numeric_contract, ObservationError, ObservationLimits,
-    ObservationSampleBounds, ResolvedComponentProjection, ResolvedObservation,
-    ResolvedObservationPlan, ResolvedObservationPlanIdentity, ResolvedObservationPoint,
-    ResolvedObservationTarget,
+    checked_bytes, derive_resolved_point_identity, materialized_field_location,
+    observation_result_storage_component_count, shape_component_count,
+    validate_output_numeric_contract, ObservationError, ObservationLimits, ObservationSampleBounds,
+    ResolvedComponentProjection, ResolvedObservation, ResolvedObservationPlan,
+    ResolvedObservationPlanIdentity, ResolvedObservationPoint, ResolvedObservationTarget,
 };
 use super::history::resolve_history_sample_bounds;
 use super::topology::StructuralObservationTopology;
@@ -309,7 +310,14 @@ fn validate_supported_spec(
             spec.target,
             ObservationTarget::Point { .. } | ObservationTarget::Path { .. }
         );
-    if !native_location && !reduced_location && !solid_point_interpolation {
+    let materialized_location_transfer = spec.source_location == FieldLocation::Element
+        && spec.output_location == FieldLocation::Node
+        && spec.recovery == RecoveryPolicy::VolumeWeightedAverage;
+    if !native_location
+        && !reduced_location
+        && !solid_point_interpolation
+        && !materialized_location_transfer
+    {
         return Err(ObservationError::Unsupported(
             "field recovery and location transfer must be completed before observation evaluation",
         ));
@@ -543,8 +551,16 @@ fn bind_field(
     let matches = fields
         .iter()
         .filter(|field| {
+            let derivation_matches = if spec.recovery == RecoveryPolicy::ShapeFunctionInterpolation
+                && spec.output_location == FieldLocation::Point
+            {
+                field.derivation() == RecoveredFieldDerivation::Native
+                    && field.location() == spec.source_location
+            } else {
+                field.satisfies_recovery(spec.source_location, spec.output_location, spec.recovery)
+            };
             field.quantity() == spec.quantity
-                && field.location() == spec.source_location
+                && derivation_matches
                 && field.value_shape() == &spec.value_shape
         })
         .collect::<Vec<_>>();
@@ -695,7 +711,7 @@ fn resolve_probe(
             "probe requests require an exact point target",
         ));
     };
-    match spec.source_location {
+    match materialized_field_location(spec) {
         FieldLocation::Node => {
             let matches = topology
                 .nodes
@@ -759,19 +775,21 @@ fn resolve_field_target(
     }
     match &spec.target {
         ObservationTarget::WholeModel
-        | ObservationTarget::Spatial(ExcitationTarget::WholeModel) => match spec.source_location {
-            FieldLocation::Node => nodes_target((0..topology.nodes.len()).collect(), topology),
-            FieldLocation::Element => {
-                let elements = topology.elements(field_domain)?;
-                elements_target((0..elements.len()).collect(), field_domain, topology)
+        | ObservationTarget::Spatial(ExcitationTarget::WholeModel) => {
+            match materialized_field_location(spec) {
+                FieldLocation::Node => nodes_target((0..topology.nodes.len()).collect(), topology),
+                FieldLocation::Element => {
+                    let elements = topology.elements(field_domain)?;
+                    elements_target((0..elements.len()).collect(), field_domain, topology)
+                }
+                _ => Err(ObservationError::Unsupported("unsupported field location")),
             }
-            _ => Err(ObservationError::Unsupported("unsupported field location")),
-        },
+        }
         ObservationTarget::Spatial(ExcitationTarget::Region(region)) => {
             match (
                 region.entity_dimension,
                 region.expected_topology,
-                spec.source_location,
+                materialized_field_location(spec),
             ) {
                 (EntityDimension::Point, ExpectedTopology::MeshNode, FieldLocation::Node) => {
                     let id = parse_node_selector(&region.region_id, spec)?;
@@ -955,7 +973,7 @@ fn resolve_reduction_target(
                     })
                 }
                 (EntityDimension::Face, ExpectedTopology::BoundaryFace)
-                    if spec.source_location == FieldLocation::Node =>
+                    if materialized_field_location(spec) == FieldLocation::Node =>
                 {
                     let face_indices = matching_faces(&region.region_id, projection);
                     enforce_cardinality(region.cardinality, face_indices.len(), spec)?;

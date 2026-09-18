@@ -197,6 +197,35 @@ impl AuthoredOutputExpression {
                     }
                 }
             }
+            Self::Recovery {
+                source,
+                output_location,
+                recovery,
+            } => {
+                let AuthoredOutputType::Field {
+                    value,
+                    shape,
+                    domain,
+                    location,
+                } = source.validate(steps, outputs)?
+                else {
+                    return Err(AuthoredOutputError::RecoveryRequiresField);
+                };
+                if location != crate::FieldLocation::Element
+                    || *output_location != crate::FieldLocation::Node
+                    || *recovery != crate::RecoveryPolicy::VolumeWeightedAverage
+                    || value != AuthoredOutputValue::Physical(ObservationQuantity::VonMisesStress)
+                    || shape != ObservationValueShape::Scalar
+                {
+                    return Err(AuthoredOutputError::UnsupportedRecovery);
+                }
+                Ok(AuthoredOutputType::Field {
+                    value,
+                    shape,
+                    domain,
+                    location: *output_location,
+                })
+            }
             Self::SpatialReduction {
                 reduction,
                 source,
@@ -486,6 +515,12 @@ pub enum AuthoredOutputError {
     UnknownOrForwardOutput(String),
     #[error("field projection requires a field source")]
     ProjectionRequiresField,
+    #[error("field recovery requires a field source")]
+    RecoveryRequiresField,
+    #[error(
+        "field recovery currently supports scalar element von Mises stress to nodes using volume_weighted_average"
+    )]
+    UnsupportedRecovery,
     #[error("magnitude requires a three-component vector field or complex scalar field")]
     MagnitudeRequiresVector,
     #[error("component requires a three-component vector field")]

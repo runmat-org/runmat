@@ -4,8 +4,9 @@ use serde::{Deserialize, Serialize};
 use crate::physics::structural::topology::CanonicalStructuralTopologyIdentity;
 
 use super::{
-    AnalysisExecutionError, AnalysisExecutionResult, FieldRecoveryRequestIdentity,
-    SolverResultIdentity, StepIdentity, StructuralFrequencyEntryResultIdentity,
+    AnalysisExecutionError, AnalysisExecutionResult, FieldRecoveryPlan,
+    FieldRecoveryRequestIdentity, SolverResultIdentity, StepIdentity,
+    StructuralFrequencyEntryResultIdentity,
 };
 
 const FIELD_RECOVERY_PREFIX: &[u8] = b"runmat-analysis-field-recovery/v1\0";
@@ -37,6 +38,7 @@ pub struct FieldRecoveryRequest {
     pub producer: StepIdentity,
     pub source: FieldRecoverySource,
     pub topology: CanonicalStructuralTopologyIdentity,
+    pub plan: FieldRecoveryPlan,
 }
 
 #[derive(Deserialize)]
@@ -47,6 +49,7 @@ struct FieldRecoveryRequestWire {
     producer: StepIdentity,
     source: FieldRecoverySource,
     topology: CanonicalStructuralTopologyIdentity,
+    plan: FieldRecoveryPlan,
 }
 
 impl TryFrom<FieldRecoveryRequestWire> for FieldRecoveryRequest {
@@ -59,6 +62,7 @@ impl TryFrom<FieldRecoveryRequestWire> for FieldRecoveryRequest {
             producer: wire.producer,
             source: wire.source,
             topology: wire.topology,
+            plan: wire.plan,
         };
         request.validate()?;
         Ok(request)
@@ -70,16 +74,18 @@ impl FieldRecoveryRequest {
         producer: StepIdentity,
         source: FieldRecoverySource,
         topology: CanonicalStructuralTopologyIdentity,
+        plan: FieldRecoveryPlan,
     ) -> AnalysisExecutionResult<Self> {
         let request = Self {
             schema_version: 1,
             identity: FieldRecoveryRequestIdentity::derive(
                 "field-recovery-request",
-                &(producer, source, topology),
+                &(producer, source, topology, &plan),
             )?,
             producer,
             source,
             topology,
+            plan,
         };
         request.validate()?;
         Ok(request)
@@ -90,9 +96,10 @@ impl FieldRecoveryRequest {
     }
 
     pub fn validate(&self) -> AnalysisExecutionResult<()> {
+        self.plan.validate()?;
         let expected = FieldRecoveryRequestIdentity::derive(
             "field-recovery-request",
-            &(self.producer, self.source, self.topology),
+            &(self.producer, self.source, self.topology, &self.plan),
         )?;
         if self.schema_version != 1
             || !self.topology.has_valid_identity()
@@ -128,9 +135,14 @@ impl FieldRecoveryRequest {
 
 #[cfg(test)]
 mod tests {
+    use runmat_analysis_core::{
+        FieldLocation, ObservationQuantity, ObservationValueShape, RecoveryPolicy,
+    };
     use runmat_execution::Digest;
 
+    use crate::execution::{FieldRecoveryCost, FieldRecoveryRequirement};
     use crate::physics::structural::topology::CanonicalStructuralTopologyIdentity;
+    use crate::results::field::RecoveredFieldEntityDomain;
 
     use super::*;
 
@@ -148,13 +160,18 @@ mod tests {
         let topology = CanonicalStructuralTopologyIdentity::Explicit {
             structural_topology_digest: Digest::sha256("topology"),
         };
-        let solver_request =
-            FieldRecoveryRequest::new(step, FieldRecoverySource::SolverResult(solver), topology)
-                .unwrap();
+        let solver_request = FieldRecoveryRequest::new(
+            step,
+            FieldRecoverySource::SolverResult(solver),
+            topology,
+            FieldRecoveryPlan::default(),
+        )
+        .unwrap();
         let frequency_request = FieldRecoveryRequest::new(
             step,
             FieldRecoverySource::StructuralFrequencyEntry(entry),
             topology,
+            FieldRecoveryPlan::default(),
         )
         .unwrap();
 
@@ -168,5 +185,53 @@ mod tests {
         );
         assert_eq!(solver_request.source.solver_result(), Some(solver));
         assert_eq!(frequency_request.source.solver_result(), None);
+    }
+
+    #[test]
+    fn recovery_method_and_topology_cost_are_identity_significant() {
+        let sequence = super::super::SequenceIdentity::new(Digest::sha256("sequence")).unwrap();
+        let step = StepIdentity::new(sequence, Digest::sha256("step")).unwrap();
+        let solver =
+            SolverResultIdentity::from_step_result(step, Digest::sha256("result")).unwrap();
+        let topology = CanonicalStructuralTopologyIdentity::Explicit {
+            structural_topology_digest: Digest::sha256("topology"),
+        };
+        let requirement = FieldRecoveryRequirement {
+            quantity: ObservationQuantity::VonMisesStress,
+            source_location: FieldLocation::Element,
+            output_location: FieldLocation::Node,
+            recovery: RecoveryPolicy::VolumeWeightedAverage,
+            value_shape: ObservationValueShape::Scalar,
+            entity_domain: RecoveredFieldEntityDomain::StructuralNodes,
+            cost: FieldRecoveryCost {
+                source_entity_count: 2,
+                output_entity_count: 7,
+                topology_incidence_count: 8,
+                arithmetic_operation_count: 23,
+            },
+        };
+        let planned = FieldRecoveryRequest::new(
+            step,
+            FieldRecoverySource::SolverResult(solver),
+            topology,
+            FieldRecoveryPlan {
+                requirements: vec![requirement],
+            },
+        )
+        .unwrap();
+        let unplanned = FieldRecoveryRequest::new(
+            step,
+            FieldRecoverySource::SolverResult(solver),
+            topology,
+            FieldRecoveryPlan::default(),
+        )
+        .unwrap();
+
+        assert_ne!(planned.identity(), unplanned.identity());
+        assert_eq!(
+            FieldRecoveryRequest::from_canonical_bytes(&planned.canonical_bytes().unwrap())
+                .unwrap(),
+            planned
+        );
     }
 }

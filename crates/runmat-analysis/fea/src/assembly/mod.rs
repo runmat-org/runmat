@@ -687,6 +687,24 @@ impl SolidRecoveryGeometry {
             Self::Tetrahedron10 { node_indices, .. } => node_indices,
         }
     }
+
+    /// Exact physical volume used by topology-changing recovery operations.
+    pub fn volume_m3(&self) -> Result<f64, String> {
+        use elements::solid::{Tetrahedron10ElementGeometry, Tetrahedron4ElementGeometry};
+
+        match self {
+            Self::Tetrahedron4 { coordinates_m, .. } => Tetrahedron4ElementGeometry {
+                nodes_m: *coordinates_m,
+            }
+            .volume_m3()
+            .map_err(|source| source.to_string()),
+            Self::Tetrahedron10 { coordinates_m, .. } => Tetrahedron10ElementGeometry {
+                nodes_m: *coordinates_m,
+            }
+            .volume_m3()
+            .map_err(|source| source.to_string()),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -153,6 +153,7 @@ geometry part {
         expect one_or_more
     }
 }
+
 mesh part on geometry.part {
     tetrahedra {
         order = linear
@@ -160,6 +161,7 @@ mesh part on geometry.part {
         maximum_deviation = 0.01 m
     }
 }
+
 model structure {}
 study response {
     geometry = geometry.part
@@ -265,4 +267,76 @@ study response {
             .result_dimension(),
         Some(PhysicalDimension::MOMENT)
     );
+}
+
+#[test]
+fn recovery_is_an_explicit_typed_element_to_node_operation() {
+    let source = r#"
+geometry part {
+    construct {
+        feature body = box(width = 1 m, depth = 1 m, height = 1 m)
+        result = feature.body
+    }
+    region body : solid {
+        select result
+        expect exactly_one
+    }
+}
+mesh part on geometry.part {
+    tetrahedra {
+        order = linear
+        target_size = 0.1 m
+        maximum_deviation = 0.01 m
+    }
+}
+model structure {}
+study response {
+    geometry = geometry.part
+    mesh = mesh.part
+    model = model.structure
+    analysis static { structural static {} }
+    output element_stress = analysis.static.field.element.stress
+    output element_von_mises = von_mises(output.element_stress)
+    output nodal_von_mises = recover(
+        output.element_von_mises,
+        to = node,
+        using = volume_weighted_average,
+    )
+}
+"#;
+    let program = check(source);
+    assert!(program.is_valid(), "{:#?}", program.diagnostics);
+    let study = program.studies.values().next().unwrap();
+    let recovered = study.sequence.steps[0].observations[2].spec().unwrap();
+    assert_eq!(
+        recovered.source_location,
+        runmat_analysis_core::FieldLocation::Element
+    );
+    assert_eq!(
+        recovered.output_location,
+        runmat_analysis_core::FieldLocation::Node
+    );
+    assert_eq!(
+        recovered.recovery,
+        runmat_analysis_core::RecoveryPolicy::VolumeWeightedAverage
+    );
+    assert_eq!(
+        recovered.quantity,
+        runmat_analysis_core::ObservationQuantity::VonMisesStress
+    );
+    assert_eq!(
+        recovered.value_shape,
+        runmat_analysis_core::ObservationValueShape::Scalar
+    );
+    assert!(matches!(
+        study.outputs[2].expression,
+        runmat_analysis_core::AuthoredOutputExpression::Recovery { .. }
+    ));
+
+    let invalid = check(&source.replace("to = node", "to = face"));
+    assert!(!invalid.is_valid());
+    assert!(invalid
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.message.contains("von Mises stress to nodes")));
 }

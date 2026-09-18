@@ -69,6 +69,12 @@ fn native_kernel_executes_explicit_structural_workload_without_mesh_input() {
         prepared.host.workload.step,
         FieldRecoverySource::SolverResult(source_result),
         result.constraint_result.topology,
+        runmat_analysis_fea::execution::FieldRecoveryPlan::resolve(
+            solve.procedure_step().unwrap(),
+            StructuralRecoveredFieldTopology::derive(&solve.model, None).unwrap(),
+            result.constraint_result.groups.len(),
+        )
+        .unwrap(),
     )
     .unwrap();
     let recovery_request = runmat_analysis_execution::prepare_analysis_objects(

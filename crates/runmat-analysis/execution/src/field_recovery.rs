@@ -144,10 +144,16 @@ pub fn prepare_structural_field_recovery(
                 "field recovery constraint result differs from the canonical executed plan",
             )
         })?;
+    let recovery_plan = runmat_analysis_fea::execution::FieldRecoveryPlan::resolve(
+        workload.procedure_step()?,
+        topology,
+        constraint_plan.groups.len(),
+    )?;
     let request = FieldRecoveryRequest::new(
         preparation.source_host.workload.step,
         FieldRecoverySource::SolverResult(source_result),
         topology.identity,
+        recovery_plan,
     )?;
     let request_bytes = request.canonical_bytes()?;
     let request_objects = prepare_analysis_objects(

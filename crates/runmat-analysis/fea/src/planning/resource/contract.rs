@@ -94,6 +94,17 @@ pub struct ObservationResourceFacts {
     pub collective_count: Count,
 }
 
+/// Exact family-owned field-recovery work admitted before observation evaluation.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FieldRecoveryResourceFacts {
+    pub requirement_count: Count,
+    pub source_entity_count: Count,
+    pub output_entity_count: Count,
+    pub topology_incidence_count: Count,
+    pub arithmetic_operation_count: Count,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AccuracyResourceDemand {
@@ -336,6 +347,7 @@ pub struct StructuralOperatorResourceDemand {
     pub assembly: AssemblyResourcePolicy,
     pub solve: SolveResourcePolicy,
     pub phase_resources: PhaseResourcePolicy,
+    pub field_recovery: FieldRecoveryResourceFacts,
     pub observations: ObservationResourceFacts,
     pub publication: CheckpointArtifactPolicy,
     pub partitioning: PartitioningPolicy,
@@ -874,6 +886,11 @@ pub struct ResourceBreakdown {
     pub phase_resident_bytes: ByteCount,
     pub phase_scratch_bytes: ByteCount,
     pub phase_retained_bytes: ByteCount,
+    pub field_recovery_requirement_count: Count,
+    pub field_recovery_source_entity_count: Count,
+    pub field_recovery_output_entity_count: Count,
+    pub field_recovery_topology_incidence_count: Count,
+    pub field_recovery_arithmetic_operation_count: Count,
     pub result_artifact_bytes: ByteCount,
     pub observation_maximum_samples_per_observation: Count,
     pub observation_produced_sample_count: Count,

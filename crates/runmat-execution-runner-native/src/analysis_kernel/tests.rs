@@ -159,6 +159,21 @@ fn structural_displacement_observation() -> runmat_analysis_core::ObservationReq
     })
 }
 
+fn structural_nodal_von_mises_observation() -> runmat_analysis_core::ObservationRequest {
+    let runmat_analysis_core::ObservationRequest::Field(mut spec) =
+        structural_displacement_observation()
+    else {
+        unreachable!("structural displacement helper always returns a field observation")
+    };
+    spec.observation_id = runmat_analysis_core::ObservationId("nodal_von_mises".into());
+    spec.quantity = runmat_analysis_core::ObservationQuantity::VonMisesStress;
+    spec.value_shape = runmat_analysis_core::ObservationValueShape::Scalar;
+    spec.source_location = runmat_analysis_core::FieldLocation::Element;
+    spec.output_location = runmat_analysis_core::FieldLocation::Node;
+    spec.recovery = runmat_analysis_core::RecoveryPolicy::VolumeWeightedAverage;
+    runmat_analysis_core::ObservationRequest::Field(spec)
+}
+
 #[path = "tests/conformal_mixed.rs"]
 mod conformal_mixed;
 #[path = "tests/explicit.rs"]

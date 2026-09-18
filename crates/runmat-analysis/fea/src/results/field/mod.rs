@@ -10,9 +10,10 @@ pub use catalog::RecoveredFieldCatalog;
 pub use contract::{
     RecoveredField, RecoveredFieldArtifact, RecoveredFieldArtifactEntry,
     RecoveredFieldArtifactIdentity, RecoveredFieldArtifactManifest, RecoveredFieldDefinition,
-    RecoveredFieldDefinitionIdentity, RecoveredFieldEntityCounts, RecoveredFieldEntityDomain,
-    RecoveredFieldError, RecoveredFieldIdentity, RecoveredFieldNumericRepresentation,
-    RecoveredFieldSample, RecoveredFieldSelection, RecoveredFieldSelectionIdentity,
+    RecoveredFieldDefinitionIdentity, RecoveredFieldDerivation, RecoveredFieldEntityCounts,
+    RecoveredFieldEntityDomain, RecoveredFieldError, RecoveredFieldIdentity,
+    RecoveredFieldNumericRepresentation, RecoveredFieldSample, RecoveredFieldSelection,
+    RecoveredFieldSelectionIdentity,
 };
 pub use partition::{RecoveredFieldPartition, RecoveredFieldPartitionIdentity};
 pub use partition_set::{

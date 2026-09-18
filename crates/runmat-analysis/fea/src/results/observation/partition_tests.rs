@@ -12,7 +12,7 @@ use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOr
 use crate::{
     execution::{SequenceIdentity, SolverResultIdentity, StepIdentity},
     results::field::{
-        RecoveredField, RecoveredFieldCatalog, RecoveredFieldDefinition,
+        RecoveredField, RecoveredFieldCatalog, RecoveredFieldDefinition, RecoveredFieldDerivation,
         RecoveredFieldEntityDomain, RecoveredFieldNumericRepresentation,
         RecoveredFieldPartitionSet, RecoveredFieldSample,
     },
@@ -221,6 +221,76 @@ fn path_interpolation_is_equivalent_across_partition_layouts() {
         None,
     )
     .unwrap();
+    assert_eq!(serial.logical_identity, partitioned.logical_identity);
+    assert_eq!(serial.entities, partitioned.entities);
+    assert_eq!(serial.field, partitioned.field);
+    assert_ne!(
+        serial.partition_evidence.identity,
+        partitioned.partition_evidence.identity
+    );
+}
+
+#[test]
+fn materialized_volume_weighted_recovery_is_partition_equivalent() {
+    let projection =
+        AnalysisProjection::derive(&canonical_tetrahedron_solver_mesh(ElementOrder::Tet10))
+            .unwrap();
+    let definition = RecoveredFieldDefinition::new_derived(
+        "structural.nodal_von_mises",
+        ObservationQuantity::VonMisesStress,
+        FieldLocation::Node,
+        RecoveredFieldEntityDomain::StructuralNodes,
+        ObservationValueShape::Scalar,
+        RecoveredFieldNumericRepresentation::Real,
+        RecoveredFieldDerivation::LocationTransfer {
+            source_location: FieldLocation::Element,
+            recovery: RecoveryPolicy::VolumeWeightedAverage,
+        },
+    )
+    .unwrap();
+    let mut observation = spec("nodal-von-mises", ObservationTarget::WholeModel);
+    observation.quantity = ObservationQuantity::VonMisesStress;
+    observation.source_location = FieldLocation::Element;
+    observation.output_location = FieldLocation::Node;
+    observation.recovery = RecoveryPolicy::VolumeWeightedAverage;
+    let mut step = ProcedureStep::structural_static("structural");
+    step.observations = vec![ObservationRequest::Field(observation)];
+    let plan = super::resolve_observation_plan(
+        &step,
+        &projection,
+        std::slice::from_ref(&definition),
+        ObservationLimits::default(),
+    )
+    .unwrap();
+    let values = (0..projection.nodes.len())
+        .map(|index| index as f64 + 1.0)
+        .collect::<Vec<_>>();
+    let field = RecoveredField::new(
+        definition,
+        RecoveredFieldSample::Final,
+        AnalysisField::host_f64("structural.nodal_von_mises", vec![values.len()], values),
+    )
+    .unwrap();
+    let topology = StructuralObservationTopology::from_projection(&projection);
+    let serial = evaluate_partitioned_observation(
+        &plan,
+        &plan.observations[0],
+        &field,
+        &topology,
+        ObservationExecutionPolicy::serial(),
+        None,
+    )
+    .unwrap();
+    let partitioned = evaluate_partitioned_observation(
+        &plan,
+        &plan.observations[0],
+        &field,
+        &topology,
+        ObservationExecutionPolicy::canonical(std::num::NonZeroU32::new(3).unwrap()),
+        None,
+    )
+    .unwrap();
+
     assert_eq!(serial.logical_identity, partitioned.logical_identity);
     assert_eq!(serial.entities, partitioned.entities);
     assert_eq!(serial.field, partitioned.field);

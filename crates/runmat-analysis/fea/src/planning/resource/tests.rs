@@ -69,6 +69,7 @@ fn input(partitioning: PartitioningPolicy) -> FeaResourcePlanningInput {
                 scratch_bytes: ByteCount(40),
                 retained_bytes: ByteCount(32),
             },
+            field_recovery: Default::default(),
             observations: ObservationResourceFacts {
                 maximum_samples_per_observation: Count(1),
                 produced_sample_count: Count(1),
@@ -322,6 +323,15 @@ fn structural_preflight_derives_numerical_facts_before_assembly() {
         plan.input.structural_operator().unwrap().constraints,
         ConstraintResourceFacts::from_plan(&constraints).unwrap()
     );
+    assert_eq!(
+        plan.input
+            .structural_operator()
+            .unwrap()
+            .field_recovery
+            .requirement_count,
+        Count(1)
+    );
+    assert!(plan.breakdown.field_recovery_arithmetic_operation_count.0 > 0);
     assert!(
         plan.input.observations().unwrap().transfer_bytes
             > serial_plan.input.observations().unwrap().transfer_bytes

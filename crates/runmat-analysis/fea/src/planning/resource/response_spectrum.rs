@@ -312,6 +312,7 @@ impl StructuralModalResponseSpectrumResourceProjection {
                             scratch_bytes: ByteCount(0),
                             retained_bytes: ByteCount(result_bytes),
                         },
+                        field_recovery: Default::default(),
                         observations: empty_observations(),
                         publication: CheckpointArtifactPolicy {
                             result_artifact_bytes: ByteCount(result_bytes),

@@ -183,6 +183,42 @@ fn lower_expression(
                     )?),
                 })
             }
+            OutputOperation::Recovery => {
+                let source = positional_or_named(arguments, 0, "field")?;
+                let to = positional_or_named(arguments, 1, "to")?;
+                let using = positional_or_named(arguments, 2, "using")?;
+                let (CheckedExpressionKind::Enum(to), CheckedExpressionKind::Enum(using)) =
+                    (&to.kind, &using.kind)
+                else {
+                    lower::error(
+                        declaration,
+                        expression.span,
+                        "recover requires `to = node` and `using = volume_weighted_average`",
+                        diagnostics,
+                    );
+                    return None;
+                };
+                if to != "node" || using != "volume_weighted_average" {
+                    lower::error(
+                        declaration,
+                        expression.span,
+                        "recover currently supports scalar element von Mises stress with `to = node, using = volume_weighted_average`",
+                        diagnostics,
+                    );
+                    return None;
+                }
+                Some(AuthoredOutputExpression::Recovery {
+                    source: Box::new(lower_expression(
+                        bound,
+                        declaration,
+                        source,
+                        available,
+                        diagnostics,
+                    )?),
+                    output_location: FieldLocation::Node,
+                    recovery: runmat_analysis_core::RecoveryPolicy::VolumeWeightedAverage,
+                })
+            }
             operation @ (OutputOperation::Integral
             | OutputOperation::Mean
             | OutputOperation::RootMeanSquare

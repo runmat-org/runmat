@@ -946,7 +946,7 @@ fn validate_resolved_observation(
             indices,
             identities,
         } => {
-            if observation.spec.source_location != FieldLocation::Node
+            if materialized_field_location(&observation.spec) != FieldLocation::Node
                 || observation.source_entity_domain != RecoveredFieldEntityDomain::StructuralNodes
                 || (has_spatial_reduction && !spatial_extrema && !has_discrete_reaction_reduction)
                 || indices.len() != identities.len()
@@ -964,7 +964,7 @@ fn validate_resolved_observation(
             indices,
             identities,
         } => {
-            if observation.spec.source_location != FieldLocation::Element
+            if materialized_field_location(&observation.spec) != FieldLocation::Element
                 || observation.source_entity_domain != *domain
                 || *domain == RecoveredFieldEntityDomain::StructuralNodes
                 || (has_spatial_reduction && !spatial_extrema)
@@ -995,7 +995,7 @@ fn validate_resolved_observation(
                     && derive_resolved_point_identity(topology_digest, sample)
                         .is_ok_and(|identity| identity == sample.identity)
             });
-            if observation.spec.source_location != FieldLocation::Node
+            if materialized_field_location(&observation.spec) != FieldLocation::Node
                 || observation.spec.output_location != FieldLocation::Point
                 || observation.source_entity_domain != RecoveredFieldEntityDomain::StructuralNodes
                 || observation.spec.recovery
@@ -1052,7 +1052,7 @@ fn validate_resolved_observation(
             face_indices,
             face_identities,
         } => {
-            if observation.spec.source_location != FieldLocation::Node
+            if materialized_field_location(&observation.spec) != FieldLocation::Node
                 || observation.source_entity_domain != RecoveredFieldEntityDomain::StructuralNodes
                 || observation.spec.reduction.is_none()
                 || face_indices.is_empty()
@@ -1078,6 +1078,17 @@ fn validate_resolved_observation(
         ));
     }
     Ok(())
+}
+
+pub(super) fn materialized_field_location(spec: &ObservationSpec) -> FieldLocation {
+    if spec.source_location == FieldLocation::Element
+        && spec.output_location == FieldLocation::Node
+        && spec.recovery == runmat_analysis_core::RecoveryPolicy::VolumeWeightedAverage
+    {
+        FieldLocation::Node
+    } else {
+        spec.source_location
+    }
 }
 
 pub(super) fn derive_resolved_point_identity(

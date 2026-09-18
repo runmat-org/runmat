@@ -23,6 +23,7 @@ pub fn output_operation_extension() -> OperationCatalogExtension {
             component(),
             principal(),
             projection("von_mises"),
+            recovery(),
             spatial_reduction("integral"),
             mean,
             rms,
@@ -51,6 +52,7 @@ pub(crate) enum OutputOperation {
     Component,
     Principal,
     VonMises,
+    Recovery,
     Integral,
     Mean,
     RootMeanSquare,
@@ -86,6 +88,7 @@ impl OutputOperation {
             "fea.output.component" => Some(Self::Component),
             "fea.output.principal" => Some(Self::Principal),
             "fea.output.von_mises" => Some(Self::VonMises),
+            "fea.output.recover" => Some(Self::Recovery),
             "fea.output.integral" => Some(Self::Integral),
             "fea.output.mean" => Some(Self::Mean),
             "fea.output.rms" => Some(Self::RootMeanSquare),
@@ -181,6 +184,30 @@ fn principal() -> OperationFacts {
         OperationDistribution::PartitionLocal,
         TopologyApplicability::AnyGeometry,
         "fea.output.principal",
+    )
+}
+
+fn recovery() -> OperationFacts {
+    operation(
+        "recover",
+        "Recover scalar element von Mises stress at nodes with an explicit scientific transfer method.",
+        vec![
+            parameter("field", field(), OperationParameterArity::Required),
+            parameter(
+                "to",
+                OperationTypePattern::StringScalar,
+                OperationParameterArity::Required,
+            ),
+            parameter(
+                "using",
+                OperationTypePattern::StringScalar,
+                OperationParameterArity::Required,
+            ),
+        ],
+        field(),
+        OperationDistribution::PartitionLocal,
+        TopologyApplicability::MeshElement,
+        "fea.output.recover",
     )
 }
 
@@ -508,9 +535,13 @@ mod tests {
     #[test]
     fn output_operations_are_one_shared_public_identity_with_fea_overloads() {
         let extension = output_operation_extension();
-        assert_eq!(extension.operations.len(), 22);
-        assert_eq!(extension.operations[11].identity.as_str(), "min");
-        assert_eq!(extension.operations[12].identity.as_str(), "max");
+        assert_eq!(extension.operations.len(), 23);
+        for expected in ["recover", "min", "max"] {
+            assert!(extension
+                .operations
+                .iter()
+                .any(|operation| operation.identity.as_str() == expected));
+        }
         assert!(extension.operations.iter().all(|operation| operation
             .overloads
             .iter()

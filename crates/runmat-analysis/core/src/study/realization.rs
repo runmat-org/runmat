@@ -308,6 +308,7 @@ fn substitute_output_regions(
 ) -> Result<(), AuthoredStudyRealizationError> {
     match expression {
         crate::AuthoredOutputExpression::Projection { source, .. }
+        | crate::AuthoredOutputExpression::Recovery { source, .. }
         | crate::AuthoredOutputExpression::Interpolation { source, .. }
         | crate::AuthoredOutputExpression::Sampling { source, .. }
         | crate::AuthoredOutputExpression::SeriesReduction { source, .. } => {

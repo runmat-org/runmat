@@ -1,3 +1,4 @@
+use crate::execution::FieldRecoveryPlan;
 use crate::physics::structural::topology::node_space::CanonicalStructuralNodeSpace;
 use crate::{
     algebra::SparsePattern,
@@ -8,8 +9,8 @@ use crate::{
 use runmat_analysis_core::{StructuralElementKind, StructuralModel};
 
 use super::contract::{
-    ByteCount, ConstraintResourceFacts, Count, ObservationResourceFacts, ResourcePlanningError,
-    SparseResourceFacts, TopologyResourceFacts,
+    ByteCount, ConstraintResourceFacts, Count, FieldRecoveryResourceFacts,
+    ObservationResourceFacts, ResourcePlanningError, SparseResourceFacts, TopologyResourceFacts,
 };
 
 impl TopologyResourceFacts {
@@ -377,6 +378,42 @@ impl ObservationResourceFacts {
             transfer_bytes: ByteCount(total.transfer_bytes),
             collective_count: Count(total.collective_count),
         })
+    }
+}
+
+impl FieldRecoveryResourceFacts {
+    pub fn from_plan(plan: &FieldRecoveryPlan) -> Result<Self, ResourcePlanningError> {
+        plan.validate()
+            .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+        let mut facts = Self::default();
+        for requirement in &plan.requirements {
+            facts.requirement_count.0 = checked_add(
+                facts.requirement_count.0,
+                1,
+                "field recovery requirement count",
+            )?;
+            facts.source_entity_count.0 = checked_add(
+                facts.source_entity_count.0,
+                requirement.cost.source_entity_count,
+                "field recovery source entities",
+            )?;
+            facts.output_entity_count.0 = checked_add(
+                facts.output_entity_count.0,
+                requirement.cost.output_entity_count,
+                "field recovery output entities",
+            )?;
+            facts.topology_incidence_count.0 = checked_add(
+                facts.topology_incidence_count.0,
+                requirement.cost.topology_incidence_count,
+                "field recovery topology incidences",
+            )?;
+            facts.arithmetic_operation_count.0 = checked_add(
+                facts.arithmetic_operation_count.0,
+                requirement.cost.arithmetic_operation_count,
+                "field recovery arithmetic operations",
+            )?;
+        }
+        Ok(facts)
     }
 }
 

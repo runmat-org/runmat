@@ -3,6 +3,7 @@ mod constraint_fields;
 mod error;
 pub mod fields;
 mod solid;
+mod volume_weighted;
 
 pub use complex_fields::{
     complex_structural_field_layout, recover_complex_structural_result_fields,

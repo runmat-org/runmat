@@ -401,6 +401,11 @@ fn build_post_process_resource_plan(
         phase_resident_bytes: ByteCount(output_construction),
         phase_scratch_bytes: ByteCount(0),
         phase_retained_bytes: accounting.retained_bytes,
+        field_recovery_requirement_count: Count(0),
+        field_recovery_source_entity_count: Count(0),
+        field_recovery_output_entity_count: Count(0),
+        field_recovery_topology_incidence_count: Count(0),
+        field_recovery_arithmetic_operation_count: Count(0),
         result_artifact_bytes: ByteCount(result_artifact_bytes),
         observation_maximum_samples_per_observation: accounting
             .observations

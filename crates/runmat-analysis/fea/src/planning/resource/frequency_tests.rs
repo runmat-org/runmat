@@ -31,7 +31,7 @@ use super::{
     build_structural_frequency_entry_resource_plan,
     build_structural_frequency_recovery_resource_plan,
     structural_frequency_entry_payload_bytes_upper_bound,
-    structural_frequency_recovery_payload_bytes_upper_bound, ByteCount, FeaResourcePhase,
+    structural_frequency_recovery_payload_bytes_upper_bound, ByteCount, Count, FeaResourcePhase,
     PreparedInputResourceFacts, PreparedOutputResourceFacts, PreparedOutputSetResourceFacts,
     PreparedPhaseResourceFacts, SolveResourcePolicy, StructuralFrequencyRecoveryResourceInput,
 };
@@ -418,6 +418,12 @@ fn frequency_recovery_plan_uses_the_same_exact_complex_field_layout_as_recovery(
         entry_request.step(),
         FieldRecoverySource::StructuralFrequencyEntry(entry.identity()),
         topology.identity,
+        crate::execution::FieldRecoveryPlan::resolve(
+            workload.procedure_step().unwrap(),
+            topology,
+            constraints.groups.len(),
+        )
+        .unwrap(),
     )
     .unwrap();
     let plan = build_structural_frequency_recovery_resource_plan(
@@ -477,6 +483,28 @@ fn frequency_recovery_plan_uses_the_same_exact_complex_field_layout_as_recovery(
     );
     assert_eq!(plan.breakdown.phase_retained_bytes.0, actual_values * 8);
     assert!(plan.breakdown.phase_resident_bytes.0 > plan.breakdown.phase_retained_bytes.0);
+    let expected_recovery_operations = request
+        .plan
+        .requirements
+        .iter()
+        .map(|requirement| requirement.cost.arithmetic_operation_count)
+        .sum::<u64>();
+    assert_eq!(
+        plan.breakdown.field_recovery_requirement_count.0,
+        request.plan.requirements.len() as u64
+    );
+    assert_eq!(
+        plan.breakdown.field_recovery_arithmetic_operation_count.0,
+        expected_recovery_operations
+    );
+    assert_eq!(
+        plan.input
+            .structural_operator()
+            .unwrap()
+            .field_recovery
+            .arithmetic_operation_count,
+        Count(expected_recovery_operations)
+    );
     assert!(plan.request.accelerators.is_empty());
 
     let (other_workload, other_mesh, _, other_request) = direct_case(3);
@@ -487,6 +515,7 @@ fn frequency_recovery_plan_uses_the_same_exact_complex_field_layout_as_recovery(
         entry_request.step(),
         FieldRecoverySource::StructuralFrequencyEntry(other_entry.identity()),
         topology.identity,
+        request.plan.clone(),
     )
     .unwrap();
     assert!(build_structural_frequency_recovery_resource_plan(

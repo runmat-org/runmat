@@ -602,6 +602,7 @@ mod tests {
             producer,
             FieldRecoverySource::SolverResult(source_result),
             topology,
+            crate::execution::FieldRecoveryPlan::default(),
         )
         .unwrap();
         let artifact = RecoveredFieldArtifact::new(

@@ -9,6 +9,7 @@ mod buckling_result;
 mod buckling_workload;
 mod error;
 mod field;
+mod field_plan;
 mod frequency_assembly;
 mod frequency_balance;
 mod frequency_entry;
@@ -62,6 +63,7 @@ pub use buckling_workload::{
 };
 pub use error::{AnalysisExecutionError, AnalysisExecutionResult};
 pub use field::{FieldRecoveryRequest, FieldRecoverySource};
+pub use field_plan::{FieldRecoveryCost, FieldRecoveryPlan, FieldRecoveryRequirement};
 pub use frequency_assembly::{
     StructuralFrequencyAssemblyEntry, StructuralFrequencyAssemblyOutput,
     StructuralFrequencyResultAssemblyRequest,

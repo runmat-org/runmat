@@ -44,6 +44,7 @@ fn recovery_request() -> crate::execution::FieldRecoveryRequestIdentity {
         crate::constraints::CanonicalStructuralTopologyIdentity::Explicit {
             structural_topology_digest: Digest::sha256("topology"),
         },
+        crate::execution::FieldRecoveryPlan::default(),
     )
     .unwrap()
     .identity()
@@ -55,6 +56,44 @@ fn definition_identity_is_semantic_not_a_display_label() {
     let second = temperature_definition("temperature.for_display");
 
     assert_eq!(first.identity(), second.identity());
+}
+
+#[test]
+fn transferred_field_identity_retains_scientific_provenance() {
+    let native = RecoveredFieldDefinition::new(
+        "stress.native",
+        ObservationQuantity::VonMisesStress,
+        FieldLocation::Node,
+        RecoveredFieldEntityDomain::StructuralNodes,
+        ObservationValueShape::Scalar,
+        RecoveredFieldNumericRepresentation::Real,
+    )
+    .unwrap();
+    let transferred = RecoveredFieldDefinition::new_derived(
+        "stress.recovered",
+        ObservationQuantity::VonMisesStress,
+        FieldLocation::Node,
+        RecoveredFieldEntityDomain::StructuralNodes,
+        ObservationValueShape::Scalar,
+        RecoveredFieldNumericRepresentation::Real,
+        RecoveredFieldDerivation::LocationTransfer {
+            source_location: FieldLocation::Element,
+            recovery: runmat_analysis_core::RecoveryPolicy::VolumeWeightedAverage,
+        },
+    )
+    .unwrap();
+
+    assert_ne!(native.identity(), transferred.identity());
+    assert!(!native.satisfies_recovery(
+        FieldLocation::Element,
+        FieldLocation::Node,
+        runmat_analysis_core::RecoveryPolicy::VolumeWeightedAverage,
+    ));
+    assert!(transferred.satisfies_recovery(
+        FieldLocation::Element,
+        FieldLocation::Node,
+        runmat_analysis_core::RecoveryPolicy::VolumeWeightedAverage,
+    ));
 }
 
 #[test]

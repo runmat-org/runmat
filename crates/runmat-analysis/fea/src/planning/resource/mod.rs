@@ -27,8 +27,8 @@ pub use buckling::{
 pub use contract::{
     AcceleratorRequirement, AccuracyResourceDemand, AssemblyResourcePolicy, ByteCount,
     CheckpointArtifactPolicy, ConstraintResourceFacts, Count, FeaResourceDemand, FeaResourcePhase,
-    FeaResourcePlan, FeaResourcePlanIdentity, FeaResourcePlanningInput, NumericalScalar,
-    ObservationAssemblyResourceDemand, ObservationHistoryCheckpointResourceDemand,
+    FeaResourcePlan, FeaResourcePlanIdentity, FeaResourcePlanningInput, FieldRecoveryResourceFacts,
+    NumericalScalar, ObservationAssemblyResourceDemand, ObservationHistoryCheckpointResourceDemand,
     ObservationPartitionPayloadLayout, ObservationPartitionResourceDemand,
     ObservationReductionResourceDemand, ObservationResourceFacts, PartitioningPolicy,
     PhaseResourcePolicy, PreconditionerStorage, PreparedInputResourceFacts,

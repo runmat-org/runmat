@@ -161,6 +161,7 @@ fn validate_output_regions(
 ) -> Result<(), AuthoredStudyError> {
     match expression {
         AuthoredOutputExpression::Projection { source, .. }
+        | AuthoredOutputExpression::Recovery { source, .. }
         | AuthoredOutputExpression::Interpolation { source, .. }
         | AuthoredOutputExpression::Sampling { source, .. }
         | AuthoredOutputExpression::SeriesReduction { source, .. } => {

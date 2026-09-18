@@ -114,6 +114,29 @@ fn lower_expression(
             apply_projection(&mut draft.spec, *projection)?;
             Ok(draft)
         }
+        AuthoredOutputExpression::Recovery {
+            source,
+            output_location,
+            recovery,
+        } => {
+            let mut draft = lower_expression(source, steps, outputs)?;
+            let projected_von_mises = draft.spec.quantity == ObservationQuantity::Stress
+                && draft.spec.component == ObservationComponent::VonMises;
+            let native_von_mises = draft.spec.quantity == ObservationQuantity::VonMisesStress
+                && draft.spec.component == ObservationComponent::All;
+            if !projected_von_mises && !native_von_mises {
+                return Err(AuthoredObservationError::InvalidProjection(
+                    "volume-weighted nodal recovery requires an element von_mises projection"
+                        .into(),
+                ));
+            }
+            draft.spec.quantity = ObservationQuantity::VonMisesStress;
+            draft.spec.value_shape = ObservationValueShape::Scalar;
+            draft.spec.component = ObservationComponent::All;
+            draft.spec.output_location = *output_location;
+            draft.spec.recovery = *recovery;
+            Ok(draft)
+        }
         AuthoredOutputExpression::SpatialReduction {
             reduction,
             source,

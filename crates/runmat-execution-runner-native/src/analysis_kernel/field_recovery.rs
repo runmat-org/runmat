@@ -66,12 +66,25 @@ pub(super) fn execute_field_recovery(
                 "field recovery constraint result differs from the canonical executed plan",
             )
         })?;
+    let expected_recovery_plan = runmat_analysis_fea::execution::FieldRecoveryPlan::resolve(
+        workload.procedure_step()?,
+        topology,
+        constraint_plan.groups.len(),
+    )?;
+    if request.plan != expected_recovery_plan {
+        return Err(AnalysisBridgeError::Identity(
+            "field recovery plan differs from the admitted workload and topology",
+        ));
+    }
     let mut fields = take_structural_observable_fields(&mut solver_result.run.fields)
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     fields.extend(
         recover_constraint_group_observable_fields(&solver_result.constraint_result)
             .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
     );
+    request
+        .plan
+        .validate_definitions(fields.iter().map(|field| field.definition().clone()))?;
     let mut entity_counts = topology.entity_counts;
     entity_counts.constraint_groups = solver_result.constraint_result.groups.len();
     let artifact = RecoveredFieldArtifact::new(

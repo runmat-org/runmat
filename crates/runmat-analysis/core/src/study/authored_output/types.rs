@@ -52,6 +52,11 @@ pub enum AuthoredOutputExpression {
         projection: AuthoredFieldProjection,
         source: Box<AuthoredOutputExpression>,
     },
+    Recovery {
+        source: Box<AuthoredOutputExpression>,
+        output_location: FieldLocation,
+        recovery: crate::RecoveryPolicy,
+    },
     SpatialReduction {
         reduction: AuthoredSpatialReduction,
         source: Box<AuthoredOutputExpression>,

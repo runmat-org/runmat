@@ -571,6 +571,16 @@ fn recover_structural_frequency_entry_fields_with_state(
         Some(solver_mesh),
     )
     .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+    let expected_recovery_plan = crate::execution::FieldRecoveryPlan::resolve(
+        workload.procedure_step()?,
+        topology,
+        constraint_plan.groups.len(),
+    )?;
+    if request.plan != expected_recovery_plan {
+        return Err(AnalysisExecutionError::Identity(
+            "structural frequency recovery plan differs from its workload and topology",
+        ));
+    }
     let sample = result.sample();
     let frequency_hz = sample.entry().frequency_hz();
     let mut fields = recover_complex_structural_result_fields(
@@ -635,6 +645,9 @@ fn recover_structural_frequency_entry_fields_with_state(
             "structural frequency recovery differs from its canonical field layout",
         ));
     }
+    request
+        .plan
+        .validate_definitions(fields.iter().map(|field| field.definition().clone()))?;
     RecoveredFieldArtifact::new(
         request.identity(),
         request.source,

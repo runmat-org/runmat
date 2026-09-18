@@ -28,10 +28,14 @@ use crate::{
         AssemblySummary, BeamRecoveryElementSummary, ShellRecoveryElementSummary,
         StructuralMaterialSummary,
     },
-    post::{error::StructuralFieldRecoveryError, solid::recover_solid_fields},
+    post::{
+        error::StructuralFieldRecoveryError, solid::recover_solid_fields,
+        volume_weighted::recover_volume_weighted_nodal_scalar,
+    },
     results::field::{
-        RecoveredField, RecoveredFieldDefinition, RecoveredFieldEntityDomain, RecoveredFieldError,
-        RecoveredFieldNumericRepresentation, RecoveredFieldSample,
+        RecoveredField, RecoveredFieldDefinition, RecoveredFieldDerivation,
+        RecoveredFieldEntityDomain, RecoveredFieldError, RecoveredFieldNumericRepresentation,
+        RecoveredFieldSample,
     },
     solve::linear::LinearSolveResult,
 };
@@ -186,8 +190,11 @@ pub fn recover_deformation_result_fields(
             .stress
             .unwrap_or_else(|| recover_stress(&strain_values, summary.structural_material));
         let von_mises_values = recover_von_mises(&stress_values);
-        let nodal_von_mises_values =
-            recover_nodal_averaged_scalar(summary, &von_mises_values, node_count);
+        let nodal_von_mises_values = recover_volume_weighted_nodal_scalar(
+            &summary.structural_solid_recovery,
+            &von_mises_values,
+            node_count,
+        )?;
         let strain_energy_density_values = strain_recovery
             .strain_energy_density
             .unwrap_or_else(|| recover_strain_energy_density(&strain_values, &stress_values));
@@ -446,14 +453,29 @@ pub fn structural_observable_field_definitions(
         .into_iter()
         .map(
             |(field_id, quantity, location, entity_domain, value_shape)| {
-                RecoveredFieldDefinition::new(
-                    field_id,
-                    quantity,
-                    location,
-                    entity_domain,
-                    value_shape,
-                    RecoveredFieldNumericRepresentation::Real,
-                )
+                if field_id == FEA_FIELD_STRUCTURAL_NODAL_VON_MISES {
+                    RecoveredFieldDefinition::new_derived(
+                        field_id,
+                        quantity,
+                        location,
+                        entity_domain,
+                        value_shape,
+                        RecoveredFieldNumericRepresentation::Real,
+                        RecoveredFieldDerivation::LocationTransfer {
+                            source_location: FieldLocation::Element,
+                            recovery: runmat_analysis_core::RecoveryPolicy::VolumeWeightedAverage,
+                        },
+                    )
+                } else {
+                    RecoveredFieldDefinition::new(
+                        field_id,
+                        quantity,
+                        location,
+                        entity_domain,
+                        value_shape,
+                        RecoveredFieldNumericRepresentation::Real,
+                    )
+                }
             },
         )
         .collect()
@@ -703,32 +725,6 @@ fn recover_structural_strain(
             .map(|edge| edge.basis.as_str())
             .unwrap_or(StructuralRecoveryBasis::OperatorConnectivity.as_str()),
     })
-}
-
-fn recover_nodal_averaged_scalar(
-    summary: &AssemblySummary,
-    element_values: &[f64],
-    node_count: usize,
-) -> Vec<f64> {
-    let mut nodal = vec![0.0_f64; node_count];
-    let mut counts = vec![0_usize; node_count];
-    for (element_index, element) in summary.structural_solid_recovery.iter().enumerate() {
-        let Some(value) = element_values.get(element_index).copied() else {
-            continue;
-        };
-        for &node_index in element.geometry.node_indices() {
-            if let Some(accumulator) = nodal.get_mut(node_index) {
-                *accumulator += value;
-                counts[node_index] += 1;
-            }
-        }
-    }
-    for (value, count) in nodal.iter_mut().zip(counts) {
-        if count > 0 {
-            *value /= count as f64;
-        }
-    }
-    nodal
 }
 
 fn recover_edge_strain(

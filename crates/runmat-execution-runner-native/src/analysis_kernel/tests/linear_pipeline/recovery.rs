@@ -2,10 +2,19 @@ use super::*;
 
 pub(super) fn execute(solved: &SolvedPipeline) -> RecoveredPipeline {
     let step = solved.prepared.host.workload.step;
+    let mesh = SolverMeshArtifact::canonical_decode(&solved.prepared.inputs[1].payload()).unwrap();
+    let topology =
+        StructuralRecoveredFieldTopology::derive(&solved.solve.model, Some(&mesh)).unwrap();
     let request = FieldRecoveryRequest::new(
         step,
         FieldRecoverySource::SolverResult(solved.source_result),
         solved.constraint_plan.topology,
+        runmat_analysis_fea::execution::FieldRecoveryPlan::resolve(
+            solved.solve.procedure_step().unwrap(),
+            topology,
+            solved.constraint_plan.groups.len(),
+        )
+        .unwrap(),
     )
     .unwrap();
     let request = runmat_analysis_execution::prepare_analysis_objects(

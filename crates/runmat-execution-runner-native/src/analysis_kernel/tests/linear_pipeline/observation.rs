@@ -60,7 +60,7 @@ pub(super) fn execute(
         solved.solve.observation_execution,
     )
     .unwrap();
-    let displacement = recovered
+    let source_field = recovered
         .artifact
         .fields()
         .iter()
@@ -95,7 +95,7 @@ pub(super) fn execute(
             partition,
             &solved.solve.model,
             Some(&solver_mesh),
-            displacement,
+            source_field,
         )
         .unwrap();
         let partition_request = ObservationPartitionEvaluationRequest::new(

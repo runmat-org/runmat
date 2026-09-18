@@ -49,6 +49,27 @@ impl OutputOperation {
                 resultant_type(self, field, argument_type(arguments, 1, "over"))
             }
             (Self::SpatialSample, Some(FeaType::Field(field))) => Ok(FeaType::Field(field.clone())),
+            (Self::Recovery, Some(FeaType::Field(field))) => {
+                let to = enum_argument(arguments, 1, "to")
+                    .ok_or("recover requires the closed `to = node` location")?;
+                let using = enum_argument(arguments, 2, "using").ok_or(
+                    "recover requires the closed `using = volume_weighted_average` method",
+                )?;
+                if field.location != Some(runmat_analysis_core::FieldLocation::Element)
+                    || field.quantity
+                        != Some(runmat_analysis_core::ObservationQuantity::VonMisesStress)
+                    || !field.value.is_numeric()
+                    || to != "node"
+                    || using != "volume_weighted_average"
+                {
+                    return Err(
+                        "recover currently supports scalar element von Mises stress to nodes using volume_weighted_average",
+                    );
+                }
+                let mut field = field.clone();
+                field.location = Some(runmat_analysis_core::FieldLocation::Node);
+                Ok(FeaType::Field(field))
+            }
             (Self::InterpolatePoint, Some(FeaType::Field(field))) => {
                 Ok(field.value.as_ref().clone())
             }
@@ -279,6 +300,17 @@ fn argument_expression<'a>(
                 | CheckedCallArgument::Named { value, .. } => value,
             })
         })
+}
+
+fn enum_argument<'a>(
+    arguments: &'a [CheckedCallArgument],
+    position: usize,
+    name: &str,
+) -> Option<&'a str> {
+    match &argument_expression(arguments, position, name)?.kind {
+        CheckedExpressionKind::Enum(value) => Some(value),
+        _ => None,
+    }
 }
 
 fn argument_type<'a>(

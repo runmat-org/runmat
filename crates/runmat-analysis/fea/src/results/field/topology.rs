@@ -11,6 +11,8 @@ use super::{RecoveredFieldEntityCounts, RecoveredFieldError};
 pub struct StructuralRecoveredFieldTopology {
     pub identity: CanonicalStructuralTopologyIdentity,
     pub entity_counts: RecoveredFieldEntityCounts,
+    /// Exact number of solid element-to-node incidences in the admitted topology.
+    pub solid_node_incidence_count: usize,
 }
 
 impl StructuralRecoveredFieldTopology {
@@ -68,9 +70,19 @@ impl StructuralRecoveredFieldTopology {
             constraint_groups: 0,
         };
         entity_counts.validate()?;
+        let solid_node_incidence_count = mesh
+            .map(|mesh| {
+                mesh.topology
+                    .volume_elements
+                    .iter()
+                    .map(|element| element.node_ids.len())
+                    .sum()
+            })
+            .unwrap_or(0);
         Ok(Self {
             identity,
             entity_counts,
+            solid_node_incidence_count,
         })
     }
 }
