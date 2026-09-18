@@ -298,14 +298,20 @@ pub(super) fn validate_storage(
     if matches!(
         spec.storage.partial_access,
         PartialAccessPolicy::ManifestAndChunks
-    ) && spec.cost.stored_bytes == 0
+    ) && spec
+        .cost
+        .upper_bound()
+        .is_some_and(|cost| cost.stored_bytes == 0)
     {
         return observation_error(
             request,
             "chunk-addressable output must estimate nonzero stored bytes",
         );
     }
-    if spec.cost.stored_bytes == 0
+    if spec
+        .cost
+        .upper_bound()
+        .is_some_and(|cost| cost.stored_bytes == 0)
         && matches!(
             &spec.storage.retention,
             RetentionPolicy::Canonical | RetentionPolicy::UntilDependentsComplete

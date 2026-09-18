@@ -70,12 +70,12 @@ pub(super) async fn execute_study(
     .await?;
     let input_materializations = signal_materializations
         .into_iter()
-        .map(runmat_analysis_execution::PreparedInputMaterialization::Signal)
-        .chain(
-            numerical_materializations
-                .into_iter()
-                .map(runmat_analysis_execution::PreparedInputMaterialization::Numerical),
-        )
+        .map(|value| {
+            runmat_analysis_execution::PreparedInputMaterialization::Signal(Box::new(value))
+        })
+        .chain(numerical_materializations.into_iter().map(|value| {
+            runmat_analysis_execution::PreparedInputMaterialization::Numerical(Box::new(value))
+        }))
         .collect::<Vec<_>>();
     let input_expectations = input_materializations
         .iter()
@@ -231,10 +231,9 @@ pub(super) async fn execute_sweep(
     .into_iter();
     let mut studies = Vec::with_capacity(spec.studies.len());
     for (study, count) in spec.studies.iter().zip(signal_counts) {
-        let signal_inputs = materializations
-            .by_ref()
-            .take(count)
-            .map(runmat_analysis_execution::PreparedInputMaterialization::Signal);
+        let signal_inputs = materializations.by_ref().take(count).map(|value| {
+            runmat_analysis_execution::PreparedInputMaterialization::Signal(Box::new(value))
+        });
         let (response_spectra, random_spectra) =
             study.model.as_ref().map_or((&[][..], &[][..]), |model| {
                 (
@@ -252,7 +251,9 @@ pub(super) async fn execute_sweep(
         )
         .await?
         .into_iter()
-        .map(runmat_analysis_execution::PreparedInputMaterialization::Numerical);
+        .map(|value| {
+            runmat_analysis_execution::PreparedInputMaterialization::Numerical(Box::new(value))
+        });
         studies.push(prepare_study_source(
             study,
             context.clone(),

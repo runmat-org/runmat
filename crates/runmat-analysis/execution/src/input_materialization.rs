@@ -10,8 +10,8 @@ use crate::{
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum PreparedInputMaterialization {
-    Signal(PreparedSignalMaterialization),
-    Numerical(PreparedNumericalMaterialization),
+    Signal(Box<PreparedSignalMaterialization>),
+    Numerical(Box<PreparedNumericalMaterialization>),
 }
 
 impl PreparedInputMaterialization {
@@ -31,8 +31,8 @@ impl PreparedInputMaterialization {
 
     pub fn rebind(self, access: &ArtifactAccess) -> AnalysisBridgeResult<Self> {
         match self {
-            Self::Signal(value) => value.rebind(access).map(Self::Signal),
-            Self::Numerical(value) => value.rebind(access).map(Self::Numerical),
+            Self::Signal(value) => value.rebind(access).map(Box::new).map(Self::Signal),
+            Self::Numerical(value) => value.rebind(access).map(Box::new).map(Self::Numerical),
         }
     }
 
@@ -40,9 +40,11 @@ impl PreparedInputMaterialization {
         match self {
             Self::Signal(value) => value
                 .expectation()
+                .map(Box::new)
                 .map(InputMaterializationExpectation::Signal),
             Self::Numerical(value) => value
                 .expectation()
+                .map(Box::new)
                 .map(InputMaterializationExpectation::Numerical),
         }
     }
@@ -79,8 +81,8 @@ impl PreparedInputMaterialization {
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum InputMaterializationExpectation {
-    Signal(SignalMaterializationExpectation),
-    Numerical(NumericalMaterializationExpectation),
+    Signal(Box<SignalMaterializationExpectation>),
+    Numerical(Box<NumericalMaterializationExpectation>),
 }
 
 impl InputMaterializationExpectation {

@@ -100,18 +100,22 @@ impl ExactStructuralStudyRootRequest {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum ExactInputMaterializationRequest {
-    Signal(ExactSignalMaterializationRequest),
-    Numerical(ExactNumericalMaterializationRequest),
+    Signal(Box<ExactSignalMaterializationRequest>),
+    Numerical(Box<ExactNumericalMaterializationRequest>),
 }
 
 impl ExactInputMaterializationRequest {
     fn from_prepared(prepared: &PreparedInputMaterialization) -> NativeExecutionResult<Self> {
         match prepared {
             PreparedInputMaterialization::Signal(value) => {
-                ExactSignalMaterializationRequest::from_prepared(value).map(Self::Signal)
+                ExactSignalMaterializationRequest::from_prepared(value)
+                    .map(Box::new)
+                    .map(Self::Signal)
             }
             PreparedInputMaterialization::Numerical(value) => {
-                ExactNumericalMaterializationRequest::from_prepared(value).map(Self::Numerical)
+                ExactNumericalMaterializationRequest::from_prepared(value)
+                    .map(Box::new)
+                    .map(Self::Numerical)
             }
         }
     }
@@ -120,9 +124,11 @@ impl ExactInputMaterializationRequest {
         match self {
             Self::Signal(value) => value
                 .to_prepared()
+                .map(Box::new)
                 .map(PreparedInputMaterialization::Signal),
             Self::Numerical(value) => value
                 .to_prepared()
+                .map(Box::new)
                 .map(PreparedInputMaterialization::Numerical),
         }
     }
@@ -686,10 +692,10 @@ fn validate_input_materialization_inventory(
                 let matches = match &prepared.authored {
                     runmat_analysis_execution::NumericalGeneratorSource::ResponseSpectrum(
                         spectrum,
-                    ) => responses.next() == Some(spectrum),
+                    ) => responses.next() == Some(spectrum.as_ref()),
                     runmat_analysis_execution::NumericalGeneratorSource::RandomSpectrum(
                         spectrum,
-                    ) => random.next() == Some(spectrum),
+                    ) => random.next() == Some(spectrum.as_ref()),
                 };
                 (
                     &prepared.admitted.invocation.program_revision,

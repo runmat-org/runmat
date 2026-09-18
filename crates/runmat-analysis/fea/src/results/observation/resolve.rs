@@ -276,7 +276,7 @@ fn resolve_request(
         transfer_bytes: stored_bytes,
         collective_count: 0,
     };
-    validate_cost(&spec.cost, &resolved_cost, limits)?;
+    validate_cost(spec.cost, &resolved_cost, limits)?;
     Ok(ResolvedObservation {
         spec: spec.clone(),
         source_field_definition_identity: source_field.identity(),
@@ -1205,42 +1205,43 @@ fn operation_multiplier(request: &ObservationRequest, spec: &ObservationSpec) ->
 }
 
 fn validate_cost(
-    authored: &ObservationCostEstimate,
+    authored: runmat_analysis_core::ObservationCostPolicy,
     resolved: &ObservationCostEstimate,
     limits: ObservationLimits,
 ) -> Result<(), ObservationError> {
-    if authored.collective_count != 0 {
-        return Err(ObservationError::Unsupported(
-            "serial observation evaluation cannot promise collective operations",
-        ));
+    if let Some(authored) = authored.upper_bound() {
+        if authored.collective_count != 0 {
+            return Err(ObservationError::Unsupported(
+                "serial observation evaluation cannot promise collective operations",
+            ));
+        }
+        if authored.operation_count < resolved.operation_count
+            || authored.peak_resident_bytes < resolved.peak_resident_bytes
+            || authored.stored_bytes < resolved.stored_bytes
+            || authored.transfer_bytes < resolved.transfer_bytes
+        {
+            return Err(ObservationError::Invalid(
+                "observation cost upper bound understates the resolved serial plan".into(),
+            ));
+        }
+        if authored.operation_count > limits.maximum_operation_count
+            || authored.peak_resident_bytes > limits.maximum_peak_resident_bytes
+            || authored.stored_bytes > limits.maximum_stored_bytes
+            || authored.transfer_bytes > limits.maximum_transfer_bytes
+        {
+            return Err(ObservationError::Limit("observation cost upper bound"));
+        }
     }
-    if authored.operation_count < resolved.operation_count
-        || authored.peak_resident_bytes < resolved.peak_resident_bytes
-        || authored.stored_bytes < resolved.stored_bytes
-        || authored.transfer_bytes < resolved.transfer_bytes
-    {
-        return Err(ObservationError::Invalid(
-            "authored observation cost estimate understates the resolved serial plan".into(),
-        ));
-    }
-    if authored.operation_count > limits.maximum_operation_count
-        || resolved.operation_count > limits.maximum_operation_count
-    {
+    if resolved.operation_count > limits.maximum_operation_count {
         return Err(ObservationError::Limit("operation count"));
     }
-    if authored.peak_resident_bytes > limits.maximum_peak_resident_bytes
-        || resolved.peak_resident_bytes > limits.maximum_peak_resident_bytes
-    {
+    if resolved.peak_resident_bytes > limits.maximum_peak_resident_bytes {
         return Err(ObservationError::Limit("peak resident bytes"));
     }
-    if authored.stored_bytes > limits.maximum_stored_bytes
-        || resolved.stored_bytes > limits.maximum_stored_bytes
-    {
+    if resolved.stored_bytes > limits.maximum_stored_bytes {
         return Err(ObservationError::Limit("stored bytes"));
     }
-    if authored.transfer_bytes > limits.maximum_transfer_bytes
-        || resolved.transfer_bytes > limits.maximum_transfer_bytes
-    {
+    if resolved.transfer_bytes > limits.maximum_transfer_bytes {
         return Err(ObservationError::Limit("transfer bytes"));
     }
     Ok(())

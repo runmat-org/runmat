@@ -273,14 +273,14 @@ fn validate_input_expectations(
                         spectrum,
                     ) => authored_responses
                         .get(numerical_index)
-                        .is_some_and(|authored| *authored == spectrum),
+                        .is_some_and(|authored| *authored == spectrum.as_ref()),
                     runmat_analysis_execution::NumericalGeneratorSource::RandomSpectrum(
                         spectrum,
                     ) => {
                         let random_index = numerical_index.saturating_sub(authored_responses.len());
                         authored_random
                             .get(random_index)
-                            .is_some_and(|authored| *authored == spectrum)
+                            .is_some_and(|authored| *authored == spectrum.as_ref())
                     }
                 }
             }

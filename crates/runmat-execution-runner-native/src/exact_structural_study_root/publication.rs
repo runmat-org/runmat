@@ -909,10 +909,10 @@ impl ExactStructuralStudyResultExpectation {
                     let matches = match &expected.authored {
                         runmat_analysis_execution::NumericalGeneratorSource::ResponseSpectrum(
                             spectrum,
-                        ) => responses.next() == Some(spectrum),
+                        ) => responses.next() == Some(spectrum.as_ref()),
                         runmat_analysis_execution::NumericalGeneratorSource::RandomSpectrum(
                             spectrum,
-                        ) => random.next() == Some(spectrum),
+                        ) => random.next() == Some(spectrum.as_ref()),
                     };
                     (&expected.admitted.invocation.program_revision, matches)
                 }

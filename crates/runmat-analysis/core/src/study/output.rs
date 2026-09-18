@@ -67,7 +67,7 @@ pub struct ObservationSpec {
     pub reduction: Option<ReductionPolicy>,
     pub storage: ObservationStoragePolicy,
     pub purpose: ObservationPurpose,
-    pub cost: ObservationCostEstimate,
+    pub cost: ObservationCostPolicy,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -533,6 +533,27 @@ pub struct ObservationCostEstimate {
     pub stored_bytes: u64,
     pub transfer_bytes: u64,
     pub collective_count: u64,
+}
+
+/// Governs when an observation's resource cost becomes authoritative.
+///
+/// Source-authored requests normally use `Automatic`: topology-aware planning computes and admits
+/// the exact cost before solve work starts. Integrations with a stricter external budget may
+/// provide an explicit upper bound, which the resolved plan must not exceed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "mode", content = "limit")]
+pub enum ObservationCostPolicy {
+    Automatic,
+    UpperBound(ObservationCostEstimate),
+}
+
+impl ObservationCostPolicy {
+    pub const fn upper_bound(self) -> Option<ObservationCostEstimate> {
+        match self {
+            Self::Automatic => None,
+            Self::UpperBound(limit) => Some(limit),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -112,13 +112,13 @@ fn spec(id: &str, target: ObservationTarget) -> ObservationSpec {
             partial_access: PartialAccessPolicy::ManifestAndChunks,
         },
         purpose: ObservationPurpose::Publication,
-        cost: ObservationCostEstimate {
+        cost: runmat_analysis_core::ObservationCostPolicy::UpperBound(ObservationCostEstimate {
             operation_count: 100_000,
             peak_resident_bytes: 1_000_000,
             stored_bytes: 1_000_000,
             transfer_bytes: 1_000_000,
             collective_count: 0,
-        },
+        }),
     }
 }
 
@@ -142,13 +142,13 @@ fn complex_pressure_history_spec(
     } else {
         SignalPrecision::Real64
     };
-    spec.cost = ObservationCostEstimate {
+    spec.cost = runmat_analysis_core::ObservationCostPolicy::UpperBound(ObservationCostEstimate {
         operation_count: 1_000_000,
         peak_resident_bytes: 10_000_000,
         stored_bytes: 10_000_000,
         transfer_bytes: 10_000_000,
         collective_count: 0,
-    };
+    });
     spec
 }
 
@@ -318,13 +318,14 @@ fn completed_scalar_series(
         extrema_ties: ties,
     });
     request.storage.retention = retention;
-    request.cost = ObservationCostEstimate {
-        operation_count: 1_000_000,
-        peak_resident_bytes: 10_000_000,
-        stored_bytes: 10_000_000,
-        transfer_bytes: 10_000_000,
-        collective_count: 0,
-    };
+    request.cost =
+        runmat_analysis_core::ObservationCostPolicy::UpperBound(ObservationCostEstimate {
+            operation_count: 1_000_000,
+            peak_resident_bytes: 10_000_000,
+            stored_bytes: 10_000_000,
+            transfer_bytes: 10_000_000,
+            collective_count: 0,
+        });
     let mut step = ProcedureStep::thermal_transient("series-step");
     step.independent_domain = runmat_analysis_core::IndependentDomain::TimeSeconds {
         origin: 0.0,
@@ -354,6 +355,26 @@ fn completed_scalar_series(
         builder.push(sample, result)?;
     }
     Ok((plan, builder.finish()?))
+}
+
+#[test]
+fn automatic_cost_policy_is_resolved_before_execution() {
+    let projection = projection(ElementOrder::Tet4);
+    let definition = scalar_definition();
+    let mut request = spec("automatic-cost", ObservationTarget::WholeModel);
+    request.cost = runmat_analysis_core::ObservationCostPolicy::Automatic;
+    let step = thermal_step(vec![ObservationRequest::Field(request)]);
+
+    let plan = resolve_observation_plan(
+        &step,
+        &projection,
+        std::slice::from_ref(&definition),
+        ObservationLimits::default(),
+    )
+    .unwrap();
+
+    assert!(plan.observations[0].resolved_cost.operation_count > 0);
+    assert!(plan.observations[0].resolved_cost.stored_bytes > 0);
 }
 
 #[test]
@@ -593,10 +614,14 @@ fn bounded_history_retains_latest_samples_with_independent_identities() {
     let mut history = spec("temperature_history", ObservationTarget::WholeModel);
     history.sampling = SamplingPolicy::TimeSeconds(vec![0.0, 1.0, 2.0]);
     history.storage.retention = RetentionPolicy::LatestSamples { count: 2 };
-    history.cost.operation_count = 1_000_000;
-    history.cost.peak_resident_bytes = 10_000_000;
-    history.cost.stored_bytes = 10_000_000;
-    history.cost.transfer_bytes = 10_000_000;
+    history.cost =
+        runmat_analysis_core::ObservationCostPolicy::UpperBound(ObservationCostEstimate {
+            operation_count: 1_000_000,
+            peak_resident_bytes: 10_000_000,
+            stored_bytes: 10_000_000,
+            transfer_bytes: 10_000_000,
+            collective_count: 0,
+        });
     let mut step = ProcedureStep::thermal_transient("thermal-history");
     step.independent_domain = runmat_analysis_core::IndependentDomain::TimeSeconds {
         origin: 0.0,
@@ -972,13 +997,14 @@ fn typed_event_histories_preserve_source_attribution_and_ordering() {
     request.quantity = ObservationQuantity::Displacement;
     request.value_shape = ObservationValueShape::Vector3;
     request.sampling = SamplingPolicy::Event(event);
-    request.cost = ObservationCostEstimate {
-        operation_count: 1_000_000,
-        peak_resident_bytes: 10_000_000,
-        stored_bytes: 10_000_000,
-        transfer_bytes: 10_000_000,
-        collective_count: 0,
-    };
+    request.cost =
+        runmat_analysis_core::ObservationCostPolicy::UpperBound(ObservationCostEstimate {
+            operation_count: 1_000_000,
+            peak_resident_bytes: 10_000_000,
+            stored_bytes: 10_000_000,
+            transfer_bytes: 10_000_000,
+            collective_count: 0,
+        });
     let mut step = ProcedureStep::structural_nonlinear("event-history");
     step.accuracy.resources.maximum_samples = 4;
     step.observations = vec![ObservationRequest::History(request)];
@@ -1082,13 +1108,14 @@ fn typed_event_histories_preserve_source_attribution_and_ordering() {
     contact_request.sampling = SamplingPolicy::Event(ObservationEvent::Solver(
         SolverObservationEvent::ContactStatusChange,
     ));
-    contact_request.cost = ObservationCostEstimate {
-        operation_count: 1_000_000,
-        peak_resident_bytes: 10_000_000,
-        stored_bytes: 10_000_000,
-        transfer_bytes: 10_000_000,
-        collective_count: 0,
-    };
+    contact_request.cost =
+        runmat_analysis_core::ObservationCostPolicy::UpperBound(ObservationCostEstimate {
+            operation_count: 1_000_000,
+            peak_resident_bytes: 10_000_000,
+            stored_bytes: 10_000_000,
+            transfer_bytes: 10_000_000,
+            collective_count: 0,
+        });
     let mut contact_step = ProcedureStep::structural_nonlinear("contact-events");
     contact_step.accuracy.resources.maximum_samples = 4;
     contact_step.observations = vec![ObservationRequest::History(contact_request)];
@@ -1177,13 +1204,14 @@ fn event_histories_may_finish_empty_but_cannot_request_series_statistics() {
     request.value_shape = ObservationValueShape::Vector3;
     request.sampling =
         SamplingPolicy::Event(ObservationEvent::Solver(SolverObservationEvent::FirstYield));
-    request.cost = ObservationCostEstimate {
-        operation_count: 1_000_000,
-        peak_resident_bytes: 10_000_000,
-        stored_bytes: 10_000_000,
-        transfer_bytes: 10_000_000,
-        collective_count: 0,
-    };
+    request.cost =
+        runmat_analysis_core::ObservationCostPolicy::UpperBound(ObservationCostEstimate {
+            operation_count: 1_000_000,
+            peak_resident_bytes: 10_000_000,
+            stored_bytes: 10_000_000,
+            transfer_bytes: 10_000_000,
+            collective_count: 0,
+        });
     let mut step = ProcedureStep::structural_nonlinear("optional-event-history");
     step.accuracy.resources.maximum_samples = 4;
     step.observations = vec![ObservationRequest::History(request.clone())];
@@ -1601,13 +1629,14 @@ fn study_parameter_history_keeps_parameter_identity_and_exact_values() {
     request.quantity = ObservationQuantity::Displacement;
     request.value_shape = ObservationValueShape::Vector3;
     request.sampling = SamplingPolicy::StudyParameterValues(vec![0.01, 0.05]);
-    request.cost = ObservationCostEstimate {
-        operation_count: 1_000_000,
-        peak_resident_bytes: 10_000_000,
-        stored_bytes: 10_000_000,
-        transfer_bytes: 10_000_000,
-        collective_count: 0,
-    };
+    request.cost =
+        runmat_analysis_core::ObservationCostPolicy::UpperBound(ObservationCostEstimate {
+            operation_count: 1_000_000,
+            peak_resident_bytes: 10_000_000,
+            stored_bytes: 10_000_000,
+            transfer_bytes: 10_000_000,
+            collective_count: 0,
+        });
     let mut step = ProcedureStep::structural_modal("parameter-study");
     step.procedure = runmat_analysis_core::AnalysisProcedure::Adaptive;
     step.independent_domain = runmat_analysis_core::IndependentDomain::StudyParameter {
@@ -1677,7 +1706,7 @@ fn history_bounds_and_coordinates_fail_closed_before_publication() {
     )
     .unwrap_err()
     .to_string()
-    .contains("cost estimate understates"));
+    .contains("cost upper bound understates"));
 
     let mut explicit = spec("explicit", ObservationTarget::WholeModel);
     explicit.sampling = SamplingPolicy::TimeSeconds(vec![0.0, 1.0]);

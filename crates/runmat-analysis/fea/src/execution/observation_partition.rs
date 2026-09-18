@@ -571,13 +571,15 @@ mod tests {
                 partial_access: PartialAccessPolicy::ManifestAndChunks,
             },
             purpose: ObservationPurpose::Publication,
-            cost: ObservationCostEstimate {
-                operation_count: 1_000_000,
-                peak_resident_bytes: 10_000_000,
-                stored_bytes: 10_000_000,
-                transfer_bytes: 10_000_000,
-                collective_count: 0,
-            },
+            cost: runmat_analysis_core::ObservationCostPolicy::UpperBound(
+                ObservationCostEstimate {
+                    operation_count: 1_000_000,
+                    peak_resident_bytes: 10_000_000,
+                    stored_bytes: 10_000_000,
+                    transfer_bytes: 10_000_000,
+                    collective_count: 0,
+                },
+            ),
         })];
         let plan = resolve_observation_plan(
             &step,

@@ -150,8 +150,8 @@ struct PreparedNumericalSource {
 
 async fn materialize_numerical_sources(
     document_path: &std::path::Path,
-    response_spectra: &mut Vec<ResponseSpectrum>,
-    random_spectra: &mut Vec<RandomExcitationSpectrum>,
+    response_spectra: &mut [ResponseSpectrum],
+    random_spectra: &mut [RandomExcitationSpectrum],
     immutable_values: &[runmat_runtime::analysis::AnalysisImmutableValueSpec],
     maximum_wall_millis: u64,
     cli: &Cli,
@@ -625,20 +625,20 @@ fn prepare_compiled_numerical_materializations(
             compiled.validate()?;
             let authored = match compiled.target {
                 NumericalGeneratorTarget::ResponseSpectrum(index) => {
-                    NumericalGeneratorSource::ResponseSpectrum(
+                    NumericalGeneratorSource::ResponseSpectrum(Box::new(
                         response_spectra
                             .get(index)
                             .context("response-spectrum generator index is out of range")?
                             .clone(),
-                    )
+                    ))
                 }
                 NumericalGeneratorTarget::RandomSpectrum(index) => {
-                    NumericalGeneratorSource::RandomSpectrum(
+                    NumericalGeneratorSource::RandomSpectrum(Box::new(
                         random_spectra
                             .get(index)
                             .context("random-spectrum generator index is out of range")?
                             .clone(),
-                    )
+                    ))
                 }
             };
             let mut selected_objects = BTreeMap::new();

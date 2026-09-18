@@ -268,7 +268,11 @@ fn validate_resources(
         else {
             continue;
         };
-        if spec.cost.peak_resident_bytes > resources.maximum_resident_bytes {
+        if spec
+            .cost
+            .upper_bound()
+            .is_some_and(|cost| cost.peak_resident_bytes > resources.maximum_resident_bytes)
+        {
             return accuracy_error(
                 plan,
                 format!(

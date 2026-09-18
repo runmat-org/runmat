@@ -141,13 +141,15 @@ fn history_observation() -> runmat_analysis_core::ObservationRequest {
             partial_access: runmat_analysis_core::PartialAccessPolicy::ManifestAndChunks,
         },
         purpose: runmat_analysis_core::ObservationPurpose::Publication,
-        cost: runmat_analysis_core::ObservationCostEstimate {
-            operation_count: 1_000,
-            peak_resident_bytes: 1_000_000,
-            stored_bytes: 1_000_000,
-            transfer_bytes: 1_000_000,
-            collective_count: 0,
-        },
+        cost: runmat_analysis_core::ObservationCostPolicy::UpperBound(
+            runmat_analysis_core::ObservationCostEstimate {
+                operation_count: 1_000,
+                peak_resident_bytes: 1_000_000,
+                stored_bytes: 1_000_000,
+                transfer_bytes: 1_000_000,
+                collective_count: 0,
+            },
+        ),
     })
 }
 

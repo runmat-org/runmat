@@ -62,13 +62,13 @@ pub(super) fn spec(id: &str, target: ObservationTarget) -> ObservationSpec {
             partial_access: PartialAccessPolicy::ManifestAndChunks,
         },
         purpose: ObservationPurpose::Publication,
-        cost: ObservationCostEstimate {
+        cost: runmat_analysis_core::ObservationCostPolicy::UpperBound(ObservationCostEstimate {
             operation_count: 100_000,
             peak_resident_bytes: 1_000_000,
             stored_bytes: 1_000_000,
             transfer_bytes: 1_000_000,
             collective_count: 0,
-        },
+        }),
     }
 }
 
@@ -1213,13 +1213,14 @@ fn partitioned_event_evaluation_binds_exact_attribution_across_workers() {
     let mut request = spec("first_yield_temperature", ObservationTarget::WholeModel);
     request.sampling =
         SamplingPolicy::Event(ObservationEvent::Solver(SolverObservationEvent::FirstYield));
-    request.cost = ObservationCostEstimate {
-        operation_count: 1_000_000,
-        peak_resident_bytes: 10_000_000,
-        stored_bytes: 10_000_000,
-        transfer_bytes: 10_000_000,
-        collective_count: 0,
-    };
+    request.cost =
+        runmat_analysis_core::ObservationCostPolicy::UpperBound(ObservationCostEstimate {
+            operation_count: 1_000_000,
+            peak_resident_bytes: 10_000_000,
+            stored_bytes: 10_000_000,
+            transfer_bytes: 10_000_000,
+            collective_count: 0,
+        });
     let mut step = ProcedureStep::thermal_transient("partitioned-event");
     step.accuracy.resources.maximum_samples = 4;
     step.independent_domain = runmat_analysis_core::IndependentDomain::TimeSeconds {

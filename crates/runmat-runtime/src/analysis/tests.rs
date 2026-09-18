@@ -5550,13 +5550,15 @@ fn canonical_meshing_boundary_ids_replace_display_face_aliases() {
                     partial_access: runmat_analysis_core::PartialAccessPolicy::ManifestAndChunks,
                 },
                 purpose: runmat_analysis_core::ObservationPurpose::Visualization,
-                cost: runmat_analysis_core::ObservationCostEstimate {
-                    operation_count: 0,
-                    peak_resident_bytes: 0,
-                    stored_bytes: 0,
-                    transfer_bytes: 0,
-                    collective_count: 0,
-                },
+                cost: runmat_analysis_core::ObservationCostPolicy::UpperBound(
+                    runmat_analysis_core::ObservationCostEstimate {
+                        operation_count: 0,
+                        peak_resident_bytes: 0,
+                        stored_bytes: 0,
+                        transfer_bytes: 0,
+                        collective_count: 0,
+                    },
+                ),
             },
         ));
     let aliases = BTreeMap::from([

@@ -298,13 +298,13 @@ mod tests {
                     partial_access: PartialAccessPolicy::ManifestAndChunks,
                 },
                 purpose: ObservationPurpose::Visualization,
-                cost: ObservationCostEstimate {
+                cost: crate::ObservationCostPolicy::UpperBound(ObservationCostEstimate {
                     operation_count: 0,
                     peak_resident_bytes: 0,
                     stored_bytes: 0,
                     transfer_bytes: 0,
                     collective_count: 0,
-                },
+                }),
             }));
         AnalysisModel {
             model_id: AnalysisModelId("model".into()),

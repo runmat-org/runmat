@@ -167,9 +167,9 @@ async fn run_exact_structural_sweep_conformance() {
         },
         analysis_accelerator_requests: Vec::new(),
         input_materializations: vec![
-            runmat_analysis_execution::PreparedInputMaterialization::Signal(
+            runmat_analysis_execution::PreparedInputMaterialization::Signal(Box::new(
                 signal_materialization.clone(),
-            ),
+            )),
         ],
         exact_meshing: exact_meshing.clone(),
     })
@@ -188,9 +188,9 @@ async fn run_exact_structural_sweep_conformance() {
         },
         analysis_accelerator_requests: Vec::new(),
         input_materializations: vec![
-            runmat_analysis_execution::PreparedInputMaterialization::Signal(
+            runmat_analysis_execution::PreparedInputMaterialization::Signal(Box::new(
                 signal_materialization.clone(),
-            ),
+            )),
         ],
         exact_meshing: exact_meshing.clone(),
     })
@@ -298,7 +298,9 @@ async fn run_exact_structural_sweep_conformance() {
         },
         analysis_accelerator_requests: Vec::new(),
         input_materializations: vec![
-            runmat_analysis_execution::PreparedInputMaterialization::Signal(signal_materialization),
+            runmat_analysis_execution::PreparedInputMaterialization::Signal(Box::new(
+                signal_materialization,
+            )),
         ],
         exact_meshing: exact_meshing.clone(),
     })

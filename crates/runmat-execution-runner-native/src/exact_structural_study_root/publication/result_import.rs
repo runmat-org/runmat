@@ -201,7 +201,7 @@ pub fn import_exact_structural_study_result(
                                 &objects.payload(),
                             )
                             .map_err(protocol)?;
-                        let mut expected_spectrum = authored.clone();
+                        let mut expected_spectrum = authored.as_ref().clone();
                         expected_spectrum.ordinates = spectrum.ordinates.clone();
                         if spectrum != expected_spectrum
                             || !matches!(
@@ -228,7 +228,7 @@ pub fn import_exact_structural_study_result(
                                 &objects.payload(),
                             )
                             .map_err(protocol)?;
-                        let mut expected_spectrum = authored.clone();
+                        let mut expected_spectrum = authored.as_ref().clone();
                         expected_spectrum.spectral_density = spectrum.spectral_density.clone();
                         if spectrum != expected_spectrum
                             || !matches!(

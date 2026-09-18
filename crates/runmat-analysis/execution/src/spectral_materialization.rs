@@ -24,8 +24,8 @@ const CONTENT_LIMITS: CanonicalLimits =
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NumericalGeneratorSource {
-    ResponseSpectrum(ResponseSpectrum),
-    RandomSpectrum(RandomExcitationSpectrum),
+    ResponseSpectrum(Box<ResponseSpectrum>),
+    RandomSpectrum(Box<RandomExcitationSpectrum>),
 }
 
 #[derive(Clone, Debug, PartialEq)]

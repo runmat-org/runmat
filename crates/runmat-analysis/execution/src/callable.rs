@@ -100,6 +100,21 @@ struct FrozenCallableBinding {
     callable_value_digest: Option<Digest>,
 }
 
+struct CallableAdmission<'a> {
+    program_revision: ProgramRevision,
+    callable: BundleCallable,
+    executable_source_digest: Digest,
+    function: &'a FunctionAnalysis,
+    available_capabilities: &'a BTreeSet<CapabilityRequirement>,
+}
+
+struct NumericalGeneratorAdmission<'a> {
+    output_domain: GeneratorOutputDomain,
+    sample_points: &'a [f64],
+    kind: NumericalGeneratorKind,
+    authored_contract_digest: Digest,
+}
+
 /// Admits one named project function against the exact static facts embedded in its executable.
 ///
 /// The caller resolves `callable` and `function` from the same frozen project and immutable
@@ -126,12 +141,14 @@ pub fn admit_named_signal_generator(
     }
     admit_signal_generator(
         signal,
-        program_revision,
-        callable,
-        executable_source_digest,
-        function,
+        CallableAdmission {
+            program_revision,
+            callable,
+            executable_source_digest,
+            function,
+            available_capabilities,
+        },
         FrozenCallableBinding::default(),
-        available_capabilities,
     )
 }
 
@@ -176,15 +193,17 @@ pub fn admit_callable_signal_generator(
     let callable_value_digest = frozen_callable.callable_digest;
     admit_signal_generator(
         signal,
-        program_revision,
-        callable,
-        executable_source_digest,
-        function,
+        CallableAdmission {
+            program_revision,
+            callable,
+            executable_source_digest,
+            function,
+            available_capabilities,
+        },
         FrozenCallableBinding {
             captures: frozen_callable.captures,
             callable_value_digest: Some(callable_value_digest),
         },
-        available_capabilities,
     )
 }
 
@@ -201,35 +220,39 @@ pub fn admit_named_response_spectrum_generator(
     })?;
     admit_named_numerical_generator(
         invocation,
-        program_revision,
-        callable,
-        executable_source_digest,
-        function,
-        GeneratorOutputDomain::Real,
-        spectrum_axis(&spectrum.abscissa),
-        NumericalGeneratorKind::ResponseSpectrum {
-            spectrum_id: spectrum.spectrum_id.clone(),
+        CallableAdmission {
+            program_revision,
+            callable,
+            executable_source_digest,
+            function,
+            available_capabilities,
         },
-        contract_digest(
-            "response-spectrum-materialization-contract",
-            &(
-                &spectrum.spectrum_id,
-                &spectrum.abscissa,
-                spectrum.damping,
-                spectrum.response,
-                spectrum.envelope,
-                spectrum.interpolation,
-                spectrum.extrapolation,
-                &spectrum.direction,
-                spectrum.modal_combination,
-                spectrum.directional_combination,
-                spectrum.truncation,
-                spectrum.rigid_response,
-                &spectrum.construction,
-                &spectrum.evidence,
-            ),
-        )?,
-        available_capabilities,
+        NumericalGeneratorAdmission {
+            output_domain: GeneratorOutputDomain::Real,
+            sample_points: spectrum_axis(&spectrum.abscissa),
+            kind: NumericalGeneratorKind::ResponseSpectrum {
+                spectrum_id: spectrum.spectrum_id.clone(),
+            },
+            authored_contract_digest: contract_digest(
+                "response-spectrum-materialization-contract",
+                &(
+                    &spectrum.spectrum_id,
+                    &spectrum.abscissa,
+                    spectrum.damping,
+                    spectrum.response,
+                    spectrum.envelope,
+                    spectrum.interpolation,
+                    spectrum.extrapolation,
+                    &spectrum.direction,
+                    spectrum.modal_combination,
+                    spectrum.directional_combination,
+                    spectrum.truncation,
+                    spectrum.rigid_response,
+                    &spectrum.construction,
+                    &spectrum.evidence,
+                ),
+            )?,
+        },
     )
 }
 
@@ -246,43 +269,40 @@ pub fn admit_named_random_spectrum_generator(
     })?;
     admit_named_numerical_generator(
         invocation,
-        program_revision,
-        callable,
-        executable_source_digest,
-        function,
-        GeneratorOutputDomain::RealOrComplex,
-        &spectrum.frequencies_hz,
-        NumericalGeneratorKind::RandomSpectrum {
-            excitation_id: spectrum.excitation_id.clone(),
-            channel_count: spectrum.channels.len(),
+        CallableAdmission {
+            program_revision,
+            callable,
+            executable_source_digest,
+            function,
+            available_capabilities,
         },
-        contract_digest(
-            "random-spectrum-materialization-contract",
-            &(
-                &spectrum.excitation_id,
-                &spectrum.frequencies_hz,
-                &spectrum.channels,
-                spectrum.convention,
-                spectrum.interpolation,
-                spectrum.extrapolation,
-                &spectrum.evidence,
-            ),
-        )?,
-        available_capabilities,
+        NumericalGeneratorAdmission {
+            output_domain: GeneratorOutputDomain::RealOrComplex,
+            sample_points: &spectrum.frequencies_hz,
+            kind: NumericalGeneratorKind::RandomSpectrum {
+                excitation_id: spectrum.excitation_id.clone(),
+                channel_count: spectrum.channels.len(),
+            },
+            authored_contract_digest: contract_digest(
+                "random-spectrum-materialization-contract",
+                &(
+                    &spectrum.excitation_id,
+                    &spectrum.frequencies_hz,
+                    &spectrum.channels,
+                    spectrum.convention,
+                    spectrum.interpolation,
+                    spectrum.extrapolation,
+                    &spectrum.evidence,
+                ),
+            )?,
+        },
     )
 }
 
 fn admit_named_numerical_generator(
     invocation: &GeneratorInvocation,
-    program_revision: ProgramRevision,
-    callable: BundleCallable,
-    executable_source_digest: Digest,
-    function: &FunctionAnalysis,
-    output_domain: GeneratorOutputDomain,
-    sample_points: &[f64],
-    kind: NumericalGeneratorKind,
-    authored_contract_digest: Digest,
-    available_capabilities: &BTreeSet<CapabilityRequirement>,
+    callable: CallableAdmission<'_>,
+    numerical: NumericalGeneratorAdmission<'_>,
 ) -> AnalysisBridgeResult<AdmittedNumericalGenerator> {
     if !matches!(
         invocation.callable,
@@ -293,26 +313,22 @@ fn admit_named_numerical_generator(
             "named project admission requires a project-function generator identity",
         ));
     }
-    validate_canonical_points(sample_points)?;
+    validate_canonical_points(numerical.sample_points)?;
     let invocation = admit_generator_invocation(
         invocation,
-        program_revision,
         callable,
-        executable_source_digest,
-        function,
         FrozenCallableBinding::default(),
-        output_domain,
-        available_capabilities,
+        numerical.output_domain,
     )?;
     let materialization_identity = NumericalMaterializationIdentity::new(
-        authored_contract_digest,
+        numerical.authored_contract_digest,
         invocation.generator_identity,
     )?;
     Ok(AdmittedNumericalGenerator {
         invocation,
         materialization_identity,
-        kind,
-        sample_points: sample_points.to_vec(),
+        kind: numerical.kind,
+        sample_points: numerical.sample_points.to_vec(),
     })
 }
 
@@ -337,25 +353,17 @@ fn validate_canonical_points(points: &[f64]) -> AnalysisBridgeResult<()> {
 
 fn admit_signal_generator(
     signal: &PhysicalSignal,
-    program_revision: ProgramRevision,
-    callable: BundleCallable,
-    executable_source_digest: Digest,
-    function: &FunctionAnalysis,
+    callable: CallableAdmission<'_>,
     binding: FrozenCallableBinding,
-    available_capabilities: &BTreeSet<CapabilityRequirement>,
 ) -> AnalysisBridgeResult<AdmittedSignalGenerator> {
     let generator = signal.generator().ok_or_else(|| {
         AnalysisBridgeError::Invalid("signal is not backed by a callable generator".into())
     })?;
     let admitted = admit_generator_invocation(
         &generator.invocation,
-        program_revision,
         callable,
-        executable_source_digest,
-        function,
         binding,
         GeneratorOutputDomain::RealOrComplex,
-        available_capabilities,
     )?;
     let authored_signal_digest = contract_digest(
         "authored-signal-contract",
@@ -397,14 +405,17 @@ fn admit_signal_generator(
 
 fn admit_generator_invocation(
     invocation: &GeneratorInvocation,
-    program_revision: ProgramRevision,
-    callable: BundleCallable,
-    executable_source_digest: Digest,
-    function: &FunctionAnalysis,
+    callable: CallableAdmission<'_>,
     binding: FrozenCallableBinding,
     output_domain: GeneratorOutputDomain,
-    available_capabilities: &BTreeSet<CapabilityRequirement>,
 ) -> AnalysisBridgeResult<AdmittedGeneratorInvocation> {
+    let CallableAdmission {
+        program_revision,
+        callable,
+        executable_source_digest,
+        function,
+        available_capabilities,
+    } = callable;
     let FrozenCallableBinding {
         captures,
         callable_value_digest,
