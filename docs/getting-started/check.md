@@ -1,6 +1,6 @@
 # runmat check
 
-Check a MATLAB script or FEA document before running it. `runmat check` reports problems it can find without executing your script or running an FEA solver.
+Check your source code before running it. `runmat check` reports problems it can find without executing your script.
 
 ## Quick start
 
@@ -30,7 +30,7 @@ The command accepts one file:
 ```text
 runmat check [OPTIONS] <FILE>
 ```
-`<FILE>` is a `.m` script or `.fea` document. For a multi-file project, pass the entry script and configure its source roots as described below. Do not treat this command as a recursive check of every independent script in a directory.
+`<FILE>` is the `.m` script to check. For a multi-file project, pass the entry script and configure its source roots as described below. Do not treat this command as a recursive check of every independent script in a directory.
 
 ## What gets checked
 
@@ -47,14 +47,12 @@ For `.m` files, checking uses the parser, HIR and MIR lowering, static analysis,
 
 | Option | Behavior |
 | --- | --- |
-| `--path DIRECTORY` | Add a MATLAB lookup root for this check. May be repeated. |
+| `--path DIRECTORY` | Add a source lookup root for this check. May be repeated. |
 | `-D warnings` | Return failure when any diagnostic warning is present. `-D warning` is also accepted. |
-| `--json` | Emit structured output. Script and FEA payloads have different shapes. |
+| `--json` | Emit structured diagnostics and analysis results as JSON. |
 | `-v`, `--verbose` | Include completed analysis domains as well as diagnostics for scripts. |
 | `-h`, `--help` | Show command help. |
 | `-V`, `--version` | Show the CLI version. |
-
-`--path` and warnings-as-errors apply to the MATLAB script analysis path. FEA uses its own study validation path.
 
 Global options include `--color auto|always|never` and package-resolution controls `--offline`, `--locked`, and `--frozen`. See [CLI runtime options](/docs/runtime/getting-started/cli#pass-runtime-options), [Configuration](/docs/runtime/getting-started/config), and [Packages](/docs/runtime/packages) for shared configuration and lockfile behavior.
 
@@ -67,12 +65,12 @@ runmat check --help
 
 ## Project sources
 
-In a separate directory, create `main.m`:
+If your project has an entry script `main.m` that calls a helper:
 
 ```matlab
 value = helper(3);
 ```
-Create a `toolbox` directory beside it, containing `helper.m`:
+and the helper is defined in `toolbox/helper.m`:
 
 ```matlab
 function y = helper(x)
@@ -87,7 +85,7 @@ runmat check --path toolbox main.m
 ```
 The first command warns that `helper` cannot be found. The second resolves it and reports zero errors and warnings. A helper placed directly beside `main.m` is also discoverable without `--path`.
 
-For persistent project configuration, put this `runmat.toml` beside `main.m`:
+For multi-file project configuration, define the source roots in a `runmat.toml` beside `main.m`:
 
 ```toml
 [package]
@@ -105,7 +103,7 @@ The result is clean. Source roots make cross-file definitions available during a
 
 ### Runtime path changes
 
-In the same two-file layout, remove `runmat.toml` for this example and save this as `dynamic.m`:
+If your project has no configured source roots and `dynamic.m` adds the helper's directory at runtime:
 
 ```matlab
 addpath('toolbox');
@@ -119,11 +117,11 @@ The check reports `RM-RES0002`, with the call site and the earlier `addpath` as 
 
 ## Reading results
 
-The following examples are independent files in a directory without a project manifest. Output blocks show diagnostic stdout; environment-specific startup messages on stderr are omitted.
+If you are checking independent files in a directory without a project manifest, use the diagnostics below to identify and address common problems. Output blocks show diagnostic stdout; environment-specific startup messages on stderr are omitted.
 
 ### An unresolved function
 
-Save as `missing.m`:
+If `missing.m` calls a function that cannot be found:
 
 ```matlab
 value = definitely_missing(1);
@@ -154,7 +152,7 @@ The diagnostic still says `warning`, but the process exits with status 1.
 
 ### A syntax error
 
-Save as `syntax.m`:
+If `syntax.m` contains an incomplete assignment:
 
 ```matlab
 value = ;
@@ -176,7 +174,7 @@ Supply an expression after `=` and check again. This error exits with status 1.
 
 ### A matrix-shape error
 
-Save as `shape.m`:
+If `shape.m` multiplies matrices whose inner dimensions do not match:
 
 ```matlab
 A = ones(2, 3);
@@ -196,7 +194,7 @@ error[RM-TYPE-MATMUL]: matrix inner dimensions 3 and 4 do not agree
   | ^^^^^^^^^ static value contract is not satisfied here
 checked shape.m: 1 error(s), 0 warning(s)
 ```
-Matrix multiplication requires matching inner dimensions. If the intended operation uses a 3-by-2 right-hand matrix, change `B` to `ones(3, 2)` and check again. Whether that change is mathematically appropriate depends on your problem.
+Matrix multiplication requires matching inner dimensions. If the intended operation uses a 3-by-2 right-hand matrix, change `B` to `ones(3, 2)` and check again. You can use `runmat check` to statically detect linear algebra operation and type rule violations.
 
 ## Exit status and automation
 
@@ -241,7 +239,7 @@ Selected fields from the clean result (other fields omitted):
   }
 }
 ```
-`analysis` describes completeness separately from `outcome`: here type and shape analysis remain partial. Diagnostics include severity, code, message, primary source spans, related spans, notes, and help. A span can include byte offsets and line/column coordinates. Keep stderr separate when parsing JSON.
+`analysis` describes coverage separately from `outcome`. A `partial` domain means the checker can identify some problems in that domain but does not provide complete coverage of all its rules or cases. Here, type and shape checking can report proven incompatibilities, such as the matrix multiplication error above, without establishing every type or array dimension. `partial` is a coverage indicator, not an additional warning or error; `outcome: clean` means no diagnostics were reported. Diagnostics include severity, code, message, primary source spans, related spans, notes, and help. A span can include byte offsets and line/column coordinates. Keep stderr separate when parsing JSON.
 
 ### Preserve the exit status in CI
 
@@ -264,44 +262,10 @@ This prints the report and exits with the check's status, even though `cat` succ
 
 Checking does not run your script, read its runtime input data, exercise every branch, or establish numerical correctness. An unresolved call is not necessarily an unsupported built-in, and a clean result does not guarantee that every runtime dependency is available.
 
-After a clean check, run the quick-start script:
+After a clean check, you can run your script with:
 
 ```bash
 runmat run analysis.m
 ```
-It prints `4`. For your own project, use representative inputs and compare the results you rely on. If you have MATLAB-style tests, see the [CLI test workflow](/docs/runtime/getting-started/cli#test-projects) and [MATLAB compatibility guide](/docs/runtime/matlab-compatibility#check-run-and-test-existing-code).
+Use representative inputs and compare the results you rely on. If you have MATLAB-style tests, see the [CLI test workflow](/docs/runtime/getting-started/cli#test-projects) and [MATLAB compatibility guide](/docs/runtime/matlab-compatibility#check-run-and-test-existing-code).
 
-## FEA documents
-
-For `.fea` studies and sweeps, checking loads geometry, resolves selectors, validates the document, and builds a solve plan without running the solver. It can read geometry files and use runtime caches; it is not a promise of zero filesystem activity.
-
-For a small validation example, save this as `triangle.obj`:
-
-```text
-v 0 0 0
-v 1 0 0
-v 0 1 0
-f 1 2 3
-```
-Beside it, save `triangle.fea`:
-
-```yaml
-version: 1
-kind: study
-id: triangle_static
-geometry:
-  path: triangle.obj
-  units: meter
-model:
-  profile: linear_static_structural
-run:
-  backend: cpu
-```
-
-```bash
-runmat check triangle.fea
-runmat check --json triangle.fea
-```
-The human result begins with `OK triangle_static` and reports `validation: passed (0 issues)`. The JSON result contains `validation.valid: true` and a `plan` object. It does not use the script diagnostic envelope shown above.
-
-This triangle uses the default profile scaffold to demonstrate validation plumbing; it is not a physically validated engineering model. Geometry paths are relative to the `.fea` file. See [Using FEA](/docs/fea/using-fea), [Models](/docs/fea/models), and [Solves](/docs/fea/solves) to define and validate a real study.
