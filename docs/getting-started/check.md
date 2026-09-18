@@ -1,12 +1,20 @@
 # runmat check
 
-Check your source code before running it. `runmat check` reports problems it can find without executing your script.
+Use `runmat check` to find syntax errors, unresolved function calls, and type or matrix-size problems that RunMat can identify before execution. It analyzes your existing `.m` code without running the script.
 
 ## Quick start
 
 [Install the CLI](/docs/runtime/getting-started/install) if `runmat` is not on your path.
 
-Save this as `analysis.m` in a new directory:
+To check an existing script, open a terminal in its directory and run:
+
+```bash
+runmat check analysis.m
+```
+
+Replace `analysis.m` with your script's filename. For a project that calls functions in other directories, see [Project sources](#project-sources).
+
+To try a minimal example first, save the following as `analysis.m` in a new directory:
 
 ```matlab
 values = [2, 4, 6];
@@ -23,18 +31,20 @@ Diagnostic output:
 ```text
 checked analysis.m: 0 error(s), 0 warning(s)
 ```
-This means no static errors or warnings were found. It does not mean the script has executed or its results are correct.
+RunMat found no errors or warnings during analysis. Next, run the script with representative inputs to check its runtime behavior and results.
+
+Warnings are reported without failing the command by default. Use `-D warnings` when warnings should also make an automated check fail.
 
 The command accepts one file:
 
 ```text
 runmat check [OPTIONS] <FILE>
 ```
-`<FILE>` is the `.m` script to check. For a multi-file project, pass the entry script and configure its source roots as described below. Do not treat this command as a recursive check of every independent script in a directory.
+`<FILE>` is the `.m` script to check. For a multi-file project, check the script you normally run. Configure source roots—the directories RunMat searches for your project's functions—when those functions live in other directories. Do not treat this command as a recursive check of every independent script in a directory.
 
 ## What gets checked
 
-For `.m` files, checking uses the parser, HIR and MIR lowering, static analysis, source lookup, and compile validation shared with editor tooling. It can report:
+`runmat check` analyzes your script and the project functions available through its source configuration. It uses the same analysis as RunMat's editor tooling and can report:
 
 - Syntax and semantic errors.
 - Type and matrix-shape incompatibilities that can be established statically.
@@ -65,12 +75,14 @@ runmat check --help
 
 ## Project sources
 
-If your project has an entry script `main.m` that calls a helper:
+If `main.m` calls a helper in `toolbox/helper.m`, and `toolbox` is not already configured as a source root:
+
+`main.m`:
 
 ```matlab
 value = helper(3);
 ```
-and the helper is defined in `toolbox/helper.m`:
+`toolbox/helper.m`:
 
 ```matlab
 function y = helper(x)
@@ -83,7 +95,7 @@ From the directory containing `main.m`, run:
 runmat check main.m
 runmat check --path toolbox main.m
 ```
-The first command warns that `helper` cannot be found. The second resolves it and reports zero errors and warnings. A helper placed directly beside `main.m` is also discoverable without `--path`.
+Without the additional source root, RunMat reports that it cannot find `helper`. Adding `--path toolbox` makes the helper available to the check. A helper placed directly beside `main.m` is also discoverable without `--path`.
 
 For multi-file project configuration, define the source roots in a `runmat.toml` beside `main.m`:
 
@@ -113,11 +125,15 @@ value = helper(3);
 ```bash
 runmat check dynamic.m
 ```
-The check reports `RM-RES0002`, with the call site and the earlier `addpath` as a related causal location. Name resolution is `runtime_dependent`: checking does not execute `addpath` to discover the final target. This is a supported dynamic execution boundary, rather than proof that the call will fail. Use source roots or `--path` when the helper should participate in static analysis.
+RunMat reports `RM-RES0002` and points to both the function call and the earlier `addpath`. Because the check does not execute `addpath`, it cannot determine the call's target from that runtime path change alone. The call may still resolve when the script runs. To make the helper available during checking, add its directory with `--path` or configure a source root.
+
+In JSON output, name-resolution coverage is reported as `runtime_dependent`.
 
 ## Reading results
 
-If you are checking independent files in a directory without a project manifest, use the diagnostics below to identify and address common problems. Output blocks show diagnostic stdout; environment-specific startup messages on stderr are omitted.
+Use the diagnostic code, source location, and help text to identify what needs attention. If your check reports one of the problems below, use the corresponding guidance to investigate it.
+
+If you are checking independent files without a project manifest or additional source roots, the commands below show the expected diagnostics. Output blocks show diagnostic stdout; environment-specific startup messages on stderr are omitted.
 
 ### An unresolved function
 
@@ -141,7 +157,7 @@ warning[RM-RES0001]: cannot find function `definitely_missing`
   = help: place `definitely_missing.m` beside this source or in a source root configured by `runmat.toml`
 checked missing.m: 0 error(s), 1 warning(s)
 ```
-`RM-RES0001` identifies the diagnostic. `missing.m:1:9` points to line 1, column 9. The note explains what was searched; the help suggests how to expose the function. Check the spelling and provide the implementation in a discoverable source location. Do not add an empty placeholder merely to silence the warning.
+`RM-RES0001` identifies the diagnostic. `missing.m:1:9` points to line 1, column 9. The note explains what was searched; the help suggests how to expose the function. Check the spelling and provide the implementation in a discoverable source location.
 
 This command exits successfully by default. To make the same warning fail an automated check:
 
@@ -239,11 +255,15 @@ Selected fields from the clean result (other fields omitted):
   }
 }
 ```
-`analysis` describes coverage separately from `outcome`. A `partial` domain means the checker can identify some problems in that domain but does not provide complete coverage of all its rules or cases. Here, type and shape checking can report proven incompatibilities, such as the matrix multiplication error above, without establishing every type or array dimension. `partial` is a coverage indicator, not an additional warning or error; `outcome: clean` means no diagnostics were reported. Diagnostics include severity, code, message, primary source spans, related spans, notes, and help. A span can include byte offsets and line/column coordinates. Keep stderr separate when parsing JSON.
+`outcome` tells you whether the check reported errors or warnings. `analysis` describes the coverage of each kind of analysis.
+
+Here, `types` and `shapes` are `partial`: RunMat checks the type and matrix-size rules it can establish, but coverage is not exhaustive. It can detect the matrix multiplication error shown above without establishing every type or array dimension. A `partial` status does not itself make the check fail.
+
+Each diagnostic includes its severity, code, message, and source location, with additional notes or help when available. Source locations include byte offsets and line/column coordinates. Keep stderr separate when parsing JSON.
 
 ### Preserve the exit status in CI
 
-Save this as `check-ci.sh` beside `analysis.m`:
+To save a JSON report while preserving the check's exit status in CI, use a shell script such as `check-ci.sh`:
 
 ```sh
 #!/bin/sh
@@ -260,12 +280,12 @@ This prints the report and exits with the check's status, even though `cat` succ
 
 ## Limits and next steps
 
-Checking does not run your script, read its runtime input data, exercise every branch, or establish numerical correctness. An unresolved call is not necessarily an unsupported built-in, and a clean result does not guarantee that every runtime dependency is available.
+Use checking to identify source-level problems, then run your script with representative inputs and compare the results you rely on. If a dependency is only loaded at runtime, its availability still needs to be checked during execution.
 
 After a clean check, you can run your script with:
 
 ```bash
 runmat run analysis.m
 ```
-Use representative inputs and compare the results you rely on. If you have MATLAB-style tests, see the [CLI test workflow](/docs/runtime/getting-started/cli#test-projects) and [MATLAB compatibility guide](/docs/runtime/matlab-compatibility#check-run-and-test-existing-code).
+If you have MATLAB-style tests, see the [CLI test workflow](/docs/runtime/getting-started/cli#test-projects) and [MATLAB compatibility guide](/docs/runtime/matlab-compatibility#check-run-and-test-existing-code).
 
