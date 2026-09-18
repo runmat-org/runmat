@@ -282,12 +282,19 @@ impl ObservationQuantity {
 impl ObservationSpec {
     /// Physical meaning of the projected result, distinct from its recovered source quantity.
     pub fn result_quantity(&self) -> ObservationResultQuantity {
-        if self.component == ObservationComponent::VonMises {
-            ObservationResultQuantity::Physical(ObservationQuantity::VonMisesStress)
-        } else if self.complex_representation == ComplexRepresentation::PhaseRadians {
-            ObservationResultQuantity::Dimensionless
+        if self.complex_representation == ComplexRepresentation::PhaseRadians {
+            return ObservationResultQuantity::Dimensionless;
+        }
+        let quantity = if self.component == ObservationComponent::VonMises {
+            ObservationQuantity::VonMisesStress
         } else {
-            ObservationResultQuantity::Physical(self.quantity)
+            self.quantity
+        };
+        match self.result_dimension() {
+            Some(dimension) if dimension != quantity.physical_dimension() => {
+                ObservationResultQuantity::Derived(dimension)
+            }
+            _ => ObservationResultQuantity::Physical(quantity),
         }
     }
 
@@ -320,11 +327,12 @@ impl ObservationSpec {
             return Some(PhysicalDimension::DIMENSIONLESS);
         }
         let source = self.quantity.physical_dimension();
-        let Some(spatial) = self.reduction.as_ref().map(|reduction| reduction.spatial) else {
-            return Some(source);
-        };
+        let spatial = self
+            .reduction
+            .as_ref()
+            .map_or(SpatialReduction::None, |reduction| reduction.spatial);
         let measure = self.target.measure_dimension();
-        match spatial {
+        let spatial_dimension = match spatial {
             SpatialReduction::Integral => source.multiply(measure?),
             SpatialReduction::Resultant => {
                 if matches!(
@@ -350,6 +358,10 @@ impl ObservationSpec {
             | SpatialReduction::EuclideanNorm
             | SpatialReduction::Minimum
             | SpatialReduction::Maximum => Some(source),
+        }?;
+        match self.reduction.as_ref().map(|reduction| reduction.series) {
+            Some(SeriesReduction::Variance { .. }) => spatial_dimension.power(2),
+            _ => Some(spatial_dimension),
         }
     }
 }
@@ -372,6 +384,7 @@ impl ObservationTarget {
 #[serde(rename_all = "snake_case", tag = "kind", content = "quantity")]
 pub enum ObservationResultQuantity {
     Physical(ObservationQuantity),
+    Derived(PhysicalDimension),
     Dimensionless,
 }
 

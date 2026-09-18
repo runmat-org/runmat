@@ -54,10 +54,25 @@ pub fn canonical_scalar(value: &CheckedExpression) -> Option<f64> {
 }
 
 pub fn canonical_list(value: &CheckedExpression) -> Option<Vec<f64>> {
-    let CheckedExpressionKind::List(values) = &value.kind else {
-        return None;
-    };
-    values.iter().map(canonical_scalar).collect()
+    match &value.kind {
+        CheckedExpressionKind::List(values) => values.iter().map(canonical_scalar).collect(),
+        CheckedExpressionKind::Quantity {
+            value,
+            scale_bits,
+            offset_bits,
+        } => {
+            let CheckedExpressionKind::List(values) = &value.kind else {
+                return None;
+            };
+            let scale = f64::from_bits(*scale_bits);
+            let offset = f64::from_bits(*offset_bits);
+            values
+                .iter()
+                .map(|value| Some(canonical_scalar(value)? * scale + offset))
+                .collect()
+        }
+        _ => None,
+    }
 }
 
 pub fn canonical_vector3(value: &CheckedExpression) -> Option<[f64; 3]> {

@@ -44,8 +44,9 @@ pub enum FeaType {
     InitialCondition,
     Declaration(FeaSymbolKind),
     Field(FeaFieldType),
-    History(Box<FeaType>),
+    History(FeaHistoryType),
     AttributedExtremum(Box<FeaType>),
+    Envelope(Box<FeaType>),
     CaseTable(Box<FeaType>),
 }
 
@@ -54,6 +55,21 @@ pub struct FeaFieldType {
     pub value: Box<FeaType>,
     pub location: Option<FieldLocation>,
     pub quantity: Option<ObservationQuantity>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FeaHistoryType {
+    pub sample: Box<FeaType>,
+    pub domain: Option<FeaSeriesDomain>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FeaSeriesDomain {
+    Time,
+    Frequency,
+    LoadFactor,
+    StudyParameter(String),
+    Mode,
 }
 
 impl FeaType {

@@ -262,7 +262,10 @@ fn analysis_type(value: AnalysisValueType) -> FeaType {
             location: None,
             quantity: None,
         }),
-        AnalysisValueType::History => FeaType::History(Box::new(FeaType::Unknown)),
+        AnalysisValueType::History => FeaType::History(crate::FeaHistoryType {
+            sample: Box::new(FeaType::Unknown),
+            domain: None,
+        }),
         AnalysisValueType::AttributedExtremum => {
             FeaType::AttributedExtremum(Box::new(FeaType::Unknown))
         }

@@ -6,9 +6,13 @@ use runmat_types::{
     OperationTypePattern, TopologyApplicability,
 };
 
-use crate::{CheckedCallArgument, FeaType};
+mod typecheck;
 
 pub fn output_operation_extension() -> OperationCatalogExtension {
+    let mut mean = spatial_reduction("mean");
+    mean.overloads.push(series_reduction_overload("mean", true));
+    let mut rms = spatial_reduction("rms");
+    rms.overloads.push(series_reduction_overload("rms", true));
     OperationCatalogExtension {
         identity: id::<OperationCatalogExtensionIdentity>("runmat.fea.outputs"),
         operations: vec![
@@ -20,13 +24,18 @@ pub fn output_operation_extension() -> OperationCatalogExtension {
             principal(),
             projection("von_mises"),
             spatial_reduction("integral"),
-            spatial_reduction("mean"),
-            spatial_reduction("rms"),
+            mean,
+            rms,
             spatial_reduction("norm"),
             extremum("min"),
             extremum("max"),
             spatial_reduction("resultant"),
             moment(),
+            sample(),
+            interpolate(),
+            series_operation("absmax", false),
+            series_operation("variance", true),
+            series_operation("envelope", false),
             case_operation("collect", "fea.output.case.collect"),
             case_operation("retain_each", "fea.output.case.retain_each"),
         ],
@@ -50,6 +59,17 @@ pub(crate) enum OutputOperation {
     Maximum,
     Resultant,
     Moment,
+    SpatialSample,
+    InterpolatePoint,
+    InterpolatePath,
+    SampleSeries,
+    MinimumSeries,
+    MaximumSeries,
+    AbsoluteMaximumSeries,
+    MeanSeries,
+    RootMeanSquareSeries,
+    VarianceSeries,
+    EnvelopeSeries,
     CollectCases,
     RetainEachCase,
     MinimumCase,
@@ -74,242 +94,23 @@ impl OutputOperation {
             "fea.output.max" => Some(Self::Maximum),
             "fea.output.resultant" => Some(Self::Resultant),
             "fea.output.moment" => Some(Self::Moment),
+            "fea.output.spatial.sample" => Some(Self::SpatialSample),
+            "fea.output.interpolate.point" => Some(Self::InterpolatePoint),
+            "fea.output.interpolate.path" => Some(Self::InterpolatePath),
+            "fea.output.series.sample" => Some(Self::SampleSeries),
+            "fea.output.series.min" => Some(Self::MinimumSeries),
+            "fea.output.series.max" => Some(Self::MaximumSeries),
+            "fea.output.series.absmax" => Some(Self::AbsoluteMaximumSeries),
+            "fea.output.series.mean" => Some(Self::MeanSeries),
+            "fea.output.series.rms" => Some(Self::RootMeanSquareSeries),
+            "fea.output.series.variance" => Some(Self::VarianceSeries),
+            "fea.output.series.envelope" => Some(Self::EnvelopeSeries),
             "fea.output.case.collect" => Some(Self::CollectCases),
             "fea.output.case.retain_each" => Some(Self::RetainEachCase),
             "fea.output.case.min" => Some(Self::MinimumCase),
             "fea.output.case.max" => Some(Self::MaximumCase),
             _ => None,
         }
-    }
-
-    pub(crate) fn result_type(
-        self,
-        arguments: &[CheckedCallArgument],
-    ) -> Result<FeaType, &'static str> {
-        let source = arguments.first().map(|argument| match argument {
-            CheckedCallArgument::Positional(value) | CheckedCallArgument::Named { value, .. } => {
-                &value.value_type
-            }
-        });
-        match (self, source) {
-            (Self::Magnitude, Some(FeaType::Field(field))) => match field.value.as_ref() {
-                FeaType::Vector {
-                    element,
-                    length: Some(3),
-                } if element.is_numeric() => {
-                    Ok(projected_field(field, element.clone(), field.quantity))
-                }
-                _ => Err("magnitude requires a three-component numeric field"),
-            },
-            (Self::Component, Some(FeaType::Field(field))) => match field.value.as_ref() {
-                FeaType::Vector {
-                    element,
-                    length: Some(3),
-                } if element.is_numeric() => {
-                    Ok(projected_field(field, element.clone(), field.quantity))
-                }
-                _ => Err("component requires a three-component numeric field"),
-            },
-            (Self::Real | Self::Imaginary, Some(FeaType::Field(field))) => {
-                Ok(FeaType::Field(field.clone()))
-            }
-            (Self::Phase, Some(FeaType::Field(field))) => Ok(projected_field(
-                field,
-                Box::new(dimensionless_shape(&field.value)),
-                None,
-            )),
-            (Self::VonMises, Some(FeaType::Field(field))) => match field.value.as_ref() {
-                FeaType::Vector {
-                    element,
-                    length: Some(6),
-                } if element.as_ref() == &FeaType::Quantity(crate::PhysicalDimension::PRESSURE) => {
-                    Ok(projected_field(
-                        field,
-                        element.clone(),
-                        Some(runmat_analysis_core::ObservationQuantity::VonMisesStress),
-                    ))
-                }
-                _ => Err("von_mises requires a symmetric stress field"),
-            },
-            (Self::Principal, Some(FeaType::Field(field))) => match field.value.as_ref() {
-                FeaType::Vector {
-                    element,
-                    length: Some(6),
-                } if element.is_numeric()
-                    && matches!(
-                        field.quantity,
-                        Some(
-                            runmat_analysis_core::ObservationQuantity::Stress
-                                | runmat_analysis_core::ObservationQuantity::Strain
-                        )
-                    ) =>
-                {
-                    Ok(projected_field(field, element.clone(), field.quantity))
-                }
-                _ => Err("principal requires a real symmetric tensor field"),
-            },
-            (Self::Integral, Some(FeaType::Field(field))) => {
-                let measure = region_measure(argument_type(arguments, 1, "over"))
-                    .ok_or("integral requires an edge, face, solid, or cell region")?;
-                scale_numeric_type(&field.value, measure)
-                    .ok_or("integral requires a numeric field with a representable dimension")
-            }
-            (Self::Mean | Self::RootMeanSquare, Some(FeaType::Field(field)))
-                if numeric_shape(&field.value) =>
-            {
-                Ok(field.value.as_ref().clone())
-            }
-            (Self::Norm, Some(FeaType::Field(field))) => scalar_dimension(&field.value)
-                .map(FeaType::Quantity)
-                .ok_or("norm requires a numeric field"),
-            (Self::Minimum | Self::Maximum, Some(FeaType::Field(field)))
-                if field.value.is_numeric() =>
-            {
-                Ok(FeaType::AttributedExtremum(field.value.clone()))
-            }
-            (Self::Minimum | Self::Maximum, Some(FeaType::Field(_))) => {
-                Err("spatial extrema require an explicit scalar field projection")
-            }
-            (Self::Resultant | Self::Moment, Some(FeaType::Field(field))) => {
-                resultant_type(self, field, argument_type(arguments, 1, "over"))
-            }
-            (Self::CollectCases, Some(value)) if value.is_numeric() => {
-                Ok(FeaType::CaseTable(Box::new(value.clone())))
-            }
-            (Self::RetainEachCase, Some(FeaType::Field(field))) => {
-                Ok(FeaType::CaseTable(Box::new(FeaType::Field(field.clone()))))
-            }
-            (Self::MinimumCase | Self::MaximumCase, Some(value)) if value.is_numeric() => {
-                Ok(FeaType::AttributedExtremum(Box::new(value.clone())))
-            }
-            _ => Err("output operation requires an analysis field"),
-        }
-    }
-}
-
-fn argument_type<'a>(
-    arguments: &'a [CheckedCallArgument],
-    position: usize,
-    name: &str,
-) -> Option<&'a FeaType> {
-    arguments
-        .iter()
-        .find_map(|argument| match argument {
-            CheckedCallArgument::Named {
-                name: candidate,
-                value,
-            } if candidate == name => Some(&value.value_type),
-            _ => None,
-        })
-        .or_else(|| {
-            arguments.get(position).map(|argument| match argument {
-                CheckedCallArgument::Positional(value)
-                | CheckedCallArgument::Named { value, .. } => &value.value_type,
-            })
-        })
-}
-
-fn numeric_shape(value: &FeaType) -> bool {
-    value.is_numeric() || matches!(value, FeaType::Vector { element, .. } if element.is_numeric())
-}
-
-fn scalar_dimension(value: &FeaType) -> Option<crate::PhysicalDimension> {
-    match value {
-        FeaType::Quantity(dimension) => Some(*dimension),
-        FeaType::Integer | FeaType::Real | FeaType::Complex => {
-            Some(crate::PhysicalDimension::DIMENSIONLESS)
-        }
-        FeaType::Vector { element, .. } => scalar_dimension(element),
-        _ => None,
-    }
-}
-
-fn scale_numeric_type(value: &FeaType, measure: crate::PhysicalDimension) -> Option<FeaType> {
-    match value {
-        FeaType::Quantity(dimension) => Some(FeaType::Quantity(dimension.multiply(measure)?)),
-        FeaType::Integer | FeaType::Real | FeaType::Complex => Some(FeaType::Quantity(measure)),
-        FeaType::Vector { element, length } => Some(FeaType::Vector {
-            element: Box::new(scale_numeric_type(element, measure)?),
-            length: *length,
-        }),
-        _ => None,
-    }
-}
-
-fn region_measure(value: Option<&FeaType>) -> Option<crate::PhysicalDimension> {
-    Some(match value? {
-        FeaType::Region(crate::FeaTopologyRole::Vertex) => return None,
-        FeaType::Region(crate::FeaTopologyRole::Edge) => crate::PhysicalDimension::LENGTH,
-        FeaType::Region(crate::FeaTopologyRole::Face) => crate::PhysicalDimension::AREA,
-        FeaType::Region(crate::FeaTopologyRole::Solid | crate::FeaTopologyRole::Cell) => {
-            crate::PhysicalDimension::VOLUME
-        }
-        _ => return None,
-    })
-}
-
-fn resultant_type(
-    operation: OutputOperation,
-    field: &crate::FeaFieldType,
-    target: Option<&FeaType>,
-) -> Result<FeaType, &'static str> {
-    use runmat_analysis_core::ObservationQuantity as Q;
-    let quantity = field
-        .quantity
-        .ok_or("resultant requires a known physical field quantity")?;
-    if operation == OutputOperation::Moment && quantity == Q::ReactionMoment {
-        return Err("moment cannot take a second moment of reaction moments");
-    }
-    let compatible = matches!(
-        field.value.as_ref(),
-        FeaType::Vector {
-            length: Some(3),
-            ..
-        }
-    ) || quantity == Q::Stress
-        || matches!(
-            quantity,
-            Q::AcousticPressure | Q::FluidPressure | Q::ContactPressure
-        );
-    if !compatible {
-        return Err("resultant requires a vector field, boundary stress, or boundary pressure");
-    }
-    let mut dimension = quantity.physical_dimension();
-    if !matches!(quantity, Q::ReactionForce | Q::ReactionMoment) {
-        dimension = dimension
-            .multiply(region_measure(target).ok_or("resultant requires a measurable region")?)
-            .ok_or("resultant dimension overflows")?;
-    }
-    if operation == OutputOperation::Moment {
-        dimension = dimension
-            .multiply(crate::PhysicalDimension::LENGTH)
-            .ok_or("moment dimension overflows")?;
-    }
-    Ok(FeaType::Vector {
-        element: Box::new(FeaType::Quantity(dimension)),
-        length: Some(3),
-    })
-}
-
-fn projected_field(
-    field: &crate::FeaFieldType,
-    value: Box<FeaType>,
-    quantity: Option<runmat_analysis_core::ObservationQuantity>,
-) -> FeaType {
-    FeaType::Field(crate::FeaFieldType {
-        value,
-        location: field.location,
-        quantity,
-    })
-}
-
-fn dimensionless_shape(value: &FeaType) -> FeaType {
-    match value {
-        FeaType::Vector { length, .. } => FeaType::Vector {
-            element: Box::new(FeaType::Quantity(crate::PhysicalDimension::DIMENSIONLESS)),
-            length: *length,
-        },
-        _ => FeaType::Quantity(crate::PhysicalDimension::DIMENSIONLESS),
     }
 }
 
@@ -462,7 +263,145 @@ fn extremum(name: &str) -> OperationFacts {
         distribution: OperationDistribution::DeterministicReduction,
         lowering: id::<OperationLoweringId>(format!("fea.output.case.{name}")),
     });
+    facts.overloads.push(series_reduction_overload(name, false));
     facts
+}
+
+fn sample() -> OperationFacts {
+    let mut facts = operation(
+        "sample",
+        "Select a bounded spatial region or explicit independent-domain samples.",
+        vec![
+            parameter("field", field(), OperationParameterArity::Required),
+            parameter("over", region(), OperationParameterArity::Required),
+        ],
+        field(),
+        OperationDistribution::PartitionLocal,
+        TopologyApplicability::Region,
+        "fea.output.spatial.sample",
+    );
+    facts.overloads.push(OperationOverloadFacts {
+        identity: id::<OperationOverloadIdentity>("sample:fea-series"),
+        frontends: vec![OperationFrontend::Fea],
+        signature: OperationSignature {
+            inputs: vec![
+                parameter(
+                    "source",
+                    OperationTypePattern::Any,
+                    OperationParameterArity::Required,
+                ),
+                parameter(
+                    "over",
+                    OperationTypePattern::Any,
+                    OperationParameterArity::Required,
+                ),
+                parameter(
+                    "at",
+                    OperationTypePattern::NumericArray,
+                    OperationParameterArity::Required,
+                ),
+            ],
+            outputs: vec![parameter(
+                "result",
+                history(),
+                OperationParameterArity::Required,
+            )],
+        },
+        quantity: OperationQuantityRule::CheckedByLowering,
+        topology: TopologyApplicability::AnyGeometry,
+        effects: OperationEffectFacts::default(),
+        distribution: OperationDistribution::PartitionLocal,
+        lowering: id::<OperationLoweringId>("fea.output.series.sample"),
+    });
+    facts
+}
+
+fn interpolate() -> OperationFacts {
+    let point = OperationTypePattern::VectorQuantity {
+        dimension: runmat_types::QuantityDimension::Length,
+        length: Some(3),
+    };
+    let mut facts = operation(
+        "interpolate",
+        "Interpolate a field at an explicit physical point.",
+        vec![
+            parameter("field", field(), OperationParameterArity::Required),
+            parameter("at", point.clone(), OperationParameterArity::Required),
+        ],
+        field(),
+        OperationDistribution::PartitionLocal,
+        TopologyApplicability::AnyGeometry,
+        "fea.output.interpolate.point",
+    );
+    facts.overloads.push(OperationOverloadFacts {
+        identity: id::<OperationOverloadIdentity>("interpolate:fea-path"),
+        frontends: vec![OperationFrontend::Fea],
+        signature: OperationSignature {
+            inputs: vec![
+                parameter("field", field(), OperationParameterArity::Required),
+                parameter(
+                    "at",
+                    OperationTypePattern::List(Box::new(point)),
+                    OperationParameterArity::Required,
+                ),
+            ],
+            outputs: vec![parameter(
+                "result",
+                field(),
+                OperationParameterArity::Required,
+            )],
+        },
+        quantity: OperationQuantityRule::CheckedByLowering,
+        topology: TopologyApplicability::AnyGeometry,
+        effects: OperationEffectFacts::default(),
+        distribution: OperationDistribution::PartitionLocal,
+        lowering: id::<OperationLoweringId>("fea.output.interpolate.path"),
+    });
+    facts
+}
+
+fn series_operation(name: &str, weighting: bool) -> OperationFacts {
+    OperationFacts {
+        identity: id::<OperationIdentity>(name),
+        category: "analysis output".into(),
+        summary: format!("Apply the typed `{name}` reduction over an observation history."),
+        overloads: vec![series_reduction_overload(name, weighting)],
+    }
+}
+
+fn series_reduction_overload(name: &str, weighting: bool) -> OperationOverloadFacts {
+    let mut inputs = vec![
+        parameter("history", history(), OperationParameterArity::Required),
+        parameter(
+            "over",
+            OperationTypePattern::Any,
+            OperationParameterArity::Required,
+        ),
+    ];
+    if weighting {
+        inputs.push(parameter(
+            "weighting",
+            OperationTypePattern::StringScalar,
+            OperationParameterArity::Required,
+        ));
+    }
+    OperationOverloadFacts {
+        identity: id::<OperationOverloadIdentity>(format!("{name}:fea-series")),
+        frontends: vec![OperationFrontend::Fea],
+        signature: OperationSignature {
+            inputs,
+            outputs: vec![parameter(
+                "result",
+                OperationTypePattern::Any,
+                OperationParameterArity::Required,
+            )],
+        },
+        quantity: OperationQuantityRule::CheckedByLowering,
+        topology: TopologyApplicability::AnyGeometry,
+        effects: OperationEffectFacts::default(),
+        distribution: OperationDistribution::DeterministicReduction,
+        lowering: id::<OperationLoweringId>(format!("fea.output.series.{name}")),
+    }
 }
 
 fn case_operation(name: &str, lowering: &str) -> OperationFacts {
@@ -535,6 +474,10 @@ fn region() -> OperationTypePattern {
     OperationTypePattern::Analysis(AnalysisValueType::Region)
 }
 
+fn history() -> OperationTypePattern {
+    OperationTypePattern::Analysis(AnalysisValueType::History)
+}
+
 trait OperationId: Sized {
     fn parse(value: String) -> Self;
 }
@@ -565,7 +508,7 @@ mod tests {
     #[test]
     fn output_operations_are_one_shared_public_identity_with_fea_overloads() {
         let extension = output_operation_extension();
-        assert_eq!(extension.operations.len(), 17);
+        assert_eq!(extension.operations.len(), 22);
         assert_eq!(extension.operations[11].identity.as_str(), "min");
         assert_eq!(extension.operations[12].identity.as_str(), "max");
         assert!(extension.operations.iter().all(|operation| operation

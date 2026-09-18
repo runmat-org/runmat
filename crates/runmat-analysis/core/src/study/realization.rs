@@ -307,10 +307,14 @@ fn substitute_output_regions(
     inputs: &BTreeMap<String, AuthoredInputValue>,
 ) -> Result<(), AuthoredStudyRealizationError> {
     match expression {
-        crate::AuthoredOutputExpression::Projection { source, .. } => {
+        crate::AuthoredOutputExpression::Projection { source, .. }
+        | crate::AuthoredOutputExpression::Interpolation { source, .. }
+        | crate::AuthoredOutputExpression::Sampling { source, .. }
+        | crate::AuthoredOutputExpression::SeriesReduction { source, .. } => {
             substitute_output_regions(source, inputs)
         }
-        crate::AuthoredOutputExpression::SpatialReduction { source, target, .. } => {
+        crate::AuthoredOutputExpression::SpatialReduction { source, target, .. }
+        | crate::AuthoredOutputExpression::SpatialSelection { source, target } => {
             substitute_output_regions(source, inputs)?;
             substitute_region(target, inputs)
         }

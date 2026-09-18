@@ -5,13 +5,14 @@ use runmat_geometry_core::GeometryRegionRole;
 use crate::{
     AuthoredExtremaTiePolicy, AuthoredFieldDomain, AuthoredFieldProjection, AuthoredOutput,
     AuthoredOutputExpression, AuthoredPrincipalSelection, AuthoredRegionSource,
-    AuthoredSpatialReduction, AuthoredVectorComponent, ComplexRepresentation, CompressionPolicy,
-    CoordinateFrame, EntityDimension, ExcitationTarget, ExpectedTopology, ExtremaTiePolicy,
-    FieldLocation, ObservationComponent, ObservationCostPolicy, ObservationId, ObservationPurpose,
-    ObservationQuantity, ObservationRequest, ObservationSpec, ObservationStoragePolicy,
-    ObservationTarget, ObservationValueShape, PartialAccessPolicy, ProcedureStep, ProcedureStepId,
-    RecoveryPolicy, ReductionPolicy, RegionTarget, RetentionPolicy, SamplingPolicy,
-    SeriesReduction, SignConvention, SignalPrecision, SpatialReduction, TargetCardinality,
+    AuthoredSeriesReduction, AuthoredSpatialReduction, AuthoredVectorComponent,
+    ComplexRepresentation, CompressionPolicy, CoordinateFrame, EntityDimension, ExcitationTarget,
+    ExpectedTopology, ExtremaTiePolicy, FieldLocation, ObservationComponent, ObservationCostPolicy,
+    ObservationId, ObservationPurpose, ObservationQuantity, ObservationRequest, ObservationSpec,
+    ObservationStoragePolicy, ObservationTarget, ObservationValueShape, PartialAccessPolicy,
+    ProcedureStep, ProcedureStepId, RecoveryPolicy, ReductionPolicy, RegionTarget, RetentionPolicy,
+    SamplingPolicy, SeriesReduction, SignConvention, SignalPrecision, SpatialReduction,
+    TargetCardinality,
 };
 
 use super::authored_output::field_domain;
@@ -42,6 +43,8 @@ pub fn lower_authored_observations(
         let request = match draft.kind {
             ObservationKind::Field => ObservationRequest::Field(draft.spec.clone()),
             ObservationKind::Reduction => ObservationRequest::Reduction(draft.spec.clone()),
+            ObservationKind::Probe => ObservationRequest::Probe(draft.spec.clone()),
+            ObservationKind::History => ObservationRequest::History(draft.spec.clone()),
         };
         requests.push(LoweredAuthoredObservation {
             step_id: ProcedureStepId(draft.step_id.clone()),
@@ -63,6 +66,8 @@ struct ObservationDraft {
 enum ObservationKind {
     Field,
     Reduction,
+    Probe,
+    History,
 }
 
 fn lower_expression(
@@ -129,6 +134,71 @@ fn lower_expression(
             ) {
                 draft.spec.output_location = FieldLocation::Global;
             }
+            Ok(draft)
+        }
+        AuthoredOutputExpression::SpatialSelection { source, target } => {
+            let mut draft = lower_expression(source, steps, outputs)?;
+            draft.spec.target =
+                ObservationTarget::Spatial(ExcitationTarget::Region(region_target(target)?));
+            Ok(draft)
+        }
+        AuthoredOutputExpression::Interpolation { source, positions } => {
+            let mut draft = lower_expression(source, steps, outputs)?;
+            draft.kind = ObservationKind::Probe;
+            draft.spec.target = match positions.as_slice() {
+                [position] => ObservationTarget::Point {
+                    position: *position,
+                },
+                positions => ObservationTarget::Path {
+                    positions: positions.to_vec(),
+                },
+            };
+            draft.spec.output_location = FieldLocation::Point;
+            draft.spec.recovery = RecoveryPolicy::ShapeFunctionInterpolation;
+            Ok(draft)
+        }
+        AuthoredOutputExpression::Sampling {
+            source, sampling, ..
+        } => {
+            let mut draft = lower_expression(source, steps, outputs)?;
+            draft.kind = ObservationKind::History;
+            draft.spec.sampling = sampling.clone();
+            Ok(draft)
+        }
+        AuthoredOutputExpression::SeriesReduction {
+            reduction,
+            source,
+            domain: _,
+            ties,
+        } => {
+            let mut draft = lower_expression(source, steps, outputs)?;
+            draft.kind = ObservationKind::History;
+            let policy = draft.spec.reduction.get_or_insert(ReductionPolicy {
+                spatial: SpatialReduction::None,
+                series: SeriesReduction::None,
+                extrema_ties: ExtremaTiePolicy::FirstCanonical,
+            });
+            policy.series = match reduction {
+                AuthoredSeriesReduction::Minimum => SeriesReduction::Minimum,
+                AuthoredSeriesReduction::Maximum => SeriesReduction::Maximum,
+                AuthoredSeriesReduction::AbsoluteMaximum => SeriesReduction::AbsoluteMaximum,
+                AuthoredSeriesReduction::Mean { weighting } => SeriesReduction::Mean {
+                    weighting: *weighting,
+                },
+                AuthoredSeriesReduction::RootMeanSquare { weighting } => {
+                    SeriesReduction::RootMeanSquare {
+                        weighting: *weighting,
+                    }
+                }
+                AuthoredSeriesReduction::Variance { weighting } => SeriesReduction::Variance {
+                    weighting: *weighting,
+                },
+                AuthoredSeriesReduction::Envelope => SeriesReduction::Envelope,
+            };
+            policy.extrema_ties = match ties {
+                AuthoredExtremaTiePolicy::FirstCanonical => ExtremaTiePolicy::FirstCanonical,
+                AuthoredExtremaTiePolicy::AllLocations => ExtremaTiePolicy::AllLocations,
+            };
             Ok(draft)
         }
     }

@@ -55,13 +55,14 @@ pub use study::{
     AuthoredCaseOutputRef, AuthoredExtremaTiePolicy, AuthoredFieldDomain, AuthoredFieldProjection,
     AuthoredMeshRef, AuthoredModelArgument, AuthoredModelArgumentValue, AuthoredModelInstance,
     AuthoredObservationError, AuthoredOutput, AuthoredOutputError, AuthoredOutputExpression,
-    AuthoredOutputType, AuthoredOutputValue, AuthoredPrincipalSelection, AuthoredSpatialReduction,
-    AuthoredStudy, AuthoredStudyError, AuthoredStudyInputBinding, AuthoredStudyInputRef,
-    AuthoredStudyRealizationError, AuthoredStudyRef, AuthoredSweep, AuthoredSweepAxis,
-    AuthoredSweepAxisValue, AuthoredSweepBinding, AuthoredSweepCase, AuthoredSweepDefinition,
-    AuthoredSweepError, AuthoredSweepOutput, AuthoredSweepOutputExpression,
-    AuthoredVectorComponent, CaseOutputProjection, LoweredAuthoredObservation, RealizedStudy,
-    SweepAxisCombination, SweepExtremum,
+    AuthoredOutputType, AuthoredOutputValue, AuthoredPrincipalSelection, AuthoredSeriesDomain,
+    AuthoredSeriesReduction, AuthoredSpatialReduction, AuthoredStudy, AuthoredStudyError,
+    AuthoredStudyInputBinding, AuthoredStudyInputRef, AuthoredStudyRealizationError,
+    AuthoredStudyRef, AuthoredSweep, AuthoredSweepAxis, AuthoredSweepAxisValue,
+    AuthoredSweepBinding, AuthoredSweepCase, AuthoredSweepDefinition, AuthoredSweepError,
+    AuthoredSweepOutput, AuthoredSweepOutputExpression, AuthoredVectorComponent,
+    CaseOutputProjection, LoweredAuthoredObservation, RealizedStudy, SweepAxisCombination,
+    SweepExtremum,
 };
 pub use validate::physics_family_can_consume_state;
 pub use validate_authored::validate_coordinate_frame;

@@ -2,8 +2,8 @@ use std::collections::BTreeSet;
 
 use runmat_analysis_core::{
     AuthoredExtremaTiePolicy, AuthoredFieldProjection, AuthoredOutput, AuthoredOutputExpression,
-    AuthoredPrincipalSelection, AuthoredRegionSource, AuthoredSpatialReduction,
-    AuthoredVectorComponent, FieldLocation, ObservationQuantity, Position,
+    AuthoredPrincipalSelection, AuthoredRegionSource, AuthoredSeriesReduction,
+    AuthoredSpatialReduction, AuthoredVectorComponent, FieldLocation, ObservationQuantity, Position,
 };
 
 use crate::{
@@ -13,6 +13,12 @@ use crate::{
 };
 
 use super::lower;
+
+mod series;
+
+use series::{
+    checked_series_weighting, interpolation_positions, series_domain, series_sampling,
+};
 
 pub(super) fn lower_outputs(
     bound: &BoundFeaProgram,
@@ -221,6 +227,142 @@ fn lower_expression(
                         diagnostics,
                     )?),
                     target,
+                    ties: AuthoredExtremaTiePolicy::FirstCanonical,
+                })
+            }
+            OutputOperation::SpatialSample => {
+                let source = positional_or_named(arguments, 0, "field")?;
+                let target = positional_or_named(arguments, 1, "over")?;
+                let target =
+                    super::super::model::region_source(bound, declaration, target, diagnostics)?;
+                if matches!(target, AuthoredRegionSource::ModelInput(_)) {
+                    lower::error(
+                        declaration,
+                        expression.span,
+                        "study output regions must name an exact geometry region",
+                        diagnostics,
+                    );
+                    return None;
+                }
+                Some(AuthoredOutputExpression::SpatialSelection {
+                    source: Box::new(lower_expression(
+                        bound,
+                        declaration,
+                        source,
+                        available,
+                        diagnostics,
+                    )?),
+                    target,
+                })
+            }
+            OutputOperation::InterpolatePoint | OutputOperation::InterpolatePath => {
+                let source = positional_or_named(arguments, 0, "field")?;
+                let at = positional_or_named(arguments, 1, "at")?;
+                let positions = interpolation_positions(at).or_else(|| {
+                    lower::error(
+                        declaration,
+                        at.span,
+                        "interpolation requires one point or a nonempty path of length vectors",
+                        diagnostics,
+                    );
+                    None
+                })?;
+                Some(AuthoredOutputExpression::Interpolation {
+                    source: Box::new(lower_expression(
+                        bound,
+                        declaration,
+                        source,
+                        available,
+                        diagnostics,
+                    )?),
+                    positions,
+                })
+            }
+            OutputOperation::SampleSeries => {
+                let source = positional_or_named(arguments, 0, "source")?;
+                let over = positional_or_named(arguments, 1, "over")?;
+                let at = positional_or_named(arguments, 2, "at")?;
+                let (domain, sampling) = series_sampling(over, at).or_else(|| {
+                    lower::error(
+                        declaration,
+                        expression.span,
+                        "sample coordinates must match time, frequency, load_factor, mode, or input.<name>",
+                        diagnostics,
+                    );
+                    None
+                })?;
+                Some(AuthoredOutputExpression::Sampling {
+                    source: Box::new(lower_expression(
+                        bound,
+                        declaration,
+                        source,
+                        available,
+                        diagnostics,
+                    )?),
+                    sampling,
+                    domain,
+                })
+            }
+            operation @ (OutputOperation::MinimumSeries
+            | OutputOperation::MaximumSeries
+            | OutputOperation::AbsoluteMaximumSeries
+            | OutputOperation::MeanSeries
+            | OutputOperation::RootMeanSquareSeries
+            | OutputOperation::VarianceSeries
+            | OutputOperation::EnvelopeSeries) => {
+                let source = positional_or_named(arguments, 0, "history")?;
+                let over = positional_or_named(arguments, 1, "over")?;
+                let domain = series_domain(over).or_else(|| {
+                    lower::error(
+                        declaration,
+                        over.span,
+                        "series reduction domain must be time, frequency, load_factor, mode, or input.<name>",
+                        diagnostics,
+                    );
+                    None
+                })?;
+                let reduction = match operation {
+                    OutputOperation::MinimumSeries => AuthoredSeriesReduction::Minimum,
+                    OutputOperation::MaximumSeries => AuthoredSeriesReduction::Maximum,
+                    OutputOperation::AbsoluteMaximumSeries => {
+                        AuthoredSeriesReduction::AbsoluteMaximum
+                    }
+                    OutputOperation::MeanSeries => AuthoredSeriesReduction::Mean {
+                        weighting: checked_series_weighting(
+                            declaration,
+                            positional_or_named(arguments, 2, "weighting")?,
+                            diagnostics,
+                        )?,
+                    },
+                    OutputOperation::RootMeanSquareSeries => {
+                        AuthoredSeriesReduction::RootMeanSquare {
+                            weighting: checked_series_weighting(
+                                declaration,
+                                positional_or_named(arguments, 2, "weighting")?,
+                                diagnostics,
+                            )?,
+                        }
+                    }
+                    OutputOperation::VarianceSeries => AuthoredSeriesReduction::Variance {
+                        weighting: checked_series_weighting(
+                            declaration,
+                            positional_or_named(arguments, 2, "weighting")?,
+                            diagnostics,
+                        )?,
+                    },
+                    OutputOperation::EnvelopeSeries => AuthoredSeriesReduction::Envelope,
+                    _ => unreachable!(),
+                };
+                Some(AuthoredOutputExpression::SeriesReduction {
+                    reduction,
+                    source: Box::new(lower_expression(
+                        bound,
+                        declaration,
+                        source,
+                        available,
+                        diagnostics,
+                    )?),
+                    domain,
                     ties: AuthoredExtremaTiePolicy::FirstCanonical,
                 })
             }

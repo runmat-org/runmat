@@ -157,10 +157,14 @@ fn validate_output_regions(
     model: &AuthoredModel,
 ) -> Result<(), AuthoredStudyError> {
     match expression {
-        AuthoredOutputExpression::Projection { source, .. } => {
+        AuthoredOutputExpression::Projection { source, .. }
+        | AuthoredOutputExpression::Interpolation { source, .. }
+        | AuthoredOutputExpression::Sampling { source, .. }
+        | AuthoredOutputExpression::SeriesReduction { source, .. } => {
             validate_output_regions(source, geometry, model)
         }
-        AuthoredOutputExpression::SpatialReduction { source, target, .. } => {
+        AuthoredOutputExpression::SpatialReduction { source, target, .. }
+        | AuthoredOutputExpression::SpatialSelection { source, target } => {
             validate_output_regions(source, geometry, model)?;
             match target {
                 AuthoredRegionSource::Geometry(region) => validate_region_owner(region, geometry),

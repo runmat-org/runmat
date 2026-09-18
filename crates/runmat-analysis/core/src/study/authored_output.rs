@@ -1,123 +1,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use serde::{Deserialize, Serialize};
-
 use crate::{
-    procedure_produces_observation_quantity, AuthoredRegionSource, FieldLocation,
-    ObservationQuantity, ObservationValueShape, ProcedureStep,
+    procedure_produces_observation_quantity, AuthoredRegionSource, ObservationQuantity,
+    ObservationValueShape, ProcedureStep,
 };
 use runmat_types::PhysicalDimension;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct AuthoredOutput {
-    pub output_id: String,
-    pub expression: AuthoredOutputExpression,
-}
+mod types;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", tag = "kind")]
-pub enum AuthoredOutputExpression {
-    AnalysisField {
-        step_id: String,
-        quantity: ObservationQuantity,
-        location: FieldLocation,
-    },
-    OutputReference {
-        output_id: String,
-    },
-    Projection {
-        projection: AuthoredFieldProjection,
-        source: Box<AuthoredOutputExpression>,
-    },
-    SpatialReduction {
-        reduction: AuthoredSpatialReduction,
-        source: Box<AuthoredOutputExpression>,
-        target: AuthoredRegionSource,
-        ties: AuthoredExtremaTiePolicy,
-    },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AuthoredFieldProjection {
-    Magnitude,
-    Component(AuthoredVectorComponent),
-    Real,
-    Imaginary,
-    Phase,
-    Principal(AuthoredPrincipalSelection),
-    VonMises,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AuthoredPrincipalSelection {
-    Maximum,
-    Minimum,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AuthoredVectorComponent {
-    X,
-    Y,
-    Z,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AuthoredSpatialReduction {
-    Integral,
-    Mean,
-    RootMeanSquare,
-    EuclideanNorm,
-    Minimum,
-    Maximum,
-    Resultant,
-    Moment { about: crate::Position },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AuthoredExtremaTiePolicy {
-    FirstCanonical,
-    AllLocations,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", tag = "kind")]
-pub enum AuthoredOutputType {
-    Field {
-        value: AuthoredOutputValue,
-        shape: ObservationValueShape,
-        domain: AuthoredFieldDomain,
-        location: FieldLocation,
-    },
-    SpatialExtremum {
-        value: AuthoredOutputValue,
-    },
-    Reduced {
-        value: AuthoredOutputValue,
-        shape: ObservationValueShape,
-    },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AuthoredOutputValue {
-    Physical(ObservationQuantity),
-    Derived(PhysicalDimension),
-    Dimensionless,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AuthoredFieldDomain {
-    Real,
-    Complex,
-    Statistical,
-}
+pub use types::*;
 
 pub fn validate_authored_outputs(
     outputs: &[AuthoredOutput],
@@ -390,8 +281,145 @@ impl AuthoredOutputExpression {
                     }
                 }
             }
+            Self::SpatialSelection { source, target } => {
+                validate_region(target)?;
+                let output @ AuthoredOutputType::Field { .. } = source.validate(steps, outputs)?
+                else {
+                    return Err(AuthoredOutputError::SpatialSelectionRequiresField);
+                };
+                Ok(output)
+            }
+            Self::Interpolation { source, positions } => {
+                if positions.is_empty()
+                    || positions.iter().any(|position| {
+                        position
+                            .meters
+                            .iter()
+                            .any(|component| !component.is_finite())
+                    })
+                {
+                    return Err(AuthoredOutputError::InvalidInterpolationPoints);
+                }
+                let AuthoredOutputType::Field {
+                    value,
+                    shape,
+                    domain,
+                    ..
+                } = source.validate(steps, outputs)?
+                else {
+                    return Err(AuthoredOutputError::InterpolationRequiresField);
+                };
+                Ok(AuthoredOutputType::Probe {
+                    value,
+                    shape,
+                    domain,
+                })
+            }
+            Self::Sampling {
+                source,
+                sampling,
+                domain,
+            } => {
+                validate_authored_sampling(sampling, domain)?;
+                let sample = source.validate(steps, outputs)?;
+                if matches!(sample, AuthoredOutputType::History { .. }) {
+                    return Err(AuthoredOutputError::NestedHistory);
+                }
+                Ok(AuthoredOutputType::History {
+                    sample: Box::new(sample),
+                    domain: domain.clone(),
+                })
+            }
+            Self::SeriesReduction {
+                reduction,
+                source,
+                domain,
+                ..
+            } => {
+                let AuthoredOutputType::History {
+                    sample,
+                    domain: sampled_domain,
+                } = source.validate(steps, outputs)?
+                else {
+                    return Err(AuthoredOutputError::SeriesReductionRequiresHistory);
+                };
+                if sampled_domain != *domain {
+                    return Err(AuthoredOutputError::SeriesReductionDomainMismatch);
+                }
+                let (value, shape) = output_value_shape(&sample)
+                    .ok_or(AuthoredOutputError::SeriesReductionRequiresNumericHistory)?;
+                match reduction {
+                    AuthoredSeriesReduction::Minimum
+                    | AuthoredSeriesReduction::Maximum
+                    | AuthoredSeriesReduction::AbsoluteMaximum => {
+                        if shape != ObservationValueShape::Scalar {
+                            return Err(AuthoredOutputError::SeriesExtremumRequiresScalar);
+                        }
+                        Ok(AuthoredOutputType::SeriesExtremum { value })
+                    }
+                    AuthoredSeriesReduction::Mean { .. }
+                    | AuthoredSeriesReduction::RootMeanSquare { .. } => {
+                        Ok(AuthoredOutputType::Reduced { value, shape })
+                    }
+                    AuthoredSeriesReduction::Variance { .. } => Ok(AuthoredOutputType::Reduced {
+                        value: AuthoredOutputValue::Derived(
+                            output_dimension(value)
+                                .power(2)
+                                .ok_or(AuthoredOutputError::DimensionOverflow)?,
+                        ),
+                        shape,
+                    }),
+                    AuthoredSeriesReduction::Envelope => {
+                        Ok(AuthoredOutputType::Envelope { value, shape })
+                    }
+                }
+            }
         }
     }
+}
+
+fn output_value_shape(
+    output: &AuthoredOutputType,
+) -> Option<(AuthoredOutputValue, ObservationValueShape)> {
+    match output {
+        AuthoredOutputType::Field { value, shape, .. }
+        | AuthoredOutputType::Reduced { value, shape }
+        | AuthoredOutputType::Probe { value, shape, .. }
+        | AuthoredOutputType::Envelope { value, shape } => Some((*value, shape.clone())),
+        AuthoredOutputType::SpatialExtremum { value }
+        | AuthoredOutputType::SeriesExtremum { value } => {
+            Some((*value, ObservationValueShape::Scalar))
+        }
+        AuthoredOutputType::History { .. } => None,
+    }
+}
+
+fn validate_authored_sampling(
+    sampling: &crate::SamplingPolicy,
+    domain: &AuthoredSeriesDomain,
+) -> Result<(), AuthoredOutputError> {
+    let matches = matches!(
+        (sampling, domain),
+        (
+            crate::SamplingPolicy::TimeSeconds(_),
+            AuthoredSeriesDomain::Time
+        ) | (
+            crate::SamplingPolicy::FrequencyHertz(_),
+            AuthoredSeriesDomain::Frequency
+        ) | (
+            crate::SamplingPolicy::LoadFactors(_),
+            AuthoredSeriesDomain::LoadFactor
+        ) | (
+            crate::SamplingPolicy::StudyParameterValues(_),
+            AuthoredSeriesDomain::StudyParameter { .. }
+        ) | (
+            crate::SamplingPolicy::ModeIndices(_),
+            AuthoredSeriesDomain::Mode
+        )
+    );
+    matches
+        .then_some(())
+        .ok_or(AuthoredOutputError::SamplingDomainMismatch)
 }
 
 fn output_dimension(value: AuthoredOutputValue) -> PhysicalDimension {
@@ -486,4 +514,22 @@ pub enum AuthoredOutputError {
     NonMeasurableRegion,
     #[error("output region target is invalid")]
     InvalidRegion,
+    #[error("spatial selection requires a field source")]
+    SpatialSelectionRequiresField,
+    #[error("interpolation requires a field source")]
+    InterpolationRequiresField,
+    #[error("interpolation requires one or more finite physical positions")]
+    InvalidInterpolationPoints,
+    #[error("a history cannot be sampled into a nested history")]
+    NestedHistory,
+    #[error("sampling coordinates do not match their independent domain")]
+    SamplingDomainMismatch,
+    #[error("series reduction requires a history source")]
+    SeriesReductionRequiresHistory,
+    #[error("series reduction domain does not match its history")]
+    SeriesReductionDomainMismatch,
+    #[error("series reduction requires numeric history samples")]
+    SeriesReductionRequiresNumericHistory,
+    #[error("series extrema require scalar history samples")]
+    SeriesExtremumRequiresScalar,
 }
