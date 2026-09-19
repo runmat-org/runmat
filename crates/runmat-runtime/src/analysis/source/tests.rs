@@ -138,7 +138,7 @@ mesh volume on geometry.part {
 }
 material steel {
     mass_density = 7850 kg/m^3
-    mechanical.linear_elastic {
+    elastic {
         youngs_modulus = 200 GPa
         poisson_ratio = 0.3
     }
@@ -196,7 +196,7 @@ study static {
             runmat_geometry_core::ResolvedGeometryRegion {
                 role: runmat_geometry_core::GeometryRegionRole::Solid,
                 entity_ids: vec![runmat_geometry_core::PersistentEntityId {
-                    kind: runmat_geometry_core::PersistentEntityKind::Region,
+                    kind: runmat_geometry_core::PersistentEntityKind::Solid,
                     source_topology_id: "body".into(),
                     assembly_path: vec!["root".into()],
                 }],
@@ -370,21 +370,36 @@ study static {
     mesh.geometry.persistent_mapping_version = geometry.revision.persistent_mapping_version;
     mesh.topology.volume_elements[0].region_id = resolved_regions["body"].entity_ids[0].clone();
     mesh.topology.regions[0].region_id = resolved_regions["body"].entity_ids[0].clone();
+    mesh.topology.volume_elements[0].region_id.kind =
+        runmat_geometry_core::PersistentEntityKind::Region;
+    mesh.topology.regions[0].region_id.kind = runmat_geometry_core::PersistentEntityKind::Region;
+    mesh.topology.volume_elements[0].provenance = vec![
+        mesh.topology.volume_elements[0].region_id.clone(),
+        resolved_regions["body"].entity_ids[0].clone(),
+    ];
+    mesh.topology.volume_elements[0].provenance.sort();
     mesh.topology.boundary_edges[0].provenance = resolved_regions["rail"].entity_ids.clone();
     mesh.topology.boundary_faces[0].provenance = resolved_regions["support"].entity_ids.clone();
     mesh.canonical_digest = runmat_meshing_core::StableDigest::ZERO;
     mesh.seal_canonical_digest().unwrap();
 
-    let compiled = runmat_analysis_fea::study::compile_analysis_study(
-        runmat_analysis_fea::study::AnalysisStudyCompilationInput {
+    let planning_policy = runmat_analysis_fea::study::StructuralStudyPlanningPolicy {
+        backend: runmat_analysis_fea::ComputeBackend::Cpu,
+        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+        numerics: runmat_analysis_fea::study::StructuralNumericalPlanningPolicy::production(),
+    };
+    let product = runmat_analysis_fea::study::build_structural_study_product(
+        runmat_analysis_fea::study::StructuralStudyProductInput {
             study: &realized,
             geometry: &geometry,
             regions: &resolved_regions,
             materials: &materials,
             mesh: &mesh,
+            planning: planning_policy,
         },
     )
     .unwrap();
+    let compiled = product.compiled;
     compiled.validate_against(&mesh).unwrap();
     assert_eq!(compiled.model.geometry_id, "part");
     assert_eq!(
@@ -394,13 +409,7 @@ study static {
     assert_eq!(compiled.properties.solid_materials().len(), 1);
     assert_eq!(compiled.properties.beam_materials().len(), 1);
     assert_ne!(compiled.scientific_digest().unwrap().bytes(), &[0; 32]);
-    let planning_policy = runmat_analysis_fea::study::StructuralStudyPlanningPolicy {
-        backend: runmat_analysis_fea::ComputeBackend::Cpu,
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
-        numerics: runmat_analysis_fea::study::StructuralNumericalPlanningPolicy::production(),
-    };
-    let workloads =
-        runmat_analysis_fea::study::plan_structural_study(&compiled, planning_policy).unwrap();
+    let workloads = product.workloads;
     assert_eq!(
         workloads.step_ids().unwrap(),
         [compiled.model.sequence.steps[0].step_id.clone()]

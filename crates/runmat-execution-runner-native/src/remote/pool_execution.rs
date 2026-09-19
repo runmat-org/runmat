@@ -318,11 +318,13 @@ async fn execute_with_allocated_workers(
         request.recipe.execution_mode == crate::GEOMETRY_MESHING_ROOT_EXECUTION_MODE;
     let exact_structural_study =
         request.recipe.execution_mode == EXACT_STRUCTURAL_STUDY_ROOT_EXECUTION_MODE;
+    let structural_study =
+        request.recipe.execution_mode == crate::STRUCTURAL_STUDY_ROOT_EXECUTION_MODE;
     let exact_structural_sweep =
         request.recipe.execution_mode == EXACT_STRUCTURAL_SWEEP_ROOT_EXECUTION_MODE;
     let pool_for_execution = Arc::clone(&pool);
     let resources_for_execution = resources.clone();
-    let mut recovery_publisher = exact_structural_study
+    let mut recovery_publisher = (exact_structural_study || structural_study)
         .then(|| {
             super::recovery::RemoteRecoveryPublisher::new(
                 control,
@@ -348,6 +350,17 @@ async fn execute_with_allocated_workers(
             request,
             run_id,
             resources_for_execution,
+        )) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + '_>>
+    } else if structural_study {
+        Box::pin(super::structural_study::execute(
+            pool_for_execution,
+            request,
+            run_id,
+            resources_for_execution,
+            recovered.as_ref(),
+            recovery_publisher
+                .as_mut()
+                .ok_or_else(|| protocol("structural study recovery publisher is absent"))?,
         )) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + '_>>
     } else if exact_structural_study {
         Box::pin(super::exact_structural_study::execute(

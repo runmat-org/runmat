@@ -23,7 +23,7 @@ use crate::StructuralTransientRecoveryPublisher;
 use crate::{NativeExecutionError, NativeExecutionResult, TopologyRegionResolution};
 
 #[derive(Clone, Debug)]
-pub(super) enum RemoteExactStructuralStudyComposition {
+pub(crate) enum RemoteExactStructuralStudyComposition {
     Completed(ProgramExecutionResponse),
     Failed(String),
     Cancelled,

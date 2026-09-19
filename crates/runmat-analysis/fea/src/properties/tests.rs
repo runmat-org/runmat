@@ -71,15 +71,25 @@ fn compiled_map_rejects_gaps_overlaps_wrong_roles_and_stale_scopes() {
 
 #[test]
 fn compiled_map_uses_bound_entity_sets_instead_of_logical_region_names() {
-    let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+    let mut mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+    let selected = runmat_geometry_core::PersistentEntityId {
+        kind: runmat_geometry_core::PersistentEntityKind::Solid,
+        source_topology_id: "selected-solid".into(),
+        assembly_path: vec!["root".into()],
+    };
+    mesh.topology.volume_elements[0]
+        .provenance
+        .push(selected.clone());
+    mesh.topology.volume_elements[0].provenance.sort();
+    mesh.canonical_digest = runmat_meshing_core::StableDigest::ZERO;
+    mesh.seal_canonical_digest().unwrap();
     let mut model = matching_model(&mesh);
-    let selected = mesh.topology.volume_elements[0].region_id.clone();
     let mut target = runmat_analysis_core::PropertyRegionTarget::solid("logical-body");
     target
         .bind_resolved_entities(vec![
             selected,
             runmat_geometry_core::PersistentEntityId {
-                kind: runmat_geometry_core::PersistentEntityKind::Region,
+                kind: runmat_geometry_core::PersistentEntityKind::Solid,
                 source_topology_id: "another-solid".into(),
                 assembly_path: vec!["root".into()],
             },

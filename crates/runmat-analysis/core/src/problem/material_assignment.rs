@@ -110,7 +110,8 @@ impl PropertyRegionTarget {
         let expected = match self {
             Self::Beam(_) => PersistentEntityKind::Edge,
             Self::Shell(_) => PersistentEntityKind::Face,
-            Self::Solid(_) | Self::Cell(_) => PersistentEntityKind::Region,
+            Self::Solid(_) => PersistentEntityKind::Solid,
+            Self::Cell(_) => PersistentEntityKind::Region,
         };
         let PropertyRegionScope::Region(selection) = self.scope_mut() else {
             return Ok(());
@@ -122,7 +123,8 @@ impl PropertyRegionTarget {
         let expected = match self {
             Self::Beam(_) => PersistentEntityKind::Edge,
             Self::Shell(_) => PersistentEntityKind::Face,
-            Self::Solid(_) | Self::Cell(_) => PersistentEntityKind::Region,
+            Self::Solid(_) => PersistentEntityKind::Solid,
+            Self::Cell(_) => PersistentEntityKind::Region,
         };
         match self.scope() {
             PropertyRegionScope::All => Ok(()),

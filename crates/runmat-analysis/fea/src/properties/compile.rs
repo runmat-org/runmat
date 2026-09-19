@@ -389,6 +389,10 @@ fn solid_scope_matches(scope: &PropertyRegionScope, element: &SolverVolumeElemen
         PropertyRegionScope::All => true,
         PropertyRegionScope::Region(selection) => {
             selection.matches_persistent_entity(&element.region_id)
+                || element
+                    .provenance
+                    .iter()
+                    .any(|entity| selection.matches_persistent_entity(entity))
         }
     }
 }

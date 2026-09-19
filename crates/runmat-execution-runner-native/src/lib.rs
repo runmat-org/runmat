@@ -42,6 +42,7 @@ mod remote;
 mod remote_exact_meshing_executor;
 mod runtime_meshing_provider;
 mod service;
+mod structural_study_root;
 pub mod supervisor;
 mod test_workload;
 mod worker;
@@ -178,5 +179,10 @@ pub use runtime_meshing_provider::{
     NativeMeshingSourceRequest,
 };
 pub use service::NativeExecutionService;
+pub use structural_study_root::{
+    decode_structural_study_root, prepare_structural_study_root, DecodedStructuralStudyRoot,
+    PreparedStructuralStudyRoot, RequiredStructuralStudyProgram, StructuralStudyRootPreparation,
+    STRUCTURAL_STUDY_ROOT_EXECUTION_MODE, STRUCTURAL_STUDY_ROOT_TARGET_PROFILE,
+};
 pub use test_workload::{execute_host_program_request, execute_host_program_request_with_project};
 pub use worker::run_worker_stdio;

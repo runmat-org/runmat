@@ -4,6 +4,7 @@ use runmat_analysis_core::{
     AccuracyTolerance, AnalysisProcedure, ErrorContributionKind, FormulationRequirement,
     PhysicsFamily, ProcedureStep, SolutionSpace,
 };
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::execution::{
@@ -25,7 +26,8 @@ mod tests;
 /// Scientific domains and accuracy tolerances remain in the compiled study. These values govern
 /// algorithms and task partitioning only. Scientific domains, accuracy tolerances, damping, and
 /// modal-mass controls remain in the compiled study.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct StructuralNumericalPlanningPolicy {
     pub maximum_transient_intervals_per_block: u64,
     pub maximum_frequency_intervals_per_task: usize,
@@ -49,7 +51,7 @@ impl StructuralNumericalPlanningPolicy {
         }
     }
 
-    fn validate(self) -> Result<(), StructuralStudyPlanningError> {
+    pub fn validate(self) -> Result<(), StructuralStudyPlanningError> {
         if self.maximum_transient_intervals_per_block == 0
             || self.maximum_frequency_intervals_per_task == 0
             || self.maximum_modal_iterations == 0
@@ -72,7 +74,8 @@ const fn open_unit_interval(value: f64) -> bool {
 ///
 /// The runtime resolves `auto`, project policy, CLI policy, and available capabilities before this
 /// boundary. No worker or scientific compiler performs a hardware fallback.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct StructuralStudyPlanningPolicy {
     pub backend: ComputeBackend,
     pub formulation_requirement: FormulationRequirement,

@@ -25,6 +25,7 @@ mod recovery;
 mod relay_channel;
 mod result_objects;
 mod route;
+pub(crate) mod structural_study;
 pub(crate) mod value_transfer;
 mod worker_bundle;
 mod worker_entry;

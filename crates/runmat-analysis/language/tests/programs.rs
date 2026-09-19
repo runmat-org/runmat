@@ -226,6 +226,32 @@ material steel {
 }
 
 #[test]
+fn material_lowering_rejects_unknown_members_instead_of_dropping_them() {
+    let source = r#"
+material steel {
+    mass_density = 7850 kg/m^3
+    mechanical.linear_elastic {
+        youngs_modulus = 200 GPa
+        poisson_ratio = 0.3
+    }
+}
+"#;
+    let host = TestHost::default();
+    let program = FeaCompiler::new(&host).check(CheckRequest {
+        modules: ModuleGraphRequest {
+            source_root: LogicalSourcePath::new("project").unwrap(),
+            root: source_module("project/main.fea", source, 1),
+        },
+    });
+    assert!(!program.is_valid());
+    assert!(program
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "fea.semantic.material_member"));
+    assert!(program.materials.is_empty());
+}
+
+#[test]
 fn mesh_request_binds_geometry_and_lowers_units_into_canonical_settings() {
     let source = r#"
 geometry bracket_geometry {

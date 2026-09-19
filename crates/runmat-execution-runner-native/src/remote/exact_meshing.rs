@@ -8,7 +8,7 @@ use runmat_execution::value::{ValuePayload, ValueRefKind};
 use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_artifact::{ProgramExecutionRequest, ProgramExecutionResponse};
 use runmat_execution_transport_native::control::ResourceRequest as AllocationResources;
-use runmat_geometry_core::PersistentEntityId;
+use runmat_geometry_core::{GeometryDocument, PersistentEntityId};
 use runmat_meshing_core::CacheAdmissionDecision;
 use runmat_meshing_execution::{
     execute_exact_meshing_dag_async, import_exact_geometry_input, prepare_exact_geometry_result,
@@ -27,6 +27,7 @@ use crate::{
 /// Exact meshing output retained in driver-owned form for composition into a larger root.
 #[derive(Clone)]
 pub(super) struct CompletedRemoteExactMeshing {
+    pub(super) document: GeometryDocument,
     pub(super) regions: MeshedGeometryRegions,
     pub(super) result: ExactMeshingDagRunResult,
 }
@@ -51,7 +52,12 @@ pub(crate) async fn execute(
 ) -> NativeExecutionResult<RemotePoolExecutionOutcome> {
     match execute_for_composition(Arc::clone(&pool), &request, &run_id, &resources).await? {
         RemoteExactMeshingComposition::Completed(completed) => {
-            let CompletedRemoteExactMeshing { regions, result } = *completed;
+            let CompletedRemoteExactMeshing {
+                document,
+                regions,
+                result,
+            } = *completed;
+            drop(document);
             drop(regions);
             package_completed(pool, &request, result)
         }
@@ -206,6 +212,7 @@ pub(super) async fn execute_geometry_for_composition(
     };
     Ok(RemoteExactMeshingComposition::Completed(Box::new(
         CompletedRemoteExactMeshing {
+            document: output.document,
             regions: MeshedGeometryRegions::Materialized(output.regions),
             result,
         },
@@ -352,6 +359,7 @@ pub(super) async fn execute_for_composition(
     let region_aliases = source_aliases(&source_edge_ids, &source_face_ids, &source_region_ids)?;
     Ok(RemoteExactMeshingComposition::Completed(Box::new(
         CompletedRemoteExactMeshing {
+            document: admission.document,
             regions: MeshedGeometryRegions::ImporterAliases(region_aliases),
             result,
         },

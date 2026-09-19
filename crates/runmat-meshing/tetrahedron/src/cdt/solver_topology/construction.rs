@@ -181,6 +181,12 @@ fn build_elements(
     options: DelaunaySolverTopologyOptions,
     cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<Vec<SolverVolumeElement>, DelaunaySolverTopologyError> {
+    let solid_by_region = input
+        .exact_topology
+        .regions
+        .iter()
+        .map(|region| (region.id.clone(), region.solid_id.clone()))
+        .collect::<BTreeMap<_, _>>();
     let mut result = Vec::with_capacity(input.volume_mesh.topology.tetrahedra.len());
     for (index, tetrahedron) in input.volume_mesh.topology.tetrahedra.iter().enumerate() {
         checkpoint(index as u64, options, cancellation)?;
@@ -188,6 +194,13 @@ fn build_elements(
             .region_id
             .clone()
             .ok_or_else(|| invalid_mesh("volume tetrahedron has no assigned region"))?;
+        let solid = solid_by_region
+            .get(&region)
+            .cloned()
+            .ok_or_else(|| invalid_mesh("volume region has no exact solid lineage"))?;
+        let mut provenance = vec![region.clone(), solid];
+        provenance.sort();
+        provenance.dedup();
         let (vertices, _) = solver_vertices(input, tetrahedron.vertex_indices)?;
         result.push(SolverVolumeElement {
             element_id: index as u64 + 1,
@@ -197,7 +210,7 @@ fn build_elements(
             order: ElementOrder::Tet4,
             node_ids: vertices.iter().map(|vertex| *vertex as u64 + 1).collect(),
             region_id: region.clone(),
-            provenance: vec![region],
+            provenance,
         });
     }
     Ok(result)

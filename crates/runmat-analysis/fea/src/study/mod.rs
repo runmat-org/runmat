@@ -2,6 +2,7 @@
 
 mod compilation;
 mod planning;
+mod product;
 
 pub use compilation::{
     compile_analysis_study, AnalysisStudyCompilationError, AnalysisStudyCompilationInput,
@@ -10,4 +11,8 @@ pub use compilation::{
 pub use planning::{
     plan_structural_study, StructuralNumericalPlanningPolicy, StructuralStudyPlanningError,
     StructuralStudyPlanningPolicy,
+};
+pub use product::{
+    build_structural_study_product, StructuralStudyProduct, StructuralStudyProductError,
+    StructuralStudyProductInput,
 };

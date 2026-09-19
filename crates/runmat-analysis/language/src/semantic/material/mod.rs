@@ -11,7 +11,7 @@ use runmat_analysis_core::{
     MaterialMechanicalModel, MaterialModel, MaterialPlasticModel, MaterialThermalModel,
     MechanicalDampingModel, RayleighMassCoefficient, RayleighStiffnessCoefficient,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 pub fn lower_materials(
     bound: &BoundFeaProgram,
@@ -49,6 +49,7 @@ fn lower_material(
     declaration: &CheckedFeaDeclaration,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> MaterialModel {
+    validate_authored_shape(declaration, diagnostics);
     let name = values::string_assignment(&declaration.statements, "name")
         .unwrap_or_else(|| declaration.key.name.clone());
     let mass_density_kg_per_m3 = values::optional_quantity(
@@ -224,6 +225,142 @@ fn lower_material(
         electrical,
         plastic,
     }
+}
+
+fn validate_authored_shape(
+    declaration: &CheckedFeaDeclaration,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) {
+    const ASSIGNMENTS: &[&str] = &["name", "mass_density"];
+    const BLOCKS: &[(&str, &[&str])] = &[
+        ("elastic", &["youngs_modulus", "poisson_ratio"]),
+        (
+            "rayleigh_damping",
+            &["mass_coefficient", "stiffness_coefficient"],
+        ),
+        (
+            "thermal",
+            &[
+                "reference_temperature",
+                "modulus_temperature_coefficient",
+                "conductivity",
+                "specific_heat",
+                "expansion_coefficient",
+            ],
+        ),
+        ("acoustic", &["speed_of_sound", "damping_ratio"]),
+        (
+            "electrical",
+            &[
+                "reference_temperature",
+                "conductivity",
+                "resistive_heating_coefficient",
+                "relative_permittivity",
+                "relative_permeability",
+            ],
+        ),
+        (
+            "plastic",
+            &[
+                "yield_strain",
+                "hardening_modulus_ratio",
+                "saturation_exponent",
+            ],
+        ),
+    ];
+    let mut seen = BTreeSet::new();
+    for statement in &declaration.statements {
+        let member = match &statement.kind {
+            crate::CheckedFeaStatementKind::Assignment { target, .. }
+                if target.len() == 1 && ASSIGNMENTS.contains(&target[0].as_str()) =>
+            {
+                Some(target[0].as_str())
+            }
+            crate::CheckedFeaStatementKind::Block {
+                header, statements, ..
+            } => BLOCKS
+                .iter()
+                .find(|(name, _)| *name == header.trim())
+                .map(|(name, members)| {
+                    validate_capability_shape(declaration, name, members, statements, diagnostics);
+                    *name
+                }),
+            _ => None,
+        };
+        let Some(member) = member else {
+            material_shape_error(
+                declaration,
+                statement.span,
+                "authored material contains an unknown or misplaced member",
+                diagnostics,
+            );
+            continue;
+        };
+        if !seen.insert(member) {
+            material_shape_error(
+                declaration,
+                statement.span,
+                format!("authored material member `{member}` is declared more than once"),
+                diagnostics,
+            );
+        }
+    }
+}
+
+fn validate_capability_shape(
+    declaration: &CheckedFeaDeclaration,
+    capability: &str,
+    allowed: &[&str],
+    statements: &[crate::CheckedFeaStatement],
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) {
+    let mut seen = BTreeSet::new();
+    for statement in statements {
+        let member = match &statement.kind {
+            crate::CheckedFeaStatementKind::Assignment { target, .. }
+                if target.len() == 1 && allowed.contains(&target[0].as_str()) =>
+            {
+                Some(target[0].as_str())
+            }
+            _ => None,
+        };
+        let Some(member) = member else {
+            material_shape_error(
+                declaration,
+                statement.span,
+                format!("material capability `{capability}` contains an unknown member"),
+                diagnostics,
+            );
+            continue;
+        };
+        if !seen.insert(member) {
+            material_shape_error(
+                declaration,
+                statement.span,
+                format!(
+                    "material capability `{capability}` member `{member}` is declared more than once"
+                ),
+                diagnostics,
+            );
+        }
+    }
+}
+
+fn material_shape_error(
+    declaration: &CheckedFeaDeclaration,
+    span: runmat_types::Span,
+    message: impl Into<String>,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) {
+    diagnostics.push(FeaDiagnostic::error(
+        "fea.semantic.material_member",
+        message,
+        FeaDiagnosticPhase::Lowering,
+        Some(FeaDiagnosticLocation {
+            path: declaration.module.clone(),
+            span,
+        }),
+    ));
 }
 
 fn inverse_temperature() -> PhysicalDimension {
