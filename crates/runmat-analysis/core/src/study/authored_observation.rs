@@ -3,8 +3,8 @@ use std::collections::BTreeMap;
 use runmat_geometry_core::GeometryRegionRole;
 
 use crate::{
-    AuthoredExtremaTiePolicy, AuthoredFieldDomain, AuthoredFieldProjection, AuthoredOutput,
-    AuthoredOutputExpression, AuthoredPrincipalSelection, AuthoredRegionSource,
+    AnalysisSequence, AuthoredExtremaTiePolicy, AuthoredFieldDomain, AuthoredFieldProjection,
+    AuthoredOutput, AuthoredOutputExpression, AuthoredPrincipalSelection, AuthoredRegionSource,
     AuthoredSeriesReduction, AuthoredSpatialReduction, AuthoredVectorComponent,
     ComplexRepresentation, CompressionPolicy, CoordinateFrame, EntityDimension, ExcitationTarget,
     ExpectedTopology, ExtremaTiePolicy, FieldLocation, ObservationComponent, ObservationCostPolicy,
@@ -68,6 +68,43 @@ pub fn lower_authored_observations(
         lowered.insert(output.output_id.clone(), draft);
     }
     Ok(requests)
+}
+
+/// Attach checked study outputs to the exact procedure steps that evaluate them.
+///
+/// Authored outputs remain the public declaration and identity authority. Procedure observations
+/// are their executable form; keeping this bridge in analysis core prevents compilers and runtimes
+/// from independently interpreting the output graph.
+pub fn attach_authored_outputs(
+    outputs: &[AuthoredOutput],
+    sequence: &mut AnalysisSequence,
+) -> Result<(), AuthoredObservationError> {
+    crate::validate_authored_outputs(outputs, &sequence.steps)
+        .map_err(|error| AuthoredObservationError::InvalidOutput(error.to_string()))?;
+    let lowered = lower_authored_observations(outputs, &sequence.steps)?;
+    let mut existing_ids = sequence
+        .steps
+        .iter()
+        .flat_map(|step| step.observations.iter())
+        .map(|request| request.observation_id().0.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+    for output in &lowered {
+        let observation_id = output.request.observation_id().0.as_str();
+        if !existing_ids.insert(observation_id.to_string()) {
+            return Err(AuthoredObservationError::DuplicateObservation(
+                observation_id.to_string(),
+            ));
+        }
+        let step = sequence
+            .steps
+            .iter_mut()
+            .find(|step| step.step_id == output.step_id)
+            .ok_or_else(|| AuthoredObservationError::UnknownStep(output.step_id.0.clone()))?;
+        step.observations.push(output.request.clone());
+    }
+    crate::validate_analysis_sequence(sequence)
+        .map(|_| ())
+        .map_err(|error| AuthoredObservationError::InvalidRequest(error.to_string()))
 }
 
 #[derive(Clone)]
@@ -370,14 +407,71 @@ fn region_target(source: &AuthoredRegionSource) -> Result<RegionTarget, Authored
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum AuthoredObservationError {
+    #[error("output declaration is invalid: {0}")]
+    InvalidOutput(String),
     #[error("output references unknown analysis step `{0}`")]
     UnknownStep(String),
     #[error("output references unknown or forward output `{0}`")]
     UnknownOutput(String),
+    #[error("output observation `{0}` conflicts with an existing procedure observation")]
+    DuplicateObservation(String),
     #[error("output projection is invalid: {0}")]
     InvalidProjection(String),
     #[error("output request is invalid: {0}")]
     InvalidRequest(String),
     #[error("output region model inputs must be realized before observation lowering")]
     UnrealizedRegionInput,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn displacement_output() -> AuthoredOutput {
+        AuthoredOutput {
+            output_id: "displacement".into(),
+            expression: AuthoredOutputExpression::AnalysisField {
+                step_id: "static".into(),
+                quantity: ObservationQuantity::Displacement,
+                location: FieldLocation::Node,
+            },
+            policy: crate::AuthoredOutputPolicy::default(),
+        }
+    }
+
+    #[test]
+    fn authored_outputs_attach_to_their_exact_procedure_step() {
+        let mut sequence = AnalysisSequence::from_steps(
+            "structural",
+            vec![ProcedureStep::structural_static("static")],
+        );
+
+        attach_authored_outputs(&[displacement_output()], &mut sequence).unwrap();
+
+        assert_eq!(sequence.steps[0].observations.len(), 1);
+        assert_eq!(
+            sequence.steps[0].observations[0].observation_id().0,
+            "displacement"
+        );
+    }
+
+    #[test]
+    fn authored_outputs_cannot_replace_an_existing_observation() {
+        let output = displacement_output();
+        let mut sequence = AnalysisSequence::from_steps(
+            "structural",
+            vec![ProcedureStep::structural_static("static")],
+        );
+        sequence.steps[0].observations = vec![
+            lower_authored_observations(std::slice::from_ref(&output), &sequence.steps)
+                .unwrap()
+                .remove(0)
+                .request,
+        ];
+
+        assert!(matches!(
+            attach_authored_outputs(&[output], &mut sequence),
+            Err(AuthoredObservationError::DuplicateObservation(id)) if id == "displacement"
+        ));
+    }
 }

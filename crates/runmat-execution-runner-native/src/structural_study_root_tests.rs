@@ -442,6 +442,23 @@ async fn typed_sweep_root_executes_geometry_mesh_compilation_and_solve_over_quic
                     .expect("typed study result omitted its compiled scientific contract");
                 compiled.validate_against(&study.mesh.artifact).unwrap();
                 assert_eq!(compiled.study_id, "static");
+                assert_eq!(
+                    compiled.model.sequence.steps[0].observations[0]
+                        .observation_id()
+                        .0,
+                    "displacement"
+                );
+                let crate::ExactStructuralStudyAnalysisResult::LinearSequence { sequence, .. } =
+                    &study.analysis
+                else {
+                    panic!("typed static study did not return a linear sequence");
+                };
+                assert!(sequence.steps[0]
+                    .result
+                    .run
+                    .observations
+                    .iter()
+                    .any(|observation| observation.observation_id.0 == "displacement"));
             }
             crate::remote::pool_execution::RemotePoolExecutionOutcome::Cancelled => {
                 panic!("typed structural sweep was cancelled")

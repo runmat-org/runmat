@@ -537,7 +537,21 @@ fn semantic_state_rejects_unimplemented_projection_transitions() {
 
 #[test]
 fn structural_linear_workload_round_trips_without_a_mesh_path() {
-    let model = crate::fixtures::fixture_model(crate::fixtures::FixtureId::CantileverLinearStatic);
+    let mut model =
+        crate::fixtures::fixture_model(crate::fixtures::FixtureId::CantileverLinearStatic);
+    runmat_analysis_core::attach_authored_outputs(
+        &[runmat_analysis_core::AuthoredOutput {
+            output_id: "displacement".into(),
+            expression: runmat_analysis_core::AuthoredOutputExpression::AnalysisField {
+                step_id: model.sequence.steps[0].step_id.0.clone(),
+                quantity: runmat_analysis_core::ObservationQuantity::Displacement,
+                location: runmat_analysis_core::FieldLocation::Node,
+            },
+            policy: runmat_analysis_core::AuthoredOutputPolicy::default(),
+        }],
+        &mut model.sequence,
+    )
+    .unwrap();
     let step_id = model.sequence.steps[0].step_id.clone();
     let workload = StructuralLinearWorkload {
         schema_version: 1,
@@ -554,6 +568,10 @@ fn structural_linear_workload_round_trips_without_a_mesh_path() {
     let bytes = workload.canonical_bytes().unwrap();
     let decoded = StructuralLinearWorkload::from_canonical_bytes(&bytes).unwrap();
     assert_eq!(decoded, workload);
+    assert_eq!(
+        decoded.solver_model().unwrap().sequence.steps[0].observations,
+        decoded.model.sequence.steps[0].observations
+    );
     assert!(!String::from_utf8_lossy(&bytes).contains("artifact_path"));
 }
 

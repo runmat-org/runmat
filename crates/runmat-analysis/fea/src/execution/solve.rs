@@ -135,9 +135,9 @@ impl StructuralLinearWorkload {
         self.validate()?;
         let mut step = self.procedure_step()?.clone();
         step.state_inputs.clear();
-        // Portable solver work produces numerical state only. Authored observations are retained
-        // in the workload identity and evaluated by the subsequent observation task.
-        step.observations.clear();
+        // Observations are part of the exact portable workload and are evaluated from this solve's
+        // admitted field state. Keeping them on the single-step projection prevents publication
+        // from silently losing authored outputs at a placement boundary.
         step.restart = RestartPolicy::Fresh;
         let mut model = self.model.clone();
         model.sequence = AnalysisSequence::from_steps(

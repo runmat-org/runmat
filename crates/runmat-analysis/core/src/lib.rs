@@ -52,11 +52,11 @@ pub use execution_policy::{
     ParallelismLimit, PartitionBalance, PlacementPreference, ResiliencePolicy,
 };
 pub use study::{
-    authored_output_types, geometry_parameter_input_type, lower_authored_observations,
-    validate_authored_outputs, AuthoredCaseOutputRef, AuthoredExtremaTiePolicy,
-    AuthoredFieldDomain, AuthoredFieldProjection, AuthoredGeometryArgument,
-    AuthoredGeometryArgumentValue, AuthoredGeometryInstance, AuthoredMeshRef,
-    AuthoredModelArgument, AuthoredModelArgumentValue, AuthoredModelInstance,
+    attach_authored_outputs, authored_output_types, geometry_parameter_input_type,
+    lower_authored_observations, validate_authored_outputs, AuthoredCaseOutputRef,
+    AuthoredExtremaTiePolicy, AuthoredFieldDomain, AuthoredFieldProjection,
+    AuthoredGeometryArgument, AuthoredGeometryArgumentValue, AuthoredGeometryInstance,
+    AuthoredMeshRef, AuthoredModelArgument, AuthoredModelArgumentValue, AuthoredModelInstance,
     AuthoredObservationError, AuthoredOutput, AuthoredOutputError, AuthoredOutputExpression,
     AuthoredOutputPolicy, AuthoredOutputType, AuthoredOutputValue, AuthoredPrincipalSelection,
     AuthoredSeriesDomain, AuthoredSeriesReduction, AuthoredSpatialReduction, AuthoredStudy,
