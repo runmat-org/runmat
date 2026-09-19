@@ -55,7 +55,8 @@ async fn execute_study(
                 &authority,
                 &execution.compute,
                 config,
-            )?;
+            )
+            .await?;
             let study_id = prepared.realized.study_id.clone();
             let completed =
                 runmat_execution_runner_native::execute_prepared_structural_study_locally(
@@ -115,7 +116,8 @@ async fn execute_sweep(
                     &authority,
                     &execution.compute,
                     config,
-                )?;
+                )
+                .await?;
                 prepared_cases.push((index, case.case_id, prepared));
             }
             let concurrent_cases = sweep_case_concurrency(&sweep, &prepared_cases);
@@ -180,7 +182,8 @@ async fn execute_sweep_remotely(
         "bundle-sizing-authority",
         &compute,
         config,
-    )?;
+    )
+    .await?;
     let saved_expectation = placeholder.root.result_expectation();
     let sweep_id = sweep.sweep.sweep_id.clone();
     let case_ids = cases
@@ -209,9 +212,11 @@ async fn execute_sweep_remotely(
         revision.clone(),
         bundle_size,
         |run_id| {
-            let prepared = prepare_sweep_root(source, &sweep, &cases, run_id, &compute, config)?;
+            let root = placeholder
+                .root
+                .rebind_artifact_access(super::preparation::artifact_access(run_id))?;
             let remote = super::remote::prepare_typed_remote_sweep_execution(
-                prepared.root,
+                root,
                 revision_for_root,
                 bundle_archive,
             )?;
@@ -255,7 +260,7 @@ struct PreparedTypedSweep {
     revision: runmat_execution::ProgramRevision,
 }
 
-fn prepare_sweep_root(
+async fn prepare_sweep_root(
     source: &CheckedFeaSource,
     sweep: &ResolvedAnalysisSweep,
     cases: &[runmat_analysis_core::AuthoredSweepCase],
@@ -281,7 +286,8 @@ fn prepare_sweep_root(
             authority,
             compute,
             config,
-        )?;
+        )
+        .await?;
         studies.push(prepared.root);
     }
     let revision = studies
@@ -367,7 +373,8 @@ async fn execute_study_remotely(
         "bundle-sizing-authority",
         &compute,
         config,
-    )?;
+    )
+    .await?;
     let saved_expectation = placeholder.root.result_expectation();
     let study_id = placeholder.realized.study_id.clone();
     let revision = placeholder.revision.clone();
@@ -392,9 +399,11 @@ async fn execute_study_remotely(
         revision.clone(),
         bundle_size,
         |run_id| {
-            let prepared = prepare_study(source, study, &inputs, run_id, &compute, config)?;
+            let root = placeholder
+                .root
+                .rebind_artifact_access(super::preparation::artifact_access(run_id))?;
             let remote = super::remote::prepare_typed_remote_execution(
-                prepared.root,
+                root,
                 revision_for_root,
                 bundle_archive,
             )?;

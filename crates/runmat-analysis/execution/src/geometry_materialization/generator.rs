@@ -98,6 +98,24 @@ pub struct PreparedGeometryGenerator {
     pub program: PreparedGeneratorProgram,
 }
 
+pub fn resolve_geometry_generator_request(
+    definition: &runmat_geometry_core::GeometryDefinition,
+    bindings: &std::collections::BTreeMap<String, GeometryAuthoringValue>,
+) -> AnalysisBridgeResult<ResolvedGeneratedGeometryRequest> {
+    let runmat_geometry_core::GeometryDefinitionSource::Generated(generated) = &definition.source
+    else {
+        return Err(AnalysisBridgeError::Invalid(
+            "geometry generator resolution requires a generated definition".into(),
+        ));
+    };
+    runmat_geometry_ops::resolve_generated_geometry_request(
+        generated,
+        &definition.parameters,
+        bindings,
+    )
+    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))
+}
+
 pub fn admit_named_geometry_generator(
     request: ResolvedGeneratedGeometryRequest,
     program_revision: ProgramRevision,
@@ -203,8 +221,8 @@ fn validate_geometry_output(output: &ValueFact) -> AnalysisBridgeResult<()> {
         .and_then(|name| name.display_name())
         .as_deref()
         != Some(GENERATED_GEOMETRY_RUNTIME_CLASS)
-        || object.handle_semantics != Some(false)
-        || !matches!(output.shape, ShapeFact::Scalar)
+        || object.handle_semantics == Some(true)
+        || output.shape.element_count() != Some(1)
     {
         return Err(AnalysisBridgeError::Invalid(
             "geometry generator output must be one immutable geometry.Generated scalar".into(),

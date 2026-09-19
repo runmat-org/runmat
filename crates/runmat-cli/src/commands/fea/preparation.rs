@@ -1,10 +1,9 @@
-use std::path::Path;
-
-use anyhow::{bail, Context, Result};
+use super::source::CheckedFeaSource;
+use anyhow::{Context, Result};
 use runmat_analysis_core::{AuthoredStudyInputBinding, RealizedStudy};
 use runmat_analysis_execution::{
     prepare_geometry_materialization_program, prepare_geometry_materialization_request,
-    GeometryMaterializationPreparation, PreparedGeometrySource,
+    GeometryMaterializationPreparation,
 };
 use runmat_analysis_language::ResolvedAnalysisStudy;
 use runmat_config::runtime::RunMatRuntimeConfig;
@@ -15,9 +14,6 @@ use runmat_execution_runner_native::{
     resolve_native_meshing_request, GeometryMeshingRootPreparation, NativeMeshingPartitionPolicy,
     PreparedStructuralStudyRoot, StructuralStudyRootPreparation,
 };
-use runmat_geometry_core::GeometryDefinitionSource;
-
-use super::source::CheckedFeaSource;
 
 pub(super) struct PreparedTypedStudy {
     pub root: PreparedStructuralStudyRoot,
@@ -32,7 +28,7 @@ pub(super) struct FeaComputeAllocation {
     pub accelerators: Vec<runmat_execution::resource::AcceleratorRequest>,
 }
 
-pub(super) fn prepare_study(
+pub(super) async fn prepare_study(
     source: &CheckedFeaSource,
     resolved: ResolvedAnalysisStudy,
     inputs: &[AuthoredStudyInputBinding],
@@ -46,7 +42,16 @@ pub(super) fn prepare_study(
         .context("realize typed FEA study inputs")?;
     let revision = program_revision(source, config)?;
     let access = artifact_access(authority);
-    let geometry_source = prepare_geometry_source(source, &resolved, &access)?;
+    let geometry_source = super::geometry_source::prepare_geometry_source(
+        source,
+        &resolved.geometry,
+        &resolved.geometry_dependencies,
+        &realized.geometry.bindings,
+        &revision,
+        &access,
+        config,
+    )
+    .await?;
     let provider = native_geometry_provider_profile()
         .context("typed FEA geometry requires a RunMat build with the OCCT feature enabled")?;
     let geometry_request = prepare_geometry_materialization_request(
@@ -107,60 +112,6 @@ pub(super) fn prepare_study(
         realized,
         workers,
     })
-}
-
-fn prepare_geometry_source(
-    source: &CheckedFeaSource,
-    resolved: &ResolvedAnalysisStudy,
-    access: &ArtifactAccess,
-) -> Result<PreparedGeometrySource> {
-    match &resolved.geometry.source {
-        GeometryDefinitionSource::Constructed(_) => Ok(PreparedGeometrySource::constructed()),
-        GeometryDefinitionSource::Imported(imported) => {
-            let path = physical_source_path(&source.source_root, &imported.logical_path)?;
-            let bytes = std::fs::read(&path)
-                .with_context(|| format!("read imported geometry {}", path.display()))?;
-            if Digest::sha256(&bytes).bytes() != imported.content_digest.bytes() {
-                bail!(
-                    "imported geometry {} changed after typed source checking",
-                    path.display()
-                );
-            }
-            let name = path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .context("imported geometry file name is not valid UTF-8")?;
-            PreparedGeometrySource::imported(
-                name,
-                &bytes,
-                4 * 1024 * 1024,
-                access,
-            )
-            .map_err(anyhow::Error::new)
-        }
-        GeometryDefinitionSource::Derived(_) => bail!(
-            "derived geometry execution requires its exact source-geometry closure; this run surface does not yet compose that prerequisite"
-        ),
-        GeometryDefinitionSource::Generated(_) => bail!(
-            "generated geometry execution requires its frozen callable product; this run surface does not yet compose that prerequisite"
-        ),
-    }
-}
-
-fn physical_source_path(source_root: &Path, logical_path: &str) -> Result<std::path::PathBuf> {
-    let relative = logical_path
-        .strip_prefix("project/")
-        .context("geometry source is outside the checked project root")?;
-    if relative.is_empty()
-        || relative
-            .split('/')
-            .any(|part| part.is_empty() || part == "." || part == "..")
-    {
-        bail!("geometry source path is not normalized");
-    }
-    Ok(relative
-        .split('/')
-        .fold(source_root.to_path_buf(), |path, part| path.join(part)))
 }
 
 fn program_revision(

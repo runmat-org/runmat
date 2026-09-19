@@ -73,6 +73,30 @@ fn parameters_are_bound_once_and_feature_values_are_resolved() {
 }
 
 #[test]
+fn parameter_references_resolve_defaults_to_canonical_literal_values() {
+    let definitions = vec![GeometryParameterDefinition {
+        parameter_id: "width".into(),
+        parameter_type: GeometryParameterType::Length,
+        required: false,
+        default: Some(GeometryAuthoringValue::Scalar(
+            GeometryScalarExpression::Binary {
+                operator: GeometryScalarOperator::Multiply,
+                left: Box::new(scalar(2.0)),
+                right: Box::new(scalar(0.5)),
+            },
+        )),
+    }];
+    let parameters = resolve_geometry_parameters(&definitions, &BTreeMap::new()).unwrap();
+
+    assert_eq!(
+        parameters
+            .resolve_value(&GeometryAuthoringValue::Parameter("width".into()))
+            .unwrap(),
+        GeometryAuthoringValue::Scalar(scalar(1.0))
+    );
+}
+
+#[test]
 fn live_artifact_bound_releases_unreferenced_intermediate_results() {
     let parameters = resolve_geometry_parameters(&[], &BTreeMap::new()).unwrap();
     let graph = GeometryFeatureGraph {

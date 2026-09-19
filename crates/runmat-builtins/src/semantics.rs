@@ -180,7 +180,34 @@ pub fn builtin_semantics_for(function: &BuiltinFunction) -> BuiltinSemantics {
     builtin_semantics_for_name(function.name).unwrap_or_else(|| derive_semantics(function))
 }
 
+const GENERATED_GEOMETRY_BUILDERS: &[&str] = &[
+    "geometry.box",
+    "geometry.cylinder",
+    "geometry.sphere",
+    "geometry.transform",
+    "geometry.instance",
+    "geometry.extrude",
+    "geometry.revolve",
+    "geometry.hole",
+    "geometry.pocket",
+    "geometry.fillet",
+    "geometry.chamfer",
+    "geometry.union",
+    "geometry.intersect",
+    "geometry.subtract",
+    "geometry.finish",
+    "geometry.solid",
+    "geometry.faces",
+    "geometry.edges",
+    "geometry.facesIntroducedBy",
+    "geometry.edgesIntroducedBy",
+    "geometry.withRegion",
+];
+
 pub fn builtin_semantics_for_name(name: &str) -> Option<BuiltinSemantics> {
+    if GENERATED_GEOMETRY_BUILDERS.contains(&name) {
+        return Some(pure(BuiltinSemanticKind::General));
+    }
     Some(match name {
         "ones" | "zeros" => pure(BuiltinSemanticKind::ArrayConstructor),
         "empty" => pure(BuiltinSemanticKind::EmptyConstructor),
@@ -529,5 +556,24 @@ fn host_callback() -> BuiltinSemantics {
         purity: BuiltinPurity::Impure,
         semantic_kind: BuiltinSemanticKind::General,
         ..BuiltinSemantics::unknown()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generated_geometry_builders_are_pure_and_non_suspending() {
+        for name in GENERATED_GEOMETRY_BUILDERS {
+            let semantics = builtin_semantics_for_name(name).unwrap();
+            assert_eq!(semantics.purity, BuiltinPurity::Pure, "{name}");
+            assert_eq!(
+                semantics.async_behavior,
+                BuiltinAsyncBehavior::NeverSuspends,
+                "{name}"
+            );
+            assert_eq!(semantics.effects, BuiltinEffects::none(), "{name}");
+        }
     }
 }

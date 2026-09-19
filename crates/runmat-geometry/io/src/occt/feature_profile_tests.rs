@@ -9,6 +9,46 @@ use runmat_geometry_ops::{
 use super::feature::OcctExactFeatureProvider;
 use crate::{ExactCadImportOptions, GeometryImportContext, ImportedExactCad};
 
+fn assert_connected_wires(geometry: &ImportedExactCad) {
+    let coedges = geometry
+        .topology
+        .coedges
+        .iter()
+        .map(|coedge| (&coedge.id, coedge))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let edges = geometry
+        .topology
+        .edges
+        .iter()
+        .map(|edge| (&edge.id, edge))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    for wire in &geometry.topology.wires {
+        for index in 0..wire.coedge_ids.len() {
+            let current = coedges[&wire.coedge_ids[index]];
+            let next = coedges[&wire.coedge_ids[(index + 1) % wire.coedge_ids.len()]];
+            let current_edge = edges[&current.edge_id];
+            let next_edge = edges[&next.edge_id];
+            let current_end = match current.orientation {
+                runmat_geometry_core::TopologicalOrientation::Forward => {
+                    &current_edge.end_vertex_id
+                }
+                runmat_geometry_core::TopologicalOrientation::Reversed => {
+                    &current_edge.start_vertex_id
+                }
+            };
+            let next_start = match next.orientation {
+                runmat_geometry_core::TopologicalOrientation::Forward => &next_edge.start_vertex_id,
+                runmat_geometry_core::TopologicalOrientation::Reversed => &next_edge.end_vertex_id,
+            };
+            assert_eq!(
+                current_end, next_start,
+                "wire {:?} disconnect between coedges {:?} ({:?}) and {:?} ({:?})",
+                wire.id, current.id, current.orientation, next.id, next.orientation
+            );
+        }
+    }
+}
+
 const SHORT_EDGE_FACE: &[u8] = include_bytes!("../../tests/fixtures/short_edge_face.brep");
 
 #[test]
@@ -89,6 +129,7 @@ fn exact_removal_and_edge_treatment_features_are_qualified() {
     );
     assert_close(volume(&hole), 1.0 - std::f64::consts::PI * 0.01, 1.0e-9);
     assert_eq!(hole.topology.solids.len(), 1);
+    assert_connected_wires(&hole);
     hole.build_closure().unwrap();
     let outside_hole = provider.execute(
         "outside_hole",

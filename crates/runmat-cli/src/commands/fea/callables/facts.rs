@@ -66,7 +66,7 @@ pub(crate) async fn compile_function_facts(
         .collect()
 }
 
-fn expected_source_path(
+pub(super) fn expected_source_path(
     source_root: &Path,
     module_path: &LogicalSourcePath,
 ) -> Result<std::path::PathBuf> {

@@ -16,6 +16,9 @@ use crate::{
 pub struct ResolvedAnalysisStudy {
     pub study: AuthoredStudy,
     pub geometry: GeometryDefinition,
+    /// Transitive geometry sources in dependency-first order. The selected geometry is not
+    /// repeated. Imported, constructed, and generated roots have an empty closure.
+    pub geometry_dependencies: Vec<GeometryDefinition>,
     pub mesh: MeshDefinition,
     pub models: BTreeMap<AuthoredModelRef, AuthoredModel>,
     /// Candidate declarations available to material-valued study inputs and sweep cases.
@@ -100,6 +103,14 @@ impl CheckedFeaProgram {
                 mesh_id: mesh.mesh_id.clone(),
             });
         }
+        let mut geometry_dependencies = Vec::new();
+        let mut geometry_visiting = BTreeSet::new();
+        collect_geometry_dependencies(
+            geometry,
+            &self.geometries,
+            &mut geometry_visiting,
+            &mut geometry_dependencies,
+        )?;
 
         let available_models = self
             .models
@@ -144,6 +155,7 @@ impl CheckedFeaProgram {
         Ok(ResolvedAnalysisStudy {
             study: study.clone(),
             geometry: geometry.clone(),
+            geometry_dependencies,
             mesh: mesh.clone(),
             models,
             material_catalog,
@@ -178,6 +190,46 @@ impl CheckedFeaProgram {
             Ok(())
         }
     }
+}
+
+fn collect_geometry_dependencies(
+    geometry: &GeometryDefinition,
+    available: &BTreeMap<(LogicalSourcePath, FeaSymbolKey), GeometryDefinition>,
+    visiting: &mut BTreeSet<runmat_geometry_core::GeometryDefinitionRef>,
+    resolved: &mut Vec<GeometryDefinition>,
+) -> Result<(), AnalysisRootResolutionError> {
+    let runmat_geometry_core::GeometryDefinitionSource::Derived(derived) = &geometry.source else {
+        return Ok(());
+    };
+    if !visiting.insert(derived.source.clone()) {
+        return Err(AnalysisRootResolutionError::GeometryDependencyCycle {
+            module_path: derived.source.module_path.clone(),
+            geometry_id: derived.source.geometry_id.clone(),
+        });
+    }
+    let source = available
+        .values()
+        .find(|candidate| {
+            candidate.module_path == derived.source.module_path
+                && candidate.geometry_id == derived.source.geometry_id
+        })
+        .ok_or_else(|| AnalysisRootResolutionError::MissingGeometry {
+            module_path: derived.source.module_path.clone(),
+            geometry_id: derived.source.geometry_id.clone(),
+        })?;
+    collect_geometry_dependencies(source, available, visiting, resolved)?;
+    visiting.remove(&derived.source);
+    let source_reference = runmat_geometry_core::GeometryDefinitionRef {
+        module_path: source.module_path.clone(),
+        geometry_id: source.geometry_id.clone(),
+    };
+    if !resolved.iter().any(|candidate| {
+        candidate.module_path == source_reference.module_path
+            && candidate.geometry_id == source_reference.geometry_id
+    }) {
+        resolved.push(source.clone());
+    }
+    Ok(())
 }
 
 fn find_study<'a>(
@@ -258,6 +310,11 @@ pub enum AnalysisRootResolutionError {
     },
     #[error("geometry `{module_path}::{geometry_id}` is unavailable")]
     MissingGeometry {
+        module_path: String,
+        geometry_id: String,
+    },
+    #[error("geometry dependency cycle reaches `{module_path}::{geometry_id}`")]
+    GeometryDependencyCycle {
         module_path: String,
         geometry_id: String,
     },

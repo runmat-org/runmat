@@ -45,10 +45,12 @@ impl ResolvedGeometryParameters {
                     })
                     .collect::<Result<_, GeometryFeatureError>>()?,
             ),
-            GeometryAuthoringValue::Parameter(name) => self
-                .get(name)
-                .ok_or_else(|| GeometryFeatureError::MissingParameter(name.clone()))?
-                .clone(),
+            GeometryAuthoringValue::Parameter(name) => {
+                let bound = self
+                    .get(name)
+                    .ok_or_else(|| GeometryFeatureError::MissingParameter(name.clone()))?;
+                self.resolve_value(bound)?
+            }
             value => value.clone(),
         })
     }

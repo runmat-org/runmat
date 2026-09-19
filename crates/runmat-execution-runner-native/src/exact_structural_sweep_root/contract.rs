@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_analysis_fea::execution::{StudyIdentity, SweepDefinition, SweepIdentity};
 use runmat_canonical_codec::{decode_contract, encode_contract};
-use runmat_execution::value::{ValuePayload, ValueRefKind};
+use runmat_execution::value::{ValuePayload, ValueRef, ValueRefKind};
 use runmat_execution::{OutputContract, ProgramRevision};
 use runmat_execution_artifact::cache::CacheImport;
 use runmat_execution_artifact::{
@@ -176,9 +176,48 @@ impl PreparedStructuralSweepRoot {
         self.expectation.clone()
     }
 
+    pub fn rebind_artifact_access(
+        mut self,
+        artifact_access: ArtifactAccess,
+    ) -> NativeExecutionResult<Self> {
+        artifact_access.validate().map_err(protocol)?;
+        for argument in &mut self.request.arguments {
+            let ValuePayload::Object(reference) = argument else {
+                return Err(protocol("structural sweep inputs must be externalized"));
+            };
+            rebind_reference(reference, &artifact_access)?;
+        }
+        for object in &mut self.objects {
+            rebind_reference(&mut object.reference, &artifact_access)?;
+            object.validate().map_err(protocol)?;
+        }
+        self.expectation.artifact_access = artifact_access.clone();
+        for study in &mut self.expectation.studies {
+            study.artifact_access = artifact_access.clone();
+        }
+        self.expectation.validate()?;
+        self.request
+            .validate_for_portable_host()
+            .map_err(protocol)?;
+        Ok(self)
+    }
+
     pub fn into_request(self) -> ProgramExecutionRequest {
         self.request
     }
+}
+
+fn rebind_reference(
+    reference: &mut ValueRef,
+    access: &ArtifactAccess,
+) -> NativeExecutionResult<()> {
+    reference.id = access.value_id(reference.logical_digest);
+    reference.authorization_scope = access.authorization_scope.clone();
+    reference.encryption_context = access.encryption_context;
+    reference.resident_fence = None;
+    ValuePayload::Object(Box::new(reference.clone()))
+        .validate(runmat_execution::value::ValueLimits::default())
+        .map_err(protocol)
 }
 
 impl PreparedExactStructuralSweepRoot {

@@ -19,6 +19,7 @@ struct CompiledCallable {
     callable: BundleCallable,
     function: runmat_mir::analysis::FunctionAnalysis,
     parameters: Vec<SourceParameter>,
+    executable: runmat_execution::ExecutableUnitEnvelope,
 }
 
 #[derive(Clone, Debug)]
@@ -109,10 +110,57 @@ async fn compile_project_definitions(
                 },
                 function,
                 parameters,
+                executable,
             },
         );
     }
     Ok((revision, compiled))
+}
+
+pub(super) async fn compile_geometry_generator(
+    document_path: &std::path::Path,
+    source_root: &std::path::Path,
+    definition: &runmat_geometry_core::GeometryDefinition,
+    bindings: &std::collections::BTreeMap<String, runmat_geometry_core::GeometryAuthoringValue>,
+    frozen: &runmat_package::FrozenProject,
+    config: &RunMatRuntimeConfig,
+) -> Result<runmat_analysis_execution::PreparedGeometryGenerator> {
+    let runmat_geometry_core::GeometryDefinitionSource::Generated(generated) = &definition.source
+    else {
+        bail!("geometry generator compilation requires a generated geometry definition");
+    };
+    let module = runmat_analysis_language::LogicalSourcePath::new(generated.module_path.clone())?;
+    let symbol = runmat_analysis_language::SourceSymbol::new(generated.function.clone())?;
+    let expected_path = facts::expected_source_path(source_root, &module)?;
+    let symbols = runmat_package::source_symbols_from_frozen(frozen, document_path);
+    let project_definition =
+        facts::exact_definition(&symbols.definitions, &expected_path, &symbol)?;
+    let key = format!("{}::{symbol}", module.as_str());
+    let (revision, mut compiled) = compile_project_definitions(
+        vec![(
+            key.clone(),
+            project_definition.qualified_name.clone(),
+            project_definition.clone(),
+        )],
+        frozen,
+        config,
+    )
+    .await?;
+    let compiled = compiled
+        .remove(&key)
+        .context("frozen geometry generator was not compiled")?;
+    let request =
+        runmat_analysis_execution::resolve_geometry_generator_request(definition, bindings)?;
+    let admitted = runmat_analysis_execution::admit_named_geometry_generator(
+        request,
+        revision,
+        compiled.callable,
+        compiled.executable.manifest.identity.source_digest,
+        &compiled.function,
+        &std::collections::BTreeSet::new(),
+    )?;
+    runmat_analysis_execution::prepare_geometry_generator(admitted, compiled.executable)
+        .map_err(anyhow::Error::new)
 }
 
 fn entrypoint_name(qualified_function: &str) -> Result<&str> {
@@ -175,6 +223,23 @@ fn operation_pattern(fact: &ValueFact) -> OperationTypePattern {
         (ValueKindFact::Character | ValueKindFact::String, ShapeFact::Scalar) => {
             OperationTypePattern::StringScalar
         }
+        (ValueKindFact::Object(object), shape) if shape.element_count() == Some(1) => match object
+            .runtime_class
+            .as_ref()
+            .and_then(runmat_types::QualifiedName::display_name)
+            .as_deref()
+        {
+            Some(runmat_analysis_execution::GENERATED_GEOMETRY_RUNTIME_CLASS) => {
+                OperationTypePattern::Analysis(runmat_types::AnalysisValueType::Geometry)
+            }
+            Some("geometry.Feature") => {
+                OperationTypePattern::Analysis(runmat_types::AnalysisValueType::GeometryFeature)
+            }
+            Some("geometry.RegionOutput") => {
+                OperationTypePattern::Analysis(runmat_types::AnalysisValueType::Region)
+            }
+            _ => OperationTypePattern::Any,
+        },
         _ => OperationTypePattern::Any,
     }
 }

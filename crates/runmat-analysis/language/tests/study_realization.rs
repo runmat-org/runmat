@@ -102,6 +102,69 @@ study response {
 }
 
 #[test]
+fn study_resolution_retains_derived_geometry_dependencies_in_execution_order() {
+    let source = r#"
+geometry stock {
+    construct {
+        feature body = box(width = 1 m, depth = 1 m, height = 1 m)
+        result = feature.body
+    }
+}
+geometry drilled from geometry.stock {
+    derive {
+        feature hole = cylinder(
+            radius = 0.1 m,
+            height = 1 m,
+            axis = global([0, 0, 1]),
+            origin = [0.5, 0.5, 0] m,
+        )
+        result = subtract(source.result, feature.hole)
+    }
+}
+geometry relieved from geometry.drilled {
+    derive {
+        feature relief = cylinder(
+            radius = 0.05 m,
+            height = 1 m,
+            axis = global([0, 1, 0]),
+            origin = [0.25, 0, 0.25] m,
+        )
+        result = subtract(source.result, feature.relief)
+    }
+}
+mesh volume on geometry.relieved {
+    tetrahedra {
+        order = linear
+        target_size = 0.25 m
+        maximum_deviation = 0.01 m
+    }
+}
+model structure {}
+study response {
+    geometry = geometry.relieved
+    mesh = mesh.volume
+    model = model.structure
+    analysis solve { structural static {} }
+}
+"#;
+    let program = check(source);
+    assert!(program.is_valid(), "{:#?}", program.diagnostics);
+
+    let resolved = program
+        .resolve_study("project/main.fea", "response")
+        .unwrap();
+    assert_eq!(
+        resolved
+            .geometry_dependencies
+            .iter()
+            .map(|geometry| geometry.geometry_id.as_str())
+            .collect::<Vec<_>>(),
+        ["stock", "drilled"]
+    );
+    assert_eq!(resolved.geometry.geometry_id, "relieved");
+}
+
+#[test]
 fn study_realization_substitutes_regions_and_evaluates_parameterized_loads() {
     let source = r#"
 geometry part {

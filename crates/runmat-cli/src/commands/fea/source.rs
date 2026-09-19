@@ -3,12 +3,13 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use runmat_analysis_language::{
-    bind_program, check_program, CheckedFeaProgram, ExecutionPlacement, ExecutionProfileFacts,
-    ExecutionProfileIdentity, FeaCompiler, LogicalSourcePath, ModuleGraphRequest, SourceSymbol,
+    bind_program, check_program, resolve_logical_path, CheckedFeaProgram, ExecutionPlacement,
+    ExecutionProfileFacts, ExecutionProfileIdentity, FeaCompiler, LogicalSourcePath,
+    ModuleGraphRequest, SourceSymbol,
 };
 use runmat_config::project::{load_project_manifest_async, ProjectManifest};
 use runmat_config::runtime::RunMatRuntimeConfig;
-use runmat_parser::fea::FeaImportKind;
+use runmat_parser::fea::{FeaImportKind, FeaModuleItem};
 use runmat_runtime::analysis::{FilesystemFeaHost, ProjectFeaHost};
 use runmat_types::{CapabilityRequirement, CapabilitySet};
 
@@ -43,10 +44,27 @@ pub(crate) async fn check_source(
         root,
     });
     let requests = graph
-        .edges
+        .modules
         .iter()
-        .filter(|edge| edge.kind == FeaImportKind::Function)
-        .map(|edge| Ok((edge.target.clone(), SourceSymbol::new(edge.symbol.clone())?)))
+        .flat_map(|(module_path, module)| {
+            module
+                .syntax
+                .iter()
+                .flat_map(|syntax| syntax.items.iter())
+                .filter_map(move |item| match item {
+                    FeaModuleItem::Import(import) if import.kind == FeaImportKind::Function => {
+                        Some((module_path, import))
+                    }
+                    _ => None,
+                })
+        })
+        .map(|(module_path, import)| {
+            Ok((
+                resolve_logical_path(&graph.source_root, module_path, &import.source)
+                    .map_err(|error| anyhow::anyhow!(error.to_string()))?,
+                SourceSymbol::new(import.name.text.clone())?,
+            ))
+        })
         .collect::<Result<BTreeSet<_>>>()?
         .into_iter()
         .collect::<Vec<_>>();
@@ -58,8 +76,14 @@ pub(crate) async fn check_source(
             .context("imported `.m` functions require an enclosing frozen RunMat project")?
             .resolved
             .frozen;
-        super::callables::compile_function_facts(path, &source_root, &requests, frozen, config)
-            .await?
+        super::callables::compile_function_facts(
+            &physical_path,
+            &source_root,
+            &requests,
+            frozen,
+            config,
+        )
+        .await?
     };
     let manifest = match project.as_ref() {
         Some(project) => Some(

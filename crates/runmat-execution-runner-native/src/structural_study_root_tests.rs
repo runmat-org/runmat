@@ -130,6 +130,31 @@ fn typed_study_root_round_trips_exact_scientific_intent() {
         prepared.transport_objects().unwrap().len(),
         prepared.objects().len()
     );
+
+    let rebound_access = ArtifactAccess {
+        authorization_scope: "typed-study-root-rebound".into(),
+        encryption_context: Digest::sha256(b"typed-study-root-rebound-encryption"),
+    };
+    let rebound = prepared
+        .clone()
+        .rebind_artifact_access(rebound_access.clone())
+        .unwrap();
+    assert_eq!(rebound.result_expectation().artifact_access, rebound_access);
+    assert!(rebound.request().arguments.iter().all(|argument| {
+        let runmat_execution::value::ValuePayload::Object(reference) = argument else {
+            return false;
+        };
+        reference.authorization_scope == rebound_access.authorization_scope
+            && reference.encryption_context == rebound_access.encryption_context
+            && reference.id == rebound_access.value_id(reference.logical_digest)
+            && reference.resident_fence.is_none()
+    }));
+    let rebound_store = tempfile::tempdir().unwrap();
+    let mut rebound_store =
+        crate::FilesystemObjectStore::open(rebound_store.path(), 64 << 20).unwrap();
+    rebound.write_to(&mut rebound_store).unwrap();
+    let decoded = decode_structural_study_root(rebound.request(), &rebound_store).unwrap();
+    assert_eq!(decoded.artifact_access, rebound_access);
 }
 
 #[cfg(feature = "occt-native")]
@@ -200,6 +225,36 @@ async fn typed_sweep_root_executes_geometry_mesh_compilation_and_solve_over_quic
     let decoded_expectation: crate::StructuralSweepResultExpectation =
         serde_json::from_slice(&encoded).unwrap();
     assert_eq!(decoded_expectation, expectation);
+    let rebound_access = ArtifactAccess {
+        authorization_scope: "typed-study-root-quic-rebound".into(),
+        encryption_context: Digest::sha256(b"typed-study-root-quic-rebound-encryption"),
+    };
+    let rebound = prepared
+        .clone()
+        .rebind_artifact_access(rebound_access.clone())
+        .unwrap();
+    assert_eq!(rebound.result_expectation().artifact_access, rebound_access);
+    assert!(rebound
+        .result_expectation()
+        .studies
+        .iter()
+        .all(|study| study.artifact_access == rebound_access));
+    assert!(rebound.transport_objects().iter().all(|object| {
+        object.reference.authorization_scope == rebound_access.authorization_scope
+            && object.reference.encryption_context == rebound_access.encryption_context
+            && object.reference.id == rebound_access.value_id(object.reference.logical_digest)
+            && object.reference.resident_fence.is_none()
+    }));
+    let rebound_store = TestResultCache(
+        rebound
+            .transport_objects()
+            .into_iter()
+            .map(|object| (object.reference.logical_digest, object.bytes))
+            .collect(),
+    );
+    let decoded_rebound =
+        crate::decode_exact_structural_sweep_root(rebound.request(), &rebound_store).unwrap();
+    assert_eq!(decoded_rebound.artifact_access, rebound_access);
     let mut builder = ExecutionBundleBuilder::native(&project, revision)
         .unwrap()
         .with_compiled_package_closure();

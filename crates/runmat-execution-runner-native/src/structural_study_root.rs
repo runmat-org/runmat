@@ -240,6 +240,29 @@ impl PreparedStructuralStudyRoot {
         self.expectation.clone()
     }
 
+    /// Rebinds transport authority without recompiling scientific or executable identity.
+    pub fn rebind_artifact_access(
+        mut self,
+        artifact_access: ArtifactAccess,
+    ) -> NativeExecutionResult<Self> {
+        artifact_access.validate().map_err(protocol)?;
+        for argument in &mut self.request.arguments {
+            let ValuePayload::Object(reference) = argument else {
+                return Err(protocol(
+                    "structural study root inputs must be externalized",
+                ));
+            };
+            rebind_reference(reference, &artifact_access)?;
+        }
+        self.expectation.artifact_access = artifact_access;
+        self.expectation.validate()?;
+        self.request
+            .validate_for_portable_host()
+            .map_err(protocol)?;
+        self.transport_objects()?;
+        Ok(self)
+    }
+
     pub fn write_to(&self, store: &mut impl CacheExport) -> NativeExecutionResult<()> {
         for object in &self.objects {
             store.write_verified(object).map_err(protocol)?;
@@ -285,6 +308,19 @@ impl PreparedStructuralStudyRoot {
     pub fn into_request(self) -> ProgramExecutionRequest {
         self.request
     }
+}
+
+fn rebind_reference(
+    reference: &mut runmat_execution::value::ValueRef,
+    access: &ArtifactAccess,
+) -> NativeExecutionResult<()> {
+    reference.id = access.value_id(reference.logical_digest);
+    reference.authorization_scope = access.authorization_scope.clone();
+    reference.encryption_context = access.encryption_context;
+    reference.resident_fence = None;
+    ValuePayload::Object(Box::new(reference.clone()))
+        .validate(runmat_execution::value::ValueLimits::default())
+        .map_err(protocol)
 }
 
 #[derive(Clone, Debug, PartialEq)]

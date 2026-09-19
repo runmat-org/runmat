@@ -15,6 +15,7 @@ use crate::AlreadyReportedCliError;
 
 pub(super) mod callables;
 mod command;
+mod geometry_source;
 mod input_materialization;
 mod plan;
 mod preparation;
