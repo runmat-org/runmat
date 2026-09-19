@@ -1,7 +1,8 @@
 use runmat_geometry_core::{GeometryDigest, GeometryRevisionIdentity, UnitSystem};
 use runmat_geometry_ops::{
     GeometryFeatureCapabilities, GeometryFeatureKind, GeometryFeatureProvider,
-    GeometryFeatureProviderOutput, ResolvedGeometryFeatureOperation,
+    GeometryFeatureProviderOutput, GeometryFeatureProviderSelection,
+    ResolvedGeometryFeatureOperation,
 };
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -80,9 +81,15 @@ impl GeometryFeatureProvider for OcctExactFeatureProvider {
                 GeometryFeatureKind::Sphere,
                 GeometryFeatureKind::Transform,
                 GeometryFeatureKind::Instance,
+                GeometryFeatureKind::Extrude,
+                GeometryFeatureKind::Revolve,
                 GeometryFeatureKind::Union,
                 GeometryFeatureKind::Subtract,
                 GeometryFeatureKind::Intersect,
+                GeometryFeatureKind::Hole,
+                GeometryFeatureKind::Pocket,
+                GeometryFeatureKind::Fillet,
+                GeometryFeatureKind::Chamfer,
             ]
             .into_iter()
             .collect(),
@@ -92,10 +99,24 @@ impl GeometryFeatureProvider for OcctExactFeatureProvider {
         }
     }
 
+    fn entity_inventory(
+        &self,
+        geometry: &Self::Geometry,
+    ) -> Result<
+        std::collections::BTreeMap<
+            runmat_geometry_core::GeometryRegionRole,
+            Vec<runmat_geometry_core::PersistentEntityId>,
+        >,
+        Self::Error,
+    > {
+        Ok(super::feature_history::role_inventory(&geometry.topology))
+    }
+
     fn execute(
         &self,
         feature_id: &str,
         operation: &ResolvedGeometryFeatureOperation,
+        selection: &GeometryFeatureProviderSelection,
         dependencies: &[(&str, &Self::Geometry)],
         _source: Option<&Self::Geometry>,
     ) -> Result<GeometryFeatureProviderOutput<Self::Geometry>, Self::Error> {
@@ -107,7 +128,7 @@ impl GeometryFeatureProvider for OcctExactFeatureProvider {
             )));
         }
         validate_dependencies(operation, dependencies)?;
-        let encoded = encode_operation(operation)?;
+        let encoded = encode_operation(operation, selection)?;
         let operands = dependencies
             .iter()
             .map(|(_, geometry)| ffi::bridge::OcctFeatureOperand {
@@ -119,6 +140,7 @@ impl GeometryFeatureProvider for OcctExactFeatureProvider {
             encoded.kind,
             &encoded.scalars,
             &encoded.matrices,
+            encoded.selections,
             operands,
             native::ffi_exact_import_options(&self.options, cancel_token.id(), 1.0),
         )
@@ -134,8 +156,7 @@ impl GeometryFeatureProvider for OcctExactFeatureProvider {
             &options,
             &self.context,
         )?;
-        let history =
-            super::feature_history::topology_history(dependencies, &geometry.topology, &payload)?;
+        let history = super::feature_history::topology_history(dependencies, &geometry, &payload)?;
         Ok(GeometryFeatureProviderOutput { geometry, history })
     }
 }
@@ -150,12 +171,21 @@ fn validate_dependencies(
         Operation::Transform { source, .. } | Operation::Instance { source, .. } => {
             vec![source.0.as_str()]
         }
+        Operation::Extrude { profile, .. } | Operation::Revolve { profile, .. } => {
+            vec![profile.0.as_str()]
+        }
         Operation::Union { operands } | Operation::Intersect { operands } => {
             operands.iter().map(|operand| operand.0.as_str()).collect()
         }
         Operation::Subtract { base, tools } => std::iter::once(base.0.as_str())
             .chain(tools.iter().map(|tool| tool.0.as_str()))
             .collect(),
+        Operation::Hole { target, .. }
+        | Operation::Fillet { target, .. }
+        | Operation::Chamfer { target, .. } => vec![target.0.as_str()],
+        Operation::Pocket {
+            target, profile, ..
+        } => vec![target.0.as_str(), profile.0.as_str()],
         _ => {
             return Err(OcctExactFeatureError::InvalidRequest(format!(
                 "operation {:?} is outside the qualified OCCT feature profile",
@@ -180,10 +210,12 @@ struct EncodedOperation {
     kind: ffi::bridge::OcctFeatureKind,
     scalars: Vec<f64>,
     matrices: Vec<f64>,
+    selections: Vec<ffi::bridge::OcctFeatureSelection>,
 }
 
 fn encode_operation(
     operation: &ResolvedGeometryFeatureOperation,
+    selection: &GeometryFeatureProviderSelection,
 ) -> Result<EncodedOperation, OcctExactFeatureError> {
     use ffi::bridge::OcctFeatureKind as Kind;
     use ResolvedGeometryFeatureOperation as Operation;
@@ -220,9 +252,60 @@ fn encode_operation(
             Vec::new(),
             transforms.iter().flatten().copied().collect(),
         ),
+        Operation::Extrude {
+            distance_m,
+            direction,
+            ..
+        } => (
+            Kind::Extrude,
+            std::iter::once(*distance_m)
+                .chain(direction.iter().copied())
+                .collect(),
+            Vec::new(),
+        ),
+        Operation::Revolve {
+            axis,
+            origin_m,
+            angle_rad,
+            ..
+        } => (
+            Kind::Revolve,
+            axis.iter()
+                .copied()
+                .chain(origin_m.iter().copied())
+                .chain(std::iter::once(*angle_rad))
+                .collect(),
+            Vec::new(),
+        ),
         Operation::Union { .. } => (Kind::Union, Vec::new(), Vec::new()),
         Operation::Subtract { .. } => (Kind::Subtract, Vec::new(), Vec::new()),
         Operation::Intersect { .. } => (Kind::Intersect, Vec::new(), Vec::new()),
+        Operation::Hole {
+            radius_m,
+            depth_m,
+            axis,
+            origin_m,
+            ..
+        } => (
+            Kind::Hole,
+            std::iter::once(*radius_m)
+                .chain(std::iter::once(*depth_m))
+                .chain(axis.iter().copied())
+                .chain(origin_m.iter().copied())
+                .collect(),
+            Vec::new(),
+        ),
+        Operation::Pocket {
+            depth_m, direction, ..
+        } => (
+            Kind::Pocket,
+            std::iter::once(*depth_m)
+                .chain(direction.iter().copied())
+                .collect(),
+            Vec::new(),
+        ),
+        Operation::Fillet { radius_m, .. } => (Kind::Fillet, vec![*radius_m], Vec::new()),
+        Operation::Chamfer { distance_m, .. } => (Kind::Chamfer, vec![*distance_m], Vec::new()),
         unsupported => {
             return Err(OcctExactFeatureError::InvalidRequest(format!(
                 "operation {:?} is outside the bounded OCCT feature profile",
@@ -230,11 +313,61 @@ fn encode_operation(
             )))
         }
     };
+    let selection_required = matches!(
+        operation,
+        Operation::Fillet { .. } | Operation::Chamfer { .. }
+    );
+    if selection_required != matches!(selection, GeometryFeatureProviderSelection::Edges(_)) {
+        return Err(OcctExactFeatureError::InvalidRequest(
+            "feature edge selection does not match the requested operation".into(),
+        ));
+    }
     Ok(EncodedOperation {
         kind,
         scalars,
         matrices,
+        selections: encode_selection(selection)?,
     })
+}
+
+fn encode_selection(
+    selection: &GeometryFeatureProviderSelection,
+) -> Result<Vec<ffi::bridge::OcctFeatureSelection>, OcctExactFeatureError> {
+    match selection {
+        GeometryFeatureProviderSelection::None => Ok(Vec::new()),
+        GeometryFeatureProviderSelection::Edges(edges) => edges
+            .iter()
+            .map(|edge| {
+                let hex = edge
+                    .source_topology_id
+                    .strip_prefix("occt:")
+                    .ok_or_else(|| {
+                        OcctExactFeatureError::Contract(
+                            "selected feature edge has a non-OCCT persistent identity".into(),
+                        )
+                    })?;
+                if hex.len() != 64 {
+                    return Err(OcctExactFeatureError::Contract(
+                        "selected feature edge has an invalid OCCT identity length".into(),
+                    ));
+                }
+                let mut identity_digest = Vec::with_capacity(32);
+                for index in (0..hex.len()).step_by(2) {
+                    identity_digest.push(u8::from_str_radix(&hex[index..index + 2], 16).map_err(
+                        |_| {
+                            OcctExactFeatureError::Contract(
+                                "selected feature edge has an invalid OCCT identity".into(),
+                            )
+                        },
+                    )?);
+                }
+                Ok(ffi::bridge::OcctFeatureSelection {
+                    kind: ffi::bridge::OcctFeatureEntityKind::Edge,
+                    identity_digest,
+                })
+            })
+            .collect(),
+    }
 }
 
 fn derived_revision(

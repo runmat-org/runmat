@@ -64,6 +64,11 @@ fn definition(
     inspection: Option<&CheckedGeometryInspection>,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<GeometryDefinition> {
+    let regions = declaration
+        .statements
+        .iter()
+        .filter_map(|statement| lower_region(declaration, statement, diagnostics))
+        .collect::<Vec<_>>();
     let imported = imported_file(&declaration.statements).is_some();
     let construct = named_block(&declaration.statements, "construct");
     let derive = named_block(&declaration.statements, "derive");
@@ -109,12 +114,17 @@ fn definition(
                 diagnostics,
             );
         }
-        GeometryDefinitionSource::Constructed(feature::graph(declaration, statements, diagnostics)?)
+        GeometryDefinitionSource::Constructed(feature::graph(
+            declaration,
+            statements,
+            &regions,
+            diagnostics,
+        )?)
     } else if let Some(statements) = derive {
         let source = derived_source(bound, declaration, diagnostics)?;
         GeometryDefinitionSource::Derived(DerivedGeometryDefinition {
             source,
-            graph: feature::graph(declaration, statements, diagnostics)?,
+            graph: feature::graph(declaration, statements, &regions, diagnostics)?,
         })
     } else {
         if declaration.source.is_some() {
@@ -137,11 +147,7 @@ fn definition(
         geometry_id: declaration.key.name.clone(),
         parameters: value::parameters(declaration, diagnostics),
         source,
-        regions: declaration
-            .statements
-            .iter()
-            .filter_map(|statement| lower_region(declaration, statement, diagnostics))
-            .collect(),
+        regions,
         cad_parameters: declaration
             .statements
             .iter()

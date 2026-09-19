@@ -4,10 +4,11 @@ use runmat_geometry_core::{
     DerivedGeometryDefinition, GeneratedGeometryDefinition, GeometryAuthoringValue,
     GeometryDefinition, GeometryDefinitionRef, GeometryDefinitionSource, GeometryDigest,
     GeometryFeature, GeometryFeatureGraph, GeometryFeatureOperation, GeometryFeatureRef,
-    GeometryParameterDefinition, GeometryParameterType, GeometryScalarExpression,
-    GeometryScalarOperator,
+    GeometryParameterDefinition, GeometryParameterType, GeometryRegionRole,
+    GeometryScalarExpression, GeometryScalarOperator, PersistentEntityId,
 };
 
+use super::provider::resolve_provider_selection;
 use super::*;
 
 fn scalar(value: f64) -> GeometryScalarExpression {
@@ -149,6 +150,101 @@ fn unsupported_operations_and_provider_bounds_fail_before_execution() {
     ));
 }
 
+struct EdgeInventoryProvider {
+    edges: Vec<PersistentEntityId>,
+}
+
+impl GeometryFeatureProvider for EdgeInventoryProvider {
+    type Geometry = String;
+    type Error = &'static str;
+
+    fn capabilities(&self) -> GeometryFeatureCapabilities {
+        capabilities([GeometryFeatureKind::Fillet, GeometryFeatureKind::Chamfer])
+    }
+
+    fn entity_inventory(
+        &self,
+        _geometry: &Self::Geometry,
+    ) -> Result<BTreeMap<GeometryRegionRole, Vec<PersistentEntityId>>, Self::Error> {
+        Ok(BTreeMap::from([(
+            GeometryRegionRole::Edge,
+            self.edges.clone(),
+        )]))
+    }
+
+    fn execute(
+        &self,
+        _feature_id: &str,
+        _operation: &ResolvedGeometryFeatureOperation,
+        _selection: &GeometryFeatureProviderSelection,
+        _dependencies: &[(&str, &Self::Geometry)],
+        _source: Option<&Self::Geometry>,
+    ) -> Result<GeometryFeatureProviderOutput<Self::Geometry>, Self::Error> {
+        Err("selection-only provider")
+    }
+}
+
+fn edge(name: &str) -> PersistentEntityId {
+    PersistentEntityId {
+        kind: runmat_geometry_core::PersistentEntityKind::Edge,
+        source_topology_id: name.into(),
+        assembly_path: vec!["root".into()],
+    }
+}
+
+#[test]
+fn edge_treatments_resolve_exact_target_membership_and_cardinality() {
+    let first = edge("edge-a");
+    let second = edge("edge-b");
+    let provider = EdgeInventoryProvider {
+        edges: vec![first.clone(), second],
+    };
+    let geometry = "stock".to_string();
+    let selector = runmat_geometry_core::GeometryFeatureRegionSelection {
+        role: GeometryRegionRole::Edge,
+        selector: runmat_geometry_core::GeometryRegionSelector::PersistentId(
+            first.analysis_selection_id().unwrap(),
+        ),
+        cardinality: runmat_geometry_core::GeometryRegionCardinality::ExactlyOne,
+    };
+    let operation = ResolvedGeometryFeatureOperation::Fillet {
+        target: GeometryFeatureRef("stock".into()),
+        edges: selector,
+        radius_m: 0.1,
+    };
+    assert_eq!(
+        resolve_provider_selection(
+            &provider,
+            "rounded",
+            &operation,
+            &[("stock", &geometry)],
+            &BTreeMap::new(),
+        )
+        .unwrap(),
+        GeometryFeatureProviderSelection::Edges(vec![first])
+    );
+
+    let overbroad = ResolvedGeometryFeatureOperation::Chamfer {
+        target: GeometryFeatureRef("stock".into()),
+        edges: runmat_geometry_core::GeometryFeatureRegionSelection {
+            role: GeometryRegionRole::Edge,
+            selector: runmat_geometry_core::GeometryRegionSelector::Result,
+            cardinality: runmat_geometry_core::GeometryRegionCardinality::ExactlyOne,
+        },
+        distance_m: 0.1,
+    };
+    assert!(matches!(
+        resolve_provider_selection(
+            &provider,
+            "beveled",
+            &overbroad,
+            &[("stock", &geometry)],
+            &BTreeMap::new(),
+        ),
+        Err(GeometryFeatureError::InvalidPlan(_))
+    ));
+}
+
 struct RecordingProvider;
 
 impl GeometryFeatureProvider for RecordingProvider {
@@ -159,10 +255,18 @@ impl GeometryFeatureProvider for RecordingProvider {
         capabilities([GeometryFeatureKind::Box, GeometryFeatureKind::Transform])
     }
 
+    fn entity_inventory(
+        &self,
+        _geometry: &Self::Geometry,
+    ) -> Result<BTreeMap<GeometryRegionRole, Vec<PersistentEntityId>>, Self::Error> {
+        Ok(BTreeMap::new())
+    }
+
     fn execute(
         &self,
         feature_id: &str,
         _operation: &ResolvedGeometryFeatureOperation,
+        _selection: &super::GeometryFeatureProviderSelection,
         dependencies: &[(&str, &Self::Geometry)],
         _source: Option<&Self::Geometry>,
     ) -> Result<GeometryFeatureProviderOutput<Self::Geometry>, Self::Error> {

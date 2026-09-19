@@ -46,6 +46,12 @@ pub struct ImportedExactCad {
     /// the topology; these ordinals never enter serialized geometry contracts.
     pub(crate) kernel_body_shapes:
         BTreeMap<runmat_geometry_core::MassPropertiesEvaluatorId, Vec<u64>>,
+    /// Exact result-table join used only while translating kernel feature history. Shape-table
+    /// keys never become semantic identity and never cross the geometry contract boundary.
+    pub(crate) kernel_entity_ids: BTreeMap<
+        (u64, runmat_geometry_core::PersistentEntityKind, u64),
+        runmat_geometry_core::PersistentEntityId,
+    >,
 }
 
 impl ImportedExactCad {

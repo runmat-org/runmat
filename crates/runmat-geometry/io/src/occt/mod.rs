@@ -47,6 +47,8 @@ pub(crate) mod feature;
 #[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
 mod feature_history;
 #[cfg(all(test, not(target_arch = "wasm32"), feature = "occt-native"))]
+mod feature_profile_tests;
+#[cfg(all(test, not(target_arch = "wasm32"), feature = "occt-native"))]
 mod feature_tests;
 #[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
 mod ffi;

@@ -5,12 +5,14 @@ use crate::{
 };
 use runmat_geometry_core::{
     GeometryFeature, GeometryFeatureGraph, GeometryFeatureOperation, GeometryFeatureRef,
-    GeometryRegionRef, GeometryRegionRole,
+    GeometryFeatureRegionSelection, GeometryRegionDefinition, GeometryRegionRef,
+    GeometryRegionRole,
 };
 
 pub(super) fn graph(
     declaration: &CheckedFeaDeclaration,
     statements: &[CheckedFeaStatement],
+    regions: &[GeometryRegionDefinition],
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<GeometryFeatureGraph> {
     let initial_errors = diagnostics.len();
@@ -19,7 +21,7 @@ pub(super) fn graph(
     for statement in statements {
         match &statement.kind {
             CheckedFeaStatementKind::Feature { name, value } => {
-                let operation = operation(declaration, value, diagnostics)?;
+                let operation = operation(declaration, value, regions, diagnostics)?;
                 features.push(GeometryFeature {
                     feature_id: name.clone(),
                     operation,
@@ -37,7 +39,7 @@ pub(super) fn graph(
                     );
                     continue;
                 }
-                result = result_expression(declaration, value, &mut features, diagnostics);
+                result = result_expression(declaration, value, regions, &mut features, diagnostics);
             }
             CheckedFeaStatementKind::Input(_) => {}
             _ => super::error(
@@ -65,13 +67,14 @@ pub(super) fn graph(
 fn result_expression(
     declaration: &CheckedFeaDeclaration,
     value: &CheckedExpression,
+    regions: &[GeometryRegionDefinition],
     features: &mut Vec<GeometryFeature>,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<GeometryFeatureRef> {
     if let Some(reference) = feature_ref(value) {
         return Some(reference);
     }
-    let operation = operation(declaration, value, diagnostics)?;
+    let operation = operation(declaration, value, regions, diagnostics)?;
     if features
         .iter()
         .any(|feature| feature.feature_id == "result")
@@ -94,9 +97,10 @@ fn result_expression(
 fn operation(
     declaration: &CheckedFeaDeclaration,
     value: &CheckedExpression,
+    regions: &[GeometryRegionDefinition],
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<GeometryFeatureOperation> {
-    let result = operation_inner(declaration, value);
+    let result = operation_inner(declaration, value, regions);
     if result.is_none() {
         super::error(
             declaration,
@@ -111,6 +115,7 @@ fn operation(
 fn operation_inner(
     declaration: &CheckedFeaDeclaration,
     value: &CheckedExpression,
+    regions: &[GeometryRegionDefinition],
 ) -> Option<GeometryFeatureOperation> {
     let CheckedExpressionKind::OperationCall {
         lowering,
@@ -187,12 +192,12 @@ fn operation_inner(
         },
         "fillet" => GeometryFeatureOperation::Fillet {
             target: feature_ref(argument(arguments, 0, "target")?)?,
-            edges: region_ref(declaration, argument(arguments, 1, "edges")?)?,
+            edges: region_selection(declaration, regions, argument(arguments, 1, "edges")?)?,
             radius_m: length(argument(arguments, 2, "radius")?)?,
         },
         "chamfer" => GeometryFeatureOperation::Chamfer {
             target: feature_ref(argument(arguments, 0, "target")?)?,
-            edges: region_ref(declaration, argument(arguments, 1, "edges")?)?,
+            edges: region_selection(declaration, regions, argument(arguments, 1, "edges")?)?,
             distance_m: length(argument(arguments, 2, "distance")?)?,
         },
         _ => return None,
@@ -307,5 +312,27 @@ fn region_ref(
             crate::FeaTopologyRole::Solid => GeometryRegionRole::Solid,
             crate::FeaTopologyRole::Cell => GeometryRegionRole::Cell,
         },
+    })
+}
+
+fn region_selection(
+    declaration: &CheckedFeaDeclaration,
+    regions: &[GeometryRegionDefinition],
+    value: &CheckedExpression,
+) -> Option<GeometryFeatureRegionSelection> {
+    let reference = region_ref(declaration, value)?;
+    if reference.role != GeometryRegionRole::Edge
+        || reference.module_path != declaration.module.as_str()
+        || reference.geometry_id != declaration.key.name
+    {
+        return None;
+    }
+    let region = regions
+        .iter()
+        .find(|region| region.region_id == reference.region_id)?;
+    Some(GeometryFeatureRegionSelection {
+        role: region.role,
+        selector: region.selector.clone(),
+        cardinality: region.cardinality,
     })
 }

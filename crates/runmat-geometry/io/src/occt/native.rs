@@ -180,6 +180,7 @@ pub(crate) fn import_exact_cad_shape(
         source_face_ids: projection.source_face_ids,
         analysis: options.analysis.clone(),
         kernel_body_shapes: projection.kernel_body_shapes,
+        kernel_entity_ids: projection.kernel_entity_ids,
     };
     let tolerance_m = imported
         .topology

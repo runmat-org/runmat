@@ -197,12 +197,12 @@ pub enum GeometryFeatureOperation {
     },
     Fillet {
         target: GeometryFeatureRef,
-        edges: GeometryRegionRef,
+        edges: GeometryFeatureRegionSelection,
         radius_m: GeometryScalarExpression,
     },
     Chamfer {
         target: GeometryFeatureRef,
-        edges: GeometryRegionRef,
+        edges: GeometryFeatureRegionSelection,
         distance_m: GeometryScalarExpression,
     },
     RegenerateSource {
@@ -221,6 +221,14 @@ pub struct GeometryRegionRef {
     pub geometry_id: String,
     pub region_id: String,
     pub role: GeometryRegionRole,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GeometryFeatureRegionSelection {
+    pub role: GeometryRegionRole,
+    pub selector: GeometryRegionSelector,
+    pub cardinality: GeometryRegionCardinality,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -26,6 +26,7 @@ struct OcctPreviewSessionChunkOptions;
 struct OcctPreviewSessionChunkPayload;
 struct OcctPreviewSessionStartPayload;
 struct OcctFeatureOperand;
+struct OcctFeatureSelection;
 struct OcctFeatureExecutionPayload;
 
 rust::String exact_kernel_abi();
@@ -45,6 +46,7 @@ OcctFeatureExecutionPayload execute_exact_feature(
     OcctFeatureKind kind,
     rust::Slice<const double> scalars,
     rust::Slice<const double> matrices,
+    rust::Vec<OcctFeatureSelection> selections,
     rust::Vec<OcctFeatureOperand> operands,
     OcctImportOptions options);
 OcctPreviewSessionStartPayload start_cad_preview_session(

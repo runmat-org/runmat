@@ -46,6 +46,7 @@ fn build_occt_backend() {
         .file("src/occt/exact_wire.cc")
         .file("src/occt/exact_evaluator.cc")
         .file("src/occt/exact_feature.cc")
+        .file("src/occt/exact_feature_operations.cc")
         .file("src/occt/exact_surface_evaluator.cc")
         .include(".")
         .include(&occt_include)
@@ -110,6 +111,8 @@ fn build_occt_backend() {
     println!("cargo:rerun-if-changed=src/occt/exact_wire.cc");
     println!("cargo:rerun-if-changed=src/occt/exact_evaluator.cc");
     println!("cargo:rerun-if-changed=src/occt/exact_feature.cc");
+    println!("cargo:rerun-if-changed=src/occt/exact_feature_internal.hxx");
+    println!("cargo:rerun-if-changed=src/occt/exact_feature_operations.cc");
     println!("cargo:rerun-if-changed=src/occt/exact_evaluator_internal.hxx");
     println!("cargo:rerun-if-changed=src/occt/exact_surface_evaluator.cc");
 }

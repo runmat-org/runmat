@@ -62,9 +62,15 @@ fn constructed_and_derived_geometry_publish_reimportable_exact_closures() {
             runmat_geometry_ops::GeometryFeatureKind::Sphere,
             runmat_geometry_ops::GeometryFeatureKind::Transform,
             runmat_geometry_ops::GeometryFeatureKind::Instance,
+            runmat_geometry_ops::GeometryFeatureKind::Extrude,
+            runmat_geometry_ops::GeometryFeatureKind::Revolve,
             runmat_geometry_ops::GeometryFeatureKind::Union,
             runmat_geometry_ops::GeometryFeatureKind::Subtract,
             runmat_geometry_ops::GeometryFeatureKind::Intersect,
+            runmat_geometry_ops::GeometryFeatureKind::Hole,
+            runmat_geometry_ops::GeometryFeatureKind::Pocket,
+            runmat_geometry_ops::GeometryFeatureKind::Fillet,
+            runmat_geometry_ops::GeometryFeatureKind::Chamfer,
         ])
     );
     let request = constructed_request(profile);

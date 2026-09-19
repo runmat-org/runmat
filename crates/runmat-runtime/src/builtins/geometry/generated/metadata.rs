@@ -162,6 +162,163 @@ descriptor!(
     ]
 );
 descriptor!(
+    EXTRUDE_DESCRIPTOR,
+    "feature = geometry.extrude(profile, distance, direction)",
+    "Extruded immutable geometry.Feature.",
+    "RM.GEOMETRY.EXTRUDE.INVALID_INPUT",
+    "RunMat:geometry:extrude:InvalidInput",
+    "geometry.extrude: invalid input",
+    [
+        ("profile", Any, Required, "Exact profile geometry.Feature."),
+        (
+            "distance",
+            NumericScalar,
+            Required,
+            "Positive distance in meters."
+        ),
+        (
+            "direction",
+            NumericArray,
+            Required,
+            "Finite nonzero three-component direction."
+        )
+    ]
+);
+descriptor!(
+    REVOLVE_DESCRIPTOR,
+    "feature = geometry.revolve(profile, axis, origin, angle)",
+    "Revolved immutable geometry.Feature.",
+    "RM.GEOMETRY.REVOLVE.INVALID_INPUT",
+    "RunMat:geometry:revolve:InvalidInput",
+    "geometry.revolve: invalid input",
+    [
+        ("profile", Any, Required, "Exact profile geometry.Feature."),
+        (
+            "axis",
+            NumericArray,
+            Required,
+            "Finite nonzero three-component axis."
+        ),
+        (
+            "origin",
+            NumericArray,
+            Required,
+            "Finite three-component origin in meters."
+        ),
+        (
+            "angle",
+            NumericScalar,
+            Required,
+            "Angle in radians in (0, 2*pi]."
+        )
+    ]
+);
+descriptor!(
+    HOLE_DESCRIPTOR,
+    "feature = geometry.hole(target, radius, depth, axis, origin)",
+    "Immutable geometry.Feature with a cylindrical hole.",
+    "RM.GEOMETRY.HOLE.INVALID_INPUT",
+    "RunMat:geometry:hole:InvalidInput",
+    "geometry.hole: invalid input",
+    [
+        ("target", Any, Required, "Target geometry.Feature."),
+        (
+            "radius",
+            NumericScalar,
+            Required,
+            "Positive radius in meters."
+        ),
+        (
+            "depth",
+            NumericScalar,
+            Required,
+            "Positive depth in meters."
+        ),
+        (
+            "axis",
+            NumericArray,
+            Required,
+            "Finite nonzero three-component axis."
+        ),
+        (
+            "origin",
+            NumericArray,
+            Required,
+            "Finite three-component origin in meters."
+        )
+    ]
+);
+descriptor!(
+    POCKET_DESCRIPTOR,
+    "feature = geometry.pocket(target, profile, depth, direction)",
+    "Immutable geometry.Feature with a swept pocket.",
+    "RM.GEOMETRY.POCKET.INVALID_INPUT",
+    "RunMat:geometry:pocket:InvalidInput",
+    "geometry.pocket: invalid input",
+    [
+        ("target", Any, Required, "Target geometry.Feature."),
+        ("profile", Any, Required, "Exact profile geometry.Feature."),
+        (
+            "depth",
+            NumericScalar,
+            Required,
+            "Positive depth in meters."
+        ),
+        (
+            "direction",
+            NumericArray,
+            Required,
+            "Finite nonzero three-component direction."
+        )
+    ]
+);
+descriptor!(
+    FILLET_DESCRIPTOR,
+    "feature = geometry.fillet(target, edges, radius)",
+    "Immutable geometry.Feature with rounded selected edges.",
+    "RM.GEOMETRY.FILLET.INVALID_INPUT",
+    "RunMat:geometry:fillet:InvalidInput",
+    "geometry.fillet: invalid input",
+    [
+        ("target", Any, Required, "Target geometry.Feature."),
+        (
+            "edges",
+            Any,
+            Required,
+            "Typed geometry.RegionOutput edge selection."
+        ),
+        (
+            "radius",
+            NumericScalar,
+            Required,
+            "Positive radius in meters."
+        )
+    ]
+);
+descriptor!(
+    CHAMFER_DESCRIPTOR,
+    "feature = geometry.chamfer(target, edges, distance)",
+    "Immutable geometry.Feature with beveled selected edges.",
+    "RM.GEOMETRY.CHAMFER.INVALID_INPUT",
+    "RunMat:geometry:chamfer:InvalidInput",
+    "geometry.chamfer: invalid input",
+    [
+        ("target", Any, Required, "Target geometry.Feature."),
+        (
+            "edges",
+            Any,
+            Required,
+            "Typed geometry.RegionOutput edge selection."
+        ),
+        (
+            "distance",
+            NumericScalar,
+            Required,
+            "Positive distance in meters."
+        )
+    ]
+);
+descriptor!(
     UNION_DESCRIPTOR,
     "feature = geometry.union(feature, feature, ...)",
     "Boolean-union geometry.Feature.",
@@ -231,6 +388,15 @@ descriptor!(
     "RM.GEOMETRY.FACES.INVALID_INPUT",
     "RunMat:geometry:faces:InvalidInput",
     "geometry.faces: invalid input",
+    [("feature", Any, Required, "Source geometry.Feature.")]
+);
+descriptor!(
+    EDGES_DESCRIPTOR,
+    "output = geometry.edges(feature)",
+    "One-or-more edge geometry.RegionOutput.",
+    "RM.GEOMETRY.EDGES.INVALID_INPUT",
+    "RunMat:geometry:edges:InvalidInput",
+    "geometry.edges: invalid input",
     [("feature", Any, Required, "Source geometry.Feature.")]
 );
 descriptor!(

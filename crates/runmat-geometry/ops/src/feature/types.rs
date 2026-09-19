@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_geometry_core::{
-    GeometryAuthoringValue, GeometryFeatureRef, GeometryRegionRef, GeometryRegionRole,
+    GeometryAuthoringValue, GeometryFeatureRef, GeometryFeatureRegionSelection, GeometryRegionRole,
     PersistentEntityId,
 };
 use serde::{Deserialize, Serialize};
@@ -104,12 +104,12 @@ pub enum ResolvedGeometryFeatureOperation {
     },
     Fillet {
         target: GeometryFeatureRef,
-        edges: GeometryRegionRef,
+        edges: GeometryFeatureRegionSelection,
         radius_m: f64,
     },
     Chamfer {
         target: GeometryFeatureRef,
-        edges: GeometryRegionRef,
+        edges: GeometryFeatureRegionSelection,
         distance_m: f64,
     },
     RegenerateSource {
@@ -283,6 +283,12 @@ fn role_accepts(role: GeometryRegionRole, entity: &PersistentEntityId) -> bool {
 pub struct GeometryFeatureProviderOutput<G> {
     pub geometry: G,
     pub history: GeometryTopologyHistory,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GeometryFeatureProviderSelection {
+    None,
+    Edges(Vec<PersistentEntityId>),
 }
 
 pub struct ExecutedGeometryFeaturePlan<G> {

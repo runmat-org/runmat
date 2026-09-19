@@ -31,9 +31,15 @@ pub(crate) mod bridge {
         Sphere,
         Transform,
         Instance,
+        Extrude,
+        Revolve,
         Union,
         Subtract,
         Intersect,
+        Hole,
+        Pocket,
+        Fillet,
+        Chamfer,
     }
 
     #[repr(u8)]
@@ -58,6 +64,12 @@ pub(crate) mod bridge {
     }
 
     #[derive(Debug, Clone)]
+    struct OcctFeatureSelection {
+        kind: OcctFeatureEntityKind,
+        identity_digest: Vec<u8>,
+    }
+
+    #[derive(Debug, Clone)]
     struct OcctFeatureSourcePayload {
         operand_index: u64,
         kind: OcctFeatureEntityKind,
@@ -71,7 +83,7 @@ pub(crate) mod bridge {
         source_kind: OcctFeatureEntityKind,
         source_identity_digest: Vec<u8>,
         result_kind: OcctFeatureEntityKind,
-        result_identity_digest: Vec<u8>,
+        result_shape_key: u64,
         relation: OcctFeatureRelationKind,
     }
 
@@ -474,6 +486,7 @@ pub(crate) mod bridge {
             kind: OcctFeatureKind,
             scalars: &[f64],
             matrices: &[f64],
+            selections: Vec<OcctFeatureSelection>,
             operands: Vec<OcctFeatureOperand>,
             options: OcctImportOptions,
         ) -> Result<OcctFeatureExecutionPayload>;

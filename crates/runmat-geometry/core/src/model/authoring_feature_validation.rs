@@ -209,8 +209,16 @@ impl GeometryFeatureOperation {
                 positive("pocket depth", [depth_m], parameters)?;
                 direction("pocket direction", axis, parameters)?;
             }
-            Self::Fillet { radius_m, .. } => positive("fillet radius", [radius_m], parameters)?,
-            Self::Chamfer { distance_m, .. } => {
+            Self::Fillet {
+                edges, radius_m, ..
+            } => {
+                edges.validate_edge_selection(prior, source)?;
+                positive("fillet radius", [radius_m], parameters)?;
+            }
+            Self::Chamfer {
+                edges, distance_m, ..
+            } => {
+                edges.validate_edge_selection(prior, source)?;
                 positive("chamfer distance", [distance_m], parameters)?;
             }
             Self::RegenerateSource { parameters: values } => {
@@ -265,6 +273,45 @@ impl GeometryFeatureOperation {
                 "feature dependency",
                 "must reference an earlier feature",
             ));
+        }
+        Ok(())
+    }
+}
+
+impl super::GeometryFeatureRegionSelection {
+    fn validate_edge_selection(
+        &self,
+        prior: &BTreeSet<&str>,
+        source: Option<&str>,
+    ) -> Result<(), GeometryContractError> {
+        if self.role != super::GeometryRegionRole::Edge {
+            return Err(GeometryContractError::invalid(
+                "feature edge selection",
+                "must have edge topology",
+            ));
+        }
+        self.selector.validate()?;
+        match &self.selector {
+            GeometryRegionSelector::FeatureResult(feature)
+            | GeometryRegionSelector::BoundaryIntroducedBy(feature)
+                if prior.contains(feature.0.as_str())
+                    || source.is_some() && feature.0 == "source.result" => {}
+            GeometryRegionSelector::FeatureResult(_)
+            | GeometryRegionSelector::BoundaryIntroducedBy(_) => {
+                return Err(GeometryContractError::invalid(
+                    "feature edge selection",
+                    "must reference an earlier feature",
+                ));
+            }
+            GeometryRegionSelector::Result | GeometryRegionSelector::PersistentId(_) => {}
+            GeometryRegionSelector::Name(_)
+            | GeometryRegionSelector::Tag(_)
+            | GeometryRegionSelector::GeneratedOutput(_) => {
+                return Err(GeometryContractError::invalid(
+                    "feature edge selection",
+                    "must use result, persistent-id, or typed feature lineage",
+                ));
+            }
         }
         Ok(())
     }

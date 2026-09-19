@@ -5,11 +5,16 @@ use runmat_value::{Tensor, Value};
 
 use super::codec::generated_from_value;
 use super::combine::{geometry_finish_builtin, geometry_subtract_builtin};
+use super::features::{
+    geometry_chamfer_builtin, geometry_extrude_builtin, geometry_fillet_builtin,
+    geometry_hole_builtin, geometry_pocket_builtin, geometry_revolve_builtin,
+};
 use super::primitives::{
     geometry_box_builtin, geometry_cylinder_builtin, geometry_instance_builtin,
 };
 use super::regions::{
-    geometry_faces_introduced_by_builtin, geometry_solid_builtin, geometry_with_region_builtin,
+    geometry_edges_builtin, geometry_faces_introduced_by_builtin, geometry_solid_builtin,
+    geometry_with_region_builtin,
 };
 
 #[test]
@@ -99,6 +104,64 @@ fn instances_require_explicit_affine_occurrences() {
         product.features.last().unwrap().operation,
         GeometryFeatureOperation::Instance { .. }
     ));
+}
+
+#[test]
+fn full_feature_builder_surface_preserves_typed_dependencies_and_selections() {
+    let stock = block_on(geometry_box_builtin(1.0, 1.0, 1.0)).unwrap();
+    let profile = block_on(geometry_box_builtin(0.25, 0.25, 0.1)).unwrap();
+    let extruded = block_on(geometry_extrude_builtin(
+        profile.clone(),
+        0.5,
+        vector([0.0, 0.0, 1.0]),
+    ))
+    .unwrap();
+    let revolved = block_on(geometry_revolve_builtin(
+        profile.clone(),
+        vector([0.0, 1.0, 0.0]),
+        vector([-1.0, 0.0, 0.0]),
+        std::f64::consts::PI,
+    ))
+    .unwrap();
+    let holed = block_on(geometry_hole_builtin(
+        stock.clone(),
+        0.1,
+        1.0,
+        vector([0.0, 0.0, 1.0]),
+        vector([0.5, 0.5, 0.0]),
+    ))
+    .unwrap();
+    let pocketed = block_on(geometry_pocket_builtin(
+        stock.clone(),
+        profile,
+        0.1,
+        vector([0.0, 0.0, 1.0]),
+    ))
+    .unwrap();
+    let edges = block_on(geometry_edges_builtin(stock.clone())).unwrap();
+    let filleted = block_on(geometry_fillet_builtin(stock.clone(), edges.clone(), 0.05)).unwrap();
+    let chamfered = block_on(geometry_chamfer_builtin(stock, edges, 0.05)).unwrap();
+
+    for (value, expected) in [
+        (extruded, "extrude"),
+        (revolved, "revolve"),
+        (holed, "hole"),
+        (pocketed, "pocket"),
+        (filleted, "fillet"),
+        (chamfered, "chamfer"),
+    ] {
+        let graph = super::codec::feature_from_value(&value, "test").unwrap();
+        let actual = match graph.features.last().unwrap().operation {
+            GeometryFeatureOperation::Extrude { .. } => "extrude",
+            GeometryFeatureOperation::Revolve { .. } => "revolve",
+            GeometryFeatureOperation::Hole { .. } => "hole",
+            GeometryFeatureOperation::Pocket { .. } => "pocket",
+            GeometryFeatureOperation::Fillet { .. } => "fillet",
+            GeometryFeatureOperation::Chamfer { .. } => "chamfer",
+            _ => panic!("unexpected generated feature operation"),
+        };
+        assert_eq!(actual, expected);
+    }
 }
 
 fn vector(values: [f64; 3]) -> Value {

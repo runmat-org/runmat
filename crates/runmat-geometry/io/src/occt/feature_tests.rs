@@ -280,16 +280,15 @@ fn feature_lineage_merges_shared_ancestors_across_boolean_branches() {
 }
 
 #[test]
-fn unqualified_profile_operations_fail_even_when_the_provider_is_called_directly() {
+fn unqualified_source_regeneration_fails_even_when_the_provider_is_called_directly() {
     let provider = provider();
     let source = unit_box(&provider, "source");
     let error = match provider.execute(
-        "extrusion",
-        &ResolvedGeometryFeatureOperation::Extrude {
-            profile: GeometryFeatureRef("source".into()),
-            distance_m: 1.0,
-            direction: [0.0, 0.0, 1.0],
+        "regeneration",
+        &ResolvedGeometryFeatureOperation::RegenerateSource {
+            parameters: BTreeMap::new(),
         },
+        &runmat_geometry_ops::GeometryFeatureProviderSelection::None,
         &[("source", &source)],
         None,
     ) {
@@ -304,6 +303,7 @@ fn unqualified_profile_operations_fail_even_when_the_provider_is_called_directly
             source: GeometryFeatureRef("source".into()),
             matrix: translation(1.0, 0.0, 0.0),
         },
+        &runmat_geometry_ops::GeometryFeatureProviderSelection::None,
         &[("wrong", &source)],
         None,
     ) {
@@ -343,7 +343,13 @@ fn execute(
     dependencies: &[(&str, &ImportedExactCad)],
 ) -> ImportedExactCad {
     provider
-        .execute(id, &operation, dependencies, None)
+        .execute(
+            id,
+            &operation,
+            &runmat_geometry_ops::GeometryFeatureProviderSelection::None,
+            dependencies,
+            None,
+        )
         .unwrap()
         .geometry
 }
@@ -369,7 +375,11 @@ fn volume(geometry: &ImportedExactCad) -> f64 {
 }
 
 fn assert_close(actual: f64, expected: f64) {
-    assert!((actual - expected).abs() <= 1.0e-9 * expected.abs().max(1.0));
+    let tolerance = 1.0e-9 * expected.abs().max(1.0);
+    assert!(
+        (actual - expected).abs() <= tolerance,
+        "actual {actual:.16e} differs from expected {expected:.16e} by more than {tolerance:.16e}"
+    );
 }
 
 fn box_definition() -> GeometryDefinition {

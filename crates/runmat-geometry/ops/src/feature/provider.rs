@@ -4,7 +4,7 @@ use std::fmt::Display;
 use super::{
     ExecutedGeometryFeaturePlan, GeometryEntityLineage, GeometryFeatureCapabilities,
     GeometryFeatureError, GeometryFeaturePlan, GeometryFeatureProviderOutput,
-    GeometryTopologyHistory, ResolvedGeometryFeatureOperation,
+    GeometryFeatureProviderSelection, GeometryTopologyHistory, ResolvedGeometryFeatureOperation,
 };
 
 pub trait GeometryFeatureProvider {
@@ -13,10 +13,22 @@ pub trait GeometryFeatureProvider {
 
     fn capabilities(&self) -> GeometryFeatureCapabilities;
 
+    fn entity_inventory(
+        &self,
+        geometry: &Self::Geometry,
+    ) -> Result<
+        BTreeMap<
+            runmat_geometry_core::GeometryRegionRole,
+            Vec<runmat_geometry_core::PersistentEntityId>,
+        >,
+        Self::Error,
+    >;
+
     fn execute(
         &self,
         feature_id: &str,
         operation: &ResolvedGeometryFeatureOperation,
+        selection: &GeometryFeatureProviderSelection,
         dependencies: &[(&str, &Self::Geometry)],
         source: Option<&Self::Geometry>,
     ) -> Result<GeometryFeatureProviderOutput<Self::Geometry>, Self::Error>;
@@ -64,8 +76,21 @@ pub fn execute_feature_plan<P: GeometryFeatureProvider>(
                 }
             })
             .collect::<Result<Vec<_>, _>>()?;
+        let selection = resolve_provider_selection(
+            provider,
+            &step.feature_id,
+            &step.operation,
+            &dependencies,
+            &lineage_by_value,
+        )?;
         let output = provider
-            .execute(&step.feature_id, &step.operation, &dependencies, source)
+            .execute(
+                &step.feature_id,
+                &step.operation,
+                &selection,
+                &dependencies,
+                source,
+            )
             .map_err(|error| GeometryFeatureError::Provider {
                 feature_id: step.feature_id.clone(),
                 message: error.to_string(),
@@ -131,6 +156,110 @@ pub fn execute_feature_plan<P: GeometryFeatureProvider>(
         geometry,
         history_by_feature,
     })
+}
+
+pub(super) fn resolve_provider_selection<P: GeometryFeatureProvider>(
+    provider: &P,
+    feature_id: &str,
+    operation: &ResolvedGeometryFeatureOperation,
+    dependencies: &[(&str, &P::Geometry)],
+    lineage_by_value: &BTreeMap<String, BTreeMap<String, GeometryTopologyHistory>>,
+) -> Result<GeometryFeatureProviderSelection, GeometryFeatureError> {
+    let (target, selection) = match operation {
+        ResolvedGeometryFeatureOperation::Fillet { target, edges, .. }
+        | ResolvedGeometryFeatureOperation::Chamfer { target, edges, .. } => (target, edges),
+        _ => return Ok(GeometryFeatureProviderSelection::None),
+    };
+    if selection.role != runmat_geometry_core::GeometryRegionRole::Edge {
+        return Err(GeometryFeatureError::InvalidPlan(format!(
+            "feature `{feature_id}` requires an edge selection"
+        )));
+    }
+    let target_geometry = dependencies
+        .iter()
+        .find_map(|(name, geometry)| (*name == target.0).then_some(*geometry))
+        .ok_or_else(|| {
+            GeometryFeatureError::InvalidPlan(format!(
+                "feature `{feature_id}` is missing selection target `{}`",
+                target.0
+            ))
+        })?;
+    let inventory = provider
+        .entity_inventory(target_geometry)
+        .map_err(|error| GeometryFeatureError::Provider {
+            feature_id: feature_id.to_string(),
+            message: error.to_string(),
+        })?;
+    let available = inventory
+        .get(&runmat_geometry_core::GeometryRegionRole::Edge)
+        .cloned()
+        .unwrap_or_default();
+    let available_set = available.iter().cloned().collect::<BTreeSet<_>>();
+    let lineage = lineage_by_value.get(&target.0);
+    let mut edges = match &selection.selector {
+        runmat_geometry_core::GeometryRegionSelector::Result => available,
+        runmat_geometry_core::GeometryRegionSelector::PersistentId(value) => available
+            .into_iter()
+            .filter(|entity| entity.matches_analysis_selection(value.as_str()))
+            .collect(),
+        runmat_geometry_core::GeometryRegionSelector::FeatureResult(origin) => lineage
+            .and_then(|history| history.get(&origin.0))
+            .ok_or_else(|| selection_history_error(feature_id, &target.0, &origin.0))?
+            .result_entities
+            .get(&runmat_geometry_core::GeometryRegionRole::Edge)
+            .cloned()
+            .unwrap_or_default(),
+        runmat_geometry_core::GeometryRegionSelector::BoundaryIntroducedBy(origin) => {
+            let history = lineage
+                .and_then(|history| history.get(&origin.0))
+                .ok_or_else(|| selection_history_error(feature_id, &target.0, &origin.0))?;
+            if !history.inventory_complete {
+                return Err(GeometryFeatureError::InvalidPlan(format!(
+                    "feature `{feature_id}` requires complete lineage for edge selection `{}`",
+                    origin.0
+                )));
+            }
+            history
+                .introduced
+                .iter()
+                .filter(|entity| entity.kind == runmat_geometry_core::PersistentEntityKind::Edge)
+                .cloned()
+                .collect()
+        }
+        runmat_geometry_core::GeometryRegionSelector::Name(_)
+        | runmat_geometry_core::GeometryRegionSelector::Tag(_)
+        | runmat_geometry_core::GeometryRegionSelector::GeneratedOutput(_) => {
+            return Err(GeometryFeatureError::InvalidPlan(format!(
+                "feature `{feature_id}` uses an edge selector unavailable during feature execution"
+            )))
+        }
+    };
+    edges.sort();
+    edges.dedup();
+    if edges.iter().any(|edge| !available_set.contains(edge)) {
+        return Err(GeometryFeatureError::InvalidPlan(format!(
+            "feature `{feature_id}` edge selection escapes target `{}`",
+            target.0
+        )));
+    }
+    let valid_cardinality = match selection.cardinality {
+        runmat_geometry_core::GeometryRegionCardinality::ExactlyOne => edges.len() == 1,
+        runmat_geometry_core::GeometryRegionCardinality::OneOrMore => !edges.is_empty(),
+    };
+    if !valid_cardinality {
+        return Err(GeometryFeatureError::InvalidPlan(format!(
+            "feature `{feature_id}` edge selection resolved {} entities, violating {:?}",
+            edges.len(),
+            selection.cardinality
+        )));
+    }
+    Ok(GeometryFeatureProviderSelection::Edges(edges))
+}
+
+fn selection_history_error(feature_id: &str, target: &str, origin: &str) -> GeometryFeatureError {
+    GeometryFeatureError::InvalidPlan(format!(
+        "feature `{feature_id}` cannot resolve `{origin}` against target `{target}`"
+    ))
 }
 
 fn project_history(

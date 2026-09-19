@@ -53,6 +53,26 @@ pub async fn geometry_faces_builtin(feature: Value) -> BuiltinResult<Value> {
 }
 
 #[runtime_builtin(
+    name = "geometry.edges",
+    category = "geometry",
+    summary = "Select one or more final edges belonging to a typed geometry feature result.",
+    keywords = "geometry,cad,region,edges,generated",
+    type_resolver(region_output_type),
+    descriptor(super::metadata::EDGES_DESCRIPTOR),
+    integer_audit(super::GENERATED_INTEGER_AUDIT),
+    builtin_path = "crate::builtins::geometry::generated::regions"
+)]
+pub async fn geometry_edges_builtin(feature: Value) -> BuiltinResult<Value> {
+    feature_output(
+        feature,
+        "geometry.edges",
+        GeometryRegionRole::Edge,
+        GeometryRegionCardinality::OneOrMore,
+        false,
+    )
+}
+
+#[runtime_builtin(
     name = "geometry.facesIntroducedBy",
     category = "geometry",
     summary = "Select final faces proven to have been introduced by a typed feature.",

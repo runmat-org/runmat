@@ -97,7 +97,7 @@ fn boolean(
     feature_value(append_operation(graph, operation(operands))?)
 }
 
-fn merge_values(
+pub(super) fn merge_values(
     values: Vec<Value>,
     builtin: &'static str,
 ) -> BuiltinResult<(GeometryFeatureGraph, Vec<GeometryFeatureRef>)> {

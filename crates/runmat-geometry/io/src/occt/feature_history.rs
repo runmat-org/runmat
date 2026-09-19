@@ -11,10 +11,10 @@ use super::{feature::OcctExactFeatureError, ffi};
 
 pub(super) fn topology_history(
     dependencies: &[(&str, &ImportedExactCad)],
-    output: &ExactBRepTopology,
+    output: &ImportedExactCad,
     payload: &ffi::bridge::OcctFeatureExecutionPayload,
 ) -> Result<GeometryTopologyHistory, OcctExactFeatureError> {
-    let result_entities = role_inventory(output);
+    let result_entities = role_inventory(&output.topology);
     let result = result_entities
         .values()
         .flatten()
@@ -37,15 +37,6 @@ pub(super) fn topology_history(
             expected_sources.insert(key);
         }
     }
-    let result_lookup = kernel_topology_ids(output)
-        .map(|entity| {
-            (
-                (entity.kind, entity.source_topology_id.clone()),
-                entity.clone(),
-            )
-        })
-        .collect::<BTreeMap<_, _>>();
-
     let mut reported_sources = BTreeSet::new();
     let mut deleted = BTreeMap::new();
     let mut source_to_result = BTreeMap::<PersistentEntityId, Vec<PersistentEntityId>>::new();
@@ -99,11 +90,12 @@ pub(super) fn topology_history(
             )
         })?;
         let result_kind = persistent_kind(relation.result_kind)?;
-        let target_key = (result_kind, digest_name(&relation.result_identity_digest)?);
-        let target = result_lookup.get(&target_key).ok_or_else(|| {
-            OcctExactFeatureError::Contract(
-                "kernel relation target does not match the imported exact result".into(),
-            )
+        let target_key = (1, result_kind, relation.result_shape_key);
+        let target = output.kernel_entity_ids.get(&target_key).ok_or_else(|| {
+            OcctExactFeatureError::Contract(format!(
+                "kernel relation target {:?} shape key {} does not match imported result topology",
+                result_kind, relation.result_shape_key
+            ))
         })?;
         source_to_result
             .get_mut(source)
@@ -120,7 +112,7 @@ pub(super) fn topology_history(
 
     append_region_lineage(
         dependencies,
-        output,
+        &output.topology,
         &mut source_to_result,
         &mut deleted,
         &mut introduced,
@@ -171,7 +163,7 @@ fn kernel_topology_ids(topology: &ExactBRepTopology) -> impl Iterator<Item = &Pe
         .chain(topology.vertices.iter().map(|entity| &entity.id))
 }
 
-fn role_inventory(
+pub(super) fn role_inventory(
     topology: &ExactBRepTopology,
 ) -> BTreeMap<GeometryRegionRole, Vec<PersistentEntityId>> {
     let mut inventory = BTreeMap::from([
