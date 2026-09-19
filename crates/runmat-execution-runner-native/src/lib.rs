@@ -78,6 +78,7 @@ pub use analysis_modal_transient::{
 };
 pub use analysis_placement::{
     execute_structural_workloads_locally, NativeStructuralStudyPlacement,
+    StructuralWorkloadLocalExecution,
 };
 pub use analysis_prestressed_frequency::{
     execute_structural_prestressed_frequency_study_locally,
@@ -145,10 +146,11 @@ pub use exact_structural_study_root::{
 pub use exact_structural_sweep_root::{
     decode_exact_structural_sweep_root, import_exact_structural_sweep_result,
     import_exact_structural_sweep_result_catalog, prepare_exact_structural_sweep_root,
-    DecodedExactStructuralSweepRoot, ExactStructuralSweepEntryResult,
-    ExactStructuralSweepEntryStatus, ExactStructuralSweepResult, ExactStructuralSweepResultCatalog,
-    ExactStructuralSweepResultExpectation, ExactStructuralSweepRootPreparation,
-    ExactStructuralSweepTerminal, PreparedExactStructuralSweepRoot,
+    prepare_structural_sweep_root, DecodedExactStructuralSweepRoot,
+    ExactStructuralSweepEntryResult, ExactStructuralSweepEntryStatus, ExactStructuralSweepResult,
+    ExactStructuralSweepResultCatalog, ExactStructuralSweepResultExpectation,
+    ExactStructuralSweepRootPreparation, ExactStructuralSweepTerminal,
+    PreparedExactStructuralSweepRoot, PreparedStructuralSweepRoot, StructuralSweepRootPreparation,
     EXACT_STRUCTURAL_SWEEP_ROOT_EXECUTION_MODE, EXACT_STRUCTURAL_SWEEP_ROOT_TARGET_PROFILE,
 };
 pub use geometry_materialization::{

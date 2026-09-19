@@ -1,10 +1,10 @@
 use anyhow::Result;
 use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::{
-    ArtifactAccess, ProgramExecutionDescriptor, ProgramExecutionInputs,
-    PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+    ArtifactAccess, ProgramExecutionDescriptor, ProgramExecutionInputs, ProgramExecutionObject,
+    ProgramExecutionRequest, PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
 };
-use runmat_execution_runner_native::PreparedStructuralStudyRoot;
+use runmat_execution_runner_native::{PreparedStructuralStudyRoot, PreparedStructuralSweepRoot};
 use runmat_runtime::analysis::PreparedStructuralStudyIntent;
 
 use crate::commands::job::submit::PreparedRemoteExecution;
@@ -16,6 +16,25 @@ pub(crate) fn prepare_typed_remote_execution(
 ) -> Result<PreparedRemoteExecution> {
     let objects = prepared.transport_objects()?;
     let request = prepared.into_request();
+    prepare_remote_execution(request, objects, revision, bundle_archive)
+}
+
+pub(crate) fn prepare_typed_remote_sweep_execution(
+    prepared: PreparedStructuralSweepRoot,
+    revision: ProgramRevision,
+    bundle_archive: Vec<u8>,
+) -> Result<PreparedRemoteExecution> {
+    let objects = prepared.transport_objects();
+    let request = prepared.into_request();
+    prepare_remote_execution(request, objects, revision, bundle_archive)
+}
+
+fn prepare_remote_execution(
+    request: ProgramExecutionRequest,
+    objects: Vec<ProgramExecutionObject>,
+    revision: ProgramRevision,
+    bundle_archive: Vec<u8>,
+) -> Result<PreparedRemoteExecution> {
     let descriptor = serde_json::to_vec(&ProgramExecutionDescriptor {
         schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
         recipe: request.recipe,

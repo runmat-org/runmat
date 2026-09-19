@@ -5,8 +5,9 @@ mod publication;
 
 pub use contract::{
     decode_exact_structural_sweep_root, prepare_exact_structural_sweep_root,
-    DecodedExactStructuralSweepRoot, ExactStructuralSweepRootPreparation,
-    PreparedExactStructuralSweepRoot,
+    prepare_structural_sweep_root, DecodedExactStructuralSweepRoot,
+    ExactStructuralSweepRootPreparation, PreparedExactStructuralSweepRoot,
+    PreparedStructuralSweepRoot, StructuralSweepRootPreparation,
 };
 pub(crate) use publication::package_exact_structural_sweep_result;
 pub(crate) use publication::ExactStructuralSweepRemoteOutcome;

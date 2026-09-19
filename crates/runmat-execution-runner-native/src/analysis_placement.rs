@@ -115,17 +115,28 @@ async fn execute_one(
     workers_per_study: u32,
 ) -> crate::NativeExecutionResult<StructuralStudyNumericalResult> {
     let study_digest = analysis_study_content_digest(study);
-    execute_structural_workloads_locally(
-        placement.config.clone(),
-        placement.program_environment.clone(),
+    execute_structural_workloads_locally(StructuralWorkloadLocalExecution {
+        execution_config: placement.config.clone(),
+        program_environment: placement.program_environment.clone(),
         study_digest,
-        None,
-        prepared.workloads(),
-        prepared.solver_mesh().clone(),
-        workers_per_study,
-        None,
-    )
+        frozen_project_digest: None,
+        workloads: prepared.workloads(),
+        mesh: prepared.solver_mesh().clone(),
+        workers: workers_per_study,
+        admitted_accelerators: None,
+    })
     .await
+}
+
+pub struct StructuralWorkloadLocalExecution<'a> {
+    pub execution_config: NativeExecutionConfig,
+    pub program_environment: ProgramEnvironment,
+    pub study_digest: Digest,
+    pub frozen_project_digest: Option<Digest>,
+    pub workloads: StructuralStudyWorkloads,
+    pub mesh: runmat_meshing_core::SolverMeshArtifact,
+    pub workers: u32,
+    pub admitted_accelerators: Option<&'a [runmat_execution::resource::AcceleratorRequest]>,
 }
 
 /// Execute an already compiled and planned structural study on the local task substrate.
@@ -133,15 +144,18 @@ async fn execute_one(
 /// This source-format-neutral terminal is shared by typed `.fea` roots and runtime-authored
 /// studies after exact geometry and meshing have produced portable workloads.
 pub async fn execute_structural_workloads_locally(
-    mut execution_config: NativeExecutionConfig,
-    program_environment: ProgramEnvironment,
-    study_digest: Digest,
-    frozen_project_digest: Option<Digest>,
-    workloads: StructuralStudyWorkloads,
-    mesh: runmat_meshing_core::SolverMeshArtifact,
-    workers: u32,
-    admitted_accelerators: Option<&[runmat_execution::resource::AcceleratorRequest]>,
+    execution: StructuralWorkloadLocalExecution<'_>,
 ) -> crate::NativeExecutionResult<StructuralStudyNumericalResult> {
+    let StructuralWorkloadLocalExecution {
+        mut execution_config,
+        program_environment,
+        study_digest,
+        frozen_project_digest,
+        workloads,
+        mesh,
+        workers,
+        admitted_accelerators,
+    } = execution;
     let revision = ProgramRevision::new(study_digest, study_digest, program_environment)
         .map_err(|error| crate::NativeExecutionError::Configuration(error.to_string()))?;
     let accelerator_requests = local_accelerator_requests(&workloads)?;

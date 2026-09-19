@@ -18,7 +18,7 @@ use super::selection::SelectedFeaRoot;
 use super::source::CheckedFeaSource;
 
 pub(super) async fn execute(
-    path: PathBuf,
+    _path: PathBuf,
     source: CheckedFeaSource,
     root: SelectedFeaRoot,
     execution: ExecutionTargetArgs,
@@ -29,16 +29,15 @@ pub(super) async fn execute(
     let execution = resolve_execution(&source, &root, &execution)?;
     match root {
         SelectedFeaRoot::Study(study) => {
-            execute_study(&path, &source, study, Vec::new(), execution, config, json).await
+            execute_study(&source, study, Vec::new(), execution, config, json).await
         }
         SelectedFeaRoot::Sweep(sweep) => {
-            execute_sweep(&path, &source, sweep, execution, config, json).await
+            execute_sweep(&source, sweep, execution, config, json).await
         }
     }
 }
 
 async fn execute_study(
-    path: &PathBuf,
     source: &CheckedFeaSource,
     study: ResolvedAnalysisStudy,
     inputs: Vec<AuthoredStudyInputBinding>,
@@ -70,7 +69,6 @@ async fn execute_study(
         }
         ExecutionTarget::Remote(target) => {
             execute_study_remotely(
-                path,
                 source,
                 study,
                 inputs,
@@ -85,7 +83,6 @@ async fn execute_study(
 }
 
 async fn execute_sweep(
-    _path: &PathBuf,
     source: &CheckedFeaSource,
     sweep: ResolvedAnalysisSweep,
     execution: ResolvedFeaExecution,
@@ -109,19 +106,16 @@ async fn execute_sweep(
                         value: binding.value,
                     })
                     .collect::<Vec<_>>();
-                let authority = format!(
-                    "typed-fea-sweep:{}:{}",
-                    sweep.sweep.sweep_id, case.case_id
-                );
-                let prepared =
-                    prepare_study(
-                        source,
-                        sweep.study.clone(),
-                        &inputs,
-                        &authority,
-                        &execution.compute,
-                        config,
-                    )?;
+                let authority =
+                    format!("typed-fea-sweep:{}:{}", sweep.sweep.sweep_id, case.case_id);
+                let prepared = prepare_study(
+                    source,
+                    sweep.study.clone(),
+                    &inputs,
+                    &authority,
+                    &execution.compute,
+                    config,
+                )?;
                 prepared_cases.push((index, case.case_id, prepared));
             }
             let concurrent_cases = sweep_case_concurrency(&sweep, &prepared_cases);
@@ -151,10 +145,169 @@ async fn execute_sweep(
                 .collect::<Vec<_>>();
             print_sweep_result(&sweep.sweep.sweep_id, &summaries, json)
         }
-        ExecutionTarget::Remote(_) => bail!(
-            "typed remote sweeps require one atomic portable sweep root; per-case job submission is deliberately not substituted"
-        ),
+        ExecutionTarget::Remote(target) => {
+            execute_sweep_remotely(
+                source,
+                sweep,
+                cases,
+                target,
+                execution.compute,
+                config,
+                json,
+            )
+            .await
+        }
     }
+}
+
+async fn execute_sweep_remotely(
+    source: &CheckedFeaSource,
+    sweep: ResolvedAnalysisSweep,
+    cases: Vec<runmat_analysis_core::AuthoredSweepCase>,
+    target: RemoteExecutionTarget,
+    compute: FeaComputeAllocation,
+    config: &RunMatRuntimeConfig,
+    json: bool,
+) -> Result<()> {
+    let frozen = source
+        .frozen_project
+        .as_ref()
+        .context("remote typed FEA requires an enclosing frozen RunMat project")?;
+    let placeholder = prepare_sweep_root(
+        source,
+        &sweep,
+        &cases,
+        "bundle-sizing-authority",
+        &compute,
+        config,
+    )?;
+    let revision = placeholder.revision.clone();
+    let mut builder =
+        ExecutionBundleBuilder::native(frozen, revision.clone())?.with_compiled_package_closure();
+    for program in placeholder.root.required_programs() {
+        builder = builder.with_materialized_program(
+            program.recipe,
+            program.artifact.form,
+            program.artifact.executable_bytes,
+        );
+    }
+    let mut bundle_archive = Vec::new();
+    write_bundle(
+        &builder.build()?,
+        &mut bundle_archive,
+        ArchiveLimits::default(),
+    )?;
+    let bundle_size = bundle_archive.len();
+    let revision_for_root = revision.clone();
+    let committed = crate::commands::job::submit::submit_scoped(
+        revision.clone(),
+        bundle_size,
+        |run_id| {
+            let prepared = prepare_sweep_root(source, &sweep, &cases, run_id, &compute, config)?;
+            let remote = super::remote::prepare_typed_remote_sweep_execution(
+                prepared.root,
+                revision_for_root,
+                bundle_archive,
+            )?;
+            Ok::<PreparedRemoteExecution, anyhow::Error>(remote)
+        },
+        RemoteSubmissionOptions {
+            project: target.project,
+            cluster: target.cluster,
+            queue: target.queue,
+            trust_identity: target.trust_identity,
+            idempotency_key: target.idempotency_key,
+            workers: target.workers.max(1),
+            accelerator: compute.accelerators.first().cloned(),
+            on_run_created: None,
+            output_intent: SavedOutputIntent::Generic,
+        },
+    )
+    .await?;
+    if target.detach {
+        if json {
+            println!("{}", serde_json::to_string(&committed)?);
+        } else {
+            println!(
+                "{} {} ({})",
+                presentation::stdout().success("FEA sweep job"),
+                committed.id,
+                committed.state
+            );
+        }
+        return Ok(());
+    }
+    crate::commands::job::attach::attach(&committed.id, false, json).await
+}
+
+struct PreparedTypedSweep {
+    root: runmat_execution_runner_native::PreparedStructuralSweepRoot,
+    revision: runmat_execution::ProgramRevision,
+}
+
+fn prepare_sweep_root(
+    source: &CheckedFeaSource,
+    sweep: &ResolvedAnalysisSweep,
+    cases: &[runmat_analysis_core::AuthoredSweepCase],
+    authority: &str,
+    compute: &FeaComputeAllocation,
+    config: &RunMatRuntimeConfig,
+) -> Result<PreparedTypedSweep> {
+    let mut studies = Vec::with_capacity(cases.len());
+    for case in cases {
+        let inputs = case
+            .bindings
+            .iter()
+            .cloned()
+            .map(|binding| AuthoredStudyInputBinding {
+                input_id: binding.input_id,
+                value: binding.value,
+            })
+            .collect::<Vec<_>>();
+        let prepared = prepare_study(
+            source,
+            sweep.study.clone(),
+            &inputs,
+            authority,
+            compute,
+            config,
+        )?;
+        studies.push(prepared.root);
+    }
+    let revision = studies
+        .first()
+        .map(|study| study.request().recipe.program_revision.clone())
+        .context("typed FEA sweep contains no prepared studies")?;
+    let identities = studies
+        .iter()
+        .map(|study| {
+            runmat_analysis_fea::execution::StudyIdentity::from_authored_digest(
+                study.authored_study_digest(),
+                None,
+            )
+        })
+        .collect::<runmat_analysis_fea::execution::AnalysisExecutionResult<Vec<_>>>()?;
+    let authored = serde_json::to_vec(&sweep.sweep)?;
+    let definition = runmat_analysis_fea::execution::SweepDefinition::new(
+        runmat_execution::Digest::sha256(
+            [
+                b"runmat-typed-fea-sweep/v1\0".as_slice(),
+                authored.as_slice(),
+            ]
+            .concat(),
+        ),
+        identities,
+        runmat_analysis_fea::execution::SweepCompositionPolicy::CollectAll,
+    )?;
+    let root = runmat_execution_runner_native::prepare_structural_sweep_root(
+        runmat_execution_runner_native::StructuralSweepRootPreparation {
+            program_revision: revision.clone(),
+            artifact_access: super::preparation::artifact_access(authority),
+            definition,
+            studies,
+        },
+    )?;
+    Ok(PreparedTypedSweep { root, revision })
 }
 
 fn sweep_case_concurrency(
@@ -185,7 +338,6 @@ fn sweep_case_concurrency(
 }
 
 async fn execute_study_remotely(
-    _path: &PathBuf,
     source: &CheckedFeaSource,
     study: ResolvedAnalysisStudy,
     inputs: Vec<AuthoredStudyInputBinding>,

@@ -149,10 +149,10 @@ fn capabilities(
     let Some(exchange) = exchange else {
         return capabilities;
     };
-    if supported(exchange, Ap242Capability::PersistentIds) || !exchange.persistent_ids.is_empty() {
-        if !capabilities.contains(&GeometryInspectionCapability::PersistentIds) {
-            capabilities.push(GeometryInspectionCapability::PersistentIds);
-        }
+    if (supported(exchange, Ap242Capability::PersistentIds) || !exchange.persistent_ids.is_empty())
+        && !capabilities.contains(&GeometryInspectionCapability::PersistentIds)
+    {
+        capabilities.push(GeometryInspectionCapability::PersistentIds);
     }
     if supported(exchange, Ap242Capability::Parameters) && !exchange.parameters.is_empty() {
         capabilities.push(GeometryInspectionCapability::Parameters);

@@ -46,7 +46,7 @@ pub(super) async fn execute(
     }
 }
 
-async fn execute_for_composition(
+pub(super) async fn execute_for_composition(
     pool: Arc<RemotePoolDriver>,
     request: &ProgramExecutionRequest,
     run_id: &str,
@@ -127,15 +127,4 @@ async fn execute_for_composition(
         },
     )
     .await
-}
-
-#[cfg(all(test, feature = "occt-native"))]
-pub(crate) async fn execute_for_test(
-    pool: Arc<RemotePoolDriver>,
-    request: &ProgramExecutionRequest,
-    run_id: &str,
-    resources: &AllocationResources,
-) -> NativeExecutionResult<super::exact_structural_study::RemoteExactStructuralStudyComposition> {
-    let mut recovery = crate::RetainedStructuralTransientRecovery::default();
-    execute_for_composition(pool, request, run_id, resources, None, &mut recovery).await
 }

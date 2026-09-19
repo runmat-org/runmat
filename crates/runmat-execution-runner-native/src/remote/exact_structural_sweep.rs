@@ -27,6 +27,20 @@ pub(crate) async fn execute(
     resources: AllocationResources,
 ) -> NativeExecutionResult<RemotePoolExecutionOutcome> {
     let decoded = crate::decode_exact_structural_sweep_root(&request, pool.as_ref())?;
+    let dynamic_studies = decoded
+        .studies
+        .iter()
+        .all(|study| study.recipe.execution_mode == crate::STRUCTURAL_STUDY_ROOT_EXECUTION_MODE);
+    if dynamic_studies {
+        return execute_structural_studies(pool, request, decoded, run_id, resources).await;
+    }
+    if decoded.studies.iter().any(|study| {
+        study.recipe.execution_mode != crate::EXACT_STRUCTURAL_STUDY_ROOT_EXECUTION_MODE
+    }) {
+        return Err(protocol(
+            "structural sweep cannot mix pre-meshed and geometry-derived study roots",
+        ));
+    }
     let mut meshing_requests = Vec::new();
     let mut studies = Vec::with_capacity(decoded.studies.len());
     for study in decoded.studies {
@@ -112,6 +126,75 @@ pub(crate) async fn execute(
                 }
                 SharedMeshingOutcome::Terminal(terminal) => terminal,
             };
+            Ok::<_, NativeExecutionError>((study_index, outcome))
+        });
+    }
+
+    let mut outcomes = (0..tasks.len()).map(|_| None).collect::<Vec<_>>();
+    let mut cancelled_siblings = false;
+    while let Some(completed) = tasks.join_next().await {
+        let (study_index, outcome) = completed
+            .map_err(|error| protocol(format!("remote sweep coordinator failed: {error}")))??;
+        let terminal = match outcome {
+            RemoteExactStructuralStudyComposition::Completed(response) => {
+                ExactStructuralSweepRemoteOutcome::Succeeded(response)
+            }
+            RemoteExactStructuralStudyComposition::Failed(message) => {
+                if decoded.composition.fail_fast() && !cancelled_siblings {
+                    pool.cancel(CancellationReason::ParentScope)?;
+                    cancelled_siblings = true;
+                }
+                ExactStructuralSweepRemoteOutcome::Failed(message)
+            }
+            RemoteExactStructuralStudyComposition::Cancelled => {
+                ExactStructuralSweepRemoteOutcome::Cancelled
+            }
+            RemoteExactStructuralStudyComposition::Indeterminate(message) => {
+                if decoded.composition.fail_fast() && !cancelled_siblings {
+                    pool.cancel(CancellationReason::ParentScope)?;
+                    cancelled_siblings = true;
+                }
+                ExactStructuralSweepRemoteOutcome::Indeterminate(message)
+            }
+        };
+        outcomes[study_index] = Some(terminal);
+    }
+    let outcomes = outcomes
+        .into_iter()
+        .map(|outcome| outcome.ok_or_else(|| protocol("remote sweep entry did not terminate")))
+        .collect::<NativeExecutionResult<Vec<_>>>()?;
+    package(
+        request,
+        decoded.identity,
+        decoded.artifact_access,
+        outcomes,
+        pool,
+    )
+}
+
+async fn execute_structural_studies(
+    pool: Arc<RemotePoolDriver>,
+    request: ProgramExecutionRequest,
+    decoded: crate::DecodedExactStructuralSweepRoot,
+    run_id: String,
+    resources: AllocationResources,
+) -> NativeExecutionResult<RemotePoolExecutionOutcome> {
+    let mut tasks = tokio::task::JoinSet::new();
+    for (study_index, study) in decoded.studies.into_iter().enumerate() {
+        let pool = Arc::clone(&pool);
+        let resources = resources.clone();
+        let task_scope = format!("{run_id}/study/{study_index}");
+        tasks.spawn(async move {
+            let mut recovery = crate::RetainedStructuralTransientRecovery::default();
+            let outcome = super::structural_study::execute_for_composition(
+                pool,
+                &study,
+                &task_scope,
+                &resources,
+                None,
+                &mut recovery,
+            )
+            .await?;
             Ok::<_, NativeExecutionError>((study_index, outcome))
         });
     }

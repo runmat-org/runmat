@@ -118,7 +118,7 @@ fn typed_study_root_round_trips_exact_scientific_intent() {
 
 #[cfg(feature = "occt-native")]
 #[tokio::test(flavor = "current_thread")]
-async fn typed_study_root_executes_geometry_mesh_compilation_and_solve_over_quic() {
+async fn typed_sweep_root_executes_geometry_mesh_compilation_and_solve_over_quic() {
     use std::collections::BTreeSet;
     use std::net::{Ipv4Addr, SocketAddr};
     use std::sync::Arc;
@@ -161,14 +161,32 @@ async fn typed_study_root_executes_geometry_mesh_compilation_and_solve_over_quic
         encryption_context: Digest::sha256(b"typed-study-root-quic-encryption"),
     };
     let prepared = prepare_source(&source_root, &path, revision.clone(), access.clone());
+    let study_identity = runmat_analysis_fea::execution::StudyIdentity::from_authored_digest(
+        prepared.authored_study_digest(),
+        None,
+    )
+    .unwrap();
+    let definition = runmat_analysis_fea::execution::SweepDefinition::new(
+        Digest::sha256(b"typed-study-root-quic-sweep"),
+        vec![study_identity],
+        runmat_analysis_fea::execution::SweepCompositionPolicy::CollectAll,
+    )
+    .unwrap();
+    let prepared = crate::prepare_structural_sweep_root(crate::StructuralSweepRootPreparation {
+        program_revision: revision.clone(),
+        artifact_access: access.clone(),
+        definition,
+        studies: vec![prepared],
+    })
+    .unwrap();
     let mut builder = ExecutionBundleBuilder::native(&project, revision)
         .unwrap()
         .with_compiled_package_closure();
     for program in prepared.required_programs() {
         builder = builder.with_materialized_program(
-            program.recipe.clone(),
+            program.recipe,
             program.artifact.form,
-            program.artifact.executable_bytes.clone(),
+            program.artifact.executable_bytes,
         );
     }
     let mut bundle = Vec::new();
@@ -281,38 +299,35 @@ async fn typed_study_root_executes_geometry_mesh_compilation_and_solve_over_quic
         )
         .unwrap();
         pool.add_worker(channel.clone()).await.unwrap();
-        for object in prepared.transport_objects().unwrap() {
+        for object in prepared.transport_objects() {
             pool.register_execution_object(object.reference, object.bytes)
                 .unwrap();
         }
         let request = prepared.into_request();
         let outcome = tokio::time::timeout(
             Duration::from_secs(180),
-            crate::remote::structural_study::execute_for_test(
+            crate::remote::exact_structural_sweep::execute(
                 Arc::clone(&pool),
-                &request,
-                &access.authorization_scope,
-                &resources,
+                request,
+                access.authorization_scope.clone(),
+                resources.clone(),
             ),
         )
         .await
-        .expect("typed structural study timed out")
+        .expect("typed structural sweep timed out")
         .unwrap();
         match outcome {
-            crate::remote::exact_structural_study::RemoteExactStructuralStudyComposition::Completed(
-                runmat_execution_artifact::ProgramExecutionResponse::ExternalizedSuccess { .. },
-            ) => {}
-            crate::remote::exact_structural_study::RemoteExactStructuralStudyComposition::Completed(
-                response,
-            ) => panic!("typed structural study returned {response:?}"),
-            crate::remote::exact_structural_study::RemoteExactStructuralStudyComposition::Failed(
-                message,
-            )
-            | crate::remote::exact_structural_study::RemoteExactStructuralStudyComposition::Indeterminate(
-                message,
-            ) => panic!("typed structural study failed: {message}"),
-            crate::remote::exact_structural_study::RemoteExactStructuralStudyComposition::Cancelled => {
-                panic!("typed structural study was cancelled")
+            crate::remote::pool_execution::RemotePoolExecutionOutcome::Completed(result) => {
+                assert!(matches!(
+                    result.response,
+                    runmat_execution_artifact::ProgramExecutionResponse::ExternalizedSuccess { .. }
+                ));
+            }
+            crate::remote::pool_execution::RemotePoolExecutionOutcome::Cancelled => {
+                panic!("typed structural sweep was cancelled")
+            }
+            crate::remote::pool_execution::RemotePoolExecutionOutcome::Indeterminate(message) => {
+                panic!("typed structural sweep was indeterminate: {message}")
             }
         }
         pool.remove_worker(worker.id, false).await.unwrap();

@@ -57,8 +57,11 @@ impl ExactStructuralSweepRootRequest {
         for entry in &self.entries {
             entry.descriptor.validate().map_err(protocol)?;
             if entry.argument_count == 0
-                || entry.descriptor.recipe.execution_mode
-                    != crate::EXACT_STRUCTURAL_STUDY_ROOT_EXECUTION_MODE
+                || !matches!(
+                    entry.descriptor.recipe.execution_mode.as_str(),
+                    crate::EXACT_STRUCTURAL_STUDY_ROOT_EXECUTION_MODE
+                        | crate::STRUCTURAL_STUDY_ROOT_EXECUTION_MODE
+                )
                 || entry.descriptor.artifact.form != ExecutableForm::AnalysisWorkload
                 || entry.descriptor.requested_outputs != 1
             {
@@ -88,12 +91,44 @@ pub struct ExactStructuralSweepRootPreparation {
     pub studies: Vec<PreparedExactStructuralStudyRoot>,
 }
 
+pub struct StructuralSweepRootPreparation {
+    pub program_revision: ProgramRevision,
+    pub artifact_access: ArtifactAccess,
+    pub definition: SweepDefinition,
+    pub studies: Vec<crate::PreparedStructuralStudyRoot>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct PreparedExactStructuralSweepRoot {
     request: ProgramExecutionRequest,
     objects: Vec<ProgramExecutionObject>,
     required_programs: Vec<RequiredStudyProgram>,
     expectation: super::ExactStructuralSweepResultExpectation,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct PreparedStructuralSweepRoot {
+    request: ProgramExecutionRequest,
+    objects: Vec<ProgramExecutionObject>,
+    required_programs: Vec<RequiredStudyProgram>,
+}
+
+impl PreparedStructuralSweepRoot {
+    pub const fn request(&self) -> &ProgramExecutionRequest {
+        &self.request
+    }
+
+    pub fn transport_objects(&self) -> Vec<ProgramExecutionObject> {
+        self.objects.clone()
+    }
+
+    pub fn required_programs(&self) -> Vec<RequiredStudyProgram> {
+        self.required_programs.clone()
+    }
+
+    pub fn into_request(self) -> ProgramExecutionRequest {
+        self.request
+    }
 }
 
 impl PreparedExactStructuralSweepRoot {
@@ -252,6 +287,123 @@ pub fn prepare_exact_structural_sweep_root(
     })
 }
 
+pub fn prepare_structural_sweep_root(
+    preparation: StructuralSweepRootPreparation,
+) -> NativeExecutionResult<PreparedStructuralSweepRoot> {
+    let StructuralSweepRootPreparation {
+        program_revision,
+        artifact_access,
+        definition,
+        studies,
+    } = preparation;
+    artifact_access.validate().map_err(protocol)?;
+    if studies.is_empty() {
+        return Err(protocol("structural sweep requires at least one study"));
+    }
+
+    let mut entries = Vec::with_capacity(studies.len());
+    let mut arguments = Vec::new();
+    let mut object_inventory = BTreeMap::new();
+    let mut required_programs = Vec::new();
+    let mut identities = Vec::with_capacity(studies.len());
+    for study in studies {
+        let request = study.request().clone();
+        if request.recipe.program_revision != program_revision {
+            return Err(protocol("sweep and study program revisions differ"));
+        }
+        let identity = StudyIdentity::from_authored_digest(study.authored_study_digest(), None)
+            .map_err(protocol)?;
+        entries.push(ExactStructuralSweepEntry {
+            study: identity,
+            descriptor: descriptor(&request),
+            argument_count: u32::try_from(request.arguments.len()).map_err(protocol)?,
+        });
+        arguments.extend(request.arguments);
+        for object in study.transport_objects()? {
+            insert_object(&mut object_inventory, object)?;
+        }
+        required_programs.extend(study.required_programs().iter().map(|program| {
+            RequiredStudyProgram {
+                recipe: program.recipe.clone(),
+                artifact: program.artifact.clone(),
+            }
+        }));
+        identities.push(identity);
+    }
+    if definition.studies() != identities {
+        return Err(protocol(
+            "sweep definition differs from its prepared study identities",
+        ));
+    }
+    definition.identity().map_err(protocol)?;
+
+    let root = ExactStructuralSweepRootRequest {
+        schema_version: 1,
+        definition,
+        entries,
+    };
+    let root_object = LogicalObject::new(
+        ObjectNamespace::InputValue,
+        "analysis/structural-sweep-roots",
+        ROOT_MEDIA_TYPE,
+        root.canonical_bytes()?,
+    )
+    .map_err(protocol)?;
+    let root_reference = artifact_access
+        .reference(&root_object, ValueRefKind::DriverObject, ROOT_VALUE_SCHEMA)
+        .map_err(protocol)?;
+    insert_object(
+        &mut object_inventory,
+        ProgramExecutionObject {
+            reference: root_reference.clone(),
+            bytes: root_object.bytes,
+        },
+    )?;
+
+    let recipe = ProgramBuildRecipe {
+        schema_version: PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
+        program_revision,
+        entrypoint: "analysis_workload".into(),
+        outputs: OutputContract {
+            requested_outputs: 1,
+        },
+        execution_mode: EXACT_STRUCTURAL_SWEEP_ROOT_EXECUTION_MODE.into(),
+        target: ProgramTarget::portable(EXACT_STRUCTURAL_SWEEP_ROOT_TARGET_PROFILE),
+        features: BTreeSet::new(),
+        compile_options: BTreeSet::new(),
+        source_objects: Vec::new(),
+        expected_artifact_id: None,
+    };
+    let artifact = ProgramArtifact::materialize(
+        &recipe,
+        ExecutableForm::AnalysisWorkload,
+        ROOT_PROGRAM_BYTES.to_vec(),
+    )
+    .map_err(protocol)?;
+    required_programs.push(RequiredStudyProgram {
+        recipe: recipe.clone(),
+        artifact: artifact.clone(),
+    });
+    let mut seen_programs = BTreeSet::new();
+    required_programs.retain(|program| seen_programs.insert(program.artifact.id));
+    let mut request_arguments = vec![ValuePayload::Object(Box::new(root_reference))];
+    request_arguments.extend(arguments);
+    let request = ProgramExecutionRequest {
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+        recipe,
+        artifact,
+        function: 0,
+        arguments: request_arguments,
+        requested_outputs: 1,
+    };
+    request.validate().map_err(protocol)?;
+    Ok(PreparedStructuralSweepRoot {
+        request,
+        objects: object_inventory.into_values().collect(),
+        required_programs,
+    })
+}
+
 pub fn decode_exact_structural_sweep_root(
     program: &ProgramExecutionRequest,
     store: &impl CacheImport,
@@ -305,7 +457,15 @@ pub fn decode_exact_structural_sweep_root(
             arguments: child_arguments[offset..end].to_vec(),
             requested_outputs: entry.descriptor.requested_outputs,
         };
-        crate::decode_exact_structural_study_root(&request, store)?;
+        match request.recipe.execution_mode.as_str() {
+            crate::EXACT_STRUCTURAL_STUDY_ROOT_EXECUTION_MODE => {
+                crate::decode_exact_structural_study_root(&request, store)?;
+            }
+            crate::STRUCTURAL_STUDY_ROOT_EXECUTION_MODE => {
+                crate::decode_structural_study_root(&request, store)?;
+            }
+            _ => return Err(protocol("structural sweep entry mode is unsupported")),
+        }
         studies.push(request);
         offset = end;
     }

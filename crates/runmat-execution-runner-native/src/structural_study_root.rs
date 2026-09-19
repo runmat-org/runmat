@@ -124,6 +124,7 @@ pub struct PreparedStructuralStudyRoot {
     request: ProgramExecutionRequest,
     objects: Vec<LogicalObject>,
     required_programs: Vec<RequiredStructuralStudyProgram>,
+    authored_study_digest: Digest,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -143,6 +144,10 @@ impl PreparedStructuralStudyRoot {
 
     pub fn required_programs(&self) -> &[RequiredStructuralStudyProgram] {
         &self.required_programs
+    }
+
+    pub const fn authored_study_digest(&self) -> Digest {
+        self.authored_study_digest
     }
 
     pub fn write_to(&self, store: &mut impl CacheExport) -> NativeExecutionResult<()> {
@@ -304,6 +309,7 @@ pub fn prepare_structural_study_root(
         request,
         objects,
         required_programs,
+        authored_study_digest: root.authored_study_digest,
     })
 }
 

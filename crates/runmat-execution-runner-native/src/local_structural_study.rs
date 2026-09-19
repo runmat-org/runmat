@@ -139,16 +139,16 @@ pub async fn execute_prepared_structural_study_locally(
             planning: decoded.planning,
         })
         .map_err(protocol)?;
-    let numerical = execute_structural_workloads_locally(
-        analysis_config,
-        request.recipe.program_revision.environment(),
-        decoded.authored_study_digest,
-        decoded.frozen_project_digest,
-        product.workloads.clone(),
-        meshing.artifact.clone(),
+    let numerical = execute_structural_workloads_locally(crate::StructuralWorkloadLocalExecution {
+        execution_config: analysis_config,
+        program_environment: request.recipe.program_revision.environment(),
+        study_digest: decoded.authored_study_digest,
+        frozen_project_digest: decoded.frozen_project_digest,
+        workloads: product.workloads.clone(),
+        mesh: meshing.artifact.clone(),
         workers,
-        Some(&decoded.analysis_accelerator_requests),
-    )
+        admitted_accelerators: Some(&decoded.analysis_accelerator_requests),
+    })
     .await?;
     Ok(CompletedLocalStructuralStudy {
         product,

@@ -250,8 +250,7 @@ where
     let accelerator_count = options
         .accelerator
         .as_ref()
-        .map(|request| i32::try_from(request.count).context("accelerator count exceeds API range"))
-        .transpose()?
+        .map(|request| i32::from(request.count))
         .unwrap_or(0);
     let accelerator_memory_bytes = options
         .accelerator
