@@ -15,10 +15,10 @@ use super::{PreparedStudySequence, PreparedStudyStep};
 use crate::analysis::frequency_result::CompletedStructuralFrequencyStep;
 use crate::analysis::{
     current_fea_runtime_config, default_fea_artifact_root, persist_linear_static_run,
-    run_operation_for_identity, storage, AnalysisExecutionStep, AnalysisModelTemplate,
-    AnalysisRunResult, AnalysisSolverOptions, AnalysisStudyRunData,
-    AnalysisStudyStatePublicationData, AnalysisStudyStepRunData, QualityGate, RunStatus,
-    ANALYSIS_RUN_STUDY_OPERATION, ANALYSIS_RUN_STUDY_OP_VERSION,
+    run_operation_for_identity, storage, AnalysisExecutionStep, AnalysisRunResult,
+    AnalysisSolverOptions, AnalysisStudyRunData, AnalysisStudyStatePublicationData,
+    AnalysisStudyStepRunData, QualityGate, RunStatus, ANALYSIS_RUN_STUDY_OPERATION,
+    ANALYSIS_RUN_STUDY_OP_VERSION,
 };
 
 const STUDY_EVIDENCE_SCHEMA_VERSION: &str = "analysis_study_evidence/2026-09";
@@ -188,7 +188,6 @@ pub(in crate::analysis) fn run_evidence_stage(run_id: &str) -> String {
 pub(in crate::analysis) struct PreparedStudyCompletion {
     pub(super) context: OperationContext,
     pub(super) study_id: String,
-    pub(super) model_template: AnalysisModelTemplate,
     pub(super) study_fingerprint: String,
     pub(super) authored_study_digest: runmat_execution::Digest,
     pub(super) model: AnalysisModel,
@@ -205,7 +204,6 @@ pub(in crate::analysis) fn study_completion_from_prepared(
     PreparedStudyCompletion {
         context: prepared.context,
         study_id: prepared.spec.study_id,
-        model_template: prepared.spec.create_model_intent.template,
         study_fingerprint: prepared.study_fingerprint,
         authored_study_digest,
         model: prepared.model,
@@ -386,7 +384,6 @@ pub(in crate::analysis) fn complete_study_run(
     let PreparedStudyCompletion {
         context,
         study_id,
-        model_template,
         study_fingerprint,
         authored_study_digest,
         model,
@@ -583,7 +580,6 @@ pub(in crate::analysis) fn complete_study_run(
             "schema_version": "fea_study_sequence_run_artifact/v1",
             "study_id": study_id.clone(),
             "model_id": model.model_id.0.clone(),
-            "model_template": model_template,
             "sequence_identity": sequence_identity,
             "steps": step_results.clone(),
             "states": state_results.clone(),
@@ -609,7 +605,6 @@ pub(in crate::analysis) fn complete_study_run(
         AnalysisStudyRunData {
             study_id,
             model_id: model.model_id.0.clone(),
-            model_template,
             sequence_identity,
             steps: step_results,
             states: state_results,

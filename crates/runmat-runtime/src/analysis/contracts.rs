@@ -2914,7 +2914,6 @@ pub struct AnalysisStudyStatePublicationData {
 pub struct AnalysisStudyRunData {
     pub study_id: String,
     pub model_id: String,
-    pub model_template: AnalysisModelTemplate,
     pub sequence_identity: SequenceIdentity,
     pub steps: Vec<AnalysisStudyStepRunData>,
     pub states: Vec<AnalysisStudyStatePublicationData>,

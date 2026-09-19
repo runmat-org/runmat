@@ -10,7 +10,7 @@ use runmat_meshing_core::SolverMeshArtifact;
 use crate::operations::OperationContext;
 
 use super::{
-    AnalysisExecutionStep, AnalysisModelTemplate, AnalysisStudySpec, PreparedStructuralLinearRun,
+    AnalysisExecutionStep, AnalysisStudySpec, PreparedStructuralLinearRun,
     StructuralStudyNumericalResult,
 };
 
@@ -156,10 +156,8 @@ pub(super) enum PreparedStructuralStudyExecution {
 #[derive(Debug, Clone)]
 pub struct PreparedStructuralStudyIntent {
     pub(super) study_id: String,
-    pub(super) model_template: AnalysisModelTemplate,
     pub(super) geometry_source_digest: runmat_execution::Digest,
     pub(super) geometry_units: runmat_geometry_core::UnitSystem,
-    pub(super) meshing_settings: Option<runmat_meshing_core::MeshingRequestSettings>,
     pub(super) meshing_request: Option<runmat_meshing_core::MeshingRequest>,
     pub(super) meshing_contacts: Vec<crate::meshing::MeshingContactDefinition>,
     pub(super) context: OperationContext,
@@ -193,10 +191,8 @@ pub type StructuralStudyExecutionOutcome =
 struct StructuralStudyIntentContinuation {
     schema_version: u16,
     study_id: String,
-    model_template: AnalysisModelTemplate,
     geometry_source_digest: runmat_execution::Digest,
     geometry_units: runmat_geometry_core::UnitSystem,
-    meshing_settings: Option<runmat_meshing_core::MeshingRequestSettings>,
     meshing_request: Option<runmat_meshing_core::MeshingRequest>,
     meshing_contacts: Vec<crate::meshing::MeshingContactDefinition>,
     context: OperationContext,
@@ -221,10 +217,6 @@ impl PreparedStructuralStudyIntent {
         &self.context
     }
 
-    pub fn model_template(&self) -> AnalysisModelTemplate {
-        self.model_template
-    }
-
     pub fn model(&self) -> &AnalysisModel {
         &self.model
     }
@@ -235,10 +227,6 @@ impl PreparedStructuralStudyIntent {
 
     pub fn operation_sequence(&self) -> &[String] {
         &self.operation_sequence
-    }
-
-    pub fn meshing_settings(&self) -> Option<&runmat_meshing_core::MeshingRequestSettings> {
-        self.meshing_settings.as_ref()
     }
 
     pub fn meshing_request(&self) -> Option<&runmat_meshing_core::MeshingRequest> {
@@ -262,10 +250,8 @@ impl PreparedStructuralStudyIntent {
         let bytes = serde_json::to_vec(&StructuralStudyIntentContinuation {
             schema_version: 1,
             study_id: self.study_id.clone(),
-            model_template: self.model_template,
             geometry_source_digest: self.geometry_source_digest,
             geometry_units: self.geometry_units,
-            meshing_settings: self.meshing_settings.clone(),
             meshing_request: self.meshing_request.clone(),
             meshing_contacts: self.meshing_contacts.clone(),
             context: self.context.clone(),
@@ -294,10 +280,8 @@ impl PreparedStructuralStudyIntent {
         }
         let intent = Self {
             study_id: continuation.study_id,
-            model_template: continuation.model_template,
             geometry_source_digest: continuation.geometry_source_digest,
             geometry_units: continuation.geometry_units,
-            meshing_settings: continuation.meshing_settings,
             meshing_request: continuation.meshing_request,
             meshing_contacts: continuation.meshing_contacts,
             context: continuation.context,
@@ -313,14 +297,12 @@ impl PreparedStructuralStudyIntent {
     }
 
     pub(super) fn validate(&self) -> Result<(), String> {
+        if let Some(request) = &self.meshing_request {
+            request.validate().map_err(|error| error.to_string())?;
+        }
         if self.study_id.trim().is_empty()
             || self.geometry_source_digest.bytes() == &[0_u8; 32]
             || self.authored_study_digest.bytes() == &[0_u8; 32]
-            || self.meshing_request
-                != resolve_intent_meshing_request(
-                    self.geometry_units,
-                    self.meshing_settings.clone(),
-                )?
             || self.meshing_contacts
                 != super::meshing::meshing_contact_definitions_for_model(&self.model)
                     .collect::<Vec<_>>()
@@ -646,10 +628,8 @@ impl PreparedStructuralStudyIntent {
     pub(super) fn semantic_digest(&self) -> Result<runmat_execution::Digest, String> {
         let bytes = serde_json::to_vec(&(
             &self.study_id,
-            self.model_template,
             self.geometry_source_digest,
             self.geometry_units,
-            &self.meshing_settings,
             &self.meshing_request,
             &self.meshing_contacts,
             &self.model,

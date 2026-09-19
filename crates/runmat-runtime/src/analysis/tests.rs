@@ -2377,10 +2377,6 @@ fn analysis_run_study_executes_linear_static_path() {
     assert_eq!(envelope.data.study_id, spec.study_id);
     assert_eq!(envelope.data.model_id, spec.create_model_intent.model_id);
     assert_eq!(
-        envelope.data.model_template,
-        AnalysisModelTemplate::LinearStaticStructural
-    );
-    assert_eq!(
         envelope.data.steps[0].procedure_step.family,
         PhysicsFamily::Structural
     );
@@ -2473,10 +2469,7 @@ fn analysis_run_study_executes_linear_static_path() {
         &fs::read(&envelope.data.evidence_artifact_path).expect("read run evidence artifact"),
     )
     .expect("parse run evidence artifact");
-    assert_eq!(
-        run_evidence_payload["model_template"].as_str(),
-        Some("linear_static_structural")
-    );
+    assert!(run_evidence_payload.get("model_template").is_none());
     drop(env_guard);
     let _ = fs::remove_dir_all(&root);
     let _ = fs::remove_dir_all(&solver_mesh_root);

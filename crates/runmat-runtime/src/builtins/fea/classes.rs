@@ -100,7 +100,6 @@ pub(super) const SWEEP_PLAN_FIELDS: &[&str] = &[
 pub(super) const RUN_RESULT_FIELDS: &[&str] = &[
     "study_id",
     "model_id",
-    "model_template",
     "sequence_identity",
     "steps",
     "states",

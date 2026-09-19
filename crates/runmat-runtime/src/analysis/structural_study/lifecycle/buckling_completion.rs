@@ -296,7 +296,6 @@ pub(super) fn complete_structural_buckling(
     let prepared = PreparedStudyCompletion {
         context: intent.context,
         study_id: intent.study_id,
-        model_template: intent.model_template,
         study_fingerprint: study_fingerprint_from_digest(intent.authored_study_digest),
         authored_study_digest: intent.authored_study_digest,
         model: resolved_model,

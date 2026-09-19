@@ -342,7 +342,6 @@ fn complete_structural_frequency(
         PreparedStudyCompletion {
             context: intent.context,
             study_id: intent.study_id,
-            model_template: intent.model_template,
             study_fingerprint: study_fingerprint_from_digest(intent.authored_study_digest),
             authored_study_digest: intent.authored_study_digest,
             model: resolved_model,
@@ -619,7 +618,6 @@ fn complete_linear_sequence(
         PreparedStudyCompletion {
             context: intent.context,
             study_id: intent.study_id,
-            model_template: intent.model_template,
             study_fingerprint: study_fingerprint_from_digest(intent.authored_study_digest),
             authored_study_digest: intent.authored_study_digest,
             model: resolved_model,
@@ -768,7 +766,6 @@ fn complete_direct_transient(
         PreparedStudyCompletion {
             context: intent.context,
             study_id: intent.study_id,
-            model_template: intent.model_template,
             study_fingerprint: study_fingerprint_from_digest(intent.authored_study_digest),
             authored_study_digest: intent.authored_study_digest,
             model: resolved_model,
