@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 
-use runmat_geometry_core::GeometryDefinitionRef;
+use runmat_geometry_core::{
+    GeometryAuthoringValue, GeometryDefinition, GeometryDefinitionRef, GeometryScalarExpression,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -9,13 +11,20 @@ use crate::{
     AuthoredPropertyAssignment, AuthoredPropertyTarget, AuthoredRegionSource,
 };
 
-use super::{AuthoredMeshRef, AuthoredStudy, AuthoredStudyError};
+use super::{AuthoredGeometryArgumentValue, AuthoredMeshRef, AuthoredStudy, AuthoredStudyError};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AuthoredStudyInputBinding {
     pub input_id: String,
     pub value: AuthoredInputValue,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RealizedGeometryInstance {
+    pub definition: GeometryDefinitionRef,
+    pub bindings: BTreeMap<String, GeometryAuthoringValue>,
 }
 
 /// A self-contained study after all declaration inputs have concrete values and every included
@@ -25,7 +34,7 @@ pub struct AuthoredStudyInputBinding {
 pub struct RealizedStudy {
     pub module_path: String,
     pub study_id: String,
-    pub geometry: GeometryDefinitionRef,
+    pub geometry: RealizedGeometryInstance,
     pub mesh: AuthoredMeshRef,
     /// The realized root model selected by the study.
     pub model: AuthoredModel,
@@ -40,10 +49,11 @@ impl AuthoredStudy {
     pub fn realize(
         &self,
         model: &AuthoredModel,
+        geometry: &GeometryDefinition,
         provided_inputs: &[AuthoredStudyInputBinding],
     ) -> Result<RealizedStudy, AuthoredStudyRealizationError> {
         let catalog = BTreeMap::from([(model.reference(), model.clone())]);
-        self.realize_with_models(&catalog, provided_inputs)
+        self.realize_with_models(&catalog, geometry, provided_inputs)
     }
 
     /// Realize the study against an exact catalog of authored models.
@@ -53,15 +63,17 @@ impl AuthoredStudy {
     pub fn realize_with_models(
         &self,
         models: &BTreeMap<AuthoredModelRef, AuthoredModel>,
+        geometry: &GeometryDefinition,
         provided_inputs: &[AuthoredStudyInputBinding],
     ) -> Result<RealizedStudy, AuthoredStudyRealizationError> {
         let model = models
             .get(&self.model.model)
             .ok_or_else(|| AuthoredStudyRealizationError::MissingModel(self.model.model.clone()))?;
-        self.validate(model)
+        self.validate(model, geometry)
             .map_err(AuthoredStudyRealizationError::InvalidStudy)?;
         let included_models = resolve_included_models(model, models)?;
         let study_inputs = bind_study_inputs(self, provided_inputs)?;
+        let geometry = realize_geometry(&self.geometry, geometry, &study_inputs)?;
         let model_inputs = bind_model_inputs(self, model, &study_inputs)?;
         let realized_model = realize_model(model.clone(), &model_inputs)?;
         let mut outputs = self.outputs.clone();
@@ -71,7 +83,7 @@ impl AuthoredStudy {
         Ok(RealizedStudy {
             module_path: self.module_path.clone(),
             study_id: self.study_id.clone(),
-            geometry: self.geometry.clone(),
+            geometry,
             mesh: self.mesh.clone(),
             model: realized_model,
             included_models,
@@ -87,6 +99,55 @@ impl AuthoredStudy {
             sequence: self.sequence.clone(),
         })
     }
+}
+
+fn realize_geometry(
+    instance: &super::AuthoredGeometryInstance,
+    definition: &GeometryDefinition,
+    study_inputs: &BTreeMap<String, AuthoredInputValue>,
+) -> Result<RealizedGeometryInstance, AuthoredStudyRealizationError> {
+    let arguments = instance
+        .arguments
+        .iter()
+        .map(|argument| (argument.parameter_id.as_str(), &argument.value))
+        .collect::<BTreeMap<_, _>>();
+    let mut bindings = BTreeMap::new();
+    for parameter in &definition.parameters {
+        let value = match arguments.get(parameter.parameter_id.as_str()) {
+            Some(AuthoredGeometryArgumentValue::Constant(value)) => geometry_authoring_value(value),
+            Some(AuthoredGeometryArgumentValue::StudyInput(reference)) => study_inputs
+                .get(&reference.input_id)
+                .and_then(geometry_authoring_value),
+            None => parameter.default.clone(),
+        }
+        .ok_or_else(|| {
+            AuthoredStudyRealizationError::InvalidGeometryArgument(parameter.parameter_id.clone())
+        })?;
+        bindings.insert(parameter.parameter_id.clone(), value);
+    }
+    Ok(RealizedGeometryInstance {
+        definition: instance.definition.clone(),
+        bindings,
+    })
+}
+
+fn geometry_authoring_value(value: &AuthoredInputValue) -> Option<GeometryAuthoringValue> {
+    Some(match value {
+        AuthoredInputValue::Boolean(value) => GeometryAuthoringValue::Boolean(*value),
+        AuthoredInputValue::Integer(value) => {
+            GeometryAuthoringValue::Scalar(GeometryScalarExpression::Literal {
+                value: *value as f64,
+            })
+        }
+        AuthoredInputValue::Real(value)
+        | AuthoredInputValue::Quantity {
+            value_si: value, ..
+        } => GeometryAuthoringValue::Scalar(GeometryScalarExpression::Literal { value: *value }),
+        AuthoredInputValue::String(value) => GeometryAuthoringValue::Text(value.clone()),
+        AuthoredInputValue::Complex { .. }
+        | AuthoredInputValue::Material(_)
+        | AuthoredInputValue::Region(_) => return None,
+    })
 }
 
 fn resolve_included_models(
@@ -393,6 +454,8 @@ pub enum AuthoredStudyRealizationError {
     ParameterizedIncludedModel(AuthoredModelRef),
     #[error("authored study is invalid: {0}")]
     InvalidStudy(AuthoredStudyError),
+    #[error("geometry argument `{0}` cannot be materialized")]
+    InvalidGeometryArgument(String),
     #[error("study input `{0}` is duplicated")]
     DuplicateStudyInput(String),
     #[error("study input `{0}` is unknown")]

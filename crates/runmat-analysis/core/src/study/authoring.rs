@@ -1,6 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use runmat_geometry_core::{GeometryDefinitionRef, GeometryRegionRef};
+use runmat_geometry_core::{
+    GeometryDefinition, GeometryDefinitionRef, GeometryParameterDefinition, GeometryParameterType,
+    GeometryRegionRef,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -22,6 +25,27 @@ pub struct AuthoredMeshRef {
 pub struct AuthoredStudyInputRef {
     pub input_id: String,
     pub value_type: AuthoredInputType,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "source", content = "value")]
+pub enum AuthoredGeometryArgumentValue {
+    Constant(AuthoredInputValue),
+    StudyInput(AuthoredStudyInputRef),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AuthoredGeometryArgument {
+    pub parameter_id: String,
+    pub value: AuthoredGeometryArgumentValue,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AuthoredGeometryInstance {
+    pub definition: GeometryDefinitionRef,
+    pub arguments: Vec<AuthoredGeometryArgument>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -51,7 +75,7 @@ pub struct AuthoredModelInstance {
 pub struct AuthoredStudy {
     pub module_path: String,
     pub study_id: String,
-    pub geometry: GeometryDefinitionRef,
+    pub geometry: AuthoredGeometryInstance,
     pub mesh: AuthoredMeshRef,
     pub model: AuthoredModelInstance,
     pub inputs: Vec<AuthoredInputDefinition>,
@@ -60,11 +84,18 @@ pub struct AuthoredStudy {
 }
 
 impl AuthoredStudy {
-    pub fn validate(&self, model: &AuthoredModel) -> Result<(), AuthoredStudyError> {
+    pub fn validate(
+        &self,
+        model: &AuthoredModel,
+        geometry: &GeometryDefinition,
+    ) -> Result<(), AuthoredStudyError> {
         token("study module path", &self.module_path)?;
         token("study id", &self.study_id)?;
-        token("geometry module path", &self.geometry.module_path)?;
-        token("geometry id", &self.geometry.geometry_id)?;
+        token(
+            "geometry module path",
+            &self.geometry.definition.module_path,
+        )?;
+        token("geometry id", &self.geometry.definition.geometry_id)?;
         token("mesh module path", &self.mesh.module_path)?;
         token("mesh id", &self.mesh.mesh_id)?;
         token("model module path", &self.model.model.module_path)?;
@@ -73,6 +104,11 @@ impl AuthoredStudy {
             || self.model.model.model_id != model.model_id
         {
             return Err(AuthoredStudyError::WrongModel);
+        }
+        if self.geometry.definition.module_path != geometry.module_path
+            || self.geometry.definition.geometry_id != geometry.geometry_id
+        {
+            return Err(AuthoredStudyError::WrongGeometry);
         }
 
         let mut study_inputs = BTreeMap::new();
@@ -87,6 +123,8 @@ impl AuthoredStudy {
                 return Err(AuthoredStudyError::DuplicateInput(input.input_id.clone()));
             }
         }
+
+        validate_geometry_arguments(&self.geometry.arguments, geometry, &study_inputs)?;
 
         let model_inputs = model
             .inputs
@@ -113,7 +151,7 @@ impl AuthoredStudy {
                         }
                     })?;
                     if let AuthoredInputValue::Region(region) = value {
-                        validate_region_owner(region, &self.geometry)?;
+                        validate_region_owner(region, &self.geometry.definition)?;
                     }
                 }
                 AuthoredModelArgumentValue::StudyInput(reference) => {
@@ -148,10 +186,95 @@ impl AuthoredStudy {
         lower_authored_observations(&self.outputs, &self.sequence.steps)
             .map_err(|error| AuthoredStudyError::InvalidOutput(error.to_string()))?;
         for output in &self.outputs {
-            validate_output_regions(&output.expression, &self.geometry, model)?;
+            validate_output_regions(&output.expression, &self.geometry.definition, model)?;
         }
         Ok(())
     }
+}
+
+fn validate_geometry_arguments(
+    arguments: &[AuthoredGeometryArgument],
+    geometry: &GeometryDefinition,
+    study_inputs: &BTreeMap<&str, &AuthoredInputDefinition>,
+) -> Result<(), AuthoredStudyError> {
+    let parameters = geometry
+        .parameters
+        .iter()
+        .map(|parameter| (parameter.parameter_id.as_str(), parameter))
+        .collect::<BTreeMap<_, _>>();
+    let mut bound = BTreeSet::new();
+    for argument in arguments {
+        token("geometry argument id", &argument.parameter_id)?;
+        if !bound.insert(argument.parameter_id.as_str()) {
+            return Err(AuthoredStudyError::DuplicateGeometryArgument(
+                argument.parameter_id.clone(),
+            ));
+        }
+        let parameter = parameters
+            .get(argument.parameter_id.as_str())
+            .ok_or_else(|| {
+                AuthoredStudyError::UnknownGeometryParameter(argument.parameter_id.clone())
+            })?;
+        let expected = geometry_parameter_input_type(parameter).ok_or_else(|| {
+            AuthoredStudyError::UnsupportedGeometryParameter(argument.parameter_id.clone())
+        })?;
+        match &argument.value {
+            AuthoredGeometryArgumentValue::Constant(value) if value.matches(expected) => {
+                value
+                    .validate()
+                    .map_err(|error| AuthoredStudyError::InvalidGeometryArgument {
+                        parameter_id: argument.parameter_id.clone(),
+                        detail: error.to_string(),
+                    })?;
+            }
+            AuthoredGeometryArgumentValue::Constant(_) => {
+                return Err(AuthoredStudyError::GeometryArgumentTypeMismatch(
+                    argument.parameter_id.clone(),
+                ));
+            }
+            AuthoredGeometryArgumentValue::StudyInput(reference) => {
+                let input = study_inputs
+                    .get(reference.input_id.as_str())
+                    .ok_or_else(|| {
+                        AuthoredStudyError::UnknownStudyInput(reference.input_id.clone())
+                    })?;
+                if input.value_type != reference.value_type
+                    || !input_type_assignable(expected, input.value_type)
+                {
+                    return Err(AuthoredStudyError::GeometryArgumentTypeMismatch(
+                        argument.parameter_id.clone(),
+                    ));
+                }
+            }
+        }
+    }
+    if let Some(parameter) = geometry.parameters.iter().find(|parameter| {
+        parameter.required
+            && parameter.default.is_none()
+            && !bound.contains(parameter.parameter_id.as_str())
+    }) {
+        return Err(AuthoredStudyError::MissingGeometryArgument(
+            parameter.parameter_id.clone(),
+        ));
+    }
+    Ok(())
+}
+
+pub fn geometry_parameter_input_type(
+    parameter: &GeometryParameterDefinition,
+) -> Option<AuthoredInputType> {
+    Some(match parameter.parameter_type {
+        GeometryParameterType::Boolean => AuthoredInputType::Boolean,
+        GeometryParameterType::Scalar => AuthoredInputType::Real,
+        GeometryParameterType::Length => {
+            AuthoredInputType::Quantity(runmat_types::QuantityDimension::Length)
+        }
+        GeometryParameterType::Angle => {
+            AuthoredInputType::Quantity(runmat_types::QuantityDimension::Dimensionless)
+        }
+        GeometryParameterType::Text => AuthoredInputType::String,
+        GeometryParameterType::Vector3 => return None,
+    })
 }
 
 fn validate_output_regions(
@@ -230,6 +353,23 @@ pub enum AuthoredStudyError {
     DuplicateInput(String),
     #[error("study input is invalid: {0}")]
     InvalidInput(String),
+    #[error("study geometry identity does not match the validated geometry")]
+    WrongGeometry,
+    #[error("geometry argument `{0}` is duplicated")]
+    DuplicateGeometryArgument(String),
+    #[error("geometry argument references unknown parameter `{0}`")]
+    UnknownGeometryParameter(String),
+    #[error("required geometry parameter `{0}` is not bound")]
+    MissingGeometryArgument(String),
+    #[error("geometry parameter `{0}` cannot be bound from a study input")]
+    UnsupportedGeometryParameter(String),
+    #[error("geometry argument `{0}` has an incompatible study-input type")]
+    GeometryArgumentTypeMismatch(String),
+    #[error("geometry argument `{parameter_id}` is invalid: {detail}")]
+    InvalidGeometryArgument {
+        parameter_id: String,
+        detail: String,
+    },
     #[error("study model identity does not match the validated model")]
     WrongModel,
     #[error("model argument `{0}` is duplicated")]
@@ -295,9 +435,12 @@ mod tests {
         AuthoredStudy {
             module_path: "project/main.fea".into(),
             study_id: "response".into(),
-            geometry: GeometryDefinitionRef {
-                module_path: "project/main.fea".into(),
-                geometry_id: "part".into(),
+            geometry: AuthoredGeometryInstance {
+                definition: GeometryDefinitionRef {
+                    module_path: "project/main.fea".into(),
+                    geometry_id: "part".into(),
+                },
+                arguments: Vec::new(),
             },
             mesh: AuthoredMeshRef {
                 module_path: "project/main.fea".into(),
@@ -334,9 +477,32 @@ mod tests {
         }
     }
 
+    fn geometry() -> GeometryDefinition {
+        GeometryDefinition {
+            module_path: "project/main.fea".into(),
+            geometry_id: "part".into(),
+            parameters: Vec::new(),
+            source: runmat_geometry_core::GeometryDefinitionSource::Constructed(
+                runmat_geometry_core::GeometryFeatureGraph {
+                    features: vec![runmat_geometry_core::GeometryFeature {
+                        feature_id: "body".into(),
+                        operation: runmat_geometry_core::GeometryFeatureOperation::Box {
+                            width_m: 1.0.into(),
+                            depth_m: 1.0.into(),
+                            height_m: 1.0.into(),
+                        },
+                    }],
+                    result: runmat_geometry_core::GeometryFeatureRef("body".into()),
+                },
+            ),
+            regions: Vec::new(),
+            cad_parameters: Vec::new(),
+        }
+    }
+
     #[test]
     fn required_model_input_can_bind_one_exact_study_input() {
-        study().validate(&model()).unwrap();
+        study().validate(&model(), &geometry()).unwrap();
     }
 
     #[test]
@@ -358,7 +524,7 @@ mod tests {
             },
         });
 
-        let error = study.validate(&model()).unwrap_err();
+        let error = study.validate(&model(), &geometry()).unwrap_err();
         assert!(matches!(error, AuthoredStudyError::InvalidOutput(_)));
         assert!(error.to_string().contains("error-bounded compression"));
     }

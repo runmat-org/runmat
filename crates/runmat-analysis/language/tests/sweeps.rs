@@ -149,6 +149,126 @@ sweep qualification : study.response {
     }
 }
 
+#[test]
+fn geometry_inputs_are_bound_by_each_sweep_case_before_materialization() {
+    let source = r#"
+geometry part {
+    input width : length
+    input depth : length = 1 m
+    construct {
+        feature body = box(width = input.width, depth = input.depth, height = 1 m)
+        result = feature.body
+    }
+    region body : solid {
+        select result
+        expect exactly_one
+    }
+}
+mesh part on geometry.part {
+    tetrahedra {
+        order = linear
+        target_size = 0.1 m
+        maximum_deviation = 0.01 m
+    }
+}
+model structure {}
+study response {
+    input stock_width : length {
+        minimum = 0.5 m
+        maximum = 2 m
+    }
+    geometry = geometry.part(width = input.stock_width)
+    mesh = mesh.part
+    model = model.structure
+    analysis static { structural static {} }
+}
+sweep sizes : study.response {
+    axis stock_width {
+        narrow = 0.75 m
+        wide = 1.5 m
+    }
+    combine = product
+}
+"#;
+    let program = check(source);
+    assert!(program.is_valid(), "{:#?}", program.diagnostics);
+    let study = program.studies.values().next().unwrap();
+    let geometry = program.geometries.values().next().unwrap();
+    let model = program.models.values().next().unwrap();
+    let sweep = program.sweeps.values().next().unwrap();
+    let cases = sweep.expand_cases(study).unwrap();
+    assert_eq!(cases.len(), 2);
+
+    let widths = cases
+        .iter()
+        .map(|case| {
+            let bindings = case
+                .bindings
+                .iter()
+                .map(|binding| runmat_analysis_core::AuthoredStudyInputBinding {
+                    input_id: binding.input_id.clone(),
+                    value: binding.value.clone(),
+                })
+                .collect::<Vec<_>>();
+            let realized = study.realize(model, geometry, &bindings).unwrap();
+            assert_eq!(realized.geometry.bindings.len(), 2);
+            assert!(matches!(
+                realized.geometry.bindings["depth"],
+                runmat_geometry_core::GeometryAuthoringValue::Scalar(_)
+            ));
+            let runmat_geometry_core::GeometryAuthoringValue::Scalar(
+                runmat_geometry_core::GeometryScalarExpression::Literal { value },
+            ) = realized.geometry.bindings["width"]
+            else {
+                panic!("geometry width must realize to one canonical SI scalar");
+            };
+            value
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(widths, [0.75, 1.5]);
+    assert_eq!(geometry.parameters.len(), 2);
+}
+
+#[test]
+fn geometry_bindings_reject_missing_unknown_and_wrong_typed_arguments() {
+    let prefix = r#"
+geometry part {
+    input width : length
+    construct {
+        feature body = box(width = input.width, depth = 1 m, height = 1 m)
+        result = feature.body
+    }
+}
+mesh part on geometry.part {
+    tetrahedra {
+        order = linear
+        target_size = 0.1 m
+        maximum_deviation = 0.01 m
+    }
+}
+model structure {}
+"#;
+    for geometry_binding in [
+        "geometry.part",
+        "geometry.part(missing = input.stock_width)",
+        "geometry.part(width = input.ratio)",
+    ] {
+        let inputs = if geometry_binding.contains("ratio") {
+            "input stock_width : length = 1 m\n    input ratio : real = 1"
+        } else {
+            "input stock_width : length = 1 m"
+        };
+        let source = format!(
+            "{prefix}\nstudy response {{\n    {inputs}\n    geometry = {geometry_binding}\n    mesh = mesh.part\n    model = model.structure\n    analysis static {{ structural static {{}} }}\n}}"
+        );
+        let program = check(&source);
+        assert!(
+            !program.is_valid(),
+            "invalid geometry binding was accepted: {geometry_binding}"
+        );
+    }
+}
+
 fn check(source: &str) -> CheckedFeaProgram {
     let host = TestHost::default()
         .with_module("project/unused.fea", "", 2)

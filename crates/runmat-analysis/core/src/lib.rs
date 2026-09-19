@@ -51,9 +51,11 @@ pub use execution_policy::{
     ParallelismLimit, PartitionBalance, PlacementPreference, ResiliencePolicy,
 };
 pub use study::{
-    authored_output_types, lower_authored_observations, validate_authored_outputs,
-    AuthoredCaseOutputRef, AuthoredExtremaTiePolicy, AuthoredFieldDomain, AuthoredFieldProjection,
-    AuthoredMeshRef, AuthoredModelArgument, AuthoredModelArgumentValue, AuthoredModelInstance,
+    authored_output_types, geometry_parameter_input_type, lower_authored_observations,
+    validate_authored_outputs, AuthoredCaseOutputRef, AuthoredExtremaTiePolicy,
+    AuthoredFieldDomain, AuthoredFieldProjection, AuthoredGeometryArgument,
+    AuthoredGeometryArgumentValue, AuthoredGeometryInstance, AuthoredMeshRef,
+    AuthoredModelArgument, AuthoredModelArgumentValue, AuthoredModelInstance,
     AuthoredObservationError, AuthoredOutput, AuthoredOutputError, AuthoredOutputExpression,
     AuthoredOutputPolicy, AuthoredOutputType, AuthoredOutputValue, AuthoredPrincipalSelection,
     AuthoredSeriesDomain, AuthoredSeriesReduction, AuthoredSpatialReduction, AuthoredStudy,
@@ -61,8 +63,8 @@ pub use study::{
     AuthoredStudyRealizationError, AuthoredStudyRef, AuthoredSweep, AuthoredSweepAxis,
     AuthoredSweepAxisValue, AuthoredSweepBinding, AuthoredSweepCase, AuthoredSweepDefinition,
     AuthoredSweepError, AuthoredSweepOutput, AuthoredSweepOutputExpression,
-    AuthoredVectorComponent, CaseOutputProjection, LoweredAuthoredObservation, RealizedStudy,
-    SweepAxisCombination, SweepExtremum,
+    AuthoredVectorComponent, CaseOutputProjection, LoweredAuthoredObservation,
+    RealizedGeometryInstance, RealizedStudy, SweepAxisCombination, SweepExtremum,
 };
 pub use validate::physics_family_can_consume_state;
 pub use validate_authored::validate_coordinate_frame;

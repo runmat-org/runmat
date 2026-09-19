@@ -87,8 +87,9 @@ study response {
         .values()
         .find(|model| model.model_id == "bracket")
         .unwrap();
+    let geometry = program.geometries.values().next().unwrap();
     assert!(matches!(
-        study.realize(root, &[]),
+        study.realize(root, geometry, &[]),
         Err(runmat_analysis_core::AuthoredStudyRealizationError::MissingModel(_))
     ));
     let catalog = program
@@ -96,7 +97,7 @@ study response {
         .values()
         .map(|model| (model.reference(), model.clone()))
         .collect();
-    let realized = study.realize_with_models(&catalog, &[]).unwrap();
+    let realized = study.realize_with_models(&catalog, geometry, &[]).unwrap();
     assert_eq!(realized.model.model_id, "bracket");
     assert_eq!(realized.included_models.len(), 2);
     assert_eq!(realized.included_models[0].model_id, "fastener");
@@ -137,7 +138,7 @@ study response {{
     assert!(program.is_valid(), "{:#?}", program.diagnostics);
     assert_eq!(program.models.values().next().unwrap().inputs.len(), 1);
     let study = program.studies.values().next().unwrap();
-    assert_eq!(study.geometry.geometry_id, "part");
+    assert_eq!(study.geometry.definition.geometry_id, "part");
     assert_eq!(study.mesh.mesh_id, "part");
     assert_eq!(study.inputs.len(), 1);
     assert!(matches!(
@@ -295,7 +296,7 @@ study response {
     assert!(program.is_valid(), "{:#?}", program.diagnostics);
     let study = program.studies.values().next().unwrap();
     assert_eq!(study.module_path, "project/main.fea");
-    assert_eq!(study.geometry.module_path, "project/library.fea");
+    assert_eq!(study.geometry.definition.module_path, "project/library.fea");
     assert_eq!(study.mesh.module_path, "project/library.fea");
     assert_eq!(study.model.model.module_path, "project/library.fea");
 }
@@ -472,7 +473,10 @@ study response {
     assert!(program.is_valid(), "{:#?}", program.diagnostics);
     let authored_model = program.models.values().next().unwrap();
     let authored_study = program.studies.values().next().unwrap();
-    let realized = authored_study.realize(authored_model, &[]).unwrap();
+    let geometry = program.geometries.values().next().unwrap();
+    let realized = authored_study
+        .realize(authored_model, geometry, &[])
+        .unwrap();
     assert!(realized.model.inputs.is_empty());
     assert!(realized.model.parameterized_signals.is_empty());
     let runmat_analysis_core::AuthoredExcitationTarget::Region(
@@ -496,6 +500,7 @@ study response {
     let overridden = authored_study
         .realize(
             authored_model,
+            geometry,
             &[runmat_analysis_core::AuthoredStudyInputBinding {
                 input_id: "commanded_load".into(),
                 value: runmat_analysis_core::AuthoredInputValue::Quantity {
@@ -518,6 +523,7 @@ study response {
 
     let out_of_bounds = authored_study.realize(
         authored_model,
+        geometry,
         &[runmat_analysis_core::AuthoredStudyInputBinding {
             input_id: "commanded_load".into(),
             value: runmat_analysis_core::AuthoredInputValue::Quantity {

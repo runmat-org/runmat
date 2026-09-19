@@ -6,8 +6,10 @@ use crate::{
     LogicalSourcePath,
 };
 use runmat_analysis_core::{
-    AuthoredMeshRef, AuthoredModel, AuthoredModelArgument, AuthoredModelArgumentValue,
-    AuthoredModelInstance, AuthoredModelRef, AuthoredStudy, AuthoredStudyInputRef,
+    geometry_parameter_input_type, AuthoredGeometryArgument, AuthoredGeometryArgumentValue,
+    AuthoredGeometryInstance, AuthoredMeshRef, AuthoredModel, AuthoredModelArgument,
+    AuthoredModelArgumentValue, AuthoredModelInstance, AuthoredModelRef, AuthoredStudy,
+    AuthoredStudyInputRef,
 };
 use runmat_geometry_core::GeometryDefinition;
 use runmat_meshing_core::MeshDefinition;
@@ -27,13 +29,8 @@ pub(super) fn lower(
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<AuthoredStudy> {
     let initial_errors = diagnostics.len();
-    let geometry = declaration_binding(
-        context.bound,
-        declaration,
-        "geometry",
-        FeaSymbolKind::Geometry,
-        diagnostics,
-    )?;
+    let (geometry, geometry_expression) =
+        geometry_binding(context.bound, declaration, diagnostics)?;
     let geometry_definition = context.geometries.get(&geometry)?;
     let mesh = declaration_binding(
         context.bound,
@@ -65,6 +62,13 @@ pub(super) fn lower(
         None
     })?;
     let inputs = super::super::input::lower_definitions(context.bound, declaration, diagnostics);
+    let geometry_arguments = geometry_arguments(
+        context.bound,
+        declaration,
+        geometry_expression,
+        geometry_definition,
+        diagnostics,
+    );
     let arguments = model_arguments(
         context.bound,
         declaration,
@@ -115,9 +119,12 @@ pub(super) fn lower(
     let study = AuthoredStudy {
         module_path: declaration.module.as_str().to_string(),
         study_id: declaration.key.name.clone(),
-        geometry: runmat_geometry_core::GeometryDefinitionRef {
-            module_path: geometry_definition.module_path.clone(),
-            geometry_id: geometry_definition.geometry_id.clone(),
+        geometry: AuthoredGeometryInstance {
+            definition: runmat_geometry_core::GeometryDefinitionRef {
+                module_path: geometry_definition.module_path.clone(),
+                geometry_id: geometry_definition.geometry_id.clone(),
+            },
+            arguments: geometry_arguments,
         },
         mesh: AuthoredMeshRef {
             module_path: mesh_definition.module_path.clone(),
@@ -134,7 +141,7 @@ pub(super) fn lower(
         outputs,
         sequence,
     };
-    if let Err(error) = study.validate(model) {
+    if let Err(error) = study.validate(model, geometry_definition) {
         lower::error(
             declaration,
             declaration.span,
@@ -144,6 +151,116 @@ pub(super) fn lower(
         return None;
     }
     Some(study)
+}
+
+fn geometry_binding<'a>(
+    bound: &BoundFeaProgram,
+    declaration: &'a CheckedFeaDeclaration,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Option<((LogicalSourcePath, FeaSymbolKey), &'a CheckedExpression)> {
+    let Some(expression) = values::assignment(&declaration.statements, "geometry") else {
+        return missing_binding(declaration, "geometry", diagnostics);
+    };
+    let path = match &expression.kind {
+        CheckedExpressionKind::Reference(path)
+        | CheckedExpressionKind::FunctionCall { function: path, .. } => path,
+        _ => return missing_binding(declaration, "geometry", diagnostics),
+    };
+    let key = symbol_key(bound, declaration, path, FeaSymbolKind::Geometry)
+        .or_else(|| missing_binding(declaration, "geometry", diagnostics))?;
+    Some((key, expression))
+}
+
+fn geometry_arguments(
+    bound: &BoundFeaProgram,
+    declaration: &CheckedFeaDeclaration,
+    expression: &CheckedExpression,
+    geometry: &GeometryDefinition,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Vec<AuthoredGeometryArgument> {
+    let CheckedExpressionKind::FunctionCall { arguments, .. } = &expression.kind else {
+        return Vec::new();
+    };
+    let parameters = geometry
+        .parameters
+        .iter()
+        .map(|parameter| (parameter.parameter_id.as_str(), parameter))
+        .collect::<BTreeMap<_, _>>();
+    arguments
+        .iter()
+        .filter_map(|argument| {
+            let CheckedCallArgument::Named { name, value } = argument else {
+                lower::error(
+                    declaration,
+                    expression.span,
+                    "geometry bindings in a study must use named arguments",
+                    diagnostics,
+                );
+                return None;
+            };
+            let Some(parameter) = parameters.get(name.as_str()) else {
+                lower::error(
+                    declaration,
+                    value.span,
+                    format!("geometry has no input `{name}`"),
+                    diagnostics,
+                );
+                return None;
+            };
+            let Some(expected) = geometry_parameter_input_type(parameter) else {
+                lower::error(
+                    declaration,
+                    value.span,
+                    format!("geometry input `{name}` cannot be bound from a study"),
+                    diagnostics,
+                );
+                return None;
+            };
+            let bound_value = match &value.kind {
+                CheckedExpressionKind::Reference(path)
+                    if matches!(path.as_slice(), [namespace, _] if namespace == "input") =>
+                {
+                    let input_id = path[1].clone();
+                    let Some(input) = declaration.inputs.get(&input_id) else {
+                        lower::error(
+                            declaration,
+                            value.span,
+                            format!("study has no input `{input_id}`"),
+                            diagnostics,
+                        );
+                        return None;
+                    };
+                    let Some(value_type) = super::super::input::authored_type(&input.value_type)
+                    else {
+                        lower::error(
+                            declaration,
+                            value.span,
+                            format!("study input `{input_id}` has no canonical authored type"),
+                            diagnostics,
+                        );
+                        return None;
+                    };
+                    AuthoredGeometryArgumentValue::StudyInput(AuthoredStudyInputRef {
+                        input_id,
+                        value_type,
+                    })
+                }
+                _ => AuthoredGeometryArgumentValue::Constant(
+                    super::super::input::lower_value(
+                        bound,
+                        declaration,
+                        expected,
+                        value,
+                        diagnostics,
+                    )?,
+                ),
+            };
+            Some(AuthoredGeometryArgument {
+                parameter_id: name.clone(),
+                value: bound_value,
+            })
+        })
+        .collect()
 }
 
 fn declaration_binding(

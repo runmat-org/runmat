@@ -23,8 +23,9 @@ pub use authored_output::{
     AuthoredSpatialReduction, AuthoredVectorComponent,
 };
 pub use authoring::{
-    AuthoredMeshRef, AuthoredModelArgument, AuthoredModelArgumentValue, AuthoredModelInstance,
-    AuthoredStudy, AuthoredStudyError, AuthoredStudyInputRef,
+    geometry_parameter_input_type, AuthoredGeometryArgument, AuthoredGeometryArgumentValue,
+    AuthoredGeometryInstance, AuthoredMeshRef, AuthoredModelArgument, AuthoredModelArgumentValue,
+    AuthoredModelInstance, AuthoredStudy, AuthoredStudyError, AuthoredStudyInputRef,
 };
 pub use compatibility::is_exposed_analysis_identity;
 pub use formulation::{
@@ -39,7 +40,10 @@ pub use identity::{
     AnalysisProcedure, CoupledPhysicsFamily, ExecutionFallbackPolicy, FormulationMaturity,
     PhysicsFamily, SolutionSpace,
 };
-pub use realization::{AuthoredStudyInputBinding, AuthoredStudyRealizationError, RealizedStudy};
+pub use realization::{
+    AuthoredStudyInputBinding, AuthoredStudyRealizationError, RealizedGeometryInstance,
+    RealizedStudy,
+};
 pub use sweep::{
     AuthoredCaseOutputRef, AuthoredStudyRef, AuthoredSweep, AuthoredSweepAxis,
     AuthoredSweepAxisValue, AuthoredSweepBinding, AuthoredSweepCase, AuthoredSweepDefinition,

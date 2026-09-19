@@ -428,3 +428,5 @@ fn failure(message: impl Into<String>) -> ProgramExecutionResponse {
 
 #[cfg(all(test, feature = "occt-native"))]
 mod geometry_materialization_tests;
+#[cfg(all(test, feature = "occt-native"))]
+mod geometry_sweep_tests;
