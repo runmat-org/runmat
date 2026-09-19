@@ -39,14 +39,15 @@ fn native_kernel_executes_conformal_mixed_structural_workload() {
     mesh.topology.regions[0].region_id = region;
     mesh.canonical_digest = StableDigest::ZERO;
     mesh.seal_canonical_digest().unwrap();
+    let attached_node_identity = mesh.topology.nodes[0].stable_identity.0;
     model.geometry_revision = mesh.geometry.geometry_revision as u32;
     model.structural = Some(StructuralModel {
         nodes: vec![
             StructuralNode {
                 node_id: 101,
                 coordinates_m: attached_coordinates,
-                solid_attachment: Some(ConformalSolidAttachment {
-                    geometry_vertex_id: "beam_root".into(),
+                solid_attachment: Some(ConformalSolidAttachment::SolverNode {
+                    stable_identity: attached_node_identity,
                 }),
             },
             StructuralNode {

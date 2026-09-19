@@ -1284,8 +1284,12 @@ fn resolve_structural_model(
                                     node.id
                                 ));
                             }
-                            Ok(runmat_analysis_core::ConformalSolidAttachment {
-                                geometry_vertex_id: geometry_vertex_id.to_string(),
+                            Ok(runmat_analysis_core::ConformalSolidAttachment::GeometryVertex {
+                                entity: runmat_geometry_core::PersistentEntityId {
+                                    kind: runmat_geometry_core::PersistentEntityKind::Vertex,
+                                    source_topology_id: geometry_vertex_id.to_owned(),
+                                    assembly_path: Vec::new(),
+                                },
                             })
                         })
                         .transpose()?,
@@ -1370,6 +1374,7 @@ fn resolve_shell_section(
     Ok(ShellSectionModel {
         section_id: section.id.clone(),
         thickness_m: required_f64(section.thickness_m, "shell_section.thickness_m")?,
+        integration_points: 3,
         shear_correction: section.shear_correction.unwrap_or(5.0 / 6.0),
         drilling_stiffness_scale: section.drilling_stiffness_scale.unwrap_or(1.0e-4),
     })
@@ -2168,14 +2173,14 @@ mod tests {
         let model = resolve_model(&study, inline_model(&study), &sample_geometry(), &intent)
             .expect("resolve model")
             .expect("model");
-        assert_eq!(
+        assert!(matches!(
             model.structural.as_ref().unwrap().nodes[0]
                 .solid_attachment
                 .as_ref()
-                .unwrap()
-                .geometry_vertex_id,
-            "vertex_000007"
-        );
+                .unwrap(),
+            runmat_analysis_core::ConformalSolidAttachment::GeometryVertex { entity }
+                if entity.source_topology_id == "vertex_000007"
+        ));
     }
 
     #[test]

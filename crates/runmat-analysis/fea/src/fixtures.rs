@@ -21,7 +21,7 @@ use runmat_analysis_core::{
 use runmat_analysis_core::{
     ElectricCurrent, ElectricPotential, Position, ReferencePoint, Temperature, Traction,
 };
-use runmat_geometry_core::UnitSystem;
+use runmat_geometry_core::{PersistentEntityId, PersistentEntityKind, UnitSystem};
 
 #[derive(Debug, Clone)]
 pub(crate) struct FixtureExcitation {
@@ -71,8 +71,12 @@ pub fn mixed_solid_beam_model(attached_coordinates_m: [f64; 3]) -> AnalysisModel
             StructuralNode {
                 node_id: 101,
                 coordinates_m: attached_coordinates_m,
-                solid_attachment: Some(ConformalSolidAttachment {
-                    geometry_vertex_id: "beam_root".into(),
+                solid_attachment: Some(ConformalSolidAttachment::GeometryVertex {
+                    entity: PersistentEntityId {
+                        kind: PersistentEntityKind::Vertex,
+                        source_topology_id: "beam_root".into(),
+                        assembly_path: vec!["root".into()],
+                    },
                 }),
             },
             StructuralNode {
@@ -903,6 +907,7 @@ fn structural_shell_plate_moment_reference() -> AnalysisModel {
         shell_sections: vec![ShellSectionModel {
             section_id: "panel_2mm".to_string(),
             thickness_m: 0.002,
+            integration_points: 3,
             shear_correction: 5.0 / 6.0,
             drilling_stiffness_scale: 1.0e-4,
         }],

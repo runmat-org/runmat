@@ -522,6 +522,7 @@ mod tests {
             shell_sections: vec![ShellSectionModel {
                 section_id: "panel_2mm".to_string(),
                 thickness_m: 0.002,
+                integration_points: 3,
                 shear_correction: 5.0 / 6.0,
                 drilling_stiffness_scale: 1.0e-4,
             }],

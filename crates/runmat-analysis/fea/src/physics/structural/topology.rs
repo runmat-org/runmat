@@ -76,7 +76,7 @@ struct ExplicitStructuralTopologyContract<'a> {
 struct ExplicitStructuralNodeContract {
     node_id: u32,
     coordinates_m: [u64; 3],
-    solid_attachment: Option<String>,
+    solid_attachment: Option<runmat_analysis_core::ConformalSolidAttachment>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -121,10 +121,7 @@ pub(crate) fn explicit_topology_digest(
             Ok(ExplicitStructuralNodeContract {
                 node_id: node.node_id,
                 coordinates_m: node.coordinates_m.map(f64::to_bits),
-                solid_attachment: node
-                    .solid_attachment
-                    .as_ref()
-                    .map(|attachment| attachment.geometry_vertex_id.clone()),
+                solid_attachment: node.solid_attachment.as_ref().cloned(),
             })
         })
         .collect::<Result<Vec<_>, _>>()?;

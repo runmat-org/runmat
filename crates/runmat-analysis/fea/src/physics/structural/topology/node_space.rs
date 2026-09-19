@@ -37,29 +37,24 @@ pub(crate) struct CanonicalStructuralNodeSpace {
 pub(crate) enum StructuralNodeSpaceError {
     #[error("mixed structural topology requires a valid canonical solver mesh: {0}")]
     InvalidMesh(String),
-    #[error("explicit node {node_id} has an empty CAD-vertex attachment")]
-    EmptyAttachment { node_id: u32 },
     #[error(
-        "explicit node {node_id} attachment `{geometry_vertex_id}` did not resolve to a solid-mesh CAD vertex"
+        "explicit node {node_id} attachment `{attachment_id}` did not resolve to one solid-mesh node"
     )]
-    MissingAttachment {
-        node_id: u32,
-        geometry_vertex_id: String,
-    },
+    MissingAttachment { node_id: u32, attachment_id: String },
     #[error(
-        "explicit node {node_id} attachment `{geometry_vertex_id}` resolved to {matched_node_count} solid-mesh nodes"
+        "explicit node {node_id} attachment `{attachment_id}` resolved to {matched_node_count} solid-mesh nodes"
     )]
     AmbiguousAttachment {
         node_id: u32,
-        geometry_vertex_id: String,
+        attachment_id: String,
         matched_node_count: usize,
     },
     #[error(
-        "explicit node {node_id} is {distance_m} m from attached CAD vertex `{geometry_vertex_id}`, exceeding topology tolerance {tolerance_m} m"
+        "explicit node {node_id} is {distance_m} m from attachment `{attachment_id}`, exceeding topology tolerance {tolerance_m} m"
     )]
     AttachmentCoordinateMismatch {
         node_id: u32,
-        geometry_vertex_id: String,
+        attachment_id: String,
         distance_m: f64,
         tolerance_m: f64,
     },
@@ -140,37 +135,27 @@ impl CanonicalStructuralNodeSpace {
         let mut attached = std::collections::BTreeMap::<usize, u32>::new();
         for node in &structural.nodes {
             let canonical_index = if let Some(attachment) = &node.solid_attachment {
-                let selection = attachment.geometry_vertex_id.trim();
-                if selection.is_empty() {
-                    return Err(StructuralNodeSpaceError::EmptyAttachment {
-                        node_id: node.node_id,
-                    });
-                }
+                let attachment_id = attachment_label(attachment);
                 let matches = mesh
                     .topology
                     .nodes
                     .iter()
                     .enumerate()
-                    .filter(|(_, candidate)| {
-                        candidate.provenance.iter().any(|entity| {
-                            entity.kind == PersistentEntityKind::Vertex
-                                && entity.matches_analysis_selection(selection)
-                        })
-                    })
+                    .filter(|(_, candidate)| attachment_matches(attachment, candidate))
                     .map(|(index, _)| index)
                     .collect::<Vec<_>>();
                 let canonical_index = match matches.as_slice() {
                     [] => {
                         return Err(StructuralNodeSpaceError::MissingAttachment {
                             node_id: node.node_id,
-                            geometry_vertex_id: attachment.geometry_vertex_id.clone(),
+                            attachment_id,
                         })
                     }
                     [index] => *index,
                     _ => {
                         return Err(StructuralNodeSpaceError::AmbiguousAttachment {
                             node_id: node.node_id,
-                            geometry_vertex_id: attachment.geometry_vertex_id.clone(),
+                            attachment_id,
                             matched_node_count: matches.len(),
                         })
                     }
@@ -188,7 +173,7 @@ impl CanonicalStructuralNodeSpace {
                 if !distance_m.is_finite() || distance_m > tolerance_m {
                     return Err(StructuralNodeSpaceError::AttachmentCoordinateMismatch {
                         node_id: node.node_id,
-                        geometry_vertex_id: attachment.geometry_vertex_id.clone(),
+                        attachment_id,
                         distance_m,
                         tolerance_m,
                     });
@@ -236,6 +221,35 @@ impl CanonicalStructuralNodeSpace {
                 structural_topology_digest,
             },
         })
+    }
+}
+
+fn attachment_matches(
+    attachment: &runmat_analysis_core::ConformalSolidAttachment,
+    candidate: &runmat_meshing_core::SolverMeshNode,
+) -> bool {
+    match attachment {
+        runmat_analysis_core::ConformalSolidAttachment::GeometryVertex { entity } => {
+            entity.kind == PersistentEntityKind::Vertex
+                && candidate.provenance.iter().any(|value| value == entity)
+        }
+        runmat_analysis_core::ConformalSolidAttachment::SolverNode { stable_identity } => {
+            candidate.stable_identity.0 == *stable_identity
+        }
+    }
+}
+
+fn attachment_label(attachment: &runmat_analysis_core::ConformalSolidAttachment) -> String {
+    match attachment {
+        runmat_analysis_core::ConformalSolidAttachment::GeometryVertex { entity } => entity
+            .analysis_selection_id()
+            .unwrap_or_else(|_| entity.source_topology_id.clone()),
+        runmat_analysis_core::ConformalSolidAttachment::SolverNode { stable_identity } => {
+            stable_identity
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect()
+        }
     }
 }
 
@@ -322,16 +336,15 @@ mod tests {
             source_topology_id: "beam-root".into(),
             assembly_path: vec!["root".into()],
         };
-        mesh.topology.nodes[0].provenance.push(vertex);
+        mesh.topology.nodes[0].provenance.push(vertex.clone());
         reseal(&mut mesh);
         let mut structural = crate::fixtures::fixture_model(
             crate::fixtures::FixtureId::StructuralBeamCantileverEndMomentReference,
         )
         .structural
         .expect("beam topology");
-        structural.nodes[0].solid_attachment = Some(ConformalSolidAttachment {
-            geometry_vertex_id: "beam-root".into(),
-        });
+        structural.nodes[0].solid_attachment =
+            Some(ConformalSolidAttachment::GeometryVertex { entity: vertex });
 
         let projected = CanonicalStructuralNodeSpace::derive(&mesh, &structural).unwrap();
         assert_eq!(projected.solid_node_count, 4);
@@ -351,8 +364,12 @@ mod tests {
         )
         .structural
         .expect("beam topology");
-        structural.nodes[0].solid_attachment = Some(ConformalSolidAttachment {
-            geometry_vertex_id: "beam-root".into(),
+        structural.nodes[0].solid_attachment = Some(ConformalSolidAttachment::GeometryVertex {
+            entity: runmat_geometry_core::PersistentEntityId {
+                kind: runmat_geometry_core::PersistentEntityKind::Vertex,
+                source_topology_id: "beam-root".into(),
+                assembly_path: Vec::new(),
+            },
         });
         assert!(matches!(
             CanonicalStructuralNodeSpace::derive(&mesh, &structural),
@@ -365,7 +382,9 @@ mod tests {
             assembly_path: vec!["root".into()],
         };
         mesh.topology.nodes[0].provenance.push(vertex.clone());
-        mesh.topology.nodes[1].provenance.push(vertex);
+        mesh.topology.nodes[1].provenance.push(vertex.clone());
+        structural.nodes[0].solid_attachment =
+            Some(ConformalSolidAttachment::GeometryVertex { entity: vertex });
         reseal(&mut mesh);
         assert!(matches!(
             CanonicalStructuralNodeSpace::derive(&mesh, &structural),
@@ -386,11 +405,12 @@ mod tests {
     #[test]
     fn topology_identity_changes_with_attachment_ownership() {
         let mut mesh = crate::assembly::solver_solid::tests::artifact(ElementOrder::Tet4);
-        mesh.topology.nodes[0].provenance.push(PersistentEntityId {
+        let vertex = PersistentEntityId {
             kind: PersistentEntityKind::Vertex,
             source_topology_id: "beam-root".into(),
             assembly_path: vec!["root".into()],
-        });
+        };
+        mesh.topology.nodes[0].provenance.push(vertex.clone());
         reseal(&mut mesh);
         let mut structural = crate::fixtures::fixture_model(
             crate::fixtures::FixtureId::StructuralBeamCantileverEndMomentReference,
@@ -398,9 +418,8 @@ mod tests {
         .structural
         .expect("beam topology");
         let disconnected = CanonicalStructuralNodeSpace::derive(&mesh, &structural).unwrap();
-        structural.nodes[0].solid_attachment = Some(ConformalSolidAttachment {
-            geometry_vertex_id: "beam-root".into(),
-        });
+        structural.nodes[0].solid_attachment =
+            Some(ConformalSolidAttachment::GeometryVertex { entity: vertex });
         let attached = CanonicalStructuralNodeSpace::derive(&mesh, &structural).unwrap();
         assert_ne!(disconnected.identity, attached.identity);
     }

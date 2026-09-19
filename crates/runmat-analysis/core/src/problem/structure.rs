@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use runmat_geometry_core::PersistentEntityId;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct StructuralModel {
     #[serde(default)]
@@ -19,13 +21,15 @@ pub struct StructuralNode {
     pub solid_attachment: Option<ConformalSolidAttachment>,
 }
 
-/// Declares that an explicit beam/shell node and the unique solid-mesh node carrying this exact
-/// CAD vertex provenance are one structural node. Translation is shared; the explicit
-/// formulation contributes any rotational degrees of freedom.
+/// Declares that an explicit beam/shell node and one exact canonical solid-mesh node are the same
+/// structural node. Translation is shared; the explicit formulation contributes any rotational
+/// degrees of freedom. Geometry-authored nodes bind by occurrence-qualified CAD identity, while
+/// mesh-derived nodes bind directly by canonical solver-node identity.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ConformalSolidAttachment {
-    pub geometry_vertex_id: String,
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum ConformalSolidAttachment {
+    GeometryVertex { entity: PersistentEntityId },
+    SolverNode { stable_identity: [u8; 32] },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -77,6 +81,7 @@ pub struct BeamSectionModel {
 pub struct ShellSectionModel {
     pub section_id: String,
     pub thickness_m: f64,
+    pub integration_points: u32,
     #[serde(default = "default_shell_shear_correction")]
     pub shear_correction: f64,
     #[serde(default = "default_shell_drilling_stiffness_scale")]
