@@ -96,7 +96,7 @@ fn execution_profile_facts(manifest: &ProjectManifest) -> Result<Vec<ExecutionPr
                 CapabilityRequirement::DistributedRuntime,
                 CapabilityRequirement::ParallelRuntime,
             ]);
-            if profile.accelerator {
+            if profile.accelerator.is_some() {
                 capabilities.insert(CapabilityRequirement::Accelerator);
             }
             Ok(ExecutionProfileFacts {
@@ -142,7 +142,9 @@ roots = ["src"]
 cluster = "cpu-cluster"
 [execution-profiles.gpu]
 cluster = "gpu-cluster"
-accelerator = true
+[execution-profiles.gpu.accelerator]
+class = "metal"
+memory-bytes = 17179869184
 "#,
         )
         .unwrap();

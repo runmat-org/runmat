@@ -15,7 +15,7 @@ pub use entrypoint::{
     DiscoveredProjectEntrypoint, ProjectEntrypointResolveError, ResolveProjectSourceInputError,
     ResolvedEntrypointTarget, ResolvedProjectEntrypoint,
 };
-pub use execution_profile::ProjectExecutionProfile;
+pub use execution_profile::{ProjectAcceleratorProfile, ProjectExecutionProfile};
 pub use manifest::{
     discover_project_manifest_from, discover_project_manifest_from_async, load_project_manifest,
     load_project_manifest_async, load_project_manifest_async_with_options,

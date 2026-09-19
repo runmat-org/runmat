@@ -198,6 +198,7 @@ impl WorkerBackend for RemoteTestBackend {
                         request.attempt
                     )),
                     workers: 1,
+                    accelerator: None,
                     on_run_created: Some(Arc::new(move |run_id| {
                         *active_run.lock().expect("remote test session poisoned") = Some(run_id);
                     })),

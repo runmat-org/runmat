@@ -116,6 +116,7 @@ pub(super) async fn execute(
             trust_identity: target.trust_identity,
             idempotency_key: target.idempotency_key,
             workers: worker_count,
+            accelerator: None,
             on_run_created: None,
             output_intent: SavedOutputIntent::Mesh {
                 solver_mesh_path: output.clone(),

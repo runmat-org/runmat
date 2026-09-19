@@ -61,7 +61,9 @@ roots = ["src"]
 cluster = "fea-production"
 queue = "cpu"
 trust-identity = "sha256:trusted-worker"
-accelerator = true
+[execution-profiles.engineering.accelerator]
+class = "metal"
+memory-bytes = 17179869184
 "#,
     );
 
@@ -73,7 +75,9 @@ accelerator = true
         profile.trust_identity.as_deref(),
         Some("sha256:trusted-worker")
     );
-    assert!(profile.accelerator);
+    let accelerator = profile.accelerator.as_ref().unwrap();
+    assert_eq!(accelerator.class, "metal");
+    assert_eq!(accelerator.memory_bytes, 17_179_869_184);
 }
 
 #[test]
@@ -96,6 +100,33 @@ cluster = " "
 
     let error = load_project_manifest(&manifest_path).unwrap_err();
     assert!(error.to_string().contains("execution profile cluster"));
+}
+
+#[test]
+fn rejects_unbounded_execution_profile_accelerator() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("src")).unwrap();
+    let manifest_path = write_manifest(
+        tmp.path(),
+        r#"
+[package]
+name = "analysis"
+
+[sources]
+roots = ["src"]
+
+[execution-profiles.gpu]
+cluster = "gpu-cluster"
+
+[execution-profiles.gpu.accelerator]
+class = "metal"
+memory-bytes = 0
+"#,
+    );
+    let error = load_project_manifest(&manifest_path).unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("execution profile accelerator memory"));
 }
 
 #[test]

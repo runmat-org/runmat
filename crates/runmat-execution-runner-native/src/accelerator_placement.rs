@@ -2,7 +2,7 @@ use runmat_execution::resource::AcceleratorRequest;
 
 use crate::{NativeExecutionError, NativeExecutionResult};
 
-pub(crate) fn active_provider_resource() -> NativeExecutionResult<AcceleratorRequest> {
+pub fn active_provider_resource() -> NativeExecutionResult<AcceleratorRequest> {
     let capability = active_hardware_capability()?;
     let class = capability.device.backend.ok_or_else(|| {
         configuration(

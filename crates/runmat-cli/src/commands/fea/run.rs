@@ -13,7 +13,7 @@ use crate::commands::job::secret::SavedOutputIntent;
 use crate::commands::job::submit::{PreparedRemoteExecution, RemoteSubmissionOptions};
 use crate::presentation;
 
-use super::preparation::prepare_study;
+use super::preparation::{prepare_study, FeaComputeAllocation};
 use super::selection::SelectedFeaRoot;
 use super::source::CheckedFeaSource;
 
@@ -26,13 +26,13 @@ pub(super) async fn execute(
     config: &RunMatRuntimeConfig,
     json: bool,
 ) -> Result<()> {
-    let target = resolve_target(&source, &root, &execution)?;
+    let execution = resolve_execution(&source, &root, &execution)?;
     match root {
         SelectedFeaRoot::Study(study) => {
-            execute_study(&path, &source, study, Vec::new(), target, config, json).await
+            execute_study(&path, &source, study, Vec::new(), execution, config, json).await
         }
         SelectedFeaRoot::Sweep(sweep) => {
-            execute_sweep(&path, &source, sweep, target, config, json).await
+            execute_sweep(&path, &source, sweep, execution, config, json).await
         }
     }
 }
@@ -42,14 +42,21 @@ async fn execute_study(
     source: &CheckedFeaSource,
     study: ResolvedAnalysisStudy,
     inputs: Vec<AuthoredStudyInputBinding>,
-    target: ExecutionTarget,
+    execution: ResolvedFeaExecution,
     config: &RunMatRuntimeConfig,
     json: bool,
 ) -> Result<()> {
-    match target {
+    match execution.target {
         ExecutionTarget::Local => {
             let authority = format!("typed-fea-local:{}", uuid::Uuid::new_v4());
-            let prepared = prepare_study(source, study, &inputs, &authority, config)?;
+            let prepared = prepare_study(
+                source,
+                study,
+                &inputs,
+                &authority,
+                &execution.compute,
+                config,
+            )?;
             let study_id = prepared.realized.study_id.clone();
             let completed =
                 runmat_execution_runner_native::execute_prepared_structural_study_locally(
@@ -62,7 +69,17 @@ async fn execute_study(
             print_local_result(&study_id, &completed, json)
         }
         ExecutionTarget::Remote(target) => {
-            execute_study_remotely(path, source, study, inputs, target, config, json).await
+            execute_study_remotely(
+                path,
+                source,
+                study,
+                inputs,
+                target,
+                execution.compute,
+                config,
+                json,
+            )
+            .await
         }
     }
 }
@@ -71,7 +88,7 @@ async fn execute_sweep(
     _path: &PathBuf,
     source: &CheckedFeaSource,
     sweep: ResolvedAnalysisSweep,
-    target: ExecutionTarget,
+    execution: ResolvedFeaExecution,
     config: &RunMatRuntimeConfig,
     json: bool,
 ) -> Result<()> {
@@ -79,7 +96,7 @@ async fn execute_sweep(
     if cases.is_empty() {
         bail!("typed FEA sweep contains no cases");
     }
-    match target {
+    match execution.target {
         ExecutionTarget::Local => {
             let case_count = cases.len();
             let mut prepared_cases = Vec::with_capacity(case_count);
@@ -97,7 +114,14 @@ async fn execute_sweep(
                     sweep.sweep.sweep_id, case.case_id
                 );
                 let prepared =
-                    prepare_study(source, sweep.study.clone(), &inputs, &authority, config)?;
+                    prepare_study(
+                        source,
+                        sweep.study.clone(),
+                        &inputs,
+                        &authority,
+                        &execution.compute,
+                        config,
+                    )?;
                 prepared_cases.push((index, case.case_id, prepared));
             }
             let concurrent_cases = sweep_case_concurrency(&sweep, &prepared_cases);
@@ -166,6 +190,7 @@ async fn execute_study_remotely(
     study: ResolvedAnalysisStudy,
     inputs: Vec<AuthoredStudyInputBinding>,
     target: RemoteExecutionTarget,
+    compute: FeaComputeAllocation,
     config: &RunMatRuntimeConfig,
     json: bool,
 ) -> Result<()> {
@@ -178,6 +203,7 @@ async fn execute_study_remotely(
         study.clone(),
         &inputs,
         "bundle-sizing-authority",
+        &compute,
         config,
     )?;
     let revision = placeholder.revision.clone();
@@ -202,7 +228,7 @@ async fn execute_study_remotely(
         revision.clone(),
         bundle_size,
         |run_id| {
-            let prepared = prepare_study(source, study, &inputs, run_id, config)?;
+            let prepared = prepare_study(source, study, &inputs, run_id, &compute, config)?;
             let remote = super::remote::prepare_typed_remote_execution(
                 prepared.root,
                 revision_for_root,
@@ -217,6 +243,7 @@ async fn execute_study_remotely(
             trust_identity: target.trust_identity,
             idempotency_key: target.idempotency_key,
             workers: target.workers.max(1),
+            accelerator: compute.accelerators.first().cloned(),
             on_run_created: None,
             output_intent: SavedOutputIntent::Generic,
         },
@@ -238,56 +265,132 @@ async fn execute_study_remotely(
     crate::commands::job::attach::attach(&committed.id, false, json).await
 }
 
-fn resolve_target(
+struct ResolvedFeaExecution {
+    target: ExecutionTarget,
+    compute: FeaComputeAllocation,
+}
+
+fn resolve_execution(
     source: &CheckedFeaSource,
     root: &SelectedFeaRoot,
     args: &ExecutionTargetArgs,
-) -> Result<ExecutionTarget> {
-    if args.cluster.is_some() {
-        return args.resolve();
-    }
+) -> Result<ResolvedFeaExecution> {
     let policy = match root {
         SelectedFeaRoot::Study(root) => root.execution_policy.as_ref(),
         SelectedFeaRoot::Sweep(root) => root.study.execution_policy.as_ref(),
     };
-    let Some(runmat_analysis_core::PlacementPreference::Cluster { profile }) =
-        policy.map(|policy| &policy.placement)
-    else {
-        return args.resolve();
-    };
-    if args.project.is_some()
-        || args.queue.is_some()
-        || args.trust_identity.is_some()
-        || args.idempotency_key.is_some()
-        || args.workers.is_some()
-        || args.detach
-    {
-        bail!("remote CLI options require an explicit --cluster override");
+    let profile_name = policy.and_then(|policy| match &policy.placement {
+        runmat_analysis_core::PlacementPreference::Cluster { profile } => profile.as_deref(),
+        runmat_analysis_core::PlacementPreference::Auto
+        | runmat_analysis_core::PlacementPreference::Local => None,
+    });
+    let profile = profile_name.and_then(|name| {
+        source
+            .project_manifest
+            .as_ref()
+            .and_then(|manifest| manifest.execution_profiles.get(name))
+    });
+    if profile_name.is_some() && profile.is_none() {
+        bail!(
+            "execution profile `{}` is unavailable",
+            profile_name.expect("checked above")
+        );
     }
-    let profile = profile.as_deref().context(
-        "cluster placement without an execution profile requires an explicit --cluster override",
-    )?;
-    let route = source
-        .project_manifest
-        .as_ref()
-        .and_then(|manifest| manifest.execution_profiles.get(profile))
-        .with_context(|| format!("execution profile `{profile}` is unavailable"))?;
-    let trust_identity = route
-        .trust_identity
-        .clone()
-        .with_context(|| format!("execution profile `{profile}` has no pinned trust identity"))?;
-    let workers = policy
-        .and_then(|policy| policy.resources.workers)
-        .map_or(1, |range| range.maximum.max(1));
-    Ok(ExecutionTarget::Remote(RemoteExecutionTarget {
-        cluster: route.cluster.clone(),
-        project: None,
-        queue: route.queue.clone().unwrap_or_else(|| "default".into()),
-        trust_identity,
-        idempotency_key: None,
-        workers,
-        detach: false,
-    }))
+    let target = if args.cluster.is_some() {
+        args.resolve()?
+    } else if matches!(
+        policy.map(|policy| &policy.placement),
+        Some(runmat_analysis_core::PlacementPreference::Cluster { .. })
+    ) {
+        if args.project.is_some()
+            || args.queue.is_some()
+            || args.trust_identity.is_some()
+            || args.idempotency_key.is_some()
+            || args.workers.is_some()
+            || args.detach
+        {
+            bail!("remote CLI options require an explicit --cluster override");
+        }
+        let profile_name = profile_name.context(
+            "cluster placement without an execution profile requires an explicit --cluster override",
+        )?;
+        let route = profile.context("execution profile disappeared during placement")?;
+        let trust_identity = route.trust_identity.clone().with_context(|| {
+            format!("execution profile `{profile_name}` has no pinned trust identity")
+        })?;
+        let workers = policy
+            .and_then(|policy| policy.resources.workers)
+            .map_or(1, |range| range.maximum.max(1));
+        ExecutionTarget::Remote(RemoteExecutionTarget {
+            cluster: route.cluster.clone(),
+            project: None,
+            queue: route.queue.clone().unwrap_or_else(|| "default".into()),
+            trust_identity,
+            idempotency_key: None,
+            workers,
+            detach: false,
+        })
+    } else {
+        args.resolve()?
+    };
+    let allocation_profile = match (&target, profile) {
+        (ExecutionTarget::Remote(target), Some(profile)) if target.cluster == profile.cluster => {
+            Some(profile)
+        }
+        (ExecutionTarget::Remote(_), _) => None,
+        (ExecutionTarget::Local, profile) => profile,
+    };
+    let compute = resolve_compute_allocation(policy, &target, allocation_profile)?;
+    Ok(ResolvedFeaExecution { target, compute })
+}
+
+fn resolve_compute_allocation(
+    policy: Option<&runmat_analysis_core::AuthoredExecutionPolicy>,
+    target: &ExecutionTarget,
+    profile: Option<&runmat_config::project::ProjectExecutionProfile>,
+) -> Result<FeaComputeAllocation> {
+    use runmat_analysis_core::{AcceleratorPreference, BackendPreference};
+
+    let backend = policy.map_or(BackendPreference::Auto, |policy| policy.backend);
+    let preference = policy.map_or(AcceleratorPreference::Disabled, |policy| {
+        policy.resources.accelerators
+    });
+    if backend == BackendPreference::Cpu || preference == AcceleratorPreference::Disabled {
+        return Ok(FeaComputeAllocation {
+            backend: runmat_analysis_fea::ComputeBackend::Cpu,
+            accelerators: Vec::new(),
+        });
+    }
+    let required =
+        backend == BackendPreference::Accelerator || preference == AcceleratorPreference::Required;
+    let allocation = match target {
+        ExecutionTarget::Local => runmat_execution_runner_native::active_provider_resource()
+            .map_err(anyhow::Error::new),
+        ExecutionTarget::Remote(_) => profile
+            .and_then(|profile| profile.accelerator.as_ref())
+            .map(|accelerator| runmat_execution::resource::AcceleratorRequest {
+                class: accelerator.class.clone(),
+                count: 1,
+                memory_bytes_each: accelerator.memory_bytes,
+            })
+            .context(
+                "remote accelerator execution requires an exact accelerator allocation in the selected execution profile",
+            ),
+    };
+    match allocation {
+        Ok(request) => {
+            request.validate().map_err(anyhow::Error::msg)?;
+            Ok(FeaComputeAllocation {
+                backend: runmat_analysis_fea::ComputeBackend::Gpu,
+                accelerators: vec![request],
+            })
+        }
+        Err(_) if !required => Ok(FeaComputeAllocation {
+            backend: runmat_analysis_fea::ComputeBackend::Cpu,
+            accelerators: Vec::new(),
+        }),
+        Err(error) => Err(error),
+    }
 }
 
 #[derive(Serialize)]
@@ -394,5 +497,77 @@ fn numerical_kind(
         }
         StructuralStudyNumericalResult::StructuralTransient(_) => "structural_transient",
         StructuralStudyNumericalResult::StructuralFrequency(_) => "structural_frequency",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use runmat_analysis_core::{
+        AcceleratorPreference, AuthoredExecutionPolicy, BackendPreference, CooperativePolicy,
+        ExecutionResourceLimits, FanoutPolicy, PlacementPreference, ResiliencePolicy,
+    };
+    use runmat_config::project::{ProjectAcceleratorProfile, ProjectExecutionProfile};
+
+    use super::*;
+
+    fn remote_target() -> ExecutionTarget {
+        ExecutionTarget::Remote(RemoteExecutionTarget {
+            cluster: "gpu-cluster".into(),
+            project: None,
+            queue: "gpu".into(),
+            trust_identity: "sha256:worker".into(),
+            idempotency_key: None,
+            workers: 2,
+            detach: false,
+        })
+    }
+
+    fn policy(accelerators: AcceleratorPreference) -> AuthoredExecutionPolicy {
+        AuthoredExecutionPolicy {
+            module_path: "project/main.fea".into(),
+            policy_id: "scale".into(),
+            placement: PlacementPreference::Cluster {
+                profile: Some("gpu".into()),
+            },
+            backend: BackendPreference::Accelerator,
+            resources: ExecutionResourceLimits {
+                workers: None,
+                maximum_memory_bytes_per_worker: None,
+                accelerators,
+            },
+            fanout: FanoutPolicy::default(),
+            cooperative: CooperativePolicy::default(),
+            resilience: ResiliencePolicy::default(),
+        }
+    }
+
+    #[test]
+    fn remote_accelerator_planning_requires_and_retains_exact_profile_allocation() {
+        let profile = ProjectExecutionProfile {
+            cluster: "gpu-cluster".into(),
+            queue: Some("gpu".into()),
+            trust_identity: Some("sha256:worker".into()),
+            accelerator: Some(ProjectAcceleratorProfile {
+                class: "metal".into(),
+                memory_bytes: 16 << 30,
+            }),
+        };
+        let allocation = resolve_compute_allocation(
+            Some(&policy(AcceleratorPreference::Required)),
+            &remote_target(),
+            Some(&profile),
+        )
+        .unwrap();
+        assert_eq!(allocation.backend, runmat_analysis_fea::ComputeBackend::Gpu);
+        assert_eq!(allocation.accelerators.len(), 1);
+        assert_eq!(allocation.accelerators[0].class, "metal");
+        assert_eq!(allocation.accelerators[0].memory_bytes_each, 16 << 30);
+
+        assert!(resolve_compute_allocation(
+            Some(&policy(AcceleratorPreference::Required)),
+            &remote_target(),
+            None,
+        )
+        .is_err());
     }
 }

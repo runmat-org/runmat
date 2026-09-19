@@ -15,9 +15,18 @@ pub struct ProjectExecutionProfile {
     /// Pinned endpoint identity. Credentials remain in the credential store.
     #[serde(default, rename = "trust-identity")]
     pub trust_identity: Option<String>,
-    /// Whether the profile admits accelerator-backed execution.
+    /// Exact scheduler accelerator allocation admitted by this profile.
     #[serde(default)]
-    pub accelerator: bool,
+    pub accelerator: Option<ProjectAcceleratorProfile>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub struct ProjectAcceleratorProfile {
+    /// Scheduler/provider class, for example `metal`, `cuda`, or `wgpu`.
+    pub class: String,
+    /// Guaranteed device memory for the single admitted accelerator.
+    pub memory_bytes: u64,
 }
 
 impl ProjectExecutionProfile {
@@ -30,6 +39,17 @@ impl ProjectExecutionProfile {
         }
         if let Some(identity) = self.trust_identity.as_deref() {
             validate_text(identity, "execution profile trust identity", &mut messages);
+        }
+        if let Some(accelerator) = &self.accelerator {
+            validate_text(
+                &accelerator.class,
+                "execution profile accelerator class",
+                &mut messages,
+            );
+            if accelerator.memory_bytes == 0 {
+                messages
+                    .push("execution profile accelerator memory must be greater than zero".into());
+            }
         }
         messages
     }

@@ -1,6 +1,7 @@
 //! Native process composition for the portable RunMat execution driver.
 
 mod accelerator_placement;
+pub use accelerator_placement::active_provider_resource;
 mod analysis_buckling;
 mod analysis_frequency;
 mod analysis_frequency_observations;

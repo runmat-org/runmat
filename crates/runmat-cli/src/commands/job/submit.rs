@@ -47,6 +47,7 @@ pub(crate) struct RemoteSubmissionOptions {
     pub trust_identity: String,
     pub idempotency_key: Option<String>,
     pub workers: u32,
+    pub accelerator: Option<runmat_execution::resource::AcceleratorRequest>,
     pub on_run_created: Option<Arc<dyn Fn(String) + Send + Sync>>,
     pub output_intent: super::secret::SavedOutputIntent,
 }
@@ -182,6 +183,7 @@ pub async fn submit(
             trust_identity,
             idempotency_key,
             workers,
+            accelerator: None,
             on_run_created: None,
             output_intent: secret::SavedOutputIntent::Generic,
         },
@@ -242,6 +244,23 @@ pub(crate) async fn submit_scoped<F>(
 where
     F: FnOnce(&str) -> Result<PreparedRemoteExecution>,
 {
+    if let Some(accelerator) = &options.accelerator {
+        accelerator.validate().map_err(anyhow::Error::msg)?;
+    }
+    let accelerator_count = options
+        .accelerator
+        .as_ref()
+        .map(|request| i32::try_from(request.count).context("accelerator count exceeds API range"))
+        .transpose()?
+        .unwrap_or(0);
+    let accelerator_memory_bytes = options
+        .accelerator
+        .as_ref()
+        .map(|request| {
+            i64::try_from(request.memory_bytes_each).context("accelerator memory exceeds API range")
+        })
+        .transpose()?
+        .unwrap_or(0);
     let (client, server_url, project_id) = super::client(options.project).await?;
     let recovery_recipient = client
         .api()
@@ -264,6 +283,7 @@ where
         &options.cluster,
         &options.queue,
         options.workers,
+        options.accelerator.as_ref(),
         recovery_fingerprint.as_deref(),
     );
     let run = client
@@ -292,9 +312,12 @@ where
                     cpu_millicores: 1_000,
                     memory_bytes: 1024 * 1024 * 1024,
                     scratch_bytes: 1024 * 1024 * 1024,
-                    accelerator_count: 0,
-                    accelerator_memory_bytes: 0,
-                    accelerator_class: None,
+                    accelerator_count,
+                    accelerator_memory_bytes,
+                    accelerator_class: options
+                        .accelerator
+                        .as_ref()
+                        .map(|request| request.class.clone()),
                     maximum_wall_millis: 60 * 60 * 1_000,
                 },
                 worker_count: Some(
@@ -304,9 +327,12 @@ where
                     cpu_millicores: 1_000,
                     memory_bytes: 1024 * 1024 * 1024,
                     scratch_bytes: 1024 * 1024 * 1024,
-                    accelerator_count: 0,
-                    accelerator_memory_bytes: 0,
-                    accelerator_class: None,
+                    accelerator_count,
+                    accelerator_memory_bytes,
+                    accelerator_class: options
+                        .accelerator
+                        .as_ref()
+                        .map(|request| request.class.clone()),
                     maximum_wall_millis: 60 * 60 * 1_000,
                 }),
             },
@@ -609,6 +635,7 @@ fn request_digest(
     cluster: &str,
     queue: &str,
     workers: u32,
+    accelerator: Option<&runmat_execution::resource::AcceleratorRequest>,
     recovery_recipient_fingerprint: Option<&str>,
 ) -> String {
     let mut digest = Sha256::new();
@@ -618,6 +645,12 @@ fn request_digest(
     digest.update(cluster.as_bytes());
     digest.update(queue.as_bytes());
     digest.update(workers.to_be_bytes());
+    if let Some(accelerator) = accelerator {
+        digest.update(b"\0accelerator\0");
+        digest.update(accelerator.class.as_bytes());
+        digest.update(accelerator.count.to_be_bytes());
+        digest.update(accelerator.memory_bytes_each.to_be_bytes());
+    }
     if let Some(fingerprint) = recovery_recipient_fingerprint {
         digest.update(b"\0recovery-recipient\0");
         digest.update(fingerprint.as_bytes());

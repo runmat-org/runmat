@@ -147,6 +147,7 @@ pub async fn execute_prepared_structural_study_locally(
         product.workloads.clone(),
         meshing.artifact.clone(),
         workers,
+        Some(&decoded.analysis_accelerator_requests),
     )
     .await?;
     Ok(CompletedLocalStructuralStudy {

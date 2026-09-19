@@ -123,6 +123,7 @@ async fn execute_one(
         prepared.workloads(),
         prepared.solver_mesh().clone(),
         workers_per_study,
+        None,
     )
     .await
 }
@@ -139,10 +140,16 @@ pub async fn execute_structural_workloads_locally(
     workloads: StructuralStudyWorkloads,
     mesh: runmat_meshing_core::SolverMeshArtifact,
     workers: u32,
+    admitted_accelerators: Option<&[runmat_execution::resource::AcceleratorRequest]>,
 ) -> crate::NativeExecutionResult<StructuralStudyNumericalResult> {
     let revision = ProgramRevision::new(study_digest, study_digest, program_environment)
         .map_err(|error| crate::NativeExecutionError::Configuration(error.to_string()))?;
     let accelerator_requests = local_accelerator_requests(&workloads)?;
+    if admitted_accelerators.is_some_and(|admitted| admitted != accelerator_requests) {
+        return Err(crate::NativeExecutionError::Configuration(
+            "local accelerator allocation differs from the immutable study root".into(),
+        ));
+    }
     let maximum_wall_millis = workloads
         .authored_model()
         .map_err(|error| crate::NativeExecutionError::Configuration(error.to_string()))?

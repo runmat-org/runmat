@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
-use runmat_analysis_core::{AuthoredStudyInputBinding, BackendPreference, RealizedStudy};
+use runmat_analysis_core::{AuthoredStudyInputBinding, RealizedStudy};
 use runmat_analysis_execution::{
     prepare_geometry_materialization_program, prepare_geometry_materialization_request,
     GeometryMaterializationPreparation, PreparedGeometrySource,
@@ -27,11 +27,18 @@ pub(super) struct PreparedTypedStudy {
     pub workers: u32,
 }
 
+#[derive(Clone, Debug)]
+pub(super) struct FeaComputeAllocation {
+    pub backend: runmat_analysis_fea::ComputeBackend,
+    pub accelerators: Vec<runmat_execution::resource::AcceleratorRequest>,
+}
+
 pub(super) fn prepare_study(
     source: &CheckedFeaSource,
     resolved: ResolvedAnalysisStudy,
     inputs: &[AuthoredStudyInputBinding],
     authority: &str,
+    compute: &FeaComputeAllocation,
     config: &RunMatRuntimeConfig,
 ) -> Result<PreparedTypedStudy> {
     let realized = resolved
@@ -68,19 +75,6 @@ pub(super) fn prepare_study(
         preferred_edges_per_partition: partition.preferred_edges_per_partition,
         preferred_faces_per_partition: partition.preferred_faces_per_partition,
     })?;
-    let backend = match resolved
-        .execution_policy
-        .as_ref()
-        .map(|policy| policy.backend)
-        .unwrap_or(BackendPreference::Auto)
-    {
-        BackendPreference::Auto | BackendPreference::Cpu => {
-            runmat_analysis_fea::ComputeBackend::Cpu
-        }
-        BackendPreference::Accelerator => bail!(
-            "typed FEA accelerator execution requires an admitted accelerator allocation; select CPU until the execution profile provides one"
-        ),
-    };
     let workers = resolved
         .execution_policy
         .as_ref()
@@ -98,11 +92,11 @@ pub(super) fn prepare_study(
         study: realized.clone(),
         materials: resolved.material_catalog,
         planning: runmat_analysis_fea::study::StructuralStudyPlanningPolicy {
-            backend,
+            backend: compute.backend,
             formulation_requirement: realized.formulation_requirement,
             numerics: runmat_analysis_fea::study::StructuralNumericalPlanningPolicy::production(),
         },
-        analysis_accelerator_requests: Vec::new(),
+        analysis_accelerator_requests: compute.accelerators.clone(),
         geometry_meshing,
     })?;
     Ok(PreparedTypedStudy {
