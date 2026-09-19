@@ -4,9 +4,7 @@ use super::model::RealizedExcitationTarget;
 
 pub(super) fn realize_target(target: &ExcitationTarget) -> RealizedExcitationTarget {
     match target {
-        ExcitationTarget::Region(target) => {
-            RealizedExcitationTarget::Region(target.region_id.clone())
-        }
+        ExcitationTarget::Region(target) => RealizedExcitationTarget::Region(target.clone()),
         ExcitationTarget::ReferencePoint(point) => RealizedExcitationTarget::ReferencePoint {
             reference_point_id: point.reference_point_id.clone(),
             position: point.position,

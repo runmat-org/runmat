@@ -88,7 +88,8 @@ fn realize_thermo_mechanical_context(
                 delta,
                 "whole-model temperature field",
             )?,
-            RealizedExcitationTarget::Region(region_id) => {
+            RealizedExcitationTarget::Region(target) => {
+                let region_id = &target.region_id;
                 if !model_region_ids.is_empty() && !model_region_ids.contains(region_id.as_str()) {
                     return Err(format!(
                         "temperature field targets unknown model region {region_id}"

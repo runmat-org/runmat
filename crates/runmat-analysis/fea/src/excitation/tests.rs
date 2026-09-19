@@ -132,6 +132,34 @@ fn realizes_typed_force_signal() {
 }
 
 #[test]
+fn realization_preserves_exact_multi_entity_region_targets() {
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    let runmat_analysis_core::ExcitationTarget::Region(target) =
+        &mut model.excitations[0].excitation_mut().target
+    else {
+        panic!("fixture force must be region-scoped");
+    };
+    let entities = ["face:0", "face:1"]
+        .map(
+            |source_topology_id| runmat_geometry_core::PersistentEntityId {
+                kind: runmat_geometry_core::PersistentEntityKind::Face,
+                source_topology_id: source_topology_id.into(),
+                assembly_path: vec!["root".into()],
+            },
+        )
+        .to_vec();
+    target.bind_resolved_entities(entities.clone()).unwrap();
+
+    let realized = realize_static(&model).expect("typed force should realize");
+    let super::RealizedExcitationTarget::Region(realized_target) =
+        &realized.iter().next().unwrap().target
+    else {
+        panic!("realized force must remain region-scoped");
+    };
+    assert_eq!(realized_target.resolved_entities(), entities);
+}
+
+#[test]
 fn realizes_one_action_with_every_active_case_membership() {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     let mut second_case = model.excitation_cases[0].clone();

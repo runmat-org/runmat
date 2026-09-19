@@ -35,16 +35,20 @@ pub(super) fn prescribed_temperatures(
                 }
                 whole_model = Some((value.real, excitation.excitation_id.0.clone()));
             }
-            RealizedExcitationTarget::Region(region_id) => {
+            RealizedExcitationTarget::Region(target) => {
                 let mut selected = vec![false; projection.nodes.len()];
                 for element in &projection.elements {
-                    if element.region_id.matches_analysis_selection(region_id) {
+                    if target.matches_persistent_entity(&element.region_id) {
                         for &node_index in &element.node_indices {
                             selected[node_index] = true;
                         }
                     }
                 }
-                for face in projection.boundary_faces_matching(region_id) {
+                for face in projection.boundary_faces.iter().filter(|face| {
+                    face.provenance
+                        .iter()
+                        .any(|entity| target.matches_persistent_entity(entity))
+                }) {
                     for &node_index in &face.node_indices {
                         selected[node_index] = true;
                     }
@@ -95,7 +99,7 @@ pub(super) fn prescribed_temperatures(
 mod tests {
     use runmat_analysis_core::{
         CoordinateFrame, ExcitationCaseId, ExcitationDistribution, ExcitationId,
-        ExcitationKinematics, PhysicalQuantityKind, ProjectionRequirement, SignalId,
+        ExcitationKinematics, PhysicalQuantityKind, ProjectionRequirement, RegionTarget, SignalId,
     };
     use runmat_meshing_core::ElementOrder;
 
@@ -134,7 +138,7 @@ mod tests {
             temperature("whole", RealizedExcitationTarget::WholeModel, 300.0),
             temperature(
                 "face",
-                RealizedExcitationTarget::Region("face:0".to_string()),
+                RealizedExcitationTarget::Region(RegionTarget::boundary("face:0")),
                 350.0,
             ),
         ]);
@@ -165,12 +169,12 @@ mod tests {
         let excitations = RealizedExcitations::new(vec![
             temperature(
                 "first",
-                RealizedExcitationTarget::Region("face:0".to_string()),
+                RealizedExcitationTarget::Region(RegionTarget::boundary("face:0")),
                 300.0,
             ),
             temperature(
                 "second",
-                RealizedExcitationTarget::Region("face:1".to_string()),
+                RealizedExcitationTarget::Region(RegionTarget::boundary("face:1")),
                 350.0,
             ),
         ]);

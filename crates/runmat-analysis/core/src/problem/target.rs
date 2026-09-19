@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use runmat_geometry_core::{PersistentEntityId, PersistentEntityKind};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EntityDimension {
@@ -32,19 +34,36 @@ pub enum TargetCardinality {
 #[serde(deny_unknown_fields)]
 pub struct RegionTarget {
     pub region_id: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    resolved_entities: Vec<PersistentEntityId>,
     pub entity_dimension: EntityDimension,
     pub expected_topology: ExpectedTopology,
     pub cardinality: TargetCardinality,
 }
 
 impl RegionTarget {
-    pub fn point(region_id: impl Into<String>) -> Self {
+    pub fn new(
+        region_id: impl Into<String>,
+        entity_dimension: EntityDimension,
+        expected_topology: ExpectedTopology,
+        cardinality: TargetCardinality,
+    ) -> Self {
         Self {
             region_id: region_id.into(),
-            entity_dimension: EntityDimension::Point,
-            expected_topology: ExpectedTopology::MeshNode,
-            cardinality: TargetCardinality::OneOrMore,
+            resolved_entities: Vec::new(),
+            entity_dimension,
+            expected_topology,
+            cardinality,
         }
+    }
+
+    pub fn point(region_id: impl Into<String>) -> Self {
+        Self::new(
+            region_id,
+            EntityDimension::Point,
+            ExpectedTopology::MeshNode,
+            TargetCardinality::OneOrMore,
+        )
     }
 
     pub fn authored(region_id: impl Into<String>) -> Self {
@@ -57,22 +76,104 @@ impl RegionTarget {
     }
 
     pub fn boundary(region_id: impl Into<String>) -> Self {
-        Self {
-            region_id: region_id.into(),
-            entity_dimension: EntityDimension::Face,
-            expected_topology: ExpectedTopology::BoundaryFace,
-            cardinality: TargetCardinality::OneOrMore,
-        }
+        Self::new(
+            region_id,
+            EntityDimension::Face,
+            ExpectedTopology::BoundaryFace,
+            TargetCardinality::OneOrMore,
+        )
     }
 
     pub fn volume(region_id: impl Into<String>) -> Self {
-        Self {
-            region_id: region_id.into(),
-            entity_dimension: EntityDimension::Volume,
-            expected_topology: ExpectedTopology::MeshElement,
-            cardinality: TargetCardinality::OneOrMore,
+        Self::new(
+            region_id,
+            EntityDimension::Volume,
+            ExpectedTopology::MeshElement,
+            TargetCardinality::OneOrMore,
+        )
+    }
+
+    pub fn resolved_entities(&self) -> &[PersistentEntityId] {
+        &self.resolved_entities
+    }
+
+    pub fn bind_resolved_entities(
+        &mut self,
+        mut entities: Vec<PersistentEntityId>,
+    ) -> Result<(), RegionTargetResolutionError> {
+        entities.sort();
+        entities.dedup();
+        let expected = self.expected_entity_kind();
+        if entities.is_empty()
+            || self.cardinality == TargetCardinality::One && entities.len() != 1
+            || entities
+                .iter()
+                .any(|entity| entity.validate().is_err() || entity.kind != expected)
+        {
+            return Err(self.resolution_error(expected, entities.len()));
+        }
+        self.resolved_entities = entities;
+        Ok(())
+    }
+
+    pub fn validate_resolution(&self) -> Result<(), RegionTargetResolutionError> {
+        if self.resolved_entities.is_empty() {
+            return Ok(());
+        }
+        let expected = self.expected_entity_kind();
+        if self.cardinality == TargetCardinality::One && self.resolved_entities.len() != 1
+            || !self
+                .resolved_entities
+                .windows(2)
+                .all(|pair| pair[0] < pair[1])
+            || self
+                .resolved_entities
+                .iter()
+                .any(|entity| entity.validate().is_err() || entity.kind != expected)
+        {
+            return Err(self.resolution_error(expected, self.resolved_entities.len()));
+        }
+        Ok(())
+    }
+
+    fn expected_entity_kind(&self) -> PersistentEntityKind {
+        match self.entity_dimension {
+            EntityDimension::Point => PersistentEntityKind::Vertex,
+            EntityDimension::Edge => PersistentEntityKind::Edge,
+            EntityDimension::Face => PersistentEntityKind::Face,
+            EntityDimension::Volume => PersistentEntityKind::Region,
         }
     }
+
+    fn resolution_error(
+        &self,
+        expected: PersistentEntityKind,
+        count: usize,
+    ) -> RegionTargetResolutionError {
+        RegionTargetResolutionError {
+            region_id: self.region_id.clone(),
+            expected,
+            count,
+        }
+    }
+
+    pub fn matches_persistent_entity(&self, entity: &PersistentEntityId) -> bool {
+        if self.resolved_entities.is_empty() {
+            entity.matches_analysis_selection(&self.region_id)
+        } else {
+            self.resolved_entities.binary_search(entity).is_ok()
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error(
+    "region `{region_id}` resolved {count} entities incompatible with required {expected:?} target"
+)]
+pub struct RegionTargetResolutionError {
+    pub region_id: String,
+    pub expected: PersistentEntityKind,
+    pub count: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

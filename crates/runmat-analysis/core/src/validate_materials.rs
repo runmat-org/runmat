@@ -26,6 +26,10 @@ pub(crate) fn validate_materials(
     let mut assigned_regions = HashSet::new();
     for assignment in assignments {
         let target_label = assignment.target_label();
+        assignment
+            .target
+            .validate_resolution()
+            .map_err(|error| invalid_assignment(target_label, error.to_string()))?;
         if assignment
             .selected_region_id()
             .is_some_and(|region_id| region_id.trim().is_empty())

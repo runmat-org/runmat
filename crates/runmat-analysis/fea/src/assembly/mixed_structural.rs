@@ -147,18 +147,13 @@ pub(super) fn assemble_mixed_structural_system(
                     .as_ref()
                     .expect("secondary connector target was requested")
             };
-            resolve_target(
-                &connector.connector_id,
-                &target.region_id,
-                mesh,
-                structural,
-                &topology,
+            resolve_target(&connector.connector_id, target, mesh, structural, &topology).map(
+                |ownership| match ownership {
+                    MixedStructuralTargetOwnership::Solid { canonical_nodes }
+                    | MixedStructuralTargetOwnership::Explicit { canonical_nodes }
+                    | MixedStructuralTargetOwnership::Shared { canonical_nodes } => canonical_nodes,
+                },
             )
-            .map(|ownership| match ownership {
-                MixedStructuralTargetOwnership::Solid { canonical_nodes }
-                | MixedStructuralTargetOwnership::Explicit { canonical_nodes }
-                | MixedStructuralTargetOwnership::Shared { canonical_nodes } => canonical_nodes,
-            })
         },
     )
     .map_err(LinearAssemblyError::Structural)?;
@@ -205,16 +200,14 @@ pub(super) fn assemble_mixed_structural_system(
         .iter()
         .filter(|load| is_structural_load(&load.kind))
         .map(|load| {
-            let ownership = load
-                .target
-                .solver_region_id()
-                .map(|selector| {
-                    resolve_target(&load.excitation_id.0, selector, mesh, structural, &topology)
-                })
-                .transpose()?
-                .unwrap_or(MixedStructuralTargetOwnership::Solid {
+            let ownership = match &load.target {
+                crate::excitation::RealizedExcitationTarget::Region(target) => {
+                    resolve_target(&load.excitation_id.0, target, mesh, structural, &topology)?
+                }
+                _ => MixedStructuralTargetOwnership::Solid {
                     canonical_nodes: Vec::new(),
-                });
+                },
+            };
             Ok((load.excitation_id.0.clone(), ownership))
         })
         .collect::<Result<Vec<_>, StructuralAssemblyError>>()
@@ -459,32 +452,31 @@ fn constraint_boundary_implementations(
 
 fn resolve_target(
     target_id: &str,
-    selector: &str,
+    target: &runmat_analysis_core::RegionTarget,
     mesh: &SolverMeshArtifact,
     structural: &runmat_analysis_core::StructuralModel,
     topology: &CanonicalStructuralNodeSpace,
 ) -> Result<MixedStructuralTargetOwnership, StructuralAssemblyError> {
-    resolve_mixed_structural_target(selector, mesh, structural, topology).map_err(|error| {
-        match error {
-            MixedStructuralTargetError::Unmapped { selector } => {
-                StructuralAssemblyError::UnmappedMixedTarget {
-                    target_id: target_id.into(),
-                    selector,
-                }
-            }
-            MixedStructuralTargetError::Ambiguous {
-                selector,
-                solid_node_count,
-                explicit_node_count,
-            } => StructuralAssemblyError::AmbiguousMixedTarget {
+    resolve_mixed_structural_target(target, mesh, structural, topology).map_err(|error| match error
+    {
+        MixedStructuralTargetError::Unmapped { selector } => {
+            StructuralAssemblyError::UnmappedMixedTarget {
                 target_id: target_id.into(),
                 selector,
-                solid_node_count,
-                explicit_node_count,
-            },
-            MixedStructuralTargetError::InvalidTopology(message) => {
-                StructuralAssemblyError::MixedTopology(message)
             }
+        }
+        MixedStructuralTargetError::Ambiguous {
+            selector,
+            solid_node_count,
+            explicit_node_count,
+        } => StructuralAssemblyError::AmbiguousMixedTarget {
+            target_id: target_id.into(),
+            selector,
+            solid_node_count,
+            explicit_node_count,
+        },
+        MixedStructuralTargetError::InvalidTopology(message) => {
+            StructuralAssemblyError::MixedTopology(message)
         }
     })
 }

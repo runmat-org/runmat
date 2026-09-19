@@ -395,14 +395,15 @@ pub(crate) fn validate_target(target: &crate::RegionTarget) -> Result<(), String
                     | ExpectedTopology::Cell
             )
     );
-    if topology_matches_dimension {
-        Ok(())
-    } else {
-        Err(format!(
+    if !topology_matches_dimension {
+        return Err(format!(
             "entity dimension {:?} is incompatible with expected topology {:?}",
             target.entity_dimension, target.expected_topology
-        ))
+        ));
     }
+    target
+        .validate_resolution()
+        .map_err(|error| error.to_string())
 }
 
 fn pairing_is_valid(pairing: &PairingPolicy) -> bool {

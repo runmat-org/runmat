@@ -179,7 +179,7 @@ fn requires_mixed_compilation(
             return;
         }
         mixed = !matches!(
-            resolve_mixed_structural_target(&target.region_id, mesh, structural, topology),
+            resolve_mixed_structural_target(target, mesh, structural, topology),
             Ok(MixedStructuralTargetOwnership::Solid { .. })
         );
     });
@@ -391,14 +391,12 @@ fn resolve_target(
     target: &runmat_analysis_core::RegionTarget,
 ) -> Result<(ResolvedConstraintTarget, Vec<usize>), ConstraintPlanError> {
     let ownership = if let Some(mesh) = mesh {
-        resolve_mixed_structural_target(&target.region_id, mesh, structural, topology).map_err(
-            |error| {
-                ConstraintPlanError::Invalid(format!(
-                    "constraint `{}` target resolution failed: {error}",
-                    constraint.constraint_id
-                ))
-            },
-        )?
+        resolve_mixed_structural_target(target, mesh, structural, topology).map_err(|error| {
+            ConstraintPlanError::Invalid(format!(
+                "constraint `{}` target resolution failed: {error}",
+                constraint.constraint_id
+            ))
+        })?
     } else {
         let canonical_nodes = explicit_target_node_indices(structural, &target.region_id)
             .into_iter()

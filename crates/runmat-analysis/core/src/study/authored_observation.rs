@@ -345,26 +345,26 @@ fn region_target(source: &AuthoredRegionSource) -> Result<RegionTarget, Authored
     };
     let cardinality = TargetCardinality::OneOrMore;
     Ok(match region.role {
-        GeometryRegionRole::Vertex => RegionTarget {
-            region_id: region.region_id.clone(),
-            entity_dimension: EntityDimension::Point,
-            expected_topology: ExpectedTopology::MeshNode,
+        GeometryRegionRole::Vertex => RegionTarget::new(
+            region.region_id.clone(),
+            EntityDimension::Point,
+            ExpectedTopology::MeshNode,
             cardinality,
-        },
-        GeometryRegionRole::Edge => RegionTarget {
-            region_id: region.region_id.clone(),
-            entity_dimension: EntityDimension::Edge,
-            expected_topology: ExpectedTopology::GeometryEntity,
+        ),
+        GeometryRegionRole::Edge => RegionTarget::new(
+            region.region_id.clone(),
+            EntityDimension::Edge,
+            ExpectedTopology::GeometryEntity,
             cardinality,
-        },
+        ),
         GeometryRegionRole::Face => RegionTarget::boundary(region.region_id.clone()),
         GeometryRegionRole::Solid => RegionTarget::volume(region.region_id.clone()),
-        GeometryRegionRole::Cell => RegionTarget {
-            region_id: region.region_id.clone(),
-            entity_dimension: EntityDimension::Volume,
-            expected_topology: ExpectedTopology::Cell,
+        GeometryRegionRole::Cell => RegionTarget::new(
+            region.region_id.clone(),
+            EntityDimension::Volume,
+            ExpectedTopology::Cell,
             cardinality,
-        },
+        ),
     })
 }
 

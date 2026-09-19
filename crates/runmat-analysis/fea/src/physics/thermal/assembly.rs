@@ -264,11 +264,9 @@ pub(crate) fn assemble(
                 .iter()
                 .filter(|element| volume_matches(element, &excitation.target))
                 .count(),
-            RealizedExcitationKind::HeatFlux(_) => excitation
-                .target
-                .solver_region_id()
-                .map(|region| projection.boundary_faces_matching(region).count())
-                .unwrap_or(0),
+            RealizedExcitationKind::HeatFlux(_) => {
+                boundary_faces_for_target(&projection, &excitation.target).count()
+            }
             _ => 0,
         };
         if entity_count == 0 {
@@ -307,8 +305,7 @@ pub(crate) fn assemble(
                 }
             }
             RealizedExcitationKind::HeatFlux(_) => {
-                let region = excitation.target.solver_region_id().unwrap_or_default();
-                for face in projection.boundary_faces_matching(region) {
+                for face in boundary_faces_for_target(&projection, &excitation.target) {
                     projection
                         .visit_boundary_quadrature(face, |point| {
                             let integrated = value.real * point.area_weight_m2;
@@ -498,11 +495,25 @@ pub(crate) fn assemble(
 fn volume_matches(element: &ProjectedElement, target: &RealizedExcitationTarget) -> bool {
     match target {
         RealizedExcitationTarget::WholeModel => true,
-        RealizedExcitationTarget::Region(region) => {
-            element.region_id.matches_analysis_selection(region)
+        RealizedExcitationTarget::Region(target) => {
+            target.matches_persistent_entity(&element.region_id)
         }
         _ => false,
     }
+}
+
+fn boundary_faces_for_target<'a>(
+    projection: &'a AnalysisProjection,
+    target: &'a RealizedExcitationTarget,
+) -> impl Iterator<Item = &'a crate::topology::ProjectedBoundaryFace> + 'a {
+    projection.boundary_faces.iter().filter(move |face| {
+        let RealizedExcitationTarget::Region(target) = target else {
+            return false;
+        };
+        face.provenance
+            .iter()
+            .any(|entity| target.matches_persistent_entity(entity))
+    })
 }
 
 fn add_scaled_matrix(assembler: &mut RealSparseAssembler, matrix: &RealSparseMatrix, scale: f64) {

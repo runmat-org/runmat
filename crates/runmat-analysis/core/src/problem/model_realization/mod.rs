@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use runmat_geometry_core::UnitSystem;
+use runmat_geometry_core::{ResolvedGeometryRegions, UnitSystem};
 
 use crate::{AnalysisModel, AnalysisModelId, AuthoredMaterialRef, MaterialModel, RealizedStudy};
 
@@ -16,13 +16,13 @@ pub struct AnalysisModelRealizationInput<'a> {
     pub geometry_id: &'a str,
     pub geometry_revision: u32,
     pub units: UnitSystem,
+    pub regions: &'a ResolvedGeometryRegions,
     pub materials: &'a BTreeMap<AuthoredMaterialRef, MaterialModel>,
 }
 
-/// Builds the canonical solver-facing model without resolving mesh entities.
+/// Builds the canonical solver-facing model with authored regions bound to exact geometry entities.
 ///
-/// Region ids remain semantic selections here. Exact entities and formulation properties are
-/// compiled after a solver mesh exists.
+/// Formulation properties are compiled against solver topology after a mesh exists.
 pub fn realize_analysis_model(
     input: AnalysisModelRealizationInput<'_>,
 ) -> Result<AnalysisModel, AnalysisModelRealizationError> {
@@ -31,6 +31,7 @@ pub fn realize_analysis_model(
         geometry_id,
         geometry_revision,
         units,
+        regions,
         materials,
     } = input;
     let models = study
@@ -61,9 +62,22 @@ pub fn realize_analysis_model(
         }
     }
 
-    let target_resolver = targets::TargetResolver::new(&study.geometry.definition);
+    let target_resolver = targets::TargetResolver::new(&study.geometry.definition, regions);
     let material_resolution =
         targets::MaterialResolution::new(materials, &models, &target_resolver)?;
+    let mut sequence = study.sequence.clone();
+    for step in &mut sequence.steps {
+        for observation in &mut step.observations {
+            let Some(spec) = observation.spec_mut() else {
+                continue;
+            };
+            if let crate::ObservationTarget::Spatial(crate::ExcitationTarget::Region(target)) =
+                &mut spec.target
+            {
+                target_resolver.bind_existing_region_target(target)?;
+            }
+        }
+    }
     let mut model = AnalysisModel {
         model_id: AnalysisModelId(study.model.model_id.clone()),
         geometry_id: geometry_id.to_string(),
@@ -88,7 +102,7 @@ pub fn realize_analysis_model(
         initial_conditions: Vec::new(),
         response_spectra: Vec::new(),
         random_excitations: Vec::new(),
-        sequence: study.sequence.clone(),
+        sequence,
     };
     for authored in models {
         constraints::extend_constraints(
@@ -116,6 +130,10 @@ pub enum AnalysisModelRealizationError {
     },
     #[error("authored region target is not fully bound")]
     UnboundRegion,
+    #[error("geometry materialization did not publish authored region `{0}`")]
+    MissingResolvedRegion(String),
+    #[error("geometry region resolution is incompatible with its authored target: {0}")]
+    InvalidRegionResolution(String),
     #[error(
         "authored target refers to geometry `{module_path}::{geometry_id}`, not the study geometry"
     )]

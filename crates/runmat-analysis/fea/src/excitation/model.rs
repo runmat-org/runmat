@@ -1,6 +1,6 @@
 use runmat_analysis_core::{
     CoordinateFrame, ExcitationCaseId, ExcitationDistribution, ExcitationId, ExcitationKinematics,
-    PhysicalQuantityKind, Position, ProjectionRequirement, SignalId,
+    PhysicalQuantityKind, Position, ProjectionRequirement, RegionTarget, SignalId,
 };
 
 use super::ProjectionSample;
@@ -57,7 +57,7 @@ pub(crate) enum ComplexComponent {
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum RealizedExcitationTarget {
-    Region(String),
+    Region(RegionTarget),
     ReferencePoint {
         reference_point_id: String,
         position: Position,
@@ -70,7 +70,7 @@ pub(crate) enum RealizedExcitationTarget {
 impl RealizedExcitationTarget {
     pub(crate) fn solver_region_id(&self) -> Option<&str> {
         match self {
-            Self::Region(region_id) => Some(region_id),
+            Self::Region(target) => Some(&target.region_id),
             Self::ReferencePoint {
                 reference_point_id, ..
             } => Some(reference_point_id),

@@ -243,6 +243,17 @@ pub struct GeometryRegionDefinition {
     pub cardinality: GeometryRegionCardinality,
 }
 
+/// One authored geometry region after exact topology and cardinality have been resolved.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResolvedGeometryRegion {
+    pub role: GeometryRegionRole,
+    pub entity_ids: Vec<super::PersistentEntityId>,
+}
+
+/// Complete named-region inventory for one materialized geometry definition.
+pub type ResolvedGeometryRegions = BTreeMap<String, ResolvedGeometryRegion>;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GeometryRegionRole {

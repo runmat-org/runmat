@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use runmat_geometry_core::{GeometryDefinitionRef, GeometryRegionRole};
+use runmat_geometry_core::{GeometryDefinitionRef, GeometryRegionRole, ResolvedGeometryRegions};
 
 use crate::{
     AuthoredMaterialRef, AuthoredMaterialSource, AuthoredModel, AuthoredPropertyTarget,
@@ -67,18 +67,25 @@ fn qualified_material_id(reference: &AuthoredMaterialRef) -> String {
 
 pub(super) struct TargetResolver<'a> {
     geometry: &'a GeometryDefinitionRef,
+    regions: &'a ResolvedGeometryRegions,
 }
 
 impl<'a> TargetResolver<'a> {
-    pub fn new(geometry: &'a GeometryDefinitionRef) -> Self {
-        Self { geometry }
+    pub fn new(geometry: &'a GeometryDefinitionRef, regions: &'a ResolvedGeometryRegions) -> Self {
+        Self { geometry, regions }
     }
 
     fn property_target(
         &self,
         target: &AuthoredPropertyTarget,
     ) -> Result<PropertyRegionTarget, AnalysisModelRealizationError> {
-        Ok(match target {
+        let expected_role = match target {
+            AuthoredPropertyTarget::Beam(_) => GeometryRegionRole::Edge,
+            AuthoredPropertyTarget::Shell(_) => GeometryRegionRole::Face,
+            AuthoredPropertyTarget::Solid(_) => GeometryRegionRole::Solid,
+            AuthoredPropertyTarget::Cell(_) => GeometryRegionRole::Cell,
+        };
+        let mut target = match target {
             AuthoredPropertyTarget::Beam(source) => {
                 PropertyRegionTarget::beam(self.region_id(source)?)
             }
@@ -91,7 +98,19 @@ impl<'a> TargetResolver<'a> {
             AuthoredPropertyTarget::Cell(source) => {
                 PropertyRegionTarget::cell(self.region_id(source)?)
             }
-        })
+        };
+        let region_id = target
+            .selected_region_id()
+            .expect("authored property targets select one named region")
+            .to_owned();
+        let entities = self
+            .resolved_region(&region_id, expected_role)?
+            .entity_ids
+            .clone();
+        target.bind_resolved_entities(entities).map_err(|error| {
+            AnalysisModelRealizationError::InvalidRegionResolution(error.to_string())
+        })?;
+        Ok(target)
     }
 
     fn region_id(
@@ -128,11 +147,66 @@ impl<'a> TargetResolver<'a> {
             GeometryRegionRole::Solid => (EntityDimension::Volume, ExpectedTopology::MeshElement),
             GeometryRegionRole::Cell => (EntityDimension::Volume, ExpectedTopology::Cell),
         };
-        Ok(RegionTarget {
-            region_id,
-            entity_dimension,
-            expected_topology,
-            cardinality,
-        })
+        let mut target =
+            RegionTarget::new(region_id, entity_dimension, expected_topology, cardinality);
+        target
+            .bind_resolved_entities(
+                self.resolved_region(&target.region_id, region.role)?
+                    .entity_ids
+                    .clone(),
+            )
+            .map_err(|error| {
+                AnalysisModelRealizationError::InvalidRegionResolution(error.to_string())
+            })?;
+        Ok(target)
+    }
+
+    pub fn bind_existing_region_target(
+        &self,
+        target: &mut RegionTarget,
+    ) -> Result<(), AnalysisModelRealizationError> {
+        let expected_role = match (target.entity_dimension, target.expected_topology) {
+            (EntityDimension::Point, ExpectedTopology::MeshNode) => GeometryRegionRole::Vertex,
+            (EntityDimension::Edge, ExpectedTopology::GeometryEntity) => GeometryRegionRole::Edge,
+            (EntityDimension::Face, ExpectedTopology::BoundaryFace) => GeometryRegionRole::Face,
+            (EntityDimension::Volume, ExpectedTopology::MeshElement) => GeometryRegionRole::Solid,
+            (EntityDimension::Volume, ExpectedTopology::Cell) => GeometryRegionRole::Cell,
+            _ => {
+                return Err(AnalysisModelRealizationError::InvalidRegionResolution(
+                    format!(
+                        "region `{}` has incompatible dimension/topology intent",
+                        target.region_id
+                    ),
+                ));
+            }
+        };
+        target
+            .bind_resolved_entities(
+                self.resolved_region(&target.region_id, expected_role)?
+                    .entity_ids
+                    .clone(),
+            )
+            .map_err(|error| {
+                AnalysisModelRealizationError::InvalidRegionResolution(error.to_string())
+            })
+    }
+
+    fn resolved_region(
+        &self,
+        region_id: &str,
+        expected_role: GeometryRegionRole,
+    ) -> Result<&runmat_geometry_core::ResolvedGeometryRegion, AnalysisModelRealizationError> {
+        let resolved = self.regions.get(region_id).ok_or_else(|| {
+            AnalysisModelRealizationError::MissingResolvedRegion(region_id.to_owned())
+        })?;
+        if resolved.role != expected_role {
+            return Err(AnalysisModelRealizationError::InvalidRegionResolution(
+                format!(
+                    "region `{region_id}` was authored as {expected_role:?} but materialized as {:?}",
+                    resolved.role
+                ),
+            ));
+        }
+        Ok(resolved)
     }
 }

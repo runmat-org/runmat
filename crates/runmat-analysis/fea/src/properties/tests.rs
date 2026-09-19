@@ -70,6 +70,33 @@ fn compiled_map_rejects_gaps_overlaps_wrong_roles_and_stale_scopes() {
 }
 
 #[test]
+fn compiled_map_uses_bound_entity_sets_instead_of_logical_region_names() {
+    let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+    let mut model = matching_model(&mesh);
+    let selected = mesh.topology.volume_elements[0].region_id.clone();
+    let mut target = runmat_analysis_core::PropertyRegionTarget::solid("logical-body");
+    target
+        .bind_resolved_entities(vec![
+            selected,
+            runmat_geometry_core::PersistentEntityId {
+                kind: runmat_geometry_core::PersistentEntityKind::Region,
+                source_topology_id: "another-solid".into(),
+                assembly_path: vec!["root".into()],
+            },
+        ])
+        .unwrap();
+    model.material_assignments[0].target = target;
+
+    let compiled = compile_solid_property_map(&model, &mesh).expect("compiled properties");
+    assert_eq!(compiled.solid_materials().len(), 1);
+
+    let mut wrong_kind = runmat_analysis_core::PropertyRegionTarget::solid("logical-body");
+    assert!(wrong_kind
+        .bind_resolved_entities(vec![mesh.topology.boundary_faces[0].provenance[0].clone()])
+        .is_err());
+}
+
+#[test]
 fn compiled_map_projects_explicit_beam_and_shell_domains_without_cross_role_fallback() {
     let beam_model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
     let beam = compile_property_map(&beam_model, None).expect("compiled beam properties");

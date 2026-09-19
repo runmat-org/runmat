@@ -55,10 +55,11 @@ pub(super) fn apply_solver_mesh_structural_loads(
             }
             continue;
         }
-        let Some(region_id) = load.target.solver_region_id() else {
+        let RealizedExcitationTarget::Region(target) = &load.target else {
             continue;
         };
-        let (target_nodes, target_face_count) = projection_region_nodes(&projection, region_id);
+        let region_id = &target.region_id;
+        let (target_nodes, target_face_count) = projection_region_nodes(&projection, target);
         match load.kind {
             RealizedExcitationKind::Force(value) => {
                 let [fx, fy, fz] = value.real;
@@ -126,8 +127,8 @@ pub(super) fn apply_solver_mesh_structural_loads(
             }
             RealizedExcitationKind::Pressure(value) => {
                 if strict_region_mapping
-                    && !projection
-                        .boundary_faces_matching(region_id)
+                    && !boundary_faces_matching(&projection, target)
+                        .into_iter()
                         .any(|face| matches!(face.node_indices.len(), 3 | 6))
                 {
                     return Err(SolverMeshRegionMappingError::UnmappedLoadRegion {
@@ -136,20 +137,14 @@ pub(super) fn apply_solver_mesh_structural_loads(
                         load_kind: StructuralLoadKind::Pressure,
                     });
                 }
-                let projection_evidence = apply_projected_pressure(
-                    &projection,
-                    layout,
-                    rhs,
-                    load,
-                    region_id,
-                    value.real,
-                )?;
+                let projection_evidence =
+                    apply_projected_pressure(&projection, layout, rhs, load, target, value.real)?;
                 record_spatial_evidence(&mut evidence, projection_evidence)?;
             }
             RealizedExcitationKind::Traction(value) => {
                 if strict_region_mapping
-                    && projection
-                        .boundary_faces_matching(region_id)
+                    && boundary_faces_matching(&projection, target)
+                        .into_iter()
                         .next()
                         .is_none()
                 {
@@ -159,14 +154,8 @@ pub(super) fn apply_solver_mesh_structural_loads(
                         load_kind: StructuralLoadKind::Traction,
                     });
                 }
-                let projection_evidence = apply_projected_traction(
-                    &projection,
-                    layout,
-                    rhs,
-                    load,
-                    region_id,
-                    value.real,
-                )?;
+                let projection_evidence =
+                    apply_projected_traction(&projection, layout, rhs, load, target, value.real)?;
                 record_spatial_evidence(&mut evidence, projection_evidence)?;
             }
             _ => {}
@@ -295,11 +284,9 @@ fn add_reference_vector(
 
 fn projection_region_nodes(
     projection: &AnalysisProjection,
-    region_id: &str,
+    target: &runmat_analysis_core::RegionTarget,
 ) -> (Vec<usize>, usize) {
-    let faces = projection
-        .boundary_faces_matching(region_id)
-        .collect::<Vec<_>>();
+    let faces = boundary_faces_matching(projection, target);
     let mut node_indices = faces
         .iter()
         .flat_map(|face| face.node_indices.iter().copied())
@@ -309,17 +296,30 @@ fn projection_region_nodes(
     (node_indices, faces.len())
 }
 
+fn boundary_faces_matching<'a>(
+    projection: &'a AnalysisProjection,
+    target: &runmat_analysis_core::RegionTarget,
+) -> Vec<&'a crate::topology::ProjectedBoundaryFace> {
+    projection
+        .boundary_faces
+        .iter()
+        .filter(|face| {
+            face.provenance
+                .iter()
+                .any(|entity| target.matches_persistent_entity(entity))
+        })
+        .collect()
+}
+
 fn apply_projected_pressure(
     projection: &AnalysisProjection,
     layout: &StructuralDofLayout,
     rhs: &mut [f64],
     load: &RealizedExcitation,
-    region_id: &str,
+    target: &runmat_analysis_core::RegionTarget,
     magnitude_pa: f64,
 ) -> Result<SpatialProjectionEvidence, SolverMeshRegionMappingError> {
-    let faces = projection
-        .boundary_faces_matching(region_id)
-        .collect::<Vec<_>>();
+    let faces = boundary_faces_matching(projection, target);
     let reference_point_m = projected_boundary_centroid(&faces);
     let mut evidence = SpatialProjectionAccumulator::new(
         load,
@@ -351,12 +351,10 @@ fn apply_projected_traction(
     layout: &StructuralDofLayout,
     rhs: &mut [f64],
     load: &RealizedExcitation,
-    region_id: &str,
+    target: &runmat_analysis_core::RegionTarget,
     traction_pa: [f64; 3],
 ) -> Result<SpatialProjectionEvidence, SolverMeshRegionMappingError> {
-    let faces = projection
-        .boundary_faces_matching(region_id)
-        .collect::<Vec<_>>();
+    let faces = boundary_faces_matching(projection, target);
     let reference_point_m = projected_boundary_centroid(&faces);
     let mut evidence = SpatialProjectionAccumulator::new(
         load,
@@ -395,9 +393,9 @@ fn apply_projected_body_force(
         .iter()
         .filter(|element| match &load.target {
             RealizedExcitationTarget::WholeModel => true,
-            RealizedExcitationTarget::Region(region_id) => element
-                .region_id
-                .matches_analysis_selection(region_id.as_str()),
+            RealizedExcitationTarget::Region(target) => {
+                target.matches_persistent_entity(&element.region_id)
+            }
             _ => false,
         })
         .collect::<Vec<_>>();

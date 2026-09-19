@@ -18,7 +18,7 @@ pub(super) fn target_nodes<Q>(
         InitialConditionTarget::WholeModel => Ok((0..topology.nodes.len()).collect()),
         InitialConditionTarget::Region(target) => {
             let result = if let Some(mesh) = mesh {
-                resolve_mixed_structural_target(&target.region_id, mesh, structural, topology)
+                resolve_mixed_structural_target(target, mesh, structural, topology)
                     .map(|ownership| ownership.canonical_nodes().to_vec())
                     .map_err(|error| error.to_string())
             } else {

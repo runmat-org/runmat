@@ -293,25 +293,16 @@ impl StructuralSymbolicOperators {
             add_dense_element_pattern(&mut rows, &element_dofs);
         }
         for connector in &model.connectors {
-            let mut connector_nodes = resolve_mixed_structural_target(
-                &connector.primary.region_id,
-                mesh,
-                structural,
-                &topology,
-            )
-            .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?
-            .canonical_nodes()
-            .to_vec();
+            let mut connector_nodes =
+                resolve_mixed_structural_target(&connector.primary, mesh, structural, &topology)
+                    .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?
+                    .canonical_nodes()
+                    .to_vec();
             if let Some(secondary) = &connector.secondary {
                 connector_nodes.extend_from_slice(
-                    resolve_mixed_structural_target(
-                        &secondary.region_id,
-                        mesh,
-                        structural,
-                        &topology,
-                    )
-                    .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?
-                    .canonical_nodes(),
+                    resolve_mixed_structural_target(secondary, mesh, structural, &topology)
+                        .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?
+                        .canonical_nodes(),
                 );
             }
             connector_nodes.sort_unstable();

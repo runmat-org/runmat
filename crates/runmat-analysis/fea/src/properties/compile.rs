@@ -387,9 +387,9 @@ fn audit_entry(
 fn solid_scope_matches(scope: &PropertyRegionScope, element: &SolverVolumeElement) -> bool {
     match scope {
         PropertyRegionScope::All => true,
-        PropertyRegionScope::Region(selection) => element
-            .region_id
-            .matches_analysis_selection(selection.region_id()),
+        PropertyRegionScope::Region(selection) => {
+            selection.matches_persistent_entity(&element.region_id)
+        }
     }
 }
 

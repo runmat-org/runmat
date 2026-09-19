@@ -235,10 +235,7 @@ fn target_nodes(
             let mut selected = vec![false; projection.nodes.len()];
             let mut matched = false;
             for element in &projection.elements {
-                if element
-                    .region_id
-                    .matches_analysis_selection(&target.region_id)
-                {
+                if target.matches_persistent_entity(&element.region_id) {
                     matched = true;
                     for &node in &element.node_indices {
                         selected[node] = true;

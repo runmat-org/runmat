@@ -170,6 +170,30 @@ study static {
         .study
         .realize_with_models(&resolved.models, &resolved.geometry, &[])
         .unwrap();
+    let resolved_regions = std::collections::BTreeMap::from([
+        (
+            "body".into(),
+            runmat_geometry_core::ResolvedGeometryRegion {
+                role: runmat_geometry_core::GeometryRegionRole::Solid,
+                entity_ids: vec![runmat_geometry_core::PersistentEntityId {
+                    kind: runmat_geometry_core::PersistentEntityKind::Region,
+                    source_topology_id: "body".into(),
+                    assembly_path: vec!["root".into()],
+                }],
+            },
+        ),
+        (
+            "support".into(),
+            runmat_geometry_core::ResolvedGeometryRegion {
+                role: runmat_geometry_core::GeometryRegionRole::Face,
+                entity_ids: vec![runmat_geometry_core::PersistentEntityId {
+                    kind: runmat_geometry_core::PersistentEntityKind::Face,
+                    source_topology_id: "support".into(),
+                    assembly_path: vec!["root".into()],
+                }],
+            },
+        ),
+    ]);
     let materials = resolved.material_catalog;
     let missing_material = runmat_analysis_core::realize_analysis_model(
         runmat_analysis_core::AnalysisModelRealizationInput {
@@ -177,6 +201,7 @@ study static {
             geometry_id: "materialized-part",
             geometry_revision: 7,
             units: runmat_geometry_core::UnitSystem::Meter,
+            regions: &resolved_regions,
             materials: &Default::default(),
         },
     )
@@ -202,6 +227,7 @@ study static {
             geometry_id: "materialized-part",
             geometry_revision: 7,
             units: runmat_geometry_core::UnitSystem::Meter,
+            regions: &resolved_regions,
             materials: &materials,
         },
     )
@@ -225,6 +251,7 @@ study static {
             geometry_id: "materialized-part",
             geometry_revision: 7,
             units: runmat_geometry_core::UnitSystem::Meter,
+            regions: &resolved_regions,
             materials: &materials,
         },
     )
@@ -234,12 +261,32 @@ study static {
         runmat_analysis_core::AnalysisModelRealizationError::RegionFromWrongGeometry { .. }
     ));
 
+    let mut wrong_role_regions = resolved_regions.clone();
+    wrong_role_regions.get_mut("body").unwrap().role =
+        runmat_geometry_core::GeometryRegionRole::Cell;
+    let wrong_role_error = runmat_analysis_core::realize_analysis_model(
+        runmat_analysis_core::AnalysisModelRealizationInput {
+            study: &realized,
+            geometry_id: "materialized-part",
+            geometry_revision: 7,
+            units: runmat_geometry_core::UnitSystem::Meter,
+            regions: &wrong_role_regions,
+            materials: &materials,
+        },
+    )
+    .unwrap_err();
+    assert!(matches!(
+        wrong_role_error,
+        runmat_analysis_core::AnalysisModelRealizationError::InvalidRegionResolution(_)
+    ));
+
     let model = runmat_analysis_core::realize_analysis_model(
         runmat_analysis_core::AnalysisModelRealizationInput {
             study: &realized,
             geometry_id: "materialized-part",
             geometry_revision: 7,
             units: runmat_geometry_core::UnitSystem::Meter,
+            regions: &resolved_regions,
             materials: &materials,
         },
     )
@@ -248,6 +295,35 @@ study static {
     assert_eq!(model.materials.len(), 1);
     assert_eq!(model.material_assignments.len(), 1);
     assert_eq!(model.constraints.len(), 1);
+    assert_eq!(
+        model.material_assignments[0]
+            .target
+            .scope()
+            .selected_region_id(),
+        Some("body")
+    );
+    let runmat_analysis_core::PropertyRegionScope::Region(material_target) =
+        model.material_assignments[0].target.scope()
+    else {
+        panic!("authored material assignment must remain region-scoped");
+    };
+    assert_eq!(
+        material_target.resolved_entities(),
+        resolved_regions["body"].entity_ids
+    );
+    assert_eq!(
+        model.constraints[0].target().unwrap().resolved_entities(),
+        resolved_regions["support"].entity_ids
+    );
+    let runmat_analysis_core::ExcitationTarget::Region(excitation_target) =
+        &model.excitations[0].excitation().target
+    else {
+        panic!("authored force must remain region-scoped");
+    };
+    assert_eq!(
+        excitation_target.resolved_entities(),
+        resolved_regions["support"].entity_ids
+    );
     assert_eq!(model.excitations.len(), 1);
     assert_eq!(model.excitation_cases.len(), 2);
     assert!(model.excitation_cases.iter().all(

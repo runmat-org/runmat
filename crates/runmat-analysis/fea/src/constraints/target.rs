@@ -20,13 +20,13 @@ pub(super) fn resolve_solid_target(
                 .filter(|face| {
                     face.provenance
                         .iter()
-                        .any(|entity| entity.matches_analysis_selection(&target.region_id))
+                        .any(|entity| target.matches_persistent_entity(entity))
                 })
                 .collect::<Vec<_>>();
             let entities = faces
                 .iter()
                 .flat_map(|face| face.provenance.iter())
-                .filter(|entity| entity.matches_analysis_selection(&target.region_id))
+                .filter(|entity| target.matches_persistent_entity(entity))
                 .cloned()
                 .collect::<Vec<_>>();
             let node_ids = faces
@@ -43,22 +43,37 @@ pub(super) fn resolve_solid_target(
             (entities, nodes)
         }
         (EntityDimension::Point, ExpectedTopology::MeshNode) => {
-            let node_id = target
-                .region_id
-                .strip_prefix("node:")
-                .and_then(|value| value.parse::<u64>().ok())
-                .ok_or_else(|| ConstraintPlanError::UnsupportedTarget {
-                    constraint_id: constraint_id.into(),
-                    reason: "mesh-node targets require a `node:<id>` selector",
-                })?;
-            let nodes = mesh
-                .topology
-                .nodes
-                .iter()
-                .filter(|node| node.node_id == node_id)
-                .map(|node| node.stable_identity)
-                .collect::<Vec<_>>();
-            (Vec::new(), nodes)
+            if target.resolved_entities().is_empty() {
+                let node_id = target
+                    .region_id
+                    .strip_prefix("node:")
+                    .and_then(|value| value.parse::<u64>().ok())
+                    .ok_or_else(|| ConstraintPlanError::UnsupportedTarget {
+                        constraint_id: constraint_id.into(),
+                        reason: "mesh-node targets require a `node:<id>` selector or exact vertex resolution",
+                    })?;
+                let nodes = mesh
+                    .topology
+                    .nodes
+                    .iter()
+                    .filter(|node| node.node_id == node_id)
+                    .map(|node| node.stable_identity)
+                    .collect::<Vec<_>>();
+                (Vec::new(), nodes)
+            } else {
+                let nodes = mesh
+                    .topology
+                    .nodes
+                    .iter()
+                    .filter(|node| {
+                        node.provenance
+                            .iter()
+                            .any(|entity| target.matches_persistent_entity(entity))
+                    })
+                    .map(|node| node.stable_identity)
+                    .collect::<Vec<_>>();
+                (target.resolved_entities().to_vec(), nodes)
+            }
         }
         _ => {
             return Err(ConstraintPlanError::UnsupportedTarget {

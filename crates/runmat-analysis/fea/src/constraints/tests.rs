@@ -237,6 +237,32 @@ fn symmetry_uses_outward_geometry_normals_on_one_persistent_face() {
 }
 
 #[test]
+fn fixed_constraint_projects_a_logical_region_bound_to_multiple_faces() {
+    let (mut model, mesh) = model_and_mesh();
+    let mut target = RegionTarget::boundary("mounting-surfaces");
+    target
+        .bind_resolved_entities(vec![
+            mesh.topology.boundary_faces[0].provenance[0].clone(),
+            mesh.topology.boundary_faces[1].provenance[0].clone(),
+        ])
+        .unwrap();
+    model.constraints = vec![AnalysisConstraint::Structural(StructuralConstraint {
+        constraint_id: "fixed_mounts".into(),
+        frame: CoordinateFrame::Global,
+        kind: StructuralConstraintKind::Fixed { target },
+    })];
+
+    let plan = CanonicalStructuralConstraintPlan::compile(&model, &mesh).unwrap();
+    let selected_nodes = mesh.topology.boundary_faces[0]
+        .node_ids
+        .iter()
+        .chain(&mesh.topology.boundary_faces[1].node_ids)
+        .copied()
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(plan.rows.len(), selected_nodes.len() * 3);
+}
+
+#[test]
 fn normal_displacement_and_antisymmetry_compile_distinct_normal_tangent_spaces() {
     let (mut model, mesh) = model_and_mesh();
     let face_entity = mesh.topology.boundary_faces[0]

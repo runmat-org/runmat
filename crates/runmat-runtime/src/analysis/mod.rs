@@ -566,18 +566,20 @@ fn persist_fea_run_result_with_progress(
 }
 
 enum ModelCondition {
-    Constraint(AnalysisConstraint),
+    Constraint(Box<AnalysisConstraint>),
     Boundary(AnalysisBoundary),
 }
 
 fn fixed_condition(id: &str, region_id: String) -> ModelCondition {
-    ModelCondition::Constraint(AnalysisConstraint::Structural(StructuralConstraint {
-        constraint_id: id.to_string(),
-        frame: CoordinateFrame::Global,
-        kind: StructuralConstraintKind::Fixed {
-            target: RegionTarget::boundary(region_id),
+    ModelCondition::Constraint(Box::new(AnalysisConstraint::Structural(
+        StructuralConstraint {
+            constraint_id: id.to_string(),
+            frame: CoordinateFrame::Global,
+            kind: StructuralConstraintKind::Fixed {
+                target: RegionTarget::boundary(region_id),
+            },
         },
-    }))
+    )))
 }
 
 fn prescribed_temperature_condition(
@@ -585,22 +587,22 @@ fn prescribed_temperature_condition(
     region_id: String,
     temperature_k: f64,
 ) -> ModelCondition {
-    ModelCondition::Constraint(AnalysisConstraint::Thermal(ThermalConstraint {
+    ModelCondition::Constraint(Box::new(AnalysisConstraint::Thermal(ThermalConstraint {
         constraint_id: id.to_string(),
         kind: ThermalConstraintKind::Prescribed {
             target: RegionTarget::boundary(region_id),
             value: PrescribedValue::Constant(Temperature::new(temperature_k)),
         },
-    }))
+    })))
 }
 
 fn magnetic_ground_condition(id: &str, region_id: String) -> ModelCondition {
-    ModelCondition::Constraint(AnalysisConstraint::Magnetic(MagneticConstraint {
+    ModelCondition::Constraint(Box::new(AnalysisConstraint::Magnetic(MagneticConstraint {
         constraint_id: id.to_string(),
         kind: MagneticConstraintKind::VectorPotentialGround {
             target: RegionTarget::boundary(region_id),
         },
-    }))
+    })))
 }
 
 fn acoustic_rigid_condition(id: &str, region_id: String) -> ModelCondition {
@@ -612,10 +614,10 @@ fn acoustic_rigid_condition(id: &str, region_id: String) -> ModelCondition {
 }
 
 fn fluid_constraint_condition(id: &str, kind: FluidConstraintKind) -> ModelCondition {
-    ModelCondition::Constraint(AnalysisConstraint::Fluid(FluidConstraint {
+    ModelCondition::Constraint(Box::new(AnalysisConstraint::Fluid(FluidConstraint {
         constraint_id: id.to_string(),
         kind,
-    }))
+    })))
 }
 
 pub fn analysis_create_model_op(
@@ -957,7 +959,7 @@ pub fn analysis_create_model_op(
     let mut boundaries = Vec::new();
     for condition in conditions {
         match condition {
-            ModelCondition::Constraint(value) => constraints.push(value),
+            ModelCondition::Constraint(value) => constraints.push(*value),
             ModelCondition::Boundary(value) => boundaries.push(value),
         }
     }

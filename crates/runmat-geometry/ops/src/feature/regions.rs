@@ -6,6 +6,8 @@ use runmat_geometry_core::{
     GeometryRegionCardinality, GeometryRegionRole, GeometryRegionSelector, PersistentEntityId,
 };
 
+pub use runmat_geometry_core::{ResolvedGeometryRegion, ResolvedGeometryRegions};
+
 use super::{GeometryFeatureError, GeometryTopologyHistory};
 
 pub trait GeometryRegionEvidence {
@@ -29,15 +31,6 @@ pub trait GeometryRegionEvidence {
         output: &str,
     ) -> Result<Vec<PersistentEntityId>, Self::Error>;
 }
-
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ResolvedGeometryRegion {
-    pub role: GeometryRegionRole,
-    pub entity_ids: Vec<PersistentEntityId>,
-}
-
-pub type ResolvedGeometryRegions = BTreeMap<String, ResolvedGeometryRegion>;
 
 pub fn resolve_geometry_regions<E: GeometryRegionEvidence>(
     definition: &GeometryDefinition,

@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use runmat_geometry_core::{PersistentEntityId, PersistentEntityKind};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EvidenceConfidence {
@@ -36,6 +38,8 @@ pub enum PropertyRegionScope {
 #[serde(deny_unknown_fields)]
 pub struct PropertyRegionSelection {
     region_id: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    resolved_entities: Vec<PersistentEntityId>,
 }
 
 impl PropertyRegionTarget {
@@ -98,6 +102,33 @@ impl PropertyRegionTarget {
     pub const fn selects_all(&self) -> bool {
         self.scope().selects_all()
     }
+
+    pub fn bind_resolved_entities(
+        &mut self,
+        entities: Vec<PersistentEntityId>,
+    ) -> Result<(), PropertyRegionResolutionError> {
+        let expected = match self {
+            Self::Beam(_) => PersistentEntityKind::Edge,
+            Self::Shell(_) => PersistentEntityKind::Face,
+            Self::Solid(_) | Self::Cell(_) => PersistentEntityKind::Region,
+        };
+        let PropertyRegionScope::Region(selection) = self.scope_mut() else {
+            return Ok(());
+        };
+        selection.bind_resolved_entities(expected, entities)
+    }
+
+    pub fn validate_resolution(&self) -> Result<(), PropertyRegionResolutionError> {
+        let expected = match self {
+            Self::Beam(_) => PersistentEntityKind::Edge,
+            Self::Shell(_) => PersistentEntityKind::Face,
+            Self::Solid(_) | Self::Cell(_) => PersistentEntityKind::Region,
+        };
+        match self.scope() {
+            PropertyRegionScope::All => Ok(()),
+            PropertyRegionScope::Region(selection) => selection.validate_resolution(expected),
+        }
+    }
 }
 
 impl PropertyRegionScope {
@@ -128,12 +159,82 @@ impl PropertyRegionSelection {
     fn new(region_id: impl Into<String>) -> Self {
         Self {
             region_id: region_id.into(),
+            resolved_entities: Vec::new(),
         }
     }
 
     pub fn region_id(&self) -> &str {
         &self.region_id
     }
+
+    pub fn resolved_entities(&self) -> &[PersistentEntityId] {
+        &self.resolved_entities
+    }
+
+    pub fn bind_resolved_entities(
+        &mut self,
+        expected: PersistentEntityKind,
+        mut entities: Vec<PersistentEntityId>,
+    ) -> Result<(), PropertyRegionResolutionError> {
+        entities.sort();
+        entities.dedup();
+        if entities.is_empty()
+            || entities
+                .iter()
+                .any(|entity| entity.validate().is_err() || entity.kind != expected)
+        {
+            return Err(PropertyRegionResolutionError {
+                region_id: self.region_id.clone(),
+                expected,
+                count: entities.len(),
+            });
+        }
+        self.resolved_entities = entities;
+        Ok(())
+    }
+
+    pub fn matches_persistent_entity(&self, entity: &PersistentEntityId) -> bool {
+        if self.resolved_entities.is_empty() {
+            entity.matches_analysis_selection(&self.region_id)
+        } else {
+            self.resolved_entities.binary_search(entity).is_ok()
+        }
+    }
+
+    fn validate_resolution(
+        &self,
+        expected: PersistentEntityKind,
+    ) -> Result<(), PropertyRegionResolutionError> {
+        if self.resolved_entities.is_empty() {
+            return Ok(());
+        }
+        if !self
+            .resolved_entities
+            .windows(2)
+            .all(|pair| pair[0] < pair[1])
+            || self
+                .resolved_entities
+                .iter()
+                .any(|entity| entity.validate().is_err() || entity.kind != expected)
+        {
+            return Err(PropertyRegionResolutionError {
+                region_id: self.region_id.clone(),
+                expected,
+                count: self.resolved_entities.len(),
+            });
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error(
+    "property region `{region_id}` resolved {count} entities incompatible with required {expected:?} domain"
+)]
+pub struct PropertyRegionResolutionError {
+    pub region_id: String,
+    pub expected: PersistentEntityKind,
+    pub count: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

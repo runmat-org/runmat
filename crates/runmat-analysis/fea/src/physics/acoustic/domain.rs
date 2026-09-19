@@ -287,8 +287,10 @@ pub(super) fn pressure_sources(
                 _ => return None,
             };
             let target = match &excitation.target {
-                crate::excitation::RealizedExcitationTarget::Region(id)
-                | crate::excitation::RealizedExcitationTarget::Port(id)
+                crate::excitation::RealizedExcitationTarget::Region(target) => {
+                    target.region_id.clone()
+                }
+                crate::excitation::RealizedExcitationTarget::Port(id)
                 | crate::excitation::RealizedExcitationTarget::Interface(id) => id.clone(),
                 crate::excitation::RealizedExcitationTarget::ReferencePoint {
                     reference_point_id,

@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use runmat_analysis_core::StructuralModel;
+use runmat_analysis_core::{RegionTarget, StructuralModel};
 use runmat_meshing_core::SolverMeshArtifact;
 use thiserror::Error;
 
@@ -40,12 +40,13 @@ pub(crate) enum MixedStructuralTargetError {
 }
 
 pub(crate) fn resolve_mixed_structural_target(
-    selector: &str,
+    target: &RegionTarget,
     mesh: &SolverMeshArtifact,
     structural: &StructuralModel,
     topology: &CanonicalStructuralNodeSpace,
 ) -> Result<MixedStructuralTargetOwnership, MixedStructuralTargetError> {
-    let solid = solid_nodes(mesh, selector)?;
+    let selector = &target.region_id;
+    let solid = solid_nodes(mesh, target)?;
     let explicit = explicit_target_node_indices(structural, selector)
         .into_iter()
         .map(|node| topology.explicit_node_indices[node])
@@ -73,7 +74,7 @@ pub(crate) fn resolve_mixed_structural_target(
 
 fn solid_nodes(
     mesh: &SolverMeshArtifact,
-    selector: &str,
+    target: &RegionTarget,
 ) -> Result<BTreeSet<usize>, MixedStructuralTargetError> {
     let node_by_id = mesh
         .topology
@@ -83,19 +84,22 @@ fn solid_nodes(
         .map(|(index, node)| (node.node_id, index))
         .collect::<BTreeMap<_, _>>();
     let mut nodes = BTreeSet::new();
-    if let Some(node_id) = selector
-        .strip_prefix("node:")
-        .and_then(|value| value.parse::<u64>().ok())
-    {
-        if let Some(node) = node_by_id.get(&node_id) {
-            nodes.insert(*node);
+    if target.resolved_entities().is_empty() {
+        if let Some(node_id) = target
+            .region_id
+            .strip_prefix("node:")
+            .and_then(|value| value.parse::<u64>().ok())
+        {
+            if let Some(node) = node_by_id.get(&node_id) {
+                nodes.insert(*node);
+            }
         }
     }
     for (index, node) in mesh.topology.nodes.iter().enumerate() {
         if node
             .provenance
             .iter()
-            .any(|entity| entity.matches_analysis_selection(selector))
+            .any(|entity| target.matches_persistent_entity(entity))
         {
             nodes.insert(index);
         }
@@ -104,7 +108,7 @@ fn solid_nodes(
         if face
             .provenance
             .iter()
-            .any(|entity| entity.matches_analysis_selection(selector))
+            .any(|entity| target.matches_persistent_entity(entity))
         {
             for node_id in &face.node_ids {
                 nodes.insert(*node_by_id.get(node_id).ok_or_else(|| {
@@ -117,11 +121,11 @@ fn solid_nodes(
         }
     }
     for element in &mesh.topology.volume_elements {
-        if element.region_id.matches_analysis_selection(selector)
+        if target.matches_persistent_entity(&element.region_id)
             || element
                 .provenance
                 .iter()
-                .any(|entity| entity.matches_analysis_selection(selector))
+                .any(|entity| target.matches_persistent_entity(entity))
         {
             for node_id in &element.node_ids {
                 nodes.insert(*node_by_id.get(node_id).ok_or_else(|| {

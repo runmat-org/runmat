@@ -801,7 +801,7 @@ fn resolve_field_target(
                 }
                 (EntityDimension::Face, ExpectedTopology::BoundaryFace, FieldLocation::Node) => {
                     let projection = solid_projection(topology, spec)?;
-                    let faces = matching_faces(&region.region_id, projection);
+                    let faces = matching_faces(region, projection);
                     enforce_cardinality(region.cardinality, faces.len(), spec)?;
                     let indices = faces
                         .into_iter()
@@ -821,14 +821,14 @@ fn resolve_field_target(
                     ExpectedTopology::MeshElement,
                     FieldLocation::Element,
                 ) => {
-                    let indices = matching_elements(&region.region_id, field_domain, topology)?;
+                    let indices = matching_elements(region, field_domain, topology)?;
                     enforce_cardinality(region.cardinality, indices.len(), spec)?;
                     elements_target(indices, field_domain, topology)
                 }
                 (EntityDimension::Volume, ExpectedTopology::MeshElement, FieldLocation::Node) => {
                     let projection = solid_projection(topology, spec)?;
                     let elements = matching_elements(
-                        &region.region_id,
+                        region,
                         RecoveredFieldEntityDomain::SolidElements,
                         topology,
                     )?;
@@ -958,7 +958,7 @@ fn resolve_reduction_target(
             match (region.entity_dimension, region.expected_topology) {
                 (EntityDimension::Volume, ExpectedTopology::MeshElement) => {
                     let element_indices = matching_elements(
-                        &region.region_id,
+                        region,
                         RecoveredFieldEntityDomain::SolidElements,
                         topology,
                     )?;
@@ -975,7 +975,7 @@ fn resolve_reduction_target(
                 (EntityDimension::Face, ExpectedTopology::BoundaryFace)
                     if materialized_field_location(spec) == FieldLocation::Node =>
                 {
-                    let face_indices = matching_faces(&region.region_id, projection);
+                    let face_indices = matching_faces(region, projection);
                     enforce_cardinality(region.cardinality, face_indices.len(), spec)?;
                     let face_identities = face_indices
                         .iter()
@@ -1043,7 +1043,7 @@ fn elements_target(
 }
 
 fn matching_elements(
-    selector: &str,
+    target: &runmat_analysis_core::RegionTarget,
     domain: RecoveredFieldEntityDomain,
     topology: &StructuralObservationTopology,
 ) -> Result<Vec<usize>, ObservationError> {
@@ -1054,9 +1054,8 @@ fn matching_elements(
                 .iter()
                 .enumerate()
                 .filter_map(|(index, element)| {
-                    element
-                        .region_id
-                        .matches_analysis_selection(selector)
+                    target
+                        .matches_persistent_entity(&element.region_id)
                         .then_some(index)
                 })
                 .collect());
@@ -1066,7 +1065,7 @@ fn matching_elements(
         .elements(domain)?
         .iter()
         .enumerate()
-        .filter_map(|(index, element)| (element.region_id == selector).then_some(index))
+        .filter_map(|(index, element)| (element.region_id == target.region_id).then_some(index))
         .collect())
 }
 
@@ -1082,7 +1081,10 @@ fn solid_projection<'a>(
     })
 }
 
-fn matching_faces(selector: &str, projection: &AnalysisProjection) -> Vec<usize> {
+fn matching_faces(
+    target: &runmat_analysis_core::RegionTarget,
+    projection: &AnalysisProjection,
+) -> Vec<usize> {
     projection
         .boundary_faces
         .iter()
@@ -1090,7 +1092,7 @@ fn matching_faces(selector: &str, projection: &AnalysisProjection) -> Vec<usize>
         .filter_map(|(index, face)| {
             face.provenance
                 .iter()
-                .any(|entity| entity.matches_analysis_selection(selector))
+                .any(|entity| target.matches_persistent_entity(entity))
                 .then_some(index)
         })
         .collect()
