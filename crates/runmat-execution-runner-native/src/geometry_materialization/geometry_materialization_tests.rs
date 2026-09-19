@@ -149,6 +149,52 @@ fn constructed_and_derived_geometry_publish_reimportable_exact_closures() {
 }
 
 #[test]
+fn constructed_geometry_program_is_preserved_by_the_meshing_root() {
+    let request = constructed_request(native_geometry_provider_profile().expect("OCCT profile"));
+    let access = access("geometry:mesh-root", b"geometry-mesh-root-key");
+    let revision = revision();
+    let geometry =
+        prepare_geometry_materialization_program(request.clone(), revision.clone(), &access, &[])
+            .unwrap();
+    let meshing_request = crate::resolve_native_meshing_request(
+        &request.import_options,
+        runmat_meshing_core::MeshingRequestSettings::default(),
+    )
+    .unwrap();
+    let prepared = crate::prepare_geometry_meshing_root(crate::GeometryMeshingRootPreparation {
+        program_revision: revision,
+        artifact_access: access.clone(),
+        geometry,
+        geometry_source_objects: Vec::new(),
+        meshing_request: meshing_request.clone(),
+        preferred_edges_per_partition: 8,
+        preferred_faces_per_partition: 8,
+    })
+    .unwrap();
+    let mut store = MemoryStore::default();
+    prepared.write_to(&mut store).unwrap();
+    let decoded = crate::decode_geometry_meshing_root(prepared.request(), &store).unwrap();
+
+    assert_eq!(decoded.artifact_access, access);
+    assert_eq!(decoded.request.meshing_request, meshing_request);
+    assert_eq!(decoded.geometry.arguments.len(), 1);
+    assert_eq!(
+        decoded.geometry.recipe.execution_mode,
+        runmat_analysis_execution::GEOMETRY_MATERIALIZATION_EXECUTION_MODE
+    );
+    let programs = prepared.required_programs();
+    assert_eq!(programs.len(), 3);
+    assert_eq!(
+        programs
+            .iter()
+            .map(|program| program.artifact.id)
+            .collect::<BTreeSet<_>>()
+            .len(),
+        3
+    );
+}
+
+#[test]
 fn imported_brep_is_verified_against_source_and_topology_identity() {
     const BOX: &[u8] = include_bytes!("../../../runmat-geometry/io/tests/fixtures/box.brep");
     let options = ExactCadImportOptions::default();

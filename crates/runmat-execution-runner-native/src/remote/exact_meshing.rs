@@ -27,10 +27,14 @@ use crate::{
 /// Exact meshing output retained in driver-owned form for composition into a larger root.
 #[derive(Clone)]
 pub(super) struct CompletedRemoteExactMeshing {
-    pub(super) source_edge_ids: BTreeMap<u64, PersistentEntityId>,
-    pub(super) source_face_ids: BTreeMap<u64, PersistentEntityId>,
-    pub(super) source_region_ids: BTreeMap<u64, PersistentEntityId>,
+    pub(super) regions: MeshedGeometryRegions,
     pub(super) result: ExactMeshingDagRunResult,
+}
+
+#[derive(Clone)]
+pub(super) enum MeshedGeometryRegions {
+    ImporterAliases(BTreeMap<String, PersistentEntityId>),
+    Materialized(runmat_geometry_ops::ResolvedGeometryRegions),
 }
 
 /// Outcome of exact meshing before the caller chooses its terminal response contract.
@@ -47,19 +51,165 @@ pub(crate) async fn execute(
 ) -> NativeExecutionResult<RemotePoolExecutionOutcome> {
     match execute_for_composition(Arc::clone(&pool), &request, &run_id, &resources).await? {
         RemoteExactMeshingComposition::Completed(completed) => {
-            let CompletedRemoteExactMeshing {
-                source_edge_ids,
-                source_face_ids,
-                source_region_ids,
-                result,
-            } = *completed;
-            drop(source_edge_ids);
-            drop(source_face_ids);
-            drop(source_region_ids);
+            let CompletedRemoteExactMeshing { regions, result } = *completed;
+            drop(regions);
             package_completed(pool, &request, result)
         }
         RemoteExactMeshingComposition::Terminal(outcome) => Ok(outcome),
     }
+}
+
+pub(crate) async fn execute_geometry_root(
+    pool: Arc<RemotePoolDriver>,
+    request: ProgramExecutionRequest,
+    run_id: String,
+    resources: AllocationResources,
+) -> NativeExecutionResult<RemotePoolExecutionOutcome> {
+    match execute_geometry_for_composition(Arc::clone(&pool), &request, &run_id, &resources).await?
+    {
+        RemoteExactMeshingComposition::Completed(completed) => {
+            package_completed(pool, &request, completed.result)
+        }
+        RemoteExactMeshingComposition::Terminal(outcome) => Ok(outcome),
+    }
+}
+
+pub(super) async fn execute_geometry_for_composition(
+    pool: Arc<RemotePoolDriver>,
+    request: &ProgramExecutionRequest,
+    run_id: &str,
+    resources: &AllocationResources,
+) -> NativeExecutionResult<RemoteExactMeshingComposition> {
+    let decoded = crate::decode_geometry_meshing_root(request, pool.as_ref())?;
+    let (geometry_request, _) = runmat_analysis_execution::decode_geometry_materialization_program(
+        &decoded.geometry,
+        pool.as_ref(),
+        &decoded.artifact_access,
+    )
+    .map_err(protocol)?;
+    let execution_policy = MeshingExecutionPolicy {
+        deadline_unix_millis: Some(super::pool_resources::task_deadline_unix_millis(resources)?),
+        ..MeshingExecutionPolicy::default()
+    };
+    let (task_id, completion) = submit_root_task(
+        &pool,
+        &decoded.geometry,
+        run_id,
+        b"remote-geometry-materialization",
+        resources,
+        BTreeSet::from([runmat_analysis_execution::geometry_provider_capability(
+            &geometry_request.provider,
+        )]),
+        RetryPolicy::ExplicitlyIdempotent {
+            max_attempts: execution_policy.maximum_attempts,
+        },
+    )?;
+    let materialized = match completion.wait().await {
+        Ok(success) => success,
+        Err(message) => {
+            return task_failure_outcome(pool, task_id, message)
+                .map(RemoteExactMeshingComposition::Terminal)
+        }
+    };
+    let output_reference = match materialized.outputs.as_slice() {
+        [ValuePayload::Object(reference)] if reference.kind == ValueRefKind::ResultObject => {
+            reference.as_ref()
+        }
+        _ => {
+            return Err(protocol(
+                "geometry materialization returned an invalid result root",
+            ))
+        }
+    };
+    if !materialized.result_objects.contains(output_reference) {
+        return Err(protocol(
+            "geometry materialization omitted its output root from the inventory",
+        ));
+    }
+    let output = runmat_analysis_execution::import_geometry_materialization_output(
+        pool.as_ref(),
+        output_reference,
+        &decoded.artifact_access,
+    )
+    .map_err(protocol)?;
+    output
+        .validate_against(&geometry_request)
+        .map_err(protocol)?;
+    if !materialized.result_objects.contains(&output.geometry_root) {
+        return Err(protocol(
+            "geometry materialization omitted its exact geometry root",
+        ));
+    }
+    let inventory = ObjectInventoryLimits::default();
+    let mut executor = RemoteExactMeshingExecutor::new(
+        Arc::clone(&pool),
+        decoded.artifact_access.clone(),
+        execution_policy,
+        super::object_transfer::MAX_REMOTE_OBJECT_BYTES,
+    )
+    .map_err(protocol)?;
+    let geometry = import_exact_geometry_input(
+        &executor,
+        output.document.clone(),
+        &output.geometry_root,
+        decoded.artifact_access.clone(),
+        inventory,
+    )
+    .map_err(protocol)?;
+    let mut expected_inventory = prepare_exact_geometry_result(
+        geometry.geometry_objects().clone(),
+        decoded.artifact_access.clone(),
+        inventory,
+    )
+    .map_err(protocol)?
+    .input_objects()
+    .to_vec();
+    expected_inventory.push(output_reference.clone());
+    validate_reference_closure(&materialized.result_objects, &expected_inventory)?;
+    let mut meshing_request = decoded.request.meshing_request;
+    if !crate::exact_geometry_admission::same_requested_tolerance(
+        &meshing_request.tolerance,
+        &output.document.tolerance,
+    ) {
+        return Err(protocol(
+            "meshing request tolerance differs from materialized exact geometry",
+        ));
+    }
+    meshing_request.tolerance = output.document.tolerance;
+    let platform = output.platform;
+    platform.validate().map_err(protocol)?;
+    let result = match execute_exact_meshing_dag_async(
+        ExactMeshingDagRun {
+            geometry: &geometry,
+            request: meshing_request,
+            artifact_access: decoded.artifact_access,
+            capability_cohort: Some(platform.capability_cohort.clone()),
+            program_revision: request.recipe.program_revision.clone(),
+            preferred_edges_per_partition: decoded.request.preferred_edges_per_partition,
+            preferred_faces_per_partition: decoded.request.preferred_faces_per_partition,
+            inventory_limits: inventory,
+            evidence: MeshingRunEvidenceContext {
+                platform,
+                sizing: Vec::new(),
+                cache_admission: CacheAdmissionDecision::Admitted,
+            },
+        },
+        &mut executor,
+    )
+    .await
+    {
+        Ok(result) => result,
+        Err(error) => {
+            return execution_failure_outcome(pool, error.to_string())
+                .map(RemoteExactMeshingComposition::Terminal)
+        }
+    };
+    Ok(RemoteExactMeshingComposition::Completed(Box::new(
+        CompletedRemoteExactMeshing {
+            regions: MeshedGeometryRegions::Materialized(output.regions),
+            result,
+        },
+    )))
 }
 
 pub(super) async fn execute_for_composition(
@@ -199,14 +349,35 @@ pub(super) async fn execute_for_composition(
         .map(|region| region.region_id.clone())
         .collect::<BTreeSet<_>>();
     validate_source_entity_bijection("region", &source_region_ids, &meshed_region_ids)?;
+    let region_aliases = source_aliases(&source_edge_ids, &source_face_ids, &source_region_ids)?;
     Ok(RemoteExactMeshingComposition::Completed(Box::new(
         CompletedRemoteExactMeshing {
-            source_edge_ids,
-            source_face_ids,
-            source_region_ids,
+            regions: MeshedGeometryRegions::ImporterAliases(region_aliases),
             result,
         },
     )))
+}
+
+fn source_aliases(
+    edges: &BTreeMap<u64, PersistentEntityId>,
+    faces: &BTreeMap<u64, PersistentEntityId>,
+    regions: &BTreeMap<u64, PersistentEntityId>,
+) -> NativeExecutionResult<BTreeMap<String, PersistentEntityId>> {
+    let mut aliases = BTreeMap::new();
+    for (prefix, identities) in [("edge", edges), ("face", faces), ("solid", regions)] {
+        for (index, identity) in identities {
+            if aliases
+                .insert(
+                    format!("{prefix}_{:06}", index.saturating_add(1)),
+                    identity.clone(),
+                )
+                .is_some()
+            {
+                return Err(protocol("geometry region aliases are not unique"));
+            }
+        }
+    }
+    Ok(aliases)
 }
 
 fn package_completed(

@@ -314,6 +314,8 @@ async fn execute_with_allocated_workers(
 
     let run_id = authority.run_id.clone();
     let exact_meshing = request.recipe.execution_mode == EXACT_MESHING_ROOT_EXECUTION_MODE;
+    let geometry_meshing =
+        request.recipe.execution_mode == crate::GEOMETRY_MESHING_ROOT_EXECUTION_MODE;
     let exact_structural_study =
         request.recipe.execution_mode == EXACT_STRUCTURAL_STUDY_ROOT_EXECUTION_MODE;
     let exact_structural_sweep =
@@ -333,7 +335,14 @@ async fn execute_with_allocated_workers(
             )
         })
         .transpose()?;
-    let mut execution = if exact_meshing {
+    let mut execution = if geometry_meshing {
+        Box::pin(super::exact_meshing::execute_geometry_root(
+            pool_for_execution,
+            request,
+            run_id,
+            resources_for_execution,
+        )) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + '_>>
+    } else if exact_meshing {
         Box::pin(super::exact_meshing::execute(
             pool_for_execution,
             request,

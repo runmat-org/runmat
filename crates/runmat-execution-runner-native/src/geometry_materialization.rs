@@ -362,12 +362,17 @@ where
     }
     let exact_result = prepare_exact_geometry_result(exact_objects, access.clone(), inventory)
         .map_err(|error| error.to_string())?;
+    let platform = crate::meshing_platform::native_meshing_platform(
+        None,
+        Some(actual_profile.kernel_abi.clone()),
+    );
     let output = GeometryMaterializationOutput {
         schema_version: 1,
         request_identity: request.identity().map_err(|error| error.to_string())?,
         definition: materialized.definition,
         materialization_kind: materialized.kind,
         provider: actual_profile,
+        platform,
         document: exact_result.geometry_objects().document.clone(),
         geometry_root: exact_result.root_input().clone(),
         regions,

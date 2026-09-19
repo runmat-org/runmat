@@ -11,6 +11,7 @@ use runmat_geometry_ops::{
     GeometryFeatureCapabilities, GeometryFeaturePlanLimits, GeometryFeatureResourceBounds,
     GeometryMaterializationKind, GeometryTopologyHistory, ResolvedGeometryRegions,
 };
+use runmat_meshing_core::PlatformBuildIdentity;
 use serde::{Deserialize, Serialize};
 
 use crate::{AnalysisBridgeError, AnalysisBridgeResult};
@@ -222,6 +223,7 @@ pub struct GeometryMaterializationOutput {
     pub definition: GeometryDefinitionRef,
     pub materialization_kind: GeometryMaterializationKind,
     pub provider: GeometryProviderProfile,
+    pub platform: PlatformBuildIdentity,
     pub document: GeometryDocument,
     pub geometry_root: runmat_execution::value::ValueRef,
     pub regions: ResolvedGeometryRegions,
@@ -235,9 +237,13 @@ impl GeometryMaterializationOutput {
             .validate()
             .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
         self.provider.validate()?;
+        self.platform
+            .validate()
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
         if self.schema_version != 1
             || self.definition.module_path.is_empty()
             || self.definition.geometry_id.is_empty()
+            || self.platform.exact_kernel_abi.as_deref() != Some(self.provider.kernel_abi.as_str())
             || self.geometry_root.kind != runmat_execution::value::ValueRefKind::ResultObject
             || self.geometry_root.logical_digest.bytes()
                 != self.document.primary_artifact().digest.bytes()

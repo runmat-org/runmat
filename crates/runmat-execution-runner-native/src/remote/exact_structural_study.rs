@@ -165,37 +165,20 @@ pub(super) async fn execute_with_completed_meshing(
         ));
     }
 
-    let mut aliases = completed
-        .source_edge_ids
-        .iter()
-        .map(|(index, identity)| {
-            (
-                format!("edge_{:06}", index.saturating_add(1)),
-                identity.clone(),
-            )
-        })
-        .collect::<BTreeMap<_, _>>();
-    for (index, identity) in &completed.source_face_ids {
-        let alias = format!("face_{:06}", index.saturating_add(1));
-        if aliases.insert(alias, identity.clone()).is_some() {
-            return Ok(RemoteExactStructuralStudyComposition::Failed(
-                "geometry region aliases are not unique".into(),
-            ));
+    let aliases = match &completed.regions {
+        super::exact_meshing::MeshedGeometryRegions::ImporterAliases(aliases) => aliases,
+        super::exact_meshing::MeshedGeometryRegions::Materialized(regions) => {
+            return Ok(RemoteExactStructuralStudyComposition::Failed(format!(
+                "{} typed geometry regions require mesh-property compilation before structural execution",
+                regions.len()
+            )))
         }
-    }
-    for (index, identity) in &completed.source_region_ids {
-        let alias = format!("solid_{:06}", index.saturating_add(1));
-        if aliases.insert(alias, identity.clone()).is_some() {
-            return Ok(RemoteExactStructuralStudyComposition::Failed(
-                "geometry region aliases are not unique".into(),
-            ));
-        }
-    }
+    };
     let resolution = TopologyRegionResolution {
         schema_version: 1,
         geometry_source_digest: decoded.geometry_source_digest,
         solver_mesh_digest: Digest::from_bytes(*completed.result.artifact.canonical_digest.bytes()),
-        aliases,
+        aliases: aliases.clone(),
     };
     resolution.validate()?;
     let region_resolution_objects =
