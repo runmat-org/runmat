@@ -32,6 +32,7 @@ mod exact_structural_sweep_root;
 mod geometry_materialization;
 mod geometry_meshing_root;
 mod local_store;
+mod local_structural_study;
 mod materialized_project;
 mod meshing_evaluator;
 mod meshing_host;
@@ -74,7 +75,9 @@ pub use analysis_modal_transient::{
     execute_structural_modal_transient_locally, execute_structural_modal_transient_remotely,
     CompletedStructuralModalTransientStudy,
 };
-pub use analysis_placement::NativeStructuralStudyPlacement;
+pub use analysis_placement::{
+    execute_structural_workloads_locally, NativeStructuralStudyPlacement,
+};
 pub use analysis_prestressed_frequency::{
     execute_structural_prestressed_frequency_study_locally,
     execute_structural_prestressed_frequency_study_locally_with_source,
@@ -156,6 +159,9 @@ pub use geometry_meshing_root::{
     GeometryMeshingRootPreparation, GeometryMeshingRootRequest, PreparedGeometryMeshingRoot,
     RequiredGeometryMeshingProgram, GEOMETRY_MESHING_ROOT_EXECUTION_MODE,
     GEOMETRY_MESHING_ROOT_TARGET_PROFILE,
+};
+pub use local_structural_study::{
+    execute_prepared_structural_study_locally, CompletedLocalStructuralStudy,
 };
 pub use meshing_evaluator::{native_meshing_kernel_dispatcher, NativeMeshingEvaluatorProvider};
 pub use meshing_host::{

@@ -1,169 +1,21 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::{
-    ArtifactAccess, ProgramExecutionDescriptor, ProgramExecutionInputs, ProgramExecutionObject,
+    ArtifactAccess, ProgramExecutionDescriptor, ProgramExecutionInputs,
     PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
 };
-use runmat_execution_runner_native::{
-    prepare_exact_meshing_root, prepare_exact_structural_study_root,
-    prepare_exact_structural_sweep_root, ExactMeshingRootPreparation,
-    ExactStructuralStudyRootPreparation, ExactStructuralSweepRootPreparation,
-    NativeMeshingContactDefinition, NativeMeshingPartitionPolicy, PreparedExactStructuralStudyRoot,
-    PreparedExactStructuralSweepRoot,
-};
-use runmat_geometry_io::ExactCadImportOptions;
-use runmat_runtime::analysis::{
-    analysis_prepare_structural_study_intent_op, AnalysisStudySpec, PreparedStructuralStudyIntent,
-};
-use runmat_runtime::operations::OperationContext;
+use runmat_execution_runner_native::PreparedStructuralStudyRoot;
+use runmat_runtime::analysis::PreparedStructuralStudyIntent;
 
 use crate::commands::job::submit::PreparedRemoteExecution;
 
-pub(super) struct RemoteStudySource {
-    pub(super) intent: PreparedStructuralStudyIntent,
-    pub(super) geometry_name: String,
-    pub(super) geometry_bytes: Vec<u8>,
-    pub(super) input_materializations: Vec<runmat_analysis_execution::PreparedInputMaterialization>,
-}
-
-pub(super) fn prepare_study_source(
-    spec: &AnalysisStudySpec,
-    context: OperationContext,
-    input_materializations: Vec<runmat_analysis_execution::PreparedInputMaterialization>,
-) -> Result<RemoteStudySource> {
-    let geometry_path = std::path::PathBuf::from(&spec.geometry.source.path);
-    let geometry_name = geometry_path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .context("FEA geometry file name is not valid UTF-8")?
-        .to_owned();
-    let intent = analysis_prepare_structural_study_intent_op(spec, context)
-        .map_err(super::super::report_operation_error)?;
-    for backend in intent
-        .workloads()
-        .backends()
-        .map_err(|error| anyhow::anyhow!(error.to_string()))?
-    {
-        validate_remote_study_backend(backend)?;
-    }
-    let geometry_bytes = std::fs::read(&geometry_path)
-        .with_context(|| format!("read FEA geometry {}", geometry_path.display()))?;
-    if Digest::sha256(&geometry_bytes) != intent.geometry_source_digest() {
-        anyhow::bail!("FEA geometry differs from its authored source SHA-256");
-    }
-    Ok(RemoteStudySource {
-        intent,
-        geometry_name,
-        geometry_bytes,
-        input_materializations,
-    })
-}
-
-pub(super) fn prepare_sweep_root(
-    studies: &[RemoteStudySource],
-    revision: ProgramRevision,
-    authority: &str,
-    definition: runmat_analysis_fea::execution::SweepDefinition,
-) -> Result<PreparedExactStructuralSweepRoot> {
-    let prepared = studies
-        .iter()
-        .map(|study| {
-            prepare_root(
-                &study.intent,
-                revision.clone(),
-                authority,
-                &study.geometry_name,
-                &study.geometry_bytes,
-                study.input_materializations.clone(),
-            )
-        })
-        .collect::<Result<Vec<_>>>()?;
-    Ok(prepare_exact_structural_sweep_root(
-        ExactStructuralSweepRootPreparation {
-            program_revision: revision,
-            artifact_access: artifact_access(authority),
-            definition,
-            studies: prepared,
-        },
-    )?)
-}
-
-pub(super) fn prepare_root(
-    study: &PreparedStructuralStudyIntent,
-    revision: ProgramRevision,
-    authority: &str,
-    geometry_name: &str,
-    geometry_bytes: &[u8],
-    input_materializations: Vec<runmat_analysis_execution::PreparedInputMaterialization>,
-) -> Result<PreparedExactStructuralStudyRoot> {
-    let access = artifact_access(authority);
-    let import_options = ExactCadImportOptions {
-        source_units: study.geometry_units(),
-        ..ExactCadImportOptions::default()
-    };
-    let meshing_request = authored_meshing_request(study)?;
-    let contact_definitions = study
-        .meshing_contacts()
-        .iter()
-        .map(|contact| NativeMeshingContactDefinition {
-            side_a_face_selectors: contact.side_a_face_selectors.clone(),
-            side_b_face_selectors: contact.side_b_face_selectors.clone(),
-        })
-        .collect();
-    let partition = NativeMeshingPartitionPolicy::default();
-    let exact_meshing = prepare_exact_meshing_root(ExactMeshingRootPreparation {
-        program_revision: revision.clone(),
-        artifact_access: access.clone(),
-        source_name: geometry_name,
-        source_bytes: geometry_bytes,
-        import_options,
-        contact_definitions,
-        meshing_request,
-        preferred_edges_per_partition: partition.preferred_edges_per_partition,
-        preferred_faces_per_partition: partition.preferred_faces_per_partition,
-        maximum_chunk_bytes: 4 * 1024 * 1024,
-    })?;
-    Ok(prepare_exact_structural_study_root(
-        ExactStructuralStudyRootPreparation {
-            program_revision: revision.clone(),
-            artifact_access: access,
-            authored_study_digest: study.authored_study_digest(),
-            frozen_project_digest: Some(*revision.graph_digest()),
-            geometry_source_digest: study.geometry_source_digest(),
-            workloads: study.workloads(),
-            analysis_accelerator_requests: Vec::new(),
-            input_materializations,
-            exact_meshing,
-        },
-    )?)
-}
-
-pub(super) fn prepare_remote_execution(
-    prepared: PreparedExactStructuralStudyRoot,
+pub(crate) fn prepare_typed_remote_execution(
+    prepared: PreparedStructuralStudyRoot,
     revision: ProgramRevision,
     bundle_archive: Vec<u8>,
 ) -> Result<PreparedRemoteExecution> {
     let objects = prepared.transport_objects()?;
     let request = prepared.into_request();
-    prepare_remote_execution_request(request, objects, revision, bundle_archive)
-}
-
-pub(super) fn prepare_remote_sweep_execution(
-    prepared: PreparedExactStructuralSweepRoot,
-    revision: ProgramRevision,
-    bundle_archive: Vec<u8>,
-) -> Result<PreparedRemoteExecution> {
-    let objects = prepared.transport_objects();
-    let request = prepared.into_request();
-    prepare_remote_execution_request(request, objects, revision, bundle_archive)
-}
-
-fn prepare_remote_execution_request(
-    request: runmat_execution_artifact::ProgramExecutionRequest,
-    objects: Vec<ProgramExecutionObject>,
-    revision: ProgramRevision,
-    bundle_archive: Vec<u8>,
-) -> Result<PreparedRemoteExecution> {
     let descriptor = serde_json::to_vec(&ProgramExecutionDescriptor {
         schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
         recipe: request.recipe,
@@ -191,7 +43,7 @@ pub(super) fn authored_meshing_request(
     study
         .meshing_request()
         .cloned()
-        .context("remote exact-CAD studies require an authored meshing request")
+        .ok_or_else(|| anyhow::anyhow!("exact-CAD studies require an authored meshing request"))
 }
 
 pub(super) fn artifact_access(authority: &str) -> ArtifactAccess {
@@ -204,25 +56,5 @@ pub(super) fn artifact_access(authority: &str) -> ArtifactAccess {
             ]
             .concat(),
         ),
-    }
-}
-
-fn validate_remote_study_backend(backend: runmat_analysis_fea::ComputeBackend) -> Result<()> {
-    match backend {
-        runmat_analysis_fea::ComputeBackend::Cpu => Ok(()),
-        runmat_analysis_fea::ComputeBackend::Gpu => anyhow::bail!(
-            "remote structural studies do not yet advertise a typed accelerator allocation; use the CPU backend or local execution"
-        ),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::validate_remote_study_backend;
-
-    #[test]
-    fn remote_study_rejects_unallocated_accelerator_execution() {
-        assert!(validate_remote_study_backend(runmat_analysis_fea::ComputeBackend::Cpu).is_ok());
-        assert!(validate_remote_study_backend(runmat_analysis_fea::ComputeBackend::Gpu).is_err());
     }
 }

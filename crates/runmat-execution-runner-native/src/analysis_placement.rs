@@ -115,13 +115,33 @@ async fn execute_one(
     workers_per_study: u32,
 ) -> crate::NativeExecutionResult<StructuralStudyNumericalResult> {
     let study_digest = analysis_study_content_digest(study);
-    let revision = ProgramRevision::new(
-        study_digest,
-        study_digest,
+    execute_structural_workloads_locally(
+        placement.config.clone(),
         placement.program_environment.clone(),
+        study_digest,
+        None,
+        prepared.workloads(),
+        prepared.solver_mesh().clone(),
+        workers_per_study,
     )
-    .map_err(|error| crate::NativeExecutionError::Configuration(error.to_string()))?;
-    let workloads = prepared.workloads();
+    .await
+}
+
+/// Execute an already compiled and planned structural study on the local task substrate.
+///
+/// This source-format-neutral terminal is shared by typed `.fea` roots and runtime-authored
+/// studies after exact geometry and meshing have produced portable workloads.
+pub async fn execute_structural_workloads_locally(
+    mut execution_config: NativeExecutionConfig,
+    program_environment: ProgramEnvironment,
+    study_digest: Digest,
+    frozen_project_digest: Option<Digest>,
+    workloads: StructuralStudyWorkloads,
+    mesh: runmat_meshing_core::SolverMeshArtifact,
+    workers: u32,
+) -> crate::NativeExecutionResult<StructuralStudyNumericalResult> {
+    let revision = ProgramRevision::new(study_digest, study_digest, program_environment)
+        .map_err(|error| crate::NativeExecutionError::Configuration(error.to_string()))?;
     let accelerator_requests = local_accelerator_requests(&workloads)?;
     let maximum_wall_millis = workloads
         .authored_model()
@@ -138,8 +158,7 @@ async fn execute_one(
         })?;
     let mut required_capabilities = BTreeSet::new();
     required_capabilities.insert(Capability::ProcessIsolation);
-    let mut execution_config = placement.config.clone();
-    execution_config.max_workers = workers_per_study.max(1);
+    execution_config.max_workers = workers.max(1);
     let policy = StructuralSequenceExecutionPolicy {
         resources: ResourceRequest {
             cpu_millicores: 1_000,
@@ -190,9 +209,9 @@ async fn execute_one(
                         execution_config,
                         runmat_analysis_execution::StructuralPrestressedFrequencyStudyPreparation {
                             authored_study_digest: study_digest,
-                            frozen_project_digest: None,
+                            frozen_project_digest,
                             workloads: authored,
-                            mesh: prepared.solver_mesh().clone(),
+                            mesh: mesh.clone(),
                             artifact_access: access.clone(),
                             program_revision: revision,
                             chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
@@ -217,7 +236,7 @@ async fn execute_one(
                 return Ok(
                     StructuralStudyNumericalResult::StructuralPrestressedFrequency(Box::new(
                         StructuralStudyPrestressedFrequencyNumericalResult {
-                            frozen_project_digest: None,
+                            frozen_project_digest,
                             preload_step_id: preload_step_id.clone(),
                             frequency_step_id: frequency_step_id.clone(),
                             preload_result: completed.preload.result.run,
@@ -301,9 +320,9 @@ async fn execute_one(
                             execution_config,
                             runmat_analysis_execution::StructuralPrestressedFrequencyStudyPreparation {
                                 authored_study_digest: study_digest,
-                                frozen_project_digest: None,
+                                frozen_project_digest,
                                 workloads: authored,
-                                mesh: prepared.solver_mesh().clone(),
+                                mesh: mesh.clone(),
                                 artifact_access: access.clone(),
                                 program_revision: revision,
                                 chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
@@ -329,7 +348,7 @@ async fn execute_one(
                     return Ok(
                         StructuralStudyNumericalResult::StructuralPrestressedFrequency(Box::new(
                             StructuralStudyPrestressedFrequencyNumericalResult {
-                                frozen_project_digest: None,
+                                frozen_project_digest,
                                 preload_step_id: producer_step_id.clone(),
                                 frequency_step_id: consumer_step_id.clone(),
                                 preload_result: completed.preload.result.run,
@@ -346,9 +365,9 @@ async fn execute_one(
                         execution_config,
                         runmat_analysis_execution::StructuralPrestressedModalStudyPreparation {
                             authored_study_digest: study_digest,
-                            frozen_project_digest: None,
+                            frozen_project_digest,
                             workloads: authored,
-                            mesh: prepared.solver_mesh().clone(),
+                            mesh: mesh.clone(),
                             artifact_access: access,
                             program_revision: revision,
                             chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
@@ -361,7 +380,7 @@ async fn execute_one(
                     .await?;
                     return Ok(StructuralStudyNumericalResult::StructuralPrestressedModal(
                         Box::new(StructuralStudyPrestressedModalNumericalResult {
-                            frozen_project_digest: None,
+                            frozen_project_digest,
                             preload_step_id: producer_step_id.clone(),
                             modal_step_id: consumer_step_id.clone(),
                             preload_result: completed.preload.result.run,
@@ -376,9 +395,9 @@ async fn execute_one(
                     execution_config,
                     runmat_analysis_execution::StructuralBucklingStudyPreparation {
                         authored_study_digest: study_digest,
-                        frozen_project_digest: None,
+                        frozen_project_digest,
                         workloads: authored,
-                        mesh: prepared.solver_mesh().clone(),
+                        mesh: mesh.clone(),
                         artifact_access: access,
                         program_revision: revision,
                         chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
@@ -391,7 +410,7 @@ async fn execute_one(
                 .await?;
                 return Ok(StructuralStudyNumericalResult::StructuralBuckling(Box::new(
                     StructuralStudyBucklingNumericalResult {
-                        frozen_project_digest: None,
+                        frozen_project_digest,
                         preload_step_id: producer_step_id.clone(),
                         buckling_step_id: consumer_step_id.clone(),
                         preload_result: completed.preload.result.run,
@@ -407,9 +426,9 @@ async fn execute_one(
                     execution_config,
                     runmat_analysis_execution::StructuralModalResponseSpectrumStudyPreparation {
                         authored_study_digest: study_digest,
-                        frozen_project_digest: None,
+                        frozen_project_digest,
                         workloads: authored,
-                        mesh: prepared.solver_mesh().clone(),
+                        mesh: mesh.clone(),
                         artifact_access: access,
                         program_revision: revision,
                         chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
@@ -423,7 +442,7 @@ async fn execute_one(
                 return Ok(
                     StructuralStudyNumericalResult::StructuralModalResponseSpectrum(Box::new(
                         StructuralStudyModalResponseSpectrumNumericalResult {
-                            frozen_project_digest: None,
+                            frozen_project_digest,
                             modal_step_id: producer_step_id.clone(),
                             response_step_id: consumer_step_id.clone(),
                             modal_result: completed.modal.result,
@@ -446,9 +465,9 @@ async fn execute_one(
                     execution_config,
                     runmat_analysis_execution::StructuralRandomResponseStudyPreparation {
                         authored_study_digest: study_digest,
-                        frozen_project_digest: None,
+                        frozen_project_digest,
                         workloads: authored,
-                        mesh: prepared.solver_mesh().clone(),
+                        mesh: mesh.clone(),
                         artifact_access: access,
                         program_revision: revision,
                         chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
@@ -461,7 +480,7 @@ async fn execute_one(
                 .await?;
                 return Ok(StructuralStudyNumericalResult::StructuralRandomResponse(
                     Box::new(StructuralStudyRandomResponseNumericalResult {
-                        frozen_project_digest: None,
+                        frozen_project_digest,
                         modal_step_id: producer_step_id.clone(),
                         response_step_id: consumer_step_id.clone(),
                         modal_result: completed.modal.result,
@@ -482,9 +501,9 @@ async fn execute_one(
                 execution_config,
                 runmat_analysis_execution::StructuralModalTransientStudyPreparation {
                     authored_study_digest: study_digest,
-                    frozen_project_digest: None,
+                    frozen_project_digest,
                     workloads: authored,
-                    mesh: prepared.solver_mesh().clone(),
+                    mesh: mesh.clone(),
                     artifact_access: access,
                     program_revision: revision,
                     chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
@@ -499,7 +518,7 @@ async fn execute_one(
             .await?;
             Ok(StructuralStudyNumericalResult::StructuralModalTransient(
                 Box::new(StructuralStudyModalTransientNumericalResult {
-                    frozen_project_digest: None,
+                    frozen_project_digest,
                     modal_step_id: producer_step_id.clone(),
                     transient_step_id: consumer_step_id.clone(),
                     modal_result: completed.modal.result,
@@ -518,11 +537,11 @@ async fn execute_one(
                 execution_config,
                 StructuralSequencePreparation {
                     authored_study_digest: study_digest,
-                    frozen_project_digest: None,
+                    frozen_project_digest,
                     program_revision: revision,
                     artifact_access: access,
                     workloads,
-                    mesh: Some(prepared.solver_mesh().clone()),
+                    mesh: Some(mesh.clone()),
                     chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
                     inventory_limits: ObjectInventoryLimits::default(),
                     required_capabilities: BTreeSet::new(),
@@ -533,7 +552,7 @@ async fn execute_one(
             .await?;
             Ok(StructuralStudyNumericalResult::LinearSequence(
                 StructuralStudySequenceNumericalResult {
-                    frozen_project_digest: None,
+                    frozen_project_digest,
                     steps: completed
                         .steps
                         .into_iter()
@@ -557,7 +576,7 @@ async fn execute_one(
                 execution_config,
                 StructuralFrequencyExecutionPreparation {
                     workload: resolved_workload.clone(),
-                    mesh: prepared.solver_mesh().clone(),
+                    mesh: mesh.clone(),
                     prestress_state: None,
                     modal_state: None,
                     program_revision: revision,
@@ -592,11 +611,11 @@ async fn execute_one(
                 execution_config,
                 runmat_analysis_execution::StructuralModalTaskPreparation {
                     authored_study_digest: study_digest,
-                    frozen_project_digest: None,
+                    frozen_project_digest,
                     program_revision: revision,
                     artifact_access: access,
                     workload: *workload,
-                    mesh: prepared.solver_mesh().clone(),
+                    mesh,
                     prestress_state: None,
                     chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
                     inventory_limits: ObjectInventoryLimits::default(),
@@ -608,7 +627,7 @@ async fn execute_one(
             .await?;
             Ok(StructuralStudyNumericalResult::StructuralModal(Box::new(
                 StructuralStudyModalNumericalResult {
-                    frozen_project_digest: None,
+                    frozen_project_digest,
                     step_id,
                     result: completed.result.result,
                     numerical_receipt: completed.result.numerical_receipt,

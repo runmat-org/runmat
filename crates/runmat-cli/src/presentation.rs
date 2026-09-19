@@ -242,6 +242,7 @@ pub fn cli_output_mode(cli: &Cli) -> OutputMode {
                 | BatchCommand::Show { json: true, .. }
                 | BatchCommand::Cancel { json: true, .. },
         }) => OutputMode::Machine,
+        Some(Commands::Fea { fea_command }) if fea_command.machine_output() => OutputMode::Machine,
         #[cfg(feature = "wgpu")]
         Some(Commands::AccelCalibrate { json: true, .. }) => OutputMode::Machine,
         Some(Commands::Config {

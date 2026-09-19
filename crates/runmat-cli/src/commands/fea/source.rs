@@ -17,6 +17,9 @@ use crate::cli::Cli;
 pub(crate) struct CheckedFeaSource {
     pub program: CheckedFeaProgram,
     pub root_module: LogicalSourcePath,
+    pub source_root: PathBuf,
+    pub frozen_project: Option<runmat_package::FrozenProject>,
+    pub project_manifest: Option<ProjectManifest>,
 }
 
 pub(crate) async fn check_source(
@@ -58,15 +61,19 @@ pub(crate) async fn check_source(
         super::callables::compile_function_facts(path, &source_root, &requests, frozen, config)
             .await?
     };
-    let profiles = match project.as_ref() {
-        Some(project) => {
-            let manifest = load_project_manifest_async(&project.resolved.frozen.manifest_path)
+    let manifest = match project.as_ref() {
+        Some(project) => Some(
+            load_project_manifest_async(&project.resolved.frozen.manifest_path)
                 .await
-                .context("failed to load frozen-project execution profiles")?;
-            execution_profile_facts(&manifest)?
-        }
-        None => Vec::new(),
+                .context("failed to load frozen-project execution profiles")?,
+        ),
+        None => None,
     };
+    let profiles = manifest
+        .as_ref()
+        .map(execution_profile_facts)
+        .transpose()?
+        .unwrap_or_default();
     let host =
         ProjectFeaHost::new(&source_root, functions, profiles).map_err(anyhow::Error::msg)?;
     let bound = bind_program(&host, graph);
@@ -74,6 +81,9 @@ pub(crate) async fn check_source(
     Ok(CheckedFeaSource {
         program,
         root_module,
+        source_root,
+        frozen_project: project.map(|project| project.resolved.frozen),
+        project_manifest: manifest,
     })
 }
 

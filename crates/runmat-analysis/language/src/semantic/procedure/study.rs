@@ -9,7 +9,7 @@ use runmat_analysis_core::{
     geometry_parameter_input_type, AuthoredGeometryArgument, AuthoredGeometryArgumentValue,
     AuthoredGeometryInstance, AuthoredMeshRef, AuthoredModel, AuthoredModelArgument,
     AuthoredModelArgumentValue, AuthoredModelInstance, AuthoredModelRef, AuthoredStudy,
-    AuthoredStudyInputRef,
+    AuthoredStudyInputRef, FormulationRequirement,
 };
 use runmat_geometry_core::GeometryDefinition;
 use runmat_meshing_core::MeshDefinition;
@@ -79,6 +79,7 @@ pub(super) fn lower(
     let model_closure = model_closure(context.models, model)?;
     let mut sequence = lower::lower_study(declaration, &model_closure, diagnostics)?;
     let outputs = super::output::lower_outputs(context.bound, declaration, diagnostics);
+    let formulation_requirement = formulation_requirement(declaration, diagnostics);
     if let Err(error) = runmat_analysis_core::validate_authored_outputs(&outputs, &sequence.steps) {
         lower::error(
             declaration,
@@ -138,6 +139,7 @@ pub(super) fn lower(
             },
             arguments,
         },
+        formulation_requirement,
         inputs,
         outputs,
         sequence,
@@ -152,6 +154,51 @@ pub(super) fn lower(
         return None;
     }
     Some(study)
+}
+
+fn formulation_requirement(
+    declaration: &CheckedFeaDeclaration,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> FormulationRequirement {
+    let requirements = declaration
+        .statements
+        .iter()
+        .filter_map(|statement| {
+            let crate::CheckedFeaStatementKind::Requirement { target, value } = &statement.kind
+            else {
+                return None;
+            };
+            (target.as_slice() == ["formulation"]).then_some(value)
+        })
+        .collect::<Vec<_>>();
+    if requirements.len() > 1 {
+        lower::error(
+            declaration,
+            declaration.span,
+            "study formulation requirement is declared more than once",
+            diagnostics,
+        );
+    }
+    let Some(value) = requirements.first() else {
+        return FormulationRequirement::Production;
+    };
+    match &value.kind {
+        CheckedExpressionKind::Enum(value) if value == "production" => {
+            FormulationRequirement::Production
+        }
+        CheckedExpressionKind::Enum(value) if value == "experimental" => {
+            FormulationRequirement::Experimental
+        }
+        _ => {
+            lower::error(
+                declaration,
+                value.span,
+                "formulation requirement must be production or experimental",
+                diagnostics,
+            );
+            FormulationRequirement::Production
+        }
+    }
 }
 
 fn model_closure<'a>(

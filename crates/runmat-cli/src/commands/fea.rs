@@ -1,25 +1,35 @@
 use anyhow::{Context, Result};
-use log::info;
 use runmat_config::runtime::RunMatRuntimeConfig;
 use runmat_execution_runner_native::NativeStructuralStudyPlacement;
 use runmat_runtime::analysis::{
     analysis_execute_structural_study_with_placement,
-    analysis_execute_structural_sweep_with_placement, load_fea_document_from_path_async,
-    AnalysisStudyRunData, AnalysisStudySweepData, FeaResolvedDocument,
+    analysis_execute_structural_sweep_with_placement, AnalysisStudyRunData, AnalysisStudySweepData,
 };
 use runmat_runtime::operations::{OperationContext, OperationEnvelope, OperationErrorEnvelope};
 use serde::Serialize;
 use std::path::PathBuf;
 
-use crate::cli::{Cli, ExecutionTarget};
-use crate::commands::accel::dump_provider_telemetry_if_requested;
+use crate::cli::{Cli, ExecutionTargetArgs};
 use crate::presentation;
 use crate::AlreadyReportedCliError;
 
 pub(super) mod callables;
+mod command;
 mod input_materialization;
+mod plan;
+mod preparation;
 pub(crate) mod remote;
+mod run;
+mod selection;
 pub(crate) mod source;
+
+pub async fn execute_command(
+    command: crate::cli::FeaCommand,
+    cli: &Cli,
+    config: &RunMatRuntimeConfig,
+) -> Result<()> {
+    command::execute(command, cli, config).await
+}
 
 #[derive(Debug)]
 pub(crate) struct NativeAnalysisService {
@@ -108,120 +118,19 @@ pub async fn execute_fea_path(
     cli: &Cli,
     config: &RunMatRuntimeConfig,
     json: bool,
-    execution: ExecutionTarget,
+    execution: ExecutionTargetArgs,
 ) -> Result<()> {
-    info!("Executing FEA document: {path:?}");
-    if !json {
-        let styles = presentation::stderr();
-        eprintln!(
-            "{} {}",
-            styles.heading("Running"),
-            styles.path(path.display())
-        );
-        eprintln!("  {}", styles.muted("loading study document"));
-    }
-    let document = load_fea_document_from_path_async(&path)
-        .await
-        .map_err(|err| anyhow::anyhow!("Failed to load FEA file {}: {err}", path.display()))?;
-    let context = OperationContext::new(None, None);
-
-    match document {
-        FeaResolvedDocument::Study(mut spec) => {
-            if !json {
-                let styles = presentation::stderr();
-                eprintln!(
-                    "  {} {} ({} procedure step{})",
-                    styles.label("study:"),
-                    styles.identifier(&spec.study_id),
-                    spec.execution.steps.len(),
-                    if spec.execution.steps.len() == 1 {
-                        ""
-                    } else {
-                        "s"
-                    }
-                );
-                eprintln!(
-                    "  {} {} regions, {} meshes",
-                    styles.label("geometry:"),
-                    spec.geometry.regions.len(),
-                    spec.geometry.meshes.len()
-                );
-                eprintln!("  {}", styles.info("validating, planning, and solving"));
-            }
-            let envelope = match execution {
-                ExecutionTarget::Local => {
-                    input_materialization::materialize_study(&path, &mut spec, cli, config).await?;
-                    let placement = NativeStructuralStudyPlacement::for_current_executable(
-                        crate::diagnostics::parser_compat(config.language.compat),
-                    )?;
-                    Some(
-                        analysis_execute_structural_study_with_placement(
-                            &spec,
-                            context.clone(),
-                            &placement,
-                        )
-                        .await
-                        .map_err(report_operation_error)?,
-                    )
-                }
-                ExecutionTarget::Remote(target) => {
-                    remote::execute_study(&path, *spec, context, target, cli, config, json).await?
-                }
-            };
-            if let Some(envelope) = envelope {
-                if json {
-                    print_envelope(&envelope, config.runtime.verbose)?;
-                } else {
-                    print_study_run_summary(&envelope.data, config.runtime.verbose);
-                }
-            }
-        }
-        FeaResolvedDocument::Sweep(mut spec) => {
-            if !json {
-                let styles = presentation::stderr();
-                eprintln!(
-                    "  {} {} ({} studies, fail_fast: {})",
-                    styles.label("sweep:"),
-                    styles.identifier(&spec.sweep_id),
-                    spec.studies.len(),
-                    spec.fail_fast
-                );
-                eprintln!(
-                    "  {}",
-                    styles.info("validating, planning, and solving studies")
-                );
-            }
-            let envelope = match execution {
-                ExecutionTarget::Local => {
-                    input_materialization::materialize_sweep(&path, &mut spec, cli, config).await?;
-                    let placement = NativeStructuralStudyPlacement::for_current_executable(
-                        crate::diagnostics::parser_compat(config.language.compat),
-                    )?;
-                    Some(
-                        analysis_execute_structural_sweep_with_placement(
-                            &spec, context, &placement,
-                        )
-                        .await
-                        .map_err(report_operation_error)?,
-                    )
-                }
-                ExecutionTarget::Remote(target) => {
-                    remote::execute_sweep(&path, spec.clone(), context, target, cli, config, json)
-                        .await?
-                }
-            };
-            if let Some(envelope) = envelope {
-                if json {
-                    print_envelope(&envelope, config.runtime.verbose)?;
-                } else {
-                    print_sweep_run_summary(&envelope.data);
-                }
-            }
-        }
-    }
-
-    dump_provider_telemetry_if_requested();
-    Ok(())
+    command::execute(
+        crate::cli::FeaCommand::Run {
+            file: path,
+            root: crate::cli::FeaRootArgs::default(),
+            execution,
+            json,
+        },
+        cli,
+        config,
+    )
+    .await
 }
 
 pub(crate) fn print_study_run_summary(data: &AnalysisStudyRunData, verbose: bool) {

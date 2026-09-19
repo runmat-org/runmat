@@ -78,6 +78,8 @@ pub struct AuthoredStudy {
     pub geometry: AuthoredGeometryInstance,
     pub mesh: AuthoredMeshRef,
     pub model: AuthoredModelInstance,
+    /// Minimum formulation maturity admitted by this scientific study.
+    pub formulation_requirement: crate::FormulationRequirement,
     pub inputs: Vec<AuthoredInputDefinition>,
     pub outputs: Vec<AuthoredOutput>,
     pub sequence: AnalysisSequence,
@@ -461,6 +463,7 @@ mod tests {
                     }),
                 }],
             },
+            formulation_requirement: crate::FormulationRequirement::Experimental,
             inputs: vec![AuthoredInputDefinition {
                 input_id: "service_load".into(),
                 value_type: AuthoredInputType::Quantity(QuantityDimension::Force),

@@ -13,7 +13,9 @@ use crate::cli::value_types::{
 };
 use crate::cli::ColorMode;
 use crate::cli::TestArgs;
-use crate::cli::{BatchCommand, ClusterCommand, ExecutionTargetArgs, JobCommand, PackageCommand};
+use crate::cli::{
+    BatchCommand, ClusterCommand, ExecutionTargetArgs, FeaCommand, JobCommand, PackageCommand,
+};
 
 #[derive(Parser, Clone)]
 #[command(
@@ -325,6 +327,11 @@ pub enum Commands {
         #[arg(long = "path", value_name = "DIRECTORY")]
         search_paths: Vec<PathBuf>,
     },
+    /// Check, plan, or run a typed finite-element analysis
+    Fea {
+        #[command(subcommand)]
+        fea_command: FeaCommand,
+    },
     /// Show version information
     Version {
         /// Show detailed version information
@@ -490,7 +497,7 @@ mod tests {
 
     use super::{Cli, Commands};
     use crate::cli::{
-        AotPolicy, BatchCommand, ClusterCommand, ClusterStateArg, MeshSourceUnitsArg,
+        AotPolicy, BatchCommand, ClusterCommand, ClusterStateArg, FeaCommand, MeshSourceUnitsArg,
     };
     use clap::Parser;
 
@@ -633,6 +640,54 @@ mod tests {
                 detach: true,
             })
         );
+    }
+
+    #[test]
+    fn typed_fea_run_selects_one_root_and_reuses_shared_placement() {
+        let cli = Cli::try_parse_from([
+            "runmat",
+            "fea",
+            "run",
+            "model.fea",
+            "--study",
+            "static_case",
+            "--cluster",
+            "analysis-cluster",
+            "--workers",
+            "4",
+            "--json",
+        ])
+        .unwrap();
+        let Some(Commands::Fea {
+            fea_command:
+                FeaCommand::Run {
+                    file,
+                    root,
+                    execution,
+                    json,
+                },
+        }) = cli.command
+        else {
+            panic!("expected typed FEA run command");
+        };
+        assert_eq!(file, PathBuf::from("model.fea"));
+        assert_eq!(root.study.as_deref(), Some("static_case"));
+        assert!(root.sweep.is_none());
+        assert_eq!(execution.cluster.as_deref(), Some("analysis-cluster"));
+        assert_eq!(execution.workers, Some(4));
+        assert!(json);
+
+        assert!(Cli::try_parse_from([
+            "runmat",
+            "fea",
+            "check",
+            "model.fea",
+            "--study",
+            "a",
+            "--sweep",
+            "b",
+        ])
+        .is_err());
     }
 
     #[test]

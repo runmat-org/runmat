@@ -36,6 +36,63 @@ fn check(source: &str) -> CheckedFeaProgram {
 }
 
 #[test]
+fn study_formulation_maturity_is_explicit_and_defaults_to_production() {
+    let study = |requirement: &str| {
+        format!(
+            r#"
+{PART_AND_MESH}
+model structure {{}}
+study response {{
+    geometry = geometry.part
+    mesh = mesh.part
+    model = model.structure
+    {requirement}
+    analysis solve {{ structural static {{}} }}
+}}
+"#
+        )
+    };
+    let production = check(&study(""));
+    assert!(production.is_valid(), "{:#?}", production.diagnostics);
+    assert_eq!(
+        production
+            .studies
+            .values()
+            .next()
+            .unwrap()
+            .formulation_requirement,
+        runmat_analysis_core::FormulationRequirement::Production
+    );
+
+    let experimental = check(&study("require formulation = experimental"));
+    assert!(experimental.is_valid(), "{:#?}", experimental.diagnostics);
+    let authored = experimental.studies.values().next().unwrap();
+    assert_eq!(
+        authored.formulation_requirement,
+        runmat_analysis_core::FormulationRequirement::Experimental
+    );
+    let geometry = experimental.geometries.values().next().unwrap();
+    let models = experimental
+        .models
+        .values()
+        .map(|model| (model.reference(), model.clone()))
+        .collect();
+    assert_eq!(
+        authored
+            .realize_with_models(&models, geometry, &[])
+            .unwrap()
+            .formulation_requirement,
+        runmat_analysis_core::FormulationRequirement::Experimental
+    );
+
+    let invalid = check(&study("require formulation = preview"));
+    assert!(!invalid.is_valid());
+    assert!(invalid.diagnostics.iter().any(|diagnostic| diagnostic
+        .message
+        .contains("must be production or experimental")));
+}
+
+#[test]
 fn study_realization_captures_the_exact_transitive_model_composition() {
     let library_module = r#"
 model fastener {

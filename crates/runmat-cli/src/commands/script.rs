@@ -63,7 +63,7 @@ pub async fn execute_script_with_args(
         if !args.is_empty() {
             anyhow::bail!(".fea files do not accept positional script arguments");
         }
-        return execute_fea_path(script, cli, config, fea_json, execution.resolve()?).await;
+        return execute_fea_path(script, cli, config, fea_json, execution).await;
     }
 
     if !matches!(execution.resolve()?, ExecutionTarget::Local) {

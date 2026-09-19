@@ -38,6 +38,7 @@ pub struct RealizedStudy {
     pub mesh: AuthoredMeshRef,
     /// The realized root model selected by the study.
     pub model: AuthoredModel,
+    pub formulation_requirement: crate::FormulationRequirement,
     /// Transitive included models in dependency-first order. The root model is not repeated here.
     pub included_models: Vec<AuthoredModel>,
     pub study_inputs: Vec<AuthoredStudyInputBinding>,
@@ -86,6 +87,7 @@ impl AuthoredStudy {
             geometry,
             mesh: self.mesh.clone(),
             model: realized_model,
+            formulation_requirement: self.formulation_requirement,
             included_models,
             study_inputs: self
                 .inputs
