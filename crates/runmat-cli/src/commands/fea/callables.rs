@@ -13,10 +13,17 @@ use runmat_config::runtime::RunMatRuntimeConfig;
 use runmat_execution::{Digest, ExecutableUnitEnvelope, ProgramRevision};
 use runmat_execution_artifact::BundleCallable;
 use runmat_package::ProjectSymbolDefinition;
-use runmat_types::CapabilityRequirement;
+use runmat_types::{
+    CapabilityRequirement, OperationParameterArity, OperationTypePattern, ShapeFact, ValueFact,
+    ValueKindFact,
+};
 
 use crate::cli::Cli;
 use crate::commands::session::create_session;
+
+mod facts;
+
+pub(super) use facts::compile_function_facts;
 
 #[derive(Clone, Debug)]
 pub(super) struct CompiledSignalGenerator {
@@ -53,6 +60,13 @@ struct CompiledCallable {
     executable_source_digest: Digest,
     function: runmat_mir::analysis::FunctionAnalysis,
     executable: ExecutableUnitEnvelope,
+    parameters: Vec<SourceParameter>,
+}
+
+#[derive(Clone, Debug)]
+struct SourceParameter {
+    name: String,
+    arity: OperationParameterArity,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -234,13 +248,37 @@ async fn compile_project_callables(
     frozen: &runmat_package::FrozenProject,
     config: &RunMatRuntimeConfig,
 ) -> Result<(ProgramRevision, BTreeMap<String, CompiledCallable>)> {
+    let symbols = runmat_package::source_symbols_from_frozen(frozen, document_path);
+    let mut requested = Vec::new();
+    for qualified_function in qualified_functions {
+        if requested
+            .iter()
+            .any(|(key, _, _): &(String, String, ProjectSymbolDefinition)| {
+                key == *qualified_function
+            })
+        {
+            continue;
+        }
+        requested.push((
+            (*qualified_function).to_string(),
+            (*qualified_function).to_string(),
+            unique_definition(&symbols.definitions, qualified_function)?.clone(),
+        ));
+    }
+    compile_project_definitions(requested, frozen, config).await
+}
+
+async fn compile_project_definitions(
+    requested: Vec<(String, String, ProjectSymbolDefinition)>,
+    frozen: &runmat_package::FrozenProject,
+    config: &RunMatRuntimeConfig,
+) -> Result<(ProgramRevision, BTreeMap<String, CompiledCallable>)> {
     let project = frozen.revision();
     let revision = ProgramRevision::new(
         Digest::from_bytes(*project.graph_digest.bytes()),
         Digest::from_bytes(*project.source_revision.bytes()),
         runmat_core::program_environment(crate::diagnostics::parser_compat(config.language.compat)),
     )?;
-    let symbols = runmat_package::source_symbols_from_frozen(frozen, document_path);
     let mut session = create_session(
         false,
         false,
@@ -249,11 +287,7 @@ async fn compile_project_callables(
     )?;
     session.install_project_handoff(runmat_package::FrozenProjectHandoff::new(frozen.clone()))?;
     let mut compiled = BTreeMap::new();
-    for qualified_function in qualified_functions {
-        if compiled.contains_key(*qualified_function) {
-            continue;
-        }
-        let definition = unique_definition(&symbols.definitions, qualified_function)?;
+    for (key, qualified_function, definition) in requested {
         let source_id = definition.source_id.as_ref().with_context(|| {
             format!("FEA generator `{qualified_function}` has no frozen source identity")
         })?;
@@ -277,6 +311,11 @@ async fn compile_project_callables(
                 definition.source_path.display()
             )
         })?;
+        let parameters = source_parameters(
+            &source_text,
+            entrypoint_name(&qualified_function)?,
+            crate::diagnostics::parser_compat(config.language.compat),
+        )?;
         let owner_identity = source_id.package_instance.to_string();
         let unit = session
             .compile_executable_unit(
@@ -314,20 +353,85 @@ async fn compile_project_callables(
                 format!("FEA generator `{qualified_function}` has an invalid executable digest")
             })?;
         compiled.insert(
-            (*qualified_function).to_string(),
+            key,
             CompiledCallable {
                 callable: BundleCallable {
                     owner_identity,
-                    qualified_name: (*qualified_function).to_string(),
+                    qualified_name: qualified_function,
                     source_digest,
                 },
                 executable_source_digest,
                 function,
                 executable,
+                parameters,
             },
         );
     }
     Ok((revision, compiled))
+}
+
+fn entrypoint_name(qualified_function: &str) -> Result<&str> {
+    qualified_function
+        .rsplit('.')
+        .next()
+        .filter(|name| !name.is_empty())
+        .context("FEA generator has an empty function name")
+}
+
+fn source_parameters(
+    source: &str,
+    entrypoint: &str,
+    compat: runmat_parser::CompatMode,
+) -> Result<Vec<SourceParameter>> {
+    let statements =
+        runmat_parser::parse_with_options(source, runmat_parser::ParserOptions::new(compat))
+            .map_err(|error| {
+                anyhow::anyhow!(
+                    "cannot parse imported function `{entrypoint}`: {}",
+                    error.message
+                )
+            })?;
+    let parameters = statements
+        .body
+        .iter()
+        .find_map(|statement| match statement {
+            runmat_parser::Stmt::Function {
+                name,
+                params,
+                argument_validations,
+                ..
+            } if name == entrypoint => Some(
+                params
+                    .iter()
+                    .map(|name| SourceParameter {
+                        name: name.clone(),
+                        arity: if name == "varargin" {
+                            OperationParameterArity::Variadic
+                        } else if argument_validations.iter().any(|validation| {
+                            validation.name == *name && validation.default_value.is_some()
+                        }) {
+                            OperationParameterArity::Optional
+                        } else {
+                            OperationParameterArity::Required
+                        },
+                    })
+                    .collect::<Vec<_>>(),
+            ),
+            _ => None,
+        });
+    parameters.with_context(|| format!("imported source does not define function `{entrypoint}`"))
+}
+
+fn operation_pattern(fact: &ValueFact) -> OperationTypePattern {
+    match (&fact.kind, &fact.shape) {
+        (ValueKindFact::Numeric(_), ShapeFact::Scalar) => OperationTypePattern::NumericScalar,
+        (ValueKindFact::Numeric(_), _) => OperationTypePattern::NumericArray,
+        (ValueKindFact::Logical, _) => OperationTypePattern::LogicalArray,
+        (ValueKindFact::Character | ValueKindFact::String, ShapeFact::Scalar) => {
+            OperationTypePattern::StringScalar
+        }
+        _ => OperationTypePattern::Any,
+    }
 }
 
 fn numerical_project_generators<'a>(
@@ -391,42 +495,6 @@ fn project_generators(signals: &[PhysicalSignal]) -> Result<Vec<(&PhysicalSignal
     Ok(requested)
 }
 
-pub(crate) async fn validate_signal_generators(
-    document_path: &Path,
-    signals: &[PhysicalSignal],
-    cli: &Cli,
-    config: &RunMatRuntimeConfig,
-) -> Result<()> {
-    for compiled in
-        compile_signal_generators(document_path, signals, cli, config, &BTreeSet::new()).await?
-    {
-        compiled.validate()?;
-    }
-    Ok(())
-}
-
-pub(crate) async fn validate_numerical_generators(
-    document_path: &Path,
-    response_spectra: &[ResponseSpectrum],
-    random_spectra: &[RandomExcitationSpectrum],
-    cli: &Cli,
-    config: &RunMatRuntimeConfig,
-) -> Result<()> {
-    for compiled in compile_numerical_generators(
-        document_path,
-        response_spectra,
-        random_spectra,
-        cli,
-        config,
-        &BTreeSet::new(),
-    )
-    .await?
-    {
-        compiled.validate()?;
-    }
-    Ok(())
-}
-
 fn unique_definition<'a>(
     definitions: &'a [ProjectSymbolDefinition],
     qualified_function: &str,
@@ -443,3 +511,7 @@ fn unique_definition<'a>(
         _ => bail!("FEA generator `{qualified_function}` is ambiguous in the frozen project graph"),
     }
 }
+
+#[cfg(test)]
+#[path = "callables_tests.rs"]
+mod tests;

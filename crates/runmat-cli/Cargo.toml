@@ -62,6 +62,7 @@ runmat-geometry-io = { workspace = true }
 runmat-analysis-core = { workspace = true }
 runmat-analysis-execution = { workspace = true }
 runmat-analysis-fea = { workspace = true }
+runmat-analysis-language = { workspace = true }
 runmat-meshing-core = { workspace = true }
 runmat-meshing-execution = { workspace = true }
 runmat-process-host = { workspace = true }

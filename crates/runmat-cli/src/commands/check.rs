@@ -1,13 +1,7 @@
 use anyhow::{Context, Result};
 use runmat_config::runtime::RunMatRuntimeConfig;
 use runmat_hir::{HirDiagnostic, HirDiagnosticSeverity, LoweringContext, Span};
-use runmat_runtime::analysis::{
-    analysis_plan_study_op, analysis_plan_study_sweep_op, analysis_validate_study_op,
-    analysis_validate_study_sweep_op, is_fea_file_path, load_fea_document_from_path_async,
-    AnalysisStudyPlanData, AnalysisStudySweepPlanData, AnalysisStudySweepValidateData,
-    AnalysisStudyValidateResult, FeaResolvedDocument,
-};
-use runmat_runtime::operations::{OperationContext, OperationErrorEnvelope};
+use runmat_runtime::analysis::is_fea_file_path;
 use serde::Serialize;
 use serde_json::json;
 use std::path::{Path, PathBuf};
@@ -87,140 +81,46 @@ async fn check_fea_file(
             styles.heading("Checking"),
             styles.path(path.display())
         );
-        eprintln!("  {}", styles.muted("loading study document"));
+        eprintln!(
+            "  {}",
+            styles.muted("resolving typed source and project facts")
+        );
     }
-    let document = load_fea_document_from_path_async(&path)
-        .await
-        .map_err(|err| anyhow::anyhow!("Failed to load FEA file {}: {err}", path.display()))?;
-    let context = OperationContext::new(None, None);
-    match document {
-        FeaResolvedDocument::Study(spec) => {
-            if let Some(model) = &spec.model {
-                crate::commands::fea::callables::validate_signal_generators(
-                    &path,
-                    &model.signals,
-                    cli,
-                    config,
-                )
-                .await?;
-                crate::commands::fea::callables::validate_numerical_generators(
-                    &path,
-                    &model.response_spectra,
-                    &model.random_excitations,
-                    cli,
-                    config,
-                )
-                .await?;
-            }
-            if !json {
-                let styles = presentation::stderr();
-                eprintln!(
-                    "  {} {} ({} procedure step{})",
-                    styles.label("study:"),
-                    styles.identifier(&spec.study_id),
-                    spec.execution.steps.len(),
-                    if spec.execution.steps.len() == 1 {
-                        ""
-                    } else {
-                        "s"
-                    }
-                );
-                eprintln!(
-                    "  {} {} regions, {} meshes",
-                    styles.label("geometry:"),
-                    spec.geometry.regions.len(),
-                    spec.geometry.meshes.len()
-                );
-                eprintln!("  {}", styles.info("validating"));
-            }
-            let validation = analysis_validate_study_op(&spec, context.clone())
-                .map_err(report_operation_error)?;
-            if !validation.data.valid {
-                if json {
-                    print_payload("study", "invalid", &validation.data, config.runtime.verbose)?;
-                } else {
-                    print_study_validation_failure(&validation.data);
-                }
-                return Err(AlreadyReportedCliError.into());
-            }
-            if !json {
-                eprintln!("  {}", presentation::stderr().info("planning"));
-            }
-            let plan = analysis_plan_study_op(&spec, context).map_err(report_operation_error)?;
-            if json {
-                print_payload(
-                    "study",
-                    "valid",
-                    &json!({
-                        "validation": validation.data,
-                        "plan": plan.data,
-                    }),
-                    config.runtime.verbose,
-                )?;
-            } else {
-                print_study_check_summary(&validation.data, &plan.data, config.runtime.verbose);
-            }
+    let checked = crate::commands::fea::source::check_source(&path, cli, config).await?;
+    let valid = checked.program.is_valid() && checked.program.diagnostics.is_empty();
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string(&json!({
+                "kind": "fea",
+                "status": if valid { "valid" } else { "invalid" },
+                "root_module": checked.root_module,
+                "studies": checked.program.studies.len(),
+                "sweeps": checked.program.sweeps.len(),
+                "diagnostics": checked.program.diagnostics,
+            }))?
+        );
+    } else if valid {
+        let styles = presentation::stdout();
+        println!("{}", styles.success("FEA source is valid"));
+        println!(
+            "  {} {}",
+            styles.label("studies:"),
+            checked.program.studies.len()
+        );
+        println!(
+            "  {} {}",
+            styles.label("sweeps:"),
+            checked.program.sweeps.len()
+        );
+    } else {
+        for diagnostic in &checked.program.diagnostics {
+            eprintln!(
+                "{:?} {}: {}",
+                diagnostic.severity, diagnostic.code, diagnostic.message
+            );
         }
-        FeaResolvedDocument::Sweep(spec) => {
-            for study in &spec.studies {
-                if let Some(model) = &study.model {
-                    crate::commands::fea::callables::validate_signal_generators(
-                        &path,
-                        &model.signals,
-                        cli,
-                        config,
-                    )
-                    .await?;
-                    crate::commands::fea::callables::validate_numerical_generators(
-                        &path,
-                        &model.response_spectra,
-                        &model.random_excitations,
-                        cli,
-                        config,
-                    )
-                    .await?;
-                }
-            }
-            if !json {
-                let styles = presentation::stderr();
-                eprintln!(
-                    "  {} {} ({} studies, fail_fast: {})",
-                    styles.label("sweep:"),
-                    styles.identifier(&spec.sweep_id),
-                    spec.studies.len(),
-                    spec.fail_fast
-                );
-                eprintln!("  {}", styles.info("validating"));
-            }
-            let validation = analysis_validate_study_sweep_op(&spec, context.clone())
-                .map_err(report_operation_error)?;
-            if !validation.data.valid {
-                if json {
-                    print_payload("sweep", "invalid", &validation.data, config.runtime.verbose)?;
-                } else {
-                    print_sweep_validation_failure(&validation.data);
-                }
-                return Err(AlreadyReportedCliError.into());
-            }
-            if !json {
-                eprintln!("  {}", presentation::stderr().info("planning"));
-            }
-            let plan =
-                analysis_plan_study_sweep_op(&spec, context).map_err(report_operation_error)?;
-            if json {
-                print_payload(
-                    "sweep",
-                    "valid",
-                    &json!({
-                        "validation": validation.data,
-                        "plan": plan.data,
-                    }),
-                    config.runtime.verbose,
-                )?;
-            } else {
-                print_sweep_check_summary(&validation.data, &plan.data);
-            }
-        }
+        return Err(AlreadyReportedCliError.into());
     }
     Ok(())
 }
@@ -608,147 +508,10 @@ fn source_line(source: &str, offset: usize) -> (usize, usize, usize, &str) {
     (line, column, line_start, &source[line_start..line_end])
 }
 
-fn print_study_check_summary(
-    validation: &AnalysisStudyValidateResult,
-    plan: &AnalysisStudyPlanData,
-    verbose: bool,
-) {
-    let styles = presentation::stdout();
-    println!(
-        "{} {}",
-        styles.success("OK"),
-        styles.identifier(&plan.study_id)
-    );
-    println!("  {} {}", styles.label("steps:"), plan.steps.len());
-    println!(
-        "  {} {}",
-        styles.label("model:"),
-        styles.identifier(&plan.model_id)
-    );
-    println!(
-        "  {} {} ({} issues)",
-        styles.label("validation:"),
-        styles.success("passed"),
-        validation.issues.len()
-    );
-    for step in &plan.steps {
-        println!(
-            "  step {}: {:?} / {:?} / {:?} on {:?} -> {} ({})",
-            styles.identifier(step.procedure_step.step_id.as_str()),
-            step.procedure_step.family,
-            step.procedure_step.procedure,
-            step.procedure_step.solution_space,
-            step.execution.backend,
-            styles.identifier(&step.run_operation),
-            step.run_op_version
-        );
-    }
-    println!(
-        "  {} {}",
-        styles.label("evidence:"),
-        styles.path(&plan.evidence_artifact_path)
-    );
-    if verbose {
-        println!("  study fingerprint: {}", plan.study_fingerprint);
-        println!("  operations:");
-        for operation in &plan.operation_sequence {
-            println!("    {operation}");
-        }
-    }
-}
-
-fn print_study_validation_failure(validation: &AnalysisStudyValidateResult) {
-    let styles = presentation::stdout();
-    println!("{} validation", styles.error("FAILED"));
-    println!(
-        "  {} {}",
-        styles.label("evidence:"),
-        styles.path(&validation.evidence_artifact_path)
-    );
-    for issue in &validation.issues {
-        println!("  {}: {}", styles.identifier(&issue.code), issue.message);
-    }
-}
-
-fn print_sweep_check_summary(
-    validation: &AnalysisStudySweepValidateData,
-    plan: &AnalysisStudySweepPlanData,
-) {
-    let styles = presentation::stdout();
-    println!(
-        "{} {}",
-        styles.success("OK"),
-        styles.identifier(&plan.sweep_id)
-    );
-    println!("  studies: {}", plan.study_count);
-    println!("  planned: {}", plan.planned_count);
-    println!("  failed: {}", plan.failed_count);
-    println!(
-        "  validation: passed ({} study entries)",
-        validation.study_entries.len()
-    );
-    println!("  evidence: {}", plan.evidence_artifact_path);
-    for entry in &plan.plan_entries {
-        println!("  {}: {} steps", entry.study_id, entry.steps.len());
-    }
-}
-
-fn print_sweep_validation_failure(validation: &AnalysisStudySweepValidateData) {
-    let styles = presentation::stdout();
-    println!(
-        "{} {}",
-        styles.error("FAILED"),
-        styles.identifier(&validation.sweep_id)
-    );
-    println!("  evidence: {}", validation.evidence_artifact_path);
-    for entry in &validation.study_entries {
-        if entry.valid {
-            continue;
-        }
-        println!("  {}", entry.study_id);
-        for issue in &entry.issues {
-            println!("    {}: {}", issue.code, issue.message);
-        }
-    }
-}
-
-fn print_payload<T: Serialize>(
-    document_kind: &'static str,
-    status: &'static str,
-    data: &T,
-    include_metadata: bool,
-) -> Result<()> {
-    if include_metadata {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&json!({
-                "document_kind": document_kind,
-                "status": status,
-                "data": data,
-            }))
-            .context("Failed to serialize check result")?
-        );
-    } else {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(data).context("Failed to serialize check result")?
-        );
-    }
-    Ok(())
-}
-
 fn is_matlab_file(path: &Path) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
         .is_some_and(|ext| ext.eq_ignore_ascii_case("m"))
-}
-
-fn report_operation_error(error: OperationErrorEnvelope) -> anyhow::Error {
-    match serde_json::to_string_pretty(&error) {
-        Ok(payload) => eprintln!("{payload}"),
-        Err(_) => eprintln!("{}: {}", error.error_code, error.message.replace('\n', " ")),
-    }
-    AlreadyReportedCliError.into()
 }
 
 #[cfg(test)]

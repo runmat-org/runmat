@@ -6213,6 +6213,7 @@ dependencies = [
  "runmat-analysis-core",
  "runmat-analysis-execution",
  "runmat-analysis-fea",
+ "runmat-analysis-language",
  "runmat-aot",
  "runmat-builtins",
  "runmat-config",

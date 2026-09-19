@@ -3,6 +3,7 @@ use super::dependency::{
     ProjectRegistry, ProjectSourceReplacement, ProjectTargetDependencies,
 };
 use super::testing::ProjectTestConfig;
+use super::ProjectExecutionProfile;
 use serde::de::IgnoredAny;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
@@ -28,6 +29,7 @@ pub struct ProjectManifest {
     pub source_replacements: BTreeMap<String, ProjectSourceReplacement>,
     pub publish: Option<ProjectPublication>,
     pub entrypoints: Vec<ProjectEntrypoint>,
+    pub execution_profiles: BTreeMap<String, ProjectExecutionProfile>,
     pub test: ProjectTestConfig,
 }
 
@@ -88,6 +90,8 @@ struct RawProjectManifest {
     publish: Option<ProjectPublication>,
     #[serde(default)]
     entrypoints: BTreeMap<String, RawProjectEntrypoint>,
+    #[serde(default, rename = "execution-profiles")]
+    execution_profiles: BTreeMap<String, ProjectExecutionProfile>,
     #[serde(default, rename = "runtime")]
     _runtime: Option<IgnoredAny>,
     #[serde(default)]
@@ -132,6 +136,7 @@ impl From<RawProjectManifest> for ProjectManifest {
             source_replacements: value.source_replacements,
             publish: value.publish,
             entrypoints,
+            execution_profiles: value.execution_profiles,
             test: value.test,
         }
     }
@@ -170,6 +175,11 @@ impl Serialize for ProjectManifest {
             #[serde(skip_serializing_if = "Option::is_none")]
             publish: &'a Option<ProjectPublication>,
             entrypoints: BTreeMap<&'a str, CanonicalEntrypoint<'a>>,
+            #[serde(
+                rename = "execution-profiles",
+                skip_serializing_if = "BTreeMap::is_empty"
+            )]
+            execution_profiles: &'a BTreeMap<String, ProjectExecutionProfile>,
             #[serde(skip_serializing_if = "ProjectTestConfig::is_default")]
             test: &'a ProjectTestConfig,
         }
@@ -211,6 +221,7 @@ impl Serialize for ProjectManifest {
             source_replacements: &self.source_replacements,
             publish: &self.publish,
             entrypoints,
+            execution_profiles: &self.execution_profiles,
             test: &self.test,
         }
         .serialize(serializer)
@@ -323,6 +334,9 @@ impl ProjectManifest {
                     ),
                 });
             }
+        }
+        for (name, profile) in &self.execution_profiles {
+            messages.extend(profile.validate(name));
         }
         messages.extend(self.test.validation_messages());
         for (field, paths) in [

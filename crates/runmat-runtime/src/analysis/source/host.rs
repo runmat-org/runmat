@@ -44,7 +44,7 @@ impl FilesystemFeaHost {
             .map_err(|diagnostic| diagnostic.to_string())
     }
 
-    fn logical_path(&self, path: &Path) -> Result<LogicalSourcePath, String> {
+    pub(super) fn logical_path(&self, path: &Path) -> Result<LogicalSourcePath, String> {
         let relative = path.strip_prefix(&self.physical_root).map_err(|_| {
             format!(
                 "FEA source `{}` is outside source root `{}`",

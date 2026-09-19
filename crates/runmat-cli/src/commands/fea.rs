@@ -19,6 +19,7 @@ use crate::AlreadyReportedCliError;
 pub(super) mod callables;
 mod input_materialization;
 pub(crate) mod remote;
+pub(crate) mod source;
 
 #[derive(Debug)]
 pub(crate) struct NativeAnalysisService {

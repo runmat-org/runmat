@@ -45,6 +45,60 @@ path = "src/main"
 }
 
 #[test]
+fn parses_strongly_typed_execution_profiles() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("src")).unwrap();
+    let manifest_path = write_manifest(
+        tmp.path(),
+        r#"
+[package]
+name = "analysis"
+
+[sources]
+roots = ["src"]
+
+[execution-profiles.engineering]
+cluster = "fea-production"
+queue = "cpu"
+trust-identity = "sha256:trusted-worker"
+accelerator = true
+"#,
+    );
+
+    let loaded = load_project_manifest(&manifest_path).unwrap();
+    let profile = &loaded.execution_profiles["engineering"];
+    assert_eq!(profile.cluster, "fea-production");
+    assert_eq!(profile.queue.as_deref(), Some("cpu"));
+    assert_eq!(
+        profile.trust_identity.as_deref(),
+        Some("sha256:trusted-worker")
+    );
+    assert!(profile.accelerator);
+}
+
+#[test]
+fn rejects_malformed_execution_profile_routing() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("src")).unwrap();
+    let manifest_path = write_manifest(
+        tmp.path(),
+        r#"
+[package]
+name = "analysis"
+
+[sources]
+roots = ["src"]
+
+[execution-profiles.engineering]
+cluster = " "
+"#,
+    );
+
+    let error = load_project_manifest(&manifest_path).unwrap_err();
+    assert!(error.to_string().contains("execution profile cluster"));
+}
+
+#[test]
 fn parses_manifest_with_runtime_section() {
     let parsed = parse_project_manifest_toml(
         r#"
