@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::fs;
 
 use runmat_analysis_language::{
@@ -164,34 +163,21 @@ study static {
     let program = check_fea_path_in_root(temporary.path(), &path).unwrap();
     assert!(program.is_valid(), "{:#?}", program.diagnostics);
 
-    let study = program.studies.values().next().unwrap();
-    let geometry = program.geometries.values().next().unwrap();
-    let models = program
-        .models
-        .values()
-        .map(|model| (model.reference(), model.clone()))
-        .collect::<BTreeMap<_, _>>();
-    let realized = study.realize_with_models(&models, geometry, &[]).unwrap();
-    let materials = program
-        .materials
-        .iter()
-        .map(|((path, key), material)| {
-            (
-                runmat_analysis_core::AuthoredMaterialRef {
-                    module_path: path.as_str().to_string(),
-                    material_id: key.name.clone(),
-                },
-                material.clone(),
-            )
-        })
-        .collect::<BTreeMap<_, _>>();
+    let resolved = program.resolve_study("project/main.fea", "static").unwrap();
+    assert_eq!(resolved.mesh.mesh_id, "volume");
+    assert!(resolved.execution_policy.is_none());
+    let realized = resolved
+        .study
+        .realize_with_models(&resolved.models, &resolved.geometry, &[])
+        .unwrap();
+    let materials = resolved.material_catalog;
     let missing_material = runmat_analysis_core::realize_analysis_model(
         runmat_analysis_core::AnalysisModelRealizationInput {
             study: &realized,
             geometry_id: "materialized-part",
             geometry_revision: 7,
             units: runmat_geometry_core::UnitSystem::Meter,
-            materials: &BTreeMap::new(),
+            materials: &Default::default(),
         },
     )
     .unwrap_err();

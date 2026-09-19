@@ -106,6 +106,19 @@ study response {
         .included_models
         .iter()
         .all(|model| model.module_path == "project/library.fea"));
+
+    let resolved = program
+        .resolve_study("project/main.fea", "response")
+        .unwrap();
+    assert_eq!(resolved.geometry.geometry_id, "part");
+    assert_eq!(resolved.mesh.mesh_id, "part");
+    assert_eq!(resolved.models.len(), 3);
+    assert!(resolved
+        .models
+        .contains_key(&runmat_analysis_core::AuthoredModelRef {
+            module_path: "project/library.fea".into(),
+            model_id: "fastener".into(),
+        }));
 }
 
 #[test]

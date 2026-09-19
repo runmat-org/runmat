@@ -109,6 +109,25 @@ sweep loads : study.response {
         program.execution_bindings.get(study_key).unwrap().policy_id,
         "scalable"
     );
+
+    let resolved_study = program
+        .resolve_study("project/main.fea", "response")
+        .unwrap();
+    assert_eq!(
+        resolved_study.execution_policy.as_ref().unwrap().policy_id,
+        "scalable"
+    );
+    let resolved_sweep = program.resolve_sweep("project/main.fea", "loads").unwrap();
+    assert_eq!(resolved_sweep.study.study.study_id, "response");
+    assert_eq!(
+        resolved_sweep
+            .study
+            .execution_policy
+            .as_ref()
+            .unwrap()
+            .policy_id,
+        "scalable"
+    );
 }
 
 #[test]
