@@ -7203,6 +7203,7 @@ dependencies = [
  "runmat-gc",
  "runmat-gc-api",
  "runmat-geometry-core",
+ "runmat-geometry-fixtures",
  "runmat-geometry-io",
  "runmat-geometry-ops",
  "runmat-macros",

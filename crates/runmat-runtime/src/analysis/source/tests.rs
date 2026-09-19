@@ -359,4 +359,58 @@ study static {
     ));
     assert_eq!(model.sequence.steps[0].observations.len(), 1);
     runmat_analysis_core::validate_model(&model).unwrap();
+
+    let (geometry, _, _) = runmat_geometry_fixtures::exact_tetrahedron();
+    let mut mesh = runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(
+        runmat_meshing_core::ElementOrder::Tet4,
+    );
+    mesh.geometry.source_digest =
+        runmat_meshing_core::StableDigest::from_bytes(*geometry.source.content_digest.bytes());
+    mesh.geometry.geometry_revision = geometry.revision.revision;
+    mesh.geometry.persistent_mapping_version = geometry.revision.persistent_mapping_version;
+    mesh.topology.volume_elements[0].region_id = resolved_regions["body"].entity_ids[0].clone();
+    mesh.topology.regions[0].region_id = resolved_regions["body"].entity_ids[0].clone();
+    mesh.topology.boundary_edges[0].provenance = resolved_regions["rail"].entity_ids.clone();
+    mesh.topology.boundary_faces[0].provenance = resolved_regions["support"].entity_ids.clone();
+    mesh.canonical_digest = runmat_meshing_core::StableDigest::ZERO;
+    mesh.seal_canonical_digest().unwrap();
+
+    let compiled = runmat_analysis_fea::study::compile_analysis_study(
+        runmat_analysis_fea::study::AnalysisStudyCompilationInput {
+            study: &realized,
+            geometry: &geometry,
+            regions: &resolved_regions,
+            materials: &materials,
+            mesh: &mesh,
+        },
+    )
+    .unwrap();
+    compiled.validate_against(&mesh).unwrap();
+    assert_eq!(compiled.model.geometry_id, "part");
+    assert_eq!(
+        compiled.model.structural.as_ref().unwrap().elements.len(),
+        1
+    );
+    assert_eq!(compiled.properties.solid_materials().len(), 1);
+    assert_eq!(compiled.properties.beam_materials().len(), 1);
+    assert_ne!(compiled.scientific_digest().unwrap().bytes(), &[0; 32]);
+
+    let mut wrong_mesh = mesh;
+    wrong_mesh.geometry.geometry_revision += 1;
+    wrong_mesh.canonical_digest = runmat_meshing_core::StableDigest::ZERO;
+    wrong_mesh.seal_canonical_digest().unwrap();
+    let mismatch = runmat_analysis_fea::study::compile_analysis_study(
+        runmat_analysis_fea::study::AnalysisStudyCompilationInput {
+            study: &realized,
+            geometry: &geometry,
+            regions: &resolved_regions,
+            materials: &materials,
+            mesh: &wrong_mesh,
+        },
+    )
+    .unwrap_err();
+    assert!(matches!(
+        mismatch,
+        runmat_analysis_fea::study::AnalysisStudyCompilationError::GeometryMeshMismatch
+    ));
 }

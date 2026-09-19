@@ -21,6 +21,7 @@ pub mod properties;
 pub mod results;
 pub mod signal_processing;
 pub mod solve;
+pub mod study;
 pub mod topology;
 
 pub use admission::AnalysisRunIdentity;

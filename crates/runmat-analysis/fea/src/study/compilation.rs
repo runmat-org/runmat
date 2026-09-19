@@ -1,0 +1,168 @@
+use std::collections::BTreeMap;
+
+use runmat_analysis_core::{
+    realize_analysis_model, AnalysisModel, AnalysisModelRealizationError,
+    AnalysisModelRealizationInput, AuthoredMaterialRef, MaterialModel, RealizedStudy,
+};
+use runmat_canonical_codec::{encode_contract, CanonicalLimits};
+use runmat_execution::Digest;
+use runmat_geometry_core::{GeometryDocument, ResolvedGeometryRegions};
+use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact, StableDigest};
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+
+use crate::properties::{
+    compile_property_map, realize_formulation_properties, CompiledPropertyMap,
+    PropertyCompilationError, PropertyRealizationError,
+};
+
+const STUDY_IDENTITY_PREFIX: &[u8] = b"runmat-compiled-analysis-study\0";
+const STUDY_IDENTITY_LIMITS: CanonicalLimits =
+    CanonicalLimits::new(512 * 1024 * 1024, 8_000_000, 65_536, 64);
+
+/// Exact scientific study product shared by local and remote execution.
+///
+/// This contract contains no worker, retry, accelerator, or placement policy. Those decisions may
+/// change without changing the admitted model, mesh, observations, or constitutive ownership.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CompiledAnalysisStudy {
+    pub module_path: String,
+    pub study_id: String,
+    pub model: AnalysisModel,
+    pub properties: CompiledPropertyMap,
+    pub solver_mesh_digest: StableDigest,
+}
+
+impl CompiledAnalysisStudy {
+    pub fn validate_against(
+        &self,
+        mesh: &SolverMeshArtifact,
+    ) -> Result<(), AnalysisStudyCompilationError> {
+        mesh.validate_canonical()
+            .map_err(|error| AnalysisStudyCompilationError::InvalidMesh(error.to_string()))?;
+        if self.module_path.trim().is_empty() || self.study_id.trim().is_empty() {
+            return Err(AnalysisStudyCompilationError::InvalidStudyIdentity);
+        }
+        if self.solver_mesh_digest != mesh.canonical_digest
+            || self.properties.identity.mesh_digest != Some(mesh.canonical_digest)
+            || self.properties.identity.geometry_id != self.model.geometry_id
+            || self.properties.identity.geometry_revision != self.model.geometry_revision
+        {
+            return Err(AnalysisStudyCompilationError::IdentityMismatch);
+        }
+        let expected = compile_property_map(&self.model, Some(mesh))?;
+        if expected != self.properties {
+            return Err(AnalysisStudyCompilationError::IdentityMismatch);
+        }
+        Ok(())
+    }
+
+    /// Identity of scientific intent and its exact topology, independent of execution placement.
+    pub fn scientific_digest(&self) -> Result<Digest, AnalysisStudyCompilationError> {
+        let bytes = encode_contract(
+            STUDY_IDENTITY_PREFIX,
+            "compiled-analysis-study",
+            &(
+                &self.model,
+                &self.properties.identity,
+                self.solver_mesh_digest,
+            ),
+            STUDY_IDENTITY_LIMITS,
+        )
+        .map_err(|error| AnalysisStudyCompilationError::Identity(error.to_string()))?;
+        Ok(Digest::sha256(bytes))
+    }
+}
+
+pub struct AnalysisStudyCompilationInput<'a> {
+    pub study: &'a RealizedStudy,
+    pub geometry: &'a GeometryDocument,
+    pub regions: &'a ResolvedGeometryRegions,
+    pub materials: &'a BTreeMap<AuthoredMaterialRef, MaterialModel>,
+    pub mesh: &'a SolverMeshArtifact,
+}
+
+/// Compile a source-independent realized study after geometry and meshing have completed.
+///
+/// Exact region binding cannot happen earlier: constructed, derived, and generated geometry only
+/// acquire persistent entities during materialization, and formulation elements only acquire
+/// canonical solver-node identities during meshing.
+pub fn compile_analysis_study(
+    input: AnalysisStudyCompilationInput<'_>,
+) -> Result<CompiledAnalysisStudy, AnalysisStudyCompilationError> {
+    let AnalysisStudyCompilationInput {
+        study,
+        geometry,
+        regions,
+        materials,
+        mesh,
+    } = input;
+    geometry
+        .validate()
+        .map_err(|error| AnalysisStudyCompilationError::InvalidGeometry(error.to_string()))?;
+    mesh.validate_canonical()
+        .map_err(|error| AnalysisStudyCompilationError::InvalidMesh(error.to_string()))?;
+    validate_geometry_mesh_identity(geometry, mesh)?;
+    if study.module_path.trim().is_empty() || study.study_id.trim().is_empty() {
+        return Err(AnalysisStudyCompilationError::InvalidStudyIdentity);
+    }
+    let geometry_revision = u32::try_from(geometry.revision.revision)
+        .map_err(|_| AnalysisStudyCompilationError::GeometryRevisionOverflow)?;
+    let realized = realize_analysis_model(AnalysisModelRealizationInput {
+        study,
+        geometry_id: &study.geometry.definition.geometry_id,
+        geometry_revision,
+        units: geometry.source.source_units,
+        regions,
+        materials,
+    })?;
+    let model = realize_formulation_properties(realized, mesh)?;
+    let properties = compile_property_map(&model, Some(mesh))?;
+    let compiled = CompiledAnalysisStudy {
+        module_path: study.module_path.clone(),
+        study_id: study.study_id.clone(),
+        model,
+        properties,
+        solver_mesh_digest: mesh.canonical_digest,
+    };
+    compiled.validate_against(mesh)?;
+    Ok(compiled)
+}
+
+fn validate_geometry_mesh_identity(
+    geometry: &GeometryDocument,
+    mesh: &SolverMeshArtifact,
+) -> Result<(), AnalysisStudyCompilationError> {
+    if geometry.source.content_digest.bytes() != mesh.geometry.source_digest.bytes()
+        || geometry.revision.revision != mesh.geometry.geometry_revision
+        || geometry.revision.persistent_mapping_version != mesh.geometry.persistent_mapping_version
+    {
+        return Err(AnalysisStudyCompilationError::GeometryMeshMismatch);
+    }
+    Ok(())
+}
+
+#[derive(Debug, Error)]
+pub enum AnalysisStudyCompilationError {
+    #[error("realized study identity is empty")]
+    InvalidStudyIdentity,
+    #[error("geometry document is invalid: {0}")]
+    InvalidGeometry(String),
+    #[error("solver mesh is invalid: {0}")]
+    InvalidMesh(String),
+    #[error("geometry document and solver mesh identities differ")]
+    GeometryMeshMismatch,
+    #[error("geometry revision exceeds the analysis model contract")]
+    GeometryRevisionOverflow,
+    #[error("compiled study identity differs from its model or mesh")]
+    IdentityMismatch,
+    #[error("compiled study identity encoding failed: {0}")]
+    Identity(String),
+    #[error(transparent)]
+    Model(#[from] AnalysisModelRealizationError),
+    #[error(transparent)]
+    Formulation(#[from] PropertyRealizationError),
+    #[error(transparent)]
+    Properties(#[from] PropertyCompilationError),
+}

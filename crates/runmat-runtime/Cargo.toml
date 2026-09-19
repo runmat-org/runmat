@@ -150,6 +150,7 @@ occt-wasm-host = ["runmat-geometry-io/occt-wasm-host"]
 
 [dev-dependencies]
 async-trait = "0.1"
+runmat-geometry-fixtures = { workspace = true }
 runmat-macros = { workspace = true } 
 matfile = "0.5.0"
 tempfile = "3.10"
