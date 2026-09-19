@@ -550,6 +550,14 @@ impl GeometryRegionEvidence for NoRegionEvidence {
         Ok(Vec::new())
     }
 
+    fn by_alias(
+        &self,
+        _role: GeometryRegionRole,
+        _alias: &str,
+    ) -> Result<Vec<PersistentEntityId>, Self::Error> {
+        Ok(Vec::new())
+    }
+
     fn generated_output(
         &self,
         _role: GeometryRegionRole,

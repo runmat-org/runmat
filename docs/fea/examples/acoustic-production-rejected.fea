@@ -1,123 +1,50 @@
-version: 1
-kind: study
-id: acoustic_production_rejected
+geometry cavity {
+    construct {
+        feature volume = box(width = 1 m, depth = 1 m, height = 1 m)
+        result = feature.volume
+    }
+    region air : solid {
+        select result
+        expect exactly_one
+    }
+    region walls : face {
+        select result
+        expect one_or_more
+    }
+}
 
-geometry:
-  path: geometry/tetrahedron.stl
-  units: meter
+mesh cavity on geometry.cavity {
+    tetrahedra {
+        order = linear
+        target_size = 0.5 m
+        maximum_deviation = 0.05 m
+    }
+}
 
-model:
-  source:
-    inline:
-      materials:
-        air:
-          name: Air
-          mass_density_kg_per_m3: 1.225
-          acoustic:
-            speed_of_sound_m_per_s: 343.0
-            damping_ratio: 0.0
+material air {
+    mass_density = 1.225 kg/m^3
+    acoustic {
+        speed_of_sound = 343 m/s
+        damping_ratio = 0.0
+    }
+}
 
-      material_assignments:
-        - target: { cell: { region: region_default } }
-          material: air
+model cavity {
+    assign material.air to geometry.cavity.region.air
+    constraint incident_pressure {
+        acoustic.pressure {
+            target = geometry.cavity.region.walls
+            value = 1 Pa
+        }
+    }
+}
 
-      boundaries:
-        - boundary_id: rigid_wall
-          target:
-            region_id: region_default
-            entity_dimension: face
-            expected_topology: boundary_face
-            cardinality: one_or_more
-          operator: acoustic_rigid_wall
-
-      signals:
-        - pressure:
-            signal_id: incident_pressure_signal
-            shape: scalar
-            frame: null
-            representation:
-              constant:
-                scalar:
-                  pascals: 1.0
-            precision: real64
-            evidence:
-              max_absolute_error: null
-              max_relative_error: null
-              derivative_max_absolute_error: null
-              sample_count: 1
-            provenance: authored
-
-      excitation_cases:
-        - case_id: incident_pressure_case
-          action_ids: [incident_pressure]
-          activation: always
-
-      excitations:
-        - acoustic_pressure:
-            excitation_id: incident_pressure
-            case_id: incident_pressure_case
-            target:
-              region:
-                region_id: region_default
-                entity_dimension: face
-                expected_topology: boundary_face
-                cardinality: one_or_more
-            frame: global
-            direction: null
-            distribution: intensity_per_area
-            kinematics: fixed_frame
-            signal_id: incident_pressure_signal
-            active_step_ids: [harmonic]
-            combination_group: null
-            projection:
-              preserve_resultant: false
-              preserve_moment: false
-              relative_tolerance: 1.0e-10
-
-sequence:
-  sequence_id: acoustic_sequence
-  steps:
-    - step_id: harmonic
-      family: acoustic
-      procedure: harmonic_response
-      solution_space: direct
-      independent_domain: { frequency_hertz: [1000.0] }
-      activations:
-        - object: { boundary: rigid_wall }
-          lifecycle: activate
-        - object: { excitation: incident_pressure }
-          lifecycle: activate
-      state_inputs: []
-      state_outputs:
-        - state_id: acoustic_complex
-          kind: acoustic_complex
-          completeness: complete
-          persistence: until_dependents_complete
-      observations: []
-      accuracy:
-        accuracy_plan_id: harmonic.accuracy
-        criteria:
-          - criterion_id: algebraic_residual
-            target: global_equilibrium
-            contribution: algebraic
-            tolerance: { relative: 1.0e-8 }
-            evidence: residual_bound
-            mandatory: true
-        unavailable_evidence: mark_indeterminate_experimental
-        exceeded_limit: fail
-        equivalence: { relative_tolerance: 1.0e-10 }
-        resources:
-          maximum_refinement_cycles: 0
-          maximum_solver_tightenings: 0
-          maximum_samples: 1000000
-          maximum_wall_time_milliseconds: 3600000
-          maximum_resident_bytes: 8589934592
-      restart: fresh
-  dependencies: []
-  transitions: []
-  branches: []
-
-execution:
-  - step: harmonic
-    backend: cpu
-    requirement: production
+study acoustic_production_rejected {
+    geometry = geometry.cavity
+    mesh = mesh.cavity
+    model = model.cavity
+    analysis harmonic {
+        acoustic harmonic { frequencies = [100, 200, 400] Hz }
+    }
+    output pressure = analysis.harmonic.field.node.acoustic_pressure
+}

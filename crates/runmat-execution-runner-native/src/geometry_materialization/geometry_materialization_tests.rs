@@ -206,13 +206,29 @@ fn imported_brep_is_verified_against_source_and_topology_identity() {
         &runmat_geometry_io::GeometryImportContext::new(),
     )
     .unwrap();
+    let expected_solid = admitted.topology.solids[0].id.clone();
+    let expected_face = admitted.source_face_ids[&0].clone();
     let source_digest = Digest::sha256(BOX);
-    let request = imported_request(
+    let mut request = imported_request(
         options,
         source_digest,
         admitted.build_closure().unwrap().manifest.topology.digest,
         BOX.len() as u64,
     );
+    request.definition.regions = vec![
+        GeometryRegionDefinition {
+            region_id: "body".into(),
+            role: GeometryRegionRole::Solid,
+            selector: GeometryRegionSelector::SourceAlias("solid_000001".into()),
+            cardinality: GeometryRegionCardinality::ExactlyOne,
+        },
+        GeometryRegionDefinition {
+            region_id: "support".into(),
+            role: GeometryRegionRole::Face,
+            selector: GeometryRegionSelector::SourceAlias("face_000001".into()),
+            cardinality: GeometryRegionCardinality::ExactlyOne,
+        },
+    ];
     let access = access("geometry:import-test", b"geometry-import-test-key");
     let source = LogicalObject::new(
         ObjectNamespace::InputValue,
@@ -251,7 +267,8 @@ fn imported_brep_is_verified_against_source_and_topology_identity() {
     };
     let output = import_geometry_materialization_output(&store, output_root, &access).unwrap();
     output.validate_against(&request).unwrap();
-    assert_eq!(output.regions["body"].entity_ids.len(), 1);
+    assert_eq!(output.regions["body"].entity_ids, vec![expected_solid]);
+    assert_eq!(output.regions["support"].entity_ids, vec![expected_face]);
 }
 
 #[test]

@@ -338,12 +338,15 @@ where
     let document = geometry
         .geometry_document()
         .map_err(|error| error.to_string())?;
+    let region_evidence = ImportedRegionEvidence {
+        imported: imported.as_ref(),
+    };
     let regions = resolve_geometry_regions_with_generated_outputs(
         &request.definition,
         &geometry.topology,
         &materialized.feature_history,
         &materialized.generated_region_outputs,
-        &UnavailableRegionEvidence,
+        &region_evidence,
     )
     .map_err(|error| error.to_string())?;
     let exact_objects = prepare_exact_geometry_objects(
@@ -422,8 +425,11 @@ where
         options
     }
 
-    struct UnavailableRegionEvidence;
-    impl GeometryRegionEvidence for UnavailableRegionEvidence {
+    struct ImportedRegionEvidence<'a> {
+        imported: Option<&'a ImportedExactCad>,
+    }
+
+    impl GeometryRegionEvidence for ImportedRegionEvidence<'_> {
         type Error = String;
 
         fn by_name(
@@ -439,6 +445,53 @@ where
             _tag: &str,
         ) -> Result<Vec<runmat_geometry_core::PersistentEntityId>, Self::Error> {
             Err("tagged CAD evidence is unavailable until AP242 admission".into())
+        }
+        fn by_alias(
+            &self,
+            role: runmat_geometry_core::GeometryRegionRole,
+            alias: &str,
+        ) -> Result<Vec<runmat_geometry_core::PersistentEntityId>, Self::Error> {
+            use runmat_geometry_core::GeometryRegionRole;
+
+            let imported = self.imported.ok_or_else(|| {
+                "source aliases require imported or derived exact CAD geometry".to_string()
+            })?;
+            let selected = match role {
+                GeometryRegionRole::Vertex => imported
+                    .topology
+                    .vertices
+                    .iter()
+                    .enumerate()
+                    .find(|(index, _)| alias == format!("vertex_{:06}", index + 1))
+                    .map(|(_, entity)| entity.id.clone()),
+                GeometryRegionRole::Edge => imported
+                    .topology
+                    .edges
+                    .iter()
+                    .enumerate()
+                    .find(|(index, _)| alias == format!("edge_{:06}", index + 1))
+                    .map(|(_, entity)| entity.id.clone()),
+                GeometryRegionRole::Face => imported
+                    .source_face_ids
+                    .iter()
+                    .find(|(index, _)| alias == format!("face_{:06}", *index + 1))
+                    .map(|(_, entity)| entity.clone()),
+                GeometryRegionRole::Solid => imported
+                    .topology
+                    .solids
+                    .iter()
+                    .enumerate()
+                    .find(|(index, _)| alias == format!("solid_{:06}", index + 1))
+                    .map(|(_, entity)| entity.id.clone()),
+                GeometryRegionRole::Cell => imported
+                    .topology
+                    .regions
+                    .iter()
+                    .enumerate()
+                    .find(|(index, _)| alias == format!("cell_{:06}", index + 1))
+                    .map(|(_, entity)| entity.id.clone()),
+            };
+            Ok(selected.into_iter().collect())
         }
         fn generated_output(
             &self,

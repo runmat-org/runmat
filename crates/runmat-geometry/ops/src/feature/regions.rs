@@ -25,6 +25,12 @@ pub trait GeometryRegionEvidence {
         tag: &str,
     ) -> Result<Vec<PersistentEntityId>, Self::Error>;
 
+    fn by_alias(
+        &self,
+        role: GeometryRegionRole,
+        alias: &str,
+    ) -> Result<Vec<PersistentEntityId>, Self::Error>;
+
     fn generated_output(
         &self,
         role: GeometryRegionRole,
@@ -92,6 +98,9 @@ fn resolve_geometry_regions_inner<E: GeometryRegionEvidence>(
                 .map_err(|error| evidence_error(&region.region_id, error))?,
             GeometryRegionSelector::Tag(tag) => evidence
                 .by_tag(region.role, tag)
+                .map_err(|error| evidence_error(&region.region_id, error))?,
+            GeometryRegionSelector::SourceAlias(alias) => evidence
+                .by_alias(region.role, alias)
                 .map_err(|error| evidence_error(&region.region_id, error))?,
             GeometryRegionSelector::PersistentId(selection) => available
                 .into_iter()

@@ -269,6 +269,7 @@ pub enum GeometryRegionRole {
 pub enum GeometryRegionSelector {
     Name(String),
     Tag(String),
+    SourceAlias(String),
     PersistentId(String),
     Result,
     FeatureResult(GeometryFeatureRef),
@@ -519,6 +520,7 @@ impl GeometryRegionSelector {
         match self {
             Self::Name(value)
             | Self::Tag(value)
+            | Self::SourceAlias(value)
             | Self::PersistentId(value)
             | Self::GeneratedOutput(value) => token("region selector", value),
             Self::FeatureResult(reference) | Self::BoundaryIntroducedBy(reference) => {

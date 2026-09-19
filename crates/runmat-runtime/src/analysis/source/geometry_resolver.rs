@@ -5,7 +5,10 @@ use runmat_analysis_language::{
     SourceAvailability, SourceDiagnostic, SourceDigest,
 };
 use runmat_geometry_core::{Ap242Capability, Ap242CapabilityDisposition, Ap242ExchangeInventory};
-use runmat_geometry_io::{import_geometry, GeometryImportOptions};
+use runmat_geometry_io::{
+    detect_geometry_format, import_exact_cad, import_geometry, ExactCadImportOptions,
+    GeometryFormat, GeometryImportContext, GeometryImportOptions,
+};
 use sha2::{Digest, Sha256};
 
 use super::host::{diagnostic, digest};
@@ -36,25 +39,78 @@ pub(super) fn inspect_geometry(
         ));
     }
     let logical_path = request.logical_path.as_str();
-    let imported = import_geometry(logical_path, &bytes, GeometryImportOptions::default())
-        .map_err(|error| {
-            diagnostic(
-                "fea.host.geometry_inspection_failed",
-                format!("cannot inspect geometry `{logical_path}`: {error}"),
-                SourceAvailability::Available,
-            )
-        })?;
-    let topology_digest = topology_digest(&imported.asset)?;
+    let imported = import_geometry(
+        logical_path,
+        &bytes,
+        GeometryImportOptions {
+            units: request.source_units,
+            ..GeometryImportOptions::default()
+        },
+    )
+    .map_err(|error| {
+        diagnostic(
+            "fea.host.geometry_inspection_failed",
+            format!("cannot inspect geometry `{logical_path}`: {error}"),
+            SourceAvailability::Available,
+        )
+    })?;
     let exchange = imported.asset.source_geometry.exchange.clone();
+    let format = detect_geometry_format(logical_path, &bytes);
+    let exact = matches!(
+        format,
+        GeometryFormat::Step | GeometryFormat::Iges | GeometryFormat::Brep
+    )
+    .then(|| {
+        import_exact_cad(
+            logical_path,
+            &bytes,
+            format,
+            &ExactCadImportOptions {
+                source_units: request.source_units,
+                ..ExactCadImportOptions::default()
+            },
+            &GeometryImportContext::new(),
+        )
+    })
+    .transpose();
+    let (topology_digest, exact_topology) = match exact {
+        Ok(Some(exact)) => {
+            let closure = exact.build_closure().map_err(|error| {
+                diagnostic(
+                    "fea.host.geometry_inspection_failed",
+                    format!("cannot close exact geometry `{logical_path}`: {error}"),
+                    SourceAvailability::Available,
+                )
+            })?;
+            (
+                SourceDigest(*closure.manifest.topology.digest.bytes()),
+                true,
+            )
+        }
+        Ok(None) => (preview_topology_digest(&imported.asset)?, false),
+        Err(_error)
+            if imported.asset.source_geometry.cad_evaluators.is_empty()
+                && imported.asset.region_entity_mappings.is_empty() =>
+        {
+            (preview_topology_digest(&imported.asset)?, false)
+        }
+        Err(error) => {
+            return Err(diagnostic(
+                "fea.host.geometry_inspection_failed",
+                format!("cannot inspect exact geometry `{logical_path}`: {error}"),
+                SourceAvailability::Available,
+            ));
+        }
+    };
     Ok(GeometryInspection {
         content_digest,
         topology_digest,
-        capabilities: capabilities(&imported.asset, exchange.as_ref()),
+        capabilities: capabilities(&imported.asset, exchange.as_ref(), exact_topology),
         exchange,
     })
 }
 
-fn topology_digest(
+fn preview_topology_digest(
     asset: &runmat_geometry_core::GeometryAsset,
 ) -> Result<SourceDigest, SourceDiagnostic> {
     let bytes = serde_json::to_vec(&(
@@ -75,9 +131,11 @@ fn topology_digest(
 fn capabilities(
     asset: &runmat_geometry_core::GeometryAsset,
     exchange: Option<&Ap242ExchangeInventory>,
+    exact_topology: bool,
 ) -> Vec<GeometryInspectionCapability> {
     let mut capabilities = Vec::new();
-    if !asset.source_geometry.cad_evaluators.is_empty()
+    if exact_topology
+        || !asset.source_geometry.cad_evaluators.is_empty()
         || asset
             .regions
             .iter()
@@ -85,11 +143,16 @@ fn capabilities(
     {
         capabilities.push(GeometryInspectionCapability::Topology);
     }
+    if exact_topology {
+        capabilities.push(GeometryInspectionCapability::PersistentIds);
+    }
     let Some(exchange) = exchange else {
         return capabilities;
     };
     if supported(exchange, Ap242Capability::PersistentIds) || !exchange.persistent_ids.is_empty() {
-        capabilities.push(GeometryInspectionCapability::PersistentIds);
+        if !capabilities.contains(&GeometryInspectionCapability::PersistentIds) {
+            capabilities.push(GeometryInspectionCapability::PersistentIds);
+        }
     }
     if supported(exchange, Ap242Capability::Parameters) && !exchange.parameters.is_empty() {
         capabilities.push(GeometryInspectionCapability::Parameters);

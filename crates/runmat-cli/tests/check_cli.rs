@@ -66,7 +66,9 @@ fn assert_fea_checks(temp: &TempDir, path: &str) {
         String::from_utf8_lossy(&output.stderr)
     );
     let payload: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(payload["validation"]["valid"], true, "{path}");
+    assert_eq!(payload["kind"], "fea", "{path}");
+    assert_eq!(payload["status"], "valid", "{path}");
+    assert_eq!(payload["diagnostics"], serde_json::json!([]), "{path}");
 }
 
 #[test]

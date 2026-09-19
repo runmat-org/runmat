@@ -19,7 +19,8 @@ pub fn region_selector(
         [select, kind, value] if select == "select" => match kind.as_str() {
             "name" => Ok(GeometryRegionSelector::Name(value.clone())),
             "tag" => Ok(GeometryRegionSelector::Tag(value.clone())),
-            "id" | "persistent_id" => Ok(GeometryRegionSelector::PersistentId(value.clone())),
+            "id" => Ok(GeometryRegionSelector::SourceAlias(value.clone())),
+            "persistent_id" => Ok(GeometryRegionSelector::PersistentId(value.clone())),
             "boundary_introduced_by" => Ok(GeometryRegionSelector::BoundaryIntroducedBy(
                 feature_reference(value)?,
             )),

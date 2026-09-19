@@ -1,60 +1,54 @@
-version: 1
-kind: study
-id: structural_static_experimental
+geometry bracket {
+    file = "./geometry/box.brep"
+    units = m
 
-geometry:
-  path: geometry/tetrahedron.stl
-  units: meter
+    region body : solid {
+        select id "solid_000001"
+        expect exactly_one
+    }
+    region support : face {
+        select id "face_000001"
+        expect exactly_one
+    }
+    region load_face : face {
+        select id "face_000002"
+        expect exactly_one
+    }
+}
 
-model:
-  source:
-    file:
-      path: models/structural-static-load.fea
+mesh bracket on geometry.bracket {
+    tetrahedra {
+        order = linear
+        target_size = 0.75 m
+        maximum_deviation = 0.05 m
+    }
+}
 
-sequence:
-  sequence_id: structural_static_sequence
-  steps:
-    - step_id: static
-      family: structural
-      procedure: static
-      solution_space: direct
-      independent_domain: static
-      activations:
-        - object: { constraint: fixed_support }
-          lifecycle: activate
-        - object: { excitation: tip_force }
-          lifecycle: activate
-      state_inputs: []
-      state_outputs:
-        - state_id: structural_primary
-          kind: structural_primary
-          completeness: complete
-          persistence: until_dependents_complete
-      observations: []
-      accuracy:
-        accuracy_plan_id: static.accuracy
-        criteria:
-          - criterion_id: algebraic_residual
-            target: global_equilibrium
-            contribution: algebraic
-            tolerance: { relative: 1.0e-8 }
-            evidence: residual_bound
-            mandatory: true
-        unavailable_evidence: mark_indeterminate_experimental
-        exceeded_limit: fail
-        equivalence: { relative_tolerance: 1.0e-10 }
-        resources:
-          maximum_refinement_cycles: 0
-          maximum_solver_tightenings: 0
-          maximum_samples: 1000000
-          maximum_wall_time_milliseconds: 3600000
-          maximum_resident_bytes: 8589934592
-      restart: fresh
-  dependencies: []
-  transitions: []
-  branches: []
+material steel {
+    mass_density = 7850 kg/m^3
+    elastic {
+        youngs_modulus = 200 GPa
+        poisson_ratio = 0.3
+    }
+}
 
-execution:
-  - step: static
-    backend: cpu
-    requirement: experimental
+model loaded_bracket {
+    assign material.steel to geometry.bracket.region.body
+    constraint fixed_support {
+        structural.fixed { target = geometry.bracket.region.support }
+    }
+    load service_force {
+        force on geometry.bracket.region.load_face = [0, -1, 0] kN
+    }
+    load_case service { include load.service_force }
+}
+
+study structural_static_experimental {
+    geometry = geometry.bracket
+    mesh = mesh.bracket
+    model = model.loaded_bracket
+    require formulation = experimental
+    analysis static { structural static {} }
+    output displacement = analysis.static.field.node.displacement
+    output von_mises = analysis.static.field.element.von_mises_stress
+}

@@ -100,6 +100,8 @@ pub trait RunMatFunctionSource {
 pub struct GeometryInspectionRequest {
     pub referrer: LogicalSourcePath,
     pub logical_path: LogicalSourcePath,
+    /// Authored source units used to normalize exact topology identity.
+    pub source_units: runmat_geometry_core::UnitSystem,
     pub expected_content_digest: Option<SourceDigest>,
 }
 

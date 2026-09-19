@@ -32,7 +32,8 @@ pub fn inspect_geometry_declarations<H: GeometryInspectionSource + ?Sized>(
             if declaration.kind != FeaDeclarationKind::Geometry {
                 continue;
             }
-            let Some((relative_path, span)) = imported_geometry_source(declaration) else {
+            let Some((relative_path, source_units, span)) = imported_geometry_source(declaration)
+            else {
                 continue;
             };
             let source_path =
@@ -51,6 +52,7 @@ pub fn inspect_geometry_declarations<H: GeometryInspectionSource + ?Sized>(
             match host.inspect(&GeometryInspectionRequest {
                 referrer: module_path.clone(),
                 logical_path: source_path.clone(),
+                source_units,
                 expected_content_digest: None,
             }) {
                 Ok(facts) => {
@@ -82,7 +84,29 @@ pub fn inspect_geometry_declarations<H: GeometryInspectionSource + ?Sized>(
 
 fn imported_geometry_source(
     declaration: &runmat_parser::fea::FeaDeclaration,
-) -> Option<(String, Span)> {
+) -> Option<(String, runmat_geometry_core::UnitSystem, Span)> {
+    let units = declaration.body.statements.iter().find_map(|statement| {
+        let FeaStatementKind::Assignment { target, value, .. } = &statement.kind else {
+            return None;
+        };
+        if target.segments.len() != 1 || target.segments[0].text != "units" {
+            return None;
+        }
+        let FeaExpressionKind::Reference(unit) = &value.kind else {
+            return None;
+        };
+        let [unit] = unit.segments.as_slice() else {
+            return None;
+        };
+        match unit.text.as_str() {
+            "m" | "meter" | "meters" => Some(runmat_geometry_core::UnitSystem::Meter),
+            "mm" | "millimeter" | "millimeters" => {
+                Some(runmat_geometry_core::UnitSystem::Millimeter)
+            }
+            "in" | "inch" | "inches" => Some(runmat_geometry_core::UnitSystem::Inch),
+            _ => None,
+        }
+    })?;
     declaration.body.statements.iter().find_map(|statement| {
         let FeaStatementKind::Assignment { target, value, .. } = &statement.kind else {
             return None;
@@ -93,7 +117,7 @@ fn imported_geometry_source(
         let FeaExpressionKind::String(path) = &value.kind else {
             return None;
         };
-        Some((path.clone(), value.span))
+        Some((path.clone(), units, value.span))
     })
 }
 

@@ -4,6 +4,43 @@ use runmat_analysis_language::*;
 use support::{source_module, TestHost};
 
 #[test]
+fn imported_source_aliases_and_persistent_ids_remain_distinct() {
+    let source = r#"
+geometry imported_part {
+    file = "./part.brep"
+    units = m
+    region support : face {
+        select id "face_000001"
+        expect exactly_one
+    }
+    region canonical_support : face {
+        select persistent_id "face:canonical"
+        expect exactly_one
+    }
+}
+"#;
+    let program = FeaCompiler::new(&TestHost::default().with_geometry("project/part.brep", 2))
+        .check(CheckRequest {
+            modules: ModuleGraphRequest {
+                source_root: LogicalSourcePath::new("project").unwrap(),
+                root: source_module("project/main.fea", source, 1),
+            },
+        });
+    assert!(program.is_valid(), "{:#?}", program.diagnostics);
+    let geometry = program.geometries.values().next().unwrap();
+    assert!(matches!(
+        geometry.regions[0].selector,
+        runmat_geometry_core::GeometryRegionSelector::SourceAlias(ref alias)
+            if alias == "face_000001"
+    ));
+    assert!(matches!(
+        geometry.regions[1].selector,
+        runmat_geometry_core::GeometryRegionSelector::PersistentId(ref id)
+            if id == "face:canonical"
+    ));
+}
+
+#[test]
 fn local_edge_regions_lower_into_typed_feature_selections() {
     let source = r#"
 geometry rounded_block {
