@@ -8,5 +8,6 @@ pub use compilation::{
     CompiledAnalysisStudy,
 };
 pub use planning::{
-    plan_structural_study, StructuralStudyPlanningError, StructuralStudyPlanningPolicy,
+    plan_structural_study, StructuralNumericalPlanningPolicy, StructuralStudyPlanningError,
+    StructuralStudyPlanningPolicy,
 };

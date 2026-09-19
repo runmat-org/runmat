@@ -235,11 +235,12 @@ pub use study::output::{
 };
 pub use study::sequence::{
     ActivationLifecycle, AnalysisSequence, IndependentDomain, InitialStateConflictPolicy,
-    ProcedureStep, ProcedureStepId, ReferenceStatePolicy, RestartPolicy, SequenceBranch,
-    SequenceBranchId, SequenceDependency, SequenceDependencyReason, StateCompleteness, StateId,
-    StateInput, StateKind, StateOutput, StatePersistence, StateSource, StateTransition,
-    StateTransitionMethod, StateUse, StepObjectActivation, StepObjectRef, TopologyTransitionPolicy,
-    TransitionId, ValidatedAnalysisSequence,
+    ProcedureSettings, ProcedureStep, ProcedureStepId, ReferenceStatePolicy, RestartPolicy,
+    SequenceBranch, SequenceBranchId, SequenceDependency, SequenceDependencyReason,
+    StateCompleteness, StateId, StateInput, StateKind, StateOutput, StatePersistence, StateSource,
+    StateTransition, StateTransitionMethod, StateUse, StepObjectActivation, StepObjectRef,
+    StructuralRandomResponseSettings, TopologyTransitionPolicy, TransitionId,
+    ValidatedAnalysisSequence,
 };
 pub use study::{
     AnalysisProcedure, BoundaryTransferImplementation, ConstitutiveImplementation,

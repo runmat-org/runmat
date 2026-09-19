@@ -1517,6 +1517,10 @@ pub(crate) fn box_random_response_workloads() -> runmat_analysis_execution::Stru
     let response_step = ProcedureStep::structural_random_response(
         "random",
         excitation.excitation_id.clone(),
+        runmat_analysis_core::StructuralRandomResponseSettings {
+            modal_damping_ratio: 0.05,
+            minimum_cumulative_mass_ratio: 0.9,
+        },
         "modes",
         "modal_basis",
     );

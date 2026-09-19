@@ -43,6 +43,8 @@ mod state_publication;
 mod state_transition;
 mod structural;
 mod structural_buckling_study;
+mod structural_modal_frequency_study;
+mod structural_modal_producer;
 mod structural_modal_response_spectrum_study;
 mod structural_modal_transient_study;
 mod structural_prestress_producer;
@@ -276,6 +278,10 @@ pub use structural::{
 };
 pub use structural_buckling_study::{
     StructuralBucklingStudyCoordinator, StructuralBucklingStudyPreparation,
+};
+pub use structural_modal_frequency_study::{
+    PreparedStructuralModalFrequency, StructuralModalFrequencyStudyCoordinator,
+    StructuralModalFrequencyStudyPreparation,
 };
 pub use structural_modal_response_spectrum_study::{
     StructuralModalResponseSpectrumStudyCoordinator,

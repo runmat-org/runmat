@@ -6,14 +6,14 @@ use crate::{
     AnalysisValidationError, BoundaryOperator, CoordinateFrame, DirectionalCombination,
     IndependentDomain, InitialCondition, InitialConditionTarget, InitialConditionValue,
     InitialStateConflictPolicy, InitialValue, ModalCombination, ModalTruncationCorrection,
-    ModalTruncationPolicy as SpectrumTruncationPolicy, PhysicsFamily, ProcedureStep,
-    ProcedureStepId, RandomExcitationId, RegionTarget, ResponseSpectrum, ResponseSpectrumId,
-    RestartPolicy, RigidResponsePolicy, SequenceBranch, SequenceBranchId, SequenceDependency,
-    SequenceDependencyReason, SolutionSpace, SpectrumAbscissa, SpectrumConstruction,
-    SpectrumDamping, SpectrumDirection, SpectrumEnvelope, SpectrumEvidence, SpectrumExtrapolation,
-    SpectrumInterpolation, SpectrumResponse, StateCompleteness, StateId, StateInput, StateKind,
-    StateOutput, StatePersistence, StateSource, StateUse, StepObjectActivation, StepObjectRef,
-    Velocity,
+    ModalTruncationPolicy as SpectrumTruncationPolicy, PhysicsFamily, ProcedureSettings,
+    ProcedureStep, ProcedureStepId, RandomExcitationId, RegionTarget, ResponseSpectrum,
+    ResponseSpectrumId, RestartPolicy, RigidResponsePolicy, SequenceBranch, SequenceBranchId,
+    SequenceDependency, SequenceDependencyReason, SolutionSpace, SpectrumAbscissa,
+    SpectrumConstruction, SpectrumDamping, SpectrumDirection, SpectrumEnvelope, SpectrumEvidence,
+    SpectrumExtrapolation, SpectrumInterpolation, SpectrumResponse, StateCompleteness, StateId,
+    StateInput, StateKind, StateOutput, StatePersistence, StateSource, StateUse,
+    StepObjectActivation, StepObjectRef, StructuralRandomResponseSettings, Velocity,
 };
 
 fn model_with_steps(steps: Vec<ProcedureStep>) -> AnalysisModel {
@@ -189,6 +189,10 @@ fn random_response_requires_one_typed_existing_excitation() {
     let mut step = ProcedureStep::structural_random_response(
         "random",
         RandomExcitationId("launch".into()),
+        StructuralRandomResponseSettings {
+            modal_damping_ratio: 0.05,
+            minimum_cumulative_mass_ratio: 0.9,
+        },
         "modes",
         "basis",
     );
@@ -206,6 +210,42 @@ fn random_response_requires_one_typed_existing_excitation() {
     step.independent_domain = IndependentDomain::FrequencyHertz(vec![10.0, 20.0]);
     assert!(matches!(
         super::step::validate(&step),
+        Err(AnalysisValidationError::InvalidProcedureStep { .. })
+    ));
+
+    let mut invalid_settings = ProcedureStep::structural_random_response(
+        "invalid-settings",
+        RandomExcitationId("launch".into()),
+        StructuralRandomResponseSettings {
+            modal_damping_ratio: 0.05,
+            minimum_cumulative_mass_ratio: 0.9,
+        },
+        "modes",
+        "basis",
+    );
+    invalid_settings.settings =
+        ProcedureSettings::StructuralRandomResponse(StructuralRandomResponseSettings {
+            modal_damping_ratio: 1.0,
+            minimum_cumulative_mass_ratio: 0.9,
+        });
+    assert!(matches!(
+        super::step::validate(&invalid_settings),
+        Err(AnalysisValidationError::InvalidProcedureStep { .. })
+    ));
+
+    let mut missing_settings = ProcedureStep::structural_random_response(
+        "missing-settings",
+        RandomExcitationId("launch".into()),
+        StructuralRandomResponseSettings {
+            modal_damping_ratio: 0.05,
+            minimum_cumulative_mass_ratio: 0.9,
+        },
+        "modes",
+        "basis",
+    );
+    missing_settings.settings = ProcedureSettings::None;
+    assert!(matches!(
+        super::step::validate(&missing_settings),
         Err(AnalysisValidationError::InvalidProcedureStep { .. })
     ));
 }

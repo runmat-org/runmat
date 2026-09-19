@@ -1606,6 +1606,10 @@ fn sample_random_response_study_spec(geometry_sha256: String) -> AnalysisStudySp
     let response = ProcedureStep::structural_random_response(
         "step_response",
         excitation.excitation_id.clone(),
+        runmat_analysis_core::StructuralRandomResponseSettings {
+            modal_damping_ratio: 0.05,
+            minimum_cumulative_mass_ratio: 0.9,
+        },
         modal.step_id.as_str(),
         "modal_basis",
     );

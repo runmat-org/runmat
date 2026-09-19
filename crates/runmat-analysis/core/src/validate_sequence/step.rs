@@ -2,8 +2,8 @@ use std::collections::HashSet;
 
 use crate::{
     AnalysisProcedure, AnalysisValidationError, CoupledPhysicsFamily, IndependentDomain,
-    InitialStateConflictPolicy, PhysicsFamily, ProcedureStep, SolutionSpace, StateCompleteness,
-    StateKind, StatePersistence, StateSource, StateUse,
+    InitialStateConflictPolicy, PhysicsFamily, ProcedureSettings, ProcedureStep, SolutionSpace,
+    StateCompleteness, StateKind, StatePersistence, StateSource, StateUse,
 };
 
 use super::step_error;
@@ -12,8 +12,39 @@ pub(super) fn validate(step: &ProcedureStep) -> Result<(), AnalysisValidationErr
     validate_family_procedure(step)?;
     validate_solution_space(step)?;
     validate_independent_domain(step)?;
+    validate_settings(step)?;
     validate_state_declarations(step)?;
     validate_required_inputs(step)
+}
+
+fn validate_settings(step: &ProcedureStep) -> Result<(), AnalysisValidationError> {
+    match (&step.settings, step.procedure) {
+        (ProcedureSettings::None, AnalysisProcedure::RandomResponse) => Err(step_error(
+            step,
+            "random response requires explicit modal damping and cumulative modal-mass controls",
+        )),
+        (ProcedureSettings::None, _) => Ok(()),
+        (
+            ProcedureSettings::StructuralRandomResponse(settings),
+            AnalysisProcedure::RandomResponse,
+        ) if settings.modal_damping_ratio.is_finite()
+            && (0.0..1.0).contains(&settings.modal_damping_ratio)
+            && settings.minimum_cumulative_mass_ratio.is_finite()
+            && (0.0..=1.0).contains(&settings.minimum_cumulative_mass_ratio) =>
+        {
+            Ok(())
+        }
+        (ProcedureSettings::StructuralRandomResponse(_), AnalysisProcedure::RandomResponse) => {
+            Err(step_error(
+                step,
+                "random-response damping must be in (0, 1) and cumulative modal mass in [0, 1]",
+            ))
+        }
+        (ProcedureSettings::StructuralRandomResponse(_), _) => Err(step_error(
+            step,
+            "structural random-response settings require the random-response procedure",
+        )),
+    }
 }
 
 fn validate_family_procedure(step: &ProcedureStep) -> Result<(), AnalysisValidationError> {

@@ -3,7 +3,7 @@ use super::lower::error;
 use super::values;
 use crate::{
     CheckedExpression, CheckedExpressionKind, CheckedFeaDeclaration, CheckedFeaStatement,
-    FeaDiagnostic,
+    FeaDiagnostic, FeaType,
 };
 use runmat_analysis_core::IndependentDomain;
 
@@ -16,6 +16,49 @@ pub fn count(
     values::assignment(statements, "modes")
         .and_then(values::positive_usize)
         .or_else(|| missing(declaration, header, "positive integer `modes`", diagnostics))
+}
+
+pub fn ratio(
+    declaration: &CheckedFeaDeclaration,
+    header: &ProcedureHeader,
+    statements: &[CheckedFeaStatement],
+    name: &str,
+    allow_zero: bool,
+    allow_one: bool,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Option<f64> {
+    let Some(expression) = values::assignment(statements, name) else {
+        return missing(
+            declaration,
+            header,
+            &format!("dimensionless ratio `{name}`"),
+            diagnostics,
+        );
+    };
+    let value = matches!(expression.value_type, FeaType::Integer | FeaType::Real)
+        .then(|| values::canonical_scalar(expression))
+        .flatten();
+    let valid = value.is_some_and(|value| {
+        value.is_finite()
+            && (value < 1.0 || (allow_one && value == 1.0))
+            && (value > 0.0 || (allow_zero && value == 0.0))
+    });
+    valid.then_some(value.unwrap_or_default()).or_else(|| {
+        invalid(
+            declaration,
+            header,
+            &format!(
+                "`{name}` must be a finite dimensionless ratio in {}",
+                match (allow_zero, allow_one) {
+                    (true, true) => "[0, 1]",
+                    (true, false) => "[0, 1)",
+                    (false, true) => "(0, 1]",
+                    (false, false) => "(0, 1)",
+                }
+            ),
+            diagnostics,
+        )
+    })
 }
 
 pub fn time(

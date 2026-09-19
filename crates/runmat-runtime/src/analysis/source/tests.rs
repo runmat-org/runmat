@@ -394,14 +394,13 @@ study static {
     assert_eq!(compiled.properties.solid_materials().len(), 1);
     assert_eq!(compiled.properties.beam_materials().len(), 1);
     assert_ne!(compiled.scientific_digest().unwrap().bytes(), &[0; 32]);
-    let workloads = runmat_analysis_fea::study::plan_structural_study(
-        &compiled,
-        runmat_analysis_fea::study::StructuralStudyPlanningPolicy {
-            backend: runmat_analysis_fea::ComputeBackend::Cpu,
-            formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
-        },
-    )
-    .unwrap();
+    let planning_policy = runmat_analysis_fea::study::StructuralStudyPlanningPolicy {
+        backend: runmat_analysis_fea::ComputeBackend::Cpu,
+        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+        numerics: runmat_analysis_fea::study::StructuralNumericalPlanningPolicy::production(),
+    };
+    let workloads =
+        runmat_analysis_fea::study::plan_structural_study(&compiled, planning_policy).unwrap();
     assert_eq!(
         workloads.step_ids().unwrap(),
         [compiled.model.sequence.steps[0].step_id.clone()]
@@ -417,14 +416,9 @@ study static {
             end: 2.0,
             interval_count: 20,
         };
-    let transient = runmat_analysis_fea::study::plan_structural_study(
-        &transient_compiled,
-        runmat_analysis_fea::study::StructuralStudyPlanningPolicy {
-            backend: runmat_analysis_fea::ComputeBackend::Cpu,
-            formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
-        },
-    )
-    .unwrap();
+    let transient =
+        runmat_analysis_fea::study::plan_structural_study(&transient_compiled, planning_policy)
+            .unwrap();
     let runmat_analysis_fea::execution::StructuralStudyWorkloads::StructuralTransient {
         workload,
         block_plan,
@@ -443,15 +437,111 @@ study static {
     assert!(matches!(
         runmat_analysis_fea::study::plan_structural_study(
             &transient_compiled,
-            runmat_analysis_fea::study::StructuralStudyPlanningPolicy {
-                backend: runmat_analysis_fea::ComputeBackend::Cpu,
-                formulation_requirement:
-                    runmat_analysis_core::FormulationRequirement::Experimental,
-            },
+            planning_policy,
         ),
         Err(
             runmat_analysis_fea::study::StructuralStudyPlanningError::MissingAlgebraicResidualTarget { .. }
         )
+    ));
+
+    let mut modal_compiled = compiled.clone();
+    modal_compiled.model.sequence = runmat_analysis_core::AnalysisSequence::from_steps(
+        "modal",
+        vec![runmat_analysis_core::ProcedureStep::structural_modal(
+            "modes",
+        )],
+    );
+    assert!(matches!(
+        runmat_analysis_fea::study::plan_structural_study(&modal_compiled, planning_policy)
+            .unwrap(),
+        runmat_analysis_fea::execution::StructuralStudyWorkloads::StructuralModal { .. }
+    ));
+
+    let mut harmonic_compiled = compiled.clone();
+    let mut harmonic = runmat_analysis_core::ProcedureStep::structural_harmonic("harmonic");
+    harmonic.independent_domain =
+        runmat_analysis_core::IndependentDomain::FrequencyHertz(vec![10.0, 20.0]);
+    harmonic_compiled.model.sequence =
+        runmat_analysis_core::AnalysisSequence::from_steps("harmonic", vec![harmonic]);
+    assert!(matches!(
+        runmat_analysis_fea::study::plan_structural_study(&harmonic_compiled, planning_policy)
+            .unwrap(),
+        runmat_analysis_fea::execution::StructuralStudyWorkloads::StructuralFrequency { .. }
+    ));
+
+    let mut modal_transient_compiled = compiled.clone();
+    let modal = runmat_analysis_core::ProcedureStep::structural_modal("modes");
+    let transient = runmat_analysis_core::ProcedureStep::structural_modal_transient(
+        "response",
+        "modes",
+        "modal_basis",
+    );
+    modal_transient_compiled.model.sequence.steps = vec![modal, transient];
+    modal_transient_compiled.model.sequence.dependencies =
+        vec![runmat_analysis_core::SequenceDependency {
+            predecessor: runmat_analysis_core::ProcedureStepId("modes".into()),
+            successor: runmat_analysis_core::ProcedureStepId("response".into()),
+            reason: runmat_analysis_core::SequenceDependencyReason::StateTransfer,
+        }];
+    modal_transient_compiled.model.sequence.transitions =
+        vec![runmat_analysis_core::StateTransition {
+            transition_id: runmat_analysis_core::TransitionId("basis-to-response".into()),
+            producer_step: runmat_analysis_core::ProcedureStepId("modes".into()),
+            consumer_step: runmat_analysis_core::ProcedureStepId("response".into()),
+            state_id: runmat_analysis_core::StateId("modal_basis".into()),
+            method: runmat_analysis_core::StateTransitionMethod::Reuse,
+            topology: runmat_analysis_core::TopologyTransitionPolicy::RequireIdentical,
+            reference: runmat_analysis_core::ReferenceStatePolicy::Preserve,
+        }];
+    let modal_transient = runmat_analysis_fea::study::plan_structural_study(
+        &modal_transient_compiled,
+        planning_policy,
+    )
+    .unwrap();
+    let runmat_analysis_fea::execution::StructuralStudyWorkloads::HeterogeneousSequence {
+        workloads,
+    } = modal_transient
+    else {
+        panic!("modal transient should produce a heterogeneous sequence");
+    };
+    assert!(matches!(
+        workloads.get(&runmat_analysis_core::ProcedureStepId("modes".into())),
+        Some(runmat_analysis_fea::execution::StructuralStepWorkload::ModalExtraction { .. })
+    ));
+    assert!(matches!(
+        workloads.get(&runmat_analysis_core::ProcedureStepId("response".into())),
+        Some(runmat_analysis_fea::execution::StructuralStepWorkload::ModalTransient { .. })
+    ));
+
+    let mut buckling_compiled = compiled.clone();
+    let preload = runmat_analysis_core::ProcedureStep::structural_preload("preload");
+    let buckling = runmat_analysis_core::ProcedureStep::structural_buckling(
+        "buckling",
+        "preload",
+        "geometric_stiffness",
+    );
+    buckling_compiled.model.sequence.steps = vec![preload, buckling];
+    buckling_compiled.model.sequence.dependencies =
+        vec![runmat_analysis_core::SequenceDependency {
+            predecessor: runmat_analysis_core::ProcedureStepId("preload".into()),
+            successor: runmat_analysis_core::ProcedureStepId("buckling".into()),
+            reason: runmat_analysis_core::SequenceDependencyReason::StateTransfer,
+        }];
+    buckling_compiled.model.sequence.transitions = vec![runmat_analysis_core::StateTransition {
+        transition_id: runmat_analysis_core::TransitionId("preload-to-buckling".into()),
+        producer_step: runmat_analysis_core::ProcedureStepId("preload".into()),
+        consumer_step: runmat_analysis_core::ProcedureStepId("buckling".into()),
+        state_id: runmat_analysis_core::StateId("geometric_stiffness".into()),
+        method: runmat_analysis_core::StateTransitionMethod::Reuse,
+        topology: runmat_analysis_core::TopologyTransitionPolicy::RequireIdentical,
+        reference: runmat_analysis_core::ReferenceStatePolicy::Preserve,
+    }];
+    let buckling =
+        runmat_analysis_fea::study::plan_structural_study(&buckling_compiled, planning_policy)
+            .unwrap();
+    assert!(matches!(
+        buckling,
+        runmat_analysis_fea::execution::StructuralStudyWorkloads::HeterogeneousSequence { .. }
     ));
 
     let mut wrong_mesh = mesh;

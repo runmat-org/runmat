@@ -51,6 +51,10 @@ fn portable_interval_tasks_are_grouping_invariant_and_bind_receipt() {
     let response = ProcedureStep::structural_random_response(
         "random",
         excitation.excitation_id.clone(),
+        runmat_analysis_core::StructuralRandomResponseSettings {
+            modal_damping_ratio: 0.05,
+            minimum_cumulative_mass_ratio: 0.9,
+        },
         "modes",
         "modal_basis",
     );

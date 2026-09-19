@@ -15,7 +15,8 @@ use runmat_analysis_execution::{
     AnalysisKernelOutput, ImportedRecoveredFields, ImportedStructuralFrequencyResult,
     PreparedAnalysisObjects, StructuralFrequencyEntryPreparation,
     StructuralFrequencyFanoutPreparation, StructuralFrequencyFieldRecoveryPreparation,
-    StructuralFrequencyResultPreparation,
+    StructuralFrequencyResultPreparation, StructuralModalFrequencyStudyCoordinator,
+    StructuralModalFrequencyStudyPreparation,
 };
 use runmat_analysis_fea::{
     execution::{
@@ -24,11 +25,15 @@ use runmat_analysis_fea::{
         SequenceIdentity, SolverResultIdentity, StepIdentity,
         StructuralFrequencyResultAssemblyRequest, StructuralFrequencySolverPlan,
         StructuralFrequencyWorkload, StructuralFrequencyWorkloadInput,
+        StructuralModalFrequencyTemplate, StructuralModalWorkload, StructuralModalWorkloadInput,
         StructuralPrestressedFrequencySolverTemplate, StructuralPrestressedFrequencyTemplate,
+        StructuralStepWorkload, StructuralStudyWorkloads,
     },
     fixtures::{fixture_model, FixtureId},
     frequency::FrequencyResponsePlan,
+    pipeline::modal_governance::ModalConvergencePolicy,
     planning::resource::{build_resource_plan, ByteCount, FeaResourceDemand},
+    results::observation::ObservationExecutionPolicy,
     solve::dynamics::DirectHarmonicPolicy,
     ComputeBackend, LinearStaticSolveOptions, ModalSolveOptions, ModalTruncationPolicy,
 };
@@ -37,6 +42,7 @@ use runmat_execution_artifact::cache::CacheImport;
 use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_artifact::{ArtifactAccess, ObjectNamespace};
 use runmat_meshing_core::{CanonicalMeshingContract, ElementOrder};
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::NativeAnalysisKernel;
 
@@ -714,4 +720,131 @@ fn native_modal_frequency_uses_the_exact_portable_basis_state() {
             panic!("modal frequency execution published a direct numerical receipt")
         }
     }
+}
+
+#[test]
+fn modal_frequency_coordinator_publishes_and_binds_the_exact_basis() {
+    let (mut model, mesh) = fixture_model_and_mesh();
+    let modal_step = ProcedureStep::structural_modal("modes");
+    let mut frequency_step =
+        ProcedureStep::structural_modal_harmonic("frequency", "modes", "modal_basis");
+    frequency_step.independent_domain = IndependentDomain::FrequencyHertz(vec![20.0, 40.0]);
+    model.sequence.steps = vec![modal_step.clone(), frequency_step.clone()];
+    model.sequence.dependencies = vec![SequenceDependency {
+        predecessor: modal_step.step_id.clone(),
+        successor: frequency_step.step_id.clone(),
+        reason: SequenceDependencyReason::StateTransfer,
+    }];
+    model.sequence.transitions = vec![StateTransition {
+        transition_id: TransitionId("modal-basis-to-frequency".into()),
+        producer_step: modal_step.step_id.clone(),
+        consumer_step: frequency_step.step_id.clone(),
+        state_id: StateId("modal_basis".into()),
+        method: StateTransitionMethod::Reuse,
+        topology: TopologyTransitionPolicy::RequireIdentical,
+        reference: ReferenceStatePolicy::Preserve,
+    }];
+    let modal = StructuralModalWorkload::new(StructuralModalWorkloadInput {
+        model: model.clone(),
+        step_id: modal_step.step_id.clone(),
+        backend: ComputeBackend::Cpu,
+        formulation_requirement: FormulationRequirement::Experimental,
+        observation_execution: ObservationExecutionPolicy::scalable(),
+        truncation: ModalTruncationPolicy::requested(6),
+        convergence: ModalConvergencePolicy::exploratory(),
+        residual_vector_directions: Vec::new(),
+        prestress_transition: None,
+    })
+    .unwrap();
+    let template = StructuralModalFrequencyTemplate {
+        schema_version: 1,
+        model,
+        step_id: frequency_step.step_id,
+        backend: ComputeBackend::Cpu,
+        formulation_requirement: FormulationRequirement::Experimental,
+        observation_execution: ObservationExecutionPolicy::scalable(),
+        plan: FrequencyResponsePlan::new(20.0, &[40.0], &[]).unwrap(),
+    };
+    let workloads = StructuralStudyWorkloads::HeterogeneousSequence {
+        workloads: BTreeMap::from([
+            (
+                modal_step.step_id,
+                StructuralStepWorkload::ModalExtraction {
+                    workload: Box::new(modal),
+                },
+            ),
+            (
+                runmat_analysis_core::ProcedureStepId("frequency".into()),
+                StructuralStepWorkload::ModalFrequency {
+                    template: Box::new(template),
+                },
+            ),
+        ]),
+    };
+    let limits = ObjectInventoryLimits::default();
+    let directory = tempfile::tempdir().unwrap();
+    let mut store = runmat_execution_artifact::cache::FilesystemObjectStore::open(
+        directory.path().join("objects"),
+        limits.max_object_bytes,
+    )
+    .unwrap();
+    let mut coordinator =
+        StructuralModalFrequencyStudyCoordinator::new(StructuralModalFrequencyStudyPreparation {
+            authored_study_digest: digest("modal-frequency-study"),
+            frozen_project_digest: None,
+            workloads,
+            mesh,
+            artifact_access: access(),
+            program_revision: revision(),
+            chunk_bytes: 256,
+            inventory_limits: limits,
+            required_capabilities: BTreeSet::new(),
+            accelerator_requests: Vec::new(),
+        })
+        .unwrap();
+    let modal = coordinator.prepare_modal().unwrap();
+    modal.program.write_to(&mut store).unwrap();
+    let completed = execute_serial_analysis(
+        &modal.program.request,
+        &mut store,
+        &NativeAnalysisKernel,
+        256,
+        limits,
+    )
+    .unwrap();
+    coordinator
+        .complete_modal(
+            &store,
+            AnalysisHostResponse::completed(&modal.host, &completed)
+                .unwrap()
+                .program_response(),
+            &modal,
+        )
+        .unwrap();
+    let state = coordinator.prepare_state().unwrap();
+    state.program.write_to(&mut store).unwrap();
+    let completed = execute_serial_analysis(
+        &state.program.request,
+        &mut store,
+        &NativeAnalysisKernel,
+        256,
+        limits,
+    )
+    .unwrap();
+    coordinator
+        .complete_state(
+            &store,
+            AnalysisHostResponse::completed(&state.host, &completed)
+                .unwrap()
+                .program_response(),
+            &state,
+        )
+        .unwrap();
+    let bound = coordinator.bind_frequency().unwrap();
+    assert_eq!(
+        bound.workload.solver(),
+        &StructuralFrequencySolverPlan::ModalReduced {
+            basis_state: bound.modal_state.identity,
+        }
+    );
 }

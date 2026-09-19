@@ -7,11 +7,11 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     AnalysisExecutionError, AnalysisExecutionResult, StructuralBucklingTemplate,
-    StructuralFrequencyWorkload, StructuralLinearWorkload, StructuralModalResponseSpectrumTemplate,
-    StructuralModalTransientTemplate, StructuralModalWorkload,
-    StructuralPrestressedFrequencySolverTemplate, StructuralPrestressedFrequencyTemplate,
-    StructuralPrestressedModalTemplate, StructuralRandomResponseTemplate,
-    StructuralTransientWorkload,
+    StructuralFrequencyWorkload, StructuralLinearWorkload, StructuralModalFrequencyTemplate,
+    StructuralModalResponseSpectrumTemplate, StructuralModalTransientTemplate,
+    StructuralModalWorkload, StructuralPrestressedFrequencySolverTemplate,
+    StructuralPrestressedFrequencyTemplate, StructuralPrestressedModalTemplate,
+    StructuralRandomResponseTemplate, StructuralTransientWorkload,
 };
 
 const STUDY_WORKLOADS_PREFIX: &[u8] = b"runmat-structural-study-workloads\0";
@@ -97,6 +97,9 @@ pub enum StructuralStepWorkload {
         template: Box<StructuralModalTransientTemplate>,
         block_plan: StructuralTransientBlockPlan,
     },
+    ModalFrequency {
+        template: Box<StructuralModalFrequencyTemplate>,
+    },
     ModalResponseSpectrum {
         template: Box<StructuralModalResponseSpectrumTemplate>,
     },
@@ -126,6 +129,7 @@ impl StructuralStepWorkload {
                 template.validate()?;
                 block_plan.validate()
             }
+            Self::ModalFrequency { template } => template.validate(),
             Self::ModalResponseSpectrum { template } => template.validate(),
             Self::RandomResponse { template } => template.validate(),
             Self::PrestressedModal { template } => template.validate(),
@@ -139,6 +143,7 @@ impl StructuralStepWorkload {
             Self::Linear { workload } => &workload.model,
             Self::ModalExtraction { workload } => workload.model(),
             Self::ModalTransient { template, .. } => &template.model,
+            Self::ModalFrequency { template } => &template.model,
             Self::ModalResponseSpectrum { template } => &template.model,
             Self::RandomResponse { template } => &template.model,
             Self::PrestressedModal { template } => &template.model,
@@ -152,6 +157,7 @@ impl StructuralStepWorkload {
             Self::Linear { workload } => &workload.step_id,
             Self::ModalExtraction { workload } => workload.step_id(),
             Self::ModalTransient { template, .. } => &template.step_id,
+            Self::ModalFrequency { template } => &template.step_id,
             Self::ModalResponseSpectrum { template } => &template.step_id,
             Self::RandomResponse { template } => &template.step_id,
             Self::PrestressedModal { template } => &template.step_id,
@@ -165,6 +171,7 @@ impl StructuralStepWorkload {
             Self::Linear { workload } => workload.backend,
             Self::ModalExtraction { workload } => workload.backend(),
             Self::ModalTransient { template, .. } => template.backend,
+            Self::ModalFrequency { template } => template.backend,
             Self::ModalResponseSpectrum { template } => template.backend,
             Self::RandomResponse { template } => template.backend,
             Self::PrestressedModal { template } => template.backend,
@@ -178,6 +185,7 @@ impl StructuralStepWorkload {
             Self::Linear { workload } => workload.model = model,
             Self::ModalExtraction { workload } => workload.replace_model(model)?,
             Self::ModalTransient { template, .. } => template.model = model,
+            Self::ModalFrequency { template } => template.model = model,
             Self::ModalResponseSpectrum { template } => template.model = model,
             Self::RandomResponse { template } => template.model = model,
             Self::PrestressedModal { template } => template.model = model,
@@ -426,6 +434,7 @@ fn validate_heterogeneous_sequence(
         .collect::<AnalysisExecutionResult<Vec<_>>>()?;
     let supported = match ordered.as_slice() {
         [StructuralStepWorkload::ModalExtraction { .. }, StructuralStepWorkload::ModalTransient { .. }]
+        | [StructuralStepWorkload::ModalExtraction { .. }, StructuralStepWorkload::ModalFrequency { .. }]
         | [StructuralStepWorkload::ModalExtraction { .. }, StructuralStepWorkload::ModalResponseSpectrum { .. }]
         | [StructuralStepWorkload::ModalExtraction { .. }, StructuralStepWorkload::RandomResponse { .. }]
         | [StructuralStepWorkload::Linear { .. }, StructuralStepWorkload::Buckling { .. }]

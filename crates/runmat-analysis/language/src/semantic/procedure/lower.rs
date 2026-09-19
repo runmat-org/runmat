@@ -10,7 +10,7 @@ use runmat_analysis_core::{
     RandomExcitationId, ReferenceStatePolicy, ResponseSpectrumId, SequenceDependency,
     SequenceDependencyReason, SolutionSpace, StateCompleteness, StateId, StateKind, StateOutput,
     StatePersistence, StateSource, StateTransition, StateTransitionMethod, StateUse,
-    TopologyTransitionPolicy, TransitionId,
+    StructuralRandomResponseSettings, TopologyTransitionPolicy, TransitionId,
 };
 use std::collections::BTreeSet;
 
@@ -278,9 +278,30 @@ fn lower_procedure(
                 "excitation",
                 diagnostics,
             )?;
+            let settings = StructuralRandomResponseSettings {
+                modal_damping_ratio: requirements::ratio(
+                    declaration,
+                    procedure,
+                    statements,
+                    "modal_damping_ratio",
+                    false,
+                    false,
+                    diagnostics,
+                )?,
+                minimum_cumulative_mass_ratio: requirements::ratio(
+                    declaration,
+                    procedure,
+                    statements,
+                    "minimum_cumulative_mass_ratio",
+                    true,
+                    true,
+                    diagnostics,
+                )?,
+            };
             ProcedureStep::structural_random_response(
                 id,
                 RandomExcitationId(excitation),
+                settings,
                 state.0,
                 state.1,
             )

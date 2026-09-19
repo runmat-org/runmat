@@ -2,139 +2,178 @@ use std::collections::BTreeMap;
 
 use runmat_analysis_core::{
     AccuracyTolerance, AnalysisProcedure, ErrorContributionKind, FormulationRequirement,
-    IndependentDomain, PhysicsFamily, ProcedureStep, SolutionSpace,
+    PhysicsFamily, ProcedureStep, SolutionSpace,
 };
 use thiserror::Error;
 
 use crate::execution::{
     AnalysisExecutionError, StructuralLinearWorkload, StructuralStudyWorkloads,
-    StructuralTransientBlockPlan, StructuralTransientSolverPlan, StructuralTransientWorkload,
 };
 use crate::results::observation::ObservationExecutionPolicy;
 use crate::solve::backend::kind::LinearAlgebraBackendKind;
 use crate::solve::preconditioner::SpdPreconditionerKind;
-use crate::solve::transient::StructuralTimeStepPolicy;
 use crate::ComputeBackend;
 
 use super::CompiledAnalysisStudy;
 
-/// Already-admitted numerical choices for translating scientific intent into portable workloads.
+mod dynamics;
+#[cfg(test)]
+mod tests;
+
+/// Portable numerical limits selected after project/CLI policy resolution.
+///
+/// Scientific domains and accuracy tolerances remain in the compiled study. These values govern
+/// algorithms and task partitioning only. Scientific domains, accuracy tolerances, damping, and
+/// modal-mass controls remain in the compiled study.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StructuralNumericalPlanningPolicy {
+    pub maximum_transient_intervals_per_block: u64,
+    pub maximum_frequency_intervals_per_task: usize,
+    pub maximum_modal_iterations: usize,
+    pub modal_eigenspace_relative_tolerance: f64,
+    pub harmonic_restart: usize,
+    pub maximum_harmonic_iterations: usize,
+    pub maximum_buckling_iterations: usize,
+}
+
+impl StructuralNumericalPlanningPolicy {
+    pub const fn production() -> Self {
+        Self {
+            maximum_transient_intervals_per_block: 256,
+            maximum_frequency_intervals_per_task: 32,
+            maximum_modal_iterations: 256,
+            modal_eigenspace_relative_tolerance: 1.0e-6,
+            harmonic_restart: 32,
+            maximum_harmonic_iterations: 2_048,
+            maximum_buckling_iterations: 256,
+        }
+    }
+
+    fn validate(self) -> Result<(), StructuralStudyPlanningError> {
+        if self.maximum_transient_intervals_per_block == 0
+            || self.maximum_frequency_intervals_per_task == 0
+            || self.maximum_modal_iterations == 0
+            || !open_unit_interval(self.modal_eigenspace_relative_tolerance)
+            || self.harmonic_restart == 0
+            || self.maximum_harmonic_iterations == 0
+            || self.maximum_buckling_iterations == 0
+        {
+            return Err(StructuralStudyPlanningError::InvalidNumericalPolicy);
+        }
+        Ok(())
+    }
+}
+
+const fn open_unit_interval(value: f64) -> bool {
+    value.is_finite() && value > 0.0 && value < 1.0
+}
+
+/// Already-admitted choices for translating scientific intent into portable workloads.
 ///
 /// The runtime resolves `auto`, project policy, CLI policy, and available capabilities before this
 /// boundary. No worker or scientific compiler performs a hardware fallback.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct StructuralStudyPlanningPolicy {
     pub backend: ComputeBackend,
     pub formulation_requirement: FormulationRequirement,
+    pub numerics: StructuralNumericalPlanningPolicy,
 }
 
 /// Build portable structural workloads from the canonical compiled procedure sequence.
-///
-/// Static sequences and a standalone direct transient study are admitted without reconstructing
-/// scientific inputs from runtime options. Other typed procedures remain valid scientific
-/// contracts but fail planning until their workload constructors move behind this same owner.
 pub fn plan_structural_study(
     study: &CompiledAnalysisStudy,
     policy: StructuralStudyPlanningPolicy,
 ) -> Result<StructuralStudyWorkloads, StructuralStudyPlanningError> {
-    if let [step] = study.model.sequence.steps.as_slice() {
-        if step.family == PhysicsFamily::Structural
-            && step.procedure == AnalysisProcedure::TransientResponse
-            && step.solution_space == SolutionSpace::Direct
-        {
-            return plan_direct_transient(study, step, policy);
-        }
+    policy.numerics.validate()?;
+    if study.model.sequence.steps.iter().all(is_linear_static_step) {
+        return plan_linear_sequence(study, policy);
     }
+    dynamics::plan(study, policy)
+}
 
-    let algebra_backend = match policy.backend {
-        ComputeBackend::Cpu => LinearAlgebraBackendKind::CpuReference,
-        ComputeBackend::Gpu => LinearAlgebraBackendKind::Accelerator,
-    };
-    let mut workloads = BTreeMap::new();
-    for step in &study.model.sequence.steps {
-        if step.family != PhysicsFamily::Structural
-            || step.procedure != AnalysisProcedure::Static
-            || step.solution_space != SolutionSpace::Direct
-        {
-            return Err(StructuralStudyPlanningError::UnsupportedProcedure {
-                step_id: step.step_id.0.clone(),
-                family: step.family,
-                procedure: step.procedure,
-                solution_space: step.solution_space,
-            });
-        }
-        let workload = StructuralLinearWorkload {
-            schema_version: 1,
-            model: study.model.clone(),
-            step_id: step.step_id.clone(),
-            backend: policy.backend,
-            formulation_requirement: policy.formulation_requirement,
-            preconditioner: SpdPreconditionerKind::Jacobi,
-            algebra_backend,
-            observation_execution: ObservationExecutionPolicy::scalable(),
-            require_solver_mesh_for_solid: true,
-            initial_guess_transition: None,
-        };
-        workload.validate_sequence_template()?;
-        workloads.insert(step.step_id.clone(), workload);
-    }
+fn is_linear_static_step(step: &ProcedureStep) -> bool {
+    step.family == PhysicsFamily::Structural
+        && step.procedure == AnalysisProcedure::Static
+        && step.solution_space == SolutionSpace::Direct
+}
+
+fn plan_linear_sequence(
+    study: &CompiledAnalysisStudy,
+    policy: StructuralStudyPlanningPolicy,
+) -> Result<StructuralStudyWorkloads, StructuralStudyPlanningError> {
+    let workloads = study
+        .model
+        .sequence
+        .steps
+        .iter()
+        .map(|step| Ok((step.step_id.clone(), linear_workload(study, step, policy)?)))
+        .collect::<Result<BTreeMap<_, _>, StructuralStudyPlanningError>>()?;
     let planned = StructuralStudyWorkloads::LinearSequence { workloads };
     planned.validate()?;
     Ok(planned)
 }
 
-fn plan_direct_transient(
+fn linear_workload(
     study: &CompiledAnalysisStudy,
     step: &ProcedureStep,
     policy: StructuralStudyPlanningPolicy,
-) -> Result<StructuralStudyWorkloads, StructuralStudyPlanningError> {
-    let IndependentDomain::TimeSeconds { interval_count, .. } = &step.independent_domain else {
-        return Err(StructuralStudyPlanningError::InvalidTransientDomain {
-            step_id: step.step_id.0.clone(),
-        });
+) -> Result<StructuralLinearWorkload, StructuralStudyPlanningError> {
+    if !is_linear_static_step(step) {
+        return Err(unsupported(step));
+    }
+    let algebra_backend = match policy.backend {
+        ComputeBackend::Cpu => LinearAlgebraBackendKind::CpuReference,
+        ComputeBackend::Gpu => LinearAlgebraBackendKind::Accelerator,
     };
-    let interval_count = *interval_count;
-    let interval_count_u64 = u64::try_from(interval_count).map_err(|_| {
-        StructuralStudyPlanningError::TransientIntervalCountOverflow {
-            step_id: step.step_id.0.clone(),
-            interval_count,
-        }
-    })?;
-    let residual_target = algebraic_residual_target(step)?;
-    let workload = StructuralTransientWorkload {
+    let workload = StructuralLinearWorkload {
         schema_version: 1,
         model: study.model.clone(),
         step_id: step.step_id.clone(),
         backend: policy.backend,
         formulation_requirement: policy.formulation_requirement,
-        solver: StructuralTransientSolverPlan::Direct,
-        time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count },
-        residual_target,
+        preconditioner: SpdPreconditionerKind::Jacobi,
+        algebra_backend,
+        observation_execution: ObservationExecutionPolicy::scalable(),
+        require_solver_mesh_for_solid: true,
+        initial_guess_transition: None,
     };
-    let block_plan = StructuralTransientBlockPlan::new(interval_count_u64.min(256))?;
-    let planned = StructuralStudyWorkloads::StructuralTransient {
-        workload: Box::new(workload),
-        block_plan,
-    };
-    planned.validate()?;
-    Ok(planned)
+    workload.validate_sequence_template()?;
+    Ok(workload)
 }
 
-fn algebraic_residual_target(step: &ProcedureStep) -> Result<f64, StructuralStudyPlanningError> {
+fn relative_accuracy_target(
+    step: &ProcedureStep,
+    contribution: ErrorContributionKind,
+) -> Result<f64, StructuralStudyPlanningError> {
     step.accuracy
         .criteria
         .iter()
-        .filter(|criterion| criterion.contribution == ErrorContributionKind::Algebraic)
+        .filter(|criterion| criterion.contribution == contribution)
         .filter_map(|criterion| match criterion.tolerance {
             AccuracyTolerance::Relative(value) => Some(value),
             AccuracyTolerance::Absolute { .. } => None,
         })
         .reduce(f64::min)
-        .ok_or_else(
-            || StructuralStudyPlanningError::MissingAlgebraicResidualTarget {
+        .ok_or_else(|| match contribution {
+            ErrorContributionKind::Algebraic => {
+                StructuralStudyPlanningError::MissingAlgebraicResidualTarget {
+                    step_id: step.step_id.0.clone(),
+                }
+            }
+            _ => StructuralStudyPlanningError::MissingRelativeAccuracyTarget {
                 step_id: step.step_id.0.clone(),
+                contribution,
             },
-        )
+        })
+}
+
+fn unsupported(step: &ProcedureStep) -> StructuralStudyPlanningError {
+    StructuralStudyPlanningError::UnsupportedProcedure {
+        step_id: step.step_id.0.clone(),
+        family: step.family,
+        procedure: step.procedure,
+        solution_space: step.solution_space,
+    }
 }
 
 #[derive(Debug, Error)]
@@ -148,8 +187,10 @@ pub enum StructuralStudyPlanningError {
         procedure: AnalysisProcedure,
         solution_space: SolutionSpace,
     },
-    #[error("transient step `{step_id}` does not declare a physical time domain")]
-    InvalidTransientDomain { step_id: String },
+    #[error("procedure step `{step_id}` has an incompatible independent domain")]
+    InvalidIndependentDomain { step_id: String },
+    #[error("procedure step `{step_id}` has incompatible procedure-specific settings")]
+    InvalidProcedureSettings { step_id: String },
     #[error(
         "transient step `{step_id}` interval count {interval_count} exceeds the portable execution contract"
     )]
@@ -157,8 +198,19 @@ pub enum StructuralStudyPlanningError {
         step_id: String,
         interval_count: usize,
     },
-    #[error("transient step `{step_id}` has no relative algebraic accuracy criterion")]
+    #[error("procedure step `{step_id}` has no relative algebraic accuracy criterion")]
     MissingAlgebraicResidualTarget { step_id: String },
+    #[error("procedure step `{step_id}` has no relative {contribution:?} accuracy criterion")]
+    MissingRelativeAccuracyTarget {
+        step_id: String,
+        contribution: ErrorContributionKind,
+    },
+    #[error("structural numerical planning policy is outside its finite bounds")]
+    InvalidNumericalPolicy,
+    #[error("procedure step `{step_id}` refinement limit exceeds the execution contract")]
+    RefinementLimitOverflow { step_id: String },
     #[error(transparent)]
     Workload(#[from] AnalysisExecutionError),
+    #[error("frequency planning failed: {0}")]
+    Frequency(String),
 }

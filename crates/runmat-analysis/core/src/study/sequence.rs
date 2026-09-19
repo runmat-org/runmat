@@ -90,12 +90,30 @@ pub struct ProcedureStep {
     pub procedure: AnalysisProcedure,
     pub solution_space: SolutionSpace,
     pub independent_domain: IndependentDomain,
+    pub settings: ProcedureSettings,
     pub activations: Vec<StepObjectActivation>,
     pub state_inputs: Vec<StateInput>,
     pub state_outputs: Vec<StateOutput>,
     pub observations: Vec<ObservationRequest>,
     pub accuracy: AccuracyPlan,
     pub restart: RestartPolicy,
+}
+
+/// Procedure-specific scientific inputs that are neither an independent domain nor an execution
+/// policy. Keeping this union closed prevents procedure controls from degrading into string-keyed
+/// solver options.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProcedureSettings {
+    None,
+    StructuralRandomResponse(StructuralRandomResponseSettings),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StructuralRandomResponseSettings {
+    pub modal_damping_ratio: f64,
+    pub minimum_cumulative_mass_ratio: f64,
 }
 
 impl ProcedureStep {
@@ -363,6 +381,7 @@ impl ProcedureStep {
             procedure,
             solution_space,
             independent_domain,
+            settings: ProcedureSettings::None,
             activations: Vec::new(),
             state_inputs: Vec::new(),
             state_outputs,
@@ -457,6 +476,7 @@ impl ProcedureStep {
     pub fn structural_random_response(
         step_id: impl Into<String>,
         excitation_id: crate::RandomExcitationId,
+        settings: StructuralRandomResponseSettings,
         producer_step: impl Into<String>,
         state_id: impl Into<String>,
     ) -> Self {
@@ -473,6 +493,7 @@ impl ProcedureStep {
         );
         step.state_inputs
             .push(modal_basis_input(producer_step, state_id));
+        step.settings = ProcedureSettings::StructuralRandomResponse(settings);
         step.accuracy = AccuracyPlan::random_response(format!("{}.accuracy", step.step_id.0));
         step
     }

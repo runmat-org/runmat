@@ -2,9 +2,8 @@ use std::collections::BTreeSet;
 
 use runmat_analysis_core::StateUse;
 use runmat_analysis_fea::execution::{
-    AnalysisTaskIdentity, SemanticStatePublicationSource, StructuralModalTransientTemplate,
-    StructuralModalWorkload, StructuralStepWorkload, StructuralStudyWorkloads,
-    StructuralTransientBlockPlan,
+    AnalysisTaskIdentity, StructuralModalTransientTemplate, StructuralStepWorkload,
+    StructuralStudyWorkloads, StructuralTransientBlockPlan,
 };
 use runmat_execution::{resource::AcceleratorRequest, Digest, ProgramRevision};
 use runmat_execution_artifact::{
@@ -12,17 +11,17 @@ use runmat_execution_artifact::{
 };
 use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
 
+use crate::structural_modal_producer::{
+    StructuralModalProducerCoordinator, StructuralModalProducerPreparation,
+};
 use crate::{
-    bind_upstream_state_transition, import_semantic_state_completion,
-    import_structural_modal_result, prepare_semantic_state_publication,
-    prepare_structural_modal_task, prepare_structural_transient_sequence, AnalysisBridgeError,
+    bind_upstream_state_transition, prepare_structural_transient_sequence, AnalysisBridgeError,
     AnalysisBridgeResult, AnalysisCapabilityRequirement, ImportedSemanticState,
     ImportedStructuralModalResult, PreparedSemanticStatePublication, PreparedStructuralModalTask,
-    SemanticStatePublicationPreparation, StructuralModalTaskPreparation,
     StructuralTransientSequencePreparation, StructuralTransientSequencePreparationInput,
 };
 
-/// Placement-neutral inputs for an authored modal-extraction → modal-transient study.
+/// Placement-neutral inputs for an authored modal-extraction -> modal-transient study.
 pub struct StructuralModalTransientStudyPreparation {
     pub authored_study_digest: Digest,
     pub frozen_project_digest: Option<Digest>,
@@ -36,29 +35,16 @@ pub struct StructuralModalTransientStudyPreparation {
     pub accelerator_requests: Vec<AcceleratorRequest>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum StudyPhase {
-    ReadyForModal,
-    AwaitingModal(Digest),
-    ReadyForState,
-    AwaitingState(Digest),
-    ReadyForTransient,
-}
-
-/// Binds produced identities into an authored heterogeneous structural sequence.
-///
-/// Numerical work, scheduler placement, and live task identifiers remain outside this state
-/// machine. Each transition accepts only the exact portable response it previously prepared.
+/// Binds a published modal basis into the authored transient consumer.
 pub struct StructuralModalTransientStudyCoordinator {
-    preparation: StructuralModalTransientStudyPreparation,
-    modal_workload: StructuralModalWorkload,
+    producer: StructuralModalProducerCoordinator,
+    mesh: SolverMeshArtifact,
     transient_template: StructuralModalTransientTemplate,
     block_plan: StructuralTransientBlockPlan,
-    modal: Option<ImportedStructuralModalResult>,
-    modal_task: Option<AnalysisTaskIdentity>,
-    state: Option<ImportedSemanticState>,
-    state_task: Option<AnalysisTaskIdentity>,
-    phase: StudyPhase,
+    artifact_access: ArtifactAccess,
+    program_revision: ProgramRevision,
+    chunk_bytes: usize,
+    inventory_limits: ObjectInventoryLimits,
 }
 
 impl StructuralModalTransientStudyCoordinator {
@@ -70,11 +56,6 @@ impl StructuralModalTransientStudyCoordinator {
             .mesh
             .validate_canonical()
             .map_err(|error| invalid(error.to_string()))?;
-        if preparation.chunk_bytes == 0 {
-            return Err(invalid(
-                "modal-transient study requires bounded object chunks",
-            ));
-        }
         let StructuralStudyWorkloads::HeterogeneousSequence { workloads } = &preparation.workloads
         else {
             return Err(invalid(
@@ -101,41 +82,33 @@ impl StructuralModalTransientStudyCoordinator {
                 "the second authored step must be an unresolved modal transient",
             ));
         };
-        workload.modal_basis_output()?;
+        let producer =
+            StructuralModalProducerCoordinator::new(StructuralModalProducerPreparation {
+                authored_study_digest: preparation.authored_study_digest,
+                frozen_project_digest: preparation.frozen_project_digest,
+                workload: (**workload).clone(),
+                mesh: preparation.mesh.clone(),
+                artifact_access: preparation.artifact_access.clone(),
+                program_revision: preparation.program_revision.clone(),
+                chunk_bytes: preparation.chunk_bytes,
+                inventory_limits: preparation.inventory_limits,
+                required_capabilities: preparation.required_capabilities,
+                accelerator_requests: preparation.accelerator_requests,
+            })?;
         Ok(Self {
-            modal_workload: (**workload).clone(),
+            producer,
+            mesh: preparation.mesh,
             transient_template: (**template).clone(),
             block_plan: *block_plan,
-            preparation,
-            modal: None,
-            modal_task: None,
-            state: None,
-            state_task: None,
-            phase: StudyPhase::ReadyForModal,
+            artifact_access: preparation.artifact_access,
+            program_revision: preparation.program_revision,
+            chunk_bytes: preparation.chunk_bytes,
+            inventory_limits: preparation.inventory_limits,
         })
     }
 
     pub fn prepare_modal(&mut self) -> AnalysisBridgeResult<PreparedStructuralModalTask> {
-        if self.phase != StudyPhase::ReadyForModal {
-            return Err(invalid(
-                "modal-transient study is not ready for modal extraction",
-            ));
-        }
-        let prepared = prepare_structural_modal_task(StructuralModalTaskPreparation {
-            authored_study_digest: self.preparation.authored_study_digest,
-            frozen_project_digest: self.preparation.frozen_project_digest,
-            program_revision: self.preparation.program_revision.clone(),
-            artifact_access: self.preparation.artifact_access.clone(),
-            workload: self.modal_workload.clone(),
-            mesh: self.preparation.mesh.clone(),
-            prestress_state: None,
-            chunk_bytes: self.preparation.chunk_bytes,
-            inventory_limits: self.preparation.inventory_limits,
-            required_capabilities: self.preparation.required_capabilities.clone(),
-            accelerator_requests: self.preparation.accelerator_requests.clone(),
-        })?;
-        self.phase = StudyPhase::AwaitingModal(prepared.host.workload.identity.digest());
-        Ok(prepared)
+        self.producer.prepare_modal()
     }
 
     pub fn complete_modal(
@@ -144,48 +117,11 @@ impl StructuralModalTransientStudyCoordinator {
         response: ProgramExecutionResponse,
         prepared: &PreparedStructuralModalTask,
     ) -> AnalysisBridgeResult<()> {
-        if self.phase != StudyPhase::AwaitingModal(prepared.host.workload.identity.digest()) {
-            return Err(AnalysisBridgeError::Identity(
-                "modal response differs from the awaited authored step",
-            ));
-        }
-        let modal = import_structural_modal_result(
-            source,
-            response,
-            prepared,
-            self.preparation.inventory_limits,
-        )?;
-        self.modal_task = Some(AnalysisTaskIdentity::new(
-            modal.host.workload.identity,
-            Vec::new(),
-        )?);
-        self.modal = Some(modal);
-        self.phase = StudyPhase::ReadyForState;
-        Ok(())
+        self.producer.complete_modal(source, response, prepared)
     }
 
     pub fn prepare_state(&mut self) -> AnalysisBridgeResult<PreparedSemanticStatePublication> {
-        if self.phase != StudyPhase::ReadyForState {
-            return Err(invalid(
-                "modal-transient study is not ready to publish a basis",
-            ));
-        }
-        let modal = self
-            .modal
-            .as_ref()
-            .ok_or_else(|| invalid("completed modal result is absent"))?;
-        let prepared = prepare_semantic_state_publication(SemanticStatePublicationPreparation {
-            source_host: modal.host.clone(),
-            source_result: modal.objects.clone(),
-            source: SemanticStatePublicationSource::ModalBasis,
-            declaration: self.modal_workload.modal_basis_output()?.clone(),
-            topology_digest: Digest::from_bytes(*self.preparation.mesh.canonical_digest.bytes()),
-            program_revision: self.preparation.program_revision.clone(),
-            chunk_bytes: self.preparation.chunk_bytes,
-            inventory_limits: self.preparation.inventory_limits,
-        })?;
-        self.phase = StudyPhase::AwaitingState(prepared.host.workload.identity.digest());
-        Ok(prepared)
+        self.producer.prepare_state()
     }
 
     pub fn complete_state(
@@ -194,78 +130,54 @@ impl StructuralModalTransientStudyCoordinator {
         response: ProgramExecutionResponse,
         prepared: &PreparedSemanticStatePublication,
     ) -> AnalysisBridgeResult<()> {
-        if self.phase != StudyPhase::AwaitingState(prepared.host.workload.identity.digest()) {
-            return Err(AnalysisBridgeError::Identity(
-                "basis publication differs from the awaited authored transition",
-            ));
-        }
-        let state = import_semantic_state_completion(
-            source,
-            response,
-            prepared,
-            self.preparation.inventory_limits,
-        )?;
-        let modal_task = self
-            .modal_task
-            .ok_or_else(|| invalid("modal producer task identity is absent"))?;
-        self.state_task = Some(AnalysisTaskIdentity::new(
-            prepared.host.workload.identity,
-            vec![modal_task],
-        )?);
-        self.state = Some(state);
-        self.phase = StudyPhase::ReadyForTransient;
-        Ok(())
+        self.producer.complete_state(source, response, prepared)
     }
 
     pub fn prepare_transient(
         &self,
     ) -> AnalysisBridgeResult<StructuralTransientSequencePreparation> {
-        if self.phase != StudyPhase::ReadyForTransient {
-            return Err(invalid(
-                "modal-transient study has not published its modal basis",
-            ));
-        }
         let state = self
-            .state
-            .as_ref()
-            .ok_or_else(|| invalid("published modal state is absent"))?;
+            .producer
+            .semantic_state()
+            .ok_or_else(|| invalid("modal-transient study has not published its modal basis"))?;
         let transition = bind_upstream_state_transition(
             &self.transient_template.model,
             &self.transient_template.step_id,
             &state.state,
             StateUse::ModalBasis,
-            Digest::from_bytes(*self.preparation.mesh.canonical_digest.bytes()),
+            Digest::from_bytes(*self.mesh.canonical_digest.bytes()),
         )?;
         let workload = self.transient_template.clone().bind(transition)?;
         prepare_structural_transient_sequence(StructuralTransientSequencePreparationInput {
             workload: &workload,
-            mesh: &self.preparation.mesh,
+            mesh: &self.mesh,
             modal_state: Some(&state.state),
             block_plan: self.block_plan,
             initial_dependencies: vec![self
-                .state_task
+                .producer
+                .state_task_identity()
                 .ok_or_else(|| invalid("basis publication task identity is absent"))?],
-            artifact_access: self.preparation.artifact_access.clone(),
-            program_revision: self.preparation.program_revision.clone(),
-            chunk_bytes: self.preparation.chunk_bytes,
-            inventory_limits: self.preparation.inventory_limits,
+            artifact_access: self.artifact_access.clone(),
+            program_revision: self.program_revision.clone(),
+            chunk_bytes: self.chunk_bytes,
+            inventory_limits: self.inventory_limits,
         })
     }
 
     pub fn modal_task_identity(&self) -> Option<AnalysisTaskIdentity> {
-        self.modal_task
+        self.producer.modal_task_identity()
     }
 
     pub fn state_task_identity(&self) -> Option<AnalysisTaskIdentity> {
-        self.state_task
+        self.producer.state_task_identity()
     }
 
     pub fn modal_result(&self) -> Option<&ImportedStructuralModalResult> {
-        self.modal.as_ref()
+        self.producer.modal_result()
     }
 
     pub fn semantic_state(&self) -> Option<&ImportedSemanticState> {
-        self.state.as_ref()
+        self.producer.semantic_state()
     }
 }
 

@@ -369,6 +369,10 @@ fn fixture() -> (
     let response = ProcedureStep::structural_random_response(
         "random",
         excitation.excitation_id.clone(),
+        runmat_analysis_core::StructuralRandomResponseSettings {
+            modal_damping_ratio: 0.04,
+            minimum_cumulative_mass_ratio: 0.0,
+        },
         "modes",
         "modal_basis",
     );

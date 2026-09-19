@@ -78,6 +78,53 @@ impl StructuralPrestressedFrequencySolverTemplate {
     }
 }
 
+/// Authored modal harmonic intent before its upstream modal-basis identity has been published.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StructuralModalFrequencyTemplate {
+    pub schema_version: u16,
+    pub model: AnalysisModel,
+    pub step_id: ProcedureStepId,
+    pub backend: ComputeBackend,
+    pub formulation_requirement: FormulationRequirement,
+    pub observation_execution: ObservationExecutionPolicy,
+    pub plan: FrequencyResponsePlan,
+}
+
+impl StructuralModalFrequencyTemplate {
+    pub fn validate(&self) -> AnalysisExecutionResult<()> {
+        if self.schema_version != 1 || self.backend != ComputeBackend::Cpu {
+            return Err(AnalysisExecutionError::Invalid(
+                "modal harmonic execution currently requires the CPU backend".into(),
+            ));
+        }
+        validate_model_sequence(&self.model)
+            .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+        self.plan
+            .validate()
+            .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+        let step = unique_frequency_step(&self.model, &self.step_id)?;
+        validate_frequency_step(step, &self.plan, SolutionSpace::ModalReduced, false, 1)
+    }
+
+    pub fn bind(
+        self,
+        basis_state: StateIdentity,
+    ) -> AnalysisExecutionResult<StructuralFrequencyWorkload> {
+        self.validate()?;
+        StructuralFrequencyWorkload::new(StructuralFrequencyWorkloadInput {
+            model: self.model,
+            step_id: self.step_id,
+            backend: self.backend,
+            formulation_requirement: self.formulation_requirement,
+            observation_execution: self.observation_execution,
+            plan: self.plan,
+            solver: StructuralFrequencySolverPlan::ModalReduced { basis_state },
+            prestress_transition: None,
+        })
+    }
+}
+
 /// Authored prestressed harmonic intent before its preload and optional modal-basis states have
 /// been published by the sequence coordinator.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
