@@ -3,8 +3,9 @@ use super::scope::{
 };
 use super::{check_expression, CheckedExpression, ExpressionCheck, ExpressionScope, FeaType};
 use crate::{
-    AnalysisOperationCatalog, BoundFeaProgram, FeaDiagnostic, FeaDiagnosticLocation,
-    FeaDiagnosticPhase, FeaSymbolKey, GeometryInspectionSource, LogicalSourcePath,
+    AnalysisOperationCatalog, BoundFeaProgram, ExecutionProfileSource, FeaDiagnostic,
+    FeaDiagnosticLocation, FeaDiagnosticPhase, FeaSymbolKey, GeometryInspectionSource,
+    LogicalSourcePath,
 };
 use runmat_parser::fea::{
     FeaBlock, FeaDeclaration, FeaModelDefinitionKind, FeaModuleItem, FeaStatementKind,
@@ -16,40 +17,7 @@ mod material_source;
 mod output;
 mod types;
 
-pub use types::{CheckedFeaStatement, CheckedFeaStatementKind};
-
-#[derive(Debug)]
-pub struct CheckedFeaProgram {
-    pub bound: BoundFeaProgram,
-    pub declarations: BTreeMap<(LogicalSourcePath, FeaSymbolKey), CheckedFeaDeclaration>,
-    pub diagnostics: Vec<FeaDiagnostic>,
-    pub geometry_inspections:
-        BTreeMap<(LogicalSourcePath, String), super::CheckedGeometryInspection>,
-    pub studies: BTreeMap<(LogicalSourcePath, FeaSymbolKey), runmat_analysis_core::AuthoredStudy>,
-    pub sweeps: BTreeMap<(LogicalSourcePath, FeaSymbolKey), runmat_analysis_core::AuthoredSweep>,
-    pub execution_policies:
-        BTreeMap<(LogicalSourcePath, FeaSymbolKey), runmat_analysis_core::AuthoredExecutionPolicy>,
-    /// Launch-policy bindings are intentionally separate from scientific study and sweep contracts.
-    pub execution_bindings: BTreeMap<
-        (LogicalSourcePath, FeaSymbolKey),
-        runmat_analysis_core::AuthoredExecutionPolicyRef,
-    >,
-    pub materials: BTreeMap<(LogicalSourcePath, FeaSymbolKey), runmat_analysis_core::MaterialModel>,
-    pub geometries:
-        BTreeMap<(LogicalSourcePath, FeaSymbolKey), runmat_geometry_core::GeometryDefinition>,
-    pub meshes: BTreeMap<(LogicalSourcePath, FeaSymbolKey), runmat_meshing_core::MeshDefinition>,
-    pub models: BTreeMap<(LogicalSourcePath, FeaSymbolKey), runmat_analysis_core::AuthoredModel>,
-}
-
-impl CheckedFeaProgram {
-    pub fn is_valid(&self) -> bool {
-        self.bound.is_valid()
-            && !self.diagnostics.iter().any(|diagnostic| {
-                diagnostic.severity == crate::FeaDiagnosticSeverity::Error
-                    && diagnostic.availability == crate::SourceAvailability::Available
-            })
-    }
-}
+pub use types::{CheckedFeaProgram, CheckedFeaStatement, CheckedFeaStatementKind};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CheckedFeaDeclaration {
@@ -82,7 +50,9 @@ pub struct CheckedFeaInput {
     pub span: Span,
 }
 
-pub fn check_program<C: AnalysisOperationCatalog + GeometryInspectionSource + ?Sized>(
+pub fn check_program<
+    C: AnalysisOperationCatalog + GeometryInspectionSource + ExecutionProfileSource + ?Sized,
+>(
     catalog: &C,
     bound: BoundFeaProgram,
 ) -> CheckedFeaProgram {
@@ -324,6 +294,12 @@ fn check_block<C: AnalysisOperationCatalog + ?Sized>(
             FeaModelDefinitionKind::Interface => ("interface", FeaType::Interface),
             FeaModelDefinitionKind::Connector => ("connector", FeaType::Connector),
             FeaModelDefinitionKind::Excitation => ("excitation", FeaType::Excitation),
+            FeaModelDefinitionKind::ResponseSpectrum => {
+                ("response_spectrum", FeaType::ResponseSpectrum)
+            }
+            FeaModelDefinitionKind::RandomExcitation => {
+                ("random_excitation", FeaType::RandomExcitation)
+            }
             FeaModelDefinitionKind::Initial => ("initial", FeaType::InitialCondition),
         };
         scope.insert_reference([namespace.to_string(), name.text.clone()], value_type);

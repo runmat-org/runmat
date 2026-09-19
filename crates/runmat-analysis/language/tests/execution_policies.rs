@@ -5,6 +5,7 @@ use runmat_analysis_core::{
     PlacementPreference,
 };
 use runmat_analysis_language::*;
+use runmat_types::{CapabilityRequirement, CapabilitySet};
 use support::{source_module, TestHost};
 
 const BASE: &str = r#"
@@ -151,12 +152,82 @@ fn execution_policy_rejects_contradictions_and_invalid_limits() {
     }
 }
 
+#[test]
+fn named_profiles_are_resolved_and_must_admit_the_authored_placement() {
+    let source = format!(
+        "{BASE}\nexecution selected {{\nplacement = profile.engineering\nbackend = accelerator\nresources {{ accelerators = required }}\n}}"
+    );
+    let unavailable = TestHost::default();
+    let program = compile_with(&unavailable, &source);
+    assert!(!program.is_valid());
+    assert!(program
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "fea.test.execution_profile_missing"));
+
+    let local = host_with_profile(
+        "engineering",
+        ExecutionPlacement::Inline,
+        CapabilitySet::default(),
+    );
+    let program = compile_with(&local, &source);
+    assert!(!program.is_valid());
+    assert!(program.diagnostics.iter().any(|diagnostic| diagnostic
+        .message
+        .contains("must admit remote distributed execution")));
+
+    let cpu_only = host_with_profile(
+        "engineering",
+        ExecutionPlacement::Remote,
+        CapabilitySet([CapabilityRequirement::DistributedRuntime].into()),
+    );
+    let program = compile_with(&cpu_only, &source);
+    assert!(!program.is_valid());
+    assert!(program.diagnostics.iter().any(|diagnostic| diagnostic
+        .message
+        .contains("does not admit accelerator execution")));
+}
+
 fn check(source: &str) -> CheckedFeaProgram {
     let host = TestHost::default()
         .with_module("project/unused.fea", "", 2)
         .with_geometry("project/unused.step", 3)
         .with_function("project/unused.m", "unused", Vec::new(), Vec::new());
-    FeaCompiler::new(&host).check(CheckRequest {
+    let mut host = host;
+    host.profiles = host_with_profile(
+        "engineering",
+        ExecutionPlacement::Remote,
+        CapabilitySet(
+            [
+                CapabilityRequirement::DistributedRuntime,
+                CapabilityRequirement::Accelerator,
+            ]
+            .into(),
+        ),
+    )
+    .profiles;
+    compile_with(&host, source)
+}
+
+fn host_with_profile(
+    name: &str,
+    placement: ExecutionPlacement,
+    capabilities: CapabilitySet,
+) -> TestHost {
+    let mut host = TestHost::default();
+    host.profiles.insert(
+        name.to_string(),
+        ExecutionProfileFacts {
+            profile: ExecutionProfileIdentity::new(name).unwrap(),
+            placement,
+            capabilities,
+        },
+    );
+    host
+}
+
+fn compile_with(host: &TestHost, source: &str) -> CheckedFeaProgram {
+    FeaCompiler::new(host).check(CheckRequest {
         modules: ModuleGraphRequest {
             source_root: LogicalSourcePath::new("project").unwrap(),
             root: source_module("project/main.fea", source, 1),

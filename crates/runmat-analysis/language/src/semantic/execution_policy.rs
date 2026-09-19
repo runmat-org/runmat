@@ -9,11 +9,14 @@ use runmat_parser::fea::{FeaAssignmentRelation, FeaBinaryOperator};
 
 use crate::{
     CheckedExpression, CheckedExpressionKind, CheckedFeaDeclaration, CheckedFeaStatement,
-    CheckedFeaStatementKind, FeaDiagnostic, FeaDiagnosticLocation, FeaDiagnosticPhase,
-    FeaSymbolKey, FeaSymbolKind, FeaType, LogicalSourcePath, PhysicalDimension,
+    CheckedFeaStatementKind, ExecutionProfileSource, FeaDiagnostic, FeaDiagnosticLocation,
+    FeaDiagnosticPhase, FeaSymbolKey, FeaSymbolKind, FeaType, LogicalSourcePath, PhysicalDimension,
 };
 
-pub(super) fn lower_execution_policies(
+mod profile;
+
+pub(super) fn lower_execution_policies<S: ExecutionProfileSource + ?Sized>(
+    source: &S,
     declarations: &BTreeMap<(LogicalSourcePath, FeaSymbolKey), CheckedFeaDeclaration>,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> BTreeMap<(LogicalSourcePath, FeaSymbolKey), AuthoredExecutionPolicy> {
@@ -21,13 +24,14 @@ pub(super) fn lower_execution_policies(
         .iter()
         .filter_map(|(key, declaration)| {
             (key.1.kind == FeaSymbolKind::Execution).then(|| {
-                lower_policy(declaration, diagnostics).map(|policy| (key.clone(), policy))
+                lower_policy(source, declaration, diagnostics).map(|policy| (key.clone(), policy))
             })?
         })
         .collect()
 }
 
-fn lower_policy(
+fn lower_policy<S: ExecutionProfileSource + ?Sized>(
+    source: &S,
     declaration: &CheckedFeaDeclaration,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<AuthoredExecutionPolicy> {
@@ -52,6 +56,14 @@ fn lower_policy(
     let fanout = fanout_policy(declaration, diagnostics);
     let cooperative = cooperative_policy(declaration, diagnostics);
     let resilience = resilience_policy(declaration, diagnostics);
+    profile::validate_named_profile(
+        source,
+        declaration,
+        &placement,
+        backend,
+        resources.accelerators,
+        diagnostics,
+    );
     validate_members(declaration, diagnostics);
     if diagnostics.len() != initial_errors {
         return None;

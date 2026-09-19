@@ -1,7 +1,45 @@
+use std::collections::BTreeMap;
+
 use runmat_parser::fea::{FeaAssignmentRelation, FeaModelDefinitionKind};
 use runmat_types::Span;
 
-use crate::CheckedExpression;
+use crate::{
+    BoundFeaProgram, CheckedExpression, CheckedFeaDeclaration, FeaDiagnostic, FeaSymbolKey,
+    LogicalSourcePath,
+};
+
+#[derive(Debug)]
+pub struct CheckedFeaProgram {
+    pub bound: BoundFeaProgram,
+    pub declarations: BTreeMap<(LogicalSourcePath, FeaSymbolKey), CheckedFeaDeclaration>,
+    pub diagnostics: Vec<FeaDiagnostic>,
+    pub geometry_inspections:
+        BTreeMap<(LogicalSourcePath, String), super::super::CheckedGeometryInspection>,
+    pub studies: BTreeMap<(LogicalSourcePath, FeaSymbolKey), runmat_analysis_core::AuthoredStudy>,
+    pub sweeps: BTreeMap<(LogicalSourcePath, FeaSymbolKey), runmat_analysis_core::AuthoredSweep>,
+    pub execution_policies:
+        BTreeMap<(LogicalSourcePath, FeaSymbolKey), runmat_analysis_core::AuthoredExecutionPolicy>,
+    /// Launch-policy bindings are intentionally separate from scientific study and sweep contracts.
+    pub execution_bindings: BTreeMap<
+        (LogicalSourcePath, FeaSymbolKey),
+        runmat_analysis_core::AuthoredExecutionPolicyRef,
+    >,
+    pub materials: BTreeMap<(LogicalSourcePath, FeaSymbolKey), runmat_analysis_core::MaterialModel>,
+    pub geometries:
+        BTreeMap<(LogicalSourcePath, FeaSymbolKey), runmat_geometry_core::GeometryDefinition>,
+    pub meshes: BTreeMap<(LogicalSourcePath, FeaSymbolKey), runmat_meshing_core::MeshDefinition>,
+    pub models: BTreeMap<(LogicalSourcePath, FeaSymbolKey), runmat_analysis_core::AuthoredModel>,
+}
+
+impl CheckedFeaProgram {
+    pub fn is_valid(&self) -> bool {
+        self.bound.is_valid()
+            && !self.diagnostics.iter().any(|diagnostic| {
+                diagnostic.severity == crate::FeaDiagnosticSeverity::Error
+                    && diagnostic.availability == crate::SourceAvailability::Available
+            })
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CheckedFeaStatement {

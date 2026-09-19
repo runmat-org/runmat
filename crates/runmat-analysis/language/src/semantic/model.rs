@@ -21,6 +21,7 @@ mod initial_conditions;
 mod physics;
 mod properties;
 mod signals;
+mod spectral_inputs;
 
 pub fn lower_models(
     bound: &BoundFeaProgram,
@@ -91,6 +92,7 @@ fn model(
     let constraints = constraints::lower(declaration, bound, &signals, diagnostics);
     let lowered_excitations = excitations::lower(declaration, bound, &signals, diagnostics);
     let initial_conditions = initial_conditions::lower(declaration, bound, &signals, diagnostics);
+    let spectral_inputs = spectral_inputs::lower(bound, declaration, diagnostics);
     signals.extend(lowered_excitations.signals);
     AuthoredModel {
         module_path: declaration.module.as_str().to_string(),
@@ -110,6 +112,8 @@ fn model(
         parameterized_signals: lowered_excitations.parameterized_signals,
         excitations: lowered_excitations.excitations,
         excitation_cases: lowered_excitations.cases,
+        response_spectra: spectral_inputs.response_spectra,
+        random_excitations: spectral_inputs.random_excitations,
         initial_conditions,
     }
 }

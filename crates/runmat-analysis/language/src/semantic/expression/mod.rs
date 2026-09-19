@@ -12,12 +12,14 @@ use std::collections::BTreeMap;
 
 mod checked;
 mod matching;
+mod reference;
 mod scope;
 mod type_rules;
 
 pub use checked::{CheckedCallArgument, ResolvedCadParameterValue};
 pub(crate) use matching::pattern_matches as operation_pattern_matches;
 use matching::{arguments_match, declaration_arguments_match, operation_output_type, outputs_type};
+use reference::{contextual_reference_type, is_untyped_zero, quantity_type, reference_path};
 pub use scope::{DeclarationInput, DeclarationSignature, ExpressionScope, FunctionSignature};
 use type_rules::{divide_type, multiply_type, numeric_join, types_compatible};
 
@@ -181,18 +183,12 @@ impl<C: AnalysisOperationCatalog + ?Sized> ExpressionChecker<'_, C> {
                 let unit_source = &self.check.source[unit.span.start..unit.span.end];
                 match parse_unit_expression(unit_source) {
                     Ok(unit) => {
-                        let value_type = match &value.value_type {
-                            FeaType::Integer | FeaType::Real => FeaType::Quantity(unit.dimension),
-                            FeaType::Vector { element, length } if element.is_numeric() => {
-                                FeaType::Vector {
-                                    element: Box::new(FeaType::Quantity(unit.dimension)),
-                                    length: *length,
-                                }
-                            }
-                            _ => {
+                        let value_type = match quantity_type(&value.value_type, unit.dimension) {
+                            Some(value_type) => value_type,
+                            None => {
                                 self.error(
                                     "fea.semantic.invalid_quantity_value",
-                                    "a quantity requires a numeric scalar or vector",
+                                    "a quantity requires a numeric scalar or regular numeric array",
                                     value.span,
                                 );
                                 FeaType::Error
@@ -540,54 +536,4 @@ impl<C: AnalysisOperationCatalog + ?Sized> ExpressionChecker<'_, C> {
             }),
         ));
     }
-}
-
-fn contextual_reference_type(path: &[String]) -> Option<FeaType> {
-    match path {
-        [analysis, _, state, _] if analysis == "analysis" && state == "state" => {
-            Some(FeaType::Unknown)
-        }
-        [analysis, _, field, location, quantity] if analysis == "analysis" && field == "field" => {
-            let location = super::procedure::field_location(location)?;
-            super::procedure::field_reference_type(quantity).map(|(quantity, value_type)| {
-                FeaType::Field(crate::FeaFieldType {
-                    value: Box::new(value_type),
-                    location: Some(location),
-                    quantity: Some(quantity),
-                })
-            })
-        }
-        [model, namespace, _]
-            if model == "model"
-                && matches!(
-                    namespace.as_str(),
-                    "constraint"
-                        | "boundary"
-                        | "connector"
-                        | "interface"
-                        | "excitation"
-                        | "load"
-                        | "load_case"
-                        | "signal"
-                        | "initial"
-                ) =>
-        {
-            Some(FeaType::Unknown)
-        }
-        [case, ..] if case == "case" => Some(FeaType::Unknown),
-        [profile, _] if profile == "profile" => Some(FeaType::Enum),
-        _ => None,
-    }
-}
-
-fn reference_path(reference: &FeaReference) -> Vec<String> {
-    reference
-        .segments
-        .iter()
-        .map(|segment| segment.text.clone())
-        .collect()
-}
-
-fn is_untyped_zero(expression: &CheckedExpression) -> bool {
-    matches!(&expression.kind, CheckedExpressionKind::Number(value) if value.parse::<f64>() == Ok(0.0))
 }

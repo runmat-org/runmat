@@ -98,8 +98,8 @@ pub(super) fn lower(
         );
         return None;
     };
-    validate_callable(declaration, facts, diagnostics);
-    let arguments = arguments(declaration, facts, statements, diagnostics)?;
+    validate_callable(declaration, facts, "signal", diagnostics);
+    let arguments = arguments(declaration, facts, statements, "signal", diagnostics)?;
     let (sampling, tolerance) = sampling(
         declaration,
         domain,
@@ -155,13 +155,14 @@ pub(super) fn lower(
 fn validate_callable(
     declaration: &CheckedFeaDeclaration,
     facts: &crate::FunctionFacts,
+    label: &str,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) {
     if !facts.effects.0.is_empty() {
         error(
             declaration,
             declaration.span,
-            "signal generator must be pure; effectful functions are not admitted",
+            format!("{label} generator must be pure; effectful functions are not admitted"),
             diagnostics,
         );
     }
@@ -174,7 +175,9 @@ fn validate_callable(
         error(
             declaration,
             declaration.span,
-            "signal generator first input must be the required numeric sample-axis vector",
+            format!(
+                "{label} generator first input must be the required numeric sample-axis vector"
+            ),
             diagnostics,
         );
     }
@@ -182,7 +185,7 @@ fn validate_callable(
         error(
             declaration,
             declaration.span,
-            "signal generator must return exactly one numeric array",
+            format!("{label} generator must return exactly one numeric array"),
             diagnostics,
         );
     }
@@ -192,6 +195,7 @@ fn arguments(
     declaration: &CheckedFeaDeclaration,
     facts: &crate::FunctionFacts,
     statements: &[CheckedFeaStatement],
+    label: &str,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<Vec<GeneratorArgument>> {
     let blocks = statements
@@ -207,7 +211,7 @@ fn arguments(
         error(
             declaration,
             declaration.span,
-            "generated signal requires exactly one `arguments` block",
+            format!("generated {label} requires exactly one `arguments` block"),
             diagnostics,
         );
         return None;
@@ -248,7 +252,7 @@ fn arguments(
                 error(
                     declaration,
                     declaration.span,
-                    format!("signal generator requires argument `{}`", parameter.name),
+                    format!("{label} generator requires argument `{}`", parameter.name),
                     diagnostics,
                 );
             }
@@ -259,7 +263,7 @@ fn arguments(
                 declaration,
                 value.span,
                 format!(
-                    "signal generator argument `{}` has an incompatible type",
+                    "{label} generator argument `{}` has an incompatible type",
                     parameter.name
                 ),
                 diagnostics,
@@ -273,7 +277,7 @@ fn arguments(
                 declaration,
                 value.span,
                 format!(
-                    "signal generator argument `{}` must be a closed constant value",
+                    "{label} generator argument `{}` must be a closed constant value",
                     parameter.name
                 ),
                 diagnostics,
@@ -284,11 +288,95 @@ fn arguments(
         error(
             declaration,
             declaration.span,
-            format!("signal generator does not declare argument `{name}`"),
+            format!("{label} generator does not declare argument `{name}`"),
             diagnostics,
         );
     }
     Some(result)
+}
+
+pub(in crate::semantic::model) fn lower_numerical_invocation(
+    declaration: &CheckedFeaDeclaration,
+    bound: &BoundFeaProgram,
+    body: &[CheckedFeaStatement],
+    label: &str,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Option<GeneratorInvocation> {
+    let generators = body
+        .iter()
+        .filter_map(|statement| match &statement.kind {
+            CheckedFeaStatementKind::GeneratedByFunction {
+                function,
+                statements,
+            } => Some((function, statements.as_slice())),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    if generators.len() != 1 {
+        error(
+            declaration,
+            declaration.span,
+            format!("generated {label} requires exactly one imported function"),
+            diagnostics,
+        );
+        return None;
+    }
+    let (function, statements) = generators[0];
+    let [namespace, imported_name] = function.as_slice() else {
+        error(
+            declaration,
+            declaration.span,
+            "generator must reference one imported function",
+            diagnostics,
+        );
+        return None;
+    };
+    if namespace != "function" {
+        error(
+            declaration,
+            declaration.span,
+            "generator reference must use the `function` namespace",
+            diagnostics,
+        );
+        return None;
+    }
+    let facts = bound
+        .functions
+        .get(&(declaration.module.clone(), imported_name.clone()))
+        .or_else(|| {
+            error(
+                declaration,
+                declaration.span,
+                format!("generated {label} references unknown imported function `{imported_name}`"),
+                diagnostics,
+            );
+            None
+        })?;
+    if statements.len() != 1
+        || !matches!(
+            &statements[0].kind,
+            CheckedFeaStatementKind::Block { header, .. } if header.trim() == "arguments"
+        )
+    {
+        error(
+            declaration,
+            declaration.span,
+            format!("generated {label} accepts exactly one `arguments` block"),
+            diagnostics,
+        );
+        return None;
+    }
+    validate_callable(declaration, facts, label, diagnostics);
+    let arguments = arguments(declaration, facts, statements, label, diagnostics)?;
+    Some(GeneratorInvocation {
+        callable: GeneratorCallable::ImportedFunction(Box::new(ImportedFunctionIdentity {
+            module_path: facts.module_path.as_str().to_string(),
+            symbol: facts.symbol.as_str().to_string(),
+            source_digest: hex_digest(facts.source_digest.0),
+        })),
+        arguments,
+        effects: GeneratorEffectPolicy::Pure,
+    })
 }
 
 fn generator_argument(value: &CheckedExpression) -> Option<GeneratorArgument> {

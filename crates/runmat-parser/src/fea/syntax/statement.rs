@@ -24,6 +24,8 @@ pub enum FeaModelDefinitionKind {
     Interface,
     Connector,
     Excitation,
+    ResponseSpectrum,
+    RandomExcitation,
     Initial,
 }
 

@@ -104,6 +104,8 @@ pub struct AuthoredModel {
     pub parameterized_signals: Vec<AuthoredParameterizedSignal>,
     pub excitations: Vec<super::authored_excitations::AuthoredExcitation>,
     pub excitation_cases: Vec<super::authored_excitations::AuthoredExcitationCase>,
+    pub response_spectra: Vec<super::response_spectrum::ResponseSpectrum>,
+    pub random_excitations: Vec<super::random_vibration::RandomExcitationSpectrum>,
     pub initial_conditions: Vec<AuthoredInitialCondition>,
 }
 
@@ -332,6 +334,18 @@ impl AuthoredModel {
             kind: "excitation",
             detail,
         })?;
+        validate_unique(
+            &self.response_spectra,
+            |value| value.spectrum_id.0.as_str(),
+            |value| value.validate_intrinsic(),
+            "response spectrum",
+        )?;
+        validate_unique(
+            &self.random_excitations,
+            |value| value.excitation_id.0.as_str(),
+            |value| value.validate_intrinsic(),
+            "random excitation",
+        )?;
         let mut initial_condition_ids = BTreeSet::new();
         for condition in &self.initial_conditions {
             condition.validate(&self.signals).map_err(|error| {

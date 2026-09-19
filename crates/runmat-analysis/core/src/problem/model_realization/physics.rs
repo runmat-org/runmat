@@ -18,6 +18,12 @@ pub(super) fn extend_model_physics(
     targets: &TargetResolver<'_>,
 ) -> Result<(), AnalysisModelRealizationError> {
     target.signals.extend(source.signals.clone());
+    target
+        .response_spectra
+        .extend(source.response_spectra.clone());
+    target
+        .random_excitations
+        .extend(source.random_excitations.clone());
     target.boundaries.extend(
         source
             .boundaries

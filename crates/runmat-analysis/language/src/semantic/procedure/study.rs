@@ -76,7 +76,8 @@ pub(super) fn lower(
         model,
         diagnostics,
     );
-    let mut sequence = lower::lower_study(declaration, model, diagnostics)?;
+    let model_closure = model_closure(context.models, model)?;
+    let mut sequence = lower::lower_study(declaration, &model_closure, diagnostics)?;
     let outputs = super::output::lower_outputs(context.bound, declaration, diagnostics);
     if let Err(error) = runmat_analysis_core::validate_authored_outputs(&outputs, &sequence.steps) {
         lower::error(
@@ -151,6 +152,35 @@ pub(super) fn lower(
         return None;
     }
     Some(study)
+}
+
+fn model_closure<'a>(
+    models: &'a BTreeMap<(LogicalSourcePath, FeaSymbolKey), AuthoredModel>,
+    root: &'a AuthoredModel,
+) -> Option<Vec<&'a AuthoredModel>> {
+    fn collect<'a>(
+        models: &'a BTreeMap<(LogicalSourcePath, FeaSymbolKey), AuthoredModel>,
+        model: &'a AuthoredModel,
+        collected: &mut Vec<&'a AuthoredModel>,
+    ) -> Option<()> {
+        for include in &model.includes {
+            let included = models.values().find(|candidate| {
+                candidate.module_path == include.model.module_path
+                    && candidate.model_id == include.model.model_id
+            })?;
+            collect(models, included, collected)?;
+        }
+        if !collected.iter().any(|candidate| {
+            candidate.module_path == model.module_path && candidate.model_id == model.model_id
+        }) {
+            collected.push(model);
+        }
+        Some(())
+    }
+
+    let mut collected = Vec::new();
+    collect(models, root, &mut collected)?;
+    Some(collected)
 }
 
 fn geometry_binding<'a>(

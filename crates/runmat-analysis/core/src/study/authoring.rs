@@ -423,6 +423,8 @@ mod tests {
             parameterized_signals: Vec::new(),
             excitations: Vec::new(),
             excitation_cases: Vec::new(),
+            response_spectra: Vec::new(),
+            random_excitations: Vec::new(),
             initial_conditions: Vec::new(),
         }
     }

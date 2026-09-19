@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    AnalysisOperationCatalog, BoundFeaProgram, CheckedFeaDeclaration, FeaDiagnostic, FeaSymbolKey,
-    GeometryInspectionSource, LogicalSourcePath,
+    AnalysisOperationCatalog, BoundFeaProgram, CheckedFeaDeclaration, ExecutionProfileSource,
+    FeaDiagnostic, FeaSymbolKey, GeometryInspectionSource, LogicalSourcePath,
 };
 
 pub(super) struct LoweredProducts {
@@ -23,7 +23,9 @@ pub(super) struct LoweredProducts {
     pub models: BTreeMap<(LogicalSourcePath, FeaSymbolKey), runmat_analysis_core::AuthoredModel>,
 }
 
-pub(super) fn lower_products<C: AnalysisOperationCatalog + GeometryInspectionSource + ?Sized>(
+pub(super) fn lower_products<
+    C: AnalysisOperationCatalog + GeometryInspectionSource + ExecutionProfileSource + ?Sized,
+>(
     catalog: &C,
     bound: &BoundFeaProgram,
     declarations: &mut BTreeMap<(LogicalSourcePath, FeaSymbolKey), CheckedFeaDeclaration>,
@@ -43,7 +45,7 @@ pub(super) fn lower_products<C: AnalysisOperationCatalog + GeometryInspectionSou
     let meshes = super::lower_mesh_definitions(bound, declarations, diagnostics);
     let models = super::lower_models(bound, declarations, diagnostics);
     let execution_policies =
-        super::execution_policy::lower_execution_policies(declarations, diagnostics);
+        super::execution_policy::lower_execution_policies(catalog, declarations, diagnostics);
     let studies = super::lower_studies(
         bound,
         declarations,

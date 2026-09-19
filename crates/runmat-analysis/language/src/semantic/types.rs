@@ -41,6 +41,8 @@ pub enum FeaType {
     Connector,
     Signal,
     Excitation,
+    ResponseSpectrum,
+    RandomExcitation,
     InitialCondition,
     Declaration(FeaSymbolKind),
     Field(FeaFieldType),

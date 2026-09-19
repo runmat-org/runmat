@@ -392,6 +392,12 @@ impl FeaParser {
             FeaTokenKind::Keyword(FeaKeyword::Interface) => FeaModelDefinitionKind::Interface,
             FeaTokenKind::Keyword(FeaKeyword::Connector) => FeaModelDefinitionKind::Connector,
             FeaTokenKind::Keyword(FeaKeyword::Excitation) => FeaModelDefinitionKind::Excitation,
+            FeaTokenKind::Keyword(FeaKeyword::ResponseSpectrum) => {
+                FeaModelDefinitionKind::ResponseSpectrum
+            }
+            FeaTokenKind::Keyword(FeaKeyword::RandomExcitation) => {
+                FeaModelDefinitionKind::RandomExcitation
+            }
             FeaTokenKind::Keyword(FeaKeyword::Initial) => FeaModelDefinitionKind::Initial,
             _ => return None,
         };

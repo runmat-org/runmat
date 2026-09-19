@@ -8,7 +8,7 @@ use runmat_analysis_core::{
     SignalId, SignalPrecision, SignalProvenance, SignalRepresentation, SignalShape, SignalValue,
 };
 
-mod generated;
+pub(in crate::semantic::model) mod generated;
 mod parameterized;
 mod policy;
 mod tabulated;

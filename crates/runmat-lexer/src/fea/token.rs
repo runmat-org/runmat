@@ -46,6 +46,8 @@ pub enum FeaKeyword {
     Orientation,
     Signal,
     Excitation,
+    ResponseSpectrum,
+    RandomExcitation,
 }
 
 impl FeaKeyword {
@@ -93,6 +95,8 @@ impl FeaKeyword {
             "orientation" => Self::Orientation,
             "signal" => Self::Signal,
             "excitation" => Self::Excitation,
+            "response_spectrum" => Self::ResponseSpectrum,
+            "random_excitation" => Self::RandomExcitation,
             _ => return None,
         })
     }

@@ -7,6 +7,7 @@ pub struct TestHost {
     modules: BTreeMap<String, SourceModule>,
     geometries: BTreeMap<String, GeometryInspection>,
     functions: BTreeMap<(String, String), FunctionFacts>,
+    pub profiles: BTreeMap<String, ExecutionProfileFacts>,
 }
 
 impl TestHost {
@@ -112,9 +113,16 @@ impl GeometryInspectionSource for TestHost {
 impl ExecutionProfileSource for TestHost {
     fn resolve(
         &self,
-        _request: &ExecutionProfileRequest,
+        request: &ExecutionProfileRequest,
     ) -> Result<ExecutionProfileFacts, SourceDiagnostic> {
-        unreachable!("semantic-only tests do not resolve execution profiles")
+        self.profiles
+            .get(request.profile.as_str())
+            .cloned()
+            .ok_or_else(|| SourceDiagnostic {
+                code: "fea.test.execution_profile_missing".to_string(),
+                message: format!("missing execution profile `{}`", request.profile),
+                availability: SourceAvailability::Available,
+            })
     }
 }
 

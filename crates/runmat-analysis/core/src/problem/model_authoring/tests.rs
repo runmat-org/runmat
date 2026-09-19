@@ -46,6 +46,8 @@ fn material_assignment_requires_declared_strongly_typed_inputs() {
         parameterized_signals: Vec::new(),
         excitations: Vec::new(),
         excitation_cases: Vec::new(),
+        response_spectra: Vec::new(),
+        random_excitations: Vec::new(),
         initial_conditions: Vec::new(),
     }
     .validate()
@@ -85,6 +87,8 @@ fn boundary_vertices_are_not_material_domains() {
         parameterized_signals: Vec::new(),
         excitations: Vec::new(),
         excitation_cases: Vec::new(),
+        response_spectra: Vec::new(),
+        random_excitations: Vec::new(),
         initial_conditions: Vec::new(),
     };
     assert_eq!(

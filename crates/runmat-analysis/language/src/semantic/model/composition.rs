@@ -5,7 +5,7 @@ use runmat_analysis_core::{
     AuthoredExcitationCase, AuthoredInitialCondition, AuthoredInterface, AuthoredLayupSource,
     AuthoredMaterialSource, AuthoredModel, AuthoredModelRef, AuthoredOrientationSource,
     AuthoredPropertyAssignment, AuthoredPropertyTarget, AuthoredRegionSource,
-    AuthoredSectionSource, PhysicalSignal,
+    AuthoredSectionSource, PhysicalSignal, RandomExcitationSpectrum, ResponseSpectrum,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -125,6 +125,18 @@ fn collect(
         "excitation case",
     )?;
     collect_named(
+        &model.response_spectra,
+        &mut assignments.response_spectra,
+        |value| value.spectrum_id.0.as_str(),
+        "response spectrum",
+    )?;
+    collect_named(
+        &model.random_excitations,
+        &mut assignments.random_excitations,
+        |value| value.excitation_id.0.as_str(),
+        "random excitation",
+    )?;
+    collect_named(
         &model.initial_conditions,
         &mut assignments.initial_conditions,
         |value| value.initial_condition_id.as_str(),
@@ -205,6 +217,8 @@ struct CompositionAssignments {
     signals: BTreeMap<String, PhysicalSignal>,
     excitations: BTreeMap<String, AuthoredExcitation>,
     excitation_cases: BTreeMap<String, AuthoredExcitationCase>,
+    response_spectra: BTreeMap<String, ResponseSpectrum>,
+    random_excitations: BTreeMap<String, RandomExcitationSpectrum>,
     initial_conditions: BTreeMap<String, AuthoredInitialCondition>,
 }
 

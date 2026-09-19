@@ -11,7 +11,7 @@ pub(super) fn bind(
     declaration: &CheckedFeaDeclaration,
     procedure: &ProcedureHeader,
     statements: &[CheckedFeaStatement],
-    model: &AuthoredModel,
+    models: &[&AuthoredModel],
     mut step: ProcedureStep,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<ProcedureStep> {
@@ -48,9 +48,9 @@ pub(super) fn bind(
         if model_namespace != "model" || initial_namespace != "initial" || !ids.insert(id) {
             return invalid_reference(declaration, reference.span, diagnostics);
         }
-        let Some(condition) = model
-            .initial_conditions
+        let Some(condition) = models
             .iter()
+            .flat_map(|model| &model.initial_conditions)
             .find(|condition| condition.initial_condition_id == *id)
         else {
             error(

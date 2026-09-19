@@ -16,7 +16,7 @@ use std::collections::BTreeSet;
 
 pub fn lower_study(
     declaration: &CheckedFeaDeclaration,
-    model: &AuthoredModel,
+    models: &[&AuthoredModel],
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<AnalysisSequence> {
     let initial_errors = diagnostics.len();
@@ -68,7 +68,7 @@ pub fn lower_study(
             &analysis,
             &procedure.0,
             procedure.1,
-            model,
+            models,
             diagnostics,
         ) else {
             continue;
@@ -170,7 +170,7 @@ fn lower_procedure(
     analysis: &AnalysisHeader,
     procedure: &ProcedureHeader,
     statements: &[CheckedFeaStatement],
-    model: &AuthoredModel,
+    models: &[&AuthoredModel],
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<ProcedureStep> {
     let id = analysis.name.clone();
@@ -256,16 +256,31 @@ fn lower_procedure(
         ("structural", "modal_response_spectrum") => {
             let state =
                 requirements::state(declaration, procedure, statements, "basis", diagnostics)?;
-            let spectra = requirements::references(
+            let spectra: Vec<ResponseSpectrumId> = requirements::references(
                 declaration,
                 procedure,
                 statements,
                 "spectra",
+                "response_spectrum",
                 diagnostics,
             )?
             .into_iter()
             .map(ResponseSpectrumId)
             .collect();
+            if spectra.iter().any(|id| {
+                !models
+                    .iter()
+                    .flat_map(|model| &model.response_spectra)
+                    .any(|spectrum| spectrum.spectrum_id == *id)
+            }) {
+                error(
+                    declaration,
+                    procedure.span,
+                    "modal response references a response spectrum not owned by the bound model",
+                    diagnostics,
+                );
+                return None;
+            }
             ProcedureStep::structural_modal_response_spectrum(id, spectra, state.0, state.1)
         }
         ("structural", "random_response") => {
@@ -276,8 +291,22 @@ fn lower_procedure(
                 procedure,
                 statements,
                 "excitation",
+                "random_excitation",
                 diagnostics,
             )?;
+            if !models
+                .iter()
+                .flat_map(|model| &model.random_excitations)
+                .any(|value| value.excitation_id.0 == excitation)
+            {
+                error(
+                    declaration,
+                    procedure.span,
+                    "random response references a random excitation not owned by the bound model",
+                    diagnostics,
+                );
+                return None;
+            }
             let settings = StructuralRandomResponseSettings {
                 modal_damping_ratio: requirements::ratio(
                     declaration,
@@ -329,7 +358,14 @@ fn lower_procedure(
             diagnostics,
         )?,
     };
-    super::initial_conditions::bind(declaration, procedure, statements, model, step, diagnostics)
+    super::initial_conditions::bind(
+        declaration,
+        procedure,
+        statements,
+        models,
+        step,
+        diagnostics,
+    )
 }
 
 fn generic_procedure(

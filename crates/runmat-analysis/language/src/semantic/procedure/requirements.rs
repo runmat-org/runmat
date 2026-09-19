@@ -217,19 +217,18 @@ pub fn reference(
     header: &ProcedureHeader,
     statements: &[CheckedFeaStatement],
     name: &str,
+    namespace: &str,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<String> {
-    values::assignment(statements, name)
-        .and_then(values::reference)
-        .and_then(|path| path.last().cloned())
-        .or_else(|| {
-            missing(
-                declaration,
-                header,
-                &format!("reference `{name}`"),
-                diagnostics,
-            )
-        })
+    let expression = values::assignment(statements, name)?;
+    model_reference_identity(expression, namespace).or_else(|| {
+        missing(
+            declaration,
+            header,
+            &format!("`{name} = model.{namespace}.<name>`"),
+            diagnostics,
+        )
+    })
 }
 
 pub fn references(
@@ -237,6 +236,7 @@ pub fn references(
     header: &ProcedureHeader,
     statements: &[CheckedFeaStatement],
     name: &str,
+    namespace: &str,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<Vec<String>> {
     let expression = values::assignment(statements, name)?;
@@ -250,7 +250,7 @@ pub fn references(
     };
     let result = items
         .iter()
-        .map(reference_identity)
+        .map(|item| model_reference_identity(item, namespace))
         .collect::<Option<Vec<_>>>()?;
     (!result.is_empty()).then_some(result).or_else(|| {
         missing(
@@ -281,8 +281,11 @@ fn scalar(
         })
 }
 
-fn reference_identity(value: &CheckedExpression) -> Option<String> {
-    values::reference(value)?.last().cloned()
+fn model_reference_identity(value: &CheckedExpression, namespace: &str) -> Option<String> {
+    let [model, actual_namespace, identity] = values::reference(value)? else {
+        return None;
+    };
+    (model == "model" && actual_namespace == namespace).then(|| identity.clone())
 }
 
 fn missing<T>(
