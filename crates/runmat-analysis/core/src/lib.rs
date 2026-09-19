@@ -170,6 +170,8 @@ pub use problem::model_authoring::{
 };
 pub use problem::model_realization::{
     realize_analysis_model, AnalysisModelRealizationError, AnalysisModelRealizationInput,
+    RealizedAnalysisModel, RealizedLayupDefinition, RealizedModelProperties,
+    RealizedOrientationDefinition, RealizedPropertyAssignment, RealizedSectionDefinition,
 };
 pub use problem::prescribed_value::{PrescribedQuantity, PrescribedValue};
 pub use problem::quantity::{

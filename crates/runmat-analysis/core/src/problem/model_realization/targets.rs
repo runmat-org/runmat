@@ -75,7 +75,7 @@ impl<'a> TargetResolver<'a> {
         Self { geometry, regions }
     }
 
-    fn property_target(
+    pub(super) fn property_target(
         &self,
         target: &AuthoredPropertyTarget,
     ) -> Result<PropertyRegionTarget, AnalysisModelRealizationError> {

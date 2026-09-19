@@ -8,7 +8,20 @@ use crate::{AnalysisModel, AnalysisModelId, AuthoredMaterialRef, MaterialModel, 
 
 mod constraints;
 mod physics;
+mod properties;
 mod targets;
+
+pub use properties::{
+    RealizedLayupDefinition, RealizedModelProperties, RealizedOrientationDefinition,
+    RealizedPropertyAssignment, RealizedSectionDefinition,
+};
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RealizedAnalysisModel {
+    pub model: AnalysisModel,
+    pub properties: RealizedModelProperties,
+}
 
 /// Inputs whose identity is fixed only once a study geometry has been materialized.
 pub struct AnalysisModelRealizationInput<'a> {
@@ -25,7 +38,7 @@ pub struct AnalysisModelRealizationInput<'a> {
 /// Formulation properties are compiled against solver topology after a mesh exists.
 pub fn realize_analysis_model(
     input: AnalysisModelRealizationInput<'_>,
-) -> Result<AnalysisModel, AnalysisModelRealizationError> {
+) -> Result<RealizedAnalysisModel, AnalysisModelRealizationError> {
     let AnalysisModelRealizationInput {
         study,
         geometry_id,
@@ -49,22 +62,12 @@ pub fn realize_analysis_model(
                 model.model_id.clone(),
             ));
         }
-        if !model.sections.is_empty()
-            || !model.property_assignments.is_empty()
-            || !model.layups.is_empty()
-            || !model.orientations.is_empty()
-        {
-            return Err(
-                AnalysisModelRealizationError::UnsupportedPropertyRealization(
-                    model.model_id.clone(),
-                ),
-            );
-        }
     }
 
     let target_resolver = targets::TargetResolver::new(&study.geometry.definition, regions);
     let material_resolution =
         targets::MaterialResolution::new(materials, &models, &target_resolver)?;
+    let properties = properties::realize_model_properties(&models, &target_resolver)?;
     let mut sequence = study.sequence.clone();
     for step in &mut sequence.steps {
         for observation in &mut step.observations {
@@ -112,7 +115,7 @@ pub fn realize_analysis_model(
         )?;
         physics::extend_model_physics(&mut model, authored, &target_resolver)?;
     }
-    Ok(model)
+    Ok(RealizedAnalysisModel { model, properties })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -121,8 +124,6 @@ pub enum AnalysisModelRealizationError {
     InvalidModel(String),
     #[error("model `{0}` still contains unbound inputs")]
     UnboundModel(String),
-    #[error("model `{0}` uses layup, orientation, or section assignments that require the mesh property compiler")]
-    UnsupportedPropertyRealization(String),
     #[error("material `{module_path}::{material_id}` is unavailable")]
     MissingMaterial {
         module_path: String,

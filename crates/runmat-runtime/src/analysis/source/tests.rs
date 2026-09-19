@@ -124,6 +124,10 @@ geometry part {
         select result
         expect one_or_more
     }
+    region rail : edge {
+        select result
+        expect one_or_more
+    }
 }
 mesh volume on geometry.part {
     tetrahedra {
@@ -140,7 +144,23 @@ material steel {
     }
 }
 model structure {
+    orientation rail_axes {
+        cartesian {
+            origin = [0 m, 0 m, 0 m]
+            x_axis = [1, 0, 0]
+            y_axis = [0, 1, 0]
+        }
+    }
+    section rail_section {
+        rectangular_beam {
+            width = 20 mm
+            height = 40 mm
+        }
+    }
     assign material.steel to geometry.part.region.body
+    assign material.steel to geometry.part.region.rail
+    assign section.rail_section to geometry.part.region.rail
+    assign orientation.rail_axes to geometry.part.region.rail
     constraint base {
         structural.fixed { target = geometry.part.region.support }
     }
@@ -193,6 +213,17 @@ study static {
                 }],
             },
         ),
+        (
+            "rail".into(),
+            runmat_geometry_core::ResolvedGeometryRegion {
+                role: runmat_geometry_core::GeometryRegionRole::Edge,
+                entity_ids: vec![runmat_geometry_core::PersistentEntityId {
+                    kind: runmat_geometry_core::PersistentEntityKind::Edge,
+                    source_topology_id: "rail-edge".into(),
+                    assembly_path: vec!["root".into()],
+                }],
+            },
+        ),
     ]);
     let materials = resolved.material_catalog;
     let missing_material = runmat_analysis_core::realize_analysis_model(
@@ -209,32 +240,6 @@ study static {
     assert!(matches!(
         missing_material,
         runmat_analysis_core::AnalysisModelRealizationError::MissingMaterial { .. }
-    ));
-
-    let mut property_bearing = realized.clone();
-    property_bearing.model.sections.push(
-        runmat_analysis_core::AuthoredSectionDefinition::RectangularBeam(
-            runmat_analysis_core::RectangularBeamSection {
-                section_id: "unsupported-unassigned-section".into(),
-                width_m: 0.02,
-                height_m: 0.04,
-            },
-        ),
-    );
-    let unsupported_property = runmat_analysis_core::realize_analysis_model(
-        runmat_analysis_core::AnalysisModelRealizationInput {
-            study: &property_bearing,
-            geometry_id: "materialized-part",
-            geometry_revision: 7,
-            units: runmat_geometry_core::UnitSystem::Meter,
-            regions: &resolved_regions,
-            materials: &materials,
-        },
-    )
-    .unwrap_err();
-    assert!(matches!(
-        unsupported_property,
-        runmat_analysis_core::AnalysisModelRealizationError::UnsupportedPropertyRealization(_)
     ));
 
     let mut wrong_geometry = realized.clone();
@@ -280,7 +285,7 @@ study static {
         runmat_analysis_core::AnalysisModelRealizationError::InvalidRegionResolution(_)
     ));
 
-    let model = runmat_analysis_core::realize_analysis_model(
+    let realized_model = runmat_analysis_core::realize_analysis_model(
         runmat_analysis_core::AnalysisModelRealizationInput {
             study: &realized,
             geometry_id: "materialized-part",
@@ -291,9 +296,32 @@ study static {
         },
     )
     .unwrap();
+    assert_eq!(realized_model.properties.sections.len(), 1);
+    assert_eq!(realized_model.properties.orientations.len(), 1);
+    assert_eq!(realized_model.properties.assignments.len(), 2);
+    for assignment in &realized_model.properties.assignments {
+        let target = match assignment {
+            runmat_analysis_core::RealizedPropertyAssignment::Section { target, .. }
+            | runmat_analysis_core::RealizedPropertyAssignment::Orientation { target, .. } => {
+                target
+            }
+            runmat_analysis_core::RealizedPropertyAssignment::Layup { .. } => {
+                panic!("fixture does not declare a layup")
+            }
+        };
+        let runmat_analysis_core::PropertyRegionScope::Region(selection) = target.scope() else {
+            panic!("authored property must remain region-scoped");
+        };
+        assert_eq!(selection.region_id(), "rail");
+        assert_eq!(
+            selection.resolved_entities(),
+            resolved_regions["rail"].entity_ids
+        );
+    }
+    let model = realized_model.model;
 
     assert_eq!(model.materials.len(), 1);
-    assert_eq!(model.material_assignments.len(), 1);
+    assert_eq!(model.material_assignments.len(), 2);
     assert_eq!(model.constraints.len(), 1);
     assert_eq!(
         model.material_assignments[0]
