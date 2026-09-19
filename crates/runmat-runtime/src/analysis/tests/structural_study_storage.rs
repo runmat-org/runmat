@@ -115,6 +115,63 @@ fn study_evidence_rejects_a_valid_json_envelope_bound_to_the_wrong_stage() {
 }
 
 #[test]
+fn authored_output_fields_are_chunked_and_selectively_readable() {
+    let _guard = analysis_test_guard();
+    let (mesh_root, mesh_path) =
+        write_ready_minimal_analysis_mesh_artifact("authored-output-field-page");
+    let mut model = sample_solid_model();
+    let step_id = model.sequence.steps[0].step_id.0.clone();
+    runmat_analysis_core::attach_authored_outputs(
+        &[runmat_analysis_core::AuthoredOutput {
+            output_id: "published_displacement".into(),
+            expression: runmat_analysis_core::AuthoredOutputExpression::AnalysisField {
+                step_id,
+                quantity: runmat_analysis_core::ObservationQuantity::Displacement,
+                location: runmat_analysis_core::FieldLocation::Node,
+            },
+            policy: runmat_analysis_core::AuthoredOutputPolicy::default(),
+        }],
+        &mut model.sequence,
+    )
+    .unwrap();
+    let generated = analysis_run_linear_static_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        FormulationRequirement::Experimental,
+        AnalysisRunOptions {
+            solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
+            ..AnalysisRunOptions::default()
+        },
+        OperationContext::new(None, None),
+    )
+    .unwrap();
+    let mut run = generated.data;
+    run.run_id = "run_authored_output_page".to_string();
+    let observation = run
+        .run
+        .observations
+        .iter()
+        .find(|observation| observation.observation_id.0 == "published_displacement")
+        .expect("authored output was not evaluated");
+    let expected = observation.field.as_host_f64().unwrap().to_vec();
+
+    let store = storage::InMemoryAnalysisArtifactStore::new();
+    storage::AnalysisArtifactStore::persist_run(&store, &run).unwrap();
+    let lookup = storage::AnalysisArtifactStore::load_field_page(
+        &store,
+        &run.run_id,
+        &AnalysisFieldSelection::new("published_displacement", None),
+        AnalysisFieldRequestOptions::default(),
+    )
+    .unwrap();
+    let storage::AnalysisFieldPageLookup::Page(page) = lookup else {
+        panic!("authored output field was not selectively readable")
+    };
+    assert_eq!(page.values, AnalysisFieldPageValues::Real(expected));
+    let _ = fs::remove_dir_all(mesh_root);
+}
+
+#[test]
 fn filesystem_run_fields_are_chunked_and_pages_read_only_intersecting_chunks() {
     let _guard = analysis_test_guard();
     storage::reset_artifact_store_for_tests();

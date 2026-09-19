@@ -6,6 +6,9 @@ macro_rules! visit_analysis_result_fields {
         for field in $($borrow)* $run_result.run.fields {
             $visit(field);
         }
+        for observation in $($borrow)* $run_result.run.observations {
+            $visit($($borrow)* observation.field);
+        }
         for reduction in $($borrow)* $run_result.run.series_reductions {
             match $($borrow)* reduction.payload {
                 SeriesReductionPayload::Values { field, .. } => $visit(field),
