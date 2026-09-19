@@ -1,9 +1,10 @@
+mod imported;
 mod values;
 
-use super::{CheckedFeaDeclaration, PhysicalDimension};
+use super::{CheckedFeaDeclaration, CheckedGeometryInspection, PhysicalDimension};
 use crate::{
-    FeaDiagnostic, FeaDiagnosticLocation, FeaDiagnosticPhase, FeaSymbolKey, FeaSymbolKind,
-    LogicalSourcePath,
+    BoundFeaProgram, FeaDiagnostic, FeaDiagnosticLocation, FeaDiagnosticPhase, FeaSymbolKey,
+    FeaSymbolKind, LogicalSourcePath,
 };
 use runmat_analysis_core::{
     validate_material_definitions, MaterialAcousticModel, MaterialElectricalModel,
@@ -13,7 +14,9 @@ use runmat_analysis_core::{
 use std::collections::BTreeMap;
 
 pub fn lower_materials(
+    bound: &BoundFeaProgram,
     declarations: &BTreeMap<(LogicalSourcePath, FeaSymbolKey), CheckedFeaDeclaration>,
+    inspections: &BTreeMap<(LogicalSourcePath, String), CheckedGeometryInspection>,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> BTreeMap<(LogicalSourcePath, FeaSymbolKey), MaterialModel> {
     let mut result = BTreeMap::new();
@@ -22,8 +25,15 @@ pub fn lower_materials(
             continue;
         }
         let initial_errors = diagnostics.len();
-        let material = lower_material(declaration, diagnostics);
+        let material = if declaration.material_source.is_some() {
+            imported::lower(bound, declaration, inspections, diagnostics)
+        } else {
+            Some(lower_material(declaration, diagnostics))
+        };
         if diagnostics.len() == initial_errors {
+            let Some(material) = material else {
+                continue;
+            };
             if let Err(validation) = validate_material_definitions(std::slice::from_ref(&material))
             {
                 error(declaration, validation.to_string(), diagnostics);
@@ -205,6 +215,7 @@ fn lower_material(
     MaterialModel {
         material_id: declaration.key.name.clone(),
         name,
+        provenance: runmat_analysis_core::MaterialProvenance::Authored,
         mass_density_kg_per_m3,
         mechanical,
         damping,

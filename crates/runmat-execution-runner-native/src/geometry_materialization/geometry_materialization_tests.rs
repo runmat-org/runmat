@@ -209,6 +209,64 @@ fn imported_brep_is_verified_against_source_and_topology_identity() {
 }
 
 #[test]
+fn imported_ap242_is_verified_against_exact_exchange_inventory() {
+    let bytes = ap242_box_source();
+    let options = ExactCadImportOptions::default();
+    let admitted = runmat_geometry_io::import_exact_cad(
+        "box.step",
+        bytes.as_bytes(),
+        runmat_geometry_io::GeometryFormat::Step,
+        &options,
+        &runmat_geometry_io::GeometryImportContext::new(),
+    )
+    .unwrap();
+    let exchange = runmat_geometry_io::ap242::inspect_ap242(&bytes).unwrap();
+    assert_eq!(exchange.parameters.len(), 1);
+    let source_digest = Digest::sha256(bytes.as_bytes());
+    let mut request = imported_request(
+        options,
+        source_digest,
+        admitted.build_closure().unwrap().manifest.topology.digest,
+        bytes.len() as u64,
+    );
+    request.definition.regions[0].cardinality = GeometryRegionCardinality::OneOrMore;
+    let GeometryDefinitionSource::Imported(imported) = &mut request.definition.source else {
+        unreachable!()
+    };
+    imported.logical_path = "box.step".into();
+    imported.format = GeometrySourceFormat::Step;
+    imported.capabilities.parameters = true;
+    imported.exchange = Some(exchange.clone());
+    let GeometryMaterializationSource::Imported {
+        source_name,
+        chunks,
+        ..
+    } = &mut request.source
+    else {
+        unreachable!()
+    };
+    *source_name = "box.step".into();
+    chunks[0].digest = source_digest;
+    let response = execute_imported_request(&request, bytes.as_bytes());
+    assert!(
+        matches!(
+            &response,
+            ProgramExecutionResponse::ExternalizedSuccess { .. }
+        ),
+        "AP242 materialization failed: {response:?}"
+    );
+
+    let GeometryDefinitionSource::Imported(imported) = &mut request.definition.source else {
+        unreachable!()
+    };
+    imported.exchange.as_mut().unwrap().parameters[0]
+        .value
+        .value_si = 0.009;
+    let response = execute_imported_request(&request, bytes.as_bytes());
+    assert!(format!("{response:?}").contains("exchange facts differ"));
+}
+
+#[test]
 fn generated_geometry_requires_and_materializes_its_frozen_product_receipt() {
     let product = GeneratedGeometryProduct {
         graph: GeometryFeatureGraph {
@@ -513,6 +571,7 @@ fn imported_request(
                     persistent_ids: true,
                     ..Default::default()
                 },
+                exchange: None,
             }),
             regions: body_region(),
             cad_parameters: Vec::new(),
@@ -533,6 +592,62 @@ fn imported_request(
         plan_limits: GeometryFeaturePlanLimits::default(),
         resources: Default::default(),
     }
+}
+
+fn execute_imported_request(
+    request: &GeometryMaterializationRequest,
+    bytes: &[u8],
+) -> ProgramExecutionResponse {
+    let access = access("geometry:ap242-test", b"geometry-ap242-test-key");
+    let source = LogicalObject::new(
+        ObjectNamespace::InputValue,
+        "geometry/sources/box.step",
+        "application/vnd.runmat.geometry-source",
+        bytes.to_vec(),
+    )
+    .unwrap();
+    let source_root = access
+        .reference(
+            &source,
+            runmat_execution::value::ValueRefKind::DriverObject,
+            "runmat.geometry.source-chunk",
+        )
+        .unwrap();
+    let prepared = prepare_geometry_materialization_program(
+        request.clone(),
+        revision(),
+        &access,
+        &[source_root],
+    )
+    .unwrap();
+    let mut store = MemoryStore::default();
+    store.write_verified(&source).unwrap();
+    prepared.write_to(&mut store).unwrap();
+    execute_geometry_materialization_program_request(
+        &prepared.program,
+        &mut store,
+        NativeGeometryMaterializationLimits::default(),
+    )
+}
+
+fn ap242_box_source() -> String {
+    const SOURCE: &str =
+        include_str!("../../../runmat-geometry/io/tests/fixtures/two_box_assembly.step");
+    let source = SOURCE.replace(
+        "AUTOMOTIVE_DESIGN { 1 0 10303 214 1 1 1 1 }",
+        "AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF { 0 1 10303 442 1 1 4 }",
+    );
+    source.replacen(
+        "ENDSEC;\nEND-ISO-10303-21;",
+        "#1000=(LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.));\n\
+#1001=(LENGTH_MEASURE_WITH_UNIT() MEASURE_REPRESENTATION_ITEM() MEASURE_WITH_UNIT(LENGTH_MEASURE(8.0),#1000) REPRESENTATION_ITEM('WallThickness'));\n\
+#1002=SHAPE_REPRESENTATION_WITH_PARAMETERS('design parameters',(#1001),#23);\n\
+#1003=PROPERTY_DEFINITION('design parameters','',#5);\n\
+#1004=PROPERTY_DEFINITION_REPRESENTATION(#1003,#1002);\n\
+#1005=ID_ATTRIBUTE('parameter-wall-thickness',#1001);\n\
+ENDSEC;\nEND-ISO-10303-21;",
+        1,
+    )
 }
 
 fn body_region() -> Vec<GeometryRegionDefinition> {

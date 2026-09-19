@@ -97,6 +97,7 @@ impl FeaParser {
         let header = self.token_range(header_start, open);
         let header_significant = self.significant(header_start, open);
         let source = self.declaration_source(kind, &header_significant, header.span);
+        let material_source = self.material_source(kind, &header_significant, header.span);
         let target = self.mesh_target(kind, &header_significant, header.span);
         let span = Span {
             start: self.token(start).span.start,
@@ -107,6 +108,7 @@ impl FeaParser {
                 kind,
                 name,
                 source,
+                material_source,
                 target,
                 header,
                 body,
@@ -114,6 +116,22 @@ impl FeaParser {
             }),
             next,
         )
+    }
+
+    fn material_source(
+        &mut self,
+        kind: FeaDeclarationKind,
+        header: &[usize],
+        span: Span,
+    ) -> Option<FeaExpression> {
+        if kind != FeaDeclarationKind::Material
+            || !header
+                .first()
+                .is_some_and(|index| self.at(*index, FeaTokenKind::Keyword(FeaKeyword::From)))
+        {
+            return None;
+        }
+        Some(self.parse_expression_indices(&header[1..], span))
     }
 
     fn declaration_source(

@@ -113,12 +113,13 @@ pub enum GeometryInspectionCapability {
     Regeneration,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GeometryInspection {
     pub content_digest: SourceDigest,
     pub topology_digest: SourceDigest,
     pub capabilities: Vec<GeometryInspectionCapability>,
+    pub exchange: Option<runmat_geometry_core::Ap242ExchangeInventory>,
 }
 
 pub trait GeometryInspectionSource {

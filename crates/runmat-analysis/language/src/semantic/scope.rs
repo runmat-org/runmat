@@ -380,7 +380,7 @@ fn extend_geometry_members(
                     scope.insert_reference(
                         [
                             "geometry".to_string(),
-                            declaration.name.text.clone(),
+                            exposed_name.to_string(),
                             "parameter".to_string(),
                             name.trim().to_string(),
                         ],

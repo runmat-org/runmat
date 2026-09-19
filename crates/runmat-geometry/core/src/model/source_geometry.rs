@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::{AssemblyNode, MaterialEvidence};
+use super::{Ap242ExchangeInventory, AssemblyNode, MaterialEvidence};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -14,6 +14,8 @@ pub struct SourceGeometry {
     pub kind: SourceGeometryKind,
     pub assembly: Option<AssemblyNode>,
     pub material_evidence: Vec<MaterialEvidence>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exchange: Option<Ap242ExchangeInventory>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub cad_evaluators: Vec<CadEvaluatorSet>,
 }

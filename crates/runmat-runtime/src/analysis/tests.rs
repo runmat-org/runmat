@@ -268,6 +268,7 @@ fn sample_model() -> AnalysisModel {
         materials: vec![MaterialModel {
             material_id: "mat_steel".to_string(),
             name: "Steel".to_string(),
+            provenance: runmat_analysis_core::MaterialProvenance::Authored,
             mass_density_kg_per_m3: Some(7850.0),
             mechanical: Some(MaterialMechanicalModel {
                 youngs_modulus_pa: 200e9,
@@ -386,6 +387,7 @@ fn sample_model_with_material_assignment_mismatch() -> AnalysisModel {
     model.materials.push(MaterialModel {
         material_id: "mat_polymer".to_string(),
         name: "Polymer".to_string(),
+        provenance: runmat_analysis_core::MaterialProvenance::Authored,
         mass_density_kg_per_m3: Some(1150.0),
         mechanical: Some(MaterialMechanicalModel {
             youngs_modulus_pa: 3.2e9,
@@ -793,6 +795,7 @@ fn sample_geometry_asset() -> GeometryAsset {
             kind: SourceGeometryKind::Mesh,
             assembly: None,
             material_evidence: Vec::new(),
+            exchange: None,
             cad_evaluators: Vec::new(),
         },
         tessellation_profile: TessellationProfile::default(),
@@ -836,6 +839,7 @@ fn closed_cube_geometry_asset() -> GeometryAsset {
             kind: SourceGeometryKind::Cad,
             assembly: None,
             material_evidence: Vec::new(),
+            exchange: None,
             cad_evaluators: Vec::new(),
         },
         tessellation_profile: TessellationProfile::default(),
@@ -7594,6 +7598,7 @@ fn analysis_run_thermal_balanced_degrades_on_high_constitutive_spread() {
     model.materials.push(MaterialModel {
         material_id: "mat_poly_high_k".to_string(),
         name: "High K Composite".to_string(),
+        provenance: runmat_analysis_core::MaterialProvenance::Authored,
         mass_density_kg_per_m3: Some(1800.0),
         mechanical: Some(MaterialMechanicalModel {
             youngs_modulus_pa: 5.0e9,

@@ -8,6 +8,7 @@ use runmat_geometry_core::{
     GeometryFeatureRegionSelection, GeometryRegionDefinition, GeometryRegionRef,
     GeometryRegionRole,
 };
+use std::collections::BTreeMap;
 
 pub(super) fn graph(
     declaration: &CheckedFeaDeclaration,
@@ -18,14 +19,53 @@ pub(super) fn graph(
     let initial_errors = diagnostics.len();
     let mut features = Vec::new();
     let mut result = None;
+    let mut source_parameters = BTreeMap::new();
     for statement in statements {
         match &statement.kind {
             CheckedFeaStatementKind::Feature { name, value } => {
-                let operation = operation(declaration, value, regions, diagnostics)?;
+                let operation =
+                    operation(declaration, value, regions, &BTreeMap::new(), diagnostics)?;
                 features.push(GeometryFeature {
                     feature_id: name.clone(),
                     operation,
                 });
+            }
+            CheckedFeaStatementKind::SourceParameterUpdate { target, value } => {
+                let [source, parameter, name] = target.as_slice() else {
+                    super::error(
+                        declaration,
+                        statement.span,
+                        "source parameter update requires `set source.parameter.<name> = <value>`",
+                        diagnostics,
+                    );
+                    continue;
+                };
+                if source != "source" || parameter != "parameter" {
+                    super::error(
+                        declaration,
+                        statement.span,
+                        "source parameter update requires `set source.parameter.<name> = <value>`",
+                        diagnostics,
+                    );
+                    continue;
+                }
+                let Some(value) = value::authoring_value(value) else {
+                    super::error(
+                        declaration,
+                        statement.span,
+                        "source parameter update requires a canonical typed value",
+                        diagnostics,
+                    );
+                    continue;
+                };
+                if source_parameters.insert(name.clone(), value).is_some() {
+                    super::error(
+                        declaration,
+                        statement.span,
+                        format!("source parameter `{name}` is updated more than once"),
+                        diagnostics,
+                    );
+                }
             }
             CheckedFeaStatementKind::Assignment { target, value, .. }
                 if target.as_slice() == ["result"] =>
@@ -39,7 +79,14 @@ pub(super) fn graph(
                     );
                     continue;
                 }
-                result = result_expression(declaration, value, regions, &mut features, diagnostics);
+                result = result_expression(
+                    declaration,
+                    value,
+                    regions,
+                    &source_parameters,
+                    &mut features,
+                    diagnostics,
+                );
             }
             CheckedFeaStatementKind::Input(_) => {}
             _ => super::error(
@@ -58,6 +105,21 @@ pub(super) fn graph(
             diagnostics,
         );
     }
+    if !source_parameters.is_empty()
+        && !features.iter().any(|feature| {
+            matches!(
+                &feature.operation,
+                GeometryFeatureOperation::RegenerateSource { .. }
+            )
+        })
+    {
+        super::error(
+            declaration,
+            declaration.span,
+            "source parameter updates require `result = regenerate(source)`",
+            diagnostics,
+        );
+    }
     (diagnostics.len() == initial_errors).then(|| GeometryFeatureGraph {
         features,
         result: result.expect("checked above"),
@@ -68,13 +130,14 @@ fn result_expression(
     declaration: &CheckedFeaDeclaration,
     value: &CheckedExpression,
     regions: &[GeometryRegionDefinition],
+    source_parameters: &BTreeMap<String, runmat_geometry_core::GeometryAuthoringValue>,
     features: &mut Vec<GeometryFeature>,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<GeometryFeatureRef> {
     if let Some(reference) = feature_ref(value) {
         return Some(reference);
     }
-    let operation = operation(declaration, value, regions, diagnostics)?;
+    let operation = operation(declaration, value, regions, source_parameters, diagnostics)?;
     if features
         .iter()
         .any(|feature| feature.feature_id == "result")
@@ -98,9 +161,10 @@ fn operation(
     declaration: &CheckedFeaDeclaration,
     value: &CheckedExpression,
     regions: &[GeometryRegionDefinition],
+    source_parameters: &BTreeMap<String, runmat_geometry_core::GeometryAuthoringValue>,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<GeometryFeatureOperation> {
-    let result = operation_inner(declaration, value, regions);
+    let result = operation_inner(declaration, value, regions, source_parameters);
     if result.is_none() {
         super::error(
             declaration,
@@ -116,6 +180,7 @@ fn operation_inner(
     declaration: &CheckedFeaDeclaration,
     value: &CheckedExpression,
     regions: &[GeometryRegionDefinition],
+    source_parameters: &BTreeMap<String, runmat_geometry_core::GeometryAuthoringValue>,
 ) -> Option<GeometryFeatureOperation> {
     let CheckedExpressionKind::OperationCall {
         lowering,
@@ -200,6 +265,15 @@ fn operation_inner(
             edges: region_selection(declaration, regions, argument(arguments, 1, "edges")?)?,
             distance_m: length(argument(arguments, 2, "distance")?)?,
         },
+        "regenerate" => {
+            let source = feature_ref(argument(arguments, 0, "source")?)?;
+            if source.0 != "source.result" || source_parameters.is_empty() {
+                return None;
+            }
+            GeometryFeatureOperation::RegenerateSource {
+                parameters: source_parameters.clone(),
+            }
+        }
         _ => return None,
     })
 }
@@ -255,6 +329,7 @@ fn feature_ref(value: &CheckedExpression) -> Option<GeometryFeatureRef> {
         return None;
     };
     match path.as_slice() {
+        [source] if source == "source" => Some(GeometryFeatureRef("source.result".to_string())),
         [namespace, name] if namespace == "feature" => Some(GeometryFeatureRef(name.clone())),
         [source, result] if source == "source" && result == "result" => {
             Some(GeometryFeatureRef("source.result".to_string()))

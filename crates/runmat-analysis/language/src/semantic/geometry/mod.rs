@@ -1,6 +1,7 @@
 mod command;
 mod feature;
 mod generated;
+mod regeneration;
 mod value;
 
 use super::{
@@ -12,11 +13,12 @@ use crate::{
     FeaSymbolKind, FeaSymbolOrigin, GeometryInspectionCapability, LogicalSourcePath,
 };
 use runmat_geometry_core::{
-    CadParameterAccess, CadParameterDefinition, CadParameterPhysicalType, CadParameterSelector,
-    DerivedGeometryDefinition, GeometryAuthoringCapabilities, GeometryDefinition,
-    GeometryDefinitionRef, GeometryDefinitionSource, GeometryDigest, GeometryRegionCardinality,
-    GeometryRegionDefinition, GeometryRegionRole, GeometryRegionSelector, GeometrySourceFormat,
-    ImportedGeometryDefinition, UnitSystem,
+    Ap242ParameterAccess, Ap242PhysicalDimension, CadParameterAccess, CadParameterDefinition,
+    CadParameterPhysicalType, CadParameterSelector, DerivedGeometryDefinition,
+    GeometryAuthoringCapabilities, GeometryDefinition, GeometryDefinitionRef,
+    GeometryDefinitionSource, GeometryDigest, GeometryRegionCardinality, GeometryRegionDefinition,
+    GeometryRegionRole, GeometryRegionSelector, GeometrySourceFormat, ImportedGeometryDefinition,
+    UnitSystem,
 };
 use std::collections::BTreeMap;
 
@@ -55,6 +57,7 @@ pub fn lower_geometry_definitions(
             }
         }
     }
+    regeneration::remove_unqualified(&mut result, declarations, diagnostics);
     result
 }
 
@@ -151,7 +154,9 @@ fn definition(
         cad_parameters: declaration
             .statements
             .iter()
-            .filter_map(|statement| lower_cad_parameter(declaration, statement, diagnostics))
+            .filter_map(|statement| {
+                lower_cad_parameter(declaration, statement, inspection, diagnostics)
+            })
             .collect(),
     })
 }
@@ -178,6 +183,7 @@ fn imported_source(
         content_digest: GeometryDigest::from_bytes(inspection.facts.content_digest.0),
         topology_digest: GeometryDigest::from_bytes(inspection.facts.topology_digest.0),
         capabilities: capabilities(inspection),
+        exchange: inspection.facts.exchange.clone(),
     })
 }
 
@@ -349,6 +355,7 @@ fn lower_region(
 fn lower_cad_parameter(
     declaration: &CheckedFeaDeclaration,
     statement: &CheckedFeaStatement,
+    inspection: Option<&CheckedGeometryInspection>,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<CadParameterDefinition> {
     let CheckedFeaStatementKind::Block {
@@ -386,12 +393,97 @@ fn lower_cad_parameter(
         error(declaration, statement.span, message, diagnostics);
         CadParameterAccess::Readable
     });
+    let Some(inventory) = inspection.and_then(|value| value.facts.exchange.as_ref()) else {
+        error(
+            declaration,
+            statement.span,
+            "CAD parameter declarations require a normalized AP242 exchange inventory",
+            diagnostics,
+        );
+        return None;
+    };
+    let matches = inventory
+        .parameters
+        .iter()
+        .filter(|parameter| match &selector {
+            CadParameterSelector::Name(name) => parameter.name == *name,
+            CadParameterSelector::PersistentId(id) => {
+                parameter.persistent_id.as_deref() == Some(id.as_str())
+            }
+        })
+        .collect::<Vec<_>>();
+    let [source] = matches.as_slice() else {
+        let detail = if matches.is_empty() {
+            "does not resolve to a source parameter"
+        } else {
+            "is ambiguous in the source exchange inventory"
+        };
+        error(
+            declaration,
+            statement.span,
+            format!("CAD parameter `{}` {detail}", name.trim()),
+            diagnostics,
+        );
+        return None;
+    };
+    if source.value.dimension != physical_dimension(physical_type) {
+        error(
+            declaration,
+            *header_span,
+            format!(
+                "CAD parameter `{}` is declared as `{}` but the source has dimension `{:?}`",
+                name.trim(),
+                physical_type_name(physical_type),
+                source.value.dimension
+            ),
+            diagnostics,
+        );
+        return None;
+    }
+    if access == CadParameterAccess::Writable && source.access != Ap242ParameterAccess::Regenerable
+    {
+        error(
+            declaration,
+            statement.span,
+            format!(
+                "CAD parameter `{}` is read-only; writable access requires a qualified regenerative source",
+                name.trim()
+            ),
+            diagnostics,
+        );
+        return None;
+    }
     Some(CadParameterDefinition {
         parameter_id: name.trim().to_string(),
         physical_type,
         selector,
         access,
+        source: (*source).clone(),
     })
+}
+
+fn physical_dimension(value: CadParameterPhysicalType) -> Ap242PhysicalDimension {
+    match value {
+        CadParameterPhysicalType::Dimensionless => Ap242PhysicalDimension::Dimensionless,
+        CadParameterPhysicalType::Length => Ap242PhysicalDimension::Length,
+        CadParameterPhysicalType::Angle => Ap242PhysicalDimension::PlaneAngle,
+        CadParameterPhysicalType::Area => Ap242PhysicalDimension::Area,
+        CadParameterPhysicalType::Volume => Ap242PhysicalDimension::Volume,
+        CadParameterPhysicalType::Mass => Ap242PhysicalDimension::Mass,
+        CadParameterPhysicalType::Temperature => Ap242PhysicalDimension::Temperature,
+    }
+}
+
+fn physical_type_name(value: CadParameterPhysicalType) -> &'static str {
+    match value {
+        CadParameterPhysicalType::Dimensionless => "dimensionless",
+        CadParameterPhysicalType::Length => "length",
+        CadParameterPhysicalType::Angle => "angle",
+        CadParameterPhysicalType::Area => "area",
+        CadParameterPhysicalType::Volume => "volume",
+        CadParameterPhysicalType::Mass => "mass",
+        CadParameterPhysicalType::Temperature => "temperature",
+    }
 }
 
 fn capabilities(inspection: &CheckedGeometryInspection) -> GeometryAuthoringCapabilities {

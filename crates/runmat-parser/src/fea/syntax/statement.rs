@@ -71,6 +71,15 @@ pub enum FeaStatementKind {
         name: FeaName,
         value: FeaExpression,
     },
+    SourceParameterUpdate {
+        target: FeaReference,
+        value: FeaExpression,
+    },
+    Use(FeaReference),
+    Requirement {
+        target: FeaReference,
+        value: FeaExpression,
+    },
     Assignment {
         target: FeaReference,
         relation: FeaAssignmentRelation,

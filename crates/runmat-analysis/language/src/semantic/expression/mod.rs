@@ -10,10 +10,12 @@ use runmat_parser::fea::{
 use runmat_types::{OperationFrontend, OperationLoweringId, OperationOverloadIdentity, Span};
 use std::collections::BTreeMap;
 
+mod checked;
 mod matching;
 mod scope;
 mod type_rules;
 
+pub use checked::{CheckedCallArgument, ResolvedCadParameterValue};
 pub(crate) use matching::pattern_matches as operation_pattern_matches;
 use matching::{arguments_match, declaration_arguments_match, operation_output_type, outputs_type};
 pub use scope::{DeclarationInput, DeclarationSignature, ExpressionScope, FunctionSignature};
@@ -33,6 +35,7 @@ pub enum CheckedExpressionKind {
     Boolean(bool),
     Enum(String),
     Reference(Vec<String>),
+    CadParameterValue(ResolvedCadParameterValue),
     List(Vec<CheckedExpression>),
     Record(BTreeMap<String, CheckedExpression>),
     Unary {
@@ -59,15 +62,6 @@ pub enum CheckedExpressionKind {
         offset_bits: u64,
     },
     Missing,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CheckedCallArgument {
-    Positional(CheckedExpression),
-    Named {
-        name: String,
-        value: CheckedExpression,
-    },
 }
 
 pub struct ExpressionCheck<'a, C: AnalysisOperationCatalog + ?Sized> {

@@ -657,6 +657,7 @@ fn isotropic_material(
     MaterialModel {
         material_id: material_id.to_string(),
         name: name.to_string(),
+        provenance: runmat_analysis_core::MaterialProvenance::Authored,
         mass_density_kg_per_m3: Some(mass_density_kg_per_m3),
         mechanical: Some(MaterialMechanicalModel {
             youngs_modulus_pa,

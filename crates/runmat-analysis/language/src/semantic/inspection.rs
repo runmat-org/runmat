@@ -7,7 +7,7 @@ use runmat_parser::fea::{FeaDeclarationKind, FeaExpressionKind, FeaModuleItem, F
 use runmat_types::Span;
 use std::collections::BTreeMap;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CheckedGeometryInspection {
     pub module: LogicalSourcePath,
     pub geometry: String,

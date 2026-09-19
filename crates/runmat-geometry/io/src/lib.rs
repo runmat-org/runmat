@@ -1,5 +1,6 @@
 //! Geometry import and normalization pipeline.
 
+pub mod ap242;
 pub mod cad;
 pub mod exact;
 pub mod faceted;

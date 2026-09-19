@@ -50,6 +50,15 @@ pub enum CheckedFeaStatementKind {
         name: String,
         value: CheckedExpression,
     },
+    SourceParameterUpdate {
+        target: Vec<String>,
+        value: CheckedExpression,
+    },
+    Use(Vec<String>),
+    Requirement {
+        target: Vec<String>,
+        value: CheckedExpression,
+    },
     Assignment {
         target: Vec<String>,
         relation: FeaAssignmentRelation,

@@ -20,6 +20,7 @@ pub fn through_hole_plate_geometry() -> GeometryAsset {
             kind: SourceGeometryKind::Cad,
             assembly: None,
             material_evidence: Vec::new(),
+            exchange: None,
             cad_evaluators: Vec::new(),
         },
         tessellation_profile: TessellationProfile::default(),

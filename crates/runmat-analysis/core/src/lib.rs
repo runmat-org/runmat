@@ -151,9 +151,12 @@ pub use problem::material_assignment::{
     PropertyRegionTarget,
 };
 pub use problem::materials::{
-    ConductivityFrequencyPoint, MaterialAcousticModel, MaterialCapability, MaterialElectricalModel,
-    MaterialMechanicalModel, MaterialModel, MaterialPlasticModel, MaterialThermalModel,
-    MechanicalDampingModel, MissingMaterialCapability,
+    ConductivityFrequencyPoint, ImportedCadEnvironmentCondition, ImportedCadMaterialAssociation,
+    ImportedCadMaterialAssociationTarget, ImportedCadMaterialProperty,
+    ImportedCadMaterialPropertyKind, ImportedCadMaterialProvenance, MaterialAcousticModel,
+    MaterialCapability, MaterialElectricalModel, MaterialMechanicalModel, MaterialModel,
+    MaterialPlasticModel, MaterialProvenance, MaterialThermalModel, MechanicalDampingModel,
+    MissingMaterialCapability,
 };
 pub use problem::model::{
     AnalysisModel, AnalysisModelId, SolverAnalysisModel, SolverAnalysisSequence,
@@ -262,6 +265,7 @@ mod tests {
             materials: vec![MaterialModel {
                 material_id: "mat_steel".to_string(),
                 name: "Steel".to_string(),
+                provenance: MaterialProvenance::Authored,
                 mass_density_kg_per_m3: Some(7850.0),
                 mechanical: Some(MaterialMechanicalModel {
                     youngs_modulus_pa: 200e9,

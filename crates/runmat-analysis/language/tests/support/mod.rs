@@ -17,8 +17,8 @@ impl TestHost {
     }
 
     pub fn with_geometry(mut self, path: &str, digest: u8) -> Self {
-        self.geometries.insert(
-            path.to_string(),
+        self = self.with_geometry_inspection(
+            path,
             GeometryInspection {
                 content_digest: SourceDigest([digest; 32]),
                 topology_digest: SourceDigest([digest.wrapping_add(1); 32]),
@@ -26,8 +26,14 @@ impl TestHost {
                     GeometryInspectionCapability::Topology,
                     GeometryInspectionCapability::PersistentIds,
                 ],
+                exchange: None,
             },
         );
+        self
+    }
+
+    pub fn with_geometry_inspection(mut self, path: &str, inspection: GeometryInspection) -> Self {
+        self.geometries.insert(path.to_string(), inspection);
         self
     }
 

@@ -119,6 +119,7 @@ fn build_step_metadata_result(
     asset.source_geometry.kind = summary.source_kind;
     asset.source_geometry.assembly = summary.assembly;
     asset.source_geometry.material_evidence = summary.material_evidence;
+    asset.source_geometry.exchange = summary.exchange;
     asset.regions = summary.regions;
 
     Ok(build_result(asset, diagnostics))
@@ -224,6 +225,7 @@ pub(crate) fn build_topology_result(
         .as_ref()
         .map(|summary| summary.material_evidence.clone())
         .unwrap_or_default();
+    asset.source_geometry.exchange = metadata.and_then(|summary| summary.exchange);
     asset.regions = regions;
     asset.region_entity_mappings = mappings;
 

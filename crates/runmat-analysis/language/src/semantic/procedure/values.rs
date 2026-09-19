@@ -35,6 +35,7 @@ pub fn positive_usize(value: &CheckedExpression) -> Option<usize> {
 pub fn canonical_scalar(value: &CheckedExpression) -> Option<f64> {
     match &value.kind {
         CheckedExpressionKind::Number(source) => source.parse().ok(),
+        CheckedExpressionKind::CadParameterValue(source) => Some(source.value_si()),
         CheckedExpressionKind::Quantity {
             value,
             scale_bits,

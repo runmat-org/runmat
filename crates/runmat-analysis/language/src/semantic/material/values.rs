@@ -107,9 +107,17 @@ fn assignment<'a>(
     })
 }
 
+pub(super) fn typed_quantity(
+    value: &CheckedExpression,
+    dimension: PhysicalDimension,
+) -> Option<f64> {
+    (value.value_type == FeaType::Quantity(dimension)).then(|| canonical_scalar(value))?
+}
+
 fn canonical_scalar(value: &CheckedExpression) -> Option<f64> {
     match &value.kind {
         CheckedExpressionKind::Number(source) => source.parse().ok(),
+        CheckedExpressionKind::CadParameterValue(source) => Some(source.value_si()),
         CheckedExpressionKind::Quantity {
             value,
             scale_bits,

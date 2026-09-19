@@ -1,3 +1,4 @@
+use runmat_types::PhysicalDimension;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -75,6 +76,7 @@ pub struct MaterialPlasticModel {
 pub struct MaterialModel {
     pub material_id: String,
     pub name: String,
+    pub provenance: MaterialProvenance,
     #[serde(default)]
     pub mass_density_kg_per_m3: Option<f64>,
     #[serde(default)]
@@ -89,6 +91,88 @@ pub struct MaterialModel {
     pub electrical: Option<MaterialElectricalModel>,
     #[serde(default)]
     pub plastic: Option<MaterialPlasticModel>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum MaterialProvenance {
+    #[default]
+    Authored,
+    ImportedCad(ImportedCadMaterialProvenance),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ImportedCadMaterialProvenance {
+    pub geometry_module_path: String,
+    pub geometry_id: String,
+    pub source_material_id: String,
+    pub source_material_name: String,
+    pub source_entity_id: u64,
+    pub persistent_id: Option<String>,
+    pub specification: Option<String>,
+    pub associations: Vec<ImportedCadMaterialAssociation>,
+    pub adopted_properties: Vec<ImportedCadMaterialProperty>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ImportedCadMaterialAssociation {
+    pub association_id: String,
+    pub source_entity_id: u64,
+    pub target: ImportedCadMaterialAssociationTarget,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind", content = "value")]
+pub enum ImportedCadMaterialAssociationTarget {
+    ProductEntity(u64),
+    ProductDefinitionEntity(u64),
+    OccurrenceEntity(u64),
+    ShapeAspectEntity(u64),
+    PersistentId(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ImportedCadMaterialProperty {
+    pub property: ImportedCadMaterialPropertyKind,
+    pub source_property_id: String,
+    pub source_name: String,
+    pub source_entity_id: u64,
+    pub representation_entity_id: u64,
+    pub dimension: PhysicalDimension,
+    pub value_si: f64,
+    pub source_value: f64,
+    pub source_unit: String,
+    pub specification: Option<String>,
+    pub environment: Vec<ImportedCadEnvironmentCondition>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImportedCadMaterialPropertyKind {
+    MassDensity,
+    YoungsModulus,
+    PoissonRatio,
+    ThermalConductivity,
+    SpecificHeat,
+    ThermalExpansionCoefficient,
+    ElectricalConductivity,
+    RelativePermittivity,
+    RelativePermeability,
+    AcousticImpedance,
+    DynamicViscosity,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ImportedCadEnvironmentCondition {
+    pub name: String,
+    pub dimension: PhysicalDimension,
+    pub value_si: f64,
+    pub source_value: f64,
+    pub source_unit: String,
 }
 
 /// Closed constitutive facts that a formulation may require from an assigned material.
@@ -183,6 +267,7 @@ mod tests {
         MaterialModel {
             material_id: "fluid".into(),
             name: "Fluid".into(),
+            provenance: MaterialProvenance::Authored,
             mass_density_kg_per_m3: Some(997.0),
             mechanical: None,
             damping: None,

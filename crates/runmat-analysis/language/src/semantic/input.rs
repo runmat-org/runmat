@@ -172,6 +172,7 @@ fn integer(expression: &CheckedExpression) -> Option<i64> {
 fn scalar(expression: &CheckedExpression) -> Option<f64> {
     match &expression.kind {
         CheckedExpressionKind::Number(value) => value.parse().ok(),
+        CheckedExpressionKind::CadParameterValue(value) => Some(value.value_si()),
         CheckedExpressionKind::Quantity {
             value,
             scale_bits,

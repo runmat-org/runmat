@@ -116,6 +116,11 @@ fn expression(
         CheckedExpressionKind::Number(source) => AuthoredNumericExpressionKind::Literal {
             value: source.parse().ok()?,
         },
+        CheckedExpressionKind::CadParameterValue(source) => {
+            AuthoredNumericExpressionKind::Literal {
+                value: source.value_si(),
+            }
+        }
         CheckedExpressionKind::Reference(path) if matches!(path.as_slice(), [namespace, _] if namespace == "input") => {
             AuthoredNumericExpressionKind::ModelInput {
                 input: AuthoredModelInputRef {

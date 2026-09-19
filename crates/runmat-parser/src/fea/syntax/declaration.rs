@@ -1,4 +1,4 @@
-use super::{FeaBlock, FeaName, FeaReference, FeaTokenRange};
+use super::{FeaBlock, FeaExpression, FeaName, FeaReference, FeaTokenRange};
 use runmat_types::Span;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,6 +37,7 @@ pub struct FeaDeclaration {
     pub kind: FeaDeclarationKind,
     pub name: FeaName,
     pub source: Option<FeaReference>,
+    pub material_source: Option<FeaExpression>,
     pub target: Option<FeaReference>,
     pub header: FeaTokenRange,
     pub body: FeaBlock,

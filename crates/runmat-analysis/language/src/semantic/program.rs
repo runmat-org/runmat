@@ -12,6 +12,7 @@ use runmat_parser::fea::{
 use runmat_types::Span;
 use std::collections::BTreeMap;
 
+mod material_source;
 mod output;
 mod types;
 
@@ -56,9 +57,17 @@ pub struct CheckedFeaDeclaration {
     pub module: LogicalSourcePath,
     pub inputs: BTreeMap<String, CheckedFeaInput>,
     pub source: Option<Vec<String>>,
+    pub material_source: Option<CheckedCadMaterialSource>,
     pub target: Option<Vec<String>>,
     pub statements: Vec<CheckedFeaStatement>,
     pub outputs: BTreeMap<String, FeaType>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CheckedCadMaterialSource {
+    pub geometry: String,
+    pub material_id: String,
     pub span: Span,
 }
 
@@ -115,7 +124,7 @@ pub fn check_program<C: AnalysisOperationCatalog + GeometryInspectionSource + ?S
         }
     }
     let products =
-        super::lowering::lower_products(catalog, &bound, &declarations, &mut diagnostics);
+        super::lowering::lower_products(catalog, &bound, &mut declarations, &mut diagnostics);
     CheckedFeaProgram {
         bound,
         declarations,
@@ -171,7 +180,12 @@ fn check_declaration<C: AnalysisOperationCatalog + ?Sized>(
             .map(|segment| segment.text.clone())
             .collect::<Vec<_>>()
     });
+    let material_source = declaration
+        .material_source
+        .as_ref()
+        .and_then(|expression| material_source::check(expression, path, diagnostics));
     if key.kind == crate::FeaSymbolKind::Geometry && source_reference.is_some() {
+        scope.insert_reference(["source".to_string()], FeaType::GeometryFeature);
         scope.insert_reference(
             ["source".to_string(), "result".to_string()],
             FeaType::GeometryFeature,
@@ -231,6 +245,7 @@ fn check_declaration<C: AnalysisOperationCatalog + ?Sized>(
         module: path.clone(),
         inputs,
         source: source_reference,
+        material_source,
         target: target_reference,
         statements,
         outputs,
@@ -435,6 +450,33 @@ fn check_block<C: AnalysisOperationCatalog + ?Sized>(
                     CheckedFeaStatementKind::Feature {
                         name: name.text.clone(),
                         value,
+                    }
+                }
+                FeaStatementKind::SourceParameterUpdate { target, value } => {
+                    CheckedFeaStatementKind::SourceParameterUpdate {
+                        target: target
+                            .segments
+                            .iter()
+                            .map(|segment| segment.text.clone())
+                            .collect(),
+                        value: check_value(catalog, path, source, scope, value, diagnostics),
+                    }
+                }
+                FeaStatementKind::Use(property) => CheckedFeaStatementKind::Use(
+                    property
+                        .segments
+                        .iter()
+                        .map(|segment| segment.text.clone())
+                        .collect(),
+                ),
+                FeaStatementKind::Requirement { target, value } => {
+                    CheckedFeaStatementKind::Requirement {
+                        target: target
+                            .segments
+                            .iter()
+                            .map(|segment| segment.text.clone())
+                            .collect(),
+                        value: check_value(catalog, path, source, scope, value, diagnostics),
                     }
                 }
                 FeaStatementKind::Assignment {

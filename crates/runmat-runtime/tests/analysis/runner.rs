@@ -1238,6 +1238,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
             model.materials.push(runmat_analysis_core::MaterialModel {
                 material_id: "mat_acoustic_air".to_string(),
                 name: "Acoustic Air".to_string(),
+                provenance: runmat_analysis_core::MaterialProvenance::Authored,
                 mass_density_kg_per_m3: Some(1.225),
                 mechanical: None,
                 damping: None,
@@ -1615,6 +1616,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                 runmat_analysis_core::MaterialModel {
                     material_id: "mat_default".to_string(),
                     name: "Default".to_string(),
+                    provenance: runmat_analysis_core::MaterialProvenance::Authored,
                     mass_density_kg_per_m3: Some(7850.0),
                     mechanical: Some(runmat_analysis_core::MaterialMechanicalModel {
                         youngs_modulus_pa: 110e9,
@@ -1637,6 +1639,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                 runmat_analysis_core::MaterialModel {
                     material_id: "mat_em_copper".to_string(),
                     name: "EM Copper".to_string(),
+                    provenance: runmat_analysis_core::MaterialProvenance::Authored,
                     electrical: Some(runmat_analysis_core::MaterialElectricalModel {
                         reference_temperature_k: 293.15,
                         conductivity_s_per_m: 5.8e7,
@@ -1672,6 +1675,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                 runmat_analysis_core::MaterialModel {
                     material_id: "mat_em_ferrite".to_string(),
                     name: "EM Ferrite".to_string(),
+                    provenance: runmat_analysis_core::MaterialProvenance::Authored,
                     electrical: Some(runmat_analysis_core::MaterialElectricalModel {
                         reference_temperature_k: 293.15,
                         conductivity_s_per_m: 8.0e4,
@@ -1707,6 +1711,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                 runmat_analysis_core::MaterialModel {
                     material_id: "mat_em_polymer".to_string(),
                     name: "EM Polymer".to_string(),
+                    provenance: runmat_analysis_core::MaterialProvenance::Authored,
                     electrical: Some(runmat_analysis_core::MaterialElectricalModel {
                         reference_temperature_k: 293.15,
                         conductivity_s_per_m: 0.2,

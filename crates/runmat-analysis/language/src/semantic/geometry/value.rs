@@ -51,6 +51,7 @@ pub(super) fn parameters(
 pub(super) fn scalar(value: &CheckedExpression) -> Option<GeometryScalarExpression> {
     match &value.kind {
         CheckedExpressionKind::Number(source) => Some(source.parse::<f64>().ok()?.into()),
+        CheckedExpressionKind::CadParameterValue(source) => Some(source.value_si().into()),
         CheckedExpressionKind::Reference(path)
             if path.len() == 2 && path.first().is_some_and(|part| part == "input") =>
         {

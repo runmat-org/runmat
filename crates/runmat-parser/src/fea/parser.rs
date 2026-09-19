@@ -5,6 +5,7 @@ use runmat_types::{merge_span, Span};
 
 mod cursor;
 mod declaration;
+mod exchange;
 mod expression;
 mod grammar;
 mod model;
@@ -230,6 +231,17 @@ impl FeaParser {
         let span = range.span;
         let kind = match self.kind(first) {
             _ if self.lexeme(first) == "sample" => self.parse_uniform_sample(&significant, range),
+            _ if self.lexeme(first) == "set" => {
+                self.parse_source_parameter_update(&significant, range)
+            }
+            _ if self.lexeme(first) == "use" => self.parse_use(&significant, range),
+            _ if self.lexeme(first) == "require"
+                && significant
+                    .iter()
+                    .any(|index| self.kind(*index) == Some(FeaTokenKind::Equal)) =>
+            {
+                self.parse_requirement(&significant, range)
+            }
             _ if significant
                 .get(1)
                 .is_some_and(|index| self.lexeme(*index) == "on")

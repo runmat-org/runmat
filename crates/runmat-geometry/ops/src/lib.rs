@@ -38,6 +38,7 @@ mod tests {
                 kind: SourceGeometryKind::Mesh,
                 assembly: None,
                 material_evidence: vec![],
+                exchange: None,
                 cad_evaluators: Vec::new(),
             },
             tessellation_profile: TessellationProfile::default(),

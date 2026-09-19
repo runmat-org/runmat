@@ -26,13 +26,20 @@ pub(super) struct LoweredProducts {
 pub(super) fn lower_products<C: AnalysisOperationCatalog + GeometryInspectionSource + ?Sized>(
     catalog: &C,
     bound: &BoundFeaProgram,
-    declarations: &BTreeMap<(LogicalSourcePath, FeaSymbolKey), CheckedFeaDeclaration>,
+    declarations: &mut BTreeMap<(LogicalSourcePath, FeaSymbolKey), CheckedFeaDeclaration>,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> LoweredProducts {
     let geometry_inspections = super::inspect_geometry_declarations(catalog, bound, diagnostics);
-    let materials = super::lower_materials(declarations, diagnostics);
+    let geometry_probe = super::lower_geometry_definitions(
+        bound,
+        declarations,
+        &geometry_inspections,
+        &mut Vec::new(),
+    );
+    super::cad_parameter_value::resolve(bound, declarations, &geometry_probe);
     let geometries =
         super::lower_geometry_definitions(bound, declarations, &geometry_inspections, diagnostics);
+    let materials = super::lower_materials(bound, declarations, &geometry_inspections, diagnostics);
     let meshes = super::lower_mesh_definitions(bound, declarations, diagnostics);
     let models = super::lower_models(bound, declarations, diagnostics);
     let execution_policies =

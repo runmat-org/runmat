@@ -770,6 +770,7 @@ pub(super) fn create_material_object_from_args(args: Vec<Value>) -> BuiltinResul
     material_to_object(MaterialModel {
         material_id,
         name,
+        provenance: runmat_analysis_core::MaterialProvenance::Authored,
         mass_density_kg_per_m3,
         mechanical,
         damping,

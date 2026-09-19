@@ -1,7 +1,8 @@
 use std::collections::HashSet;
 
 use crate::{
-    AnalysisValidationError, ConductivityFrequencyPoint, MaterialAssignment, MaterialModel,
+    AnalysisValidationError, ConductivityFrequencyPoint, ImportedCadMaterialPropertyKind,
+    MaterialAssignment, MaterialModel, MaterialProvenance,
 };
 
 pub(crate) fn validate_materials(
@@ -80,6 +81,7 @@ fn validate_material(material: &MaterialModel) -> Result<(), AnalysisValidationE
     if material.name.trim().is_empty() {
         return Err(invalid_material(material, "name must be non-empty"));
     }
+    validate_provenance(material)?;
     if material.mass_density_kg_per_m3.is_none()
         && material.mechanical.is_none()
         && material.damping.is_none()
@@ -205,6 +207,103 @@ fn validate_material(material: &MaterialModel) -> Result<(), AnalysisValidationE
     Ok(())
 }
 
+fn validate_provenance(material: &MaterialModel) -> Result<(), AnalysisValidationError> {
+    let MaterialProvenance::ImportedCad(source) = &material.provenance else {
+        return Ok(());
+    };
+    if source.geometry_module_path.trim().is_empty()
+        || source.geometry_id.trim().is_empty()
+        || source.source_material_id.trim().is_empty()
+        || source.source_material_name.trim().is_empty()
+        || source.source_entity_id == 0
+    {
+        return Err(invalid_material(
+            material,
+            "imported CAD material provenance requires complete nonzero source identity",
+        ));
+    }
+    if source
+        .persistent_id
+        .as_ref()
+        .is_some_and(|value| value.trim().is_empty())
+        || source
+            .specification
+            .as_ref()
+            .is_some_and(|value| value.trim().is_empty())
+    {
+        return Err(invalid_material(
+            material,
+            "imported CAD material identifiers and specifications must be non-empty",
+        ));
+    }
+    let mut associations = HashSet::new();
+    for association in &source.associations {
+        if association.association_id.trim().is_empty()
+            || association.source_entity_id == 0
+            || !associations.insert(association.association_id.as_str())
+        {
+            return Err(invalid_material(
+                material,
+                "imported CAD material associations require unique nonzero source identity",
+            ));
+        }
+    }
+    if source.adopted_properties.is_empty() {
+        return Err(invalid_material(
+            material,
+            "imported CAD material provenance requires adopted properties",
+        ));
+    }
+    let mut properties = HashSet::new();
+    for property in &source.adopted_properties {
+        if property.source_property_id.trim().is_empty()
+            || property.source_name.trim().is_empty()
+            || property.source_unit.trim().is_empty()
+            || property.source_entity_id == 0
+            || property.representation_entity_id == 0
+            || !property.value_si.is_finite()
+            || !property.source_value.is_finite()
+            || !properties.insert(property.property)
+        {
+            return Err(invalid_material(
+                material,
+                "adopted CAD properties require unique kinds and complete finite source evidence",
+            ));
+        }
+        for condition in &property.environment {
+            if condition.name.trim().is_empty()
+                || condition.source_unit.trim().is_empty()
+                || !condition.value_si.is_finite()
+                || !condition.source_value.is_finite()
+            {
+                return Err(invalid_material(
+                    material,
+                    "adopted CAD property environments require complete finite evidence",
+                ));
+            }
+        }
+        let canonical = match property.property {
+            ImportedCadMaterialPropertyKind::MassDensity => material.mass_density_kg_per_m3,
+            ImportedCadMaterialPropertyKind::YoungsModulus => material
+                .mechanical
+                .as_ref()
+                .map(|mechanical| mechanical.youngs_modulus_pa),
+            ImportedCadMaterialPropertyKind::PoissonRatio => material
+                .mechanical
+                .as_ref()
+                .map(|mechanical| mechanical.poisson_ratio),
+            _ => None,
+        };
+        if canonical.is_some_and(|value| value.to_bits() != property.value_si.to_bits()) {
+            return Err(invalid_material(
+                material,
+                "canonical material values must equal their adopted CAD conversion evidence",
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn validate_frequency_response(
     material: &MaterialModel,
     points: &[ConductivityFrequencyPoint],
@@ -315,6 +414,7 @@ mod tests {
         MaterialModel {
             material_id: "steel".to_string(),
             name: "Steel".to_string(),
+            provenance: crate::MaterialProvenance::Authored,
             mass_density_kg_per_m3: Some(7850.0),
             mechanical: Some(MaterialMechanicalModel {
                 youngs_modulus_pa: 200.0e9,

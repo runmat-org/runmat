@@ -350,6 +350,7 @@ geometry part {
         expect one_or_more
     }
 }
+
 "#;
     let host = TestHost::default().with_geometry("project/geometry/part.step", 8);
     let program = FeaCompiler::new(&host).check(CheckRequest {

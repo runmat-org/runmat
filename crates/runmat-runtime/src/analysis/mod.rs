@@ -12,10 +12,9 @@ use runmat_analysis_core::{
     AnalysisValidationError, BoundaryOperator, ContactFriction, CoordinateFrame,
     CoupledPhysicsFamily, EvidenceConfidence, ExcitationAction, FluidConstraint,
     FluidConstraintKind, MagneticConstraint, MagneticConstraintKind, MaterialAssignment,
-    MaterialMechanicalModel, MaterialModel, MaterialThermalModel, PhysicsFamily, PrescribedValue,
-    Pressure, ProcedureStep, ProcedureStepId, RegionTarget, StateKind, StateOutput,
-    StructuralConstraint, StructuralConstraintKind, Temperature, ThermalConstraint,
-    ThermalConstraintKind, ThermalInterfaceTransfer, Velocity,
+    MaterialModel, PhysicsFamily, PrescribedValue, Pressure, ProcedureStep, ProcedureStepId,
+    RegionTarget, StateKind, StateOutput, StructuralConstraint, StructuralConstraintKind,
+    Temperature, ThermalConstraint, ThermalConstraintKind, ThermalInterfaceTransfer, Velocity,
 };
 use runmat_analysis_fea::execution::{
     CanonicalSemanticState, CanonicalSemanticStateInput, CanonicalSemanticStatePayload,
@@ -72,6 +71,7 @@ mod figures;
 mod formulation_admission;
 mod frequency_result;
 mod linear_static_result;
+mod material_inference;
 pub(crate) mod meshing;
 mod operations;
 mod policy;
@@ -90,6 +90,7 @@ use excitation_authoring::{
 use execution_dispatch::{execution_operation, run_operation_for_identity, AnalysisOperation};
 use execution_error::{admit_runtime_proxy_for_operation, map_fea_run_error};
 use formulation_admission::{RuntimeDomainSource, RuntimeDomainTopology, RuntimeProxyFormulation};
+use material_inference::infer_material_models;
 use result_policy::{classify_run_status, evaluate_production_publication};
 #[cfg(test)]
 use structural_study::persist_immutable_study_evidence;
@@ -8147,74 +8148,6 @@ fn diagnostic_metric_bool(
                 .find_map(|token| token.strip_prefix(&format!("{key}=")))
         })
         .and_then(|value| value.parse::<bool>().ok())
-}
-
-fn infer_material_models(geometry: &GeometryAsset) -> Vec<MaterialModel> {
-    let mut materials = Vec::new();
-    for evidence in &geometry.source_geometry.material_evidence {
-        let value = evidence.value.to_ascii_lowercase();
-        let (material_id, name, youngs_modulus_pa, poisson_ratio) = if value.contains("aluminum") {
-            ("mat_aluminum", "Aluminum", 69e9, 0.33)
-        } else if value.contains("steel") {
-            ("mat_steel", "Steel", 200e9, 0.30)
-        } else if value.contains("polymer") || value.contains("plastic") {
-            ("mat_polymer", "Polymer", 3.2e9, 0.37)
-        } else {
-            ("mat_inferred", "Inferred Material", 100e9, 0.32)
-        };
-
-        if materials
-            .iter()
-            .any(|m: &MaterialModel| m.material_id == material_id)
-        {
-            continue;
-        }
-        materials.push(MaterialModel {
-            material_id: material_id.to_string(),
-            name: name.to_string(),
-            mass_density_kg_per_m3: Some(7850.0),
-            mechanical: Some(MaterialMechanicalModel {
-                youngs_modulus_pa,
-                poisson_ratio,
-            }),
-            damping: None,
-            thermal: Some(MaterialThermalModel {
-                reference_temperature_k: 293.15,
-                modulus_temp_coeff_per_k: -2.5e-4,
-                conductivity_w_per_mk: 45.0,
-                specific_heat_j_per_kgk: 500.0,
-                expansion_coefficient_per_k: 1.2e-5,
-            }),
-            acoustic: None,
-            electrical: None,
-            plastic: None,
-        });
-    }
-
-    if materials.is_empty() {
-        materials.push(MaterialModel {
-            material_id: "mat_default_steel".to_string(),
-            name: "Steel (Default)".to_string(),
-            mass_density_kg_per_m3: Some(7850.0),
-            mechanical: Some(MaterialMechanicalModel {
-                youngs_modulus_pa: 200e9,
-                poisson_ratio: 0.3,
-            }),
-            damping: None,
-            thermal: Some(MaterialThermalModel {
-                reference_temperature_k: 293.15,
-                modulus_temp_coeff_per_k: -2.5e-4,
-                conductivity_w_per_mk: 45.0,
-                specific_heat_j_per_kgk: 500.0,
-                expansion_coefficient_per_k: 1.2e-5,
-            }),
-            acoustic: None,
-            electrical: None,
-            plastic: None,
-        });
-    }
-
-    materials
 }
 
 fn select_fixed_region_id(geometry: &GeometryAsset) -> Option<String> {

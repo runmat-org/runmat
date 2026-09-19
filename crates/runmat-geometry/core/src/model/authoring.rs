@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 use super::{
+    Ap242ExchangeInventory, Ap242Parameter, Ap242ParameterAccess, Ap242PhysicalDimension,
     GeometryAuthoringValue, GeometryContractError, GeometryDigest, GeometryScalarExpression,
     GeometrySourceFormat, UnitSystem,
 };
@@ -38,6 +39,8 @@ pub struct ImportedGeometryDefinition {
     pub content_digest: GeometryDigest,
     pub topology_digest: GeometryDigest,
     pub capabilities: GeometryAuthoringCapabilities,
+    #[serde(default)]
+    pub exchange: Option<Ap242ExchangeInventory>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -269,13 +272,14 @@ pub enum GeometryRegionCardinality {
     OneOrMore,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CadParameterDefinition {
     pub parameter_id: String,
     pub physical_type: CadParameterPhysicalType,
     pub selector: CadParameterSelector,
     pub access: CadParameterAccess,
+    pub source: Ap242Parameter,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -361,6 +365,49 @@ impl GeometryDefinition {
                     "parameter ids must be unique",
                 ));
             }
+            parameter.validate()?;
+        }
+        Ok(())
+    }
+}
+
+impl CadParameterDefinition {
+    fn validate(&self) -> Result<(), GeometryContractError> {
+        self.source.validate()?;
+        let selected = match &self.selector {
+            CadParameterSelector::Name(name) => self.source.name == *name,
+            CadParameterSelector::PersistentId(id) => {
+                self.source.persistent_id.as_deref() == Some(id.as_str())
+            }
+        };
+        if !selected {
+            return Err(GeometryContractError::invalid(
+                "CAD parameter selector",
+                "resolved source parameter does not match the authored selector",
+            ));
+        }
+        let dimension = match self.physical_type {
+            CadParameterPhysicalType::Dimensionless => Ap242PhysicalDimension::Dimensionless,
+            CadParameterPhysicalType::Length => Ap242PhysicalDimension::Length,
+            CadParameterPhysicalType::Angle => Ap242PhysicalDimension::PlaneAngle,
+            CadParameterPhysicalType::Area => Ap242PhysicalDimension::Area,
+            CadParameterPhysicalType::Volume => Ap242PhysicalDimension::Volume,
+            CadParameterPhysicalType::Mass => Ap242PhysicalDimension::Mass,
+            CadParameterPhysicalType::Temperature => Ap242PhysicalDimension::Temperature,
+        };
+        if self.source.value.dimension != dimension {
+            return Err(GeometryContractError::invalid(
+                "CAD parameter type",
+                "authored physical type does not match the normalized source measure",
+            ));
+        }
+        if self.access == CadParameterAccess::Writable
+            && self.source.access != Ap242ParameterAccess::Regenerable
+        {
+            return Err(GeometryContractError::invalid(
+                "CAD parameter access",
+                "writable access requires a qualified regenerative source parameter",
+            ));
         }
         Ok(())
     }
@@ -389,6 +436,43 @@ impl ImportedGeometryDefinition {
             return Err(GeometryContractError::invalid(
                 "geometry capabilities",
                 "topology and persistent ids are required",
+            ));
+        }
+        if let Some(exchange) = &self.exchange {
+            if self.format != GeometrySourceFormat::Step {
+                return Err(GeometryContractError::invalid(
+                    "geometry exchange inventory",
+                    "AP242 exchange facts require a STEP source",
+                ));
+            }
+            exchange.validate()?;
+            use super::{Ap242Capability, Ap242CapabilityDisposition};
+            let available = |capability| {
+                !matches!(
+                    exchange.capability(capability),
+                    Ap242CapabilityDisposition::Absent
+                        | Ap242CapabilityDisposition::PresentUnsupported
+                )
+            };
+            if self.capabilities.parameters != available(Ap242Capability::Parameters)
+                || self.capabilities.engineering_properties
+                    != available(Ap242Capability::EngineeringProperties)
+                || self.capabilities.material_candidates != available(Ap242Capability::Materials)
+                || self.capabilities.regeneration != available(Ap242Capability::Regeneration)
+            {
+                return Err(GeometryContractError::invalid(
+                    "geometry exchange capabilities",
+                    "declared booleans must match the normalized AP242 inventory",
+                ));
+            }
+        } else if self.capabilities.parameters
+            || self.capabilities.engineering_properties
+            || self.capabilities.material_candidates
+            || self.capabilities.regeneration
+        {
+            return Err(GeometryContractError::invalid(
+                "geometry exchange capabilities",
+                "rich CAD capabilities require normalized exchange evidence",
             ));
         }
         Ok(())

@@ -1161,6 +1161,7 @@ fn resolve_material(id: &str, material: &FeaMaterialDocument) -> MaterialModel {
     MaterialModel {
         material_id: id.to_string(),
         name: material.name.clone().unwrap_or_else(|| id.to_string()),
+        provenance: runmat_analysis_core::MaterialProvenance::Authored,
         mass_density_kg_per_m3: material.mass_density_kg_per_m3,
         mechanical: material.mechanical.clone(),
         damping: material.damping,
@@ -1743,6 +1744,7 @@ mod tests {
                 kind: SourceGeometryKind::Cad,
                 assembly: None,
                 material_evidence: Vec::new(),
+                exchange: None,
                 cad_evaluators: Vec::new(),
             },
             tessellation_profile: TessellationProfile::default(),

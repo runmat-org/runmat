@@ -100,10 +100,7 @@ pub fn geometry_operation_extension() -> OperationCatalogExtension {
                     ("distance", length()),
                 ],
             ),
-            operation(
-                "regenerate_source",
-                &[("parameters", OperationTypePattern::Any)],
-            ),
+            operation("regenerate", &[("source", feature())]),
             global_operation(),
         ],
     }

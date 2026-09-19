@@ -190,6 +190,32 @@ where
             if detected != GeometryFormat::Unknown && detected != expected {
                 return Err("imported geometry format differs from its declaration".into());
             }
+            if expected == GeometryFormat::Step {
+                let is_ap242 = runmat_geometry_io::ap242::has_ap242_schema_bytes(&bytes);
+                let actual = is_ap242
+                    .then(|| {
+                        let text = std::str::from_utf8(&bytes)
+                            .map_err(|_| "qualified AP242 source must be UTF-8".to_string())?;
+                        runmat_geometry_io::ap242::inspect_ap242(text)
+                            .map_err(|error| error.to_string())
+                    })
+                    .transpose()?;
+                match (&declared.exchange, actual) {
+                    (Some(expected), Some(actual)) if expected == &actual => {}
+                    (None, None) => {}
+                    (Some(_), Some(_)) => {
+                        return Err("AP242 exchange facts differ from the admitted source".into())
+                    }
+                    (Some(_), None) => {
+                        return Err(
+                            "declared AP242 exchange facts have no AP242 source profile".into()
+                        )
+                    }
+                    (None, Some(_)) => {
+                        return Err("AP242 source is missing admitted exchange facts".into())
+                    }
+                }
+            }
             let geometry = import_exact_cad(
                 source_name,
                 &bytes,
