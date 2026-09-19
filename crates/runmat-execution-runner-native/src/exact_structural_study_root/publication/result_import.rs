@@ -321,6 +321,7 @@ pub fn import_exact_structural_study_result(
     resolved_workloads
         .replace_model(resolved_model)
         .map_err(protocol)?;
+    let retained_workloads = resolved_workloads.clone();
     let analysis = match (resolved_workloads, publication.analysis) {
         (
             StructuralStudyWorkloads::LinearSequence { workloads },
@@ -652,6 +653,7 @@ pub fn import_exact_structural_study_result(
         compiled_study: publication.compiled_study,
         mesh,
         region_resolution,
+        resolved_workloads: retained_workloads,
         analysis,
     })
 }

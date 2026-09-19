@@ -135,7 +135,7 @@ pub trait StructuralLinearExecutor: Send + Sync {
         &self,
         workload: &StructuralLinearWorkload,
         mesh: &SolverMeshArtifact,
-    ) -> Result<FeaRunResult, String>;
+    ) -> Result<runmat_analysis_fea::execution::StructuralLinearWorkloadResult, String>;
 }
 
 /// A fully resolved structural-linear solve at the placement boundary.
@@ -154,7 +154,8 @@ pub struct PreparedStructuralLinearRun {
 pub struct StructuralStudyStepNumericalResult {
     pub step_id: ProcedureStepId,
     pub solver_result_identity: runmat_analysis_fea::execution::SolverResultIdentity,
-    pub result: FeaRunResult,
+    pub result: runmat_analysis_fea::execution::StructuralLinearWorkloadResult,
+    pub numerical_receipt: runmat_analysis_fea::execution::StructuralLinearNumericalReceiptArtifact,
 }
 
 #[derive(Debug, Clone)]
@@ -238,8 +239,10 @@ pub struct StructuralStudyBucklingNumericalResult {
     pub frozen_project_digest: Option<runmat_execution::Digest>,
     pub preload_step_id: ProcedureStepId,
     pub buckling_step_id: ProcedureStepId,
-    pub preload_result: FeaRunResult,
+    pub preload_result: runmat_analysis_fea::execution::StructuralLinearWorkloadResult,
     pub preload_solver_result_identity: runmat_analysis_fea::execution::SolverResultIdentity,
+    pub preload_numerical_receipt:
+        runmat_analysis_fea::execution::StructuralLinearNumericalReceiptArtifact,
     pub prestress_state: runmat_analysis_fea::execution::CanonicalSemanticState,
     pub buckling_result: runmat_analysis_fea::execution::StructuralBucklingSolverResult,
     pub buckling_numerical_receipt:
@@ -251,8 +254,10 @@ pub struct StructuralStudyPrestressedModalNumericalResult {
     pub frozen_project_digest: Option<runmat_execution::Digest>,
     pub preload_step_id: ProcedureStepId,
     pub modal_step_id: ProcedureStepId,
-    pub preload_result: FeaRunResult,
+    pub preload_result: runmat_analysis_fea::execution::StructuralLinearWorkloadResult,
     pub preload_solver_result_identity: runmat_analysis_fea::execution::SolverResultIdentity,
+    pub preload_numerical_receipt:
+        runmat_analysis_fea::execution::StructuralLinearNumericalReceiptArtifact,
     pub prestress_state: runmat_analysis_fea::execution::CanonicalSemanticState,
     pub modal_result: runmat_analysis_fea::execution::StructuralModalSolverResult,
     pub modal_numerical_receipt: runmat_analysis_fea::execution::StructuralModalNumericalReceipt,
@@ -277,8 +282,10 @@ pub struct StructuralStudyPrestressedFrequencyNumericalResult {
     pub frozen_project_digest: Option<runmat_execution::Digest>,
     pub preload_step_id: ProcedureStepId,
     pub frequency_step_id: ProcedureStepId,
-    pub preload_result: FeaRunResult,
+    pub preload_result: runmat_analysis_fea::execution::StructuralLinearWorkloadResult,
     pub preload_solver_result_identity: runmat_analysis_fea::execution::SolverResultIdentity,
+    pub preload_numerical_receipt:
+        runmat_analysis_fea::execution::StructuralLinearNumericalReceiptArtifact,
     pub prestress_state: runmat_analysis_fea::execution::CanonicalSemanticState,
     pub reduction: StructuralStudyPrestressedFrequencyReductionResult,
     pub frequency: StructuralStudyFrequencyNumericalResult,
@@ -2221,7 +2228,10 @@ pub fn analysis_complete_structural_study_op(
         })?;
         let resolved_solver_options =
             AnalysisSolverOptions::StructuralLinear(linear.options.clone());
-        let run = analysis_admit_linear_static_run_with_id(linear, step.result, None)?;
+        step.numerical_receipt
+            .validate_against(step.solver_result_identity, &step.result)
+            .map_err(|error| study_sequence_contract_error(&prepared.study.context, error))?;
+        let run = analysis_admit_linear_static_run_with_id(linear, step.result.run, None)?;
         completed.push(CompletedStudyStep {
             step_id: step.step_id,
             solver_result_identity: step.solver_result_identity,
@@ -6486,6 +6496,7 @@ fn analysis_run_linear_static_with_executor(
                     )]),
                 )
             })?
+            .run
     } else {
         run_linear_static_with_options(
             &prepared.workload.model,

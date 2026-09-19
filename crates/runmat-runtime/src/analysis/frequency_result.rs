@@ -364,6 +364,10 @@ impl StructuralStudyFrequencyNumericalResult {
         &self.artifact_roots
     }
 
+    pub const fn step_id(&self) -> &runmat_analysis_core::ProcedureStepId {
+        &self.step_id
+    }
+
     pub(in crate::analysis) fn persistence(&self) -> StructuralFrequencyPersistence {
         StructuralFrequencyPersistence {
             object_catalog: self.object_catalog.clone(),

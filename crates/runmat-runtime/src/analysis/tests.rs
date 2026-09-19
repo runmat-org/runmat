@@ -99,11 +99,37 @@ mod topology_identity;
 const TRIANGLE_STL: &str = "solid tri\n  facet normal 0 0 1\n    outer loop\n      vertex 0 0 0\n      vertex 1 0 0\n      vertex 0 1 0\n    endloop\n  endfacet\nendsolid tri\n";
 const SIMPLE_STEP: &str = "ISO-10303-21;\nHEADER;\nFILE_NAME('Assembly_A');\nENDSEC;\nDATA;\n#10=PRODUCT('Bracket_A','',(#1));\nENDSEC;\nEND-ISO-10303-21;\n";
 
-fn test_solver_result_identity(
-    label: &str,
-) -> runmat_analysis_fea::execution::SolverResultIdentity {
-    serde_json::from_value(
-        serde_json::to_value(runmat_execution::Digest::sha256(label.as_bytes())).unwrap(),
+fn test_linear_workload_identity(
+    workload: &runmat_analysis_fea::execution::StructuralLinearWorkload,
+    mesh: &runmat_meshing_core::SolverMeshArtifact,
+) -> runmat_analysis_fea::execution::AnalysisWorkloadIdentity {
+    use runmat_analysis_fea::execution::{
+        AnalysisWorkKind, AnalysisWorkloadIdentity, ConstraintPlanIdentity, DiscretizationIdentity,
+        ExecutionPlanIdentity, NumericalPlanIdentity, OperatorIdentity, ProblemIdentity,
+        SequenceIdentity, StepIdentity, StudyIdentity,
+    };
+    let digest = runmat_execution::Digest::sha256(b"runtime-linear-completion-test");
+    let study = StudyIdentity::from_authored_digest(digest, None).unwrap();
+    let sequence = SequenceIdentity::from_solver_contract(&workload.model.sequence).unwrap();
+    let step =
+        StepIdentity::from_solver_contract(sequence, workload.procedure_step().unwrap()).unwrap();
+    let constraints = ConstraintPlanIdentity::new(step, digest, digest).unwrap();
+    let problem = ProblemIdentity::new(step, digest, None, constraints, Vec::new()).unwrap();
+    let mesh_digest = runmat_execution::Digest::from_bytes(*mesh.canonical_digest.bytes());
+    let discretization = DiscretizationIdentity::new(problem, mesh_digest, digest).unwrap();
+    let operator = OperatorIdentity::new(discretization, digest).unwrap();
+    let numerical = NumericalPlanIdentity::new(operator, digest).unwrap();
+    let execution = ExecutionPlanIdentity::new(numerical, digest).unwrap();
+    AnalysisWorkloadIdentity::new(
+        study,
+        step,
+        execution,
+        AnalysisWorkKind::Solve,
+        digest,
+        vec![
+            runmat_execution::Digest::sha256(workload.canonical_bytes().unwrap()),
+            mesh_digest,
+        ],
     )
     .unwrap()
 }
@@ -112,7 +138,7 @@ fn test_structural_sequence_result(
     spec: &AnalysisStudySpec,
     workload: &runmat_analysis_fea::execution::StructuralLinearWorkload,
     mesh: &runmat_meshing_core::SolverMeshArtifact,
-    result: runmat_analysis_fea::FeaRunResult,
+    result: runmat_analysis_fea::execution::StructuralLinearWorkloadResult,
 ) -> StructuralStudyNumericalResult {
     let _study = runmat_analysis_fea::execution::StudyIdentity::from_authored_digest(
         analysis_study_content_digest(spec),
@@ -126,8 +152,16 @@ fn test_structural_sequence_result(
     let step = workload.procedure_step().unwrap();
     let producer =
         runmat_analysis_fea::execution::StepIdentity::from_solver_contract(sequence, step).unwrap();
-    let solver_result_identity = test_solver_result_identity("prepared-study-result");
+    let source_workload = test_linear_workload_identity(workload, mesh);
+    let numerical_receipt =
+        runmat_analysis_fea::execution::StructuralLinearNumericalReceiptArtifact::new(
+            source_workload,
+            &result,
+        )
+        .unwrap();
+    let solver_result_identity = numerical_receipt.source_result();
     let fields = result
+        .run
         .fields
         .iter()
         .filter(|field| !field.is_empty() && field.as_host_f64().is_some())
@@ -157,6 +191,7 @@ fn test_structural_sequence_result(
             step_id: workload.step_id.clone(),
             solver_result_identity,
             result,
+            numerical_receipt,
         }],
         states,
     })
@@ -2456,7 +2491,7 @@ impl StructuralLinearExecutor for CanonicalStructuralExecutor {
         &self,
         workload: &runmat_analysis_fea::execution::StructuralLinearWorkload,
         mesh: &runmat_meshing_core::SolverMeshArtifact,
-    ) -> Result<runmat_analysis_fea::FeaRunResult, String> {
+    ) -> Result<runmat_analysis_fea::execution::StructuralLinearWorkloadResult, String> {
         use runmat_meshing_core::CanonicalMeshingContract;
 
         self.calls.fetch_add(1, Ordering::Relaxed);
@@ -2507,7 +2542,6 @@ impl StructuralLinearExecutor for CanonicalStructuralExecutor {
             .canonical_bytes()
             .map_err(|error| error.to_string())?,
         )
-        .map(|result| result.run)
         .map_err(|error| error.to_string())
     }
 }

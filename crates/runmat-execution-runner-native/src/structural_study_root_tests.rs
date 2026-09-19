@@ -83,7 +83,7 @@ fn typed_study_root_round_trips_exact_scientific_intent() {
         .unwrap();
     let planning = StructuralStudyPlanningPolicy {
         backend: runmat_analysis_fea::ComputeBackend::Cpu,
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+        formulation_requirement: realized.formulation_requirement,
         numerics: StructuralNumericalPlanningPolicy::production(),
     };
     let authored_study_digest = runmat_analysis_fea::study::structural_study_source_digest(
@@ -424,8 +424,17 @@ async fn typed_sweep_root_executes_geometry_mesh_compilation_and_solve_over_quic
                 let [entry] = imported.entries.as_slice() else {
                     panic!("typed structural sweep changed its case count");
                 };
-                let crate::ExactStructuralSweepTerminal::Succeeded(study) = &entry.terminal else {
-                    panic!("typed structural sweep case did not succeed");
+                let study = match &entry.terminal {
+                    crate::ExactStructuralSweepTerminal::Succeeded(study) => study,
+                    crate::ExactStructuralSweepTerminal::Failed(message) => {
+                        panic!("typed structural sweep case failed: {message}")
+                    }
+                    crate::ExactStructuralSweepTerminal::Cancelled => {
+                        panic!("typed structural sweep case was cancelled")
+                    }
+                    crate::ExactStructuralSweepTerminal::Indeterminate(message) => {
+                        panic!("typed structural sweep case was indeterminate: {message}")
+                    }
                 };
                 let compiled = study
                     .compiled_study
@@ -512,6 +521,7 @@ fn prepare_source(
         &resolved.material_catalog,
     )
     .unwrap();
+    let formulation_requirement = realized.formulation_requirement;
     prepare_structural_study_root(StructuralStudyRootPreparation {
         program_revision: revision,
         artifact_access: access,
@@ -521,7 +531,7 @@ fn prepare_source(
         materials: resolved.material_catalog,
         planning: StructuralStudyPlanningPolicy {
             backend: runmat_analysis_fea::ComputeBackend::Cpu,
-            formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+            formulation_requirement,
             numerics: StructuralNumericalPlanningPolicy::production(),
         },
         analysis_accelerator_requests: Vec::new(),
@@ -594,6 +604,7 @@ study static {
     geometry = geometry.part
     mesh = mesh.volume
     model = model.structure
+    require formulation = experimental
     analysis solve {
         structural static {}
     }

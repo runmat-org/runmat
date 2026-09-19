@@ -580,7 +580,7 @@ fn complete_linear_sequence(
             .local_run_id(intent.authored_study_digest, &step.procedure_step.step_id);
         let run = analysis_admit_linear_static_run_with_id(
             prepared_linear,
-            numerical.result,
+            numerical.result.run,
             Some(&assigned_run_id),
         )?;
         let mut authored_execution = step.authored_execution;

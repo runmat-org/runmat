@@ -154,7 +154,7 @@ pub(in crate::analysis) fn complete_prestressed_frequency_study(
             options: preload_options.clone(),
             context: prepared.context.clone(),
         },
-        numerical.preload_result,
+        numerical.preload_result.run,
         Some(&preload_run_id),
     )?;
     numerical.prestress_state.validate().map_err(|error| {

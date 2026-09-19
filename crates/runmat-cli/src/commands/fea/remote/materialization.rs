@@ -125,6 +125,7 @@ fn exact_result(
         compiled,
         exact.mesh.artifact,
         exact.mesh.evidence,
+        exact.resolved_workloads,
         numerical,
     )
     .map_err(anyhow::Error::msg)
@@ -317,7 +318,8 @@ fn study_result(
                     .map(|step| StructuralStudyStepNumericalResult {
                         step_id: step.step_id.clone(),
                         solver_result_identity: step.result_identity,
-                        result: step.result.run.clone(),
+                        result: step.result.clone(),
+                        numerical_receipt: step.numerical_receipt.clone(),
                     })
                     .collect(),
                 states: sequence
@@ -413,8 +415,9 @@ fn study_result(
                 frozen_project_digest: result.frozen_project_digest,
                 preload_step_id: buckling.preload_workload.step_id.clone(),
                 buckling_step_id: buckling.buckling_workload.step_id().clone(),
-                preload_result: buckling.preload_result.run.clone(),
+                preload_result: (*buckling.preload_result).clone(),
                 preload_solver_result_identity: buckling.preload_result_identity,
+                preload_numerical_receipt: buckling.preload_numerical_receipt.clone(),
                 prestress_state: buckling.prestress_state.clone(),
                 buckling_result: (*buckling.buckling_result).clone(),
                 buckling_numerical_receipt: buckling.buckling_numerical_receipt.clone(),
@@ -427,8 +430,9 @@ fn study_result(
                 frozen_project_digest: result.frozen_project_digest,
                 preload_step_id: modal.preload_workload.step_id.clone(),
                 modal_step_id: modal.modal_workload.step_id().clone(),
-                preload_result: modal.preload_result.run.clone(),
+                preload_result: (*modal.preload_result).clone(),
                 preload_solver_result_identity: modal.preload_result_identity,
+                preload_numerical_receipt: modal.preload_numerical_receipt.clone(),
                 prestress_state: modal.prestress_state.clone(),
                 modal_result: (*modal.modal_result).clone(),
                 modal_numerical_receipt: modal.modal_numerical_receipt.clone(),
@@ -452,8 +456,9 @@ fn study_result(
                     frozen_project_digest: result.frozen_project_digest,
                     preload_step_id: frequency.preload_workload.step_id.clone(),
                     frequency_step_id: frequency.frequency.resolved_workload.step_id().clone(),
-                    preload_result: frequency.preload_result.run.clone(),
+                    preload_result: (*frequency.preload_result).clone(),
                     preload_solver_result_identity: frequency.preload_result_identity,
+                    preload_numerical_receipt: frequency.preload_numerical_receipt.clone(),
                     prestress_state: frequency.prestress_state.clone(),
                     reduction: runmat_runtime::analysis::StructuralStudyPrestressedFrequencyReductionResult::Direct,
                     frequency: nested,
@@ -478,8 +483,9 @@ fn study_result(
                     frozen_project_digest: result.frozen_project_digest,
                     preload_step_id: frequency.preload_workload.step_id.clone(),
                     frequency_step_id: frequency.frequency.resolved_workload.step_id().clone(),
-                    preload_result: frequency.preload_result.run.clone(),
+                    preload_result: (*frequency.preload_result).clone(),
                     preload_solver_result_identity: frequency.preload_result_identity,
+                    preload_numerical_receipt: frequency.preload_numerical_receipt.clone(),
                     prestress_state: frequency.prestress_state.clone(),
                     reduction: runmat_runtime::analysis::StructuralStudyPrestressedFrequencyReductionResult::ModalReduced(Box::new(runmat_runtime::analysis::StructuralStudyPrestressedModalFrequencyReductionResult {
                         modal_step_id: frequency.modal_workload.step_id().clone(),

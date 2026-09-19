@@ -13,6 +13,7 @@ use crate::{
     execution::{StructuralStepWorkload, StructuralStudyWorkloads},
     fixtures::{fixture_model, FixtureId},
     properties::compile_property_map,
+    study::AnalysisStudyCompilationError,
     ComputeBackend,
 };
 
@@ -84,11 +85,71 @@ fn planner_creates_an_unresolved_modal_frequency_consumer() {
     assert_eq!(template.plan.reference_frequency_hz(), 12.0);
 }
 
+#[test]
+fn planner_rejects_a_formulation_requirement_different_from_the_compiled_study() {
+    let study = compiled(fixture_model(FixtureId::CantileverLinearStatic));
+    let mut planning = policy();
+    planning.formulation_requirement = FormulationRequirement::Production;
+
+    assert!(matches!(
+        plan_structural_study(&study, planning),
+        Err(super::StructuralStudyPlanningError::FormulationRequirementMismatch)
+    ));
+}
+
+#[test]
+fn compiled_identity_includes_the_formulation_requirement() {
+    let experimental = compiled(fixture_model(FixtureId::CantileverLinearStatic));
+    let mut production = experimental.clone();
+    production.formulation_requirement = FormulationRequirement::Production;
+
+    assert_ne!(
+        experimental.scientific_digest().unwrap(),
+        production.scientific_digest().unwrap()
+    );
+}
+
+#[test]
+fn compiled_identity_includes_and_validates_the_public_output_contract() {
+    let without_output = compiled(fixture_model(FixtureId::CantileverLinearStatic));
+    let mut with_output = without_output.clone();
+    let step_id = with_output.model.sequence.steps[0].step_id.0.clone();
+    with_output
+        .outputs
+        .push(runmat_analysis_core::AuthoredOutput {
+            output_id: "displacement".into(),
+            expression: runmat_analysis_core::AuthoredOutputExpression::AnalysisField {
+                step_id,
+                quantity: runmat_analysis_core::ObservationQuantity::Displacement,
+                location: runmat_analysis_core::FieldLocation::Node,
+            },
+            policy: runmat_analysis_core::AuthoredOutputPolicy::default(),
+        });
+
+    assert_ne!(
+        without_output.scientific_digest().unwrap(),
+        with_output.scientific_digest().unwrap()
+    );
+    with_output.outputs[0].expression =
+        runmat_analysis_core::AuthoredOutputExpression::AnalysisField {
+            step_id: "absent".into(),
+            quantity: runmat_analysis_core::ObservationQuantity::Displacement,
+            location: runmat_analysis_core::FieldLocation::Node,
+        };
+    assert!(matches!(
+        with_output.scientific_digest(),
+        Err(AnalysisStudyCompilationError::InvalidOutputs(_))
+    ));
+}
+
 fn compiled(model: runmat_analysis_core::AnalysisModel) -> CompiledAnalysisStudy {
     let properties = compile_property_map(&model, None).unwrap();
     CompiledAnalysisStudy {
         module_path: "tests/planning.fea".into(),
         study_id: "planning".into(),
+        formulation_requirement: FormulationRequirement::Experimental,
+        study_inputs: Vec::new(),
+        outputs: Vec::new(),
         model,
         properties,
         solver_mesh_digest: StableDigest::ZERO,

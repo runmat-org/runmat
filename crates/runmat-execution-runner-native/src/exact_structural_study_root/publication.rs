@@ -558,6 +558,7 @@ pub struct ExactStructuralStudyResult {
     pub compiled_study: Option<runmat_analysis_fea::study::CompiledAnalysisStudy>,
     pub mesh: ExactMeshingDagRunResult,
     pub region_resolution: TopologyRegionResolution,
+    pub resolved_workloads: StructuralStudyWorkloads,
     pub analysis: ExactStructuralStudyAnalysisResult,
 }
 

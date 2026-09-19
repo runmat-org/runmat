@@ -147,6 +147,7 @@ pub async fn execute_prepared_structural_study_locally(
         product.compiled,
         meshing.artifact,
         meshing.evidence,
+        product.workloads,
         numerical,
     )
     .map_err(protocol)

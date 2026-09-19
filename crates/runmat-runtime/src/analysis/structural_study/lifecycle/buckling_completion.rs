@@ -93,7 +93,7 @@ pub(in crate::analysis) fn complete_buckling_study(
             options: preload_options.clone(),
             context: prepared.context.clone(),
         },
-        numerical.preload_result,
+        numerical.preload_result.run,
         Some(&preload_run_id),
     )?;
     let preload_fields = crate::analysis::collect_semantic_state_fields(&preload_run.data);

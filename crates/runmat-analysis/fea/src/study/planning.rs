@@ -88,6 +88,9 @@ pub fn plan_structural_study(
     policy: StructuralStudyPlanningPolicy,
 ) -> Result<StructuralStudyWorkloads, StructuralStudyPlanningError> {
     policy.numerics.validate()?;
+    if policy.formulation_requirement != study.formulation_requirement {
+        return Err(StructuralStudyPlanningError::FormulationRequirementMismatch);
+    }
     if study.model.sequence.steps.iter().all(is_linear_static_step) {
         return plan_linear_sequence(study, policy);
     }
@@ -210,6 +213,8 @@ pub enum StructuralStudyPlanningError {
     },
     #[error("structural numerical planning policy is outside its finite bounds")]
     InvalidNumericalPolicy,
+    #[error("structural planning policy differs from the compiled formulation requirement")]
+    FormulationRequirementMismatch,
     #[error("procedure step `{step_id}` refinement limit exceeds the execution contract")]
     RefinementLimitOverflow { step_id: String },
     #[error(transparent)]

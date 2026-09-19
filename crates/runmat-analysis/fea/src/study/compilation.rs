@@ -1,8 +1,10 @@
 use std::collections::BTreeMap;
 
 use runmat_analysis_core::{
-    realize_analysis_model, AnalysisModel, AnalysisModelRealizationError,
-    AnalysisModelRealizationInput, AuthoredMaterialRef, MaterialModel, RealizedStudy,
+    realize_analysis_model, validate_authored_outputs, AnalysisModel,
+    AnalysisModelRealizationError, AnalysisModelRealizationInput, AuthoredMaterialRef,
+    AuthoredOutput, AuthoredStudyInputBinding, FormulationRequirement, MaterialModel,
+    RealizedStudy,
 };
 use runmat_canonical_codec::{encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
@@ -29,21 +31,32 @@ const STUDY_IDENTITY_LIMITS: CanonicalLimits =
 pub struct CompiledAnalysisStudy {
     pub module_path: String,
     pub study_id: String,
+    pub formulation_requirement: FormulationRequirement,
+    pub study_inputs: Vec<AuthoredStudyInputBinding>,
+    pub outputs: Vec<AuthoredOutput>,
     pub model: AnalysisModel,
     pub properties: CompiledPropertyMap,
     pub solver_mesh_digest: StableDigest,
 }
 
 impl CompiledAnalysisStudy {
+    fn validate_contract(&self) -> Result<(), AnalysisStudyCompilationError> {
+        if self.module_path.trim().is_empty() || self.study_id.trim().is_empty() {
+            return Err(AnalysisStudyCompilationError::InvalidStudyIdentity);
+        }
+        validate_study_inputs(&self.study_inputs)?;
+        validate_authored_outputs(&self.outputs, &self.model.sequence.steps)
+            .map_err(|error| AnalysisStudyCompilationError::InvalidOutputs(error.to_string()))?;
+        Ok(())
+    }
+
     pub fn validate_against(
         &self,
         mesh: &SolverMeshArtifact,
     ) -> Result<(), AnalysisStudyCompilationError> {
         mesh.validate_canonical()
             .map_err(|error| AnalysisStudyCompilationError::InvalidMesh(error.to_string()))?;
-        if self.module_path.trim().is_empty() || self.study_id.trim().is_empty() {
-            return Err(AnalysisStudyCompilationError::InvalidStudyIdentity);
-        }
+        self.validate_contract()?;
         if self.solver_mesh_digest != mesh.canonical_digest
             || self.properties.identity.mesh_digest != Some(mesh.canonical_digest)
             || self.properties.identity.geometry_id != self.model.geometry_id
@@ -60,10 +73,16 @@ impl CompiledAnalysisStudy {
 
     /// Identity of scientific intent and its exact topology, independent of execution placement.
     pub fn scientific_digest(&self) -> Result<Digest, AnalysisStudyCompilationError> {
+        self.validate_contract()?;
         let bytes = encode_contract(
             STUDY_IDENTITY_PREFIX,
             "compiled-analysis-study",
             &(
+                &self.module_path,
+                &self.study_id,
+                self.formulation_requirement,
+                &self.study_inputs,
+                &self.outputs,
                 &self.model,
                 &self.properties.identity,
                 self.solver_mesh_digest,
@@ -122,12 +141,31 @@ pub fn compile_analysis_study(
     let compiled = CompiledAnalysisStudy {
         module_path: study.module_path.clone(),
         study_id: study.study_id.clone(),
+        formulation_requirement: study.formulation_requirement,
+        study_inputs: study.study_inputs.clone(),
+        outputs: study.outputs.clone(),
         model,
         properties,
         solver_mesh_digest: mesh.canonical_digest,
     };
     compiled.validate_against(mesh)?;
     Ok(compiled)
+}
+
+fn validate_study_inputs(
+    inputs: &[AuthoredStudyInputBinding],
+) -> Result<(), AnalysisStudyCompilationError> {
+    let mut ids = std::collections::BTreeSet::new();
+    for input in inputs {
+        if input.input_id.trim().is_empty() || !ids.insert(input.input_id.as_str()) {
+            return Err(AnalysisStudyCompilationError::InvalidStudyInputs);
+        }
+        input
+            .value
+            .validate()
+            .map_err(|_| AnalysisStudyCompilationError::InvalidStudyInputs)?;
+    }
+    Ok(())
 }
 
 fn validate_geometry_mesh_identity(
@@ -157,6 +195,10 @@ pub enum AnalysisStudyCompilationError {
     GeometryRevisionOverflow,
     #[error("compiled study identity differs from its model or mesh")]
     IdentityMismatch,
+    #[error("compiled study inputs are invalid or have duplicate identifiers")]
+    InvalidStudyInputs,
+    #[error("compiled study outputs are invalid: {0}")]
+    InvalidOutputs(String),
     #[error("compiled study identity encoding failed: {0}")]
     Identity(String),
     #[error(transparent)]

@@ -1,4 +1,4 @@
-use runmat_analysis_fea::study::CompiledAnalysisStudy;
+use runmat_analysis_fea::{execution::StructuralStudyWorkloads, study::CompiledAnalysisStudy};
 use runmat_execution::Digest;
 use runmat_meshing_core::{MeshingEvidence, SolverMeshArtifact};
 
@@ -14,6 +14,7 @@ pub struct StructuralStudyResult {
     compiled: CompiledAnalysisStudy,
     mesh: SolverMeshArtifact,
     meshing_evidence: MeshingEvidence,
+    workloads: StructuralStudyWorkloads,
     numerical: StructuralStudyNumericalResult,
 }
 
@@ -22,6 +23,7 @@ impl StructuralStudyResult {
         compiled: CompiledAnalysisStudy,
         mesh: SolverMeshArtifact,
         meshing_evidence: MeshingEvidence,
+        workloads: StructuralStudyWorkloads,
         numerical: StructuralStudyNumericalResult,
     ) -> Result<Self, String> {
         compiled
@@ -30,10 +32,21 @@ impl StructuralStudyResult {
         meshing_evidence
             .validate(&mesh)
             .map_err(|error| error.to_string())?;
+        workloads.validate().map_err(|error| error.to_string())?;
+        if workloads
+            .authored_model()
+            .map_err(|error| error.to_string())?
+            != &compiled.model
+        {
+            return Err("structural study workloads differ from the compiled model".into());
+        }
+        validate_numerical_kind_and_steps(&workloads, &numerical)?;
+        validate_numerical_evidence(&numerical)?;
         Ok(Self {
             compiled,
             mesh,
             meshing_evidence,
+            workloads,
             numerical,
         })
     }
@@ -56,6 +69,10 @@ impl StructuralStudyResult {
         &self.meshing_evidence
     }
 
+    pub const fn workloads(&self) -> &StructuralStudyWorkloads {
+        &self.workloads
+    }
+
     pub const fn numerical(&self) -> &StructuralStudyNumericalResult {
         &self.numerical
     }
@@ -66,13 +83,266 @@ impl StructuralStudyResult {
         CompiledAnalysisStudy,
         SolverMeshArtifact,
         MeshingEvidence,
+        StructuralStudyWorkloads,
         StructuralStudyNumericalResult,
     ) {
         (
             self.compiled,
             self.mesh,
             self.meshing_evidence,
+            self.workloads,
             self.numerical,
         )
     }
+}
+
+fn validate_numerical_evidence(numerical: &StructuralStudyNumericalResult) -> Result<(), String> {
+    match numerical {
+        StructuralStudyNumericalResult::LinearSequence(result) => {
+            for step in &result.steps {
+                step.numerical_receipt
+                    .validate_against(step.solver_result_identity, &step.result)
+                    .map_err(|error| error.to_string())?;
+            }
+            for state in &result.states {
+                state.validate().map_err(|error| error.to_string())?;
+            }
+        }
+        StructuralStudyNumericalResult::StructuralModal(result) => result
+            .numerical_receipt
+            .validate_against(result.numerical_receipt.source_result(), &result.result)
+            .map_err(|error| error.to_string())?,
+        StructuralStudyNumericalResult::StructuralModalTransient(result) => {
+            result
+                .modal_numerical_receipt
+                .validate_against(
+                    result.modal_numerical_receipt.source_result(),
+                    &result.modal_result,
+                )
+                .map_err(|error| error.to_string())?;
+            result
+                .transient_numerical_receipt
+                .validate_for_result(&result.transient_result)
+                .map_err(|error| error.to_string())?;
+            result
+                .basis_state
+                .validate()
+                .map_err(|error| error.to_string())?;
+        }
+        StructuralStudyNumericalResult::StructuralModalResponseSpectrum(result) => {
+            result
+                .modal_numerical_receipt
+                .validate_against(
+                    result.modal_numerical_receipt.source_result(),
+                    &result.modal_result,
+                )
+                .map_err(|error| error.to_string())?;
+            result
+                .response_numerical_receipt
+                .validate_against(
+                    result.response_numerical_receipt.source_result(),
+                    &result.response_result,
+                )
+                .map_err(|error| error.to_string())?;
+            result
+                .basis_state
+                .validate()
+                .map_err(|error| error.to_string())?;
+            result
+                .envelope_state
+                .validate()
+                .map_err(|error| error.to_string())?;
+        }
+        StructuralStudyNumericalResult::StructuralRandomResponse(result) => {
+            result
+                .modal_numerical_receipt
+                .validate_against(
+                    result.modal_numerical_receipt.source_result(),
+                    &result.modal_result,
+                )
+                .map_err(|error| error.to_string())?;
+            result
+                .response_numerical_receipt
+                .validate_against(
+                    result.response_numerical_receipt.source_result(),
+                    &result.response_result,
+                )
+                .map_err(|error| error.to_string())?;
+            result
+                .basis_state
+                .validate()
+                .map_err(|error| error.to_string())?;
+            result
+                .statistics_state
+                .validate()
+                .map_err(|error| error.to_string())?;
+        }
+        StructuralStudyNumericalResult::StructuralBuckling(result) => {
+            validate_linear_producer(
+                &result.preload_numerical_receipt,
+                result.preload_solver_result_identity,
+                &result.preload_result,
+            )?;
+            result
+                .buckling_numerical_receipt
+                .validate_against(
+                    result.buckling_numerical_receipt.source_result(),
+                    &result.buckling_result,
+                )
+                .map_err(|error| error.to_string())?;
+            result
+                .prestress_state
+                .validate()
+                .map_err(|error| error.to_string())?;
+        }
+        StructuralStudyNumericalResult::StructuralPrestressedModal(result) => {
+            validate_linear_producer(
+                &result.preload_numerical_receipt,
+                result.preload_solver_result_identity,
+                &result.preload_result,
+            )?;
+            result
+                .modal_numerical_receipt
+                .validate_against(
+                    result.modal_numerical_receipt.source_result(),
+                    &result.modal_result,
+                )
+                .map_err(|error| error.to_string())?;
+            result
+                .prestress_state
+                .validate()
+                .map_err(|error| error.to_string())?;
+        }
+        StructuralStudyNumericalResult::StructuralPrestressedFrequency(result) => {
+            validate_linear_producer(
+                &result.preload_numerical_receipt,
+                result.preload_solver_result_identity,
+                &result.preload_result,
+            )?;
+            result
+                .prestress_state
+                .validate()
+                .map_err(|error| error.to_string())?;
+            if let super::StructuralStudyPrestressedFrequencyReductionResult::ModalReduced(
+                reduction,
+            ) = &result.reduction
+            {
+                reduction
+                    .modal_numerical_receipt
+                    .validate_against(
+                        reduction.modal_numerical_receipt.source_result(),
+                        &reduction.modal_result,
+                    )
+                    .map_err(|error| error.to_string())?;
+                reduction
+                    .basis_state
+                    .validate()
+                    .map_err(|error| error.to_string())?;
+            }
+        }
+        StructuralStudyNumericalResult::StructuralTransient(result) => result
+            .numerical_receipt
+            .validate_for_result(&result.result)
+            .map_err(|error| error.to_string())?,
+        StructuralStudyNumericalResult::StructuralFrequency(_) => {}
+    }
+    Ok(())
+}
+
+fn validate_linear_producer(
+    receipt: &runmat_analysis_fea::execution::StructuralLinearNumericalReceiptArtifact,
+    identity: runmat_analysis_fea::execution::SolverResultIdentity,
+    result: &runmat_analysis_fea::execution::StructuralLinearWorkloadResult,
+) -> Result<(), String> {
+    receipt
+        .validate_against(identity, result)
+        .map_err(|error| error.to_string())
+}
+
+fn validate_numerical_kind_and_steps(
+    workloads: &StructuralStudyWorkloads,
+    numerical: &StructuralStudyNumericalResult,
+) -> Result<(), String> {
+    let expected = workloads.step_ids().map_err(|error| error.to_string())?;
+    let actual = match numerical {
+        StructuralStudyNumericalResult::LinearSequence(result) => result
+            .steps
+            .iter()
+            .map(|step| step.step_id.clone())
+            .collect(),
+        StructuralStudyNumericalResult::StructuralModal(result) => vec![result.step_id.clone()],
+        StructuralStudyNumericalResult::StructuralModalTransient(result) => {
+            vec![
+                result.modal_step_id.clone(),
+                result.transient_step_id.clone(),
+            ]
+        }
+        StructuralStudyNumericalResult::StructuralModalResponseSpectrum(result) => {
+            vec![
+                result.modal_step_id.clone(),
+                result.response_step_id.clone(),
+            ]
+        }
+        StructuralStudyNumericalResult::StructuralRandomResponse(result) => {
+            vec![
+                result.modal_step_id.clone(),
+                result.response_step_id.clone(),
+            ]
+        }
+        StructuralStudyNumericalResult::StructuralBuckling(result) => {
+            vec![
+                result.preload_step_id.clone(),
+                result.buckling_step_id.clone(),
+            ]
+        }
+        StructuralStudyNumericalResult::StructuralPrestressedModal(result) => {
+            vec![result.preload_step_id.clone(), result.modal_step_id.clone()]
+        }
+        StructuralStudyNumericalResult::StructuralPrestressedFrequency(result) => {
+            let mut steps = vec![result.preload_step_id.clone()];
+            if let super::StructuralStudyPrestressedFrequencyReductionResult::ModalReduced(
+                reduction,
+            ) = &result.reduction
+            {
+                steps.push(reduction.modal_step_id.clone());
+            }
+            steps.push(result.frequency_step_id.clone());
+            steps
+        }
+        StructuralStudyNumericalResult::StructuralTransient(result) => vec![result.step_id.clone()],
+        StructuralStudyNumericalResult::StructuralFrequency(result) => {
+            vec![result.step_id().clone()]
+        }
+    };
+    if actual != expected {
+        return Err("structural numerical result differs from its exact workload steps".into());
+    }
+    let compatible = matches!(
+        (workloads, numerical),
+        (
+            StructuralStudyWorkloads::LinearSequence { .. },
+            StructuralStudyNumericalResult::LinearSequence(_)
+        ) | (
+            StructuralStudyWorkloads::StructuralTransient { .. },
+            StructuralStudyNumericalResult::StructuralTransient(_)
+        ) | (
+            StructuralStudyWorkloads::StructuralFrequency { .. },
+            StructuralStudyNumericalResult::StructuralFrequency(_)
+        ) | (
+            StructuralStudyWorkloads::StructuralModal { .. },
+            StructuralStudyNumericalResult::StructuralModal(_)
+        ) | (
+            StructuralStudyWorkloads::HeterogeneousSequence { .. },
+            StructuralStudyNumericalResult::StructuralModalTransient(_)
+                | StructuralStudyNumericalResult::StructuralModalResponseSpectrum(_)
+                | StructuralStudyNumericalResult::StructuralRandomResponse(_)
+                | StructuralStudyNumericalResult::StructuralBuckling(_)
+                | StructuralStudyNumericalResult::StructuralPrestressedModal(_)
+                | StructuralStudyNumericalResult::StructuralPrestressedFrequency(_)
+        )
+    );
+    if !compatible {
+        return Err("structural numerical result kind differs from its exact workloads".into());
+    }
+    Ok(())
 }

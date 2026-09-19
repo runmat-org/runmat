@@ -297,6 +297,20 @@ fn structural_buckling_completion_publishes_ordinary_runtime_results() {
             topology_digest,
         )
         .unwrap();
+    let constraint_result =
+        runmat_analysis_fea::constraints::CanonicalStructuralConstraintResult::recover(
+            &constraints,
+            &meshing_output.artifact,
+            &preload.run.fields,
+        )
+        .unwrap();
+    let preload =
+        runmat_analysis_fea::execution::StructuralLinearWorkloadResult::with_linearization(
+            preload.run,
+            constraint_result,
+            preload.linearization,
+        )
+        .unwrap();
     let sequence =
         runmat_analysis_fea::execution::SequenceIdentity::from_solver_contract(&model.sequence)
             .unwrap();
@@ -305,11 +319,13 @@ fn structural_buckling_completion_publishes_ordinary_runtime_results() {
         &model.sequence.steps[0],
     )
     .unwrap();
-    let source_result = runmat_analysis_fea::execution::SolverResultIdentity::from_step_result(
-        producer,
-        preload.linearization.identity().digest(),
-    )
-    .unwrap();
+    let preload_numerical_receipt =
+        runmat_analysis_fea::execution::StructuralLinearNumericalReceiptArtifact::new(
+            linear_test_workload_identity(&preload_workload, &meshing_output.artifact),
+            &preload,
+        )
+        .unwrap();
+    let source_result = preload_numerical_receipt.source_result();
     let declaration = model.sequence.steps[0]
         .state_outputs
         .iter()
@@ -324,7 +340,7 @@ fn structural_buckling_completion_publishes_ordinary_runtime_results() {
             source_result,
             payload:
                 runmat_analysis_fea::execution::CanonicalSemanticStatePayload::StructuralLinearization {
-                    linearization: Box::new(preload.linearization),
+                    linearization: Box::new(preload.linearization.clone().unwrap()),
                 },
         },
     )
@@ -357,7 +373,8 @@ fn structural_buckling_completion_publishes_ordinary_runtime_results() {
                 frozen_project_digest: None,
                 preload_step_id,
                 buckling_step_id,
-                preload_result: preload.run,
+                preload_numerical_receipt,
+                preload_result: preload,
                 preload_solver_result_identity: source_result,
                 prestress_state: state,
                 buckling_result,
@@ -466,6 +483,20 @@ fn structural_prestressed_modal_completion_publishes_exact_state_and_modes() {
             topology_digest,
         )
         .unwrap();
+    let constraint_result =
+        runmat_analysis_fea::constraints::CanonicalStructuralConstraintResult::recover(
+            &constraints,
+            &meshing_output.artifact,
+            &preload.run.fields,
+        )
+        .unwrap();
+    let preload =
+        runmat_analysis_fea::execution::StructuralLinearWorkloadResult::with_linearization(
+            preload.run,
+            constraint_result,
+            preload.linearization,
+        )
+        .unwrap();
     let sequence =
         runmat_analysis_fea::execution::SequenceIdentity::from_solver_contract(&model.sequence)
             .unwrap();
@@ -474,11 +505,13 @@ fn structural_prestressed_modal_completion_publishes_exact_state_and_modes() {
         &model.sequence.steps[0],
     )
     .unwrap();
-    let source_result = runmat_analysis_fea::execution::SolverResultIdentity::from_step_result(
-        producer,
-        preload.linearization.identity().digest(),
-    )
-    .unwrap();
+    let preload_numerical_receipt =
+        runmat_analysis_fea::execution::StructuralLinearNumericalReceiptArtifact::new(
+            linear_test_workload_identity(&preload_workload, &meshing_output.artifact),
+            &preload,
+        )
+        .unwrap();
+    let source_result = preload_numerical_receipt.source_result();
     let declaration = model.sequence.steps[0]
         .state_outputs
         .iter()
@@ -493,7 +526,7 @@ fn structural_prestressed_modal_completion_publishes_exact_state_and_modes() {
             source_result,
             payload:
                 runmat_analysis_fea::execution::CanonicalSemanticStatePayload::StructuralLinearization {
-                    linearization: Box::new(preload.linearization),
+                    linearization: Box::new(preload.linearization.clone().unwrap()),
                 },
         },
     )
@@ -527,7 +560,8 @@ fn structural_prestressed_modal_completion_publishes_exact_state_and_modes() {
                 frozen_project_digest: None,
                 preload_step_id,
                 modal_step_id,
-                preload_result: preload.run,
+                preload_numerical_receipt,
+                preload_result: preload,
                 preload_solver_result_identity: source_result,
                 prestress_state: state,
                 modal_result,
@@ -1927,6 +1961,20 @@ fn modal_test_workload_identity(
     )
 }
 
+fn linear_test_workload_identity(
+    workload: &runmat_analysis_fea::execution::StructuralLinearWorkload,
+    mesh: &runmat_meshing_core::SolverMeshArtifact,
+) -> runmat_analysis_fea::execution::AnalysisWorkloadIdentity {
+    test_analysis_workload_identity(
+        &workload.model,
+        workload.procedure_step().unwrap(),
+        runmat_analysis_fea::execution::AnalysisWorkKind::Solve,
+        runmat_execution::Digest::sha256(workload.canonical_bytes().unwrap()),
+        mesh,
+        "runtime-linear-completion-test",
+    )
+}
+
 fn buckling_test_workload_identity(
     workload: &runmat_analysis_fea::execution::StructuralBucklingWorkload,
     mesh: &runmat_meshing_core::SolverMeshArtifact,
@@ -2046,7 +2094,7 @@ fn only_workload(
 fn sequence_result(
     intent: &PreparedStructuralStudyIntent,
     mesh: &runmat_meshing_core::SolverMeshArtifact,
-    result: runmat_analysis_fea::FeaRunResult,
+    result: runmat_analysis_fea::execution::StructuralLinearWorkloadResult,
 ) -> StructuralStudyNumericalResult {
     let workload = only_workload(intent);
     let _study = runmat_analysis_fea::execution::StudyIdentity::from_authored_digest(
@@ -2061,8 +2109,16 @@ fn sequence_result(
     let step = workload.procedure_step().unwrap();
     let producer =
         runmat_analysis_fea::execution::StepIdentity::from_solver_contract(sequence, step).unwrap();
-    let solver_result_identity = test_solver_result_identity("intent-result");
+    let source_workload = linear_test_workload_identity(&workload, mesh);
+    let numerical_receipt =
+        runmat_analysis_fea::execution::StructuralLinearNumericalReceiptArtifact::new(
+            source_workload,
+            &result,
+        )
+        .unwrap();
+    let solver_result_identity = numerical_receipt.source_result();
     let fields = result
+        .run
         .fields
         .iter()
         .filter(|field| !field.is_empty() && field.as_host_f64().is_some())
@@ -2095,6 +2151,7 @@ fn sequence_result(
             step_id: workload.step_id.clone(),
             solver_result_identity,
             result,
+            numerical_receipt,
         }],
         states,
     })
