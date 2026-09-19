@@ -562,7 +562,7 @@ mod tests {
     fn heat_generation(value: f64) -> RealizedExcitations {
         RealizedExcitations::new(vec![RealizedExcitation {
             excitation_id: ExcitationId("uniform_heat".into()),
-            case_id: ExcitationCaseId("uniform_heat_case".into()),
+            case_ids: vec![ExcitationCaseId("uniform_heat_case".into())],
             signal_id: SignalId("uniform_heat_signal".into()),
             quantity: PhysicalQuantityKind::HeatGenerationDensity,
             sample: crate::excitation::ProjectionSample::Static,

@@ -106,7 +106,7 @@ mod tests {
     fn temperature(id: &str, target: RealizedExcitationTarget, kelvin: f64) -> RealizedExcitation {
         RealizedExcitation {
             excitation_id: ExcitationId(id.to_string()),
-            case_id: ExcitationCaseId(format!("{id}.case")),
+            case_ids: vec![ExcitationCaseId(format!("{id}.case"))],
             signal_id: SignalId(format!("{id}.signal")),
             quantity: PhysicalQuantityKind::Temperature,
             sample: crate::excitation::ProjectionSample::Static,

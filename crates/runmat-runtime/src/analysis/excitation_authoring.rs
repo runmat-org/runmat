@@ -34,7 +34,6 @@ pub(crate) fn append_constant_excitation(
         ConstantExcitation::Force(value) => append_vector(
             model,
             &id,
-            case_id.clone(),
             ExcitationTarget::Region(RegionTarget::boundary(region_id)),
             value.map(Force::new),
             ExcitationDistribution::PreserveResultant,
@@ -44,7 +43,6 @@ pub(crate) fn append_constant_excitation(
         ConstantExcitation::AcousticPressure(value) => append_scalar(
             model,
             &id,
-            case_id.clone(),
             ExcitationTarget::Region(RegionTarget::boundary(region_id)),
             Pressure::new(value),
             ExcitationDistribution::IntensityPerArea,
@@ -54,7 +52,6 @@ pub(crate) fn append_constant_excitation(
         ConstantExcitation::HeatGeneration(value) => append_scalar(
             model,
             &id,
-            case_id.clone(),
             ExcitationTarget::Region(RegionTarget::volume(region_id)),
             HeatGenerationDensity::new(value),
             ExcitationDistribution::IntensityPerVolume,
@@ -68,7 +65,6 @@ pub(crate) fn append_constant_excitation(
         } => append_complex_scalar(
             model,
             &id,
-            case_id.clone(),
             ExcitationTarget::Region(RegionTarget::volume(region_id)),
             ElectricCurrent::new(real_amperes),
             ElectricCurrent::new(imaginary_amperes),
@@ -96,7 +92,6 @@ pub(crate) fn append_whole_model_heat_generation(
     append_scalar(
         model,
         &id,
-        case_id.clone(),
         ExcitationTarget::WholeModel,
         HeatGenerationDensity::new(watts_per_cubic_meter),
         ExcitationDistribution::IntensityPerVolume,
@@ -113,7 +108,6 @@ pub(crate) fn append_whole_model_heat_generation(
 fn append_scalar<Q>(
     model: &mut AnalysisModel,
     id: &str,
-    case_id: ExcitationCaseId,
     target: ExcitationTarget,
     value: Q,
     distribution: ExcitationDistribution,
@@ -123,7 +117,6 @@ fn append_scalar<Q>(
     append(
         model,
         id,
-        case_id,
         target,
         SignalShape::Scalar,
         SignalRepresentation::Constant(SignalValue::Scalar(value)),
@@ -137,7 +130,6 @@ fn append_scalar<Q>(
 fn append_vector<Q>(
     model: &mut AnalysisModel,
     id: &str,
-    case_id: ExcitationCaseId,
     target: ExcitationTarget,
     value: [Q; 3],
     distribution: ExcitationDistribution,
@@ -147,7 +139,6 @@ fn append_vector<Q>(
     append(
         model,
         id,
-        case_id,
         target,
         SignalShape::Vector3,
         SignalRepresentation::Constant(SignalValue::Vector3(value)),
@@ -161,7 +152,6 @@ fn append_vector<Q>(
 fn append_complex_scalar<Q>(
     model: &mut AnalysisModel,
     id: &str,
-    case_id: ExcitationCaseId,
     target: ExcitationTarget,
     real: Q,
     imaginary: Q,
@@ -188,7 +178,6 @@ fn append_complex_scalar<Q>(
     append(
         model,
         id,
-        case_id,
         target,
         SignalShape::Scalar,
         representation,
@@ -206,7 +195,6 @@ fn append_complex_scalar<Q>(
 fn append<Q>(
     model: &mut AnalysisModel,
     id: &str,
-    case_id: ExcitationCaseId,
     target: ExcitationTarget,
     shape: SignalShape,
     representation: SignalRepresentation<Q>,
@@ -233,7 +221,6 @@ fn append<Q>(
     }));
     model.excitations.push(action(AnalysisExcitation {
         excitation_id: ExcitationId(id.to_string()),
-        case_id,
         target,
         frame: CoordinateFrame::Global,
         direction: None,

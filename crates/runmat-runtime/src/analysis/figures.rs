@@ -2668,7 +2668,7 @@ mod tests {
                 "wrench_moment.signal",
                 [Moment::new(0.0), Moment::new(0.0), Moment::new(4.0)],
             )));
-        let mut wrench_force = test_action(
+        let wrench_force = test_action(
             "wrench_force",
             "wrench_axis_region",
             "wrench_force.signal",
@@ -2676,8 +2676,7 @@ mod tests {
             ExcitationAction::Force,
             Some("wrench"),
         );
-        wrench_force.excitation_mut().case_id = ExcitationCaseId("wrench.case".to_string());
-        let mut wrench_moment = test_action(
+        let wrench_moment = test_action(
             "wrench_moment",
             "wrench_axis_region",
             "wrench_moment.signal",
@@ -2685,7 +2684,6 @@ mod tests {
             ExcitationAction::Moment,
             Some("wrench"),
         );
-        wrench_moment.excitation_mut().case_id = ExcitationCaseId("wrench.case".to_string());
         model.excitations.extend([wrench_force, wrench_moment]);
         model.excitation_cases = vec![ExcitationCase {
             case_id: ExcitationCaseId("wrench.case".to_string()),
@@ -2719,7 +2717,6 @@ mod tests {
     ) -> ExcitationAction {
         let mut action = wrap(AnalysisExcitation {
             excitation_id: ExcitationId(id.to_string()),
-            case_id: ExcitationCaseId(format!("{id}.case")),
             target: ExcitationTarget::Region(
                 if matches!(distribution, ExcitationDistribution::IntensityPerVolume) {
                     RegionTarget::volume(region_id)

@@ -80,14 +80,12 @@ fn exact_signal_evidence(sample_count: usize) -> SignalApproximationEvidence {
 
 fn excitation(
     id: &str,
-    case_id: ExcitationCaseId,
     target: ExcitationTarget,
     signal_id: SignalId,
     distribution: ExcitationDistribution,
 ) -> AnalysisExcitation {
     AnalysisExcitation {
         excitation_id: ExcitationId(id.to_string()),
-        case_id,
         target,
         frame: CoordinateFrame::Global,
         direction: None,
@@ -120,7 +118,6 @@ fn replace_with_force(model: &mut AnalysisModel, id: &str, region_id: &str, forc
     })];
     model.excitations = vec![ExcitationAction::Force(excitation(
         id,
-        case_id.clone(),
         ExcitationTarget::Region(RegionTarget::authored(region_id)),
         signal_id,
         ExcitationDistribution::PreserveResultant,
@@ -153,7 +150,6 @@ fn replace_with_electric_current(
     })];
     model.excitations = vec![ExcitationAction::ElectricCurrent(excitation(
         id,
-        case_id.clone(),
         ExcitationTarget::Region(RegionTarget::volume(region_id)),
         signal_id,
         ExcitationDistribution::Concentrated,
@@ -193,7 +189,6 @@ fn append_inlet_velocity_history(model: &mut AnalysisModel, id: &str, samples: [
     }));
     let mut inlet = excitation(
         &excitation_id.0,
-        case_id.clone(),
         ExcitationTarget::Region(RegionTarget::boundary("fluid_inlet")),
         signal_id,
         ExcitationDistribution::TopologyField,

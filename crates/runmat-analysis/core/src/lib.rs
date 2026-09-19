@@ -21,6 +21,7 @@ pub mod problem {
     pub mod materials;
     pub mod model;
     pub mod model_authoring;
+    pub mod model_realization;
     pub mod prescribed_value;
     pub mod quantity;
     pub mod random_vibration;
@@ -166,6 +167,9 @@ pub use problem::model_authoring::{
     AuthoredMaterialAssignment, AuthoredMaterialRef, AuthoredMaterialSource, AuthoredModel,
     AuthoredModelError, AuthoredModelInclude, AuthoredModelInputRef, AuthoredModelRef,
     AuthoredPropertyTarget, AuthoredRegionSource,
+};
+pub use problem::model_realization::{
+    realize_analysis_model, AnalysisModelRealizationError, AnalysisModelRealizationInput,
 };
 pub use problem::prescribed_value::{PrescribedQuantity, PrescribedValue};
 pub use problem::quantity::{
@@ -320,7 +324,6 @@ mod tests {
             })],
             excitations: vec![ExcitationAction::Force(AnalysisExcitation {
                 excitation_id: ExcitationId("tip_force".to_string()),
-                case_id: ExcitationCaseId("primary_case".to_string()),
                 target: ExcitationTarget::Region(RegionTarget::boundary("tip")),
                 frame: CoordinateFrame::Global,
                 direction: None,
@@ -719,7 +722,6 @@ mod tests {
         )];
         let excitation = AnalysisExcitation {
             excitation_id: ExcitationId("tip_pressure".to_string()),
-            case_id: ExcitationCaseId("service_case".to_string()),
             target: ExcitationTarget::Region(RegionTarget::boundary("tip")),
             frame: CoordinateFrame::Global,
             direction: None,
@@ -750,7 +752,6 @@ mod tests {
         )];
         model.excitations = vec![ExcitationAction::Force(AnalysisExcitation {
             excitation_id: ExcitationId("tip_force_action".to_string()),
-            case_id: ExcitationCaseId("service_case".to_string()),
             target: ExcitationTarget::Region(RegionTarget::boundary("tip")),
             frame: CoordinateFrame::Global,
             direction: Some(Direction {
@@ -792,7 +793,7 @@ mod tests {
     }
 
     #[test]
-    fn excitation_case_membership_is_reciprocal_and_exhaustive() {
+    fn excitation_case_membership_is_owned_by_cases_and_exhaustive() {
         let mut model = valid_model();
         model.signals = vec![force_signal(
             "tip_force",
@@ -800,7 +801,6 @@ mod tests {
         )];
         model.excitations = vec![ExcitationAction::Force(AnalysisExcitation {
             excitation_id: ExcitationId("tip_force_action".to_string()),
-            case_id: ExcitationCaseId("declared_owner".to_string()),
             target: ExcitationTarget::Region(RegionTarget::boundary("tip")),
             frame: CoordinateFrame::Global,
             direction: Some(Direction {
@@ -823,10 +823,14 @@ mod tests {
             activation: ExcitationCaseActivation::Always,
         }];
 
-        assert!(matches!(
-            validate_model(&model),
-            Err(AnalysisValidationError::InvalidExcitationCase { .. })
-        ));
+        validate_model(&model).expect("the case action inventory is authoritative");
+
+        model.excitation_cases.push(ExcitationCase {
+            case_id: ExcitationCaseId("second_case".to_string()),
+            action_ids: vec![ExcitationId("tip_force_action".to_string())],
+            activation: ExcitationCaseActivation::Always,
+        });
+        validate_model(&model).expect("one physical action may participate in several cases");
     }
 
     #[test]
@@ -838,7 +842,6 @@ mod tests {
         )];
         model.excitations = vec![ExcitationAction::Force(AnalysisExcitation {
             excitation_id: ExcitationId("tip_force_action".to_string()),
-            case_id: ExcitationCaseId("service_case".to_string()),
             target: ExcitationTarget::Region(RegionTarget::boundary("tip")),
             frame: CoordinateFrame::Global,
             direction: None,

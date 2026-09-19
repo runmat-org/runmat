@@ -233,7 +233,7 @@ mod tests {
         AnalysisBoundary, AnalysisConnector, AnalysisConstraint, AnalysisExcitation,
         AnalysisInterface, AnalysisInterfaceKind, AnalysisModelId, AnalysisSequence,
         BoundaryOperator, CompressionPolicy, ConnectorKind, ContactFriction, ContactInterfaceModel,
-        CoordinateFrame, ExcitationAction, ExcitationCaseId, ExcitationDistribution, ExcitationId,
+        CoordinateFrame, ExcitationAction, ExcitationDistribution, ExcitationId,
         ExcitationKinematics, FieldLocation, InitialCondition, InitialConditionTarget,
         InitialConditionValue, InitialValue, ObservationComponent, ObservationCostEstimate,
         ObservationId, ObservationPurpose, ObservationQuantity, ObservationRequest,
@@ -351,7 +351,6 @@ mod tests {
             signals: Vec::new(),
             excitations: vec![ExcitationAction::Force(AnalysisExcitation {
                 excitation_id: ExcitationId("force".into()),
-                case_id: ExcitationCaseId("case".into()),
                 target: ExcitationTarget::Region(RegionTarget::boundary("face_000007")),
                 frame: CoordinateFrame::Global,
                 direction: None,

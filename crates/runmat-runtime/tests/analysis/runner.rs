@@ -368,7 +368,6 @@ fn append_fixture_excitations(model: &mut AnalysisModel, specs: Vec<FixtureExcit
         model.signals.push(signal);
         model.excitations.push(action(AnalysisExcitation {
             excitation_id: excitation_id.clone(),
-            case_id: case_id.clone(),
             target: ExcitationTarget::Region(target),
             frame: CoordinateFrame::Global,
             direction: None,
@@ -634,7 +633,6 @@ fn append_signal_excitation(
         .excitations
         .push(action(runmat_analysis_core::AnalysisExcitation {
             excitation_id: excitation_id.clone(),
-            case_id: case_id.clone(),
             target,
             frame: runmat_analysis_core::CoordinateFrame::Global,
             direction,

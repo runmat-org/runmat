@@ -17,7 +17,6 @@ pub struct ExcitationCaseId(pub String);
 #[serde(deny_unknown_fields)]
 pub struct AnalysisExcitation {
     pub excitation_id: ExcitationId,
-    pub case_id: ExcitationCaseId,
     pub target: ExcitationTarget,
     pub frame: CoordinateFrame,
     pub direction: Option<Direction>,

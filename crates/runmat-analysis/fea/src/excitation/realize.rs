@@ -70,7 +70,16 @@ fn realize_excitations_for_step(
     let mut entries = Vec::new();
     for action in &model.excitations {
         let excitation = action.excitation();
-        if !active_cases.contains(excitation.case_id.0.as_str())
+        let case_ids = model
+            .excitation_cases
+            .iter()
+            .filter(|case| {
+                active_cases.contains(case.case_id.0.as_str())
+                    && case.action_ids.contains(&excitation.excitation_id)
+            })
+            .map(|case| case.case_id.clone())
+            .collect::<Vec<_>>();
+        if case_ids.is_empty()
             || step.is_some_and(|step| {
                 !step.object_is_active(&runmat_analysis_core::StepObjectRef::Excitation(
                     excitation.excitation_id.0.clone(),
@@ -96,7 +105,7 @@ fn realize_excitations_for_step(
             })?;
         entries.push(RealizedExcitation {
             excitation_id: excitation.excitation_id.clone(),
-            case_id: excitation.case_id.clone(),
+            case_ids,
             signal_id: excitation.signal_id.clone(),
             quantity: action.expected_quantity(),
             sample: sample.into(),

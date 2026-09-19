@@ -3102,7 +3102,6 @@ mod tests {
         .expect("typed force signal should build");
         let excitation_value = block_on(excitations::structural_force(
             "tip_force".into(),
-            "service".into(),
             Value::Object(region),
             signal_value.clone(),
         ))

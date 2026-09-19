@@ -3862,7 +3862,7 @@ mod tests {
                     excitation_id: runmat_analysis_core::ExcitationId(format!(
                         "unsupported_{expected_kind}"
                     )),
-                    case_id: runmat_analysis_core::ExcitationCaseId("case".to_string()),
+                    case_ids: vec![runmat_analysis_core::ExcitationCaseId("case".to_string())],
                     signal_id: runmat_analysis_core::SignalId("signal".to_string()),
                     quantity,
                     sample: crate::excitation::ProjectionSample::Static,

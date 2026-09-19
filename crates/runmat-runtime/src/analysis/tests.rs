@@ -466,7 +466,6 @@ fn append_scalar_history_excitation<Q>(
     let excitation_id = ExcitationId(id.to_string());
     model.excitations.push(action(AnalysisExcitation {
         excitation_id: excitation_id.clone(),
-        case_id: case_id.clone(),
         target,
         frame: CoordinateFrame::Global,
         direction,
@@ -516,7 +515,6 @@ fn append_scalar_constant_excitation<Q>(
     let excitation_id = ExcitationId(id.to_string());
     model.excitations.push(action(AnalysisExcitation {
         excitation_id: excitation_id.clone(),
-        case_id: case_id.clone(),
         target,
         frame: CoordinateFrame::Global,
         direction,
@@ -568,7 +566,6 @@ fn replace_with_moment_excitation(model: &mut AnalysisModel, excitation_id: &str
     })];
     model.excitations = vec![ExcitationAction::Moment(AnalysisExcitation {
         excitation_id: ExcitationId(excitation_id.to_string()),
-        case_id: case_id.clone(),
         target: ExcitationTarget::Region(RegionTarget::boundary("tip")),
         frame: CoordinateFrame::Global,
         direction: None,

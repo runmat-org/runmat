@@ -2578,7 +2578,6 @@ source:
         model.excitations = vec![ExcitationAction::Force(
             runmat_analysis_core::AnalysisExcitation {
                 excitation_id: runmat_analysis_core::ExcitationId("force".into()),
-                case_id: runmat_analysis_core::ExcitationCaseId("case".into()),
                 target: ExcitationTarget::Region(RegionTarget::authored("loaded")),
                 frame: CoordinateFrame::Global,
                 direction: None,

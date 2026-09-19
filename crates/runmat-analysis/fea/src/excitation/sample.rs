@@ -79,15 +79,16 @@ pub(crate) fn time_breakpoints(
         .iter()
         .map(|action| action.excitation())
         .filter(|excitation| {
-            active_cases.contains(excitation.case_id.0.as_str())
-                && step.object_is_active(&runmat_analysis_core::StepObjectRef::Excitation(
-                    excitation.excitation_id.0.clone(),
-                ))
-                && (excitation.active_step_ids.is_empty()
-                    || excitation
-                        .active_step_ids
-                        .iter()
-                        .any(|active| active == step.step_id.as_str()))
+            model.excitation_cases.iter().any(|case| {
+                active_cases.contains(case.case_id.0.as_str())
+                    && case.action_ids.contains(&excitation.excitation_id)
+            }) && step.object_is_active(&runmat_analysis_core::StepObjectRef::Excitation(
+                excitation.excitation_id.0.clone(),
+            )) && (excitation.active_step_ids.is_empty()
+                || excitation
+                    .active_step_ids
+                    .iter()
+                    .any(|active| active == step.step_id.as_str()))
         })
         .map(|excitation| excitation.signal_id.0.as_str())
         .collect::<std::collections::HashSet<_>>();

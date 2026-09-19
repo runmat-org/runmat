@@ -64,9 +64,6 @@ fn validate_excitations(
             if id.trim().is_empty() || !ids.insert(id) {
                 return Err("excitation ids must be non-empty and unique".to_string());
             }
-            if excitation.case_id.0.trim().is_empty() {
-                return Err("excitation must name its containing case".to_string());
-            }
             let signal = signals
                 .get(&excitation.signal_id)
                 .ok_or_else(|| "referenced signal does not exist".to_string())?;
@@ -285,9 +282,12 @@ fn validate_cases(
             || case.action_ids.is_empty()
             || case.action_ids.iter().collect::<HashSet<_>>().len() != case.action_ids.len()
             || case.action_ids.iter().any(|action_id| {
-                actions_by_id.get(action_id).is_none_or(|action| {
-                    action.case_id != case.case_id || !assigned_actions.insert(action_id)
-                })
+                if actions_by_id.contains_key(action_id) {
+                    assigned_actions.insert(action_id);
+                    false
+                } else {
+                    true
+                }
             })
             || match &case.activation {
                 ExcitationCaseActivation::Steps(active) => {
@@ -309,7 +309,7 @@ fn validate_cases(
     if assigned_actions.len() != actions.len() {
         return Err(AnalysisValidationError::InvalidExcitationCase {
             case_id: String::new(),
-            detail: "every excitation must belong to exactly one declared case".to_string(),
+            detail: "every excitation must belong to at least one declared case".to_string(),
         });
     }
     Ok(())
@@ -529,9 +529,9 @@ fn validate_response_spectra(
 mod tests {
     use super::*;
     use crate::{
-        CoordinateFrame, ExcitationCaseId, ExcitationId, HeatFlux, ProjectionRequirement,
-        RegionTarget, Signal, SignalApproximationEvidence, SignalPrecision, SignalProvenance,
-        SignalRepresentation, SignalSampleApproach, SignalValue, Velocity,
+        CoordinateFrame, ExcitationId, HeatFlux, ProjectionRequirement, RegionTarget, Signal,
+        SignalApproximationEvidence, SignalPrecision, SignalProvenance, SignalRepresentation,
+        SignalSampleApproach, SignalValue, Velocity,
     };
 
     #[test]
@@ -554,7 +554,6 @@ mod tests {
         });
         let excitation = AnalysisExcitation {
             excitation_id: ExcitationId("flux".to_string()),
-            case_id: ExcitationCaseId("case".to_string()),
             target: ExcitationTarget::Region(RegionTarget::boundary("wall")),
             frame: CoordinateFrame::Global,
             direction: None,

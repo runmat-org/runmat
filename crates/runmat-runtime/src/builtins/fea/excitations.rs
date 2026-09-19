@@ -62,16 +62,11 @@ impl GeometryBoundExcitation {
     }
 }
 
-const ACTION_INPUTS: [BuiltinParamDescriptor; 4] = [
+const ACTION_INPUTS: [BuiltinParamDescriptor; 3] = [
     required(
         "id",
         BuiltinParamType::StringScalar,
         "Stable excitation identifier.",
-    ),
-    required(
-        "caseId",
-        BuiltinParamType::StringScalar,
-        "Identifier of the containing excitation case.",
     ),
     required(
         "region",
@@ -169,7 +164,6 @@ fn create_action(
     builtin: &'static str,
     class_name: &'static str,
     id: String,
-    case_id: String,
     region: &Value,
     signal: &Value,
     expected_quantity: runmat_analysis_core::PhysicalQuantityKind,
@@ -178,11 +172,11 @@ fn create_action(
     preserve_moment: bool,
     wrap: impl FnOnce(AnalysisExcitation) -> ExcitationAction,
 ) -> BuiltinResult<Value> {
-    if id.trim().is_empty() || case_id.trim().is_empty() {
+    if id.trim().is_empty() {
         return Err(builtin_error(
             builtin,
             &ERROR_INPUT,
-            "excitation and case identifiers must not be empty",
+            "excitation identifier must not be empty",
         ));
     }
     let region = region_ref_from_value(builtin, region)?;
@@ -204,7 +198,6 @@ fn create_action(
     };
     let action = wrap(AnalysisExcitation {
         excitation_id: ExcitationId(id),
-        case_id: ExcitationCaseId(case_id),
         target: ExcitationTarget::Region(target),
         frame,
         direction: None,
@@ -237,7 +230,7 @@ macro_rules! action_builtin {
         $quantity:path, $region:expr, $distribution:path, $preserve_moment:expr, $variant:path
     ) => {
         const $signatures: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-            label: concat!("action = ", $builtin, "(id, caseId, region, signal)"),
+            label: concat!("action = ", $builtin, "(id, region, signal)"),
             inputs: &ACTION_INPUTS,
             outputs: &OUT_ANY,
         }];
@@ -258,7 +251,6 @@ macro_rules! action_builtin {
                                         )]
         pub async fn $function(
             id: String,
-            case_id: String,
             region: Value,
             signal: Value,
         ) -> BuiltinResult<Value> {
@@ -266,7 +258,6 @@ macro_rules! action_builtin {
                 $builtin,
                 $class,
                 id,
-                case_id,
                 &region,
                 &signal,
                 $quantity,
@@ -664,18 +655,7 @@ fn create_case(
     }
     let mut action_ids = Vec::with_capacity(actions.len());
     for action in actions {
-        let excitation = action.action.excitation();
-        if excitation.case_id.0 != id {
-            return Err(builtin_error(
-                builtin,
-                &ERROR_INPUT,
-                format!(
-                    "excitation `{}` names case `{}`, not `{id}`",
-                    excitation.excitation_id.0, excitation.case_id.0
-                ),
-            ));
-        }
-        action_ids.push(excitation.excitation_id.clone());
+        action_ids.push(action.action.excitation().excitation_id.clone());
     }
     serializable_to_object(
         builtin,
@@ -1012,13 +992,7 @@ mod tests {
             Value::Tensor(Tensor::new_2d(vec![0.0, -1250.0, 0.0], 1, 3).unwrap()),
         ))
         .unwrap();
-        let action = block_on(structural_force(
-            "tip".into(),
-            "service".into(),
-            region(),
-            signal,
-        ))
-        .unwrap();
+        let action = block_on(structural_force("tip".into(), region(), signal)).unwrap();
         let case = block_on(excitation_case_always("service".into(), action.clone())).unwrap();
         for value in [&action, &case] {
             assert_eq!(
@@ -1036,33 +1010,21 @@ mod tests {
     }
 
     #[test]
-    fn action_rejects_wrong_signal_quantity_and_case_rejects_mismatch() {
+    fn action_rejects_wrong_signal_quantity_and_cases_own_membership() {
         let pressure = block_on(super::super::signals::pressure_constant(
             "pressure.signal".into(),
             Value::Num(2.0),
         ))
         .unwrap();
-        assert!(block_on(structural_force(
-            "tip".into(),
-            "service".into(),
-            region(),
-            pressure,
-        ))
-        .is_err());
+        assert!(block_on(structural_force("tip".into(), region(), pressure,)).is_err());
 
         let force = block_on(force_constant(
             "tip.signal".into(),
             Value::Tensor(Tensor::new_2d(vec![0.0, -1.0, 0.0], 1, 3).unwrap()),
         ))
         .unwrap();
-        let action = block_on(structural_force(
-            "tip".into(),
-            "service".into(),
-            region(),
-            force,
-        ))
-        .unwrap();
-        assert!(block_on(excitation_case_always("other".into(), action)).is_err());
+        let action = block_on(structural_force("tip".into(), region(), force)).unwrap();
+        assert!(block_on(excitation_case_always("other".into(), action)).is_ok());
 
         let malformed = Value::Cell(
             CellArray::new(vec![Value::Num(1.0)], 1, 1).expect("test cell should be valid"),
@@ -1089,13 +1051,7 @@ mod tests {
             Value::Tensor(Tensor::new_2d(vec![0.0, -1250.0, 0.0], 1, 3).unwrap()),
         ))
         .unwrap();
-        let action = block_on(structural_force(
-            "tip".into(),
-            "service".into(),
-            region,
-            signal.clone(),
-        ))
-        .unwrap();
+        let action = block_on(structural_force("tip".into(), region, signal.clone())).unwrap();
         let case = block_on(excitation_case_always("service".into(), action.clone())).unwrap();
         let model = super::super::modeling::create_model_object_from_args(vec![
             Value::String("bracket".into()),

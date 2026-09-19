@@ -105,7 +105,7 @@ pub(crate) enum RealizedExcitationKind {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct RealizedExcitation {
     pub excitation_id: ExcitationId,
-    pub case_id: ExcitationCaseId,
+    pub case_ids: Vec<ExcitationCaseId>,
     pub signal_id: SignalId,
     pub quantity: PhysicalQuantityKind,
     pub sample: ProjectionSample,

@@ -176,7 +176,6 @@ pub(crate) fn replace_fixture_with_electric_current(
     })];
     model.excitations = vec![ExcitationAction::ElectricCurrent(AnalysisExcitation {
         excitation_id: ExcitationId(id.to_string()),
-        case_id: case_id.clone(),
         target: ExcitationTarget::Region(RegionTarget::volume(region_id)),
         frame: CoordinateFrame::Global,
         direction: None,
@@ -254,7 +253,6 @@ fn append_fixture_scalar_action<Q>(
     }));
     model.excitations.push(action(fixture_action(
         id,
-        case_id.clone(),
         target,
         signal_id,
         ExcitationDistribution::Concentrated,
@@ -286,7 +284,6 @@ fn append_fixture_excitation(model: &mut AnalysisModel, specification: FixtureEx
         FixtureExcitationKind::Force(value) => append_vector_excitation(
             model,
             &specification.id,
-            case_id.clone(),
             target,
             value,
             VectorExcitationKind::Force,
@@ -294,7 +291,6 @@ fn append_fixture_excitation(model: &mut AnalysisModel, specification: FixtureEx
         FixtureExcitationKind::Moment(value) => append_vector_excitation(
             model,
             &specification.id,
-            case_id.clone(),
             target,
             value,
             VectorExcitationKind::Moment,
@@ -303,7 +299,6 @@ fn append_fixture_excitation(model: &mut AnalysisModel, specification: FixtureEx
         FixtureExcitationKind::Traction(value) => append_vector_excitation(
             model,
             &specification.id,
-            case_id.clone(),
             target,
             value,
             VectorExcitationKind::Traction,
@@ -311,7 +306,6 @@ fn append_fixture_excitation(model: &mut AnalysisModel, specification: FixtureEx
         FixtureExcitationKind::Pressure(value) => append_scalar_excitation(
             model,
             &specification.id,
-            case_id.clone(),
             target,
             Pressure::new(value),
             PhysicalSignal::Pressure,
@@ -320,7 +314,6 @@ fn append_fixture_excitation(model: &mut AnalysisModel, specification: FixtureEx
         FixtureExcitationKind::BodyForce(value) => append_vector_excitation(
             model,
             &specification.id,
-            case_id.clone(),
             target,
             value,
             VectorExcitationKind::BodyForce,
@@ -340,7 +333,6 @@ fn append_fixture_excitation(model: &mut AnalysisModel, specification: FixtureEx
             append_vector_excitation(
                 model,
                 &force_id,
-                case_id.clone(),
                 target.clone(),
                 force,
                 VectorExcitationKind::Force,
@@ -348,7 +340,6 @@ fn append_fixture_excitation(model: &mut AnalysisModel, specification: FixtureEx
             append_vector_excitation(
                 model,
                 &moment_id,
-                case_id.clone(),
                 target,
                 moment,
                 VectorExcitationKind::Moment,
@@ -378,7 +369,6 @@ enum VectorExcitationKind {
 fn append_vector_excitation(
     model: &mut AnalysisModel,
     id: &str,
-    case_id: ExcitationCaseId,
     target: ExcitationTarget,
     values: [f64; 3],
     kind: VectorExcitationKind,
@@ -404,7 +394,7 @@ fn append_vector_excitation(
         ),
     };
     model.signals.push(signal);
-    let action = fixture_action(id, case_id, target, signal_id, distribution);
+    let action = fixture_action(id, target, signal_id, distribution);
     model.excitations.push(match kind {
         VectorExcitationKind::Force => ExcitationAction::Force(action),
         VectorExcitationKind::Moment => ExcitationAction::Moment(action),
@@ -434,7 +424,6 @@ fn fixture_vector_signal<Q: Copy + FromFixtureComponent>(
 fn append_scalar_excitation<Q>(
     model: &mut AnalysisModel,
     id: &str,
-    case_id: ExcitationCaseId,
     target: ExcitationTarget,
     value: Q,
     signal_kind: impl FnOnce(Signal<Q>) -> PhysicalSignal,
@@ -452,7 +441,6 @@ fn append_scalar_excitation<Q>(
     }));
     model.excitations.push(action_kind(fixture_action(
         id,
-        case_id,
         target,
         signal_id,
         ExcitationDistribution::IntensityPerArea,
@@ -461,14 +449,12 @@ fn append_scalar_excitation<Q>(
 
 fn fixture_action(
     id: &str,
-    case_id: ExcitationCaseId,
     target: ExcitationTarget,
     signal_id: SignalId,
     distribution: ExcitationDistribution,
 ) -> AnalysisExcitation {
     AnalysisExcitation {
         excitation_id: ExcitationId(id.to_string()),
-        case_id,
         target,
         frame: CoordinateFrame::Global,
         direction: Some(Direction {

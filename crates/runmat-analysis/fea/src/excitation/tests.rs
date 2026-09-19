@@ -132,6 +132,26 @@ fn realizes_typed_force_signal() {
 }
 
 #[test]
+fn realizes_one_action_with_every_active_case_membership() {
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    let mut second_case = model.excitation_cases[0].clone();
+    second_case.case_id = runmat_analysis_core::ExcitationCaseId("proof_case".into());
+    model.excitation_cases.push(second_case);
+
+    let realized = realize_static(&model).expect("shared action should realize once");
+    let entries = realized.iter().collect::<Vec<_>>();
+
+    assert_eq!(entries.len(), 1);
+    assert_eq!(
+        entries[0].case_ids,
+        [
+            runmat_analysis_core::ExcitationCaseId("tip_load.case".into()),
+            runmat_analysis_core::ExcitationCaseId("proof_case".into()),
+        ]
+    );
+}
+
+#[test]
 fn static_realization_does_not_implicitly_take_the_first_time_sample() {
     let model = tabulated_force_model(
         runmat_analysis_core::TabulatedSignalDomain::TimeSeconds,
