@@ -366,6 +366,7 @@ mod tests {
             origin: 0.0,
             start: 0.0,
             end: 1.0,
+            interval_count: 10,
         };
         assert!(observation_sampling_matches_domain(
             &time,
@@ -402,6 +403,7 @@ mod tests {
             origin: 0.0,
             start: 0.0,
             end: 1.0,
+            interval_count: 10,
         };
         assert!(observation_sampling_matches_domain(&time, &first_yield));
         assert!(observation_sampling_matches_domain(

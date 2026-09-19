@@ -121,6 +121,7 @@ pub enum IndependentDomain {
         origin: f64,
         start: f64,
         end: f64,
+        interval_count: usize,
     },
     FrequencyHertz(Vec<f64>),
     LoadFactor {
@@ -486,6 +487,7 @@ impl ProcedureStep {
                 origin: 0.0,
                 start: 0.0,
                 end: 1.0,
+                interval_count: 10,
             },
             vec![
                 state("structural_primary", StateKind::StructuralPrimary),
@@ -552,6 +554,7 @@ impl ProcedureStep {
                 origin: 0.0,
                 start: 0.0,
                 end: 1.0,
+                interval_count: 10,
             },
             vec![state("thermal", StateKind::Thermal)],
         )
@@ -632,6 +635,7 @@ impl ProcedureStep {
                 origin: 0.0,
                 start: 0.0,
                 end: 1.0,
+                interval_count: 10,
             },
             vec![state("fluid", StateKind::Fluid)],
         )
@@ -647,6 +651,7 @@ impl ProcedureStep {
                 origin: 0.0,
                 start: 0.0,
                 end: 1.0,
+                interval_count: 10,
             },
             AnalysisProcedure::Nonlinear => IndependentDomain::LoadFactor {
                 start: 0.0,
@@ -739,6 +744,7 @@ mod tests {
                 origin: 0.0,
                 start: 0.0,
                 end: 1.0,
+                interval_count: 10,
             }
         );
         assert_eq!(step.state_outputs[0].kind, StateKind::Thermal);

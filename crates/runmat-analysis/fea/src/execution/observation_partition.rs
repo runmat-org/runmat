@@ -546,6 +546,7 @@ mod tests {
             origin: 0.0,
             start: 0.0,
             end: 1.0,
+            interval_count: 10,
         };
         step.accuracy.resources.maximum_samples = 4;
         step.observations = vec![ObservationRequest::History(ObservationSpec {

@@ -69,7 +69,10 @@ impl ProcedureTimeGrid {
 }
 
 fn time_bounds(step: &ProcedureStep) -> Result<(f64, f64), String> {
-    let IndependentDomain::TimeSeconds { origin, start, end } = step.independent_domain else {
+    let IndependentDomain::TimeSeconds {
+        origin, start, end, ..
+    } = step.independent_domain
+    else {
         return Err(format!(
             "procedure step '{}' requires a time domain for transient execution",
             step.step_id.as_str()
@@ -108,6 +111,7 @@ mod tests {
                 origin: 0.0,
                 start,
                 end,
+                interval_count: 10,
             },
             Vec::new(),
         )

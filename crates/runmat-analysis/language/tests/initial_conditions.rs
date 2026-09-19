@@ -69,6 +69,7 @@ study response {
         thermomechanical transient {
             start_time = 0 s
             end_time = 1 s
+            time_step = 0.1 s
             initial_conditions = [
                 model.initial.at_rest,
                 model.initial.warm_start,

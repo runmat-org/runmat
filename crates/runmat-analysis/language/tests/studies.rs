@@ -391,6 +391,7 @@ study response {{
             basis = analysis.modes.state.basis
             start_time = 0 s
             end_time = 2 s
+            time_step = 0.1 s
         }}
     }}
 }}
@@ -401,6 +402,13 @@ study response {{
     let sequence = &program.studies.values().next().unwrap().sequence;
     assert_eq!(sequence.steps.len(), 2);
     assert_eq!(sequence.steps[0].state_outputs[0].state_id.0, "basis");
+    assert!(matches!(
+        sequence.steps[1].independent_domain,
+        runmat_analysis_core::IndependentDomain::TimeSeconds {
+            interval_count: 20,
+            ..
+        }
+    ));
     assert_eq!(
         sequence.steps[1].solution_space,
         runmat_analysis_core::SolutionSpace::ModalReduced
@@ -435,6 +443,42 @@ study response {{
         diagnostic.code == "fea.semantic.procedure" && diagnostic.message.contains("start_time")
     }));
     assert!(program.studies.is_empty());
+}
+
+#[test]
+fn transient_time_step_is_dimensioned_and_must_partition_the_authored_domain() {
+    let source = format!(
+        r#"{PART_AND_MESH}
+model structure {{
+}}
+study response {{
+    geometry = geometry.part
+    mesh = mesh.part
+    model = model.structure
+    analysis transient {{
+        structural transient {{
+            start_time = 0 s
+            end_time = 1 s
+            time_step = 0.3 s
+        }}
+    }}
+}}
+"#
+    );
+    let program = check(&source);
+    assert!(!program.is_valid());
+    assert!(program.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "fea.semantic.procedure"
+            && diagnostic.message.contains("exactly partition")
+    }));
+
+    let wrong_dimension = source.replace("0.3 s", "0.25 m");
+    let program = check(&wrong_dimension);
+    assert!(!program.is_valid());
+    assert!(program.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "fea.semantic.procedure"
+            && diagnostic.message.contains("time quantity `time_step`")
+    }));
 }
 
 #[test]

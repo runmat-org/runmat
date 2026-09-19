@@ -120,7 +120,7 @@ sequence:
       procedure: transient_response
       solution_space: direct
       independent_domain:
-        time_seconds: { origin: 0.0, start: 0.0, end: 1.0 }
+        time_seconds: { origin: 0.0, start: 0.0, end: 1.0, interval_count: 10 }
       activations:
         - object: { constraint: fixed_support }
           lifecycle: activate

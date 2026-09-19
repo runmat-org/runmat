@@ -43,6 +43,7 @@ study response {
         structural transient {
             start_time = 0 s
             end_time = 1 s
+            time_step = 0.1 s
         }
     }
     output displacement = analysis.transient.field.node.displacement

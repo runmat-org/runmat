@@ -108,7 +108,7 @@ Every procedure step has one typed independent domain:
 | Constructor | Meaning |
 | --- | --- |
 | `fea.IndependentDomain.staticDomain()` | One static equilibrium state |
-| `.timeSeconds(origin, start, end)` | Physical time interval with an explicit total-time origin |
+| `.timeSeconds(origin, start, end, intervalCount)` | Physical time interval with an explicit total-time origin and discretization |
 | `.frequencyHertz(values)` | Explicit finite frequency samples |
 | `.loadFactor(start, end)` | Static or nonlinear load-factor interval |
 | `.eigenvalue(count)` | Requested eigenpair count |

@@ -91,6 +91,7 @@ fn high_rate_history_checkpoints_write_only_new_chunks_and_resume_exactly() {
         origin: 0.0,
         start: 0.0,
         end: (sample_count - 1) as f64,
+        interval_count: sample_count - 1,
     };
     step.observations = vec![runmat_analysis_core::ObservationRequest::History(
         spec.clone(),

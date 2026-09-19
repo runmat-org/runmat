@@ -111,6 +111,7 @@ fn rejects_family_procedure_and_domain_mismatches() {
         origin: 0.0,
         start: 0.0,
         end: 1.0,
+        interval_count: 10,
     };
     assert!(matches!(
         validate_sequence(&model_with_steps(vec![invalid_domain])),

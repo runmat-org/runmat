@@ -163,12 +163,18 @@ fn validate_independent_domain(step: &ProcedureStep) -> Result<(), AnalysisValid
 
     let valid = match &step.independent_domain {
         IndependentDomain::Static => true,
-        IndependentDomain::TimeSeconds { origin, start, end } => {
+        IndependentDomain::TimeSeconds {
+            origin,
+            start,
+            end,
+            interval_count,
+        } => {
             origin.is_finite()
                 && start.is_finite()
                 && end.is_finite()
                 && start >= origin
                 && end > start
+                && *interval_count > 0
         }
         IndependentDomain::FrequencyHertz(values) => {
             !values.is_empty()

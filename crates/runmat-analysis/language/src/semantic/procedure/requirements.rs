@@ -24,22 +24,61 @@ pub fn time(
     statements: &[CheckedFeaStatement],
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<IndependentDomain> {
-    let start = scalar(declaration, header, statements, "start_time", diagnostics)?;
-    let end = scalar(declaration, header, statements, "end_time", diagnostics)?;
-    (start >= 0.0 && end > start)
+    let start = time_scalar(declaration, header, statements, "start_time", diagnostics)?;
+    let end = time_scalar(declaration, header, statements, "end_time", diagnostics)?;
+    let time_step = time_scalar(declaration, header, statements, "time_step", diagnostics)?;
+    let interval_count = exact_interval_count(start, end, time_step);
+    (start >= 0.0 && end > start && interval_count.is_some())
         .then_some(IndependentDomain::TimeSeconds {
             origin: 0.0,
             start,
             end,
+            interval_count: interval_count.unwrap_or_default(),
         })
         .or_else(|| {
             invalid(
                 declaration,
                 header,
-                "time range must satisfy 0 <= start_time < end_time",
+                "time range must satisfy 0 <= start_time < end_time and positive time_step must exactly partition it",
                 diagnostics,
             )
         })
+}
+
+fn exact_interval_count(start: f64, end: f64, time_step: f64) -> Option<usize> {
+    if !start.is_finite() || !end.is_finite() || !time_step.is_finite() || time_step <= 0.0 {
+        return None;
+    }
+    let count = (end - start) / time_step;
+    let rounded = count.round();
+    let tolerance = 64.0 * f64::EPSILON * count.abs().max(1.0);
+    if rounded < 1.0 || (count - rounded).abs() > tolerance || rounded > usize::MAX as f64 {
+        return None;
+    }
+    Some(rounded as usize)
+}
+
+fn time_scalar(
+    declaration: &CheckedFeaDeclaration,
+    header: &ProcedureHeader,
+    statements: &[CheckedFeaStatement],
+    name: &str,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Option<f64> {
+    let value = values::assignment(statements, name);
+    match value {
+        Some(value)
+            if value.value_type == crate::FeaType::Quantity(crate::PhysicalDimension::TIME) =>
+        {
+            values::canonical_scalar(value)
+        }
+        _ => missing(
+            declaration,
+            header,
+            &format!("time quantity `{name}`"),
+            diagnostics,
+        ),
+    }
 }
 
 pub fn frequencies(

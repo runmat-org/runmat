@@ -173,6 +173,7 @@ fn native_kernel_advances_exact_history_checkpoint_lineage() {
         origin: 0.0,
         start: 0.0,
         end: 1.0,
+        interval_count: 10,
     };
     step.observations = vec![history_observation()];
     let plan = resolve_observation_plan(

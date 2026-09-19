@@ -35,6 +35,7 @@ pub(super) fn preparation(
         origin: 0.0,
         start: 0.0,
         end: 1.0,
+        interval_count: 10,
     };
     let mut sequence = AnalysisSequence::from_steps(
         "process-modal-transient",

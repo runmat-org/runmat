@@ -331,6 +331,7 @@ fn completed_scalar_series(
         origin: 0.0,
         start: times[0],
         end: *times.last().unwrap(),
+        interval_count: times.len() - 1,
     };
     step.observations = vec![ObservationRequest::History(request)];
     let plan = resolve_observation_plan(
@@ -764,6 +765,7 @@ fn bounded_history_retains_latest_samples_with_independent_identities() {
         origin: 0.0,
         start: 0.0,
         end: 2.0,
+        interval_count: 20,
     };
     step.observations = vec![ObservationRequest::History(history)];
     let plan = resolve_observation_plan(
@@ -843,6 +845,7 @@ fn history_checkpoint_restart_preserves_exact_lineage_without_gaps_or_duplicates
         origin: 0.0,
         start: 0.0,
         end: 2.0,
+        interval_count: 20,
     };
     step.observations = vec![ObservationRequest::History(history)];
     let plan = resolve_observation_plan(

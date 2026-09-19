@@ -1424,6 +1424,7 @@ fn sample_modal_transient_study_spec(geometry_sha256: String) -> AnalysisStudySp
         origin: 0.0,
         start: 0.0,
         end: 0.1,
+        interval_count: 10,
     };
     let mut sequence = AnalysisSequence::from_steps(
         "sequence_modal_transient",

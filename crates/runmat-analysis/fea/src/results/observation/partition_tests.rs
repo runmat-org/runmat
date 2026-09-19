@@ -479,6 +479,7 @@ fn partitioned_history_restart_preserves_placement_neutral_result_identity() {
         origin: 0.0,
         start: 0.0,
         end: 1.0,
+        interval_count: 10,
     };
     step.observations = vec![ObservationRequest::History(history_spec)];
     let plan = super::resolve_observation_plan(
@@ -1297,6 +1298,7 @@ fn partitioned_event_evaluation_binds_exact_attribution_across_workers() {
         origin: 0.0,
         start: 0.0,
         end: 1.0,
+        interval_count: 10,
     };
     step.observations = vec![ObservationRequest::History(request)];
     let plan = super::resolve_observation_plan(

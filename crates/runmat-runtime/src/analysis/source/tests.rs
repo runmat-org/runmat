@@ -394,6 +394,65 @@ study static {
     assert_eq!(compiled.properties.solid_materials().len(), 1);
     assert_eq!(compiled.properties.beam_materials().len(), 1);
     assert_ne!(compiled.scientific_digest().unwrap().bytes(), &[0; 32]);
+    let workloads = runmat_analysis_fea::study::plan_structural_study(
+        &compiled,
+        runmat_analysis_fea::study::StructuralStudyPlanningPolicy {
+            backend: runmat_analysis_fea::ComputeBackend::Cpu,
+            formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        workloads.step_ids().unwrap(),
+        [compiled.model.sequence.steps[0].step_id.clone()]
+    );
+
+    let mut transient_compiled = compiled.clone();
+    transient_compiled.model.sequence.steps[0].procedure =
+        runmat_analysis_core::AnalysisProcedure::TransientResponse;
+    transient_compiled.model.sequence.steps[0].independent_domain =
+        runmat_analysis_core::IndependentDomain::TimeSeconds {
+            origin: 0.0,
+            start: 0.0,
+            end: 2.0,
+            interval_count: 20,
+        };
+    let transient = runmat_analysis_fea::study::plan_structural_study(
+        &transient_compiled,
+        runmat_analysis_fea::study::StructuralStudyPlanningPolicy {
+            backend: runmat_analysis_fea::ComputeBackend::Cpu,
+            formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+        },
+    )
+    .unwrap();
+    let runmat_analysis_fea::execution::StructuralStudyWorkloads::StructuralTransient {
+        workload,
+        block_plan,
+    } = transient
+    else {
+        panic!("direct transient study should produce a transient workload");
+    };
+    assert_eq!(workload.time_step_policy.interval_count(), 20);
+    assert_eq!(workload.residual_target, 1.0e-8);
+    assert_eq!(block_plan.maximum_intervals_per_block(), 20);
+
+    transient_compiled.model.sequence.steps[0]
+        .accuracy
+        .criteria
+        .clear();
+    assert!(matches!(
+        runmat_analysis_fea::study::plan_structural_study(
+            &transient_compiled,
+            runmat_analysis_fea::study::StructuralStudyPlanningPolicy {
+                backend: runmat_analysis_fea::ComputeBackend::Cpu,
+                formulation_requirement:
+                    runmat_analysis_core::FormulationRequirement::Experimental,
+            },
+        ),
+        Err(
+            runmat_analysis_fea::study::StructuralStudyPlanningError::MissingAlgebraicResidualTarget { .. }
+        )
+    ));
 
     let mut wrong_mesh = mesh;
     wrong_mesh.geometry.geometry_revision += 1;

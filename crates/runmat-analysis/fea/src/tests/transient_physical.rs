@@ -250,6 +250,7 @@ fn modal_support_motion_workloads(
         origin: 0.0,
         start: 0.0,
         end: 1.0,
+        interval_count: 10,
     };
     model.sequence.steps = vec![modal_step, transient_step];
     model.sequence.dependencies = vec![SequenceDependency {

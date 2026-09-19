@@ -60,7 +60,7 @@ const fn required(
 }
 
 const NO_INPUTS: [BuiltinParamDescriptor; 0] = [];
-const DOMAIN_TIME_INPUTS: [BuiltinParamDescriptor; 3] = [
+const DOMAIN_TIME_INPUTS: [BuiltinParamDescriptor; 4] = [
     required(
         "origin",
         BuiltinParamType::NumericScalar,
@@ -75,6 +75,11 @@ const DOMAIN_TIME_INPUTS: [BuiltinParamDescriptor; 3] = [
         "end",
         BuiltinParamType::NumericScalar,
         "Step end time in seconds.",
+    ),
+    required(
+        "intervalCount",
+        BuiltinParamType::NumericScalar,
+        "Positive number of equal time intervals.",
     ),
 ];
 const DOMAIN_VALUES_INPUTS: [BuiltinParamDescriptor; 1] = [required(
@@ -158,7 +163,7 @@ descriptor!(
 descriptor!(
     DOMAIN_TIME_DESCRIPTOR,
     DOMAIN_TIME_SIGNATURES,
-    "domain = fea.IndependentDomain.timeSeconds(origin, start, end)",
+    "domain = fea.IndependentDomain.timeSeconds(origin, start, end, intervalCount)",
     &DOMAIN_TIME_INPUTS
 );
 descriptor!(
@@ -241,8 +246,21 @@ fn numeric_values(builtin: &'static str, value: &Value, field: &str) -> BuiltinR
     integer_capabilities(DOMAIN_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::fea::sequences"
 )]
-pub async fn domain_time(origin: Value, start: Value, end: Value) -> BuiltinResult<Value> {
+pub async fn domain_time(
+    origin: Value,
+    start: Value,
+    end: Value,
+    interval_count: Value,
+) -> BuiltinResult<Value> {
     const NAME: &str = "fea.IndependentDomain.timeSeconds";
+    let interval_count = usize_from_value(NAME, &interval_count)?;
+    if interval_count == 0 {
+        return Err(builtin_error(
+            NAME,
+            &ERROR_INPUT,
+            "intervalCount must be positive",
+        ));
+    }
     to_typed_value(
         NAME,
         INDEPENDENT_DOMAIN_CLASS,
@@ -250,6 +268,7 @@ pub async fn domain_time(origin: Value, start: Value, end: Value) -> BuiltinResu
             origin: values::finite_numeric_scalar(NAME, &origin, "origin")?,
             start: values::finite_numeric_scalar(NAME, &start, "start")?,
             end: values::finite_numeric_scalar(NAME, &end, "end")?,
+            interval_count,
         },
     )
 }
@@ -1119,6 +1138,37 @@ mod tests {
     fn cell(values: Vec<Value>) -> Value {
         let columns = values.len();
         Value::Cell(CellArray::new(values, 1, columns).expect("valid row cell"))
+    }
+
+    #[tokio::test]
+    async fn time_domain_requires_and_retains_a_positive_interval_count() {
+        let domain = domain_time(
+            Value::Num(0.0),
+            Value::Num(0.0),
+            Value::Num(2.0),
+            Value::Num(20.0),
+        )
+        .await
+        .unwrap();
+        let decoded: IndependentDomain =
+            from_typed_value("test", INDEPENDENT_DOMAIN_CLASS, &domain).unwrap();
+        assert_eq!(
+            decoded,
+            IndependentDomain::TimeSeconds {
+                origin: 0.0,
+                start: 0.0,
+                end: 2.0,
+                interval_count: 20,
+            }
+        );
+        assert!(domain_time(
+            Value::Num(0.0),
+            Value::Num(0.0),
+            Value::Num(2.0),
+            Value::Num(0.0),
+        )
+        .await
+        .is_err());
     }
 
     #[tokio::test]
