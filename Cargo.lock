@@ -7195,6 +7195,7 @@ dependencies = [
  "runmat-accelerate-api",
  "runmat-analysis-core",
  "runmat-analysis-fea",
+ "runmat-analysis-language",
  "runmat-async",
  "runmat-builtins",
  "runmat-execution",

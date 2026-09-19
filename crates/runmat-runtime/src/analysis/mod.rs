@@ -77,6 +77,7 @@ mod operations;
 mod policy;
 mod result_policy;
 mod solver_mesh_artifact;
+mod source;
 pub mod storage;
 mod structural_study;
 mod study_execution;
@@ -447,6 +448,7 @@ pub use operations::{
 pub(crate) use operations::{analysis_run_field_ids, collect_analysis_result_fields};
 pub use runmat_analysis_core::FormulationRequirement;
 pub use runmat_analysis_fea::{FeaProgressEvent, FeaProgressPhase, FeaProgressStatus};
+pub use source::{check_fea_path, check_fea_path_in_root, FilesystemFeaHost};
 
 const ANALYSIS_CREATE_MODEL_OPERATION: &str = "fea.create_model";
 const ANALYSIS_CREATE_MODEL_OP_VERSION: &str = "fea.create_model/v1";
