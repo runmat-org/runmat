@@ -29,6 +29,7 @@ use crate::{
 pub(super) struct CompletedRemoteExactMeshing {
     pub(super) document: GeometryDocument,
     pub(super) regions: MeshedGeometryRegions,
+    pub(super) materialization: Option<runmat_analysis_execution::GeometryMaterializationOutput>,
     pub(super) result: ExactMeshingDagRunResult,
 }
 
@@ -55,10 +56,12 @@ pub(crate) async fn execute(
             let CompletedRemoteExactMeshing {
                 document,
                 regions,
+                materialization,
                 result,
             } = *completed;
             drop(document);
             drop(regions);
+            drop(materialization);
             package_completed(pool, &request, result)
         }
         RemoteExactMeshingComposition::Terminal(outcome) => Ok(outcome),
@@ -182,6 +185,7 @@ pub(super) async fn execute_geometry_for_composition(
         ));
     }
     meshing_request.tolerance = output.document.tolerance;
+    let materialization = output.clone();
     let platform = output.platform;
     platform.validate().map_err(protocol)?;
     let result = match execute_exact_meshing_dag_async(
@@ -214,6 +218,7 @@ pub(super) async fn execute_geometry_for_composition(
         CompletedRemoteExactMeshing {
             document: output.document,
             regions: MeshedGeometryRegions::Materialized(output.regions),
+            materialization: Some(materialization),
             result,
         },
     )))
@@ -361,6 +366,7 @@ pub(super) async fn execute_for_composition(
         CompletedRemoteExactMeshing {
             document: admission.document,
             regions: MeshedGeometryRegions::ImporterAliases(region_aliases),
+            materialization: None,
             result,
         },
     )))

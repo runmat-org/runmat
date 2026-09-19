@@ -1,6 +1,6 @@
 //! Local composition of the same portable whole-study root used by remote execution.
 
-use runmat_analysis_fea::study::{StructuralStudyProduct, StructuralStudyProductInput};
+use runmat_analysis_fea::study::StructuralStudyProductInput;
 use runmat_execution::value::{ValuePayload, ValueRefKind};
 use runmat_execution_artifact::cache::CacheExport;
 use runmat_execution_artifact::object::ObjectInventoryLimits;
@@ -8,7 +8,7 @@ use runmat_execution_artifact::ProgramExecutionResponse;
 use runmat_meshing_core::CacheAdmissionDecision;
 use runmat_meshing_execution::{
     execute_exact_meshing_dag_async, import_exact_geometry_input, prepare_exact_geometry_input,
-    ExactMeshingDagRun, ExactMeshingDagRunResult, MeshingRunEvidenceContext,
+    ExactMeshingDagRun, MeshingRunEvidenceContext,
 };
 
 use crate::{
@@ -16,13 +16,6 @@ use crate::{
     NativeExecutionError, NativeExecutionResult, NativeGeometryMaterializationLimits,
     NativeProgramSession, PreparedStructuralStudyRoot,
 };
-
-/// Complete local product of a typed whole-study root.
-pub struct CompletedLocalStructuralStudy {
-    pub product: StructuralStudyProduct,
-    pub meshing: ExactMeshingDagRunResult,
-    pub numerical: runmat_runtime::analysis::StructuralStudyNumericalResult,
-}
 
 /// Execute a portable typed study through geometry, exact meshing, compilation, and solve.
 ///
@@ -32,7 +25,7 @@ pub async fn execute_prepared_structural_study_locally(
     mut config: NativeExecutionConfig,
     prepared: PreparedStructuralStudyRoot,
     workers: u32,
-) -> NativeExecutionResult<CompletedLocalStructuralStudy> {
+) -> NativeExecutionResult<runmat_runtime::analysis::StructuralStudyResult> {
     let request = prepared.request().clone();
     let inventory = ObjectInventoryLimits::default();
     let composition_root = config
@@ -150,11 +143,13 @@ pub async fn execute_prepared_structural_study_locally(
         admitted_accelerators: Some(&decoded.analysis_accelerator_requests),
     })
     .await?;
-    Ok(CompletedLocalStructuralStudy {
-        product,
-        meshing,
+    runmat_runtime::analysis::StructuralStudyResult::new(
+        product.compiled,
+        meshing.artifact,
+        meshing.evidence,
         numerical,
-    })
+    )
+    .map_err(protocol)
 }
 
 fn materialization_output_root(

@@ -1,12 +1,17 @@
 //! Placement-neutral compilation of realized studies onto exact solver topology.
 
 mod compilation;
+mod identity;
 mod planning;
 mod product;
 
 pub use compilation::{
     compile_analysis_study, AnalysisStudyCompilationError, AnalysisStudyCompilationInput,
     CompiledAnalysisStudy,
+};
+pub use identity::{
+    structural_study_source_digest, StructuralStudyMaterialBinding,
+    StructuralStudySourceIdentityError,
 };
 pub use planning::{
     plan_structural_study, StructuralNumericalPlanningPolicy, StructuralStudyPlanningError,

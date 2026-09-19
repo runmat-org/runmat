@@ -39,6 +39,17 @@ pub(crate) struct RemotePoolExecutionResult {
     pub(super) objects: super::result_objects::RemoteResultObjects,
 }
 
+impl RemotePoolExecutionResult {
+    #[cfg(all(test, feature = "occt-native"))]
+    pub(crate) fn read_result_object(
+        &self,
+        reference: &runmat_execution::value::ValueRef,
+        authorization_scope: &str,
+    ) -> NativeExecutionResult<Vec<u8>> {
+        self.objects.read(reference, authorization_scope)
+    }
+}
+
 pub(super) struct RemotePoolExecution<'a> {
     pub(super) control: &'a dyn DriverControlPlane,
     pub(super) authority: &'a DriverAuthority,

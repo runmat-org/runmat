@@ -373,6 +373,10 @@ pub struct DecodedExactStructuralStudyRoot {
     pub exact_meshing: ProgramExecutionRequest,
     pub meshing_request: MeshingRequest,
     pub artifact_access: ArtifactAccess,
+    /// Present when the study was compiled from source-neutral geometry after meshing.
+    /// Pre-meshed low-level roots intentionally have no authored compilation product.
+    pub compiled_study: Option<runmat_analysis_fea::study::CompiledAnalysisStudy>,
+    pub compiled_geometry_output: Option<runmat_analysis_execution::GeometryMaterializationOutput>,
 }
 
 pub fn prepare_exact_structural_study_root(
@@ -636,6 +640,8 @@ pub fn decode_exact_structural_study_root(
         exact_meshing,
         meshing_request: decoded_exact.request.meshing_request,
         artifact_access,
+        compiled_study: None,
+        compiled_geometry_output: None,
     })
 }
 

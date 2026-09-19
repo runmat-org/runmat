@@ -225,6 +225,39 @@ async fn print_terminal(
         outputs
             .validate()
             .context("remote result payload failed integrity validation")?;
+        if let secret::SavedOutputIntent::FeaStudy {
+            study_id,
+            expectation,
+        } = &saved.output_intent
+        {
+            let objects = download_output_objects(client, saved, &outputs).await?;
+            let result = crate::commands::fea::remote::materialize_fea_study(
+                &run.id,
+                outputs.response,
+                objects,
+                (**expectation).clone(),
+            )?;
+            return crate::commands::fea::result_presentation::print_fea_result(
+                study_id, &result, json,
+            );
+        }
+        if let secret::SavedOutputIntent::FeaSweep {
+            sweep_id,
+            case_ids,
+            expectation,
+        } = &saved.output_intent
+        {
+            let objects = download_output_objects(client, saved, &outputs).await?;
+            let result = crate::commands::fea::remote::materialize_fea_sweep(
+                &run.id,
+                outputs.response,
+                objects,
+                (**expectation).clone(),
+            )?;
+            return crate::commands::fea::result_presentation::print_fea_sweep_result(
+                sweep_id, case_ids, &result, json,
+            );
+        }
         if let secret::SavedOutputIntent::Mesh {
             solver_mesh_path,
             evidence_path,

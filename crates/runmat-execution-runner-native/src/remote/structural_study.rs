@@ -101,6 +101,11 @@ pub(super) async fn execute_for_composition(
     };
     let geometry_source_digest =
         Digest::from_bytes(*completed.result.artifact.geometry.source_digest.bytes());
+    let compiled_geometry_output = completed.materialization.clone().ok_or_else(|| {
+        crate::NativeExecutionError::Protocol(
+            "typed structural study geometry has no materialization receipt".into(),
+        )
+    })?;
     let mut completed = completed;
     completed.regions = MeshedGeometryRegions::ImporterAliases(BTreeMap::new());
     let execution_view = crate::DecodedExactStructuralStudyRoot {
@@ -113,6 +118,8 @@ pub(super) async fn execute_for_composition(
         exact_meshing: decoded.geometry_meshing,
         meshing_request: geometry_contract.request.meshing_request,
         artifact_access: decoded.artifact_access,
+        compiled_study: Some(product.compiled),
+        compiled_geometry_output: Some(compiled_geometry_output),
     };
     super::exact_structural_study::execute_with_completed_meshing(
         pool,

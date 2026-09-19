@@ -52,10 +52,45 @@ pub struct CompiledExplicitElementMaterial {
 pub struct CompiledPropertyMap {
     pub identity: CompiledPropertyMapIdentity,
     pub audit_digest: Digest,
+    #[serde(with = "ordered_map_serde")]
     solid_materials: BTreeMap<StableDigest, CompiledElementMaterial>,
+    #[serde(with = "ordered_map_serde")]
     beam_materials: BTreeMap<StableDigest, CompiledExplicitElementMaterial>,
+    #[serde(with = "ordered_map_serde")]
     shell_materials: BTreeMap<StableDigest, CompiledExplicitElementMaterial>,
     audit: Vec<CompiledPropertyAudit>,
+}
+
+mod ordered_map_serde {
+    use std::collections::BTreeMap;
+
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S, K, V>(map: &BTreeMap<K, V>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+        K: Serialize + Ord,
+        V: Serialize,
+    {
+        map.iter().collect::<Vec<_>>().serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D, K, V>(deserializer: D) -> Result<BTreeMap<K, V>, D::Error>
+    where
+        D: Deserializer<'de>,
+        K: Deserialize<'de> + Ord,
+        V: Deserialize<'de>,
+    {
+        let entries = Vec::<(K, V)>::deserialize(deserializer)?;
+        let entry_count = entries.len();
+        let map = entries.into_iter().collect::<BTreeMap<_, _>>();
+        if map.len() != entry_count {
+            return Err(serde::de::Error::custom(
+                "compiled property map contains duplicate element identities",
+            ));
+        }
+        Ok(map)
+    }
 }
 
 impl CompiledPropertyMap {

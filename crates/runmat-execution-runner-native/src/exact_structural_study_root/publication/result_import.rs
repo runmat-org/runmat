@@ -87,6 +87,11 @@ pub fn import_exact_structural_study_result(
             "whole-study mesh differs from the authored meshing request",
         ));
     }
+    if let Some(compiled) = &publication.compiled_study {
+        compiled
+            .validate_against(&mesh.artifact)
+            .map_err(protocol)?;
+    }
     let region_resolution_manifest_bytes = read(source, &publication.region_resolution_root)?;
     let region_resolution_manifest =
         runmat_analysis_fea::execution::AnalysisObjectManifest::from_canonical_bytes(
@@ -644,6 +649,7 @@ pub fn import_exact_structural_study_result(
     };
     Ok(ExactStructuralStudyResult {
         frozen_project_digest: expected.frozen_project_digest,
+        compiled_study: publication.compiled_study,
         mesh,
         region_resolution,
         analysis,

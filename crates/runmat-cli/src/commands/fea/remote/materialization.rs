@@ -11,8 +11,10 @@ use runmat_execution_artifact::{
 };
 use runmat_execution_runner_native::{
     import_exact_structural_study_result, import_exact_structural_sweep_result,
+    import_structural_study_result, import_structural_sweep_result,
     ExactStructuralStudyResultExpectation, ExactStructuralSweepResultExpectation,
-    ExactStructuralSweepTerminal,
+    ExactStructuralSweepTerminal, StructuralStudyResultExpectation,
+    StructuralSweepResultExpectation,
 };
 use runmat_runtime::analysis::{
     analysis_complete_study_sweep_op, structural_study_execution_failure, AnalysisStudyRunData,
@@ -29,6 +31,104 @@ use runmat_runtime::analysis::{
 use runmat_runtime::operations::OperationEnvelope;
 
 use super::preparation::{artifact_access, authored_meshing_request};
+
+pub(crate) enum MaterializedFeaSweepTerminal {
+    Succeeded(Box<runmat_runtime::analysis::StructuralStudyResult>),
+    Failed(String),
+    Cancelled,
+    Indeterminate(String),
+}
+
+pub(crate) struct MaterializedFeaSweepEntry {
+    pub study_index: usize,
+    pub terminal: MaterializedFeaSweepTerminal,
+}
+
+pub(crate) struct MaterializedFeaSweep {
+    pub entries: Vec<MaterializedFeaSweepEntry>,
+}
+
+pub(crate) fn materialize_fea_study(
+    run_id: &str,
+    response: ProgramExecutionResponse,
+    objects: Vec<ProgramExecutionObject>,
+    mut expectation: StructuralStudyResultExpectation,
+) -> Result<runmat_runtime::analysis::StructuralStudyResult> {
+    expectation.artifact_access = artifact_access(run_id);
+    expectation.validate()?;
+    let cache = DownloadedResultCache::from_objects(objects);
+    let exact = import_structural_study_result(
+        &cache,
+        response,
+        &expectation,
+        ObjectInventoryLimits::default(),
+    )?;
+    exact_result(exact, cache)
+}
+
+pub(crate) fn materialize_fea_sweep(
+    run_id: &str,
+    response: ProgramExecutionResponse,
+    objects: Vec<ProgramExecutionObject>,
+    mut expectation: StructuralSweepResultExpectation,
+) -> Result<MaterializedFeaSweep> {
+    let access = artifact_access(run_id);
+    expectation.artifact_access = access.clone();
+    for study in &mut expectation.studies {
+        study.artifact_access = access.clone();
+    }
+    expectation.validate()?;
+    let cache = DownloadedResultCache::from_objects(objects);
+    let imported = import_structural_sweep_result(
+        &cache,
+        response,
+        &expectation,
+        ObjectInventoryLimits::default(),
+    )?;
+    let entries = imported
+        .entries
+        .into_iter()
+        .map(|entry| {
+            let terminal = match entry.terminal {
+                ExactStructuralSweepTerminal::Succeeded(result) => {
+                    MaterializedFeaSweepTerminal::Succeeded(Box::new(exact_result(
+                        *result,
+                        cache.clone(),
+                    )?))
+                }
+                ExactStructuralSweepTerminal::Failed(message) => {
+                    MaterializedFeaSweepTerminal::Failed(message)
+                }
+                ExactStructuralSweepTerminal::Cancelled => MaterializedFeaSweepTerminal::Cancelled,
+                ExactStructuralSweepTerminal::Indeterminate(message) => {
+                    MaterializedFeaSweepTerminal::Indeterminate(message)
+                }
+            };
+            Ok(MaterializedFeaSweepEntry {
+                study_index: entry.study_index,
+                terminal,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(MaterializedFeaSweep { entries })
+}
+
+fn exact_result(
+    exact: runmat_execution_runner_native::ExactStructuralStudyResult,
+    source: DownloadedResultCache,
+) -> Result<runmat_runtime::analysis::StructuralStudyResult> {
+    let numerical = study_result(&exact, source)?;
+    let compiled = exact
+        .compiled_study
+        .context("typed structural result omitted its compiled scientific contract")?;
+    runmat_runtime::analysis::StructuralStudyResult::new(
+        compiled,
+        exact.mesh.artifact,
+        exact.mesh.evidence,
+        numerical,
+    )
+    .map_err(anyhow::Error::msg)
+}
 
 pub(crate) fn materialize_remote_outputs(
     run_id: &str,

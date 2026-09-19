@@ -17,8 +17,8 @@ use super::{
     PUBLICATION_VALUE_SCHEMA,
 };
 use crate::{
-    import_exact_structural_study_result, ExactStructuralStudyResult,
-    ExactStructuralStudyResultExpectation, NativeExecutionResult,
+    import_exact_structural_study_result, import_structural_study_result,
+    ExactStructuralStudyResult, ExactStructuralStudyResultExpectation, NativeExecutionResult,
 };
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -300,6 +300,88 @@ pub fn import_exact_structural_sweep_result(
         .collect::<NativeExecutionResult<Vec<_>>>()?;
     Ok(ExactStructuralSweepResult {
         identity: catalog.identity,
+        entries,
+    })
+}
+
+pub fn import_structural_sweep_result(
+    source: &impl CacheImport,
+    response: ProgramExecutionResponse,
+    expected: &crate::StructuralSweepResultExpectation,
+    limits: ObjectInventoryLimits,
+) -> NativeExecutionResult<ExactStructuralSweepResult> {
+    expected.validate()?;
+    let ProgramExecutionResponse::ExternalizedSuccess {
+        outputs,
+        result_objects,
+    } = response
+    else {
+        return Err(protocol("structural sweep did not return a result closure"));
+    };
+    let [ValuePayload::Object(root)] = outputs.as_slice() else {
+        return Err(protocol("structural sweep result root is invalid"));
+    };
+    expected
+        .artifact_access
+        .validate_reference(
+            root,
+            ValueRefKind::ResultObject,
+            PUBLICATION_MEDIA_TYPE,
+            PUBLICATION_VALUE_SCHEMA,
+        )
+        .map_err(protocol)?;
+    let publication = ExactStructuralSweepPublication::decode(&read(source, root)?)?;
+    if publication.program_revision != expected.program_revision
+        || publication.identity != expected.identity()?
+        || publication.entries.len() != expected.studies.len()
+    {
+        return Err(protocol("structural sweep publication identity changed"));
+    }
+    let mut expected_inventory = BTreeMap::new();
+    insert_reference(&mut expected_inventory, (**root).clone())?;
+    for entry in &publication.entries {
+        if let PublishedSweepEntry::Succeeded {
+            response: ProgramExecutionResponse::ExternalizedSuccess { result_objects, .. },
+        } = entry
+        {
+            for reference in result_objects {
+                insert_reference(&mut expected_inventory, reference.clone())?;
+            }
+        }
+    }
+    if expected_inventory.into_values().collect::<Vec<_>>() != result_objects {
+        return Err(protocol(
+            "structural sweep result inventory differs from its publication closure",
+        ));
+    }
+    let entries = publication
+        .entries
+        .into_iter()
+        .zip(&expected.studies)
+        .enumerate()
+        .map(|(study_index, (entry, study))| {
+            let terminal = match entry {
+                PublishedSweepEntry::Succeeded { response } => {
+                    ExactStructuralSweepTerminal::Succeeded(Box::new(
+                        import_structural_study_result(source, response, study, limits)?,
+                    ))
+                }
+                PublishedSweepEntry::Failed { message } => {
+                    ExactStructuralSweepTerminal::Failed(message)
+                }
+                PublishedSweepEntry::Cancelled => ExactStructuralSweepTerminal::Cancelled,
+                PublishedSweepEntry::Indeterminate { message } => {
+                    ExactStructuralSweepTerminal::Indeterminate(message)
+                }
+            };
+            Ok(ExactStructuralSweepEntryResult {
+                study_index,
+                terminal,
+            })
+        })
+        .collect::<NativeExecutionResult<Vec<_>>>()?;
+    Ok(ExactStructuralSweepResult {
+        identity: publication.identity,
         entries,
     })
 }

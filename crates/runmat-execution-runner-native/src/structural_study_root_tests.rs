@@ -86,10 +86,15 @@ fn typed_study_root_round_trips_exact_scientific_intent() {
         formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         numerics: StructuralNumericalPlanningPolicy::production(),
     };
+    let authored_study_digest = runmat_analysis_fea::study::structural_study_source_digest(
+        &realized,
+        &resolved.material_catalog,
+    )
+    .unwrap();
     let prepared = prepare_structural_study_root(StructuralStudyRootPreparation {
         program_revision: revision,
         artifact_access: access,
-        authored_study_digest: Digest::sha256(SOURCE.as_bytes()),
+        authored_study_digest,
         frozen_project_digest: Some(Digest::sha256(b"frozen-project")),
         study: realized.clone(),
         materials: resolved.material_catalog.clone(),
@@ -102,6 +107,17 @@ fn typed_study_root_round_trips_exact_scientific_intent() {
         .required_programs()
         .iter()
         .any(|program| program.recipe.execution_mode == STRUCTURAL_STUDY_ROOT_EXECUTION_MODE));
+    let expectation = prepared.result_expectation();
+    let encoded = serde_json::to_vec(&expectation).unwrap();
+    let decoded_expectation: StructuralStudyResultExpectation =
+        serde_json::from_slice(&encoded).unwrap();
+    assert_eq!(decoded_expectation, expectation);
+    let mut substituted_material = expectation.clone();
+    substituted_material.materials[0].material.name = "substituted steel".into();
+    assert!(substituted_material.validate().is_err());
+    let mut substituted_geometry = expectation.clone();
+    substituted_geometry.geometry_request.definition.geometry_id = "other-part".into();
+    assert!(substituted_geometry.validate().is_err());
     let directory = tempfile::tempdir().unwrap();
     let mut store = crate::FilesystemObjectStore::open(directory.path(), 64 << 20).unwrap();
     prepared.write_to(&mut store).unwrap();
@@ -179,6 +195,11 @@ async fn typed_sweep_root_executes_geometry_mesh_compilation_and_solve_over_quic
         studies: vec![prepared],
     })
     .unwrap();
+    let expectation = prepared.result_expectation();
+    let encoded = serde_json::to_vec(&expectation).unwrap();
+    let decoded_expectation: crate::StructuralSweepResultExpectation =
+        serde_json::from_slice(&encoded).unwrap();
+    assert_eq!(decoded_expectation, expectation);
     let mut builder = ExecutionBundleBuilder::native(&project, revision)
         .unwrap()
         .with_compiled_package_closure();
@@ -318,10 +339,45 @@ async fn typed_sweep_root_executes_geometry_mesh_compilation_and_solve_over_quic
         .unwrap();
         match outcome {
             crate::remote::pool_execution::RemotePoolExecutionOutcome::Completed(result) => {
-                assert!(matches!(
+                let runmat_execution_artifact::ProgramExecutionResponse::ExternalizedSuccess {
+                    result_objects,
+                    ..
+                } = &result.response
+                else {
+                    panic!("typed structural sweep did not publish a result closure");
+                };
+                let cache = TestResultCache(
+                    result_objects
+                        .iter()
+                        .map(|reference| {
+                            (
+                                reference.logical_digest,
+                                result
+                                    .read_result_object(reference, &access.authorization_scope)
+                                    .unwrap(),
+                            )
+                        })
+                        .collect(),
+                );
+                let imported = crate::import_structural_sweep_result(
+                    &cache,
                     result.response,
-                    runmat_execution_artifact::ProgramExecutionResponse::ExternalizedSuccess { .. }
-                ));
+                    &expectation,
+                    runmat_execution_artifact::object::ObjectInventoryLimits::default(),
+                )
+                .unwrap();
+                let [entry] = imported.entries.as_slice() else {
+                    panic!("typed structural sweep changed its case count");
+                };
+                let crate::ExactStructuralSweepTerminal::Succeeded(study) = &entry.terminal else {
+                    panic!("typed structural sweep case did not succeed");
+                };
+                let compiled = study
+                    .compiled_study
+                    .as_ref()
+                    .expect("typed study result omitted its compiled scientific contract");
+                compiled.validate_against(&study.mesh.artifact).unwrap();
+                assert_eq!(compiled.study_id, "static");
             }
             crate::remote::pool_execution::RemotePoolExecutionOutcome::Cancelled => {
                 panic!("typed structural sweep was cancelled")
@@ -334,6 +390,19 @@ async fn typed_sweep_root_executes_geometry_mesh_compilation_and_solve_over_quic
     };
     let (server_result, ()) = tokio::join!(server, client);
     server_result.unwrap();
+}
+
+#[cfg(feature = "occt-native")]
+struct TestResultCache(std::collections::BTreeMap<Digest, Vec<u8>>);
+
+#[cfg(feature = "occt-native")]
+impl runmat_execution_artifact::cache::CacheImport for TestResultCache {
+    fn read_verified(
+        &self,
+        digest: Digest,
+    ) -> runmat_execution_artifact::ArtifactResult<Option<Vec<u8>>> {
+        Ok(self.0.get(&digest).cloned())
+    }
 }
 
 #[cfg(feature = "occt-native")]
@@ -383,10 +452,15 @@ fn prepare_source(
             preferred_faces_per_partition: 8,
         })
         .unwrap();
+    let authored_study_digest = runmat_analysis_fea::study::structural_study_source_digest(
+        &realized,
+        &resolved.material_catalog,
+    )
+    .unwrap();
     prepare_structural_study_root(StructuralStudyRootPreparation {
         program_revision: revision,
         artifact_access: access,
-        authored_study_digest: Digest::sha256(SOURCE.as_bytes()),
+        authored_study_digest,
         frozen_project_digest: Some(Digest::sha256(b"frozen-project")),
         study: realized,
         materials: resolved.material_catalog,

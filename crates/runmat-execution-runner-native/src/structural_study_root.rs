@@ -119,12 +119,98 @@ pub struct StructuralStudyRootPreparation {
     pub geometry_meshing: PreparedGeometryMeshingRoot,
 }
 
+/// Client-held admission contract for a geometry-derived structural study result.
+///
+/// Workloads are intentionally absent: exact topology is not available until the remote geometry
+/// and meshing stages finish. The importer admits the published compiled study against these
+/// immutable inputs, derives the workloads locally, and then applies the ordinary exact-result
+/// validation path.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StructuralStudyResultExpectation {
+    pub program_revision: ProgramRevision,
+    pub artifact_access: ArtifactAccess,
+    pub authored_study_digest: Digest,
+    pub frozen_project_digest: Option<Digest>,
+    pub study: RealizedStudy,
+    pub materials: Vec<StructuralStudyMaterialExpectation>,
+    pub planning: StructuralStudyPlanningPolicy,
+    pub analysis_accelerator_requests: Vec<AcceleratorRequest>,
+    pub geometry_request: runmat_analysis_execution::GeometryMaterializationRequest,
+    pub expected_meshing_request: runmat_meshing_core::MeshingRequest,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StructuralStudyMaterialExpectation {
+    pub reference: AuthoredMaterialRef,
+    pub material: MaterialModel,
+}
+
+impl StructuralStudyResultExpectation {
+    pub fn validate(&self) -> NativeExecutionResult<()> {
+        self.artifact_access.validate().map_err(protocol)?;
+        self.planning.numerics.validate().map_err(protocol)?;
+        self.expected_meshing_request.validate().map_err(protocol)?;
+        self.geometry_request.validate().map_err(protocol)?;
+        if self.authored_study_digest.bytes() == &[0; 32]
+            || self
+                .frozen_project_digest
+                .is_some_and(|digest| digest.bytes() == &[0; 32])
+        {
+            return Err(protocol("structural study result expectation is invalid"));
+        }
+        if self.study.module_path.trim().is_empty()
+            || self.study.study_id.trim().is_empty()
+            || self.materials.iter().enumerate().any(|(index, material)| {
+                self.materials[..index]
+                    .iter()
+                    .any(|existing| existing.reference == material.reference)
+            })
+        {
+            return Err(protocol(
+                "structural study result source contract is invalid",
+            ));
+        }
+        runmat_analysis_core::validate_material_definitions(
+            &self
+                .materials
+                .iter()
+                .map(|entry| entry.material.clone())
+                .collect::<Vec<_>>(),
+        )
+        .map_err(protocol)?;
+        let materials = self
+            .materials
+            .iter()
+            .map(|entry| (entry.reference.clone(), entry.material.clone()))
+            .collect::<BTreeMap<_, _>>();
+        let expected_source_digest =
+            runmat_analysis_fea::study::structural_study_source_digest(&self.study, &materials)
+                .map_err(protocol)?;
+        let geometry_definition = runmat_geometry_core::GeometryDefinitionRef {
+            module_path: self.geometry_request.definition.module_path.clone(),
+            geometry_id: self.geometry_request.definition.geometry_id.clone(),
+        };
+        if expected_source_digest != self.authored_study_digest
+            || self.study.geometry.definition != geometry_definition
+            || self.study.geometry.bindings != self.geometry_request.bindings
+        {
+            return Err(protocol(
+                "structural study result source identity differs from its geometry or materials",
+            ));
+        }
+        validate_accelerator_requests(self.planning.backend, &self.analysis_accelerator_requests)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct PreparedStructuralStudyRoot {
     request: ProgramExecutionRequest,
     objects: Vec<LogicalObject>,
     required_programs: Vec<RequiredStructuralStudyProgram>,
     authored_study_digest: Digest,
+    expectation: StructuralStudyResultExpectation,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -148,6 +234,10 @@ impl PreparedStructuralStudyRoot {
 
     pub const fn authored_study_digest(&self) -> Digest {
         self.authored_study_digest
+    }
+
+    pub fn result_expectation(&self) -> StructuralStudyResultExpectation {
+        self.expectation.clone()
     }
 
     pub fn write_to(&self, store: &mut impl CacheExport) -> NativeExecutionResult<()> {
@@ -229,6 +319,8 @@ pub fn prepare_structural_study_root(
             "geometry-meshing and structural-study program revisions differ",
         ));
     }
+    let expected_meshing_request = geometry_meshing.meshing_request().clone();
+    let geometry_request = geometry_meshing.geometry_request().clone();
     let root = StructuralStudyRootRequest {
         schema_version: 1,
         authored_study_digest,
@@ -305,11 +397,32 @@ pub fn prepare_structural_study_root(
     });
     let mut seen = BTreeSet::new();
     required_programs.retain(|program| seen.insert(program.artifact.id));
+    let expectation = StructuralStudyResultExpectation {
+        program_revision: request.recipe.program_revision.clone(),
+        artifact_access,
+        authored_study_digest: root.authored_study_digest,
+        frozen_project_digest: root.frozen_project_digest,
+        study: root.study.clone(),
+        materials: root
+            .materials
+            .iter()
+            .map(|entry| StructuralStudyMaterialExpectation {
+                reference: entry.reference.clone(),
+                material: entry.material.clone(),
+            })
+            .collect(),
+        planning: root.planning,
+        analysis_accelerator_requests: root.analysis_accelerator_requests.clone(),
+        geometry_request,
+        expected_meshing_request,
+    };
+    expectation.validate()?;
     Ok(PreparedStructuralStudyRoot {
         request,
         objects,
         required_programs,
         authored_study_digest: root.authored_study_digest,
+        expectation,
     })
 }
 

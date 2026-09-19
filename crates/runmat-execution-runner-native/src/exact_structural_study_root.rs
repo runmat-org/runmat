@@ -14,8 +14,9 @@ pub use contract::{
     PreparedExactStructuralStudyRoot, RequiredStudyProgram,
 };
 pub use publication::{
-    import_exact_structural_study_result, ExactStructuralBucklingAnalysisResult,
-    ExactStructuralFrequencyAnalysisResult, ExactStructuralModalResponseSpectrumAnalysisResult,
+    import_exact_structural_study_result, import_structural_study_result,
+    ExactStructuralBucklingAnalysisResult, ExactStructuralFrequencyAnalysisResult,
+    ExactStructuralModalResponseSpectrumAnalysisResult,
     ExactStructuralModalTransientAnalysisResult, ExactStructuralPrestressedFrequencyAnalysisResult,
     ExactStructuralPrestressedModalAnalysisResult, ExactStructuralRandomResponseAnalysisResult,
     ExactStructuralStudyAnalysisResult, ExactStructuralStudyResult,

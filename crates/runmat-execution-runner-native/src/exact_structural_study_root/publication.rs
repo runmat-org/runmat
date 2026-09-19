@@ -48,11 +48,13 @@ mod prestressed_modal_import;
 mod random_response_import;
 mod response_spectrum_import;
 mod result_import;
+mod source_result_import;
 mod specialized_publication_import;
 
 use inventory::*;
 pub(crate) use packaging::package_exact_structural_study_result;
 pub use result_import::import_exact_structural_study_result;
+pub use source_result_import::import_structural_study_result;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -60,6 +62,8 @@ struct ExactStructuralStudyPublication {
     schema_version: u16,
     program_revision: ProgramRevision,
     authored_study_digest: Digest,
+    compiled_study: Option<runmat_analysis_fea::study::CompiledAnalysisStudy>,
+    compiled_geometry_output: Option<runmat_analysis_execution::GeometryMaterializationOutput>,
     unresolved_workloads_digest: Digest,
     meshing_request_digest: Digest,
     meshing_root: ValueRef,
@@ -484,6 +488,11 @@ impl ExactStructuralStudyPublication {
         {
             return Err(protocol("exact structural study publication is invalid"));
         }
+        if self.compiled_study.is_some() != self.compiled_geometry_output.is_some() {
+            return Err(protocol(
+                "compiled study publication has an incomplete source contract",
+            ));
+        }
         for reference in self
             .meshing_objects
             .iter()
@@ -546,6 +555,7 @@ impl ExactStructuralStudyPublication {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ExactStructuralStudyResult {
     pub frozen_project_digest: Option<Digest>,
+    pub compiled_study: Option<runmat_analysis_fea::study::CompiledAnalysisStudy>,
     pub mesh: ExactMeshingDagRunResult,
     pub region_resolution: TopologyRegionResolution,
     pub analysis: ExactStructuralStudyAnalysisResult,

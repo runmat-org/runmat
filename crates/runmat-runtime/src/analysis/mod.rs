@@ -82,6 +82,7 @@ pub mod storage;
 mod structural_study;
 mod study_execution;
 mod study_placement;
+mod study_result;
 mod study_sweep;
 pub mod value_admission;
 
@@ -115,6 +116,7 @@ pub use study_placement::{
     StructuralStudyPlacementExecutor, StructuralStudyPlacementFuture,
     StructuralStudyPlacementResult,
 };
+pub use study_result::StructuralStudyResult;
 pub use study_sweep::{
     analysis_complete_study_sweep_op, analysis_study_sweep_definition,
     analysis_study_sweep_identity, AnalysisStudySweepRunOutcome,

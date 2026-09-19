@@ -26,6 +26,17 @@ fn compiled_map_separates_semantic_identity_from_audit_confidence() {
 }
 
 #[test]
+fn compiled_map_has_a_canonical_json_safe_round_trip() {
+    let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+    let compiled =
+        compile_solid_property_map(&matching_model(&mesh), &mesh).expect("compiled properties");
+    let encoded = serde_json::to_vec(&compiled).expect("encode compiled property map");
+    let decoded: CompiledPropertyMap =
+        serde_json::from_slice(&encoded).expect("decode compiled property map");
+    assert_eq!(decoded, compiled);
+}
+
+#[test]
 fn compiled_map_rejects_gaps_overlaps_wrong_roles_and_stale_scopes() {
     let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
     let model = matching_model(&mesh);

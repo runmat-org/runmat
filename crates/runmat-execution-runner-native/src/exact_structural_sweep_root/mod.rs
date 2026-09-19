@@ -7,15 +7,15 @@ pub use contract::{
     decode_exact_structural_sweep_root, prepare_exact_structural_sweep_root,
     prepare_structural_sweep_root, DecodedExactStructuralSweepRoot,
     ExactStructuralSweepRootPreparation, PreparedExactStructuralSweepRoot,
-    PreparedStructuralSweepRoot, StructuralSweepRootPreparation,
+    PreparedStructuralSweepRoot, StructuralSweepResultExpectation, StructuralSweepRootPreparation,
 };
 pub(crate) use publication::package_exact_structural_sweep_result;
 pub(crate) use publication::ExactStructuralSweepRemoteOutcome;
 pub use publication::{
     import_exact_structural_sweep_result, import_exact_structural_sweep_result_catalog,
-    ExactStructuralSweepEntryResult, ExactStructuralSweepEntryStatus, ExactStructuralSweepResult,
-    ExactStructuralSweepResultCatalog, ExactStructuralSweepResultExpectation,
-    ExactStructuralSweepTerminal,
+    import_structural_sweep_result, ExactStructuralSweepEntryResult,
+    ExactStructuralSweepEntryStatus, ExactStructuralSweepResult, ExactStructuralSweepResultCatalog,
+    ExactStructuralSweepResultExpectation, ExactStructuralSweepTerminal,
 };
 
 use runmat_canonical_codec::CanonicalLimits;

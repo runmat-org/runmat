@@ -88,6 +88,7 @@ pub struct GeometryMeshingRootPreparation {
 pub struct PreparedGeometryMeshingRoot {
     request: ProgramExecutionRequest,
     objects: Vec<LogicalObject>,
+    geometry_request: runmat_analysis_execution::GeometryMaterializationRequest,
     meshing_request: MeshingRequest,
     required_programs: Vec<RequiredGeometryMeshingProgram>,
 }
@@ -109,6 +110,12 @@ impl PreparedGeometryMeshingRoot {
 
     pub const fn meshing_request(&self) -> &MeshingRequest {
         &self.meshing_request
+    }
+
+    pub const fn geometry_request(
+        &self,
+    ) -> &runmat_analysis_execution::GeometryMaterializationRequest {
+        &self.geometry_request
     }
 
     pub fn required_programs(&self) -> &[RequiredGeometryMeshingProgram] {
@@ -146,6 +153,7 @@ pub fn prepare_geometry_meshing_root(
         preferred_edges_per_partition,
         preferred_faces_per_partition,
     } = preparation;
+    let geometry_request = geometry.request.clone();
     artifact_access.validate().map_err(protocol)?;
     geometry.request.validate().map_err(protocol)?;
     geometry
@@ -244,6 +252,7 @@ pub fn prepare_geometry_meshing_root(
     Ok(PreparedGeometryMeshingRoot {
         request,
         objects,
+        geometry_request,
         meshing_request,
         required_programs,
     })

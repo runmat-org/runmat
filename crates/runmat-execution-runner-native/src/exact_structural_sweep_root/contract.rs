@@ -98,6 +98,51 @@ pub struct StructuralSweepRootPreparation {
     pub studies: Vec<crate::PreparedStructuralStudyRoot>,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StructuralSweepResultExpectation {
+    pub program_revision: ProgramRevision,
+    pub artifact_access: ArtifactAccess,
+    pub definition: SweepDefinition,
+    pub studies: Vec<crate::StructuralStudyResultExpectation>,
+}
+
+impl StructuralSweepResultExpectation {
+    pub fn identity(&self) -> NativeExecutionResult<SweepIdentity> {
+        self.definition.identity().map_err(protocol)
+    }
+
+    pub fn validate(&self) -> NativeExecutionResult<()> {
+        self.artifact_access.validate().map_err(protocol)?;
+        if self.studies.is_empty() {
+            return Err(protocol("structural sweep expectation is empty"));
+        }
+        for study in &self.studies {
+            study.validate()?;
+            if study.program_revision != self.program_revision
+                || study.artifact_access != self.artifact_access
+            {
+                return Err(protocol(
+                    "structural sweep study differs from its revision or authority",
+                ));
+            }
+        }
+        let studies = self
+            .studies
+            .iter()
+            .map(|study| StudyIdentity::from_authored_digest(study.authored_study_digest, None))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(protocol)?;
+        if self.definition.studies() != studies {
+            return Err(protocol(
+                "structural sweep definition differs from its ordered studies",
+            ));
+        }
+        self.identity()?;
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct PreparedExactStructuralSweepRoot {
     request: ProgramExecutionRequest,
@@ -111,6 +156,7 @@ pub struct PreparedStructuralSweepRoot {
     request: ProgramExecutionRequest,
     objects: Vec<ProgramExecutionObject>,
     required_programs: Vec<RequiredStudyProgram>,
+    expectation: StructuralSweepResultExpectation,
 }
 
 impl PreparedStructuralSweepRoot {
@@ -124,6 +170,10 @@ impl PreparedStructuralSweepRoot {
 
     pub fn required_programs(&self) -> Vec<RequiredStudyProgram> {
         self.required_programs.clone()
+    }
+
+    pub fn result_expectation(&self) -> StructuralSweepResultExpectation {
+        self.expectation.clone()
     }
 
     pub fn into_request(self) -> ProgramExecutionRequest {
@@ -306,6 +356,7 @@ pub fn prepare_structural_sweep_root(
     let mut object_inventory = BTreeMap::new();
     let mut required_programs = Vec::new();
     let mut identities = Vec::with_capacity(studies.len());
+    let mut expectations = Vec::with_capacity(studies.len());
     for study in studies {
         let request = study.request().clone();
         if request.recipe.program_revision != program_revision {
@@ -329,6 +380,7 @@ pub fn prepare_structural_sweep_root(
             }
         }));
         identities.push(identity);
+        expectations.push(study.result_expectation());
     }
     if definition.studies() != identities {
         return Err(protocol(
@@ -337,6 +389,7 @@ pub fn prepare_structural_sweep_root(
     }
     definition.identity().map_err(protocol)?;
 
+    let expectation_definition = definition.clone();
     let root = ExactStructuralSweepRootRequest {
         schema_version: 1,
         definition,
@@ -397,10 +450,18 @@ pub fn prepare_structural_sweep_root(
         requested_outputs: 1,
     };
     request.validate().map_err(protocol)?;
+    let expectation = StructuralSweepResultExpectation {
+        program_revision: request.recipe.program_revision.clone(),
+        artifact_access,
+        definition: expectation_definition,
+        studies: expectations,
+    };
+    expectation.validate()?;
     Ok(PreparedStructuralSweepRoot {
         request,
         objects: object_inventory.into_values().collect(),
         required_programs,
+        expectation,
     })
 }
 

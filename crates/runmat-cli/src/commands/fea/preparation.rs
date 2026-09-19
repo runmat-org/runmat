@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
@@ -80,7 +79,10 @@ pub(super) fn prepare_study(
         .as_ref()
         .and_then(|policy| policy.resources.workers)
         .map_or(1, |range| range.maximum.max(1));
-    let authored_study_digest = typed_study_digest(&realized, &resolved.material_catalog)?;
+    let authored_study_digest = runmat_analysis_fea::study::structural_study_source_digest(
+        &realized,
+        &resolved.material_catalog,
+    )?;
     let root = prepare_structural_study_root(StructuralStudyRootPreparation {
         program_revision: revision.clone(),
         artifact_access: access,
@@ -195,19 +197,6 @@ fn program_revision(
         source_digest,
         runmat_core::program_environment(crate::diagnostics::parser_compat(config.language.compat)),
     )?)
-}
-
-fn typed_study_digest(
-    study: &RealizedStudy,
-    materials: &BTreeMap<
-        runmat_analysis_core::AuthoredMaterialRef,
-        runmat_analysis_core::MaterialModel,
-    >,
-) -> Result<Digest> {
-    Ok(Digest::sha256(serde_json::to_vec(&(
-        study,
-        materials.iter().collect::<Vec<_>>(),
-    ))?))
 }
 
 pub(super) fn artifact_access(authority: &str) -> ArtifactAccess {

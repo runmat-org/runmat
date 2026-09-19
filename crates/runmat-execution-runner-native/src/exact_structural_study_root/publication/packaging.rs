@@ -7,6 +7,16 @@ pub(crate) fn package_exact_structural_study_result(
     region_resolution: &runmat_analysis_execution::PreparedAnalysisObjects,
     analysis: ExactStructuralAnalysisPublication<'_>,
 ) -> NativeExecutionResult<(ProgramExecutionResponse, Vec<ProgramExecutionObject>)> {
+    if let Some(compiled) = &decoded.compiled_study {
+        compiled
+            .validate_against(&meshing.artifact)
+            .map_err(protocol)?;
+        if decoded.workloads.authored_model().map_err(protocol)? != &compiled.model {
+            return Err(protocol(
+                "compiled study model differs from its executed structural workloads",
+            ));
+        }
+    }
     let region_resolution_objects = region_resolution
         .references(&decoded.artifact_access, ValueRefKind::ResultObject)
         .map_err(protocol)?;
@@ -85,6 +95,8 @@ pub(crate) fn package_exact_structural_study_result(
         schema_version: 1,
         program_revision: request.recipe.program_revision.clone(),
         authored_study_digest: decoded.authored_study_digest,
+        compiled_study: decoded.compiled_study.clone(),
+        compiled_geometry_output: decoded.compiled_geometry_output.clone(),
         unresolved_workloads_digest,
         meshing_request_digest: Digest::from_bytes(
             *decoded

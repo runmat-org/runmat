@@ -5,7 +5,6 @@ use runmat_analysis_language::{ResolvedAnalysisStudy, ResolvedAnalysisSweep};
 use runmat_config::runtime::RunMatRuntimeConfig;
 use runmat_execution_artifact::archive::{write_bundle, ArchiveLimits};
 use runmat_execution_artifact::ExecutionBundleBuilder;
-use serde::Serialize;
 use std::path::PathBuf;
 
 use crate::cli::{Cli, ExecutionTarget, ExecutionTargetArgs, RemoteExecutionTarget};
@@ -14,6 +13,7 @@ use crate::commands::job::submit::{PreparedRemoteExecution, RemoteSubmissionOpti
 use crate::presentation;
 
 use super::preparation::{prepare_study, FeaComputeAllocation};
+use super::result_presentation::{local_summary, print_fea_result, print_sweep_result};
 use super::selection::SelectedFeaRoot;
 use super::source::CheckedFeaSource;
 
@@ -65,7 +65,7 @@ async fn execute_study(
                     prepared.workers,
                 )
                 .await?;
-            print_local_result(&study_id, &completed, json)
+            print_fea_result(&study_id, &completed, json)
         }
         ExecutionTarget::Remote(target) => {
             execute_study_remotely(
@@ -181,6 +181,12 @@ async fn execute_sweep_remotely(
         &compute,
         config,
     )?;
+    let saved_expectation = placeholder.root.result_expectation();
+    let sweep_id = sweep.sweep.sweep_id.clone();
+    let case_ids = cases
+        .iter()
+        .map(|case| case.case_id.clone())
+        .collect::<Vec<_>>();
     let revision = placeholder.revision.clone();
     let mut builder =
         ExecutionBundleBuilder::native(frozen, revision.clone())?.with_compiled_package_closure();
@@ -220,7 +226,11 @@ async fn execute_sweep_remotely(
             workers: target.workers.max(1),
             accelerator: compute.accelerators.first().cloned(),
             on_run_created: None,
-            output_intent: SavedOutputIntent::Generic,
+            output_intent: SavedOutputIntent::FeaSweep {
+                sweep_id,
+                case_ids,
+                expectation: Box::new(saved_expectation),
+            },
         },
     )
     .await?;
@@ -358,6 +368,8 @@ async fn execute_study_remotely(
         &compute,
         config,
     )?;
+    let saved_expectation = placeholder.root.result_expectation();
+    let study_id = placeholder.realized.study_id.clone();
     let revision = placeholder.revision.clone();
     let mut builder =
         ExecutionBundleBuilder::native(frozen, revision.clone())?.with_compiled_package_closure();
@@ -397,7 +409,10 @@ async fn execute_study_remotely(
             workers: target.workers.max(1),
             accelerator: compute.accelerators.first().cloned(),
             on_run_created: None,
-            output_intent: SavedOutputIntent::Generic,
+            output_intent: SavedOutputIntent::FeaStudy {
+                study_id,
+                expectation: Box::new(saved_expectation),
+            },
         },
     )
     .await?;
@@ -545,181 +560,5 @@ fn resolve_compute_allocation(
     }
 }
 
-#[derive(Serialize)]
-struct LocalRunSummary {
-    root_id: String,
-    procedure: &'static str,
-    mesh_digest: String,
-    nodes: usize,
-    elements: usize,
-    boundary_faces: usize,
-}
-
-fn local_summary(
-    root_id: impl Into<String>,
-    completed: &runmat_execution_runner_native::CompletedLocalStructuralStudy,
-) -> LocalRunSummary {
-    LocalRunSummary {
-        root_id: root_id.into(),
-        procedure: numerical_kind(&completed.numerical),
-        mesh_digest: stable_digest_hex(&completed.meshing.artifact.canonical_digest),
-        nodes: completed.meshing.artifact.topology.nodes.len(),
-        elements: completed.meshing.artifact.topology.volume_elements.len(),
-        boundary_faces: completed.meshing.artifact.topology.boundary_faces.len(),
-    }
-}
-
-fn print_local_result(
-    study_id: &str,
-    completed: &runmat_execution_runner_native::CompletedLocalStructuralStudy,
-    json: bool,
-) -> Result<()> {
-    let summary = local_summary(study_id, completed);
-    if json {
-        println!("{}", serde_json::to_string_pretty(&summary)?);
-        return Ok(());
-    }
-    let styles = presentation::stdout();
-    println!(
-        "{} {}",
-        styles.success("FEA run complete"),
-        styles.identifier(study_id)
-    );
-    println!("  {} {}", styles.label("procedure:"), summary.procedure);
-    println!("  {} {}", styles.label("mesh:"), summary.mesh_digest);
-    println!(
-        "  {} {} nodes, {} tetrahedra, {} boundary faces",
-        styles.label("topology:"),
-        summary.nodes,
-        summary.elements,
-        summary.boundary_faces
-    );
-    Ok(())
-}
-
-fn print_sweep_result(id: &str, summaries: &[LocalRunSummary], json: bool) -> Result<()> {
-    if json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&serde_json::json!({
-                "sweep_id": id,
-                "cases": summaries,
-            }))?
-        );
-    } else {
-        let styles = presentation::stdout();
-        println!(
-            "{} {} ({} cases)",
-            styles.success("FEA sweep complete"),
-            styles.identifier(id),
-            summaries.len()
-        );
-        for summary in summaries {
-            println!(
-                "  {}: {} tetrahedra, {}",
-                summary.root_id, summary.elements, summary.procedure
-            );
-        }
-    }
-    Ok(())
-}
-
-fn stable_digest_hex(digest: &runmat_meshing_core::StableDigest) -> String {
-    digest.0.iter().map(|byte| format!("{byte:02x}")).collect()
-}
-
-fn numerical_kind(
-    result: &runmat_runtime::analysis::StructuralStudyNumericalResult,
-) -> &'static str {
-    use runmat_runtime::analysis::StructuralStudyNumericalResult;
-    match result {
-        StructuralStudyNumericalResult::LinearSequence(_) => "structural_linear_sequence",
-        StructuralStudyNumericalResult::StructuralModal(_) => "structural_modal",
-        StructuralStudyNumericalResult::StructuralModalTransient(_) => "structural_modal_transient",
-        StructuralStudyNumericalResult::StructuralModalResponseSpectrum(_) => {
-            "structural_modal_response_spectrum"
-        }
-        StructuralStudyNumericalResult::StructuralRandomResponse(_) => "structural_random_response",
-        StructuralStudyNumericalResult::StructuralBuckling(_) => "structural_buckling",
-        StructuralStudyNumericalResult::StructuralPrestressedModal(_) => {
-            "structural_prestressed_modal"
-        }
-        StructuralStudyNumericalResult::StructuralPrestressedFrequency(_) => {
-            "structural_prestressed_frequency"
-        }
-        StructuralStudyNumericalResult::StructuralTransient(_) => "structural_transient",
-        StructuralStudyNumericalResult::StructuralFrequency(_) => "structural_frequency",
-    }
-}
-
 #[cfg(test)]
-mod tests {
-    use runmat_analysis_core::{
-        AcceleratorPreference, AuthoredExecutionPolicy, BackendPreference, CooperativePolicy,
-        ExecutionResourceLimits, FanoutPolicy, PlacementPreference, ResiliencePolicy,
-    };
-    use runmat_config::project::{ProjectAcceleratorProfile, ProjectExecutionProfile};
-
-    use super::*;
-
-    fn remote_target() -> ExecutionTarget {
-        ExecutionTarget::Remote(RemoteExecutionTarget {
-            cluster: "gpu-cluster".into(),
-            project: None,
-            queue: "gpu".into(),
-            trust_identity: "sha256:worker".into(),
-            idempotency_key: None,
-            workers: 2,
-            detach: false,
-        })
-    }
-
-    fn policy(accelerators: AcceleratorPreference) -> AuthoredExecutionPolicy {
-        AuthoredExecutionPolicy {
-            module_path: "project/main.fea".into(),
-            policy_id: "scale".into(),
-            placement: PlacementPreference::Cluster {
-                profile: Some("gpu".into()),
-            },
-            backend: BackendPreference::Accelerator,
-            resources: ExecutionResourceLimits {
-                workers: None,
-                maximum_memory_bytes_per_worker: None,
-                accelerators,
-            },
-            fanout: FanoutPolicy::default(),
-            cooperative: CooperativePolicy::default(),
-            resilience: ResiliencePolicy::default(),
-        }
-    }
-
-    #[test]
-    fn remote_accelerator_planning_requires_and_retains_exact_profile_allocation() {
-        let profile = ProjectExecutionProfile {
-            cluster: "gpu-cluster".into(),
-            queue: Some("gpu".into()),
-            trust_identity: Some("sha256:worker".into()),
-            accelerator: Some(ProjectAcceleratorProfile {
-                class: "metal".into(),
-                memory_bytes: 16 << 30,
-            }),
-        };
-        let allocation = resolve_compute_allocation(
-            Some(&policy(AcceleratorPreference::Required)),
-            &remote_target(),
-            Some(&profile),
-        )
-        .unwrap();
-        assert_eq!(allocation.backend, runmat_analysis_fea::ComputeBackend::Gpu);
-        assert_eq!(allocation.accelerators.len(), 1);
-        assert_eq!(allocation.accelerators[0].class, "metal");
-        assert_eq!(allocation.accelerators[0].memory_bytes_each, 16 << 30);
-
-        assert!(resolve_compute_allocation(
-            Some(&policy(AcceleratorPreference::Required)),
-            &remote_target(),
-            None,
-        )
-        .is_err());
-    }
-}
+mod tests;

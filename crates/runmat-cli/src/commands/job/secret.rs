@@ -22,6 +22,15 @@ pub enum OutputMaterialization {
 )]
 pub enum SavedOutputIntent {
     Generic,
+    FeaStudy {
+        study_id: String,
+        expectation: Box<runmat_execution_runner_native::StructuralStudyResultExpectation>,
+    },
+    FeaSweep {
+        sweep_id: String,
+        case_ids: Vec<String>,
+        expectation: Box<runmat_execution_runner_native::StructuralSweepResultExpectation>,
+    },
     Mesh {
         solver_mesh_path: PathBuf,
         evidence_path: PathBuf,
@@ -97,6 +106,35 @@ impl SavedRemoteRun {
         }
         if self.run_id != expected_run_id {
             anyhow::bail!("saved remote run identity does not match its storage key");
+        }
+        match &self.output_intent {
+            SavedOutputIntent::FeaStudy {
+                study_id,
+                expectation,
+            } => {
+                if study_id.trim().is_empty() {
+                    anyhow::bail!("saved FEA study identity is empty");
+                }
+                expectation.validate()?;
+            }
+            SavedOutputIntent::FeaSweep {
+                sweep_id,
+                case_ids,
+                expectation,
+            } => {
+                if sweep_id.trim().is_empty()
+                    || case_ids.len() != expectation.studies.len()
+                    || case_ids.iter().any(|case| case.trim().is_empty())
+                    || case_ids
+                        .iter()
+                        .enumerate()
+                        .any(|(index, case)| case_ids[..index].contains(case))
+                {
+                    anyhow::bail!("saved FEA sweep identity or case order is invalid");
+                }
+                expectation.validate()?;
+            }
+            _ => {}
         }
         if let SavedOutputIntent::Mesh {
             solver_mesh_path,
@@ -311,6 +349,8 @@ pub fn mark_output_materialized(run_id: &str) -> Result<()> {
         } => *materialization = OutputMaterialization::Materialized,
         SavedOutputIntent::StructuralStudy { .. }
         | SavedOutputIntent::StructuralSweep { .. }
+        | SavedOutputIntent::FeaStudy { .. }
+        | SavedOutputIntent::FeaSweep { .. }
         | SavedOutputIntent::Generic => {
             anyhow::bail!("remote run has no deferred output intent")
         }

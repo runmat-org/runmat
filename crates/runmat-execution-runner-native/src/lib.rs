@@ -133,9 +133,9 @@ pub use exact_meshing_root::{
 };
 pub use exact_structural_study_root::{
     decode_exact_structural_study_root, import_exact_structural_study_result,
-    prepare_exact_structural_study_root, DecodedExactStructuralStudyRoot,
-    ExactStructuralBucklingAnalysisResult, ExactStructuralFrequencyAnalysisResult,
-    ExactStructuralModalResponseSpectrumAnalysisResult,
+    import_structural_study_result, prepare_exact_structural_study_root,
+    DecodedExactStructuralStudyRoot, ExactStructuralBucklingAnalysisResult,
+    ExactStructuralFrequencyAnalysisResult, ExactStructuralModalResponseSpectrumAnalysisResult,
     ExactStructuralModalTransientAnalysisResult, ExactStructuralPrestressedFrequencyAnalysisResult,
     ExactStructuralPrestressedModalAnalysisResult, ExactStructuralRandomResponseAnalysisResult,
     ExactStructuralStudyAnalysisResult, ExactStructuralStudyResult,
@@ -145,12 +145,13 @@ pub use exact_structural_study_root::{
 };
 pub use exact_structural_sweep_root::{
     decode_exact_structural_sweep_root, import_exact_structural_sweep_result,
-    import_exact_structural_sweep_result_catalog, prepare_exact_structural_sweep_root,
-    prepare_structural_sweep_root, DecodedExactStructuralSweepRoot,
-    ExactStructuralSweepEntryResult, ExactStructuralSweepEntryStatus, ExactStructuralSweepResult,
-    ExactStructuralSweepResultCatalog, ExactStructuralSweepResultExpectation,
-    ExactStructuralSweepRootPreparation, ExactStructuralSweepTerminal,
-    PreparedExactStructuralSweepRoot, PreparedStructuralSweepRoot, StructuralSweepRootPreparation,
+    import_exact_structural_sweep_result_catalog, import_structural_sweep_result,
+    prepare_exact_structural_sweep_root, prepare_structural_sweep_root,
+    DecodedExactStructuralSweepRoot, ExactStructuralSweepEntryResult,
+    ExactStructuralSweepEntryStatus, ExactStructuralSweepResult, ExactStructuralSweepResultCatalog,
+    ExactStructuralSweepResultExpectation, ExactStructuralSweepRootPreparation,
+    ExactStructuralSweepTerminal, PreparedExactStructuralSweepRoot, PreparedStructuralSweepRoot,
+    StructuralSweepResultExpectation, StructuralSweepRootPreparation,
     EXACT_STRUCTURAL_SWEEP_ROOT_EXECUTION_MODE, EXACT_STRUCTURAL_SWEEP_ROOT_TARGET_PROFILE,
 };
 pub use geometry_materialization::{
@@ -163,9 +164,7 @@ pub use geometry_meshing_root::{
     RequiredGeometryMeshingProgram, GEOMETRY_MESHING_ROOT_EXECUTION_MODE,
     GEOMETRY_MESHING_ROOT_TARGET_PROFILE,
 };
-pub use local_structural_study::{
-    execute_prepared_structural_study_locally, CompletedLocalStructuralStudy,
-};
+pub use local_structural_study::execute_prepared_structural_study_locally;
 pub use meshing_evaluator::{native_meshing_kernel_dispatcher, NativeMeshingEvaluatorProvider};
 pub use meshing_host::{
     execute_meshing_program_request, run_meshing_worker_stdio, NativeMeshingHostLimits,
@@ -192,6 +191,9 @@ pub use structural_study_root::{
     decode_structural_study_root, prepare_structural_study_root, DecodedStructuralStudyRoot,
     PreparedStructuralStudyRoot, RequiredStructuralStudyProgram, StructuralStudyRootPreparation,
     STRUCTURAL_STUDY_ROOT_EXECUTION_MODE, STRUCTURAL_STUDY_ROOT_TARGET_PROFILE,
+};
+pub use structural_study_root::{
+    StructuralStudyMaterialExpectation, StructuralStudyResultExpectation,
 };
 pub use test_workload::{execute_host_program_request, execute_host_program_request_with_project};
 pub use worker::run_worker_stdio;
