@@ -494,6 +494,23 @@ test("operational materialization rejects parent bytes outside the authorized pr
   assert.equal(fs.readFileSync(target, "utf8"), "// unreviewed parent edit\n");
 });
 
+test("operational materialization authenticates initial parents by frozen baseline bytes", () => {
+  const fixture = controlledFixture({
+    composition: true,
+    legacyCompositionProjection: true,
+  });
+  const target = path.join(
+    fixture.repository, "crates/runmat-runtime/src/builtins/math/mod.rs",
+  );
+  assert.match(fs.readFileSync(target, "utf8"), /projection\/v5/);
+  materializeEffectiveModuleComposition({
+    repository: fixture.repository, control: fixture.control,
+    queueState: fixture.queueState, queueCheckpoint: fixture.queueCheckpoint,
+    lease: fixture.lease,
+  });
+  assert.match(fs.readFileSync(target, "utf8"), /projection\/v6/);
+});
+
 test("operational materialization rejects an unauthorized present parent", () => {
   const fixture = controlledFixture({ composition: true });
   const definition = moduleCompositionProductRegistry()

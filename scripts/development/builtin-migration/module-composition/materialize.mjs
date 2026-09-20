@@ -1,4 +1,5 @@
 import { compareCodePoint } from "../constants.mjs";
+import { contentDigest } from "../evidence.mjs";
 import { deepImmutable } from "../immutable.mjs";
 import { assertActiveLease } from "../lease.mjs";
 import { validateReviewedModuleCompositionAuthority } from "./authority.mjs";
@@ -43,10 +44,21 @@ export function materializeEffectiveModuleComposition({
   );
   return withCompositionTransaction(repository, (lock, recovery) => {
     const priorPresent = priorProducts.filter((product) => product.state === "present");
-    const priorRendered = renderCompositionSetTwice(priorPresent);
+    const renderedPriorIds = new Set(state.priorRenderedProductIds);
+    const priorRendered = renderCompositionSetTwice(
+      priorPresent.filter((product) => renderedPriorIds.has(product.product_id)),
+    );
     renewCompositionRepositoryLock(lock);
-    const priorContents = new Map(priorRendered
-      .map((entry) => [entry.product.product_id, entry.content]));
+    const priorDigests = new Map(priorRendered
+      .map((entry) => [entry.product.product_id, contentDigest(entry.content)]));
+    for (const product of priorPresent) {
+      if (priorDigests.has(product.product_id)) continue;
+      const reviewed = control.integrationProducts.get(product.product_id);
+      if (!reviewed || reviewed.baseline_digest === null) {
+        throw new Error(`${product.product_id}: present baseline product lacks its frozen digest`);
+      }
+      priorDigests.set(product.product_id, reviewed.baseline_digest);
+    }
     const proveAuthority = (expectedChildStates = null) => {
       const observed = deriveModuleCompositionMaterializationState({
         control, queueState, queueCheckpoint, lease, clock,
@@ -57,7 +69,7 @@ export function materializeEffectiveModuleComposition({
       validateReviewedModuleCompositionAuthority(control.integrationProducts, observed.prior);
       validateReviewedModuleCompositionAuthority(control.integrationProducts, observed.effective);
       const inventory = inspectCanonicalMaterializationTargets(
-        lock.repository, priorProducts, priorContents,
+        lock.repository, priorProducts, priorDigests,
       );
       inspectMaterializationTargets(lock.repository, products, { authorizedPendingChildKeys });
       const childStates = inspectEffectiveChildStates(
