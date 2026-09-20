@@ -40,6 +40,7 @@ import {
   type GpuStatus,
   type SessionStats,
   type InputRequest,
+  type FeaSourceCheckResult,
   setSignalTraceHandler,
   withSignalTrace
 } from "./index.js";
@@ -236,6 +237,7 @@ interface NativeSession {
   installProjectHandoff?: (handoff: unknown) => unknown;
   clearProjectHandoff?: () => void;
   projectRevision?: () => unknown | null;
+  checkFeaSource?: (path: string) => FeaSourceCheckResult | Promise<FeaSourceCheckResult>;
 }
 
 const baseExecuteResult: ExecuteResult = {
@@ -283,6 +285,25 @@ describe("initRunMat wiring", () => {
   afterEach(() => {
     __internals.setNativeModuleOverride(null);
     vi.restoreAllMocks();
+  });
+
+  it("delegates FEA source checks to the typed WASM API", async () => {
+    const checkResult: FeaSourceCheckResult = {
+      status: "valid",
+      rootModule: "models/bracket.fea",
+      roots: [{ kind: "study", id: "static_response" }],
+      diagnostics: [],
+    };
+    const checkFeaSource = vi.fn(async () => checkResult);
+    __internals.setNativeModuleOverride({
+      default: async () => {},
+      initRunMat: async () => createMockNativeSession({ checkFeaSource }),
+    } as NativeModule);
+
+    const session = await initRunMat({ enableGpu: false });
+
+    await expect(session.checkFeaSource("models/bracket.fea")).resolves.toEqual(checkResult);
+    expect(checkFeaSource).toHaveBeenCalledWith("models/bracket.fea");
   });
 
   it("forwards dynamic language policy and error namespace updates", async () => {

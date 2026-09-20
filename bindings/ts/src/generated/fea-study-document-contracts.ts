@@ -50,6 +50,43 @@ export type FeaProgressPhase = "geometry_load" | "region_resolution" | "mesh_pre
 
 export type FeaProgressStatus = "started" | "advanced" | "completed" | "failed" | "cancelled";
 
+export type FeaCheckStatus = "valid" | "invalid" | "incomplete";
+
+export type FeaSourceAvailability = "Available" | "Unavailable";
+
+export type FeaDiagnosticSeverity = "Error" | "Warning";
+
+export type FeaDiagnosticPhase = "Syntax" | "ModuleGraph" | "Binding" | "Semantic" | "Inspection" | "Lowering";
+
+export type FeaRootSelector = { kind: "study"; id: string } | { kind: "sweep"; id: string };
+
+export interface FeaSourceLocation {
+  path: string;
+  span: { start: number; end: number };
+}
+
+export interface FeaRelatedDiagnostic {
+  message: string;
+  location: FeaSourceLocation;
+}
+
+export interface FeaDiagnostic {
+  code: string;
+  message: string;
+  severity: FeaDiagnosticSeverity;
+  phase: FeaDiagnosticPhase;
+  location: FeaSourceLocation | null;
+  related: FeaRelatedDiagnostic[];
+  availability: FeaSourceAvailability;
+}
+
+export interface FeaSourceCheckResult {
+  status: FeaCheckStatus;
+  rootModule: string;
+  roots: FeaRootSelector[];
+  diagnostics: FeaDiagnostic[];
+}
+
 export type FeaGeometryUnits = "unspecified" | "meter" | "millimeter" | "inch";
 
 export type FeaComputeBackend = "cpu" | "gpu";
@@ -322,16 +359,6 @@ export interface FeaCapabilities {
   supportsResults: boolean;
   supportsLiveProgress: boolean;
   visualizationBackend: string;
-}
-
-export interface FeaCheckResult {
-  path: string;
-  documentKind: FeaDocumentKind;
-  valid: boolean;
-  validation: unknown;
-  plan?: unknown;
-  diagnostics: unknown[];
-  evidenceArtifactPaths: string[];
 }
 
 export interface FeaRunResult {

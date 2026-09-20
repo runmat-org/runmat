@@ -17,6 +17,14 @@ const rustFeaProgressPath = path.resolve(
   repoRoot,
   "crates/runmat-analysis/fea/src/progress.rs"
 );
+const rustFeaSourceReportPath = path.resolve(
+  repoRoot,
+  "crates/runmat-runtime/src/analysis/source/report.rs"
+);
+const rustFeaDiagnosticPath = path.resolve(
+  repoRoot,
+  "crates/runmat-analysis/language/src/diagnostic.rs"
+);
 const rustCoreIdentityPath = path.resolve(
   repoRoot,
   "crates/runmat-analysis/core/src/study/identity.rs"
@@ -74,7 +82,6 @@ const progressEnumTypes = [
 ];
 const analysisStructTypes = [
   ["AnalysisRuntimeCapabilities", "FeaCapabilities", { renameAll: "camelCase" }],
-  ["AnalysisDocumentCheckResult", "FeaCheckResult", { renameAll: "camelCase" }],
   ["AnalysisDocumentRunResult", "FeaRunResult", { renameAll: "camelCase" }],
   ["AnalysisFieldBinding", "FeaFieldBinding", { renameAll: "camelCase" }],
   ["AnalysisFieldRequestOptions", "FeaFieldRequestOptions", { renameAll: "camelCase" }],
@@ -122,6 +129,11 @@ function readAnalysisConstant(source, rustName) {
 
 function snakeToCamel(value) {
   return value.replace(/_([a-z])/g, (_, char) => char.toUpperCase());
+}
+
+function snakeToPascal(value) {
+  const camel = snakeToCamel(value);
+  return camel.charAt(0).toUpperCase() + camel.slice(1);
 }
 
 function rustTypeToTs(type) {
@@ -271,6 +283,26 @@ function readTupleEnumValues(source, name) {
   }
   if (values.length === 0) {
     throw new Error(`Rust enum ${name} did not contain tuple variants.`);
+  }
+  return values;
+}
+
+function readStringIdStructEnumValues(source, name) {
+  const body = readEnumBody(source, name);
+  const values = [];
+  for (const rawLine of body.split("\n")) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#[")) {
+      continue;
+    }
+    const variantMatch = line.match(/^([A-Za-z0-9_]+)\s*\{\s*id:\s*String\s*\},$/);
+    if (!variantMatch) {
+      throw new Error(`Could not parse string-id enum variant in ${name}: ${line}`);
+    }
+    values.push(rustVariantToSnake(variantMatch[1]));
+  }
+  if (values.length === 0) {
+    throw new Error(`Rust enum ${name} did not contain string-id variants.`);
   }
   return values;
 }
@@ -519,6 +551,8 @@ function main() {
   const analysisSource = fs.readFileSync(rustAnalysisContractsPath, "utf8");
   const feaDocumentSource = fs.readFileSync(rustFeaDocumentPath, "utf8");
   const progressSource = fs.readFileSync(rustFeaProgressPath, "utf8");
+  const sourceReportSource = fs.readFileSync(rustFeaSourceReportPath, "utf8");
+  const diagnosticSource = fs.readFileSync(rustFeaDiagnosticPath, "utf8");
   const coreIdentitySource = fs.readFileSync(rustCoreIdentityPath, "utf8");
   const coreFormulationSource = fs.readFileSync(rustCoreFormulationPath, "utf8");
   const coreOutputSource = fs.readFileSync(rustCoreOutputPath, "utf8");
@@ -540,6 +574,47 @@ function main() {
   const progressEnums = progressEnumTypes.map(([rustName, tsName]) =>
     formatTypeUnion(tsName, readEnumValues(progressSource, rustName))
   );
+  const sourceCheckContracts = [
+    formatTypeUnion("FeaCheckStatus", readEnumValues(sourceReportSource, "FeaCheckStatus")),
+    formatTypeUnion(
+      "FeaSourceAvailability",
+      readEnumValues(diagnosticSource, "SourceAvailability").map(snakeToPascal)
+    ),
+    formatTypeUnion(
+      "FeaDiagnosticSeverity",
+      readEnumValues(diagnosticSource, "FeaDiagnosticSeverity").map(snakeToPascal)
+    ),
+    formatTypeUnion(
+      "FeaDiagnosticPhase",
+      readEnumValues(diagnosticSource, "FeaDiagnosticPhase").map(snakeToPascal)
+    ),
+    `export type FeaRootSelector = ${readStringIdStructEnumValues(sourceReportSource, "FeaRootSelector")
+      .map((variant) => `{ kind: ${JSON.stringify(variant)}; id: string }`)
+      .join(" | ")};`,
+    `export interface FeaSourceLocation {
+  path: string;
+  span: { start: number; end: number };
+}`,
+    `export interface FeaRelatedDiagnostic {
+  message: string;
+  location: FeaSourceLocation;
+}`,
+    `export interface FeaDiagnostic {
+  code: string;
+  message: string;
+  severity: FeaDiagnosticSeverity;
+  phase: FeaDiagnosticPhase;
+  location: FeaSourceLocation | null;
+  related: FeaRelatedDiagnostic[];
+  availability: FeaSourceAvailability;
+}`,
+    `export interface FeaSourceCheckResult {
+  status: FeaCheckStatus;
+  rootModule: string;
+  roots: FeaRootSelector[];
+  diagnostics: FeaDiagnostic[];
+}`,
+  ];
   const authoringEnums = [
     formatTypeUnion("FeaGeometryUnits", readEnumValues(geometryUnitsSource, "UnitSystem")),
     formatTypeUnion("FeaComputeBackend", readEnumValues(feaContractsSource, "ComputeBackend")),
@@ -705,6 +780,7 @@ export interface FeaSequenceBranch { branch_id: string; producer_step: string; s
     "",
     ...enumTypes.flatMap((typeSource) => [typeSource, ""]),
     ...progressEnums.flatMap((typeSource) => [typeSource, ""]),
+    ...sourceCheckContracts.flatMap((typeSource) => [typeSource, ""]),
     ...authoringEnums.flatMap((typeSource) => [typeSource, ""]),
     "export type FeaStructuralTimeStepPolicy = { fixed: { interval_count: number } };",
     "export interface FeaModalTruncationPolicy { requested_mode_count: number; eigenspace_relative_tolerance: number; }",

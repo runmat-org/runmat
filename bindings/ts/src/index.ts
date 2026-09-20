@@ -3,7 +3,7 @@ import type {
 } from "./fs/provider-types.js";
 import type {
   FeaCapabilities,
-  FeaCheckResult,
+  FeaSourceCheckResult,
   FeaDiagnosticsArtifactPayload,
   FeaDocumentKind,
   FeaFieldBinding,
@@ -87,7 +87,7 @@ export type {
   FeaBoundaryInput,
   FeaCanonicalSequence,
   FeaCapabilities,
-  FeaCheckResult,
+  FeaSourceCheckResult,
   FeaDiagnosticsArtifactPayload,
   FeaDocumentKind,
   FeaFieldBinding,
@@ -1004,8 +1004,7 @@ export interface RunMatSessionHandle {
     geometrySceneHandle?: number | null,
   ): Promise<void> | void;
   feaCapabilities(): Promise<FeaCapabilities>;
-  checkFeaStudy(path: string): Promise<FeaCheckResult>;
-  runFeaStudy(path: string, artifactRoot?: string | null): Promise<FeaRunResult>;
+  checkFeaSource(path: string): Promise<FeaSourceCheckResult>;
   feaField(runId: string, fieldId: string, options?: FeaFieldRequestOptions): Promise<FeaFieldResult>;
   materializeDataFileVariable(
     path: string,
@@ -1096,8 +1095,7 @@ interface RunMatNativeSession {
     geometrySceneHandle?: number | null,
   ) => void | Promise<void>;
   feaCapabilities?: () => FeaCapabilities | Promise<FeaCapabilities>;
-  checkFeaStudy?: (path: string) => FeaCheckResult | Promise<FeaCheckResult>;
-  runFeaStudy?: (path: string, artifactRoot?: string | null) => FeaRunResult | Promise<FeaRunResult>;
+  checkFeaSource?: (path: string) => FeaSourceCheckResult | Promise<FeaSourceCheckResult>;
   feaField?: (
     runId: string,
     fieldId: string,
@@ -2177,20 +2175,12 @@ class WebRunMatSession implements RunMatSessionHandle {
     return this.native.feaCapabilities();
   }
 
-  async checkFeaStudy(path: string): Promise<FeaCheckResult> {
+  async checkFeaSource(path: string): Promise<FeaSourceCheckResult> {
     this.ensureActive();
-    if (typeof this.native.checkFeaStudy !== "function") {
-      throw new Error("The loaded runmat-wasm module does not expose checkFeaStudy yet.");
+    if (typeof this.native.checkFeaSource !== "function") {
+      throw new Error("The loaded runmat-wasm module does not expose checkFeaSource yet.");
     }
-    return this.native.checkFeaStudy(path);
-  }
-
-  async runFeaStudy(path: string, artifactRoot?: string | null): Promise<FeaRunResult> {
-    this.ensureActive();
-    if (typeof this.native.runFeaStudy !== "function") {
-      throw new Error("The loaded runmat-wasm module does not expose runFeaStudy yet.");
-    }
-    return this.native.runFeaStudy(path, artifactRoot ?? null);
+    return this.native.checkFeaSource(path);
   }
 
   async feaField(runId: string, fieldId: string, options?: FeaFieldRequestOptions): Promise<FeaFieldResult> {
