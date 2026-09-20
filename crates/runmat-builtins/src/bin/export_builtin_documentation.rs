@@ -3,6 +3,7 @@ use runmat_builtins::{
     BuiltinDocumentationLinkTarget,
 };
 use serde_json::{json, Map, Value};
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs;
@@ -166,24 +167,54 @@ fn annotate_legacy_document(key: &str, document: &mut Value) -> Result<(), Strin
     object.insert("authority".into(), Value::String("legacy_sidecar".into()));
     if let Some(examples) = object.get_mut("examples").and_then(Value::as_array_mut) {
         for example in examples {
-            let Some(example) = example.as_object_mut() else {
-                continue;
-            };
-            example
-                .entry("fixture")
-                .or_insert_with(|| Value::String("None".into()));
-            example.entry("requirements").or_insert_with(|| {
-                json!({
-                    "host": "Any",
-                    "engine": "Default",
-                    "compiler": [],
-                    "runtime": [],
-                    "toolchain": []
-                })
-            });
+            match example {
+                Value::Object(example) => annotate_legacy_example(example),
+                Value::String(description) if !description.trim().is_empty() => {
+                    let description = description.clone();
+                    *example = json!({
+                        "id": legacy_presentation_example_id(key, &description),
+                        "description": description,
+                        "fixture": "None",
+                        "requirements": no_example_requirements(),
+                    });
+                }
+                _ => {
+                    return Err(format!(
+                        "legacy documentation for {key} has an invalid example"
+                    ))
+                }
+            }
         }
     }
     Ok(())
+}
+
+fn annotate_legacy_example(example: &mut Map<String, Value>) {
+    example
+        .entry("fixture")
+        .or_insert_with(|| Value::String("None".into()));
+    example
+        .entry("requirements")
+        .or_insert_with(no_example_requirements);
+}
+
+fn no_example_requirements() -> Value {
+    json!({
+        "host": "Any",
+        "engine": "Default",
+        "compiler": [],
+        "runtime": [],
+        "toolchain": []
+    })
+}
+
+fn legacy_presentation_example_id(key: &str, description: &str) -> String {
+    let mut digest = Sha256::new();
+    digest.update(b"runmat.builtin-example.legacy-presentation.v1\0");
+    digest.update(key.as_bytes());
+    digest.update(b"\0");
+    digest.update(description.as_bytes());
+    format!("legacy-presentation-{digest:x}")
 }
 
 fn record_document(
@@ -381,10 +412,12 @@ mod tests {
         for document in first["builtins"]
             .as_array()
             .expect("documentation export rows")
-            .iter()
-            .filter(|document| document["authority"] == "catalog")
         {
-            for example in document["examples"].as_array().expect("catalog examples") {
+            for example in document["examples"]
+                .as_array()
+                .expect("documentation examples")
+            {
+                assert!(example.is_object());
                 assert!(example.get("fixture").is_some());
                 assert!(example.get("requirements").is_some());
             }
@@ -393,5 +426,25 @@ mod tests {
             .as_array()
             .is_some_and(|missing| !missing.is_empty());
         assert_eq!(build_export(&directory, false).is_err(), has_missing);
+    }
+
+    #[test]
+    fn legacy_presentation_examples_are_explicit_schema_v2_records() {
+        let mut document = json!({
+            "title": "sample",
+            "examples": ["A prose-only example."]
+        });
+
+        annotate_legacy_document("sample", &mut document).expect("annotate legacy document");
+
+        let example = &document["examples"][0];
+        assert_eq!(example["description"], "A prose-only example.");
+        assert_eq!(example["fixture"], "None");
+        assert_eq!(example["requirements"], no_example_requirements());
+        assert_eq!(
+            example["id"],
+            legacy_presentation_example_id("sample", "A prose-only example.")
+        );
+        assert!(example.get("input").is_none());
     }
 }
