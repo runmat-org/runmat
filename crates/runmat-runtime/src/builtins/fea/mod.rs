@@ -289,7 +289,7 @@ const FIELD_INPUTS: [BuiltinParamDescriptor; 3] = [
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Typed FEA field selector, such as fea.StructuralField.stress().",
+        description: "Typed quantity or authored-output selector, such as fea.StructuralField.stress() or fea.OutputField.named(\"peak_stress\").",
     },
     BuiltinParamDescriptor {
         name: "sample",

@@ -116,7 +116,7 @@ fn observation(
 }
 macro_rules! observation_builtin {
     ($function:ident, $name:literal, $descriptor:ident, $form:expr) => {
-        #[runtime_builtin(name = $name, category = "fea", summary = "Create a typed scientific observation request.", keywords = "fea,observation,field,history,probe,reduction,typed", descriptor($descriptor), integer_audit(STRUCTURAL_AUDIT), builtin_path = "crate::builtins::fea::observations")]
+        #[runtime_builtin(name = $name, category = "fea", summary = "Create a typed analysis observation request.", keywords = "fea,observation,field,history,probe,reduction,typed", descriptor($descriptor), integer_audit(STRUCTURAL_AUDIT), builtin_path = "crate::builtins::fea::observations")]
         pub async fn $function(args: Vec<Value>) -> BuiltinResult<Value> { observation($name, args, $form) }
     };
 }

@@ -25,6 +25,16 @@ macro_rules! visit_analysis_result_fields {
                 $visit(field);
             }
         }
+        if let Some(buckling) = $run_result.buckling_results.$as_ref() {
+            for fields in [
+                $($borrow)* buckling.mode_shapes,
+                $($borrow)* buckling.rotation_mode_shapes,
+            ] {
+                for field in fields {
+                    $visit(field);
+                }
+            }
+        }
         if let Some(thermal) = $run_result.thermal_results.$as_ref() {
             for fields in [
                 $($borrow)* thermal.temperature_snapshots,

@@ -90,8 +90,22 @@ end
     let first: Value = serde_json::from_slice(&first.stdout).unwrap();
     assert_eq!(first["root_id"], "response");
     assert_eq!(first["procedure"], "structural_linear_sequence");
+    assert!(first["study_definition_digest"]
+        .as_str()
+        .is_some_and(|digest| digest.starts_with("sha256:")));
     assert!(first["nodes"].as_u64().unwrap() > 0);
     assert!(first["elements"].as_u64().unwrap() > 0);
+    let step_run_ids = first["step_run_ids"]
+        .as_array()
+        .expect("typed publication must expose its persisted step runs");
+    assert_eq!(step_run_ids.len(), 1);
+    let result_manifest = first["result_manifest_artifact_path"]
+        .as_str()
+        .expect("typed publication must expose its result manifest");
+    assert!(
+        project.path().join(result_manifest).is_file(),
+        "typed result manifest was not persisted at {result_manifest}"
+    );
 
     let repeated = runmat(
         &project,
@@ -112,8 +126,17 @@ end
     );
     let repeated: Value = serde_json::from_slice(&repeated.stdout).unwrap();
     assert_eq!(repeated["mesh_digest"], first["mesh_digest"]);
+    assert_eq!(
+        repeated["study_definition_digest"],
+        first["study_definition_digest"]
+    );
     assert_eq!(repeated["nodes"], first["nodes"]);
     assert_eq!(repeated["elements"], first["elements"]);
+    assert_eq!(repeated["step_run_ids"], first["step_run_ids"]);
+    let repeated_manifest = repeated["result_manifest_artifact_path"]
+        .as_str()
+        .expect("repeat publication must expose its result manifest");
+    assert!(project.path().join(repeated_manifest).is_file());
 }
 
 const STUDY: &str = r#"

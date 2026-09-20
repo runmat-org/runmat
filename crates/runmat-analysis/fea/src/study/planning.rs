@@ -70,10 +70,10 @@ const fn open_unit_interval(value: f64) -> bool {
     value.is_finite() && value > 0.0 && value < 1.0
 }
 
-/// Already-admitted choices for translating scientific intent into portable workloads.
+/// Already-admitted choices for translating a compiled study definition into portable workloads.
 ///
 /// The runtime resolves `auto`, project policy, CLI policy, and available capabilities before this
-/// boundary. No worker or scientific compiler performs a hardware fallback.
+/// boundary. No worker or study compiler performs a hardware fallback.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StructuralStudyPlanningPolicy {

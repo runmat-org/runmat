@@ -67,7 +67,7 @@ impl PlannedResourceUsageGraph {
     }
 }
 
-/// Publishes one scheduler-measured task graph against its terminal scientific result.
+/// Publishes one scheduler-measured task graph against its terminal numerical result.
 ///
 /// The caller supplies the terminal task's plan as the primary plan; every distinct phase plan is
 /// recovered from the measured attempts, so publication cannot omit an executed phase or invent
@@ -157,7 +157,7 @@ pub fn prepare_structural_resource_usage(
 
 /// Extends solve accounting with a measured downstream execution graph while retaining one
 /// canonical FEA evidence object. Generic execution owns interval measurement and aggregation;
-/// this bridge only binds those records to the scientific workload and result identities.
+/// this bridge only binds those records to the workload and numerical-result identities.
 pub fn extend_structural_resource_usage(
     prepared: &PreparedStructuralLinearProgram,
     result: &ImportedStructuralLinearResult,

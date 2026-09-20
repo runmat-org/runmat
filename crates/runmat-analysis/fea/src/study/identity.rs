@@ -13,7 +13,7 @@ const LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024 * 1024, 1_000_000
 ///
 /// A sequence is used at the serialization boundary because material references are structured
 /// keys rather than JSON/CBOR text-map keys. Construction from a `BTreeMap` provides canonical
-/// ordering without giving serialization format details authority over the scientific model.
+/// ordering without giving serialization details authority over the analysis model.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StructuralStudyMaterialBinding {

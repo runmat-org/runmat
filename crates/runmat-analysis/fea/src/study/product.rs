@@ -29,7 +29,7 @@ pub struct StructuralStudyProductInput<'a> {
     pub planning: StructuralStudyPlanningPolicy,
 }
 
-/// Compile authored scientific intent against exact topology and derive its portable workloads.
+/// Compile an authored study against exact topology and derive its portable workloads.
 ///
 /// This is the single post-mesh boundary used by local and remote roots. It deliberately accepts
 /// no worker, retry, placement, or transport state.

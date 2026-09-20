@@ -50,7 +50,7 @@ fn resource_plan_identity() -> FeaResourcePlanIdentity {
 }
 
 #[test]
-fn governed_extrema_preserve_scientific_identity_and_publish_execution_evidence() {
+fn governed_extrema_preserve_observation_identity_and_publish_execution_evidence() {
     let mut maximum = spec("accelerated_maximum", ObservationTarget::WholeModel);
     maximum.reduction = Some(ReductionPolicy {
         spatial: SpatialReduction::Maximum,

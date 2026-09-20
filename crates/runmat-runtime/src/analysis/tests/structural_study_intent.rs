@@ -1944,6 +1944,17 @@ fn sample_prestressed_modal_frequency_study_spec(geometry_sha256: String) -> Ana
             }),
         },
     );
+    let frequency_execution = spec
+        .execution
+        .steps
+        .iter_mut()
+        .find(|execution| execution.step_id == frequency.step_id)
+        .expect("prestressed frequency execution must exist");
+    frequency_execution.solver_options =
+        AnalysisSolverOptions::StructuralFrequency(AnalysisStructuralFrequencyRunOptions {
+            solver: AnalysisStructuralFrequencySolver::ModalReduced,
+            ..AnalysisStructuralFrequencyRunOptions::default()
+        });
     spec
 }
 

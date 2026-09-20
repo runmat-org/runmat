@@ -194,7 +194,7 @@ different model, sequence, topology, or state from being accepted accidentally.
 
 ## Observation Requests
 
-The four scientific observation forms share one explicit signature:
+The four analysis observation forms share one explicit signature:
 
 ```text
 fea.Observation.field|history|probe|reduction(
@@ -376,7 +376,7 @@ sample chunks are content-addressed and reused across checkpoints; only a new ch
 and genuinely new sample chunks cross the artifact-cache boundary. After a durable or remote
 restart, the imported object inventory seeds the same deduplication state. Final publication reuses
 the checkpointed sample chunks and produces the ordinary canonical history, so uninterrupted and
-restarted attempts have the same scientific identity and result while preserving distinct execution
+restarted attempts have the same study-definition identity and result while preserving distinct execution
 lineage.
 
 Not every replacement is a physical restart. Modal response-spectrum directions and random-response

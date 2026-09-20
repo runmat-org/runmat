@@ -30,7 +30,7 @@ pub(super) fn generate(
     if materialized.complex_magnitude {
         for figure in &mut figures {
             figure.warnings.push(
-                "Complex frequency-response phasors are rendered as component magnitudes; the persisted scientific field retains exact real and imaginary values."
+                "Complex frequency-response phasors are rendered as component magnitudes; the persisted result field retains exact real and imaginary values."
                     .to_string(),
             );
         }

@@ -409,7 +409,7 @@ study static {
     );
     assert_eq!(compiled.properties.solid_materials().len(), 1);
     assert_eq!(compiled.properties.beam_materials().len(), 1);
-    assert_ne!(compiled.scientific_digest().unwrap().bytes(), &[0; 32]);
+    assert_ne!(compiled.definition_digest().unwrap().bytes(), &[0; 32]);
     let workloads = product.workloads;
     assert_eq!(
         workloads.step_ids().unwrap(),

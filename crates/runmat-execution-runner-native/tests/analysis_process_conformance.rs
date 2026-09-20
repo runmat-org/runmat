@@ -430,7 +430,7 @@ fn assert_publication_semantics(
     expected: &runmat_analysis_fea::results::publication::PublishedAnalysisResult,
 ) {
     // Publication identity intentionally binds measured attempt accounting. Equivalent work run
-    // through another execution driver must retain its scientific sources and gate decision, while
+    // through another execution driver must retain its analysis sources and gate decision, while
     // naming the resource-usage evidence produced by that execution rather than an earlier run.
     assert_eq!(actual.schema_version, expected.schema_version);
     assert_eq!(actual.producer, expected.producer);

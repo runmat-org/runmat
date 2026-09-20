@@ -238,7 +238,10 @@ async fn print_terminal(
                 (**expectation).clone(),
             )?;
             return crate::commands::fea::result_presentation::print_fea_result(
-                study_id, &result, json,
+                study_id,
+                &result.result,
+                &result.publication,
+                json,
             );
         }
         if let secret::SavedOutputIntent::FeaSweep {

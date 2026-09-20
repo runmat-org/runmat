@@ -8,12 +8,18 @@ use crate::builtins::fea::study_values::{from_typed_value, to_typed_value};
 pub(super) const STRUCTURAL_FIELD_CLASS: &str = "fea.StructuralField";
 pub(super) const RESPONSE_SPECTRUM_FIELD_CLASS: &str = "fea.ResponseSpectrumField";
 pub(super) const RANDOM_RESPONSE_FIELD_CLASS: &str = "fea.RandomResponseField";
+pub(super) const OUTPUT_FIELD_CLASS: &str = "fea.OutputField";
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(transparent)]
+pub(super) struct OutputFieldSelector(String);
 
 #[derive(Debug, PartialEq)]
 pub(super) enum FieldSelector {
     Structural(StructuralFieldSelector),
     ResponseSpectrum(ResponseSpectrumFieldSelector),
     RandomResponse(RandomResponseFieldSelector),
+    Output(OutputFieldSelector),
 }
 
 impl FieldSelector {
@@ -22,6 +28,7 @@ impl FieldSelector {
             Self::Structural(selector) => selector.field_id().to_string(),
             Self::ResponseSpectrum(selector) => selector.field_id(),
             Self::RandomResponse(selector) => selector.field_id(),
+            Self::Output(selector) => selector.0.clone(),
         }
     }
 }
@@ -32,6 +39,50 @@ const INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescript
     canonical_builtin: None,
     notes: "Structural field selectors have no integer inputs.",
 };
+
+const OUTPUT_NAME_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "name",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Authored output identifier declared by the FEA study.",
+}];
+const OUTPUT_NAMED_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "field = fea.OutputField.named(name)",
+    inputs: &OUTPUT_NAME_INPUTS,
+    outputs: &OUT_ANY,
+}];
+pub(super) const OUTPUT_NAMED_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &OUTPUT_NAMED_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ERRORS,
+};
+
+#[runtime_builtin(
+    name = "fea.OutputField.named",
+    category = "fea",
+    summary = "Select an authored FEA output by its declared identifier.",
+    keywords = "fea,output,field,result,typed",
+    descriptor(OUTPUT_NAMED_DESCRIPTOR),
+    integer_audit(INTEGER_AUDIT),
+    builtin_path = "crate::builtins::fea::field_selectors"
+)]
+pub async fn output_named(name: Value) -> BuiltinResult<Value> {
+    const BUILTIN: &str = "fea.OutputField.named";
+    let name = scalar_string(&name, BUILTIN, &ERROR_INPUT)?;
+    let mut characters = name.chars();
+    let valid = matches!(characters.next(), Some(first) if first == '_' || first.is_ascii_alphabetic())
+        && characters.all(|character| character == '_' || character.is_ascii_alphanumeric());
+    if !valid || name.len() > 512 {
+        return Err(builtin_error(
+            BUILTIN,
+            &ERROR_INPUT,
+            "authored output name must be a valid FEA identifier",
+        ));
+    }
+    to_typed_value(BUILTIN, OUTPUT_FIELD_CLASS, OutputFieldSelector(name))
+}
 
 macro_rules! selector {
     ($function:ident, $descriptor:ident, $signatures:ident, $builtin:literal, $variant:ident) => {
@@ -253,10 +304,42 @@ pub(super) fn from_value(builtin: &'static str, value: &Value) -> BuiltinResult<
             from_typed_value(builtin, RANDOM_RESPONSE_FIELD_CLASS, value)
                 .map(FieldSelector::RandomResponse)
         }
+        OUTPUT_FIELD_CLASS => from_typed_value(builtin, OUTPUT_FIELD_CLASS, value)
+            .map(FieldSelector::Output),
         _ => Err(builtin_error(
             builtin,
             &ERROR_INPUT,
-            "field selector must be a fea.StructuralField, fea.ResponseSpectrumField, or fea.RandomResponseField value",
+            "field selector must be a fea.StructuralField, fea.ResponseSpectrumField, fea.RandomResponseField, or fea.OutputField value",
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use futures::executor::block_on;
+
+    use super::*;
+
+    #[test]
+    fn authored_output_field_selectors_are_typed_named_data() {
+        super::super::ensure_value_classes_registered();
+        let selector = block_on(output_named(Value::String("peak_stress".into())))
+            .expect("typed authored output field");
+        let Value::Object(object) = &selector else {
+            panic!("expected authored output field selector object");
+        };
+        assert_eq!(object.class_name, OUTPUT_FIELD_CLASS);
+        assert_eq!(
+            from_value("test", &selector).unwrap().field_id(),
+            "peak_stress"
+        );
+        let encoded = crate::execution::value_codec::encode_inline_value(&selector)
+            .expect("authored output selector should be portable");
+        assert_eq!(
+            crate::execution::value_codec::decode_inline_value(&encoded)
+                .expect("portable authored output selector should decode"),
+            selector
+        );
+        assert!(block_on(output_named(Value::String("not valid".into()))).is_err());
     }
 }

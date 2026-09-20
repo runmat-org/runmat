@@ -117,7 +117,8 @@ Error codes use `RM.<DOMAIN>.<OPERATION>.<REASON>`, for example `RM.FEA.RUN_STUD
 | `fea.run(study)` | Run a `.fea` path, `fea.Study`, or `fea.Sweep`. |
 | `fea.stepResult(run, stepId)` or `run.step(stepId)` | Select one typed persisted procedure-step result from an aggregate study run. |
 | `fea.results(runOrId, Name, Value, ...)` | Load result data from a run result object or persisted run id. |
-| `fea.field(resultsOrRun, fieldSelector, sample)` | Select one field with a typed family selector and optional typed independent-domain sample. |
+| `fea.OutputField.named(name)` | Create a typed selector for an open authored output identifier declared by the study. |
+| `fea.field(resultsOrRun, fieldSelector, sample)` | Select one field with a typed family-quantity or authored-output selector and optional typed independent-domain sample. |
 | `fea.fieldPage(field, start, count)` or `field.page(start, count)` | Read a bounded logical-value page without materializing the complete artifact; values retain native real or complex tensor semantics. |
 | `plot(field, Name, Value, ...)` | Plot an `fea.Field` using its retained study geometry and solver topology context. Field selection remains in `fea.field`. |
 | `mesh(runOrResultsOrField, Name, Value, ...)` | Display the solver mesh by default; `Source` accepts `solver`, `cad`, `cad_reference`, or `auto`, and `Edges` controls the solver-edge overlay. |
@@ -184,7 +185,8 @@ These constructors, planning operations, field projections, comparisons, and plo
 | `fea.validate` | `result = fea.validate(studyOrSweepOrPath)` | Object/path identity is checked before document validation; no solver executes. |
 | `fea.run` | `run = fea.run(studyOrSweepOrPath)` | Object/path identity and document validity are checked before the selected solver executes. |
 | `fea.results` | `results = fea.results(runOrRunId, Name, Value, ...)` | Run identity, option pairing, option values, and selector shape/range are checked before artifact lookup. An existing `fea.Results` object is accepted without options. |
-| `fea.field` | `field = fea.field(resultsOrRun, fieldSelector, sample)` | The field selector is a typed family value. The optional independent-domain sample is typed and must identify exactly one published field. |
+| `fea.OutputField.named` | `selector = fea.OutputField.named(name)` | The name is open study data, not solver dispatch. It must be a valid FEA identifier and resolves exactly to a declared, persisted output. |
+| `fea.field` | `field = fea.field(resultsOrRun, fieldSelector, sample)` | The selector is a typed family quantity or `fea.OutputField`. The optional independent-domain sample is typed and must identify exactly one published field. |
 | `fea.fieldPage` | `page = fea.fieldPage(field, start, count)` | The field must retain a persisted run identity. Start and count are positive exact host integers; count defaults to 256 and is capped at 4096. Every selected object and chunk is verified before values are returned. |
 | `fea.trends` | `trends = fea.trends(Name, Value, ...)` | `WindowSize` is checked before artifact-store access. |
 

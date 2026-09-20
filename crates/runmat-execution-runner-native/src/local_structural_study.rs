@@ -20,7 +20,7 @@ use crate::{
 /// Execute a portable typed study through geometry, exact meshing, compilation, and solve.
 ///
 /// The input is the same immutable root transported to a remote driver. Local execution only
-/// supplies process placement and storage; it does not reconstruct scientific intent.
+/// supplies process placement and storage; it does not reconstruct the analysis definition.
 pub async fn execute_prepared_structural_study_locally(
     mut config: NativeExecutionConfig,
     prepared: PreparedStructuralStudyRoot,

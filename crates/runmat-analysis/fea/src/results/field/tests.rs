@@ -59,7 +59,7 @@ fn definition_identity_is_semantic_not_a_display_label() {
 }
 
 #[test]
-fn transferred_field_identity_retains_scientific_provenance() {
+fn transferred_field_identity_retains_source_provenance() {
     let native = RecoveredFieldDefinition::new(
         "stress.native",
         ObservationQuantity::VonMisesStress,

@@ -190,7 +190,7 @@ fn principal() -> OperationFacts {
 fn recovery() -> OperationFacts {
     operation(
         "recover",
-        "Recover scalar element von Mises stress at nodes with an explicit scientific transfer method.",
+        "Recover scalar element von Mises stress at nodes with an explicit field-transfer method.",
         vec![
             parameter("field", field(), OperationParameterArity::Required),
             parameter(

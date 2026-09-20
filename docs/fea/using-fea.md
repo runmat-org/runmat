@@ -475,7 +475,7 @@ potential; magnetic vector potential; acoustic pressure; and fluid pressure and 
 have separate constructors and accept only a signal of the required quantity and shape.
 
 A response spectrum is equally explicit. The spectrum ordinates remain numeric data; every
-scientific choice around those data is a typed value:
+result-selection choice around those data is a typed value:
 
 ```matlab
 axis = fea.SpectrumAxis.frequencyHertz([5 10 20]);

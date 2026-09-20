@@ -84,6 +84,7 @@ mod study_execution;
 mod study_placement;
 mod study_result;
 mod study_sweep;
+mod typed_study_publication;
 pub mod value_admission;
 
 use excitation_authoring::{
@@ -121,6 +122,7 @@ pub use study_sweep::{
     analysis_complete_study_sweep_op, analysis_study_sweep_definition,
     analysis_study_sweep_identity, AnalysisStudySweepRunOutcome,
 };
+pub use typed_study_publication::publish_structural_study_result;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FeaRuntimeConfig {
@@ -413,9 +415,10 @@ pub use contracts::{
     AnalysisRunDatasetFieldPagingPolicy, AnalysisRunDatasetPayload, AnalysisRunDatasetStudyRef,
     AnalysisRunOptions, AnalysisRunResult, AnalysisRuntimeCapabilities,
     AnalysisRuntimeModelTemplateCatalogEntry, AnalysisRuntimeModelTemplateDefaultObservation,
-    AnalysisSolverOptions, AnalysisStructuralFrequencyRunOptions, AnalysisStructuralTimeStepPolicy,
-    AnalysisStudyIssue, AnalysisStudyPlanData, AnalysisStudyPlanStepData, AnalysisStudyRunData,
-    AnalysisStudySpec, AnalysisStudyStatePublicationData, AnalysisStudyStepNumericalResultData,
+    AnalysisSolverOptions, AnalysisStructuralFrequencyRunOptions,
+    AnalysisStructuralFrequencySolver, AnalysisStructuralTimeStepPolicy, AnalysisStudyIssue,
+    AnalysisStudyPlanData, AnalysisStudyPlanStepData, AnalysisStudyRunData, AnalysisStudySpec,
+    AnalysisStudyStatePublicationData, AnalysisStudyStepNumericalResultData,
     AnalysisStudyStepRunData, AnalysisStudySweepData, AnalysisStudySweepFailureEntry,
     AnalysisStudySweepFailureKind, AnalysisStudySweepPlanData, AnalysisStudySweepPlanEntry,
     AnalysisStudySweepRunEntry, AnalysisStudySweepSpec, AnalysisStudySweepValidateData,

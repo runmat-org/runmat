@@ -187,7 +187,7 @@ impl ObservationQuantity {
     /// Resolve the stable source-language spelling of an observation quantity.
     ///
     /// Keeping this closed mapping beside the canonical enum prevents frontends from growing
-    /// independent string-dispatch tables for the same scientific quantities.
+    /// independent string-dispatch tables for the same result quantities.
     pub fn from_source_name(name: &str) -> Option<Self> {
         Some(match name {
             "displacement" => Self::Displacement,

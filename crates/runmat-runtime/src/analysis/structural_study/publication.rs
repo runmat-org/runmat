@@ -562,20 +562,9 @@ pub(in crate::analysis) fn complete_study_run(
     });
     let numerically_acceptable = step_results.iter().all(|step| step.numerically_acceptable);
     let production_publishable = step_results.iter().all(|step| step.production_publishable);
-    let aggregate_stage_digest = runmat_execution::Digest::sha256(
-        &serde_json::to_vec(&(&sequence_identity, &step_results, &state_results)).map_err(
-            |error| completion_error(&context, "RM.FEA.RUN_STUDY.IDENTITY_INVALID", error),
-        )?,
-    );
-    let aggregate_stage = format!(
-        "sequence-run-{}",
-        aggregate_stage_digest
-            .to_string()
-            .trim_start_matches("sha256:")
-    );
-    let evidence_artifact_path = persist_immutable_study_evidence(
+    let evidence_artifact_path = persist_content_addressed_study_evidence(
         &study_fingerprint,
-        &aggregate_stage,
+        "sequence-run",
         serde_json::json!({
             "schema_version": "fea_study_sequence_run_artifact/v1",
             "study_id": study_id.clone(),
@@ -618,6 +607,7 @@ pub(in crate::analysis) fn complete_study_run(
             solver_convergence,
             result_quality,
             evidence_artifact_path,
+            result_manifest_artifact_path: None,
         },
     ))
 }

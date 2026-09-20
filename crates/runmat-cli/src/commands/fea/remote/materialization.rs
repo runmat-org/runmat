@@ -33,10 +33,15 @@ use runmat_runtime::operations::OperationEnvelope;
 use super::preparation::{artifact_access, authored_meshing_request};
 
 pub(crate) enum MaterializedFeaSweepTerminal {
-    Succeeded(Box<runmat_runtime::analysis::StructuralStudyResult>),
+    Succeeded(Box<MaterializedFeaStudy>),
     Failed(String),
     Cancelled,
     Indeterminate(String),
+}
+
+pub(crate) struct MaterializedFeaStudy {
+    pub result: runmat_runtime::analysis::StructuralStudyResult,
+    pub publication: AnalysisStudyRunData,
 }
 
 pub(crate) struct MaterializedFeaSweepEntry {
@@ -53,7 +58,7 @@ pub(crate) fn materialize_fea_study(
     response: ProgramExecutionResponse,
     objects: Vec<ProgramExecutionObject>,
     mut expectation: StructuralStudyResultExpectation,
-) -> Result<runmat_runtime::analysis::StructuralStudyResult> {
+) -> Result<MaterializedFeaStudy> {
     expectation.artifact_access = artifact_access(run_id);
     expectation.validate()?;
     let cache = DownloadedResultCache::from_objects(objects);
@@ -63,7 +68,12 @@ pub(crate) fn materialize_fea_study(
         &expectation,
         ObjectInventoryLimits::default(),
     )?;
-    exact_result(exact, cache)
+    let result = exact_result(exact, cache)?;
+    let publication = publish_materialized_result(&result, run_id)?;
+    Ok(MaterializedFeaStudy {
+        result,
+        publication,
+    })
 }
 
 pub(crate) fn materialize_fea_sweep(
@@ -91,10 +101,15 @@ pub(crate) fn materialize_fea_sweep(
         .map(|entry| {
             let terminal = match entry.terminal {
                 ExactStructuralSweepTerminal::Succeeded(result) => {
-                    MaterializedFeaSweepTerminal::Succeeded(Box::new(exact_result(
-                        *result,
-                        cache.clone(),
-                    )?))
+                    let result = exact_result(*result, cache.clone())?;
+                    let publication = publish_materialized_result(
+                        &result,
+                        &format!("{run_id}_study_{}", entry.study_index),
+                    )?;
+                    MaterializedFeaSweepTerminal::Succeeded(Box::new(MaterializedFeaStudy {
+                        result,
+                        publication,
+                    }))
                 }
                 ExactStructuralSweepTerminal::Failed(message) => {
                     MaterializedFeaSweepTerminal::Failed(message)
@@ -113,6 +128,21 @@ pub(crate) fn materialize_fea_sweep(
     Ok(MaterializedFeaSweep { entries })
 }
 
+fn publish_materialized_result(
+    result: &runmat_runtime::analysis::StructuralStudyResult,
+    run_id: &str,
+) -> Result<AnalysisStudyRunData> {
+    let publication = runmat_runtime::analysis::StructuralStudyCompletionIdentity::new(run_id)
+        .map_err(anyhow::Error::msg)?;
+    runmat_runtime::analysis::publish_structural_study_result(
+        result,
+        runmat_runtime::operations::OperationContext::new(None, Some(run_id.to_string())),
+        publication,
+    )
+    .map(|envelope| envelope.data)
+    .map_err(super::super::report_operation_error)
+}
+
 fn exact_result(
     exact: runmat_execution_runner_native::ExactStructuralStudyResult,
     source: DownloadedResultCache,
@@ -120,7 +150,7 @@ fn exact_result(
     let numerical = study_result(&exact, source)?;
     let compiled = exact
         .compiled_study
-        .context("typed structural result omitted its compiled scientific contract")?;
+        .context("typed structural result omitted its compiled study definition")?;
     runmat_runtime::analysis::StructuralStudyResult::new(
         compiled,
         exact.mesh.artifact,

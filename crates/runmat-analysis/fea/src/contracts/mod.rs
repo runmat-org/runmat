@@ -44,7 +44,7 @@ const FEA_FIELD_RANDOM_RESPONSE_PREFIX: &str = "structural.random_response";
 /// Closed structural field selector used by language and storage boundaries.
 ///
 /// Field identifiers remain stable data names, while callers select supported structural
-/// quantities through this enum rather than dispatching scientific behavior from strings.
+/// quantities through this enum rather than dispatching solver behavior from strings.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StructuralFieldSelector {

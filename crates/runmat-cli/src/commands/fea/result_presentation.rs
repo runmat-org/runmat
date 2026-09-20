@@ -7,32 +7,52 @@ use crate::presentation;
 pub(super) struct LocalRunSummary {
     root_id: String,
     procedure: &'static str,
+    study_definition_digest: String,
     mesh_digest: String,
     nodes: usize,
     elements: usize,
     boundary_faces: usize,
+    step_run_ids: Vec<String>,
+    result_manifest_artifact_path: String,
 }
 
 pub(super) fn local_summary(
     root_id: impl Into<String>,
     completed: &runmat_runtime::analysis::StructuralStudyResult,
-) -> LocalRunSummary {
-    LocalRunSummary {
+    publication: &runmat_runtime::analysis::AnalysisStudyRunData,
+) -> Result<LocalRunSummary> {
+    Ok(LocalRunSummary {
         root_id: root_id.into(),
         procedure: numerical_kind(completed.numerical()),
+        study_definition_digest: completed
+            .definition_digest()
+            .map_err(anyhow::Error::msg)?
+            .to_string(),
         mesh_digest: stable_digest_hex(&completed.mesh().canonical_digest),
         nodes: completed.mesh().topology.nodes.len(),
         elements: completed.mesh().topology.volume_elements.len(),
         boundary_faces: completed.mesh().topology.boundary_faces.len(),
-    }
+        step_run_ids: publication
+            .steps
+            .iter()
+            .map(|step| step.run_id.clone())
+            .collect(),
+        result_manifest_artifact_path: publication
+            .result_manifest_artifact_path
+            .clone()
+            .ok_or_else(|| {
+                anyhow::anyhow!("typed study publication omitted its result manifest")
+            })?,
+    })
 }
 
 pub(crate) fn print_fea_result(
     study_id: &str,
     completed: &runmat_runtime::analysis::StructuralStudyResult,
+    publication: &runmat_runtime::analysis::AnalysisStudyRunData,
     json: bool,
 ) -> Result<()> {
-    let summary = local_summary(study_id, completed);
+    let summary = local_summary(study_id, completed, publication)?;
     if json {
         println!("{}", serde_json::to_string_pretty(&summary)?);
         return Ok(());
@@ -44,7 +64,22 @@ pub(crate) fn print_fea_result(
         styles.identifier(study_id)
     );
     println!("  {} {}", styles.label("procedure:"), summary.procedure);
+    println!(
+        "  {} {}",
+        styles.label("study definition:"),
+        summary.study_definition_digest
+    );
     println!("  {} {}", styles.label("mesh:"), summary.mesh_digest);
+    println!(
+        "  {} {}",
+        styles.label("result runs:"),
+        summary.step_run_ids.join(", ")
+    );
+    println!(
+        "  {} {}",
+        styles.label("result manifest:"),
+        summary.result_manifest_artifact_path
+    );
     println!(
         "  {} {} nodes, {} tetrahedra, {} boundary faces",
         styles.label("topology:"),
@@ -77,7 +112,7 @@ pub(crate) fn print_fea_sweep_result(
                     serde_json::json!({
                         "case_id": case_id,
                         "status": "succeeded",
-                        "result": local_summary(case_id, study),
+                        "result": local_summary(case_id, &study.result, &study.publication)?,
                     })
                 }
                 super::remote::MaterializedFeaSweepTerminal::Failed(message) => serde_json::json!({

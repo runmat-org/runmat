@@ -485,10 +485,21 @@ fn admit_structural_frequency_result_with_state(
         ),
     }
     .map_err(|error| error.to_string())?;
-    options
-        .direct_solver
-        .validate()
-        .map_err(|error| error.to_string())?;
+    match (&options.solver, numerical.workload.solver()) {
+        (
+            super::AnalysisStructuralFrequencySolver::Direct { policy: authored },
+            runmat_analysis_fea::execution::StructuralFrequencySolverPlan::Direct { policy },
+        ) if authored == policy => authored.validate().map_err(|error| error.to_string())?,
+        (
+            super::AnalysisStructuralFrequencySolver::ModalReduced,
+            runmat_analysis_fea::execution::StructuralFrequencySolverPlan::ModalReduced { .. },
+        ) => {}
+        _ => {
+            return Err(
+                "structural frequency publication solver differs from its typed workload".into(),
+            )
+        }
+    }
 
     let receipt = numerical.publication.receipt();
     let evidence = receipt.samples();
@@ -514,7 +525,7 @@ fn admit_structural_frequency_result_with_state(
         );
     }
 
-    let relative_tolerance = options.direct_solver.relative_tolerance;
+    let relative_tolerance = authored_frequency_relative_tolerance(&numerical.workload)?;
     let maximum_solver_residual = evidence
         .iter()
         .map(|sample| sample.solver_relative_residual())
@@ -586,4 +597,38 @@ fn admit_structural_frequency_result_with_state(
         )),
         persistence: numerical.persistence(),
     })
+}
+
+fn authored_frequency_relative_tolerance(
+    workload: &runmat_analysis_fea::execution::StructuralFrequencyWorkload,
+) -> Result<f64, String> {
+    let step = workload
+        .model()
+        .sequence
+        .steps
+        .iter()
+        .find(|step| step.step_id == *workload.step_id())
+        .ok_or_else(|| "structural frequency workload omits its authored step".to_string())?;
+    step.accuracy
+        .criteria
+        .iter()
+        .filter(|criterion| {
+            criterion.mandatory
+                && criterion.contribution
+                    == runmat_analysis_core::ErrorContributionKind::Algebraic
+                && matches!(
+                    criterion.evidence,
+                    runmat_analysis_core::RequiredAccuracyEvidence::ResidualBound
+                        | runmat_analysis_core::RequiredAccuracyEvidence::ConservationBalance
+                )
+        })
+        .filter_map(|criterion| match criterion.tolerance {
+            runmat_analysis_core::AccuracyTolerance::Relative(tolerance) => Some(tolerance),
+            runmat_analysis_core::AccuracyTolerance::Absolute { .. } => None,
+        })
+        .min_by(f64::total_cmp)
+        .ok_or_else(|| {
+            "structural frequency publication requires a mandatory relative algebraic residual or conservation criterion"
+                .to_string()
+        })
 }

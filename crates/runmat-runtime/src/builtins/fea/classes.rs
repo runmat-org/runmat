@@ -113,6 +113,7 @@ pub(super) const RUN_RESULT_FIELDS: &[&str] = &[
     "solver_convergence",
     "result_quality",
     "evidence_artifact_path",
+    "result_manifest_artifact_path",
     FEA_STUDY_CONTEXT_PROPERTY,
 ];
 pub(super) const STEP_RUN_RESULT_FIELDS: &[&str] = &[
@@ -353,6 +354,7 @@ pub(crate) fn ensure_fea_classes_registered() {
                 super::field_selectors::RANDOM_RESPONSE_FIELD_CLASS => {
                     random_response_field_methods()
                 }
+                super::field_selectors::OUTPUT_FIELD_CLASS => output_field_methods(),
                 _ => HashMap::new(),
             };
             crate::class_registry::register_class(crate::class_registry::RuntimeClass {
@@ -795,6 +797,10 @@ fn structural_field_methods() -> HashMap<String, crate::class_registry::RuntimeM
     ])
 }
 
+fn output_field_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
+    static_methods(&[("named", "fea.OutputField.named")])
+}
+
 fn response_spectrum_field_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
     static_methods(&[
         (
@@ -870,7 +876,7 @@ fn static_methods(names: &[(&str, &str)]) -> HashMap<String, crate::class_regist
         .collect()
 }
 
-fn fea_class_schemas() -> [FeaClassSchema; 49] {
+fn fea_class_schemas() -> [FeaClassSchema; 50] {
     [
         (
             FEA_STUDY_CLASS,
@@ -1243,6 +1249,13 @@ fn fea_class_schemas() -> [FeaClassSchema; 49] {
         (
             super::field_selectors::RANDOM_RESPONSE_FIELD_CLASS,
             "runmat.fea.random-response-field",
+            super::study_values::VALUE_FIELD,
+            super::study_values::VALUE_FIELD,
+            validate_fea_object,
+        ),
+        (
+            super::field_selectors::OUTPUT_FIELD_CLASS,
+            "runmat.fea.output-field",
             super::study_values::VALUE_FIELD,
             super::study_values::VALUE_FIELD,
             validate_fea_object,

@@ -614,8 +614,14 @@ pub(in crate::analysis) fn prepare_structural_frequency_workload(
     step: &super::super::PreparedStudyStep,
     options: &crate::analysis::AnalysisStructuralFrequencyRunOptions,
 ) -> Result<runmat_analysis_fea::execution::StructuralFrequencyWorkload, OperationErrorEnvelope> {
-    options
-        .direct_solver
+    let crate::analysis::AnalysisStructuralFrequencySolver::Direct { policy } = options.solver
+    else {
+        return Err(portable_study_contract_error(
+            study,
+            "standalone structural frequency execution requires a direct solver".into(),
+        ));
+    };
+    policy
         .validate()
         .map_err(|error| portable_study_contract_error(study, error.to_string()))?;
     let plan = prepare_structural_frequency_plan(study, step)?;
@@ -629,7 +635,7 @@ pub(in crate::analysis) fn prepare_structural_frequency_workload(
                 runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
             plan,
             solver: runmat_analysis_fea::execution::StructuralFrequencySolverPlan::Direct {
-                policy: options.direct_solver,
+                policy,
             },
             prestress_transition: None,
         },
@@ -645,18 +651,30 @@ pub(in crate::analysis) fn prepare_structural_prestressed_frequency_template(
     runmat_analysis_fea::execution::StructuralPrestressedFrequencyTemplate,
     OperationErrorEnvelope,
 > {
-    let solver = match step.procedure_step.solution_space {
-        runmat_analysis_core::SolutionSpace::Direct => {
-            options
-                .direct_solver
+    let solver = match (step.procedure_step.solution_space, options.solver) {
+        (
+            runmat_analysis_core::SolutionSpace::Direct,
+            crate::analysis::AnalysisStructuralFrequencySolver::Direct { policy },
+        ) => {
+            policy
                 .validate()
                 .map_err(|error| portable_study_contract_error(study, error.to_string()))?;
             runmat_analysis_fea::execution::StructuralPrestressedFrequencySolverTemplate::Direct {
-                policy: options.direct_solver,
+                policy,
             }
         }
-        runmat_analysis_core::SolutionSpace::ModalReduced => {
+        (
+            runmat_analysis_core::SolutionSpace::ModalReduced,
+            crate::analysis::AnalysisStructuralFrequencySolver::ModalReduced,
+        ) => {
             runmat_analysis_fea::execution::StructuralPrestressedFrequencySolverTemplate::ModalReduced
+        }
+        _ => {
+            return Err(portable_study_contract_error(
+                study,
+                "structural frequency solver method differs from the authored solution space"
+                    .into(),
+            ))
         }
     };
     let template = runmat_analysis_fea::execution::StructuralPrestressedFrequencyTemplate {

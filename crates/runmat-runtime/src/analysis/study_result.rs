@@ -6,7 +6,7 @@ use super::StructuralStudyNumericalResult;
 
 /// Placement-neutral completed structural study.
 ///
-/// The compiled scientific contract, canonical mesh, governed meshing evidence, and numerical
+/// The compiled analysis definition, canonical mesh, governed meshing evidence, and numerical
 /// result travel together. Local execution and a verified remote import must construct this same
 /// type; paths, worker identities, retry state, and transport authority do not belong here.
 #[derive(Debug, Clone)]
@@ -51,9 +51,9 @@ impl StructuralStudyResult {
         })
     }
 
-    pub fn scientific_digest(&self) -> Result<Digest, String> {
+    pub fn definition_digest(&self) -> Result<Digest, String> {
         self.compiled
-            .scientific_digest()
+            .definition_digest()
             .map_err(|error| error.to_string())
     }
 

@@ -22,7 +22,7 @@ const STUDY_IDENTITY_PREFIX: &[u8] = b"runmat-compiled-analysis-study\0";
 const STUDY_IDENTITY_LIMITS: CanonicalLimits =
     CanonicalLimits::new(512 * 1024 * 1024, 8_000_000, 65_536, 64);
 
-/// Exact scientific study product shared by local and remote execution.
+/// Exact compiled study definition shared by local and remote execution.
 ///
 /// This contract contains no worker, retry, accelerator, or placement policy. Those decisions may
 /// change without changing the admitted model, mesh, observations, or constitutive ownership.
@@ -71,8 +71,8 @@ impl CompiledAnalysisStudy {
         Ok(())
     }
 
-    /// Identity of scientific intent and its exact topology, independent of execution placement.
-    pub fn scientific_digest(&self) -> Result<Digest, AnalysisStudyCompilationError> {
+    /// Identity of the compiled analysis definition and exact topology, independent of placement.
+    pub fn definition_digest(&self) -> Result<Digest, AnalysisStudyCompilationError> {
         self.validate_contract()?;
         let bytes = encode_contract(
             STUDY_IDENTITY_PREFIX,

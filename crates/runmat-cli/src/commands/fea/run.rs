@@ -66,7 +66,8 @@ async fn execute_study(
                     prepared.workers,
                 )
                 .await?;
-            print_fea_result(&study_id, &completed, json)
+            let publication = publish_local_result(&completed)?;
+            print_fea_result(&study_id, &completed, &publication, json)
         }
         ExecutionTarget::Remote(target) => {
             execute_study_remotely(
@@ -132,7 +133,11 @@ async fn execute_sweep(
                         )
                         .await
                         .with_context(|| format!("execute sweep case `{case_id}`"))?;
-                    Ok::<_, anyhow::Error>((index, local_summary(case_id, &result)))
+                    let publication = publish_local_result(&result)?;
+                    Ok::<_, anyhow::Error>((
+                        index,
+                        local_summary(case_id, &result, &publication)?,
+                    ))
                 },
             ))
             .buffer_unordered(concurrent_cases)
@@ -160,6 +165,24 @@ async fn execute_sweep(
             .await
         }
     }
+}
+
+fn publish_local_result(
+    result: &runmat_runtime::analysis::StructuralStudyResult,
+) -> Result<runmat_runtime::analysis::AnalysisStudyRunData> {
+    let digest = result.definition_digest().map_err(anyhow::Error::msg)?;
+    let publication = runmat_runtime::analysis::StructuralStudyCompletionIdentity::new(format!(
+        "typed-local:{}",
+        digest.to_string().trim_start_matches("sha256:")
+    ))
+    .map_err(anyhow::Error::msg)?;
+    runmat_runtime::analysis::publish_structural_study_result(
+        result,
+        runmat_runtime::operations::OperationContext::new(None, None),
+        publication,
+    )
+    .map(|envelope| envelope.data)
+    .map_err(super::report_operation_error)
 }
 
 async fn execute_sweep_remotely(

@@ -242,7 +242,7 @@ pub fn recover_completed_structural_buckling_run(
         .iter()
         .map(|mode| mode.residual_norm)
         .collect::<Vec<_>>();
-    let mut fields = vec![
+    let fields = vec![
         AnalysisField::host_f64(
             FEA_FIELD_BUCKLING_LOAD_FACTOR,
             vec![load_factors.len()],
@@ -254,13 +254,6 @@ pub fn recover_completed_structural_buckling_run(
             residual_norms.clone(),
         ),
     ];
-    fields.extend(mode_shapes.iter().cloned());
-    fields.extend(
-        rotation_mode_shapes
-            .iter()
-            .filter(|field| !field.is_empty())
-            .cloned(),
-    );
     Ok(FeaBucklingRunResult {
         run: FeaRunResult {
             identity: expected_run,

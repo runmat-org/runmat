@@ -1,4 +1,4 @@
-//! Whole-study contract that carries typed scientific intent through geometry and meshing.
+//! Whole-study contract that carries a typed analysis definition through geometry and meshing.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -240,7 +240,7 @@ impl PreparedStructuralStudyRoot {
         self.expectation.clone()
     }
 
-    /// Rebinds transport authority without recompiling scientific or executable identity.
+    /// Rebinds transport authority without recompiling study-definition or executable identity.
     pub fn rebind_artifact_access(
         mut self,
         artifact_access: ArtifactAccess,

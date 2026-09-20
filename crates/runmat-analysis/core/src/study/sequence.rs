@@ -99,7 +99,7 @@ pub struct ProcedureStep {
     pub restart: RestartPolicy,
 }
 
-/// Procedure-specific scientific inputs that are neither an independent domain nor an execution
+/// Procedure-specific analysis inputs that are neither an independent domain nor an execution
 /// policy. Keeping this union closed prevents procedure controls from degrading into string-keyed
 /// solver options.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

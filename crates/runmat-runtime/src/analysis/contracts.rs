@@ -531,19 +531,29 @@ impl Default for AnalysisRunOptions {
     }
 }
 
-/// Numerical policy for a standalone direct structural harmonic-response study.
+/// Numerical method for a structural harmonic-response study.
 ///
 /// Frequencies are owned by the procedure step's typed independent domain. Keeping them out of
-/// solver options prevents two competing sweep authorities from reaching execution.
+/// solver options prevents two competing sweep authorities from reaching execution. Modal-reduced
+/// execution carries no inapplicable direct-solver policy.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AnalysisStructuralFrequencyRunOptions {
     pub deterministic_mode: bool,
     pub precision_mode: PrecisionMode,
     pub quality_policy: QualityPolicy,
-    pub direct_solver: runmat_analysis_fea::solve::dynamics::DirectHarmonicPolicy,
+    pub solver: AnalysisStructuralFrequencySolver,
     #[serde(default)]
     pub solver_mesh_artifact_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind", deny_unknown_fields)]
+pub enum AnalysisStructuralFrequencySolver {
+    Direct {
+        policy: runmat_analysis_fea::solve::dynamics::DirectHarmonicPolicy,
+    },
+    ModalReduced,
 }
 
 impl Default for AnalysisStructuralFrequencyRunOptions {
@@ -552,7 +562,9 @@ impl Default for AnalysisStructuralFrequencyRunOptions {
             deterministic_mode: false,
             precision_mode: PrecisionMode::Fp64,
             quality_policy: QualityPolicy::Balanced,
-            direct_solver: runmat_analysis_fea::solve::dynamics::DirectHarmonicPolicy::default(),
+            solver: AnalysisStructuralFrequencySolver::Direct {
+                policy: runmat_analysis_fea::solve::dynamics::DirectHarmonicPolicy::default(),
+            },
             solver_mesh_artifact_path: None,
         }
     }
@@ -562,7 +574,7 @@ impl Default for AnalysisStructuralFrequencyRunOptions {
 ///
 /// Spectrum interpolation, modal/directional combination, rigid response, and truncation
 /// correction belong to the typed spectra referenced by the procedure step. They are deliberately
-/// absent here so runtime execution cannot introduce a second scientific authority.
+/// absent here so runtime execution cannot introduce a second analysis-definition authority.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AnalysisResponseSpectrumRunOptions {
@@ -1342,7 +1354,7 @@ pub struct AnalysisFieldRequestOptions {
     pub limit: Option<usize>,
 }
 
-/// Strongly typed scientific selection of one field sample.
+/// Strongly typed selection of one result-field sample.
 ///
 /// `field_id` names the produced quantity. `sample` selects its independent-domain coordinate;
 /// omitting it is valid only when the field has one unambiguous published sample.
@@ -2929,6 +2941,8 @@ pub struct AnalysisStudyRunData {
     pub solver_convergence: QualityGate,
     pub result_quality: QualityGate,
     pub evidence_artifact_path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result_manifest_artifact_path: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

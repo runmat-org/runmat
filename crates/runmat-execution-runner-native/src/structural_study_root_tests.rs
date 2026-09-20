@@ -31,7 +31,7 @@ fn typed_study_root_binds_bounded_accelerators_to_the_planned_backend() {
 }
 
 #[test]
-fn typed_study_root_round_trips_exact_scientific_intent() {
+fn typed_study_root_round_trips_exact_analysis_definition() {
     let temporary = tempfile::tempdir().unwrap();
     let path = temporary.path().join("main.fea");
     std::fs::write(&path, SOURCE).unwrap();
@@ -439,7 +439,7 @@ async fn typed_sweep_root_executes_geometry_mesh_compilation_and_solve_over_quic
                 let compiled = study
                     .compiled_study
                     .as_ref()
-                    .expect("typed study result omitted its compiled scientific contract");
+                    .expect("typed study result omitted its compiled study definition");
                 compiled.validate_against(&study.mesh.artifact).unwrap();
                 assert_eq!(compiled.study_id, "static");
                 assert_eq!(

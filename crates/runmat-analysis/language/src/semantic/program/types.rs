@@ -19,7 +19,7 @@ pub struct CheckedFeaProgram {
     pub sweeps: BTreeMap<(LogicalSourcePath, FeaSymbolKey), runmat_analysis_core::AuthoredSweep>,
     pub execution_policies:
         BTreeMap<(LogicalSourcePath, FeaSymbolKey), runmat_analysis_core::AuthoredExecutionPolicy>,
-    /// Launch-policy bindings are intentionally separate from scientific study and sweep contracts.
+    /// Launch-policy bindings are intentionally separate from study and sweep definitions.
     pub execution_bindings: BTreeMap<
         (LogicalSourcePath, FeaSymbolKey),
         runmat_analysis_core::AuthoredExecutionPolicyRef,

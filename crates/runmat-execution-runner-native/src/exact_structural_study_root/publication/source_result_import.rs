@@ -50,9 +50,10 @@ pub fn import_structural_study_result(
             "structural study result differs from its submitted source identity",
         ));
     }
-    let compiled = publication.compiled_study.as_ref().ok_or_else(|| {
-        protocol("structural study result omits its compiled scientific contract")
-    })?;
+    let compiled = publication
+        .compiled_study
+        .as_ref()
+        .ok_or_else(|| protocol("structural study result omits its compiled study definition"))?;
     let geometry_output = publication
         .compiled_geometry_output
         .as_ref()
@@ -108,7 +109,7 @@ pub fn import_structural_study_result(
     let result = super::import_exact_structural_study_result(source, response, &exact, limits)?;
     if result.compiled_study.as_ref() != Some(compiled) {
         return Err(protocol(
-            "imported structural study changed its compiled scientific contract",
+            "imported structural study changed its compiled study definition",
         ));
     }
     Ok(result)

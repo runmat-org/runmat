@@ -104,8 +104,8 @@ fn compiled_identity_includes_the_formulation_requirement() {
     production.formulation_requirement = FormulationRequirement::Production;
 
     assert_ne!(
-        experimental.scientific_digest().unwrap(),
-        production.scientific_digest().unwrap()
+        experimental.definition_digest().unwrap(),
+        production.definition_digest().unwrap()
     );
 }
 
@@ -127,8 +127,8 @@ fn compiled_identity_includes_and_validates_the_public_output_contract() {
         });
 
     assert_ne!(
-        without_output.scientific_digest().unwrap(),
-        with_output.scientific_digest().unwrap()
+        without_output.definition_digest().unwrap(),
+        with_output.definition_digest().unwrap()
     );
     with_output.outputs[0].expression =
         runmat_analysis_core::AuthoredOutputExpression::AnalysisField {
@@ -137,7 +137,7 @@ fn compiled_identity_includes_and_validates_the_public_output_contract() {
             location: runmat_analysis_core::FieldLocation::Node,
         };
     assert!(matches!(
-        with_output.scientific_digest(),
+        with_output.definition_digest(),
         Err(AnalysisStudyCompilationError::InvalidOutputs(_))
     ));
 }

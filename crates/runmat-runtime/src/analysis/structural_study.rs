@@ -417,11 +417,18 @@ impl PreparedStructuralStudyIntent {
                                 runmat_analysis_fea::execution::StructuralPrestressedFrequencySolverTemplate::Direct { policy } => {
                                     step.procedure_step.solution_space
                                         == runmat_analysis_core::SolutionSpace::Direct
-                                        && policy == options.direct_solver
+                                        && matches!(
+                                            options.solver,
+                                            super::AnalysisStructuralFrequencySolver::Direct {
+                                                policy: authored_policy,
+                                            } if authored_policy == policy
+                                        )
                                 }
                                 runmat_analysis_fea::execution::StructuralPrestressedFrequencySolverTemplate::ModalReduced => {
                                     step.procedure_step.solution_space
                                         == runmat_analysis_core::SolutionSpace::ModalReduced
+                                        && options.solver
+                                            == super::AnalysisStructuralFrequencySolver::ModalReduced
                                 }
                             }
                             && options.solver_mesh_artifact_path.is_none() => {}
@@ -588,7 +595,12 @@ impl PreparedStructuralStudyIntent {
                     || workload.backend() != step.authored_execution.backend
                     || workload.formulation_requirement() != step.authored_execution.requirement
                     || workload.observation_execution() != ObservationExecutionPolicy::scalable()
-                    || *policy != options.direct_solver
+                    || !matches!(
+                        options.solver,
+                        super::AnalysisStructuralFrequencySolver::Direct {
+                            policy: authored_policy,
+                        } if authored_policy == *policy
+                    )
                     || options.solver_mesh_artifact_path.is_some()
                 {
                     return Err(

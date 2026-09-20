@@ -25,7 +25,7 @@ pub enum FeaCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Print the canonical logical phases and scientific intent for one study or sweep
+    /// Print the canonical logical phases and analysis definition for one study or sweep
     Plan {
         /// Root .fea source file
         file: PathBuf,
