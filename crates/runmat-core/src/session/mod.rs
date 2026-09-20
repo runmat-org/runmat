@@ -53,6 +53,7 @@ mod compile;
 mod config;
 mod executable;
 mod fea_source;
+pub use fea_source::CheckedFeaSessionSource;
 mod init;
 #[cfg(not(target_arch = "wasm32"))]
 mod program;

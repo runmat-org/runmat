@@ -8,15 +8,9 @@ use runmat_package::ProjectSymbolDefinition;
 
 use crate::commands::session::create_session;
 
-mod facts;
-
-pub(super) use facts::compile_function_facts;
-
 struct CompiledCallable {
     callable: BundleCallable,
     function: runmat_mir::analysis::FunctionAnalysis,
-    declaration_span: runmat_types::Span,
-    parameters: Vec<facts::CallableParameter>,
     executable: runmat_execution::ExecutableUnitEnvelope,
 }
 
@@ -77,10 +71,6 @@ async fn compile_project_definitions(
             .await
             .with_context(|| format!("compile FEA function `{qualified_function}`"))?;
         let entrypoint = entrypoint_name(&qualified_function)?;
-        let interface = unit
-            .primary_function_interface(entrypoint)
-            .map_err(anyhow::Error::msg)
-            .with_context(|| format!("analyze FEA function `{qualified_function}`"))?;
         let executable = unit
             .portable_envelope_for(Some(entrypoint))
             .map_err(anyhow::Error::msg)
@@ -100,15 +90,6 @@ async fn compile_project_definitions(
                     source_digest,
                 },
                 function,
-                parameters: interface
-                    .inputs
-                    .into_iter()
-                    .map(|parameter| facts::CallableParameter {
-                        name: parameter.name,
-                        arity: parameter.arity,
-                    })
-                    .collect(),
-                declaration_span: interface.declaration_span,
                 executable,
             },
         );
@@ -130,7 +111,8 @@ pub(super) async fn compile_geometry_generator(
     };
     let module = runmat_analysis_language::LogicalSourcePath::new(generated.module_path.clone())?;
     let symbol = runmat_analysis_language::SourceSymbol::new(generated.function.clone())?;
-    let expected_path = facts::expected_source_path(source_root, &module)?;
+    let expected_path = runmat_runtime::analysis::physical_source_path(source_root, &module)
+        .map_err(anyhow::Error::msg)?;
     let project_definition = runmat_package::resolve_visible_function_definition(
         frozen,
         document_path,

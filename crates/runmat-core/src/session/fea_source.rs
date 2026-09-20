@@ -7,6 +7,54 @@ use runmat_runtime::analysis::{
 
 use super::RunMatSession;
 
+/// Checked `.fea` source and the immutable project context used to check it.
+///
+/// Native execution consumes this product so it cannot rediscover a different project graph,
+/// execution-profile catalog, or entry path after source checking succeeds.
+#[derive(Debug)]
+pub struct CheckedFeaSessionSource {
+    checked: runmat_runtime::analysis::CheckedFeaSource,
+    physical_path: PathBuf,
+    frozen_project: Option<runmat_package::FrozenProject>,
+    project_manifest: Option<runmat_config::project::ProjectManifest>,
+    program_environment: runmat_execution::ProgramEnvironment,
+    compatibility_mode: crate::CompatMode,
+}
+
+impl CheckedFeaSessionSource {
+    pub const fn checked(&self) -> &runmat_runtime::analysis::CheckedFeaSource {
+        &self.checked
+    }
+
+    pub fn physical_path(&self) -> &Path {
+        &self.physical_path
+    }
+
+    pub const fn frozen_project(&self) -> Option<&runmat_package::FrozenProject> {
+        self.frozen_project.as_ref()
+    }
+
+    pub const fn project_manifest(&self) -> Option<&runmat_config::project::ProjectManifest> {
+        self.project_manifest.as_ref()
+    }
+
+    pub const fn program_environment(&self) -> &runmat_execution::ProgramEnvironment {
+        &self.program_environment
+    }
+
+    pub const fn compatibility_mode(&self) -> crate::CompatMode {
+        self.compatibility_mode
+    }
+}
+
+impl std::ops::Deref for CheckedFeaSessionSource {
+    type Target = runmat_runtime::analysis::CheckedFeaSource;
+
+    fn deref(&self) -> &Self::Target {
+        &self.checked
+    }
+}
+
 impl RunMatSession {
     /// Check a `.fea` source against this session's exact frozen project and executable compiler.
     ///
@@ -16,6 +64,17 @@ impl RunMatSession {
         &mut self,
         requested_path: &Path,
     ) -> Result<FeaSourceCheckResult, String> {
+        Ok(self
+            .load_and_check_fea_source_path(requested_path)
+            .await?
+            .check_result())
+    }
+
+    /// Load and check a `.fea` source while retaining its exact native execution context.
+    pub async fn load_and_check_fea_source_path(
+        &mut self,
+        requested_path: &Path,
+    ) -> Result<CheckedFeaSessionSource, String> {
         let project = self
             .project_handoff
             .as_ref()
@@ -49,7 +108,8 @@ impl RunMatSession {
             }
         }
 
-        let profiles = execution_profiles(project.as_ref()).await?;
+        let project_manifest = project_manifest(project.as_ref()).await?;
+        let profiles = execution_profiles(project_manifest.as_ref())?;
         let mut prepared = snapshot.prepare()?;
         let functions = match project.as_ref() {
             Some(project) => {
@@ -71,7 +131,14 @@ impl RunMatSession {
                 prepared.add_geometry(request.logical_path, bytes)?;
             }
         }
-        Ok(prepared.check(functions, profiles)?.check_result())
+        Ok(CheckedFeaSessionSource {
+            checked: prepared.check(functions, profiles)?,
+            physical_path,
+            frozen_project: project,
+            project_manifest,
+            program_environment: crate::program_environment(self.compat_mode()),
+            compatibility_mode: self.compat_mode(),
+        })
     }
 
     async fn compile_fea_function_facts(
@@ -201,15 +268,24 @@ fn source_identity(
     Ok((source_root, requested_path.to_path_buf(), logical_path))
 }
 
-async fn execution_profiles(
+async fn project_manifest(
     project: Option<&runmat_package::FrozenProject>,
-) -> Result<Vec<runmat_runtime::analysis::ExecutionProfileFacts>, String> {
+) -> Result<Option<runmat_config::project::ProjectManifest>, String> {
     let Some(project) = project else {
+        return Ok(None);
+    };
+    runmat_config::project::load_project_manifest_async(&project.manifest_path)
+        .await
+        .map(Some)
+        .map_err(|error| format!("cannot load FEA project manifest: {error}"))
+}
+
+fn execution_profiles(
+    manifest: Option<&runmat_config::project::ProjectManifest>,
+) -> Result<Vec<runmat_runtime::analysis::ExecutionProfileFacts>, String> {
+    let Some(manifest) = manifest else {
         return Ok(Vec::new());
     };
-    let manifest = runmat_config::project::load_project_manifest_async(&project.manifest_path)
-        .await
-        .map_err(|error| format!("cannot load FEA execution profiles: {error}"))?;
     runmat_runtime::analysis::remote_execution_profile_facts(
         manifest
             .execution_profiles

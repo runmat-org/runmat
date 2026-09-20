@@ -1,14 +1,13 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
-use runmat_analysis_language::remote_execution_profile_facts;
-use runmat_config::project::{load_project_manifest_async, ProjectManifest};
+use anyhow::Result;
+use runmat_config::project::ProjectManifest;
 use runmat_config::runtime::RunMatRuntimeConfig;
 
 use crate::cli::Cli;
 
 pub(crate) struct NativeCheckedFeaSource {
-    pub checked: runmat_runtime::analysis::CheckedFeaSource,
+    pub session_source: runmat_core::CheckedFeaSessionSource,
     pub frozen_project: Option<runmat_package::FrozenProject>,
     pub project_manifest: Option<ProjectManifest>,
 }
@@ -17,7 +16,7 @@ impl std::ops::Deref for NativeCheckedFeaSource {
     type Target = runmat_runtime::analysis::CheckedFeaSource;
 
     fn deref(&self) -> &Self::Target {
-        &self.checked
+        self.session_source.checked()
     }
 }
 
@@ -32,54 +31,25 @@ pub(crate) async fn check_source(
         .map(|project| project.resolved.frozen.workspace_root.clone())
         .unwrap_or_else(|| source_parent(path));
     let physical_path = absolute_entry_path(&source_root, path);
-    let prepared = runmat_runtime::analysis::prepare_fea_path_in_root(&source_root, &physical_path)
-        .map_err(anyhow::Error::msg)?;
-    let requests = prepared.function_requests().map_err(anyhow::Error::msg)?;
-    let functions = if requests.is_empty() {
-        Vec::new()
-    } else {
-        let frozen = &project
-            .as_ref()
-            .context("imported `.m` functions require an enclosing frozen RunMat project")?
-            .resolved
-            .frozen;
-        super::callables::compile_function_facts(
-            &physical_path,
-            &source_root,
-            &requests,
-            frozen,
-            config,
-        )
-        .await?
-    };
-    let manifest = match project.as_ref() {
-        Some(project) => Some(
-            load_project_manifest_async(&project.resolved.frozen.manifest_path)
-                .await
-                .context("failed to load frozen-project execution profiles")?,
-        ),
-        None => None,
-    };
-    let profiles = manifest
-        .as_ref()
-        .map(|manifest| {
-            remote_execution_profile_facts(
-                manifest
-                    .execution_profiles
-                    .iter()
-                    .map(|(name, profile)| (name.clone(), profile.accelerator.is_some())),
-            )
-            .map_err(anyhow::Error::new)
-        })
-        .transpose()?
-        .unwrap_or_default();
-    let checked = prepared
-        .check(functions, profiles)
+    let mut session = crate::commands::session::create_session(
+        false,
+        false,
+        config,
+        "create FEA source-check session",
+    )?;
+    if let Some(project) = project.as_ref() {
+        session.install_project_handoff(runmat_package::FrozenProjectHandoff::new(
+            project.resolved.frozen.clone(),
+        ))?;
+    }
+    let session_source = session
+        .load_and_check_fea_source_path(&physical_path)
+        .await
         .map_err(anyhow::Error::msg)?;
     Ok(NativeCheckedFeaSource {
-        checked,
-        frozen_project: project.map(|project| project.resolved.frozen),
-        project_manifest: manifest,
+        frozen_project: session_source.frozen_project().cloned(),
+        project_manifest: session_source.project_manifest().cloned(),
+        session_source,
     })
 }
 
@@ -104,8 +74,6 @@ mod tests {
     use runmat_config::project::parse_project_manifest_toml;
     use runmat_types::CapabilityRequirement;
 
-    use super::*;
-
     #[test]
     fn project_profiles_become_exact_compiler_facts() {
         let manifest = parse_project_manifest_toml(
@@ -124,7 +92,7 @@ memory-bytes = 17179869184
 "#,
         )
         .unwrap();
-        let facts = remote_execution_profile_facts(
+        let facts = runmat_analysis_language::remote_execution_profile_facts(
             manifest
                 .execution_profiles
                 .iter()

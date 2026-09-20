@@ -19,7 +19,6 @@ pub(super) struct PreparedTypedStudy {
     pub root: PreparedStructuralStudyRoot,
     pub revision: ProgramRevision,
     pub realized: RealizedStudy,
-    pub workers: u32,
 }
 
 #[derive(Clone, Debug)]
@@ -79,11 +78,6 @@ pub(super) async fn prepare_study(
         preferred_edges_per_partition: partition.preferred_edges_per_partition,
         preferred_faces_per_partition: partition.preferred_faces_per_partition,
     })?;
-    let workers = resolved
-        .execution_policy
-        .as_ref()
-        .and_then(|policy| policy.resources.workers)
-        .map_or(1, |range| range.maximum.max(1));
     let authored_study_digest = runmat_analysis_fea::study::structural_study_source_digest(
         &realized,
         &resolved.material_catalog,
@@ -110,7 +104,6 @@ pub(super) async fn prepare_study(
         root,
         revision,
         realized,
-        workers,
     })
 }
 

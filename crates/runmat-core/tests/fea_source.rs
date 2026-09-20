@@ -57,6 +57,22 @@ fn session_checks_a_complete_fea_source() {
 }
 
 #[test]
+fn checked_session_source_retains_the_exact_entry_context() {
+    let fixture = tempfile::tempdir().expect("create fixture");
+    let path = fixture.path().join("study.fea");
+    fs::write(&path, COMPLETE_STUDY).expect("write FEA source");
+    let mut session = RunMatSession::with_options(false, false).expect("create session");
+
+    let source = futures::executor::block_on(session.load_and_check_fea_source_path(&path))
+        .expect("load and check FEA source");
+
+    assert_eq!(source.physical_path(), path);
+    assert!(source.frozen_project().is_none());
+    assert!(source.project_manifest().is_none());
+    assert_eq!(source.check_result().status, FeaCheckStatus::Valid);
+}
+
+#[test]
 fn session_reports_an_unavailable_import_as_incomplete() {
     let fixture = tempfile::tempdir().expect("create fixture");
     let path = fixture.path().join("study.fea");

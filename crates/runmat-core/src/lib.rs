@@ -24,7 +24,7 @@ pub use executable::*;
 pub use execution::*;
 pub use fusion::*;
 pub use runmat_parser::CompatMode;
-pub use session::RunMatSession;
+pub use session::{CheckedFeaSessionSource, RunMatSession};
 pub use telemetry::{
     TelemetryFailureInfo, TelemetryHost, TelemetryPlatformInfo, TelemetryRunConfig,
     TelemetryRunFinish, TelemetryRunGuard, TelemetrySink,

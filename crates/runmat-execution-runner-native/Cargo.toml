@@ -12,6 +12,7 @@ repository = "https://github.com/runmat-org/runmat"
 runmat-analysis-core = { workspace = true }
 runmat-analysis-execution = { workspace = true }
 runmat-analysis-fea = { workspace = true }
+runmat-analysis-language = { workspace = true }
 runmat-accelerate-api = { workspace = true }
 runmat-value = { workspace = true }
 runmat-builtins = { workspace = true }
@@ -33,6 +34,8 @@ runmat-runtime = { workspace = true }
 runmat-test-runner = { workspace = true }
 runmat-test-runner-execution = { workspace = true }
 runmat-vm = { workspace = true }
+runmat-mir = { workspace = true }
+runmat-types = { workspace = true }
 dirs = "5.0"
 base64 = "0.22"
 futures = "0.3"

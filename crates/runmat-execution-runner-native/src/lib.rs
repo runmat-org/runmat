@@ -47,6 +47,7 @@ mod service;
 mod structural_study_root;
 pub mod supervisor;
 mod test_workload;
+mod typed_fea;
 mod worker;
 
 pub use analysis_buckling::{
@@ -196,4 +197,7 @@ pub use structural_study_root::{
     StructuralStudyMaterialExpectation, StructuralStudyResultExpectation,
 };
 pub use test_workload::{execute_host_program_request, execute_host_program_request_with_project};
+pub use typed_fea::{
+    execute_checked_fea_locally, CompletedLocalFeaCase, LocalFeaExecution, LocalFeaExecutionOptions,
+};
 pub use worker::run_worker_stdio;

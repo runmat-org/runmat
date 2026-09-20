@@ -1,5 +1,4 @@
 use anyhow::{bail, Context, Result};
-use futures::StreamExt as _;
 use runmat_analysis_core::AuthoredStudyInputBinding;
 use runmat_analysis_language::{ResolvedAnalysisStudy, ResolvedAnalysisSweep};
 use runmat_config::runtime::RunMatRuntimeConfig;
@@ -47,27 +46,33 @@ async fn execute_study(
 ) -> Result<()> {
     match execution.target {
         ExecutionTarget::Local => {
-            let authority = format!("typed-fea-local:{}", uuid::Uuid::new_v4());
-            let prepared = prepare_study(
-                source,
-                study,
-                &inputs,
-                &authority,
-                &execution.compute,
-                config,
+            if !inputs.is_empty() {
+                bail!("direct study execution cannot supply sweep case inputs");
+            }
+            let selector = runmat_runtime::analysis::FeaRootSelector::Study {
+                id: study.study.study_id.clone(),
+            };
+            let completed = runmat_execution_runner_native::execute_checked_fea_locally(
+                &source.session_source,
+                runmat_execution_runner_native::LocalFeaExecutionOptions {
+                    root: Some(selector),
+                    workers: None,
+                    backend: execution.compute.backend,
+                    accelerators: execution.compute.accelerators.clone(),
+                },
             )
-            .await?;
-            let study_id = prepared.realized.study_id.clone();
-            let completed =
-                runmat_execution_runner_native::execute_prepared_structural_study_locally(
-                    runmat_execution_runner_native::NativeExecutionConfig::for_current_executable(
-                    )?,
-                    prepared.root,
-                    prepared.workers,
-                )
-                .await?;
-            let publication = publish_local_result(&completed)?;
-            print_fea_result(&study_id, &completed, &publication, json)
+            .await
+            .map_err(anyhow::Error::msg)?;
+            let runmat_execution_runner_native::LocalFeaExecution::Study(completed) = completed
+            else {
+                bail!("selected study resolved to a sweep during native execution");
+            };
+            print_fea_result(
+                &completed.case_id,
+                &completed.result,
+                &completed.publication,
+                json,
+            )
         }
         ExecutionTarget::Remote(target) => {
             execute_study_remotely(
@@ -97,59 +102,30 @@ async fn execute_sweep(
     }
     match execution.target {
         ExecutionTarget::Local => {
-            let case_count = cases.len();
-            let mut prepared_cases = Vec::with_capacity(case_count);
-            for (index, case) in cases.into_iter().enumerate() {
-                let inputs = case
-                    .bindings
-                    .into_iter()
-                    .map(|binding| AuthoredStudyInputBinding {
-                        input_id: binding.input_id,
-                        value: binding.value,
-                    })
-                    .collect::<Vec<_>>();
-                let authority =
-                    format!("typed-fea-sweep:{}:{}", sweep.sweep.sweep_id, case.case_id);
-                let prepared = prepare_study(
-                    source,
-                    sweep.study.clone(),
-                    &inputs,
-                    &authority,
-                    &execution.compute,
-                    config,
-                )
-                .await?;
-                prepared_cases.push((index, case.case_id, prepared));
-            }
-            let concurrent_cases = sweep_case_concurrency(&sweep, &prepared_cases);
-            let mut completed = futures::stream::iter(prepared_cases.into_iter().map(
-                |(index, case_id, prepared)| async move {
-                    let result =
-                        runmat_execution_runner_native::execute_prepared_structural_study_locally(
-                            runmat_execution_runner_native::NativeExecutionConfig::for_current_executable(
-                            )?,
-                            prepared.root,
-                            prepared.workers,
-                        )
-                        .await
-                        .with_context(|| format!("execute sweep case `{case_id}`"))?;
-                    let publication = publish_local_result(&result)?;
-                    Ok::<_, anyhow::Error>((
-                        index,
-                        local_summary(case_id, &result, &publication)?,
-                    ))
+            let selector = runmat_runtime::analysis::FeaRootSelector::Sweep {
+                id: sweep.sweep.sweep_id.clone(),
+            };
+            let completed = runmat_execution_runner_native::execute_checked_fea_locally(
+                &source.session_source,
+                runmat_execution_runner_native::LocalFeaExecutionOptions {
+                    root: Some(selector),
+                    workers: None,
+                    backend: execution.compute.backend,
+                    accelerators: execution.compute.accelerators.clone(),
                 },
-            ))
-            .buffer_unordered(concurrent_cases)
-            .collect::<Vec<_>>()
+            )
             .await
-            .into_iter()
-            .collect::<Result<Vec<_>>>()?;
-            completed.sort_by_key(|(index, _)| *index);
+            .map_err(anyhow::Error::msg)?;
+            let runmat_execution_runner_native::LocalFeaExecution::Sweep {
+                cases: completed, ..
+            } = completed
+            else {
+                bail!("selected sweep resolved to a study during native execution");
+            };
             let summaries = completed
-                .into_iter()
-                .map(|(_, summary)| summary)
-                .collect::<Vec<_>>();
+                .iter()
+                .map(|case| local_summary(&case.case_id, &case.result, &case.publication))
+                .collect::<Result<Vec<_>>>()?;
             print_sweep_result(&sweep.sweep.sweep_id, &summaries, json)
         }
         ExecutionTarget::Remote(target) => {
@@ -165,24 +141,6 @@ async fn execute_sweep(
             .await
         }
     }
-}
-
-fn publish_local_result(
-    result: &runmat_runtime::analysis::StructuralStudyResult,
-) -> Result<runmat_runtime::analysis::AnalysisStudyRunData> {
-    let digest = result.definition_digest().map_err(anyhow::Error::msg)?;
-    let publication = runmat_runtime::analysis::StructuralStudyCompletionIdentity::new(format!(
-        "typed-local:{}",
-        digest.to_string().trim_start_matches("sha256:")
-    ))
-    .map_err(anyhow::Error::msg)?;
-    runmat_runtime::analysis::publish_structural_study_result(
-        result,
-        runmat_runtime::operations::OperationContext::new(None, None),
-        publication,
-    )
-    .map(|envelope| envelope.data)
-    .map_err(super::report_operation_error)
 }
 
 async fn execute_sweep_remotely(
@@ -347,33 +305,6 @@ async fn prepare_sweep_root(
         },
     )?;
     Ok(PreparedTypedSweep { root, revision })
-}
-
-fn sweep_case_concurrency(
-    sweep: &ResolvedAnalysisSweep,
-    cases: &[(usize, String, super::preparation::PreparedTypedStudy)],
-) -> usize {
-    let available = std::thread::available_parallelism().map_or(1, usize::from);
-    let requested = sweep
-        .study
-        .execution_policy
-        .as_ref()
-        .map(|policy| policy.fanout.sweep_cases)
-        .and_then(|limit| match limit {
-            runmat_analysis_core::ParallelismLimit::Auto => None,
-            runmat_analysis_core::ParallelismLimit::Fixed(value) => Some(value as usize),
-        })
-        .unwrap_or(available);
-    let workers_per_case = cases
-        .iter()
-        .map(|(_, _, prepared)| prepared.workers as usize)
-        .max()
-        .unwrap_or(1)
-        .max(1);
-    requested
-        .min(available / workers_per_case.max(1))
-        .max(1)
-        .min(cases.len().max(1))
 }
 
 async fn execute_study_remotely(

@@ -6577,6 +6577,7 @@ dependencies = [
  "runmat-analysis-core",
  "runmat-analysis-execution",
  "runmat-analysis-fea",
+ "runmat-analysis-language",
  "runmat-builtins",
  "runmat-canonical-codec",
  "runmat-core",
