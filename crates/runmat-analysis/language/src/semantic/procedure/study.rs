@@ -358,7 +358,7 @@ pub(crate) fn symbol_key(
     let [namespace, name] = path else {
         return None;
     };
-    if namespace != namespace_for(kind) {
+    if namespace != kind.namespace() {
         return None;
     }
     let key = FeaSymbolKey {
@@ -474,17 +474,4 @@ fn missing_binding<T>(
         diagnostics,
     );
     None
-}
-
-fn namespace_for(kind: FeaSymbolKind) -> &'static str {
-    match kind {
-        FeaSymbolKind::Geometry => "geometry",
-        FeaSymbolKind::Mesh => "mesh",
-        FeaSymbolKind::Material => "material",
-        FeaSymbolKind::Model => "model",
-        FeaSymbolKind::Study => "study",
-        FeaSymbolKind::Sweep => "sweep",
-        FeaSymbolKind::Execution => "execution",
-        FeaSymbolKind::Function => "function",
-    }
 }

@@ -33,7 +33,29 @@ pub fn check_fea_source_in_root(
     source: impl Into<Vec<u8>>,
 ) -> Result<CheckedFeaProgram, String> {
     let physical_path = entry_path(source_root, path);
-    let host = FilesystemFeaHost::new(source_root)?.with_source_overlay(&physical_path, source)?;
+    check_fea_sources_in_root(
+        source_root,
+        &physical_path,
+        &[(physical_path.clone(), source.into())],
+    )
+}
+
+/// Check one entry module against an exact set of unsaved project buffers.
+///
+/// Each overlay must remain below `source_root`. The entry module must be present either in the
+/// overlay set or on disk. This lets an editor check a coherent in-memory module graph without
+/// mutating the project filesystem.
+pub fn check_fea_sources_in_root(
+    source_root: &Path,
+    path: &Path,
+    overlays: &[(PathBuf, Vec<u8>)],
+) -> Result<CheckedFeaProgram, String> {
+    let physical_path = entry_path(source_root, path);
+    let mut host = FilesystemFeaHost::new(source_root)?;
+    for (overlay_path, source) in overlays {
+        let overlay_path = entry_path(source_root, overlay_path);
+        host = host.with_source_overlay(&overlay_path, source.clone())?;
+    }
     check_with_host(&host, source_root, &physical_path)
 }
 

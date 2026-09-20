@@ -5,7 +5,9 @@ use runmat_analysis_language::{
 };
 use tempfile::tempdir;
 
-use super::{check_fea_path_in_root, check_fea_source_in_root, FilesystemFeaHost};
+use super::{
+    check_fea_path_in_root, check_fea_source_in_root, check_fea_sources_in_root, FilesystemFeaHost,
+};
 
 #[test]
 fn filesystem_host_checks_a_complete_constructed_study() {
@@ -53,18 +55,15 @@ study static {
 fn source_overlay_checks_unsaved_root_without_mutating_the_filesystem() {
     let temporary = tempdir().unwrap();
     let imported = temporary.path().join("materials.fea");
-    fs::write(
-        &imported,
-        r#"material steel {
+    let imported_source = r#"material steel {
     mass_density = 7850 kg/m^3
     elastic {
         youngs_modulus = 200 GPa
         poisson_ratio = 0.3
     }
 }
-"#,
-    )
-    .unwrap();
+"#;
+    fs::write(&imported, imported_source).unwrap();
     let path = temporary.path().join("main.fea");
     fs::write(&path, "this saved source is intentionally invalid\n").unwrap();
     let source = r#"
@@ -109,6 +108,22 @@ study static {
     assert_eq!(
         fs::read_to_string(&path).unwrap(),
         "this saved source is intentionally invalid\n"
+    );
+
+    fs::write(&imported, "this imported source is also invalid\n").unwrap();
+    let program = check_fea_sources_in_root(
+        temporary.path(),
+        &path,
+        &[
+            (path.clone(), source.as_bytes().to_vec()),
+            (imported.clone(), imported_source.as_bytes().to_vec()),
+        ],
+    )
+    .unwrap();
+    assert!(program.is_valid(), "{:#?}", program.diagnostics);
+    assert_eq!(
+        fs::read_to_string(&imported).unwrap(),
+        "this imported source is also invalid\n"
     );
 }
 

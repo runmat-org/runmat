@@ -6823,6 +6823,7 @@ dependencies = [
  "log",
  "lsp-types",
  "once_cell",
+ "runmat-analysis-language",
  "runmat-builtins",
  "runmat-config",
  "runmat-filesystem",

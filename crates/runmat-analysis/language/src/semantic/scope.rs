@@ -29,7 +29,7 @@ pub(super) fn extend_module_scope(
         for symbol in symbols.values() {
             scope.insert_reference(
                 [
-                    namespace(symbol.key.kind).to_string(),
+                    symbol.key.kind.namespace().to_string(),
                     symbol.key.name.clone(),
                 ],
                 FeaType::Declaration(symbol.key.kind),
@@ -178,7 +178,7 @@ pub(super) fn extend_declaration_signatures(
                 .collect();
         let kind = declaration_kind(declaration.kind);
         scope.insert_declaration(
-            [namespace(kind).to_string(), declaration.name.text.clone()],
+            [kind.namespace().to_string(), declaration.name.text.clone()],
             DeclarationSignature {
                 result: FeaType::Declaration(kind),
                 inputs,
@@ -423,19 +423,6 @@ fn split_parameters(source: &str) -> Vec<&str> {
         parameters.push(final_parameter);
     }
     parameters
-}
-
-fn namespace(kind: FeaSymbolKind) -> &'static str {
-    match kind {
-        FeaSymbolKind::Geometry => "geometry",
-        FeaSymbolKind::Mesh => "mesh",
-        FeaSymbolKind::Material => "material",
-        FeaSymbolKind::Model => "model",
-        FeaSymbolKind::Study => "study",
-        FeaSymbolKind::Sweep => "sweep",
-        FeaSymbolKind::Execution => "execution",
-        FeaSymbolKind::Function => "function",
-    }
 }
 
 fn declaration_kind(kind: runmat_parser::fea::FeaDeclarationKind) -> FeaSymbolKind {

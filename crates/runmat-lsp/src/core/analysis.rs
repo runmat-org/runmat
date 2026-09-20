@@ -804,19 +804,35 @@ pub fn document_symbols(_text: &str, _analysis: &DocumentAnalysis) -> Vec<Docume
     };
     let mut symbols = Vec::new();
     for func in &semantic.functions {
-        #[allow(deprecated)]
-        symbols.push(DocumentSymbol {
-            name: func.signature.name.clone(),
-            detail: Some(func.signature.display()),
-            kind: lsp_types::SymbolKind::FUNCTION,
-            tags: None,
-            deprecated: None,
-            range: func.range.to_lsp_range(_text),
-            selection_range: func.selection.to_lsp_range(_text),
-            children: None,
-        });
+        symbols.push(make_document_symbol(
+            func.signature.name.clone(),
+            Some(func.signature.display()),
+            lsp_types::SymbolKind::FUNCTION,
+            func.range.to_lsp_range(_text),
+            func.selection.to_lsp_range(_text),
+        ));
     }
     symbols
+}
+
+pub(crate) fn make_document_symbol(
+    name: String,
+    detail: Option<String>,
+    kind: lsp_types::SymbolKind,
+    range: Range,
+    selection_range: Range,
+) -> DocumentSymbol {
+    #[allow(deprecated)]
+    DocumentSymbol {
+        name,
+        detail,
+        kind,
+        tags: None,
+        deprecated: None,
+        range,
+        selection_range,
+        children: None,
+    }
 }
 
 pub fn semantic_tokens_legend() -> lsp_types::SemanticTokensLegend {

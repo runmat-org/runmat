@@ -7,7 +7,10 @@ use runmat_parser::fea::{
     FeaBinaryOperator, FeaCallArgument, FeaExpression, FeaExpressionKind, FeaReference,
     FeaUnaryOperator,
 };
-use runmat_types::{OperationFrontend, OperationLoweringId, OperationOverloadIdentity, Span};
+use runmat_types::{
+    OperationFrontend, OperationIdentity, OperationLoweringId, OperationOverloadIdentity,
+    OperationSignature, Span,
+};
 use std::collections::BTreeMap;
 
 mod checked;
@@ -50,12 +53,15 @@ pub enum CheckedExpressionKind {
         right: Box<CheckedExpression>,
     },
     OperationCall {
+        operation: OperationIdentity,
         overload: OperationOverloadIdentity,
         lowering: OperationLoweringId,
+        signature: OperationSignature,
         arguments: Vec<CheckedCallArgument>,
     },
     FunctionCall {
         function: Vec<String>,
+        signature: CheckedCallableSignature,
         arguments: Vec<CheckedCallArgument>,
     },
     Quantity {
@@ -64,6 +70,12 @@ pub enum CheckedExpressionKind {
         offset_bits: u64,
     },
     Missing,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CheckedCallableSignature {
+    Function(FunctionSignature),
+    Declaration(DeclarationSignature),
 }
 
 pub struct ExpressionCheck<'a, C: AnalysisOperationCatalog + ?Sized> {
@@ -321,6 +333,7 @@ impl<C: AnalysisOperationCatalog + ?Sized> ExpressionChecker<'_, C> {
             return CheckedExpression {
                 kind: CheckedExpressionKind::FunctionCall {
                     function: reference_path(reference),
+                    signature: CheckedCallableSignature::Function(signature.clone()),
                     arguments: checked_arguments,
                 },
                 value_type: outputs_type(&signature.outputs),
@@ -339,6 +352,7 @@ impl<C: AnalysisOperationCatalog + ?Sized> ExpressionChecker<'_, C> {
             return CheckedExpression {
                 kind: CheckedExpressionKind::FunctionCall {
                     function: reference_path(reference),
+                    signature: CheckedCallableSignature::Declaration(signature.clone()),
                     arguments: checked_arguments,
                 },
                 value_type: signature.result,
@@ -423,8 +437,10 @@ impl<C: AnalysisOperationCatalog + ?Sized> ExpressionChecker<'_, C> {
         );
         CheckedExpression {
             kind: CheckedExpressionKind::OperationCall {
+                operation: operation.identity.clone(),
                 overload: overload.identity.clone(),
                 lowering: overload.lowering.clone(),
+                signature: overload.signature.clone(),
                 arguments: checked_arguments,
             },
             value_type,

@@ -2,16 +2,18 @@ use std::collections::BTreeMap;
 
 use runmat_parser::fea::{FeaAssignmentRelation, FeaModelDefinitionKind};
 use runmat_types::Span;
+use runmat_types::{OperationIdentity, OperationOverloadIdentity, OperationSignature};
 
 use crate::{
-    BoundFeaProgram, CheckedExpression, CheckedFeaDeclaration, FeaDiagnostic, FeaSymbolKey,
-    LogicalSourcePath,
+    BoundFeaProgram, CheckedCallableSignature, CheckedExpression, CheckedFeaDeclaration,
+    FeaDiagnostic, FeaSymbolKey, LogicalSourcePath,
 };
 
 #[derive(Debug)]
 pub struct CheckedFeaProgram {
     pub bound: BoundFeaProgram,
     pub declarations: BTreeMap<(LogicalSourcePath, FeaSymbolKey), CheckedFeaDeclaration>,
+    pub call_sites: Vec<CheckedFeaCallSite>,
     pub diagnostics: Vec<FeaDiagnostic>,
     pub geometry_inspections:
         BTreeMap<(LogicalSourcePath, String), super::super::CheckedGeometryInspection>,
@@ -29,6 +31,26 @@ pub struct CheckedFeaProgram {
         BTreeMap<(LogicalSourcePath, FeaSymbolKey), runmat_geometry_core::GeometryDefinition>,
     pub meshes: BTreeMap<(LogicalSourcePath, FeaSymbolKey), runmat_meshing_core::MeshDefinition>,
     pub models: BTreeMap<(LogicalSourcePath, FeaSymbolKey), runmat_analysis_core::AuthoredModel>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CheckedFeaCallSite {
+    pub module: LogicalSourcePath,
+    pub span: Span,
+    pub callable: CheckedFeaCallable,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CheckedFeaCallable {
+    Operation {
+        operation: OperationIdentity,
+        overload: OperationOverloadIdentity,
+        signature: OperationSignature,
+    },
+    Named {
+        path: Vec<String>,
+        signature: CheckedCallableSignature,
+    },
 }
 
 impl CheckedFeaProgram {

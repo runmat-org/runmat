@@ -13,11 +13,15 @@ use runmat_parser::fea::{
 use runmat_types::Span;
 use std::collections::BTreeMap;
 
+mod call_sites;
 mod material_source;
 mod output;
 mod types;
 
-pub use types::{CheckedFeaProgram, CheckedFeaStatement, CheckedFeaStatementKind};
+pub use types::{
+    CheckedFeaCallSite, CheckedFeaCallable, CheckedFeaProgram, CheckedFeaStatement,
+    CheckedFeaStatementKind,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CheckedFeaDeclaration {
@@ -93,11 +97,13 @@ pub fn check_program<
             }
         }
     }
+    let call_sites = call_sites::collect(&declarations);
     let products =
         super::lowering::lower_products(catalog, &bound, &mut declarations, &mut diagnostics);
     CheckedFeaProgram {
         bound,
         declarations,
+        call_sites,
         diagnostics,
         geometry_inspections: products.geometry_inspections,
         studies: products.studies,

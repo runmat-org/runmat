@@ -9,9 +9,12 @@ use crate::core::analysis::{
     semantic_document_facts, semantic_tokens_full, semantic_tokens_legend, signature_help_at,
     CompatMode, DocumentAnalysis,
 };
+use crate::core::fea::FeaDocumentAnalysis;
 use crate::core::position::position_to_offset;
 use crate::core::project::ProjectContext;
-use crate::core::workspace::{workspace_symbols_from_documents, workspace_symbols_with_project};
+use crate::core::workspace::{
+    merge_workspace_symbols, workspace_symbols_from_documents, workspace_symbols_with_project,
+};
 use log::{debug, info};
 use runmat_config::runtime::{ConfigLoader, LanguageCompatMode};
 use serde_json::json;
@@ -32,6 +35,8 @@ use tower_lsp::lsp_types::{
     WorkspaceFoldersServerCapabilities, WorkspaceServerCapabilities, WorkspaceSymbolParams,
 };
 use tower_lsp::{async_trait, Client, LanguageServer};
+
+mod fea;
 // Cargo substitutes this at compile time so we can surface the precise build version in logs.
 const SERVER_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -47,6 +52,7 @@ struct DocumentState {
     text: String,
     version: Option<i32>,
     analysis: Option<DocumentAnalysis>,
+    fea_analysis: Option<FeaDocumentAnalysis>,
 }
 
 struct AnalyzerState {
@@ -153,6 +159,9 @@ impl RunMatLanguageServer {
     }
 
     async fn reanalyze(&self, uri: &Url) {
+        if fea::reanalyze(self, uri).await {
+            return;
+        }
         let Some((analysis, previous_exports, new_exports)) = self.analyze_and_store(uri).await
         else {
             return;
@@ -609,13 +618,21 @@ impl LanguageServer for RunMatLanguageServer {
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
 
-        let (text, analysis) = {
+        let (text, analysis, fea_analysis) = {
             let state = self.state.read().await;
             match state.documents.get(&uri) {
-                Some(doc) => (doc.text.clone(), doc.analysis.clone()),
+                Some(doc) => (
+                    doc.text.clone(),
+                    doc.analysis.clone(),
+                    doc.fea_analysis.clone(),
+                ),
                 None => return Ok(None),
             }
         };
+
+        if let Some(analysis) = fea_analysis {
+            return Ok(analysis.hover(&text, &position));
+        }
 
         let Some(analysis) = analysis else {
             return Ok(None);
@@ -628,13 +645,21 @@ impl LanguageServer for RunMatLanguageServer {
         let uri = params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
 
-        let (text, analysis) = {
+        let (text, analysis, fea_analysis) = {
             let state = self.state.read().await;
             match state.documents.get(&uri) {
-                Some(doc) => (doc.text.clone(), doc.analysis.clone()),
+                Some(doc) => (
+                    doc.text.clone(),
+                    doc.analysis.clone(),
+                    doc.fea_analysis.clone(),
+                ),
                 None => return Ok(None),
             }
         };
+
+        if let Some(analysis) = fea_analysis {
+            return Ok(Some(CompletionResponse::Array(analysis.completion_items())));
+        }
 
         let Some(analysis) = analysis else {
             return Ok(None);
@@ -652,13 +677,23 @@ impl LanguageServer for RunMatLanguageServer {
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
 
-        let (text, analysis) = {
+        let (text, analysis, fea_analysis) = {
             let state = self.state.read().await;
             match state.documents.get(&uri) {
-                Some(doc) => (doc.text.clone(), doc.analysis.clone()),
+                Some(doc) => (
+                    doc.text.clone(),
+                    doc.analysis.clone(),
+                    doc.fea_analysis.clone(),
+                ),
                 None => return Ok(None),
             }
         };
+
+        if let Some(analysis) = fea_analysis {
+            return Ok(analysis
+                .definition(&text, &position)
+                .map(|location| GotoDefinitionResponse::Array(vec![location])));
+        }
 
         let Some(analysis) = analysis else {
             return Ok(None);
@@ -690,13 +725,21 @@ impl LanguageServer for RunMatLanguageServer {
         let uri = params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
 
-        let (text, analysis) = {
+        let (text, analysis, fea_analysis) = {
             let state = self.state.read().await;
             match state.documents.get(&uri) {
-                Some(doc) => (doc.text.clone(), doc.analysis.clone()),
+                Some(doc) => (
+                    doc.text.clone(),
+                    doc.analysis.clone(),
+                    doc.fea_analysis.clone(),
+                ),
                 None => return Ok(None),
             }
         };
+        if let Some(analysis) = fea_analysis {
+            let locations = analysis.references(&text, &position);
+            return Ok((!locations.is_empty()).then_some(locations));
+        }
         let Some(analysis) = analysis else {
             return Ok(None);
         };
@@ -729,13 +772,21 @@ impl LanguageServer for RunMatLanguageServer {
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
 
-        let (text, analysis) = {
+        let (text, analysis, fea_analysis) = {
             let state = self.state.read().await;
             match state.documents.get(&uri) {
-                Some(doc) => (doc.text.clone(), doc.analysis.clone()),
+                Some(doc) => (
+                    doc.text.clone(),
+                    doc.analysis.clone(),
+                    doc.fea_analysis.clone(),
+                ),
                 None => return Ok(None),
             }
         };
+
+        if let Some(analysis) = fea_analysis {
+            return Ok(analysis.signature_help(&text, &position));
+        }
 
         let Some(analysis) = analysis else {
             return Ok(None);
@@ -750,21 +801,24 @@ impl LanguageServer for RunMatLanguageServer {
     ) -> RpcResult<Option<SemanticTokensResult>> {
         let uri = params.text_document.uri;
 
-        let analysis = {
+        let (analysis, fea_analysis, text) = {
             let state = self.state.read().await;
-            state.documents.get(&uri).and_then(|d| d.analysis.clone())
+            match state.documents.get(&uri) {
+                Some(document) => (
+                    document.analysis.clone(),
+                    document.fea_analysis.clone(),
+                    document.text.clone(),
+                ),
+                None => return Ok(None),
+            }
         };
+        if let Some(analysis) = fea_analysis {
+            return Ok(analysis
+                .semantic_tokens(&text)
+                .map(SemanticTokensResult::Tokens));
+        }
         let Some(analysis) = analysis else {
             return Ok(None);
-        };
-
-        let text = {
-            let state = self.state.read().await;
-            state
-                .documents
-                .get(&uri)
-                .map(|doc| doc.text.clone())
-                .unwrap_or_default()
         };
 
         let tokens = semantic_tokens_full(&text, &analysis);
@@ -776,13 +830,21 @@ impl LanguageServer for RunMatLanguageServer {
         params: DocumentFormattingParams,
     ) -> RpcResult<Option<Vec<TextEdit>>> {
         let uri = params.text_document.uri;
-        let (text, analysis) = {
+        let (text, analysis, fea_analysis) = {
             let state = self.state.read().await;
             match state.documents.get(&uri) {
-                Some(doc) => (doc.text.clone(), doc.analysis.clone()),
+                Some(doc) => (
+                    doc.text.clone(),
+                    doc.analysis.clone(),
+                    doc.fea_analysis.clone(),
+                ),
                 None => return Ok(None),
             }
         };
+
+        if let Some(analysis) = fea_analysis {
+            return Ok(Some(analysis.formatting_edits(&text)));
+        }
 
         let Some(analysis) = analysis else {
             return Ok(None);
@@ -798,13 +860,23 @@ impl LanguageServer for RunMatLanguageServer {
     ) -> RpcResult<Option<DocumentSymbolResponse>> {
         let uri = params.text_document.uri;
 
-        let (text, analysis) = {
+        let (text, analysis, fea_analysis) = {
             let state = self.state.read().await;
             match state.documents.get(&uri) {
-                Some(doc) => (doc.text.clone(), doc.analysis.clone()),
+                Some(doc) => (
+                    doc.text.clone(),
+                    doc.analysis.clone(),
+                    doc.fea_analysis.clone(),
+                ),
                 None => return Ok(None),
             }
         };
+
+        if let Some(analysis) = fea_analysis {
+            return Ok(Some(DocumentSymbolResponse::Nested(
+                analysis.document_symbols(&text),
+            )));
+        }
 
         let Some(analysis) = analysis else {
             return Ok(None);
@@ -819,7 +891,7 @@ impl LanguageServer for RunMatLanguageServer {
         &self,
         _params: WorkspaceSymbolParams,
     ) -> RpcResult<Option<Vec<lsp_types::SymbolInformation>>> {
-        let (docs, compat_mode) = {
+        let (docs, fea_symbols, compat_mode) = {
             let state = self.state.read().await;
             (
                 state
@@ -831,6 +903,12 @@ impl LanguageServer for RunMatLanguageServer {
                             .map(|analysis| (uri.clone(), doc.text.clone(), analysis.clone()))
                     })
                     .collect::<Vec<_>>(),
+                state
+                    .documents
+                    .values()
+                    .filter_map(|document| document.fea_analysis.as_ref())
+                    .flat_map(|analysis| analysis.workspace_symbols(Some(_params.query.as_str())))
+                    .collect::<Vec<_>>(),
                 state.compat_mode,
             )
         };
@@ -840,14 +918,15 @@ impl LanguageServer for RunMatLanguageServer {
                 .values()
                 .map(|doc| (doc.uri.clone(), doc.text.clone(), doc.analysis.clone()))
                 .collect::<Vec<_>>();
-            return Ok(Some(workspace_symbols_from_documents(
-                &project_docs,
+            return Ok(Some(merge_workspace_symbols(
+                workspace_symbols_from_documents(&project_docs, Some(_params.query.as_str())),
+                fea_symbols,
                 Some(_params.query.as_str()),
             )));
         }
-        Ok(Some(workspace_symbols_with_project(
-            &docs,
-            compat_mode,
+        Ok(Some(merge_workspace_symbols(
+            workspace_symbols_with_project(&docs, compat_mode, Some(_params.query.as_str())),
+            fea_symbols,
             Some(_params.query.as_str()),
         )))
     }
@@ -1006,6 +1085,7 @@ roots = ["src"]
                 text: summarize_text,
                 version: Some(1),
                 analysis: Some(summarize_analysis),
+                ..DocumentState::default()
             },
         );
         docs.insert(
@@ -1014,6 +1094,7 @@ roots = ["src"]
                 text: main_text,
                 version: Some(1),
                 analysis: Some(main_analysis),
+                ..DocumentState::default()
             },
         );
         docs.insert(
@@ -1022,6 +1103,7 @@ roots = ["src"]
                 text: other_text,
                 version: Some(1),
                 analysis: Some(other_analysis),
+                ..DocumentState::default()
             },
         );
 

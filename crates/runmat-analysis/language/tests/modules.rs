@@ -20,7 +20,7 @@ fn compiler_loads_transitive_modules_and_binds_explicit_symbols() {
         );
     let root = source_module(
         "project/main.fea",
-        "import model bracket from \"./models/bracket.fea\"\nimport function pulse from \"./pulse.m\"\nstudy main {\n}\n",
+        "import model bracket from \"./models/bracket.fea\"\nimport function pulse from \"./pulse.m\"\nstudy main {\nmodel = model.bracket\n}\n",
         1,
     );
     let program = FeaCompiler::new(&host).check_bindings(CheckRequest {
@@ -44,6 +44,14 @@ fn compiler_loads_transitive_modules_and_binds_explicit_symbols() {
         name: "pulse".to_string(),
     }));
     assert_eq!(program.functions.len(), 1);
+    assert_eq!(program.symbol_uses.len(), 1);
+    assert_eq!(program.symbol_uses[0].module.as_str(), "project/main.fea");
+    assert_eq!(
+        program.symbol_uses[0].target_module.as_str(),
+        "project/models/bracket.fea"
+    );
+    assert_eq!(program.symbol_uses[0].target.kind, FeaSymbolKind::Model);
+    assert_eq!(program.symbol_uses[0].target.name, "bracket");
 }
 
 #[test]

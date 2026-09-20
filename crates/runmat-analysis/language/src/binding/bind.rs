@@ -1,4 +1,7 @@
-use super::{BoundFeaProgram, BoundFeaSymbol, FeaSymbolKey, FeaSymbolKind, FeaSymbolOrigin};
+use super::{
+    uses::collect_symbol_uses, BoundFeaProgram, BoundFeaSymbol, FeaSymbolKey, FeaSymbolKind,
+    FeaSymbolOrigin,
+};
 use crate::{
     resolve_logical_path, FeaDiagnostic, FeaDiagnosticLocation, FeaDiagnosticPhase, FeaModuleGraph,
     FeaRelatedDiagnostic, FunctionRequest, LogicalSourcePath, RunMatFunctionSource, SourceSymbol,
@@ -142,10 +145,12 @@ where
         }
     }
 
+    let symbol_uses = collect_symbol_uses(&graph, &symbols, &functions);
     BoundFeaProgram {
         graph,
         symbols,
         functions,
+        symbol_uses,
         diagnostics,
     }
 }
@@ -204,16 +209,7 @@ fn import_kind(kind: FeaImportKind) -> FeaSymbolKind {
 }
 
 fn symbol_kind_name(kind: FeaSymbolKind) -> &'static str {
-    match kind {
-        FeaSymbolKind::Geometry => "geometry",
-        FeaSymbolKind::Mesh => "mesh",
-        FeaSymbolKind::Material => "material",
-        FeaSymbolKind::Model => "model",
-        FeaSymbolKind::Study => "study",
-        FeaSymbolKind::Sweep => "sweep",
-        FeaSymbolKind::Execution => "execution",
-        FeaSymbolKind::Function => "function",
-    }
+    kind.namespace()
 }
 
 fn location(path: &LogicalSourcePath, span: Span) -> FeaDiagnosticLocation {

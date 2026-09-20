@@ -14,6 +14,21 @@ pub enum FeaSymbolKind {
     Function,
 }
 
+impl FeaSymbolKind {
+    pub const fn namespace(self) -> &'static str {
+        match self {
+            Self::Geometry => "geometry",
+            Self::Mesh => "mesh",
+            Self::Material => "material",
+            Self::Model => "model",
+            Self::Study => "study",
+            Self::Sweep => "sweep",
+            Self::Execution => "execution",
+            Self::Function => "function",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct FeaSymbolKey {
     pub kind: FeaSymbolKind,
@@ -38,11 +53,20 @@ pub struct BoundFeaSymbol {
     pub origin: FeaSymbolOrigin,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BoundFeaSymbolUse {
+    pub module: LogicalSourcePath,
+    pub span: Span,
+    pub target_module: LogicalSourcePath,
+    pub target: FeaSymbolKey,
+}
+
 #[derive(Debug)]
 pub struct BoundFeaProgram {
     pub graph: FeaModuleGraph,
     pub symbols: BTreeMap<LogicalSourcePath, BTreeMap<FeaSymbolKey, BoundFeaSymbol>>,
     pub functions: BTreeMap<(LogicalSourcePath, String), FunctionFacts>,
+    pub symbol_uses: Vec<BoundFeaSymbolUse>,
     pub diagnostics: Vec<FeaDiagnostic>,
 }
 
