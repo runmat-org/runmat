@@ -82,7 +82,7 @@ pub(super) async fn execute(
     }
 }
 
-fn require_valid(source: &super::source::CheckedFeaSource, json: bool) -> Result<()> {
+fn require_valid(source: &super::source::NativeCheckedFeaSource, json: bool) -> Result<()> {
     if source.program.is_valid() && source.program.diagnostics.is_empty() {
         Ok(())
     } else {
@@ -90,7 +90,7 @@ fn require_valid(source: &super::source::CheckedFeaSource, json: bool) -> Result
     }
 }
 
-fn print_diagnostics(source: &super::source::CheckedFeaSource, json: bool) -> Result<()> {
+fn print_diagnostics(source: &super::source::NativeCheckedFeaSource, json: bool) -> Result<()> {
     if json {
         println!(
             "{}",

@@ -1,5 +1,8 @@
-use crate::{FeaDiagnostic, LogicalSourcePath, SourceDigest, SourceModule};
-use runmat_parser::fea::{FeaImportKind, FeaSyntaxModule};
+use crate::{
+    resolve_logical_path, FeaDiagnostic, FunctionRequest, LogicalPathError, LogicalSourcePath,
+    SourceDigest, SourceIdentityError, SourceModule, SourceSymbol,
+};
+use runmat_parser::fea::{FeaImportKind, FeaModuleItem, FeaSyntaxModule};
 use runmat_types::Span;
 use std::collections::BTreeMap;
 
@@ -43,6 +46,45 @@ impl FeaModuleGraph {
             .map(|(path, module)| (path.clone(), module.source.source_digest))
             .collect()
     }
+
+    pub fn function_requests(&self) -> Result<Vec<FunctionRequest>, FunctionRequestError> {
+        self.modules
+            .iter()
+            .flat_map(|(module_path, module)| {
+                module.syntax.iter().flat_map(move |syntax| {
+                    syntax.items.iter().filter_map(move |item| {
+                        let FeaModuleItem::Import(import) = item else {
+                            return None;
+                        };
+                        (import.kind == FeaImportKind::Function).then_some((module_path, import))
+                    })
+                })
+            })
+            .map(|(module_path, import)| {
+                Ok((
+                    resolve_logical_path(&self.source_root, module_path, &import.source)?,
+                    SourceSymbol::new(import.name.text.clone())?,
+                ))
+            })
+            .collect::<Result<std::collections::BTreeSet<_>, FunctionRequestError>>()
+            .map(|requests| {
+                requests
+                    .into_iter()
+                    .map(|(module_path, symbol)| FunctionRequest {
+                        module_path,
+                        symbol,
+                    })
+                    .collect()
+            })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum FunctionRequestError {
+    #[error("invalid imported function path: {0}")]
+    Path(#[from] LogicalPathError),
+    #[error("invalid imported function symbol: {0}")]
+    Symbol(#[from] SourceIdentityError),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

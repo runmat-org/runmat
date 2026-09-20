@@ -1,4 +1,4 @@
-use super::source::CheckedFeaSource;
+use super::source::NativeCheckedFeaSource;
 use anyhow::{Context, Result};
 use runmat_analysis_core::{AuthoredStudyInputBinding, RealizedStudy};
 use runmat_analysis_execution::{
@@ -29,7 +29,7 @@ pub(super) struct FeaComputeAllocation {
 }
 
 pub(super) async fn prepare_study(
-    source: &CheckedFeaSource,
+    source: &NativeCheckedFeaSource,
     resolved: ResolvedAnalysisStudy,
     inputs: &[AuthoredStudyInputBinding],
     authority: &str,
@@ -115,7 +115,7 @@ pub(super) async fn prepare_study(
 }
 
 fn program_revision(
-    source: &CheckedFeaSource,
+    source: &NativeCheckedFeaSource,
     config: &RunMatRuntimeConfig,
 ) -> Result<ProgramRevision> {
     let (graph, source_digest) = match &source.frozen_project {

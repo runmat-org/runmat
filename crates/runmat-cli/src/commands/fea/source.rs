@@ -1,71 +1,40 @@
-use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use runmat_analysis_language::{
-    bind_program, check_program, remote_execution_profile_facts, resolve_logical_path,
-    CheckedFeaProgram, FeaCompiler, LogicalSourcePath, ModuleGraphRequest, SourceSymbol,
-};
+use runmat_analysis_language::remote_execution_profile_facts;
 use runmat_config::project::{load_project_manifest_async, ProjectManifest};
 use runmat_config::runtime::RunMatRuntimeConfig;
-use runmat_parser::fea::{FeaImportKind, FeaModuleItem};
-use runmat_runtime::analysis::{FilesystemFeaHost, ProjectFeaHost};
 
 use crate::cli::Cli;
 
-pub(crate) struct CheckedFeaSource {
-    pub program: CheckedFeaProgram,
-    pub root_module: LogicalSourcePath,
-    pub source_root: PathBuf,
+pub(crate) struct NativeCheckedFeaSource {
+    pub checked: runmat_runtime::analysis::CheckedFeaSource,
     pub frozen_project: Option<runmat_package::FrozenProject>,
     pub project_manifest: Option<ProjectManifest>,
+}
+
+impl std::ops::Deref for NativeCheckedFeaSource {
+    type Target = runmat_runtime::analysis::CheckedFeaSource;
+
+    fn deref(&self) -> &Self::Target {
+        &self.checked
+    }
 }
 
 pub(crate) async fn check_source(
     path: &Path,
     cli: &Cli,
     config: &RunMatRuntimeConfig,
-) -> Result<CheckedFeaSource> {
+) -> Result<NativeCheckedFeaSource> {
     let project = crate::commands::package::resolve_for_source(path, cli).await?;
     let source_root = project
         .as_ref()
         .map(|project| project.resolved.frozen.workspace_root.clone())
         .unwrap_or_else(|| source_parent(path));
     let physical_path = absolute_entry_path(&source_root, path);
-    let files = FilesystemFeaHost::new(&source_root).map_err(anyhow::Error::msg)?;
-    let root = files
-        .load_physical_module(&physical_path)
+    let prepared = runmat_runtime::analysis::prepare_fea_path_in_root(&source_root, &physical_path)
         .map_err(anyhow::Error::msg)?;
-    let root_module = root.logical_path.clone();
-    let graph = FeaCompiler::new(&files).build_module_graph(ModuleGraphRequest {
-        source_root: LogicalSourcePath::new(files.logical_root().to_string())?,
-        root,
-    });
-    let requests = graph
-        .modules
-        .iter()
-        .flat_map(|(module_path, module)| {
-            module
-                .syntax
-                .iter()
-                .flat_map(|syntax| syntax.items.iter())
-                .filter_map(move |item| match item {
-                    FeaModuleItem::Import(import) if import.kind == FeaImportKind::Function => {
-                        Some((module_path, import))
-                    }
-                    _ => None,
-                })
-        })
-        .map(|(module_path, import)| {
-            Ok((
-                resolve_logical_path(&graph.source_root, module_path, &import.source)
-                    .map_err(|error| anyhow::anyhow!(error.to_string()))?,
-                SourceSymbol::new(import.name.text.clone())?,
-            ))
-        })
-        .collect::<Result<BTreeSet<_>>>()?
-        .into_iter()
-        .collect::<Vec<_>>();
+    let requests = prepared.function_requests().map_err(anyhow::Error::msg)?;
     let functions = if requests.is_empty() {
         Vec::new()
     } else {
@@ -104,14 +73,11 @@ pub(crate) async fn check_source(
         })
         .transpose()?
         .unwrap_or_default();
-    let host =
-        ProjectFeaHost::new(&source_root, functions, profiles).map_err(anyhow::Error::msg)?;
-    let bound = bind_program(&host, graph);
-    let program = check_program(&host, bound);
-    Ok(CheckedFeaSource {
-        program,
-        root_module,
-        source_root,
+    let checked = prepared
+        .check(functions, profiles)
+        .map_err(anyhow::Error::msg)?;
+    Ok(NativeCheckedFeaSource {
+        checked,
         frozen_project: project.map(|project| project.resolved.frozen),
         project_manifest: manifest,
     })

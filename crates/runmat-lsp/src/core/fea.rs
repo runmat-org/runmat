@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -7,14 +7,9 @@ use lsp_types::{
     HoverContents, MarkupContent, MarkupKind, Position, Range, SemanticToken, SemanticTokens,
     SymbolInformation, TextEdit, Url,
 };
-use runmat_analysis_language::{
-    resolve_logical_path, CheckedFeaProgram, ExecutionProfileFacts, FeaDiagnosticSeverity,
-    FunctionFacts, FunctionRequest, LogicalSourcePath, SourceSymbol,
-};
+use runmat_analysis_language::{CheckedFeaProgram, FeaDiagnosticSeverity, LogicalSourcePath};
 use runmat_lexer::fea::{FeaToken, FeaTokenKind};
-use runmat_parser::fea::{
-    format_fea, FeaFormatOptions, FeaImportKind, FeaModuleItem, FeaSyntaxModule,
-};
+use runmat_parser::fea::{format_fea, FeaFormatOptions, FeaModuleItem, FeaSyntaxModule};
 use runmat_types::Span;
 
 use super::analysis::make_document_symbol;
@@ -38,12 +33,12 @@ pub struct FeaDocumentAnalysis {
 }
 
 impl FeaDocumentAnalysis {
-    pub fn check_with_overlays(
+    pub(crate) fn prepare_with_overlays(
         source: &str,
         physical_path: &Path,
         workspace_roots: &[PathBuf],
         project_overlays: &[(PathBuf, Vec<u8>)],
-    ) -> Result<Self, String> {
+    ) -> Result<runmat_runtime::analysis::PreparedFeaSource, String> {
         let source_root = source_root(physical_path, workspace_roots);
         let mut overlays = project_overlays
             .iter()
@@ -51,90 +46,23 @@ impl FeaDocumentAnalysis {
             .cloned()
             .collect::<Vec<_>>();
         replace_root_overlay(&mut overlays, physical_path, source);
-        let program = runmat_runtime::analysis::check_fea_sources_in_root(
+        runmat_runtime::analysis::prepare_fea_sources_in_root(
             &source_root,
             physical_path,
             &overlays,
-        )?;
-        let root = program.bound.graph.root.clone();
-        Ok(Self {
-            program: Arc::new(program),
-            root,
-            source_root,
-            function_sources: BTreeMap::new(),
-        })
+        )
     }
 
-    pub fn check_with_project_facts(
-        source: &str,
-        physical_path: &Path,
-        workspace_roots: &[PathBuf],
-        project_overlays: &[(PathBuf, Vec<u8>)],
-        functions: Vec<FunctionFacts>,
-        profiles: Vec<ExecutionProfileFacts>,
+    pub(crate) fn from_checked(
+        checked: runmat_runtime::analysis::CheckedFeaSource,
         function_sources: BTreeMap<LogicalSourcePath, Arc<str>>,
-    ) -> Result<Self, String> {
-        let source_root = source_root(physical_path, workspace_roots);
-        let mut overlays = project_overlays
-            .iter()
-            .filter(|(path, _)| path.starts_with(&source_root))
-            .cloned()
-            .collect::<Vec<_>>();
-        replace_root_overlay(&mut overlays, physical_path, source);
-        let program = runmat_runtime::analysis::check_fea_project_sources_in_root(
-            &source_root,
-            physical_path,
-            &overlays,
-            functions,
-            profiles,
-        )?;
-        let root = program.bound.graph.root.clone();
-        Ok(Self {
-            program: Arc::new(program),
-            root,
-            source_root,
+    ) -> Self {
+        Self {
+            program: Arc::new(checked.program),
+            root: checked.root_module,
+            source_root: checked.source_root,
             function_sources,
-        })
-    }
-
-    pub fn required_functions(&self) -> Vec<FunctionRequest> {
-        self.program
-            .bound
-            .graph
-            .modules
-            .iter()
-            .flat_map(|(module_path, module)| {
-                module.syntax.iter().flat_map(move |syntax| {
-                    syntax.items.iter().filter_map(move |item| {
-                        let FeaModuleItem::Import(import) = item else {
-                            return None;
-                        };
-                        if import.kind != FeaImportKind::Function {
-                            return None;
-                        }
-                        Some((
-                            resolve_logical_path(
-                                &self.program.bound.graph.source_root,
-                                module_path,
-                                &import.source,
-                            )
-                            .ok()?,
-                            SourceSymbol::new(import.name.text.clone()).ok()?,
-                        ))
-                    })
-                })
-            })
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .map(|(module_path, symbol)| FunctionRequest {
-                module_path,
-                symbol,
-            })
-            .collect()
-    }
-
-    pub fn source_root(&self) -> &Path {
-        &self.source_root
+        }
     }
 
     pub fn status_message(&self) -> String {

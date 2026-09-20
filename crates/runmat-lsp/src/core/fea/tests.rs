@@ -3,6 +3,24 @@ use runmat_lexer::fea::FeaKeyword;
 
 use super::*;
 
+fn check_with_overlays(
+    source: &str,
+    physical_path: &std::path::Path,
+    workspace_roots: &[PathBuf],
+    project_overlays: &[(PathBuf, Vec<u8>)],
+) -> Result<FeaDocumentAnalysis, String> {
+    let prepared = FeaDocumentAnalysis::prepare_with_overlays(
+        source,
+        physical_path,
+        workspace_roots,
+        project_overlays,
+    )?;
+    Ok(FeaDocumentAnalysis::from_checked(
+        prepared.check(Vec::new(), Vec::new())?,
+        BTreeMap::new(),
+    ))
+}
+
 #[test]
 fn keyword_inventory_matches_the_lexer() {
     for keyword in KEYWORDS {
@@ -59,13 +77,8 @@ study static {
     output displacement = analysis.solve.field.node.displacement
 }
 "#;
-    let analysis = FeaDocumentAnalysis::check_with_overlays(
-        source,
-        &main_path,
-        &[temporary.path().to_path_buf()],
-        &[],
-    )
-    .unwrap();
+    let analysis =
+        check_with_overlays(source, &main_path, &[temporary.path().to_path_buf()], &[]).unwrap();
 
     assert!(analysis.diagnostics(source).is_empty());
     assert_eq!(analysis.document_symbols(source).len(), 5);
@@ -108,13 +121,8 @@ fn invalid_unsaved_source_reports_production_parser_diagnostics() {
     let temporary = tempfile::tempdir().unwrap();
     let path = temporary.path().join("invalid.fea");
     let source = "study broken {\n";
-    let analysis = FeaDocumentAnalysis::check_with_overlays(
-        source,
-        &path,
-        &[temporary.path().to_path_buf()],
-        &[],
-    )
-    .unwrap();
+    let analysis =
+        check_with_overlays(source, &path, &[temporary.path().to_path_buf()], &[]).unwrap();
     let diagnostics = analysis.diagnostics(source);
     assert!(!diagnostics.is_empty());
     assert!(diagnostics.iter().any(|diagnostic| {
@@ -156,13 +164,14 @@ end
     let source = "import function impactPulse from \"./impactPulse.m\"\n";
     std::fs::write(&study_path, source).unwrap();
 
-    let preliminary = FeaDocumentAnalysis::check_with_overlays(
+    let prepared = FeaDocumentAnalysis::prepare_with_overlays(
         source,
         &study_path,
         &[source_root.to_path_buf()],
         &[],
     )
     .unwrap();
+    let requests = prepared.function_requests().unwrap();
     let unsaved_function = r#"% Unsaved editor overlay.
 % The saved file still has one parameter.
 
@@ -172,7 +181,8 @@ end
 "#;
     let source_overlays = BTreeMap::from([(function_path.clone(), unsaved_function.to_string())]);
     let facts = resolve_project_facts(
-        &preliminary,
+        prepared.source_root(),
+        &requests,
         &study_path,
         crate::core::analysis::CompatMode::RunMat,
         &source_overlays,
@@ -184,16 +194,8 @@ end
     assert_eq!(facts.profiles.len(), 1);
     assert_eq!(facts.profiles[0].profile.as_str(), "engineering");
 
-    let analysis = FeaDocumentAnalysis::check_with_project_facts(
-        source,
-        &study_path,
-        &[source_root.to_path_buf()],
-        &[],
-        facts.functions,
-        facts.profiles,
-        facts.function_sources,
-    )
-    .unwrap();
+    let checked = prepared.check(facts.functions, facts.profiles).unwrap();
+    let analysis = FeaDocumentAnalysis::from_checked(checked, facts.function_sources);
     assert!(analysis.diagnostics(source).is_empty());
     let offset = source.find("impactPulse").unwrap() + 2;
     let definition = analysis

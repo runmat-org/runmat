@@ -24,6 +24,8 @@ impl fmt::Display for LogicalPathError {
     }
 }
 
+impl std::error::Error for LogicalPathError {}
+
 pub fn resolve_logical_path(
     source_root: &LogicalSourcePath,
     referrer: &LogicalSourcePath,

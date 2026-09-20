@@ -6,7 +6,8 @@ use runmat_analysis_language::{
 use tempfile::tempdir;
 
 use super::{
-    check_fea_path_in_root, check_fea_source_in_root, check_fea_sources_in_root, FilesystemFeaHost,
+    check_fea_path_in_root, check_fea_source_in_root, check_fea_sources_in_root,
+    prepare_fea_sources_in_root, FilesystemFeaHost,
 };
 
 #[test]
@@ -62,6 +63,7 @@ fn source_overlay_checks_unsaved_root_without_mutating_the_filesystem() {
         poisson_ratio = 0.3
     }
 }
+
 "#;
     fs::write(&imported, imported_source).unwrap();
     let path = temporary.path().join("main.fea");
@@ -124,6 +126,34 @@ study static {
     assert_eq!(
         fs::read_to_string(&imported).unwrap(),
         "this imported source is also invalid\n"
+    );
+}
+
+#[test]
+fn prepared_source_reports_exact_deduplicated_runmat_function_requests() {
+    let temporary = tempdir().unwrap();
+    let path = temporary.path().join("main.fea");
+    fs::write(&path, "this saved source is intentionally invalid\n").unwrap();
+    let source = b"import function impactPulse from \"./signals.m\"\n\
+import function impactPulse from \"./signals.m\"\n";
+
+    let prepared =
+        prepare_fea_sources_in_root(temporary.path(), &path, &[(path.clone(), source.to_vec())])
+            .unwrap();
+    let requests = prepared.function_requests().unwrap();
+
+    assert_eq!(requests.len(), 1);
+    assert_eq!(
+        requests[0].module_path,
+        LogicalSourcePath::new("project/signals.m").unwrap()
+    );
+    assert_eq!(
+        requests[0].symbol,
+        runmat_analysis_language::SourceSymbol::new("impactPulse").unwrap()
+    );
+    assert_eq!(
+        fs::read_to_string(path).unwrap(),
+        "this saved source is intentionally invalid\n"
     );
 }
 

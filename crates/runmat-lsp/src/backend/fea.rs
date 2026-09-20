@@ -61,24 +61,33 @@ async fn reanalyze_document(server: &RunMatLanguageServer, uri: &Url) {
         )
     };
     let result = match uri.to_file_path() {
-        Ok(path) => match FeaDocumentAnalysis::check_with_overlays(&text, &path, &roots, &overlays)
-        {
-            Ok(preliminary) => {
-                match resolve_project_facts(&preliminary, &path, compat, &source_overlays) {
-                    Ok(facts) => FeaDocumentAnalysis::check_with_project_facts(
-                        &text,
+        Ok(path) => {
+            match FeaDocumentAnalysis::prepare_with_overlays(&text, &path, &roots, &overlays) {
+                Ok(prepared) => match prepared.function_requests() {
+                    Ok(requests) => match resolve_project_facts(
+                        prepared.source_root(),
+                        &requests,
                         &path,
-                        &roots,
-                        &overlays,
-                        facts.functions,
-                        facts.profiles,
-                        facts.function_sources,
-                    ),
+                        compat,
+                        &source_overlays,
+                    ) {
+                        Ok(facts) => {
+                            prepared
+                                .check(facts.functions, facts.profiles)
+                                .map(|checked| {
+                                    FeaDocumentAnalysis::from_checked(
+                                        checked,
+                                        facts.function_sources,
+                                    )
+                                })
+                        }
+                        Err(error) => Err(error),
+                    },
                     Err(error) => Err(error),
-                }
+                },
+                Err(error) => Err(error),
             }
-            Err(error) => Err(error),
-        },
+        }
         Err(()) => Err("FEA language tooling requires a file-backed document".to_string()),
     };
     let (analysis, error) = match result {

@@ -15,11 +15,11 @@ use crate::presentation;
 use super::preparation::{prepare_study, FeaComputeAllocation};
 use super::result_presentation::{local_summary, print_fea_result, print_sweep_result};
 use super::selection::SelectedFeaRoot;
-use super::source::CheckedFeaSource;
+use super::source::NativeCheckedFeaSource;
 
 pub(super) async fn execute(
     _path: PathBuf,
-    source: CheckedFeaSource,
+    source: NativeCheckedFeaSource,
     root: SelectedFeaRoot,
     execution: ExecutionTargetArgs,
     _cli: &Cli,
@@ -38,7 +38,7 @@ pub(super) async fn execute(
 }
 
 async fn execute_study(
-    source: &CheckedFeaSource,
+    source: &NativeCheckedFeaSource,
     study: ResolvedAnalysisStudy,
     inputs: Vec<AuthoredStudyInputBinding>,
     execution: ResolvedFeaExecution,
@@ -85,7 +85,7 @@ async fn execute_study(
 }
 
 async fn execute_sweep(
-    source: &CheckedFeaSource,
+    source: &NativeCheckedFeaSource,
     sweep: ResolvedAnalysisSweep,
     execution: ResolvedFeaExecution,
     config: &RunMatRuntimeConfig,
@@ -186,7 +186,7 @@ fn publish_local_result(
 }
 
 async fn execute_sweep_remotely(
-    source: &CheckedFeaSource,
+    source: &NativeCheckedFeaSource,
     sweep: ResolvedAnalysisSweep,
     cases: Vec<runmat_analysis_core::AuthoredSweepCase>,
     target: RemoteExecutionTarget,
@@ -284,7 +284,7 @@ struct PreparedTypedSweep {
 }
 
 async fn prepare_sweep_root(
-    source: &CheckedFeaSource,
+    source: &NativeCheckedFeaSource,
     sweep: &ResolvedAnalysisSweep,
     cases: &[runmat_analysis_core::AuthoredSweepCase],
     authority: &str,
@@ -377,7 +377,7 @@ fn sweep_case_concurrency(
 }
 
 async fn execute_study_remotely(
-    source: &CheckedFeaSource,
+    source: &NativeCheckedFeaSource,
     study: ResolvedAnalysisStudy,
     inputs: Vec<AuthoredStudyInputBinding>,
     target: RemoteExecutionTarget,
@@ -470,7 +470,7 @@ struct ResolvedFeaExecution {
 }
 
 fn resolve_execution(
-    source: &CheckedFeaSource,
+    source: &NativeCheckedFeaSource,
     root: &SelectedFeaRoot,
     args: &ExecutionTargetArgs,
 ) -> Result<ResolvedFeaExecution> {

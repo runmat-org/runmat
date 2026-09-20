@@ -25,12 +25,12 @@ use runmat_geometry_core::{
     GeometryAuthoringValue, GeometryDefinition, GeometryDefinitionRef, GeometryDefinitionSource,
 };
 
-use super::source::CheckedFeaSource;
+use super::source::NativeCheckedFeaSource;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 pub(super) async fn prepare_geometry_source(
-    source: &CheckedFeaSource,
+    source: &NativeCheckedFeaSource,
     definition: &GeometryDefinition,
     dependencies: &[GeometryDefinition],
     bindings: &BTreeMap<String, GeometryAuthoringValue>,
@@ -94,7 +94,7 @@ pub(super) async fn prepare_geometry_source(
 }
 
 async fn prepare_generated_source(
-    source: &CheckedFeaSource,
+    source: &NativeCheckedFeaSource,
     definition: &GeometryDefinition,
     bindings: &BTreeMap<String, GeometryAuthoringValue>,
     access: &ArtifactAccess,

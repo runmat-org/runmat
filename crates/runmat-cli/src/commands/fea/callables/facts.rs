@@ -2,7 +2,8 @@ use std::path::Path;
 
 use anyhow::{bail, Context, Result};
 use runmat_analysis_language::{
-    operation_pattern_from_value_fact, FunctionFacts, LogicalSourcePath, SourceDigest, SourceSymbol,
+    operation_pattern_from_value_fact, FunctionFacts, FunctionRequest, LogicalSourcePath,
+    SourceDigest, SourceSymbol,
 };
 use runmat_config::runtime::RunMatRuntimeConfig;
 use runmat_package::ProjectSymbolDefinition;
@@ -13,17 +14,17 @@ use super::compile_project_definitions;
 pub(crate) async fn compile_function_facts(
     document_path: &Path,
     source_root: &Path,
-    requests: &[(LogicalSourcePath, SourceSymbol)],
+    requests: &[FunctionRequest],
     frozen: &runmat_package::FrozenProject,
     config: &RunMatRuntimeConfig,
 ) -> Result<Vec<FunctionFacts>> {
     let symbols = runmat_package::source_symbols_from_frozen(frozen, document_path);
     let mut definitions = Vec::with_capacity(requests.len());
-    for (module_path, symbol) in requests {
-        let expected_path = expected_source_path(source_root, module_path)?;
-        let definition = exact_definition(&symbols.definitions, &expected_path, symbol)?;
+    for request in requests {
+        let expected_path = expected_source_path(source_root, &request.module_path)?;
+        let definition = exact_definition(&symbols.definitions, &expected_path, &request.symbol)?;
         definitions.push((
-            request_key(module_path, symbol),
+            request_key(&request.module_path, &request.symbol),
             definition.qualified_name.clone(),
             definition.clone(),
         ));
@@ -31,7 +32,9 @@ pub(crate) async fn compile_function_facts(
     let (_, compiled) = compile_project_definitions(definitions, frozen, config).await?;
     requests
         .iter()
-        .map(|(module_path, symbol)| {
+        .map(|request| {
+            let module_path = &request.module_path;
+            let symbol = &request.symbol;
             let callable = compiled
                 .get(&request_key(module_path, symbol))
                 .with_context(|| {

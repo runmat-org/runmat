@@ -12,7 +12,6 @@ use super::super::analysis::{
     analyze_document_with_compat_and_source, semantic_document_facts, CompatMode,
 };
 use super::super::project::ProjectContext;
-use super::FeaDocumentAnalysis;
 
 pub(crate) struct FeaProjectFacts {
     pub functions: Vec<FunctionFacts>,
@@ -21,12 +20,12 @@ pub(crate) struct FeaProjectFacts {
 }
 
 pub(crate) fn resolve_project_facts(
-    analysis: &FeaDocumentAnalysis,
+    source_root: &Path,
+    requests: &[FunctionRequest],
     entry_path: &Path,
     compat: CompatMode,
     source_overlays: &BTreeMap<PathBuf, String>,
 ) -> Result<FeaProjectFacts, String> {
-    let requests = analysis.required_functions();
     let project = ProjectContext::discover_from_source_name(entry_path.to_str());
     if !requests.is_empty() && project.is_none() {
         return Err("imported `.m` functions require an enclosing frozen RunMat project".into());
@@ -50,7 +49,7 @@ pub(crate) fn resolve_project_facts(
     let mut functions = Vec::with_capacity(requests.len());
     let mut function_sources = BTreeMap::new();
     for request in requests {
-        let path = physical_path(analysis.source_root(), &request.module_path)?;
+        let path = physical_path(source_root, &request.module_path)?;
         let project = project.as_ref().ok_or_else(|| {
             "imported `.m` functions require an enclosing frozen RunMat project".to_string()
         })?;
@@ -67,8 +66,8 @@ pub(crate) fn resolve_project_facts(
             })?,
         };
         let document = analyze_document_with_compat_and_source(&source, compat, path.to_str());
-        functions.push(function_facts(&request, &source, &document)?);
-        function_sources.insert(request.module_path, Arc::<str>::from(source));
+        functions.push(function_facts(request, &source, &document)?);
+        function_sources.insert(request.module_path.clone(), Arc::<str>::from(source));
     }
     Ok(FeaProjectFacts {
         functions,

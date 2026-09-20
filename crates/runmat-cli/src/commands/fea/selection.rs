@@ -3,7 +3,7 @@ use runmat_analysis_language::{ResolvedAnalysisStudy, ResolvedAnalysisSweep};
 
 use crate::cli::FeaRootArgs;
 
-use super::source::CheckedFeaSource;
+use super::source::NativeCheckedFeaSource;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(super) enum SelectedFeaRoot {
@@ -28,7 +28,7 @@ impl SelectedFeaRoot {
 }
 
 pub(super) fn select_root(
-    source: &CheckedFeaSource,
+    source: &NativeCheckedFeaSource,
     selection: &FeaRootArgs,
 ) -> Result<SelectedFeaRoot> {
     let module = source.root_module.as_str();

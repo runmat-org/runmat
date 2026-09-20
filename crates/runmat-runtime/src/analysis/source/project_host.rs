@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use runmat_analysis_language::{
     AnalysisOperationCatalog, ExecutionProfileFacts, ExecutionProfileIdentity,
@@ -46,25 +46,6 @@ impl ProjectFeaHost {
             }
         }
         Ok(host)
-    }
-
-    pub fn logical_root(&self) -> &'static str {
-        self.files.logical_root()
-    }
-
-    pub fn logical_path(&self, path: &Path) -> Result<LogicalSourcePath, String> {
-        self.files.logical_path(path)
-    }
-
-    pub fn load_physical_module(&self, path: &Path) -> Result<SourceModule, String> {
-        self.files.load_physical_module(path)
-    }
-
-    pub fn with_source_overlays(mut self, overlays: &[(PathBuf, Vec<u8>)]) -> Result<Self, String> {
-        for (path, source) in overlays {
-            self.files = self.files.with_source_overlay(path, source.clone())?;
-        }
-        Ok(self)
     }
 }
 
