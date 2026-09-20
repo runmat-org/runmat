@@ -5,10 +5,6 @@ const path = require("path");
 
 const bindingsRoot = path.resolve(__dirname, "..");
 const repoRoot = path.resolve(bindingsRoot, "../..");
-const rustFeaDocumentPath = path.resolve(
-  repoRoot,
-  "crates/runmat-runtime/src/analysis/fea_document.rs"
-);
 const rustAnalysisContractsPath = path.resolve(
   repoRoot,
   "crates/runmat-runtime/src/analysis/contracts.rs"
@@ -43,6 +39,10 @@ const rustGeometryUnitsPath = path.resolve(
   repoRoot,
   "crates/runmat-geometry/core/src/model/units.rs"
 );
+const rustGeometryAuthoringPath = path.resolve(
+  repoRoot,
+  "crates/runmat-geometry/core/src/model/authoring.rs"
+);
 const rustMeshingRequestPath = path.resolve(
   repoRoot,
   "crates/runmat-meshing/core/src/contracts/canonical/request.rs"
@@ -52,7 +52,7 @@ const rustFeaContractsPath = path.resolve(
   "crates/runmat-analysis/fea/src/contracts/mod.rs"
 );
 const generatedRoot = path.resolve(bindingsRoot, "src/generated");
-const outputPath = path.resolve(generatedRoot, "fea-study-document-contracts.ts");
+const outputPath = path.resolve(generatedRoot, "fea-analysis-contracts.ts");
 const analysisConstants = [
   ["ANALYSIS_RUN_DATASET_SCHEMA_VERSION", "FEA_RUN_DATASET_SCHEMA_VERSION"],
   ["ANALYSIS_FIELD_BINDINGS_SCHEMA_VERSION", "FEA_FIELD_BINDINGS_SCHEMA_VERSION"],
@@ -67,7 +67,6 @@ const analysisConstants = [
   ["ANALYSIS_FIELD_DEFAULT_MATERIALIZE_LIMIT", "FEA_FIELD_DEFAULT_MATERIALIZE_LIMIT"],
 ];
 const analysisEnumTypes = [
-  ["AnalysisModelTemplate", "FeaModelTemplate"],
   ["AnalysisDocumentKind", "FeaDocumentKind"],
   ["AnalysisFieldKind", "FeaFieldKind"],
   ["AnalysisFieldStorage", "FeaFieldStorage"],
@@ -164,8 +163,6 @@ function rustTypeToTs(type) {
       return { type: "number", nullable: false };
     case "UnitSystem":
       return { type: "FeaGeometryUnits", nullable: false };
-    case "AnalysisModelTemplate":
-      return { type: "FeaModelTemplate", nullable: false };
     case "ComputeBackend":
       return { type: "FeaComputeBackend", nullable: false };
     case "ElementOrder":
@@ -180,10 +177,6 @@ function rustTypeToTs(type) {
       return { type: "FeaProcedureStep", nullable: false };
     case "ProcedureStepId":
       return { type: "string", nullable: false };
-    case "AnalysisRuntimeModelTemplateCatalogEntry":
-      return { type: "FeaModelTemplateCatalogEntry", nullable: false };
-    case "AnalysisRuntimeModelTemplateDefaultObservation":
-      return { type: "{ field: string; location: string }", nullable: false };
     case "AnalysisFieldPageValues":
       return {
         type: '{ numericRepresentation: "real" | "complex_interleaved"; values: number[] }',
@@ -315,155 +308,6 @@ function formatTypeUnion(name, values) {
   return `export type ${name} = ${values.map((value) => JSON.stringify(value)).join(" | ")};`;
 }
 
-function formatConstArray(name, values) {
-  return [
-    `export const ${name} = [`,
-    ...values.map((value) => `  ${JSON.stringify(value)},`),
-    "] as const;",
-  ].join("\n");
-}
-
-function findMatching(source, startIndex, openChar, closeChar) {
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
-  for (let index = startIndex; index < source.length; index += 1) {
-    const char = source[index];
-    if (inString) {
-      escaped = char === "\\" && !escaped;
-      if (char === "\"" && !escaped) {
-        inString = false;
-      }
-      if (char !== "\\") {
-        escaped = false;
-      }
-      continue;
-    }
-    if (char === "\"") {
-      inString = true;
-      continue;
-    }
-    if (char === openChar) {
-      depth += 1;
-    } else if (char === closeChar) {
-      depth -= 1;
-      if (depth === 0) {
-        return index;
-      }
-    }
-  }
-  throw new Error(`Could not find matching ${closeChar} for ${openChar}.`);
-}
-
-function readConstArrayBody(source, constName) {
-  const marker = `pub const ${constName}`;
-  const constIndex = source.indexOf(marker);
-  if (constIndex === -1) {
-    throw new Error(`Could not find Rust const ${constName}.`);
-  }
-  const assignmentIndex = source.indexOf("=", constIndex);
-  if (assignmentIndex === -1) {
-    throw new Error(`Could not find assignment for Rust const ${constName}.`);
-  }
-  const arrayStart = source.indexOf("&[", assignmentIndex);
-  if (arrayStart === -1) {
-    throw new Error(`Could not find array initializer for Rust const ${constName}.`);
-  }
-  const bodyStart = arrayStart + 1;
-  const bodyEnd = findMatching(source, bodyStart, "[", "]");
-  return source.slice(bodyStart + 1, bodyEnd);
-}
-
-function readNamedStringField(body, fieldName) {
-  const match = body.match(new RegExp(`${fieldName}:\\s*"([^"]*)"`));
-  if (!match) {
-    throw new Error(`Could not parse string field ${fieldName} in model template catalog entry.`);
-  }
-  return match[1];
-}
-
-function readNamedTemplateField(body) {
-  const match = body.match(/template:\s*AnalysisModelTemplate::([A-Za-z0-9_]+)/);
-  if (!match) {
-    throw new Error("Could not parse template field in physics template catalog entry.");
-  }
-  return rustVariantToSnake(match[1]);
-}
-
-function splitStructInitializers(body, structName) {
-  const entries = [];
-  let searchIndex = 0;
-  const marker = `${structName} {`;
-  while (searchIndex < body.length) {
-    const entryStart = body.indexOf(marker, searchIndex);
-    if (entryStart === -1) {
-      break;
-    }
-    const braceStart = body.indexOf("{", entryStart);
-    const braceEnd = findMatching(body, braceStart, "{", "}");
-    entries.push(body.slice(braceStart + 1, braceEnd));
-    searchIndex = braceEnd + 1;
-  }
-  return entries;
-}
-
-function readModelTemplateCatalog(source) {
-  const body = readConstArrayBody(source, "ANALYSIS_MODEL_TEMPLATE_CATALOG");
-  const entries = splitStructInitializers(body, "AnalysisModelTemplateCatalogEntry");
-  if (entries.length === 0) {
-    throw new Error("ANALYSIS_MODEL_TEMPLATE_CATALOG did not contain any entries.");
-  }
-  return entries.map((entry) => ({
-    template: readNamedTemplateField(entry),
-    label: readNamedStringField(entry, "label"),
-    family: readNamedStringField(entry, "family"),
-    target: readNamedStringField(entry, "target"),
-    value: readNamedStringField(entry, "value"),
-    defaultObservations: splitStructInitializers(entry, "AnalysisModelTemplateDefaultObservation").map((observation) => ({
-      field: readNamedStringField(observation, "field"),
-      location: readNamedStringField(observation, "location"),
-    })),
-  }));
-}
-
-function formatModelTemplateCatalog(entries) {
-  return [
-    "export interface FeaModelTemplateCatalogEntry {",
-    "  template: FeaModelTemplate;",
-    "  label: string;",
-    "  family: string;",
-    "  target: string;",
-    "  value: string;",
-    "  defaultObservations: readonly {",
-    "    field: string;",
-    "    location: string;",
-    "  }[];",
-    "}",
-    "",
-    "export const FEA_SUPPORTED_MODEL_TEMPLATES: readonly FeaModelTemplateCatalogEntry[] = [",
-    ...entries.flatMap((entry) => [
-      "  {",
-      `    template: ${JSON.stringify(entry.template)},`,
-      `    label: ${JSON.stringify(entry.label)},`,
-      `    family: ${JSON.stringify(entry.family)},`,
-      `    target: ${JSON.stringify(entry.target)},`,
-      `    value: ${JSON.stringify(entry.value)},`,
-      "    defaultObservations: [",
-      ...entry.defaultObservations.map(
-        (observation) =>
-          `      { field: ${JSON.stringify(observation.field)}, location: ${JSON.stringify(observation.location)} },`
-      ),
-      "    ],",
-      "  },",
-    ]),
-    "] as const;",
-    "",
-    "export const FEA_SUPPORTED_PHYSICS_FAMILIES: readonly string[] = Array.from(",
-    "  new Set(FEA_SUPPORTED_MODEL_TEMPLATES.map((template) => template.family))",
-    ");",
-  ].join("\n");
-}
-
 function readStructBody(source, name) {
   const match = source.match(new RegExp(`pub struct ${name} \\{(?<body>[\\s\\S]*?)\\n\\}`));
   if (!match?.groups?.body) {
@@ -549,7 +393,6 @@ function formatInterface(name, fields) {
 
 function main() {
   const analysisSource = fs.readFileSync(rustAnalysisContractsPath, "utf8");
-  const feaDocumentSource = fs.readFileSync(rustFeaDocumentPath, "utf8");
   const progressSource = fs.readFileSync(rustFeaProgressPath, "utf8");
   const sourceReportSource = fs.readFileSync(rustFeaSourceReportPath, "utf8");
   const diagnosticSource = fs.readFileSync(rustFeaDiagnosticPath, "utf8");
@@ -559,6 +402,7 @@ function main() {
   const signalSource = fs.readFileSync(rustSignalPath, "utf8");
   const excitationSource = fs.readFileSync(rustExcitationPath, "utf8");
   const geometryUnitsSource = fs.readFileSync(rustGeometryUnitsPath, "utf8");
+  const geometryAuthoringSource = fs.readFileSync(rustGeometryAuthoringPath, "utf8");
   const meshingRequestSource = fs.readFileSync(rustMeshingRequestPath, "utf8");
   const feaContractsSource = fs.readFileSync(rustFeaContractsPath, "utf8");
   const constants = analysisConstants.map(([rustName, tsName]) => ({
@@ -706,11 +550,10 @@ export interface FeaSequenceBranch { branch_id: string; producer_step: string; s
     return `{ ${variant}: FeaSignalBody<${quantity}> }`;
   }).join(" | ")};`;
   const canonicalInputs = [
-    externallyTaggedUnion(
-      "FeaRegionSelector",
-      readTupleEnumValues(feaDocumentSource, "FeaRegionSelector"),
-      "string"
-    ),
+    `export type FeaRegionSelector = ${readTupleEnumValues(geometryAuthoringSource, "GeometryRegionSelector")
+      .map((variant) => `{ kind: ${JSON.stringify(variant)}; value: string }`)
+      .concat('{ kind: "result" }')
+      .join(" | ")};`,
     "export interface FeaRegionInput { region_id: string; selector: FeaRegionSelector; }",
     "export interface FeaRegionTarget {",
     "  region_id: string;",
@@ -758,7 +601,6 @@ export interface FeaSequenceBranch { branch_id: string; producer_step: string; s
     "export interface FeaCanonicalSequence { sequence_id: string; steps: FeaProcedureStep[]; dependencies: FeaSequenceDependency[]; transitions: FeaStateTransition[]; branches: FeaSequenceBranch[]; }",
     "export type FeaExecutionInput = { step: string; backend?: FeaComputeBackend; requirement?: FeaFormulationRequirement } & ({ solver: \"structural_linear\"; options: FeaStructuralLinearOptions } | { solver: \"structural_modes\"; options: FeaStructuralModesOptions } | { solver: \"acoustic_helmholtz\"; options: FeaAcousticHelmholtzOptions } | { solver: \"thermal_diffusion\"; options: FeaThermalDiffusionOptions } | { solver: \"structural_transient\"; options: FeaStructuralTransientOptions } | { solver: \"incompressible_flow\"; options: FeaIncompressibleFlowOptions } | { solver: \"conjugate_heat_transfer\"; options: FeaConjugateHeatTransferOptions } | { solver: \"fluid_structure_interaction\"; options: FeaFluidStructureInteractionOptions } | { solver: \"structural_nonlinear\"; options: FeaStructuralNonlinearOptions } | { solver: \"electromagnetic_potential\"; options: FeaElectromagneticPotentialOptions } | { solver?: never; options?: never });",
   ].join("\n\n");
-  const modelTemplateCatalog = readModelTemplateCatalog(analysisSource);
   const analysisInterfaces = analysisStructTypes.map(([rustName, tsName, options]) =>
     formatInterface(tsName, readStructFields(analysisSource, rustName, options))
   );
@@ -773,11 +615,6 @@ export interface FeaSequenceBranch { branch_id: string; producer_step: string; s
     "",
     ...constants.map(({ tsName, value }) => `export const ${tsName} = ${value} as const;`),
     "",
-    formatConstArray(
-      "FEA_MODEL_TEMPLATES",
-      analysisEnumValues.find(({ rustName }) => rustName === "AnalysisModelTemplate")?.values ?? []
-    ),
-    "",
     ...enumTypes.flatMap((typeSource) => [typeSource, ""]),
     ...progressEnums.flatMap((typeSource) => [typeSource, ""]),
     ...sourceCheckContracts.flatMap((typeSource) => [typeSource, ""]),
@@ -790,15 +627,13 @@ export interface FeaSequenceBranch { branch_id: string; producer_step: string; s
     "",
     procedureStep,
     "",
-    formatModelTemplateCatalog(modelTemplateCatalog),
-    "",
     ...progressInterfaces.flatMap((interfaceSource) => [interfaceSource, ""]),
     ...analysisInterfaces.flatMap((interfaceSource) => [interfaceSource, ""]),
     canonicalInputs,
   ].join("\n");
   fs.writeFileSync(outputPath, contents);
   console.log(
-    `Generated ${constants.length} FEA analysis constants, ${enumTypes.length + progressEnums.length + authoringEnums.length} type unions, ${modelTemplateCatalog.length} model template catalog entries, and ${progressInterfaces.length + analysisInterfaces.length} analysis interfaces.`
+    `Generated ${constants.length} FEA analysis constants, ${enumTypes.length + progressEnums.length + authoringEnums.length} type unions, and ${progressInterfaces.length + analysisInterfaces.length} analysis interfaces.`
   );
 }
 

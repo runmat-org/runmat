@@ -13,25 +13,6 @@ export const FEA_ARTIFACT_MANIFEST_KIND = "finite_element_artifact_manifest" as 
 export const FEA_FIELD_DEFAULT_PAGE_SIZE = 4096 as const;
 export const FEA_FIELD_DEFAULT_MATERIALIZE_LIMIT = 256 as const;
 
-export const FEA_MODEL_TEMPLATES = [
-  "linear_static_structural",
-  "structural_harmonic",
-  "thermo_mechanical_coupled",
-  "thermal_steady",
-  "thermal_transient",
-  "modal_structural",
-  "acoustic_harmonic",
-  "transient_structural",
-  "nonlinear_structural",
-  "electromagnetic_harmonic",
-  "cfd_steady_state",
-  "cfd_transient",
-  "cht_coupled",
-  "fsi_coupled",
-] as const;
-
-export type FeaModelTemplate = "linear_static_structural" | "structural_harmonic" | "thermo_mechanical_coupled" | "thermal_steady" | "thermal_transient" | "modal_structural" | "acoustic_harmonic" | "transient_structural" | "nonlinear_structural" | "electromagnetic_harmonic" | "cfd_steady_state" | "cfd_transient" | "cht_coupled" | "fsi_coupled";
-
 export type FeaDocumentKind = "study" | "sweep";
 
 export type FeaFieldKind = "scalar" | "vector" | "tensor" | "unknown";
@@ -164,181 +145,6 @@ export interface FeaSequenceDependency { predecessor: string; successor: string;
 export interface FeaStateTransition { transition_id: string; producer_step: string; consumer_step: string; state_id: string; method: "reuse" | "conservative_projection" | "interpolation" | "linearize" | "derive_operator_contribution" | "initial_guess_only"; topology: "require_identical" | "project_with_evidence" | "adapted_mesh_lineage"; reference: "preserve" | "receiving_step_origin" | "explicit_linearization_point"; }
 export interface FeaSequenceBranch { branch_id: string; producer_step: string; state_ids: string[]; consumer_steps: string[]; }
 
-export interface FeaModelTemplateCatalogEntry {
-  template: FeaModelTemplate;
-  label: string;
-  family: string;
-  target: string;
-  value: string;
-  defaultObservations: readonly {
-    field: string;
-    location: string;
-  }[];
-}
-
-export const FEA_SUPPORTED_MODEL_TEMPLATES: readonly FeaModelTemplateCatalogEntry[] = [
-  {
-    template: "linear_static_structural",
-    label: "Linear static structural",
-    family: "structural",
-    target: "solid mechanics",
-    value: "static stress and displacement",
-    defaultObservations: [
-      { field: "structural.displacement", location: "nodes" },
-      { field: "structural.von_mises", location: "elements" },
-    ],
-  },
-  {
-    template: "structural_harmonic",
-    label: "Structural harmonic",
-    family: "structural",
-    target: "solid mechanics",
-    value: "complex frequency response",
-    defaultObservations: [
-      { field: "structural.displacement", location: "nodes" },
-    ],
-  },
-  {
-    template: "thermo_mechanical_coupled",
-    label: "Thermo-mechanical",
-    family: "coupled physics",
-    target: "coupled solid mechanics and heat transfer",
-    value: "coupled temperature, stress, and displacement",
-    defaultObservations: [
-      { field: "thermal.temperature", location: "nodes" },
-      { field: "structural.displacement", location: "nodes" },
-      { field: "structural.von_mises", location: "elements" },
-    ],
-  },
-  {
-    template: "thermal_steady",
-    label: "Thermal steady",
-    family: "thermal",
-    target: "steady heat transfer",
-    value: "equilibrium temperature and heat flux",
-    defaultObservations: [
-      { field: "thermal.temperature", location: "nodes" },
-      { field: "thermal.heat_flux", location: "elements" },
-    ],
-  },
-  {
-    template: "thermal_transient",
-    label: "Thermal transient",
-    family: "thermal",
-    target: "heat transfer",
-    value: "time-dependent temperature and heat flux",
-    defaultObservations: [
-      { field: "thermal.temperature", location: "nodes" },
-      { field: "thermal.heat_flux", location: "elements" },
-    ],
-  },
-  {
-    template: "modal_structural",
-    label: "Modal structural",
-    family: "modal",
-    target: "solid mechanics",
-    value: "natural frequencies and modes",
-    defaultObservations: [
-      { field: "structural.mode_shapes", location: "nodes" },
-      { field: "structural.natural_frequencies", location: "modes" },
-    ],
-  },
-  {
-    template: "acoustic_harmonic",
-    label: "Acoustic harmonic",
-    family: "acoustic",
-    target: "acoustics",
-    value: "frequency-domain pressure",
-    defaultObservations: [
-      { field: "acoustic.pressure", location: "nodes" },
-      { field: "acoustic.sound_pressure_level", location: "nodes" },
-    ],
-  },
-  {
-    template: "transient_structural",
-    label: "Transient structural",
-    family: "structural",
-    target: "solid mechanics",
-    value: "time response",
-    defaultObservations: [
-      { field: "structural.displacement", location: "nodes" },
-      { field: "structural.von_mises", location: "elements" },
-    ],
-  },
-  {
-    template: "nonlinear_structural",
-    label: "Nonlinear structural",
-    family: "structural",
-    target: "solid mechanics",
-    value: "large deformation or nonlinear material",
-    defaultObservations: [
-      { field: "structural.displacement", location: "nodes" },
-      { field: "structural.von_mises", location: "elements" },
-    ],
-  },
-  {
-    template: "electromagnetic_harmonic",
-    label: "Electromagnetic harmonic",
-    family: "electromagnetic",
-    target: "electromagnetics",
-    value: "frequency-domain electric and magnetic fields",
-    defaultObservations: [
-      { field: "em.electric_field", location: "elements" },
-      { field: "em.magnetic_flux_density", location: "elements" },
-    ],
-  },
-  {
-    template: "cfd_steady_state",
-    label: "CFD steady state",
-    family: "CFD",
-    target: "fluid flow",
-    value: "steady flow fields",
-    defaultObservations: [
-      { field: "fluid.velocity", location: "nodes" },
-      { field: "fluid.pressure", location: "nodes" },
-    ],
-  },
-  {
-    template: "cfd_transient",
-    label: "CFD transient",
-    family: "CFD",
-    target: "fluid flow",
-    value: "time-dependent flow fields",
-    defaultObservations: [
-      { field: "fluid.velocity", location: "nodes" },
-      { field: "fluid.pressure", location: "nodes" },
-    ],
-  },
-  {
-    template: "cht_coupled",
-    label: "Conjugate heat transfer",
-    family: "coupled physics",
-    target: "coupled fluid and solid heat transfer",
-    value: "fluid and solid heat transfer",
-    defaultObservations: [
-      { field: "thermal.temperature", location: "nodes" },
-      { field: "fluid.velocity", location: "nodes" },
-      { field: "fluid.pressure", location: "nodes" },
-    ],
-  },
-  {
-    template: "fsi_coupled",
-    label: "Fluid-structure interaction",
-    family: "coupled physics",
-    target: "coupled fluid and structural response",
-    value: "fluid loads and structural response",
-    defaultObservations: [
-      { field: "structural.displacement", location: "nodes" },
-      { field: "structural.von_mises", location: "elements" },
-      { field: "fluid.pressure", location: "nodes" },
-    ],
-  },
-] as const;
-
-export const FEA_SUPPORTED_PHYSICS_FAMILIES: readonly string[] = Array.from(
-  new Set(FEA_SUPPORTED_MODEL_TEMPLATES.map((template) => template.family))
-);
-
 export interface FeaProgressEvent {
   operation: string;
   phase: FeaProgressPhase;
@@ -353,7 +159,6 @@ export interface FeaProgressEvent {
 export interface FeaCapabilities {
   supportedDocumentExtensions: string[];
   supportedGeometryExtensions: string[];
-  modelTemplates: FeaModelTemplateCatalogEntry[];
   supportsCheck: boolean;
   supportsRun: boolean;
   supportsResults: boolean;
@@ -414,7 +219,6 @@ export interface FeaRunDatasetPayload {
   sessionId: string;
   docPath: string;
   study: FeaRunDatasetStudyRef;
-  modelTemplate?: FeaModelTemplate;
   physicsFamily?: string;
   procedureStep?: FeaProcedureStep;
   availableOutputSummary?: string;
@@ -600,7 +404,7 @@ export interface FeaElectromagneticPotentialOptions {
   sweep_frequency_hz: number[];
 }
 
-export type FeaRegionSelector = { id: string } | { tag: string } | { name: string };
+export type FeaRegionSelector = { kind: "name"; value: string } | { kind: "tag"; value: string } | { kind: "source_alias"; value: string } | { kind: "persistent_id"; value: string } | { kind: "feature_result"; value: string } | { kind: "boundary_introduced_by"; value: string } | { kind: "generated_output"; value: string } | { kind: "result" };
 
 export interface FeaRegionInput { region_id: string; selector: FeaRegionSelector; }
 

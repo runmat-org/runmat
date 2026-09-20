@@ -63,7 +63,6 @@ import type {
 import { __internals as workspaceHoverInternals } from "./workspace-hover.js";
 import { installWebGpuCompatibilityShims } from "./webgpu-shims.js";
 export {
-  FEA_MODEL_TEMPLATES,
   FEA_ARTIFACT_MANIFEST_KIND,
   FEA_DATASET_ARTIFACT_KIND,
   FEA_DIAGNOSTICS_ARTIFACT_KIND,
@@ -78,8 +77,6 @@ export {
   FEA_RUN_CELL_ID,
   FEA_RUN_KIND,
   FEA_RUN_MANIFEST_METADATA_SCHEMA_VERSION,
-  FEA_SUPPORTED_PHYSICS_FAMILIES,
-  FEA_SUPPORTED_MODEL_TEMPLATES,
   feaRunArtifactRefId,
 } from "./fea-contracts.js";
 export type {
@@ -115,8 +112,6 @@ export type {
   FeaInterfaceInput,
   FeaMaterialAssignmentInput,
   FeaMaterialInput,
-  FeaModelTemplate,
-  FeaModelTemplateCatalogEntry,
   FeaPhysicsFamily,
   FeaProcedureStep,
   FeaRegionInput,

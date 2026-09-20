@@ -20,7 +20,6 @@ import {
   decodePackageLock,
   encodePackageLock,
   handoffFromFrozenProject,
-  FEA_MODEL_TEMPLATES,
   FEA_ARTIFACT_MANIFEST_KIND,
   FEA_DATASET_ARTIFACT_KIND,
   FEA_DIAGNOSTICS_ARTIFACT_KIND,
@@ -32,7 +31,6 @@ import {
   FEA_OBJECT_ARTIFACT_METADATA_SCHEMA_VERSION,
   FEA_RUN_DATASET_KIND,
   FEA_RUN_DATASET_SCHEMA_VERSION,
-  FEA_SUPPORTED_MODEL_TEMPLATES,
   type RunMatSessionHandle,
   type RunMatFilesystemProvider,
   type ExecuteRequest,
@@ -68,58 +66,6 @@ describe("FEA runtime contracts", () => {
     expect(FEA_FIELD_DEFAULT_MATERIALIZE_LIMIT).toBe(256);
   });
 
-  it("keeps the public FEA model-template catalog aligned with Rust", () => {
-    expect(FEA_MODEL_TEMPLATES).toEqual([
-      "linear_static_structural",
-      "structural_harmonic",
-      "thermo_mechanical_coupled",
-      "thermal_steady",
-      "thermal_transient",
-      "modal_structural",
-      "acoustic_harmonic",
-      "transient_structural",
-      "nonlinear_structural",
-      "electromagnetic_harmonic",
-      "cfd_steady_state",
-      "cfd_transient",
-      "cht_coupled",
-      "fsi_coupled",
-    ]);
-    const catalogTemplates = FEA_SUPPORTED_MODEL_TEMPLATES.map((entry) => entry.template);
-    expect(catalogTemplates).toHaveLength(FEA_MODEL_TEMPLATES.length);
-    expect(new Set(catalogTemplates)).toEqual(new Set(FEA_MODEL_TEMPLATES));
-    expect(new Set(FEA_SUPPORTED_MODEL_TEMPLATES.map((entry) => entry.family))).toEqual(
-      new Set(["structural", "modal", "coupled physics", "thermal", "acoustic", "electromagnetic", "CFD"]),
-    );
-  });
-
-  it("describes thermal and electromagnetic templates by their admitted procedures", () => {
-    const thermalSteady = FEA_SUPPORTED_MODEL_TEMPLATES.find(
-      (entry) => entry.template === "thermal_steady"
-    );
-    const thermalTransient = FEA_SUPPORTED_MODEL_TEMPLATES.find(
-      (entry) => entry.template === "thermal_transient"
-    );
-    const electromagnetic = FEA_SUPPORTED_MODEL_TEMPLATES.find(
-      (entry) => entry.template === "electromagnetic_harmonic"
-    );
-
-    expect(thermalSteady).toMatchObject({
-      label: "Thermal steady",
-      family: "thermal",
-      value: "equilibrium temperature and heat flux",
-    });
-    expect(thermalTransient).toMatchObject({
-      label: "Thermal transient",
-      family: "thermal",
-      value: "time-dependent temperature and heat flux",
-    });
-    expect(electromagnetic).toMatchObject({
-      label: "Electromagnetic harmonic",
-      family: "electromagnetic",
-      value: "frequency-domain electric and magnetic fields",
-    });
-  });
 });
 
 function createExecuteResult(overrides: Partial<ExecuteResult> = {}): ExecuteResult {

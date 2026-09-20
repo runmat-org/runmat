@@ -396,7 +396,7 @@ fn install_fea_solver_context() -> runmat_analysis_fea::FeaProgressContextGuard 
 }
 
 pub use contracts::{
-    analysis_runtime_model_template_catalog, AnalysisAcousticRunOptions,
+    AnalysisAcousticRunOptions,
     AnalysisBucklingRunOptions, AnalysisCfdRunOptions, AnalysisChtRunOptions,
     AnalysisCreateModelIntentSpec, AnalysisDiagnosticsArtifactPayload, AnalysisDocumentCheckResult,
     AnalysisDocumentKind, AnalysisDocumentRunResult, AnalysisElectromagneticRunOptions,
@@ -413,7 +413,6 @@ pub use contracts::{
     AnalysisResultsCompareQuery, AnalysisResultsData, AnalysisResultsQuery, AnalysisResultsSummary,
     AnalysisRunDatasetFieldPagingPolicy, AnalysisRunDatasetPayload, AnalysisRunDatasetStudyRef,
     AnalysisRunOptions, AnalysisRunResult, AnalysisRuntimeCapabilities,
-    AnalysisRuntimeModelTemplateCatalogEntry, AnalysisRuntimeModelTemplateDefaultObservation,
     AnalysisSolverOptions, AnalysisStructuralFrequencyRunOptions,
     AnalysisStructuralFrequencySolver, AnalysisStructuralTimeStepPolicy, AnalysisStudyIssue,
     AnalysisStudyPlanData, AnalysisStudyPlanStepData, AnalysisStudyRunData, AnalysisStudySpec,

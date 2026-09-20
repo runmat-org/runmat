@@ -888,7 +888,6 @@ impl RunMatWasm {
                 ".gltf".to_string(),
                 ".glb".to_string(),
             ],
-            model_templates: runmat_runtime::analysis::analysis_runtime_model_template_catalog(),
             supports_check: true,
             supports_run: false,
             supports_results: true,
