@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 
 use runmat_analysis_language::{
@@ -18,6 +19,7 @@ const LOGICAL_ROOT: &str = "project";
 pub struct FilesystemFeaHost {
     physical_root: PathBuf,
     catalog: ComposedOperationCatalog,
+    source_overlays: BTreeMap<LogicalSourcePath, Vec<u8>>,
 }
 
 impl FilesystemFeaHost {
@@ -31,7 +33,21 @@ impl FilesystemFeaHost {
         Ok(Self {
             physical_root,
             catalog,
+            source_overlays: BTreeMap::new(),
         })
+    }
+
+    /// Replace the source bytes for one module while retaining filesystem resolution for its
+    /// imports and referenced geometry. Editor hosts use this for unsaved buffers so diagnostics
+    /// come from the production compiler rather than a second parser or a temporary file.
+    pub fn with_source_overlay(
+        mut self,
+        physical_path: &Path,
+        source: impl Into<Vec<u8>>,
+    ) -> Result<Self, String> {
+        let logical_path = self.logical_path(physical_path)?;
+        self.source_overlays.insert(logical_path, source.into());
+        Ok(self)
     }
 
     pub fn logical_root(&self) -> &'static str {
@@ -89,6 +105,13 @@ impl FilesystemFeaHost {
         &self,
         logical_path: LogicalSourcePath,
     ) -> Result<SourceModule, SourceDiagnostic> {
+        if let Some(source) = self.source_overlays.get(&logical_path) {
+            return Ok(SourceModule {
+                logical_path,
+                source_digest: digest(source),
+                source: source.clone(),
+            });
+        }
         let path = self.physical_path(&logical_path)?;
         let source = runmat_filesystem::read(&path).map_err(|error| {
             diagnostic(

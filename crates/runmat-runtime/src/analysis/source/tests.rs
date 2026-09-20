@@ -5,7 +5,7 @@ use runmat_analysis_language::{
 };
 use tempfile::tempdir;
 
-use super::{check_fea_path_in_root, FilesystemFeaHost};
+use super::{check_fea_path_in_root, check_fea_source_in_root, FilesystemFeaHost};
 
 #[test]
 fn filesystem_host_checks_a_complete_constructed_study() {
@@ -47,6 +47,69 @@ study static {
     assert_eq!(program.meshes.len(), 1);
     assert_eq!(program.models.len(), 1);
     assert_eq!(program.studies.len(), 1);
+}
+
+#[test]
+fn source_overlay_checks_unsaved_root_without_mutating_the_filesystem() {
+    let temporary = tempdir().unwrap();
+    let imported = temporary.path().join("materials.fea");
+    fs::write(
+        &imported,
+        r#"material steel {
+    mass_density = 7850 kg/m^3
+    elastic {
+        youngs_modulus = 200 GPa
+        poisson_ratio = 0.3
+    }
+}
+"#,
+    )
+    .unwrap();
+    let path = temporary.path().join("main.fea");
+    fs::write(&path, "this saved source is intentionally invalid\n").unwrap();
+    let source = r#"
+import material steel from "./materials.fea"
+geometry part {
+    construct {
+        feature body = box(width = 1 m, depth = 1 m, height = 1 m)
+        result = feature.body
+    }
+    region body : solid {
+        select result
+        expect exactly_one
+    }
+}
+mesh volume on geometry.part {
+    tetrahedra {
+        order = linear
+        target_size = 0.1 m
+        maximum_deviation = 0.01 m
+    }
+}
+model structure {
+    assign material.steel to geometry.part.region.body
+}
+study static {
+    geometry = geometry.part
+    mesh = mesh.volume
+    model = model.structure
+    require formulation = experimental
+    analysis solve {
+        structural static {}
+    }
+    output displacement = analysis.solve.field.node.displacement
+}
+"#;
+
+    let program = check_fea_source_in_root(temporary.path(), &path, source.as_bytes()).unwrap();
+
+    assert!(program.is_valid(), "{:#?}", program.diagnostics);
+    assert_eq!(program.materials.len(), 1);
+    assert_eq!(program.studies.len(), 1);
+    assert_eq!(
+        fs::read_to_string(&path).unwrap(),
+        "this saved source is intentionally invalid\n"
+    );
 }
 
 #[test]
@@ -175,6 +238,7 @@ study static {
     geometry = geometry.part
     mesh = mesh.volume
     model = model.structure
+    require formulation = experimental
     analysis solve { structural static {} }
     output displacement = analysis.solve.field.node.displacement
 }

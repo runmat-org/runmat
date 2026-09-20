@@ -454,7 +454,10 @@ pub use operations::{
 pub(crate) use operations::{analysis_run_field_ids, collect_analysis_result_fields};
 pub use runmat_analysis_core::FormulationRequirement;
 pub use runmat_analysis_fea::{FeaProgressEvent, FeaProgressPhase, FeaProgressStatus};
-pub use source::{check_fea_path, check_fea_path_in_root, FilesystemFeaHost, ProjectFeaHost};
+pub use source::{
+    check_fea_path, check_fea_path_in_root, check_fea_source_in_root, FilesystemFeaHost,
+    ProjectFeaHost,
+};
 
 const ANALYSIS_CREATE_MODEL_OPERATION: &str = "fea.create_model";
 const ANALYSIS_CREATE_MODEL_OP_VERSION: &str = "fea.create_model/v1";
