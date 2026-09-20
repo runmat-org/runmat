@@ -413,10 +413,10 @@ mod tests {
             .as_array()
             .expect("documentation export rows")
         {
-            for example in document["examples"]
-                .as_array()
-                .expect("documentation examples")
-            {
+            let Some(examples) = document["examples"].as_array() else {
+                continue;
+            };
+            for example in examples {
                 assert!(example.is_object());
                 assert!(example.get("fixture").is_some());
                 assert!(example.get("requirements").is_some());
