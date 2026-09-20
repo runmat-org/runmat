@@ -7,7 +7,7 @@ use tempfile::tempdir;
 
 use super::{
     check_fea_path_in_root, check_fea_source_in_root, check_fea_sources_in_root,
-    prepare_fea_sources_in_root, FilesystemFeaHost,
+    prepare_fea_path_in_root, prepare_fea_sources_in_root, FilesystemFeaHost,
 };
 
 #[test]
@@ -155,6 +155,86 @@ import function impactPulse from \"./signals.m\"\n";
         fs::read_to_string(path).unwrap(),
         "this saved source is intentionally invalid\n"
     );
+}
+
+#[test]
+fn source_check_status_distinguishes_invalid_and_incomplete_facts() {
+    let temporary = tempdir().unwrap();
+    let path = temporary.path().join("main.fea");
+    fs::write(&path, "this is not FEA source\n").unwrap();
+
+    let invalid = prepare_fea_path_in_root(temporary.path(), &path)
+        .unwrap()
+        .check(Vec::new(), Vec::new())
+        .unwrap();
+    let invalid_report = invalid.check_result();
+    assert_eq!(invalid_report.status, super::FeaCheckStatus::Invalid);
+    assert!(!invalid_report.diagnostics.is_empty());
+
+    let source = b"import function impactPulse from \"./signals.m\"\n";
+    let incomplete =
+        prepare_fea_sources_in_root(temporary.path(), &path, &[(path.clone(), source.to_vec())])
+            .unwrap()
+            .check(Vec::new(), Vec::new())
+            .unwrap();
+    let incomplete_report = incomplete.check_result();
+    assert_eq!(incomplete_report.status, super::FeaCheckStatus::Incomplete);
+    assert!(incomplete_report.diagnostics.iter().any(|diagnostic| {
+        diagnostic.availability == runmat_analysis_language::SourceAvailability::Unavailable
+    }));
+}
+
+#[test]
+fn runnable_root_selection_is_typed_and_requires_disambiguation() {
+    let temporary = tempdir().unwrap();
+    let path = temporary.path().join("main.fea");
+    let source = r#"
+geometry part {
+    construct {
+        feature body = box(width = 1 m, depth = 1 m, height = 1 m)
+        result = feature.body
+    }
+}
+mesh volume on geometry.part {
+    tetrahedra {
+        order = linear
+        target_size = 0.1 m
+        maximum_deviation = 0.01 m
+    }
+}
+model structure {}
+study first {
+    geometry = geometry.part
+    mesh = mesh.volume
+    model = model.structure
+    analysis solve { structural static {} }
+    output displacement = analysis.solve.field.node.displacement
+}
+study second {
+    geometry = geometry.part
+    mesh = mesh.volume
+    model = model.structure
+    analysis solve { structural static {} }
+    output displacement = analysis.solve.field.node.displacement
+}
+"#;
+    fs::write(&path, source).unwrap();
+    let checked = prepare_fea_path_in_root(temporary.path(), &path)
+        .unwrap()
+        .check(Vec::new(), Vec::new())
+        .unwrap();
+
+    assert_eq!(checked.check_result().status, super::FeaCheckStatus::Valid);
+    assert!(matches!(
+        checked.resolve_root(None),
+        Err(super::FeaRootSelectionError::MultipleRoots { .. })
+    ));
+    let selected = checked
+        .resolve_root(Some(&super::FeaRootSelector::Study {
+            id: "second".to_string(),
+        }))
+        .unwrap();
+    assert_eq!(selected.id(), "second");
 }
 
 #[test]

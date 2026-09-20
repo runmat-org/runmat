@@ -5,6 +5,7 @@ use runmat_analysis_language::{ResolvedAnalysisStudy, ResolvedAnalysisSweep};
 use runmat_config::runtime::RunMatRuntimeConfig;
 use runmat_execution_artifact::archive::{write_bundle, ArchiveLimits};
 use runmat_execution_artifact::ExecutionBundleBuilder;
+use runmat_runtime::analysis::ResolvedFeaRoot;
 use std::path::PathBuf;
 
 use crate::cli::{Cli, ExecutionTarget, ExecutionTargetArgs, RemoteExecutionTarget};
@@ -14,13 +15,12 @@ use crate::presentation;
 
 use super::preparation::{prepare_study, FeaComputeAllocation};
 use super::result_presentation::{local_summary, print_fea_result, print_sweep_result};
-use super::selection::SelectedFeaRoot;
 use super::source::NativeCheckedFeaSource;
 
 pub(super) async fn execute(
     _path: PathBuf,
     source: NativeCheckedFeaSource,
-    root: SelectedFeaRoot,
+    root: ResolvedFeaRoot,
     execution: ExecutionTargetArgs,
     _cli: &Cli,
     config: &RunMatRuntimeConfig,
@@ -28,10 +28,10 @@ pub(super) async fn execute(
 ) -> Result<()> {
     let execution = resolve_execution(&source, &root, &execution)?;
     match root {
-        SelectedFeaRoot::Study(study) => {
+        ResolvedFeaRoot::Study(study) => {
             execute_study(&source, study, Vec::new(), execution, config, json).await
         }
-        SelectedFeaRoot::Sweep(sweep) => {
+        ResolvedFeaRoot::Sweep(sweep) => {
             execute_sweep(&source, sweep, execution, config, json).await
         }
     }
@@ -471,12 +471,12 @@ struct ResolvedFeaExecution {
 
 fn resolve_execution(
     source: &NativeCheckedFeaSource,
-    root: &SelectedFeaRoot,
+    root: &ResolvedFeaRoot,
     args: &ExecutionTargetArgs,
 ) -> Result<ResolvedFeaExecution> {
     let policy = match root {
-        SelectedFeaRoot::Study(root) => root.execution_policy.as_ref(),
-        SelectedFeaRoot::Sweep(root) => root.study.execution_policy.as_ref(),
+        ResolvedFeaRoot::Study(root) => root.execution_policy.as_ref(),
+        ResolvedFeaRoot::Sweep(root) => root.study.execution_policy.as_ref(),
     };
     let profile_name = policy.and_then(|policy| match &policy.placement {
         runmat_analysis_core::PlacementPreference::Cluster { profile } => profile.as_deref(),

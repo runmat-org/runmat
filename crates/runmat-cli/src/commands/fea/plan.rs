@@ -2,11 +2,10 @@ use anyhow::Result;
 use runmat_analysis_core::{AuthoredExecutionPolicy, AuthoredStudy, AuthoredSweep};
 use runmat_geometry_core::GeometryDefinition;
 use runmat_meshing_core::MeshDefinition;
+use runmat_runtime::analysis::ResolvedFeaRoot;
 use serde::Serialize;
 
 use crate::presentation;
-
-use super::selection::SelectedFeaRoot;
 
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -35,7 +34,7 @@ struct FeaLogicalPlan {
     phases: Vec<FeaPlanPhase>,
 }
 
-pub(super) fn print(root: &SelectedFeaRoot, json: bool) -> Result<()> {
+pub(super) fn print(root: &ResolvedFeaRoot, json: bool) -> Result<()> {
     let plan = logical_plan(root)?;
     if json {
         println!("{}", serde_json::to_string_pretty(&plan)?);
@@ -70,9 +69,9 @@ pub(super) fn print(root: &SelectedFeaRoot, json: bool) -> Result<()> {
     Ok(())
 }
 
-fn logical_plan(root: &SelectedFeaRoot) -> Result<FeaLogicalPlan> {
+fn logical_plan(root: &ResolvedFeaRoot) -> Result<FeaLogicalPlan> {
     let (study, sweep, sweep_case_count, geometry, mesh, execution) = match root {
-        SelectedFeaRoot::Study(root) => (
+        ResolvedFeaRoot::Study(root) => (
             root.study.clone(),
             None,
             None,
@@ -80,7 +79,7 @@ fn logical_plan(root: &SelectedFeaRoot) -> Result<FeaLogicalPlan> {
             root.mesh.clone(),
             root.execution_policy.clone(),
         ),
-        SelectedFeaRoot::Sweep(root) => (
+        ResolvedFeaRoot::Sweep(root) => (
             root.study.study.clone(),
             Some(root.sweep.clone()),
             Some(root.sweep.expand_cases(&root.study.study)?.len()),

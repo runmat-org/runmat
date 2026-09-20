@@ -67,8 +67,11 @@ end
     );
     let checked: Value = serde_json::from_slice(&checked.stdout).unwrap();
     assert_eq!(checked["status"], "valid");
-    assert_eq!(checked["selected_kind"], "study");
-    assert_eq!(checked["selected_id"], "response");
+    assert_eq!(checked["rootModule"], "project/src/main.fea");
+    assert_eq!(
+        checked["roots"],
+        serde_json::json!([{ "kind": "study", "id": "response" }])
+    );
 
     let first = runmat(
         &project,
