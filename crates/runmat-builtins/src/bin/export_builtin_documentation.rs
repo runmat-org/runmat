@@ -214,7 +214,7 @@ fn legacy_presentation_example_id(key: &str, description: &str) -> String {
     digest.update(key.as_bytes());
     digest.update(b"\0");
     digest.update(description.as_bytes());
-    format!("legacy-presentation-{digest:x}")
+    format!("legacy-presentation-{:x}", digest.finalize())
 }
 
 fn record_document(
