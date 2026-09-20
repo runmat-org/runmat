@@ -108,7 +108,7 @@ impl FilesystemFeaHost {
         if let Some(source) = self.source_overlays.get(&logical_path) {
             return Ok(SourceModule {
                 logical_path,
-                source_digest: digest(source),
+                source_digest: source_digest(source),
                 source: source.clone(),
             });
         }
@@ -122,7 +122,7 @@ impl FilesystemFeaHost {
         })?;
         Ok(SourceModule {
             logical_path,
-            source_digest: digest(&source),
+            source_digest: source_digest(&source),
             source,
         })
     }
@@ -193,7 +193,7 @@ impl AnalysisOperationCatalog for FilesystemFeaHost {
     }
 }
 
-pub(super) fn digest(bytes: &[u8]) -> SourceDigest {
+pub fn source_digest(bytes: &[u8]) -> SourceDigest {
     SourceDigest(Sha256::digest(bytes).into())
 }
 

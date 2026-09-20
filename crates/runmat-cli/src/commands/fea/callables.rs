@@ -5,9 +5,7 @@ use runmat_config::runtime::RunMatRuntimeConfig;
 use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::BundleCallable;
 use runmat_package::ProjectSymbolDefinition;
-use runmat_types::{
-    OperationParameterArity, OperationTypePattern, ShapeFact, ValueFact, ValueKindFact,
-};
+use runmat_types::OperationParameterArity;
 
 use crate::commands::session::create_session;
 
@@ -18,6 +16,7 @@ pub(super) use facts::compile_function_facts;
 struct CompiledCallable {
     callable: BundleCallable,
     function: runmat_mir::analysis::FunctionAnalysis,
+    declaration_span: runmat_types::Span,
     parameters: Vec<SourceParameter>,
     executable: runmat_execution::ExecutableUnitEnvelope,
 }
@@ -26,6 +25,12 @@ struct CompiledCallable {
 struct SourceParameter {
     name: String,
     arity: OperationParameterArity,
+}
+
+#[derive(Clone, Debug)]
+struct SourceFunction {
+    declaration_span: runmat_types::Span,
+    parameters: Vec<SourceParameter>,
 }
 
 async fn compile_project_definitions(
@@ -71,7 +76,7 @@ async fn compile_project_definitions(
                 definition.source_path.display()
             )
         })?;
-        let parameters = source_parameters(
+        let source_function = source_function(
             &source_text,
             entrypoint_name(&qualified_function)?,
             crate::diagnostics::parser_compat(config.language.compat),
@@ -109,7 +114,8 @@ async fn compile_project_definitions(
                     source_digest,
                 },
                 function,
-                parameters,
+                parameters: source_function.parameters,
+                declaration_span: source_function.declaration_span,
                 executable,
             },
         );
@@ -171,11 +177,11 @@ fn entrypoint_name(qualified_function: &str) -> Result<&str> {
         .context("FEA function has an empty function name")
 }
 
-fn source_parameters(
+fn source_function(
     source: &str,
     entrypoint: &str,
     compat: runmat_parser::CompatMode,
-) -> Result<Vec<SourceParameter>> {
+) -> Result<SourceFunction> {
     let statements =
         runmat_parser::parse_with_options(source, runmat_parser::ParserOptions::new(compat))
             .map_err(|error| {
@@ -192,9 +198,11 @@ fn source_parameters(
                 name,
                 params,
                 argument_validations,
+                span,
                 ..
-            } if name == entrypoint => Some(
-                params
+            } if name == entrypoint => Some(SourceFunction {
+                declaration_span: *span,
+                parameters: params
                     .iter()
                     .map(|name| SourceParameter {
                         name: name.clone(),
@@ -209,37 +217,8 @@ fn source_parameters(
                         },
                     })
                     .collect::<Vec<_>>(),
-            ),
+            }),
             _ => None,
         });
     parameters.with_context(|| format!("imported source does not define function `{entrypoint}`"))
-}
-
-fn operation_pattern(fact: &ValueFact) -> OperationTypePattern {
-    match (&fact.kind, &fact.shape) {
-        (ValueKindFact::Numeric(_), ShapeFact::Scalar) => OperationTypePattern::NumericScalar,
-        (ValueKindFact::Numeric(_), _) => OperationTypePattern::NumericArray,
-        (ValueKindFact::Logical, _) => OperationTypePattern::LogicalArray,
-        (ValueKindFact::Character | ValueKindFact::String, ShapeFact::Scalar) => {
-            OperationTypePattern::StringScalar
-        }
-        (ValueKindFact::Object(object), shape) if shape.element_count() == Some(1) => match object
-            .runtime_class
-            .as_ref()
-            .and_then(runmat_types::QualifiedName::display_name)
-            .as_deref()
-        {
-            Some(runmat_analysis_execution::GENERATED_GEOMETRY_RUNTIME_CLASS) => {
-                OperationTypePattern::Analysis(runmat_types::AnalysisValueType::Geometry)
-            }
-            Some("geometry.Feature") => {
-                OperationTypePattern::Analysis(runmat_types::AnalysisValueType::GeometryFeature)
-            }
-            Some("geometry.RegionOutput") => {
-                OperationTypePattern::Analysis(runmat_types::AnalysisValueType::Region)
-            }
-            _ => OperationTypePattern::Any,
-        },
-        _ => OperationTypePattern::Any,
-    }
 }

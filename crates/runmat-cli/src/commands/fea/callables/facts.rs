@@ -1,12 +1,14 @@
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
-use runmat_analysis_language::{FunctionFacts, LogicalSourcePath, SourceDigest, SourceSymbol};
+use runmat_analysis_language::{
+    operation_pattern_from_value_fact, FunctionFacts, LogicalSourcePath, SourceDigest, SourceSymbol,
+};
 use runmat_config::runtime::RunMatRuntimeConfig;
 use runmat_package::ProjectSymbolDefinition;
 use runmat_types::OperationParameter;
 
-use super::{compile_project_definitions, operation_pattern};
+use super::compile_project_definitions;
 
 pub(crate) async fn compile_function_facts(
     document_path: &Path,
@@ -42,13 +44,14 @@ pub(crate) async fn compile_function_facts(
                 module_path: module_path.clone(),
                 symbol: symbol.clone(),
                 source_digest: SourceDigest(*callable.callable.source_digest.bytes()),
+                declaration_span: callable.declaration_span,
                 inputs: callable
                     .parameters
                     .iter()
                     .zip(&callable.function.callable.parameters)
                     .map(|(parameter, fact)| OperationParameter {
                         name: parameter.name.clone(),
-                        value: operation_pattern(fact),
+                        value: operation_pattern_from_value_fact(fact),
                         arity: parameter.arity,
                         default: None,
                     })
@@ -57,7 +60,7 @@ pub(crate) async fn compile_function_facts(
                     .function
                     .outputs
                     .iter()
-                    .map(operation_pattern)
+                    .map(operation_pattern_from_value_fact)
                     .collect(),
                 effects: callable.function.effects.clone(),
                 capabilities: callable.function.capabilities.clone(),

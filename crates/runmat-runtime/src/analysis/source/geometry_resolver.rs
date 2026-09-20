@@ -11,7 +11,7 @@ use runmat_geometry_io::{
 };
 use sha2::{Digest, Sha256};
 
-use super::host::{diagnostic, digest};
+use super::host::{diagnostic, source_digest};
 
 pub(super) fn inspect_geometry(
     path: &Path,
@@ -24,7 +24,7 @@ pub(super) fn inspect_geometry(
             SourceAvailability::Unavailable,
         )
     })?;
-    let content_digest = digest(&bytes);
+    let content_digest = source_digest(&bytes);
     if request
         .expected_content_digest
         .is_some_and(|expected| expected != content_digest)

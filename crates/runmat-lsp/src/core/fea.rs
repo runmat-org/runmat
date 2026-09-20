@@ -1,33 +1,40 @@
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use lsp_types::{
     CompletionItem, CompletionItemKind, Diagnostic, DiagnosticSeverity, DocumentSymbol, Hover,
-    HoverContents, Location, MarkupContent, MarkupKind, Position, Range, SemanticToken,
-    SemanticTokens, SignatureHelp, SignatureInformation, SymbolInformation, TextEdit, Url,
+    HoverContents, MarkupContent, MarkupKind, Position, Range, SemanticToken, SemanticTokens,
+    SymbolInformation, TextEdit, Url,
 };
 use runmat_analysis_language::{
-    CheckedCallableSignature, CheckedFeaCallable, CheckedFeaProgram, FeaDiagnosticSeverity,
-    FeaSymbolKey, FeaSymbolKind, FeaSymbolOrigin, LogicalSourcePath,
+    resolve_logical_path, CheckedFeaProgram, ExecutionProfileFacts, FeaDiagnosticSeverity,
+    FunctionFacts, FunctionRequest, LogicalSourcePath, SourceSymbol,
 };
 use runmat_lexer::fea::{FeaToken, FeaTokenKind};
-use runmat_parser::fea::{format_fea, FeaFormatOptions, FeaModuleItem, FeaSyntaxModule};
+use runmat_parser::fea::{
+    format_fea, FeaFormatOptions, FeaImportKind, FeaModuleItem, FeaSyntaxModule,
+};
 use runmat_types::Span;
 
 use super::analysis::make_document_symbol;
 use super::position::{offset_to_position, position_to_offset};
 
+mod navigation;
 mod presentation;
+mod project;
 #[cfg(test)]
 mod tests;
 
 use presentation::*;
+pub(crate) use project::resolve_project_facts;
 
 #[derive(Clone)]
 pub struct FeaDocumentAnalysis {
     program: Arc<CheckedFeaProgram>,
     root: LogicalSourcePath,
     source_root: PathBuf,
+    function_sources: BTreeMap<LogicalSourcePath, Arc<str>>,
 }
 
 impl FeaDocumentAnalysis {
@@ -43,11 +50,7 @@ impl FeaDocumentAnalysis {
             .filter(|(path, _)| path.starts_with(&source_root))
             .cloned()
             .collect::<Vec<_>>();
-        if let Some((_, overlay)) = overlays.iter_mut().find(|(path, _)| path == physical_path) {
-            *overlay = source.as_bytes().to_vec();
-        } else {
-            overlays.push((physical_path.to_path_buf(), source.as_bytes().to_vec()));
-        }
+        replace_root_overlay(&mut overlays, physical_path, source);
         let program = runmat_runtime::analysis::check_fea_sources_in_root(
             &source_root,
             physical_path,
@@ -58,7 +61,80 @@ impl FeaDocumentAnalysis {
             program: Arc::new(program),
             root,
             source_root,
+            function_sources: BTreeMap::new(),
         })
+    }
+
+    pub fn check_with_project_facts(
+        source: &str,
+        physical_path: &Path,
+        workspace_roots: &[PathBuf],
+        project_overlays: &[(PathBuf, Vec<u8>)],
+        functions: Vec<FunctionFacts>,
+        profiles: Vec<ExecutionProfileFacts>,
+        function_sources: BTreeMap<LogicalSourcePath, Arc<str>>,
+    ) -> Result<Self, String> {
+        let source_root = source_root(physical_path, workspace_roots);
+        let mut overlays = project_overlays
+            .iter()
+            .filter(|(path, _)| path.starts_with(&source_root))
+            .cloned()
+            .collect::<Vec<_>>();
+        replace_root_overlay(&mut overlays, physical_path, source);
+        let program = runmat_runtime::analysis::check_fea_project_sources_in_root(
+            &source_root,
+            physical_path,
+            &overlays,
+            functions,
+            profiles,
+        )?;
+        let root = program.bound.graph.root.clone();
+        Ok(Self {
+            program: Arc::new(program),
+            root,
+            source_root,
+            function_sources,
+        })
+    }
+
+    pub fn required_functions(&self) -> Vec<FunctionRequest> {
+        self.program
+            .bound
+            .graph
+            .modules
+            .iter()
+            .flat_map(|(module_path, module)| {
+                module.syntax.iter().flat_map(move |syntax| {
+                    syntax.items.iter().filter_map(move |item| {
+                        let FeaModuleItem::Import(import) = item else {
+                            return None;
+                        };
+                        if import.kind != FeaImportKind::Function {
+                            return None;
+                        }
+                        Some((
+                            resolve_logical_path(
+                                &self.program.bound.graph.source_root,
+                                module_path,
+                                &import.source,
+                            )
+                            .ok()?,
+                            SourceSymbol::new(import.name.text.clone()).ok()?,
+                        ))
+                    })
+                })
+            })
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .map(|(module_path, symbol)| FunctionRequest {
+                module_path,
+                symbol,
+            })
+            .collect()
+    }
+
+    pub fn source_root(&self) -> &Path {
+        &self.source_root
     }
 
     pub fn status_message(&self) -> String {
@@ -242,113 +318,6 @@ impl FeaDocumentAnalysis {
         })
     }
 
-    pub fn definition(&self, source: &str, position: &Position) -> Option<Location> {
-        let (target_module, target) = self.target_at(source, position)?;
-        if target.kind == FeaSymbolKind::Function {
-            return Some(Location {
-                uri: self.logical_uri(&target_module)?,
-                range: Range::new(Position::new(0, 0), Position::new(0, 0)),
-            });
-        }
-        let target_symbol = self
-            .program
-            .bound
-            .symbols
-            .get(&target_module)?
-            .get(&target)?;
-        Some(Location {
-            uri: self.logical_uri(&target_module)?,
-            range: self.logical_span(&target_module, target_symbol.span)?,
-        })
-    }
-
-    pub fn references(&self, source: &str, position: &Position) -> Vec<Location> {
-        let Some((target_module, target)) = self.target_at(source, position) else {
-            return Vec::new();
-        };
-        self.program
-            .bound
-            .symbol_uses
-            .iter()
-            .filter(|usage| usage.target_module == target_module && usage.target == target)
-            .filter_map(|usage| {
-                Some(Location {
-                    uri: self.logical_uri(&usage.module)?,
-                    range: self.logical_span(&usage.module, usage.span)?,
-                })
-            })
-            .collect()
-    }
-
-    pub fn signature_help(&self, source: &str, position: &Position) -> Option<SignatureHelp> {
-        let offset = position_to_offset(source, position);
-        let site = self
-            .program
-            .call_sites
-            .iter()
-            .filter(|site| {
-                site.module == self.root && site.span.start <= offset && offset <= site.span.end
-            })
-            .min_by_key(|site| site.span.end.saturating_sub(site.span.start))?;
-        let (name, labels) = match &site.callable {
-            CheckedFeaCallable::Operation {
-                operation,
-                signature,
-                ..
-            } => (
-                operation.as_str().to_string(),
-                signature
-                    .inputs
-                    .iter()
-                    .map(parameter_label)
-                    .collect::<Vec<_>>(),
-            ),
-            CheckedFeaCallable::Named { path, signature } => match signature {
-                CheckedCallableSignature::Function(signature) => (
-                    path.join("."),
-                    signature
-                        .inputs
-                        .iter()
-                        .map(parameter_label)
-                        .collect::<Vec<_>>(),
-                ),
-                CheckedCallableSignature::Declaration(signature) => (
-                    path.join("."),
-                    signature
-                        .inputs
-                        .iter()
-                        .map(|(name, input)| {
-                            format!(
-                                "{}{}: {:?}",
-                                name,
-                                if input.required { "" } else { "?" },
-                                input.value_type
-                            )
-                        })
-                        .collect(),
-                ),
-            },
-        };
-        Some(SignatureHelp {
-            signatures: vec![SignatureInformation {
-                label: format!("{name}({})", labels.join(", ")),
-                documentation: None,
-                parameters: Some(
-                    labels
-                        .into_iter()
-                        .map(|label| lsp_types::ParameterInformation {
-                            label: lsp_types::ParameterLabel::Simple(label),
-                            documentation: None,
-                        })
-                        .collect(),
-                ),
-                active_parameter: None,
-            }],
-            active_signature: Some(0),
-            active_parameter: Some(active_parameter(source, site.span, offset) as u32),
-        })
-    }
-
     pub fn semantic_tokens(&self, source: &str) -> Option<SemanticTokens> {
         let syntax = self.syntax()?;
         let mut encoded = Vec::new();
@@ -384,90 +353,6 @@ impl FeaDocumentAnalysis {
             data: encoded,
         })
     }
-
-    fn symbol_at(&self, source: &str, position: &Position) -> Option<FeaSymbolKey> {
-        let syntax = self.syntax()?;
-        let token = token_at(syntax, source, position)?;
-        if token.kind != FeaTokenKind::Identifier {
-            return None;
-        }
-        let name = syntax.tokens.lexeme(token);
-        let symbols = self.program.bound.symbols.get(&self.root)?;
-        let namespace = preceding_namespace(syntax, token);
-        let candidates = symbols
-            .keys()
-            .filter(|key| {
-                key.name == name
-                    && namespace
-                        .map(|namespace| namespace == symbol_kind_name(key.kind))
-                        .unwrap_or(true)
-            })
-            .cloned()
-            .collect::<Vec<_>>();
-        match candidates.as_slice() {
-            [key] => Some(key.clone()),
-            _ => None,
-        }
-    }
-
-    fn target_at(
-        &self,
-        source: &str,
-        position: &Position,
-    ) -> Option<(LogicalSourcePath, FeaSymbolKey)> {
-        let offset = position_to_offset(source, position);
-        if let Some(usage) = self.program.bound.symbol_uses.iter().find(|usage| {
-            usage.module == self.root && usage.span.start <= offset && offset < usage.span.end
-        }) {
-            return Some((usage.target_module.clone(), usage.target.clone()));
-        }
-        let key = self.symbol_at(source, position)?;
-        let symbol = self.program.bound.symbols.get(&self.root)?.get(&key)?;
-        match &symbol.origin {
-            FeaSymbolOrigin::Local => Some((symbol.module.clone(), symbol.key.clone())),
-            FeaSymbolOrigin::Import {
-                target_module,
-                target,
-            } => Some((target_module.clone(), target.clone())),
-            FeaSymbolOrigin::Function => self
-                .program
-                .bound
-                .functions
-                .get(&(self.root.clone(), key.name.clone()))
-                .map(|facts| {
-                    (
-                        facts.module_path.clone(),
-                        FeaSymbolKey {
-                            kind: FeaSymbolKind::Function,
-                            name: facts.symbol.as_str().to_string(),
-                        },
-                    )
-                }),
-        }
-    }
-
-    fn logical_uri(&self, path: &LogicalSourcePath) -> Option<Url> {
-        let relative = path.as_str().strip_prefix("project/")?;
-        Url::from_file_path(
-            relative
-                .split('/')
-                .fold(self.source_root.clone(), |path, part| path.join(part)),
-        )
-        .ok()
-    }
-
-    fn logical_span(&self, path: &LogicalSourcePath, span: Span) -> Option<Range> {
-        let source = self
-            .program
-            .bound
-            .graph
-            .modules
-            .get(path)?
-            .syntax
-            .as_ref()?
-            .source();
-        Some(span_range(source, span))
-    }
 }
 
 pub fn is_fea_uri(uri: &Url) -> bool {
@@ -484,6 +369,17 @@ fn source_root(path: &Path, workspace_roots: &[PathBuf]) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
+fn replace_root_overlay(overlays: &mut Vec<(PathBuf, Vec<u8>)>, path: &Path, source: &str) {
+    if let Some((_, overlay)) = overlays
+        .iter_mut()
+        .find(|(overlay_path, _)| overlay_path == path)
+    {
+        *overlay = source.as_bytes().to_vec();
+    } else {
+        overlays.push((path.to_path_buf(), source.as_bytes().to_vec()));
+    }
+}
+
 fn token_at(syntax: &FeaSyntaxModule, source: &str, position: &Position) -> Option<FeaToken> {
     let offset = position_to_offset(source, position);
     syntax
@@ -492,22 +388,4 @@ fn token_at(syntax: &FeaSyntaxModule, source: &str, position: &Position) -> Opti
         .iter()
         .copied()
         .find(|token| token.span.start <= offset && offset < token.span.end)
-}
-
-fn preceding_namespace(syntax: &FeaSyntaxModule, token: FeaToken) -> Option<&str> {
-    let significant = syntax
-        .tokens
-        .tokens
-        .iter()
-        .copied()
-        .filter(|candidate| !candidate.kind.is_trivia())
-        .collect::<Vec<_>>();
-    let index = significant
-        .iter()
-        .position(|candidate| *candidate == token)?;
-    if index < 2 || significant[index - 1].kind != FeaTokenKind::Dot {
-        return None;
-    }
-    let namespace = significant[index - 2];
-    (namespace.kind == FeaTokenKind::Identifier).then(|| syntax.tokens.lexeme(namespace))
 }

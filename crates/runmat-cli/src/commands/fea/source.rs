@@ -3,15 +3,13 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use runmat_analysis_language::{
-    bind_program, check_program, resolve_logical_path, CheckedFeaProgram, ExecutionPlacement,
-    ExecutionProfileFacts, ExecutionProfileIdentity, FeaCompiler, LogicalSourcePath,
-    ModuleGraphRequest, SourceSymbol,
+    bind_program, check_program, remote_execution_profile_facts, resolve_logical_path,
+    CheckedFeaProgram, FeaCompiler, LogicalSourcePath, ModuleGraphRequest, SourceSymbol,
 };
 use runmat_config::project::{load_project_manifest_async, ProjectManifest};
 use runmat_config::runtime::RunMatRuntimeConfig;
 use runmat_parser::fea::{FeaImportKind, FeaModuleItem};
 use runmat_runtime::analysis::{FilesystemFeaHost, ProjectFeaHost};
-use runmat_types::{CapabilityRequirement, CapabilitySet};
 
 use crate::cli::Cli;
 
@@ -95,7 +93,15 @@ pub(crate) async fn check_source(
     };
     let profiles = manifest
         .as_ref()
-        .map(execution_profile_facts)
+        .map(|manifest| {
+            remote_execution_profile_facts(
+                manifest
+                    .execution_profiles
+                    .iter()
+                    .map(|(name, profile)| (name.clone(), profile.accelerator.is_some())),
+            )
+            .map_err(anyhow::Error::new)
+        })
         .transpose()?
         .unwrap_or_default();
     let host =
@@ -109,27 +115,6 @@ pub(crate) async fn check_source(
         frozen_project: project.map(|project| project.resolved.frozen),
         project_manifest: manifest,
     })
-}
-
-fn execution_profile_facts(manifest: &ProjectManifest) -> Result<Vec<ExecutionProfileFacts>> {
-    manifest
-        .execution_profiles
-        .iter()
-        .map(|(name, profile)| {
-            let mut capabilities = std::collections::BTreeSet::from([
-                CapabilityRequirement::DistributedRuntime,
-                CapabilityRequirement::ParallelRuntime,
-            ]);
-            if profile.accelerator.is_some() {
-                capabilities.insert(CapabilityRequirement::Accelerator);
-            }
-            Ok(ExecutionProfileFacts {
-                profile: ExecutionProfileIdentity::new(name.clone())?,
-                placement: ExecutionPlacement::Remote,
-                capabilities: CapabilitySet(capabilities),
-            })
-        })
-        .collect()
 }
 
 fn source_parent(path: &Path) -> PathBuf {
@@ -149,6 +134,7 @@ fn absolute_entry_path(source_root: &Path, path: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
+    use runmat_analysis_language::ExecutionPlacement;
     use runmat_config::project::parse_project_manifest_toml;
     use runmat_types::CapabilityRequirement;
 
@@ -172,7 +158,13 @@ memory-bytes = 17179869184
 "#,
         )
         .unwrap();
-        let facts = execution_profile_facts(&manifest).unwrap();
+        let facts = remote_execution_profile_facts(
+            manifest
+                .execution_profiles
+                .iter()
+                .map(|(name, profile)| (name.clone(), profile.accelerator.is_some())),
+        )
+        .unwrap();
         assert_eq!(facts.len(), 2);
         let cpu = facts
             .iter()

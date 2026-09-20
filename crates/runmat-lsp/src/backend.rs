@@ -169,18 +169,18 @@ impl RunMatLanguageServer {
         self.publish_status_and_diagnostics(uri, &analysis).await;
 
         let changed_symbols = symmetric_diff_symbols(&previous_exports, &new_exports);
-        if changed_symbols.is_empty() {
-            return;
-        }
-        let dependent_uris = self
-            .collect_dependent_documents(uri, &changed_symbols)
-            .await;
-        for dependent in dependent_uris {
-            if let Some((analysis, _, _)) = self.analyze_and_store(&dependent).await {
-                self.publish_status_and_diagnostics(&dependent, &analysis)
-                    .await;
+        if !changed_symbols.is_empty() {
+            let dependent_uris = self
+                .collect_dependent_documents(uri, &changed_symbols)
+                .await;
+            for dependent in dependent_uris {
+                if let Some((analysis, _, _)) = self.analyze_and_store(&dependent).await {
+                    self.publish_status_and_diagnostics(&dependent, &analysis)
+                        .await;
+                }
             }
         }
+        fea::reanalyze_open_documents(self).await;
     }
 
     async fn analyze_and_store(

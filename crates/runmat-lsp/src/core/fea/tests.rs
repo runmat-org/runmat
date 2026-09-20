@@ -124,3 +124,85 @@ fn invalid_unsaved_source_reports_production_parser_diagnostics() {
         )
     }));
 }
+
+#[test]
+fn project_imports_supply_callable_profile_and_source_navigation_facts() {
+    let temporary = tempfile::tempdir().unwrap();
+    let source_root = temporary.path();
+    let source_dir = source_root.join("src");
+    std::fs::create_dir(&source_dir).unwrap();
+    std::fs::write(
+        source_root.join("runmat.toml"),
+        r#"[package]
+name = "fea-editor-project"
+
+[sources]
+roots = ["src"]
+
+[execution-profiles.engineering]
+cluster = "engineering-cluster"
+"#,
+    )
+    .unwrap();
+    let function_path = source_dir.join("impactPulse.m");
+    let function_source = r#"% Exact imported excitation function.
+
+function y = impactPulse(t)
+    y = t;
+end
+"#;
+    std::fs::write(&function_path, function_source).unwrap();
+    let study_path = source_dir.join("main.fea");
+    let source = "import function impactPulse from \"./impactPulse.m\"\n";
+    std::fs::write(&study_path, source).unwrap();
+
+    let preliminary = FeaDocumentAnalysis::check_with_overlays(
+        source,
+        &study_path,
+        &[source_root.to_path_buf()],
+        &[],
+    )
+    .unwrap();
+    let unsaved_function = r#"% Unsaved editor overlay.
+% The saved file still has one parameter.
+
+function y = impactPulse(t, scale)
+    y = t * scale;
+end
+"#;
+    let source_overlays = BTreeMap::from([(function_path.clone(), unsaved_function.to_string())]);
+    let facts = resolve_project_facts(
+        &preliminary,
+        &study_path,
+        crate::core::analysis::CompatMode::RunMat,
+        &source_overlays,
+    )
+    .unwrap();
+    assert_eq!(facts.functions.len(), 1);
+    assert_eq!(facts.functions[0].inputs[0].name, "t");
+    assert_eq!(facts.functions[0].inputs[1].name, "scale");
+    assert_eq!(facts.profiles.len(), 1);
+    assert_eq!(facts.profiles[0].profile.as_str(), "engineering");
+
+    let analysis = FeaDocumentAnalysis::check_with_project_facts(
+        source,
+        &study_path,
+        &[source_root.to_path_buf()],
+        &[],
+        facts.functions,
+        facts.profiles,
+        facts.function_sources,
+    )
+    .unwrap();
+    assert!(analysis.diagnostics(source).is_empty());
+    let offset = source.find("impactPulse").unwrap() + 2;
+    let definition = analysis
+        .definition(source, &offset_to_position(source, offset))
+        .unwrap();
+    assert_eq!(definition.uri, Url::from_file_path(&function_path).unwrap());
+    assert_eq!(definition.range.start.line, 3);
+    assert_eq!(
+        std::fs::read_to_string(&function_path).unwrap(),
+        function_source
+    );
+}

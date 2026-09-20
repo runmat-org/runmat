@@ -1,5 +1,8 @@
 use crate::SourceDiagnostic;
-use runmat_types::{CapabilitySet, EffectSet, OperationParameter, OperationTypePattern};
+use runmat_types::{
+    AnalysisValueType, CapabilitySet, EffectSet, OperationParameter, OperationTypePattern,
+    ShapeFact, Span, ValueFact, ValueKindFact,
+};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::fmt;
 
@@ -85,6 +88,7 @@ pub struct FunctionFacts {
     pub module_path: LogicalSourcePath,
     pub symbol: SourceSymbol,
     pub source_digest: SourceDigest,
+    pub declaration_span: Span,
     pub inputs: Vec<OperationParameter>,
     pub outputs: Vec<OperationTypePattern>,
     pub effects: EffectSet,
@@ -93,6 +97,37 @@ pub struct FunctionFacts {
 
 pub trait RunMatFunctionSource {
     fn resolve(&self, request: &FunctionRequest) -> Result<FunctionFacts, SourceDiagnostic>;
+}
+
+pub fn operation_pattern_from_value_fact(fact: &ValueFact) -> OperationTypePattern {
+    match (&fact.kind, &fact.shape) {
+        (ValueKindFact::Numeric(_), ShapeFact::Scalar) => OperationTypePattern::NumericScalar,
+        (ValueKindFact::Numeric(_), _) => OperationTypePattern::NumericArray,
+        (ValueKindFact::Logical, _) => OperationTypePattern::LogicalArray,
+        (ValueKindFact::Character | ValueKindFact::String, ShapeFact::Scalar) => {
+            OperationTypePattern::StringScalar
+        }
+        (ValueKindFact::Object(object), shape) if shape.element_count() == Some(1) => {
+            match object
+                .runtime_class
+                .as_ref()
+                .and_then(runmat_types::QualifiedName::display_name)
+                .as_deref()
+            {
+                Some("geometry.Generated") => {
+                    OperationTypePattern::Analysis(AnalysisValueType::Geometry)
+                }
+                Some("geometry.Feature") => {
+                    OperationTypePattern::Analysis(AnalysisValueType::GeometryFeature)
+                }
+                Some("geometry.RegionOutput") => {
+                    OperationTypePattern::Analysis(AnalysisValueType::Region)
+                }
+                _ => OperationTypePattern::Any,
+            }
+        }
+        _ => OperationTypePattern::Any,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -158,6 +193,28 @@ pub trait ExecutionProfileSource {
         &self,
         request: &ExecutionProfileRequest,
     ) -> Result<ExecutionProfileFacts, SourceDiagnostic>;
+}
+
+pub fn remote_execution_profile_facts(
+    profiles: impl IntoIterator<Item = (String, bool)>,
+) -> Result<Vec<ExecutionProfileFacts>, SourceIdentityError> {
+    profiles
+        .into_iter()
+        .map(|(name, has_accelerator)| {
+            let mut capabilities = std::collections::BTreeSet::from([
+                runmat_types::CapabilityRequirement::DistributedRuntime,
+                runmat_types::CapabilityRequirement::ParallelRuntime,
+            ]);
+            if has_accelerator {
+                capabilities.insert(runmat_types::CapabilityRequirement::Accelerator);
+            }
+            Ok(ExecutionProfileFacts {
+                profile: ExecutionProfileIdentity::new(name)?,
+                placement: ExecutionPlacement::Remote,
+                capabilities: CapabilitySet(capabilities),
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]

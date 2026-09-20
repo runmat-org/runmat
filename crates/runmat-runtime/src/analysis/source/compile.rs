@@ -1,10 +1,11 @@
 use std::path::{Path, PathBuf};
 
 use runmat_analysis_language::{
-    CheckRequest, CheckedFeaProgram, FeaCompiler, LogicalSourcePath, ModuleGraphRequest,
+    CheckRequest, CheckedFeaProgram, ExecutionProfileFacts, FeaCompiler, FunctionFacts,
+    LogicalSourcePath, ModuleGraphRequest,
 };
 
-use super::FilesystemFeaHost;
+use super::{FilesystemFeaHost, ProjectFeaHost};
 
 pub fn check_fea_path(path: &Path) -> Result<CheckedFeaProgram, String> {
     let parent = path
@@ -57,6 +58,26 @@ pub fn check_fea_sources_in_root(
         host = host.with_source_overlay(&overlay_path, source.clone())?;
     }
     check_with_host(&host, source_root, &physical_path)
+}
+
+pub fn check_fea_project_sources_in_root(
+    source_root: &Path,
+    path: &Path,
+    overlays: &[(PathBuf, Vec<u8>)],
+    functions: impl IntoIterator<Item = FunctionFacts>,
+    profiles: impl IntoIterator<Item = ExecutionProfileFacts>,
+) -> Result<CheckedFeaProgram, String> {
+    let physical_path = entry_path(source_root, path);
+    let host =
+        ProjectFeaHost::new(source_root, functions, profiles)?.with_source_overlays(overlays)?;
+    let root = host.load_physical_module(&physical_path)?;
+    Ok(FeaCompiler::new(&host).check(CheckRequest {
+        modules: ModuleGraphRequest {
+            source_root: LogicalSourcePath::new(host.logical_root().to_string())
+                .map_err(|error| error.to_string())?,
+            root,
+        },
+    }))
 }
 
 fn check_with_host(
