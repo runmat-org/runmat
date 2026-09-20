@@ -14197,6 +14197,34 @@ fn generic_native_entry_publication_reuses_exact_units_and_invalidates_only_depe
     assert_eq!(session.generic_native_cache_counts(), (2, 1));
 }
 
+#[test]
+fn executable_function_interface_preserves_source_parameters_and_static_facts() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let source = ExecutableSource::new(
+        "function-interface-test@1",
+        "signals.m",
+        "function y = signals(amplitude, width)\narguments\n  amplitude (1,1) double\n  width (1,1) double = 0.5\nend\ny = amplitude * width;\nend\n",
+    );
+    let unit = block_on(session.compile_executable_unit(source, None)).expect("compile unit");
+    let interface = unit
+        .primary_function_interface("signals")
+        .expect("primary function interface");
+
+    assert_eq!(
+        interface
+            .inputs
+            .iter()
+            .map(|input| (input.name.as_str(), input.arity))
+            .collect::<Vec<_>>(),
+        vec![
+            ("amplitude", runmat_types::OperationParameterArity::Required),
+            ("width", runmat_types::OperationParameterArity::Optional),
+        ]
+    );
+    assert_eq!(interface.outputs.len(), 1);
+    assert!(unit.primary_function_interface("missing").is_err());
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn deterministic_native_tiering_has_bounded_warmup_and_stable_steady_state() {

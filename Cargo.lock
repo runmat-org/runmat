@@ -7469,6 +7469,7 @@ dependencies = [
  "runmat-test-runner",
  "runmat-test-runner-execution",
  "runmat-thread-local",
+ "runmat-types",
  "runmat-value",
  "runmat-vm",
  "serde",

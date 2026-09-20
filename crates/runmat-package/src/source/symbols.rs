@@ -226,6 +226,41 @@ pub fn source_symbols_from_frozen(
     }
 }
 
+/// Resolve one public function definition by exact source path and terminal symbol within the
+/// visibility graph of a frozen project requester.
+pub fn resolve_visible_function_definition(
+    frozen: &FrozenProject,
+    requester_path: &Path,
+    expected_source_path: &Path,
+    symbol: &str,
+) -> Result<ProjectSymbolDefinition, String> {
+    let symbols = source_symbols_from_frozen(frozen, requester_path);
+    let matches = symbols
+        .definitions
+        .into_iter()
+        .filter(|definition| {
+            !definition.is_private
+                && definition.source_path == expected_source_path
+                && definition
+                    .qualified_name
+                    .rsplit('.')
+                    .next()
+                    .is_some_and(|name| name == symbol)
+        })
+        .collect::<Vec<_>>();
+    match matches.as_slice() {
+        [definition] => Ok(definition.clone()),
+        [] => Err(format!(
+            "function `{symbol}` is not visibly defined by `{}`",
+            expected_source_path.display()
+        )),
+        _ => Err(format!(
+            "function `{symbol}` has multiple visible definitions in `{}`",
+            expected_source_path.display()
+        )),
+    }
+}
+
 fn push_definition(
     definitions: &mut Vec<ProjectSymbolDefinition>,
     name: String,

@@ -5,7 +5,6 @@ use runmat_config::runtime::RunMatRuntimeConfig;
 use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::BundleCallable;
 use runmat_package::ProjectSymbolDefinition;
-use runmat_types::OperationParameterArity;
 
 use crate::commands::session::create_session;
 
@@ -17,20 +16,8 @@ struct CompiledCallable {
     callable: BundleCallable,
     function: runmat_mir::analysis::FunctionAnalysis,
     declaration_span: runmat_types::Span,
-    parameters: Vec<SourceParameter>,
+    parameters: Vec<facts::CallableParameter>,
     executable: runmat_execution::ExecutableUnitEnvelope,
-}
-
-#[derive(Clone, Debug)]
-struct SourceParameter {
-    name: String,
-    arity: OperationParameterArity,
-}
-
-#[derive(Clone, Debug)]
-struct SourceFunction {
-    declaration_span: runmat_types::Span,
-    parameters: Vec<SourceParameter>,
 }
 
 async fn compile_project_definitions(
@@ -76,11 +63,6 @@ async fn compile_project_definitions(
                 definition.source_path.display()
             )
         })?;
-        let source_function = source_function(
-            &source_text,
-            entrypoint_name(&qualified_function)?,
-            crate::diagnostics::parser_compat(config.language.compat),
-        )?;
         let owner_identity = source_id.package_instance.to_string();
         let unit = session
             .compile_executable_unit(
@@ -95,6 +77,10 @@ async fn compile_project_definitions(
             .await
             .with_context(|| format!("compile FEA function `{qualified_function}`"))?;
         let entrypoint = entrypoint_name(&qualified_function)?;
+        let interface = unit
+            .primary_function_interface(entrypoint)
+            .map_err(anyhow::Error::msg)
+            .with_context(|| format!("analyze FEA function `{qualified_function}`"))?;
         let executable = unit
             .portable_envelope_for(Some(entrypoint))
             .map_err(anyhow::Error::msg)
@@ -114,8 +100,15 @@ async fn compile_project_definitions(
                     source_digest,
                 },
                 function,
-                parameters: source_function.parameters,
-                declaration_span: source_function.declaration_span,
+                parameters: interface
+                    .inputs
+                    .into_iter()
+                    .map(|parameter| facts::CallableParameter {
+                        name: parameter.name,
+                        arity: parameter.arity,
+                    })
+                    .collect(),
+                declaration_span: interface.declaration_span,
                 executable,
             },
         );
@@ -138,15 +131,19 @@ pub(super) async fn compile_geometry_generator(
     let module = runmat_analysis_language::LogicalSourcePath::new(generated.module_path.clone())?;
     let symbol = runmat_analysis_language::SourceSymbol::new(generated.function.clone())?;
     let expected_path = facts::expected_source_path(source_root, &module)?;
-    let symbols = runmat_package::source_symbols_from_frozen(frozen, document_path);
-    let project_definition =
-        facts::exact_definition(&symbols.definitions, &expected_path, &symbol)?;
+    let project_definition = runmat_package::resolve_visible_function_definition(
+        frozen,
+        document_path,
+        &expected_path,
+        symbol.as_str(),
+    )
+    .map_err(anyhow::Error::msg)?;
     let key = format!("{}::{symbol}", module.as_str());
     let (revision, mut compiled) = compile_project_definitions(
         vec![(
             key.clone(),
             project_definition.qualified_name.clone(),
-            project_definition.clone(),
+            project_definition,
         )],
         frozen,
         config,
@@ -175,50 +172,4 @@ fn entrypoint_name(qualified_function: &str) -> Result<&str> {
         .next()
         .filter(|name| !name.is_empty())
         .context("FEA function has an empty function name")
-}
-
-fn source_function(
-    source: &str,
-    entrypoint: &str,
-    compat: runmat_parser::CompatMode,
-) -> Result<SourceFunction> {
-    let statements =
-        runmat_parser::parse_with_options(source, runmat_parser::ParserOptions::new(compat))
-            .map_err(|error| {
-                anyhow::anyhow!(
-                    "cannot parse imported function `{entrypoint}`: {}",
-                    error.message
-                )
-            })?;
-    let parameters = statements
-        .body
-        .iter()
-        .find_map(|statement| match statement {
-            runmat_parser::Stmt::Function {
-                name,
-                params,
-                argument_validations,
-                span,
-                ..
-            } if name == entrypoint => Some(SourceFunction {
-                declaration_span: *span,
-                parameters: params
-                    .iter()
-                    .map(|name| SourceParameter {
-                        name: name.clone(),
-                        arity: if name == "varargin" {
-                            OperationParameterArity::Variadic
-                        } else if argument_validations.iter().any(|validation| {
-                            validation.name == *name && validation.default_value.is_some()
-                        }) {
-                            OperationParameterArity::Optional
-                        } else {
-                            OperationParameterArity::Required
-                        },
-                    })
-                    .collect::<Vec<_>>(),
-            }),
-            _ => None,
-        });
-    parameters.with_context(|| format!("imported source does not define function `{entrypoint}`"))
 }

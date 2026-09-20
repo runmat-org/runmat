@@ -541,6 +541,7 @@ fn finite_positive(value: Option<f64>) -> Option<f64> {
 async fn check_fea_path(
     path: String,
     project: Option<&runmat_package::FrozenProject>,
+    session_slot: &RefCell<RunMatSession>,
 ) -> Result<FeaCheckPayload, String> {
     let requested_path = std::path::PathBuf::from(path);
     let (source_root, physical_path, logical_path) = fea_source_identity(&requested_path, project)?;
@@ -582,7 +583,19 @@ async fn check_fea_path(
 
     let profiles = fea_execution_profiles(project).await?;
     let mut prepared = snapshot.prepare()?;
-    let requests = prepared.requests(Vec::new(), profiles.clone())?;
+    let functions = match project {
+        Some(project) => {
+            compile_fea_function_facts(
+                session_slot,
+                project,
+                &physical_path,
+                prepared.function_requests()?,
+            )
+            .await?
+        }
+        None => Vec::new(),
+    };
+    let requests = prepared.requests(functions.clone(), profiles.clone())?;
     for request in requests.geometry {
         let physical_path =
             runmat_runtime::analysis::physical_source_path(&source_root, &request.logical_path)
@@ -591,7 +604,7 @@ async fn check_fea_path(
             prepared.add_geometry(request.logical_path, bytes)?;
         }
     }
-    Ok(prepared.check(Vec::new(), profiles)?.check_result())
+    Ok(prepared.check(functions, profiles)?.check_result())
 }
 
 fn fea_source_identity(
@@ -648,6 +661,118 @@ async fn fea_execution_profiles(
             .map(|(name, profile)| (name.clone(), profile.accelerator.is_some())),
     )
     .map_err(|error| error.to_string())
+}
+
+async fn compile_fea_function_facts(
+    session_slot: &RefCell<RunMatSession>,
+    project: &runmat_package::FrozenProject,
+    requester_path: &std::path::Path,
+    requests: Vec<runmat_analysis_language::FunctionRequest>,
+) -> Result<Vec<runmat_analysis_language::FunctionFacts>, String> {
+    if requests.is_empty() {
+        return Ok(Vec::new());
+    }
+    let project_revision = project.revision();
+    let mut session = {
+        let mut slot = session_slot.borrow_mut();
+        std::mem::take(&mut *slot)
+    };
+    let result = async {
+        let revision = runmat_execution::ProgramRevision::new(
+            runmat_execution::Digest::from_bytes(*project_revision.graph_digest.bytes()),
+            runmat_execution::Digest::from_bytes(*project_revision.source_revision.bytes()),
+            runmat_core::program_environment(session.compat_mode()),
+        )
+        .map_err(|error| error.to_string())?;
+        let mut facts = Vec::with_capacity(requests.len());
+        for request in requests {
+            let source_path = runmat_runtime::analysis::physical_source_path(
+                &project.workspace_root,
+                &request.module_path,
+            )
+            .map_err(|error| error.to_string())?;
+            let definition = runmat_package::resolve_visible_function_definition(
+                project,
+                requester_path,
+                &source_path,
+                request.symbol.as_str(),
+            )?;
+            let source_id = definition.source_id.as_ref().ok_or_else(|| {
+                format!(
+                    "imported function `{}` has no frozen source identity",
+                    definition.qualified_name
+                )
+            })?;
+            let source = runmat_filesystem::read_async(&source_path)
+                .await
+                .map_err(|error| {
+                    format!(
+                        "cannot read imported function {}: {error}",
+                        source_path.display()
+                    )
+                })?;
+            let source_digest = runmat_execution::Digest::sha256(&source);
+            if source_digest.bytes() != source_id.content_digest.bytes() {
+                return Err(format!(
+                    "imported function `{}` changed after the project source graph was frozen",
+                    definition.qualified_name
+                ));
+            }
+            let source_text = String::from_utf8(source).map_err(|_| {
+                format!(
+                    "imported function {} is not UTF-8 MATLAB text",
+                    source_path.display()
+                )
+            })?;
+            let interface = session
+                .compile_executable_unit(
+                    runmat_core::ExecutableSource::frozen(
+                        source_id.package_instance.to_string(),
+                        source_id.relative_path.as_str(),
+                        source_path.to_string_lossy(),
+                        source_text,
+                    ),
+                    Some(revision.clone()),
+                )
+                .await
+                .map_err(|error| {
+                    format!(
+                        "cannot compile imported function `{}`: {error}",
+                        definition.qualified_name
+                    )
+                })?
+                .primary_function_interface(request.symbol.as_str())?;
+            facts.push(runmat_analysis_language::FunctionFacts {
+                module_path: request.module_path,
+                symbol: request.symbol,
+                source_digest: runmat_analysis_language::SourceDigest(*source_digest.bytes()),
+                declaration_span: interface.declaration_span,
+                inputs: interface
+                    .inputs
+                    .into_iter()
+                    .map(|parameter| runmat_types::OperationParameter {
+                        name: parameter.name,
+                        value: runmat_analysis_language::operation_pattern_from_value_fact(
+                            &parameter.value,
+                        ),
+                        arity: parameter.arity,
+                        default: None,
+                    })
+                    .collect(),
+                outputs: interface
+                    .outputs
+                    .iter()
+                    .map(runmat_analysis_language::operation_pattern_from_value_fact)
+                    .collect(),
+                effects: interface.effects,
+                capabilities: interface.capabilities,
+            });
+        }
+        Ok(facts)
+    }
+    .await;
+    *session_slot.borrow_mut() = session;
+    result
 }
 
 fn load_fea_field(
@@ -1004,7 +1129,7 @@ impl RunMatWasm {
             .borrow()
             .project_handoff()
             .map(|handoff| handoff.project.clone());
-        let payload = check_fea_path(path, project.as_ref())
+        let payload = check_fea_path(path, project.as_ref(), &self.session)
             .await
             .map_err(|err| js_error(&err))?;
         serde_wasm_bindgen::to_value(&payload)

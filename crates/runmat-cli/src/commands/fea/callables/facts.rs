@@ -6,10 +6,14 @@ use runmat_analysis_language::{
     SourceDigest, SourceSymbol,
 };
 use runmat_config::runtime::RunMatRuntimeConfig;
-use runmat_package::ProjectSymbolDefinition;
 use runmat_types::OperationParameter;
 
 use super::compile_project_definitions;
+
+pub(super) struct CallableParameter {
+    pub name: String,
+    pub arity: runmat_types::OperationParameterArity,
+}
 
 pub(crate) async fn compile_function_facts(
     document_path: &Path,
@@ -18,15 +22,20 @@ pub(crate) async fn compile_function_facts(
     frozen: &runmat_package::FrozenProject,
     config: &RunMatRuntimeConfig,
 ) -> Result<Vec<FunctionFacts>> {
-    let symbols = runmat_package::source_symbols_from_frozen(frozen, document_path);
     let mut definitions = Vec::with_capacity(requests.len());
     for request in requests {
         let expected_path = expected_source_path(source_root, &request.module_path)?;
-        let definition = exact_definition(&symbols.definitions, &expected_path, &request.symbol)?;
+        let definition = runmat_package::resolve_visible_function_definition(
+            frozen,
+            document_path,
+            &expected_path,
+            request.symbol.as_str(),
+        )
+        .map_err(anyhow::Error::msg)?;
         definitions.push((
             request_key(&request.module_path, &request.symbol),
             definition.qualified_name.clone(),
-            definition.clone(),
+            definition,
         ));
     }
     let (_, compiled) = compile_project_definitions(definitions, frozen, config).await?;
@@ -83,36 +92,6 @@ pub(super) fn expected_source_path(
     Ok(relative
         .split('/')
         .fold(source_root.to_path_buf(), |path, part| path.join(part)))
-}
-
-pub(super) fn exact_definition<'a>(
-    definitions: &'a [ProjectSymbolDefinition],
-    expected_path: &Path,
-    symbol: &SourceSymbol,
-) -> Result<&'a ProjectSymbolDefinition> {
-    let matches = definitions
-        .iter()
-        .filter(|definition| {
-            !definition.is_private
-                && definition.source_path == expected_path
-                && definition
-                    .qualified_name
-                    .rsplit('.')
-                    .next()
-                    .is_some_and(|name| name == symbol.as_str())
-        })
-        .collect::<Vec<_>>();
-    match matches.as_slice() {
-        [definition] => Ok(*definition),
-        [] => bail!(
-            "imported function `{symbol}` is not defined by `{}`",
-            expected_path.display()
-        ),
-        _ => bail!(
-            "imported function `{symbol}` has multiple visible definitions in `{}`",
-            expected_path.display()
-        ),
-    }
 }
 
 fn request_key(module_path: &LogicalSourcePath, symbol: &SourceSymbol) -> String {

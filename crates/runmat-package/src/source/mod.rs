@@ -62,8 +62,8 @@ pub use symbols::{
     discover_known_project_symbols_from_source_name,
     discover_known_project_symbols_from_source_name_async,
     discover_source_symbols_from_source_name, discover_source_symbols_from_source_name_async,
-    source_symbols_from_frozen, source_symbols_from_index, DiscoverSourceSymbolsError,
-    DiscoveredSourceSymbols, ProjectSymbolDefinition,
+    resolve_visible_function_definition, source_symbols_from_frozen, source_symbols_from_index,
+    DiscoverSourceSymbolsError, DiscoveredSourceSymbols, ProjectSymbolDefinition,
 };
 pub use vendor::{
     VendorManifest, VendoredPackage, VENDOR_MANIFEST_FILENAME, VENDOR_SCHEMA_VERSION,

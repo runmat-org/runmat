@@ -2,6 +2,22 @@ use std::rc::Rc;
 
 use super::{CoveragePlan, ExecutableRevision, ExecutableSource, ExecutableSourceMap};
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ExecutableFunctionParameter {
+    pub name: String,
+    pub value: runmat_types::ValueFact,
+    pub arity: runmat_types::OperationParameterArity,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ExecutableFunctionInterface {
+    pub declaration_span: runmat_types::Span,
+    pub inputs: Vec<ExecutableFunctionParameter>,
+    pub outputs: Vec<runmat_types::ValueFact>,
+    pub effects: runmat_types::EffectSet,
+    pub capabilities: runmat_types::CapabilitySet,
+}
+
 /// Immutable canonical compilation product reusable across invocations.
 #[derive(Clone, Debug)]
 pub struct ExecutableUnit {
@@ -80,6 +96,106 @@ impl ExecutableUnit {
             .functions
             .iter()
             .find(|analysis| analysis.function == function)
+    }
+
+    /// Return the exact compiler facts for one named, top-level function defined by the primary
+    /// source of this executable. Companion-project functions with the same name are never used as
+    /// a substitute.
+    pub fn primary_function_interface(
+        &self,
+        name: &str,
+    ) -> Result<ExecutableFunctionInterface, String> {
+        let primary_source_ids = self
+            .source_map
+            .entries()
+            .iter()
+            .filter(|entry| entry.relative_path == self.source.relative_path)
+            .map(|entry| {
+                u32::try_from(entry.source_id)
+                    .map(runmat_types::ProgramSourceId)
+                    .map_err(|_| {
+                        "primary source identity exceeds the portable analysis schema".to_string()
+                    })
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        let matches = self
+            .mir
+            .functions
+            .iter()
+            .filter(|(_, metadata)| {
+                metadata.parent.is_none()
+                    && matches!(metadata.kind, runmat_hir::FunctionKind::Named)
+                    && metadata.name.0 == name
+                    && primary_source_ids.contains(&metadata.source)
+            })
+            .collect::<Vec<_>>();
+        let (function, metadata) = match matches.as_slice() {
+            [entry] => *entry,
+            [] => {
+                return Err(format!(
+                    "primary source `{}` does not define top-level function `{name}`",
+                    self.source.relative_path
+                ))
+            }
+            _ => {
+                return Err(format!(
+                    "primary source `{}` defines top-level function `{name}` more than once",
+                    self.source.relative_path
+                ))
+            }
+        };
+        let program_function = runmat_types::ProgramFunctionId(
+            u32::try_from(function.0)
+                .map_err(|_| "function identity exceeds the portable analysis schema")?,
+        );
+        let analysis = self
+            .function_analysis(program_function)
+            .ok_or_else(|| format!("function `{name}` has no static analysis facts"))?;
+        if !analysis.callable.parameters_complete || !analysis.callable.outputs_complete {
+            return Err(format!(
+                "static callable facts for function `{name}` are incomplete"
+            ));
+        }
+        let bytecode = self
+            .functions
+            .get(*function)
+            .ok_or_else(|| format!("function `{name}` has no executable interface"))?;
+        if bytecode.input_slots.len() != analysis.callable.parameters.len() {
+            return Err(format!(
+                "parameter identities and static facts for function `{name}` do not agree"
+            ));
+        }
+        let inputs = bytecode
+            .input_slots
+            .iter()
+            .zip(&analysis.callable.parameters)
+            .map(|(slot, value)| {
+                let name = bytecode.var_names.get(slot).cloned().ok_or_else(|| {
+                    format!("function `{name}` parameter slot {slot} has no source name")
+                })?;
+                let arity = if bytecode.varargin_slot == Some(*slot) {
+                    runmat_types::OperationParameterArity::Variadic
+                } else if bytecode.argument_validations.iter().any(|validation| {
+                    validation.input_slot == *slot && validation.default_value.is_some()
+                }) {
+                    runmat_types::OperationParameterArity::Optional
+                } else {
+                    runmat_types::OperationParameterArity::Required
+                };
+                Ok(ExecutableFunctionParameter {
+                    name,
+                    value: value.clone(),
+                    arity,
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        Ok(ExecutableFunctionInterface {
+            declaration_span: metadata.span,
+            inputs,
+            outputs: analysis.outputs.clone(),
+            effects: analysis.effects.clone(),
+            capabilities: analysis.capabilities.clone(),
+        })
     }
 
     /// Canonical analyzed MIR retained for native lowering and artifact production.
