@@ -44,6 +44,7 @@ test("materialization state keeps the active transition out of its prior project
   assert.deepEqual(effective.children.map((child) => child.module), ["basic"]);
   assert.equal(prior.state, "present");
   assert.equal(effective.state, "present");
+  assert.deepEqual(state.priorRenderedProductIds, []);
 });
 
 test("baseline-only products do not require an unrelated active bundle transition", () => {

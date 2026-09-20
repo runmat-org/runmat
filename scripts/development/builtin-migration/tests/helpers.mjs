@@ -30,8 +30,14 @@ export const REVISION = `git:${"1".repeat(40)}`;
 export function repositoryFixture({
   sidecar = false, identity = "foo", identities = null, composition = false,
   compositionTransition = "retain", compositionBaseChild = false, family = "basic",
-  familyCompositionProduct = false,
+  familyCompositionProduct = false, legacyCompositionProjection = false,
 } = {}) {
+  const compositionBytes = (value) => {
+    const rendered = renderModuleCompositionProduct(value);
+    return legacyCompositionProjection
+      ? rendered.replace("runmat-builtin-module-composition-projection/v6", "runmat-builtin-module-composition-projection/v5")
+      : rendered;
+  };
   const fixtureIdentities = identities ?? [identity];
   const fixtureRoot = createTemporaryDirectory("runmat-migration-factory-");
   const root = path.join(fixtureRoot, "repository");
@@ -44,7 +50,7 @@ export function repositoryFixture({
   write(
     root,
     "crates/runmat-builtins/src/catalog/entries/mod.rs",
-    renderModuleCompositionProduct({
+    compositionBytes({
       ...structuredClone(moduleCompositionProductRegistry()
         .find((entry) => entry.product_id === "catalog-root")),
       state: "present",
@@ -55,7 +61,7 @@ export function repositoryFixture({
     write(
       root,
       "crates/runmat-builtins/src/catalog/entries/math/mod.rs",
-      renderModuleCompositionProduct({
+      compositionBytes({
         ...structuredClone(moduleCompositionProductRegistry()
           .find((entry) => entry.product_id === "catalog-math")),
         state: "present",
@@ -77,7 +83,7 @@ export function repositoryFixture({
   write(
     root,
     "crates/runmat-runtime/src/builtins/mod.rs",
-    renderModuleCompositionProduct({
+    compositionBytes({
       ...structuredClone(moduleCompositionProductRegistry()
         .find((entry) => entry.product_id === "runtime-root")),
       state: "present",
@@ -92,7 +98,7 @@ export function repositoryFixture({
     write(
       root,
       runtimeMath.path,
-      renderModuleCompositionProduct({
+      compositionBytes({
         ...structuredClone(runtimeMath), state: "present", children,
       }),
     );

@@ -38,6 +38,16 @@ export function deriveModuleCompositionMaterializationState({
     const transition = control.moduleComposition.transitions.get(reference.bundle_id);
     return transition === null ? [] : [transition];
   });
+  const priorRenderedProductIds = new Set(acceptedTransitions.flatMap((transition) =>
+    transition.product_states.map((entry) => entry.product_id)));
+  if (state.acceptedSeals.length > 0) {
+    for (const product of control.integrationProducts.values()) {
+      if (product.verification.kind === "rust_module_composition"
+        && product.lifecycle.kind === "reviewed-baseline-only") {
+        priorRenderedProductIds.add(product.product_id);
+      }
+    }
+  }
   const prior = applyModuleCompositionTransitions(baseline, acceptedTransitions);
   const activeTransition = transitionForActiveBundle(control, active.bundle);
   const effective = activeTransition === null
@@ -46,6 +56,7 @@ export function deriveModuleCompositionMaterializationState({
   return deepImmutable({
     prior,
     effective,
+    priorRenderedProductIds: [...priorRenderedProductIds].sort(),
   });
 }
 
