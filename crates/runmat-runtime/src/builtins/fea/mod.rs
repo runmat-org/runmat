@@ -76,7 +76,7 @@ mod modeling;
 pub(crate) mod observations;
 pub(crate) mod response_spectra;
 pub(crate) mod response_spectrum_policies;
-mod run_results;
+pub(crate) mod run_results;
 pub(crate) mod sequences;
 pub(crate) mod signal_policies;
 pub(crate) mod signals;

@@ -95,15 +95,14 @@ fn create_pipeline(
             label: Some(label),
             source: wgpu::ShaderSource::Wgsl(Cow::Owned(source)),
         });
-    let pipeline =
-        provider
-            .device_ref()
-            .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some(label),
-                layout: Some(&pipeline_layout),
-                module: &module,
-                entry_point: "main",
-            });
+    let pipeline = provider.device_ref().create_compute_pipeline(
+        &crate::backend::wgpu::compat::wgpu_compute_pipeline_descriptor!(
+            label: Some(label),
+            layout: Some(&pipeline_layout),
+            module: &module,
+            entry_point: "main",
+        ),
+    );
     (layout, pipeline)
 }
 

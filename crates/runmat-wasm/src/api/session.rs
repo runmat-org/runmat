@@ -1,7 +1,7 @@
 use std::cell::{Cell, RefCell};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    Arc, Mutex,
+    Arc,
 };
 
 use log::warn;
@@ -11,10 +11,9 @@ use runmat_core::{
     TelemetryRunFinish, TelemetrySink, WorkspaceEntry, WorkspaceResidency,
 };
 use runmat_runtime::analysis::{
-    AnalysisDocumentCheckResult as FeaCheckPayload, AnalysisDocumentKind,
-    AnalysisDocumentRunResult as FeaRunPayload, AnalysisFieldPageResult as FeaFieldPayload,
-    AnalysisFieldRequestOptions as FeaFieldRequestPayload,
-    AnalysisRuntimeCapabilities as FeaCapabilitiesPayload,
+    AnalysisFieldPageResult as FeaFieldPayload,
+    AnalysisFieldRequestOptions as FeaFieldRequestPayload, AnalysisFieldSelection,
+    AnalysisRuntimeCapabilities as FeaCapabilitiesPayload, FeaSourceCheckResult as FeaCheckPayload,
 };
 use runmat_runtime::builtins::plotting::{
     close_figure as runtime_close_figure, close_geometry_scene as runtime_close_geometry_scene,
@@ -539,211 +538,116 @@ fn finite_positive(value: Option<f64>) -> Option<f64> {
     value.filter(|value| value.is_finite() && *value > 0.0)
 }
 
-async fn check_fea_path(path: String) -> Result<FeaCheckPayload, String> {
-    let document = runmat_runtime::analysis::load_fea_document_from_path_async(
-        &std::path::PathBuf::from(&path),
-    )
-    .await?;
-    match document {
-        runmat_runtime::analysis::FeaResolvedDocument::Study(study) => {
-            let validation = runmat_runtime::analysis::analysis_validate_study_op(
-                &study,
-                runmat_runtime::operations::OperationContext::new(None, None),
+async fn check_fea_path(
+    path: String,
+    project: Option<&runmat_package::FrozenProject>,
+) -> Result<FeaCheckPayload, String> {
+    let requested_path = std::path::PathBuf::from(path);
+    let (source_root, physical_path, logical_path) = fea_source_identity(&requested_path, project)?;
+    let source = runmat_filesystem::read_async(&physical_path)
+        .await
+        .map_err(|error| {
+            format!(
+                "cannot read FEA source {}: {error}",
+                physical_path.display()
             )
-            .map_err(|err| err.message)?
-            .data;
-            let plan = if validation.valid {
-                Some(
-                    runmat_runtime::analysis::analysis_plan_study_op(
-                        &study,
-                        runmat_runtime::operations::OperationContext::new(None, None),
-                    )
-                    .map_err(|err| err.message)?
-                    .data,
-                )
-            } else {
-                None
-            };
-            let mut evidence_paths = vec![validation.evidence_artifact_path.clone()];
-            if let Some(plan) = plan.as_ref() {
-                evidence_paths.push(plan.evidence_artifact_path.clone());
-            }
-            Ok(FeaCheckPayload {
-                path,
-                document_kind: AnalysisDocumentKind::Study,
-                valid: validation.valid,
-                validation: serde_json::to_value(validation).map_err(|err| err.to_string())?,
-                plan: plan
-                    .map(serde_json::to_value)
-                    .transpose()
-                    .map_err(|err| err.to_string())?,
-                diagnostics: Vec::new(),
-                evidence_artifact_paths: evidence_paths,
-            })
+        })?;
+    let root =
+        runmat_runtime::analysis::FeaSourceSnapshotBuilder::source_module(logical_path, source);
+    let mut snapshot = runmat_runtime::analysis::FeaSourceSnapshotBuilder::new(&source_root, root)?;
+    let mut attempted_modules = std::collections::BTreeSet::new();
+    loop {
+        let missing = snapshot
+            .missing_module_paths()?
+            .into_iter()
+            .filter(|path| attempted_modules.insert(path.clone()))
+            .collect::<Vec<_>>();
+        if missing.is_empty() {
+            break;
         }
-        runmat_runtime::analysis::FeaResolvedDocument::Sweep(sweep) => {
-            let validation = runmat_runtime::analysis::analysis_validate_study_sweep_op(
-                &sweep,
-                runmat_runtime::operations::OperationContext::new(None, None),
-            )
-            .map_err(|err| err.message)?
-            .data;
-            let plan = if validation.valid {
-                Some(
-                    runmat_runtime::analysis::analysis_plan_study_sweep_op(
-                        &sweep,
-                        runmat_runtime::operations::OperationContext::new(None, None),
-                    )
-                    .map_err(|err| err.message)?
-                    .data,
-                )
-            } else {
-                None
-            };
-            let mut evidence_paths = vec![validation.evidence_artifact_path.clone()];
-            if let Some(plan) = plan.as_ref() {
-                evidence_paths.push(plan.evidence_artifact_path.clone());
-            }
-            Ok(FeaCheckPayload {
-                path,
-                document_kind: AnalysisDocumentKind::Sweep,
-                valid: validation.valid,
-                validation: serde_json::to_value(validation).map_err(|err| err.to_string())?,
-                plan: plan
-                    .map(serde_json::to_value)
-                    .transpose()
-                    .map_err(|err| err.to_string())?,
-                diagnostics: Vec::new(),
-                evidence_artifact_paths: evidence_paths,
-            })
-        }
-    }
-}
-
-async fn run_fea_path(path: String) -> Result<FeaRunPayload, String> {
-    ensure_runtime_not_cancelled("FEA run")?;
-    let document = runmat_runtime::analysis::load_fea_document_from_path_async(
-        &std::path::PathBuf::from(&path),
-    )
-    .await?;
-    ensure_runtime_not_cancelled("FEA run")?;
-    match document {
-        runmat_runtime::analysis::FeaResolvedDocument::Study(study) => {
-            let run = runmat_runtime::analysis::analysis_run_study_op(
-                &study,
-                runmat_runtime::operations::OperationContext::new(None, None),
-            )
-            .map_err(operation_error_message)?
-            .data;
-            ensure_runtime_not_cancelled("FEA run")?;
-            let mut step_results = Vec::with_capacity(run.steps.len());
-            let mut field_bindings = Vec::new();
-            let mut figure_handles = Vec::new();
-            let mut diagnostics = Vec::new();
-            for (index, step) in run.steps.iter().enumerate() {
-                let results = runmat_runtime::analysis::analysis_results_by_run_id_op(
-                    &step.run_id,
-                    runmat_runtime::analysis::AnalysisResultsQuery::metadata_only(),
-                    runmat_runtime::operations::OperationContext::new(None, None),
-                )
-                .map_err(operation_error_message)?
-                .data;
-                field_bindings.extend(results.field_descriptors.iter().cloned().map(
-                    |descriptor| runmat_runtime::analysis::AnalysisFieldBinding {
-                        step_id: step.procedure_step.step_id.clone(),
-                        run_id: step.run_id.clone(),
-                        descriptor,
-                    },
-                ));
-                let include_history = index + 1 == run.steps.len();
-                let generated = runmat_runtime::analysis::analysis_generate_study_run_figures(
-                    &study,
-                    &step.run_id,
-                    runmat_runtime::analysis::AnalysisFigureGenerationOptions {
-                        include_comparison: include_history,
-                        include_trends: include_history,
-                        ..runmat_runtime::analysis::AnalysisFigureGenerationOptions::default()
-                    },
+        for logical_path in missing {
+            let physical_path =
+                runmat_runtime::analysis::physical_source_path(&source_root, &logical_path)
+                    .map_err(|error| error.to_string())?;
+            if let Ok(source) = runmat_filesystem::read_async(&physical_path).await {
+                snapshot.add_module(
+                    runmat_runtime::analysis::FeaSourceSnapshotBuilder::source_module(
+                        logical_path,
+                        source,
+                    ),
                 )?;
-                for figure in generated {
-                    figure_handles.push(runtime_import_figure(figure.figure).as_u32());
-                    diagnostics.extend(figure.warnings.into_iter().map(|message| {
-                        serde_json::json!({
-                            "code": "FEA_VISUALIZATION_WARNING",
-                            "severity": "warning",
-                            "message": message,
-                            "source": "runmat.fea.visualization",
-                        })
-                    }));
-                }
-                step_results.push((step, results));
             }
-            let (results, result_summary) = serialize_study_result_views(&step_results)?;
-            Ok(FeaRunPayload {
-                path,
-                document_kind: AnalysisDocumentKind::Study,
-                run: serde_json::to_value(run).map_err(|err| err.to_string())?,
-                results,
-                field_bindings,
-                result_summary,
-                figure_handles,
-                artifact_manifest: None,
-                diagnostics,
-                progress_events: Vec::new(),
-            })
-        }
-        runmat_runtime::analysis::FeaResolvedDocument::Sweep(sweep) => {
-            let run = runmat_runtime::analysis::analysis_run_study_sweep_op(
-                &sweep,
-                runmat_runtime::operations::OperationContext::new(None, None),
-            )
-            .map_err(operation_error_message)?
-            .data;
-            Ok(FeaRunPayload {
-                path,
-                document_kind: AnalysisDocumentKind::Sweep,
-                run: serde_json::to_value(run).map_err(|err| err.to_string())?,
-                results: None,
-                field_bindings: Vec::new(),
-                result_summary: None,
-                figure_handles: Vec::new(),
-                artifact_manifest: None,
-                diagnostics: Vec::new(),
-                progress_events: Vec::new(),
-            })
         }
     }
+
+    let profiles = fea_execution_profiles(project).await?;
+    let mut prepared = snapshot.prepare()?;
+    let requests = prepared.requests(Vec::new(), profiles.clone())?;
+    for request in requests.geometry {
+        let physical_path =
+            runmat_runtime::analysis::physical_source_path(&source_root, &request.logical_path)
+                .map_err(|error| error.to_string())?;
+        if let Ok(bytes) = runmat_filesystem::read_async(&physical_path).await {
+            prepared.add_geometry(request.logical_path, bytes)?;
+        }
+    }
+    Ok(prepared.check(Vec::new(), profiles)?.check_result())
 }
 
-fn serialize_study_result_views(
-    step_results: &[(
-        &runmat_runtime::analysis::AnalysisStudyStepRunData,
-        runmat_runtime::analysis::AnalysisResultsData,
-    )],
-) -> Result<(Option<JsonValue>, Option<JsonValue>), String> {
-    match step_results {
-        [] => Ok((None, None)),
-        [(_, results)] => Ok((
-            Some(serde_json::to_value(results).map_err(|error| error.to_string())?),
-            Some(serde_json::to_value(&results.summary).map_err(|error| error.to_string())?),
-        )),
-        results => Ok((
-            Some(serde_json::json!({
-                "steps": results.iter().map(|(step, results)| serde_json::json!({
-                    "stepId": &step.procedure_step.step_id,
-                    "runId": &step.run_id,
-                    "results": results,
-                })).collect::<Vec<_>>()
-            })),
-            Some(serde_json::json!({
-                "steps": results.iter().map(|(step, results)| serde_json::json!({
-                    "stepId": &step.procedure_step.step_id,
-                    "runId": &step.run_id,
-                    "summary": &results.summary,
-                })).collect::<Vec<_>>()
-            })),
-        )),
+fn fea_source_identity(
+    requested_path: &std::path::Path,
+    project: Option<&runmat_package::FrozenProject>,
+) -> Result<
+    (
+        std::path::PathBuf,
+        std::path::PathBuf,
+        runmat_analysis_language::LogicalSourcePath,
+    ),
+    String,
+> {
+    if let Some(project) = project {
+        let source_root = project.workspace_root.clone();
+        let physical_path =
+            if requested_path.is_absolute() || requested_path.starts_with(&source_root) {
+                requested_path.to_path_buf()
+            } else {
+                source_root.join(requested_path)
+            };
+        let logical_path =
+            runmat_runtime::analysis::logical_source_path(&source_root, &physical_path)?;
+        return Ok((source_root, physical_path, logical_path));
     }
+    let file_name = requested_path
+        .file_name()
+        .and_then(std::ffi::OsStr::to_str)
+        .ok_or_else(|| "FEA source path must name a UTF-8 file".to_string())?;
+    let source_root = requested_path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| std::path::Path::new("."))
+        .to_path_buf();
+    let logical_path =
+        runmat_analysis_language::LogicalSourcePath::new(format!("project/{file_name}"))
+            .map_err(|error| error.to_string())?;
+    Ok((source_root, requested_path.to_path_buf(), logical_path))
+}
+
+async fn fea_execution_profiles(
+    project: Option<&runmat_package::FrozenProject>,
+) -> Result<Vec<runmat_analysis_language::ExecutionProfileFacts>, String> {
+    let Some(project) = project else {
+        return Ok(Vec::new());
+    };
+    let manifest = runmat_config::project::load_project_manifest_async(&project.manifest_path)
+        .await
+        .map_err(|error| format!("cannot load FEA execution profiles: {error}"))?;
+    runmat_analysis_language::remote_execution_profile_facts(
+        manifest
+            .execution_profiles
+            .iter()
+            .map(|(name, profile)| (name.clone(), profile.accelerator.is_some())),
+    )
+    .map_err(|error| error.to_string())
 }
 
 fn load_fea_field(
@@ -751,14 +655,14 @@ fn load_fea_field(
     field_id: String,
     options: FeaFieldRequestPayload,
 ) -> Result<FeaFieldPayload, String> {
-    runmat_runtime::analysis::analysis_field_page_by_run_id_op(
+    Ok(runmat_runtime::analysis::analysis_field_page_by_run_id_op(
         &run_id,
-        &field_id,
+        AnalysisFieldSelection::new(field_id, None),
         options,
         runmat_runtime::operations::OperationContext::new(None, None),
     )
     .map_err(|err| err.message)?
-    .data
+    .data)
 }
 
 fn filename_for_display(path: &str) -> &str {
@@ -1083,60 +987,28 @@ impl RunMatWasm {
             ],
             model_templates: runmat_runtime::analysis::analysis_runtime_model_template_catalog(),
             supports_check: true,
-            supports_run: true,
+            supports_run: false,
             supports_results: true,
-            supports_live_progress: true,
+            supports_live_progress: false,
             visualization_backend: "runmat-plot".to_string(),
         };
         serde_wasm_bindgen::to_value(&payload)
             .map_err(|err| js_error(&format!("Failed to serialize FEA capabilities: {err}")))
     }
 
-    #[wasm_bindgen(js_name = checkFeaStudy)]
-    pub async fn check_fea_study_js(&self, path: String) -> Result<JsValue, JsValue> {
+    #[wasm_bindgen(js_name = checkFeaSource)]
+    pub async fn check_fea_source_js(&self, path: String) -> Result<JsValue, JsValue> {
         self.ensure_not_disposed()?;
-        let payload = check_fea_path(path).await.map_err(|err| js_error(&err))?;
+        let project = self
+            .session
+            .borrow()
+            .project_handoff()
+            .map(|handoff| handoff.project.clone());
+        let payload = check_fea_path(path, project.as_ref())
+            .await
+            .map_err(|err| js_error(&err))?;
         serde_wasm_bindgen::to_value(&payload)
             .map_err(|err| js_error(&format!("Failed to serialize FEA check result: {err}")))
-    }
-
-    #[wasm_bindgen(js_name = runFeaStudy)]
-    pub async fn run_fea_study_js(
-        &self,
-        path: String,
-        artifact_root: Option<String>,
-    ) -> Result<JsValue, JsValue> {
-        self.ensure_not_disposed()?;
-        init_logging_once();
-        let interrupt_handle = self.session.borrow().interrupt_handle();
-        let _interrupt_guard = install_wasm_interrupt(&self.active_interrupt, interrupt_handle);
-        let progress_events = Arc::new(Mutex::new(Vec::new()));
-        let progress_events_for_handler = Arc::clone(&progress_events);
-        let _progress_guard =
-            runmat_runtime::analysis::replace_fea_progress_handler(Some(Arc::new(move |event| {
-                if let Ok(mut slot) = progress_events_for_handler.lock() {
-                    slot.push(event);
-                }
-            })));
-        if let Some(root) = artifact_root
-            .as_deref()
-            .filter(|value| !value.trim().is_empty())
-        {
-            let root = std::path::PathBuf::from(root);
-            let _ = runmat_runtime::analysis::configure_fea_runtime(
-                runmat_runtime::analysis::FeaRuntimeConfig {
-                    artifact_root: Some(root.clone()),
-                    study_artifact_root: None,
-                },
-            );
-        }
-        let mut payload = run_fea_path(path).await.map_err(|err| js_error(&err))?;
-        payload.progress_events = progress_events
-            .lock()
-            .map(|events| events.clone())
-            .unwrap_or_default();
-        serde_wasm_bindgen::to_value(&payload)
-            .map_err(|err| js_error(&format!("Failed to serialize FEA run result: {err}")))
     }
 
     #[wasm_bindgen(js_name = feaField)]

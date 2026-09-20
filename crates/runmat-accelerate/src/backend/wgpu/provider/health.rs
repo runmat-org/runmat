@@ -14,6 +14,7 @@ pub(in crate::backend::wgpu::provider) struct WgpuDeviceHealth {
 }
 
 impl WgpuDeviceHealth {
+    #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn mark_lost(&self, reason: SparseProviderLossReason) {
         let _ = self.loss_reason.compare_exchange(
             HEALTHY,
@@ -44,6 +45,7 @@ impl WgpuDeviceHealth {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn encode(reason: SparseProviderLossReason) -> u8 {
     match reason {
         SparseProviderLossReason::Unknown => UNKNOWN,
@@ -68,6 +70,7 @@ impl Drop for TestDeviceLossGuard<'_> {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn loss_reason(reason: wgpu::DeviceLostReason) -> SparseProviderLossReason {
     match reason {
         wgpu::DeviceLostReason::Unknown => SparseProviderLossReason::Unknown,

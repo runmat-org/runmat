@@ -456,9 +456,11 @@ pub use runmat_analysis_core::FormulationRequirement;
 pub use runmat_analysis_fea::{FeaProgressEvent, FeaProgressPhase, FeaProgressStatus};
 pub use source::{
     check_fea_path, check_fea_path_in_root, check_fea_source_in_root, check_fea_sources_in_root,
-    prepare_fea_path_in_root, prepare_fea_sources_in_root, source_digest, CheckedFeaSource,
-    FeaCheckStatus, FeaRootSelectionError, FeaRootSelector, FeaSourceCheckResult,
-    FilesystemFeaHost, PreparedFeaSource, ProjectFeaHost, ResolvedFeaRoot,
+    logical_source_path, physical_source_path, prepare_fea_path_in_root,
+    prepare_fea_sources_in_root, source_digest, CheckedFeaSource, FeaCheckStatus,
+    FeaRootSelectionError, FeaRootSelector, FeaSourceCheckResult, FeaSourceSnapshotBuilder,
+    FeaSourceSnapshotRequests, FilesystemFeaHost, PreparedFeaSource, PreparedFeaSourceSnapshot,
+    ProjectFeaHost, ResolvedFeaRoot,
 };
 
 const ANALYSIS_CREATE_MODEL_OPERATION: &str = "fea.create_model";

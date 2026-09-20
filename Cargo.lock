@@ -7448,6 +7448,7 @@ dependencies = [
  "miette",
  "runmat-accelerate",
  "runmat-accelerate-api",
+ "runmat-analysis-language",
  "runmat-builtins",
  "runmat-config",
  "runmat-core",

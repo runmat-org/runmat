@@ -511,8 +511,8 @@ scalar_signal!(
 );
 
 pub(super) mod bindings;
-pub(super) mod callable;
-pub(super) mod knots;
+pub(crate) mod callable;
+pub(crate) mod knots;
 pub(super) mod materialize;
 pub(crate) mod time_samples;
 

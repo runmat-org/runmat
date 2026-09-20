@@ -53,6 +53,7 @@ mod compile;
 mod config;
 mod executable;
 mod init;
+#[cfg(not(target_arch = "wasm32"))]
 mod program;
 mod project;
 mod run;

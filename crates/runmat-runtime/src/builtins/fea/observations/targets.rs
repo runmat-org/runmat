@@ -95,7 +95,7 @@ async fn region_target(name: &'static str, region: Value, volume: bool) -> Built
     keywords = "fea,observation,target,boundary,typed",
     descriptor(TARGET_BOUNDARY_DESCRIPTOR),
     integer_audit(STRUCTURAL_AUDIT),
-    builtin_path = "crate::builtins::fea::observations"
+    builtin_path = "crate::builtins::fea::observations::targets"
 )]
 pub async fn target_boundary(region: Value) -> BuiltinResult<Value> {
     region_target("fea.ObservationTarget.boundary", region, false).await
@@ -107,7 +107,7 @@ pub async fn target_boundary(region: Value) -> BuiltinResult<Value> {
     keywords = "fea,observation,target,volume,typed",
     descriptor(TARGET_VOLUME_DESCRIPTOR),
     integer_audit(STRUCTURAL_AUDIT),
-    builtin_path = "crate::builtins::fea::observations"
+    builtin_path = "crate::builtins::fea::observations::targets"
 )]
 pub async fn target_volume(region: Value) -> BuiltinResult<Value> {
     region_target("fea.ObservationTarget.volume", region, true).await
@@ -119,7 +119,7 @@ pub async fn target_volume(region: Value) -> BuiltinResult<Value> {
     keywords = "fea,observation,target,point,typed",
     descriptor(TARGET_POINT_DESCRIPTOR),
     integer_audit(STRUCTURAL_AUDIT),
-    builtin_path = "crate::builtins::fea::observations"
+    builtin_path = "crate::builtins::fea::observations::targets"
 )]
 pub async fn target_point(position: Value) -> BuiltinResult<Value> {
     const NAME: &str = "fea.ObservationTarget.point";
@@ -133,7 +133,7 @@ pub async fn target_point(position: Value) -> BuiltinResult<Value> {
     keywords = "fea,observation,target,path,typed",
     descriptor(TARGET_PATH_DESCRIPTOR),
     integer_capabilities(NUMERIC_CAPABILITIES),
-    builtin_path = "crate::builtins::fea::observations"
+    builtin_path = "crate::builtins::fea::observations::targets"
 )]
 pub async fn target_path(positions: Value) -> BuiltinResult<Value> {
     const NAME: &str = "fea.ObservationTarget.path";
@@ -169,7 +169,7 @@ pub async fn target_path(positions: Value) -> BuiltinResult<Value> {
 }
 macro_rules! id_target {
     ($function:ident, $name:literal, $descriptor:ident, $value:expr) => {
-        #[runtime_builtin(name = $name, category = "fea", summary = "Create a typed named observation target.", keywords = "fea,observation,target,typed", descriptor($descriptor), integer_audit(STRUCTURAL_AUDIT), builtin_path = "crate::builtins::fea::observations")]
+        #[runtime_builtin(name = $name, category = "fea", summary = "Create a typed named observation target.", keywords = "fea,observation,target,typed", descriptor($descriptor), integer_audit(STRUCTURAL_AUDIT), builtin_path = "crate::builtins::fea::observations::targets")]
         pub async fn $function(id: String) -> BuiltinResult<Value> {
             to_typed_value($name, TARGET_CLASS, ($value)(nonempty_id($name, "target id", id)?))
         }
@@ -206,7 +206,7 @@ id_target!(
     keywords = "fea,observation,target,whole,model,typed",
     descriptor(TARGET_WHOLE_DESCRIPTOR),
     integer_audit(STRUCTURAL_AUDIT),
-    builtin_path = "crate::builtins::fea::observations"
+    builtin_path = "crate::builtins::fea::observations::targets"
 )]
 pub async fn target_whole() -> BuiltinResult<Value> {
     to_typed_value(

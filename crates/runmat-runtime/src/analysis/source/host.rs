@@ -25,11 +25,7 @@ pub struct FilesystemFeaHost {
 impl FilesystemFeaHost {
     pub fn new(physical_root: &Path) -> Result<Self, String> {
         let physical_root = normalized_root(physical_root)?;
-        let catalog = compose_operation_catalog(&[
-            geometry_operation_extension(),
-            output_operation_extension(),
-        ])
-        .map_err(|error| format!("cannot compose FEA operation catalog: {error}"))?;
+        let catalog = fea_operation_catalog()?;
         Ok(Self {
             physical_root,
             catalog,
@@ -61,46 +57,43 @@ impl FilesystemFeaHost {
     }
 
     pub(super) fn logical_path(&self, path: &Path) -> Result<LogicalSourcePath, String> {
-        let relative = path.strip_prefix(&self.physical_root).map_err(|_| {
-            format!(
-                "FEA source `{}` is outside source root `{}`",
-                path.display(),
-                self.physical_root.display()
-            )
-        })?;
-        if relative.as_os_str().is_empty() {
-            return Err("FEA source path must name a file below the source root".to_string());
-        }
-        let relative = logical_components(relative)?;
-        LogicalSourcePath::new(format!("{LOGICAL_ROOT}/{relative}"))
-            .map_err(|error| error.to_string())
+        logical_source_path(&self.physical_root, path)
     }
 
     fn physical_path(&self, logical_path: &LogicalSourcePath) -> Result<PathBuf, SourceDiagnostic> {
-        let prefix = format!("{LOGICAL_ROOT}/");
-        let relative = logical_path.as_str().strip_prefix(&prefix).ok_or_else(|| {
-            diagnostic(
-                "fea.host.path_outside_root",
-                format!("logical source `{logical_path}` is outside `{LOGICAL_ROOT}`"),
-                SourceAvailability::Available,
-            )
-        })?;
-        if relative.is_empty()
-            || relative
-                .split('/')
-                .any(|part| part.is_empty() || part == "." || part == "..")
-        {
-            return Err(diagnostic(
-                "fea.host.invalid_logical_path",
-                format!("logical source `{logical_path}` is not normalized"),
-                SourceAvailability::Available,
-            ));
-        }
-        Ok(relative
-            .split('/')
-            .fold(self.physical_root.clone(), |path, part| path.join(part)))
+        physical_source_path(&self.physical_root, logical_path)
     }
+}
 
+pub fn physical_source_path(
+    physical_root: &Path,
+    logical_path: &LogicalSourcePath,
+) -> Result<PathBuf, SourceDiagnostic> {
+    let prefix = format!("{LOGICAL_ROOT}/");
+    let relative = logical_path.as_str().strip_prefix(&prefix).ok_or_else(|| {
+        diagnostic(
+            "fea.host.path_outside_root",
+            format!("logical source `{logical_path}` is outside `{LOGICAL_ROOT}`"),
+            SourceAvailability::Available,
+        )
+    })?;
+    if relative.is_empty()
+        || relative
+            .split('/')
+            .any(|part| part.is_empty() || part == "." || part == "..")
+    {
+        return Err(diagnostic(
+            "fea.host.invalid_logical_path",
+            format!("logical source `{logical_path}` is not normalized"),
+            SourceAvailability::Available,
+        ));
+    }
+    Ok(relative
+        .split('/')
+        .fold(physical_root.to_path_buf(), |path, part| path.join(part)))
+}
+
+impl FilesystemFeaHost {
     fn read_module(
         &self,
         logical_path: LogicalSourcePath,
@@ -126,6 +119,44 @@ impl FilesystemFeaHost {
             source,
         })
     }
+}
+
+pub fn logical_source_path(
+    physical_root: &Path,
+    physical_path: &Path,
+) -> Result<LogicalSourcePath, String> {
+    let physical_root = normalized_root(physical_root)?;
+    let relative = physical_path.strip_prefix(&physical_root).map_err(|_| {
+        format!(
+            "FEA source `{}` is outside source root `{}`",
+            physical_path.display(),
+            physical_root.display()
+        )
+    })?;
+    if relative.as_os_str().is_empty() {
+        return Err("FEA source path must name a file below the source root".to_string());
+    }
+    let relative = logical_components(relative)?;
+    LogicalSourcePath::new(format!("{LOGICAL_ROOT}/{relative}")).map_err(|error| error.to_string())
+}
+
+pub(super) fn fea_operation_catalog() -> Result<ComposedOperationCatalog, String> {
+    compose_operation_catalog(&[geometry_operation_extension(), output_operation_extension()])
+        .map_err(|error| format!("cannot compose FEA operation catalog: {error}"))
+}
+
+pub(super) fn resolve_operation(
+    catalog: &ComposedOperationCatalog,
+    request: &OperationResolutionRequest,
+) -> Result<ResolvedOperationFacts, OperationDiagnostic> {
+    catalog
+        .operation(&request.operation)
+        .cloned()
+        .map(|operation| ResolvedOperationFacts { operation })
+        .ok_or_else(|| OperationDiagnostic {
+            code: "fea.operation.unknown".to_string(),
+            message: format!("unknown analysis operation `{}`", request.operation),
+        })
 }
 
 impl FeaModuleSource for FilesystemFeaHost {
@@ -182,14 +213,7 @@ impl AnalysisOperationCatalog for FilesystemFeaHost {
         &self,
         request: &OperationResolutionRequest,
     ) -> Result<ResolvedOperationFacts, OperationDiagnostic> {
-        self.catalog
-            .operation(&request.operation)
-            .cloned()
-            .map(|operation| ResolvedOperationFacts { operation })
-            .ok_or_else(|| OperationDiagnostic {
-                code: "fea.operation.unknown".to_string(),
-                message: format!("unknown analysis operation `{}`", request.operation),
-            })
+        resolve_operation(&self.catalog, request)
     }
 }
 

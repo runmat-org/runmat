@@ -238,6 +238,59 @@ study second {
 }
 
 #[test]
+fn immutable_snapshot_discovers_modules_and_geometry_before_checking() {
+    let temporary = tempdir().unwrap();
+    let root_path = LogicalSourcePath::new("project/main.fea").unwrap();
+    let root = super::FeaSourceSnapshotBuilder::source_module(
+        root_path,
+        br#"import material steel from "./materials.fea"
+geometry bracket {
+    file = "./geometry/box.brep"
+    units = m
+}
+"#,
+    );
+    let mut builder = super::FeaSourceSnapshotBuilder::new(temporary.path(), root).unwrap();
+
+    assert_eq!(
+        builder.missing_module_paths().unwrap(),
+        vec![LogicalSourcePath::new("project/materials.fea").unwrap()]
+    );
+    builder
+        .add_module(super::FeaSourceSnapshotBuilder::source_module(
+            LogicalSourcePath::new("project/materials.fea").unwrap(),
+            br#"material steel {
+    mass_density = 7850 kg/m^3
+    elastic {
+        youngs_modulus = 200 GPa
+        poisson_ratio = 0.3
+    }
+}
+"#,
+        ))
+        .unwrap();
+    assert!(builder.missing_module_paths().unwrap().is_empty());
+
+    let mut prepared = builder.prepare().unwrap();
+    let requests = prepared.requests(Vec::new(), Vec::new()).unwrap();
+    assert_eq!(requests.geometry.len(), 1);
+    assert_eq!(
+        requests.geometry[0].logical_path,
+        LogicalSourcePath::new("project/geometry/box.brep").unwrap()
+    );
+    prepared
+        .add_geometry(
+            requests.geometry[0].logical_path.clone(),
+            include_bytes!("../../../../runmat-geometry/io/tests/fixtures/box.brep").to_vec(),
+        )
+        .unwrap();
+
+    let checked = prepared.check(Vec::new(), Vec::new()).unwrap();
+    assert_eq!(checked.check_result().status, super::FeaCheckStatus::Valid);
+    assert_eq!(checked.program.geometries.len(), 1);
+}
+
+#[test]
 fn filesystem_host_confines_imports_to_the_declared_root() {
     let temporary = tempdir().unwrap();
     let source_root = temporary.path().join("project");

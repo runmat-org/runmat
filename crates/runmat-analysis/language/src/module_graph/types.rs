@@ -6,7 +6,7 @@ use runmat_parser::fea::{FeaImportKind, FeaModuleItem, FeaSyntaxModule};
 use runmat_types::Span;
 use std::collections::BTreeMap;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ParsedFeaModule {
     pub source: SourceModule,
     pub syntax: Option<FeaSyntaxModule>,
@@ -22,7 +22,7 @@ pub struct FeaModuleEdge {
     pub span: Span,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FeaModuleGraph {
     pub root: LogicalSourcePath,
     pub source_root: LogicalSourcePath,

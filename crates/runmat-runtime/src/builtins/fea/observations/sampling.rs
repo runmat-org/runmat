@@ -84,7 +84,7 @@ sampling_descriptor!(
 
 macro_rules! sampling_no_arg {
     ($function:ident, $name:literal, $descriptor:ident, $value:expr) => {
-        #[runtime_builtin(name = $name, category = "fea", summary = "Create a typed observation sampling policy.", keywords = "fea,observation,sampling,typed", descriptor($descriptor), integer_audit(STRUCTURAL_AUDIT), builtin_path = "crate::builtins::fea::observations")]
+        #[runtime_builtin(name = $name, category = "fea", summary = "Create a typed observation sampling policy.", keywords = "fea,observation,sampling,typed", descriptor($descriptor), integer_audit(STRUCTURAL_AUDIT), builtin_path = "crate::builtins::fea::observations::sampling")]
         pub async fn $function() -> BuiltinResult<Value> { to_typed_value($name, SAMPLING_CLASS, $value) }
     };
 }
@@ -102,7 +102,7 @@ sampling_no_arg!(
 );
 macro_rules! sampling_values {
     ($function:ident, $name:literal, $descriptor:ident, $wrap:expr) => {
-        #[runtime_builtin(name = $name, category = "fea", summary = "Create a typed observation sampling policy.", keywords = "fea,observation,sampling,typed", descriptor($descriptor), integer_capabilities(NUMERIC_CAPABILITIES), builtin_path = "crate::builtins::fea::observations")]
+        #[runtime_builtin(name = $name, category = "fea", summary = "Create a typed observation sampling policy.", keywords = "fea,observation,sampling,typed", descriptor($descriptor), integer_capabilities(NUMERIC_CAPABILITIES), builtin_path = "crate::builtins::fea::observations::sampling")]
         pub async fn $function(values: Value) -> BuiltinResult<Value> { to_typed_value($name, SAMPLING_CLASS, ($wrap)(numeric_values($name, &values)?)) }
     };
 }
@@ -137,7 +137,7 @@ sampling_values!(
     keywords = "fea,observation,sampling,modes,typed",
     descriptor(SAMPLING_MODES_DESCRIPTOR),
     integer_capabilities(NUMERIC_CAPABILITIES),
-    builtin_path = "crate::builtins::fea::observations"
+    builtin_path = "crate::builtins::fea::observations::sampling"
 )]
 pub async fn sampling_modes(values: Value) -> BuiltinResult<Value> {
     to_typed_value(
@@ -151,7 +151,7 @@ pub async fn sampling_modes(values: Value) -> BuiltinResult<Value> {
 }
 macro_rules! sampling_interval {
     ($function:ident, $name:literal, $descriptor:ident, $wrap:expr) => {
-        #[runtime_builtin(name = $name, category = "fea", summary = "Create a typed interval sampling policy.", keywords = "fea,observation,sampling,interval,typed", descriptor($descriptor), integer_capabilities(NUMERIC_CAPABILITIES), builtin_path = "crate::builtins::fea::observations")]
+        #[runtime_builtin(name = $name, category = "fea", summary = "Create a typed interval sampling policy.", keywords = "fea,observation,sampling,interval,typed", descriptor($descriptor), integer_capabilities(NUMERIC_CAPABILITIES), builtin_path = "crate::builtins::fea::observations::sampling")]
         pub async fn $function(start: Value, end: Value, interval: Value) -> BuiltinResult<Value> {
             to_typed_value(
                 $name,
@@ -199,7 +199,7 @@ sampling_interval!(
 macro_rules! event_choice {
     ($function:ident, $name:literal, $descriptor:ident, $signatures:ident, $label:literal, $value:expr) => {
         descriptor!($descriptor, $signatures, $label, &NO_INPUTS);
-        #[runtime_builtin(name = $name, category = "fea", summary = "Select a typed observation event.", keywords = "fea,observation,event,typed", descriptor($descriptor), integer_audit(STRUCTURAL_AUDIT), builtin_path = "crate::builtins::fea::observations")]
+        #[runtime_builtin(name = $name, category = "fea", summary = "Select a typed observation event.", keywords = "fea,observation,event,typed", descriptor($descriptor), integer_audit(STRUCTURAL_AUDIT), builtin_path = "crate::builtins::fea::observations::sampling")]
         pub async fn $function() -> BuiltinResult<Value> { to_typed_value($name, EVENT_CLASS, $value) }
     };
 }
@@ -250,7 +250,7 @@ event_choice!(
     keywords = "fea,observation,sampling,event,typed",
     descriptor(SAMPLING_EVENT_DESCRIPTOR),
     integer_audit(STRUCTURAL_AUDIT),
-    builtin_path = "crate::builtins::fea::observations"
+    builtin_path = "crate::builtins::fea::observations::sampling"
 )]
 pub async fn sampling_event(event: Value) -> BuiltinResult<Value> {
     let event: TypedStudyValue<ObservationEvent> =
@@ -268,7 +268,7 @@ pub async fn sampling_event(event: Value) -> BuiltinResult<Value> {
     keywords = "fea,observation,sampling,adaptive,typed",
     descriptor(SAMPLING_ADAPTIVE_DESCRIPTOR),
     integer_capabilities(NUMERIC_CAPABILITIES),
-    builtin_path = "crate::builtins::fea::observations"
+    builtin_path = "crate::builtins::fea::observations::sampling"
 )]
 pub async fn sampling_adaptive(
     minimum: Value,

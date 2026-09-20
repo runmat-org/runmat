@@ -1,6 +1,6 @@
-pub(super) mod accuracy;
-pub(super) mod observation;
-pub(super) mod sequence;
+pub(crate) mod accuracy;
+pub(crate) mod observation;
+pub(crate) mod sequence;
 
 pub(super) fn ensure_study_policy_classes_registered() {
     sequence::ensure_classes_registered();

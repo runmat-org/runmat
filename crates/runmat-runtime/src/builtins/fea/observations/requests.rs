@@ -116,7 +116,7 @@ fn observation(
 }
 macro_rules! observation_builtin {
     ($function:ident, $name:literal, $descriptor:ident, $form:expr) => {
-        #[runtime_builtin(name = $name, category = "fea", summary = "Create a typed analysis observation request.", keywords = "fea,observation,field,history,probe,reduction,typed", descriptor($descriptor), integer_audit(STRUCTURAL_AUDIT), builtin_path = "crate::builtins::fea::observations")]
+        #[runtime_builtin(name = $name, category = "fea", summary = "Create a typed analysis observation request.", keywords = "fea,observation,field,history,probe,reduction,typed", descriptor($descriptor), integer_audit(STRUCTURAL_AUDIT), builtin_path = "crate::builtins::fea::observations::requests")]
         pub async fn $function(args: Vec<Value>) -> BuiltinResult<Value> { observation($name, args, $form) }
     };
 }
@@ -172,7 +172,7 @@ descriptor!(
     keywords = "fea,observation,diagnostic,typed",
     descriptor(DIAGNOSTIC_DESCRIPTOR),
     integer_audit(STRUCTURAL_AUDIT),
-    builtin_path = "crate::builtins::fea::observations"
+    builtin_path = "crate::builtins::fea::observations::requests"
 )]
 pub async fn diagnostic(
     id: String,
@@ -221,7 +221,7 @@ descriptor!(
     keywords = "fea,observation,monitor,cadence,typed",
     descriptor(CADENCE_ACCEPTED_DESCRIPTOR),
     integer_capabilities(NUMERIC_CAPABILITIES),
-    builtin_path = "crate::builtins::fea::observations"
+    builtin_path = "crate::builtins::fea::observations::requests"
 )]
 pub async fn cadence_accepted(interval: Value) -> BuiltinResult<Value> {
     to_typed_value(
@@ -239,7 +239,7 @@ pub async fn cadence_accepted(interval: Value) -> BuiltinResult<Value> {
     keywords = "fea,observation,monitor,cadence,typed",
     descriptor(CADENCE_WALL_DESCRIPTOR),
     integer_capabilities(NUMERIC_CAPABILITIES),
-    builtin_path = "crate::builtins::fea::observations"
+    builtin_path = "crate::builtins::fea::observations::requests"
 )]
 pub async fn cadence_wall(interval: Value) -> BuiltinResult<Value> {
     const NAME: &str = "fea.MonitorCadence.wallSeconds";
@@ -307,7 +307,7 @@ descriptor!(STOP_CHANGE_DESCRIPTOR, STOP_CHANGE_SIGNATURES, "condition = fea.Mon
     keywords = "fea,observation,monitor,stop,typed",
     descriptor(STOP_NONE_DESCRIPTOR),
     integer_audit(STRUCTURAL_AUDIT),
-    builtin_path = "crate::builtins::fea::observations"
+    builtin_path = "crate::builtins::fea::observations::requests"
 )]
 pub async fn stop_none() -> BuiltinResult<Value> {
     to_typed_value::<Option<MonitorStopCondition>>(
@@ -333,7 +333,7 @@ fn threshold(
     keywords = "fea,observation,monitor,stop,threshold,typed",
     descriptor(STOP_LESS_DESCRIPTOR),
     integer_capabilities(NUMERIC_CAPABILITIES),
-    builtin_path = "crate::builtins::fea::observations"
+    builtin_path = "crate::builtins::fea::observations::requests"
 )]
 pub async fn stop_less(quantity: Value, value: Value) -> BuiltinResult<Value> {
     const NAME: &str = "fea.MonitorStopCondition.lessThan";
@@ -352,7 +352,7 @@ pub async fn stop_less(quantity: Value, value: Value) -> BuiltinResult<Value> {
     keywords = "fea,observation,monitor,stop,threshold,typed",
     descriptor(STOP_GREATER_DESCRIPTOR),
     integer_capabilities(NUMERIC_CAPABILITIES),
-    builtin_path = "crate::builtins::fea::observations"
+    builtin_path = "crate::builtins::fea::observations::requests"
 )]
 pub async fn stop_greater(quantity: Value, value: Value) -> BuiltinResult<Value> {
     const NAME: &str = "fea.MonitorStopCondition.greaterThan";
@@ -371,7 +371,7 @@ pub async fn stop_greater(quantity: Value, value: Value) -> BuiltinResult<Value>
     keywords = "fea,observation,monitor,stop,change,typed",
     descriptor(STOP_CHANGE_DESCRIPTOR),
     integer_capabilities(NUMERIC_CAPABILITIES),
-    builtin_path = "crate::builtins::fea::observations"
+    builtin_path = "crate::builtins::fea::observations::requests"
 )]
 pub async fn stop_change(
     quantity: Value,
@@ -420,7 +420,7 @@ descriptor!(
     keywords = "fea,observation,monitor,solver,typed",
     descriptor(MONITOR_DESCRIPTOR),
     integer_audit(STRUCTURAL_AUDIT),
-    builtin_path = "crate::builtins::fea::observations"
+    builtin_path = "crate::builtins::fea::observations::requests"
 )]
 pub async fn monitor(
     id: String,

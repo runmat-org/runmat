@@ -158,10 +158,10 @@ fn numeric_values(name: &'static str, value: &Value) -> BuiltinResult<Vec<f64>> 
     Ok(values)
 }
 
-mod requests;
-mod sampling;
-mod storage;
-mod targets;
+pub(crate) mod requests;
+pub(crate) mod sampling;
+pub(crate) mod storage;
+pub(crate) mod targets;
 
 #[cfg(test)]
 pub(super) use requests::field;

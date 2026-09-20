@@ -28,7 +28,7 @@ descriptor!(
     keywords = "fea,observation,reduction,none,typed",
     descriptor(REDUCTION_NONE_DESCRIPTOR),
     integer_audit(STRUCTURAL_AUDIT),
-    builtin_path = "crate::builtins::fea::observations"
+    builtin_path = "crate::builtins::fea::observations::storage"
 )]
 pub async fn reduction_none() -> BuiltinResult<Value> {
     to_typed_value::<Option<ReductionPolicy>>("fea.ReductionPolicy.none", REDUCTION_CLASS, None)
@@ -40,7 +40,7 @@ pub async fn reduction_none() -> BuiltinResult<Value> {
     keywords = "fea,observation,reduction,typed",
     descriptor(REDUCTION_DESCRIPTOR),
     integer_audit(STRUCTURAL_AUDIT),
-    builtin_path = "crate::builtins::fea::observations"
+    builtin_path = "crate::builtins::fea::observations::storage"
 )]
 pub async fn reduction(spatial: Value, series: Value, ties: Value) -> BuiltinResult<Value> {
     const NAME: &str = "fea.ReductionPolicy.new";
@@ -58,7 +58,7 @@ pub async fn reduction(spatial: Value, series: Value, ties: Value) -> BuiltinRes
 macro_rules! typed_no_arg {
     ($function:ident, $name:literal, $descriptor:ident, $signatures:ident, $label:literal, $class:expr, $value:expr) => {
         descriptor!($descriptor, $signatures, $label, &NO_INPUTS);
-        #[runtime_builtin(name = $name, category = "fea", summary = "Select a typed observation storage policy.", keywords = "fea,observation,storage,typed", descriptor($descriptor), integer_audit(STRUCTURAL_AUDIT), builtin_path = "crate::builtins::fea::observations")]
+        #[runtime_builtin(name = $name, category = "fea", summary = "Select a typed observation storage policy.", keywords = "fea,observation,storage,typed", descriptor($descriptor), integer_audit(STRUCTURAL_AUDIT), builtin_path = "crate::builtins::fea::observations::storage")]
         pub async fn $function() -> BuiltinResult<Value> { to_typed_value($name, $class, $value) }
     };
 }
@@ -129,7 +129,7 @@ descriptor!(
     keywords = "fea,observation,compression,error,typed",
     descriptor(COMPRESSION_ERROR_DESCRIPTOR),
     integer_capabilities(NUMERIC_CAPABILITIES),
-    builtin_path = "crate::builtins::fea::observations"
+    builtin_path = "crate::builtins::fea::observations::storage"
 )]
 pub async fn compression_error(value: Value) -> BuiltinResult<Value> {
     const NAME: &str = "fea.CompressionPolicy.errorBounded";
@@ -182,7 +182,7 @@ descriptor!(
     keywords = "fea,observation,retention,bounded,typed",
     descriptor(RETENTION_LATEST_DESCRIPTOR),
     integer_capabilities(NUMERIC_CAPABILITIES),
-    builtin_path = "crate::builtins::fea::observations"
+    builtin_path = "crate::builtins::fea::observations::storage"
 )]
 pub async fn retention_latest(count: Value) -> BuiltinResult<Value> {
     to_typed_value(
@@ -200,7 +200,7 @@ pub async fn retention_latest(count: Value) -> BuiltinResult<Value> {
     keywords = "fea,observation,retention,bounded,typed",
     descriptor(RETENTION_EXPLICIT_DESCRIPTOR),
     integer_capabilities(NUMERIC_CAPABILITIES),
-    builtin_path = "crate::builtins::fea::observations"
+    builtin_path = "crate::builtins::fea::observations::storage"
 )]
 pub async fn retention_explicit(count: Value) -> BuiltinResult<Value> {
     to_typed_value(
@@ -247,7 +247,7 @@ descriptor!(
     keywords = "fea,observation,storage,retention,typed",
     descriptor(STORAGE_DESCRIPTOR),
     integer_audit(STRUCTURAL_AUDIT),
-    builtin_path = "crate::builtins::fea::observations"
+    builtin_path = "crate::builtins::fea::observations::storage"
 )]
 pub async fn storage(
     precision: Value,
@@ -310,7 +310,7 @@ descriptor!(COST_DESCRIPTOR, COST_SIGNATURES, "cost = fea.ObservationCost.new(op
     keywords = "fea,observation,cost,resources,typed",
     descriptor(COST_DESCRIPTOR),
     integer_capabilities(NUMERIC_CAPABILITIES),
-    builtin_path = "crate::builtins::fea::observations"
+    builtin_path = "crate::builtins::fea::observations::storage"
 )]
 pub async fn cost(args: Vec<Value>) -> BuiltinResult<Value> {
     const NAME: &str = "fea.ObservationCost.new";

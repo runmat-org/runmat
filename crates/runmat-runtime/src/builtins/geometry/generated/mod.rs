@@ -1,9 +1,9 @@
 mod codec;
-mod combine;
-mod features;
+pub(crate) mod combine;
+pub(crate) mod features;
 mod metadata;
-mod primitives;
-mod regions;
+pub(crate) mod primitives;
+pub(crate) mod regions;
 
 use std::sync::Once;
 

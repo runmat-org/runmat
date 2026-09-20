@@ -24,24 +24,28 @@ pub(super) fn inspect_geometry(
             SourceAvailability::Unavailable,
         )
     })?;
-    let content_digest = source_digest(&bytes);
+    inspect_geometry_bytes(&bytes, request)
+}
+
+pub(super) fn inspect_geometry_bytes(
+    bytes: &[u8],
+    request: &GeometryInspectionRequest,
+) -> Result<GeometryInspection, SourceDiagnostic> {
+    let logical_path = request.logical_path.as_str();
+    let content_digest = source_digest(bytes);
     if request
         .expected_content_digest
         .is_some_and(|expected| expected != content_digest)
     {
         return Err(diagnostic(
             "fea.host.geometry_digest_mismatch",
-            format!(
-                "geometry {} differs from its expected digest",
-                path.display()
-            ),
+            format!("geometry `{logical_path}` differs from its expected digest"),
             SourceAvailability::Available,
         ));
     }
-    let logical_path = request.logical_path.as_str();
     let imported = import_geometry(
         logical_path,
-        &bytes,
+        bytes,
         GeometryImportOptions {
             units: request.source_units,
             ..GeometryImportOptions::default()
@@ -55,7 +59,7 @@ pub(super) fn inspect_geometry(
         )
     })?;
     let exchange = imported.asset.source_geometry.exchange.clone();
-    let format = detect_geometry_format(logical_path, &bytes);
+    let format = detect_geometry_format(logical_path, bytes);
     let exact = matches!(
         format,
         GeometryFormat::Step | GeometryFormat::Iges | GeometryFormat::Brep
@@ -63,7 +67,7 @@ pub(super) fn inspect_geometry(
     .then(|| {
         import_exact_cad(
             logical_path,
-            &bytes,
+            bytes,
             format,
             &ExactCadImportOptions {
                 source_units: request.source_units,

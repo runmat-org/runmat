@@ -129,7 +129,7 @@ macro_rules! scalar_time_signal {
                                             keywords = "fea,signal,time,history,samples,typed,si",
                                             descriptor($descriptor),
                                             integer_capabilities(TIME_SAMPLE_INTEGER_CAPABILITIES),
-                                            builtin_path = "crate::builtins::fea::signals"
+                                            builtin_path = "crate::builtins::fea::signals::time_samples"
                                         )]
         pub async fn $function(
             id: String,
@@ -190,7 +190,7 @@ macro_rules! vector_time_signal {
                                     keywords = "fea,signal,time,history,samples,vector,typed,si",
                                     descriptor($descriptor),
                                     integer_capabilities(TIME_SAMPLE_INTEGER_CAPABILITIES),
-                                    builtin_path = "crate::builtins::fea::signals"
+                                    builtin_path = "crate::builtins::fea::signals::time_samples"
                                 )]
         pub async fn $function(
             id: String,
