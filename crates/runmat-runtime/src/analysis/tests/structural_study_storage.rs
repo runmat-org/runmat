@@ -155,8 +155,42 @@ fn authored_output_fields_are_chunked_and_selectively_readable() {
         .expect("authored output was not evaluated");
     let expected = observation.field.as_host_f64().unwrap().to_vec();
 
-    let store = storage::InMemoryAnalysisArtifactStore::new();
+    let store_root = mesh_root.join("store");
+    let store = storage::FilesystemAnalysisArtifactStore::new(store_root.clone());
     storage::AnalysisArtifactStore::persist_run(&store, &run).unwrap();
+    let metadata = storage::AnalysisArtifactStore::load_run_metadata(&store, &run.run_id)
+        .unwrap()
+        .expect("persisted run metadata");
+    assert!(metadata.run.observations.is_empty());
+    assert!(metadata
+        .run
+        .fields
+        .iter()
+        .all(|field| field.as_host_f64() == Some(&[])));
+    let inventory = storage::AnalysisArtifactStore::load_field_inventory(&store, &run.run_id)
+        .unwrap()
+        .expect("persisted field inventory");
+    assert!(inventory.iter().any(|field| {
+        field.field_id == "published_displacement" && field.as_host_f64() == Some(&[])
+    }));
+    storage::configure_artifact_store(storage::AnalysisArtifactStoreConfig::Filesystem {
+        root: store_root,
+    })
+    .unwrap();
+    let mut metadata_query = AnalysisResultsQuery::metadata_only();
+    metadata_query.include_fields = vec!["published_displacement".to_string()];
+    let public_metadata = analysis_results_by_run_id_op(
+        &run.run_id,
+        metadata_query,
+        OperationContext::new(None, None),
+    )
+    .unwrap()
+    .data;
+    assert_eq!(public_metadata.field_descriptors.len(), 1);
+    assert_eq!(
+        public_metadata.field_descriptors[0].field_id,
+        "published_displacement"
+    );
     let lookup = storage::AnalysisArtifactStore::load_field_page(
         &store,
         &run.run_id,
@@ -167,7 +201,18 @@ fn authored_output_fields_are_chunked_and_selectively_readable() {
     let storage::AnalysisFieldPageLookup::Page(page) = lookup else {
         panic!("authored output field was not selectively readable")
     };
-    assert_eq!(page.values, AnalysisFieldPageValues::Real(expected));
+    assert_eq!(page.values, AnalysisFieldPageValues::Real(expected.clone()));
+    let reloaded = storage::AnalysisArtifactStore::load_run(&store, &run.run_id)
+        .unwrap()
+        .expect("persisted run");
+    let reloaded_output = reloaded
+        .run
+        .observations
+        .iter()
+        .find(|observation| observation.observation_id.0 == "published_displacement")
+        .expect("reloaded authored output");
+    assert_eq!(reloaded_output.field.as_host_f64().unwrap(), expected);
+    storage::reset_artifact_store_for_tests();
     let _ = fs::remove_dir_all(mesh_root);
 }
 

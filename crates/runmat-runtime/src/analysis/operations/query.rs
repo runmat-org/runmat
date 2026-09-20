@@ -179,7 +179,17 @@ pub fn analysis_results_op(
     query: AnalysisResultsQuery,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisResultsData>, OperationErrorEnvelope> {
-    let mut collected_fields = collect_analysis_result_fields(run_result);
+    analysis_results_op_with_field_inventory(run_result, query, context, None)
+}
+
+fn analysis_results_op_with_field_inventory(
+    run_result: &AnalysisRunResult,
+    query: AnalysisResultsQuery,
+    context: OperationContext,
+    field_inventory: Option<Vec<AnalysisField>>,
+) -> Result<OperationEnvelope<AnalysisResultsData>, OperationErrorEnvelope> {
+    let mut collected_fields =
+        field_inventory.unwrap_or_else(|| collect_analysis_result_fields(run_result));
 
     if !query.include_fields.is_empty() {
         let mut filtered = Vec::new();
@@ -1311,6 +1321,25 @@ pub fn analysis_results_by_run_id_op(
     query: AnalysisResultsQuery,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisResultsData>, OperationErrorEnvelope> {
+    let field_inventory = if query.include_field_values {
+        None
+    } else {
+        storage::load_field_inventory(run_id).map_err(|err| {
+            operation_error(
+                ANALYSIS_RESULTS_OPERATION,
+                ANALYSIS_RESULTS_OP_VERSION,
+                &context,
+                OperationErrorSpec {
+                    error_code: "RM.FEA.RESULTS.ARTIFACT_STORE_FAILED",
+                    error_type: OperationErrorType::Internal,
+                    retryable: true,
+                    severity: OperationErrorSeverity::Error,
+                },
+                format!("failed to load FEA field inventory: {err}"),
+                BTreeMap::from([("run_id".to_string(), run_id.to_string())]),
+            )
+        })?
+    };
     let run_result = if query.include_field_values {
         storage::load_run_result(run_id)
     } else {
@@ -1366,7 +1395,8 @@ pub fn analysis_results_by_run_id_op(
         ));
     };
 
-    let mut envelope = analysis_results_op(&run_result, query, context)?;
+    let mut envelope =
+        analysis_results_op_with_field_inventory(&run_result, query, context, field_inventory)?;
     for descriptor in &mut envelope.data.field_descriptors {
         if descriptor.storage == AnalysisFieldStorage::HostF64 {
             descriptor.storage_ref.kind = "chunked_field".to_string();
