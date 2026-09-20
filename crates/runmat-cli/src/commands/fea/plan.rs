@@ -13,7 +13,7 @@ use super::selection::SelectedFeaRoot;
 enum FeaPlanPhase {
     MaterializeGeometry,
     GenerateExactMesh,
-    CompileScientificModel,
+    CompileStudy,
     PlanNumericalWorkloads,
     ExecuteProcedures,
     RecoverOutputs,
@@ -102,7 +102,7 @@ fn logical_plan(root: &SelectedFeaRoot) -> Result<FeaLogicalPlan> {
         phases: vec![
             FeaPlanPhase::MaterializeGeometry,
             FeaPlanPhase::GenerateExactMesh,
-            FeaPlanPhase::CompileScientificModel,
+            FeaPlanPhase::CompileStudy,
             FeaPlanPhase::PlanNumericalWorkloads,
             FeaPlanPhase::ExecuteProcedures,
             FeaPlanPhase::RecoverOutputs,

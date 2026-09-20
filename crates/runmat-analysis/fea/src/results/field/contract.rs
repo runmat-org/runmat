@@ -76,7 +76,7 @@ pub enum RecoveredFieldEntityDomain {
     ConstraintGroups,
 }
 
-/// Scientific provenance of the values in one published field.
+/// Physical and numerical provenance of the values in one published field.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind")]
 pub enum RecoveredFieldDerivation {

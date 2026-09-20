@@ -15,6 +15,7 @@ export const FEA_FIELD_DEFAULT_MATERIALIZE_LIMIT = 256 as const;
 
 export const FEA_MODEL_TEMPLATES = [
   "linear_static_structural",
+  "structural_harmonic",
   "thermo_mechanical_coupled",
   "thermal_steady",
   "thermal_transient",
@@ -29,7 +30,7 @@ export const FEA_MODEL_TEMPLATES = [
   "fsi_coupled",
 ] as const;
 
-export type FeaModelTemplate = "linear_static_structural" | "thermo_mechanical_coupled" | "thermal_steady" | "thermal_transient" | "modal_structural" | "acoustic_harmonic" | "transient_structural" | "nonlinear_structural" | "electromagnetic_harmonic" | "cfd_steady_state" | "cfd_transient" | "cht_coupled" | "fsi_coupled";
+export type FeaModelTemplate = "linear_static_structural" | "structural_harmonic" | "thermo_mechanical_coupled" | "thermal_steady" | "thermal_transient" | "modal_structural" | "acoustic_harmonic" | "transient_structural" | "nonlinear_structural" | "electromagnetic_harmonic" | "cfd_steady_state" | "cfd_transient" | "cht_coupled" | "fsi_coupled";
 
 export type FeaDocumentKind = "study" | "sweep";
 
@@ -148,6 +149,16 @@ export const FEA_SUPPORTED_MODEL_TEMPLATES: readonly FeaModelTemplateCatalogEntr
     defaultObservations: [
       { field: "structural.displacement", location: "nodes" },
       { field: "structural.von_mises", location: "elements" },
+    ],
+  },
+  {
+    template: "structural_harmonic",
+    label: "Structural harmonic",
+    family: "structural",
+    target: "solid mechanics",
+    value: "complex frequency response",
+    defaultObservations: [
+      { field: "structural.displacement", location: "nodes" },
     ],
   },
   {
@@ -351,7 +362,7 @@ export interface FeaFieldResult {
   runId: string;
   fieldId: string;
   descriptor: FeaFieldDescriptor;
-  values: number[];
+  values: { numericRepresentation: "real" | "complex_interleaved"; values: number[] };
   offset: number;
   count: number;
   totalCount: number;
@@ -427,8 +438,11 @@ export interface FeaFieldStorageRef {
 
 export interface FeaFieldDescriptor {
   field_id: string;
+  sample: "final" | { domain: "time_seconds" | "mode_index" | "frequency_hertz" | "load_factor" | "study_parameter_value"; coordinate: number } | null;
+  numeric_representation: "real" | "complex_interleaved" | null;
   family: string;
   quantity: string;
+  statistic: "component_magnitude_envelope" | "root_mean_square" | "variance" | null;
   topology_id: string | null;
   element_kind: string | null;
   class_name: string;
@@ -462,6 +476,7 @@ export interface FeaStructuralModesOptions {
   quality_policy: FeaQualityPolicy;
   truncation: FeaModalTruncationPolicy;
   convergence: FeaModalConvergencePolicy;
+  residual_vector_directions: { frame: FeaCoordinateFrame; vector: [number, number, number] }[];
   solver_mesh_artifact_path: string | null;
 }
 
@@ -558,52 +573,6 @@ export interface FeaElectromagneticPotentialOptions {
   sweep_frequency_hz: number[];
 }
 
-export const FEA_STUDY_DOCUMENT_OPERATIONS = [
-  "get_summary",
-  "create",
-  "add_region",
-  "update_region",
-  "remove_region",
-  "add_material",
-  "update_material",
-  "remove_material",
-  "assign_material",
-  "remove_material_assignment",
-  "add_constraint",
-  "update_constraint",
-  "remove_constraint",
-  "add_boundary",
-  "update_boundary",
-  "remove_boundary",
-  "add_connector",
-  "update_connector",
-  "remove_connector",
-  "add_interface",
-  "update_interface",
-  "remove_interface",
-  "add_signal",
-  "update_signal",
-  "remove_signal",
-  "add_excitation_case",
-  "update_excitation_case",
-  "remove_excitation_case",
-  "add_excitation",
-  "update_excitation",
-  "remove_excitation",
-  "add_initial_condition",
-  "update_initial_condition",
-  "remove_initial_condition",
-  "add_response_spectrum",
-  "update_response_spectrum",
-  "remove_response_spectrum",
-  "set_sequence",
-  "set_domains",
-  "set_mesh",
-  "clear_mesh",
-] as const;
-
-export type FeaStudyDocumentOperation = typeof FEA_STUDY_DOCUMENT_OPERATIONS[number];
-
 export type FeaRegionSelector = { id: string } | { tag: string } | { name: string };
 
 export interface FeaRegionInput { region_id: string; selector: FeaRegionSelector; }
@@ -694,150 +663,6 @@ export interface FeaResponseSpectrumInput { spectrum_id: string; abscissa: { fre
 
 export interface FeaDomainsInput { thermo_mechanical?: { reference_temperature: { kelvin: number } }; electro_thermal?: { reference_temperature: { kelvin: number } }; electromagnetic?: { reference_frequency: { hertz: number } }; cfd?: { density: { kilograms_per_cubic_meter: number }; dynamic_viscosity: { pascal_seconds: number }; turbulence_intensity: { ratio: number } }; }
 
-export type FeaMeshSettingsInput = Partial<FeaStudyMeshInput>;
-
-export interface FeaStudyCreateInput { study_id?: string; geometry: { path: string; units?: FeaGeometryUnits; import?: { max_triangles?: number } }; model: { id?: string; template: FeaModelTemplate; frame?: FeaCoordinateFrame; defaults?: "template_scaffold" | "none" }; mesh?: FeaMeshSettingsInput; sequence?: FeaCanonicalSequence; execution?: FeaExecutionInput[]; }
-
 export interface FeaCanonicalSequence { sequence_id: string; steps: FeaProcedureStep[]; dependencies: FeaSequenceDependency[]; transitions: FeaStateTransition[]; branches: FeaSequenceBranch[]; }
 
 export type FeaExecutionInput = { step: string; backend?: FeaComputeBackend; requirement?: FeaFormulationRequirement } & ({ solver: "structural_linear"; options: FeaStructuralLinearOptions } | { solver: "structural_modes"; options: FeaStructuralModesOptions } | { solver: "acoustic_helmholtz"; options: FeaAcousticHelmholtzOptions } | { solver: "thermal_diffusion"; options: FeaThermalDiffusionOptions } | { solver: "structural_transient"; options: FeaStructuralTransientOptions } | { solver: "incompressible_flow"; options: FeaIncompressibleFlowOptions } | { solver: "conjugate_heat_transfer"; options: FeaConjugateHeatTransferOptions } | { solver: "fluid_structure_interaction"; options: FeaFluidStructureInteractionOptions } | { solver: "structural_nonlinear"; options: FeaStructuralNonlinearOptions } | { solver: "electromagnetic_potential"; options: FeaElectromagneticPotentialOptions } | { solver?: never; options?: never });
-
-export interface FeaStudyOperationInputs {
-
-  get_summary: Record<string, never>; create: FeaStudyCreateInput;
-
-  add_region: FeaRegionInput; update_region: FeaRegionInput; remove_region: { id: string };
-
-  add_material: FeaMaterialInput; update_material: FeaMaterialInput; remove_material: { id: string };
-
-  assign_material: FeaMaterialAssignmentInput; remove_material_assignment: { region: string; material: string };
-
-  add_constraint: FeaConstraintInput; update_constraint: FeaConstraintInput; remove_constraint: { id: string };
-
-  add_boundary: FeaBoundaryInput; update_boundary: FeaBoundaryInput; remove_boundary: { id: string };
-
-  add_connector: FeaConnectorInput; update_connector: FeaConnectorInput; remove_connector: { id: string };
-
-  add_interface: FeaInterfaceInput; update_interface: FeaInterfaceInput; remove_interface: { id: string };
-
-  add_signal: FeaSignalInput; update_signal: FeaSignalInput; remove_signal: { id: string };
-
-  add_excitation_case: FeaExcitationCaseInput; update_excitation_case: FeaExcitationCaseInput; remove_excitation_case: { id: string };
-
-  add_excitation: FeaExcitationInput; update_excitation: FeaExcitationInput; remove_excitation: { id: string };
-
-  add_initial_condition: FeaInitialConditionInput; update_initial_condition: FeaInitialConditionInput; remove_initial_condition: { id: string };
-
-  add_response_spectrum: FeaResponseSpectrumInput; update_response_spectrum: FeaResponseSpectrumInput; remove_response_spectrum: { id: string };
-
-  set_sequence: FeaCanonicalSequence; set_domains: FeaDomainsInput; set_mesh: FeaMeshSettingsInput; clear_mesh: Record<string, never>;
-
-}
-
-export type FeaStudyOperationInput<O extends FeaStudyDocumentOperation> = FeaStudyOperationInputs[O];
-
-export interface FeaStudyDocumentOperationOutput {
-  source: string;
-  result: FeaStudyDocumentOperationResult;
-  write: boolean;
-}
-
-export interface FeaStudySummary {
-  studyId: string | null;
-  geometryPath: string | null;
-  geometryUnits: FeaGeometryUnits | null;
-  modelTemplate: FeaModelTemplate | null;
-  mesh: FeaStudyMeshInput | null;
-  executionBackend: FeaComputeBackend | null;
-  sequenceId: string | null;
-  primaryFamily: FeaPhysicsFamily | null;
-  primaryProcedure: FeaAnalysisProcedure | null;
-}
-
-export interface FeaStudyMeshInput {
-  element_order: FeaElementOrder;
-  maximum_elements: number;
-  target_edge_length_m: number;
-  maximum_chordal_deviation_m: number;
-  maximum_grading_ratio: number;
-  deterministic_seed: number;
-}
-
-export interface FeaStudyRegionEntry {
-  key: string;
-  selector: FeaRegionSelector | null;
-}
-
-export interface FeaStudyMaterialEntry {
-  key: string;
-  name: string | null;
-}
-
-export interface FeaStudyMaterialAssignmentEntry {
-  index: number;
-  region: string | null;
-  material: string | null;
-}
-
-export interface FeaStudyNamedEntry {
-  index: number;
-  id: string;
-}
-
-export interface FeaStudySequenceSummary {
-  sequenceId: string;
-  stepCount: number;
-  primaryFamily: FeaPhysicsFamily | null;
-  primaryProcedure: FeaAnalysisProcedure | null;
-}
-
-export interface FeaStudyReadiness {
-  readyToSolve: boolean;
-  blockers: string[];
-}
-
-export interface FeaStudyDocumentDiff {
-  changedSections: string[];
-  before: FeaStudySummary;
-  after: FeaStudySummary;
-  sourceLengthBefore: number;
-  sourceLengthAfter: number;
-}
-
-export interface FeaStudyDocumentCounts {
-  regions: number;
-  materials: number;
-  materialAssignments: number;
-  constraints: number;
-  boundaries: number;
-  connectors: number;
-  interfaces: number;
-  signals: number;
-  excitationCases: number;
-  excitations: number;
-  initialConditions: number;
-  responseSpectra: number;
-  sequenceSteps: number;
-}
-
-export interface FeaStudyDocumentOperationResult {
-  path: string;
-  documentKind: string;
-  summary: FeaStudySummary;
-  regions: FeaStudyRegionEntry[];
-  materials: FeaStudyMaterialEntry[];
-  materialAssignments: FeaStudyMaterialAssignmentEntry[];
-  constraints: FeaStudyNamedEntry[];
-  boundaries: FeaStudyNamedEntry[];
-  connectors: FeaStudyNamedEntry[];
-  interfaces: FeaStudyNamedEntry[];
-  signals: FeaStudyNamedEntry[];
-  excitationCases: FeaStudyNamedEntry[];
-  excitations: FeaStudyNamedEntry[];
-  initialConditions: FeaStudyNamedEntry[];
-  responseSpectra: FeaStudyNamedEntry[];
-  sequence: FeaStudySequenceSummary | null;
-  counts: FeaStudyDocumentCounts;
-  readiness: FeaStudyReadiness;
-  diff?: FeaStudyDocumentDiff;
-}

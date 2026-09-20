@@ -1100,34 +1100,6 @@ impl RunMatWasm {
             .map_err(|err| js_error(&format!("Failed to serialize FEA check result: {err}")))
     }
 
-    #[wasm_bindgen(js_name = applyFeaStudyDocumentOperation)]
-    pub fn apply_fea_study_document_operation_js(
-        &self,
-        operation: String,
-        path: String,
-        source: Option<String>,
-        input: JsValue,
-    ) -> Result<JsValue, JsValue> {
-        self.ensure_not_disposed()?;
-        let input = serde_wasm_bindgen::from_value::<JsonValue>(input).map_err(|err| {
-            js_error(&format!(
-                "Failed to deserialize FEA study operation input: {err}"
-            ))
-        })?;
-        let output = runmat_runtime::analysis::apply_fea_study_document_operation(
-            &operation,
-            &path,
-            source.as_deref(),
-            input,
-        )
-        .map_err(|err| js_error(&err))?;
-        serde_wasm_bindgen::to_value(&output).map_err(|err| {
-            js_error(&format!(
-                "Failed to serialize FEA study operation result: {err}"
-            ))
-        })
-    }
-
     #[wasm_bindgen(js_name = runFeaStudy)]
     pub async fn run_fea_study_js(
         &self,

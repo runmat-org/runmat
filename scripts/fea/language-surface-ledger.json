@@ -31,7 +31,7 @@
         "cardinality": "required_once",
         "default": "none",
         "target": "sweep declaration member",
-        "identity": "scientific sweep identity unless marked policy",
+        "identity": "sweep-definition identity unless marked policy",
         "validation": "bound and type checked by sweep semantics",
         "positive_coverage": "language.sweep.accepts",
         "negative_coverage": "language.sweep.rejects"
@@ -66,7 +66,7 @@
         "cardinality": "required_once",
         "default": "none",
         "target": "study declaration member",
-        "identity": "scientific study identity",
+        "identity": "study-definition identity",
         "validation": "bound and type checked against model and procedure",
         "positive_coverage": "language.study.accepts",
         "negative_coverage": "language.study.rejects"
@@ -98,7 +98,7 @@
           "cardinality": "zero_or_more",
           "default": "empty",
           "target": "frozen values derived from imported functions and arguments",
-          "identity": "generator and scientific identity",
+          "identity": "generator and geometry-definition identity",
           "validation": "compiler verifies portability and capture closure"
         },
         "sequence": { "target": "typed steps and explicit state edges inside study" }
@@ -142,7 +142,7 @@
         "disposition": "removed",
         "cardinality": "optional_once",
         "default": "none",
-        "target": "render tessellation policy outside scientific geometry definition",
+        "target": "render tessellation policy outside geometry-definition identity",
         "identity": "render or attempt identity only",
         "validation": "retired field is rejected by the language",
         "positive_coverage": "language.geometry.render_policy.accepts",
@@ -253,7 +253,7 @@
         "cardinality": "zero_or_more",
         "default": "empty",
         "target": "typed model declaration collection",
-        "identity": "scientific model identity",
+        "identity": "model-definition identity",
         "validation": "unique symbols, typed references, topology compatibility",
         "positive_coverage": "language.model_members.accepts",
         "negative_coverage": "language.model_members.rejects"
@@ -404,7 +404,7 @@
         "cardinality": "required_once",
         "default": "none",
         "target": "typed property assignment member",
-        "identity": "scientific assignment identity unless marked audit",
+        "identity": "property-assignment identity unless marked audit",
         "validation": "target role, exact coverage, and capability compatibility",
         "positive_coverage": "language.assignment.accepts",
         "negative_coverage": "language.assignment.rejects"
@@ -652,7 +652,7 @@
         "cardinality": "optional_once",
         "default": "none",
         "target": "procedure-specific typed model/study settings",
-        "identity": "scientific study identity",
+        "identity": "study-definition identity",
         "validation": "family/procedure compatibility and typed physical values",
         "positive_coverage": "language.procedure_settings.accepts",
         "negative_coverage": "language.domains_container.rejects"
@@ -724,7 +724,7 @@
         "cardinality": "required_once",
         "default": "none",
         "target": "lowered canonical model contract",
-        "identity": "scientific model identity",
+        "identity": "model-definition identity",
         "validation": "analysis-core validates the complete typed model",
         "positive_coverage": "language.lowering.model.accepts",
         "negative_coverage": "language.lowering.model.rejects"
@@ -835,7 +835,7 @@
         "cardinality": "required_once",
         "default": "none",
         "target": "lowered canonical study contract",
-        "identity": "scientific or logical identity according to member role",
+        "identity": "definition, result, or logical-execution identity according to member role",
         "validation": "runtime revalidates all lowered typed contracts",
         "positive_coverage": "language.lowering.study.accepts",
         "negative_coverage": "language.lowering.study.rejects"
@@ -862,7 +862,7 @@
         "cardinality": "required_once",
         "default": "none",
         "target": "lowered canonical sweep contract",
-        "identity": "scientific sweep identity unless policy",
+        "identity": "sweep-definition identity unless policy",
         "validation": "ordered unique expanded study identities",
         "positive_coverage": "language.lowering.sweep.accepts",
         "negative_coverage": "language.lowering.sweep.rejects"
@@ -977,7 +977,7 @@
         "cardinality": "required_once_per_solve",
         "default": "none",
         "target": "canonical family-neutral solver result",
-        "identity": "scientific result or attempt evidence according to member",
+        "identity": "numerical-result or execution-attempt evidence according to member",
         "validation": "result identity, field shapes, evidence, and convergence closure",
         "positive_coverage": "results.fea_run.accepts",
         "negative_coverage": "results.fea_run.rejects"
@@ -993,11 +993,11 @@
         "solver_host_sync_count": { "identity": "physical attempt evidence" },
         "accelerator_evidence": { "identity": "physical attempt evidence" },
         "diagnostics": { "identity": "result evidence" },
-        "spatial_projection_evidence": { "identity": "scientific result evidence" },
-        "observations": { "identity": "scientific result identity" },
-        "observation_histories": { "identity": "scientific result identity" },
-        "series_reductions": { "identity": "scientific result identity" },
-        "fields": { "identity": "scientific result identity" }
+        "spatial_projection_evidence": { "identity": "numerical-result evidence" },
+        "observations": { "identity": "numerical-result identity" },
+        "observation_histories": { "identity": "numerical-result identity" },
+        "series_reductions": { "identity": "numerical-result identity" },
+        "fields": { "identity": "numerical-result identity" }
       }
     },
     {
@@ -1016,14 +1016,14 @@
       },
       "members": {
         "run_id": { "identity": "result publication identity" },
-        "run": { "identity": "scientific result identity" },
+        "run": { "identity": "numerical-result identity" },
         "render_topology": { "identity": "render identity" },
-        "modal_results": { "identity": "scientific result identity" },
-        "buckling_results": { "identity": "scientific result identity" },
-        "thermal_results": { "identity": "scientific result identity" },
-        "transient_results": { "identity": "scientific result identity" },
-        "nonlinear_results": { "identity": "scientific result identity" },
-        "electromagnetic_results": { "identity": "scientific result identity" },
+        "modal_results": { "identity": "numerical-result identity" },
+        "buckling_results": { "identity": "numerical-result identity" },
+        "thermal_results": { "identity": "numerical-result identity" },
+        "transient_results": { "identity": "numerical-result identity" },
+        "nonlinear_results": { "identity": "numerical-result identity" },
+        "electromagnetic_results": { "identity": "numerical-result identity" },
         "model_validity": { "identity": "quality evidence" },
         "solver_convergence": { "identity": "quality evidence" },
         "result_quality": { "identity": "quality evidence" },
@@ -1044,7 +1044,7 @@
         "cardinality": "optional_once_per_read",
         "default": "all result categories with values and diagnostics",
         "target": "typed result accessor and paging request",
-        "identity": "read request only; never scientific identity",
+        "identity": "read request only; never study-definition or numerical-result identity",
         "validation": "field, mode, snapshot, and payload selection bounds",
         "positive_coverage": "results.query.accepts",
         "negative_coverage": "results.query.rejects"

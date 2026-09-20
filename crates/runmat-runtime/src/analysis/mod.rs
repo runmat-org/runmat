@@ -64,7 +64,6 @@ mod excitation_authoring;
 mod execution_dispatch;
 mod execution_error;
 mod fea_document;
-mod fea_document_authoring;
 pub(crate) mod field_selection;
 #[cfg(feature = "plot-core")]
 mod figures;
@@ -441,11 +440,6 @@ pub use contracts::{
 pub use fea_document::{
     is_fea_file_path, load_fea_document_from_path_async, parse_and_resolve_fea_document,
     FeaResolvedDocument,
-};
-pub use fea_document_authoring::{
-    apply_fea_study_document_operation, apply_fea_study_document_operation_typed,
-    summarize_fea_study_document, FeaStudyDocumentOperation, FeaStudyDocumentOperationOutput,
-    FEA_STUDY_DOCUMENT_OPERATION_NAMES,
 };
 #[cfg(feature = "plot-core")]
 pub use figures::{

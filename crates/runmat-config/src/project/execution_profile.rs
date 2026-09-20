@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 /// Project-owned routing facts for a named remote execution environment.
 ///
-/// Scientific resource requirements remain in source. This profile binds a stable source-level
+/// Analysis resource requirements remain in source. This profile binds a stable source-level
 /// name to deployment routing and the capabilities that can be admitted before submission.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]

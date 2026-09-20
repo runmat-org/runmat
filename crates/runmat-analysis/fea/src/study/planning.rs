@@ -23,8 +23,8 @@ mod tests;
 
 /// Portable numerical limits selected after project/CLI policy resolution.
 ///
-/// Scientific domains and accuracy tolerances remain in the compiled study. These values govern
-/// algorithms and task partitioning only. Scientific domains, accuracy tolerances, damping, and
+/// Physical domains and accuracy tolerances remain in the compiled study. These values govern
+/// algorithms and task partitioning only. Physical domains, accuracy tolerances, damping, and
 /// modal-mass controls remain in the compiled study.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

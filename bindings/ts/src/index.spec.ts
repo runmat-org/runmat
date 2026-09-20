@@ -32,9 +32,7 @@ import {
   FEA_OBJECT_ARTIFACT_METADATA_SCHEMA_VERSION,
   FEA_RUN_DATASET_KIND,
   FEA_RUN_DATASET_SCHEMA_VERSION,
-  FEA_STUDY_DOCUMENT_OPERATIONS,
   FEA_SUPPORTED_MODEL_TEMPLATES,
-  type FeaStudyOperationInput,
   type RunMatSessionHandle,
   type RunMatFilesystemProvider,
   type ExecuteRequest,
@@ -54,23 +52,7 @@ const defaultStats: SessionStats = {
   averageExecutionTimeMs: 0
 };
 
-describe("FEA study document contracts", () => {
-  const canonicalCreateInput = {
-    geometry: { path: "part.step", units: "millimeter" },
-    model: { template: "linear_static_structural" },
-    execution: [
-      {
-        step: "solve",
-        backend: "cpu",
-        requirement: "production",
-      },
-    ],
-  } satisfies FeaStudyOperationInput<"create">;
-  const canonicalRegionInput = {
-    region_id: "loaded_face",
-    selector: { tag: "load" },
-  } satisfies FeaStudyOperationInput<"add_region">;
-
+describe("FEA runtime contracts", () => {
   it("exports Rust-generated analysis artifact constants", () => {
     expect(FEA_RUN_DATASET_SCHEMA_VERSION).toBe(1);
     expect(FEA_FIELD_BINDINGS_SCHEMA_VERSION).toBe(1);
@@ -85,67 +67,10 @@ describe("FEA study document contracts", () => {
     expect(FEA_FIELD_DEFAULT_MATERIALIZE_LIMIT).toBe(256);
   });
 
-  it("exports Rust-generated study operation names", () => {
-    expect(FEA_STUDY_DOCUMENT_OPERATIONS).toEqual([
-      "get_summary",
-      "create",
-      "add_region",
-      "update_region",
-      "remove_region",
-      "add_material",
-      "update_material",
-      "remove_material",
-      "assign_material",
-      "remove_material_assignment",
-      "add_constraint",
-      "update_constraint",
-      "remove_constraint",
-      "add_boundary",
-      "update_boundary",
-      "remove_boundary",
-      "add_connector",
-      "update_connector",
-      "remove_connector",
-      "add_interface",
-      "update_interface",
-      "remove_interface",
-      "add_signal",
-      "update_signal",
-      "remove_signal",
-      "add_excitation_case",
-      "update_excitation_case",
-      "remove_excitation_case",
-      "add_excitation",
-      "update_excitation",
-      "remove_excitation",
-      "add_initial_condition",
-      "update_initial_condition",
-      "remove_initial_condition",
-      "add_response_spectrum",
-      "update_response_spectrum",
-      "remove_response_spectrum",
-      "set_sequence",
-      "set_domains",
-      "set_mesh",
-      "clear_mesh",
-    ]);
-  });
-
-  it("types canonical create execution without a retired run wrapper", () => {
-    expect(canonicalCreateInput.execution[0]).toEqual({
-      step: "solve",
-      backend: "cpu",
-      requirement: "production",
-    });
-  });
-
-  it("types region selection as an explicit selector variant", () => {
-    expect(canonicalRegionInput.selector).toEqual({ tag: "load" });
-  });
-
   it("keeps the public FEA model-template catalog aligned with Rust", () => {
     expect(FEA_MODEL_TEMPLATES).toEqual([
       "linear_static_structural",
+      "structural_harmonic",
       "thermo_mechanical_coupled",
       "thermal_steady",
       "thermal_transient",

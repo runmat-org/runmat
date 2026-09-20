@@ -10,7 +10,7 @@ These are separate contracts in RunMat:
 | --- | --- | --- |
 | `fea.AnalysisSequence` | Procedure order, dependencies, transitions, and branches | Worker placement or solver task scheduling |
 | `fea.ProcedureStep` | Physics procedure, independent domain, activations, state, observations, accuracy, and restart | Materials, loads, or geometry definitions |
-| `fea.Observation` | Scientific quantity, target, recovery, sampling, reduction, and retention | Plot styling or figure creation |
+| `fea.Observation` | Physical quantity, target, recovery, sampling, reduction, and retention | Plot styling or figure creation |
 | `fea.AccuracyPlan` | Required numerical evidence, tolerances, resource ceilings, and limit action | Formulation maturity or publication status |
 
 The objects are immutable and portable. A sequence authored in RunMat code serializes into the

@@ -23,10 +23,7 @@ import type {
   FeaRunDatasetFieldPagingPolicy,
   FeaRunDatasetPayload,
   FeaRunDatasetStudyRef,
-  FeaRunResult,
-  FeaStudyDocumentOperation,
-  FeaStudyDocumentOperationOutput,
-  FeaStudyOperationInput
+  FeaRunResult
 } from "./fea-contracts.js";
 import {
   FEA_ARTIFACT_MANIFEST_KIND,
@@ -81,7 +78,6 @@ export {
   FEA_RUN_CELL_ID,
   FEA_RUN_KIND,
   FEA_RUN_MANIFEST_METADATA_SCHEMA_VERSION,
-  FEA_STUDY_DOCUMENT_OPERATIONS,
   FEA_SUPPORTED_PHYSICS_FAMILIES,
   FEA_SUPPORTED_MODEL_TEMPLATES,
   feaRunArtifactRefId,
@@ -119,7 +115,6 @@ export type {
   FeaInterfaceInput,
   FeaMaterialAssignmentInput,
   FeaMaterialInput,
-  FeaMeshSettingsInput,
   FeaModelTemplate,
   FeaModelTemplateCatalogEntry,
   FeaPhysicsFamily,
@@ -136,22 +131,6 @@ export type {
   FeaRunDatasetPayload,
   FeaRunDatasetStudyRef,
   FeaRunResult,
-  FeaStudyDocumentCounts,
-  FeaStudyCreateInput,
-  FeaStudyDocumentDiff,
-  FeaStudyDocumentOperation,
-  FeaStudyDocumentOperationOutput,
-  FeaStudyDocumentOperationResult,
-  FeaStudyOperationInput,
-  FeaStudyOperationInputs,
-  FeaStudyMeshInput,
-  FeaStudyNamedEntry,
-  FeaStudyMaterialAssignmentEntry,
-  FeaStudyMaterialEntry,
-  FeaStudyReadiness,
-  FeaStudyRegionEntry,
-  FeaStudySequenceSummary,
-  FeaStudySummary,
   FeaRunArtifactRole
 } from "./fea-contracts.js";
 export {
@@ -1026,12 +1005,6 @@ export interface RunMatSessionHandle {
   ): Promise<void> | void;
   feaCapabilities(): Promise<FeaCapabilities>;
   checkFeaStudy(path: string): Promise<FeaCheckResult>;
-  applyFeaStudyDocumentOperation<O extends FeaStudyDocumentOperation>(
-    operation: O,
-    path: string,
-    source: string | null,
-    input: FeaStudyOperationInput<O>,
-  ): Promise<FeaStudyDocumentOperationOutput>;
   runFeaStudy(path: string, artifactRoot?: string | null): Promise<FeaRunResult>;
   feaField(runId: string, fieldId: string, options?: FeaFieldRequestOptions): Promise<FeaFieldResult>;
   materializeDataFileVariable(
@@ -1124,12 +1097,6 @@ interface RunMatNativeSession {
   ) => void | Promise<void>;
   feaCapabilities?: () => FeaCapabilities | Promise<FeaCapabilities>;
   checkFeaStudy?: (path: string) => FeaCheckResult | Promise<FeaCheckResult>;
-  applyFeaStudyDocumentOperation?: <O extends FeaStudyDocumentOperation>(
-    operation: O,
-    path: string,
-    source: string | null,
-    input: FeaStudyOperationInput<O>,
-  ) => FeaStudyDocumentOperationOutput | Promise<FeaStudyDocumentOperationOutput>;
   runFeaStudy?: (path: string, artifactRoot?: string | null) => FeaRunResult | Promise<FeaRunResult>;
   feaField?: (
     runId: string,
@@ -2216,19 +2183,6 @@ class WebRunMatSession implements RunMatSessionHandle {
       throw new Error("The loaded runmat-wasm module does not expose checkFeaStudy yet.");
     }
     return this.native.checkFeaStudy(path);
-  }
-
-  async applyFeaStudyDocumentOperation<O extends FeaStudyDocumentOperation>(
-    operation: O,
-    path: string,
-    source: string | null,
-    input: FeaStudyOperationInput<O>,
-  ): Promise<FeaStudyDocumentOperationOutput> {
-    this.ensureActive();
-    if (typeof this.native.applyFeaStudyDocumentOperation !== "function") {
-      throw new Error("The loaded runmat-wasm module does not expose applyFeaStudyDocumentOperation yet.");
-    }
-    return this.native.applyFeaStudyDocumentOperation(operation, path, source, input);
   }
 
   async runFeaStudy(path: string, artifactRoot?: string | null): Promise<FeaRunResult> {

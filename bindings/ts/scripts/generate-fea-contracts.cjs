@@ -5,14 +5,6 @@ const path = require("path");
 
 const bindingsRoot = path.resolve(__dirname, "..");
 const repoRoot = path.resolve(bindingsRoot, "../..");
-const rustAuthoringPath = path.resolve(
-  repoRoot,
-  "crates/runmat-runtime/src/analysis/fea_document_authoring.rs"
-);
-const rustAuthoringContractsPath = path.resolve(
-  repoRoot,
-  "crates/runmat-runtime/src/analysis/fea_document_authoring/contracts.rs"
-);
 const rustFeaDocumentPath = path.resolve(
   repoRoot,
   "crates/runmat-runtime/src/analysis/fea_document.rs"
@@ -111,40 +103,6 @@ const analysisStructTypes = [
 const progressStructTypes = [
   ["FeaProgressEvent", "FeaProgressEvent", { renameAll: "camelCase" }],
 ];
-const studyDocumentStructTypes = [
-  ["FeaStudyDocumentOperationOutput", {}],
-  ["FeaStudySummary", { renameAll: "camelCase" }],
-  ["FeaStudyMeshInput", {}],
-  ["FeaStudyRegionEntry", { renameAll: "camelCase" }],
-  ["FeaStudyMaterialEntry", { renameAll: "camelCase" }],
-  ["FeaStudyMaterialAssignmentEntry", { renameAll: "camelCase" }],
-  ["FeaStudyNamedEntry", { renameAll: "camelCase" }],
-  ["FeaStudySequenceSummary", { renameAll: "camelCase" }],
-  ["FeaStudyReadiness", { renameAll: "camelCase" }],
-  ["FeaStudyDocumentDiff", { renameAll: "camelCase" }],
-  ["FeaStudyDocumentCounts", { renameAll: "camelCase" }],
-  ["FeaStudyDocumentOperationResult", { renameAll: "camelCase" }],
-];
-const studyDocumentStructs = studyDocumentStructTypes.map(([name]) => name);
-
-function readOperationNames(source) {
-  const match = source.match(
-    /pub const FEA_STUDY_DOCUMENT_OPERATION_NAMES:\s*&\[&str\]\s*=\s*&\[(?<body>[\s\S]*?)\];/
-  );
-  if (!match?.groups?.body) {
-    throw new Error("Could not find FEA_STUDY_DOCUMENT_OPERATION_NAMES in Rust authoring source.");
-  }
-
-  const names = [];
-  for (const stringMatch of match.groups.body.matchAll(/"([^"]+)"/g)) {
-    names.push(stringMatch[1]);
-  }
-  if (names.length === 0) {
-    throw new Error("FEA_STUDY_DOCUMENT_OPERATION_NAMES did not contain any operation names.");
-  }
-  return names;
-}
-
 function readAnalysisConstant(source, rustName) {
   const match = source.match(
     new RegExp(`pub const ${rustName}:\\s*[^=]+?=\\s*(?<value>[^;]+);`)
@@ -214,6 +172,28 @@ function rustTypeToTs(type) {
       return { type: "FeaModelTemplateCatalogEntry", nullable: false };
     case "AnalysisRuntimeModelTemplateDefaultObservation":
       return { type: "{ field: string; location: string }", nullable: false };
+    case "AnalysisFieldPageValues":
+      return {
+        type: '{ numericRepresentation: "real" | "complex_interleaved"; values: number[] }',
+        nullable: false,
+      };
+    case "runmat_analysis_fea::results::field::RecoveredFieldSample":
+      return {
+        type: '"final" | { domain: "time_seconds" | "mode_index" | "frequency_hertz" | "load_factor" | "study_parameter_value"; coordinate: number }',
+        nullable: false,
+      };
+    case "runmat_analysis_fea::results::field::RecoveredFieldNumericRepresentation":
+      return { type: '"real" | "complex_interleaved"', nullable: false };
+    case "AnalysisFieldStatistic":
+      return {
+        type: '"component_magnitude_envelope" | "root_mean_square" | "variance"',
+        nullable: false,
+      };
+    case "runmat_analysis_core::SpectrumDirection":
+      return {
+        type: "{ frame: FeaCoordinateFrame; vector: [number, number, number] }",
+        nullable: false,
+      };
     case "AnalysisStructuralTimeStepPolicy":
       return { type: "FeaStructuralTimeStepPolicy", nullable: false };
     case "runmat_analysis_fea::ModalTruncationPolicy":
@@ -223,9 +203,6 @@ function rustTypeToTs(type) {
     default:
       if (/^BTreeMap<String,\s*String>$/.test(trimmed)) {
         return { type: "Record<string, string>", nullable: false };
-      }
-      if (studyDocumentStructs.includes(trimmed)) {
-        return { type: trimmed, nullable: false };
       }
       for (const [rustName, tsName] of analysisStructTypes) {
         if (trimmed === rustName) {
@@ -466,12 +443,30 @@ function readStructBody(source, name) {
 function readStructFields(source, name, options = {}) {
   const body = readStructBody(source, name);
   const fields = [];
+  const lines = [];
+  let pendingField = "";
+  for (const rawLine of body.split("\n")) {
+    const line = rawLine.trim();
+    if (pendingField) {
+      pendingField += ` ${line}`;
+      if (line.endsWith(",")) {
+        lines.push(pendingField);
+        pendingField = "";
+      }
+    } else if (line.startsWith("pub ") && !line.endsWith(",")) {
+      pendingField = line;
+    } else {
+      lines.push(line);
+    }
+  }
+  if (pendingField) {
+    throw new Error(`Unterminated field declaration in ${name}: ${pendingField}`);
+  }
   let rename = null;
   let skipIfNone = false;
   const renameAll = options.renameAll ?? null;
 
-  for (const rawLine of body.split("\n")) {
-    const line = rawLine.trim();
+  for (const line of lines) {
     if (!line) {
       continue;
     }
@@ -521,9 +516,6 @@ function formatInterface(name, fields) {
 }
 
 function main() {
-  const authoringSource = [rustAuthoringPath, rustAuthoringContractsPath]
-    .map((sourcePath) => fs.readFileSync(sourcePath, "utf8"))
-    .join("\n");
   const analysisSource = fs.readFileSync(rustAnalysisContractsPath, "utf8");
   const feaDocumentSource = fs.readFileSync(rustFeaDocumentPath, "utf8");
   const progressSource = fs.readFileSync(rustFeaProgressPath, "utf8");
@@ -535,7 +527,6 @@ function main() {
   const geometryUnitsSource = fs.readFileSync(rustGeometryUnitsPath, "utf8");
   const meshingRequestSource = fs.readFileSync(rustMeshingRequestPath, "utf8");
   const feaContractsSource = fs.readFileSync(rustFeaContractsPath, "utf8");
-  const operations = readOperationNames(authoringSource);
   const constants = analysisConstants.map(([rustName, tsName]) => ({
     tsName,
     value: readAnalysisConstant(analysisSource, rustName),
@@ -689,27 +680,8 @@ export interface FeaSequenceBranch { branch_id: string; producer_step: string; s
     "export type FeaInitialConditionInput = { displacement: FeaInitialConditionBody<{ meters: number }> } | { velocity: FeaInitialConditionBody<{ meters_per_second: number }> } | { angular_velocity: FeaInitialConditionBody<{ radians_per_second: number }> } | { temperature: FeaInitialConditionBody<{ kelvin: number }> } | { electric_potential: FeaInitialConditionBody<{ volts: number }> } | { magnetic_vector_potential: FeaInitialConditionBody<{ webers_per_meter: number }> } | { acoustic_pressure: FeaInitialConditionBody<{ pascals: number }> } | { fluid_pressure: FeaInitialConditionBody<{ pascals: number }> } | { fluid_velocity: FeaInitialConditionBody<{ meters_per_second: number }> };",
     "export interface FeaResponseSpectrumInput { spectrum_id: string; abscissa: { frequency_hertz: number[] } | { period_seconds: number[] }; ordinates: number[]; damping: { ratio: number } | { quality_factor: number }; response: \"relative_displacement\" | \"relative_velocity\" | \"relative_acceleration\" | \"absolute_acceleration\" | \"pseudo_velocity\" | \"pseudo_acceleration\"; envelope: \"positive\" | \"negative\" | \"maximax\"; interpolation: \"linear_frequency\" | \"linear_period\" | \"log_log\"; extrapolation: \"reject\" | \"hold_endpoint\"; direction: { frame: FeaCoordinateFrame; vector: [number, number, number] }; modal_combination: \"srss\" | \"complete_quadratic_combination\" | \"ten_percent\" | \"absolute_sum\"; directional_combination: \"srss\" | \"absolute_sum\" | { percentage_rule: { primary: number; secondary: number } }; truncation: { minimum_cumulative_mass_ratio: number; include_residual_mode: boolean; include_rigid_response: boolean; include_missing_mass: boolean }; construction: \"authored_design\" | { derived_from_acceleration_history: { source_signal_id: string; method: \"exact_piecewise_linear\" | \"recursive_filter\" } }; evidence: { sampling_adequacy_ratio: number; max_interpolation_error: number | null }; provenance_digest: string; }",
     "export interface FeaDomainsInput { thermo_mechanical?: { reference_temperature: { kelvin: number } }; electro_thermal?: { reference_temperature: { kelvin: number } }; electromagnetic?: { reference_frequency: { hertz: number } }; cfd?: { density: { kilograms_per_cubic_meter: number }; dynamic_viscosity: { pascal_seconds: number }; turbulence_intensity: { ratio: number } }; }",
-    "export type FeaMeshSettingsInput = Partial<FeaStudyMeshInput>;",
-    "export interface FeaStudyCreateInput { study_id?: string; geometry: { path: string; units?: FeaGeometryUnits; import?: { max_triangles?: number } }; model: { id?: string; template: FeaModelTemplate; frame?: FeaCoordinateFrame; defaults?: \"template_scaffold\" | \"none\" }; mesh?: FeaMeshSettingsInput; sequence?: FeaCanonicalSequence; execution?: FeaExecutionInput[]; }",
     "export interface FeaCanonicalSequence { sequence_id: string; steps: FeaProcedureStep[]; dependencies: FeaSequenceDependency[]; transitions: FeaStateTransition[]; branches: FeaSequenceBranch[]; }",
     "export type FeaExecutionInput = { step: string; backend?: FeaComputeBackend; requirement?: FeaFormulationRequirement } & ({ solver: \"structural_linear\"; options: FeaStructuralLinearOptions } | { solver: \"structural_modes\"; options: FeaStructuralModesOptions } | { solver: \"acoustic_helmholtz\"; options: FeaAcousticHelmholtzOptions } | { solver: \"thermal_diffusion\"; options: FeaThermalDiffusionOptions } | { solver: \"structural_transient\"; options: FeaStructuralTransientOptions } | { solver: \"incompressible_flow\"; options: FeaIncompressibleFlowOptions } | { solver: \"conjugate_heat_transfer\"; options: FeaConjugateHeatTransferOptions } | { solver: \"fluid_structure_interaction\"; options: FeaFluidStructureInteractionOptions } | { solver: \"structural_nonlinear\"; options: FeaStructuralNonlinearOptions } | { solver: \"electromagnetic_potential\"; options: FeaElectromagneticPotentialOptions } | { solver?: never; options?: never });",
-    "export interface FeaStudyOperationInputs {",
-    "  get_summary: Record<string, never>; create: FeaStudyCreateInput;",
-    "  add_region: FeaRegionInput; update_region: FeaRegionInput; remove_region: { id: string };",
-    "  add_material: FeaMaterialInput; update_material: FeaMaterialInput; remove_material: { id: string };",
-    "  assign_material: FeaMaterialAssignmentInput; remove_material_assignment: { region: string; material: string };",
-    "  add_constraint: FeaConstraintInput; update_constraint: FeaConstraintInput; remove_constraint: { id: string };",
-    "  add_boundary: FeaBoundaryInput; update_boundary: FeaBoundaryInput; remove_boundary: { id: string };",
-    "  add_connector: FeaConnectorInput; update_connector: FeaConnectorInput; remove_connector: { id: string };",
-    "  add_interface: FeaInterfaceInput; update_interface: FeaInterfaceInput; remove_interface: { id: string };",
-    "  add_signal: FeaSignalInput; update_signal: FeaSignalInput; remove_signal: { id: string };",
-    "  add_excitation_case: FeaExcitationCaseInput; update_excitation_case: FeaExcitationCaseInput; remove_excitation_case: { id: string };",
-    "  add_excitation: FeaExcitationInput; update_excitation: FeaExcitationInput; remove_excitation: { id: string };",
-    "  add_initial_condition: FeaInitialConditionInput; update_initial_condition: FeaInitialConditionInput; remove_initial_condition: { id: string };",
-    "  add_response_spectrum: FeaResponseSpectrumInput; update_response_spectrum: FeaResponseSpectrumInput; remove_response_spectrum: { id: string };",
-    "  set_sequence: FeaCanonicalSequence; set_domains: FeaDomainsInput; set_mesh: FeaMeshSettingsInput; clear_mesh: Record<string, never>;",
-    "}",
-    "export type FeaStudyOperationInput<O extends FeaStudyDocumentOperation> = FeaStudyOperationInputs[O];",
   ].join("\n\n");
   const modelTemplateCatalog = readModelTemplateCatalog(analysisSource);
   const analysisInterfaces = analysisStructTypes.map(([rustName, tsName, options]) =>
@@ -717,9 +689,6 @@ export interface FeaSequenceBranch { branch_id: string; producer_step: string; s
   );
   const progressInterfaces = progressStructTypes.map(([rustName, tsName, options]) =>
     formatInterface(tsName, readStructFields(progressSource, rustName, options))
-  );
-  const interfaces = studyDocumentStructTypes.map(([name, options]) =>
-    formatInterface(name, readStructFields(authoringSource, name, options))
   );
 
   fs.mkdirSync(generatedRoot, { recursive: true });
@@ -749,19 +718,11 @@ export interface FeaSequenceBranch { branch_id: string; producer_step: string; s
     "",
     ...progressInterfaces.flatMap((interfaceSource) => [interfaceSource, ""]),
     ...analysisInterfaces.flatMap((interfaceSource) => [interfaceSource, ""]),
-    "export const FEA_STUDY_DOCUMENT_OPERATIONS = [",
-    ...operations.map((operation) => `  ${JSON.stringify(operation)},`),
-    "] as const;",
-    "",
-    "export type FeaStudyDocumentOperation = typeof FEA_STUDY_DOCUMENT_OPERATIONS[number];",
-    "",
     canonicalInputs,
-    "",
-    ...interfaces.flatMap((interfaceSource) => [interfaceSource, ""]),
   ].join("\n");
   fs.writeFileSync(outputPath, contents);
   console.log(
-    `Generated ${constants.length} FEA analysis constants, ${enumTypes.length + progressEnums.length + authoringEnums.length} type unions, ${modelTemplateCatalog.length} model template catalog entries, ${progressInterfaces.length + analysisInterfaces.length} analysis interfaces, ${operations.length} FEA study document operations, and ${interfaces.length} study interfaces.`
+    `Generated ${constants.length} FEA analysis constants, ${enumTypes.length + progressEnums.length + authoringEnums.length} type unions, ${modelTemplateCatalog.length} model template catalog entries, and ${progressInterfaces.length + analysisInterfaces.length} analysis interfaces.`
   );
 }
 

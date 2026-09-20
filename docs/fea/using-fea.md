@@ -666,9 +666,8 @@ runmat run docs/fea/examples/modal-random-response-experimental.fea
 ```
 
 Use the ordinary result surface after completion: select a published field with `fea.field(...)`,
-then call `plot(field)`; call `mesh(run)` to inspect the solver topology. Random-excitation
-authoring is also available through the typed document operations `add_random_excitation`,
-`update_random_excitation`, and `remove_random_excitation`.
+then call `plot(field)`; call `mesh(run)` to inspect the solver topology. Random-excitation inputs
+are declared directly in the model with typed channel directions and cross-power spectra.
 
 RMS and variance are distinct typed selectors and retain distinct units. For example, displacement
 RMS has units of metres while displacement variance has units of square metres:
