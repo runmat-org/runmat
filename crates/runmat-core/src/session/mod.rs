@@ -52,6 +52,7 @@ fn runtime_language_mode(mode: CompatMode) -> runmat_runtime::context::RuntimeLa
 mod compile;
 mod config;
 mod executable;
+mod fea_source;
 mod init;
 #[cfg(not(target_arch = "wasm32"))]
 mod program;

@@ -454,6 +454,10 @@ pub use operations::{
 pub(crate) use operations::{analysis_run_field_ids, collect_analysis_result_fields};
 pub use runmat_analysis_core::FormulationRequirement;
 pub use runmat_analysis_fea::{FeaProgressEvent, FeaProgressPhase, FeaProgressStatus};
+pub use runmat_analysis_language::{
+    operation_pattern_from_value_fact, remote_execution_profile_facts, ExecutionProfileFacts,
+    FunctionFacts, FunctionRequest, LogicalSourcePath, SourceDigest,
+};
 pub use source::{
     check_fea_path, check_fea_path_in_root, check_fea_source_in_root, check_fea_sources_in_root,
     logical_source_path, physical_source_path, prepare_fea_path_in_root,
