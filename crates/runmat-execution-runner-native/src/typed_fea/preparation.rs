@@ -8,24 +8,27 @@ use runmat_execution_artifact::ArtifactAccess;
 
 use super::LocalFeaExecutionOptions;
 
-pub(super) struct PreparedTypedStudy {
+pub struct PreparedFeaStudy {
     pub root: crate::PreparedStructuralStudyRoot,
     pub workers: u32,
+    pub revision: ProgramRevision,
+    pub realized: RealizedStudy,
 }
 
-pub(super) async fn prepare_study(
+pub async fn prepare_study(
     source: &runmat_core::CheckedFeaSessionSource,
     resolved: runmat_analysis_language::ResolvedAnalysisStudy,
     inputs: &[AuthoredStudyInputBinding],
     authority: &str,
     options: &LocalFeaExecutionOptions,
-) -> Result<PreparedTypedStudy, String> {
+) -> Result<PreparedFeaStudy, String> {
+    ensure_structural_execution_boundary(&resolved)?;
     let realized: RealizedStudy = resolved
         .study
         .realize_with_models(&resolved.models, &resolved.geometry, inputs)
         .map_err(|error| error.to_string())?;
     let revision = program_revision(source)?;
-    let access = artifact_access(authority);
+    let access = checked_fea_artifact_access(authority);
     let geometry_source = super::geometry::prepare_geometry_source(
         source,
         &resolved.geometry,
@@ -80,14 +83,16 @@ pub(super) async fn prepare_study(
         &resolved.material_catalog,
     )
     .map_err(|error| error.to_string())?;
+    let input_materializations =
+        super::input::prepare_input_materializations(source, &realized).await?;
     let root = crate::prepare_structural_study_root(crate::StructuralStudyRootPreparation {
-        program_revision: revision,
+        program_revision: revision.clone(),
         artifact_access: access,
         authored_study_digest,
         frozen_project_digest: source
             .frozen_project()
             .map(|project| Digest::from_bytes(*project.graph_digest().bytes())),
-        study: realized,
+        study: realized.clone(),
         materials: resolved.material_catalog,
         planning: runmat_analysis_fea::study::StructuralStudyPlanningPolicy {
             backend: options.backend,
@@ -95,10 +100,34 @@ pub(super) async fn prepare_study(
             numerics: runmat_analysis_fea::study::StructuralNumericalPlanningPolicy::production(),
         },
         analysis_accelerator_requests: options.accelerators.clone(),
+        input_materializations,
         geometry_meshing,
     })
     .map_err(|error| error.to_string())?;
-    Ok(PreparedTypedStudy { root, workers })
+    Ok(PreparedFeaStudy {
+        root,
+        workers,
+        revision,
+        realized,
+    })
+}
+
+fn ensure_structural_execution_boundary(
+    resolved: &runmat_analysis_language::ResolvedAnalysisStudy,
+) -> Result<(), String> {
+    let unsupported = resolved
+        .study
+        .sequence
+        .steps
+        .iter()
+        .find(|step| step.family != runmat_analysis_core::PhysicsFamily::Structural);
+    if let Some(step) = unsupported {
+        return Err(format!(
+            "RM.FEA.TYPED_EXECUTION.UNSUPPORTED_PHYSICS_FAMILY: typed native execution does not yet dispatch {:?}/{:?} for step `{}`",
+            step.family, step.procedure, step.step_id.0
+        ));
+    }
+    Ok(())
 }
 
 fn program_revision(
@@ -133,7 +162,7 @@ fn program_revision(
         .map_err(|error| error.to_string())
 }
 
-fn artifact_access(authority: &str) -> ArtifactAccess {
+pub fn checked_fea_artifact_access(authority: &str) -> ArtifactAccess {
     ArtifactAccess {
         authorization_scope: authority.to_string(),
         encryption_context: Digest::sha256(

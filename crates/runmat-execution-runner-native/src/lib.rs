@@ -32,6 +32,8 @@ mod exact_structural_study_root;
 mod exact_structural_sweep_root;
 mod geometry_materialization;
 mod geometry_meshing_root;
+mod input_materialization;
+mod input_materialization_contract;
 mod local_store;
 mod local_structural_study;
 mod materialized_project;
@@ -110,8 +112,9 @@ pub use analysis_sequence::{
     StructuralSequenceExecutionPolicy,
 };
 pub use analysis_transient::{
-    execute_structural_transient_remotely, CompletedStructuralTransientSequence,
-    RetainedStructuralTransientRecovery, StructuralTransientRecoveryPublisher,
+    execute_structural_transient_locally, execute_structural_transient_remotely,
+    CompletedStructuralTransientSequence, RetainedStructuralTransientRecovery,
+    StructuralTransientRecoveryPublisher,
 };
 pub use config::NativeExecutionConfig;
 pub use driver::{
@@ -197,6 +200,7 @@ pub use structural_study_root::{
     StructuralStudyMaterialExpectation, StructuralStudyResultExpectation,
 };
 pub use test_workload::{execute_host_program_request, execute_host_program_request_with_project};
+pub use typed_fea::{checked_fea_artifact_access, prepare_checked_fea_study, PreparedFeaStudy};
 pub use typed_fea::{
     execute_checked_fea_locally, CompletedLocalFeaCase, LocalFeaExecution, LocalFeaExecutionOptions,
 };

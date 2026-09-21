@@ -105,7 +105,7 @@ pub async fn execute_prepared_structural_study_locally(
         ExactMeshingDagRun {
             geometry: &geometry,
             request: meshing_request,
-            artifact_access: decoded.artifact_access,
+            artifact_access: decoded.artifact_access.clone(),
             capability_cohort: Some(output.platform.capability_cohort.clone()),
             program_revision: request.recipe.program_revision.clone(),
             preferred_edges_per_partition: geometry_meshing.request.preferred_edges_per_partition,
@@ -132,22 +132,38 @@ pub async fn execute_prepared_structural_study_locally(
             planning: decoded.planning,
         })
         .map_err(protocol)?;
+    let completed_inputs = crate::input_materialization::execute_locally(
+        analysis_config.clone(),
+        &decoded.input_materializations,
+        &composition_store,
+        &decoded.artifact_access,
+        workers,
+    )
+    .await?;
+    let mut compiled = product.compiled;
+    let mut workloads = product.workloads;
+    let mut resolved_model = workloads.authored_model().map_err(protocol)?.clone();
+    crate::input_materialization::apply_to_model(&mut resolved_model, completed_inputs)?;
+    workloads
+        .replace_model(resolved_model.clone())
+        .map_err(protocol)?;
+    compiled.model = resolved_model;
     let numerical = execute_structural_workloads_locally(crate::StructuralWorkloadLocalExecution {
         execution_config: analysis_config,
         program_environment: request.recipe.program_revision.environment(),
         study_digest: decoded.authored_study_digest,
         frozen_project_digest: decoded.frozen_project_digest,
-        workloads: product.workloads.clone(),
+        workloads: workloads.clone(),
         mesh: meshing.artifact.clone(),
         workers,
         admitted_accelerators: Some(&decoded.analysis_accelerator_requests),
     })
     .await?;
     runmat_runtime::analysis::StructuralStudyResult::new(
-        product.compiled,
+        compiled,
         meshing.artifact,
         meshing.evidence,
-        product.workloads,
+        workloads,
         numerical,
     )
     .map_err(protocol)

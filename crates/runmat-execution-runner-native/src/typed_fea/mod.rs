@@ -4,8 +4,22 @@
 //! session product, resolves a typed root, materializes geometry, meshes, executes, and publishes
 //! without interpreting authoring syntax or introducing host-specific physics defaults.
 
+mod callable;
 mod geometry;
+mod input;
 mod preparation;
+
+pub use preparation::{checked_fea_artifact_access, PreparedFeaStudy};
+
+pub async fn prepare_checked_fea_study(
+    source: &runmat_core::CheckedFeaSessionSource,
+    resolved: runmat_analysis_language::ResolvedAnalysisStudy,
+    inputs: &[AuthoredStudyInputBinding],
+    authority: &str,
+    options: &LocalFeaExecutionOptions,
+) -> Result<PreparedFeaStudy, String> {
+    preparation::prepare_study(source, resolved, inputs, authority, options).await
+}
 
 use futures::StreamExt as _;
 use runmat_analysis_core::AuthoredStudyInputBinding;
@@ -146,7 +160,7 @@ async fn execute_case(
 ) -> Result<CompletedLocalFeaCase, String> {
     let case_id = study.study.study_id.clone();
     let authority = format!("typed-fea-local:{}", uuid::Uuid::new_v4());
-    let prepared = preparation::prepare_study(source, study, &inputs, &authority, options).await?;
+    let prepared = prepare_checked_fea_study(source, study, &inputs, &authority, options).await?;
     let result = super::execute_prepared_structural_study_locally(
         super::NativeExecutionConfig::for_current_executable()
             .map_err(|error| error.to_string())?,

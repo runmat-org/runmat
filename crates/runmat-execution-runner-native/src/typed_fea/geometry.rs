@@ -13,7 +13,7 @@ use runmat_execution::value::{ValueLimits, ValuePayload};
 use runmat_execution::{CancellationReason, Digest, ProgramRevision};
 use runmat_execution_artifact::cache::{CacheExport, CacheImport};
 use runmat_execution_artifact::{
-    ArtifactAccess, ArtifactResult, BundleCallable, LogicalObject, ProgramExecutionResponse,
+    ArtifactAccess, ArtifactResult, LogicalObject, ProgramExecutionResponse,
 };
 use runmat_geometry_core::{
     GeometryAuthoringValue, GeometryDefinition, GeometryDefinitionRef, GeometryDefinitionSource,
@@ -109,102 +109,26 @@ async fn compile_geometry_generator(
     let GeometryDefinitionSource::Generated(generated) = &definition.source else {
         return Err("geometry generator compilation requires generated geometry".into());
     };
-    let frozen = source.frozen_project().ok_or_else(|| {
-        "generated geometry requires an enclosing frozen RunMat project".to_string()
-    })?;
-    let module = runmat_analysis_language::LogicalSourcePath::new(generated.module_path.clone())
-        .map_err(|error| error.to_string())?;
-    let symbol = runmat_analysis_language::SourceSymbol::new(generated.function.clone())
-        .map_err(|error| error.to_string())?;
-    let expected_path =
-        runmat_runtime::analysis::physical_source_path(&source.source_root, &module)
-            .map_err(|error| error.to_string())?;
-    let definition_record = runmat_package::resolve_visible_function_definition(
-        frozen,
-        source.physical_path(),
-        &expected_path,
-        symbol.as_str(),
-    )?;
-    let source_id = definition_record.source_id.as_ref().ok_or_else(|| {
-        format!(
-            "FEA function `{}` has no frozen source identity",
-            definition_record.qualified_name
-        )
-    })?;
-    let source_bytes = runmat_filesystem::read_async(&definition_record.source_path)
-        .await
-        .map_err(|error| {
-            format!(
-                "cannot read frozen FEA function source {}: {error}",
-                definition_record.source_path.display()
-            )
-        })?;
-    let source_digest = Digest::sha256(&source_bytes);
-    if source_digest.bytes() != source_id.content_digest.bytes() {
-        return Err(format!(
-            "FEA function `{}` changed after its project graph was frozen",
-            definition_record.qualified_name
-        ));
-    }
-    let source_text = String::from_utf8(source_bytes).map_err(|_| {
-        format!(
-            "FEA function source {} is not UTF-8 MATLAB text",
-            definition_record.source_path.display()
-        )
-    })?;
-    let revision = ProgramRevision::new(
-        Digest::from_bytes(*frozen.graph_digest().bytes()),
-        Digest::from_bytes(*frozen.source_revision().bytes()),
-        source.program_environment().clone(),
+    let compiled = super::callable::compile_imported_function(
+        source,
+        &generated.module_path,
+        &generated.function,
+        None,
     )
-    .map_err(|error| error.to_string())?;
-    let mut session = runmat_core::RunMatSession::with_options(false, false)
-        .map_err(|error| error.to_string())?;
-    session.set_compat_mode(source.compatibility_mode());
-    session
-        .install_project_handoff(runmat_package::FrozenProjectHandoff::new(frozen.clone()))
-        .map_err(|error| error.to_string())?;
-    let entrypoint = definition_record
-        .qualified_name
-        .rsplit('.')
-        .next()
-        .filter(|name| !name.is_empty())
-        .ok_or_else(|| "FEA function has an empty function name".to_string())?;
-    let unit = session
-        .compile_executable_unit(
-            runmat_core::ExecutableSource::frozen(
-                source_id.package_instance.to_string(),
-                source_id.relative_path.as_str(),
-                definition_record.source_path.to_string_lossy(),
-                source_text,
-            ),
-            Some(revision.clone()),
-        )
-        .await
-        .map_err(|error| format!("cannot compile FEA function: {error}"))?;
-    let executable = unit
-        .portable_envelope_for(Some(entrypoint))
-        .map_err(|error| error.to_string())?;
-    let function = unit
-        .function_analysis(executable.manifest.identity.entrypoint_function)
-        .ok_or_else(|| "FEA function has no static function facts".to_string())?;
+    .await?;
     let request =
         runmat_analysis_execution::resolve_geometry_generator_request(definition, bindings)
             .map_err(|error| error.to_string())?;
     let admitted = runmat_analysis_execution::admit_named_geometry_generator(
         request,
-        revision,
-        BundleCallable {
-            owner_identity: source_id.package_instance.to_string(),
-            qualified_name: definition_record.qualified_name,
-            source_digest,
-        },
-        executable.manifest.identity.source_digest,
-        function,
+        compiled.revision,
+        compiled.callable,
+        compiled.executable_source_digest,
+        &compiled.function,
         &BTreeSet::new(),
     )
     .map_err(|error| error.to_string())?;
-    runmat_analysis_execution::prepare_geometry_generator(admitted, executable)
+    runmat_analysis_execution::prepare_geometry_generator(admitted, compiled.executable)
         .map_err(|error| error.to_string())
 }
 

@@ -12,6 +12,12 @@ pub(crate) struct NativeCheckedFeaSource {
     pub project_manifest: Option<ProjectManifest>,
 }
 
+pub(crate) fn is_fea_source_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("fea"))
+}
+
 impl std::ops::Deref for NativeCheckedFeaSource {
     type Target = runmat_runtime::analysis::CheckedFeaSource;
 

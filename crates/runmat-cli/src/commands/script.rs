@@ -56,7 +56,7 @@ pub async fn execute_script_with_args(
     let script = resolve_script_input(script)?;
     info!("Executing script: {script:?}");
 
-    if runmat_runtime::analysis::is_fea_file_path(&script) {
+    if crate::commands::fea::source::is_fea_source_path(&script) {
         if emit_bytecode_path.is_some() {
             anyhow::bail!("--emit-bytecode is only supported for .m script files");
         }

@@ -270,7 +270,7 @@ fn arguments(
             );
             continue;
         }
-        if let Some(value) = generator_argument(value) {
+        if let Some(value) = generator_argument(value, &parameter.value) {
             result.push(value);
         } else {
             error(
@@ -379,14 +379,26 @@ pub(in crate::semantic::model) fn lower_numerical_invocation(
     })
 }
 
-fn generator_argument(value: &CheckedExpression) -> Option<GeneratorArgument> {
+fn generator_argument(
+    value: &CheckedExpression,
+    parameter: &OperationTypePattern,
+) -> Option<GeneratorArgument> {
     match &value.kind {
         CheckedExpressionKind::Boolean(value) => Some(GeneratorArgument::Boolean(*value)),
         CheckedExpressionKind::String(value) => Some(GeneratorArgument::Text(value.clone())),
-        CheckedExpressionKind::Number(source) if value.value_type == FeaType::Integer => source
-            .parse::<i64>()
-            .ok()
-            .map(GeneratorArgument::SignedInteger),
+        CheckedExpressionKind::Number(source) if value.value_type == FeaType::Integer => {
+            if matches!(
+                parameter,
+                OperationTypePattern::IntegerScalar | OperationTypePattern::Size
+            ) {
+                source
+                    .parse::<i64>()
+                    .ok()
+                    .map(GeneratorArgument::SignedInteger)
+            } else {
+                source.parse::<f64>().ok().map(GeneratorArgument::Real)
+            }
+        }
         CheckedExpressionKind::List(values) => values
             .iter()
             .map(scalar)

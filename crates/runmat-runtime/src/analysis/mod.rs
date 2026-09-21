@@ -63,7 +63,6 @@ mod contracts;
 mod excitation_authoring;
 mod execution_dispatch;
 mod execution_error;
-mod fea_document;
 pub(crate) mod field_selection;
 #[cfg(feature = "plot-core")]
 mod figures;
@@ -396,13 +395,12 @@ fn install_fea_solver_context() -> runmat_analysis_fea::FeaProgressContextGuard 
 }
 
 pub use contracts::{
-    AnalysisAcousticRunOptions,
-    AnalysisBucklingRunOptions, AnalysisCfdRunOptions, AnalysisChtRunOptions,
-    AnalysisCreateModelIntentSpec, AnalysisDiagnosticsArtifactPayload, AnalysisDocumentCheckResult,
-    AnalysisDocumentKind, AnalysisDocumentRunResult, AnalysisElectromagneticRunOptions,
-    AnalysisExecutionPlan, AnalysisExecutionStep, AnalysisFieldBinding,
-    AnalysisFieldBindingsArtifactPayload, AnalysisFieldDescriptor, AnalysisFieldKind,
-    AnalysisFieldLocation, AnalysisFieldPageResult, AnalysisFieldPageValues,
+    AnalysisAcousticRunOptions, AnalysisBucklingRunOptions, AnalysisCfdRunOptions,
+    AnalysisChtRunOptions, AnalysisCreateModelIntentSpec, AnalysisDiagnosticsArtifactPayload,
+    AnalysisDocumentCheckResult, AnalysisDocumentKind, AnalysisDocumentRunResult,
+    AnalysisElectromagneticRunOptions, AnalysisExecutionPlan, AnalysisExecutionStep,
+    AnalysisFieldBinding, AnalysisFieldBindingsArtifactPayload, AnalysisFieldDescriptor,
+    AnalysisFieldKind, AnalysisFieldLocation, AnalysisFieldPageResult, AnalysisFieldPageValues,
     AnalysisFieldPagingDescriptor, AnalysisFieldRequestOptions, AnalysisFieldSelection,
     AnalysisFieldStatistic, AnalysisFieldStorage, AnalysisFieldStorageRef, AnalysisFsiRunOptions,
     AnalysisImmutableValueSpec, AnalysisModalRunOptions, AnalysisModelSourceEvidence,
@@ -412,10 +410,10 @@ pub use contracts::{
     AnalysisRenderTriangleRange, AnalysisResponseSpectrumRunOptions, AnalysisResultsCompareData,
     AnalysisResultsCompareQuery, AnalysisResultsData, AnalysisResultsQuery, AnalysisResultsSummary,
     AnalysisRunDatasetFieldPagingPolicy, AnalysisRunDatasetPayload, AnalysisRunDatasetStudyRef,
-    AnalysisRunOptions, AnalysisRunResult, AnalysisRuntimeCapabilities,
-    AnalysisSolverOptions, AnalysisStructuralFrequencyRunOptions,
-    AnalysisStructuralFrequencySolver, AnalysisStructuralTimeStepPolicy, AnalysisStudyIssue,
-    AnalysisStudyPlanData, AnalysisStudyPlanStepData, AnalysisStudyRunData, AnalysisStudySpec,
+    AnalysisRunOptions, AnalysisRunResult, AnalysisRuntimeCapabilities, AnalysisSolverOptions,
+    AnalysisStructuralFrequencyRunOptions, AnalysisStructuralFrequencySolver,
+    AnalysisStructuralTimeStepPolicy, AnalysisStudyIssue, AnalysisStudyPlanData,
+    AnalysisStudyPlanStepData, AnalysisStudyRunData, AnalysisStudySpec,
     AnalysisStudyStatePublicationData, AnalysisStudyStepNumericalResultData,
     AnalysisStudyStepRunData, AnalysisStudySweepData, AnalysisStudySweepFailureEntry,
     AnalysisStudySweepFailureKind, AnalysisStudySweepPlanData, AnalysisStudySweepPlanEntry,
@@ -435,10 +433,6 @@ pub use contracts::{
     ANALYSIS_FIELD_DEFAULT_MATERIALIZE_LIMIT, ANALYSIS_FIELD_DEFAULT_PAGE_SIZE,
     ANALYSIS_OBJECT_ARTIFACT_METADATA_SCHEMA_VERSION, ANALYSIS_RUN_DATASET_KIND,
     ANALYSIS_RUN_DATASET_SCHEMA_VERSION,
-};
-pub use fea_document::{
-    is_fea_file_path, load_fea_document_from_path_async, parse_and_resolve_fea_document,
-    FeaResolvedDocument,
 };
 #[cfg(feature = "plot-core")]
 pub use figures::{

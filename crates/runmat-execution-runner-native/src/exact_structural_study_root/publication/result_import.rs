@@ -317,6 +317,7 @@ pub fn import_exact_structural_study_result(
     resolved_model =
         runmat_analysis_core::resolve_geometry_region_aliases(&resolved_model, &aliases)
             .map_err(protocol)?;
+    let resolved_compiled_model = resolved_model.clone();
     let mut resolved_workloads = expected.workloads.clone();
     resolved_workloads
         .replace_model(resolved_model)
@@ -648,9 +649,16 @@ pub fn import_exact_structural_study_result(
             ))
         }
     };
+    let mut compiled_study = publication.compiled_study;
+    if let Some(compiled) = &mut compiled_study {
+        compiled.model = resolved_compiled_model;
+        compiled
+            .validate_against(&mesh.artifact)
+            .map_err(protocol)?;
+    }
     Ok(ExactStructuralStudyResult {
         frozen_project_digest: expected.frozen_project_digest,
-        compiled_study: publication.compiled_study,
+        compiled_study,
         mesh,
         region_resolution,
         resolved_workloads: retained_workloads,

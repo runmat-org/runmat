@@ -11,8 +11,13 @@ use runmat_execution::TaskId;
 
 use crate::analysis_sequence::StructuralSequenceExecutionPolicy;
 use crate::analysis_task::{prepare_analysis_task, AnalysisTaskPolicy};
-use crate::analysis_task_pool::{AnalysisTaskPool, RemoteAnalysisTaskPool};
-use crate::{NativeExecutionError, NativeExecutionResult, RemotePoolDriver};
+use crate::analysis_task_pool::{
+    configure_local_analysis, AnalysisTaskPool, LocalAnalysisTaskPool, RemoteAnalysisTaskPool,
+};
+use crate::{
+    NativeExecutionConfig, NativeExecutionError, NativeExecutionResult, NativeProgramSession,
+    RemotePoolDriver,
+};
 
 #[async_trait]
 pub trait StructuralTransientRecoveryPublisher: Send {
@@ -47,6 +52,26 @@ impl StructuralTransientRecoveryPublisher for RetainedStructuralTransientRecover
 #[derive(Clone, Debug, PartialEq)]
 pub struct CompletedStructuralTransientSequence {
     pub result: ImportedStructuralTransientResult,
+}
+
+pub async fn execute_structural_transient_locally(
+    mut config: NativeExecutionConfig,
+    preparation: StructuralTransientSequencePreparation,
+    policy: StructuralSequenceExecutionPolicy,
+) -> NativeExecutionResult<CompletedStructuralTransientSequence> {
+    policy.validate()?;
+    configure_local_analysis(&mut config, &policy.resources);
+    let session = NativeProgramSession::new(config)?;
+    let mut publisher = RetainedStructuralTransientRecovery::default();
+    execute_structural_transient_with_pool(
+        &mut LocalAnalysisTaskPool::new(session),
+        preparation,
+        policy,
+        None,
+        &mut publisher,
+        Vec::new(),
+    )
+    .await
 }
 
 pub async fn execute_structural_transient_remotely(

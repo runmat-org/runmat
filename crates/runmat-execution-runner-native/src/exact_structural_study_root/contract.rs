@@ -1,9 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_analysis_execution::{
-    prepare_analysis_host_program, AnalysisHostProgramArtifact, PreparedGeneratorChunk,
-    PreparedGeneratorProgram, PreparedInputMaterialization, PreparedNumericalMaterialization,
-    PreparedSignalMaterialization, StructuralStudyWorkloads,
+    prepare_analysis_host_program, AnalysisHostProgramArtifact, PreparedInputMaterialization,
+    StructuralStudyWorkloads,
 };
 use runmat_canonical_codec::{decode_contract, encode_contract};
 use runmat_execution::resource::AcceleratorRequest;
@@ -25,6 +24,7 @@ use super::{
     EXACT_STRUCTURAL_STUDY_ROOT_TARGET_PROFILE, ROOT_DOMAIN, ROOT_MEDIA_TYPE, ROOT_PREFIX,
     ROOT_PROGRAM_BYTES, ROOT_VALUE_SCHEMA,
 };
+use crate::input_materialization_contract::InputMaterializationRequest;
 use crate::{decode_exact_meshing_root, NativeExecutionResult, PreparedExactMeshingRoot};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -36,7 +36,7 @@ struct ExactStructuralStudyRootRequest {
     geometry_source_digest: Digest,
     workloads: StructuralStudyWorkloads,
     analysis_accelerator_requests: Vec<AcceleratorRequest>,
-    input_materializations: Vec<ExactInputMaterializationRequest>,
+    input_materializations: Vec<InputMaterializationRequest>,
     exact_meshing: ProgramExecutionDescriptor,
     exact_argument_count: u32,
     materialization_argument_count: u32,
@@ -53,7 +53,7 @@ impl ExactStructuralStudyRootRequest {
         let prepared_inputs = self
             .input_materializations
             .iter()
-            .map(ExactInputMaterializationRequest::to_prepared)
+            .map(InputMaterializationRequest::to_prepared)
             .collect::<NativeExecutionResult<Vec<_>>>()?;
         validate_input_materialization_inventory(
             &self.workloads,
@@ -94,167 +94,6 @@ impl ExactStructuralStudyRootRequest {
             decode_contract(ROOT_PREFIX, ROOT_DOMAIN, bytes, CONTRACT_LIMITS).map_err(protocol)?;
         Self::validate(&root)?;
         Ok(root)
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum ExactInputMaterializationRequest {
-    Signal(Box<ExactSignalMaterializationRequest>),
-    Numerical(Box<ExactNumericalMaterializationRequest>),
-}
-
-impl ExactInputMaterializationRequest {
-    fn from_prepared(prepared: &PreparedInputMaterialization) -> NativeExecutionResult<Self> {
-        match prepared {
-            PreparedInputMaterialization::Signal(value) => {
-                ExactSignalMaterializationRequest::from_prepared(value)
-                    .map(Box::new)
-                    .map(Self::Signal)
-            }
-            PreparedInputMaterialization::Numerical(value) => {
-                ExactNumericalMaterializationRequest::from_prepared(value)
-                    .map(Box::new)
-                    .map(Self::Numerical)
-            }
-        }
-    }
-
-    fn to_prepared(&self) -> NativeExecutionResult<PreparedInputMaterialization> {
-        match self {
-            Self::Signal(value) => value
-                .to_prepared()
-                .map(Box::new)
-                .map(PreparedInputMaterialization::Signal),
-            Self::Numerical(value) => value
-                .to_prepared()
-                .map(Box::new)
-                .map(PreparedInputMaterialization::Numerical),
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ExactSignalMaterializationRequest {
-    authored: runmat_analysis_core::PhysicalSignal,
-    admitted: runmat_analysis_execution::AdmittedSignalGenerator,
-    descriptor: ProgramExecutionDescriptor,
-    chunks: Vec<runmat_analysis_execution::GeneratorChunk>,
-    input_references: Vec<ValueRef>,
-    input_admissions: Vec<runmat_analysis_execution::SignalInputAdmission>,
-}
-
-impl ExactSignalMaterializationRequest {
-    fn from_prepared(prepared: &PreparedSignalMaterialization) -> NativeExecutionResult<Self> {
-        prepared.validate().map_err(protocol)?;
-        Ok(Self {
-            authored: prepared.authored.clone(),
-            admitted: prepared.admitted.clone(),
-            descriptor: prepared.program.descriptor.clone(),
-            chunks: prepared
-                .program
-                .chunks
-                .iter()
-                .map(|chunk| chunk.plan.clone())
-                .collect(),
-            input_references: prepared.program.input_references.clone(),
-            input_admissions: prepared.input_admissions.clone(),
-        })
-    }
-
-    fn to_prepared(&self) -> NativeExecutionResult<PreparedSignalMaterialization> {
-        let chunks = self
-            .chunks
-            .iter()
-            .cloned()
-            .map(|plan| PreparedGeneratorChunk {
-                request: ProgramExecutionRequest {
-                    schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
-                    recipe: self.descriptor.recipe.clone(),
-                    artifact: self.descriptor.artifact.clone(),
-                    function: self.descriptor.function,
-                    arguments: plan.arguments.clone(),
-                    requested_outputs: self.descriptor.requested_outputs,
-                },
-                plan,
-            })
-            .collect();
-        let prepared = PreparedSignalMaterialization {
-            authored: self.authored.clone(),
-            admitted: self.admitted.clone(),
-            program: PreparedGeneratorProgram {
-                descriptor: self.descriptor.clone(),
-                chunks,
-                input_references: self.input_references.clone(),
-            },
-            input_objects: Vec::new(),
-            input_admissions: self.input_admissions.clone(),
-        };
-        prepared.validate().map_err(protocol)?;
-        Ok(prepared)
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ExactNumericalMaterializationRequest {
-    authored: runmat_analysis_execution::NumericalGeneratorSource,
-    admitted: runmat_analysis_execution::AdmittedNumericalGenerator,
-    descriptor: ProgramExecutionDescriptor,
-    chunks: Vec<runmat_analysis_execution::GeneratorChunk>,
-    input_references: Vec<ValueRef>,
-    input_admissions: Vec<runmat_analysis_execution::SignalInputAdmission>,
-}
-
-impl ExactNumericalMaterializationRequest {
-    fn from_prepared(prepared: &PreparedNumericalMaterialization) -> NativeExecutionResult<Self> {
-        prepared.validate().map_err(protocol)?;
-        Ok(Self {
-            authored: prepared.authored.clone(),
-            admitted: prepared.admitted.clone(),
-            descriptor: prepared.program.descriptor.clone(),
-            chunks: prepared
-                .program
-                .chunks
-                .iter()
-                .map(|chunk| chunk.plan.clone())
-                .collect(),
-            input_references: prepared.program.input_references.clone(),
-            input_admissions: prepared.input_admissions.clone(),
-        })
-    }
-
-    fn to_prepared(&self) -> NativeExecutionResult<PreparedNumericalMaterialization> {
-        let chunks = self
-            .chunks
-            .iter()
-            .cloned()
-            .map(|plan| PreparedGeneratorChunk {
-                request: ProgramExecutionRequest {
-                    schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
-                    recipe: self.descriptor.recipe.clone(),
-                    artifact: self.descriptor.artifact.clone(),
-                    function: self.descriptor.function,
-                    arguments: plan.arguments.clone(),
-                    requested_outputs: self.descriptor.requested_outputs,
-                },
-                plan,
-            })
-            .collect();
-        let prepared = PreparedNumericalMaterialization {
-            authored: self.authored.clone(),
-            admitted: self.admitted.clone(),
-            program: PreparedGeneratorProgram {
-                descriptor: self.descriptor.clone(),
-                chunks,
-                input_references: self.input_references.clone(),
-            },
-            input_objects: Vec::new(),
-            input_admissions: self.input_admissions.clone(),
-        };
-        prepared.validate().map_err(protocol)?;
-        Ok(prepared)
     }
 }
 
@@ -449,7 +288,7 @@ pub fn prepare_exact_structural_study_root(
         analysis_accelerator_requests,
         input_materializations: input_materializations
             .iter()
-            .map(ExactInputMaterializationRequest::from_prepared)
+            .map(InputMaterializationRequest::from_prepared)
             .collect::<NativeExecutionResult<Vec<_>>>()?,
         exact_meshing: descriptor(&exact_request),
         exact_argument_count: u32::try_from(exact_request.arguments.len()).map_err(protocol)?,
@@ -601,7 +440,7 @@ pub fn decode_exact_structural_study_root(
     let input_materializations = root
         .input_materializations
         .iter()
-        .map(ExactInputMaterializationRequest::to_prepared)
+        .map(InputMaterializationRequest::to_prepared)
         .collect::<NativeExecutionResult<Vec<_>>>()?;
     let expected_materialization_references = input_materializations
         .iter()

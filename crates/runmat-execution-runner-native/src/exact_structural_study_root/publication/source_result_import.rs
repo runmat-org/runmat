@@ -103,13 +103,23 @@ pub fn import_structural_study_result(
         geometry_source_digest: Digest::from_bytes(*mesh.artifact.geometry.source_digest.bytes()),
         workloads: recompiled.workloads,
         analysis_accelerator_requests: expected.analysis_accelerator_requests.clone(),
-        input_materializations: Vec::new(),
+        input_materializations: expected.input_materializations.clone(),
         expected_meshing_request: expected.expected_meshing_request.clone(),
     };
     let result = super::import_exact_structural_study_result(source, response, &exact, limits)?;
-    if result.compiled_study.as_ref() != Some(compiled) {
+    if result
+        .compiled_study
+        .as_ref()
+        .map(|compiled| &compiled.model)
+        != Some(
+            result
+                .resolved_workloads
+                .authored_model()
+                .map_err(protocol)?,
+        )
+    {
         return Err(protocol(
-            "imported structural study changed its compiled study definition",
+            "imported structural study differs from its materialized workload model",
         ));
     }
     Ok(result)

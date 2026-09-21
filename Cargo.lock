@@ -7222,7 +7222,6 @@ dependencies = [
  "rustfft",
  "serde",
  "serde_json",
- "serde_yaml",
  "sha2 0.10.9",
  "tempfile",
  "thiserror 1.0.69",

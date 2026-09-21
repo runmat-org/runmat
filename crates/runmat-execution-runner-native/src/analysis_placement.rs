@@ -28,9 +28,9 @@ use crate::{
     execute_structural_prestressed_frequency_study_locally_with_source,
     execute_structural_prestressed_modal_frequency_study_locally_with_source,
     execute_structural_prestressed_modal_study_locally, execute_structural_random_response_locally,
-    execute_structural_sequence_locally, NativeExecutionConfig,
-    RetainedStructuralTransientRecovery, StructuralFrequencyExecutionPreparation,
-    StructuralSequenceExecutionPolicy,
+    execute_structural_sequence_locally, execute_structural_transient_locally,
+    NativeExecutionConfig, RetainedStructuralTransientRecovery,
+    StructuralFrequencyExecutionPreparation, StructuralSequenceExecutionPolicy,
 };
 
 /// Native-process placement for runtime-prepared structural studies.
@@ -200,9 +200,9 @@ pub async fn execute_structural_workloads_locally(
     match workloads {
         StructuralStudyWorkloads::HeterogeneousSequence { workloads } => {
             let authored = StructuralStudyWorkloads::HeterogeneousSequence { workloads };
-            let step_ids = authored.step_ids().map_err(|error| {
-                crate::NativeExecutionError::Configuration(error.to_string())
-            })?;
+            let step_ids = authored
+                .step_ids()
+                .map_err(|error| crate::NativeExecutionError::Configuration(error.to_string()))?;
             if let [preload_step_id, modal_step_id, frequency_step_id] = step_ids.as_slice() {
                 let is_modal_frequency = match &authored {
                     StructuralStudyWorkloads::HeterogeneousSequence { workloads } => matches!(
@@ -281,20 +281,20 @@ pub async fn execute_structural_workloads_locally(
                 ));
             };
             let producer = match &authored {
-                StructuralStudyWorkloads::HeterogeneousSequence { workloads } => workloads
-                    .get(producer_step_id)
-                    .ok_or_else(|| crate::NativeExecutionError::Configuration(
-                        "heterogeneous structural producer is absent".into(),
-                    ))?,
+                StructuralStudyWorkloads::HeterogeneousSequence { workloads } => {
+                    workloads.get(producer_step_id).ok_or_else(|| {
+                        crate::NativeExecutionError::Configuration(
+                            "heterogeneous structural producer is absent".into(),
+                        )
+                    })?
+                }
                 _ => unreachable!(),
             };
             let consumer_is_prestressed_modal = match &authored {
                 StructuralStudyWorkloads::HeterogeneousSequence { workloads } => matches!(
                     workloads.get(consumer_step_id),
                     Some(
-                        runmat_analysis_fea::execution::StructuralStepWorkload::PrestressedModal {
-                            ..
-                        }
+                        runmat_analysis_fea::execution::StructuralStepWorkload::PrestressedModal { .. }
                     )
                 ),
                 _ => false,
@@ -325,9 +325,7 @@ pub async fn execute_structural_workloads_locally(
                 StructuralStudyWorkloads::HeterogeneousSequence { workloads } => matches!(
                     workloads.get(consumer_step_id),
                     Some(
-                        runmat_analysis_fea::execution::StructuralStepWorkload::RandomResponse {
-                            ..
-                        }
+                        runmat_analysis_fea::execution::StructuralStepWorkload::RandomResponse { .. }
                     )
                 ),
                 _ => false,
@@ -432,8 +430,8 @@ pub async fn execute_structural_workloads_locally(
                     policy,
                 )
                 .await?;
-                return Ok(StructuralStudyNumericalResult::StructuralBuckling(Box::new(
-                    StructuralStudyBucklingNumericalResult {
+                return Ok(StructuralStudyNumericalResult::StructuralBuckling(
+                    Box::new(StructuralStudyBucklingNumericalResult {
                         frozen_project_digest,
                         preload_step_id: producer_step_id.clone(),
                         buckling_step_id: consumer_step_id.clone(),
@@ -443,8 +441,8 @@ pub async fn execute_structural_workloads_locally(
                         prestress_state: completed.prestress_state.state,
                         buckling_result: completed.buckling.result,
                         buckling_numerical_receipt: completed.buckling.numerical_receipt,
-                    },
-                )));
+                    }),
+                ));
             }
             if consumer_is_response_spectrum {
                 let completed = execute_structural_modal_response_spectrum_locally(
@@ -550,10 +548,7 @@ pub async fn execute_structural_workloads_locally(
                     modal_numerical_receipt: completed.modal.numerical_receipt,
                     basis_state: completed.basis_state.state,
                     transient_result: completed.transient.result.result,
-                    transient_numerical_receipt: completed
-                        .transient
-                        .result
-                        .numerical_receipt,
+                    transient_numerical_receipt: completed.transient.result.numerical_receipt,
                 }),
             ))
         }
@@ -660,10 +655,36 @@ pub async fn execute_structural_workloads_locally(
                 },
             )))
         }
-        StructuralStudyWorkloads::StructuralTransient { .. } => {
-            Err(crate::NativeExecutionError::Configuration(
-                "local placement does not execute structural transient studies through this boundary"
-                    .into(),
+        StructuralStudyWorkloads::StructuralTransient {
+            workload,
+            block_plan,
+        } => {
+            let step_id = workload.step_id.clone();
+            let preparation = runmat_analysis_execution::prepare_structural_transient_sequence(
+                runmat_analysis_execution::StructuralTransientSequencePreparationInput {
+                    workload: &workload,
+                    mesh: &mesh,
+                    modal_state: None,
+                    block_plan,
+                    initial_dependencies: Vec::new(),
+                    artifact_access: access,
+                    program_revision: revision,
+                    chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
+                    inventory_limits: ObjectInventoryLimits::default(),
+                },
+            )
+            .map_err(|error| crate::NativeExecutionError::Configuration(error.to_string()))?;
+            let completed =
+                execute_structural_transient_locally(execution_config, preparation, policy).await?;
+            Ok(StructuralStudyNumericalResult::StructuralTransient(
+                Box::new(
+                    runmat_runtime::analysis::StructuralStudyTransientNumericalResult {
+                        frozen_project_digest,
+                        step_id,
+                        result: completed.result.result,
+                        numerical_receipt: completed.result.numerical_receipt,
+                    },
+                ),
             ))
         }
     }

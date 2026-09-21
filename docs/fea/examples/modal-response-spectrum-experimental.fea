@@ -34,8 +34,8 @@ model launch_bracket {
         structural.fixed { target = geometry.bracket.region.support }
     }
     response_spectrum qualification_x {
-        frequencies = [5, 10, 20, 40] Hz
-        ordinates = [1.2, 2.5, 1.8, 0.7] g
+        frequencies = [0.1, 100, 1000, 10000, 100000] Hz
+        ordinates = [1.2, 1.2, 2.5, 1.8, 0.7] g
         damping_ratio = 0.05
         response = pseudo_acceleration
         direction = [1, 0, 0]
@@ -53,7 +53,7 @@ study modal_response_spectrum_experimental {
     model = model.launch_bracket
     require formulation = experimental
     analysis modes {
-        structural modal { modes = 6 }
+        structural modal { modes = 30 }
         retain basis
     }
     analysis response_spectrum after analysis.modes {

@@ -1,15 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use runmat_analysis_core::{PhysicalSignal, RandomExcitationSpectrum, ResponseSpectrum};
 use runmat_analysis_execution::{
-    build_generator_task_submission, canonical_materialized_random_spectrum_bytes,
-    canonical_materialized_response_spectrum_bytes, canonicalize_signal_generator_outputs,
-    materialize_random_spectrum, materialize_response_spectrum, materialize_signal_for_solver,
-    prepare_analysis_objects, GeneratorChunkOutput, GeneratorExecutionContext,
-    NumericalGeneratorSource, PreparedAnalysisObjects, PreparedInputMaterialization,
+    build_generator_task_submission, prepare_analysis_objects, GeneratorChunkOutput,
+    GeneratorExecutionContext, PreparedInputMaterialization,
 };
-use runmat_analysis_fea::execution::{AnalysisNumericalObjectKind, DEFAULT_ANALYSIS_CHUNK_BYTES};
+use runmat_analysis_fea::execution::DEFAULT_ANALYSIS_CHUNK_BYTES;
 use runmat_execution::resource::Capability;
 use runmat_execution::state::TaskState;
 use runmat_execution::task::RetryPolicy;
@@ -20,24 +16,12 @@ use runmat_execution_artifact::{ArtifactAccess, ObjectNamespace};
 use runmat_execution_transport_native::control::ResourceRequest as AllocationResources;
 
 use super::RemotePoolDriver;
+use crate::input_materialization::{materialize_input, CompletedInputMaterialization};
 use crate::{NativeExecutionError, NativeExecutionResult};
 
 #[derive(Clone, Debug)]
-pub(crate) enum CompletedRemoteInput {
-    Signal(PhysicalSignal),
-    ResponseSpectrum(ResponseSpectrum),
-    RandomSpectrum(RandomExcitationSpectrum),
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct CompletedRemoteInputMaterialization {
-    pub input: CompletedRemoteInput,
-    pub objects: PreparedAnalysisObjects,
-}
-
-#[derive(Clone, Debug)]
 pub(super) enum RemoteInputMaterializationOutcome {
-    Completed(Box<CompletedRemoteInputMaterialization>),
+    Completed(Box<CompletedInputMaterialization>),
     Failed(String),
     Cancelled,
     Indeterminate(String),
@@ -193,97 +177,14 @@ pub(super) async fn execute(
             ) {
                 pool.register_execution_object(reference, object.bytes.clone())?;
             }
-            RemoteInputMaterializationOutcome::Completed(Box::new(
-                CompletedRemoteInputMaterialization { input, objects },
-            ))
+            RemoteInputMaterializationOutcome::Completed(Box::new(CompletedInputMaterialization {
+                input,
+                objects,
+            }))
         };
         outcomes.insert(identity, outcome);
     }
     Ok(outcomes)
-}
-
-fn materialize_input(
-    prepared: &PreparedInputMaterialization,
-    chunks: &[runmat_analysis_execution::GeneratorChunk],
-    outputs: &[GeneratorChunkOutput],
-) -> NativeExecutionResult<(
-    CompletedRemoteInput,
-    AnalysisNumericalObjectKind,
-    runmat_execution::Digest,
-    Vec<u8>,
-)> {
-    match prepared {
-        PreparedInputMaterialization::Signal(prepared) => {
-            let realization = canonicalize_signal_generator_outputs(
-                &prepared.authored,
-                &prepared.admitted,
-                None,
-                &prepared.input_admissions,
-                chunks,
-                outputs,
-            )
-            .map_err(protocol)?;
-            let signal =
-                materialize_signal_for_solver(&prepared.authored, &prepared.admitted, &realization)
-                    .map_err(protocol)?;
-            Ok((
-                CompletedRemoteInput::Signal(signal),
-                AnalysisNumericalObjectKind::Signal,
-                realization.identity.digest(),
-                realization.canonical_bytes().map_err(protocol)?,
-            ))
-        }
-        PreparedInputMaterialization::Numerical(prepared) => match &prepared.authored {
-            NumericalGeneratorSource::ResponseSpectrum(authored) => {
-                let spectrum = materialize_response_spectrum(
-                    authored,
-                    &prepared.admitted,
-                    &prepared.input_admissions,
-                    chunks,
-                    outputs,
-                )
-                .map_err(protocol)?;
-                let identity = spectrum
-                    .ordinates
-                    .numerical_digest()
-                    .map_err(protocol)?
-                    .parse()
-                    .map_err(protocol)?;
-                let bytes =
-                    canonical_materialized_response_spectrum_bytes(&spectrum).map_err(protocol)?;
-                Ok((
-                    CompletedRemoteInput::ResponseSpectrum(spectrum),
-                    AnalysisNumericalObjectKind::ResponseSpectrum,
-                    identity,
-                    bytes,
-                ))
-            }
-            NumericalGeneratorSource::RandomSpectrum(authored) => {
-                let spectrum = materialize_random_spectrum(
-                    authored,
-                    &prepared.admitted,
-                    &prepared.input_admissions,
-                    chunks,
-                    outputs,
-                )
-                .map_err(protocol)?;
-                let identity = spectrum
-                    .spectral_density
-                    .numerical_digest()
-                    .map_err(protocol)?
-                    .parse()
-                    .map_err(protocol)?;
-                let bytes =
-                    canonical_materialized_random_spectrum_bytes(&spectrum).map_err(protocol)?;
-                Ok((
-                    CompletedRemoteInput::RandomSpectrum(spectrum),
-                    AnalysisNumericalObjectKind::RandomSpectrum,
-                    identity,
-                    bytes,
-                ))
-            }
-        },
-    }
 }
 
 fn validate_registered_inputs(
@@ -311,10 +212,7 @@ pub(super) fn apply_to_model(
     model: &mut runmat_analysis_core::AnalysisModel,
     required: &[PreparedInputMaterialization],
     outcomes: &BTreeMap<runmat_execution::Digest, RemoteInputMaterializationOutcome>,
-) -> Result<Vec<CompletedRemoteInputMaterialization>, RemoteInputMaterializationOutcome> {
-    let mut signal_replacements = BTreeMap::new();
-    let mut response_replacements = BTreeMap::new();
-    let mut random_replacements = BTreeMap::new();
+) -> Result<Vec<CompletedInputMaterialization>, RemoteInputMaterializationOutcome> {
     let mut completed = Vec::with_capacity(required.len());
     for prepared in required {
         let outcome = outcomes
@@ -328,66 +226,10 @@ pub(super) fn apply_to_model(
             RemoteInputMaterializationOutcome::Completed(result) => result.as_ref().clone(),
             terminal => return Err(terminal.clone()),
         };
-        match &result.input {
-            CompletedRemoteInput::Signal(signal) => {
-                signal_replacements.insert(signal.signal_id().clone(), signal.clone());
-            }
-            CompletedRemoteInput::ResponseSpectrum(spectrum) => {
-                response_replacements.insert(spectrum.spectrum_id.clone(), spectrum.clone());
-            }
-            CompletedRemoteInput::RandomSpectrum(spectrum) => {
-                random_replacements.insert(spectrum.excitation_id.clone(), spectrum.clone());
-            }
-        }
         completed.push(result);
     }
-    model.signals = model
-        .signals
-        .iter()
-        .map(|signal| {
-            if signal.generator().is_none() {
-                signal.clone()
-            } else {
-                signal_replacements
-                    .get(signal.signal_id())
-                    .cloned()
-                    .unwrap_or_else(|| signal.clone())
-            }
-        })
-        .collect();
-    if model
-        .signals
-        .iter()
-        .any(|signal| signal.generator().is_some())
-    {
-        return Err(RemoteInputMaterializationOutcome::Failed(
-            "remote study retained an unmaterialized signal generator".into(),
-        ));
-    }
-    for spectrum in &mut model.response_spectra {
-        if let Some(replacement) = response_replacements.get(&spectrum.spectrum_id) {
-            *spectrum = replacement.clone();
-        }
-    }
-    for spectrum in &mut model.random_excitations {
-        if let Some(replacement) = random_replacements.get(&spectrum.excitation_id) {
-            *spectrum = replacement.clone();
-        }
-    }
-    if model
-        .response_spectra
-        .iter()
-        .any(|spectrum| spectrum.ordinates.generator().is_some())
-        || model
-            .random_excitations
-            .iter()
-            .any(|spectrum| spectrum.spectral_density.generator().is_some())
-    {
-        return Err(RemoteInputMaterializationOutcome::Failed(
-            "remote study retained an unmaterialized spectral generator".into(),
-        ));
-    }
-    Ok(completed)
+    crate::input_materialization::apply_to_model(model, completed)
+        .map_err(|error| RemoteInputMaterializationOutcome::Failed(error.to_string()))
 }
 
 fn task_terminal(

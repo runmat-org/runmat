@@ -717,66 +717,64 @@ pub struct ExactStructuralFrequencyHistoryResult {
 
 pub(crate) enum ExactStructuralAnalysisPublication<'a> {
     LinearSequence {
-        inputs: &'a [crate::remote::input_materialization::CompletedRemoteInputMaterialization],
+        inputs: &'a [crate::input_materialization::CompletedInputMaterialization],
         sequence: &'a CompletedStructuralSequence,
         unresolved_workloads_digest: Digest,
     },
     StructuralTransient {
-        inputs: &'a [crate::remote::input_materialization::CompletedRemoteInputMaterialization],
+        inputs: &'a [crate::input_materialization::CompletedInputMaterialization],
         completion: &'a CompletedStructuralTransientSequence,
         unresolved_workloads_digest: Digest,
     },
     StructuralModal {
-        inputs: &'a [crate::remote::input_materialization::CompletedRemoteInputMaterialization],
+        inputs: &'a [crate::input_materialization::CompletedInputMaterialization],
         completion: &'a crate::CompletedStructuralModalStudy,
         unresolved_workloads_digest: Digest,
     },
     StructuralModalTransient {
-        inputs: &'a [crate::remote::input_materialization::CompletedRemoteInputMaterialization],
+        inputs: &'a [crate::input_materialization::CompletedInputMaterialization],
         completion: &'a crate::CompletedStructuralModalTransientStudy,
         unresolved_workloads_digest: Digest,
     },
     StructuralModalResponseSpectrum {
-        inputs: &'a [crate::remote::input_materialization::CompletedRemoteInputMaterialization],
+        inputs: &'a [crate::input_materialization::CompletedInputMaterialization],
         completion: &'a crate::CompletedStructuralModalResponseSpectrumStudy,
         unresolved_workloads_digest: Digest,
     },
     StructuralRandomResponse {
-        inputs: &'a [crate::remote::input_materialization::CompletedRemoteInputMaterialization],
+        inputs: &'a [crate::input_materialization::CompletedInputMaterialization],
         completion: &'a crate::CompletedStructuralRandomResponseStudy,
         unresolved_workloads_digest: Digest,
     },
     StructuralBuckling {
-        inputs: &'a [crate::remote::input_materialization::CompletedRemoteInputMaterialization],
+        inputs: &'a [crate::input_materialization::CompletedInputMaterialization],
         completion: &'a crate::CompletedStructuralBucklingSequenceStudy,
         unresolved_workloads_digest: Digest,
     },
     StructuralPrestressedModal {
-        inputs: &'a [crate::remote::input_materialization::CompletedRemoteInputMaterialization],
+        inputs: &'a [crate::input_materialization::CompletedInputMaterialization],
         completion: &'a crate::CompletedStructuralPrestressedModalStudy,
         unresolved_workloads_digest: Digest,
     },
     StructuralPrestressedFrequency {
-        inputs: &'a [crate::remote::input_materialization::CompletedRemoteInputMaterialization],
+        inputs: &'a [crate::input_materialization::CompletedInputMaterialization],
         completion: &'a crate::CompletedStructuralPrestressedFrequencyStudy,
         unresolved_workloads_digest: Digest,
     },
     StructuralPrestressedModalFrequency {
-        inputs: &'a [crate::remote::input_materialization::CompletedRemoteInputMaterialization],
+        inputs: &'a [crate::input_materialization::CompletedInputMaterialization],
         completion: &'a crate::CompletedStructuralPrestressedModalFrequencyStudy,
         unresolved_workloads_digest: Digest,
     },
     StructuralFrequency {
-        inputs: &'a [crate::remote::input_materialization::CompletedRemoteInputMaterialization],
+        inputs: &'a [crate::input_materialization::CompletedInputMaterialization],
         completion: &'a crate::CompletedStructuralFrequencyStudy,
         unresolved_workloads_digest: Digest,
     },
 }
 
 impl ExactStructuralAnalysisPublication<'_> {
-    fn inputs(
-        &self,
-    ) -> &[crate::remote::input_materialization::CompletedRemoteInputMaterialization] {
+    fn inputs(&self) -> &[crate::input_materialization::CompletedInputMaterialization] {
         match self {
             Self::LinearSequence { inputs, .. }
             | Self::StructuralTransient { inputs, .. }

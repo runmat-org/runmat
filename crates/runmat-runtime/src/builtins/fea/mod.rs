@@ -35,7 +35,6 @@ use runmat_value::{IntValue, IntegerStorage, NumericScalar, ObjectInstance, Tens
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
 
 #[cfg(test)]
 use crate::analysis::AnalysisStudySweepValidateData;
@@ -43,13 +42,12 @@ use crate::analysis::{
     analysis_create_model_op, analysis_field_page_by_run_id_op, analysis_plan_study_op,
     analysis_plan_study_sweep_op, analysis_results_by_run_id_op, analysis_results_compare_op,
     analysis_run_study_op, analysis_run_study_sweep_op, analysis_trends_op,
-    analysis_validate_study_op, analysis_validate_study_sweep_op,
-    load_fea_document_from_path_async, AnalysisCreateModelIntentSpec, AnalysisExecutionPlan,
-    AnalysisExecutionStep, AnalysisFieldDescriptor, AnalysisFieldRequestOptions,
-    AnalysisFieldSelection, AnalysisModelTemplate, AnalysisResultsCompareQuery,
-    AnalysisResultsQuery, AnalysisSolverOptions, AnalysisStudySpec, AnalysisStudySweepData,
-    AnalysisStudySweepFailureEntry, AnalysisStudySweepPlanData, AnalysisStudySweepSpec,
-    AnalysisTrendsQuery, FeaResolvedDocument,
+    analysis_validate_study_op, analysis_validate_study_sweep_op, AnalysisCreateModelIntentSpec,
+    AnalysisExecutionPlan, AnalysisExecutionStep, AnalysisFieldDescriptor,
+    AnalysisFieldRequestOptions, AnalysisFieldSelection, AnalysisModelTemplate,
+    AnalysisResultsCompareQuery, AnalysisResultsQuery, AnalysisSolverOptions, AnalysisStudySpec,
+    AnalysisStudySweepData, AnalysisStudySweepFailureEntry, AnalysisStudySweepPlanData,
+    AnalysisStudySweepSpec, AnalysisTrendsQuery,
 };
 use crate::builtins::common::{json::int_value_to_json, tensor as tensor_utils};
 use crate::builtins::geometry::{GEOMETRY_ASSET_CLASS, GEOMETRY_ASSET_JSON_PROPERTY};
@@ -99,7 +97,6 @@ use steps::*;
 #[cfg(test)]
 use visualization::{mesh_request_from_args, plot_request_from_args};
 
-const LOAD_NAME: &str = "fea.load";
 const STUDY_NAME: &str = "fea.study";
 const SWEEP_NAME: &str = "fea.sweep";
 const MODEL_NAME: &str = "fea.model";
@@ -145,19 +142,12 @@ const OUT_ANY: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     default: None,
     description: "FEA object or operation result.",
 }];
-const IN_PATH: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "path",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Path to a .fea file.",
-}];
 const IN_INPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "study",
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "A .fea path, fea.Study object, or fea.Sweep object.",
+    description: "A fea.Study or fea.Sweep object.",
 }];
 const IN_STUDY_ARGS: [BuiltinParamDescriptor; 3] = [
     BuiltinParamDescriptor {
@@ -371,25 +361,13 @@ const COMPARE_INPUTS: [BuiltinParamDescriptor; 2] = [
     },
 ];
 
-const LOAD_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "doc = fea.load(path)",
-    inputs: &IN_PATH,
+const STUDY_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "study = fea.study(id, geometry, Name, Value, ...)",
+    inputs: &IN_STUDY_ARGS,
     outputs: &OUT_ANY,
 }];
-const STUDY_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "study = fea.study(path)",
-        inputs: &IN_PATH,
-        outputs: &OUT_ANY,
-    },
-    BuiltinSignatureDescriptor {
-        label: "study = fea.study(id, geometry, Name, Value, ...)",
-        inputs: &IN_STUDY_ARGS,
-        outputs: &OUT_ANY,
-    },
-];
 const VALIDATE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "result = fea.validate(studyOrSweepOrPath)",
+    label: "result = fea.validate(studyOrSweep)",
     inputs: &IN_INPUT,
     outputs: &OUT_ANY,
 }];
@@ -399,7 +377,7 @@ const PLAN_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescri
     outputs: &OUT_ANY,
 }];
 const RUN_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "run = fea.run(studyOrSweepOrPath)",
+    label: "run = fea.run(studyOrSweep)",
     inputs: &IN_INPUT,
     outputs: &OUT_ANY,
 }];
@@ -459,12 +437,6 @@ const TRENDS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDesc
     outputs: &OUT_ANY,
 }];
 
-const ERROR_LOAD: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FEA.BUILTIN.LOAD_FAILED",
-    identifier: Some("RunMat:fea:LoadFailed"),
-    when: "A .fea document cannot be read, parsed, or resolved.",
-    message: "fea: failed to load FEA document",
-};
 const ERROR_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.FEA.BUILTIN.INVALID_INPUT",
     identifier: Some("RunMat:fea:InvalidInput"),
@@ -483,15 +455,7 @@ const ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     when: "An FEA object or operation result cannot be converted to a RunMat value.",
     message: "fea: internal error",
 };
-const ERRORS: [BuiltinErrorDescriptor; 4] =
-    [ERROR_LOAD, ERROR_INPUT, ERROR_OPERATION, ERROR_INTERNAL];
-
-pub const FEA_LOAD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &LOAD_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
+const ERRORS: [BuiltinErrorDescriptor; 3] = [ERROR_INPUT, ERROR_OPERATION, ERROR_INTERNAL];
 pub const FEA_STUDY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &STUDY_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
@@ -738,18 +702,6 @@ pub const FEA_TRENDS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 };
 
 #[runtime_builtin(
-    name = "fea.load",
-    category = "fea",
-    summary = "Load a .fea study or sweep document.",
-    keywords = "fea,study,sweep,load,yaml",
-    descriptor(crate::builtins::fea::FEA_LOAD_DESCRIPTOR),
-    builtin_path = "crate::builtins::fea"
-)]
-pub async fn fea_load_builtin(path: String) -> BuiltinResult<Value> {
-    load_document_object(PathBuf::from(path)).await
-}
-
-#[runtime_builtin(
     name = "fea.study",
     category = "fea",
     summary = "Create a typed FEA study from geometry, model data, and run settings.",
@@ -759,10 +711,6 @@ pub async fn fea_load_builtin(path: String) -> BuiltinResult<Value> {
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_study_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    if args.len() == 1 {
-        let path = scalar_string(&args[0], STUDY_NAME, &ERROR_INPUT)?;
-        return load_document_object(PathBuf::from(path)).await;
-    }
     create_study_object_from_args(args)
 }
 
@@ -978,13 +926,6 @@ pub async fn fea_trends_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     create_trends_object_from_args(args)
 }
 
-async fn load_document_object(path: PathBuf) -> BuiltinResult<Value> {
-    let document = load_fea_document_from_path_async(&path)
-        .await
-        .map_err(|err| builtin_error(LOAD_NAME, &ERROR_LOAD, err))?;
-    resolved_document_to_object(document)
-}
-
 async fn resolve_document_input(
     input: Value,
     builtin: &'static str,
@@ -999,23 +940,10 @@ async fn resolve_document_input(
             modeling::sweep_from_value_with_generators(builtin, &input)
                 .map(RuntimeResolvedDocument::Sweep)
         }
-        Value::String(path) => resolved_runtime_document_from_file(
-            load_fea_document_from_path_async(&PathBuf::from(path))
-                .await
-                .map_err(|err| builtin_error(builtin, &ERROR_LOAD, err))?,
-        ),
-        Value::CharArray(chars) if chars.rows == 1 => {
-            let path: String = chars.data.iter().collect();
-            resolved_runtime_document_from_file(
-                load_fea_document_from_path_async(&PathBuf::from(path))
-                    .await
-                    .map_err(|err| builtin_error(builtin, &ERROR_LOAD, err))?,
-            )
-        }
         other => Err(builtin_error(
             builtin,
             &ERROR_INPUT,
-            format!("expected .fea path, {FEA_STUDY_CLASS}, or {FEA_SWEEP_CLASS}; got {other:?}"),
+            format!("expected {FEA_STUDY_CLASS} or {FEA_SWEEP_CLASS}; got {other:?}"),
         )),
     }
 }
@@ -1023,47 +951,6 @@ async fn resolve_document_input(
 enum RuntimeResolvedDocument {
     Study(Box<modeling::ComposedStudy>),
     Sweep(modeling::ComposedSweep),
-}
-
-fn resolved_runtime_document_from_file(
-    document: FeaResolvedDocument,
-) -> BuiltinResult<RuntimeResolvedDocument> {
-    match document {
-        FeaResolvedDocument::Study(study) => {
-            let signals = study
-                .model
-                .as_ref()
-                .map(|model| model.signals.as_slice())
-                .unwrap_or_default();
-            let frozen_generators =
-                signals::bindings::FrozenGeneratorInventory::new(LOAD_NAME, signals, Vec::new())?;
-            Ok(RuntimeResolvedDocument::Study(Box::new(
-                modeling::ComposedStudy {
-                    study: *study,
-                    frozen_generators,
-                },
-            )))
-        }
-        FeaResolvedDocument::Sweep(sweep) => {
-            let composed = sweep
-                .studies
-                .iter()
-                .cloned()
-                .map(|study| {
-                    (
-                        study,
-                        signals::bindings::FrozenGeneratorInventory::default(),
-                    )
-                })
-                .collect::<Vec<_>>();
-            Ok(RuntimeResolvedDocument::Sweep(modeling::ComposedSweep {
-                frozen_generators: signals::bindings::FrozenStudyGeneratorInventory::new(
-                    LOAD_NAME, &composed,
-                )?,
-                sweep,
-            }))
-        }
-    }
 }
 
 fn create_results_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -2263,19 +2150,8 @@ fn one_based_usize_vec_from_value(
         .collect()
 }
 
-fn resolved_document_to_object(document: FeaResolvedDocument) -> BuiltinResult<Value> {
-    match document {
-        FeaResolvedDocument::Study(spec) => study_to_object(*spec),
-        FeaResolvedDocument::Sweep(spec) => sweep_to_object(spec),
-    }
-}
-
 fn study_to_object(spec: AnalysisStudySpec) -> BuiltinResult<Value> {
     serializable_to_object(STUDY_NAME, &ERROR_INTERNAL, FEA_STUDY_CLASS, &spec)
-}
-
-fn sweep_to_object(spec: AnalysisStudySweepSpec) -> BuiltinResult<Value> {
-    serializable_to_object(SWEEP_NAME, &ERROR_INTERNAL, FEA_SWEEP_CLASS, &spec)
 }
 
 fn operation_result_to_object<T: Serialize>(
@@ -2820,13 +2696,15 @@ fn parse_scalar_enum_for_builtin<T: DeserializeOwned>(
     text: &str,
     label: &str,
 ) -> BuiltinResult<T> {
-    serde_yaml::from_str::<T>(&text.to_ascii_lowercase()).map_err(|err| {
-        builtin_error(
-            builtin,
-            &ERROR_INPUT,
-            format!("invalid {label} value `{text}`: {err}"),
-        )
-    })
+    serde_json::from_value::<T>(serde_json::Value::String(text.to_ascii_lowercase())).map_err(
+        |err| {
+            builtin_error(
+                builtin,
+                &ERROR_INPUT,
+                format!("invalid {label} value `{text}`: {err}"),
+            )
+        },
+    )
 }
 
 fn workflow_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
@@ -3028,14 +2906,6 @@ mod tests {
 
     const TRIANGLE_STL: &str = "solid tri\n  facet normal 0 0 1\n    outer loop\n      vertex 0 0 0\n      vertex 1 0 0\n      vertex 0 1 0\n    endloop\n  endfacet\nendsolid tri\n";
     const SIMPLE_STEP: &str = "ISO-10303-21;\nHEADER;\nFILE_NAME('Assembly_A');\nENDSEC;\nDATA;\n#10=PRODUCT('Bracket_A','',(#1));\nENDSEC;\nEND-ISO-10303-21;\n";
-
-    fn static_sequence_json(document_id: &str) -> String {
-        serde_json::to_string(&AnalysisSequence::from_steps(
-            format!("{document_id}.sequence"),
-            vec![ProcedureStep::structural_static("static")],
-        ))
-        .expect("canonical static sequence should serialize")
-    }
 
     fn test_run_identity(
         procedure: runmat_analysis_core::AnalysisProcedure,
@@ -4015,97 +3885,6 @@ mod tests {
     }
 
     #[test]
-    fn fea_load_validate_and_plan_document_workflow() {
-        let tmp = tempfile::tempdir().expect("tempdir should be created");
-        std::fs::write(tmp.path().join("part.stl"), TRIANGLE_STL)
-            .expect("geometry fixture should write");
-        let fea_path = tmp.path().join("bracket.fea");
-        std::fs::write(
-            &fea_path,
-            format!(
-                r#"
-version: 1
-kind: study
-id: bracket_static
-geometry:
-  path: part.stl
-  units: meter
-model:
-  template: linear_static_structural
-constraints:
-  - structural:
-      constraint_id: fixed_support
-      frame: global
-      kind:
-        fixed:
-          target:
-            region_id: region_default
-            entity_dimension: face
-            expected_topology: boundary_face
-            cardinality: one_or_more
-sequence: {}
-execution:
-  - step: static
-    backend: cpu
-    requirement: experimental
-"#,
-                static_sequence_json("bracket_static")
-            ),
-        )
-        .expect("FEA fixture should write");
-
-        let study = block_on(fea_load_builtin(fea_path.to_string_lossy().to_string()))
-            .expect("FEA document should load");
-        let Value::Object(study_object) = study.clone() else {
-            panic!("expected loaded FEA study object");
-        };
-        assert_eq!(study_object.class_name, FEA_STUDY_CLASS);
-        assert_eq!(
-            study_object.properties.get("study_id"),
-            Some(&Value::String("bracket_static".into()))
-        );
-        let inline = crate::execution::value_codec::encode_inline_value(&study)
-            .expect("typed FEA study should cross an execution boundary");
-        let decoded = crate::execution::value_codec::decode_inline_value(&inline)
-            .expect("typed FEA study should decode from an execution boundary");
-        assert_eq!(decoded, study);
-        let mut invalid = study.clone();
-        let Value::Object(invalid_object) = &mut invalid else {
-            unreachable!("loaded study is an object")
-        };
-        invalid_object
-            .properties
-            .insert("unknown".into(), Value::Bool(true));
-        assert!(crate::execution::value_codec::encode_inline_value(&invalid).is_err());
-        let (study_id_property, owner) =
-            crate::class_registry::lookup_property(FEA_STUDY_CLASS, "study_id")
-                .expect("FEA study properties should be registered");
-        assert_eq!(owner, FEA_STUDY_CLASS);
-        assert!(study_id_property.is_constant);
-        assert_eq!(study_id_property.set_access, MemberAccess::Private);
-
-        let validation =
-            block_on(fea_validate_builtin(study.clone())).expect("FEA study should validate");
-        let Value::Object(validation_object) = validation else {
-            panic!("expected validation object");
-        };
-        assert_eq!(validation_object.class_name, FEA_VALIDATION_CLASS);
-        assert_eq!(
-            validation_object.properties.get("valid"),
-            Some(&Value::Bool(true)),
-            "validation properties: {:?}",
-            validation_object.properties,
-        );
-
-        let plan = block_on(fea_plan_builtin(study)).expect("FEA study should plan");
-        let Value::Object(plan_object) = plan else {
-            panic!("expected plan object");
-        };
-        assert_eq!(plan_object.class_name, FEA_PLAN_CLASS);
-        assert!(plan_object.properties.contains_key("operation_sequence"));
-    }
-
-    #[test]
     fn typed_constructors_build_full_study_and_sweep_objects() {
         let tmp = tempfile::tempdir().expect("tempdir should be created");
         let geometry_path = tmp.path().join("part.step");
@@ -4653,31 +4432,38 @@ execution:
         let tmp = tempfile::tempdir().expect("tempdir should be created");
         std::fs::write(tmp.path().join("part.stl"), TRIANGLE_STL)
             .expect("geometry fixture should write");
-        let fea_path = tmp.path().join("plot.fea");
-        std::fs::write(
-            &fea_path,
-            format!(
-                r#"
-version: 1
-kind: study
-id: synthetic_plot
-geometry:
-  path: part.stl
-  units: meter
-model:
-  template: linear_static_structural
-sequence: {}
-execution:
-  - step: static
-    backend: cpu
-    requirement: experimental
-"#,
-                static_sequence_json("synthetic_plot")
-            ),
+        let geometry_value = block_on(crate::builtins::geometry::geometry_load_builtin(vec![
+            Value::String(tmp.path().join("part.stl").to_string_lossy().to_string()),
+        ]))
+        .expect("geometry should load");
+        let geometry = geometry_asset_from_value(STUDY_NAME, &geometry_value)
+            .expect("geometry payload should decode");
+        let sequence = AnalysisSequence::from_steps(
+            "synthetic_plot.sequence",
+            vec![ProcedureStep::structural_static("static")],
+        );
+        let execution = AnalysisExecutionPlan::for_sequence_with_requirement(
+            &sequence,
+            ComputeBackend::Cpu,
+            runmat_analysis_core::FormulationRequirement::Experimental,
         )
-        .expect("FEA fixture should write");
-        let study = block_on(fea_load_builtin(fea_path.to_string_lossy().to_string()))
-            .expect("study should load");
+        .expect("execution plan should match the sequence");
+        let study = study_to_object(AnalysisStudySpec {
+            study_id: "synthetic_plot".to_string(),
+            geometry,
+            create_model_intent: AnalysisCreateModelIntentSpec {
+                model_id: "synthetic_plot.model".to_string(),
+                template: AnalysisModelTemplate::LinearStaticStructural,
+            },
+            model_source_evidence: None,
+            model: None,
+            execution,
+            meshing_settings: None,
+            immutable_values: Vec::new(),
+            solver_mesh_artifact_path: None,
+            meshing_evidence_artifact_path: None,
+        })
+        .expect("study context should encode");
         let identity = test_run_identity(runmat_analysis_core::AnalysisProcedure::Static);
         let run_id = crate::analysis::storage::next_run_id();
         let run = crate::analysis::AnalysisRunResult {

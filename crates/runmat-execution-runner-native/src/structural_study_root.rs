@@ -3,7 +3,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_analysis_core::{AuthoredMaterialRef, MaterialModel, RealizedStudy};
-use runmat_analysis_execution::prepare_analysis_host_program;
+use runmat_analysis_execution::{
+    prepare_analysis_host_program, InputMaterializationExpectation, PreparedInputMaterialization,
+};
 use runmat_analysis_fea::study::StructuralStudyPlanningPolicy;
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use runmat_execution::resource::AcceleratorRequest;
@@ -18,6 +20,7 @@ use runmat_execution_artifact::{
 };
 use serde::{Deserialize, Serialize};
 
+use crate::input_materialization_contract::InputMaterializationRequest;
 use crate::{
     decode_geometry_meshing_root, NativeExecutionError, NativeExecutionResult,
     PreparedGeometryMeshingRoot, RequiredGeometryMeshingProgram,
@@ -43,8 +46,10 @@ struct StructuralStudyRootRequest {
     materials: Vec<StructuralStudyMaterial>,
     planning: StructuralStudyPlanningPolicy,
     analysis_accelerator_requests: Vec<AcceleratorRequest>,
+    input_materializations: Vec<InputMaterializationRequest>,
     geometry_meshing: ProgramExecutionDescriptor,
     geometry_argument_count: u32,
+    materialization_argument_count: u32,
 }
 
 impl StructuralStudyRootRequest {
@@ -84,7 +89,31 @@ impl StructuralStudyRootRequest {
             .map(|entry| entry.material.clone())
             .collect::<Vec<_>>();
         runmat_analysis_core::validate_material_definitions(&materials).map_err(protocol)?;
-        validate_accelerator_requests(self.planning.backend, &self.analysis_accelerator_requests)
+        validate_accelerator_requests(self.planning.backend, &self.analysis_accelerator_requests)?;
+        let materializations = self
+            .input_materializations
+            .iter()
+            .map(InputMaterializationRequest::to_prepared)
+            .collect::<NativeExecutionResult<Vec<_>>>()?;
+        validate_input_materialization_inventory(
+            &self.study,
+            &materializations,
+            &self.geometry_meshing.recipe.program_revision,
+        )?;
+        let reference_count = materializations
+            .iter()
+            .flat_map(|prepared| prepared.program().input_references.iter())
+            .map(|reference| reference.id)
+            .collect::<BTreeSet<_>>()
+            .len();
+        if usize::try_from(self.materialization_argument_count).map_err(protocol)?
+            != reference_count
+        {
+            return Err(protocol(
+                "structural study input-reference count differs from its materialization plans",
+            ));
+        }
+        Ok(())
     }
 
     fn canonical_bytes(&self) -> NativeExecutionResult<Vec<u8>> {
@@ -116,6 +145,7 @@ pub struct StructuralStudyRootPreparation {
     pub materials: BTreeMap<AuthoredMaterialRef, MaterialModel>,
     pub planning: StructuralStudyPlanningPolicy,
     pub analysis_accelerator_requests: Vec<AcceleratorRequest>,
+    pub input_materializations: Vec<PreparedInputMaterialization>,
     pub geometry_meshing: PreparedGeometryMeshingRoot,
 }
 
@@ -136,6 +166,7 @@ pub struct StructuralStudyResultExpectation {
     pub materials: Vec<StructuralStudyMaterialExpectation>,
     pub planning: StructuralStudyPlanningPolicy,
     pub analysis_accelerator_requests: Vec<AcceleratorRequest>,
+    pub input_materializations: Vec<InputMaterializationExpectation>,
     pub geometry_request: runmat_analysis_execution::GeometryMaterializationRequest,
     pub expected_meshing_request: runmat_meshing_core::MeshingRequest,
 }
@@ -200,7 +231,13 @@ impl StructuralStudyResultExpectation {
                 "structural study result source identity differs from its geometry or materials",
             ));
         }
-        validate_accelerator_requests(self.planning.backend, &self.analysis_accelerator_requests)
+        validate_accelerator_requests(self.planning.backend, &self.analysis_accelerator_requests)?;
+        validate_input_expectation_inventory(
+            &self.study,
+            &self.input_materializations,
+            &self.program_revision,
+        )?;
+        Ok(())
     }
 }
 
@@ -208,6 +245,7 @@ impl StructuralStudyResultExpectation {
 pub struct PreparedStructuralStudyRoot {
     request: ProgramExecutionRequest,
     objects: Vec<LogicalObject>,
+    input_value_objects: Vec<ProgramExecutionObject>,
     required_programs: Vec<RequiredStructuralStudyProgram>,
     authored_study_digest: Digest,
     expectation: StructuralStudyResultExpectation,
@@ -254,6 +292,9 @@ impl PreparedStructuralStudyRoot {
             };
             rebind_reference(reference, &artifact_access)?;
         }
+        for object in &mut self.input_value_objects {
+            rebind_reference(&mut object.reference, &artifact_access)?;
+        }
         self.expectation.artifact_access = artifact_access;
         self.expectation.validate()?;
         self.request
@@ -266,6 +307,24 @@ impl PreparedStructuralStudyRoot {
     pub fn write_to(&self, store: &mut impl CacheExport) -> NativeExecutionResult<()> {
         for object in &self.objects {
             store.write_verified(object).map_err(protocol)?;
+        }
+        for object in &self.input_value_objects {
+            let logical = LogicalObject::new(
+                ObjectNamespace::InputValue,
+                format!(
+                    "analysis/generator-inputs/{}",
+                    object.reference.logical_digest
+                ),
+                object.reference.media_type.clone(),
+                object.bytes.clone(),
+            )
+            .map_err(protocol)?;
+            if logical.descriptor.digest != object.reference.logical_digest {
+                return Err(protocol(
+                    "generator input object differs from its logical reference",
+                ));
+            }
+            store.write_verified(&logical).map_err(protocol)?;
         }
         Ok(())
     }
@@ -282,7 +341,7 @@ impl PreparedStructuralStudyRoot {
                 )),
             })
             .collect::<NativeExecutionResult<BTreeMap<_, _>>>()?;
-        let objects = self
+        let mut objects = self
             .objects
             .iter()
             .map(|object| {
@@ -297,6 +356,18 @@ impl PreparedStructuralStudyRoot {
                 Ok(object)
             })
             .collect::<NativeExecutionResult<Vec<_>>>()?;
+        for object in &self.input_value_objects {
+            let reference = references
+                .get(&object.reference.logical_digest)
+                .ok_or_else(|| protocol("structural study omits a generator input reference"))?;
+            if reference.as_ref() != &object.reference {
+                return Err(protocol(
+                    "structural study generator input differs from its request reference",
+                ));
+            }
+            object.validate().map_err(protocol)?;
+            objects.push(object.clone());
+        }
         if objects.len() != references.len() {
             return Err(protocol(
                 "structural study root object inventory differs from its inputs",
@@ -331,6 +402,7 @@ pub struct DecodedStructuralStudyRoot {
     pub materials: BTreeMap<AuthoredMaterialRef, MaterialModel>,
     pub planning: StructuralStudyPlanningPolicy,
     pub analysis_accelerator_requests: Vec<AcceleratorRequest>,
+    pub input_materializations: Vec<PreparedInputMaterialization>,
     pub geometry_meshing: ProgramExecutionRequest,
     pub artifact_access: ArtifactAccess,
 }
@@ -347,6 +419,7 @@ pub fn prepare_structural_study_root(
         materials,
         planning,
         analysis_accelerator_requests,
+        input_materializations,
         geometry_meshing,
     } = preparation;
     artifact_access.validate().map_err(protocol)?;
@@ -357,6 +430,33 @@ pub fn prepare_structural_study_root(
     }
     let expected_meshing_request = geometry_meshing.meshing_request().clone();
     let geometry_request = geometry_meshing.geometry_request().clone();
+    let input_materializations = input_materializations
+        .into_iter()
+        .map(|materialization| materialization.rebind(&artifact_access).map_err(protocol))
+        .collect::<NativeExecutionResult<Vec<_>>>()?;
+    validate_input_materialization_inventory(&study, &input_materializations, &program_revision)?;
+    let mut input_value_objects = BTreeMap::new();
+    for materialization in &input_materializations {
+        materialization.validate_closed().map_err(protocol)?;
+        for object in materialization.input_objects() {
+            match input_value_objects.get(&object.reference.id) {
+                Some(existing) if existing != object => {
+                    return Err(protocol(
+                        "generator input value id collides with different immutable content",
+                    ));
+                }
+                Some(_) => {}
+                None => {
+                    input_value_objects.insert(object.reference.id, object.clone());
+                }
+            }
+        }
+    }
+    let input_expectations = input_materializations
+        .iter()
+        .map(PreparedInputMaterialization::expectation)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(protocol)?;
     let root = StructuralStudyRootRequest {
         schema_version: 1,
         authored_study_digest,
@@ -371,8 +471,14 @@ pub fn prepare_structural_study_root(
             .collect(),
         planning,
         analysis_accelerator_requests,
+        input_materializations: input_materializations
+            .iter()
+            .map(InputMaterializationRequest::from_prepared)
+            .collect::<NativeExecutionResult<Vec<_>>>()?,
         geometry_meshing: descriptor_from_request(geometry_meshing.request()),
         geometry_argument_count: u32::try_from(geometry_meshing.request().arguments.len())
+            .map_err(protocol)?,
+        materialization_argument_count: u32::try_from(input_value_objects.len())
             .map_err(protocol)?,
     };
     let root_object = LogicalObject::new(
@@ -407,6 +513,11 @@ pub fn prepare_structural_study_root(
     .map_err(protocol)?;
     let mut arguments = vec![ValuePayload::Object(Box::new(root_reference))];
     arguments.extend(geometry_meshing.request().arguments.clone());
+    arguments.extend(
+        input_value_objects
+            .values()
+            .map(|object| ValuePayload::Object(Box::new(object.reference.clone()))),
+    );
     let request = ProgramExecutionRequest {
         schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
         recipe: recipe.clone(),
@@ -425,6 +536,12 @@ pub fn prepare_structural_study_root(
             .iter()
             .map(required_program),
     );
+    for materialization in &input_materializations {
+        required_programs.push(RequiredStructuralStudyProgram {
+            recipe: materialization.program().descriptor.recipe.clone(),
+            artifact: materialization.program().descriptor.artifact.clone(),
+        });
+    }
     let analysis_host =
         prepare_analysis_host_program(request.recipe.program_revision.clone()).map_err(protocol)?;
     required_programs.push(RequiredStructuralStudyProgram {
@@ -449,6 +566,7 @@ pub fn prepare_structural_study_root(
             .collect(),
         planning: root.planning,
         analysis_accelerator_requests: root.analysis_accelerator_requests.clone(),
+        input_materializations: input_expectations,
         geometry_request,
         expected_meshing_request,
     };
@@ -456,6 +574,7 @@ pub fn prepare_structural_study_root(
     Ok(PreparedStructuralStudyRoot {
         request,
         objects,
+        input_value_objects: input_value_objects.into_values().collect(),
         required_programs,
         authored_study_digest: root.authored_study_digest,
         expectation,
@@ -511,22 +630,49 @@ pub fn decode_structural_study_root(
             "geometry-meshing and structural-study program revisions differ",
         ));
     }
-    let count = usize::try_from(root.geometry_argument_count).map_err(protocol)?;
+    let geometry_count = usize::try_from(root.geometry_argument_count).map_err(protocol)?;
+    let materialization_count =
+        usize::try_from(root.materialization_argument_count).map_err(protocol)?;
+    let component_count = geometry_count
+        .checked_add(materialization_count)
+        .ok_or_else(|| protocol("structural study component count overflows"))?;
     let arguments = program
         .arguments
         .get(1..)
-        .filter(|arguments| arguments.len() == count)
-        .ok_or_else(|| protocol("geometry-meshing argument count differs"))?
-        .to_vec();
+        .filter(|arguments| arguments.len() == component_count)
+        .ok_or_else(|| protocol("structural study component count differs"))?;
+    let (geometry_arguments, materialization_arguments) = arguments.split_at(geometry_count);
     let geometry_meshing = ProgramExecutionRequest {
         schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
         recipe: root.geometry_meshing.recipe,
         artifact: root.geometry_meshing.artifact,
         function: root.geometry_meshing.function,
-        arguments,
+        arguments: geometry_arguments.to_vec(),
         requested_outputs: root.geometry_meshing.requested_outputs,
     };
     decode_geometry_meshing_root(&geometry_meshing, store)?;
+    let input_materializations = root
+        .input_materializations
+        .iter()
+        .map(InputMaterializationRequest::to_prepared)
+        .collect::<NativeExecutionResult<Vec<_>>>()?;
+    let expected_materialization_references = input_materializations
+        .iter()
+        .flat_map(|prepared| prepared.program().input_references.iter())
+        .map(|reference| (reference.id, reference))
+        .collect::<BTreeMap<_, _>>();
+    let transported_materialization_references = materialization_arguments
+        .iter()
+        .map(|argument| match argument {
+            ValuePayload::Object(reference) => Ok((reference.id, reference.as_ref())),
+            ValuePayload::Inline(_) => Err(protocol("generator input value is not externalized")),
+        })
+        .collect::<NativeExecutionResult<BTreeMap<_, _>>>()?;
+    if expected_materialization_references != transported_materialization_references {
+        return Err(protocol(
+            "structural study generator references differ from its materialization plans",
+        ));
+    }
     Ok(DecodedStructuralStudyRoot {
         authored_study_digest: root.authored_study_digest,
         frozen_project_digest: root.frozen_project_digest,
@@ -538,6 +684,7 @@ pub fn decode_structural_study_root(
             .collect(),
         planning: root.planning,
         analysis_accelerator_requests: root.analysis_accelerator_requests,
+        input_materializations,
         geometry_meshing,
         artifact_access,
     })
@@ -581,6 +728,145 @@ fn validate_accelerator_requests(
         )),
         _ => Ok(()),
     }
+}
+
+fn validate_input_materialization_inventory(
+    study: &RealizedStudy,
+    materializations: &[PreparedInputMaterialization],
+    revision: &ProgramRevision,
+) -> NativeExecutionResult<()> {
+    let models = study
+        .included_models
+        .iter()
+        .chain(std::iter::once(&study.model))
+        .collect::<Vec<_>>();
+    let mut signals = models
+        .iter()
+        .flat_map(|model| &model.signals)
+        .filter(|signal| signal.generator().is_some());
+    let mut responses = models
+        .iter()
+        .flat_map(|model| &model.response_spectra)
+        .filter(|spectrum| spectrum.ordinates.generator().is_some());
+    let mut random = models
+        .iter()
+        .flat_map(|model| &model.random_excitations)
+        .filter(|spectrum| spectrum.spectral_density.generator().is_some());
+    let expected_count =
+        signals.clone().count() + responses.clone().count() + random.clone().count();
+    if expected_count != materializations.len() {
+        return Err(protocol(
+            "study input materializations differ from its authored generator inventory",
+        ));
+    }
+    let mut identities = BTreeSet::new();
+    for prepared in materializations {
+        prepared.validate().map_err(protocol)?;
+        let (materialization_revision, identity, authored_matches) = match prepared {
+            PreparedInputMaterialization::Signal(prepared) => (
+                &prepared.admitted.program_revision,
+                prepared.admitted.materialization_identity.digest(),
+                signals.next() == Some(&prepared.authored),
+            ),
+            PreparedInputMaterialization::Numerical(prepared) => {
+                let authored_matches = match &prepared.authored {
+                    runmat_analysis_execution::NumericalGeneratorSource::ResponseSpectrum(
+                        spectrum,
+                    ) => responses.next() == Some(spectrum.as_ref()),
+                    runmat_analysis_execution::NumericalGeneratorSource::RandomSpectrum(
+                        spectrum,
+                    ) => random.next() == Some(spectrum.as_ref()),
+                };
+                (
+                    &prepared.admitted.invocation.program_revision,
+                    prepared.admitted.materialization_identity.digest(),
+                    authored_matches,
+                )
+            }
+        };
+        if materialization_revision != revision || !authored_matches || !identities.insert(identity)
+        {
+            return Err(protocol(
+                "study input materialization inventory is inconsistent or duplicated",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_input_expectation_inventory(
+    study: &RealizedStudy,
+    expectations: &[InputMaterializationExpectation],
+    revision: &ProgramRevision,
+) -> NativeExecutionResult<()> {
+    for expectation in expectations {
+        expectation.validate().map_err(protocol)?;
+    }
+    let models = study
+        .included_models
+        .iter()
+        .chain(std::iter::once(&study.model))
+        .collect::<Vec<_>>();
+    let expected = models
+        .iter()
+        .flat_map(|model| &model.signals)
+        .filter(|signal| signal.generator().is_some())
+        .map(InputExpectationSource::Signal)
+        .chain(
+            models
+                .iter()
+                .flat_map(|model| &model.response_spectra)
+                .filter(|spectrum| spectrum.ordinates.generator().is_some())
+                .map(InputExpectationSource::Response),
+        )
+        .chain(
+            models
+                .iter()
+                .flat_map(|model| &model.random_excitations)
+                .filter(|spectrum| spectrum.spectral_density.generator().is_some())
+                .map(InputExpectationSource::Random),
+        )
+        .collect::<Vec<_>>();
+    let actual = expectations
+        .iter()
+        .map(|expectation| match expectation {
+            InputMaterializationExpectation::Signal(value) => (
+                &value.admitted.program_revision,
+                InputExpectationSource::Signal(&value.authored),
+            ),
+            InputMaterializationExpectation::Numerical(value) => {
+                let source = match &value.authored {
+                    runmat_analysis_execution::NumericalGeneratorSource::ResponseSpectrum(
+                        value,
+                    ) => InputExpectationSource::Response(value),
+                    runmat_analysis_execution::NumericalGeneratorSource::RandomSpectrum(value) => {
+                        InputExpectationSource::Random(value)
+                    }
+                };
+                (&value.admitted.invocation.program_revision, source)
+            }
+        })
+        .collect::<Vec<_>>();
+    if actual.len() != expected.len()
+        || actual
+            .iter()
+            .zip(expected)
+            .any(|((actual_revision, actual), expected)| {
+                *actual_revision != revision || *actual != expected
+            })
+    {
+        return Err(protocol(
+            "study input expectations differ from its authored generator inventory",
+        ));
+    }
+    Ok(())
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum InputExpectationSource<'a> {
+    Signal(&'a runmat_analysis_core::PhysicalSignal),
+    Response(&'a runmat_analysis_core::ResponseSpectrum),
+    Random(&'a runmat_analysis_core::RandomExcitationSpectrum),
 }
 
 fn protocol(error: impl std::fmt::Display) -> NativeExecutionError {

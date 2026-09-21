@@ -34,11 +34,11 @@ model random_environment {
         structural.fixed { target = geometry.bracket.region.support }
     }
     random_excitation base_motion {
-        frequencies = [5, 10, 20, 40] Hz
+        frequencies = [0.1, 100, 1000, 10000, 100000] Hz
         channels = [
             { id = "x", quantity = base_acceleration, direction = [1, 0, 0] },
         ]
-        spectral_density_real = [[[0.01]], [[0.04]], [[0.02]], [[0.005]]] m^2/s^3
+        spectral_density_real = [[[0.01]], [[0.01]], [[0.04]], [[0.02]], [[0.005]]] m^2/s^3
         convention = one_sided_per_hertz
         interpolation = linear_frequency
         extrapolation = reject
@@ -52,7 +52,7 @@ study modal_random_response_experimental {
     model = model.random_environment
     require formulation = experimental
     analysis modes {
-        structural modal { modes = 6 }
+        structural modal { modes = 30 }
         retain basis
     }
     analysis random_response after analysis.modes {

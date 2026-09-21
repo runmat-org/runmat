@@ -1,7 +1,6 @@
 use anyhow::{Context, Result};
 use runmat_config::runtime::RunMatRuntimeConfig;
 use runmat_hir::{HirDiagnostic, HirDiagnosticSeverity, LoweringContext, Span};
-use runmat_runtime::analysis::is_fea_file_path;
 use serde::Serialize;
 use serde_json::json;
 use std::path::{Path, PathBuf};
@@ -23,7 +22,7 @@ pub async fn execute_check(
 ) -> Result<()> {
     let deny_warnings = parse_denied_levels(&deny)?;
     let file = resolve_script_input(file)?;
-    if is_fea_file_path(&file) {
+    if crate::commands::fea::source::is_fea_source_path(&file) {
         return check_fea_file(file, cli, config, json).await;
     }
     if is_matlab_file(&file) {

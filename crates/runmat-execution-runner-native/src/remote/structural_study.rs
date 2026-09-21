@@ -55,16 +55,24 @@ pub(super) async fn execute_for_composition(
     recovery_publisher: &mut dyn StructuralTransientRecoveryPublisher,
 ) -> NativeExecutionResult<super::exact_structural_study::RemoteExactStructuralStudyComposition> {
     let decoded = crate::decode_structural_study_root(request, pool.as_ref())?;
+    let input_materializations = decoded.input_materializations.clone();
+    let artifact_access = decoded.artifact_access.clone();
     let geometry_contract =
         crate::decode_geometry_meshing_root(&decoded.geometry_meshing, pool.as_ref())?;
-    let completed = match super::exact_meshing::execute_geometry_for_composition(
+    let geometry = super::exact_meshing::execute_geometry_for_composition(
         Arc::clone(&pool),
         &decoded.geometry_meshing,
         run_id,
         resources,
-    )
-    .await?
-    {
+    );
+    let inputs = super::input_materialization::execute(
+        Arc::clone(&pool),
+        input_materializations.clone(),
+        &artifact_access,
+        resources,
+    );
+    let (geometry, input_outcomes) = tokio::join!(geometry, inputs);
+    let completed = match geometry? {
         RemoteExactMeshingComposition::Completed(completed) => completed,
         RemoteExactMeshingComposition::Terminal(outcome) => {
             return Ok(super::exact_structural_study::composition(outcome))
@@ -114,7 +122,7 @@ pub(super) async fn execute_for_composition(
         geometry_source_digest,
         workloads: product.workloads,
         analysis_accelerator_requests: decoded.analysis_accelerator_requests,
-        input_materializations: Vec::new(),
+        input_materializations,
         exact_meshing: decoded.geometry_meshing,
         meshing_request: geometry_contract.request.meshing_request,
         artifact_access: decoded.artifact_access,
@@ -126,7 +134,7 @@ pub(super) async fn execute_for_composition(
         request,
         execution_view,
         completed,
-        &BTreeMap::new(),
+        &input_outcomes?,
         resources,
         super::exact_structural_study::StructuralTransientRecoveryAdmission::Available {
             restored: recovered,

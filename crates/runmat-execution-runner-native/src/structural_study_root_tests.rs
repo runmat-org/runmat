@@ -100,6 +100,7 @@ fn typed_study_root_round_trips_exact_analysis_definition() {
         materials: resolved.material_catalog.clone(),
         planning,
         analysis_accelerator_requests: Vec::new(),
+        input_materializations: Vec::new(),
         geometry_meshing,
     })
     .unwrap();
@@ -552,6 +553,7 @@ fn prepare_source(
             numerics: StructuralNumericalPlanningPolicy::production(),
         },
         analysis_accelerator_requests: Vec::new(),
+        input_materializations: Vec::new(),
         geometry_meshing,
     })
     .unwrap()
