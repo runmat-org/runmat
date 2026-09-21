@@ -200,7 +200,10 @@ pub use structural_study_root::{
     StructuralStudyMaterialExpectation, StructuralStudyResultExpectation,
 };
 pub use test_workload::{execute_host_program_request, execute_host_program_request_with_project};
-pub use typed_fea::{checked_fea_artifact_access, prepare_checked_fea_study, PreparedFeaStudy};
+pub use typed_fea::{
+    checked_fea_artifact_access, materialize_checked_fea_study_geometry, prepare_checked_fea_study,
+    MaterializedFeaGeometry, PreparedFeaStudy,
+};
 pub use typed_fea::{
     execute_checked_fea_locally, CompletedLocalFeaCase, LocalFeaExecution, LocalFeaExecutionOptions,
 };

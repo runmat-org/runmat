@@ -21,6 +21,117 @@ use runmat_geometry_core::{
 
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct MaterializedFeaGeometry {
+    pub output: runmat_analysis_execution::GeometryMaterializationOutput,
+    pub topology: runmat_geometry_core::ExactBRepTopology,
+    pub kernel_representation: Vec<u8>,
+}
+
+pub(super) async fn materialize_study_geometry(
+    source: &runmat_core::CheckedFeaSessionSource,
+    resolved: &runmat_analysis_language::ResolvedAnalysisStudy,
+    inputs: &[runmat_analysis_core::AuthoredStudyInputBinding],
+    authority: &str,
+) -> Result<MaterializedFeaGeometry, String> {
+    let realized = resolved
+        .study
+        .realize_with_models(&resolved.models, &resolved.geometry, inputs)
+        .map_err(|error| error.to_string())?;
+    let revision = super::preparation::program_revision(source)?;
+    let access = super::preparation::checked_fea_artifact_access(authority);
+    let geometry_source = prepare_geometry_source(
+        source,
+        &resolved.geometry,
+        &resolved.geometry_dependencies,
+        &realized.geometry.bindings,
+        &revision,
+        &access,
+    )
+    .await?;
+    let provider = crate::native_geometry_provider_profile().ok_or_else(|| {
+        "typed FEA geometry preview requires a RunMat build with the OCCT feature enabled"
+            .to_string()
+    })?;
+    let request = prepare_geometry_materialization_request(
+        resolved.geometry.clone(),
+        realized.geometry.bindings,
+        &geometry_source,
+        provider,
+        GeometryMaterializationPreparation::default(),
+    )
+    .map_err(|error| error.to_string())?;
+    let prepared = prepare_geometry_materialization_program(
+        request.clone(),
+        revision,
+        &access,
+        &geometry_source.roots,
+    )
+    .map_err(|error| error.to_string())?;
+    let mut store = CapturedObjectStore::default();
+    geometry_source
+        .write_to(&mut store)
+        .map_err(|error| error.to_string())?;
+    prepared
+        .write_to(&mut store)
+        .map_err(|error| error.to_string())?;
+    let limits = crate::NativeGeometryMaterializationLimits::default();
+    let response = crate::execute_geometry_materialization_program_request(
+        &prepared.program,
+        &mut store,
+        limits,
+    );
+    let ProgramExecutionResponse::ExternalizedSuccess { outputs, .. } = response else {
+        return Err(format!(
+            "typed FEA geometry preview failed to materialize: {response:?}"
+        ));
+    };
+    let [ValuePayload::Object(output_root)] = outputs.as_slice() else {
+        return Err("typed FEA geometry preview returned an invalid result root".into());
+    };
+    let output = import_geometry_materialization_output(&store, output_root, &access)
+        .map_err(|error| error.to_string())?;
+    output
+        .validate_against(&request)
+        .map_err(|error| error.to_string())?;
+    let exact = runmat_meshing_execution::import_exact_geometry_input(
+        &store,
+        output.document.clone(),
+        &output.geometry_root,
+        access,
+        limits.inventory,
+    )
+    .map_err(|error| error.to_string())?;
+    let topology = exact.geometry_objects().topology.clone();
+    let mapped_faces = output
+        .source_face_ids
+        .values()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let topology_faces = topology
+        .faces
+        .iter()
+        .map(|face| face.id.clone())
+        .collect::<BTreeSet<_>>();
+    if mapped_faces != topology_faces {
+        return Err(
+            "materialized FEA geometry face ordinals do not match its exact topology".into(),
+        );
+    }
+    let kernel_representation = exact
+        .geometry_objects()
+        .kernel_representation
+        .clone()
+        .ok_or_else(|| {
+            "materialized FEA geometry has no exact kernel representation".to_string()
+        })?;
+    Ok(MaterializedFeaGeometry {
+        output,
+        topology,
+        kernel_representation,
+    })
+}
+
 pub(super) async fn prepare_geometry_source(
     source: &runmat_core::CheckedFeaSessionSource,
     definition: &GeometryDefinition,

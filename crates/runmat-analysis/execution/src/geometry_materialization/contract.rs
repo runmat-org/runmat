@@ -4,7 +4,8 @@ use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
 use runmat_geometry_core::{
     GeneratedGeometryDefinition, GeometryAuthoringValue, GeometryDefinition, GeometryDefinitionRef,
-    GeometryDigest, GeometryDocument, GeometryModel, GeometryObjectRef,
+    GeometryDigest, GeometryDocument, GeometryModel, GeometryObjectRef, PersistentEntityId,
+    PersistentEntityKind,
 };
 use runmat_geometry_io::ExactCadImportOptions;
 use runmat_geometry_ops::{
@@ -226,6 +227,10 @@ pub struct GeometryMaterializationOutput {
     pub platform: PlatformBuildIdentity,
     pub document: GeometryDocument,
     pub geometry_root: runmat_execution::value::ValueRef,
+    /// Kernel face ordinal to exact persistent face identity. Display tessellation uses the
+    /// ordinal while analysis selection uses the persistent identity; this is their authoritative
+    /// join and must never be inferred from canonical topology ordering.
+    pub source_face_ids: BTreeMap<u64, PersistentEntityId>,
     pub regions: ResolvedGeometryRegions,
     pub feature_history: BTreeMap<String, GeometryTopologyHistory>,
     pub feature_resources: Option<GeometryFeatureResourceBounds>,
@@ -257,6 +262,20 @@ impl GeometryMaterializationOutput {
             return Err(AnalysisBridgeError::Invalid(
                 "geometry materialization output is malformed".into(),
             ));
+        }
+        let mut face_identities = std::collections::BTreeSet::new();
+        for (expected_ordinal, (ordinal, identity)) in self.source_face_ids.iter().enumerate() {
+            if *ordinal != expected_ordinal as u64
+                || identity.kind != PersistentEntityKind::Face
+                || !face_identities.insert(identity)
+            {
+                return Err(AnalysisBridgeError::Invalid(
+                    "geometry materialization face identity map is malformed".into(),
+                ));
+            }
+            identity
+                .validate()
+                .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
         }
         validate_output_sets(self)
     }

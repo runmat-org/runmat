@@ -9,7 +9,29 @@ mod geometry;
 mod input;
 mod preparation;
 
+#[cfg(all(test, feature = "occt-native"))]
+mod tests;
+
+pub use geometry::MaterializedFeaGeometry;
 pub use preparation::{checked_fea_artifact_access, PreparedFeaStudy};
+
+pub async fn materialize_checked_fea_study_geometry(
+    source: &runmat_core::CheckedFeaSessionSource,
+    study_id: &str,
+    inputs: &[AuthoredStudyInputBinding],
+    authority: &str,
+) -> Result<MaterializedFeaGeometry, String> {
+    let selector = FeaRootSelector::Study {
+        id: study_id.to_string(),
+    };
+    let resolved = source
+        .resolve_root(Some(&selector))
+        .map_err(|error| error.to_string())?;
+    let ResolvedFeaRoot::Study(study) = resolved else {
+        return Err(format!("`{study_id}` did not resolve to an FEA study"));
+    };
+    geometry::materialize_study_geometry(source, &study, inputs, authority).await
+}
 
 pub async fn prepare_checked_fea_study(
     source: &runmat_core::CheckedFeaSessionSource,

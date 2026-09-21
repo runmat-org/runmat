@@ -349,6 +349,7 @@ where
         &region_evidence,
     )
     .map_err(|error| error.to_string())?;
+    let source_face_ids = geometry.source_face_ids.clone();
     let exact_objects = prepare_exact_geometry_objects(
         document,
         geometry.topology,
@@ -378,6 +379,7 @@ where
         platform,
         document: exact_result.geometry_objects().document.clone(),
         geometry_root: exact_result.root_input().clone(),
+        source_face_ids,
         regions,
         feature_history: materialized.feature_history,
         feature_resources: materialized.feature_resources,

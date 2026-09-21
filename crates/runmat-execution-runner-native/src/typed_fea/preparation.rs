@@ -130,7 +130,7 @@ fn ensure_structural_execution_boundary(
     Ok(())
 }
 
-fn program_revision(
+pub(super) fn program_revision(
     source: &runmat_core::CheckedFeaSessionSource,
 ) -> Result<ProgramRevision, String> {
     let (graph, source_digest) = match source.frozen_project() {
