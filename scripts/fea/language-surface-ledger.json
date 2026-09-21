@@ -138,11 +138,6 @@
       "members": {
         "study_id": {},
         "geometry": {},
-        "create_model_intent": {
-          "disposition": "removed",
-          "target": "explicit lowered model; no template intent",
-          "identity": "none"
-        },
         "model_source_evidence": {
           "target": "module graph evidence",
           "identity": "source and audit identity"

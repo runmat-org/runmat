@@ -39,12 +39,11 @@ use std::collections::{HashMap, HashSet};
 #[cfg(test)]
 use crate::analysis::AnalysisStudySweepValidateData;
 use crate::analysis::{
-    analysis_create_model_op, analysis_field_page_by_run_id_op, analysis_plan_study_op,
-    analysis_plan_study_sweep_op, analysis_results_by_run_id_op, analysis_results_compare_op,
-    analysis_run_study_op, analysis_run_study_sweep_op, analysis_trends_op,
-    analysis_validate_study_op, analysis_validate_study_sweep_op, AnalysisCreateModelIntentSpec,
-    AnalysisExecutionPlan, AnalysisExecutionStep, AnalysisFieldDescriptor,
-    AnalysisFieldRequestOptions, AnalysisFieldSelection, AnalysisModelTemplate,
+    analysis_field_page_by_run_id_op, analysis_plan_study_op, analysis_plan_study_sweep_op,
+    analysis_results_by_run_id_op, analysis_results_compare_op, analysis_run_study_op,
+    analysis_run_study_sweep_op, analysis_trends_op, analysis_validate_study_op,
+    analysis_validate_study_sweep_op, AnalysisExecutionPlan, AnalysisExecutionStep,
+    AnalysisFieldDescriptor, AnalysisFieldRequestOptions, AnalysisFieldSelection,
     AnalysisResultsCompareQuery, AnalysisResultsQuery, AnalysisSolverOptions, AnalysisStudySpec,
     AnalysisStudySweepData, AnalysisStudySweepFailureEntry, AnalysisStudySweepPlanData,
     AnalysisStudySweepSpec, AnalysisTrendsQuery,
@@ -149,7 +148,7 @@ const IN_INPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     default: None,
     description: "A fea.Study or fea.Sweep object.",
 }];
-const IN_STUDY_ARGS: [BuiltinParamDescriptor; 3] = [
+const IN_STUDY_ARGS: [BuiltinParamDescriptor; 4] = [
     BuiltinParamDescriptor {
         name: "id",
         ty: BuiltinParamType::StringScalar,
@@ -165,12 +164,18 @@ const IN_STUDY_ARGS: [BuiltinParamDescriptor; 3] = [
         description: "geometry.Asset returned by geometry.load.",
     },
     BuiltinParamDescriptor {
+        name: "model",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Explicit fea.Model bound to the supplied geometry revision.",
+    },
+    BuiltinParamDescriptor {
         name: "Name, Value",
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Variadic,
         default: None,
-        description:
-            "Required Template plus optional Mesh, Execution, ModelId, and typed model setup options.",
+        description: "Optional Mesh and Execution settings.",
     },
 ];
 const IN_VARIADIC_ARGS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -201,7 +206,8 @@ const MODEL_INPUTS: [BuiltinParamDescriptor; 3] = [
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Variadic,
         default: None,
-        description: "Template, frame, defaults, and typed model-component options.",
+        description:
+            "Explicit frame, materials, assignments, constraints, boundaries, signals, excitations, steps or sequence, domains, and interfaces.",
     },
 ];
 const MATERIAL_INPUTS: [BuiltinParamDescriptor; 2] = [
@@ -362,7 +368,7 @@ const COMPARE_INPUTS: [BuiltinParamDescriptor; 2] = [
 ];
 
 const STUDY_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "study = fea.study(id, geometry, Name, Value, ...)",
+    label: "study = fea.study(id, geometry, model, Name, Value, ...)",
     inputs: &IN_STUDY_ARGS,
     outputs: &OUT_ANY,
 }];
@@ -2878,18 +2884,6 @@ where
         .build()
 }
 
-fn sanitize_id(id: &str) -> String {
-    id.chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' {
-                ch
-            } else {
-                '_'
-            }
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2946,55 +2940,6 @@ mod tests {
             (1, values.len())
         };
         Value::Cell(CellArray::new(values, shape.0, shape.1).expect("cell should build"))
-    }
-
-    #[test]
-    fn study_options_accept_canonical_signal_excitation_and_case_values() {
-        crate::builtins::geometry::region::ensure_region_class_registered();
-        let mut region =
-            ObjectInstance::new(crate::builtins::geometry::region::GEOMETRY_REGION_CLASS.into());
-        region
-            .properties
-            .insert("geometry_id".into(), Value::String("geom".into()));
-        region
-            .properties
-            .insert("geometry_revision".into(), Value::Int(IntValue::U32(2)));
-        region
-            .properties
-            .insert("region_id".into(), Value::String("tip".into()));
-        region
-            .properties
-            .insert("name".into(), Value::String("Tip".into()));
-        let signal_value = block_on(signals::force_constant(
-            "tip_force.signal".into(),
-            Value::Tensor(Tensor::new_2d(vec![0.0, -1_000.0, 0.0], 1, 3).unwrap()),
-        ))
-        .expect("typed force signal should build");
-        let excitation_value = block_on(excitations::structural_force(
-            "tip_force".into(),
-            Value::Object(region),
-            signal_value.clone(),
-        ))
-        .expect("typed structural excitation should build");
-        let case_value = block_on(excitations::excitation_case_always(
-            "service".into(),
-            excitation_value.clone(),
-        ))
-        .expect("typed excitation case should build");
-
-        let options = StudyConstructorOptions::parse(&[
-            Value::String("Signals".into()),
-            signal_value,
-            Value::String("Excitations".into()),
-            excitation_value,
-            Value::String("ExcitationCases".into()),
-            case_value,
-        ])
-        .expect("canonical authored components should parse");
-
-        assert_eq!(options.signals.len(), 1);
-        assert_eq!(options.excitations.len(), 1);
-        assert_eq!(options.excitation_cases.len(), 1);
     }
 
     fn object_payload<T: DeserializeOwned>(value: &Value) -> T {
@@ -3847,7 +3792,7 @@ mod tests {
     }
 
     #[test]
-    fn fea_study_requires_template() {
+    fn fea_study_requires_explicit_model() {
         let tmp = tempfile::tempdir().expect("tempdir should be created");
         let geometry_path = tmp.path().join("part.step");
         std::fs::write(&geometry_path, SIMPLE_STEP).expect("geometry fixture should write");
@@ -3857,16 +3802,18 @@ mod tests {
         .expect("geometry should load");
 
         let err = block_on(fea_study_builtin(vec![
-            Value::String("missing_template".to_string()),
+            Value::String("missing_model".to_string()),
             geometry,
         ]))
-        .expect_err("missing template should fail");
+        .expect_err("missing model should fail");
         assert_eq!(err.identifier(), Some("RunMat:fea:InvalidInput"));
-        assert!(err.message().contains("fea.study requires Template"));
+        assert!(err
+            .message()
+            .contains("fea.study requires id, geometry, and model arguments"));
     }
 
     #[test]
-    fn fea_model_requires_template() {
+    fn fea_model_requires_explicit_procedure_sequence() {
         let tmp = tempfile::tempdir().expect("tempdir should be created");
         let geometry_path = tmp.path().join("part.step");
         std::fs::write(&geometry_path, SIMPLE_STEP).expect("geometry fixture should write");
@@ -3876,12 +3823,40 @@ mod tests {
         .expect("geometry should load");
 
         let err = block_on(fea_model_builtin(vec![
-            Value::String("missing_template_model".to_string()),
+            Value::String("missing_sequence_model".to_string()),
             geometry,
         ]))
-        .expect_err("missing template should fail");
+        .expect_err("missing sequence should fail");
         assert_eq!(err.identifier(), Some("RunMat:fea:InvalidInput"));
-        assert!(err.message().contains("fea.model requires Template"));
+        assert!(err
+            .message()
+            .contains("fea.model requires exactly one of Sequence or Steps"));
+    }
+
+    #[test]
+    fn fea_model_rejects_ambiguous_component_option_aliases() {
+        let tmp = tempfile::tempdir().expect("tempdir should be created");
+        let geometry_path = tmp.path().join("part.step");
+        std::fs::write(&geometry_path, SIMPLE_STEP).expect("geometry fixture should write");
+        let geometry = block_on(crate::builtins::geometry::geometry_load_builtin(vec![
+            Value::String(geometry_path.to_string_lossy().to_string()),
+            Value::String("Units".to_string()),
+            Value::String("meter".to_string()),
+        ]))
+        .expect("geometry should load");
+
+        for alias in ["Assignments", "Cases"] {
+            let error = block_on(fea_model_builtin(vec![
+                Value::String(format!("rejected_{alias}")),
+                geometry.clone(),
+                Value::String("Steps".to_string()),
+                modeling::static_test_steps_value(),
+                Value::String(alias.to_string()),
+                cell(Vec::new()),
+            ]))
+            .expect_err("ambiguous component option alias must be rejected");
+            assert!(error.message().contains("unsupported fea.model option"));
+        }
     }
 
     #[test]
@@ -3995,8 +3970,6 @@ mod tests {
         assert!(block_on(fea_model_builtin(vec![
             Value::String("cross_geometry_model".into()),
             geometry.clone(),
-            Value::String("Template".into()),
-            Value::String("linear_static_structural".into()),
             Value::String("Materials".into()),
             cell(vec![material.clone()]),
             Value::String("MaterialAssignments".into()),
@@ -4048,28 +4021,9 @@ mod tests {
         ]))
         .expect("callable force signal should build");
 
-        let scaffold_with_replaced_materials = block_on(fea_model_builtin(vec![
-            Value::String("scaffold_with_replaced_materials".to_string()),
-            geometry.clone(),
-            Value::String("Template".to_string()),
-            Value::String("linear_static_structural".to_string()),
-            Value::String("Materials".to_string()),
-            cell(vec![material.clone()]),
-            Value::String("Constraints".to_string()),
-            cell(vec![fixed.clone()]),
-        ]))
-        .expect("scaffold model should accept replacement materials");
-        let scaffold = modeling::model_from_value("test", &scaffold_with_replaced_materials)
-            .expect("scaffold model should decode");
-        assert!(scaffold.model.material_assignments.is_empty());
-
         let model = block_on(fea_model_builtin(vec![
             Value::String("bracket_static_model".to_string()),
             geometry.clone(),
-            Value::String("Defaults".to_string()),
-            Value::String("none".to_string()),
-            Value::String("Template".to_string()),
-            Value::String("linear_static_structural".to_string()),
             Value::String("Materials".to_string()),
             cell(vec![material]),
             Value::String("MaterialAssignments".to_string()),
@@ -4134,12 +4088,9 @@ mod tests {
         let study = block_on(fea_study_builtin(vec![
             Value::String("bracket_static".to_string()),
             geometry,
-            Value::String("Template".to_string()),
-            Value::String("linear_static_structural".to_string()),
+            model,
             Value::String("Execution".to_string()),
             execution,
-            Value::String("Model".to_string()),
-            model,
         ]))
         .expect("study should build");
         assert_object_class(&study, FEA_STUDY_CLASS);
@@ -4448,15 +4399,37 @@ mod tests {
             runmat_analysis_core::FormulationRequirement::Experimental,
         )
         .expect("execution plan should match the sequence");
+        let model = runmat_analysis_core::AnalysisModel {
+            model_id: runmat_analysis_core::AnalysisModelId("synthetic_plot.model".to_string()),
+            geometry_id: geometry.geometry_id.clone(),
+            geometry_revision: geometry.revision,
+            units: geometry.units,
+            frame: runmat_analysis_core::CoordinateFrame::Global,
+            materials: Vec::new(),
+            material_assignments: Vec::new(),
+            structural: None,
+            thermal: None,
+            thermo_mechanical: None,
+            electro_thermal: None,
+            electromagnetic: None,
+            cfd: None,
+            interfaces: Vec::new(),
+            constraints: Vec::new(),
+            boundaries: Vec::new(),
+            connectors: Vec::new(),
+            signals: Vec::new(),
+            excitations: Vec::new(),
+            excitation_cases: Vec::new(),
+            initial_conditions: Vec::new(),
+            response_spectra: Vec::new(),
+            random_excitations: Vec::new(),
+            sequence,
+        };
         let study = study_to_object(AnalysisStudySpec {
             study_id: "synthetic_plot".to_string(),
             geometry,
-            create_model_intent: AnalysisCreateModelIntentSpec {
-                model_id: "synthetic_plot.model".to_string(),
-                template: AnalysisModelTemplate::LinearStaticStructural,
-            },
             model_source_evidence: None,
-            model: None,
+            model,
             execution,
             meshing_settings: None,
             immutable_values: Vec::new(),

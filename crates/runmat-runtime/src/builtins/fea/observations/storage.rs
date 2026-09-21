@@ -1,4 +1,5 @@
 use super::*;
+use runmat_analysis_core::ObservationCostPolicy;
 
 const REDUCTION_INPUTS: [BuiltinParamDescriptor; 3] = [
     required("spatial", BuiltinParamType::Any, "Typed spatial reduction."),
@@ -334,12 +335,12 @@ pub async fn cost(args: Vec<Value>) -> BuiltinResult<Value> {
         NAME,
         &ERROR_INTERNAL,
         COST_CLASS,
-        &ObservationCostEstimate {
+        &ObservationCostPolicy::UpperBound(ObservationCostEstimate {
             operation_count: values[0],
             peak_resident_bytes: values[1],
             stored_bytes: values[2],
             transfer_bytes: values[3],
             collective_count: values[4],
-        },
+        }),
     )
 }

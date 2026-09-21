@@ -21,7 +21,7 @@ pub(super) fn generate(
     let render_topology = render_topology_for_persisted_run(study, run_id)?;
     let mut figures = mesh_result_figures_from_fields(
         &study.geometry,
-        study.model.as_ref(),
+        Some(&study.model),
         render_topology.as_ref(),
         std::slice::from_ref(&materialized.field),
         run_id,

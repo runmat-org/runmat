@@ -52,10 +52,7 @@ pub(super) fn resolve_study_mesh(spec: &AnalysisStudySpec) -> Result<ResolvedStu
 pub(super) fn meshing_contact_definitions(
     spec: &AnalysisStudySpec,
 ) -> Vec<crate::meshing::MeshingContactDefinition> {
-    spec.model
-        .iter()
-        .flat_map(meshing_contact_definitions_for_model)
-        .collect()
+    meshing_contact_definitions_for_model(&spec.model).collect()
 }
 
 pub(super) fn meshing_contact_definitions_for_model(

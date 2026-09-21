@@ -8,12 +8,13 @@
   "description": "`fea.model(id, geometry, Name, Value, ...)` assembles an analysis model from a `geometry.Asset` and typed RunMat FEA components.",
   "behaviors": [
     "Model id and component identities remain exact structural values; the geometry revision is copied exactly into the model.",
-    "Template, frame, defaults mode, materials, assignments, constraints, natural boundaries, signals, excitations, excitation cases, steps, domains, and interfaces are validated during assembly.",
+    "Frame, materials, assignments, constraints, natural boundaries, signals, excitations, excitation cases, domains, interfaces, and an explicit procedure sequence are validated during assembly.",
+    "Exactly one of `Steps` or `Sequence` is required. Physics family, procedure, materials, conditions, and excitations are all explicit typed inputs.",
     "Constraints and boundaries are separate options. Each value is bound to the selected `geometry.Region`; model assembly rejects a foreign geometry identity or stale revision.",
     "Numeric physics values must already have crossed their owning constructor's explicit binary64 boundary; `fea.model` does not reinterpret integer arrays as components.",
     "Model assembly consumes an existing geometry asset and does not intrinsically require native OCCT. OCCT is only relevant when a topology-bearing CAD file must first be imported."
   ],
-  "examples": [{ "description": "Assemble an explicit model", "input": "model = fea.model(\"bracket\", geom, \"Materials\", {steel}, \"Loads\", {tipLoad});" }],
+  "examples": [{ "description": "Assemble an explicit model", "input": "model = fea.model(\"bracket\", geom, \"Materials\", {steel}, \"MaterialAssignments\", {steelRegion}, \"Constraints\", {fixedSupport}, \"Excitations\", {tipLoad}, \"Steps\", {staticStep});" }],
   "faqs": [{ "question": "Does `fea.model` import CAD?", "answer": "No. Pass a `geometry.Asset`. CAD import is a separate geometry operation and only some CAD formats require an OCCT-enabled importer." }],
   "links": [{ "label": "FEA models", "url": "../../fea/models" }],
   "source": { "label": "`crates/runmat-runtime/src/builtins/fea/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/fea/mod.rs" }

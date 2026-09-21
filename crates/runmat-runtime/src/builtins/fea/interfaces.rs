@@ -628,8 +628,8 @@ mod tests {
         let model = create_model_object_from_args(vec![
             Value::String("model".into()),
             asset,
-            Value::String("Template".into()),
-            Value::String("linear_static_structural".into()),
+            Value::String("Steps".into()),
+            super::super::modeling::static_test_steps_value(),
             Value::String("Interfaces".into()),
             interface.clone(),
         ])
@@ -643,8 +643,8 @@ mod tests {
         let error = create_model_object_from_args(vec![
             Value::String("foreign".into()),
             foreign,
-            Value::String("Template".into()),
-            Value::String("linear_static_structural".into()),
+            Value::String("Steps".into()),
+            super::super::modeling::static_test_steps_value(),
             Value::String("Interfaces".into()),
             interface,
         ])

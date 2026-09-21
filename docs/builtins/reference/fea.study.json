@@ -2,18 +2,18 @@
   "title": "fea.study",
   "category": "fea",
   "keywords": ["fea", "study", "model", "geometry"],
-  "summary": "Create or load a typed RunMat FEA study.",
+  "summary": "Create a typed RunMat FEA study from explicit geometry and model objects.",
   "requires_feature": "fea",
   "tested": { "unit": "builtins::fea::tests", "integration": "crates/runmat-vm/tests/integer_builtin_fea_execution_and_feedback_file_status.rs" },
-  "description": "`fea.study(path)` loads a study document, while `fea.study(id, geometry, Name, Value, ...)` assembles a typed `fea.Study`.",
+  "description": "`fea.study(id, geometry, model, Name, Value, ...)` assembles a typed `fea.Study` from an explicit `geometry.Asset` and `fea.Model`.",
   "behaviors": [
-    "The path form requires one `.fea` text path that resolves to a study rather than a sweep. The constructor form requires a text id and `geometry.Asset`.",
-    "Constructor options are `Template`, `Backend`, `Requirement`, `ModelId`, `Model`, `Frame`, `Defaults`, `Materials`, `MaterialAssignments` or `Assignments`, `Constraints`, `Boundaries`, `Signals`, `Excitations`, `ExcitationCases` or `Cases`, `Steps`, `Domains`, `Interfaces`, and `Mesh`.",
-    "Template defaults from an explicitly supplied model or is otherwise required when authored components are supplied. Backend defaults to `cpu`, requirement defaults to `production`, defaults mode is `template_scaffold`, and model id defaults to the supplied model id or a sanitized `<study-id>_model`.",
+    "The constructor requires a text id, a `geometry.Asset`, and a typed `fea.Model` as positional arguments.",
+    "The model must be bound to the same geometry identity and revision. A mismatch is rejected before the study is created.",
+    "Optional constructor settings are `Execution` and `Mesh`. When `Execution` is omitted, RunMat derives a CPU execution plan from the model's explicit procedure sequence.",
     "Direct integer inputs have no role. Nested typed components and run options retain their own exact structural or binary64 physics contracts. Public revision and count properties remain exact typed integers.",
-    "Object identity, option names, profile/run-kind agreement, and component classes are validated before study construction. Existing and STL/synthetic geometry require no native OCCT; loading topology CAD may require the configured importer."
+    "Object identity, option names, execution/procedure agreement, and component classes are validated before study construction. Existing and STL/synthetic geometry require no native OCCT; loading topology CAD may require the configured importer."
   ],
-  "examples": [{ "description": "Create a study", "input": "study = fea.study(\"bracket\", geom, \"Template\", \"linear_static_structural\", \"Backend\", \"cpu\");" }],
+  "examples": [{ "description": "Create a study from an explicit model", "input": "model = fea.model(\"bracket_model\", geom, \"Materials\", {steel}, \"MaterialAssignments\", {steelRegion}, \"Constraints\", {fixedSupport}, \"Excitations\", {tipLoad}, \"Steps\", {staticStep});\nstudy = fea.study(\"bracket\", geom, model);" }],
   "faqs": [{ "question": "Can numeric values stand in for a profile or backend?", "answer": "No. Structural identity fields are text or typed objects and are never numerically coerced." }],
   "links": [{ "label": "Using FEA", "url": "../../fea/using-fea" }],
   "source": { "label": "`crates/runmat-runtime/src/builtins/fea/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/fea/mod.rs" }

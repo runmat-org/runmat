@@ -10,19 +10,8 @@ pub(in crate::builtins::fea) async fn materialize_study(
     study: &mut crate::analysis::AnalysisStudySpec,
     bindings: &FrozenGeneratorInventory,
 ) -> BuiltinResult<()> {
-    let wall_millis = study
-        .model
-        .as_ref()
-        .map(materialization_wall_millis)
-        .unwrap_or(60_000);
-    let Some(model) = study.model.as_mut() else {
-        if bindings.is_empty() {
-            return Ok(());
-        }
-        return Err(materialization_error(
-            "frozen signal callables require a study model",
-        ));
-    };
+    let wall_millis = materialization_wall_millis(&study.model);
+    let model = &mut study.model;
     model.signals = materialize_signals(&model.signals, bindings, wall_millis).await?;
     Ok(())
 }

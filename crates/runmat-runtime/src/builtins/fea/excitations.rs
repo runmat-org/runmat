@@ -1056,8 +1056,8 @@ mod tests {
         let model = super::super::modeling::create_model_object_from_args(vec![
             Value::String("bracket".into()),
             geometry,
-            Value::String("Template".into()),
-            Value::String("linear_static_structural".into()),
+            Value::String("Steps".into()),
+            super::super::modeling::static_test_steps_value(),
             Value::String("Signals".into()),
             signal,
             Value::String("Excitations".into()),
@@ -1070,11 +1070,5 @@ mod tests {
         assert_eq!(model.signals.len(), 1);
         assert_eq!(model.excitations.len(), 1);
         assert_eq!(model.excitation_cases.len(), 1);
-        runmat_analysis_core::validate_model_against_geometry(
-            &model,
-            asset.units,
-            &CoordinateFrame::Global,
-        )
-        .unwrap();
     }
 }

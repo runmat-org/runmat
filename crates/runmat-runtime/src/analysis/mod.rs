@@ -7,14 +7,10 @@ use std::time::Instant;
 
 use chrono::Utc;
 use runmat_analysis_core::{
-    validate_model_against_geometry, AnalysisBoundary, AnalysisConstraint, AnalysisField,
-    AnalysisInterfaceKind, AnalysisModel, AnalysisModelId, AnalysisProcedure, AnalysisSequence,
-    AnalysisValidationError, BoundaryOperator, ContactFriction, CoordinateFrame,
-    CoupledPhysicsFamily, EvidenceConfidence, ExcitationAction, FluidConstraint,
-    FluidConstraintKind, MagneticConstraint, MagneticConstraintKind, MaterialAssignment,
-    MaterialModel, PhysicsFamily, PrescribedValue, Pressure, ProcedureStep, ProcedureStepId,
-    RegionTarget, StateKind, StateOutput, StructuralConstraint, StructuralConstraintKind,
-    Temperature, ThermalConstraint, ThermalConstraintKind, ThermalInterfaceTransfer, Velocity,
+    validate_model_against_geometry, AnalysisConstraint, AnalysisField, AnalysisInterfaceKind,
+    AnalysisModel, AnalysisProcedure, AnalysisValidationError, BoundaryOperator, ContactFriction,
+    CoordinateFrame, CoupledPhysicsFamily, ExcitationAction, MagneticConstraintKind, PhysicsFamily,
+    ProcedureStepId, StateKind, StateOutput, ThermalInterfaceTransfer,
 };
 use runmat_analysis_fea::execution::{
     CanonicalSemanticState, CanonicalSemanticStateInput, CanonicalSemanticStatePayload,
@@ -33,7 +29,7 @@ use runmat_analysis_fea::{
     ModalSolveOptions, SolverMethod, SolverPreconditioner, ThermalProcedureControl,
     ThermalSolveOptions,
 };
-use runmat_geometry_core::{GeometryAsset, UnitSystem};
+use runmat_geometry_core::UnitSystem;
 use runmat_meshing_core::SolverMeshArtifact;
 
 use crate::operations::{
@@ -60,6 +56,7 @@ use policy::{
 };
 
 mod contracts;
+#[cfg(test)]
 mod excitation_authoring;
 mod execution_dispatch;
 mod execution_error;
@@ -69,7 +66,6 @@ mod figures;
 mod formulation_admission;
 mod frequency_result;
 mod linear_static_result;
-mod material_inference;
 pub(crate) mod meshing;
 mod operations;
 mod policy;
@@ -85,13 +81,11 @@ mod study_sweep;
 mod typed_study_publication;
 pub mod value_admission;
 
-use excitation_authoring::{
-    append_constant_excitation, append_whole_model_heat_generation, ConstantExcitation,
-};
+#[cfg(test)]
+use excitation_authoring::{append_constant_excitation, ConstantExcitation};
 use execution_dispatch::{execution_operation, run_operation_for_identity, AnalysisOperation};
 use execution_error::{admit_runtime_proxy_for_operation, map_fea_run_error};
 use formulation_admission::{RuntimeDomainSource, RuntimeDomainTopology, RuntimeProxyFormulation};
-use material_inference::infer_material_models;
 use result_policy::{classify_run_status, evaluate_production_publication};
 #[cfg(test)]
 use structural_study::persist_immutable_study_evidence;
@@ -396,17 +390,17 @@ fn install_fea_solver_context() -> runmat_analysis_fea::FeaProgressContextGuard 
 
 pub use contracts::{
     AnalysisAcousticRunOptions, AnalysisBucklingRunOptions, AnalysisCfdRunOptions,
-    AnalysisChtRunOptions, AnalysisCreateModelIntentSpec, AnalysisDiagnosticsArtifactPayload,
-    AnalysisDocumentCheckResult, AnalysisDocumentKind, AnalysisDocumentRunResult,
-    AnalysisElectromagneticRunOptions, AnalysisExecutionPlan, AnalysisExecutionStep,
-    AnalysisFieldBinding, AnalysisFieldBindingsArtifactPayload, AnalysisFieldDescriptor,
-    AnalysisFieldKind, AnalysisFieldLocation, AnalysisFieldPageResult, AnalysisFieldPageValues,
+    AnalysisChtRunOptions, AnalysisDiagnosticsArtifactPayload, AnalysisDocumentCheckResult,
+    AnalysisDocumentKind, AnalysisDocumentRunResult, AnalysisElectromagneticRunOptions,
+    AnalysisExecutionPlan, AnalysisExecutionStep, AnalysisFieldBinding,
+    AnalysisFieldBindingsArtifactPayload, AnalysisFieldDescriptor, AnalysisFieldKind,
+    AnalysisFieldLocation, AnalysisFieldPageResult, AnalysisFieldPageValues,
     AnalysisFieldPagingDescriptor, AnalysisFieldRequestOptions, AnalysisFieldSelection,
     AnalysisFieldStatistic, AnalysisFieldStorage, AnalysisFieldStorageRef, AnalysisFsiRunOptions,
     AnalysisImmutableValueSpec, AnalysisModalRunOptions, AnalysisModelSourceEvidence,
-    AnalysisModelSourceFileEvidence, AnalysisModelSourceKind, AnalysisModelTemplate,
-    AnalysisNonlinearRunOptions, AnalysisObjectArtifactMetadata, AnalysisRandomResponseRunOptions,
-    AnalysisRenderMesh, AnalysisRenderRegion, AnalysisRenderTopology, AnalysisRenderTopologySource,
+    AnalysisModelSourceFileEvidence, AnalysisModelSourceKind, AnalysisNonlinearRunOptions,
+    AnalysisObjectArtifactMetadata, AnalysisRandomResponseRunOptions, AnalysisRenderMesh,
+    AnalysisRenderRegion, AnalysisRenderTopology, AnalysisRenderTopologySource,
     AnalysisRenderTriangleRange, AnalysisResponseSpectrumRunOptions, AnalysisResultsCompareData,
     AnalysisResultsCompareQuery, AnalysisResultsData, AnalysisResultsQuery, AnalysisResultsSummary,
     AnalysisRunDatasetFieldPagingPolicy, AnalysisRunDatasetPayload, AnalysisRunDatasetStudyRef,
@@ -461,8 +455,6 @@ pub use source::{
     ProjectFeaHost, ResolvedFeaRoot,
 };
 
-const ANALYSIS_CREATE_MODEL_OPERATION: &str = "fea.create_model";
-const ANALYSIS_CREATE_MODEL_OP_VERSION: &str = "fea.create_model/v1";
 const ANALYSIS_VALIDATE_STUDY_OPERATION: &str = "fea.validate_study";
 const ANALYSIS_VALIDATE_STUDY_OP_VERSION: &str = "fea.validate_study/v1";
 const ANALYSIS_PLAN_STUDY_OPERATION: &str = "fea.plan_study";
@@ -576,499 +568,15 @@ fn persist_fea_run_result_with_progress(
     }
 }
 
-enum ModelCondition {
-    Constraint(Box<AnalysisConstraint>),
-    Boundary(AnalysisBoundary),
-}
-
-fn fixed_condition(id: &str, region_id: String) -> ModelCondition {
-    ModelCondition::Constraint(Box::new(AnalysisConstraint::Structural(
-        StructuralConstraint {
-            constraint_id: id.to_string(),
-            frame: CoordinateFrame::Global,
-            kind: StructuralConstraintKind::Fixed {
-                target: RegionTarget::boundary(region_id),
-            },
-        },
-    )))
-}
-
-fn prescribed_temperature_condition(
-    id: &str,
-    region_id: String,
-    temperature_k: f64,
-) -> ModelCondition {
-    ModelCondition::Constraint(Box::new(AnalysisConstraint::Thermal(ThermalConstraint {
-        constraint_id: id.to_string(),
-        kind: ThermalConstraintKind::Prescribed {
-            target: RegionTarget::boundary(region_id),
-            value: PrescribedValue::Constant(Temperature::new(temperature_k)),
-        },
-    })))
-}
-
-fn magnetic_ground_condition(id: &str, region_id: String) -> ModelCondition {
-    ModelCondition::Constraint(Box::new(AnalysisConstraint::Magnetic(MagneticConstraint {
-        constraint_id: id.to_string(),
-        kind: MagneticConstraintKind::VectorPotentialGround {
-            target: RegionTarget::boundary(region_id),
-        },
-    })))
-}
-
-fn acoustic_rigid_condition(id: &str, region_id: String) -> ModelCondition {
-    ModelCondition::Boundary(AnalysisBoundary {
-        boundary_id: id.to_string(),
-        target: RegionTarget::boundary(region_id),
-        operator: BoundaryOperator::AcousticRigidWall,
-    })
-}
-
-fn fluid_constraint_condition(id: &str, kind: FluidConstraintKind) -> ModelCondition {
-    ModelCondition::Constraint(Box::new(AnalysisConstraint::Fluid(FluidConstraint {
-        constraint_id: id.to_string(),
-        kind,
-    })))
-}
-
-pub fn analysis_create_model_op(
-    geometry: &GeometryAsset,
-    intent: AnalysisCreateModelIntentSpec,
-    context: OperationContext,
-) -> Result<OperationEnvelope<AnalysisModel>, OperationErrorEnvelope> {
-    if intent.model_id.trim().is_empty() {
-        return Err(operation_error(
-            ANALYSIS_CREATE_MODEL_OPERATION,
-            ANALYSIS_CREATE_MODEL_OP_VERSION,
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.CREATE_MODEL.INVALID_INTENT",
-                error_type: OperationErrorType::Input,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "FEA model intent requires a non-empty model_id",
-            BTreeMap::from([("geometry_id".to_string(), geometry.geometry_id.clone())]),
-        ));
-    }
-
-    if geometry.meshes.is_empty() {
-        return Err(operation_error(
-            ANALYSIS_CREATE_MODEL_OPERATION,
-            ANALYSIS_CREATE_MODEL_OP_VERSION,
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.CREATE_MODEL.GEOMETRY_EMPTY",
-                error_type: OperationErrorType::Validation,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "geometry must contain at least one mesh to create an FEA model",
-            BTreeMap::from([("geometry_id".to_string(), geometry.geometry_id.clone())]),
-        ));
-    }
-
-    if geometry.units == UnitSystem::Unspecified {
-        return Err(operation_error(
-            ANALYSIS_CREATE_MODEL_OPERATION,
-            ANALYSIS_CREATE_MODEL_OP_VERSION,
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.CREATE_MODEL.UNIT_UNSPECIFIED",
-                error_type: OperationErrorType::Validation,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "geometry units must be specified before creating an FEA model",
-            BTreeMap::from([("geometry_id".to_string(), geometry.geometry_id.clone())]),
-        ));
-    }
-
-    let fixed_region_id = select_fixed_region_id(geometry)
-        .or_else(|| {
-            geometry
-                .regions
-                .first()
-                .map(|region| region.region_id.clone())
-        })
-        .unwrap_or_else(|| "region_default".to_string());
-    let load_region_id = select_load_region_id(geometry)
-        .or_else(|| {
-            geometry
-                .regions
-                .last()
-                .map(|region| region.region_id.clone())
-        })
-        .unwrap_or_else(|| fixed_region_id.clone());
-
-    let mut inferred_materials = infer_material_models(geometry);
-    if matches!(intent.template, AnalysisModelTemplate::AcousticHarmonic) {
-        for material in &mut inferred_materials {
-            material.acoustic = Some(runmat_analysis_core::MaterialAcousticModel {
-                speed_of_sound_m_per_s: 343.0,
-                damping_ratio: 0.02,
-            });
-        }
-    }
-    if matches!(
-        intent.template,
-        AnalysisModelTemplate::ElectromagneticHarmonic
-    ) {
-        for material in &mut inferred_materials {
-            material.electrical = Some(runmat_analysis_core::MaterialElectricalModel {
-                reference_temperature_k: 293.15,
-                conductivity_s_per_m: 1.0,
-                resistive_heating_coefficient: 0.0,
-                relative_permittivity: 1.0,
-                relative_permeability: 1.0,
-                conductivity_frequency_response: Vec::new(),
-            });
-        }
-    }
-    let inferred_assignments = infer_material_assignments(intent.template, &inferred_materials);
-
-    let (default_bc, default_excitation, default_steps) = match intent.template {
-        AnalysisModelTemplate::LinearStaticStructural => (
-            fixed_condition("bc_default_fixed", fixed_region_id),
-            Some((
-                "excitation_default_force",
-                ConstantExcitation::Force([0.0, -1000.0, 0.0]),
-            )),
-            vec![ProcedureStep::structural_static(
-                "step_default_static".to_string(),
-            )],
-        ),
-        AnalysisModelTemplate::StructuralHarmonic => {
-            let mut step = ProcedureStep::structural_harmonic("step_default_harmonic");
-            step.independent_domain =
-                runmat_analysis_core::IndependentDomain::FrequencyHertz(vec![10.0, 100.0, 1_000.0]);
-            (
-                fixed_condition("bc_default_fixed", fixed_region_id),
-                Some((
-                    "excitation_default_harmonic_force",
-                    ConstantExcitation::Force([0.0, -1_000.0, 0.0]),
-                )),
-                vec![step],
-            )
-        }
-        AnalysisModelTemplate::ThermoMechanicalCoupled => (
-            fixed_condition("bc_default_fixed", fixed_region_id),
-            Some((
-                "excitation_default_thermal_mech_force",
-                ConstantExcitation::Force([0.0, -650.0, 0.0]),
-            )),
-            vec![ProcedureStep::coupled(
-                "step_default_thermo_mech",
-                CoupledPhysicsFamily::Thermomechanical,
-                AnalysisProcedure::Static,
-            )],
-        ),
-        AnalysisModelTemplate::ThermalSteady => (
-            prescribed_temperature_condition("bc_default_temperature", fixed_region_id, 293.15),
-            Some((
-                "excitation_default_heat_generation",
-                ConstantExcitation::HeatGeneration(1.0),
-            )),
-            vec![ProcedureStep::thermal_steady(
-                "step_default_thermal_steady".to_string(),
-            )],
-        ),
-        AnalysisModelTemplate::ThermalTransient => (
-            prescribed_temperature_condition("bc_default_temperature", fixed_region_id, 293.15),
-            Some((
-                "excitation_default_heat_generation",
-                ConstantExcitation::HeatGeneration(1.0),
-            )),
-            vec![ProcedureStep::thermal_transient(
-                "step_default_thermal".to_string(),
-            )],
-        ),
-        AnalysisModelTemplate::ModalStructural => (
-            fixed_condition("bc_default_fixed", fixed_region_id),
-            None,
-            vec![ProcedureStep::structural_modal(
-                "step_default_modal".to_string(),
-            )],
-        ),
-        AnalysisModelTemplate::AcousticHarmonic => (
-            acoustic_rigid_condition("bc_default_acoustic_rigid_wall", fixed_region_id),
-            Some((
-                "excitation_default_acoustic_pressure",
-                ConstantExcitation::AcousticPressure(1.0),
-            )),
-            vec![ProcedureStep::acoustic_harmonic(
-                "step_default_acoustic_harmonic",
-            )],
-        ),
-        AnalysisModelTemplate::TransientStructural => (
-            fixed_condition("bc_default_fixed", fixed_region_id),
-            Some((
-                "excitation_default_transient_force",
-                ConstantExcitation::Force([0.0, -500.0, 0.0]),
-            )),
-            vec![ProcedureStep::structural_transient(
-                "step_default_transient".to_string(),
-            )],
-        ),
-        AnalysisModelTemplate::NonlinearStructural => (
-            fixed_condition("bc_default_fixed", fixed_region_id),
-            Some((
-                "excitation_default_nonlinear_force",
-                ConstantExcitation::Force([0.0, -750.0, 0.0]),
-            )),
-            vec![ProcedureStep::structural_nonlinear(
-                "step_default_nonlinear".to_string(),
-            )],
-        ),
-        AnalysisModelTemplate::ElectromagneticHarmonic => (
-            magnetic_ground_condition("bc_default_em_ground", fixed_region_id),
-            Some((
-                "excitation_default_em_current",
-                ConstantExcitation::ElectricCurrent {
-                    real_amperes: 100.0,
-                    imaginary_amperes: 0.0,
-                    frequency_hz: None,
-                },
-            )),
-            vec![ProcedureStep::electromagnetic_harmonic(
-                "step_default_electromagnetic".to_string(),
-            )],
-        ),
-        AnalysisModelTemplate::CfdSteadyState => (
-            fixed_condition("bc_default_fixed", fixed_region_id),
-            None,
-            vec![ProcedureStep::fluid_static("step_default_cfd".to_string())],
-        ),
-        AnalysisModelTemplate::CfdTransient => (
-            fixed_condition("bc_default_fixed", fixed_region_id),
-            None,
-            vec![ProcedureStep::fluid_transient("step_default_cfd_transient")],
-        ),
-        AnalysisModelTemplate::ChtCoupled => (
-            fixed_condition("bc_default_fixed", fixed_region_id),
-            Some((
-                "excitation_default_cht_heat_generation",
-                ConstantExcitation::HeatGeneration(1.0),
-            )),
-            vec![ProcedureStep::coupled(
-                "step_default_cht",
-                CoupledPhysicsFamily::ConjugateHeatTransfer,
-                AnalysisProcedure::TransientResponse,
-            )],
-        ),
-        AnalysisModelTemplate::FsiCoupled => (
-            fixed_condition("bc_default_fixed", fixed_region_id),
-            Some((
-                "excitation_default_fsi_force",
-                ConstantExcitation::Force([0.0, -450.0, 0.0]),
-            )),
-            vec![ProcedureStep::coupled(
-                "step_default_fsi",
-                CoupledPhysicsFamily::FluidStructureInteraction,
-                AnalysisProcedure::TransientResponse,
-            )],
-        ),
-    };
-
-    let cfd = match intent.template {
-        AnalysisModelTemplate::CfdSteadyState => Some(runmat_analysis_core::CfdDomain {
-            density: runmat_analysis_core::MassDensity::new(1.225),
-            dynamic_viscosity: runmat_analysis_core::DynamicViscosity::new(1.81e-5),
-            turbulence_intensity: runmat_analysis_core::TurbulenceIntensity::new(0.05),
-        }),
-        AnalysisModelTemplate::CfdTransient => Some(runmat_analysis_core::CfdDomain {
-            density: runmat_analysis_core::MassDensity::new(1.225),
-            dynamic_viscosity: runmat_analysis_core::DynamicViscosity::new(1.81e-5),
-            turbulence_intensity: runmat_analysis_core::TurbulenceIntensity::new(0.08),
-        }),
-        AnalysisModelTemplate::ChtCoupled => Some(runmat_analysis_core::CfdDomain {
-            density: runmat_analysis_core::MassDensity::new(1.225),
-            dynamic_viscosity: runmat_analysis_core::DynamicViscosity::new(1.81e-5),
-            turbulence_intensity: runmat_analysis_core::TurbulenceIntensity::new(0.07),
-        }),
-        AnalysisModelTemplate::FsiCoupled => Some(runmat_analysis_core::CfdDomain {
-            density: runmat_analysis_core::MassDensity::new(1.225),
-            dynamic_viscosity: runmat_analysis_core::DynamicViscosity::new(1.81e-5),
-            turbulence_intensity: runmat_analysis_core::TurbulenceIntensity::new(0.06),
-        }),
-        _ => None,
-    };
-    let electromagnetic = match intent.template {
-        AnalysisModelTemplate::ElectromagneticHarmonic => {
-            Some(runmat_analysis_core::ElectromagneticDomain {
-                reference_frequency: runmat_analysis_core::Frequency::new(60.0),
-            })
-        }
-        _ => None,
-    };
-    let thermo_mechanical = match intent.template {
-        AnalysisModelTemplate::ThermoMechanicalCoupled => {
-            Some(runmat_analysis_core::ThermoMechanicalDomain {
-                reference_temperature: Temperature::new(293.15),
-            })
-        }
-        AnalysisModelTemplate::ChtCoupled => Some(runmat_analysis_core::ThermoMechanicalDomain {
-            reference_temperature: Temperature::new(293.15),
-        }),
-        _ => None,
-    };
-    let thermal = match intent.template {
-        AnalysisModelTemplate::ThermalSteady
-        | AnalysisModelTemplate::ThermalTransient
-        | AnalysisModelTemplate::ChtCoupled => Some(runmat_analysis_core::ThermalDomain {
-            reference_temperature: Temperature::new(293.15),
-        }),
-        _ => None,
-    };
-    let electro_thermal = None;
-
-    let mut conditions = vec![default_bc];
-    if matches!(
-        intent.template,
-        AnalysisModelTemplate::CfdSteadyState
-            | AnalysisModelTemplate::CfdTransient
-            | AnalysisModelTemplate::ChtCoupled
-            | AnalysisModelTemplate::FsiCoupled
-    ) {
-        let default_cfd_inlet_velocity = match intent.template {
-            AnalysisModelTemplate::CfdSteadyState | AnalysisModelTemplate::CfdTransient => 5.0,
-            AnalysisModelTemplate::ChtCoupled => 4.5,
-            AnalysisModelTemplate::FsiCoupled => 4.0,
-            _ => unreachable!("fluid defaults are created only for fluid templates"),
-        };
-        conditions.extend([
-            fluid_constraint_condition(
-                "bc_default_cfd_inlet",
-                FluidConstraintKind::PrescribedVelocity {
-                    target: RegionTarget::boundary("inlet"),
-                    value: PrescribedValue::Constant(Velocity::new(default_cfd_inlet_velocity)),
-                },
-            ),
-            fluid_constraint_condition(
-                "bc_default_cfd_outlet",
-                FluidConstraintKind::PressureReference {
-                    target: RegionTarget::boundary("outlet"),
-                    value: PrescribedValue::Constant(Pressure::new(0.0)),
-                },
-            ),
-            fluid_constraint_condition(
-                "bc_default_cfd_wall_upper",
-                FluidConstraintKind::NoSlipWall {
-                    target: RegionTarget::boundary("wall_upper"),
-                },
-            ),
-            fluid_constraint_condition(
-                "bc_default_cfd_wall_lower",
-                FluidConstraintKind::NoSlipWall {
-                    target: RegionTarget::boundary("wall_lower"),
-                },
-            ),
-        ]);
-    }
-
-    let mut constraints = Vec::new();
-    let mut boundaries = Vec::new();
-    for condition in conditions {
-        match condition {
-            ModelCondition::Constraint(value) => constraints.push(*value),
-            ModelCondition::Boundary(value) => boundaries.push(value),
-        }
-    }
-
-    let mut model = AnalysisModel {
-        model_id: AnalysisModelId(intent.model_id.clone()),
-        geometry_id: geometry.geometry_id.clone(),
-        geometry_revision: geometry.revision,
-        units: geometry.units,
-        frame: CoordinateFrame::Global,
-        materials: inferred_materials,
-        material_assignments: inferred_assignments,
-        structural: None,
-        thermal,
-        thermo_mechanical,
-        electro_thermal,
-        electromagnetic,
-        cfd,
-        interfaces: Vec::new(),
-        constraints,
-        boundaries,
-        connectors: Vec::new(),
-        signals: Vec::new(),
-        excitations: Vec::new(),
-        excitation_cases: Vec::new(),
-        initial_conditions: Vec::new(),
-        response_spectra: Vec::new(),
-        random_excitations: Vec::new(),
-        sequence: AnalysisSequence::from_steps(
-            format!("{}.sequence", intent.model_id),
-            default_steps,
-        ),
-    };
-
-    if let Some((excitation_id, excitation)) = default_excitation {
-        match excitation {
-            ConstantExcitation::HeatGeneration(value) => {
-                append_whole_model_heat_generation(&mut model, excitation_id, value);
-            }
-            excitation => {
-                append_constant_excitation(&mut model, excitation_id, load_region_id, excitation);
-            }
-        }
-    }
-    validate_model_against_geometry(&model, geometry.units, &CoordinateFrame::Global).map_err(
-        |error| {
-            operation_error(
-                ANALYSIS_CREATE_MODEL_OPERATION,
-                ANALYSIS_CREATE_MODEL_OP_VERSION,
-                &context,
-                OperationErrorSpec {
-                    error_code: "RM.FEA.CREATE_MODEL.INVALID",
-                    error_type: OperationErrorType::Validation,
-                    retryable: false,
-                    severity: OperationErrorSeverity::Error,
-                },
-                format!("created FEA model failed validation: {error:?}"),
-                BTreeMap::from([
-                    ("analysis_model_id".to_string(), model.model_id.0.clone()),
-                    ("geometry_id".to_string(), geometry.geometry_id.clone()),
-                ]),
-            )
-        },
-    )?;
-
-    Ok(OperationEnvelope::new(
-        ANALYSIS_CREATE_MODEL_OPERATION,
-        ANALYSIS_CREATE_MODEL_OP_VERSION,
-        &context,
-        model,
-    ))
-}
-
 pub fn analysis_validate_study_op(
     spec: &AnalysisStudySpec,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisStudyValidateResult>, OperationErrorEnvelope> {
     let mut issue_codes = validate_study_issue_codes(spec);
-    let model_validation_detail = spec.model.as_ref().and_then(|model| {
-        validate_model_against_geometry(model, spec.geometry.units, &CoordinateFrame::Global)
+    let model_validation_detail =
+        validate_model_against_geometry(&spec.model, spec.geometry.units, &CoordinateFrame::Global)
             .err()
-            .map(|error| error.to_string())
-    });
-    if spec.model.is_none()
-        && !issue_codes.iter().any(|code| {
-            matches!(
-                code.as_str(),
-                "RM.FEA.STUDY.GEOMETRY_MESHES_EMPTY"
-                    | "RM.FEA.STUDY.GEOMETRY_UNITS_UNSPECIFIED"
-                    | "RM.FEA.STUDY.MODEL_ID_EMPTY"
-            )
-        })
-    {
-        let model = resolve_study_model(spec, &context)?;
-        if spec.execution.validate_against(&model.sequence).is_err() {
-            issue_codes.push("RM.FEA.STUDY.EXECUTION_PLAN_INVALID".to_string());
-        }
-    }
+            .map(|error| error.to_string());
     issue_codes.sort();
     issue_codes.dedup();
     let issues: Vec<AnalysisStudyIssue> = issue_codes
@@ -1078,7 +586,7 @@ pub fn analysis_validate_study_op(
             message: if code == "RM.FEA.STUDY.MODEL_INVALID" {
                 model_validation_detail
                     .as_ref()
-                    .map(|detail| format!("resolved model failed FEA validation: {detail}"))
+                    .map(|detail| format!("study model failed FEA validation: {detail}"))
                     .unwrap_or_else(|| study_issue_message(code).to_string())
             } else {
                 study_issue_message(code).to_string()
@@ -1148,7 +656,7 @@ pub fn analysis_plan_study_op(
         ));
     }
     let study_fingerprint = study_fingerprint(spec);
-    let model = resolve_study_model(spec, &context)?;
+    let model = &spec.model;
     spec.execution
         .validate_against(&model.sequence)
         .map_err(|message| {
@@ -1202,7 +710,7 @@ pub fn analysis_plan_study_op(
         serde_json::json!({
             "schema_version": "fea_study_sequence_plan_artifact/v1",
             "study_id": spec.study_id.clone(),
-            "model_id": spec.create_model_intent.model_id.clone(),
+            "model_id": model.model_id.0.clone(),
             "sequence_id": model.sequence.sequence_id.clone(),
             "steps": steps.clone(),
             "study_fingerprint": study_fingerprint.clone(),
@@ -1230,8 +738,8 @@ pub fn analysis_plan_study_op(
         &context,
         AnalysisStudyPlanData {
             study_id: spec.study_id.clone(),
-            model_id: spec.create_model_intent.model_id.clone(),
-            sequence_id: model.sequence.sequence_id,
+            model_id: model.model_id.0.clone(),
+            sequence_id: model.sequence.sequence_id.clone(),
             steps,
             operation_sequence,
             study_fingerprint,
@@ -2523,7 +2031,7 @@ fn prepare_study_semantics(
         ));
     }
     let study_fingerprint = study_fingerprint(spec);
-    let model = resolve_study_model(spec, &context)?;
+    let model = spec.model.clone();
     spec.execution
         .validate_against(&model.sequence)
         .map_err(|message| {
@@ -7502,28 +7010,13 @@ fn sanitize_study_sweep_id(sweep_id: &str) -> String {
         .collect()
 }
 
-fn resolve_study_model(
-    spec: &AnalysisStudySpec,
-    context: &OperationContext,
-) -> Result<AnalysisModel, OperationErrorEnvelope> {
-    match &spec.model {
-        Some(model) => Ok(model.clone()),
-        None => analysis_create_model_op(
-            &spec.geometry,
-            spec.create_model_intent.clone(),
-            context.clone(),
-        )
-        .map(|envelope| envelope.data),
-    }
-}
-
 fn validate_study_issue_codes(spec: &AnalysisStudySpec) -> Vec<String> {
     let mut issue_codes = Vec::new();
 
     if spec.study_id.trim().is_empty() {
         issue_codes.push("RM.FEA.STUDY.ID_EMPTY".to_string());
     }
-    if spec.create_model_intent.model_id.trim().is_empty() {
+    if spec.model.model_id.0.trim().is_empty() {
         issue_codes.push("RM.FEA.STUDY.MODEL_ID_EMPTY".to_string());
     }
     if spec.geometry.meshes.is_empty() {
@@ -7538,20 +7031,19 @@ fn validate_study_issue_codes(spec: &AnalysisStudySpec) -> Vec<String> {
     if !immutable_value_inventory_is_exact(spec) {
         issue_codes.push("RM.FEA.STUDY.IMMUTABLE_VALUES_INVALID".to_string());
     }
-    if let Some(model) = &spec.model {
-        if model.geometry_id != spec.geometry.geometry_id
-            || model.geometry_revision != spec.geometry.revision
-        {
-            issue_codes.push("RM.FEA.STUDY.MODEL_GEOMETRY_MISMATCH".to_string());
-        }
-        if validate_model_against_geometry(model, spec.geometry.units, &CoordinateFrame::Global)
-            .is_err()
-        {
-            issue_codes.push("RM.FEA.STUDY.MODEL_INVALID".to_string());
-        }
-        if spec.execution.validate_against(&model.sequence).is_err() {
-            issue_codes.push("RM.FEA.STUDY.EXECUTION_PLAN_INVALID".to_string());
-        }
+    let model = &spec.model;
+    if model.geometry_id != spec.geometry.geometry_id
+        || model.geometry_revision != spec.geometry.revision
+    {
+        issue_codes.push("RM.FEA.STUDY.MODEL_GEOMETRY_MISMATCH".to_string());
+    }
+    if validate_model_against_geometry(model, spec.geometry.units, &CoordinateFrame::Global)
+        .is_err()
+    {
+        issue_codes.push("RM.FEA.STUDY.MODEL_INVALID".to_string());
+    }
+    if spec.execution.validate_against(&model.sequence).is_err() {
+        issue_codes.push("RM.FEA.STUDY.EXECUTION_PLAN_INVALID".to_string());
     }
     for execution in &spec.execution.steps {
         if let AnalysisSolverOptions::ElectromagneticPotential(options) = &execution.solver_options
@@ -7587,10 +7079,7 @@ fn validate_study_issue_codes(spec: &AnalysisStudySpec) -> Vec<String> {
 fn immutable_value_inventory_is_exact(spec: &AnalysisStudySpec) -> bool {
     contracts::validate_immutable_value_inventory(
         &spec.immutable_values,
-        spec.model
-            .as_ref()
-            .map(|model| model.signals.as_slice())
-            .unwrap_or_default(),
+        spec.model.signals.as_slice(),
     )
     .is_ok()
 }
@@ -7598,7 +7087,7 @@ fn immutable_value_inventory_is_exact(spec: &AnalysisStudySpec) -> bool {
 fn study_issue_message(code: &str) -> &'static str {
     match code {
         "RM.FEA.STUDY.ID_EMPTY" => "study_id must be non-empty",
-        "RM.FEA.STUDY.MODEL_ID_EMPTY" => "create_model_intent.model_id must be non-empty",
+        "RM.FEA.STUDY.MODEL_ID_EMPTY" => "model.model_id must be non-empty",
         "RM.FEA.STUDY.GEOMETRY_MESHES_EMPTY" => "geometry must contain at least one mesh",
         "RM.FEA.STUDY.GEOMETRY_UNITS_UNSPECIFIED" => {
             "geometry.units must be specified (not unspecified)"
@@ -7611,9 +7100,9 @@ fn study_issue_message(code: &str) -> &'static str {
             "execution must map each canonical model procedure step to exactly one compatible solver"
         }
         "RM.FEA.STUDY.MODEL_GEOMETRY_MISMATCH" => {
-            "resolved model geometry id or revision does not match the study geometry"
+            "study model geometry id or revision does not match the study geometry"
         }
-        "RM.FEA.STUDY.MODEL_INVALID" => "resolved model failed FEA validation",
+        "RM.FEA.STUDY.MODEL_INVALID" => "study model failed FEA validation",
         "RM.FEA.STUDY.ELECTROMAGNETIC_RESIDUAL_TARGET_INVALID" => {
             "electromagnetic execution options.residual_target must be finite and positive"
         }
@@ -7663,11 +7152,8 @@ fn study_fingerprint_from_digest(digest: runmat_execution::Digest) -> String {
     format!("sha256:{encoded}")
 }
 
-fn study_operation_sequence(spec: &AnalysisStudySpec, run_op_versions: &[String]) -> Vec<String> {
-    let mut operation_sequence = Vec::with_capacity(2 + run_op_versions.len());
-    if spec.model.is_none() {
-        operation_sequence.push(ANALYSIS_CREATE_MODEL_OP_VERSION.to_string());
-    }
+fn study_operation_sequence(_spec: &AnalysisStudySpec, run_op_versions: &[String]) -> Vec<String> {
+    let mut operation_sequence = Vec::with_capacity(1 + run_op_versions.len());
     operation_sequence.push(ANALYSIS_VALIDATE_OP_VERSION.to_string());
     operation_sequence.extend(run_op_versions.iter().cloned());
     operation_sequence
@@ -8167,97 +7653,6 @@ fn diagnostic_metric_bool(
                 .find_map(|token| token.strip_prefix(&format!("{key}=")))
         })
         .and_then(|value| value.parse::<bool>().ok())
-}
-
-fn select_fixed_region_id(geometry: &GeometryAsset) -> Option<String> {
-    geometry
-        .regions
-        .iter()
-        .find(|region| {
-            let key = format!(
-                "{} {}",
-                region.name.to_ascii_lowercase(),
-                region
-                    .tag
-                    .as_deref()
-                    .unwrap_or_default()
-                    .to_ascii_lowercase()
-            );
-            key.contains("root")
-                || key.contains("base")
-                || key.contains("fixed")
-                || key.contains("mount")
-        })
-        .map(|region| region.region_id.clone())
-}
-
-fn select_load_region_id(geometry: &GeometryAsset) -> Option<String> {
-    geometry
-        .regions
-        .iter()
-        .find(|region| {
-            let key = format!(
-                "{} {}",
-                region.name.to_ascii_lowercase(),
-                region
-                    .tag
-                    .as_deref()
-                    .unwrap_or_default()
-                    .to_ascii_lowercase()
-            );
-            key.contains("tip")
-                || key.contains("load")
-                || key.contains("force")
-                || key.contains("free")
-        })
-        .map(|region| region.region_id.clone())
-}
-
-fn infer_material_assignments(
-    template: AnalysisModelTemplate,
-    materials: &[MaterialModel],
-) -> Vec<MaterialAssignment> {
-    // Geometry material evidence is currently asset-wide. It cannot truthfully associate several
-    // imported materials with individual domains, so only the unambiguous single-material case is
-    // scaffolded. The resulting all-domain assignments remain explicit model data and can be
-    // replaced by selected-region assignments before execution.
-    let [material] = materials else {
-        return Vec::new();
-    };
-    let material_id = material.material_id.clone();
-    let targets: &[runmat_analysis_core::PropertyRegionTarget] = match template {
-        AnalysisModelTemplate::LinearStaticStructural
-        | AnalysisModelTemplate::StructuralHarmonic
-        | AnalysisModelTemplate::ThermoMechanicalCoupled
-        | AnalysisModelTemplate::ThermalSteady
-        | AnalysisModelTemplate::ThermalTransient
-        | AnalysisModelTemplate::ModalStructural
-        | AnalysisModelTemplate::TransientStructural
-        | AnalysisModelTemplate::NonlinearStructural => {
-            &[runmat_analysis_core::PropertyRegionTarget::all_solids()]
-        }
-        AnalysisModelTemplate::AcousticHarmonic
-        | AnalysisModelTemplate::ElectromagneticHarmonic
-        | AnalysisModelTemplate::CfdSteadyState
-        | AnalysisModelTemplate::CfdTransient => {
-            &[runmat_analysis_core::PropertyRegionTarget::all_cells()]
-        }
-        AnalysisModelTemplate::ChtCoupled | AnalysisModelTemplate::FsiCoupled => &[
-            runmat_analysis_core::PropertyRegionTarget::all_solids(),
-            runmat_analysis_core::PropertyRegionTarget::all_cells(),
-        ],
-    };
-
-    targets
-        .iter()
-        .cloned()
-        .map(|target| MaterialAssignment {
-            target,
-            expected_material_id: material_id.clone(),
-            assigned_material_id: material_id.clone(),
-            confidence: EvidenceConfidence::Inferred,
-        })
-        .collect()
 }
 
 fn map_validate_error(

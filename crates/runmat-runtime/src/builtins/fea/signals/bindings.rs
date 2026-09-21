@@ -150,11 +150,7 @@ impl FrozenStudyGeneratorInventory {
                     format!("study `{}` is declared more than once", study.study_id),
                 ));
             }
-            let signals = study
-                .model
-                .as_ref()
-                .map(|model| model.signals.as_slice())
-                .unwrap_or_default();
+            let signals = study.model.signals.as_slice();
             inventory.validate_against(builtin, signals)?;
             if !inventory.is_empty() {
                 retained.push((study.study_id.clone(), inventory.clone()));
@@ -256,11 +252,7 @@ impl FrozenStudyGeneratorInventory {
             .cloned()
             .map(|study| {
                 let bindings = decoded.remove(&study.study_id).unwrap_or_default();
-                let signals = study
-                    .model
-                    .as_ref()
-                    .map(|model| model.signals.as_slice())
-                    .unwrap_or_default();
+                let signals = study.model.signals.as_slice();
                 FrozenGeneratorInventory::new(builtin, signals, bindings)
                     .map(|inventory| (study, inventory))
             })

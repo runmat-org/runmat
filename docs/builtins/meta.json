@@ -90128,7 +90128,7 @@
               "ty": "Any",
               "arity": "Variadic",
               "default": null,
-              "description": "Template, frame, defaults, and typed model-component options."
+              "description": "Explicit frame, materials, assignments, constraints, boundaries, signals, excitations, steps or sequence, domains, and interfaces."
             }
           ],
           "outputs": [
@@ -90504,28 +90504,7 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "study = fea.study(path)",
-          "inputs": [
-            {
-              "name": "path",
-              "ty": "StringScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Path to a .fea file."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "result",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "FEA object or operation result."
-            }
-          ]
-        },
-        {
-          "label": "study = fea.study(id, geometry, Name, Value, ...)",
+          "label": "study = fea.study(id, geometry, model, Name, Value, ...)",
           "inputs": [
             {
               "name": "id",
@@ -90542,11 +90521,18 @@
               "description": "geometry.Asset returned by geometry.load."
             },
             {
+              "name": "model",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Explicit fea.Model bound to the supplied geometry revision."
+            },
+            {
               "name": "Name, Value",
               "ty": "Any",
               "arity": "Variadic",
               "default": null,
-              "description": "Required Template plus optional Mesh, Execution, ModelId, and typed model setup options."
+              "description": "Optional Mesh and Execution settings."
             }
           ],
           "outputs": [

@@ -89,15 +89,9 @@ fn random_response_intent_is_typed_path_free_and_round_trips() {
 fn structural_study_intent_is_path_free_and_does_not_require_a_mesh() {
     let _guard = analysis_test_guard();
     let mut spec = sample_linear_static_study_spec();
-    let mut model = analysis_create_model_op(
-        &spec.geometry,
-        spec.create_model_intent.clone(),
-        OperationContext::new(None, None),
-    )
-    .expect("sample structural model should resolve")
-    .data;
+    let mut model = spec.model.clone();
     set_model_contact(&mut model, 0.0);
-    spec.model = Some(model);
+    spec.model = model;
     spec.geometry.source.path = "/author/machine/private/part.step".to_string();
     spec.geometry.source.sha256 = "11".repeat(32);
     spec.solver_mesh_artifact_path = Some("/missing/local/mesh.cbor".to_string());
@@ -692,7 +686,7 @@ fn structural_prestressed_modal_frequency_intent_is_typed_and_restartable() {
 fn structural_study_intent_admits_one_typed_direct_transient_workload() {
     let _guard = analysis_test_guard();
     let spec = sample_direct_transient_study_spec("44".repeat(32), 9, 4);
-    let step = spec.model.as_ref().unwrap().sequence.steps[0].clone();
+    let step = spec.model.sequence.steps[0].clone();
 
     let intent = analysis_prepare_structural_study_intent_op(
         &spec,
@@ -1143,9 +1137,7 @@ fn structural_study_intent_completes_a_partitioned_direct_transient_with_state()
     assert_eq!(envelope.data.steps.len(), 1);
     assert_eq!(
         envelope.data.states.len(),
-        spec.model.as_ref().unwrap().sequence.steps[0]
-            .state_outputs
-            .len()
+        spec.model.sequence.steps[0].state_outputs.len()
     );
     assert!(envelope
         .data
@@ -1379,16 +1371,10 @@ fn sample_direct_transient_study_spec(
 ) -> AnalysisStudySpec {
     let mut spec = sample_linear_static_study_spec();
     spec.geometry.source.sha256 = geometry_sha256;
-    let mut model = analysis_create_model_op(
-        &spec.geometry,
-        spec.create_model_intent.clone(),
-        OperationContext::new(None, None),
-    )
-    .expect("sample structural model should resolve")
-    .data;
+    let mut model = spec.model.clone();
     let step = ProcedureStep::structural_transient("step_direct_transient");
     model.sequence = AnalysisSequence::from_steps("sequence_direct_transient", vec![step.clone()]);
-    spec.model = Some(model);
+    spec.model = model;
     spec.execution = AnalysisExecutionPlan {
         steps: vec![AnalysisExecutionStep {
             step_id: step.step_id,
@@ -1409,18 +1395,12 @@ fn sample_direct_transient_study_spec(
 fn sample_modal_study_spec(geometry_sha256: String) -> AnalysisStudySpec {
     let mut spec = sample_linear_static_study_spec();
     spec.geometry.source.sha256 = geometry_sha256;
-    let mut model = analysis_create_model_op(
-        &spec.geometry,
-        spec.create_model_intent.clone(),
-        OperationContext::new(None, None),
-    )
-    .expect("sample structural model should resolve")
-    .data;
+    let mut model = spec.model.clone();
     let mut step = ProcedureStep::structural_modal("step_modal");
     step.independent_domain =
         runmat_analysis_core::IndependentDomain::Eigenvalue { requested_count: 1 };
     model.sequence = AnalysisSequence::from_steps("sequence_modal", vec![step.clone()]);
-    spec.model = Some(model);
+    spec.model = model;
     spec.execution = AnalysisExecutionPlan {
         steps: vec![AnalysisExecutionStep {
             step_id: step.step_id,
@@ -1439,13 +1419,7 @@ fn sample_modal_study_spec(geometry_sha256: String) -> AnalysisStudySpec {
 fn sample_modal_transient_study_spec(geometry_sha256: String) -> AnalysisStudySpec {
     let mut spec = sample_linear_static_study_spec();
     spec.geometry.source.sha256 = geometry_sha256;
-    let mut model = analysis_create_model_op(
-        &spec.geometry,
-        spec.create_model_intent.clone(),
-        OperationContext::new(None, None),
-    )
-    .expect("sample structural model should resolve")
-    .data;
+    let mut model = spec.model.clone();
     let mut modal = ProcedureStep::structural_modal("step_modal");
     modal.independent_domain =
         runmat_analysis_core::IndependentDomain::Eigenvalue { requested_count: 1 };
@@ -1477,7 +1451,7 @@ fn sample_modal_transient_study_spec(geometry_sha256: String) -> AnalysisStudySp
             reference: runmat_analysis_core::ReferenceStatePolicy::Preserve,
         });
     model.sequence = sequence;
-    spec.model = Some(model);
+    spec.model = model;
     spec.execution = AnalysisExecutionPlan {
         steps: vec![
             AnalysisExecutionStep {
@@ -1512,13 +1486,7 @@ fn sample_modal_transient_study_spec(geometry_sha256: String) -> AnalysisStudySp
 fn sample_response_spectrum_study_spec(geometry_sha256: String) -> AnalysisStudySpec {
     let mut spec = sample_linear_static_study_spec();
     spec.geometry.source.sha256 = geometry_sha256;
-    let mut model = analysis_create_model_op(
-        &spec.geometry,
-        spec.create_model_intent.clone(),
-        OperationContext::new(None, None),
-    )
-    .expect("sample structural model should resolve")
-    .data;
+    let mut model = spec.model.clone();
     let mut modal = ProcedureStep::structural_modal("step_modal");
     modal.independent_domain =
         runmat_analysis_core::IndependentDomain::Eigenvalue { requested_count: 3 };
@@ -1575,7 +1543,7 @@ fn sample_response_spectrum_study_spec(geometry_sha256: String) -> AnalysisStudy
         });
     model.sequence = sequence;
     model.response_spectra = vec![spectrum];
-    spec.model = Some(model);
+    spec.model = model;
     spec.execution = AnalysisExecutionPlan {
         steps: vec![
             AnalysisExecutionStep {
@@ -1604,13 +1572,7 @@ fn sample_response_spectrum_study_spec(geometry_sha256: String) -> AnalysisStudy
 fn sample_random_response_study_spec(geometry_sha256: String) -> AnalysisStudySpec {
     let mut spec = sample_linear_static_study_spec();
     spec.geometry.source.sha256 = geometry_sha256;
-    let mut model = analysis_create_model_op(
-        &spec.geometry,
-        spec.create_model_intent.clone(),
-        OperationContext::new(None, None),
-    )
-    .expect("sample structural model should resolve")
-    .data;
+    let mut model = spec.model.clone();
     let mut modal = ProcedureStep::structural_modal("step_modal");
     modal.independent_domain =
         runmat_analysis_core::IndependentDomain::Eigenvalue { requested_count: 3 };
@@ -1665,7 +1627,7 @@ fn sample_random_response_study_spec(geometry_sha256: String) -> AnalysisStudySp
         });
     model.sequence = sequence;
     model.random_excitations = vec![excitation];
-    spec.model = Some(model);
+    spec.model = model;
     spec.execution = AnalysisExecutionPlan {
         steps: vec![
             AnalysisExecutionStep {
@@ -1701,13 +1663,7 @@ fn sample_random_response_study_spec(geometry_sha256: String) -> AnalysisStudySp
 fn sample_buckling_study_spec(geometry_sha256: String) -> AnalysisStudySpec {
     let mut spec = sample_linear_static_study_spec();
     spec.geometry.source.sha256 = geometry_sha256;
-    let mut model = analysis_create_model_op(
-        &spec.geometry,
-        spec.create_model_intent.clone(),
-        OperationContext::new(None, None),
-    )
-    .expect("sample structural model should resolve")
-    .data;
+    let mut model = spec.model.clone();
     let runmat_analysis_core::PhysicalSignal::Force(signal) = &mut model.signals[0] else {
         panic!("buckling fixture must carry a force signal")
     };
@@ -1741,7 +1697,7 @@ fn sample_buckling_study_spec(geometry_sha256: String) -> AnalysisStudySpec {
             reference: runmat_analysis_core::ReferenceStatePolicy::Preserve,
         });
     model.sequence = sequence;
-    spec.model = Some(model);
+    spec.model = model;
     spec.execution = AnalysisExecutionPlan {
         steps: vec![
             AnalysisExecutionStep {
@@ -1774,7 +1730,7 @@ fn sample_buckling_study_spec(geometry_sha256: String) -> AnalysisStudySpec {
 
 fn sample_prestressed_modal_study_spec(geometry_sha256: String) -> AnalysisStudySpec {
     let mut spec = sample_buckling_study_spec(geometry_sha256);
-    let model = spec.model.as_mut().unwrap();
+    let model = &mut spec.model;
     let preload = model.sequence.steps[0].clone();
     let mut modal = ProcedureStep::structural_prestressed_modal(
         "step_prestressed_modal",
@@ -1817,7 +1773,7 @@ fn sample_prestressed_modal_study_spec(geometry_sha256: String) -> AnalysisStudy
 
 fn sample_prestressed_frequency_study_spec(geometry_sha256: String) -> AnalysisStudySpec {
     let mut spec = sample_buckling_study_spec(geometry_sha256);
-    let model = spec.model.as_mut().unwrap();
+    let model = &mut spec.model;
     let preload = model.sequence.steps[0].clone();
     let mut frequency = ProcedureStep::structural_prestressed_harmonic(
         "step_prestressed_frequency",
@@ -1858,7 +1814,7 @@ fn sample_prestressed_frequency_study_spec(geometry_sha256: String) -> AnalysisS
 
 fn sample_prestressed_modal_frequency_study_spec(geometry_sha256: String) -> AnalysisStudySpec {
     let mut spec = sample_prestressed_frequency_study_spec(geometry_sha256);
-    let model = spec.model.as_mut().unwrap();
+    let model = &mut spec.model;
     let preload = model.sequence.steps[0].clone();
     let mut modal = ProcedureStep::structural_prestressed_modal(
         "step_prestressed_modes",

@@ -82,9 +82,9 @@ use runmat_analysis_fea::{
     FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 use runmat_geometry_core::{
-    EntityIdRange, EntityKind, GeometryAsset, GeometrySource, MaterialEvidence,
-    MaterialEvidenceConfidence, MeshDescriptor, MeshKind, Region, RegionEntityMapping,
-    SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile, UnitSystem,
+    EntityIdRange, EntityKind, GeometryAsset, GeometrySource, MeshDescriptor, MeshKind, Region,
+    RegionEntityMapping, SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile,
+    UnitSystem,
 };
 use runmat_meshing_core::{
     CanonicalMeshingContract, ElementOrder, PersistentEntityId, PersistentEntityKind, StableDigest,
@@ -619,10 +619,6 @@ fn replace_with_moment_excitation(model: &mut AnalysisModel, excitation_id: &str
     }];
 }
 
-fn excitation_id(action: &ExcitationAction) -> &str {
-    action.excitation().excitation_id.0.as_str()
-}
-
 fn excitation_region_id(action: &ExcitationAction) -> &str {
     let runmat_analysis_core::ExcitationTarget::Region(target) = &action.excitation().target else {
         panic!("expected a region excitation target");
@@ -702,6 +698,130 @@ fn sample_fsi_model() -> AnalysisModel {
     );
     model.cfd = Some(sample_cfd_domain());
     model
+}
+
+#[derive(Clone, Copy)]
+enum TestModelKind {
+    LinearStaticStructural,
+    ModalStructural,
+    AcousticHarmonic,
+    ElectromagneticHarmonic,
+}
+
+struct TestModelSpec {
+    model_id: String,
+    kind: TestModelKind,
+}
+
+fn test_model_for_geometry(
+    geometry: &GeometryAsset,
+    spec: TestModelSpec,
+    context: OperationContext,
+) -> Result<OperationEnvelope<AnalysisModel>, OperationErrorEnvelope> {
+    let mut model = sample_solid_model();
+    model.model_id = AnalysisModelId(spec.model_id);
+    model.geometry_id = geometry.geometry_id.clone();
+    model.geometry_revision = geometry.revision;
+    model.units = geometry.units;
+    model.material_assignments = vec![MaterialAssignment {
+        target: match spec.kind {
+            TestModelKind::AcousticHarmonic | TestModelKind::ElectromagneticHarmonic => {
+                runmat_analysis_core::PropertyRegionTarget::all_cells()
+            }
+            _ => runmat_analysis_core::PropertyRegionTarget::all_solids(),
+        },
+        expected_material_id: "mat_steel".to_string(),
+        assigned_material_id: "mat_steel".to_string(),
+        confidence: EvidenceConfidence::Verified,
+    }];
+    match spec.kind {
+        TestModelKind::LinearStaticStructural => {
+            model.sequence = AnalysisSequence::from_steps(
+                "test_linear_static",
+                vec![ProcedureStep::structural_static("step_default_static")],
+            );
+        }
+        TestModelKind::ModalStructural => {
+            model.sequence = AnalysisSequence::from_steps(
+                "test_modal",
+                vec![ProcedureStep::structural_modal("step_default_modal")],
+            );
+            model.signals.clear();
+            model.excitations.clear();
+            model.excitation_cases.clear();
+        }
+        TestModelKind::AcousticHarmonic => {
+            for material in &mut model.materials {
+                material.acoustic = Some(runmat_analysis_core::MaterialAcousticModel {
+                    speed_of_sound_m_per_s: 343.0,
+                    damping_ratio: 0.02,
+                });
+            }
+            model.sequence = AnalysisSequence::from_steps(
+                "test_acoustic_harmonic",
+                vec![ProcedureStep::acoustic_harmonic(
+                    "step_default_acoustic_harmonic",
+                )],
+            );
+            model.constraints.clear();
+            model.boundaries = vec![runmat_analysis_core::AnalysisBoundary {
+                boundary_id: "bc_default_acoustic_rigid_wall".to_string(),
+                target: RegionTarget::boundary("root"),
+                operator: runmat_analysis_core::BoundaryOperator::AcousticRigidWall,
+            }];
+            model.signals.clear();
+            model.excitations.clear();
+            model.excitation_cases.clear();
+            append_constant_excitation(
+                &mut model,
+                "excitation_default_acoustic_pressure",
+                "tip",
+                ConstantExcitation::AcousticPressure(1.0),
+            );
+        }
+        TestModelKind::ElectromagneticHarmonic => {
+            for material in &mut model.materials {
+                material.electrical = Some(test_electrical_material());
+            }
+            model.electromagnetic = Some(ElectromagneticDomain {
+                reference_frequency: Frequency::new(60.0),
+            });
+            model.sequence = AnalysisSequence::from_steps(
+                "test_electromagnetic_harmonic",
+                vec![ProcedureStep::electromagnetic_harmonic(
+                    "step_default_electromagnetic",
+                )],
+            );
+            model.constraints = vec![runmat_analysis_core::AnalysisConstraint::Magnetic(
+                runmat_analysis_core::MagneticConstraint {
+                    constraint_id: "bc_default_em_ground".to_string(),
+                    kind: runmat_analysis_core::MagneticConstraintKind::VectorPotentialGround {
+                        target: RegionTarget::boundary("root"),
+                    },
+                },
+            )];
+            model.boundaries.clear();
+            model.signals.clear();
+            model.excitations.clear();
+            model.excitation_cases.clear();
+            append_constant_excitation(
+                &mut model,
+                "excitation_default_em_current",
+                "tip",
+                ConstantExcitation::ElectricCurrent {
+                    real_amperes: 100.0,
+                    imaginary_amperes: 0.0,
+                    frequency_hz: None,
+                },
+            );
+        }
+    }
+    Ok(OperationEnvelope::new(
+        "test.explicit_model",
+        "test.explicit_model/v1",
+        &context,
+        model,
+    ))
 }
 
 fn set_model_thermo_coupling(model: &mut AnalysisModel, coupling: TestThermoMechanicalCoupling) {
@@ -921,49 +1041,24 @@ fn closed_cube_geometry_asset() -> GeometryAsset {
     }
 }
 
-fn sample_step_like_geometry_asset() -> GeometryAsset {
-    let mut asset = sample_geometry_asset();
-    asset.source_geometry.kind = SourceGeometryKind::Cad;
-    asset.source_geometry.material_evidence = vec![MaterialEvidence {
-        source_key: "STEP:MATERIAL".to_string(),
-        normalized_key: "material_name".to_string(),
-        value: "Aluminum 6061".to_string(),
-        confidence: MaterialEvidenceConfidence::High,
-        unit_basis: None,
-        assumptions: vec!["imported".to_string()],
-    }];
-    asset.regions = vec![
-        Region {
-            region_id: "region_root".to_string(),
-            name: "Base_Mount".to_string(),
-            tag: Some("fixed".to_string()),
-            cad_ownership: None,
-        },
-        Region {
-            region_id: "region_tip".to_string(),
-            name: "Tip_Load".to_string(),
-            tag: Some("load".to_string()),
-            cad_ownership: None,
-        },
-    ];
-    asset.region_entity_mappings = vec![
-        RegionEntityMapping::all_faces("region_root", "mesh_1", 1),
-        RegionEntityMapping::all_faces("region_tip", "mesh_1", 1),
-    ];
-    asset
-}
-
 fn sample_linear_static_study_spec() -> AnalysisStudySpec {
     let procedure_step = ProcedureStep::structural_static("step_default_static");
+    let geometry = closed_cube_geometry_asset();
+    let model = test_model_for_geometry(
+        &geometry,
+        TestModelSpec {
+            model_id: "study_model_linear_static_001".to_string(),
+            kind: TestModelKind::LinearStaticStructural,
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("explicit structural test model")
+    .data;
     AnalysisStudySpec {
         study_id: "study_linear_static_001".to_string(),
-        geometry: closed_cube_geometry_asset(),
-        create_model_intent: AnalysisCreateModelIntentSpec {
-            model_id: "study_model_linear_static_001".to_string(),
-            template: AnalysisModelTemplate::LinearStaticStructural,
-        },
+        geometry,
         model_source_evidence: None,
-        model: None,
+        model,
         execution: AnalysisExecutionPlan {
             steps: vec![AnalysisExecutionStep {
                 step_id: procedure_step.step_id.clone(),
@@ -981,15 +1076,22 @@ fn sample_linear_static_study_spec() -> AnalysisStudySpec {
 
 fn sample_electromagnetic_study_spec() -> AnalysisStudySpec {
     let procedure_step = ProcedureStep::electromagnetic_harmonic("step_default_electromagnetic");
+    let geometry = sample_geometry_asset();
+    let model = test_model_for_geometry(
+        &geometry,
+        TestModelSpec {
+            model_id: "study_model_electromagnetic_001".to_string(),
+            kind: TestModelKind::ElectromagneticHarmonic,
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("explicit electromagnetic test model")
+    .data;
     AnalysisStudySpec {
         study_id: "study_electromagnetic_001".to_string(),
-        geometry: sample_geometry_asset(),
-        create_model_intent: AnalysisCreateModelIntentSpec {
-            model_id: "study_model_electromagnetic_001".to_string(),
-            template: AnalysisModelTemplate::ElectromagneticHarmonic,
-        },
+        geometry,
         model_source_evidence: None,
-        model: None,
+        model,
         execution: AnalysisExecutionPlan {
             steps: vec![AnalysisExecutionStep {
                 step_id: procedure_step.step_id.clone(),
@@ -1048,39 +1150,6 @@ fn runtime_contracts_reject_retired_mesh_artifact_field_names() {
             serde_json::Value::String("retired.json".to_owned()),
         );
     assert!(serde_json::from_value::<AnalysisRunOptions>(options).is_err());
-}
-
-#[test]
-fn analysis_create_model_returns_v1_envelope() {
-    let _guard = analysis_test_guard();
-    let geometry = sample_geometry_asset();
-    let envelope = analysis_create_model_op(
-        &geometry,
-        AnalysisCreateModelIntentSpec {
-            model_id: "model_from_geo".to_string(),
-            template: AnalysisModelTemplate::LinearStaticStructural,
-        },
-        OperationContext::new(Some("trace-create-1".to_string()), None),
-    )
-    .expect("create model should pass");
-
-    assert_eq!(envelope.operation, "fea.create_model");
-    assert_eq!(envelope.op_version, "fea.create_model/v1");
-    assert_eq!(envelope.data.model_id.0, "model_from_geo");
-    assert_eq!(envelope.data.geometry_id, "geo:beam");
-    assert_eq!(envelope.data.geometry_revision, 2);
-    assert_eq!(envelope.data.units, UnitSystem::Meter);
-    assert_eq!(envelope.data.frame, CoordinateFrame::Global);
-    assert!(!envelope.data.materials.is_empty());
-    assert!(!envelope.data.constraints.is_empty() || !envelope.data.boundaries.is_empty());
-    assert!(!envelope.data.excitations.is_empty());
-    assert!(!envelope.data.signals.is_empty());
-    assert!(!envelope.data.excitation_cases.is_empty());
-    assert!(!envelope.data.sequence.steps.is_empty());
-    assert_eq!(
-        envelope.data.sequence.steps[0].procedure,
-        AnalysisProcedure::Static
-    );
 }
 
 #[test]
@@ -1172,296 +1241,6 @@ fn nonlinear_run_option_presets_are_ordered_for_cost_vs_accuracy() {
 }
 
 #[test]
-fn analysis_create_model_maps_invalid_intent_error() {
-    let _guard = analysis_test_guard();
-    let geometry = sample_geometry_asset();
-    let err = analysis_create_model_op(
-        &geometry,
-        AnalysisCreateModelIntentSpec {
-            model_id: "   ".to_string(),
-            template: AnalysisModelTemplate::LinearStaticStructural,
-        },
-        OperationContext::new(None, None),
-    )
-    .expect_err("create model should fail");
-
-    assert_eq!(err.error_code, "RM.FEA.CREATE_MODEL.INVALID_INTENT");
-    assert_eq!(err.operation, "fea.create_model");
-    assert_eq!(err.op_version, "fea.create_model/v1");
-}
-
-#[test]
-fn analysis_create_model_supports_nonlinear_template() {
-    let _guard = analysis_test_guard();
-    let geometry = sample_geometry_asset();
-    let envelope = analysis_create_model_op(
-        &geometry,
-        AnalysisCreateModelIntentSpec {
-            model_id: "nonlinear_model".to_string(),
-            template: AnalysisModelTemplate::NonlinearStructural,
-        },
-        OperationContext::new(None, None),
-    )
-    .expect("nonlinear template should be supported");
-
-    assert_eq!(envelope.data.model_id.0, "nonlinear_model");
-    assert_eq!(
-        envelope.data.sequence.steps[0].procedure,
-        AnalysisProcedure::Nonlinear
-    );
-    assert_eq!(
-        excitation_id(&envelope.data.excitations[0]),
-        "excitation_default_nonlinear_force"
-    );
-}
-
-#[test]
-fn analysis_create_model_supports_transient_template() {
-    let _guard = analysis_test_guard();
-    let geometry = sample_geometry_asset();
-    let envelope = analysis_create_model_op(
-        &geometry,
-        AnalysisCreateModelIntentSpec {
-            model_id: "transient_model".to_string(),
-            template: AnalysisModelTemplate::TransientStructural,
-        },
-        OperationContext::new(None, None),
-    )
-    .expect("transient template should be supported");
-
-    assert_eq!(envelope.data.model_id.0, "transient_model");
-    assert_eq!(
-        envelope.data.sequence.steps[0].procedure,
-        AnalysisProcedure::TransientResponse
-    );
-    assert_eq!(
-        excitation_id(&envelope.data.excitations[0]),
-        "excitation_default_transient_force"
-    );
-}
-
-#[test]
-fn analysis_create_model_supports_modal_template() {
-    let _guard = analysis_test_guard();
-    let geometry = sample_geometry_asset();
-    let envelope = analysis_create_model_op(
-        &geometry,
-        AnalysisCreateModelIntentSpec {
-            model_id: "modal_model".to_string(),
-            template: AnalysisModelTemplate::ModalStructural,
-        },
-        OperationContext::new(None, None),
-    )
-    .expect("modal template should be supported");
-
-    assert_eq!(envelope.data.model_id.0, "modal_model");
-    assert_eq!(
-        envelope.data.sequence.steps[0].procedure,
-        AnalysisProcedure::ModalExtraction
-    );
-    assert_eq!(
-        envelope.data.sequence.steps[0].family,
-        PhysicsFamily::Structural
-    );
-    assert!(envelope.data.excitations.is_empty());
-    assert!(envelope.data.excitation_cases.is_empty());
-}
-
-#[test]
-fn analysis_create_model_supports_acoustic_harmonic_template() {
-    let _guard = analysis_test_guard();
-    let geometry = sample_geometry_asset();
-    let envelope = analysis_create_model_op(
-        &geometry,
-        AnalysisCreateModelIntentSpec {
-            model_id: "acoustic_harmonic_model".to_string(),
-            template: AnalysisModelTemplate::AcousticHarmonic,
-        },
-        OperationContext::new(None, None),
-    )
-    .expect("acoustic harmonic template should be supported");
-
-    assert_eq!(envelope.data.model_id.0, "acoustic_harmonic_model");
-    assert_eq!(
-        envelope.data.sequence.steps[0].procedure,
-        AnalysisProcedure::HarmonicResponse
-    );
-    assert_eq!(
-        envelope.data.sequence.steps[0].family,
-        PhysicsFamily::Acoustic
-    );
-    assert_eq!(
-        excitation_id(&envelope.data.excitations[0]),
-        "excitation_default_acoustic_pressure"
-    );
-}
-
-#[test]
-fn analysis_create_model_supports_electromagnetic_template() {
-    let _guard = analysis_test_guard();
-    let geometry = sample_geometry_asset();
-    let envelope = analysis_create_model_op(
-        &geometry,
-        AnalysisCreateModelIntentSpec {
-            model_id: "electromagnetic_template_model".to_string(),
-            template: AnalysisModelTemplate::ElectromagneticHarmonic,
-        },
-        OperationContext::new(Some("trace-create-em-template".to_string()), None),
-    )
-    .expect("electromagnetic template model creation should succeed");
-
-    assert_eq!(
-        envelope.data.sequence.steps[0].family,
-        PhysicsFamily::Electromagnetic
-    );
-    let domain = envelope
-        .data
-        .electromagnetic
-        .as_ref()
-        .expect("electromagnetic domain should be populated");
-    assert_eq!(domain.reference_frequency.hertz, 60.0);
-    assert!(
-        runmat_analysis_fea::pipeline::electromagnetic::has_nonzero_source_at_frequency(
-            &envelope.data,
-            AnalysisProcedure::HarmonicResponse,
-            60.0,
-        )
-        .expect("authored electromagnetic source should realize")
-    );
-}
-
-#[test]
-fn analysis_create_model_supports_cfd_steady_template() {
-    let _guard = analysis_test_guard();
-    let geometry = sample_geometry_asset();
-    let envelope = analysis_create_model_op(
-        &geometry,
-        AnalysisCreateModelIntentSpec {
-            model_id: "cfd_steady_model".to_string(),
-            template: AnalysisModelTemplate::CfdSteadyState,
-        },
-        OperationContext::new(None, None),
-    )
-    .expect("cfd steady template should be supported");
-
-    assert_eq!(envelope.data.sequence.steps[0].family, PhysicsFamily::Fluid);
-    let cfd = envelope
-        .data
-        .cfd
-        .as_ref()
-        .expect("cfd domain should be populated");
-    assert_eq!(
-        envelope.data.sequence.steps[0].procedure,
-        AnalysisProcedure::Static
-    );
-    assert_eq!(cfd.density.kilograms_per_cubic_meter, 1.225);
-}
-
-#[test]
-fn analysis_create_model_supports_cfd_transient_template() {
-    let _guard = analysis_test_guard();
-    let geometry = sample_geometry_asset();
-    let envelope = analysis_create_model_op(
-        &geometry,
-        AnalysisCreateModelIntentSpec {
-            model_id: "cfd_transient_model".to_string(),
-            template: AnalysisModelTemplate::CfdTransient,
-        },
-        OperationContext::new(None, None),
-    )
-    .expect("cfd transient template should be supported");
-
-    assert_eq!(envelope.data.sequence.steps[0].family, PhysicsFamily::Fluid);
-    let cfd = envelope
-        .data
-        .cfd
-        .as_ref()
-        .expect("cfd domain should be populated");
-    assert_eq!(
-        envelope.data.sequence.steps[0].procedure,
-        AnalysisProcedure::TransientResponse
-    );
-    assert_eq!(cfd.turbulence_intensity.ratio, 0.08);
-}
-
-#[test]
-fn analysis_create_model_supports_cht_coupled_template() {
-    let _guard = analysis_test_guard();
-    let geometry = sample_geometry_asset();
-    let envelope = analysis_create_model_op(
-        &geometry,
-        AnalysisCreateModelIntentSpec {
-            model_id: "cht_coupled_model".to_string(),
-            template: AnalysisModelTemplate::ChtCoupled,
-        },
-        OperationContext::new(None, None),
-    )
-    .expect("cht coupled template should be supported");
-
-    assert_eq!(envelope.data.sequence.steps.len(), 1);
-    assert_eq!(
-        envelope.data.sequence.steps[0].family,
-        PhysicsFamily::Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer)
-    );
-    assert_eq!(
-        envelope.data.sequence.steps[0].procedure,
-        AnalysisProcedure::TransientResponse
-    );
-    let cfd = envelope
-        .data
-        .cfd
-        .as_ref()
-        .expect("cfd domain should be populated for cht template");
-    assert_eq!(cfd.turbulence_intensity.ratio, 0.07);
-    assert_eq!(
-        envelope
-            .data
-            .thermo_mechanical
-            .as_ref()
-            .expect("thermo-mechanical domain should be populated")
-            .reference_temperature
-            .kelvin,
-        293.15
-    );
-}
-
-#[test]
-fn analysis_create_model_supports_fsi_coupled_template() {
-    let _guard = analysis_test_guard();
-    let geometry = sample_geometry_asset();
-    let envelope = analysis_create_model_op(
-        &geometry,
-        AnalysisCreateModelIntentSpec {
-            model_id: "fsi_coupled_model".to_string(),
-            template: AnalysisModelTemplate::FsiCoupled,
-        },
-        OperationContext::new(None, None),
-    )
-    .expect("fsi coupled template should be supported");
-
-    assert_eq!(envelope.data.sequence.steps.len(), 1);
-    assert_eq!(
-        envelope.data.sequence.steps[0].family,
-        PhysicsFamily::Coupled(CoupledPhysicsFamily::FluidStructureInteraction)
-    );
-    assert_eq!(
-        envelope.data.sequence.steps[0].procedure,
-        AnalysisProcedure::TransientResponse
-    );
-    assert_eq!(
-        excitation_id(&envelope.data.excitations[0]),
-        "excitation_default_fsi_force"
-    );
-    let cfd = envelope
-        .data
-        .cfd
-        .as_ref()
-        .expect("cfd domain should be populated for fsi template");
-    assert_eq!(cfd.turbulence_intensity.ratio, 0.06);
-    assert!(envelope.data.thermo_mechanical.is_none());
-}
-
-#[test]
 fn analysis_validate_study_reports_invalid_study_id() {
     let _guard = analysis_test_guard();
     let root = temp_artifact_root("validate-study-evidence");
@@ -1503,7 +1282,7 @@ fn analysis_validate_study_preserves_typed_model_failure_detail() {
     let mut spec = sample_linear_static_study_spec();
     let mut model = sample_model();
     model.materials.clear();
-    spec.model = Some(model);
+    spec.model = model;
 
     let envelope = analysis_validate_study_op(&spec, OperationContext::new(None, None))
         .expect("study validation should return typed output");
@@ -1606,7 +1385,7 @@ fn analysis_plan_study_returns_canonical_linear_static_sequence() {
     assert_eq!(envelope.operation, "fea.plan_study");
     assert_eq!(envelope.op_version, "fea.plan_study/v1");
     assert_eq!(envelope.data.study_id, spec.study_id);
-    assert_eq!(envelope.data.model_id, spec.create_model_intent.model_id);
+    assert_eq!(envelope.data.model_id, spec.model.model_id.0);
     assert_eq!(envelope.data.steps.len(), 1);
     assert_eq!(
         envelope.data.steps[0].run_operation,
@@ -1623,7 +1402,6 @@ fn analysis_plan_study_returns_canonical_linear_static_sequence() {
     assert_eq!(
         envelope.data.operation_sequence,
         vec![
-            "fea.create_model/v1".to_string(),
             "fea.validate/v1".to_string(),
             "fea.run_linear_static/v1".to_string(),
         ]
@@ -1794,7 +1572,7 @@ fn analysis_run_study_executes_linear_static_path() {
     assert_eq!(envelope.operation, "fea.run_study");
     assert_eq!(envelope.op_version, "fea.run_study/v1");
     assert_eq!(envelope.data.study_id, spec.study_id);
-    assert_eq!(envelope.data.model_id, spec.create_model_intent.model_id);
+    assert_eq!(envelope.data.model_id, spec.model.model_id.0);
     assert_eq!(
         envelope.data.steps[0].procedure_step.family,
         PhysicsFamily::Structural
@@ -1822,7 +1600,6 @@ fn analysis_run_study_executes_linear_static_path() {
     assert_eq!(
         envelope.data.operation_sequence,
         vec![
-            "fea.create_model/v1".to_string(),
             "fea.validate/v1".to_string(),
             "fea.run_linear_static/v1".to_string(),
         ]
@@ -2056,11 +1833,11 @@ fn placement_lifecycle_restores_authored_sweep_order_before_publication() {
         write_ready_minimal_analysis_mesh_artifact("placement-lifecycle-solver-mesh");
     let mut first = sample_linear_static_study_spec();
     first.study_id = "placement_first".to_string();
-    first.create_model_intent.model_id = "placement_first_model".to_string();
+    first.model.model_id = AnalysisModelId("placement_first_model".to_string());
     first.solver_mesh_artifact_path = Some(solver_mesh_path.display().to_string());
     let mut second = first.clone();
     second.study_id = "placement_second".to_string();
-    second.create_model_intent.model_id = "placement_second_model".to_string();
+    second.model.model_id = AnalysisModelId("placement_second_model".to_string());
     let sweep = AnalysisStudySweepSpec {
         sweep_id: "placement_order_sweep".to_string(),
         studies: vec![first, second],
@@ -2122,11 +1899,11 @@ fn placement_lifecycle_owns_fail_fast_admission() {
         write_ready_minimal_analysis_mesh_artifact("placement-fail-fast-solver-mesh");
     let mut first = sample_linear_static_study_spec();
     first.study_id = "placement_fail_fast_first".to_string();
-    first.create_model_intent.model_id = "placement_fail_fast_first_model".to_string();
+    first.model.model_id = AnalysisModelId("placement_fail_fast_first_model".to_string());
     first.solver_mesh_artifact_path = Some(solver_mesh_path.display().to_string());
     let mut second = first.clone();
     second.study_id = "placement_fail_fast_second".to_string();
-    second.create_model_intent.model_id = "placement_fail_fast_second_model".to_string();
+    second.model.model_id = AnalysisModelId("placement_fail_fast_second_model".to_string());
     let sweep = AnalysisStudySweepSpec {
         sweep_id: "placement_fail_fast_sweep".to_string(),
         studies: vec![first, second],
@@ -2200,18 +1977,12 @@ fn portable_structural_study_executes_every_independent_step_in_authored_order()
     spec.solver_mesh_artifact_path = Some(solver_mesh_path.display().to_string());
     let first = ProcedureStep::structural_static("step_static_first");
     let second = ProcedureStep::structural_static("step_static_second");
-    let mut model = analysis_create_model_op(
-        &spec.geometry,
-        spec.create_model_intent.clone(),
-        OperationContext::new(None, None),
-    )
-    .expect("structural model creation should succeed")
-    .data;
+    let mut model = spec.model.clone();
     model.sequence = AnalysisSequence::from_steps(
         "sequence_two_independent_static_steps",
         vec![first.clone(), second.clone()],
     );
-    spec.model = Some(model);
+    spec.model = model;
     spec.execution = AnalysisExecutionPlan::for_sequence_with_requirement(
         &AnalysisSequence::from_steps(
             "sequence_two_independent_static_steps",
@@ -2322,7 +2093,7 @@ fn analysis_run_study_preserves_requested_canonical_solver_mesh_artifact() {
         confidence: EvidenceConfidence::Verified,
     }];
     spec.execution.steps[0].step_id = model.sequence.steps[0].step_id.clone();
-    spec.model = Some(model);
+    spec.model = model;
     let (solver_mesh_root, solver_mesh_path) =
         write_ready_minimal_analysis_mesh_artifact("requested-canonical-solver-mesh");
     spec.solver_mesh_artifact_path = Some(solver_mesh_path.display().to_string());
@@ -2838,114 +2609,6 @@ fn analysis_validate_study_sweep_reports_sweep_and_study_issue_details() {
         .issues
         .iter()
         .any(|issue| issue.code == "RM.FEA.STUDY.ID_EMPTY" && !issue.message.is_empty()));
-}
-
-#[test]
-fn analysis_create_model_infers_materials_and_assignments_from_geometry_evidence() {
-    let _guard = analysis_test_guard();
-    let geometry = sample_step_like_geometry_asset();
-    let envelope = analysis_create_model_op(
-        &geometry,
-        AnalysisCreateModelIntentSpec {
-            model_id: "model_from_step_like".to_string(),
-            template: AnalysisModelTemplate::LinearStaticStructural,
-        },
-        OperationContext::new(None, None),
-    )
-    .expect("create model should succeed");
-
-    assert!(envelope
-        .data
-        .materials
-        .iter()
-        .any(|material| material.material_id == "mat_aluminum"));
-    assert_eq!(envelope.data.material_assignments.len(), 1);
-    assert_eq!(
-        envelope.data.material_assignments[0].target,
-        runmat_analysis_core::PropertyRegionTarget::all_solids()
-    );
-    assert_eq!(
-        envelope.data.material_assignments[0].assigned_material_id,
-        "mat_aluminum"
-    );
-    assert_eq!(
-        envelope.data.constraints[0]
-            .target()
-            .expect("target")
-            .region_id,
-        "region_root"
-    );
-    assert_eq!(
-        excitation_region_id(&envelope.data.excitations[0]),
-        "region_tip"
-    );
-}
-
-#[test]
-fn analysis_create_model_scaffolds_only_unambiguous_typed_material_domains() {
-    let _guard = analysis_test_guard();
-    let geometry = sample_geometry_asset();
-    for (template, expected_targets) in [
-        (
-            AnalysisModelTemplate::LinearStaticStructural,
-            vec![runmat_analysis_core::PropertyRegionTarget::all_solids()],
-        ),
-        (
-            AnalysisModelTemplate::AcousticHarmonic,
-            vec![runmat_analysis_core::PropertyRegionTarget::all_cells()],
-        ),
-        (
-            AnalysisModelTemplate::ChtCoupled,
-            vec![
-                runmat_analysis_core::PropertyRegionTarget::all_solids(),
-                runmat_analysis_core::PropertyRegionTarget::all_cells(),
-            ],
-        ),
-    ] {
-        let model = analysis_create_model_op(
-            &geometry,
-            AnalysisCreateModelIntentSpec {
-                model_id: format!("typed_domains_{template:?}"),
-                template,
-            },
-            OperationContext::new(None, None),
-        )
-        .expect("single-material scaffold should resolve")
-        .data;
-        assert_eq!(
-            model
-                .material_assignments
-                .iter()
-                .map(|assignment| assignment.target.clone())
-                .collect::<Vec<_>>(),
-            expected_targets
-        );
-    }
-
-    let mut ambiguous_geometry = sample_step_like_geometry_asset();
-    ambiguous_geometry
-        .source_geometry
-        .material_evidence
-        .push(MaterialEvidence {
-            source_key: "STEP:MATERIAL:2".to_string(),
-            normalized_key: "material_name".to_string(),
-            value: "Structural steel".to_string(),
-            confidence: MaterialEvidenceConfidence::High,
-            unit_basis: None,
-            assumptions: vec!["imported without body ownership".to_string()],
-        });
-    let model = analysis_create_model_op(
-        &ambiguous_geometry,
-        AnalysisCreateModelIntentSpec {
-            model_id: "ambiguous_material_ownership".to_string(),
-            template: AnalysisModelTemplate::LinearStaticStructural,
-        },
-        OperationContext::new(None, None),
-    )
-    .expect("material declarations remain usable without guessing ownership")
-    .data;
-    assert_eq!(model.materials.len(), 2);
-    assert!(model.material_assignments.is_empty());
 }
 
 #[test]
@@ -4386,11 +4049,11 @@ fn analysis_trends_classifies_acoustic_runs_separately() {
     storage::reset_artifact_store_for_tests();
 
     let geometry = sample_geometry_asset();
-    let acoustic_model = analysis_create_model_op(
+    let acoustic_model = test_model_for_geometry(
         &geometry,
-        AnalysisCreateModelIntentSpec {
+        TestModelSpec {
             model_id: "acoustic_trend_model".to_string(),
-            template: AnalysisModelTemplate::AcousticHarmonic,
+            kind: TestModelKind::AcousticHarmonic,
         },
         OperationContext::new(None, None),
     )
@@ -5221,11 +4884,11 @@ fn analysis_artifacts_record_family_specific_op_versions_for_coupled_runs() {
         OperationContext::new(None, None),
     )
     .expect("fsi run should succeed");
-    let acoustic_model = analysis_create_model_op(
+    let acoustic_model = test_model_for_geometry(
         &sample_geometry_asset(),
-        AnalysisCreateModelIntentSpec {
+        TestModelSpec {
             model_id: "acoustic_op_version_model".to_string(),
-            template: AnalysisModelTemplate::AcousticHarmonic,
+            kind: TestModelKind::AcousticHarmonic,
         },
         OperationContext::new(None, None),
     )
@@ -5709,11 +5372,11 @@ fn analysis_run_acoustic_rejects_models_without_acoustic_harmonic_step() {
 fn analysis_run_acoustic_rejects_models_without_acoustic_source() {
     let _guard = analysis_test_guard();
     let geometry = sample_geometry_asset();
-    let mut acoustic_model = analysis_create_model_op(
+    let mut acoustic_model = test_model_for_geometry(
         &geometry,
-        AnalysisCreateModelIntentSpec {
+        TestModelSpec {
             model_id: "acoustic_model_missing_source".to_string(),
-            template: AnalysisModelTemplate::AcousticHarmonic,
+            kind: TestModelKind::AcousticHarmonic,
         },
         OperationContext::new(None, None),
     )
@@ -5748,11 +5411,11 @@ fn analysis_run_acoustic_rejects_models_without_acoustic_source() {
 fn analysis_run_acoustic_rejects_moment_excitations() {
     let _guard = analysis_test_guard();
     let geometry = sample_geometry_asset();
-    let mut acoustic_model = analysis_create_model_op(
+    let mut acoustic_model = test_model_for_geometry(
         &geometry,
-        AnalysisCreateModelIntentSpec {
+        TestModelSpec {
             model_id: "acoustic_model_with_moment".to_string(),
-            template: AnalysisModelTemplate::AcousticHarmonic,
+            kind: TestModelKind::AcousticHarmonic,
         },
         OperationContext::new(None, None),
     )
@@ -5779,11 +5442,11 @@ fn analysis_run_acoustic_rejects_moment_excitations() {
 fn analysis_run_acoustic_rejects_models_without_acoustic_boundary() {
     let _guard = analysis_test_guard();
     let geometry = sample_geometry_asset();
-    let mut acoustic_model = analysis_create_model_op(
+    let mut acoustic_model = test_model_for_geometry(
         &geometry,
-        AnalysisCreateModelIntentSpec {
+        TestModelSpec {
             model_id: "acoustic_model_missing_boundary".to_string(),
-            template: AnalysisModelTemplate::AcousticHarmonic,
+            kind: TestModelKind::AcousticHarmonic,
         },
         OperationContext::new(None, None),
     )
@@ -8683,11 +8346,11 @@ fn nonlinear_balanced_degrades_when_contact_severity_is_high() {
 fn analysis_run_modal_returns_native_modal_result() {
     let _guard = analysis_test_guard();
     let geometry = sample_geometry_asset();
-    let modal_model = analysis_create_model_op(
+    let modal_model = test_model_for_geometry(
         &geometry,
-        AnalysisCreateModelIntentSpec {
+        TestModelSpec {
             model_id: "modal_model_run".to_string(),
-            template: AnalysisModelTemplate::ModalStructural,
+            kind: TestModelKind::ModalStructural,
         },
         OperationContext::new(None, None),
     )
@@ -8787,11 +8450,11 @@ fn analysis_run_modal_returns_native_modal_result() {
 fn analysis_run_acoustic_returns_acoustic_fields_and_diagnostics() {
     let _guard = analysis_test_guard();
     let geometry = sample_geometry_asset();
-    let acoustic_model = analysis_create_model_op(
+    let acoustic_model = test_model_for_geometry(
         &geometry,
-        AnalysisCreateModelIntentSpec {
+        TestModelSpec {
             model_id: "acoustic_model_run".to_string(),
-            template: AnalysisModelTemplate::AcousticHarmonic,
+            kind: TestModelKind::AcousticHarmonic,
         },
         OperationContext::new(None, None),
     )
@@ -8913,11 +8576,11 @@ fn analysis_run_acoustic_returns_acoustic_fields_and_diagnostics() {
 fn analysis_run_acoustic_realizes_complex_frequency_pressure() {
     let _guard = analysis_test_guard();
     let geometry = sample_geometry_asset();
-    let mut complex_model = analysis_create_model_op(
+    let mut complex_model = test_model_for_geometry(
         &geometry,
-        AnalysisCreateModelIntentSpec {
+        TestModelSpec {
             model_id: "acoustic_complex_frequency_source".to_string(),
-            template: AnalysisModelTemplate::AcousticHarmonic,
+            kind: TestModelKind::AcousticHarmonic,
         },
         OperationContext::new(None, None),
     )
@@ -8999,11 +8662,11 @@ fn analysis_run_acoustic_realizes_complex_frequency_pressure() {
 fn analysis_run_modal_with_options_controls_requested_mode_count() {
     let _guard = analysis_test_guard();
     let geometry = sample_geometry_asset();
-    let modal_model = analysis_create_model_op(
+    let modal_model = test_model_for_geometry(
         &geometry,
-        AnalysisCreateModelIntentSpec {
+        TestModelSpec {
             model_id: "modal_model_run_opts".to_string(),
-            template: AnalysisModelTemplate::ModalStructural,
+            kind: TestModelKind::ModalStructural,
         },
         OperationContext::new(None, None),
     )
@@ -9040,11 +8703,11 @@ fn analysis_run_modal_with_options_controls_requested_mode_count() {
 fn analysis_results_include_modal_payload_for_modal_runs() {
     let _guard = analysis_test_guard();
     let geometry = sample_geometry_asset();
-    let modal_model = analysis_create_model_op(
+    let modal_model = test_model_for_geometry(
         &geometry,
-        AnalysisCreateModelIntentSpec {
+        TestModelSpec {
             model_id: "modal_model_results".to_string(),
-            template: AnalysisModelTemplate::ModalStructural,
+            kind: TestModelKind::ModalStructural,
         },
         OperationContext::new(None, None),
     )
@@ -9094,11 +8757,11 @@ fn analysis_results_include_modal_payload_for_modal_runs() {
 fn analysis_results_query_can_exclude_modal_payload() {
     let _guard = analysis_test_guard();
     let geometry = sample_geometry_asset();
-    let modal_model = analysis_create_model_op(
+    let modal_model = test_model_for_geometry(
         &geometry,
-        AnalysisCreateModelIntentSpec {
+        TestModelSpec {
             model_id: "modal_model_results_filter".to_string(),
-            template: AnalysisModelTemplate::ModalStructural,
+            kind: TestModelKind::ModalStructural,
         },
         OperationContext::new(None, None),
     )
@@ -9139,11 +8802,11 @@ fn analysis_results_query_can_exclude_modal_payload() {
 fn analysis_results_query_rejects_unknown_modal_mode_index() {
     let _guard = analysis_test_guard();
     let geometry = sample_geometry_asset();
-    let modal_model = analysis_create_model_op(
+    let modal_model = test_model_for_geometry(
         &geometry,
-        AnalysisCreateModelIntentSpec {
+        TestModelSpec {
             model_id: "modal_model_results_index".to_string(),
-            template: AnalysisModelTemplate::ModalStructural,
+            kind: TestModelKind::ModalStructural,
         },
         OperationContext::new(None, None),
     )
@@ -9351,6 +9014,7 @@ fn analysis_generate_study_run_mesh_figure_uses_solver_topology_for_em_run() {
     let (solver_mesh_root, solver_mesh_path) =
         write_ready_minimal_analysis_mesh_artifact("em-field-figures-solver-mesh");
     spec.geometry.revision = 1;
+    spec.model.geometry_revision = spec.geometry.revision;
     spec.solver_mesh_artifact_path = Some(solver_mesh_path.display().to_string());
     let run = analysis_run_study_op(&spec, OperationContext::new(None, None))
         .expect("electromagnetic study should run");

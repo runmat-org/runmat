@@ -1358,10 +1358,6 @@ mod tests {
         let model_value = super::super::modeling::create_model_object_from_args(vec![
             Value::String("model".into()),
             geometry.clone(),
-            Value::String("Template".into()),
-            Value::String("linear_static_structural".into()),
-            Value::String("Defaults".into()),
-            Value::String("None".into()),
             Value::String("Sequence".into()),
             value.clone(),
         ])
@@ -1373,10 +1369,6 @@ mod tests {
         let conflict = super::super::modeling::create_model_object_from_args(vec![
             Value::String("model".into()),
             geometry,
-            Value::String("Template".into()),
-            Value::String("linear_static_structural".into()),
-            Value::String("Defaults".into()),
-            Value::String("None".into()),
             Value::String("Sequence".into()),
             value,
             Value::String("Steps".into()),

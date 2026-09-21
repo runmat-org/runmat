@@ -3,7 +3,7 @@ use super::signals::bindings::{
     FROZEN_STUDY_GENERATORS_PROPERTY,
 };
 use super::*;
-use runmat_analysis_core::{PropertyRegionTarget, ThermalDomain};
+use runmat_analysis_core::{validate_model_against_geometry, PropertyRegionTarget, ThermalDomain};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -88,12 +88,6 @@ pub(super) enum BoundConstraintPayload {
     BoundFluid(BoundFluidConstraint),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum ModelDefaultsMode {
-    TemplateScaffold,
-    None,
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct ComposedModel {
     pub(super) model: AnalysisModel,
@@ -118,110 +112,43 @@ struct RuntimeSignals {
     frozen_generators: FrozenGeneratorInventory,
 }
 
-impl Default for ModelDefaultsMode {
-    fn default() -> Self {
-        Self::TemplateScaffold
-    }
-}
-
 #[derive(Debug, Default)]
 pub(super) struct StudyConstructorOptions {
-    pub(super) template: Option<AnalysisModelTemplate>,
     pub(super) execution: Option<AnalysisExecutionPlan>,
-    pub(super) model_id: Option<String>,
-    pub(super) model: Option<ComposedModel>,
-    pub(super) frame: Option<CoordinateFrame>,
-    pub(super) model_defaults: ModelDefaultsMode,
-    pub(super) materials: Vec<MaterialModel>,
-    pub(super) material_assignments: Vec<GeometryBoundMaterialAssignment>,
-    pub(super) constraints: Vec<BoundConstraintPayload>,
-    pub(super) boundaries: Vec<GeometryBoundBoundary>,
-    pub(super) signals: Vec<PhysicalSignal>,
-    pub(super) frozen_generators: FrozenGeneratorInventory,
-    pub(super) excitations: Vec<super::excitations::GeometryBoundExcitation>,
-    pub(super) excitation_cases: Vec<ExcitationCase>,
-    pub(super) initial_conditions: Vec<super::initial_conditions::GeometryBoundInitialCondition>,
-    pub(super) response_spectra: Vec<runmat_analysis_core::ResponseSpectrum>,
-    pub(super) steps: Vec<ProcedureStep>,
-    pub(super) sequence: Option<AnalysisSequence>,
-    pub(super) domains: Vec<DomainPayload>,
-    pub(super) interfaces: Vec<GeometryBoundInterface>,
     pub(super) mesh: Option<crate::meshing::MeshingExecutionOutput>,
 }
 
 pub(super) fn create_study_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
-    if args.len() < 2 {
+    if args.len() < 3 {
         return Err(builtin_error(
             STUDY_NAME,
             &ERROR_INPUT,
-            "fea.study requires id and geometry arguments",
+            "fea.study requires id, geometry, and model arguments",
         ));
     }
     let study_id = scalar_string(&args[0], STUDY_NAME, &ERROR_INPUT)?;
     let geometry = geometry_asset_from_value(STUDY_NAME, &args[1])?;
-    let options = StudyConstructorOptions::parse(&args[2..])?;
+    let composed_model = model_from_value(STUDY_NAME, &args[2])?;
+    let options = StudyConstructorOptions::parse(&args[3..])?;
     let supplied_mesh = options.mesh.clone();
-    let template = resolve_study_template(&options)?;
     let supplied_execution = options.execution.clone();
-    if options.model.is_some() && options.has_model_components() {
-        return Err(builtin_error(
-            STUDY_NAME,
-            &ERROR_INPUT,
-            "Model cannot be combined with separate model component options; compose components in fea.model",
-        ));
-    }
-    let model_id = options.model_id.clone().unwrap_or_else(|| {
-        options
-            .model
-            .as_ref()
-            .map(|model| model.model.model_id.0.clone())
-            .unwrap_or_else(|| format!("{}_model", sanitize_id(&study_id)))
-    });
-    let has_model_components = options.has_model_components();
-    let (mut model, frozen_generators) = match options.model {
-        Some(model) => (model.model, model.frozen_generators),
-        None if has_model_components => build_model_from_parts(
-            STUDY_NAME,
-            &geometry,
-            model_id.clone(),
-            template,
-            options.model_defaults,
-            options.frame,
-            options.materials,
-            options.material_assignments,
-            options.constraints,
-            options.boundaries,
-            options.signals,
-            options.excitations,
-            options.excitation_cases,
-            options.initial_conditions,
-            options.response_spectra,
-            options.steps,
-            options.sequence,
-            options.domains,
-            options.interfaces,
-        )
-        .map(|model| (model, options.frozen_generators))?,
-        None => {
-            let model = analysis_create_model_op(
-                &geometry,
-                AnalysisCreateModelIntentSpec {
-                    model_id: model_id.clone(),
-                    template,
-                },
-                OperationContext::new(None, None),
-            )
-            .map_err(|error| operation_error(STUDY_NAME, &ERROR_OPERATION, error))?
-            .data;
-            (model, FrozenGeneratorInventory::default())
-        }
-    };
+    let (mut model, frozen_generators) = (composed_model.model, composed_model.frozen_generators);
+    require_model_geometry(STUDY_NAME, &model, &geometry)?;
     if let Some(mesh) = supplied_mesh.as_ref() {
         let aliases = runmat_analysis_core::GeometryRegionAliases::new(mesh.region_aliases.clone())
             .map_err(|error| builtin_error(STUDY_NAME, &ERROR_INPUT, error.to_string()))?;
         model = runmat_analysis_core::resolve_geometry_region_aliases(&model, &aliases)
             .map_err(|error| builtin_error(STUDY_NAME, &ERROR_INPUT, error.to_string()))?;
     }
+    validate_model_against_geometry(&model, geometry.units, &CoordinateFrame::Global).map_err(
+        |error| {
+            builtin_error(
+                STUDY_NAME,
+                &ERROR_INPUT,
+                format!("FEA model failed study validation: {error}"),
+            )
+        },
+    )?;
     let execution = match supplied_execution {
         Some(execution) => {
             execution
@@ -243,9 +170,8 @@ pub(super) fn create_study_object_from_args(args: Vec<Value>) -> BuiltinResult<V
     let spec = AnalysisStudySpec {
         study_id,
         geometry,
-        create_model_intent: AnalysisCreateModelIntentSpec { model_id, template },
         model_source_evidence: None,
-        model: Some(model),
+        model,
         execution,
         meshing_settings: None,
         immutable_values: Vec::new(),
@@ -272,11 +198,7 @@ impl StudyConstructorOptions {
         let mut seen = HashSet::new();
         for pair in args.chunks(2) {
             let key = option_key(&pair[0], STUDY_NAME)?;
-            let canonical = match key.as_str() {
-                "materialassignments" | "assignments" => "materialassignments",
-                "excitationcases" | "cases" => "excitationcases",
-                other => other,
-            };
+            let canonical = key.as_str();
             if !seen.insert(canonical.to_string()) {
                 return Err(builtin_error(
                     STUDY_NAME,
@@ -285,81 +207,15 @@ impl StudyConstructorOptions {
                 ));
             }
             match key.as_str() {
-                "template" => {
-                    let text = scalar_string(&pair[1], STUDY_NAME, &ERROR_INPUT)?;
-                    options.template = Some(parse_scalar_enum(&text, "Template")?);
-                }
                 "execution" => {
                     options.execution = Some(super::execution::execution_plan_from_value(
                         STUDY_NAME, &pair[1],
                     )?)
                 }
-                "modelid" => {
-                    options.model_id = Some(scalar_string(&pair[1], STUDY_NAME, &ERROR_INPUT)?);
-                }
-                "model" => {
-                    options.model = Some(model_from_value(STUDY_NAME, &pair[1])?);
-                }
                 "mesh" => {
                     options.mesh = Some(crate::builtins::meshing::execution_output_from_value(
                         STUDY_NAME, &pair[1],
                     )?);
-                }
-                "frame" => {
-                    let text = scalar_string(&pair[1], STUDY_NAME, &ERROR_INPUT)?;
-                    options.frame = Some(parse_scalar_enum(&text, "Frame")?);
-                }
-                "defaults" => {
-                    options.model_defaults = parse_model_defaults_mode(&scalar_string(
-                        &pair[1],
-                        STUDY_NAME,
-                        &ERROR_INPUT,
-                    )?)?;
-                }
-                "materials" => options.materials = material_vec_from_value(STUDY_NAME, &pair[1])?,
-                "materialassignments" | "assignments" => {
-                    options.material_assignments =
-                        material_assignment_vec_from_value(STUDY_NAME, &pair[1])?;
-                }
-                "constraints" => {
-                    options.constraints = constraint_vec_from_value(STUDY_NAME, &pair[1])?;
-                }
-                "boundaries" => {
-                    options.boundaries = boundary_vec_from_value(STUDY_NAME, &pair[1])?;
-                }
-                "signals" => {
-                    let signals = signal_vec_from_value(STUDY_NAME, &pair[1])?;
-                    options.signals = signals.signals;
-                    options.frozen_generators = signals.frozen_generators;
-                }
-                "excitations" => {
-                    options.excitations =
-                        super::excitations::bound_excitation_vec_from_value(STUDY_NAME, &pair[1])?;
-                }
-                "excitationcases" | "cases" => {
-                    options.excitation_cases =
-                        super::excitations::excitation_case_vec_from_value(STUDY_NAME, &pair[1])?;
-                }
-                "initialconditions" => {
-                    options.initial_conditions =
-                        super::initial_conditions::initial_condition_vec_from_value(
-                            STUDY_NAME, &pair[1],
-                        )?;
-                }
-                "responsespectra" => {
-                    options.response_spectra =
-                        super::response_spectra::response_spectrum_vec_from_value(
-                            STUDY_NAME, &pair[1],
-                        )?;
-                }
-                "steps" => options.steps = step_vec_from_value(STUDY_NAME, &pair[1])?,
-                "sequence" => {
-                    options.sequence =
-                        Some(super::sequences::sequence_from_value(STUDY_NAME, &pair[1])?)
-                }
-                "domains" => options.domains = domain_vec_from_value(STUDY_NAME, &pair[1])?,
-                "interfaces" => {
-                    options.interfaces = interface_vec_from_value(STUDY_NAME, &pair[1])?;
                 }
                 other => {
                     return Err(builtin_error(
@@ -372,30 +228,11 @@ impl StudyConstructorOptions {
         }
         Ok(options)
     }
-
-    fn has_model_components(&self) -> bool {
-        self.frame.is_some()
-            || !self.materials.is_empty()
-            || !self.material_assignments.is_empty()
-            || !self.constraints.is_empty()
-            || !self.boundaries.is_empty()
-            || !self.signals.is_empty()
-            || !self.excitations.is_empty()
-            || !self.excitation_cases.is_empty()
-            || !self.initial_conditions.is_empty()
-            || !self.response_spectra.is_empty()
-            || !self.steps.is_empty()
-            || self.sequence.is_some()
-            || !self.domains.is_empty()
-            || !self.interfaces.is_empty()
-    }
 }
 
 #[derive(Debug, Default)]
 struct ModelConstructorOptions {
-    template: Option<AnalysisModelTemplate>,
     frame: Option<CoordinateFrame>,
-    defaults: ModelDefaultsMode,
     materials: Vec<MaterialModel>,
     material_assignments: Vec<GeometryBoundMaterialAssignment>,
     constraints: Vec<BoundConstraintPayload>,
@@ -472,19 +309,10 @@ pub(super) fn create_model_object_from_args(args: Vec<Value>) -> BuiltinResult<V
     let model_id = scalar_string(&args[0], MODEL_NAME, &ERROR_INPUT)?;
     let geometry = geometry_asset_from_value(MODEL_NAME, &args[1])?;
     let options = parse_model_constructor_options(MODEL_NAME, &args[2..])?;
-    let template = options.template.ok_or_else(|| {
-        builtin_error(
-            MODEL_NAME,
-            &ERROR_INPUT,
-            "fea.model requires the typed Template option",
-        )
-    })?;
     let model = build_model_from_parts(
         MODEL_NAME,
         &geometry,
         model_id,
-        template,
-        options.defaults,
         options.frame,
         options.materials,
         options.material_assignments,
@@ -506,6 +334,25 @@ pub(super) fn create_model_object_from_args(args: Vec<Value>) -> BuiltinResult<V
     })
 }
 
+#[cfg(test)]
+pub(super) fn static_test_step_value() -> Value {
+    serializable_to_object(
+        MODEL_NAME,
+        &ERROR_INTERNAL,
+        FEA_STRUCTURAL_STEP_CLASS,
+        &ProcedureStep::structural_static("explicit_test_step"),
+    )
+    .expect("static test step should serialize")
+}
+
+#[cfg(test)]
+pub(super) fn static_test_steps_value() -> Value {
+    Value::Cell(
+        runmat_value::CellArray::new(vec![static_test_step_value()], 1, 1)
+            .expect("static test step cell should build"),
+    )
+}
+
 fn parse_model_constructor_options(
     builtin: &'static str,
     args: &[Value],
@@ -513,20 +360,12 @@ fn parse_model_constructor_options(
     let mut options = ModelConstructorOptions::default();
     for pair in expect_name_value_tail(builtin, args)? {
         match pair.key.as_str() {
-            "template" => {
-                let text = scalar_string(pair.value, builtin, &ERROR_INPUT)?;
-                options.template = Some(parse_scalar_enum(&text, "Template")?);
-            }
             "frame" => {
                 let text = scalar_string(pair.value, builtin, &ERROR_INPUT)?;
                 options.frame = Some(parse_scalar_enum(&text, "Frame")?);
             }
-            "defaults" => {
-                options.defaults =
-                    parse_model_defaults_mode(&scalar_string(pair.value, builtin, &ERROR_INPUT)?)?;
-            }
             "materials" => options.materials = material_vec_from_value(builtin, pair.value)?,
-            "materialassignments" | "assignments" => {
+            "materialassignments" => {
                 options.material_assignments =
                     material_assignment_vec_from_value(builtin, pair.value)?;
             }
@@ -545,7 +384,7 @@ fn parse_model_constructor_options(
                 options.excitations =
                     super::excitations::bound_excitation_vec_from_value(builtin, pair.value)?
             }
-            "excitationcases" | "cases" => {
+            "excitationcases" => {
                 options.excitation_cases =
                     super::excitations::excitation_case_vec_from_value(builtin, pair.value)?
             }
@@ -871,8 +710,6 @@ fn build_model_from_parts(
     builtin: &'static str,
     geometry: &GeometryAsset,
     model_id: String,
-    template: AnalysisModelTemplate,
-    defaults: ModelDefaultsMode,
     frame: Option<CoordinateFrame>,
     materials: Vec<MaterialModel>,
     material_assignments: Vec<GeometryBoundMaterialAssignment>,
@@ -888,19 +725,7 @@ fn build_model_from_parts(
     domains: Vec<DomainPayload>,
     interfaces: Vec<GeometryBoundInterface>,
 ) -> BuiltinResult<AnalysisModel> {
-    let mut model = match defaults {
-        ModelDefaultsMode::TemplateScaffold => analysis_create_model_op(
-            geometry,
-            AnalysisCreateModelIntentSpec {
-                model_id: model_id.clone(),
-                template,
-            },
-            OperationContext::new(None, None),
-        )
-        .map(|envelope| envelope.data)
-        .map_err(|err| operation_error(builtin, &ERROR_OPERATION, err))?,
-        ModelDefaultsMode::None => empty_model(model_id, geometry),
-    };
+    let mut model = empty_model(model_id, geometry);
 
     if let Some(frame) = frame {
         model.frame = frame;
@@ -1009,6 +834,12 @@ fn build_model_from_parts(
     } else if !steps.is_empty() {
         model.sequence =
             AnalysisSequence::from_steps(format!("{}.sequence", model.model_id.0), steps);
+    } else {
+        return Err(builtin_error(
+            builtin,
+            &ERROR_INPUT,
+            "fea.model requires exactly one of Sequence or Steps",
+        ));
     }
     for domain in domains {
         match domain {
@@ -1058,6 +889,28 @@ fn empty_model(model_id: String, geometry: &GeometryAsset) -> AnalysisModel {
     }
 }
 
+fn require_model_geometry(
+    builtin: &'static str,
+    model: &AnalysisModel,
+    geometry: &GeometryAsset,
+) -> BuiltinResult<()> {
+    if model.geometry_id != geometry.geometry_id || model.geometry_revision != geometry.revision {
+        return Err(builtin_error(
+            builtin,
+            &ERROR_INPUT,
+            format!(
+                "model `{}` is bound to geometry `{}@{}`, but the study uses `{}@{}`",
+                model.model_id.0,
+                model.geometry_id,
+                model.geometry_revision,
+                geometry.geometry_id,
+                geometry.revision
+            ),
+        ));
+    }
+    Ok(())
+}
+
 fn material_to_object(material: MaterialModel) -> BuiltinResult<Value> {
     serializable_to_object(
         MATERIAL_NAME,
@@ -1103,11 +956,7 @@ pub(super) fn study_to_object_with_generators(
     spec: AnalysisStudySpec,
     frozen_generators: FrozenGeneratorInventory,
 ) -> BuiltinResult<Value> {
-    let signals = spec
-        .model
-        .as_ref()
-        .map(|model| model.signals.as_slice())
-        .unwrap_or_default();
+    let signals = spec.model.signals.as_slice();
     let frozen_generators =
         FrozenGeneratorInventory::new(STUDY_NAME, signals, frozen_generators.bindings().to_vec())?;
     let mut value = serializable_to_object(STUDY_NAME, &ERROR_INTERNAL, FEA_STUDY_CLASS, &spec)?;
@@ -1134,11 +983,7 @@ pub(super) fn study_from_value_with_generators(
     stripped.properties.remove(FROZEN_GENERATORS_PROPERTY);
     let study: AnalysisStudySpec =
         object_payload(builtin, &Value::Object(stripped), FEA_STUDY_CLASS)?;
-    let signals = study
-        .model
-        .as_ref()
-        .map(|model| model.signals.as_slice())
-        .unwrap_or_default();
+    let signals = study.model.signals.as_slice();
     let frozen_generators =
         FrozenGeneratorInventory::from_property_value(builtin, sidecar.as_ref(), signals)?;
     Ok(ComposedStudy {
@@ -1548,27 +1393,4 @@ pub(super) fn object_vec_from_value<T: DeserializeOwned>(
             format!("expected {expected_class} object or cell array; got {other:?}"),
         )),
     }
-}
-fn parse_model_defaults_mode(text: &str) -> BuiltinResult<ModelDefaultsMode> {
-    match normalize_token(text).as_str() {
-        "templatescaffold" | "scaffold" | "template" => Ok(ModelDefaultsMode::TemplateScaffold),
-        "none" | "empty" => Ok(ModelDefaultsMode::None),
-        other => Err(builtin_error(
-            MODEL_NAME,
-            &ERROR_INPUT,
-            format!("unsupported model defaults mode `{other}`"),
-        )),
-    }
-}
-
-fn resolve_study_template(
-    options: &StudyConstructorOptions,
-) -> BuiltinResult<AnalysisModelTemplate> {
-    options.template.ok_or_else(|| {
-        builtin_error(
-            STUDY_NAME,
-            &ERROR_INPUT,
-            "fea.study requires the typed Template option",
-        )
-    })
 }

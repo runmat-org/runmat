@@ -515,8 +515,6 @@ mod tests {
         let model = create_model_object_from_args(vec![
             Value::String("model".into()),
             geometry.clone(),
-            Value::String("Template".into()),
-            Value::String("linear_static_structural".into()),
             Value::String("Steps".into()),
             step.clone(),
         ])
@@ -532,8 +530,6 @@ mod tests {
         let error = create_model_object_from_args(vec![
             Value::String("mislabeled".into()),
             geometry,
-            Value::String("Template".into()),
-            Value::String("linear_static_structural".into()),
             Value::String("Steps".into()),
             Value::Object(mislabeled),
         ])

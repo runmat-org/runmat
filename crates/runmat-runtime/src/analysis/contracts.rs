@@ -19,32 +19,6 @@ pub struct AnalysisValidateResult {
     pub valid: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct AnalysisCreateModelIntentSpec {
-    pub model_id: String,
-    pub template: AnalysisModelTemplate,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AnalysisModelTemplate {
-    LinearStaticStructural,
-    StructuralHarmonic,
-    ThermoMechanicalCoupled,
-    ThermalSteady,
-    ThermalTransient,
-    ModalStructural,
-    AcousticHarmonic,
-    TransientStructural,
-    NonlinearStructural,
-    ElectromagneticHarmonic,
-    CfdSteadyState,
-    CfdTransient,
-    ChtCoupled,
-    FsiCoupled,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PrecisionMode {
@@ -2465,11 +2439,9 @@ pub(crate) fn validate_immutable_value_inventory(
 pub struct AnalysisStudySpec {
     pub study_id: String,
     pub geometry: GeometryAsset,
-    pub create_model_intent: AnalysisCreateModelIntentSpec,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_source_evidence: Option<AnalysisModelSourceEvidence>,
-    #[serde(default)]
-    pub model: Option<AnalysisModel>,
+    pub model: AnalysisModel,
     pub execution: AnalysisExecutionPlan,
     #[serde(default)]
     pub meshing_settings: Option<MeshingRequestSettings>,
@@ -2736,31 +2708,6 @@ fn default_study_sweep_fail_fast() -> bool {
 
 const fn default_formulation_requirement() -> FormulationRequirement {
     FormulationRequirement::Production
-}
-
-impl AnalysisModelTemplate {
-    pub fn from_snake_case(value: &str) -> Option<Self> {
-        serde_json::from_value(JsonValue::String(value.trim().to_ascii_lowercase())).ok()
-    }
-
-    pub fn as_snake_case(self) -> &'static str {
-        match self {
-            AnalysisModelTemplate::LinearStaticStructural => "linear_static_structural",
-            AnalysisModelTemplate::StructuralHarmonic => "structural_harmonic",
-            AnalysisModelTemplate::ThermoMechanicalCoupled => "thermo_mechanical_coupled",
-            AnalysisModelTemplate::ThermalSteady => "thermal_steady",
-            AnalysisModelTemplate::ThermalTransient => "thermal_transient",
-            AnalysisModelTemplate::ModalStructural => "modal_structural",
-            AnalysisModelTemplate::AcousticHarmonic => "acoustic_harmonic",
-            AnalysisModelTemplate::TransientStructural => "transient_structural",
-            AnalysisModelTemplate::NonlinearStructural => "nonlinear_structural",
-            AnalysisModelTemplate::ElectromagneticHarmonic => "electromagnetic_harmonic",
-            AnalysisModelTemplate::CfdSteadyState => "cfd_steady_state",
-            AnalysisModelTemplate::CfdTransient => "cfd_transient",
-            AnalysisModelTemplate::ChtCoupled => "cht_coupled",
-            AnalysisModelTemplate::FsiCoupled => "fsi_coupled",
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -3148,29 +3095,6 @@ pub(crate) fn format_quality_policy(mode: QualityPolicy) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn model_template_names_are_truthful_and_do_not_accept_retired_aliases() {
-        assert_eq!(
-            AnalysisModelTemplate::from_snake_case("thermal_steady"),
-            Some(AnalysisModelTemplate::ThermalSteady)
-        );
-        assert_eq!(
-            AnalysisModelTemplate::from_snake_case("thermal_transient"),
-            Some(AnalysisModelTemplate::ThermalTransient)
-        );
-        assert_eq!(
-            AnalysisModelTemplate::from_snake_case("electromagnetic_harmonic"),
-            Some(AnalysisModelTemplate::ElectromagneticHarmonic)
-        );
-        for retired in [
-            "thermal_standalone",
-            "electromagnetic_static",
-            "electro_thermal_coupled",
-        ] {
-            assert_eq!(AnalysisModelTemplate::from_snake_case(retired), None);
-        }
-    }
 
     #[test]
     fn solver_defaults_admit_only_implemented_exact_procedures() {

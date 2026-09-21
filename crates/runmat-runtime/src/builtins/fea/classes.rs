@@ -53,7 +53,6 @@ pub(super) static FEA_CLASSES_REGISTERED: crate::class_registry::ClassRegistrati
 pub(super) const STUDY_FIELDS: &[&str] = &[
     "study_id",
     "geometry",
-    "create_model_intent",
     "model",
     "execution",
     "meshing_settings",
@@ -198,6 +197,7 @@ pub(super) const STEP_FIELDS: &[&str] = &[
     "family",
     "procedure",
     "solution_space",
+    "settings",
     "independent_domain",
     "activations",
     "state_inputs",
@@ -882,7 +882,7 @@ fn fea_class_schemas() -> [FeaClassSchema; 50] {
             FEA_STUDY_CLASS,
             "runmat.fea.study",
             STUDY_FIELDS,
-            &["study_id", "geometry", "create_model_intent", "execution"],
+            &["study_id", "geometry", "model", "execution"],
             validate_fea_object,
         ),
         (

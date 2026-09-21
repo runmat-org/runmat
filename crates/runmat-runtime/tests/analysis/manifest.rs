@@ -1418,7 +1418,7 @@ pub(super) fn manifest_specs() -> Vec<FixtureSpec> {
         },
         FixtureSpec {
             id: "nonlinear_create_model_cpu",
-            description: "nonlinear fixture synthesized via fea.create_model",
+            description: "explicit nonlinear assembly fixture",
             model: synthesized_nonlinear_model,
             expect_validate_error: None,
             expect_run_error: None,

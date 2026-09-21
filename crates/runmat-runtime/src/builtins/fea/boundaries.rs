@@ -498,8 +498,8 @@ mod tests {
         let model = create_model_object_from_args(vec![
             Value::String("model".into()),
             asset,
-            Value::String("Template".into()),
-            Value::String("linear_static_structural".into()),
+            Value::String("Steps".into()),
+            super::super::modeling::static_test_steps_value(),
             Value::String("Boundaries".into()),
             boundary.clone(),
         ])
@@ -511,8 +511,8 @@ mod tests {
         let error = create_model_object_from_args(vec![
             Value::String("foreign".into()),
             foreign,
-            Value::String("Template".into()),
-            Value::String("linear_static_structural".into()),
+            Value::String("Steps".into()),
+            super::super::modeling::static_test_steps_value(),
             Value::String("Boundaries".into()),
             boundary.clone(),
         ])
@@ -526,8 +526,8 @@ mod tests {
         let error = create_model_object_from_args(vec![
             Value::String("mislabeled".into()),
             load_stl_fixture(&tmp.path().join("part-a-copy.stl"), 1.0),
-            Value::String("Template".into()),
-            Value::String("linear_static_structural".into()),
+            Value::String("Steps".into()),
+            super::super::modeling::static_test_steps_value(),
             Value::String("Boundaries".into()),
             Value::Object(mislabeled),
         ])

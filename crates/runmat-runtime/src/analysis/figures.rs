@@ -128,8 +128,7 @@ pub fn analysis_generate_study_run_figures(
 ) -> Result<Vec<AnalysisGeneratedFigure>, String> {
     let current = storage::load_run_result(run_id)?
         .ok_or_else(|| format!("FEA run_id '{run_id}' was not found"))?;
-    let mut figures =
-        generate_run_figures(&study.geometry, study.model.as_ref(), &current, options);
+    let mut figures = generate_run_figures(&study.geometry, Some(&study.model), &current, options);
 
     if options.include_comparison {
         if let Some(previous) = previous_run_of_kind(&current)? {

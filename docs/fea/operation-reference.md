@@ -79,7 +79,6 @@ Host integrations use versioned operation envelopes. The main object-oriented op
 
 | Operation | Purpose |
 | --- | --- |
-| `fea.create_model/v1` | construct a typed in-memory analysis model |
 | `fea.validate_study/v1` | validate an in-memory study |
 | `fea.plan_study/v1` | plan an in-memory study |
 | `fea.run_study/v1` | execute an in-memory study through the configured runtime provider |
