@@ -19,4 +19,4 @@ Stable entrypoints:
 - `scripts/check-closed-world-binary.sh <executable> <link-plan.json>`: verifies that a linked closed-world executable's defined builtin symbols exactly match its plan and that compiler, VM, and JIT symbols were omitted. Qualification hosts need `nm`, `jq`, and `rg`.
 - `scripts/development/integer-storage-census.sh`: stable lexical baseline for the authoritative numeric-storage migration. Its output is a discovery frontier, not a defect count.
 - `scripts/development/check-architecture-boundaries.sh`: validates durable dependency-direction and ownership boundaries between the value, type, builtin catalog, frontend, and runtime crates, then verifies that every tracked FEA authoring, canonical, execution, meshing, geometry-import, and result member has a reviewed language-surface disposition.
-- `scripts/fea/check-language-surface-ledger.sh`: focused local entrypoint for the machine-checkable FEA current-to-target surface ledger.
+- `scripts/fea/check-language-surface-ledger.sh`: focused local entrypoint for the machine-checkable canonical FEA contract-surface ledger.

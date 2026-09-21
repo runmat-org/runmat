@@ -89805,60 +89805,6 @@
       }
     },
     {
-      "name": "fea.load",
-      "output_mode": "Fixed",
-      "completion_policy": "Public",
-      "signatures": [
-        {
-          "label": "doc = fea.load(path)",
-          "inputs": [
-            {
-              "name": "path",
-              "ty": "StringScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Path to a .fea file."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "result",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "FEA object or operation result."
-            }
-          ]
-        }
-      ],
-      "errors": [
-        {
-          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
-          "identifier": "RunMat:fea:LoadFailed",
-          "when": "A .fea document cannot be read, parsed, or resolved.",
-          "message": "fea: failed to load FEA document"
-        },
-        {
-          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
-          "identifier": "RunMat:fea:InvalidInput",
-          "when": "A builtin receives an unsupported argument pattern or object type.",
-          "message": "fea: invalid input"
-        },
-        {
-          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
-          "identifier": "RunMat:fea:OperationFailed",
-          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
-          "message": "fea: operation failed"
-        },
-        {
-          "code": "RM.FEA.BUILTIN.INTERNAL",
-          "identifier": "RunMat:fea:Internal",
-          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
-          "message": "fea: internal error"
-        }
-      ]
-    },
-    {
       "name": "fea.material",
       "output_mode": "Fixed",
       "completion_policy": "Public",

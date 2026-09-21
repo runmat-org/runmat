@@ -1,145 +1,124 @@
 # Models
 
-A model attaches physics data to geometry. It defines what material exists where, how the model is constrained, what loads or sources apply, which domains are active, and which analysis steps can be run.
+A model owns physical data attached to typed geometry: materials, sections, layups, orientations, essential constraints, natural boundaries, applied actions, signals, initial conditions, interfaces, and load cases. A model does not choose a solver procedure or execution location; a study does that.
 
-## What A Model Contains
+## Material Is Separate From Assignment
 
-| Part | Purpose |
-| --- | --- |
-| Geometry identity | The geometry id, revision, units, and reference frame the model belongs to. |
-| Materials | Mechanical, thermal, electrical, and plastic material properties. |
-| Material assignments | Which regions use which materials, with optional confidence evidence. |
-| Boundary conditions | Constraints, prescribed displacements, electromagnetic anchors, and related boundary data. |
-| Loads and sources | Forces, moments/torques, pressures, body forces, current density, coil currents, and similar inputs. |
-| Signals | Quantity-typed constants and sampled histories, including interpolation and extrapolation policy. |
-| Initial conditions | Family-typed state sampled from a signal before a named procedure step. |
-| Response spectra | Direction, damping, response measure, modal combination, truncation, construction, and evidence for modal response-spectrum work. |
-| Domains | Thermo-mechanical, electro-thermal, electromagnetic, or CFD domain data. |
-| Interfaces | Contact and coupling interfaces between regions. |
+```fea
+material steel {
+    mass_density = 7850 kg/m^3
+    elastic {
+        youngs_modulus = 200 GPa
+        poisson_ratio = 0.30
+    }
+}
 
-The study's sibling `sequence` block owns typed procedure steps, activation lifecycles, state
-transitions, observations, accuracy plans, branches, and restart policy. It is deliberately not
-model data: reusing a material-and-boundary model must not silently select a solver procedure.
-
-## Model Sources
-
-A `.fea` study names exactly one typed model source. There are three source forms:
-
-| Source | Meaning |
-| --- | --- |
-| `inline` | The model data is written directly in the study. |
-| `file` | The model data comes from a relative `.fea` file whose document kind is `model`. |
-| `compose` | An ordered, non-empty list of inline or file sources is merged into one model. |
-
-There is no hidden template expansion. Every material, assignment, condition, signal, excitation,
-domain, and interface can be traced to an authored source. Procedure steps and execution entries,
-not the model source, determine what is solved.
-
-File paths are relative to the document containing the reference. Absolute paths and parent
-traversal are rejected, imported documents must use `version: 1` and `kind: model`, and import
-cycles are rejected. Composition is typed: equal repeated definitions are deduplicated, while two
-different definitions with the same identity—or two different material assignments for the same
-target—are an error. Sources do not silently override earlier sources.
-
-Resolution records the top-level source kind, every imported logical path and content digest, and
-a digest of the fully resolved model. That evidence travels with the study contract, so local and
-cluster execution identify the same composed model without depending on an absolute workstation
-path.
-
-## Define Model Data
-
-Model data can be written in a `.fea` file or assembled in RunMat code with typed constructors such as `fea.material(...)`, the family-specific constraint, boundary, signal, excitation, and initial-condition classes, `fea.ExcitationCase`, `fea.ResponseSpectrum`, concrete domain classes such as `fea.ElectromagneticDomain` and `fea.FluidDomain`, and `fea.model(...)`. Use a `.fea` file when the model definition is a portable study artifact. Use `.m` code when the model is generated from parameters, calculations, or loops.
-
-For multi-procedure models, construct an explicit `fea.AnalysisSequence` and pass it as the
-`Sequence` model option. The sequence API and its activation, state, observation, accuracy, branch,
-and restart contracts are described in [Procedure Sequences, Observations, and Accuracy](./study-contracts).
-
-```yaml
-model:
-  id: bracket_static_model
-  frame: global
-  source:
-    compose:
-      - file:
-          path: models/steel-solid.fea
-      - inline:
-          constraints: # typed AnalysisConstraint records
-          signals: # typed physical signal records
-          excitation_cases: # typed excitation-case records
-          excitations: # typed ExcitationAction records
-
-sequence: # typed AnalysisSequence record
-execution: # per-step backend, requirement, and solver options
+model bracket {
+    assign material.steel to geometry.part.region.body
+}
 ```
 
-The referenced file is a model document, not a runnable study:
+Defining `steel` does not apply it everywhere. The assignment names the exact geometry region that owns the constitutive law. For a tetrahedral volume model that target is a solid or cell region—not one of its boundary faces. Edge and face material ownership is used for beam and shell formulations together with the required section, layup, and orientation properties.
 
-```yaml
-version: 1
-kind: model
-source:
-  inline:
-    materials:
-      steel:
-        mechanical:
-          youngs_modulus_pa: 200000000000.0
-          poisson_ratio: 0.30
-    material_assignments:
-      - target: all_solids
-        material: steel
+Before assembly, RunMat projects every assignment through persistent geometry-to-mesh lineage into one immutable element property map. It rejects gaps, overlaps, wrong topology, incompatible capabilities, stale geometry/mesh revisions, and competing homogeneous/composite ownership. Solver implementations consume that compiled map and cannot choose a fallback material independently.
+
+## Material Capabilities
+
+Material declarations may provide the capabilities required by the selected physics:
+
+- mass density;
+- linear elasticity;
+- Rayleigh damping;
+- thermal reference data, conductivity, heat capacity, expansion, and temperature dependence;
+- acoustic density/sound-speed damping data;
+- electrical and magnetic properties;
+- typed plasticity parameters.
+
+The checker validates physical dimensions and admissible ranges. A study cannot satisfy a mechanical formulation with only thermal conductivity, or invent a missing density for dynamics.
+
+AP242 material/property candidates can be adopted explicitly from imported geometry. The declaration identifies each property to use, its evidence environment, and conflict policy; source confidence remains provenance and never scales a coefficient.
+
+## Constraints And Natural Boundaries
+
+```fea
+model supported {
+    constraint fixed_support {
+        structural.fixed { target = geometry.part.region.support }
+    }
+    load pressure {
+        structural.pressure {
+            target = geometry.part.region.pressure_face
+            value = 250 kPa
+        }
+    }
+}
 ```
 
-Material definitions and material assignments are separate. `all_solids`, `all_shells`,
-`all_beams`, and `all_cells` are explicit whole-formulation scopes. A selected scope uses a closed
-target variant such as `target: { solid: { region: bracket_body } }`; the region may be a direct
-geometry identity or an alias from the `regions` block. Every active material-bearing element must
-match exactly one compatible assignment. A CAD face used as a volume boundary is not a shell
-material domain. Beam and shell sections, laminate layups, contact/interface laws, and material
-orientation are separate model properties rather than material-assignment options.
+Constraint and boundary kinds are closed, family-specific typed variants. Structural fixed/symmetry/antisymmetry, prescribed structural motion, thermal temperature/tie/flux/convection, electrical potential/current/reference, magnetic vector-potential/gauge, acoustic pressure/impedance/radiation, and fluid wall/inlet/outlet/periodic conditions retain their exact target topology and physical units.
 
-Before assembly, RunMat compiles those authored assignments into one immutable property map keyed
-by canonical element identities. The compiler projects solid, beam, and shell scopes separately;
-requires exactly one compatible assignment for every material-bearing element; and rejects gaps,
-overlaps, stale regions, wrong-dimensional targets, duplicate material ids, and geometry or mesh
-revision mismatches. Structural, thermal, recovery, and coupled assembly consume this same map, so
-no solver is allowed to repeat region lookup or choose a fallback material independently.
+Relational constraints—tie, periodic, rigid/distributing coupling, equations, and phase-shifted periodic forms—name both sides and the constrained degrees of freedom explicitly. Unsupported or contradictory combinations fail during checking rather than becoming solver conventions.
 
-The map has two identities. Its semantic digest covers the exact discretization and effective
-material on every element, and is suitable for cache and distributed-task identity. Its audit
-digest additionally covers authored assignment indices and evidence confidence. Confidence is
-provenance only: it never scales a modulus, density, conductivity, or any other physical value.
+## Loads, Signals, And Cases
 
-Direct moment excitations use a typed moment signal and coordinate frame. They require
-rotational-DOF structural elements. Beam nodes and shell/plate nodes can own `rx`, `ry`, and `rz`;
-displacement-only solid regions reject moments with an invalid-model error instead of silently
-converting them to forces.
+A constant applied action can use concise syntax:
 
-In RunMat code, construct this with a moment-valued signal and
-`fea.StructuralExcitation.moment(...)`; in `.fea`, serialize the corresponding typed signal and
-`moment` excitation variants. There is no parallel generic `loads` schema.
+```fea
+load downward {
+    force on geometry.part.region.pad = [0, -1, 0] kN
+}
+load_case service { include load.downward }
+```
 
-When rotational DOFs are present, structural results include `structural.rotation` and `structural.reaction_moment`. Beam results can also include `structural.beam_torsion_moment`, `structural.beam_bending_moment`, `structural.beam_bending_stress`, and `structural.beam_torsion_stress`; shell results can include `structural.shell_membrane_force`, `structural.shell_bending_moment`, `structural.shell_transverse_shear`, and `structural.shell_von_mises`.
+Time-, frequency-, or parameter-dependent action uses a quantity-typed signal:
 
-## Validate Before Solving
+```fea
+signal pulse : force over time {
+    samples = [
+        { at = 0 s, value = 0 N },
+        { at = 0.01 s, value = 1 kN },
+        { at = 0.02 s, value = 0 N },
+    ]
+    interpolation = linear
+    extrapolation = reject
+}
 
-Validation checks the model and study shape before a run starts. It catches problems such as:
+excitation impact {
+    force {
+        target = geometry.part.region.pad
+        signal = signal.pulse
+        direction = global([0, -1, 0])
+    }
+}
+load_case impact { include excitation.impact }
+```
 
-- empty study or model ids,
-- missing geometry meshes,
-- unspecified units,
-- sequence-step and execution-plan mismatches,
-- missing required steps,
-- invalid family-specific options,
-- missing or incompatible domain data.
-- direct moment loads on non-structural families or displacement-only structural regions.
+Signals own physical quantity, domain, interpolation, extrapolation, discontinuity, and frame rules. Standard time waveforms include step, ramp, sine, half-sine, triangular, and rectangular pulses. Pure imported `.m` functions may generate time histories or spectral data through the bounded materialization contract described in [RunMat functions and outputs](./language/functions-and-outputs).
 
-`runmat check model.fea` is the usual CLI path. Host integrations can call `fea.validate_study/v1` or lower-level model validation operations.
+## Sections, Layups, And Orientations
 
-## Engineering Data
+Beam models use explicit general, rectangular, circular, or tubular sections. Shell models use a homogeneous section or an ordered laminate layup with typed plies. Orientations may be global Cartesian, explicit Cartesian, cylindrical, or spherical.
 
-Examples and test fixtures may use deliberately small authored models. Engineering studies should
-explicitly provide and review the materials, assignments, excitations, constraints, domains, and
-assumptions that matter for the result. Referenced and composed model files remain ordinary,
-inspectable `.fea` sources; they do not activate hidden template defaults.
+These are separate definitions and assignments. A material assignment does not imply a section, thickness, laminate stacking direction, or material frame. Duplicate owners, degenerate frames, empty layups, invalid section geometry, and unsupported offsets fail before assembly.
 
-Validation proves the model is shaped correctly enough to run. Verification and validation evidence is still required before treating a result as production-grade physics. See [Verification & Validation](/docs/fea/validation).
+## Initial Conditions And Spectral Environments
+
+Models can declare typed structural displacement/velocity/angular-velocity, thermal temperature, electrical potential, magnetic vector-potential, acoustic pressure, and fluid pressure/velocity initial state. Sources are uniform values, signal samples, or admitted field artifacts; the consuming procedure names the state explicitly.
+
+Response-spectrum and random-excitation declarations are also model data. They own axes, ordinate units, damping or quality factor, response measure, directions/channels, modal/directional/truncation policy, spectral convention, interpolation, extrapolation, and evidence. A modal response analysis names the exact model declaration and retained modal basis it consumes.
+
+## Reusable Models
+
+Models can take strongly typed region and material parameters:
+
+```fea
+model reusable(region body : region<solid>) {
+    input body_material : material
+    assign input.body_material to input.body
+}
+```
+
+A study binds every required parameter when selecting the model. `include model.base` composes reusable declarations while preserving defining-module identity. Cycles, missing bindings, wrong region roles, duplicate ids, and conflicting assignments fail; source order never acts as an override rule.
+
+## Validation Boundary
+
+`runmat fea check` validates authored types, units, references, topology roles, composition, procedure compatibility, and required capabilities. Exact execution adds geometry realization, region binding, mesh projection, complete property coverage, solver well-posedness checks, and numerical evidence. A valid source file is necessary but does not by itself qualify a formulation for production use.

@@ -8,15 +8,15 @@ FEA results need records. RunMat writes records at the boundaries where a workfl
 flowchart TD
   Geometry["Geometry asset"]
   Mesh["Solver mesh artifact"]
-  Validate["Study validation"]
-  Plan["Study plan"]
-  Run["Run artifact"]
+  Check["Typed source check"]
+  Plan["Logical plan"]
+  Run["Typed result manifest"]
   Query["Results query"]
   Compare["Compare and trend"]
   Governance["Governance records"]
 
   Geometry --> Mesh
-  Geometry --> Validate --> Plan --> Run --> Query --> Compare --> Governance
+  Geometry --> Check --> Plan --> Run --> Query --> Compare --> Governance
   Mesh --> Run
 ```
 
@@ -26,7 +26,7 @@ flowchart TD
 | --- | --- |
 | Operation envelope | The operation name, version, trace/request ids, and typed payload. |
 | Operation error envelope | A typed failure with stable error code, severity, retryability, context, and operation identity. |
-| Study issue | A validation issue that tells an author what to fix in a `.fea` study or sweep. |
+| Source diagnostic | A structured syntax, binding, type, unit, topology, availability, or contract diagnostic with source location. |
 | Diagnostic | Domain-specific evidence emitted by a solver or runtime path. |
 | Quality reason | Machine-readable reason a run was degraded or rejected. |
 | Provenance | Backend, solver backend, precision, deterministic mode, solver method, preconditioner, and fallback events. |
@@ -34,37 +34,24 @@ flowchart TD
 
 ## Study Evidence
 
-`runmat check model.fea` emits validation and plan data. The same records are available through `fea.validate_study/v1` and `fea.plan_study/v1`.
+`runmat fea check model.fea --json` is side-effect-free. It reports `valid`, `invalid`, or
+`incomplete`, the root module identity, declared runnable roots, and structured compiler
+diagnostics. It does not materialize geometry, produce a solver mesh, plan numerical workloads, or
+write an evidence artifact.
 
-Study validation records include:
+`runmat fea plan model.fea --json` selects a study or sweep and reports its authored definition,
+geometry, mesh, optional execution policy, case count, and canonical logical phases. It does not
+execute those phases or claim realized model validation.
 
-- `valid`,
-- `issue_codes`,
-- structured `issues`,
-- study fingerprint,
-- evidence artifact path.
+`runmat fea run model.fea --json` adds factual execution evidence and a content-addressed typed
+result manifest. The manifest retains the checked/realized study, exact geometry and mesh identity,
+meshing evidence, compiled model, resolved workloads, numerical receipts, semantic state, authored
+output bindings, and published field references. Scheduler allocation, provider operations,
+transfers, retries, timings, and terminal state remain measured run evidence.
 
-Study planning records include:
-
-- model id,
-- semantic procedure sequence,
-- per-step requested backend and formulation requirement,
-- selected solver variant,
-- operation sequence,
-- selected run operation and version,
-- per-step solver options,
-- study fingerprint,
-- plan artifact path.
-
-Study run records add:
-
-- run id,
-- run status,
-- publishable flag,
-- quality gates,
-- quality reasons,
-- provenance,
-- run artifact path.
+The versioned `fea.validate_study/v1`, `fea.plan_study/v1`, and related sweep operations apply to
+in-memory typed `fea.Study` and `fea.Sweep` objects. They are a separate host-object workflow and do
+not replace typed `.fea` source checking.
 
 ## Issue Codes And Error Codes
 

@@ -1,104 +1,163 @@
 # Geometry
 
-Geometry is the first object in the FEA workflow. Before a model can have materials, loads, constraints, or domains, RunMat needs a structured `geometry.Asset`.
+Geometry is an immutable, typed input to meshing and analysis. A `.fea` declaration may import CAD, construct a feature graph, derive a new exact shape from another declaration, or call one exact pure `.m` geometry function. Every route converges on the same exact-geometry artifact, persistent topology, region, lineage, and provenance contracts.
 
-## Load Or Inspect
-
-From `.m` code:
+## Inspect Or Load From `.m`
 
 ```matlab
-info = geometry.inspect("geometry/bracket.step");
-geom = geometry.load("geometry/bracket.step", "Units", "millimeter");
+facts = geometry.inspect("geometry/bracket.step");
+part = geometry.load("geometry/bracket.step", "Units", "millimeter");
+regions = geometry.listRegions(part);
+mesh(part);
 ```
 
-From a `.fea` file:
+Inspection answers which exact format, units, assemblies, products, parameters, materials, topology aliases, names, tags, and persistent identities the file actually contains. Do this before authoring region selectors.
 
-```yaml
-geometry:
-  path: ../geometry/bracket.step
-  units: millimeter
-  import:
-    max_triangles: 16000000
+## Import In `.fea`
+
+```fea
+geometry bracket {
+    file = "./geometry/bracket.step"
+    units = mm
+
+    region body : solid {
+        select id "solid_000001"
+        expect exactly_one
+    }
+    region mount : face {
+        select name "Mounting Face"
+        expect one_or_more
+    }
+}
 ```
 
-## Supported Inputs
+Accepted authored coordinate units are meters, millimeters, and inches. The source path is confined to the frozen project. Exact execution re-reads content-addressed bytes and verifies the inspected topology/material/parameter inventory before geometry can enter a mesh or solve.
 
-| Format family | Typical use | Notes |
-| --- | --- | --- |
-| STL | Surface mesh input | Good for mesh-only workflows. Region semantics are limited. |
-| STEP | CAD exchange input | Source builds without OCCT read STEP metadata. OCCT-enabled builds import topology, tessellate faces, and map XCAF assembly, label, layer, color, and material ownership to selectable regions when the file carries that data. |
-| IGES | CAD exchange input | Requires the OCCT CAD backend. Imports topology as tessellated face regions and maps XCAF names, layers, and colors when available. |
-| BREP | Native OCCT B-rep input | Requires the OCCT CAD backend. Imports topology as tessellated face regions. BREP files do not normally carry STEP-style exchange metadata. |
-| OBJ | Mesh-style geometry input | Useful for polygonal assets. |
-| PLY | Mesh or point-oriented input | Useful for mesh/scan style data. |
-| glTF | Scene or mesh input | Useful when geometry arrives as a scene asset. |
+## Supported Input Families
 
-Format support means RunMat can ingest the file family. It does not guarantee that every file contains the region names, topology, or material evidence your study needs.
-
-Source builds that do not enable the optional OCCT feature do not link OCCT. In those builds, STEP remains useful for assembly, product-label, and material-evidence metadata, but it does not produce CAD face topology. Official RunMat CLI and desktop binaries are built with OCCT enabled, so they can import STEP, IGES, and BREP topology through OCCT. Browser/WASM builds use the `occt-wasm-host` feature with a configured browser sidecar.
-
-Native packagers can build the OCCT path from the bundled OCCT source or point RunMat at an existing OCCT installation with `RUNMAT_OCCT_ROOT`, or with `RUNMAT_OCCT_INCLUDE_DIR` and `RUNMAT_OCCT_LIB_DIR`. Building bundled OCCT requires CMake on `PATH` or through Cargo's `CMAKE` environment overrides. `RUNMAT_OCCT_ROOT` accepts both `include/` and `include/opencascade/` header layouts. Use `RUNMAT_OCCT_LINK_MODE=static` for static CLI-style linking. Use `RUNMAT_OCCT_LINK_MODE=dylib` for dynamic desktop packaging; dynamic mode requires an existing dynamic OCCT installation and does not use the bundled static OCCT builder.
-
-## Inspect Before Modeling
-
-Use inspection when you need to answer:
-
-| Question | Operation |
+| Format | Analysis use |
 | --- | --- |
-| What format is this file? | `geometry.inspect/v1` |
-| What meshes and regions were imported? | `geometry.list_regions/v1` |
-| What vertices and faces can I plot from a script? | `geometry.meshes(asset)` |
-| What are the basic counts and statistics? | `geometry.compute_stats/v1` |
-| Which entities match this bounded query? | `geometry.query_entities/v1` |
-| Can I save visual evidence for review? | `geometry.capture_view/v1` |
+| STEP | Exact CAD topology plus AP242/XCAF product, assembly, label, layer, color, parameter, material, and property evidence when authored by the source tool |
+| IGES | Exact CAD topology and available XCAF names/layers/colors |
+| BREP | Exact native OCCT topology; normally little exchange metadata |
+| STL, OBJ, PLY, glTF | Tessellated or scene geometry for inspection/display and workflows that do not require exact CAD recovery |
 
-This matters because model setup attaches physics data to geometry regions. A study is easier to review when the selected regions are visible and stable.
+Tetrahedral solver meshing requires an admitted closed exact solid. A format being readable does not imply that a particular file contains solid topology, named boundaries, units, materials, or parameters.
+
+Official native CLI and Desktop builds use the OCCT backend for STEP, IGES, and BREP. Metadata-only builds can inspect supported STEP exchange facts without claiming exact face/solid topology. Browser execution remains unavailable until its configured geometry, meshing, and solver host can satisfy the same contracts.
 
 ## Regions And Selectors
 
-FEA materials, boundary conditions, loads, and interfaces attach to regions in the imported `geometry.Asset`. Region selectors are resolved against `geometry.regions`; they are not a separate FEA-only naming system.
+A region declaration has three independent facts:
 
-Supported selectors are:
+1. a name used by the model;
+2. a topology role (`vertex`, `edge`, `face`, `solid`, or `cell`);
+3. a selector plus `exactly_one` or `one_or_more` cardinality.
 
-| Selector | Meaning |
+Implemented selectors include:
+
+| Form | Meaning |
 | --- | --- |
-| `region_1` | Direct region id. |
-| `id:region_1` | Explicit region id. |
-| `region:region_1` | Explicit region id. |
-| `name:Base_Mount` | Region whose imported name is `Base_Mount`. |
-| `tag:step_part` | First region with the imported tag `step_part`. |
-| `tag:occt_face` | First face region produced by the OCCT CAD backend. |
-| `tag:cad_body` | First body-level semantic region mapped from CAD ownership metadata. |
-| `tag:cad_layer` | First layer-level semantic region mapped from CAD ownership metadata. |
-| `tag:cad_material` | First material-level semantic region mapped from CAD ownership metadata. |
+| `select id "..."` | role-scoped alias published by source inspection |
+| `select persistent_id "..."` | canonical persistent entity identity |
+| `select name "..."` | imported authored name |
+| `select tag "..."` | imported semantic tag |
+| `select result` | final result of constructed geometry |
+| `select feature.<id>` | exact output of a feature |
+| `select boundary_introduced_by feature.<id>` | boundary introduced by one feature operation |
+| `select output.region.<id>` | region returned by generated geometry |
 
-Always inspect the loaded geometry before writing selectors:
+Selectors are resolved at exact realization and then projected onto the solver mesh. Wrong topology, empty selection, cardinality mismatch, missing lineage, or changed source identity fails before assembly.
 
-```matlab
-geom = geometry.load("geometry/bracket.step", "Units", "millimeter");
-regions = geometry.listRegions(geom);
+## Construct Geometry
+
+```fea
+geometry bracket {
+    input width : length = 80 mm
+    input thickness : length = 8 mm
+    construct {
+        feature stock = box(
+            width = input.width,
+            depth = input.thickness,
+            height = 50 mm,
+        )
+        feature hole = cylinder(
+            radius = 5 mm,
+            height = input.thickness,
+            axis = global([0, 1, 0]),
+            origin = [15, 0, 15] mm,
+        )
+        feature finished = subtract(feature.stock, feature.hole)
+        result = feature.finished
+    }
+    region body : solid { select result expect exactly_one }
+}
 ```
 
-Without OCCT, STEP regions are derived from STEP `PRODUCT` labels when they are present. If a STEP file does not contain explicit product labels, the metadata importer creates a synthetic `region_1` for the model.
+The closed feature set includes boxes, cylinders, spheres, transforms, instances, extrusion, revolution, Boolean union/subtraction/intersection, holes, pockets, fillets, chamfers, and qualified regeneration. Values are unit-checked; feature dependencies form an acyclic immutable graph.
 
-With the OCCT CAD backend, STEP, IGES, and BREP imports produce tessellated face regions such as `face_000001` with the tag `occt_face`. Those regions map directly to imported mesh faces, so they can be picked, highlighted, and used by `.fea` selectors.
+## Derive Geometry
 
-STEP and IGES imports also use the OCCT XCAF document model. When the file contains usable ownership metadata, RunMat creates additional semantic regions from CAD labels, bodies, components, assemblies, layers, colors, and materials. These regions use ids such as `cad_label_0_1_1`, `cad_layer_boundary_faces`, or `cad_material_aluminum_6061`, and tags such as `cad_body`, `cad_component`, `cad_assembly`, `cad_layer`, `cad_color`, and `cad_material`.
+```fea
+geometry relieved from geometry.bracket {
+    derive {
+        feature relief = cylinder(
+            radius = 8 mm,
+            height = 8 mm,
+            axis = global([0, 1, 0]),
+            origin = [50, 0, 25] mm,
+        )
+        result = subtract(source.result, feature.relief)
+    }
+}
+```
 
-Semantic CAD regions are evidence from the imported exchange file. If a CAD file does not carry layer names, material assignments, color assignments, or meaningful product/body labels, RunMat still imports topology and face regions, but it cannot invent authored boundary names.
+Derived declarations keep the exact source closure and compose provider-proven created/modified/deleted topology lineage through every feature. They do not mutate the source declaration.
 
-Mesh-only formats often have weaker region metadata and may need a workflow-specific annotation step before they are useful for boundary conditions.
+## Generate Geometry With RunMat
 
-## Meshing Geometry
+```fea
+import function makeBracket from "./makeBracket.m"
 
-Analysis studies compose geometry loading, deterministic meshing, and solver execution. The meshing request selects the canonical solver artifact consumed by FEA, while persistent CAD entities preserve region and boundary provenance across the geometry-to-mesh boundary. See [Meshing](/docs/fea/meshing) for request controls, quality evidence, local and distributed execution, and runnable examples.
+geometry bracket {
+    input width : length = 80 mm
+    generated by function.makeBracket {
+        arguments { width = input.width }
+    }
+    region body : solid {
+        select output.region.body
+        expect exactly_one
+    }
+}
+```
 
-## Boundaries
+The imported function must resolve to the exact frozen `.m` definition, satisfy the typed geometry signature, and be pure and non-suspending. It returns a portable typed geometry value; a worker cannot replace it with arbitrary file or process output.
 
-- STEP and IGES can expose useful product, body, layer, color, and material ownership, but the quality of that ownership depends on the exported CAD data.
-- OCCT-enabled CAD import provides face-level topology for STEP, IGES, and BREP, plus semantic regions for STEP and IGES when XCAF ownership metadata is present.
-- Builds without OCCT enabled can load STEP metadata but not face-level topology.
-- Mesh-only formats usually need additional region or boundary data from the workflow.
-- A valid mesh does not by itself prove that a physics model is well posed.
+The same typed geometry value can be built directly in `.m` code:
 
-See [Current Status](/docs/fea/status) for current support by workflow stage.
+```matlab
+stock = geometry.box(0.08, 0.05, 0.008);
+bore = geometry.cylinder(0.005, 0.008, [0 0 1], [0.04 0.025 0]);
+body = geometry.subtract(stock, bore);
+bodyRegion = geometry.solid(body);
+part = geometry.finish(body);
+part = geometry.withRegion(part, "body", bodyRegion);
+mesh(part);
+```
+
+The programmatic operation set includes box, cylinder, sphere, transform, instance, extrude,
+revolve, union, intersection, subtraction, hole, pocket, fillet, chamfer, finalization, and typed
+solid/face/edge or feature-introduced region outputs. These functions build immutable geometry
+values; display through `mesh(part)` does not discretize them for a solver.
+
+## AP242 Parameters And Engineering Properties
+
+AP242 parameters can be named and required as readable or writable facts. Typed parameter values can feed study inputs or derived geometry. Material candidates and engineering properties may be adopted explicitly into an analysis-owned material declaration; visual color or an incomplete elasticity record is not a physical material.
+
+RunMat reports source capabilities honestly. Reading and sidecar change-set generation are distinct from regenerating a STEP file. If the active provider cannot perform a qualified write/regeneration, the request fails closed rather than claiming the source was updated.
+
+## Geometry To Mesh To Model
+
+The geometry declaration owns topology. The mesh declaration owns discretization. The model assigns materials and other properties to typed geometry regions. Exact projection publishes canonical element ownership and persistent CAD provenance so every solver family consumes the same resolved property map instead of repeating selector logic.
+
+See [Meshing](./meshing), [Models](./models), and the [language geometry reference](./language/geometry-and-models).

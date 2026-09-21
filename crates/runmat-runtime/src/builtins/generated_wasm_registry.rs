@@ -2315,7 +2315,6 @@ __runmat_wasm_register_builtin_position_millimeters_builtin();
 __runmat_wasm_register_builtin_translation_meters_builtin();
     crate :: builtins :: fea :: values ::
 __runmat_wasm_register_builtin_translation_millimeters_builtin();
-    crate :: builtins :: fea :: __runmat_wasm_register_builtin_fea_load_builtin();
     crate :: builtins :: fea ::
 __runmat_wasm_register_builtin_fea_study_builtin();
     crate :: builtins :: fea ::

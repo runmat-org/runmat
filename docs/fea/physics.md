@@ -1,76 +1,68 @@
-# Physics Families
+# Physics Families And Procedures
 
-Choose the physics family from the engineering question. The typed procedure step determines the
-family and procedure; its execution entry selects an eligible solver configuration. Together with
-the model, they determine required data, diagnostics, result payloads, and current support
-boundaries.
+The procedure declaration states the physical question. Its typed contract determines required material capabilities, conditions, excitation quantities, independent domain, state inputs/outputs, admissible fields, numerical controls, and formulation evidence. Execution policy chooses eligible placement and resources; it does not change the physics.
 
-## Families
+## Structural Procedures
 
-| Family | Use when you need to know... | Selected solver |
+The typed language and native structural whole-study path cover these procedure shapes:
+
+| Procedure | Primary intent | Important explicit inputs/state |
 | --- | --- | --- |
-| Linear static structural | Static displacement and stress response. | `linear_static` |
-| Modal structural | Natural modes and modal frequencies. | `modal` |
-| Acoustic harmonic | Acoustic pressure and particle-velocity response from a damped Helmholtz domain graph. | `acoustic` |
-| Thermal standalone | Temperature response and thermal quality signals. | `thermal` |
-| Structural transient | Structural response over time. | `transient` |
-| Nonlinear structural | Nonlinear, plasticity, contact, or increment-controlled response. | `nonlinear` |
-| Thermo-mechanical | Structural response with thermal coupling context. | `transient` |
-| Electro-thermal | Heating behavior from electrical coupling context. | Coupled thermal, transient, or nonlinear paths with electro-thermal domain data. |
-| Electromagnetic | Electromagnetic source, boundary, material, frequency, and sweep behavior. | `electromagnetic` |
-| CFD | Finite-volume incompressible fluid behavior, cell fields, residuals, and diagnostics. | `cfd` |
-| CHT | Coupled fluid and thermal behavior with interface heat-flux closure. | `cht` |
-| FSI | Partitioned fluid and structural behavior with interface pressure, traction, displacement, and closure diagnostics. | `fsi` |
+| `structural static` | linear static response | load case, constraints, accuracy |
+| `structural preload` | retained prestress state | load case and retained state |
+| `structural modal` | eigenmodes | requested mode count; may retain a modal basis |
+| `structural transient` | direct time response | start, end, time step, signals/initial state |
+| `structural modal_transient` | reduced time response | retained modal basis and time domain |
+| `structural harmonic` | direct frequency response | frequency samples and damping |
+| `structural modal_harmonic` | reduced frequency response | retained modal basis and frequencies |
+| `structural prestressed_modal` | modes about a prestressed state | retained prestress and mode count |
+| `structural buckling` | linearized buckling modes | retained prestress and mode count |
+| `structural prestressed_harmonic` | frequency response about prestress | prestress plus frequencies |
+| `structural modal_response_spectrum` | combined modal response spectrum | modal basis plus named model spectra |
+| `structural random_response` | statistical response from CPSD input | modal basis, named random excitation, damping/mass truncation |
+| `structural nonlinear` | load-factor nonlinear response | explicit load-factor domain and nonlinear formulation |
 
-## Choosing A Family
+Not every formulation/backend/scale combination in this table is production-qualified. A study must declare `require formulation = production` or `experimental`; admission and the result evidence are authoritative.
 
-| If the question is about... | Check these model inputs |
-| --- | --- |
-| Static structural response | Mechanical material properties, loads, fixed or prescribed boundary conditions, static step. |
-| Natural frequencies | Mechanical material properties, constraints, modal step, requested mode count. |
-| Thermal response | Thermal material properties, thermal step, thermal domain or coupled thermal context. |
-| Time response | Transient step, time profile, time-step controls, stability diagnostics. |
-| Plasticity or contact | Nonlinear step, plastic material data, contact interfaces, nonlinear options. |
-| Electromagnetic behavior | Electrical material properties, electromagnetic domain, sources, boundaries, harmonic or sweep options. |
-| Fluid behavior | CFD domain properties, CFD step, inlet or flow controls, coupled thermal or structural data when applicable. |
+## Other Typed Family Contracts
 
-## Run Options
+The language also checks thermal, acoustic, electromagnetic, fluid, thermo-mechanical, electro-thermal, conjugate heat-transfer, and fluid-structure procedure contracts. These declarations provide strong authoring types and allow the remaining solvers to converge on one model, constraint, excitation, state, output, and execution vocabulary.
 
-Each `.fea` `execution` entry is typed by its referenced procedure step and optional
-`solver`/`options` pair.
+The current native typed `.fea` executor rejects a graph containing a non-structural procedure. Some lower-level runtime object operations and numerical components for those families exist, but they are not a complete typed-source geometry-to-publication path and must not be treated as one. See [Current status](./status).
 
-Common option themes include:
+## State Flow Is Explicit
 
-- deterministic mode,
-- precision mode,
-- quality policy,
-- canonical solver mesh artifact,
-- preconditioner mode where applicable.
+```fea
+analysis preload {
+    structural preload {}
+    retain prestress
+}
+analysis modes after analysis.preload {
+    structural prestressed_modal {
+        prestress = analysis.preload.state.prestress
+        modes = 20
+    }
+    retain basis
+}
+```
 
-Families can add controls such as modal mode count, transient time stepping, nonlinear increment policy, or electromagnetic harmonic and sweep settings.
+Procedure order alone does not invent a data dependency. A consumer names the exact retained state. The compiler checks family, state type, producer, ordering, and compatibility before execution.
 
-## Result Payloads
+## Model Requirements
 
-Every procedure-step result has a `run_id`, fields, diagnostics, quality gates, quality reasons,
-publishability, and provenance. `fea.run` returns an aggregate study result whose `steps` preserve
-the authored sequence; select a typed `fea.StepRunResult` before querying a multi-step study. Some
-families add domain payloads:
+The selected procedures drive complete model admission:
 
-| Payload | Used by |
-| --- | --- |
-| `modal_results` | Modal paths. |
-| `thermal_results` | Thermal and coupled thermal paths. |
-| `transient_results` | Structural transient paths where applicable. |
-| `nonlinear_results` | Nonlinear structural paths. |
-| `electromagnetic_results` | Electromagnetic paths. |
-| Family-specific fields | Acoustic, CFD, CHT, and FSI paths expose their primary payload through typed `run.fields`, diagnostics, summaries, and result queries. |
+- static structures need compatible elasticity and constraint/load coverage;
+- dynamics additionally need density, damping policy where applicable, and a physical independent domain;
+- modal reductions require a validated operator-bound basis;
+- spectrum/random response require named typed environmental inputs and truncation/combination policy;
+- thermal procedures require thermal capabilities and temperature/flux/source conditions;
+- electromagnetic, acoustic, and fluid procedures require their family-specific material, gauge/reference, source, boundary, and interface data.
 
-## Support Is Per Family
+Missing data is an error. The compiler or solver cannot choose a first material, average several candidates, fix an arbitrary degree of freedom, invent damping, or infer a reference boundary.
 
-A family can be implemented and tested without being production-grade for every engineering use. Current support varies by family:
+## Results
 
-- dedicated solver-backed paths exist for structural, thermal, nonlinear, transient, modal, acoustic, electromagnetic, CFD, CHT, and FSI workflows,
-- CFD, CHT, and FSI have governed fluid/coupled paths with typed fields, diagnostics, known-answer gates, and typed invalid-authoring errors,
-- V&V maturity depends on known-answer tests, convergence checks, independent references, and governed thresholds.
+Each completed step publishes the exact resolved workload, numerical receipt, semantic state, and only the fields admitted for that procedure. Authored output expressions select and transform those typed fields. Multi-step results retain step identity; queries must select a step when an aggregate is ambiguous.
 
-Use [Current Status](/docs/fea/status) before relying on a family for a workflow, and use [Verification & Validation](/docs/fea/validation) for the evidence standard.
+Use [Study contracts](./study-contracts) for observations, accuracy, restart, and state semantics, and [Verification and validation](./validation) for qualification requirements.

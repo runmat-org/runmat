@@ -1,36 +1,50 @@
-# FEA: Run Math on Geometry (Beta)
+# Finite-Element Analysis
 
-RunMat FEA lets you start with a CAD or mesh file and run repeatable physics studies against it. The FEA subsystem in RunMat allows you to load geometry, mesh it into finite elements, define material properties, loads, constraints, domains, interfaces, and steps, and solve multi-physics ODEs and parametric sweeps.
+RunMat FEA turns exact geometry, an explicitly authored physical model, and a procedure sequence into a validated solver result. A `.fea` file is a typed declarative program: RunMat parses and type-checks it, resolves imported `.fea` modules and `.m` functions, realizes geometry, generates a solver mesh, compiles region-bound properties and conditions, schedules the numerical work locally or on a cluster, and publishes a content-addressed result.
 
-> [!NOTE] RunMat FEA is in beta and is under active development. The API is subject to change.
+> [!NOTE]
+> FEA is a breaking API while its production qualification is in progress. Every study states the formulation maturity it requires, and execution fails closed when a requested physics family, formulation, backend, or evidence level is not available.
 
-## How To Use It
+## Start Here
 
-| If you want to... | Use |
+The repository contains complete checked examples in [`docs/fea/examples`](./examples):
+
+```sh
+runmat fea check docs/fea/examples/structural-static-experimental.fea
+runmat fea plan docs/fea/examples/structural-static-experimental.fea
+runmat fea run docs/fea/examples/structural-static-experimental.fea
+```
+
+`runmat check file.fea` and `runmat run file.fea` are shorthand for the corresponding `runmat fea` commands. If a root module declares more than one runnable root, select it with `--study <id>` or `--sweep <id>`.
+
+## Choose The Right Surface
+
+| Work | Interface |
 | --- | --- |
-| Run a repeatable study from the terminal or CI | `runmat check model.fea` and `runmat run model.fea` |
-| Build or generate a study from RunMat code | `geometry.load(...)`, `meshing.generate(...)`, `fea.model(...)`, `fea.study(...)`, `fea.validate(...)`, `fea.run(...)` |
-| Build or generate a study from a `.fea` file | A `.fea` YAML document can be loaded by `fea.load(...)` or run with `runmat run` |
-| Inspect geometry before modeling | `geometry.inspect(...)` and geometry runtime operations |
-| Integrate from Rust or a host application | Versioned runtime operations such as `fea.create_model/v1` and `fea.run_study/v1` |
+| Author a repeatable analysis | Typed `.fea` source plus imported `.fea` modules and pure `.m` functions |
+| Check without executing | `runmat fea check model.fea` |
+| Inspect the canonical logical plan | `runmat fea plan model.fea` |
+| Run locally | `runmat fea run model.fea` |
+| Run on a configured cluster | `runmat fea run model.fea --cluster <name> --trust-identity <sha256-fingerprint>` |
+| Load and inspect geometry in `.m` code | `geometry.load`, `geometry.inspect`, and geometry query operations |
+| Generate and display a mesh in `.m` code | `meshing.generate`, `mesh(meshValue)`, and mesh-quality operations |
+| Read a published result in `.m` code | typed FEA result, step, field, and mesh objects; use `plot(fieldValue)` for field rendering |
 
-`.fea` is a declarative study format. It is a YAML document with a RunMat-specific extension, similar to how `.m` is the code format. Just like `.m` files, `.fea` files can be passed to `runmat check` or `runmat run` for static analysis and execution, respectively.
+The `.fea` language is the authoring authority. Runtime objects expose geometry, mesh, and result inspection; source modules are compiled by the typed FEA commands.
 
-## Topics
+## Documentation Map
 
-| Task | Read |
+| Topic | Read |
 | --- | --- |
-| Run studies from the CLI, `.m` code, or Rust host code | [Using FEA](/docs/fea/using-fea) |
-| Load, inspect, and prepare CAD or mesh geometry | [Geometry](/docs/fea/geometry) |
-| Generate deterministic solver meshes and inspect quality evidence | [Meshing](/docs/fea/meshing) |
-| Define solver-ready model data | [Models](/docs/fea/models) |
-| Compose procedure sequences, observations, and accuracy requirements | [Procedure Sequences, Observations, and Accuracy](/docs/fea/study-contracts) |
-| Choose the physics family and understand family limits | [Physics Families](/docs/fea/physics) |
-| Run direct solves, studies, and sweeps | [Solves, Studies, and Sweeps](/docs/fea/solves) |
-| Understand saved artifacts, diagnostics, and provenance | [Evidence & Artifacts](/docs/fea/evidence) |
-| Understand how correctness is tested and validated | [Verification & Validation](/docs/fea/validation) |
-| Interpret result quality and trust signals | [Results & Trust](/docs/fea/trust) |
-| Check current support and known boundaries | [Current Status](/docs/fea/status) |
-| Integrate with runtime operation contracts | [Operation Reference](/docs/fea/operation-reference) |
+| First complete study, CLI execution, and result access | [Using FEA](./using-fea) |
+| Language syntax and declaration reference | [FEA language](./language/) |
+| Imported, constructed, derived, and generated geometry | [Geometry](./geometry) |
+| Deterministic tetrahedral meshing, quality, evidence, and scale | [Meshing](./meshing) |
+| Materials, property assignment, conditions, and model composition | [Models](./models) |
+| Procedure sequences, state transfer, observations, and accuracy | [Study contracts](./study-contracts) |
+| Studies, sweeps, placement, and publication | [Solves](./solves) |
+| Physics-family and formulation status | [Physics families](./physics) and [Current status](./status) |
+| Result evidence, provenance, and trust | [Evidence](./evidence), [Validation](./validation), and [Trust](./trust) |
+| Runtime and host operation contracts | [Operation reference](./operation-reference) |
 
-For general runtime execution, see [Execution](/docs/runtime/execution). For host session behavior, see [Session Engine](/docs/runtime/session). For GPU behavior, see [GPU Acceleration & Fusion Engine](/docs/runtime/gpu).
+FEA scheduling uses the same execution substrate as other RunMat workloads. Cluster routing, queue selection, retries, worker allocation, encrypted transport, artifact storage, and cancellation are execution concerns; they do not change the physical study definition or its identity.

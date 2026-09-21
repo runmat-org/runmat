@@ -1,328 +1,99 @@
-# Operation Reference
+# FEA Operation Reference
 
-This page is for host integrations and tooling that care about operation names, envelopes, error codes, artifact roots, and builtin names.
+This page maps the public command, language, runtime-object, and host-operation surfaces. The typed `.fea` compiler is the source-authoring authority; runtime functions operate on already typed objects and published results.
 
-## Envelopes
+## Command Line
 
-Successful operations return `OperationEnvelope<T>`:
-
-| Field | Meaning |
+| Command | Purpose |
 | --- | --- |
-| `operation` | Stable operation name, such as `fea.run_modal`. |
-| `op_version` | Versioned operation identifier, such as `fea.run_modal/v1`. |
-| `trace_id` | Optional host trace id. |
-| `request_id` | Optional host request id. |
-| `data` | Typed operation payload. |
+| `runmat fea check <file>` | Resolve and type-check one complete source graph without execution |
+| `runmat fea plan <file>` | Print canonical logical phases and the selected study or sweep definition |
+| `runmat fea run <file>` | Realize geometry, mesh, compile, solve, and publish one study or sweep |
+| `runmat check <file.fea>` | Shorthand for typed FEA check |
+| `runmat run <file.fea>` | Shorthand for typed FEA run |
+| `runmat mesh <cad-file>` | Produce a canonical solver mesh plus bound meshing evidence |
 
-Failures return `OperationErrorEnvelope`:
+FEA root-selection options are `--study <id>` and `--sweep <id>`. `check`, `plan`, and `run` accept `--json`; `run` additionally accepts `--cluster`, `--project`, `--queue`, `--trust-identity`, `--idempotency-key`, `--workers`, and `--detach`.
 
-| Field | Meaning |
+`runmat mesh --help` is authoritative for direct meshing controls. Principal options are `--source-units`, `--target-size`, `--deviation`, `--element-order tet4|tet10`, `--max-elements`, `--seed`, `--output`, `--evidence`, `--force`, and the same remote placement options.
+
+## `.fea` Declarations
+
+| Declaration | Required core |
 | --- | --- |
-| `error_code` | Stable machine-readable code. |
-| `error_type` | `input`, `validation`, `capacity`, `backend`, `internal`, or `contract`. |
-| `message` | Human-readable message. |
-| `operation`, `op_version` | Operation identity that failed. |
-| `retryable` | Whether retrying may be reasonable. |
-| `severity` | `warning`, `error`, or `fatal`. |
-| `context` | String key/value details for automation. |
-| `trace_id`, `request_id`, `timestamp` | Correlation and timing metadata. |
+| `geometry <id> { ... }` | exactly one imported, constructed, or generated source plus typed regions as needed |
+| `geometry <id> from geometry.<source> { derive { ... } }` | immutable derived feature graph |
+| `mesh <id> on geometry.<id> { tetrahedra { ... } }` | `order`, `target_size`, and `maximum_deviation` |
+| `material <id> { ... }` | one or more physical capability properties required by its consumers |
+| `model <id> { ... }` | assignments, conditions, actions/signals, cases, properties, and composition |
+| `study <id> { ... }` | geometry, matching mesh, model, at least one analysis, and optional outputs/inputs/execution |
+| `sweep <id> : study.<id> { ... }` | axes with `product|zip`, or explicit cases |
+| `execution <id> { ... }` | optional placement/resource/fan-out/cooperative/resilience preferences |
 
-Error codes use `RM.<DOMAIN>.<OPERATION>.<REASON>`, for example `RM.FEA.RUN_STUDY.INVALID_SPEC` or `RM.GEOMETRY.LOAD.UNSUPPORTED_FORMAT`.
+See the [language reference](./language/) for exact syntax and operation signatures.
 
-## Geometry Operations
+## Geometry And Meshing In `.m`
 
-| Operation version | Use |
+| Function | Result |
 | --- | --- |
-| `geometry.inspect/v1` | Detect supported input format and byte count before loading. |
-| `geometry.load/v1` | Import geometry bytes into a `GeometryAsset`. |
-| `geometry.compute_stats/v1` | Return geometry statistics for an asset. |
-| `geometry.list_regions/v1` | Return known geometry regions. |
-| `geometry.query_entities/v1` | Return region, mesh, or entity references with a bounded query. |
-| `geometry.capture_view/v1` | Capture a geometry view through the installed adapter. |
+| `geometry.inspect(path)` | immutable facts about source format, topology, metadata, parameters, and properties |
+| `geometry.load(path, Name, Value, ...)` | typed `geometry.Asset` |
+| `geometry.listRegions(asset)` | selectable region inventory |
+| `geometry.meshes(asset)` | render-oriented geometry meshes |
+| `meshing.generate(asset, Name, Value, ...)` | validated `meshing.Mesh` with bound evidence |
+| `meshing.nodes(meshValue)` | node ids and coordinates |
+| `meshing.elements(meshValue)` | typed element topology |
+| `meshing.boundaryFaces(meshValue)` | boundary-face topology and provenance |
+| `meshing.regions(meshValue)` | physical mesh-region inventory |
+| `meshing.quality(meshValue)` | per-element and summary quality measures |
+| `meshing.evidence(meshValue)` | request, stage, invariant, resource, and provenance evidence |
+| `meshing.save(meshValue, meshPath, evidencePath)` | atomically save the jointly validated pair |
+| `meshing.load(meshPath, evidencePath)` | load and jointly validate a saved pair |
+| `mesh(assetOrMesh, Name, Value, ...)` | display geometry or a solver mesh; numeric `mesh(X,Y,Z)` is unchanged |
 
-## FEA Operations
+Geometry/mesh display options affect rendering only; they do not alter exact geometry or canonical solver-mesh identity.
 
-| Operation version | Use |
+## Result Access In `.m`
+
+| Function | Contract |
 | --- | --- |
-| `fea.create_model/v1` | Build an `AnalysisModel` from geometry and a typed model-template intent. |
-| `fea.validate/v1` | Validate model units, frame, materials, loads, boundary conditions, domains, and geometry compatibility. |
-| `fea.run_linear_static/v1` | Run the linear static structural path. |
-| `fea.run_modal/v1` | Run modal analysis. |
-| `fea.run_acoustic/v1` | Run acoustic harmonic analysis. |
-| `fea.run_thermal/v1` | Run standalone thermal analysis. |
-| `fea.run_transient/v1` | Run structural transient analysis. |
-| `fea.run_nonlinear/v1` | Run nonlinear structural analysis. |
-| `fea.run_electromagnetic/v1` | Run electromagnetic analysis. |
-| `fea.run_cfd/v1` | Run finite-volume incompressible CFD analysis. |
-| `fea.run_cht/v1` | Run coupled CFD plus thermal conjugate heat-transfer analysis. |
-| `fea.run_fsi/v1` | Run partitioned fluid-structure interaction analysis. |
-| `fea.results/v1` | Query fields, diagnostics, payload subsets, quality reasons, provenance, and summaries. |
-| `fea.results_compare/v1` | Compare selected fields between two persisted runs. |
-| `fea.trends/v1` | Summarize persisted runs by family. |
+| `fea.results(runOrRunId, Name, Value, ...)` | load typed result metadata and selected descriptors from a result object or persisted run id |
+| `fea.field(resultsOrRun, selector, sample)` | select one typed field or authored output at an optional typed independent-domain sample |
+| `fea.fieldPage(field, start, count)` | load a bounded one-based page, at most 4096 logical values |
+| `plot(field, Name, Value, ...)` | render a selected field using ordinary RunMat plotting dispatch |
+| `mesh(runOrResultsOrField, Name, Value, ...)` | display the exact solver mesh carried by FEA result context |
+| `fea.compare(baselineRunId, candidateRunId)` | compare persisted runs |
+| `fea.trends(Name, Value, ...)` | query bounded result trends |
 
-## Study Operations
+Selectors are typed objects such as `fea.OutputField.named("von_mises")`, structural field selectors, and independent-domain values such as `fea.Frequency.hertz(120)`. Field choice belongs to `fea.field`; it is not a string option to `plot`.
 
-| Operation version | Use |
+## Programmatic Typed Objects
+
+RunMat also exposes typed constructors for materials, assignments, constraints, signals, excitations, sequences, accuracy policies, sampling/storage policies, and result selectors. They are useful when `.m` code creates an in-memory study object. `fea.validate`, `fea.plan`, and `fea.run` accept only typed `fea.Study` or `fea.Sweep` values; they do not accept a `.fea` path. Use the CLI/source compiler to execute a `.fea` module graph.
+
+Introspection and completion are generated from builtin descriptors, so the active runtime remains the signature authority for the full constructor inventory.
+
+## Host Operations
+
+Host integrations use versioned operation envelopes. The main object-oriented operations are:
+
+| Operation | Purpose |
 | --- | --- |
-| `fea.validate_study/v1` | Validate one study and write a validation artifact. |
-| `fea.plan_study/v1` | Produce operation sequence, run operation, fingerprint, and plan artifact. |
-| `fea.run_study/v1` | Execute one study and write run evidence. |
-| `fea.validate_study_sweep/v1` | Validate a sweep with aggregate and per-study issues. |
-| `fea.plan_study_sweep/v1` | Plan a sweep with plan entries and failure entries. |
-| `fea.run_study_sweep/v1` | Execute a deterministic sequential sweep. |
+| `fea.create_model/v1` | construct a typed in-memory analysis model |
+| `fea.validate_study/v1` | validate an in-memory study |
+| `fea.plan_study/v1` | plan an in-memory study |
+| `fea.run_study/v1` | execute an in-memory study through the configured runtime provider |
+| `fea.validate_study_sweep/v1` | validate an in-memory sweep |
+| `fea.plan_study_sweep/v1` | plan an in-memory sweep |
+| `fea.run_study_sweep/v1` | execute an in-memory sweep |
+| `fea.results/v1` | query persisted result metadata |
+| `fea.results_compare/v1` | compare persisted results |
+| `fea.trends/v1` | query result trends |
 
-## RunMat Builtins
+Typed `.fea` source checking and native root execution use their public source/result contracts directly rather than serializing an authoring document through these object operations.
 
-| Builtin | Use |
-| --- | --- |
-| `geometry.inspect(path)` | Read a geometry file and return a `geometry.InspectResult` object. |
-| `geometry.load(path, "Units", units)` | Read geometry with explicit source units and return a `geometry.Asset` object. |
-| `geometry.listRegions(asset)` | Return imported regions from a `geometry.Asset`. |
-| `geometry.meshes(asset)` | Return patch-ready surface mesh topology with vertices, faces/triangles, and region mappings. |
-| `mesh(asset, Name, Value, ...)` | Display a `geometry.Asset`; `Edges` and `XRay` are visual options. |
-| `meshing.generate(asset, Name, Value, ...)` | Generate a validated `meshing.Mesh` through the installed execution provider. |
-| `meshing.load(meshPath, evidencePath)` | Decode and jointly validate canonical solver-mesh and evidence artifacts. |
-| `meshing.save(mesh, meshPath, evidencePath, Name, Value, ...)` | Stage and transactionally publish the canonical pair; existing paths require `Force`, true. |
-| `meshing.nodes(mesh)`, `meshing.elements(mesh)`, `meshing.boundaryFaces(mesh)` | Return coordinates and exact typed topology identifiers/connectivity. |
-| `meshing.regions(mesh)` | Return persistent physical-region ids and element counts. |
-| `meshing.quality(mesh)` | Return per-element and summary Jacobian, aspect-ratio, and volume statistics. |
-| `meshing.evidence(mesh)` | Return the evidence identity and resource summary bound to the mesh. |
-| `mesh(mesh, Name, Value, ...)` | Display solver topology with `Edges`, `Regions`, and `Section` options. |
-| `fea.load(path)` | Load a `.fea` study or sweep file and return `fea.Study` or `fea.Sweep`. |
-| `fea.material(...)`, `fea.materialAssignment(...)` | Create typed material data and region assignments. |
-| `fea.<Family>Constraint.<kind>(...)` | Create typed essential, kinematic, gauge, pairing, and reference constraints. |
-| `fea.<Family>Boundary.<kind>(...)` | Create typed natural and Robin boundary operators. |
-| `fea.<Quantity>Signal.constant<Unit>(...)` | Create a quantity-typed constant physical signal. |
-| `fea.SignalInterpolation.<policy>()`, `fea.SignalExtrapolation.<policy>()` | Create closed typed sampling policies. |
-| `fea.<Quantity>Signal.fromTimeSamples(id, times, values, interpolation, extrapolation)` | Create a quantity-typed sampled time history. |
-| `fea.<Family>Excitation.<action>(...)`, `fea.ExcitationCase.<activation>(...)` | Bind signals to geometry, then group actions under a typed activation policy. |
-| `fea.InitialConditionTarget.wholeModel()`, `fea.<Family>InitialCondition.<state>(...)` | Create whole-model or region-bound initial state from a typed signal sample. |
-| `fea.ResponseSpectrum.new(...)` and `fea.Spectrum*` policy classes | Create a typed modal response spectrum with explicit axis, direction, combination, evidence, and provenance. |
-| `.fea` random-spectrum declarations | Author typed channel directions and complete complex cross-power spectral-density matrices for modal random response. |
-| `fea.<Family>Step.<procedure>(id)`, `fea.<Physics>Domain.<constructor>(...)` | Create concrete typed analysis steps and physics domains. |
-| `fea.StepObjectRef.*`, `fea.ActivationLifecycle.*`, `fea.StepObjectActivation.new(...)` | Bind authored model objects to an explicit step lifecycle. |
-| `fea.StateInput.*`, `fea.StateOutput.new(...)`, `fea.StateTransition.new(...)` | Declare solver-neutral state production, consumption, and transfer. |
-| `fea.ProcedureStep.configure(...)`, `fea.AnalysisSequence.new(...)` | Compose the semantic procedure sequence independently of execution placement. |
-| `fea.Observation.*`, `fea.ObservationTarget.*`, `fea.SamplingPolicy.*`, `fea.ReductionPolicy.*` | Plan field, history, probe, reduction, diagnostic, and monitor computation and retention. |
-| `fea.AccuracyCriterion.new(...)`, `fea.AccuracyPlan.new(...)` | Declare numerical evidence, acceptance tolerances, and bounded corrective action. |
-| `fea.ContactInterface.frictionless(...)`, `.coulomb(...)`; `fea.FluidStructureInterface.noSlip(...)`; `fea.ConjugateHeatTransferInterface.perfect(...)`, `.conductance(...)`, `.resistance(...)` | Create a concrete typed interface between two `geometry.Region` values. |
-| `fea.ComputeBackend.cpu/gpu`, `fea.FormulationRequirement.production/experimental` | Create closed typed execution-policy choices. |
-| `fea.SolverOptions.defaults(step)` | Create family-compatible typed solver options for a procedure step. |
-| `fea.ExecutionStep.new(...)`, `fea.ExecutionPlan.new/defaults(...)` | Compose a validated per-step execution plan. |
-| `fea.model(id, geometry, Name, Value, ...)` | Assemble an explicit model from geometry and typed components. |
-| `fea.study(id, geometry, Name, Value, ...)` | Create a `fea.Study` from geometry, optional validated `Mesh`, typed template/model data, sequence, backend, and formulation requirement. |
-| `fea.sweep(id, studies, Name, Value, ...)` | Create a deterministic sweep from `fea.Study` objects. |
-| `fea.validate(study)` | Validate a `.fea` path, `fea.Study`, or `fea.Sweep`. |
-| `fea.plan(study)` | Plan a `.fea` path, `fea.Study`, or `fea.Sweep`. |
-| `fea.run(study)` | Run a `.fea` path, `fea.Study`, or `fea.Sweep`. |
-| `fea.stepResult(run, stepId)` or `run.step(stepId)` | Select one typed persisted procedure-step result from an aggregate study run. |
-| `fea.results(runOrId, Name, Value, ...)` | Load result data from a run result object or persisted run id. |
-| `fea.OutputField.named(name)` | Create a typed selector for an open authored output identifier declared by the study. |
-| `fea.field(resultsOrRun, fieldSelector, sample)` | Select one field with a typed family-quantity or authored-output selector and optional typed independent-domain sample. |
-| `fea.fieldPage(field, start, count)` or `field.page(start, count)` | Read a bounded logical-value page without materializing the complete artifact; values retain native real or complex tensor semantics. |
-| `plot(field, Name, Value, ...)` | Plot an `fea.Field` using its retained study geometry and solver topology context. Field selection remains in `fea.field`. |
-| `mesh(runOrResultsOrField, Name, Value, ...)` | Display the solver mesh by default; `Source` accepts `solver`, `cad`, `cad_reference`, or `auto`, and `Edges` controls the solver-edge overlay. |
-| `fea.compare(baselineRunId, candidateRunId)` | Compare two persisted runs; no Name, Value options are accepted. |
-| `fea.trends(Name, Value, ...)` | Summarize recent persisted runs. |
+## Identity And Errors
 
-Statistical structural procedures use typed selectors rather than overloading ordinary signed
-fields:
+Source/module revision, exact geometry, mesh request, compiled properties, procedure workloads, generated inputs, outputs, and execution artifacts each have separate canonical identities. Physical paths, process ids, worker ids, queue names, retry attempts, and timings do not enter the placement-neutral study identity.
 
-| Selector | Meaning |
-|---|---|
-| `fea.ResponseSpectrumField.relativeDisplacement()` (and the velocity, acceleration, pseudo, absolute, and angular counterparts) | The configured nonconcurrent nodal component envelope. |
-| `fea.ResponseSpectrumField.envelope(fea.StructuralField.stress())` | A displacement-derived component envelope for a supported linear structural quantity. |
-| `fea.RandomResponseField.rms(fea.StructuralField.displacement())` | Root-mean-square response for a supported linear quantity. |
-| `fea.RandomResponseField.variance(fea.StructuralField.displacement())` | Variance for that quantity, with squared physical units. |
-
-The compositional constructors accept only linear structural quantities. They reject nonlinear
-derived selectors such as von Mises stress rather than assigning an invalid statistical meaning.
-
-Family-specific constraints and boundaries require immutable `geometry.Region` values, so every authored condition carries the source geometry identity and revision. Model composition rejects regions from another geometry or an earlier revision. Numeric physical inputs are dimensioned values rather than bare scalars: pressure, heat flux, ambient temperature, heat-transfer coefficient, and acoustic impedance each use their corresponding `fea.*` quantity class. Constraints are supplied through the `Constraints` model/study option; natural and Robin operators are supplied through `Boundaries`.
-
-| Boundary constructor | Typed value |
-| --- | --- |
-| `fea.StructuralBoundary.pressure(id, region, pressure)` | `fea.Pressure` |
-| `fea.ThermalBoundary.heatFlux(id, region, heatFlux)` | `fea.HeatFlux` |
-| `fea.ThermalBoundary.convection(id, region, ambientTemperature, coefficient)` | `fea.Temperature`, `fea.HeatTransferCoefficient` |
-| `fea.MagneticBoundary.insulation(id, region)` | None |
-| `fea.AcousticBoundary.rigidWall(id, region)` | None |
-| `fea.AcousticBoundary.radiation(id, region)` | None |
-| `fea.AcousticBoundary.impedance(id, region, impedance)` | `fea.SpecificAcousticImpedance` |
-| `fea.FluidBoundary.outletPressure(id, region, pressure)` | `fea.Pressure` |
-
-Fluid inlet velocity, moving/no-slip/slip walls, and symmetry are kinematic constraints and therefore live on `fea.FluidConstraint`. A fluid outlet pressure is a natural boundary. Thermal prescribed temperature is an essential constraint, while heat flux and convection are natural/Robin boundaries. This division follows the mathematical role of the condition rather than its placement on a geometric boundary.
-
-| Interface constructor | Typed parameters |
-| --- | --- |
-| `fea.ContactInterface.frictionless(id, primary, secondary)` | None |
-| `fea.ContactInterface.coulomb(id, primary, secondary, coefficient)` | `fea.FrictionCoefficient` |
-| `fea.FluidStructureInterface.noSlip(id, fluid, structure)` | None |
-| `fea.ConjugateHeatTransferInterface.perfect(id, fluid, solid)` | None |
-| `fea.ConjugateHeatTransferInterface.conductance(id, fluid, solid, conductance)` | `fea.HeatTransferCoefficient` |
-| `fea.ConjugateHeatTransferInterface.resistance(id, fluid, solid, resistance)` | `fea.ThermalContactResistance` |
-
-Each interface joins two distinct `geometry.Region` values from one geometry revision. Contact does not choose an FSI or CHT transfer law, and coupled interfaces do not double as contact constraints. Their orientation is explicit: FSI and CHT use the fluid region as the primary side, with the structure or solid region as the secondary side.
-
-`fea.material`, the quantity-specific signal constructors, and the dimensioned quantity constructors are RunMat-native host constructors. Finite real quantity inputs accept all eight built-in integer classes, preserve exact input through shape validation, and then cross one binary64 model-storage boundary; sufficiently wide integers can round, and resident numeric fields are rejected without provider dispatch. Physics domains accept only the corresponding typed quantities and cannot contain loads, signals, solver choices, or enable flags. Interface constructors accept only typed `geometry.Region` selections and, where required, a semantic physical parameter. CHT selects exactly one of perfect transfer, conductance, or resistance, so redundant or contradictory transfer laws cannot be authored. Contact penalty, stabilization, damping, and relaxation are numerical policy owned by the step and solver rather than interface physics.
-
-`fea.materialAssignment`, `fea.model`, `fea.plan`, `fea.field`, and `fea.compare` accept structural objects and text rather than integer arrays. `fea.fieldPage` accepts positive exact host integers (or exactly integral scalar doubles) for its one-based start and bounded count. FEA objects overload the ordinary `plot` and `mesh` functions through the runtime object protocol; numeric calls keep their MATLAB-compatible behavior. Discrete output metadata remains integer typed: model and geometry revisions, plan counts and indexes, field shape/component/element/size metadata, page positions and counts, and comparison count deltas do not pass through a physical-value binary64 boundary. The conventional figure handle remains a double at the scripting boundary. Input arity and structural identity are validated before artifact lookup, planning, field projection, comparison, or figure creation.
-
-These constructors, planning operations, field projections, comparisons, and plots do not intrinsically require native OCCT. Existing geometry assets, STL or synthetic geometry, and persisted mesh/result artifacts use their normal paths without OCCT; only document resolution that must import topology-bearing CAD may require an OCCT-enabled geometry backend.
-
-### Workflow signatures and validation
-
-| Builtin | Exact signature | Validation boundary |
-| --- | --- | --- |
-| `fea.StructuralStep.static/modal/harmonic/transient/nonlinear` | `step = fea.StructuralStep.<procedure>(id)` | The id is a non-empty text scalar; family, procedure, direct solution space, independent domain, and state outputs come from the concrete method. |
-| `fea.ProcedureStep.configure` | `step = fea.ProcedureStep.configure(step, independentDomain, activations, stateInputs, stateOutputs, observations, accuracy, restart)` | Every supplied value has a closed typed class; the concrete family/procedure identity cannot be changed. |
-| `fea.AnalysisSequence.new` | `sequence = fea.AnalysisSequence.new(id, steps, dependencies, transitions, branches)` | Step identity, dependency graph, transition compatibility, activation ancestry, observation semantics, and accuracy dimensions are validated with the model. |
-| `fea.ThermalStep.transient`, `fea.ElectromagneticStep.harmonic`, `fea.AcousticStep.harmonic` | `step = fea.<Family>Step.<procedure>(id)` | Only currently supported family/procedure combinations are constructible. |
-| `fea.FluidStep.steadyState/transient` | `step = fea.FluidStep.<procedure>(id)` | Steady-state produces a static domain; transient produces a time domain. |
-| `fea.ThermoMechanicalStep.transient`, `fea.ElectroThermalStep.transient/nonlinear`, `fea.ConjugateHeatTransferStep.steadyState/transient`, `fea.FluidStructureStep.transient` | `step = fea.<CoupledFamily>Step.<procedure>(id)` | Coupled family and procedure are fixed by the concrete method and cannot be supplied as strings. |
-| `fea.study` | `study = fea.study(path)` or `study = fea.study(id, geometry, Name, Value, ...)` | The path must resolve to a study. Constructor identity, geometry class, option spelling, component classes, sequence, and template/step agreement are checked before construction. |
-| `fea.sweep` | `sweep = fea.sweep(id, studies, Name, Value, ...)` | The id and study object classes are checked before `FailFast`; `FailFast` is a logical scalar and defaults to true. |
-| `fea.validate` | `result = fea.validate(studyOrSweepOrPath)` | Object/path identity is checked before document validation; no solver executes. |
-| `fea.run` | `run = fea.run(studyOrSweepOrPath)` | Object/path identity and document validity are checked before the selected solver executes. |
-| `fea.results` | `results = fea.results(runOrRunId, Name, Value, ...)` | Run identity, option pairing, option values, and selector shape/range are checked before artifact lookup. An existing `fea.Results` object is accepted without options. |
-| `fea.OutputField.named` | `selector = fea.OutputField.named(name)` | The name is open study data, not solver dispatch. It must be a valid FEA identifier and resolves exactly to a declared, persisted output. |
-| `fea.field` | `field = fea.field(resultsOrRun, fieldSelector, sample)` | The selector is a typed family quantity or `fea.OutputField`. The optional independent-domain sample is typed and must identify exactly one published field. |
-| `fea.fieldPage` | `page = fea.fieldPage(field, start, count)` | The field must retain a persisted run identity. Start and count are positive exact host integers; count defaults to 256 and is capped at 4096. Every selected object and chunk is verified before values are returned. |
-| `fea.trends` | `trends = fea.trends(Name, Value, ...)` | `WindowSize` is checked before artifact-store access. |
-
-The RunMat-code `fea.study` constructor requires `Template`, defaults to a CPU/production execution
-entry for every sequence step, uses defaults mode `template_scaffold`, and creates a sanitized `<study-id>_model` model id
-when none is supplied. Its constructor options include `Template`, `Execution`, `ModelId`, `Model`,
-`Frame`, `Defaults`, `Materials`, `MaterialAssignments`/`Assignments`, `Constraints`, `Boundaries`,
-`Signals`, `Excitations`, `ExcitationCases`/`Cases`, `InitialConditions`, `ResponseSpectra`, `Steps`,
-`Sequence`, `Domains`, `Interfaces`, and `Mesh`. `Steps` and `Sequence` are mutually exclusive.
-`fea.model` accepts the model-component subset. Direct integer values do not substitute for any
-identity or typed-object option.
-
-Those constructor conveniences do not apply to `.fea` documents. File-authored studies use an
-explicit `model.source` (`inline`, `file`, or `compose`) and never expand a hidden model template.
-
-### Execution-plan contracts
-
-| Builtin | Contract |
-| --- | --- |
-| `fea.ComputeBackend.cpu()` / `.gpu()` | Select requested compute placement without claiming where work actually ran. Result provenance records actual execution and fallback separately. |
-| `fea.FormulationRequirement.production()` / `.experimental()` | Require production-qualified formulations or explicitly admit experimental ones. Production requests never silently downgrade. |
-| `fea.SolverOptions.defaults(step)` | Select the solver-option variant from the typed family, procedure, and solution space carried by `step`. Unsupported combinations reject. |
-| `fea.ExecutionStep.new(step, backend, requirement, solverOptions)` | Bind one procedure-step id to compatible typed solver options and execution policy. |
-| `fea.ExecutionPlan.new(sequence, steps)` | Require exactly one ordered execution entry for every semantic sequence step. |
-| `fea.ExecutionPlan.defaults(sequence, backend, requirement)` | Build the complete validated plan with family-compatible defaults. |
-
-`fea.study(..., "Execution", execution)` accepts only a `fea.ExecutionPlan`. The retired string
-`Backend`, `Requirement`, and solver-kind dispatch forms are not compatibility aliases.
-
-### Results query options
-
-| Option | Accepted value | Default |
-| --- | --- | --- |
-| `Fields` / `IncludeFields` | Field-id text list | Empty; do not filter by field id |
-| `IncludeFieldValues` / `FieldValues` | Logical or exact numeric 0/1 | `true` |
-| `IncludeDiagnostics` | Logical or exact numeric 0/1 | `true` |
-| `DiagnosticCodes` | Diagnostic-code text list | Empty; do not filter by code |
-| `IncludeModalResults` | Logical or exact numeric 0/1 | `true` |
-| `ModeIndices` | Positive one-based exact structural vector | Empty; include every mode |
-| `IncludeTransientResults` | Logical or exact numeric 0/1 | `true` |
-| `TransientSnapshotIndices` | Positive one-based exact structural vector | Empty; include every snapshot |
-| `IncludeNonlinearResults` | Logical or exact numeric 0/1 | `true` |
-| `IncludeElectromagneticResults` | Logical or exact numeric 0/1 | `true` |
-
-Mode and transient snapshot selectors use the normal one-based RunMat scripting convention. All eight integer classes and ordinary integral doubles are accepted from authoritative host storage; zero, negative, fractional, nonfinite, out-of-range, matrix-shaped, and resident selectors reject before artifact lookup. Public field shapes, element/component counts, byte sizes, mode/snapshot indexes, iteration counts, fingerprints, study/sweep counts, failure indexes, and solver synchronization counts remain exact typed integers. Field values and true physical, timing, residual, rate, and ratio quantities remain double.
-
-`fea.trends` accepts only `WindowSize`, a positive exact structural scalar defaulting to 16. All eight integer classes and ordinary integral doubles are accepted; invalid and resident values reject before artifact-store access.
-
-The `fea.results` and `fea.trends` query paths read canonical host `double` result fields and never trigger device execution or an implicit transfer. `fea.run` may execute through the study's configured GPU solver; its backend, device-operator ratio, synchronization count, and fallback provenance remain separate from published field storage. None of these operations intrinsically requires native OCCT when consuming existing typed objects, STL/synthetic geometry, or persisted artifacts; only path-time import of topology-bearing CAD may require the configured OCCT backend.
-
-`fea.Study` and `fea.Sweep` objects expose `validate`, `plan`, and `run` methods through the class system. A study produces `fea.Validation`, `fea.Plan`, and an aggregate `fea.RunResult`; a sweep produces the distinct aggregate classes `fea.SweepValidation`, `fea.SweepPlan`, and `fea.SweepRunResult`. `fea.RunResult.step(stepId)` returns one typed `fea.StepRunResult`, which owns the persisted `run_id` and exposes `results`, `field`, and `mesh`. The aggregate exposes the same convenience methods only when it contains exactly one step. `fea.Results` exposes `field` and `mesh`; `fea.Field` exposes `page`, `plot`, and `mesh`.
-
-## `.fea` Document Fields
-
-Top-level study fields:
-
-| Field | Required | Meaning |
-| --- | --- | --- |
-| `version` | Yes | Document version. Current value is `1`. |
-| `kind` | Yes | `study`. |
-| `id` | Yes | Stable study id. |
-| `geometry` | Yes | Geometry file path, units, and import options. |
-| `model` | Yes | Model id, typed template, defaults mode, and frame. |
-| `sequence` | Yes | Typed procedure steps, activation, state flow, observations, accuracy, dependencies, transitions, branches, and restart policy. |
-| `execution` | Yes | Per-step backend, formulation requirement, and optional typed solver/options pair. |
-| `regions` | No | Named aliases for geometry region selectors. |
-| `materials` | No | Material definitions keyed by material id. |
-| `material_assignments` | Required for material-bearing formulations | Typed beam, shell, solid, or cell material-domain assignments. Each active element must have exactly one assignment; use an explicit `all_*` target or selected region target. |
-| `constraints` | No | Typed prescribed-unknown and kinematic constraints. |
-| `boundaries` | No | Typed natural, flux, impedance, and Robin boundary operators. |
-| `connectors` | No | Typed relations between model targets. |
-| `signals` | No | Typed physical values over static, time, frequency, or parameter domains. |
-| `excitation_cases` | No | Named activation and combination groups for excitations. |
-| `excitations` | No | Typed forces, moments, pressures, sources, flow inputs, and other driving actions. |
-| `initial_conditions` | No | Typed state applied before a named procedure step. |
-| `response_spectra` | No | Typed modal response-spectrum inputs and combination policy. |
-| `domains` | No | Thermo-mechanical, electro-thermal, electromagnetic, or CFD domain data. |
-| `interfaces` | No | Contact or coupling interfaces. |
-
-Top-level sweep fields:
-
-| Field | Required | Meaning |
-| --- | --- | --- |
-| `version` | Yes | Document version. Current value is `1`. |
-| `kind` | Yes | `sweep`. |
-| `id` | Yes | Stable sweep id. |
-| `fail_fast` | No | Defaults to `true`. |
-| `studies` | Yes | List of nested study documents. Nested studies omit `kind`. |
-
-Excitations are closed typed records. Structural moment excitations use the `moment` variant and a
-moment-valued signal. Direct moments are valid only for structural targets whose elements provide
-rotational DOFs; incompatible families and displacement-only solid regions reject them during
-validation or assembly.
-
-Rotational structural runs may return `structural.rotation` and `structural.reaction_moment` fields. Beam-specific moment resultants use `structural.beam_torsion_moment` and `structural.beam_bending_moment`; shell-specific resultants use `structural.shell_bending_moment`.
-
-| Structural motion constructor | Exact signature | Contract |
-| --- | --- | --- |
-| `fea.StructuralMotion.acceleration` | `motion = fea.StructuralMotion.acceleration(dof, acceleration, initialDisplacement, initialVelocity)` | `dof` is a typed translational DOF; `acceleration` is a real64 three-component time history; initial values are typed displacement and velocity. The selected global component is integrated with exact piecewise-linear reconstruction. |
-| `fea.StructuralConstraint.prescribedMotion` | `constraint = fea.StructuralConstraint.prescribedMotion(id, region, motions)` | Binds one motion or a cell of distinct translational components to a geometry region. Only structural transient response admits the constraint. |
-
-Structural transient payloads retain one required entry per accepted time point for displacement,
-velocity, acceleration, reaction force, kinetic energy, strain energy, residual norm, applied-load
-work, support work, damping dissipation, signed energy-balance residual, normalized energy-balance error, and the full
-`M*a`, `C*v`, `K*u`, applied-load, and equilibrium-residual vectors. Rotation, angular velocity,
-angular acceleration, reaction moment, and continuum recovery histories are present only when the
-executed formulation owns those quantities. Snapshot queries validate the complete inventory before
-returning a subset and reject partial or malformed stored payloads.
-
-## Runtime Config
-
-Use `[runtime.fea]`:
-
-| Key | Purpose |
-| --- | --- |
-| `artifact_store` | `in_memory` or `filesystem` run artifact store. Defaults to `filesystem` when omitted by the CLI/runtime bootstrap. |
-| `artifact_root` | Filesystem root for persisted run artifacts. Defaults to `artifacts`. |
-| `artifact_max_runs` | Optional global retained run limit. |
-| `artifact_max_runs_per_kind` | Optional retained run limit per family. |
-| `study_artifact_root` | Study validate, plan, run, and sweep artifact root. |
-
-Preferred environment variables:
-
-| Environment variable | Purpose |
-| --- | --- |
-| `RUNMAT_FEA_ARTIFACT_STORE` | `in_memory` or `filesystem` run artifact store fallback. |
-| `RUNMAT_FEA_ARTIFACT_ROOT` | Run artifact root. |
-| `RUNMAT_FEA_ARTIFACT_MAX_RUNS` | Optional global retained run limit. |
-| `RUNMAT_FEA_ARTIFACT_MAX_RUNS_PER_KIND` | Optional retained run limit per family. |
-| `RUNMAT_FEA_STUDY_ARTIFACT_ROOT` | Study validate, plan, run, and sweep artifact root. |
-
-## Evolution Rules
-
-1. Add fields instead of changing field meaning.
-2. Preserve stable error codes and quality reason codes.
-3. Keep operation-specific validation failures typed as operation errors.
-4. Persist enough provenance to explain backend and solver policy choices.
-5. Update status, V&V docs, and tests when a family changes support level.
-6. Version-bump an operation if a payload or semantic break is unavoidable.
+Errors are structured by phase and stable code. Syntax/type/topology/model errors are distinct from unavailable capabilities, exact-geometry admission, meshing quality/budget failures, scheduler failures, numerical failures, cancelled work, and result-publication or reconstruction failures. Callers should branch on the stable code/status and present the accompanying message and source span or evidence witness.

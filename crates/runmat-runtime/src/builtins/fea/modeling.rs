@@ -476,7 +476,7 @@ pub(super) fn create_model_object_from_args(args: Vec<Value>) -> BuiltinResult<V
         builtin_error(
             MODEL_NAME,
             &ERROR_INPUT,
-            "fea.model requires Template; choose a model template from fea.capabilities().modelTemplates",
+            "fea.model requires the typed Template option",
         )
     })?;
     let model = build_model_from_parts(
@@ -1568,7 +1568,7 @@ fn resolve_study_template(
         builtin_error(
             STUDY_NAME,
             &ERROR_INPUT,
-            "fea.study requires Template; choose a model template from fea.capabilities().modelTemplates",
+            "fea.study requires the typed Template option",
         )
     })
 }

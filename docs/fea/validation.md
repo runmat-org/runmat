@@ -9,7 +9,7 @@ The purpose of validation is to determine whether the implementation, numerical 
 | Layer | Question | Evidence |
 | --- | --- | --- |
 | Contract correctness | Does the public operation behave as specified? | Versioned envelopes, typed errors, payload snapshots, builtin tests. |
-| Input validation | Is the model or `.fea` document well formed? | `runmat check`, `fea.validate_study/v1`, model validation, issue codes. |
+| Input validation | Is the model or typed `.fea` source well formed? | `runmat check`, `fea.validate_study/v1`, model validation, issue codes. |
 | Solver implementation verification | Does the implementation solve the intended discrete problem? | Residual checks, deterministic replay, convergence diagnostics, backend provenance. |
 | Numerical verification | Does the discretization converge toward known answers? | Analytic cases, manufactured solutions, patch tests, mesh convergence, time-step convergence. |
 | Physics validation | Does the model match trusted external behavior? | Literature cases, independent solver comparisons, standard benchmarks, experimental references. |
@@ -49,7 +49,12 @@ Use these labels in [Current Status](/docs/fea/status):
 | `crates/runmat-runtime/tests/analysis` | Conformance manifest and benchmark report harness across the supported families. |
 | `scripts/fea/governance` | Benchmark report validation, external references, readiness, thresholds, and promotion calibration. |
 
-These checks provide strong L0-L2 evidence across many paths. Families marked L2 in the summary below have reached the L2 bar for their currently exposed public contract: solver behavior, fields, diagnostics, invalid-case classes, and backend parity or documented fallback are covered by automated evidence. L3-L5 require deeper family-specific known-answer, convergence, external-reference, and governance evidence.
+These checks provide substantial contract and component evidence, but component tests do not promote a
+whole-study workflow. The public typed `.fea` executor currently admits structural procedure graphs
+only. Other physics families have checkable language contracts and varying amounts of solver-component
+evidence; they remain unavailable through the native whole-study entry point until that complete path is
+implemented and qualified. L3-L5 additionally require family-specific known-answer, convergence,
+external-reference, and governance evidence.
 
 ## Current Gaps
 
@@ -66,20 +71,18 @@ The main gaps for production-grade claims are:
 
 ## Family Maturity Summary
 
-| Family | Current maturity | Main missing evidence |
+| Family | Public whole-study state | Main open gate |
 | --- | --- | --- |
-| Linear static structural | L2 | Broader analytic and patch-test families, mesh convergence, and independent references for L3-L5. |
-| Modal structural | L2 evidence in progress | Dedicated repeated/near-repeated mode fixtures, known eigenfrequency references, modal convergence studies, external solver comparisons. |
-| Thermal standalone | L2 | Broader sampled element-gradient fixtures, mesh convergence, and external thermal references for L3-L5. |
-| Structural transient | L2 evidence in progress | Physical Tet4 damped-step, finite-pulse, and acceleration-driven moving-support references verify second-order time convergence, exact sided discontinuity handling, dynamic reactions, separated applied/support work, field recovery, and energy closure. Fully prescribed motion retains the complete schedule. Broader element families, rotational motion, restart, distributed/accelerator execution, and independent external references remain. |
-| Nonlinear structural | L2 | True contact-surface maps when geometry carries them, broader nonlinear-law coverage, and independent nonlinear, plasticity, and contact references for L3-L5. |
-| Thermo-mechanical | L2 evidence in progress | Broader coupled known-answer cases and independent thermo-mechanical references. |
-| Electro-thermal | L2 | Broader coupled electrical/thermal references, conservation studies across more authored cases, mesh-convergence evidence, and larger workload studies for L3-L5. |
-| Electromagnetic | L2 | Broader Maxwell field validation, source/boundary realization references, convergence studies, independent references, and larger workload studies for L3-L5. |
-| Acoustic harmonic | L2 evidence in progress | Broader impedance/radiation validation, mesh convergence, and external acoustic references. |
-| CFD | L2 | Canonical CFD benchmarks, conservation checks, independent fluid references, and GPU parity beyond explicit fallback for L3-L5. |
-| CHT | L2 | Broader coupled fluid/thermal benchmarks, mesh-convergence evidence, and independent CHT references for L3-L5. |
-| FSI | L2 | Broader two-way FSI benchmarks, mesh-convergence evidence, and independent FSI references for L3-L5. |
+| Structural | Executable with formulation-specific experimental or production admission | Close the recorded result/recovery defects, then qualify each formulation and execution envelope independently. |
+| Thermal and thermo-mechanical | Checkable; native typed execution unavailable | Connect geometry, properties, procedures, recovery, publication, local/remote execution, and governed validation evidence end to end. |
+| Electro-thermal and electromagnetic | Checkable; native typed execution unavailable | Complete the same whole-study path plus conservation, source/boundary realization, convergence, and independent references. |
+| Acoustic | Checkable; native typed execution unavailable | Complete the whole-study path plus impedance/radiation, convergence, and independent acoustic references. |
+| Fluid, conjugate heat transfer, and fluid-structure interaction | Checkable; native typed execution unavailable | Complete the whole-study path plus conservation, coupling/interface, canonical benchmark, scale, and independent-reference evidence. |
+
+Within the structural family, static, modal, transient, harmonic, spectrum, random-response,
+prestress-dependent, nonlinear, and buckling paths do not share one maturity label. Consult the
+formulation requirement and emitted evidence for the exact run, and see [Current Status](./status)
+for the current execution boundary.
 
 ## Adding A V&V Case
 
@@ -101,7 +104,7 @@ Use these terms precisely:
 
 | Term | Use for |
 | --- | --- |
-| Input validation | Schema, units, missing materials, missing loads, incompatible options, invalid `.fea` documents. |
+| Input validation | Syntax, types, units, missing materials, missing loads, incompatible options, and invalid `.fea` sources. |
 | Evidence | Artifacts, diagnostics, quality reasons, provenance, benchmark reports, readiness records. |
 | Verification | Showing the implementation solves the intended discrete equations correctly. |
 | Validation | Showing the implemented model matches known physical or trusted external behavior for a defined use. |

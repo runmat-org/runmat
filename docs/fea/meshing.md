@@ -11,7 +11,7 @@ Meshing has four entry points:
 | --- | --- |
 | Generate, inspect, and display a mesh in RunMat code | `part = geometry.load(...); solverMesh = meshing.generate(part); mesh(solverMesh)` |
 | Generate canonical artifacts directly from a shell | `runmat mesh part.step` |
-| Mesh as part of an analysis | Add a `mesh:` block to a `.fea` study and run `runmat run study.fea` |
+| Mesh as part of an analysis | Declare `mesh <id> on geometry.<id>` in typed `.fea` source and run `runmat fea run study.fea` |
 | Integrate meshing into another host | Use the canonical meshing request, DAG, and execution-host APIs from Rust |
 
 The direct CLI and `.fea` paths import exact STEP, IGES, or Open CASCADE B-rep geometry. They
@@ -124,25 +124,33 @@ are staged before either destination is replaced, and a publication error rolls 
 Meshing owns geometry discretization and persistent regions. FEA owns materials, assignments,
 excitations, constraints, natural boundaries, solver configuration, fields, and result visualization:
 
-```matlab
-study = fea.study("bracket_static", part, ...
-    "Template", "linear_static_structural", ...
-    "Mesh", solverMesh, ...
-    "Materials", steel, ...
-    "MaterialAssignments", assignments, ...
-    "Constraints", supports, ...
-    "Signals", signals, ...
-    "Excitations", excitations, ...
-    "ExcitationCases", excitationCases);
+```fea
+mesh bracket on geometry.bracket {
+    tetrahedra {
+        order = quadratic
+        target_size = 5 mm
+        maximum_deviation = 0.05 mm
+        maximum_grading_ratio = 1.3
+        deterministic_seed = 42
+    }
+}
 
-run = fea.run(study);
-stress = fea.field(fea.results(run), fea.StructuralField.vonMises());
-plot(stress);
+model bracket_model {
+    assign material.steel to geometry.bracket.region.body
+}
+
+study bracket_static {
+    geometry = geometry.bracket
+    mesh = mesh.bracket
+    model = model.bracket_model
+    analysis static { structural static {} }
+    output stress = analysis.static.field.element.von_mises_stress
+}
 ```
 
-Passing `"Mesh", solverMesh` content-addresses the already validated canonical pair in the FEA
-artifact store and binds it to the study. It does not regenerate the mesh. Material assignment is
-therefore by persistent FEA region and never an option to `meshing.generate`.
+The study compiles model assignments only after exact meshing has projected persistent CAD regions
+onto canonical elements. Material assignment is therefore by typed geometry region and never an
+option to `meshing.generate` or the `mesh` declaration.
 
 RunMat code does not choose local versus remote placement in the meshing request. The installed
 native host supplies its existing execution provider, pool, queue, trust, retry, cancellation, and
@@ -217,20 +225,18 @@ binds:
 Display tessellation remains a revision-keyed cache for rendering and selection. Exact curve,
 surface, and volume meshing operate on the B-rep and its evaluators.
 
-The `runmat mesh` command interprets source coordinates as metres. A `.fea` study declares source
-units explicitly, and RunMat normalizes the imported geometry before deriving its revision:
+`runmat mesh` accepts `--source-units meter|millimeter|inch` when source geometry does not declare
+its units. A `.fea` geometry declaration always states imported coordinate units explicitly:
 
-Add a `mesh` block to a complete typed study. For example, this is the geometry, template, and
-meshing portion of the runnable structural fixture:
-
-```yaml
-geometry:
-  path: ../geometry/bracket.step
-  units: millimeter
+```fea
+geometry bracket {
+    file = "../geometry/bracket.step"
+    units = mm
+}
 ```
 
-Valid unit names include the values accepted by the geometry document schema, such as `meter` and
-`millimeter`. Paths in `.fea` files are resolved relative to the document. If the CAD file is
+Paths in `.fea` files are resolved relative to the importing module and confined to the frozen
+project. If the CAD file is
 changed, re-exported, imported with different units, or admitted under a different exact-kernel ABI,
 the geometry revision changes, preventing reuse of an incompatible mesh.
 
@@ -244,6 +250,7 @@ does not substitute a bounding box or display tessellation for the exact CAD mod
 
 | Option | Meaning | Default |
 | --- | --- | --- |
+| `--source-units meter\|millimeter\|inch` | Coordinate units for sources that do not declare them | `meter` |
 | `--target-size <metres>` | Global target edge length used to construct the metric field | `0.01` |
 | `--deviation <metres>` | Maximum curve and surface chordal deviation | `0.0001` |
 | `--element-order tet4\|tet10` | Linear or quadratic tetrahedra | `tet4` |
@@ -257,7 +264,7 @@ does not substitute a bounding box or display tessellation for the exact CAD mod
 | `--project <id>` | Remote project; otherwise use the active project | Active project |
 | `--queue <name>` | Remote scheduler queue | `default` |
 | `--workers <count>` | Remote worker capacity; zero selects the meshing minimum | `0` |
-| `--trust-identity <fingerprint>` | Pinned identity required for a remote endpoint | None |
+| `--trust-identity <fingerprint>` | Pinned remote endpoint identity; required with explicit `--cluster` | None for local execution |
 | `--idempotency-key <key>` | Stable identity for safe submission retries | Generated |
 | `--detach` | Return after remote submission; materialize verified outputs on `job attach` | Off |
 
@@ -276,30 +283,18 @@ solver-ready result.
 
 ### Meshing in a `.fea` study
 
-The `.fea` study schema exposes these meshing controls:
+The typed `.fea` mesh declaration exposes the controls that are part of a study definition:
 
-```yaml
-version: 1
-kind: study
-id: bracket_static
-
-geometry:
-  path: ../geometry/bracket.step
-  units: millimeter
-
-model:
-  source:
-    file:
-      path: models/bracket-structural.fea
-
-mesh:
-  element_order: tet10
-  maximum_elements: 2000000
-  target_edge_length_m: 0.005
-  maximum_chordal_deviation_m: 0.00005
-  maximum_grading_ratio: 1.3
-  deterministic_seed: 42
-
+```fea
+mesh bracket on geometry.bracket {
+    tetrahedra {
+        order = quadratic
+        target_size = 5 mm
+        maximum_deviation = 0.05 mm
+        maximum_grading_ratio = 1.3
+        deterministic_seed = 42
+    }
+}
 ```
 
 Check and run it with:
@@ -309,14 +304,15 @@ runmat check studies/bracket_static.fea
 runmat run studies/bracket_static.fea
 ```
 
-The complete sequence, constraints, excitation, and execution plan are in
-`docs/fea/examples/structural-static-experimental.fea`. The `mesh:` block is resolved into the same canonical request used by direct generation. Algorithm
+The complete procedure, constraints, loads, and outputs are in
+`docs/fea/examples/structural-static-experimental.fea`. The declaration is resolved into the same canonical request used by direct generation. Algorithm
 identities and implementation choices are recorded as evidence; they are not user-selectable
 backends. `maximum_grading_ratio` limits how quickly the requested size may change through adjacent
 regions. Lower values produce smoother transitions and can require more elements.
 
-For a linear-static structural template, omitting `mesh:` uses the defaults shown above. An explicit `mesh:`
-block pins those values in the study document and makes request changes visible in review and CI.
+`order`, `target_size`, and `maximum_deviation` are required. `maximum_grading_ratio` and
+`deterministic_seed` have canonical defaults. The language does not currently expose region-local
+refinement, boundary layers, hybrid element families, or user-selectable meshing algorithms.
 
 ## What the Mesher Does
 
@@ -526,20 +522,19 @@ The published `SolverMeshArtifact` provides solver-facing topology and metadata:
   canonical digest. Legal partition and chunk layouts can have different manifest references while
   retaining the same mesh digest.
 
-When a `.fea` study does not provide an existing internal mesh artifact, the runtime asks its
-installed meshing provider to generate one. It persists the mesh and evidence beneath the configured
+When a `.fea` study runs, the native executor asks its installed meshing provider to realize the
+declared mesh. It persists the mesh and evidence beneath the configured
 `[runtime.fea].artifact_root`, using content-derived names under the meshing store. Before solver
 use, the runtime decodes the canonical artifact, validates its complete topology and request, checks
 the evidence binding, verifies geometry compatibility, and then projects it into solver options.
 
 Meshing owns region identity, not material assignment. A canonical mesh can therefore be reused by
 multiple studies that assign different materials to the same regions without changing mesh
-identity. The analysis document resolves its `material_assignments` against each mesh region's
-persistent source identity when it constructs solver coefficients. Material declarations never
+identity. The compiled study resolves typed assignments against each mesh region's persistent
+source identity when it constructs solver coefficients. Material declarations never
 imply coverage: every active material-bearing element must be covered by exactly one compatible
-typed assignment, even when the study declares only one material. Use an explicit `all_solids`
-scope when one material intentionally covers every continuum solid, or selected `solid`, `shell`,
-`beam`, and `cell` scopes for heterogeneous and mixed-dimensional models. Gaps, overlaps, stale
+typed assignment, even when the source declares only one material. Use explicit solid, shell,
+beam, and cell region targets for heterogeneous and mixed-dimensional models. Gaps, overlaps, stale
 selectors, and formulation mismatches fail before operator assembly. The meshing result carries one
 typed topology-alias inventory: `edge_######`, `face_######`, and `solid_######` retain the
 importer's source order and persistent occurrence-qualified identity on local and remote paths.

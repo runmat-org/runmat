@@ -1,201 +1,105 @@
-# Solves, Studies, and Sweeps
+# Studies, Solves, and Sweeps
 
-RunMat has three execution levels:
+A study is the complete placement-neutral definition of one analysis graph. It selects exact geometry, its matching solver mesh, a bound physical model, formulation maturity, ordered procedures, and authored outputs. A sweep supplies typed input cases to one study. Execution policy is optional and does not change the physical definition.
 
-| Level | Use |
-| --- | --- |
-| Direct solve operation | A host already has an `AnalysisModel` and wants to call a specific run family. |
-| Study | A named create-model, validate, plan, and run workflow. |
-| Sweep | A deterministic sequence of studies. |
-
-Most users should start with studies. Direct solve operations are best for host integrations that already own model construction.
-
-## Study Flow
-
-```mermaid
-flowchart TD
-  File[".fea study"]
-  Resolve["Load geometry and resolve model data"]
-  Validate["Validate study"]
-  Plan["Plan operation sequence"]
-  Run["Run selected family"]
-  Result["Run result"]
-  Evidence["Study and run artifacts"]
-
-  File --> Resolve --> Validate --> Plan --> Run --> Result --> Evidence
-```
-
-From the CLI:
-
-```sh
-runmat check studies/bracket_static.fea
-runmat run studies/bracket_static.fea
-```
-
-From `.m` code:
-
-```matlab
-study = fea.load("studies/bracket_static.fea");
-validation = fea.validate(study);
-plan = fea.plan(study);
-result = fea.run(study);
-```
-
-## What Check Does
-
-`runmat check <file>` supports `.m` and `.fea`.
-
-For `.fea`, it:
-
-1. reads the YAML document,
-2. resolves geometry paths,
-3. builds or resolves the study model,
-4. validates the study or sweep,
-5. plans the operation sequence,
-6. prints a validation and plan summary.
-
-Use `runmat check --json <file>` for structured validation and plan data.
-
-It does not solve.
-
-## What Run Does
-
-`runmat run <file>` supports `.m` and `.fea`.
-
-For `.fea`, it executes either:
-
-- `fea.run_study/v1` for a single study, or
-- `fea.run_study_sweep/v1` for a sweep.
-
-The result includes run ids, selected operation identities, quality gates, quality reasons, provenance, and artifact paths.
-
-## Direct Solve Flow
-
-Host integrations can call lower-level operations:
-
-```mermaid
-flowchart TD
-  Geometry["geometry.load/v1"]
-  Model["fea.create_model/v1"]
-  Validate["fea.validate/v1"]
-  Solve{"fea.run_*/v1"}
-  Query["fea.results/v1"]
-  Compare["fea.results_compare/v1"]
-  Trends["fea.trends/v1"]
-
-  Geometry --> Model --> Validate --> Solve --> Query
-  Query --> Compare
-  Query --> Trends
-```
-
-Direct solve operations require an `AnalysisModel`. They are the right boundary for applications that construct models themselves, manage trace ids, or need direct result queries.
-
-## Study Operations
-
-| Operation | Purpose |
-| --- | --- |
-| `fea.validate_study/v1` | Validate one study and write a validation artifact. |
-| `fea.plan_study/v1` | Produce operation sequence, run operation/version, fingerprint, and plan artifact. |
-| `fea.run_study/v1` | Execute one study and write run evidence. |
-| `fea.validate_study_sweep/v1` | Validate a sweep with aggregate and per-study issues. |
-| `fea.plan_study_sweep/v1` | Plan a sweep with per-study plan entries and failure entries. |
-| `fea.run_study_sweep/v1` | Execute a sweep sequentially. |
-
-## Run Options
-
-Solver options are specified by an `execution` entry in `.fea`, or through typed runtime option
-objects in host code. Each entry names a sequence step, backend, formulation requirement, and—when
-needed—a matching `solver`/`options` pair. Validation checks the options against that step's typed
-family and procedure.
-
-Example:
-
-```yaml
-execution:
-  - step: harmonic
-    backend: cpu
-    requirement: experimental
-    solver: electromagnetic
-    options:
-      deterministic_mode: true
-      precision_mode: fp64
-      quality_policy: balanced
-      residual_target: 1.0e-6
-      harmonic_tolerance: 1.0e-7
-      harmonic_max_iterations: 96
-      sweep_enabled: true
-      sweep_frequency_hz: [40.0, 60.0, 120.0]
-```
-
-Supplying options for a solver that does not support the referenced step is a validation error.
-
-Structural transient solves use the average-acceleration Newmark method with a typed fixed-step
-policy. The procedure step owns the physical start and end times; `time_step_policy` selects the
-number of intervals over that authored domain. The structural transient kernel computes in `f64`,
-and run provenance reports `fp64`; structural transient options therefore do not expose a precision
-selector. Signal discontinuities and requested history samples become exact solve boundaries. A
-boundary that lies on the nominal time lattice is snapped within a bounded floating-point envelope,
-so it does not create a numerically meaningless extra increment.
-
-Every accepted structural state retains displacement, velocity, and acceleration together with the
-physical balance
+## The Execution Pipeline
 
 ```text
-M a + C v + K u - f = r
+typed source graph
+  -> exact geometry realization and region lineage
+  -> deterministic solver mesh and quality evidence
+  -> property/constraint/load projection
+  -> procedure workload graph
+  -> local or cluster scheduling
+  -> numerical results and receipts
+  -> evaluated outputs and content-addressed publication
 ```
 
-The projected free-coordinate norm of `r` is the convergence residual. Its constrained-coordinate
-components are the dynamic support reactions; translational and rotational reactions are published
-separately when the formulation owns rotational degrees of freedom. The transient payload also
-contains strain energy, kinetic energy, cumulative applied-load work, cumulative support work,
-cumulative damping dissipation, the signed energy-balance residual, and its normalized absolute
-error at every time point. For initial mechanical energy `E0`, the reported balance is
-`E - E0 - Wload - Wsupport + D`. Formulation-owned solid
-strain, stress, von Mises, and strain-energy-density histories are recovered from each accepted
-physical state. Those fields remain absent for operator-only or other formulations that do not own
-the corresponding continuum recovery.
+Every boundary has a canonical identity. Local and remote execution must return the same study definition, realized geometry, mesh, workloads, and numerical closure; placement, worker id, retry attempt, queue, and measured timing remain execution evidence rather than physical identity.
 
-The current direct-transient implementation requires invariant structural K, M, C, DOF layout, and
-constraint operators during one run. A reassembly that changes any of them fails before advancing
-the state. Time-varying loads and translational prescribed support motion are supported. Support
-motion is an essential constraint, not an excitation: one real64 vector acceleration history plus
-typed initial displacement and velocity determines displacement, velocity, and acceleration for a
-selected global translational DOF. The history must use linear interpolation, reject extrapolation,
-and cover the procedure interval exactly. RunMat integrates each acceleration segment exactly,
-solves in absolute coordinates with a fixed affine reduction, and publishes absolute state. At a
-jump, displacement and velocity remain continuous; the authored point-continuity rule selects the
-public acceleration and reaction, while the right limit starts the next positive-duration interval.
-Point refreshes add no work. Rotational support motion and displacement- or velocity-authored motion
-are outside the current admitted envelope and fail closed.
+## Check
 
-## Results After A Run
-
-Persisted run ids can be queried through:
-
-| Operation | Purpose |
-| --- | --- |
-| `fea.results/v1` | Query fields, diagnostics, domain payloads, quality reasons, summaries, and provenance. |
-| `fea.results_compare/v1` | Compare two persisted runs. |
-| `fea.trends/v1` | Summarize recent runs by family. |
-
-From RunMat code:
-
-```matlab
-run = fea.run(study);
-results = fea.results(run);
-stress = fea.field(results, fea.StructuralField.vonMises());
-stress = fea.field(fea.results(run), fea.StructuralField.vonMises());
-stressPage = stress.page(1, 1024);
-figureHandle = plot(stress);
-print(figureHandle, "von_mises.png", "-dpng");
-
-meshHandle = mesh(fea.results(run));
-print(meshHandle, "solver_mesh.png", "-dpng");
-
-stepRun = run.step("static");
-later = fea.results(stepRun.run_id);
-comparison = fea.compare("run_baseline", "run_candidate");
-trend = fea.trends("WindowSize", 16);
+```sh
+runmat fea check model.fea
+runmat fea check model.fea --study static --json
 ```
 
-For interpretation, see [Results & Trust](/docs/fea/trust). For saved records, see [Evidence & Artifacts](/docs/fea/evidence).
+Checking resolves the complete `.fea` module graph, exact `.m` imports, referenced geometry facts, and named execution-profile capabilities. It validates syntax, references, physical types/units, topology roles, model composition, procedure state flow, output expressions, sweep cases, and execution constraints. It neither meshes nor solves and does not write result evidence.
+
+The result is `valid`, `invalid`, or `incomplete`. Incomplete means required project facts were unavailable; it is never executable success.
+
+## Plan
+
+```sh
+runmat fea plan model.fea --study static
+```
+
+Planning reports the canonical logical phases and selected analysis definition. It is useful in code review and CI because it exposes what will be materialized and solved without performing the work.
+
+## Run Locally
+
+```sh
+runmat fea run model.fea --study static --json
+```
+
+The native runner executes portable geometry, meshing, generated-input, and analysis tasks through the shared process-isolated task substrate. Independent generated-input chunks, sweep cases, and frequency samples may run concurrently. Procedures with state dependencies preserve their declared order and recovery closure.
+
+## Run On A Cluster
+
+```sh
+runmat fea run model.fea \
+  --cluster engineering \
+  --project 7a7d4d37-f0ae-4a6b-a0f8-013a04e0a9d5 \
+  --queue batch \
+  --workers 16 \
+  --trust-identity sha256:<endpoint-fingerprint> \
+  --idempotency-key bracket-qualification-42
+```
+
+The client freezes one checked source/project revision, bundles content-addressed inputs once, binds authority once, and submits one study or sweep root. Workers receive exact program, object, resource, and capability contracts. Encrypted transport, retry, replacement, checkpoint/recovery, cancellation, and publication use the same infrastructure as other RunMat distributed work.
+
+`--detach` returns after submission. Every explicit `--cluster` run requires `--trust-identity`, and `--project` is a UUID. `--workers 0` retains automatic or driver-only allocation behavior.
+
+## Procedure State
+
+Dependencies are explicit:
+
+```fea
+analysis modes {
+    structural modal { modes = 30 }
+    retain basis
+}
+analysis spectrum after analysis.modes {
+    structural modal_response_spectrum {
+        basis = analysis.modes.state.basis
+        spectra = [model.response_spectrum.qualification_x]
+    }
+}
+```
+
+Prestress, modal bases, transient checkpoints, and other semantic states are named products. The compiler validates producer/consumer compatibility and rejects missing, stale, or ambiguous state. Restart and worker recovery restore the canonical numerical closure; an observation history is not treated as integrator state.
+
+## Sweeps
+
+A sweep is one atomic ordered root, not a client loop that submits unrelated jobs. Product, zipped, or explicit cases have stable identities. Independent cases may fan out across local workers or cluster allocations, while terminal results return in authored order with success, failure, cancelled, or indeterminate state retained per case.
+
+Sweep outputs can collect attributed scalar values, retain each case's field, or select a governing case through typed operations. Failed cases cannot silently disappear from an envelope.
+
+## GPU And Cooperative Distribution
+
+Backend admission is explicit. A required accelerator request must match an allocated class and memory envelope; it never silently falls back to a host solve. GPU execution is advertised only for qualified shapes and hardware evidence.
+
+Fan-out and cooperative distribution are different:
+
+- fan-out schedules independent cases, frequencies, or generated-input chunks;
+- cooperative execution partitions one operator/state across workers and requires exact ownership, communication, reduction, and restart contracts.
+
+The execution policy can express both. The current typed runner consumes worker bounds and sweep-case fan-out; authored frequency fan-out, cooperative partitioning, and resilience fields remain checked contracts until their scheduler wiring and evidence gates are complete. A run is described as distributed only when one numerical problem actually uses the cooperative contract.
+
+## Publication And Partial Access
+
+Successful execution publishes a typed result manifest containing the compiled study, mesh and meshing evidence, exact resolved workloads, numerical receipts, semantic state, authored output bindings, and public run links. Large field data is chunked in the ordinary artifact store and can be paged by exact step, field, and sample identity.
+
+Measured stage time, scheduler allocation, transfers, retries, and provider operations are factual run evidence. They do not alter the deterministic study-definition digest.
+
+See [Study contracts](./study-contracts), [Evidence](./evidence), and [Trust](./trust).
