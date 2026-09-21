@@ -54,13 +54,14 @@ impl FeaRootSelector {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FeaSourceCheckResult {
     pub status: FeaCheckStatus,
     pub root_module: LogicalSourcePath,
     pub roots: Vec<FeaRootSelector>,
     pub studies: Vec<FeaStudyCheckSummary>,
+    pub presentations: Vec<super::FeaStudyPresentation>,
     pub diagnostics: Vec<FeaDiagnostic>,
 }
 
@@ -117,6 +118,7 @@ impl CheckedFeaSource {
             root_module: self.root_module.clone(),
             roots: self.root_selectors(),
             studies: self.study_summaries(),
+            presentations: self.study_presentations(),
             diagnostics,
         }
     }

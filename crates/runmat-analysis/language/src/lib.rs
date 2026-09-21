@@ -17,5 +17,6 @@ pub use compiler::*;
 pub use diagnostic::*;
 pub use module_graph::*;
 pub use operations::*;
+pub use runmat_parser::fea::FeaModelDefinitionKind;
 pub use semantic::*;
 pub use source::*;

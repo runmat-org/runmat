@@ -20,6 +20,7 @@ geometry part {
         result = feature.body
     }
 }
+
 mesh volume on geometry.part {
     tetrahedra {
         order = linear
@@ -50,6 +51,100 @@ study static {
     assert_eq!(program.meshes.len(), 1);
     assert_eq!(program.models.len(), 1);
     assert_eq!(program.studies.len(), 1);
+}
+
+#[test]
+fn source_check_presents_typed_study_objects_without_losing_targets_or_case_membership() {
+    let temporary = tempdir().unwrap();
+    let source = r#"
+geometry bracket {
+    construct {
+        feature body = box(width = 1 m, depth = 1 m, height = 1 m)
+        result = feature.body
+    }
+    region pad : face {
+        select result
+        expect one_or_more
+    }
+}
+mesh volume on geometry.bracket {
+    tetrahedra {
+        order = linear
+        target_size = 0.1 m
+        maximum_deviation = 0.01 m
+    }
+}
+model loaded {
+    constraint support {
+        structural.fixed { target = geometry.bracket.region.pad }
+    }
+    load downward {
+        force on geometry.bracket.region.pad = [0, -1, 0] kN
+    }
+    load_case service {
+        include load.downward
+    }
+}
+study static {
+    geometry = geometry.bracket
+    mesh = mesh.volume
+    model = model.loaded
+    formulation = experimental
+    analysis solve { structural static {} }
+    output displacement = analysis.solve.field.node.displacement
+}
+"#;
+    let path = temporary.path().join("main.fea");
+    fs::write(&path, source).unwrap();
+
+    let checked = prepare_fea_path_in_root(temporary.path(), &path)
+        .unwrap()
+        .check(Vec::new(), Vec::new())
+        .unwrap();
+    assert!(
+        checked.program.is_valid(),
+        "{:#?}",
+        checked.program.diagnostics
+    );
+    let report = checked.check_result();
+    let presentation = report.presentations.first().unwrap();
+    assert_eq!(presentation.study_id, "static");
+    assert_eq!(presentation.procedures.len(), 1);
+    assert_eq!(presentation.outputs[0].output_id, "displacement");
+
+    let force = presentation
+        .objects
+        .iter()
+        .find(|object| object.object_id == "load.downward")
+        .unwrap();
+    assert!(matches!(
+        force.details,
+        super::FeaStudyObjectDetails::Excitation(ref excitation)
+            if excitation.kind == runmat_analysis_core::AuthoredExcitationKind::Force
+    ));
+    assert!(matches!(
+        force.targets.as_slice(),
+        [super::FeaPresentationTarget::GeometryRegion(region)] if region.region_id == "pad"
+    ));
+    assert_eq!(force.active_case_ids, ["load_case.service"]);
+    assert!(force.signal.is_some());
+    assert!(force.source.is_some());
+
+    let case = presentation
+        .objects
+        .iter()
+        .find(|object| object.object_id == "load_case.service")
+        .unwrap();
+    assert!(matches!(
+        case.details,
+        super::FeaStudyObjectDetails::ExcitationCase(ref definition)
+            if definition.excitation_ids == ["load.downward"]
+    ));
+    assert_eq!(case.active_step_ids, ["solve"]);
+
+    let encoded = serde_json::to_vec(&report).unwrap();
+    let decoded: super::FeaSourceCheckResult = serde_json::from_slice(&encoded).unwrap();
+    assert_eq!(decoded, report);
 }
 
 #[test]
