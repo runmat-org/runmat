@@ -15,6 +15,24 @@ solid used where a face is required, a stale persistent id, or an ambiguous sele
 | Contact and multiphysics transfer | [Interfaces](./interfaces) |
 | Displacement, velocity, temperature, pressure, and field state at the initial instant | [Initial conditions](./initial-conditions) |
 
+## Find a constraint by modeling task
+
+| I need to model… | Start here |
+| --- | --- |
+| Fixed, pinned, roller, sliding, simple, symmetry, or prescribed-motion support | [Structural constraints](./structural) |
+| Bolt/weld idealization, rigid/distributing coupling, nonmatching tie, or equation | [Structural couplings and ties](./structural#coupling-and-ties) |
+| Spring, dashpot, elastic support, or compliant mount | [Connectors](./connectors) |
+| Opening, sliding, friction, bonded contact, or finite interface stiffness | [Interfaces](./interfaces) |
+| Controlled temperature, adiabatic wall, thermal contact, or periodic temperature | [Thermal constraints](./thermal) |
+| Ground, floating/equipotential conductor, current terminal, magnetic gauge, or sector | [Electromagnetic constraints](./electromagnetic) |
+| Pressure-release surface, datum, acoustic periodic cell, or Bloch phase | [Acoustic constraints](./acoustic) |
+| Inlet velocity, stationary/moving/slip wall, pressure datum, or periodic passage | [Fluid constraints](./fluid) |
+| Initial displacement, velocity, temperature, pressure, or restart state | [Initial conditions](./initial-conditions) |
+
+These are physical modeling choices, not alternative solver stabilization knobs. Each linked guide
+states the equation being imposed, exact `.fea` form, target topology, common conflicts, and evidence
+to inspect.
+
 The guides distinguish essential constraints from natural boundaries. Pressure, heat flux,
 convection, impedance, radiation, magnetic insulation, and outlet pressure are documented with
 [loads and boundary conditions](../loads/), because they contribute flux or traction rather than
@@ -129,3 +147,31 @@ Check resolved target coverage, removed/free DOF counts, pair projection coverag
 status, reaction resultants, and any constraint residual. For contact, also inspect active/open/slip
 state and penetration. These facts belong in result evidence so a later run can show exactly which
 constraint realization was solved.
+
+## How do constraints interact with load cases and analysis steps?
+
+Constraints are stable named model objects. The study sequence determines when admitted constraints
+are active or continued; load cases determine external actions. A preload or retained-state procedure
+must state which constraints remain active downstream. Omission does not mean the solver may choose
+a convenient support.
+
+## How do I parameterize a prescribed value?
+
+Bind the value to a compatible typed input or signal where that constraint kind admits one. Keep
+length, angle, temperature, pressure, velocity, or electromagnetic quantity types intact. A sweep
+varies the typed input and produces distinct result cases; it does not perform textual replacement in
+the constraint block.
+
+## How do I choose primary and secondary sides?
+
+Choose the direction that matches the declared geometric transform, projection policy, and physical
+reporting convention. Primary/secondary is retained in evidence and can affect normal sign,
+projection, phase, and contact reporting. Reversing the pair is not merely cosmetic when the law is
+directional.
+
+## What happens to constraints when the mesh changes?
+
+Constraints resolve from persistent CAD regions on each admitted mesh. Ties, periodic pairs, and
+interfaces repeat their pairing/projection and report coverage/error. RunMat does not preserve stale
+node numbers from a prior mesh. Compare target measure, projected entity count, rank, and residual
+between mesh revisions.

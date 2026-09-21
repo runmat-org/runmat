@@ -51,6 +51,20 @@ constraint uniform_inlet {
 This is a uniform prescribed value. Use a signal-driven `inlet_velocity` excitation for time or
 frequency dependence. Use `mass_flow` when the total flow is known but its spatial profile is not.
 
+## How do I prescribe only the normal inlet speed?
+
+Use the signal-driven `inlet_velocity` form when the scalar speed and direction are the controlled
+inputs. `fluid.velocity` prescribes the complete vector and can unintentionally suppress tangential
+components. For a curved inlet, a single global vector is not the same as a uniform normal speed;
+use a normal/spatial field contract admitted by the formulation.
+
+## How do I apply a developed inlet profile?
+
+The constant vector form is uniform. A parabolic, turbulent, measured, or mapped profile must enter
+through a typed topology field or function that preserves coordinates, units, and interpolation.
+RunMat does not infer “fully developed” from a region name. See
+[fluid loads](../loads/fluid#how-do-i-apply-a-parabolic-or-fully-developed-inlet-profile).
+
 ## How do I model a moving wall in CFD?
 
 ```fea
@@ -66,6 +80,13 @@ This prescribes wall velocity and no-slip relative to that wall. For a time-vary
 `wall_motion` excitation. For motion supplied by a structural solution use an FSI interface instead
 of duplicating the displacement history manually.
 
+## How do I model a rotating no-slip wall?
+
+The wall field must satisfy $\mathbf u_w=\boldsymbol\omega\times(\mathbf x-\mathbf x_0)$. A constant
+`fluid.moving_wall` vector only represents translation. Use an admitted generated field or rotating
+domain contract with explicit axis, origin, angular velocity, and frame; do not assign one tangent
+vector across an entire cylindrical rotor.
+
 ## How do I apply a no-slip wall?
 
 ```fea
@@ -78,6 +99,12 @@ No-slip imposes zero wall-relative velocity and is appropriate for ordinary visc
 Check that inlet/outlet faces are excluded from a multi-face `walls` region; overlapping conditions
 can overconstrain boundary DOFs.
 
+## How do I model a stationary solid wall in a moving reference frame?
+
+State wall velocity in the formulation's declared frame. “Stationary” in the laboratory frame can
+be nonzero in a rotating frame. Do not mix global and rotating-frame values without the explicit
+frame transformation and angular velocity.
+
 ## How do I apply a slip wall?
 
 ```fea
@@ -88,6 +115,12 @@ constraint ideal_slip_wall {
 
 Slip blocks normal velocity while allowing tangential motion. Use it for a deliberate inviscid or
 symmetry-like wall approximation, not as a convergence workaround for a viscous boundary layer.
+
+## How do I model an inviscid wall or centerline?
+
+Use `fluid.slip_wall` for an impermeable inviscid wall where tangential traction is zero. Use
+`fluid.symmetry` for an actual symmetry plane. They can produce similar local velocity restrictions,
+but symmetry also asserts mirrored geometry, loading, and solution.
 
 ## How do I apply a fluid symmetry plane?
 
@@ -116,6 +149,19 @@ constraint pressure_reference {
 It is not automatically an outlet law. Use `fluid.outlet_pressure` for a natural outlet boundary.
 Do not add multiple incompatible references to suppress a singular matrix.
 
+## Where should I place the incompressible pressure reference?
+
+Place it on a physically meaningful reference region admitted by the formulation, usually associated
+with a pressure outlet or known datum. The value fixes only the additive gauge. Results in pressure
+difference and velocity should be invariant to a consistent datum shift; absolute thermodynamic
+pressure for density/material laws remains a separate convention.
+
+## Why is pressure still singular after adding a reference?
+
+Check disconnected fluid components, empty/unresolved targets, and periodic components not connected
+to the referenced region. Every independent pressure nullspace needs one admitted datum. Adding
+several overlapping references to one component can instead overconstrain it.
+
 ## How do I model periodic flow through a repeating passage?
 
 ```fea
@@ -131,6 +177,34 @@ constraint repeating_passage {
 
 Plain periodicity maps velocity/pressure fluctuations across the pair. A macroscopic pressure drop
 or mass-flow driving condition remains a separate physical input; periodicity does not invent it.
+
+## How do I model rotationally periodic turbomachinery passages?
+
+Use `fluid.periodic` with a complete rotational transform when the formulation admits sector
+periodicity. The primary-to-secondary mapping needs origin, axis, angle, and compatible face
+topology. Rotor/stator interfaces with different pitch or relative motion are not ordinary periodic
+pairs and require a dedicated interface.
+
+## How do I model a free surface, porous wall, or outlet backflow?
+
+These are not aliases for the essential constraints on this page. A free surface needs a
+multiphase/free-surface law, a porous wall needs normal resistance or mass transfer, and outlet
+backflow belongs to the outlet formulation with transported-state data. Use the corresponding typed
+physics contract when admitted rather than weakening a no-slip or velocity constraint.
+
+## Why is the velocity field overconstrained at an inlet edge?
+
+An inlet face and adjacent no-slip wall share edge nodes. The formulation must reconcile the inlet
+profile with zero wall-relative velocity; a uniform nonzero profile has a discontinuity at the
+corner. Use a compatible developed profile or documented weak enforcement and inspect localized
+residuals. Do not apply duplicate complete vectors to the same boundary entities.
+
+## What should I inspect after applying fluid constraints?
+
+Inspect exact target faces, wall/inlet overlap, prescribed velocity frame, normal flux, pressure
+datum ownership, periodic pair coverage, mass conservation, wall-relative velocity, and constraint
+residuals. In the Desktop preview, verify motion vectors and periodic pair annotations before the
+solve.
 
 An outlet-pressure natural boundary is documented under [fluid loads](../loads/fluid). Choose one
 pressure datum consistent with the formulation and avoid simultaneously prescribing incompatible

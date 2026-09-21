@@ -75,6 +75,45 @@ The target is normally a face for a solid model, an edge for a shell boundary, o
 endpoint region for a beam. A fixed face is much stiffer than a bolt, bearing, pin, or compliant
 fixture; use component-wise constraints, coupling, connectors, or contact when those motions matter.
 
+## How do I model a pinned support?
+
+A pin removes translation at its center while permitting the intended rotation. Do not use
+`structural.fixed` on the whole bore: that also suppresses rotation and distorts bearing stress. Use
+a reference-point/distributing coupling for the bore and prescribe only the supported translations,
+or model pin contact when clearance, separation, and load direction matter. The exact choice depends
+on whether pin deformation and contact pressure are part of the result.
+
+## How do I model a roller support?
+
+Use `structural.normal_displacement` with zero value on the support surface when it may slide
+tangentially but cannot penetrate normally:
+
+```fea
+constraint lower_roller {
+    structural.normal_displacement {
+        target = geometry.beam.region.roller_surface
+        value = 0 mm
+    }
+}
+```
+
+This is bilateral: it also prevents separation. Use frictionless contact when the roller can lose
+contact or when contact pressure is needed.
+
+## How do I model a simply supported beam or plate?
+
+Represent the actual pin/roller kinematics: one support removes the required translations and the
+other removes only the transverse/normal translation, leaving axial expansion free. For shells or
+beams, preserve the rotations that a simple support permits. Confirm the remaining rigid-body modes
+with the constraint/nullspace report rather than fixing extra DOFs until the matrix solves.
+
+## How do I constrain rigid-body motion without overconstraining strain?
+
+Use a minimal physical 3-2-1-style component constraint set, a reference-point coupling, or the
+actual supports. For a 3D free solid, six independent rigid modes must be removed, but six scalar
+rows are sufficient only when they are independent. RunMat reports the remaining nullspace; it does
+not add weak springs or silently pin arbitrary nodes.
+
 ## How do I use symmetry in a structural FEA model?
 
 Use `structural.symmetry` only on a geometric and loading symmetry plane. It removes displacement
@@ -122,6 +161,38 @@ constraint sliding_guide {
 
 At least one component is required. `ux`, `uy`, and `uz` carry length; `rx`, `ry`, and `rz` carry
 dimensionless angle. The frame is part of the constraint identity—changing it changes the problem.
+
+## How do I constrain motion in a local coordinate system?
+
+Declare the supported local frame and use it in `structural.prescribed`. A cylindrical radial guide,
+for example, is not correctly represented by setting one global Cartesian component to zero over a
+curved surface. Use `structural.normal_displacement` when the desired direction is the local surface
+normal; use a true local coordinate frame when one fixed oriented basis applies.
+
+## How do I prescribe a nonzero displacement?
+
+Set the selected component to a typed length value:
+
+```fea
+constraint imposed_extension {
+    structural.prescribed {
+        target = geometry.coupon.region.pulled_end
+        frame = global
+        ux = 0.5 mm
+    }
+}
+```
+
+Keep the other components omitted if they remain free. A nonzero prescribed displacement produces
+reaction work; it is not a force load and should not also be paired with an incompatible force on
+the same constrained DOF.
+
+## How do I apply a time-varying prescribed displacement?
+
+Use a compatible typed prescribed-value signal where the chosen procedure admits it. If the source
+data are acceleration, use `structural.prescribed_motion` so RunMat owns deterministic integration
+and initial conditions. Do not numerically integrate acceleration in an undocumented preprocessing
+step and then lose its reconstruction evidence.
 
 ## How do I prescribe base acceleration or support motion?
 
@@ -176,6 +247,19 @@ This is suitable for an ideal frictionless roller/contact surrogate when separat
 status do not need to be solved. The region must provide a well-defined surface normal; use contact
 when unilateral opening/closing matters.
 
+## How do I model frictionless contact without bonding two faces?
+
+Use a `contact.frictionless` interface, not `structural.tie` or a zero normal-displacement constraint.
+Contact enforces nonpenetration only while active and permits opening/sliding. See
+[interfaces](./interfaces#how-do-i-model-frictionless-structural-contact) for the paired-region
+declaration and contact evidence to inspect.
+
+## How do I model bonded contact?
+
+Use `structural.tie` for perfect displacement continuity when opening and slip are impossible. Use a
+finite-stiffness interface or cohesive law when adhesive compliance, damage, or separation matters.
+A tie is an exact kinematic relation, not a very stiff adhesive.
+
 ## Coupling and ties
 
 ```fea
@@ -217,6 +301,14 @@ constraint distributed_bolt_load {
 
 Both require a stable reference-point id and position. A rigid coupling can artificially stiffen a
 large face; prefer distributing coupling when the connected surface should still deform.
+
+## How do I model a bolt, weld, or rigid attachment without detailed geometry?
+
+Choose the abstraction by the result you need. A distributing coupling plus connector can transfer
+bolt resultants without rigidizing the entire flange. A tie represents a perfectly bonded weld only
+when local weld stress is outside scope. Springs/dashpots represent known compliance. Detailed
+contact/preload is required for separation, slip, bearing, or bolt-load distribution. Do not call a
+fixed face a bolt model.
 
 ## How do I tie two nonmatching structural surfaces?
 
@@ -272,6 +364,20 @@ constraint cyclic_sector {
 The transform maps primary to secondary. A mismatched direction or angle produces wrong pairing even
 when faces look coincident in a viewer; inspect the resolved pair and coverage evidence.
 
+## How do I model translational periodicity in a unit cell?
+
+Use `structural.periodic` with the primary-to-secondary translation. Ordinary periodicity enforces
+the admitted equal mapped displacement relation. A homogenization problem with macroscopic strain
+needs an affine displacement relation or constraint equations in addition to periodic fluctuations;
+plain equality alone does not impose that strain state.
+
+## How do I model sector harmonics or phase-shifted cyclic symmetry?
+
+The structural periodic kind shown here owns geometric periodicity but does not claim a complex
+phase-shifted structural sector contract. Do not insert phase into `rotation_angle`: that field is
+the geometric sector transform. A harmonic-index formulation needs a distinct typed phase relation
+and complex structural space.
+
 ## How do I write a multi-point structural constraint equation?
 
 Use `structural.equation` for a linear relation between translation DOFs:
@@ -292,6 +398,34 @@ The relation is $\sum_i a_i u_i=b$. Each term has exactly `target`, `dof`, and d
 `coefficient`; the right-hand side has length. Equations can create redundant or contradictory rows,
 so review rank/nullspace diagnostics and avoid duplicating relations already imposed by ties or
 fixed supports.
+
+## Why is my structural model singular?
+
+Inspect the reported nullspace by connected component. Typical causes are a free body, a connector
+that restrains only one direction, an open contact pair, a disconnected part, or a coupling whose
+target resolved to no entities. Add only physically present restraints. A singular model is not
+repaired by hiding weak springs in solver options.
+
+## Why are support stresses mesh dependent?
+
+An abrupt fixed boundary can create a local stress singularity or an unrealistically stiff load
+path. Model fixture compliance/contact when it matters, compare reaction resultants, and evaluate
+stress away from the idealized edge. Convergence of displacement or total reaction does not imply
+convergence of peak stress at a singular support.
+
+## How do I verify support reactions and constraint equations?
+
+Check resultant force and moment about a stated origin, reactions by support and component,
+constraint residuals, equation rank, and energy/work balance. For symmetry or fractional models,
+apply the correct geometric scaling to reported totals. For coupled reference points, include both
+force and moment transfer.
+
+## What should I inspect in the Desktop study preview?
+
+Confirm each annotation is anchored to the intended CAD region, arrows/components use the expected
+frame, paired constraints show both sides, reference points are in the right position, and no hidden
+face was captured by a broad selector. Zoom-dependent annotation simplification changes only the
+display; the study graph and checked presentation retain the full typed constraint.
 
 ## How do I avoid over-constraint and conflicting supports?
 

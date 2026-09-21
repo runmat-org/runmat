@@ -48,6 +48,52 @@ The value may be a compatible prescribed signal where the procedure admits one. 
 temperature to approximate finite convection unless the wall temperature is genuinely controlled;
 it removes thermal resistance and can underpredict component temperature.
 
+## How do I prescribe a time-varying boundary temperature?
+
+Define a temperature signal and reference it from the prescribed constraint when the selected
+transient procedure admits signal-backed prescribed values. The signal owns time sampling and
+interpolation; the constraint owns the geometric target:
+
+```fea
+signal oven_cycle : temperature over time {
+    samples = [
+        { at = 0 s, value = 293.15 K },
+        { at = 10 min, value = 423.15 K },
+        { at = 40 min, value = 423.15 K },
+        { at = 55 min, value = 293.15 K },
+    ]
+    interpolation = linear
+    extrapolation = hold_endpoint
+}
+
+constraint programmed_wall {
+    thermal.temperature {
+        target = geometry.oven.region.controlled_wall
+        value = signal.oven_cycle
+    }
+}
+```
+
+Use a constant value for steady analysis. Use a signal only when the procedure has an independent
+time or frequency domain against which it can be sampled.
+
+## How do I set an initial temperature without holding it for the whole solve?
+
+Use a thermal initial condition, not `thermal.temperature`. An initial condition sets $T(\mathbf
+x,t_0)$; a constraint enforces $T=\bar T$ for as long as it is active. The distinction matters for
+cool-down, warm-up, quenching, and thermal-shock studies. See
+[initial conditions](./initial-conditions#how-do-i-set-the-initial-temperature-for-transient-heat-transfer)
+for the exact declaration.
+
+## How do I model an isothermal component or surface?
+
+If the actual temperature is known, apply `thermal.temperature` to the whole controlled region. If
+only the fact that the region is spatially isothermal is known while its temperature must be solved,
+a fixed temperature is wrong: it supplies an artificial heat reservoir. Use an admitted
+equipotential/lumped thermal relation when available, or model the high-conductivity body explicitly.
+The current closed thermal constraint set does not disguise an unknown isothermal temperature as a
+Dirichlet value.
+
 ## How do I tie temperatures across two nonmatching meshes?
 
 Use `thermal.tie` when the interface has no temperature jump:
@@ -65,6 +111,36 @@ constraint perfect_bond {
 The pairing projection must cover the intended interface. The tolerance controls geometric pairing,
 not contact conductance. For finite contact resistance, use a conjugate-heat-transfer interface with
 conductance/resistance rather than weakening the tie numerically.
+
+## How do I model perfect thermal contact between two solids?
+
+Use `thermal.tie` for two independently meshed solid faces when temperature is continuous and no
+interface resistance is intended. If both materials already share conforming nodes, no duplicate
+tie should be necessary: the shared degrees of freedom already impose continuity. Use
+[thermal contact conductance](./interfaces#how-do-i-specify-thermal-interface-conductance) when a
+finite temperature jump is physical.
+
+## How do I model thermal contact resistance?
+
+Do not use `thermal.affine_jump`: it prescribes a known jump and does not make the jump proportional
+to heat flux. Declare a thermal interface with conductance $h_c$ or resistance $R_c=1/h_c$. The
+interface law is $q_n=h_c(T_p-T_s)$, while a tie is the limiting perfect-contact relation
+$T_p=T_s$.
+
+## How do I model an insulated or adiabatic boundary?
+
+For the standard heat equation, a boundary with no declared thermal flux naturally has
+$-\mathbf n\cdot k\nabla T=0$. Leave that face out of heat-flux, convection, radiation, and
+temperature declarations. Do not add a `0 K` temperature constraint: that is a cold isothermal
+boundary, not insulation.
+
+## How do I model convection instead of a fixed wall temperature?
+
+Convection is a natural boundary condition,
+$-\mathbf n\cdot k\nabla T=h(T-T_\infty)$, and belongs in a `thermal.convection` load. It keeps the
+wall temperature as an unknown. See
+[thermal loads](../loads/thermal#how-do-i-model-convection-to-air-or-coolant) for exact `.fea`
+syntax.
 
 ## How do I model periodic temperature in a repeating cell?
 
@@ -107,6 +183,58 @@ $$T(\mathbf x+\mathbf L)-T(\mathbf x)=\Delta T.$$
 The `jump` has temperature-difference units. Its sign follows primary-to-secondary mapping, so verify
 the transform and expected heat-flow direction. A jump without a compatible periodic pair is
 rejected.
+
+## How do I model a repeating thermal sector around an axis?
+
+Use `thermal.periodic` with a rotational transform when the solved temperatures repeat exactly from
+one sector face to the next. Use `thermal.affine_jump` only when the repeated cell carries a known
+macroscopic temperature difference. A rotation describes geometry correspondence; the `jump`
+describes thermodynamic difference. They are independent fields and should not be inferred from one
+another.
+
+## How do I impose a heat-flow rate through a periodic cell?
+
+The affine constraint controls temperature difference, not total heat rate. To prescribe heat rate,
+apply a compatible heat-flux/resultant boundary load and use ordinary periodicity on the fluctuation
+field when the formulation supports that homogenization setup. Do not tune `jump` until the desired
+power appears unless the study is explicitly solving an inverse problem.
+
+## Can I prescribe temperature on a point, edge, face, or volume?
+
+The target must satisfy the topology admitted by the formulation and resolve before meshing. A face
+is the normal boundary target. A solid-region temperature constraint fixes every projected thermal
+degree of freedom and is usually equivalent to an ideal thermostatted body; use it deliberately.
+Point or edge constraints are valid only if the chosen formulation admits those boundary roles.
+RunMat rejects an incompatible solid/cell or unsupported target rather than silently expanding it.
+
+## Why is my steady thermal solve singular?
+
+A connected conduction component with only zero-flux boundaries has an arbitrary additive constant.
+Give it one physical temperature reference, positive convection/radiation to a known environment, or
+another admitted condition that establishes absolute temperature. Each disconnected thermal
+component needs its own path to a reference. A tie only joins components if its region pairing
+actually resolves.
+
+## Why is the predicted temperature too low near a support or coolant wall?
+
+A prescribed temperature supplies unlimited heat transfer needed to hold that value. If the real
+support has finite contact resistance or the coolant has finite film conductance, use an interface or
+convection load instead. Also check that a broad region selector did not fix hidden faces or the
+entire solid.
+
+## Why does a thermal tie or periodic pair fail validation?
+
+Verify exact region identity, primary-to-secondary transform, target topology, pairing coverage,
+maximum projection distance, and duplicate ownership. Do not use a large tolerance to compensate for
+different interface shapes. A failed pair is a geometry/modeling issue until the evidence shows
+otherwise.
+
+## What should I inspect after applying thermal constraints?
+
+Inspect resolved target measure, projected node count, imposed-temperature extrema, tie/periodic
+pair coverage, maximum pairing distance, constraint residual, total boundary heat flow, and steady
+energy balance. For affine jumps, verify sign by comparing mean temperature on the primary and
+secondary faces.
 
 Prescribed temperature is an essential condition. Convection and heat flux are natural boundaries
 and belong in [thermal loads](../loads/thermal). Check that the chosen combination admits heat flow

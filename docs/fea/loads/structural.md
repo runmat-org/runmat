@@ -71,6 +71,40 @@ excitation actuator {
 }
 ```
 
+## How do I distribute a known force over a face?
+
+Apply `force` to the face when the total resultant is known and RunMat should distribute it through
+the admitted projection. Apply `traction` when force per area is known. These are not interchangeable:
+doubling target area leaves a resultant force unchanged but doubles the integrated force from an
+unchanged traction.
+
+## How do I apply a force at a remote point?
+
+Create a reference-point coupling from the attachment region to the physical load application point,
+then apply the resultant through that admitted reference-point target. Choose rigid coupling only if
+the attachment truly moves rigidly; use distributing coupling when the face may deform. Applying the
+same force directly to the face omits the moment $\mathbf r\times\mathbf F$ created by the offset.
+
+## How do I ramp, pulse, or cycle a force?
+
+Use a `signal` over time and an explicit force excitation, as in `actuator_history` above. For a
+repeating waveform, state the full time interval and extrapolation behavior; do not assume the
+signal repeats after its last sample. A fatigue cycle count is an analysis/procedure input, not a
+force unit.
+
+## How do I apply a sinusoidal harmonic force?
+
+Use a force signal over frequency with the amplitude and phase convention admitted by the harmonic
+procedure. Keep direction in the excitation and amplitude in the signal. A frequency sweep describes
+many harmonic solves; it is not a time-history sine wave sampled at the sweep frequencies.
+
+## How do I apply an impact load?
+
+Use a time-domain force or pressure signal with the measured pulse shape. Preserve impulse
+$\int F(t)\,dt$, peak convention, rise time, and application region. A single static peak force does
+not reproduce dynamic amplification, while an unrealistically sharp sample transition introduces
+high-frequency content that must be resolved by the mesh and time integrator.
+
 ## How do I apply a torque or moment?
 
 ```fea
@@ -82,6 +116,26 @@ load shaft_torque {
 `moment` preserves the resultant moment during projection. Confirm the frame, sign convention, and
 whether a pure moment is physically transferred by the selected fixture. A force offset from an axis
 and a pure applied moment are different load models.
+
+## How do I apply combined force and torque?
+
+Declare a force and a moment as separate named loads on the compatible attachment target and include
+both in one load case. This preserves each resultant and makes their origins reviewable:
+
+```fea
+load shaft_thrust {
+    force on geometry.shaft.region.end_face = [0, 0, 8] kN
+}
+
+load shaft_drive_torque {
+    moment on geometry.shaft.region.end_face = [0, 0, 250] N*m
+}
+
+load_case drive {
+    include load.shaft_thrust
+    include load.shaft_drive_torque
+}
+```
 
 ## How do I apply traction to a surface?
 
@@ -112,6 +166,20 @@ For a signal-driven pressure use `pressure on ...` or an explicit `pressure` exc
 acts along the resolved surface normal. Verify normal orientation and whether `fixed_frame` or
 `follower` kinematics matches the intended nonlinear formulation.
 
+## How do I apply wind or aerodynamic pressure without running CFD?
+
+Apply measured or code-derived pressure/traction to named exterior regions and document the source,
+sign, spatial distribution, and load combination. Uniform `structural.pressure` is suitable only
+when the engineering approximation is uniform. If pressure varies spatially, use an admitted field
+mapping; do not replace it with one unexplained average. This is a structural load model, not a CFD
+solution.
+
+## How do I map pressure from a fluid result onto a structure?
+
+Use a typed fluid-structure interface so topology mapping, traction conservation, time/frequency
+sampling, and provenance are retained. Copying nodal values between unrelated meshes outside the
+interface loses the conservation evidence needed to trust the load transfer.
+
 ## How do I apply gravity or another body force?
 
 ```fea
@@ -123,6 +191,20 @@ load vertical_body_force {
 `body_force` carries force per volume and targets solid/cell regions. For gravity, the density-
 dependent value is $\mathbf b=\rho\mathbf g$; if density varies by material region, author the
 appropriate typed gravity/body-force model rather than using one averaged density.
+
+## How do I apply self-weight to a multi-material assembly?
+
+Self-weight is $\rho_r\mathbf g$ in each material region $r$. Use a gravity/body-force realization
+that reads the assigned material density, or declare region-specific body-force densities. A single
+average value preserves neither local stress nor total weight when densities differ. Verify
+$\int_\Omega \rho\mathbf g\,d\Omega$ against the expected assembly weight.
+
+## How do I apply inertial acceleration to the whole model?
+
+For a known nonrotating frame acceleration $\mathbf a$, the equivalent body force is
+$\mathbf b=-\rho\mathbf a$. Prefer a typed inertial/base-motion contract when dynamic relative
+motion matters. A body-force approximation is appropriate only when its frame, density source, and
+quasi-static assumption are explicit.
 
 ## When should I use `pressure` versus `structural.pressure`?
 
@@ -172,6 +254,13 @@ frame, density source, and angular speed. A uniform `body_force` vector is not c
 For prestressed modal or harmonic response, solve the rotational preload first and consume its
 retained structural state in the downstream procedure.
 
+## How do I model an unbalanced rotating mass?
+
+An imbalance $m_e e$ rotating at angular speed $\omega$ produces force amplitude
+$F=m_e e\omega^2$ with two quadrature components. Use a harmonic force excitation with the correct
+phase relationship and attachment point, or a rotor-dynamics formulation that owns the rotating
+frame. A static centrifugal body force represents mean rotational stress, not synchronous imbalance.
+
 ## How do I apply base acceleration or earthquake motion?
 
 Use `structural.prescribed_motion` on the support region with a typed acceleration signal. This is a
@@ -188,6 +277,42 @@ replace it with an unexplained nodal force or thermal trick. Model a physically 
 interference, pressure, or applied-force setup only when it represents the assembly process, and
 retain the resulting preload state. A dedicated bolt pretension contract should be added before
 claiming section-cut preload semantics.
+
+## How do I apply thermal expansion as a structural load?
+
+Thermal strain is a constitutive input,
+$\boldsymbol\varepsilon_{th}=\boldsymbol\alpha(T-T_{ref})$, not a surface force. Assign thermal
+expansion properties by material region and transfer a temperature field through a thermomechanical
+procedure. Converting temperature change into an arbitrary nodal force is valid only for a separately
+derived reduced model and should not be presented as continuum thermal expansion.
+
+## How do I combine dead, live, pressure, and accidental load cases?
+
+Name each physical load once, build explicit `load_case` declarations, and use study inputs/sweeps
+for factors or alternatives. Keep design-code combination factors separate from raw physical loads
+so evidence can report both. Do not duplicate a pressure or force under several names merely to
+change its factor.
+
+## Why do reactions not balance the applied force?
+
+Check dynamic inertia, contact/interface forces, body-load volume, omitted model fractions,
+reference-point moments, and projection evidence before treating it as solver error. In static
+equilibrium, resolved external resultants and reactions should balance within tolerance. In a
+transient solve, the balance also contains mass times acceleration and damping forces.
+
+## Why is a concentrated load causing a stress singularity?
+
+A point force, sharp re-entrant corner, or abrupt constraint can produce a nonconvergent local
+stress. Model the real contact/loaded area or coupling when it is known, and assess converged
+resultants or stresses away from the singularity. Mesh refinement alone cannot make an ideal
+continuum singularity finite.
+
+## What should I inspect after applying structural loads?
+
+Inspect resolved target topology and measure, projected force and moment error, pressure/traction
+normal, active load case and step, material-weight total for body loads, and global reaction balance.
+For signal-driven loads, verify domain coverage, interpolation, extrapolation, amplitude convention,
+and frame/follower kinematics.
 
 A vector-valued direct load carries its magnitude and direction in one typed value. An explicit
 excitation may instead name a scalar signal and a normalized `global([x,y,z])` direction. Force and

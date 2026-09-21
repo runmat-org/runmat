@@ -36,6 +36,73 @@ constraint driven_pressure {
 For frequency-dependent drive, prefer an `acoustic_pressure` signal/excitation so domain and complex
 amplitude are explicit. Prescribed pressure is not the same as a radiation or impedance boundary.
 
+## How do I set the acoustic pressure datum without driving the model?
+
+Use a zero `acoustic.pressure` constraint only on a region that is physically held at the reference
+pressure. The constraint removes the pressure degree of freedom on every node projected from that
+region:
+
+```fea
+constraint vent_pressure_reference {
+    acoustic.pressure {
+        target = geometry.enclosure.region.vent
+        value = 0 Pa
+    }
+}
+```
+
+Do not add an arbitrary zero-pressure face to a sealed cavity merely to make its matrix nonsingular.
+That turns the selected face into a pressure-release boundary and changes the modes. A formulation
+that needs a scalar datum for an otherwise valid sealed problem must provide that gauge explicitly;
+it is not represented by hiding a physical boundary condition in solver settings.
+
+## How do I model a pressure-release or soft acoustic boundary?
+
+A pressure-release boundary has $p=0$, so it is exactly a zero `acoustic.pressure` constraint:
+
+```fea
+constraint free_surface {
+    acoustic.pressure {
+        target = geometry.tank.region.liquid_surface
+        value = 0 Pa
+    }
+}
+```
+
+This is appropriate for an ideal pressure-release surface, not for a generic opening. A duct opening
+that radiates into an exterior domain needs `acoustic.radiation`; a lined wall needs
+`acoustic.impedance`. Those natural conditions are documented under
+[acoustic loads and boundaries](../loads/acoustic).
+
+## How do I prescribe a complex harmonic pressure?
+
+The constraint value is a typed pressure value. Use it for a real constant datum or a known real
+boundary value. A harmonic pressure with frequency-dependent magnitude or phase belongs in a
+pressure signal and `acoustic_pressure` excitation so the frequency domain and complex convention
+remain explicit:
+
+```fea
+signal inlet_pressure : pressure over frequency {
+    samples = [
+        { at = 100 Hz, value = 1.0 Pa },
+        { at = 500 Hz, value = 2.5 Pa },
+        { at = 1 kHz, value = 1.2 Pa },
+    ]
+    interpolation = linear
+    extrapolation = reject
+}
+
+excitation driven_inlet {
+    acoustic_pressure {
+        target = geometry.duct.region.inlet
+        signal = signal.inlet_pressure
+    }
+}
+```
+
+Use the excitation in the analysis load case. Do not encode phase by placing degrees in a pressure
+field; pressure and phase are different quantities.
+
 ## How do I model a periodic acoustic unit cell?
 
 ```fea
@@ -68,6 +135,71 @@ constraint bloch_pair {
 The relation is $p_s=e^{i\phi}p_p$. It requires a complex harmonic solution space and is used for
 wave propagation/band-structure cells. Phase direction follows the primary-to-secondary map; reverse
 the pair only if the sign convention changes with it.
+
+## How do I model a straight periodic duct with no phase shift?
+
+Use `acoustic.periodic`, not a zero-degree phase-shifted declaration. The ordinary periodic kind
+states the intended real equality directly and works for steady or transient formulations that
+admit periodic acoustic pressure:
+
+```fea
+constraint repeating_segment {
+    acoustic.periodic {
+        primary = geometry.duct_cell.region.inlet_cut
+        secondary = geometry.duct_cell.region.outlet_cut
+        translation = [100 mm, 0 mm, 0 mm]
+        tolerance = 2 um
+    }
+}
+```
+
+The translation maps primary coordinates to secondary coordinates. It is not a flow direction or a
+propagation vector.
+
+## How do I model acoustic cyclic symmetry around an axis?
+
+Use a rotational transform on the periodic pair. The axis, angle, and paired sector faces must
+describe one complete primary-to-secondary map. For a traveling circumferential wave, use
+`acoustic.phase_shifted_periodic` and supply the sector phase as well. Do not constrain both faces
+independently after pairing them: that over-specifies the same pressure degrees of freedom.
+
+## How do I choose the Bloch phase for a wave vector?
+
+For translation $\mathbf L$ and wave vector $\mathbf k$, the phase is
+$\phi=\mathbf k\cdot\mathbf L$. Supply that phase to the phase-shifted periodic constraint using the
+same primary-to-secondary direction as the geometric transform. A band-structure sweep should sweep
+the typed phase input and retain the wave-vector/sector convention in study evidence; it should not
+rewrite region pairing for each case.
+
+## Why does an acoustic periodic constraint fail to pair its faces?
+
+Check the failure in this order:
+
+1. Both regions must resolve to boundary faces, not solids or derived mesh-only groups.
+2. The transform must map the complete primary face to the secondary face.
+3. The faces must have compatible topology and discretization for the admitted pairing policy.
+4. `tolerance` must describe CAD/mesh correspondence error, not bridge a genuinely different shape.
+5. Primary and secondary must not overlap after mapping unless the periodic formulation explicitly
+   admits that topology.
+
+Increasing tolerance is not a general repair. A large tolerance can pair the wrong nodes and give a
+smooth but physically incorrect pressure field.
+
+## Why is my acoustic model overconstrained?
+
+The usual causes are a prescribed pressure on a face that is also in a periodic pair, independent
+pressure constraints on both members of a periodic pair, or a pressure constraint combined with an
+incompatible pressure excitation on the same degrees of freedom. Keep one owner for each essential
+pressure condition. Radiation, impedance, normal velocity, and rigid-wall declarations are natural
+boundary operators and must be checked for compatibility separately.
+
+## What should I inspect after applying acoustic constraints?
+
+Inspect the resolved CAD regions, projected node counts, unpaired periodic entities, maximum pairing
+distance, constraint residual, and reaction/acoustic-flux balance exposed by the procedure. For
+phase-shifted periodicity, also verify the complex phase sign with a known propagation direction.
+Successful parsing proves the declaration is typed; it does not prove the selected faces represent
+the intended physical boundary.
 
 Rigid walls, radiation boundaries, and impedance are natural boundaries rather than essential
 constraints; see [acoustic loads and boundaries](../loads/acoustic). A periodic pair may specify a

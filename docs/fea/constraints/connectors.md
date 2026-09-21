@@ -66,6 +66,27 @@ The current typed contract uses force-per-length stiffness. Confirm how the admi
 distributes that scalar over the selected region and inspect the resolved contribution evidence;
 do not assume an unimplemented Winkler modulus per area.
 
+## How do I model a compliant mount or isolator?
+
+Use a translational spring for static/dynamic compliance and a dashpot for viscous damping, with the
+same physical attachment regions. If both are present, declare both connectors so stiffness and
+damping remain separately inspectable. A real elastomer may be nonlinear, frequency dependent, and
+multiaxial; the scalar linear contracts are appropriate only when that reduction is justified.
+
+## How do I attach a lumped component to a structure?
+
+Couple the attachment face to a reference point with the appropriate structural coupling, place the
+lumped inertia at that reference point through the admitted mass model, and connect it with spring/
+dashpot relations as required. Do not spread a point mass across arbitrary face nodes without
+preserving its center of mass and rotational inertia.
+
+## How do I model a foundation under a plate or machine base?
+
+Use `elastic_foundation` only when its admitted stiffness measure matches the engineering foundation
+law. A scalar `N/m` connector and a Winkler modulus in `N/m^3` have different dimensions. If the
+support pressure is $p=k_w u_n$, use a formulation that explicitly accepts $k_w$ per area/volume;
+do not enter the same number into a scalar spring field.
+
 ## How do I model a spring or damper to ground?
 
 Omit `secondary` only when the admitted connector explicitly interprets omission as the fixed
@@ -80,6 +101,33 @@ matrix. Those need a first-class typed connector with an explicit frame and posi
 stability validation; a scalar spring should not be duplicated in coincident regions to imply
 unimplemented coupling.
 
+## How do I model a rotational spring or torsional damper?
+
+The current closed connector set is translational. A rotational connector needs moment-per-angle
+stiffness, moment-per-angular-velocity damping, an axis/frame, and rotational DOF support. Do not
+enter `N*m/rad` into `translational_spring`, whose quantity is force per translation.
+
+## How do I model a nonlinear spring, gap, stop, or one-way support?
+
+A linear translational spring acts in tension and compression with constant tangent. Gaps, stops,
+piecewise curves, preload, hysteresis, and unilateral response require a typed nonlinear connector or
+contact law with state and convergence behavior. Do not approximate a gap by an enormous linear
+stiffness that is active everywhere.
+
+## How do I model frequency-dependent mount stiffness or damping?
+
+The scalar connector values are constant. Viscoelastic or measured dynamic properties need a typed
+frequency/temperature-dependent constitutive model with interpolation and causality/passivity checks.
+Running a sweep while manually changing constants creates separate models and should retain the
+parameter tuple explicitly if used as an approximation.
+
+## How do springs combine in series or parallel?
+
+For one-dimensional ideal springs, $k_{parallel}=\sum_i k_i$ and
+$1/k_{series}=\sum_i1/k_i$. In a finite-element assembly, geometry, direction, reference points, and
+couplings decide whether connectors are actually in series or parallel. Prefer declaring the physical
+connectors and verifying modal/static response over collapsing a multiaxial assembly by arithmetic.
+
 ## How do I choose spring and dashpot coefficients for a target natural frequency?
 
 For a one-DOF estimate, $\omega_n=\sqrt{k/m}$ and damping ratio
@@ -92,6 +140,26 @@ attachment excites several structural modes.
 A translational connector only restrains the relative motion represented by its admitted basis. It
 may leave rigid rotation or orthogonal translations free. Inspect connector target coverage and the
 remaining rigid-body modes; add only the physical constraints the assembly really has.
+
+## Why did a connector make the model too stiff?
+
+Check for duplicate connectors, an unintended spring to ground, a rigid coupling that suppresses
+face deformation, incorrect units, and several connectors acting in parallel on the same DOF. Inspect
+strain energy by connector and run a limiting check with the coefficient reduced/increased by a known
+factor.
+
+## How do I verify connector forces and energy?
+
+For a linear spring, verify $F=k\Delta u$ and stored energy
+$U=\tfrac12k(\Delta u)^2$. For a dashpot, verify $F=c\Delta\dot u$ and nonnegative dissipated energy
+under the stated sign convention. Check equal-and-opposite endpoint resultants and the actual relative
+motion in the connector frame.
+
+## What should I inspect in the study preview?
+
+The preview should show both endpoint regions, connector kind, coefficient with units, ground status
+when secondary is absent, and direction/frame when supported. A label anchored to only one face is
+insufficient for a two-ended connector; use the study graph to inspect the complete relation.
 
 Use springs for elastic compliance, dashpots for rate-dependent force, and a foundation for a
 distributed support law. Use [structural constraints](./structural) for kinematic restrictions and

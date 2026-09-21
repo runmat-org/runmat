@@ -13,6 +13,25 @@ prescribing the primary unknown.
 | Pressure, normal velocity, rigid/radiating/impedance boundaries | [Acoustic loads](./acoustic) |
 | Inlet velocity, mass flow, wall motion, and outlet pressure | [Fluid loads](./fluid) |
 
+## Find a load by modeling task
+
+| I need to model… | Start here |
+| --- | --- |
+| A force distributed over a bracket, bolt hole, face, edge, or point | [Total force and distribution](./structural#how-do-i-apply-a-total-force-to-a-face-edge-or-point) |
+| Torque, thrust, or a combined shaft wrench | [Moment and combined force/torque](./structural#how-do-i-apply-a-torque-or-moment) |
+| Pressure vessel, wind, bearing, hydrostatic, or follower pressure | [Structural pressure](./structural#how-do-i-apply-pressure-to-a-structural-surface) |
+| Gravity, self-weight, frame acceleration, centrifugal load, or imbalance | [Structural body and inertial loads](./structural#how-do-i-apply-gravity-or-another-body-force) |
+| Impact, pulse, cyclic, harmonic, random, or base excitation | [Varying loads](#how-do-i-make-a-load-vary-with-time-or-frequency) |
+| Electronics loss, battery heat, heater power, laser flux, or convection | [Thermal loads](./thermal) |
+| Voltage source, terminal current, charge, coil drive, or current density | [Electromagnetic loads](./electromagnetic) |
+| Loudspeaker, piston, pressure pulse, liner, open end, or rigid acoustic wall | [Acoustic loads](./acoustic) |
+| Inlet velocity, mass flow, moving/rotating wall, suction, or outlet pressure | [Fluid loads](./fluid) |
+| Loads transferred between thermal, fluid, structural, or electromagnetic solves | [Interfaces](../constraints/interfaces) |
+
+The guides use searchable questions as headings and distinguish a directly supported declaration
+from a required coupled procedure or a capability that is not yet first class. An unsupported model
+is never represented by silently reusing a quantity with different dimensions.
+
 ## Constant and varying forms
 
 ```fea
@@ -166,3 +185,37 @@ A natural load normally contributes to the right-hand side or boundary operator 
 primary unknown. Some pairs still conflict physically—for example, prescribing complete inlet
 velocity and an incompatible mass flow, or prescribing terminal voltage and total current at the
 same terminal. Treat the checker diagnostic as a modeling conflict, not a solver-tolerance problem.
+
+## How do I apply the same load in several analyses?
+
+Declare it once under the model, include it in named load cases, and activate the applicable case in
+each analysis step. This keeps one stable source identity and lets results state exactly which case
+ran. Use typed inputs or sweeps for amplitudes that change between cases; avoid copied declarations
+whose values can drift.
+
+## How do I parameterize a load for a sweep?
+
+Bind its supported numeric field to a typed study input, then sweep that input. Units and admissible
+ranges belong to the input declaration. The compiler expands cases without turning the physical
+quantity into a string substitution, and the result key retains the input tuple.
+
+## How do I apply loads to an assembly with several materials?
+
+Loads target geometry regions; materials are assigned to solid/cell regions separately. A force on a
+face does not select a material, and a material assignment does not create a load. Body forces and
+coupled source laws that depend on density, conductivity, or another property must resolve the
+property from each assigned material region.
+
+## How do I tell whether a quantity is a resultant or an intensity?
+
+Check its dimension and projection invariant. Newtons, amperes, coulombs, kilograms per second, and
+newton-metres are resultants. Pascals, watts per square metre, watts per cubic metre, amperes per
+square metre, and force per volume are intensities. Evidence should report both authored value and
+integrated realized resultant where an integral is meaningful.
+
+## What happens when CAD or mesh resolution changes?
+
+Resultant-preserving loads keep their total while their nodal distribution changes. Intensity loads
+keep their local magnitude, so their integrated total changes if selected area or volume changes.
+Persistent region identity and projection evidence make that behavior reviewable; ordinal face or
+element indices are not accepted as a durable substitute.

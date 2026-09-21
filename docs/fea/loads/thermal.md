@@ -49,6 +49,25 @@ $P=\int_\Omega Q\,d\Omega$; compare it with the expected electrical, chemical, o
 For temperature-dependent or spatially nonuniform loss, use a compatible signal/function or coupled
 physics state rather than one averaged constant.
 
+## How do I apply electronic, battery, or chemical heat generation?
+
+Convert the governing loss model to a volumetric source only when its spatial support is known. For
+uniform loss in a cell or die, use `heat_generation` on that exact solid region. For state-dependent
+loss, generate the source from a typed RunMat function or transfer it from the electrical/chemical
+procedure so units, parameter values, and integrated power remain in evidence.
+
+## How do I apply heat to a thin layer or surface heater?
+
+Use surface `heat_flux` when thickness is intentionally collapsed. Use `heat_generation` in the
+actual solid when through-thickness gradients or layer heat capacity matter. Converting a layer
+source $Q$ to surface flux requires $q''=Qt$ with modeled thickness $t$; record that reduction.
+
+## How do I split total power among several components?
+
+Create one region-specific generation load per component. If fractions $f_i$ are known, use
+$Q_i=f_iP/V_i$ and verify $\sum_i\int_{V_i}Q_i\,dV=P$. Do not apply the full assembly power to each
+solid or divide by the total bounding-box volume.
+
 ## How do I apply a heat flux to a surface?
 
 The direct form creates a constant excitation:
@@ -73,6 +92,25 @@ load imposed_flux {
 Both carry power per area. Check the outward-normal sign convention and integrated power over the
 resolved area. A total wattage must be converted through known area or represented by a resultant-
 preserving contract; it is not numerically equal to heat flux.
+
+## How do I apply a known total heater power to a face?
+
+For uniform distribution over resolved area $A$, set $q''=P/A$ and verify the integrated boundary
+power in evidence. If the heater footprint or spatial distribution matters, define that exact CAD
+region and use its field. A constant flux on a changing/deformed area needs an explicit reference-
+versus-current configuration convention.
+
+## How do I model a laser or moving heat source?
+
+A constant `heat_flux` models a stationary uniform spot only. A moving Gaussian source needs beam
+power, absorptivity, radius, path, coordinate frame, and time dependence in a typed spatial function.
+Do not approximate it by turning an entire face on and off unless that is the intended reduced model.
+
+## Why is my heat-flux sign reversed?
+
+Flux sign follows the resolved outward normal and formulation convention. Preview the CAD face,
+check its normal, and compare integrated boundary power with the expected input. Reversing a face
+selector or negating a value are not interchangeable if several bodies share an interface.
 
 ## How do I prescribe a temperature field as a load?
 
@@ -126,6 +164,26 @@ This applies $q=h(T-T_\infty)$ with constant $h$ and $T_\infty$. Split regions w
 zones need different coefficients. Do not use convection as an undocumented surrogate for radiation
 or contact resistance.
 
+## How do I choose a convection coefficient?
+
+Use a correlation, test result, or coupled flow solution valid for the geometry, fluid, regime, and
+temperature range. Record whether $h$ is local or area-averaged. A single coefficient on all faces
+can hide stagnant zones and fins with very different flow. Run a sensitivity range when $h$ is an
+uncertain engineering input.
+
+## How do I model natural versus forced convection?
+
+The `thermal.convection` syntax is the same once $h$ and $T_\infty$ are known; their derivation is
+different. For natural convection, $h$ depends on orientation, gravity, geometry, and temperature
+difference. For forced convection, it depends on flow speed and regime. Solve conjugate heat
+transfer when the fluid field and local coefficient must be predicted rather than prescribed.
+
+## How do I apply different ambient temperatures to different faces?
+
+Split the CAD into governed regions and declare one convection load per environment. Do not select a
+parent region and then try to override a subset with a second load: overlapping Robin operators can
+double-count heat transfer unless the formulation explicitly defines precedence.
+
 ## How do I create a time-varying power or heat-flux cycle?
 
 Use a typed `heat_generation` or `heat_flux` signal over time, then apply it with a matching
@@ -174,11 +232,52 @@ coefficient unless that linearization and its operating temperature are part of 
 An admitted radiation boundary needs emissivity, surrounding/radiation temperature, view-factor or
 enclosure semantics, nonlinear tangent behavior, and energy-balance evidence.
 
+## How do I linearize radiation near an operating temperature?
+
+If a documented reduced model is acceptable, derive
+$h_r\approx4\epsilon\sigma T_m^3$ about stated mean absolute temperature $T_m$ and use convection
+with $h_r$ and the radiation-environment temperature. Record the linearization temperature and run
+a sensitivity check. This approximation is not a first-class radiation solve and becomes inaccurate
+over wide temperature ranges.
+
 ## How do I model heat transfer across a contact interface?
 
 Use `conjugate_heat_transfer.perfect`, `.conductance`, or `.resistance` between the two named
 surfaces. A heat flux applies a known boundary source; it does not conserve equal-and-opposite energy
 between independently solved bodies. See [contact and multiphysics interfaces](../constraints/interfaces).
+
+## How do I model heat-sink contact or thermal interface material?
+
+Use a conductance/resistance interface when the layer is reduced to a boundary law. Model the layer
+as a solid with conductivity, density, and heat capacity when its thickness gradients or transient
+storage matter. Do not represent contact resistance by lowering bulk conductivity in unrelated
+parts.
+
+## How do I model Joule heating from an electrical solve?
+
+Transfer the retained electromagnetic loss field through an electrothermal procedure. The transfer
+must conserve integrated electrical loss and record topology mapping. Use manually authored
+`heat_generation` only for a deliberate one-way reduced model with the source calculation retained
+as evidence.
+
+## How do I model plastic-work, friction, or damping heat?
+
+These are coupled dissipation sources. Use a procedure/interface that transfers the correct fraction
+of mechanical work into thermal power. A constant guessed heat flux is acceptable only as an
+explicit engineering approximation. State partition factors, contact side, and time dependence.
+
+## Why does the thermal energy balance not close?
+
+Check volume and surface units, source-region volume, convection area, boundary normal signs,
+interface double counting, transient stored energy, and whether imported coupled losses preserve
+their resultant. In steady state, total source power should equal total outward boundary/interface
+power within tolerance. In transient analysis, include the rate of stored thermal energy.
+
+## What should I inspect after applying thermal loads?
+
+Inspect resolved volumes/areas, integrated power by source, convection/radiation sink power, contact
+transfer on both sides, peak and mean temperatures, and global energy residual. For signal-driven
+loads, verify time-domain coverage and interpolation at every solver step.
 
 For varying heat input, declare a `heat_generation` or `heat_flux` signal over time and apply it
 with an excitation of the same kind. Surface flux and volume generation are deliberately different
