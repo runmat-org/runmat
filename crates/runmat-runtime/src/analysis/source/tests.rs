@@ -124,10 +124,18 @@ study static {
     ));
     assert!(matches!(
         force.targets.as_slice(),
-        [super::FeaPresentationTarget::GeometryRegion(region)] if region.region_id == "pad"
+        [super::FeaPresentationTarget::GeometryRegion(target)]
+            if target.region.region_id == "pad"
+                && target.selector
+                    == runmat_geometry_core::GeometryRegionSelector::Result
     ));
     assert_eq!(force.active_case_ids, ["load_case.service"]);
-    assert!(force.signal.is_some());
+    let signal = force.signal.as_ref().unwrap();
+    assert_eq!(
+        signal.constant.as_ref().unwrap().values,
+        [0.0, -1000.0, 0.0]
+    );
+    assert_eq!(signal.constant.as_ref().unwrap().canonical_unit, "N");
     assert!(force.source.is_some());
 
     let case = presentation

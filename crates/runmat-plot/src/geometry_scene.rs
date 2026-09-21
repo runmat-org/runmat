@@ -144,6 +144,14 @@ impl GeometryScene {
         stable_node_id(&self.scene_id, self.revision, index, chunk_id)
     }
 
+    #[cfg(feature = "egui-overlay")]
+    pub(crate) fn region_anchor(&self, region_id: &str) -> Option<Vec3> {
+        self.chunks
+            .iter()
+            .filter(|chunk| chunk.visible)
+            .find_map(|chunk| chunk.region_anchor(region_id))
+    }
+
     fn annotation_nodes(&self, presentation: &GeometryScenePresentation) -> Vec<SceneNode> {
         if presentation.region_annotations.is_empty() {
             return Vec::new();

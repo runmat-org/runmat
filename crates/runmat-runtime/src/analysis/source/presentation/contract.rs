@@ -7,7 +7,9 @@ use runmat_analysis_core::{
     SignalDomainKind, SignalShape,
 };
 use runmat_analysis_language::FeaDiagnosticLocation;
-use runmat_geometry_core::{GeometryRegionRef, GeometryRegionRole, UnitSystem};
+use runmat_geometry_core::{
+    GeometryRegionRef, GeometryRegionRole, GeometryRegionSelector, UnitSystem,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -189,12 +191,20 @@ pub enum FeaInitialConditionPresentationKind {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "target")]
 pub enum FeaPresentationTarget {
-    GeometryRegion(GeometryRegionRef),
+    GeometryRegion(FeaGeometryRegionPresentation),
     ModelInput {
         input_id: String,
         role: GeometryRegionRole,
     },
     WholeModel,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FeaGeometryRegionPresentation {
+    #[serde(flatten)]
+    pub region: GeometryRegionRef,
+    pub selector: GeometryRegionSelector,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -205,6 +215,15 @@ pub struct FeaSignalPresentation {
     pub domain: SignalDomainKind,
     pub shape: SignalShape,
     pub representation: FeaSignalRepresentation,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub constant: Option<FeaSignalConstantPresentation>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FeaSignalConstantPresentation {
+    pub values: Vec<f64>,
+    pub canonical_unit: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

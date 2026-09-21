@@ -1,3 +1,4 @@
+use crate::core::plot_renderer::GeometryScreenAnnotation;
 use crate::core::CameraViewPreset;
 use crate::geometry_scene::{
     GeometrySceneAssemblyNode, GeometrySceneCompleteness, GeometrySceneOverlay,
@@ -60,6 +61,7 @@ pub(crate) struct CadOverlayRenderInput<'a> {
     pub xray_enabled: bool,
     pub owner_visible: &'a dyn Fn(&str) -> bool,
     pub font_scale: f32,
+    pub annotations: &'a [GeometryScreenAnnotation],
 }
 
 impl CadOverlayState {
@@ -80,6 +82,7 @@ impl CadOverlayState {
             xray_enabled,
             owner_visible,
             font_scale,
+            annotations,
         } = input;
         let scale = font_scale.clamp(0.9, 1.0);
         let theme = CadOverlayTheme::from_context(ctx);
@@ -98,6 +101,7 @@ impl CadOverlayState {
             &mut actions,
         );
         self.render_view_menu(ctx, plot_rect, scale, &theme, &mut actions);
+        self.render_annotations(ctx, plot_rect, annotations, scale, &theme);
 
         let panel_top = plot_rect.min.y + strip_height(scale) + 12.0 * scale;
         if self.show_details {
@@ -117,6 +121,53 @@ impl CadOverlayState {
         }
 
         actions
+    }
+
+    fn render_annotations(
+        &self,
+        ctx: &egui::Context,
+        plot_rect: egui::Rect,
+        annotations: &[GeometryScreenAnnotation],
+        scale: f32,
+        theme: &CadOverlayTheme,
+    ) {
+        if annotations.is_empty() {
+            return;
+        }
+        let painter = ctx.layer_painter(egui::LayerId::new(
+            egui::Order::Foreground,
+            egui::Id::new("runmat_fea_geometry_annotations"),
+        ));
+        let mut occupied = Vec::<egui::Rect>::new();
+        for annotation in annotations {
+            let anchor = plot_rect.min + egui::vec2(annotation.position[0], annotation.position[1]);
+            if !plot_rect.contains(anchor) {
+                continue;
+            }
+            let nearest = nearest_annotation_distance(annotation, annotations);
+            let detail = annotation_detail(nearest, annotations.len());
+            let label = annotation_label(annotation, detail);
+            let font = egui::FontId::proportional(match detail {
+                AnnotationDetail::Full => 11.0 * scale,
+                AnnotationDetail::Compact => 10.0 * scale,
+                AnnotationDetail::Symbol => 12.0 * scale,
+            });
+            let galley = painter.layout_no_wrap(label, font.clone(), theme.primary_text);
+            let padding = egui::vec2(6.0 * scale, 3.0 * scale);
+            let rect = egui::Rect::from_min_size(
+                anchor + egui::vec2(7.0 * scale, -galley.size().y * 0.5 - padding.y),
+                galley.size() + 2.0 * padding,
+            );
+            if occupied.iter().any(|used| used.intersects(rect)) {
+                continue;
+            }
+            occupied.push(rect);
+            let color = annotation_color(annotation.color);
+            painter.rect_filled(rect, 3.0 * scale, theme.strip_bg.gamma_multiply(0.94));
+            painter.rect_stroke(rect, 3.0 * scale, egui::Stroke::new(1.0, color));
+            painter.circle_filled(anchor, 3.0 * scale, color);
+            painter.galley(rect.min + padding, galley, theme.primary_text);
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -758,7 +809,68 @@ fn region_icon(ui: &mut egui::Ui, scale: f32, theme: &CadOverlayTheme) {
         .circle_filled(center, 2.0 * scale, theme.region_dot);
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AnnotationDetail {
+    Full,
+    Compact,
+    Symbol,
+}
+
+fn nearest_annotation_distance(
+    annotation: &GeometryScreenAnnotation,
+    annotations: &[GeometryScreenAnnotation],
+) -> f32 {
+    annotations
+        .iter()
+        .filter(|candidate| !std::ptr::eq(*candidate, annotation))
+        .map(|candidate| {
+            let dx = candidate.position[0] - annotation.position[0];
+            let dy = candidate.position[1] - annotation.position[1];
+            (dx * dx + dy * dy).sqrt()
+        })
+        .fold(f32::INFINITY, f32::min)
+}
+
+fn annotation_detail(nearest_distance: f32, count: usize) -> AnnotationDetail {
+    if count <= 8 && nearest_distance >= 105.0 {
+        AnnotationDetail::Full
+    } else if count <= 24 && nearest_distance >= 48.0 {
+        AnnotationDetail::Compact
+    } else {
+        AnnotationDetail::Symbol
+    }
+}
+
+fn annotation_label(annotation: &GeometryScreenAnnotation, detail: AnnotationDetail) -> String {
+    match detail {
+        AnnotationDetail::Full => annotation.label.clone(),
+        AnnotationDetail::Compact => annotation
+            .label
+            .split_once(" · ")
+            .map(|(_, detail)| detail.to_string())
+            .unwrap_or_else(|| annotation.label.clone()),
+        AnnotationDetail::Symbol => match annotation.role.as_deref() {
+            Some("excitation") if annotation.label.contains("</>") => "</>".to_string(),
+            Some("excitation") => "→".to_string(),
+            Some("constraint") => "⌁".to_string(),
+            Some("boundary") => "▱".to_string(),
+            Some("connector") => "⟷".to_string(),
+            Some("interface") => "⇄".to_string(),
+            Some("initial_condition") => "◌".to_string(),
+            _ => "•".to_string(),
+        },
+    }
+}
+
+fn annotation_color(color: [f32; 4]) -> egui::Color32 {
+    egui::Color32::from_rgba_unmultiplied(
+        (color[0].clamp(0.0, 1.0) * 255.0).round() as u8,
+        (color[1].clamp(0.0, 1.0) * 255.0).round() as u8,
+        (color[2].clamp(0.0, 1.0) * 255.0).round() as u8,
+        (color[3].clamp(0.0, 1.0) * 255.0).round() as u8,
+    )
+}
+
 struct CadOverlayTheme {
     strip_bg: egui::Color32,
     strip_border: egui::Color32,
@@ -1139,5 +1251,33 @@ fn format_bytes(bytes: u64) -> String {
         format!("{:.1} KB", value / KIB)
     } else {
         format!("{bytes} B")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn annotation_labels_reduce_detail_as_projected_spacing_tightens() {
+        assert_eq!(annotation_detail(160.0, 4), AnnotationDetail::Full);
+        assert_eq!(annotation_detail(70.0, 12), AnnotationDetail::Compact);
+        assert_eq!(annotation_detail(30.0, 12), AnnotationDetail::Symbol);
+
+        let function = GeometryScreenAnnotation {
+            position: [10.0, 20.0],
+            color: [1.0, 0.0, 0.0, 1.0],
+            role: Some("excitation".to_string()),
+            label: "Force · </> impactPulse".to_string(),
+        };
+        assert_eq!(
+            annotation_label(&function, AnnotationDetail::Full),
+            "Force · </> impactPulse"
+        );
+        assert_eq!(
+            annotation_label(&function, AnnotationDetail::Compact),
+            "</> impactPulse"
+        );
+        assert_eq!(annotation_label(&function, AnnotationDetail::Symbol), "</>");
     }
 }

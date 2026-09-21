@@ -34,6 +34,15 @@ struct CachedSceneBuffers {
     index_buffer: Option<Arc<wgpu::Buffer>>,
 }
 
+#[cfg(feature = "egui-overlay")]
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct GeometryScreenAnnotation {
+    pub position: [f32; 2],
+    pub color: [f32; 4],
+    pub role: Option<String>,
+    pub label: String,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 struct AxesViewContract {
     rows: usize,
@@ -3536,6 +3545,52 @@ impl PlotRenderer {
     }
     pub fn geometry_scene_presentation(&self) -> &GeometryScenePresentation {
         &self.geometry_presentation
+    }
+    #[cfg(feature = "egui-overlay")]
+    pub(crate) fn geometry_screen_annotations(
+        &self,
+        viewport_size: [f32; 2],
+    ) -> Vec<GeometryScreenAnnotation> {
+        let Some(scene) = self.last_geometry_scene.as_ref() else {
+            return Vec::new();
+        };
+        if viewport_size[0] <= 0.0 || viewport_size[1] <= 0.0 {
+            return Vec::new();
+        }
+        let mut camera = self.camera().clone();
+        let view_projection = camera.view_proj_matrix();
+        self.geometry_presentation
+            .region_annotations
+            .iter()
+            .filter_map(|annotation| {
+                let label = annotation.label.as_deref()?.trim();
+                if label.is_empty() {
+                    return None;
+                }
+                let anchor = scene.region_anchor(&annotation.region_id)?;
+                let clip = view_projection * anchor.extend(1.0);
+                if !clip.w.is_finite() || clip.w <= 0.0 {
+                    return None;
+                }
+                let ndc = clip.truncate() / clip.w;
+                if !ndc.is_finite()
+                    || !(-1.05..=1.05).contains(&ndc.x)
+                    || !(-1.05..=1.05).contains(&ndc.y)
+                    || !(-0.05..=1.05).contains(&ndc.z)
+                {
+                    return None;
+                }
+                Some(GeometryScreenAnnotation {
+                    position: [
+                        (ndc.x + 1.0) * 0.5 * viewport_size[0],
+                        (1.0 - ndc.y) * 0.5 * viewport_size[1],
+                    ],
+                    color: annotation.color.unwrap_or([0.9, 0.9, 0.9, 1.0]),
+                    role: annotation.role.clone(),
+                    label: label.to_string(),
+                })
+            })
+            .collect()
     }
     pub fn set_geometry_scene_presentation(&mut self, mut presentation: GeometryScenePresentation) {
         let requested_view_preset = presentation.view_preset.take();

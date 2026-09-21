@@ -4,7 +4,7 @@ use runmat_analysis_core::{
     AuthoredInputValue, AuthoredModel, AuthoredModelArgumentValue, AuthoredStudy, StepObjectRef,
 };
 use runmat_analysis_language::{FeaSymbolKind, LogicalSourcePath};
-use runmat_geometry_core::{GeometryDefinitionSource, GeometryRegionRef};
+use runmat_geometry_core::{GeometryDefinitionSource, GeometryRegionRef, GeometryRegionSelector};
 
 use super::{
     model::present_models, FeaOutputPresentation, FeaProcedurePresentation,
@@ -30,6 +30,7 @@ impl CheckedFeaSource {
     ) -> FeaStudyPresentation {
         let models = study_models(study, self.program.models.values());
         let region_bindings = model_region_bindings(study);
+        let region_selectors = geometry_region_selectors(self.program.geometries.values());
         let active_steps = active_object_steps(study);
         let all_step_ids = study
             .sequence
@@ -75,6 +76,7 @@ impl CheckedFeaSource {
             objects: present_models(
                 &models,
                 &region_bindings,
+                &region_selectors,
                 &active_steps,
                 &all_step_ids,
                 sources,
@@ -113,6 +115,26 @@ impl CheckedFeaSource {
                 .collect(),
         }
     }
+}
+
+fn geometry_region_selectors<'a>(
+    geometries: impl Iterator<Item = &'a runmat_geometry_core::GeometryDefinition>,
+) -> BTreeMap<GeometryRegionRef, GeometryRegionSelector> {
+    geometries
+        .flat_map(|geometry| {
+            geometry.regions.iter().map(move |region| {
+                (
+                    GeometryRegionRef {
+                        module_path: geometry.module_path.clone(),
+                        geometry_id: geometry.geometry_id.clone(),
+                        region_id: region.region_id.clone(),
+                        role: region.role,
+                    },
+                    region.selector.clone(),
+                )
+            })
+        })
+        .collect()
 }
 
 fn model_region_bindings(study: &AuthoredStudy) -> BTreeMap<String, GeometryRegionRef> {

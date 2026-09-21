@@ -2,11 +2,11 @@ use std::collections::BTreeSet;
 
 use runmat_analysis_core::{
     AuthoredNumericExpression, AuthoredNumericExpressionKind, AuthoredParameterizedSignal,
-    AuthoredSignalExpression, GeneratorCallable, PhysicalSignal, SignalDomainKind,
-    SignalRepresentation,
+    AuthoredSignalExpression, CanonicalQuantity, GeneratorCallable, PhysicalQuantityKind,
+    PhysicalSignal, Signal, SignalDomainKind, SignalRepresentation, SignalValue,
 };
 
-use super::{FeaSignalPresentation, FeaSignalRepresentation};
+use super::{FeaSignalConstantPresentation, FeaSignalPresentation, FeaSignalRepresentation};
 
 pub(super) fn present_signal(signal: &PhysicalSignal) -> FeaSignalPresentation {
     FeaSignalPresentation {
@@ -15,6 +15,7 @@ pub(super) fn present_signal(signal: &PhysicalSignal) -> FeaSignalPresentation {
         domain: signal.domain(),
         shape: signal.shape().clone(),
         representation: representation(signal),
+        constant: constant(signal),
     }
 }
 
@@ -38,6 +39,86 @@ pub(super) fn present_parameterized_signal(
         representation: FeaSignalRepresentation::Parameterized {
             input_ids: input_ids.into_iter().collect(),
         },
+        constant: None,
+    }
+}
+
+fn constant(signal: &PhysicalSignal) -> Option<FeaSignalConstantPresentation> {
+    macro_rules! values {
+        ($signal:expr) => {
+            constant_values($signal, canonical_unit(signal.quantity()))
+        };
+    }
+    match signal {
+        PhysicalSignal::Displacement(value) => values!(value),
+        PhysicalSignal::Rotation(value) => values!(value),
+        PhysicalSignal::Velocity(value) => values!(value),
+        PhysicalSignal::Acceleration(value) => values!(value),
+        PhysicalSignal::AngularVelocity(value) => values!(value),
+        PhysicalSignal::AngularAcceleration(value) => values!(value),
+        PhysicalSignal::Force(value) => values!(value),
+        PhysicalSignal::Moment(value) => values!(value),
+        PhysicalSignal::Traction(value) => values!(value),
+        PhysicalSignal::Pressure(value) => values!(value),
+        PhysicalSignal::BodyForceDensity(value) => values!(value),
+        PhysicalSignal::Temperature(value) => values!(value),
+        PhysicalSignal::TemperatureDifference(value) => values!(value),
+        PhysicalSignal::HeatFlux(value) => values!(value),
+        PhysicalSignal::HeatGenerationDensity(value) => values!(value),
+        PhysicalSignal::ElectricPotential(value) => values!(value),
+        PhysicalSignal::ElectricCurrent(value) => values!(value),
+        PhysicalSignal::ElectricCharge(value) => values!(value),
+        PhysicalSignal::ElectricCurrentDensity(value) => values!(value),
+        PhysicalSignal::ElectricChargeDensity(value) => values!(value),
+        PhysicalSignal::MagneticVectorPotential(value) => values!(value),
+        PhysicalSignal::MassFlowRate(value) => values!(value),
+    }
+}
+
+fn constant_values<Q: CanonicalQuantity>(
+    signal: &Signal<Q>,
+    canonical_unit: &str,
+) -> Option<FeaSignalConstantPresentation> {
+    let SignalRepresentation::Constant(value) = &signal.representation else {
+        return None;
+    };
+    let values = match value {
+        SignalValue::Scalar(value) => vec![value.canonical_value()],
+        SignalValue::Vector3(values) => {
+            values.iter().map(|value| value.canonical_value()).collect()
+        }
+        SignalValue::Tensor { values, .. } => {
+            values.iter().map(|value| value.canonical_value()).collect()
+        }
+    };
+    Some(FeaSignalConstantPresentation {
+        values,
+        canonical_unit: canonical_unit.to_string(),
+    })
+}
+
+const fn canonical_unit(quantity: PhysicalQuantityKind) -> &'static str {
+    match quantity {
+        PhysicalQuantityKind::Displacement => "m",
+        PhysicalQuantityKind::Rotation => "rad",
+        PhysicalQuantityKind::Velocity => "m/s",
+        PhysicalQuantityKind::Acceleration => "m/s^2",
+        PhysicalQuantityKind::AngularVelocity => "rad/s",
+        PhysicalQuantityKind::AngularAcceleration => "rad/s^2",
+        PhysicalQuantityKind::Force => "N",
+        PhysicalQuantityKind::Moment => "N*m",
+        PhysicalQuantityKind::Traction | PhysicalQuantityKind::Pressure => "Pa",
+        PhysicalQuantityKind::BodyForceDensity => "N/m^3",
+        PhysicalQuantityKind::Temperature | PhysicalQuantityKind::TemperatureDifference => "K",
+        PhysicalQuantityKind::HeatFlux => "W/m^2",
+        PhysicalQuantityKind::HeatGenerationDensity => "W/m^3",
+        PhysicalQuantityKind::ElectricPotential => "V",
+        PhysicalQuantityKind::ElectricCurrent => "A",
+        PhysicalQuantityKind::ElectricCharge => "C",
+        PhysicalQuantityKind::ElectricCurrentDensity => "A/m^2",
+        PhysicalQuantityKind::ElectricChargeDensity => "C/m^3",
+        PhysicalQuantityKind::MagneticVectorPotential => "Wb/m",
+        PhysicalQuantityKind::MassFlowRate => "kg/s",
     }
 }
 

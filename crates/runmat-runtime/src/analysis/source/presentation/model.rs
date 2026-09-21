@@ -4,20 +4,22 @@ use runmat_analysis_core::{
     AuthoredInitialConditionTarget, AuthoredModel, AuthoredPropertyAssignment,
     AuthoredPropertyTarget, AuthoredRegionSource,
 };
-use runmat_geometry_core::GeometryRegionRef;
+use runmat_geometry_core::{GeometryRegionRef, GeometryRegionSelector};
 
 use super::{
     kinds::{
         boundary_kind, connector_kind, constraint_kind, initial_condition_kind, interface_kind,
     },
     signal::{present_parameterized_signal, present_signal},
-    FeaPresentationTarget, FeaRandomExcitationPresentation, FeaResponseSpectrumPresentation,
-    FeaStudyObjectDetails, FeaStudyObjectKind, FeaStudyObjectPresentation, PresentationSourceMap,
+    FeaGeometryRegionPresentation, FeaPresentationTarget, FeaRandomExcitationPresentation,
+    FeaResponseSpectrumPresentation, FeaStudyObjectDetails, FeaStudyObjectKind,
+    FeaStudyObjectPresentation, PresentationSourceMap,
 };
 
 pub(super) fn present_models(
     models: &[&AuthoredModel],
     region_bindings: &BTreeMap<String, GeometryRegionRef>,
+    region_selectors: &BTreeMap<GeometryRegionRef, GeometryRegionSelector>,
     active_steps: &BTreeMap<String, Vec<String>>,
     all_step_ids: &[String],
     sources: &PresentationSourceMap,
@@ -42,7 +44,7 @@ pub(super) fn present_models(
                 model,
                 FeaStudyObjectKind::MaterialAssignment,
                 FeaStudyObjectDetails::MaterialAssignment(assignment.clone()),
-                property_target(&assignment.target, region_bindings),
+                property_target(&assignment.target, region_bindings, region_selectors),
                 None,
             ));
         }
@@ -52,14 +54,16 @@ pub(super) fn present_models(
                 model,
                 FeaStudyObjectKind::PropertyAssignment,
                 FeaStudyObjectDetails::PropertyAssignment(assignment.clone()),
-                property_assignment_targets(assignment, region_bindings),
+                property_assignment_targets(assignment, region_bindings, region_selectors),
                 None,
             ));
         }
         for constraint in &model.constraints {
             let mut targets = Vec::new();
             constraint.kind.visit_targets(|target| {
-                if let Some(target) = region_target(&target.region, region_bindings) {
+                if let Some(target) =
+                    region_target(&target.region, region_bindings, region_selectors)
+                {
                     targets.push(target);
                 }
             });
@@ -83,7 +87,7 @@ pub(super) fn present_models(
                 model,
                 FeaStudyObjectKind::Boundary(boundary_kind(&boundary.kind)),
                 FeaStudyObjectDetails::Boundary(boundary.kind.clone()),
-                region_target(&boundary.target, region_bindings)
+                region_target(&boundary.target, region_bindings, region_selectors)
                     .into_iter()
                     .collect(),
                 sources.model_object(
@@ -95,14 +99,14 @@ pub(super) fn present_models(
             ));
         }
         for connector in &model.connectors {
-            let mut targets = region_target(&connector.primary, region_bindings)
+            let mut targets = region_target(&connector.primary, region_bindings, region_selectors)
                 .into_iter()
                 .collect::<Vec<_>>();
             targets.extend(
                 connector
                     .secondary
                     .as_ref()
-                    .and_then(|target| region_target(target, region_bindings)),
+                    .and_then(|target| region_target(target, region_bindings, region_selectors)),
             );
             objects.push(object(
                 connector.connector_id.clone(),
@@ -121,7 +125,7 @@ pub(super) fn present_models(
         for interface in &model.interfaces {
             let targets = [&interface.primary, &interface.secondary]
                 .into_iter()
-                .filter_map(|target| region_target(target, region_bindings))
+                .filter_map(|target| region_target(target, region_bindings, region_selectors))
                 .collect();
             objects.push(object(
                 interface.interface_id.clone(),
@@ -178,7 +182,9 @@ pub(super) fn present_models(
         for excitation in &model.excitations {
             let targets = match &excitation.target {
                 runmat_analysis_core::AuthoredExcitationTarget::Region(target) => {
-                    region_target(target, region_bindings).into_iter().collect()
+                    region_target(target, region_bindings, region_selectors)
+                        .into_iter()
+                        .collect()
                 }
                 runmat_analysis_core::AuthoredExcitationTarget::WholeModel => {
                     vec![FeaPresentationTarget::WholeModel]
@@ -223,7 +229,9 @@ pub(super) fn present_models(
         for condition in &model.initial_conditions {
             let targets = match &condition.target {
                 AuthoredInitialConditionTarget::Region(target) => {
-                    region_target(target, region_bindings).into_iter().collect()
+                    region_target(target, region_bindings, region_selectors)
+                        .into_iter()
+                        .collect()
                 }
                 AuthoredInitialConditionTarget::WholeModel => {
                     vec![FeaPresentationTarget::WholeModel]
@@ -345,25 +353,27 @@ fn object(
 fn region_target(
     source: &AuthoredRegionSource,
     bindings: &BTreeMap<String, GeometryRegionRef>,
+    selectors: &BTreeMap<GeometryRegionRef, GeometryRegionSelector>,
 ) -> Option<FeaPresentationTarget> {
-    match source {
-        AuthoredRegionSource::Geometry(region) => {
-            Some(FeaPresentationTarget::GeometryRegion(region.clone()))
-        }
-        AuthoredRegionSource::ModelInput(input) => bindings
-            .get(&input.input_id)
-            .cloned()
-            .map(FeaPresentationTarget::GeometryRegion)
-            .or_else(|| match input.value_type {
-                runmat_analysis_core::AuthoredInputType::Region(role) => {
-                    Some(FeaPresentationTarget::ModelInput {
-                        input_id: input.input_id.clone(),
-                        role,
-                    })
-                }
-                _ => None,
-            }),
-    }
+    let region = match source {
+        AuthoredRegionSource::Geometry(region) => region.clone(),
+        AuthoredRegionSource::ModelInput(input) => match bindings.get(&input.input_id) {
+            Some(region) => region.clone(),
+            None => {
+                let runmat_analysis_core::AuthoredInputType::Region(role) = input.value_type else {
+                    return None;
+                };
+                return Some(FeaPresentationTarget::ModelInput {
+                    input_id: input.input_id.clone(),
+                    role,
+                });
+            }
+        },
+    };
+    let selector = selectors.get(&region)?.clone();
+    Some(FeaPresentationTarget::GeometryRegion(
+        FeaGeometryRegionPresentation { region, selector },
+    ))
 }
 
 fn activation_steps(
@@ -382,6 +392,7 @@ fn activation_steps(
 fn property_target(
     target: &AuthoredPropertyTarget,
     bindings: &BTreeMap<String, GeometryRegionRef>,
+    selectors: &BTreeMap<GeometryRegionRef, GeometryRegionSelector>,
 ) -> Vec<FeaPresentationTarget> {
     let source = match target {
         AuthoredPropertyTarget::Beam(source)
@@ -389,20 +400,25 @@ fn property_target(
         | AuthoredPropertyTarget::Solid(source)
         | AuthoredPropertyTarget::Cell(source) => source,
     };
-    region_target(source, bindings).into_iter().collect()
+    region_target(source, bindings, selectors)
+        .into_iter()
+        .collect()
 }
 
 fn property_assignment_targets(
     assignment: &AuthoredPropertyAssignment,
     bindings: &BTreeMap<String, GeometryRegionRef>,
+    selectors: &BTreeMap<GeometryRegionRef, GeometryRegionSelector>,
 ) -> Vec<FeaPresentationTarget> {
     match assignment {
         AuthoredPropertyAssignment::Section { target, .. }
         | AuthoredPropertyAssignment::Orientation { target, .. } => {
-            property_target(target, bindings)
+            property_target(target, bindings, selectors)
         }
         AuthoredPropertyAssignment::Layup { target, .. } => {
-            region_target(target, bindings).into_iter().collect()
+            region_target(target, bindings, selectors)
+                .into_iter()
+                .collect()
         }
     }
 }

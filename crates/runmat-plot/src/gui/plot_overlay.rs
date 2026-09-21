@@ -1638,6 +1638,10 @@ impl PlotOverlay {
 
         if config.show_cad_overlay {
             if let Some(overlay) = plot_renderer.geometry_overlay() {
+                let annotations = plot_renderer.geometry_screen_annotations([
+                    centered_plot_rect.width(),
+                    centered_plot_rect.height(),
+                ]);
                 let actions = self.cad_overlay.render(CadOverlayRenderInput {
                     ctx: ui.ctx(),
                     plot_rect: centered_plot_rect,
@@ -1646,6 +1650,7 @@ impl PlotOverlay {
                     xray_enabled: plot_renderer.geometry_xray_enabled(),
                     owner_visible: &|owner_id| plot_renderer.geometry_owner_visible(owner_id),
                     font_scale: config.font_scale,
+                    annotations: &annotations,
                 });
                 self.cad_actions.merge(actions);
             }

@@ -12,14 +12,7 @@ pub use compile::{
     prepare_fea_path_in_root, prepare_fea_sources_in_root, CheckedFeaSource, PreparedFeaSource,
 };
 pub use host::{logical_source_path, physical_source_path, source_digest, FilesystemFeaHost};
-pub use presentation::{
-    FeaBoundaryPresentationKind, FeaConnectorPresentationKind, FeaConstraintPresentationKind,
-    FeaInitialConditionPresentationKind, FeaInterfacePresentationKind, FeaOutputPresentation,
-    FeaPresentationTarget, FeaProcedurePresentation, FeaRandomExcitationPresentation,
-    FeaResponseSpectrumPresentation, FeaSignalPresentation, FeaSignalRepresentation,
-    FeaStudyInputPresentation, FeaStudyObjectDetails, FeaStudyObjectKind,
-    FeaStudyObjectPresentation, FeaStudyPresentation,
-};
+pub use presentation::*;
 pub use project_host::ProjectFeaHost;
 pub use report::{
     FeaCheckStatus, FeaRootSelector, FeaSourceCheckResult, FeaStudyCheckSummary,
