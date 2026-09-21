@@ -7,7 +7,9 @@ RunMat FEA turns exact geometry, an explicitly authored physical model, and a pr
 
 ## Start Here
 
-The repository contains complete checked examples in [`docs/fea/examples`](./examples):
+The repository contains complete checked examples in [`docs/fea/examples`](./examples). The first
+study below imports a two-part STEP assembly and runs exact CAD import, multi-solid material
+coverage, meshing, solve, result publication, and typed field access in the release workflow:
 
 ```sh
 runmat fea check docs/fea/examples/structural-static-experimental.fea

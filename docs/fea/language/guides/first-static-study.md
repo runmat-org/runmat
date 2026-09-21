@@ -2,8 +2,8 @@
 
 This guide uses the checked example at
 [`docs/fea/examples/structural-static-experimental.fea`](../../examples/structural-static-experimental.fea).
-Its geometry is deliberately small so the complete import, mesh, model, solve, and result path can
-run in a release check.
+It uses a two-part STEP assembly so the complete exact import, mesh, multi-solid material coverage,
+model, solve, and result path can run in a release check.
 
 ## 1. Inspect the geometry
 
@@ -19,25 +19,33 @@ guess a face ordinal from a viewport.
 
 ## 2. Declare geometry and regions
 
-The example declares one solid material domain and two boundary-face regions. Each region states
-its topology role and expected cardinality. Run `runmat fea check` after this step; a stale or
-ambiguous selector should fail before meshing.
+The example declares both solid occurrences, a support on each disconnected part, and a load face
+on the left part. Each region states its topology role and expected cardinality. Run `runmat fea
+check` after this step; a stale or ambiguous selector should fail before meshing.
 
 ```fea
 geometry bracket {
-    file = "./geometry/box.brep"
+    file = "./geometry/two-box-assembly.step"
     units = m
 
-    region body : solid {
+    region left_body : solid {
         select id "solid_000001"
         expect exactly_one
     }
-    region support : face {
+    region right_body : solid {
+        select id "solid_000002"
+        expect exactly_one
+    }
+    region left_support : face {
         select id "face_000001"
         expect exactly_one
     }
-    region load_face : face {
+    region left_load_face : face {
         select id "face_000002"
+        expect exactly_one
+    }
+    region right_support : face {
+        select id "face_000007"
         expect exactly_one
     }
 }
@@ -53,7 +61,7 @@ perform a governed refinement study before using results quantitatively.
 mesh bracket on geometry.bracket {
     tetrahedra {
         order = linear
-        target_size = 0.75 m
+        target_size = 1.5 m
         maximum_deviation = 0.05 m
     }
 }
@@ -61,9 +69,10 @@ mesh bracket on geometry.bracket {
 
 ## 4. Define and assign material behavior
 
-The steel declaration supplies elasticity and mass density. The assignment targets the solid body,
-not one of its faces. The fixed constraint and force target face regions. This distinction is what
-allows the compiler to prove complete constitutive coverage and correct boundary dimensionality.
+The steel declaration supplies elasticity and mass density. Separate assignments cover both solid
+occurrences, not their faces. The fixed constraints and force target face regions. This distinction
+lets the compiler prove complete constitutive coverage and correct boundary dimensionality; the
+second support also prevents the disconnected right occurrence from retaining rigid-body modes.
 
 ```fea
 material steel {
@@ -75,12 +84,16 @@ material steel {
 }
 
 model loaded_bracket {
-    assign material.steel to geometry.bracket.region.body
-    constraint fixed_support {
-        structural.fixed { target = geometry.bracket.region.support }
+    assign material.steel to geometry.bracket.region.left_body
+    assign material.steel to geometry.bracket.region.right_body
+    constraint left_support {
+        structural.fixed { target = geometry.bracket.region.left_support }
+    }
+    constraint right_support {
+        structural.fixed { target = geometry.bracket.region.right_support }
     }
     load service_force {
-        force on geometry.bracket.region.load_face = [0, -1, 0] kN
+        force on geometry.bracket.region.left_load_face = [0, -1, 0] kN
     }
     load_case service { include load.service_force }
 }

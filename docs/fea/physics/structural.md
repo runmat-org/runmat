@@ -57,20 +57,23 @@ make these systems solvable.
 
 ## How do I run a linear static stress analysis?
 
-This complete model assigns steel to the solid, fixes one face, applies a resultant force to another,
-and requests displacement and von Mises stress:
+This complete model assigns steel to both solids in a STEP assembly, fixes one face on each
+disconnected occurrence, applies a resultant force to the left part, and requests displacement and
+von Mises stress:
 
 ```fea
 geometry bracket {
-    file = "../examples/geometry/box.brep"
+    file = "../examples/geometry/two-box-assembly.step"
     units = m
-    region body : solid { select id "solid_000001" expect exactly_one }
-    region fixed_face : face { select id "face_000001" expect exactly_one }
-    region loaded_face : face { select id "face_000002" expect exactly_one }
+    region left_body : solid { select id "solid_000001" expect exactly_one }
+    region right_body : solid { select id "solid_000002" expect exactly_one }
+    region left_support : face { select id "face_000001" expect exactly_one }
+    region left_load_face : face { select id "face_000002" expect exactly_one }
+    region right_support : face { select id "face_000007" expect exactly_one }
 }
 
 mesh bracket on geometry.bracket {
-    tetrahedra { order = linear target_size = 0.75 m maximum_deviation = 0.05 m }
+    tetrahedra { order = linear target_size = 1.5 m maximum_deviation = 0.05 m }
 }
 
 material steel {
@@ -79,12 +82,16 @@ material steel {
 }
 
 model loaded_bracket {
-    assign material.steel to geometry.bracket.region.body
-    constraint support {
-        structural.fixed { target = geometry.bracket.region.fixed_face }
+    assign material.steel to geometry.bracket.region.left_body
+    assign material.steel to geometry.bracket.region.right_body
+    constraint left_support {
+        structural.fixed { target = geometry.bracket.region.left_support }
+    }
+    constraint right_support {
+        structural.fixed { target = geometry.bracket.region.right_support }
     }
     load service_force {
-        force on geometry.bracket.region.loaded_face = [0, -1, 0] kN
+        force on geometry.bracket.region.left_load_face = [0, -1, 0] kN
     }
     load_case service { include load.service_force }
 }

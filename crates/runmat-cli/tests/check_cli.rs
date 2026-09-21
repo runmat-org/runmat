@@ -92,6 +92,49 @@ fn canonical_fea_documentation_examples_check_cleanly() {
 }
 
 #[test]
+fn structural_static_step_documentation_example_runs_and_publishes_fields() {
+    let temp = TempDir::new().unwrap();
+    let path = "docs/fea/examples/structural-static-experimental.fea";
+    let output = runmat_from_repository(&temp, &["run", path, "--json"]);
+    assert!(
+        output.status.success(),
+        "{path} failed run:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let payload: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(payload["root_id"], "structural_static_experimental");
+    assert_eq!(payload["procedure"], "structural_linear_sequence");
+    let step_run_id = payload["step_run_ids"]
+        .as_array()
+        .and_then(|steps| steps.first())
+        .and_then(Value::as_str)
+        .expect("static step run id");
+
+    let script_path = temp.path().join("static-fields.m");
+    fs::write(
+        &script_path,
+        format!(
+            "results = fea.results(\"{step_run_id}\");\ndisplacement = fea.field(results, fea.OutputField.named(\"displacement\"));\ndisplacementPage = fea.fieldPage(displacement, 1, 3);\nstress = fea.field(results, fea.OutputField.named(\"von_mises\"));\nstressPage = fea.fieldPage(stress, 1, 3);\ndisp(displacement.field_id);\ndisp(displacementPage.count);\ndisp(stress.field_id);\ndisp(stressPage.count);\n"
+        ),
+    )
+    .unwrap();
+    let fields = runmat_from_repository(
+        &temp,
+        &["run", script_path.to_str().expect("UTF-8 script path")],
+    );
+    assert!(
+        fields.status.success(),
+        "STEP-backed result field smoke failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&fields.stdout),
+        String::from_utf8_lossy(&fields.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&fields.stdout);
+    assert!(stdout.contains("displacement"));
+    assert!(stdout.contains("von_mises"));
+}
+
+#[test]
 fn response_spectrum_documentation_example_runs_its_two_step_study() {
     let temp = TempDir::new().unwrap();
     let path = "docs/fea/examples/modal-response-spectrum-experimental.fea";

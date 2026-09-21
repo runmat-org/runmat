@@ -1,17 +1,25 @@
 geometry bracket {
-    file = "./geometry/box.brep"
+    file = "./geometry/two-box-assembly.step"
     units = m
 
-    region body : solid {
+    region left_body : solid {
         select id "solid_000001"
         expect exactly_one
     }
-    region support : face {
+    region right_body : solid {
+        select id "solid_000002"
+        expect exactly_one
+    }
+    region left_support : face {
         select id "face_000001"
         expect exactly_one
     }
-    region load_face : face {
+    region left_load_face : face {
         select id "face_000002"
+        expect exactly_one
+    }
+    region right_support : face {
+        select id "face_000007"
         expect exactly_one
     }
 }
@@ -19,7 +27,7 @@ geometry bracket {
 mesh bracket on geometry.bracket {
     tetrahedra {
         order = linear
-        target_size = 0.75 m
+        target_size = 1.5 m
         maximum_deviation = 0.05 m
     }
 }
@@ -33,12 +41,16 @@ material steel {
 }
 
 model loaded_bracket {
-    assign material.steel to geometry.bracket.region.body
-    constraint fixed_support {
-        structural.fixed { target = geometry.bracket.region.support }
+    assign material.steel to geometry.bracket.region.left_body
+    assign material.steel to geometry.bracket.region.right_body
+    constraint left_support {
+        structural.fixed { target = geometry.bracket.region.left_support }
+    }
+    constraint right_support {
+        structural.fixed { target = geometry.bracket.region.right_support }
     }
     load service_force {
-        force on geometry.bracket.region.load_face = [0, -1, 0] kN
+        force on geometry.bracket.region.left_load_face = [0, -1, 0] kN
     }
     load_case service { include load.service_force }
 }
