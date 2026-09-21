@@ -2,7 +2,11 @@
 name = "runmat-execution-transport-native"
 version = "0.6.2"
 edition = "2021"
+authors = ["Dystr Team"]
 license-file = "../../LICENSE.md"
+description = "Native QUIC and WebSocket transport adapters for RunMat execution"
+homepage = "https://runmat.com"
+repository = "https://github.com/runmat-org/runmat"
 
 [dependencies]
 async-trait = "0.1"

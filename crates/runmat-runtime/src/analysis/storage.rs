@@ -6,7 +6,7 @@ use std::sync::{Arc, OnceLock, RwLock};
 #[cfg(test)]
 use std::sync::{Mutex, MutexGuard};
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use runmat_analysis_core::{AnalysisField, AnalysisFieldValues};
 use runmat_analysis_fea::execution::{
     chunk_numerical_payload, AnalysisNumericalObjectKind, AnalysisObjectManifest,
@@ -1545,30 +1545,46 @@ fn prune_filesystem_runs(root: &Path) -> Result<(), String> {
         let Ok(persisted) = decode_persisted_artifact(&bytes, run_id) else {
             continue;
         };
-        let identity = match persisted {
-            PersistedAnalysisArtifact::Standard(persisted) => persisted.metadata.run.identity,
-            PersistedAnalysisArtifact::StructuralFrequency(persisted) => persisted.step.identity,
+        let (identity, embedded_run_id, created_at) = match persisted {
+            PersistedAnalysisArtifact::Standard(persisted) => (
+                persisted.metadata.run.identity,
+                persisted.metadata.run_id,
+                parse_recorded_at(&persisted.created_at),
+            ),
+            PersistedAnalysisArtifact::StructuralFrequency(persisted) => (
+                persisted.step.identity,
+                persisted.step.run_id,
+                parse_recorded_at(&persisted.created_at),
+            ),
         };
-        let modified = fs_modified(&path).ok().flatten();
-        artifacts.push((path, identity, modified));
+        let modified_at = fs_modified(&path).ok().flatten().map(DateTime::<Utc>::from);
+        artifacts.push(FilesystemRunArtifact {
+            path,
+            identity,
+            run_id: embedded_run_id,
+            created_at,
+            modified_at,
+        });
     }
-    artifacts.sort_by(|a, b| b.2.cmp(&a.2));
+    sort_filesystem_artifacts_newest_first(&mut artifacts);
 
     let mut to_remove = Vec::new();
     if max_runs_per_kind > 0 {
         let mut per_kind_counts: HashMap<AnalysisRunIdentity, usize> = HashMap::new();
-        for (path, identity, _modified) in &artifacts {
-            let count = per_kind_counts.entry(identity.clone()).or_default();
+        for artifact in &artifacts {
+            let count = per_kind_counts
+                .entry(artifact.identity.clone())
+                .or_default();
             *count += 1;
             if *count > max_runs_per_kind {
-                to_remove.push(path.clone());
+                to_remove.push(artifact.path.clone());
             }
         }
     }
     if max_runs > 0 {
-        for (index, (path, _identity, _modified)) in artifacts.iter().enumerate() {
+        for (index, artifact) in artifacts.iter().enumerate() {
             if index >= max_runs {
-                to_remove.push(path.clone());
+                to_remove.push(artifact.path.clone());
             }
         }
     }
@@ -1578,6 +1594,43 @@ fn prune_filesystem_runs(root: &Path) -> Result<(), String> {
         let _ = fs_remove_file(path);
     }
     Ok(())
+}
+
+#[derive(Debug)]
+struct FilesystemRunArtifact {
+    path: PathBuf,
+    identity: AnalysisRunIdentity,
+    run_id: String,
+    created_at: Option<DateTime<Utc>>,
+    modified_at: Option<DateTime<Utc>>,
+}
+
+impl FilesystemRunArtifact {
+    fn recorded_at(&self) -> Option<DateTime<Utc>> {
+        self.created_at.or(self.modified_at)
+    }
+}
+
+fn parse_recorded_at(value: &str) -> Option<DateTime<Utc>> {
+    DateTime::parse_from_rfc3339(value)
+        .ok()
+        .map(|value| value.with_timezone(&Utc))
+}
+
+fn generated_run_id_order(run_id: &str) -> Option<(i64, u64)> {
+    let suffix = run_id.strip_prefix("run_")?;
+    let (timestamp_millis, sequence) = suffix.rsplit_once('_')?;
+    Some((timestamp_millis.parse().ok()?, sequence.parse().ok()?))
+}
+
+fn sort_filesystem_artifacts_newest_first(artifacts: &mut [FilesystemRunArtifact]) {
+    artifacts.sort_by(|a, b| {
+        b.recorded_at()
+            .cmp(&a.recorded_at())
+            .then_with(|| generated_run_id_order(&b.run_id).cmp(&generated_run_id_order(&a.run_id)))
+            .then_with(|| b.run_id.cmp(&a.run_id))
+            .then_with(|| b.path.cmp(&a.path))
+    });
 }
 
 fn global_store() -> &'static RwLock<Arc<dyn AnalysisArtifactStore>> {
@@ -1787,4 +1840,10 @@ pub(crate) fn artifact_store_test_guard() -> MutexGuard<'static, ()> {
     LOCK.get_or_init(|| Mutex::new(()))
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+#[cfg(test)]
+#[test]
+fn generated_run_sequence_breaks_timestamp_ties_numerically() {
+    assert!(generated_run_id_order("run_1000_10") > generated_run_id_order("run_1000_9"));
 }
