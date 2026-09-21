@@ -31,6 +31,25 @@ model impact_test {
 }
 ```
 
+The corresponding `impactPulse.m` receives the requested sample coordinates as its first argument.
+Quantity-bearing `.fea` arguments cross this boundary as canonical SI numeric values: newtons for
+`peak`, seconds for `duration`, and seconds for `time`. The result must have one value per requested
+sample:
+
+```matlab
+function force = impactPulse(time, peak, duration)
+  arguments
+      time (:,1) double
+      peak (1,1) double
+      duration (1,1) double
+  end
+
+  insidePulse = time <= duration;
+  phase = min(time ./ duration, 1);
+  force = peak .* sin(pi .* phase) .* insidePulse;
+end
+```
+
 The signal declaration owns physical quantity, domain, sample range, interpolation, extrapolation,
 and tolerance. The `.m` function computes values for admitted samples; it does not mutate the
 model, select geometry, or run inside a solver kernel.
@@ -67,6 +86,34 @@ geometry bracket {
     }
 }
 ```
+
+`makeBracket.m` returns the typed geometry value expected by that declaration. Geometry operations
+are the same immutable operations available to ordinary RunMat code; `geometry.withRegion` gives
+the returned body the `output.region.body` name used by the `.fea` selector:
+
+```matlab
+function part = makeBracket(width)
+  arguments
+      width (1,1) double
+  end
+
+  depth = 0.05;
+  height = 0.008;
+  holeRadius = 0.005;
+
+  stock = geometry.box(width, depth, height);
+  hole = geometry.cylinder(holeRadius, height, [0 0 1], ...
+      [width / 2, depth / 2, 0]);
+  body = geometry.subtract(stock, hole);
+
+  part = geometry.finish(body);
+  part = geometry.withRegion(part, "body", geometry.solid(body));
+end
+```
+
+Lengths arrive in meters because `length` inputs normalize to SI before portable function
+execution. The function does not read the `.fea` geometry declaration or invent selector names at
+runtime; its checked return value explicitly publishes the named region.
 
 The function result must satisfy the declared geometry-output contract. RunMat admits the result
 through the same canonical geometry validation, persistent-topology, region, meshing, caching, and

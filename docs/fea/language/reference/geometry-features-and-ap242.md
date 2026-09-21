@@ -51,3 +51,51 @@ An export claim states exactly which product structure, geometry, parameters, pe
 properties were preserved, added, changed, or omitted. Round-trip qualification is fixture- and
 capability-specific. RunMat does not describe a file as AP242-complete when only its boundary
 representation was retained.
+
+## Examples
+
+Constructed geometry forms an immutable feature graph and names one result:
+
+```fea
+geometry clevis {
+    input pin_radius : length = 6 mm
+    construct {
+        feature blank = box(width = 80 mm, depth = 30 mm, height = 16 mm)
+        feature pin_hole = cylinder(radius = input.pin_radius, height = 16 mm)
+        feature finished = subtract(feature.blank, feature.pin_hole)
+        result = feature.finished
+    }
+    region body : solid {
+        select result
+        expect exactly_one
+    }
+}
+```
+
+Imported CAD regions should use stable names, tags, or persistent ids published by inspection:
+
+```fea
+geometry bracket {
+    file = "./bracket.step"
+    units = mm
+    region fixed_pad : face {
+        select name "FIXED_PAD"
+        expect exactly_one
+    }
+    region fastener_holes : face {
+        select tag "FASTENER_HOLE"
+        expect one_or_more
+    }
+}
+```
+
+CAD metadata becomes active only through an explicit declaration:
+
+```fea
+material cad_steel from geometry.bracket.cad_material("steel-4340") {
+    use mass_density
+    use elastic.youngs_modulus
+    require operating_temperature = 20 degC
+    on_conflict = reject
+}
+```

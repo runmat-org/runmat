@@ -44,3 +44,49 @@ Operation errors report the resolved argument types, physical dimensions, locati
 overloads, and invalid named argument. There is no fallback to a string-dispatched solver helper.
 An operation is not part of the language unless its catalog descriptor, type checker, lowering,
 editor metadata, and documentation are all present.
+
+## Examples
+
+Field operations compose inside an output expression while preserving quantity and location:
+
+```fea
+output displacement = analysis.solve.field.node.displacement
+output displacement_magnitude = magnitude(output.displacement)
+output peak_displacement = max(
+    output.displacement_magnitude,
+    over = geometry.bracket.region.body,
+)
+```
+
+Use a block when an output also needs retention policy:
+
+```fea
+output tip_history {
+    value = sample(
+        source = output.tip_displacement,
+        over = time,
+        at = [0 s, 0.5 s, 1 s],
+    )
+    precision = real64
+    compression = lossless
+    retention = explicit_samples
+    maximum_samples = 2000
+    partial_access = manifest_and_chunks
+    purpose = publication
+}
+```
+
+Sweep expressions consume outputs declared by the source study:
+
+```fea
+sweep thickness_study over study.static_check {
+    axis wall_thickness {
+        thin = 2 mm
+        nominal = 3 mm
+        thick = 4 mm
+    }
+    output peak_by_case = collect case.output.peak_stress.value
+    output governing_case = max(case.output.peak_stress.value, over = cases)
+    output stress_fields = retain_each case.output.stress
+}
+```

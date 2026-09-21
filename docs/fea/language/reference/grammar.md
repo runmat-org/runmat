@@ -28,6 +28,23 @@ argument          = expression | identifier "=" expression
 quantity          = number unit-expression
 ```
 
+The following fragment shows declarations, statements, references, calls, named arguments, and a
+quantity literal in context:
+
+```fea
+study static_check {
+    input service_load : force = 1.5 kN
+    geometry = geometry.bracket
+    mesh = mesh.bracket
+    model = model.loaded(service_load = input.service_load)
+    analysis solve { structural static {} }
+    output peak = max(
+        magnitude(analysis.solve.field.node.displacement),
+        over = geometry.bracket.region.body,
+    )
+}
+```
+
 Line breaks terminate statements when the preceding token cannot continue an expression. A
 semicolon may be used as an explicit terminator. Commas separate call arguments, list items, and
 record fields. `//` introduces a line comment.

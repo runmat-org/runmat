@@ -23,11 +23,41 @@ The example declares one solid material domain and two boundary-face regions. Ea
 its topology role and expected cardinality. Run `runmat fea check` after this step; a stale or
 ambiguous selector should fail before meshing.
 
+```fea
+geometry bracket {
+    file = "./geometry/box.brep"
+    units = m
+
+    region body : solid {
+        select id "solid_000001"
+        expect exactly_one
+    }
+    region support : face {
+        select id "face_000001"
+        expect exactly_one
+    }
+    region load_face : face {
+        select id "face_000002"
+        expect exactly_one
+    }
+}
+```
+
 ## 3. Declare the mesh
 
 The mesh targets the same geometry by reference. `target_size` controls nominal volume resolution;
 `maximum_deviation` bounds geometric approximation. Start with a coarse mesh for model setup, then
 perform a governed refinement study before using results quantitatively.
+
+```fea
+mesh bracket on geometry.bracket {
+    tetrahedra {
+        order = linear
+        target_size = 0.75 m
+        maximum_deviation = 0.05 m
+    }
+}
+```
 
 ## 4. Define and assign material behavior
 
@@ -35,12 +65,45 @@ The steel declaration supplies elasticity and mass density. The assignment targe
 not one of its faces. The fixed constraint and force target face regions. This distinction is what
 allows the compiler to prove complete constitutive coverage and correct boundary dimensionality.
 
+```fea
+material steel {
+    mass_density = 7850 kg/m^3
+    elastic {
+        youngs_modulus = 200 GPa
+        poisson_ratio = 0.3
+    }
+}
+
+model loaded_bracket {
+    assign material.steel to geometry.bracket.region.body
+    constraint fixed_support {
+        structural.fixed { target = geometry.bracket.region.support }
+    }
+    load service_force {
+        force on geometry.bracket.region.load_face = [0, -1, 0] kN
+    }
+    load_case service { include load.service_force }
+}
+```
+
 ## 5. Define the study
 
 The study binds geometry, mesh, and model, then names one structural static analysis. The example
 sets `formulation = experimental` because the current runnable structural formulation has not been
 promoted to production. Remove that line only when the status page and admission evidence identify
 the selected formulation as production-qualified.
+
+```fea
+study structural_static_experimental {
+    geometry = geometry.bracket
+    mesh = mesh.bracket
+    model = model.loaded_bracket
+    formulation = experimental
+    analysis static { structural static {} }
+    output displacement = analysis.static.field.node.displacement
+    output von_mises = analysis.static.field.element.von_mises_stress
+}
+```
 
 ## 6. Check, plan, and run
 

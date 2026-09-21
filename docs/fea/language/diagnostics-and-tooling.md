@@ -67,5 +67,26 @@ than suppressing it downstream. Typical failures include:
 - a sweep case outside an input bound;
 - a placement request unavailable to the selected procedure.
 
+For example, this assignment fails because a bulk material requires a solid, shell, beam, or cell
+domain; a face is a boundary target:
+
+```fea
+model incorrect {
+    assign material.steel to geometry.bracket.region.load_face
+}
+```
+
+Assign the material to the solid region and keep the face for the load:
+
+```fea
+model corrected {
+    assign material.steel to geometry.bracket.region.body
+    load service_force {
+        force on geometry.bracket.region.load_face = [0, -1, 0] kN
+    }
+    load_case service { include load.service_force }
+}
+```
+
 Warnings do not convert unsupported execution into support. The [current status](../status) page
 separates language coverage, executable procedure coverage, and production qualification.

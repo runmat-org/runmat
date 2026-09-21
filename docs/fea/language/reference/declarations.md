@@ -58,3 +58,84 @@ numerical model content. An empty declaration is valid but has no purpose.
 `import <kind> <name> from "<path>"` appears before declarations. Supported kinds are `geometry`,
 `mesh`, `material`, `model`, `study`, `sweep`, `execution`, and `function`. The imported symbol must
 exist with exactly that kind. Imports do not re-export the rest of a file.
+
+## Examples
+
+An imported geometry and its mesh are separate declarations. Regions belong to the geometry; mesh
+controls belong to the mesh:
+
+```fea
+geometry bracket {
+    file = "./geometry/bracket.step"
+    units = mm
+    region body : solid {
+        select id "solid_000001"
+        expect exactly_one
+    }
+}
+
+mesh bracket on geometry.bracket {
+    tetrahedra {
+        order = quadratic
+        target_size = 2 mm
+        maximum_deviation = 0.05 mm
+    }
+}
+```
+
+A material declares behavior; a model assigns it to a physical domain and adds boundary data:
+
+```fea
+material aluminum {
+    mass_density = 2700 kg/m^3
+    elastic {
+        youngs_modulus = 69 GPa
+        poisson_ratio = 0.33
+    }
+}
+
+model mounting(region body : region<solid>, region base : region<face>) {
+    input body_material : material
+    assign input.body_material to input.body
+    constraint support {
+        structural.fixed { target = input.base }
+    }
+}
+```
+
+The study binds the declarations into one procedure graph. Scale policy is referenced only when the
+study needs it:
+
+```fea
+execution cluster {
+    placement = profile.engineering
+    backend = auto
+    resources {
+        workers = 4..32
+        memory_per_worker <= 16 GiB
+    }
+    fanout { sweep_cases = auto }
+    resilience { retries = 2 }
+}
+
+study static_check {
+    geometry = geometry.bracket
+    mesh = mesh.bracket
+    model = model.mounting(
+        body_material = material.aluminum,
+        body = geometry.bracket.region.body,
+        base = geometry.bracket.region.base,
+    )
+    execution = execution.cluster
+    analysis solve { structural static {} }
+    output displacement = analysis.solve.field.node.displacement
+}
+```
+
+Imports bind one named symbol of one declared kind:
+
+```fea
+import geometry bracket from "./geometry/bracket.fea"
+import model mounting from "./models/mounting.fea"
+import function impact_pulse from "./impact_pulse.m"
+```

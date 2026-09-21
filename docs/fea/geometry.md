@@ -131,6 +131,29 @@ geometry bracket {
 }
 ```
 
+The imported `makeBracket` symbol is defined in `makeBracket.m`:
+
+```matlab
+function part = makeBracket(width)
+arguments
+    width (1,1) double
+end
+
+depth = 0.05;
+height = 0.008;
+stock = geometry.box(width, depth, height);
+hole = geometry.cylinder(0.005, height, [0 0 1], ...
+    [width / 2, depth / 2, 0]);
+body = geometry.subtract(stock, hole);
+
+part = geometry.finish(body);
+part = geometry.withRegion(part, "body", geometry.solid(body));
+end
+```
+
+The `.fea` length input reaches the function as meters. The return value is an immutable typed
+geometry value, and the named `body` region is what makes `output.region.body` a valid selector.
+
 The imported function must resolve to the exact frozen `.m` definition, satisfy the typed geometry signature, and be pure and non-suspending. It returns a portable typed geometry value; a worker cannot replace it with arbitrary file or process output.
 
 The same typed geometry value can be built directly in `.m` code:

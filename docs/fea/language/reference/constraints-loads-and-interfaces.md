@@ -56,3 +56,77 @@ coupling.
 
 The language server supplies the exact fields and units for a selected kind. Unknown members are
 errors rather than ignored extension data.
+
+## Constraint examples
+
+```fea
+constraint base_support {
+    structural.fixed { target = geometry.bracket.region.base }
+}
+
+constraint prescribed_temperature {
+    thermal.temperature {
+        target = geometry.bracket.region.heated_face
+        value = 80 degC
+    }
+}
+```
+
+## Load and excitation examples
+
+A constant force needs no separately named signal:
+
+```fea
+load service_force {
+    force on geometry.bracket.region.load_face = [0, -2.5, 0] kN
+}
+load_case service { include load.service_force }
+```
+
+Name the signal when its history or generator is part of the model:
+
+```fea
+signal impact_force : force over time {
+    samples = [
+        { at = 0 ms, value = 0 N },
+        { at = 5 ms, value = 2.5 kN },
+        { at = 20 ms, value = 0 N },
+    ]
+    interpolation = linear
+    extrapolation = zero
+}
+
+excitation impact {
+    force {
+        target = geometry.bracket.region.load_face
+        direction = global([0, -1, 0])
+        signal = signal.impact_force
+    }
+}
+```
+
+## Initial-condition and relationship examples
+
+```fea
+initial warm_start {
+    thermal.temperature {
+        target = whole_model
+        uniform = 325 K
+    }
+}
+
+connector mount_spring {
+    translational_spring {
+        primary = geometry.assembly.region.mount
+        secondary = geometry.assembly.region.frame
+        stiffness = 18 kN/m
+    }
+}
+
+interface bonded_contact {
+    contact.frictionless {
+        primary = geometry.assembly.region.part_a_contact
+        secondary = geometry.assembly.region.part_b_contact
+    }
+}
+```

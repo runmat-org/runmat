@@ -55,3 +55,41 @@ alone supplies ordering and does not substitute for a required state binding.
 - Nonlinear load-factor ranges require finite increasing endpoints.
 
 No procedure infers one of these domains from a signal, output request, or another analysis.
+
+## Examples
+
+A single-step static procedure has no independent-domain fields:
+
+```fea
+analysis solve {
+    structural static {}
+}
+```
+
+Transient procedures state their complete time domain:
+
+```fea
+analysis heat_up {
+    thermal transient {
+        start_time = 0 s
+        end_time = 60 s
+        time_step = 0.5 s
+    }
+}
+```
+
+Dependent procedures bind the state they consume instead of relying on block order:
+
+```fea
+analysis modes {
+    structural modal { modes = 24 }
+    retain basis
+}
+
+analysis spectrum after analysis.modes {
+    structural modal_response_spectrum {
+        basis = analysis.modes.state.basis
+        spectra = [model.spectrum.design]
+    }
+}
+```

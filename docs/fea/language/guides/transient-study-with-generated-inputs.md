@@ -4,6 +4,24 @@ Use an imported `.m` function when a time history is more naturally computed tha
 
 Define a pure function in `impactPulse.m`, then import it by file:
 
+```matlab
+function force = impactPulse(time, peak, duration)
+arguments
+    time (:,1) double
+    peak (1,1) double
+    duration (1,1) double
+end
+
+insidePulse = time <= duration;
+phase = min(time ./ duration, 1);
+force = peak .* sin(pi .* phase) .* insidePulse;
+end
+```
+
+The first parameter receives the column vector of requested time samples. The remaining parameters
+match the names in the `.fea` `arguments` block. All three values use canonical SI units at the
+function boundary, and the returned column has one force value in newtons for each time sample.
+
 ```fea
 import function impactPulse from "./impactPulse.m"
 ```
