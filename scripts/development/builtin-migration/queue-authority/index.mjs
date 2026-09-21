@@ -59,6 +59,7 @@ export function loadQueueAuthorityFromCliPaths({
   statePath, checkpointPath, trustedCheckpointDigest, control,
 }) {
   const resolvedStatePath = path.resolve(statePath);
+  const resolvedCheckpointPath = path.resolve(checkpointPath);
   const lexicalRoot = path.dirname(resolvedStatePath);
   const root = openAuthorityRoot(lexicalRoot);
   const session = openAuthorityLoadSession(root);
@@ -68,7 +69,7 @@ export function loadQueueAuthorityFromCliPaths({
       lexicalRoot, resolvedStatePath, "queue state path",
     ),
     checkpointPath: canonicalCliChildPath(
-      lexicalRoot, checkpointPath, "queue checkpoint path",
+      lexicalRoot, resolvedCheckpointPath, "queue checkpoint path",
     ),
     trustedCheckpointDigest,
     control,
