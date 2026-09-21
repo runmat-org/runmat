@@ -25,6 +25,33 @@ pub struct FeaStudyPresentation {
     pub objects: Vec<FeaStudyObjectPresentation>,
     pub procedures: Vec<FeaProcedurePresentation>,
     pub outputs: Vec<FeaOutputPresentation>,
+    pub available_sections: Vec<FeaStudySectionPresentation>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FeaStudySectionKind {
+    Inputs,
+    MaterialAssignments,
+    PropertyAssignments,
+    Constraints,
+    Boundaries,
+    Connectors,
+    Interfaces,
+    Signals,
+    ExcitationCases,
+    Excitations,
+    InitialConditions,
+    ResponseSpectra,
+    RandomExcitations,
+    Outputs,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FeaStudySectionPresentation {
+    pub section: FeaStudySectionKind,
+    pub configured_count: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

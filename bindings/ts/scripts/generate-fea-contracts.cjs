@@ -596,6 +596,14 @@ function main() {
   attributed: boolean;
   source?: FeaSourceLocation;
 }`,
+    formatTypeUnion(
+      "FeaStudySectionKind",
+      readEnumValues(presentationSource, "FeaStudySectionKind"),
+    ),
+    `export interface FeaStudySectionPresentation {
+  section: FeaStudySectionKind;
+  configuredCount: number;
+}`,
     `export interface FeaStudyPresentation {
   studyId: string;
   geometryId: string;
@@ -606,6 +614,7 @@ function main() {
   objects: FeaStudyObjectPresentation[];
   procedures: FeaProcedurePresentation[];
   outputs: FeaOutputPresentation[];
+  availableSections: FeaStudySectionPresentation[];
 }`,
     `export interface FeaSourceCheckResult {
   status: FeaCheckStatus;

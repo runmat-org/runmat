@@ -210,6 +210,13 @@ export interface FeaOutputPresentation {
   source?: FeaSourceLocation;
 }
 
+export type FeaStudySectionKind = "inputs" | "material_assignments" | "property_assignments" | "constraints" | "boundaries" | "connectors" | "interfaces" | "signals" | "excitation_cases" | "excitations" | "initial_conditions" | "response_spectra" | "random_excitations" | "outputs";
+
+export interface FeaStudySectionPresentation {
+  section: FeaStudySectionKind;
+  configuredCount: number;
+}
+
 export interface FeaStudyPresentation {
   studyId: string;
   geometryId: string;
@@ -220,6 +227,7 @@ export interface FeaStudyPresentation {
   objects: FeaStudyObjectPresentation[];
   procedures: FeaProcedurePresentation[];
   outputs: FeaOutputPresentation[];
+  availableSections: FeaStudySectionPresentation[];
 }
 
 export interface FeaSourceCheckResult {

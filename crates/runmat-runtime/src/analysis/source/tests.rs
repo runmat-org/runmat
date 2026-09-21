@@ -111,6 +111,34 @@ study static {
     assert_eq!(presentation.study_id, "static");
     assert_eq!(presentation.procedures.len(), 1);
     assert_eq!(presentation.outputs[0].output_id, "displacement");
+    assert_eq!(presentation.available_sections.len(), 14);
+    assert_eq!(
+        presentation
+            .available_sections
+            .iter()
+            .find(|section| section.section == super::FeaStudySectionKind::Constraints)
+            .unwrap()
+            .configured_count,
+        1
+    );
+    assert_eq!(
+        presentation
+            .available_sections
+            .iter()
+            .find(|section| section.section == super::FeaStudySectionKind::Boundaries)
+            .unwrap()
+            .configured_count,
+        0
+    );
+    assert_eq!(
+        presentation
+            .available_sections
+            .iter()
+            .find(|section| section.section == super::FeaStudySectionKind::Outputs)
+            .unwrap()
+            .configured_count,
+        1
+    );
 
     let force = presentation
         .objects

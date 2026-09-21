@@ -456,8 +456,9 @@ pub use source::{
     FeaSignalRepresentation, FeaSourceCheckResult, FeaSourceSnapshotBuilder,
     FeaSourceSnapshotRequests, FeaStudyCheckSummary, FeaStudyInputPresentation,
     FeaStudyObjectCounts, FeaStudyObjectDetails, FeaStudyObjectKind, FeaStudyObjectPresentation,
-    FeaStudyPresentation, FeaStudyProcedureSummary, FilesystemFeaHost, PreparedFeaSource,
-    PreparedFeaSourceSnapshot, ProjectFeaHost, ResolvedFeaRoot,
+    FeaStudyPresentation, FeaStudyProcedureSummary, FeaStudySectionKind,
+    FeaStudySectionPresentation, FilesystemFeaHost, PreparedFeaSource, PreparedFeaSourceSnapshot,
+    ProjectFeaHost, ResolvedFeaRoot,
 };
 
 const ANALYSIS_VALIDATE_STUDY_OPERATION: &str = "fea.validate_study";

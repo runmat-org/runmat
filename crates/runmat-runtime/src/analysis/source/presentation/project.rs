@@ -8,7 +8,8 @@ use runmat_geometry_core::{GeometryDefinitionSource, GeometryRegionRef, Geometry
 
 use super::{
     model::present_models, FeaOutputPresentation, FeaProcedurePresentation,
-    FeaStudyInputPresentation, FeaStudyPresentation, PresentationSourceMap,
+    FeaStudyInputPresentation, FeaStudyObjectKind, FeaStudyObjectPresentation,
+    FeaStudyPresentation, FeaStudySectionKind, FeaStudySectionPresentation, PresentationSourceMap,
 };
 use crate::analysis::source::CheckedFeaSource;
 
@@ -53,6 +54,15 @@ impl CheckedFeaSource {
         let study_source = LogicalSourcePath::new(&study.module_path)
             .ok()
             .and_then(|module| sources.declaration(&module, FeaSymbolKind::Study, &study.study_id));
+        let objects = present_models(
+            &models,
+            &region_bindings,
+            &region_selectors,
+            &active_steps,
+            &all_step_ids,
+            sources,
+        );
+        let available_sections = available_sections(study, &objects);
 
         FeaStudyPresentation {
             study_id: study.study_id.clone(),
@@ -73,14 +83,7 @@ impl CheckedFeaSource {
                     source: study_source.clone(),
                 })
                 .collect(),
-            objects: present_models(
-                &models,
-                &region_bindings,
-                &region_selectors,
-                &active_steps,
-                &all_step_ids,
-                sources,
-            ),
+            objects,
             procedures: study
                 .sequence
                 .steps
@@ -113,7 +116,72 @@ impl CheckedFeaSource {
                     source: study_source.clone(),
                 })
                 .collect(),
+            available_sections,
         }
+    }
+}
+
+fn available_sections(
+    study: &AuthoredStudy,
+    objects: &[FeaStudyObjectPresentation],
+) -> Vec<FeaStudySectionPresentation> {
+    use FeaStudySectionKind as Section;
+    let count = |section| {
+        objects
+            .iter()
+            .filter(|object| object_section(&object.kind) == section)
+            .count()
+    };
+    [
+        (Section::Inputs, study.inputs.len()),
+        (
+            Section::MaterialAssignments,
+            count(Section::MaterialAssignments),
+        ),
+        (
+            Section::PropertyAssignments,
+            count(Section::PropertyAssignments),
+        ),
+        (Section::Constraints, count(Section::Constraints)),
+        (Section::Boundaries, count(Section::Boundaries)),
+        (Section::Connectors, count(Section::Connectors)),
+        (Section::Interfaces, count(Section::Interfaces)),
+        (Section::Signals, count(Section::Signals)),
+        (Section::ExcitationCases, count(Section::ExcitationCases)),
+        (Section::Excitations, count(Section::Excitations)),
+        (
+            Section::InitialConditions,
+            count(Section::InitialConditions),
+        ),
+        (Section::ResponseSpectra, count(Section::ResponseSpectra)),
+        (
+            Section::RandomExcitations,
+            count(Section::RandomExcitations),
+        ),
+        (Section::Outputs, study.outputs.len()),
+    ]
+    .into_iter()
+    .map(|(section, configured_count)| FeaStudySectionPresentation {
+        section,
+        configured_count,
+    })
+    .collect()
+}
+
+fn object_section(kind: &FeaStudyObjectKind) -> FeaStudySectionKind {
+    match kind {
+        FeaStudyObjectKind::MaterialAssignment => FeaStudySectionKind::MaterialAssignments,
+        FeaStudyObjectKind::PropertyAssignment => FeaStudySectionKind::PropertyAssignments,
+        FeaStudyObjectKind::Constraint(_) => FeaStudySectionKind::Constraints,
+        FeaStudyObjectKind::Boundary(_) => FeaStudySectionKind::Boundaries,
+        FeaStudyObjectKind::Connector(_) => FeaStudySectionKind::Connectors,
+        FeaStudyObjectKind::Interface(_) => FeaStudySectionKind::Interfaces,
+        FeaStudyObjectKind::Signal => FeaStudySectionKind::Signals,
+        FeaStudyObjectKind::Excitation(_) => FeaStudySectionKind::Excitations,
+        FeaStudyObjectKind::ExcitationCase => FeaStudySectionKind::ExcitationCases,
+        FeaStudyObjectKind::InitialCondition(_) => FeaStudySectionKind::InitialConditions,
+        FeaStudyObjectKind::ResponseSpectrum => FeaStudySectionKind::ResponseSpectra,
+        FeaStudyObjectKind::RandomExcitation => FeaStudySectionKind::RandomExcitations,
     }
 }
 
