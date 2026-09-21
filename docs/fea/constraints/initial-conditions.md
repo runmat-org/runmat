@@ -222,5 +222,63 @@ initial equilibrium equation. Inspect the resolved initial-state coverage, the s
 $t_0$, and the first-step residual. Do not hide the discontinuity by reducing the time step unless
 the physical startup is genuinely discontinuous.
 
+## How do I initialize several disconnected parts?
+
+Give each part an explicit region and initial declaration when their states differ. A whole-model
+initial condition is suitable only when every admitted field degree of freedom starts with the same
+value. Overlapping declarations must agree on shared projected entities; source order does not
+provide an override rule.
+
+```fea
+initial hot_insert {
+    thermal.temperature {
+        target = geometry.assembly.region.insert
+        uniform = 423.15 K
+    }
+}
+
+initial cold_housing {
+    thermal.temperature {
+        target = geometry.assembly.region.housing
+        uniform = 293.15 K
+    }
+}
+```
+
+This is the correct starting point for a thermal-contact transient. Two continuing
+`thermal.temperature` constraints would instead hold both bodies at those temperatures indefinitely.
+
+## How do I initialize a field from measured data?
+
+Use a topology-bound field artifact whose units, coordinate frame, source topology, interpolation,
+coverage, and source digest are retained. The transfer must report uncovered target measure and a
+conservation or interpolation error appropriate to the field. A CSV of unlabeled node values is not
+a portable initial condition because remeshing changes node identity and order.
+
+## How do initial conditions interact with constraints at time zero?
+
+The admitted initial state must satisfy active essential constraints. If a fixed support owns
+$\mathbf u=0$, a nonzero displacement or velocity on the same constrained degrees of freedom is a
+conflict. For prescribed motion, use the correct left/right signal limit at $t_0$ and initialize
+velocity/acceleration consistently. RunMat should diagnose an incompatible overlap before advancing
+the first step.
+
+## How do I check initial energy and momentum?
+
+For structures, compare $\tfrac12\dot{\mathbf u}_0^T\mathsf M\dot{\mathbf u}_0$ and
+$\tfrac12\mathbf u_0^T\mathsf K\mathbf u_0$ with the intended release state, and inspect total
+linear/angular momentum. For thermal work, compare initial stored energy against the reference used
+by the material capacity law. For fluids and acoustics, inspect divergence/compatibility and the
+pressure/velocity energy convention. These checks expose unit, frame, and whole-model targeting
+errors before they become a transient startup spike.
+
+## When should I use restart state instead of an initial condition?
+
+Use restart state whenever the producing solve owns history that cannot be reconstructed from the
+visible primary field: plastic strain, contact status, internal variables, integration state,
+accumulated dissipation, or a reduced-order basis. Use initial declarations for a genuinely new
+study whose required state is completely described by the authored fields. A restart must bind to
+the exact producing topology and operator contract or pass an explicit governed transfer.
+
 See [study state flow](../language/studies-analyses-and-state),
 [transient structural analysis](../physics/structural), and [transient heat transfer](../physics/thermal).

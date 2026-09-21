@@ -219,3 +219,68 @@ Resultant-preserving loads keep their total while their nodal distribution chang
 keep their local magnitude, so their integrated total changes if selected area or volume changes.
 Persistent region identity and projection evidence make that behavior reviewable; ordinal face or
 element indices are not accepted as a durable substitute.
+
+## How do I read a load declaration from left to right?
+
+For a direct load, read the kind, target, value, and unit as one physical sentence:
+
+```fea
+load service_pressure {
+    pressure on geometry.vessel.region.inner_wall = 2.5 MPa
+}
+```
+
+This says that `service_pressure` is a normal surface-pressure action, that its target is the
+persistent `inner_wall` face region, and that its constant intensity is 2.5 MPa. The declaration
+does not choose a material, mesh entity, solver step, or load combination. Those belong to material
+assignment, mesh realization, analysis activation, and `load_case`, respectively.
+
+For a varying excitation, read the signal separately from the physical application:
+
+```fea
+signal pressure_cycle : pressure over time {
+    samples = [
+        { at = 0 s, value = 0 Pa },
+        { at = 2 s, value = 2.5 MPa },
+        { at = 10 s, value = 2.5 MPa },
+    ]
+    interpolation = linear
+    extrapolation = reject
+}
+
+excitation cyclic_pressure {
+    pressure {
+        target = geometry.vessel.region.inner_wall
+        signal = signal.pressure_cycle
+        kinematics = fixed_frame
+    }
+}
+```
+
+The signal owns the independent variable and sampling policy. The excitation owns the target and
+application semantics. This separation lets several procedures reuse one measured history without
+copying its samples or losing its source identity.
+
+## How do I know whether RunMat supports the load I need?
+
+Use the family pages as the closed source-language reference. A section with `.fea` syntax names a
+supported declaration. A section that says a first-class contract is unavailable describes the
+required physics and the safe alternative; it is not permission to place the same number into a
+different kind. `runmat fea check study.fea` rejects unknown kinds, wrong quantities, invalid target
+roles, missing signal domains, and incompatible combinations before execution.
+
+## Which result proves that a load was applied correctly?
+
+No single contour proves it. Use the invariant associated with the declaration:
+
+| Load form | Evidence to compare with the authored input |
+| --- | --- |
+| Resultant force or moment | Integrated projected force and moment about a stated origin |
+| Pressure, traction, flux, or current density | Resolved measure, orientation, and integrated resultant |
+| Body or volume source | Resolved volume and integrated source |
+| Terminal current, charge, or mass flow | Conserved terminal resultant and global balance |
+| Signal-driven excitation | Sample-domain coverage, interpolation decisions, and active step/case |
+| Coupled source | Producer result identity, transfer coverage, and conservation residual |
+
+Then compare global equilibrium, energy, charge, or mass balance for the physics family. A plausible
+field picture with the wrong integrated input is not an accepted load realization.

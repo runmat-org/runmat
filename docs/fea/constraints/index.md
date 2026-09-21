@@ -175,3 +175,66 @@ Constraints resolve from persistent CAD regions on each admitted mesh. Ties, per
 interfaces repeat their pairing/projection and report coverage/error. RunMat does not preserve stale
 node numbers from a prior mesh. Compare target measure, projected entity count, rank, and residual
 between mesh revisions.
+
+## What is the difference between a constraint, connector, interface, and load?
+
+These declarations assemble different mathematical objects:
+
+| Declaration | Mathematical role | Typical question |
+| --- | --- | --- |
+| Constraint | Prescribes a field value or exact relation, $\mathsf B\mathbf x=\mathbf g$ | “Which motion or field value is forbidden or known?” |
+| Connector | Adds a constitutive relation such as $\mathbf f=k\Delta\mathbf u$ | “What compliant or dissipative attachment connects these regions?” |
+| Interface | Transfers fields or enforces unilateral/coupled behavior between two domains | “How do these bodies or physics communicate?” |
+| Natural-boundary load | Adds traction, flux, impedance, or an outlet operator | “What conjugate action acts on this boundary?” |
+
+This distinction controls result interpretation. A fixed constraint produces a reaction; a spring
+stores energy; contact changes active status; pressure contributes external work. Choosing one only
+because it makes the matrix solvable changes the model.
+
+## How do I write a complete constrained model fragment?
+
+Declare geometry regions by their physical role, then place constraints inside the model that owns
+them. Loads remain separately named so activation is reviewable:
+
+```fea
+geometry bracket {
+    file = "bracket.step"
+    units = mm
+    region body : solid { select tag "body" expect exactly_one }
+    region mount : face { select tag "mount" expect one_or_more }
+    region pad : face { select tag "load_pad" expect exactly_one }
+}
+
+model supported_bracket {
+    assign material.steel to geometry.bracket.region.body
+
+    constraint mounting_fixture {
+        structural.fixed { target = geometry.bracket.region.mount }
+    }
+
+    load service_force {
+        force on geometry.bracket.region.pad = [0, -4, 0] kN
+    }
+    load_case service { include load.service_force }
+}
+```
+
+`mounting_fixture` removes admitted structural degrees of freedom only on `mount`. The load case
+does not activate or infer the support. In a multi-step study, the analysis sequence states whether
+that named constraint continues into each downstream procedure.
+
+## How do I review constraint rank and reactions?
+
+For linear equality constraints, inspect the resolved relation matrix rank, removed degrees of
+freedom, redundant rows, and residual $\|\mathsf B\mathbf x-\mathbf g\|$. For supports, integrate
+reaction force and moment by named constraint. For ties and periodic pairs, inspect matched measure,
+unmatched entities, projection distance, and pair residual. For contact, rank alone is insufficient:
+inspect active/open/stick/slip state, penetration, and contact work.
+
+## What should fail during `runmat fea check`?
+
+Checking should reject an incompatible topology role, missing or ambiguous region, duplicate
+identity, invalid quantity or frame, incomplete pair transform, self-pair, nonphysical coefficient,
+conflicting ownership, and a procedure that cannot consume the constraint kind. Geometry-dependent
+pair coverage and operator nullspaces are resolved later, but they still fail closed before a result
+is admitted. Solver regularization is not a substitute for a missing physical reference.

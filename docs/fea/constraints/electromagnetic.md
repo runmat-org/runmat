@@ -209,5 +209,43 @@ regularization to choose an arbitrary voltage datum. Magnetic vector-potential f
 need an explicit gauge/reference compatible with the chosen domain.
 
 Phase-shifted periodic constraints use the same primary/secondary mapping and transform fields as
-other periodic constraints, plus a typed `phase`. See [electromagnetic studies](../physics/electromagnetic)
-and [electromagnetic loads](../loads/electromagnetic).
+other periodic constraints, plus a typed `phase`.
+
+## What is the difference between electrical ground and potential reference?
+
+`electrical.potential_reference` removes the additive voltage datum without claiming a driven
+terminal voltage beyond that reference semantics. `electrical.potential` prescribes an actual value
+on its target. In a simple DC model, both may establish zero on a return terminal, but their physical
+ownership and result interpretation differ. Use the declaration matching the formulation and avoid
+several arbitrary references on one connected conductor network.
+
+## How do I model several electrically isolated conductor islands?
+
+Each disconnected island needs a well-posed potential relation: a driven/reference terminal or an
+`electrical.floating_conductor` contract with its applicable integral charge/current condition.
+Do not ground every island merely to remove singularities; that creates conductive references that
+may not exist. Inspect connected components and nullspace evidence before selecting constraints.
+
+## How do I model an equipotential electrode whose voltage is unknown?
+
+Use `electrical.equipotential` to make the conductor surface share one unknown potential, then add
+the physical integral relation that determines it, such as a floating-conductor charge condition.
+A uniform `electrical.potential` would instead prescribe voltage. The result should report the
+solved electrode potential and integral charge or current balance.
+
+## How do I verify magnetic periodic-sector constraints?
+
+Inspect geometric pair coverage, rotation origin, axis and angle, transformed vector orientation,
+phase sign, and constraint residual. Then compare integrated flux and energy on corresponding
+sectors. For phase-shifted periodicity, validate against a known traveling-wave direction; a
+reversed primary/secondary pair changes the intended phase relation.
+
+## What electromagnetic constraint evidence should be archived?
+
+Retain terminal/reference target identity, constrained DOF counts, connected conductor components,
+floating/equipotential integral residuals, magnetic gauge rank, periodic mapping coverage, and phase
+convention. These facts distinguish a physical field solution from one stabilized by an unintended
+datum or gauge.
+
+See [electromagnetic studies](../physics/electromagnetic) and
+[electromagnetic loads](../loads/electromagnetic).

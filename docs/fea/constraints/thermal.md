@@ -243,3 +243,51 @@ and does not impose incompatible temperatures on the same DOFs.
 For steady pure-Neumann conduction, adding one physical temperature reference or a positive
 convection boundary removes the constant-temperature nullspace. RunMat rejects an underconstrained
 connected component rather than choosing an arbitrary mean temperature.
+
+## How do I model hot and cold controlled boundaries in one thermal study?
+
+Declare each reservoir as its own `thermal.temperature` constraint so its heat flow and target stay
+separately attributable:
+
+```fea
+constraint hot_reservoir {
+    thermal.temperature {
+        target = geometry.sample.region.hot_face
+        value = 373.15 K
+    }
+}
+
+constraint cold_reservoir {
+    thermal.temperature {
+        target = geometry.sample.region.cold_face
+        value = 293.15 K
+    }
+}
+```
+
+Request reaction heat flow on both constraints and compare it with volume and natural-boundary
+sources. Do not apply both values to overlapping faces or use one broad selector that captures both
+ends.
+
+## How do I model thermal shock at a surface?
+
+Choose the physical boundary law. If a bath or controller truly fixes surface temperature, use a
+time-varying `thermal.temperature`. If heat transfer is limited by a film, use time-varying ambient
+temperature with `thermal.convection`; the wall remains unknown. Initialize the body separately at
+its pre-shock temperature. The initial field, boundary signal, and first-step side limit determine
+whether the shock is intentional or an input discontinuity.
+
+## How do I constrain a thermally periodic representative volume element?
+
+Pair opposite faces with `thermal.periodic` for zero macroscopic gradient or
+`thermal.affine_jump` for a prescribed temperature difference. Supply the exact translation or
+rotation, and constrain one physical temperature reference if the fluctuation field retains an
+additive nullspace. Verify mean heat flux, face-pair residual, and effective conductivity against
+cell size and mesh refinement.
+
+## What thermal constraint results should I request?
+
+Request prescribed-temperature reaction heat flow, mean/minimum/maximum temperature on each target,
+tie or periodic residual, pair coverage, and global energy balance. For affine jumps, also request
+the volume-averaged gradient and heat flux. A temperature contour cannot reveal whether a fixed wall
+supplied an unrealistic amount of heat.

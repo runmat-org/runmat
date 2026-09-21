@@ -206,4 +206,32 @@ constraints; see [acoustic loads and boundaries](../loads/acoustic). A periodic 
 translation or complete rotation and an optional geometric tolerance. The phase-shifted form also
 requires `phase`, making Bloch/Floquet intent explicit rather than embedding it in solver flags.
 
+## Should I use a rigid wall, pressure-release boundary, or impedance?
+
+A rigid wall imposes zero normal particle velocity and belongs to the natural acoustic boundary set.
+A pressure-release surface uses `acoustic.pressure` with zero perturbation pressure. An impedance
+boundary relates pressure to normal velocity and can absorb or reflect energy. They are different
+physical limits; applying pressure zero and rigid wall to the same face overconstrains the boundary.
+
+## How do I model an acoustic symmetry plane?
+
+Choose the field parity implied by the acoustic mode. A hard symmetry plane corresponds to zero
+normal velocity; an antisymmetric or pressure-release plane corresponds to zero pressure. Use the
+matching typed boundary or constraint rather than a generic label, and verify the mirrored mode
+against a full-domain reference when possible.
+
+## How do I set up a periodic waveguide cell?
+
+Name both cell-end faces, declare their translation, and use `acoustic.periodic` for zero phase or
+`acoustic.phase_shifted_periodic` for a Bloch phase. Keep wall termination and material definitions
+separate. Sweep phase or frequency through typed study inputs, and request pair residual plus complex
+power flux so a sign error is visible.
+
+## What acoustic constraint results should I request?
+
+Request constrained pressure values, periodic pair coverage and residual, complex pressure and
+normal velocity on paired faces, and acoustic power flux. For phase-shifted pairs, compare amplitude
+and phase after applying the declared mapping. A magnitude-only contour can hide an incorrect Bloch
+phase or reversed face normal.
+
 Further reading: [acoustic studies](../physics/acoustic) and [geometry regions](../geometry).

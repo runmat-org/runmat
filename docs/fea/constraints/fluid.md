@@ -209,3 +209,39 @@ solve.
 An outlet-pressure natural boundary is documented under [fluid loads](../loads/fluid). Choose one
 pressure datum consistent with the formulation and avoid simultaneously prescribing incompatible
 velocity and pressure data on the same boundary.
+
+## How do I combine an inlet, walls, and outlet in one RunMat fluid model?
+
+Use `fluid.velocity` on the inlet, `fluid.no_slip_wall` on stationary viscous walls, one physical
+pressure reference when required, and `fluid.outlet_pressure` as the outlet natural boundary. Give
+each role a nonoverlapping CAD region. Do not prescribe full velocity and outlet pressure on the same
+face or place a wall constraint over inlet edge entities without a compatible profile.
+
+## Should I use a slip wall or a symmetry plane?
+
+Both suppress normal flow under common formulations, but symmetry also constrains mirrored field
+behavior and is justified only when geometry, loading, and expected solution are symmetric. A slip
+wall represents an impermeable boundary without tangential no-slip shear. Use `fluid.symmetry` for a
+cut model and `fluid.slip_wall` for a physical inviscid or slip boundary; inspect tangential traction
+and normal flux.
+
+## How do I model wall motion from a prescribed mechanical motion?
+
+Use `fluid.moving_wall` when wall velocity is a known input. Use
+`fluid_structure.no_slip` when structural displacement and velocity are solved and must feed back
+with fluid traction. Applying both to the same face creates two owners for wall kinematics unless the
+coupling procedure explicitly defines one as an override.
+
+## How do I constrain a fluid domain with several disconnected cavities?
+
+Each disconnected incompressible pressure component needs its own datum or a boundary relation that
+establishes pressure. One reference in cavity A cannot remove the constant-pressure nullspace in
+cavity B. Inspect connected components after interfaces and periodic pairs resolve; do not scatter
+arbitrary point references until the linear system happens to factor.
+
+## What fluid constraint evidence should be archived?
+
+Retain resolved boundary areas and normals, prescribed velocity frames, wall-relative velocity,
+pressure-reference ownership by connected component, periodic mapping coverage, constraint
+residuals, and signed mass flux. For moving walls, also retain the motion signal or producing FSI
+state identity.

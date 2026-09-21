@@ -161,6 +161,64 @@ The preview should show both endpoint regions, connector kind, coefficient with 
 when secondary is absent, and direction/frame when supported. A label anchored to only one face is
 insufficient for a two-ended connector; use the study graph to inspect the complete relation.
 
+## How do I put a spring and dashpot in parallel in RunMat?
+
+Declare two connectors on the same named endpoint regions. They remain separate physical objects,
+so static stiffness and transient dissipation can be reviewed independently:
+
+```fea
+connector isolator_stiffness {
+    translational_spring {
+        primary = geometry.machine.region.mount
+        secondary = geometry.frame.region.mount
+        stiffness = 180 kN/m
+    }
+}
+
+connector isolator_damping {
+    translational_dashpot {
+        primary = geometry.machine.region.mount
+        secondary = geometry.frame.region.mount
+        damping = 1.8 kN*s/m
+    }
+}
+```
+
+The pair implements $\mathbf f=k\Delta\mathbf u+c\Delta\dot{\mathbf u}$ on the admitted connector
+basis. Do not add coefficients before authoring unless the physical devices truly share the same
+endpoints and direction; separate declarations retain the contribution of each device.
+
+## How do I model several mounts under one machine?
+
+Create one connector pair per physical mount and give every attachment its own CAD region. This
+preserves lever arms and allows unequal reactions. A single spring attached to an all-mounts region
+can preserve total translational stiffness while losing pitch, roll, and load-sharing behavior.
+For each mount, check the actual endpoint displacement difference and equal-and-opposite connector
+forces.
+
+## How do I choose connector regions on CAD geometry?
+
+Select the physical attachment footprints, not entire parts. A face region can be coupled to a
+reference point when the reduced connector acts at a mount center; the coupling determines how face
+motion becomes connector motion. Keep the coupling and connector as separate named objects. If two
+mounts share one broad selector, RunMat cannot infer their separate locations or load paths.
+
+## Which analyses use springs, dashpots, and foundations?
+
+Springs contribute stiffness to static, buckling base-state, modal, harmonic, and transient
+operators when those procedures admit the connector basis. Dashpots contribute damping to harmonic
+and transient response but do not change an undamped static solution. Foundations contribute their
+distributed stiffness only on the resolved target. A study must reject a connector when its
+procedure, topology, or degrees of freedom cannot represent it; silently dropping a connector is
+never a valid fallback.
+
+## What connector results should I request?
+
+Request relative displacement, relative velocity where applicable, connector force, spring energy,
+and dashpot dissipation by connector identity. Also request support reactions and global energy
+balance. A displacement contour alone cannot show whether a mount used the intended coefficient or
+whether several mounts accidentally acted in parallel on the same projected entities.
+
 Use springs for elastic compliance, dashpots for rate-dependent force, and a foundation for a
 distributed support law. Use [structural constraints](./structural) for kinematic restrictions and
 [interfaces](./interfaces) for contact or multiphysics transfer.

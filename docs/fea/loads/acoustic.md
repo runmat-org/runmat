@@ -271,5 +271,47 @@ Use an excitation with a pressure or velocity signal for transient or harmonic d
 radiation boundary, and impedance boundary describe different physical terminations; none should be
 selected from geometry names automatically.
 
+## How do I convert sound-pressure level to an acoustic pressure input?
+
+For a stated reference pressure $p_{ref}$ and RMS convention,
+$p_{rms}=p_{ref}10^{L_p/20}$. Convert to peak only if the harmonic procedure expects peak amplitude.
+Then apply the pressure with its phase as an `acoustic_pressure` signal. State whether the level is
+free-field, diffuse-field, incident, or total pressure; the same decibel value does not define the
+boundary wave decomposition.
+
+## How do I model a duct inlet and anechoic outlet?
+
+Drive the inlet with `normal_velocity` or `acoustic_pressure` and terminate the outlet with
+`acoustic.radiation` or a characterized `acoustic.impedance`. Keep wall regions under
+`acoustic.rigid_wall` unless wall compliance is modeled through an FSI interface. The outlet must be
+far enough from strong evanescent content for the selected termination law to be valid.
+
+```fea
+load duct_inlet {
+    normal_velocity on geometry.duct.region.inlet = 0.02 m/s
+}
+
+load open_end {
+    acoustic.radiation {
+        target = geometry.duct.region.outlet
+    }
+}
+```
+
+## How do I model a cavity resonance test?
+
+Use rigid or impedance wall boundaries matching the test article, drive a small known pressure or
+normal velocity on the physical source patch, and sweep frequency with sufficient resolution around
+expected modes. Request complex pressure at microphone or probe locations and wall/source power. A
+uniform pressure constraint on the entire cavity suppresses rather than excites many cavity modes.
+
+## How do I verify acoustic energy balance?
+
+Compare time-averaged input power at driven boundaries with radiated, absorbed, and dissipated power.
+Inspect reflected flux at truncations and phase at probes, not only pressure magnitude. Mesh and
+frequency refinement must resolve wavelength and boundary layers required by the formulation; a
+stable-looking SPL plot with nonclosing power balance is not sufficient evidence.
+
 Further reading: [acoustic constraints](../constraints/acoustic),
-[acoustic studies](../physics/acoustic), and [fluid–structure interaction](../physics/fluid-structure-interaction).
+[acoustic studies](../physics/acoustic), and
+[fluid–structure interaction](../physics/fluid-structure-interaction).

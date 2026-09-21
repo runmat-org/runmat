@@ -146,6 +146,77 @@ and pair weights. Structural contact should report penetration, normal/tangentia
 stick/slip state, and contact work. Thermal and FSI transfer should report equal-and-opposite
 integrated flux/traction to their numerical tolerance.
 
+## How do I select primary and secondary contact surfaces?
+
+Choose the pairing direction deliberately. The secondary side supplies the surface against which
+the primary side is searched/projected under the admitted contact formulation. Prefer a side whose
+geometry and discretization make the projection well conditioned, then verify coverage rather than
+relying on a “fine mesh versus coarse mesh” rule. Reversing the pair can change normals, projection
+error, and reported reactions even when the physical bodies are unchanged.
+
+```fea
+interface pin_in_bore {
+    contact.frictionless {
+        primary = geometry.joint.region.pin_contact
+        secondary = geometry.joint.region.bore_contact
+    }
+}
+```
+
+The two regions must name the physical mating patches. Selecting a complete cylindrical face when
+only a partial arc can contact changes both search and resultant interpretation.
+
+## How do I model a bonded structural interface?
+
+Use `structural.tie` in the owning model when the surfaces remain kinematically bonded for the whole
+analysis. It is a bilateral constraint, not an `interface` declaration:
+
+```fea
+constraint bonded_joint {
+    structural.tie {
+        primary = geometry.assembly.region.part_a_bond
+        secondary = geometry.assembly.region.part_b_bond
+        tolerance = 10 um
+    }
+}
+```
+
+Use contact instead when opening or slip is part of the physics. Use a first-class cohesive law
+when finite interface stiffness or damage is required; the tie cannot represent adhesive compliance.
+
+## How do I model a fluid–structure boundary in RunMat?
+
+Declare one `fluid_structure.no_slip` interface and use it from a
+`fluid_structure_interaction` procedure. The interface owns the paired CAD regions; the procedure
+owns the coupling and convergence policy. Do not add an independent prescribed wall velocity on the
+same fluid face unless the study intentionally overrides structural motion. At every accepted
+coupling step, compare transferred fluid traction with the structural interface load and compare
+wall velocity/displacement after mapping.
+
+## How do I model conjugate heat transfer between a fluid and solid?
+
+Use `conjugate_heat_transfer.perfect` when temperature is continuous. Use `.conductance` or
+`.resistance` when the model intentionally retains a temperature jump. The interface is then
+consumed by a `conjugate_heat_transfer` procedure; two unrelated thermal boundary loads do not
+constitute a coupled interface. Verify equal-and-opposite integrated heat flow and report the
+temperature jump for finite conductance/resistance.
+
+## Why does an interface leave unmatched faces or nodes?
+
+Check that both named regions cover the same physical patch, the primary-to-secondary orientation
+is correct, assembly transforms were applied, and the requested tolerance reflects geometric
+discretization error. A large tolerance may hide a missing fillet, gap, offset, or incorrect part
+occurrence. Inspect unmatched area and maximum projection distance in physical units before changing
+mesh size or pairing policy.
+
+## What results establish interface convergence?
+
+For contact, inspect penetration, complementarity residual, normal reaction, tangential traction,
+stick/slip/open status, and contact work. For CHT, inspect paired temperature/flux residual and
+integrated energy conservation. For FSI, inspect displacement/velocity transfer, traction balance,
+and coupling residual by iteration. Report these against the named interface, not only as one global
+solver norm.
+
 Primary and secondary are part of the contract. The compiler checks topology roles; realization
 checks coverage and projection; execution evidence records the resolved interface. Never rely on
 geometric proximity to create contact or transfer automatically.

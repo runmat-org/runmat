@@ -329,5 +329,50 @@ load_case operating {
 ```
 
 Check the resolved resultant, moment, target area/volume, sign convention, active analysis steps,
-and reaction balance. Further reading: [structural constraints](../constraints/structural) and
+and reaction balance.
+
+## How do I model snow, occupancy, or other area design loads?
+
+Convert the design action into the physical pressure or traction acting on the modeled surface,
+including tributary-area and direction conventions. Use `structural.pressure` for a constant normal
+intensity or `traction` for a vector intensity:
+
+```fea
+load roof_snow {
+    structural.pressure {
+        target = geometry.roof.region.loaded_panels
+        value = 1.2 kPa
+    }
+}
+```
+
+Do not enter a total building force as pascals or apply the full area load to every repeated panel.
+For code combinations, keep the characteristic load and combination factor separately traceable.
+
+## How do I apply a load in a local coordinate system?
+
+Direct vector loads are expressed in the vector's declared frame. For signal-driven scalar force,
+keep amplitude in the signal and direction in the excitation. Use an admitted local frame when the
+load follows a shaft, beam, or fixture axis; otherwise use `global([x, y, z])`. The checker must
+reject a frame that is unavailable at the target. Review the transformed vector and resultant in
+global coordinates before interpreting reactions.
+
+## How do I model a line load on a beam or edge?
+
+Use a compatible edge or beam target and the load kind whose dimensions match the known quantity. A
+resultant `force` preserves total newtons over the selected edge; a distributed line load requires a
+force-per-length contract. Do not enter `N/m` into `traction`, which is force per area. When no
+first-class line-intensity kind is admitted, use resolved beam loads or a justified resultant rather
+than silently changing dimensions.
+
+## How do I confirm structural load mesh convergence?
+
+Track both the load invariant and the response. Across refinements, compare resolved target measure,
+integrated force and moment, reaction balance, displacement and energy norms, and stresses away from
+singular load/support edges. A resultant load should retain total force while its nodal vector
+changes; a pressure should retain intensity while its total follows the admitted area. If either
+invariant drifts, the projection or region selection changed and the response comparison is not a
+clean convergence study.
+
+Further reading: [structural constraints](../constraints/structural) and
 [structural studies](../physics/structural).

@@ -436,5 +436,44 @@ invalid pairs/transforms, and a remaining operator nullspace. It cannot decide t
 incorrect fixture is wrong merely because its matrix is nonsingular; review reaction directions and
 run sensitivity studies with plausible fixture compliance.
 
+## How do I constrain a bolt pattern or mounting-foot assembly?
+
+Create one named region per physically distinct bolt group or foot. Use fixed support only when the
+attachment truly suppresses every admitted displacement and rotation. When load distribution,
+fixture compliance, or bolt-line motion matters, couple each footprint to its own reference point
+and connect that point to the fixture model. Combining all feet into one rigid region can suppress
+chassis distortion and erase the moments created by their spacing.
+
+## How do I model a cylindrical bearing support?
+
+Express restrained components in a cylindrical frame aligned with the bearing axis. A radial
+support normally blocks radial motion while allowing axial translation and rotation according to the
+real bearing; a thrust bearing also restrains an axial component. Use component-wise
+`structural.prescribed` or an admitted normal-displacement relation rather than `structural.fixed`.
+Verify the local frame at every target and inspect reactions by radial, tangential, and axial
+component.
+
+## How do I prescribe a rotation without fixing translation?
+
+Use `structural.prescribed` with rotational degrees of freedom selected in an explicit frame. The
+target formulation must own rotations; solid displacement-only nodes cannot accept an independent
+rotation without a reference-point or coupling construction. Do not approximate a prescribed angle
+with arbitrary tangential displacements unless rigid-body kinematics and rotation center are
+explicitly derived.
+
+## How do I compare fixed, pinned, and elastic support assumptions?
+
+Author each support model as a separate named model or sweepable study case, then compare global
+deflection, reaction distribution, strain energy, modal frequencies, and stresses away from support
+singularities. Fixed and pinned supports are kinematic limits; an elastic mount belongs in a
+connector. Keeping variants explicit prevents a solver setting from silently changing the fixture.
+
+## What structural constraint evidence should be archived?
+
+Retain persistent target identity, projected entity and DOF counts, constraint rank, redundant-row
+diagnostics, reference frames, pair coverage and transforms, reaction force and moment by constraint,
+and normalized residual. For moving constraints, also retain signal identity and support work. This
+evidence explains why geometrically similar runs can have different load paths.
+
 Further reading: [structural studies](../physics/structural), [structural loads](../loads/structural),
 and [geometry regions](../geometry).

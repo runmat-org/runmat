@@ -285,5 +285,69 @@ dimensions and target roles. A temperature constraint fixes the primary field; c
 do not.
 
 Check integrated power, exterior area, sign convention, temperature units, and energy balance.
-Further reading: [thermal constraints](../constraints/thermal), [heat-transfer studies](../physics/thermal),
-and [electrothermal analysis](../physics/electrothermal).
+
+## How do I model a chip, PCB, or battery heat source in RunMat?
+
+Create a solid region for each dissipating component, assign its thermal material, and apply
+`heat_generation` using power divided by that region's admitted volume. Keep sources separate when
+their powers or duty cycles differ:
+
+```fea
+load processor_loss {
+    heat_generation on geometry.board.region.processor_die = 18 MW/m^3
+}
+
+load regulator_loss {
+    heat_generation on geometry.board.region.regulator_die = 6 MW/m^3
+}
+
+load_case full_power {
+    include load.processor_loss
+    include load.regulator_loss
+}
+```
+
+Verify the integrated watts for each component. Applying total board power to a bounding-box region
+changes source density and spreads heat through material that does not generate it.
+
+## How do I model a prescribed heater power and convection together?
+
+Declare the heater and cooling boundaries as separate loads and include them in the same case. The
+heater adds energy; convection removes or adds energy according to the current wall temperature:
+
+```fea
+load cartridge_heater {
+    heat_generation on geometry.assembly.region.heater = 4 MW/m^3
+}
+
+load ambient_cooling {
+    thermal.convection {
+        target = geometry.assembly.region.exposed_faces
+        ambient_temperature = 293.15 K
+        coefficient = 12 W/(m^2*K)
+    }
+}
+```
+
+Do not subtract an estimated convective wattage from the heater input; the Robin boundary computes
+heat exchange from the solved wall temperature.
+
+## How do I choose between temperature, heat flux, and convection boundary conditions?
+
+Use `thermal.temperature` when a controller or reservoir truly fixes surface temperature. Use
+`thermal.heat_flux` when surface power density is known independently of surface temperature. Use
+`thermal.convection` when heat flow is proportional to the difference between unknown wall
+temperature and known ambient. These produce different thermal resistances and cannot be selected
+only to obtain a desired peak temperature.
+
+## How do I check a thermal load mesh refinement study?
+
+Across meshes, compare admitted source volume or area, integrated source power, boundary heat flow,
+stored-energy change, and temperature norms. Thin layers and sharp source footprints can require
+local refinement even when total energy closes. A stable peak temperature with a drifting energy
+balance is not convergence; neither is energy closure with an unresolved local gradient at a
+material or contact interface.
+
+Further reading: [thermal constraints](../constraints/thermal),
+[heat-transfer studies](../physics/thermal), and
+[electrothermal analysis](../physics/electrothermal).

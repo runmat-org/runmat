@@ -256,6 +256,37 @@ An inlet-velocity excitation preserves a velocity field; mass flow preserves a r
 motion is distinct from a structural displacement unless an FSI interface transfers the motion.
 Avoid combining incompatible prescribed velocity and pressure data on one boundary.
 
+## How do I convert volumetric flow rate to a RunMat inlet condition?
+
+The closed inlet resultant is `mass_flow`, so convert volumetric rate using density consistent with
+the fluid model: $\dot m=\rho Q$. For a uniform velocity approximation on admitted area $A$,
+$\bar u=Q/A$. Choose one representation; do not prescribe both on the same inlet. Compressible or
+strongly variable-density flow requires the formulation to own the state-dependent conversion
+rather than using one nominal density silently.
+
+## How do I model a fan curve or pump curve?
+
+A fan or pump curve relates pressure rise to flow and is not a fixed outlet pressure. The current
+load set does not expose a first-class pressure-jump-versus-flow device. Use a resolved rotating-
+machine domain or an admitted typed reduced component when available. For one operating-point
+approximation, state the derived pressure/flow condition and its limited validity; do not present it
+as a complete fan curve.
+
+## How do I model an opening where flow may enter or leave?
+
+Use an outlet or open-boundary formulation that owns backflow state and transported quantities. A
+prescribed velocity fixes direction and cannot represent bidirectional exchange; a pressure outlet
+may admit backflow but needs compatible temperature, species, and turbulence data from the
+formulation. Place the boundary where the reduced opening law is physically appropriate and inspect
+signed flux.
+
+## How do I verify inlet and outlet mass conservation?
+
+Integrate signed mass flux over every inlet, outlet, porous transfer, and moving boundary. For a
+steady closed control volume, the algebraic sum must close within tolerance. For transient or
+compressible work, include storage. Compare each boundary's resolved area, normal, and resultant
+after remeshing; a plausible velocity field does not compensate for a nonclosing mass balance.
+
 Further reading: [fluid constraints](../constraints/fluid), [fluid studies](../physics/fluid),
 [conjugate heat transfer](../physics/conjugate-heat-transfer), and
 [fluid–structure interaction](../physics/fluid-structure-interaction).

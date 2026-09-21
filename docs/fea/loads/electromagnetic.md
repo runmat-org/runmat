@@ -262,5 +262,37 @@ Inspect resolved terminal area and orientation, integrated current and charge co
 reference and return paths, gauge status, source phase/amplitude convention, skin-depth mesh
 adequacy, stored-energy and loss balance, and transferred force or heat resultants.
 
+## How do I specify RMS, peak, and phase for AC electrical excitation?
+
+State the amplitude convention used by the consuming harmonic procedure. If a catalog or test gives
+$I_{rms}$, convert to peak only when the procedure expects peak amplitude
+($I_{peak}=\sqrt{2}I_{rms}$ for a sinusoid). Preserve complex phase in the signal rather than
+encoding it in an unrelated sign or geometry orientation. Report the convention with current,
+voltage, loss, and force outputs so downstream thermal or structural coupling uses consistent power.
+
+## How do I model a coil with a known ampere-turn excitation?
+
+The closed source set accepts terminal current and current density; it does not turn an ampere-turn
+number into winding topology automatically. Represent the actual conductor turns or use an admitted
+stranded-coil constitutive source that owns turn count, winding direction, fill factor, and current.
+Until that first-class contract is available, do not enter $NI$ amperes as `electric_current`: that
+would change terminal-current resultant rather than describe winding linkage.
+
+## How do I drive an impedance or circuit-connected terminal?
+
+A prescribed voltage or current is only one side of a circuit relation. A resistor, complex
+impedance, power-electronics network, or external circuit needs a typed circuit/interface contract
+that relates terminal voltage and current. Do not prescribe both from separate loads unless they are
+mathematically compatible and the procedure explicitly treats one as control or measurement. For a
+reduced approximation, derive one source from the stated operating point and retain that derivation.
+
+## How do I verify an electromagnetic source after remeshing?
+
+Compare terminal area and orientation, integrated current or charge, source phase,
+reference/gauge ownership, magnetic/electric energy, and dissipated power. For coupled work, also
+compare transferred total heat, force, and moment. Current-density contours can change with edge
+resolution; the terminal resultant and global conservation law must remain within tolerance.
+
 Further reading: [electromagnetic constraints](../constraints/electromagnetic),
-[electromagnetic studies](../physics/electromagnetic), and [electrothermal analysis](../physics/electrothermal).
+[electromagnetic studies](../physics/electromagnetic), and
+[electrothermal analysis](../physics/electrothermal).
