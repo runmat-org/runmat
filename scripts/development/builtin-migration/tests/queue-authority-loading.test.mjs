@@ -103,6 +103,20 @@ test("recursive authority returns exact predecessor and seal capabilities", () =
   assert.equal(seal.reference.digest, accepted.reference.digest);
 });
 
+test("CLI resolves sibling state and checkpoint paths from the caller directory", () => {
+  const fixture = controlledFixture();
+  const files = writeInitialQueueAuthority(fixture);
+  const snapshot = loadQueueAuthorityFromCliPaths({
+    statePath: path.relative(process.cwd(), files.state),
+    checkpointPath: path.relative(process.cwd(), files.checkpoint),
+    trustedCheckpointDigest: fixture.queueCheckpointValue.digest,
+    control: fixture.control,
+  });
+
+  assert.equal(snapshot.observations.state.path, "state.json");
+  assert.equal(snapshot.observations.checkpoint.path, "checkpoint.json");
+});
+
 test("CLI paths cannot escape the state authority root", () => {
   const fixture = controlledFixture();
   const files = writeInitialQueueAuthority(fixture);
