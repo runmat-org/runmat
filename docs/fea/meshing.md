@@ -9,19 +9,82 @@ Meshing has four entry points:
 
 | Goal | Entry point |
 | --- | --- |
-| Generate, inspect, and display a mesh in RunMat code | `part = geometry.load(...); solverMesh = meshing.generate(part); mesh(solverMesh)` |
-| Generate canonical artifacts directly from a shell | `runmat mesh part.step` |
 | Mesh as part of an analysis | Declare `mesh <id> on geometry.<id>` in typed `.fea` source and run `runmat fea run study.fea` |
+| Generate canonical artifacts directly from a shell | `runmat mesh part.step` |
+| Generate, inspect, and display a mesh in RunMat code | `part = geometry.load(...); solverMesh = meshing.generate(part); mesh(solverMesh)` |
 | Integrate meshing into another host | Use the canonical meshing request, DAG, and execution-host APIs from Rust |
 
 The direct CLI and `.fea` paths import exact STEP, IGES, or Open CASCADE B-rep geometry. They
 require a RunMat build with the native Open CASCADE (OCCT) capability. Official native CLI and
 Desktop builds include it.
 
-## Quick Start
+## Quick start: mesh a study
 
-From RunMat code, load the source geometry with explicit units, inspect the admitted geometry, and
-generate a solver mesh:
+Create `bracket.fea` beside a `geometry` directory containing `bracket.step`:
+
+```fea
+geometry bracket {
+    file = "./geometry/bracket.step"
+    units = mm
+
+    region body : solid {
+        select id "solid_000001"
+        expect exactly_one
+    }
+}
+
+mesh bracket on geometry.bracket {
+    tetrahedra {
+        order = quadratic
+        target_size = 5 mm
+        maximum_deviation = 0.05 mm
+        maximum_grading_ratio = 1.3
+        deterministic_seed = 42
+    }
+}
+
+material aluminum {
+    mass_density = 2700 kg/m^3
+    elastic { youngs_modulus = 68.9 GPa poisson_ratio = 0.33 }
+}
+
+model bracket_model {
+    assign material.aluminum to geometry.bracket.region.body
+}
+
+study bracket_static {
+    geometry = geometry.bracket
+    mesh = mesh.bracket
+    model = model.bracket_model
+    formulation = experimental
+    analysis static { structural static {} }
+}
+```
+
+The geometry declaration admits exact CAD and gives its coordinates physical units. The mesh
+declaration says how to discretize that geometry. The study selects the mesh; material ownership is
+declared separately on the solid region. Check the complete source before running it:
+
+```sh
+runmat fea check bracket.fea
+runmat fea plan bracket.fea
+runmat fea run bracket.fea
+```
+
+`check` resolves modules, types, units, regions, and declaration contracts. `plan` reports the
+selected geometry, mesh, model, execution policy, and logical work. `run` materializes the exact
+geometry, generates or resolves the canonical solver mesh, compiles the model, and executes the
+admitted analysis graph.
+
+For a linear mesh, change only `order = linear`. Omit `maximum_grading_ratio` or
+`deterministic_seed` when their defaults are acceptable; the geometry, mesh, and model bindings
+remain required. The direct CLI and programmatic API expose a maximum-element admission cap; the
+current `.fea` mesh declaration does not.
+
+## Programmatic and advanced mesh inspection
+
+RunMat code is useful when you need to inspect topology and quality, display several region or
+section views, or process mesh arrays before constructing an analysis object:
 
 ```matlab
 part = geometry.load("bracket.step", "Units", "millimeter");
@@ -68,7 +131,7 @@ mesh(solverMesh, "Section", [1 0 0 -xMid], "Edges", true);
 
 The section vector is the plane `[a b c d]` in metres, with `a*x + b*y + c*z + d = 0`.
 
-### Inspect topology, quality, and evidence
+### Inspect topology, quality, and evidence from RunMat code
 
 The inspection functions return script-friendly data while preserving topology identifiers as
 typed `uint64` values:
@@ -119,32 +182,14 @@ Existing destinations are protected. Add `"Force", true` only for intentional re
 are staged before either destination is replaced, and a publication error rolls the pair back;
 `meshing.load` decodes both and rejects a mismatched or invalid pair.
 
-### Hand a mesh to FEA
+### Keep meshing and physical assignments separate
 
 Meshing owns geometry discretization and persistent regions. FEA owns materials, assignments,
 excitations, constraints, natural boundaries, solver configuration, fields, and result visualization:
 
 ```fea
-mesh bracket on geometry.bracket {
-    tetrahedra {
-        order = quadratic
-        target_size = 5 mm
-        maximum_deviation = 0.05 mm
-        maximum_grading_ratio = 1.3
-        deterministic_seed = 42
-    }
-}
-
 model bracket_model {
     assign material.steel to geometry.bracket.region.body
-}
-
-study bracket_static {
-    geometry = geometry.bracket
-    mesh = mesh.bracket
-    model = model.bracket_model
-    analysis static { structural static {} }
-    output stress = analysis.static.field.element.von_mises_stress
 }
 ```
 

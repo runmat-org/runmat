@@ -43,7 +43,9 @@ The `.fea` language is the authoring authority. Runtime objects expose geometry,
 | Materials, property assignment, conditions, and model composition | [Models](./models) |
 | Procedure sequences, state transfer, observations, and accuracy | [Study contracts](./study-contracts) |
 | Studies, sweeps, placement, and publication | [Solves](./solves) |
-| Physics-family and formulation status | [Physics families](./physics) and [Current status](./status) |
+| How to run each supported physics family | [Physics guides](./physics/) and [Current status](./status) |
+| Supports, prescribed values, coupling, contact, and interfaces | [Constraint guides](./constraints/) |
+| Loads, excitations, signals, and natural boundaries | [Load guides](./loads/) |
 | Result evidence, provenance, and trust | [Evidence](./evidence), [Validation](./validation), and [Trust](./trust) |
 | Runtime and host operation contracts | [Operation reference](./operation-reference) |
 
