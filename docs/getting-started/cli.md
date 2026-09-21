@@ -147,6 +147,8 @@ For `.fea` files, check loads geometry, resolves selectors, validates the study 
 
 FEA JSON mode returns structured validation and plan payloads for CI and tooling.
 
+See the [runmat check reference](/docs/runtime/getting-started/check) for worked diagnostics, project source examples, and guidance on using checks in automation.
+
 ## Pass Runtime Options
 
 Global options apply to the REPL, local scripts, and most commands.
