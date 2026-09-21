@@ -22,7 +22,7 @@ The typed language and native structural whole-study path cover these procedure 
 | `structural random_response` | statistical response from CPSD input | modal basis, named random excitation, damping/mass truncation |
 | `structural nonlinear` | load-factor nonlinear response | explicit load-factor domain and nonlinear formulation |
 
-Not every formulation/backend/scale combination in this table is production-qualified. A study must declare `require formulation = production` or `experimental`; admission and the result evidence are authoritative.
+Not every formulation, backend, and scale combination in this table is production-qualified. A study sets `formulation = experimental` when it intentionally admits an experimental formulation; omitted `formulation` means production is required. Admission and result evidence are authoritative.
 
 ## Other Typed Family Contracts
 

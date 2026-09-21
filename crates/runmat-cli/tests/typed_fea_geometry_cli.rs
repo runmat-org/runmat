@@ -205,7 +205,7 @@ study response {
     geometry = geometry.relieved
     mesh = mesh.volume
     model = model.structure
-    require formulation = experimental
+    formulation = experimental
     analysis solve {
         structural static {}
     }

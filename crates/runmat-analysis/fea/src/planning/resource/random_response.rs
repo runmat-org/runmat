@@ -236,7 +236,7 @@ impl StructuralRandomResponseResourceProjection {
         )?;
         let quadrature_values = add(
             multiply(
-                maximum_frequency_evaluation_count,
+                evaluations_per_interval,
                 response_value_count,
                 "random-response cached integrand values",
             )?,

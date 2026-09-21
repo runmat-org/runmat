@@ -51,7 +51,7 @@ study modal_response_spectrum_experimental {
     geometry = geometry.bracket
     mesh = mesh.bracket
     model = model.launch_bracket
-    require formulation = experimental
+    formulation = experimental
     analysis modes {
         structural modal { modes = 30 }
         retain basis

@@ -27,7 +27,7 @@ FEA root-selection options are `--study <id>` and `--sweep <id>`. `check`, `plan
 | `material <id> { ... }` | one or more physical capability properties required by its consumers |
 | `model <id> { ... }` | assignments, conditions, actions/signals, cases, properties, and composition |
 | `study <id> { ... }` | geometry, matching mesh, model, at least one analysis, and optional outputs/inputs/execution |
-| `sweep <id> : study.<id> { ... }` | axes with `product|zip`, or explicit cases |
+| `sweep <id> over study.<id> { ... }` | axes with `product|zip`, or explicit cases |
 | `execution <id> { ... }` | optional placement/resource/fan-out/cooperative/resilience preferences |
 
 See the [language reference](./language/) for exact syntax and operation signatures.

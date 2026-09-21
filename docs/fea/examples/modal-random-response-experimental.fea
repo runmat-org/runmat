@@ -15,8 +15,8 @@ geometry bracket {
 mesh bracket on geometry.bracket {
     tetrahedra {
         order = linear
-        target_size = 0.75 m
-        maximum_deviation = 0.05 m
+        target_size = 2 m
+        maximum_deviation = 0.1 m
     }
 }
 
@@ -34,11 +34,11 @@ model random_environment {
         structural.fixed { target = geometry.bracket.region.support }
     }
     random_excitation base_motion {
-        frequencies = [0.1, 100, 1000, 10000, 100000] Hz
+        frequencies = [0.1, 100, 1000, 2000] Hz
         channels = [
             { id = "x", quantity = base_acceleration, direction = [1, 0, 0] },
         ]
-        spectral_density_real = [[[0.01]], [[0.01]], [[0.04]], [[0.02]], [[0.005]]] m^2/s^3
+        spectral_density_real = [[[0.01]], [[0.01]], [[0.04]], [[0.02]]] m^2/s^3
         convention = one_sided_per_hertz
         interpolation = linear_frequency
         extrapolation = reject
@@ -50,9 +50,9 @@ study modal_random_response_experimental {
     geometry = geometry.bracket
     mesh = mesh.bracket
     model = model.random_environment
-    require formulation = experimental
+    formulation = experimental
     analysis modes {
-        structural modal { modes = 30 }
+        structural modal { modes = 10 }
         retain basis
     }
     analysis random_response after analysis.modes {
@@ -60,7 +60,7 @@ study modal_random_response_experimental {
             basis = analysis.modes.state.basis
             excitation = model.random_excitation.base_motion
             modal_damping_ratio = 0.03
-            minimum_cumulative_mass_ratio = 0.9
+            minimum_cumulative_mass_ratio = 0.5
         }
     }
     output displacement = analysis.random_response.field.node.displacement

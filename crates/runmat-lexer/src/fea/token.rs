@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 pub enum FeaKeyword {
     Import,
     From,
+    Over,
     Geometry,
     Mesh,
     Material,
@@ -55,6 +56,7 @@ impl FeaKeyword {
         Some(match value {
             "import" => Self::Import,
             "from" => Self::From,
+            "over" => Self::Over,
             "geometry" => Self::Geometry,
             "mesh" => Self::Mesh,
             "material" => Self::Material,

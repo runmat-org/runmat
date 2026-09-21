@@ -88,7 +88,7 @@ model impact {
                 duration = 6 ms
             }
             sample from 0 s to 50 ms at 100 kHz
-            interpolation = piecewise_linear
+            interpolation = linear
             extrapolation = reject
             tolerance = 1e-5 g
         }

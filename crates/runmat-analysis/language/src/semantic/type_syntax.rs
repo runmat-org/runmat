@@ -45,9 +45,9 @@ pub fn parse_type_syntax(source: &str) -> Result<FeaType, TypeSyntaxError> {
         return Err(TypeSyntaxError::InvalidParameterization(compact));
     }
     Ok(match compact.as_str() {
-        "boolean" | "bool" => FeaType::Boolean,
+        "boolean" => FeaType::Boolean,
         "integer" => FeaType::Integer,
-        "real" | "scalar" => FeaType::Real,
+        "real" => FeaType::Real,
         "complex" => FeaType::Complex,
         "string" => FeaType::String,
         "dimensionless" => FeaType::Quantity(PhysicalDimension::DIMENSIONLESS),
@@ -57,7 +57,7 @@ pub fn parse_type_syntax(source: &str) -> Result<FeaType, TypeSyntaxError> {
         "time" => FeaType::Quantity(PhysicalDimension::TIME),
         "frequency" => FeaType::Quantity(PhysicalDimension::FREQUENCY),
         "mass" => FeaType::Quantity(PhysicalDimension::MASS),
-        "density" | "mass_density" => FeaType::Quantity(PhysicalDimension::DENSITY),
+        "mass_density" => FeaType::Quantity(PhysicalDimension::DENSITY),
         "temperature" => FeaType::Quantity(PhysicalDimension::TEMPERATURE),
         "velocity" => FeaType::Quantity(PhysicalDimension::VELOCITY),
         "acceleration" => FeaType::Quantity(PhysicalDimension::ACCELERATION),
@@ -103,5 +103,15 @@ mod tests {
             parse_type_syntax("region<anything>"),
             Err(TypeSyntaxError::InvalidParameterization(_))
         ));
+    }
+
+    #[test]
+    fn rejects_retired_type_aliases() {
+        for retired in ["bool", "scalar", "density"] {
+            assert!(matches!(
+                parse_type_syntax(retired),
+                Err(TypeSyntaxError::Unknown(value)) if value == retired
+            ));
+        }
     }
 }

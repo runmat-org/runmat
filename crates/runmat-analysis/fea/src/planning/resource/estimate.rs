@@ -384,7 +384,11 @@ fn build_operator_resource_plan(
     if input.worker.maximum_wall_milliseconds
         > input.accuracy_ceiling.maximum_wall_time_milliseconds
     {
-        return Err(ResourcePlanningError::AccuracyCeiling("wall time"));
+        return Err(ResourcePlanningError::AccuracyCeiling {
+            resource: "wall time milliseconds",
+            required: input.worker.maximum_wall_milliseconds,
+            maximum: input.accuracy_ceiling.maximum_wall_time_milliseconds,
+        });
     }
     validate_accuracy_demand(&input, &demand.accuracy_demand, &demand.observations)?;
     let partition = partition_facts(
@@ -523,7 +527,11 @@ fn partition_facts(
     match partitioning {
         PartitioningPolicy::Monolithic => {
             if total_memory > input.accuracy_ceiling.maximum_resident_bytes {
-                return Err(ResourcePlanningError::AccuracyCeiling("resident memory"));
+                return Err(ResourcePlanningError::AccuracyCeiling {
+                    resource: "resident memory bytes",
+                    required: total_memory,
+                    maximum: input.accuracy_ceiling.maximum_resident_bytes,
+                });
             }
             Ok(PartitionFacts {
                 partitionable_memory: 0,
@@ -593,7 +601,11 @@ fn validate_common(input: &FeaResourcePlanningInput) -> Result<(), ResourcePlann
     if input.worker.maximum_wall_milliseconds
         > input.accuracy_ceiling.maximum_wall_time_milliseconds
     {
-        return Err(ResourcePlanningError::AccuracyCeiling("wall time"));
+        return Err(ResourcePlanningError::AccuracyCeiling {
+            resource: "wall time milliseconds",
+            required: input.worker.maximum_wall_milliseconds,
+            maximum: input.accuracy_ceiling.maximum_wall_time_milliseconds,
+        });
     }
     let mut accelerator_classes = std::collections::BTreeSet::new();
     for accelerator in &input.worker.accelerators {
@@ -867,13 +879,29 @@ fn validate_accuracy_demand(
     let samples = u64::try_from(input.accuracy_ceiling.maximum_samples)
         .map_err(|_| ResourcePlanningError::Overflow("accuracy sample ceiling"))?;
     if demand.refinement_cycles.0 > refinements {
-        return Err(ResourcePlanningError::AccuracyCeiling("refinement cycles"));
+        return Err(ResourcePlanningError::AccuracyCeiling {
+            resource: "refinement cycles",
+            required: demand.refinement_cycles.0,
+            maximum: refinements,
+        });
     }
     if demand.solver_tightenings.0 > tightenings {
-        return Err(ResourcePlanningError::AccuracyCeiling("solver tightenings"));
+        return Err(ResourcePlanningError::AccuracyCeiling {
+            resource: "solver tightenings",
+            required: demand.solver_tightenings.0,
+            maximum: tightenings,
+        });
     }
-    if demand.samples.0 > samples || observations.maximum_samples_per_observation.0 > samples {
-        return Err(ResourcePlanningError::AccuracyCeiling("samples"));
+    let required_samples = demand
+        .samples
+        .0
+        .max(observations.maximum_samples_per_observation.0);
+    if required_samples > samples {
+        return Err(ResourcePlanningError::AccuracyCeiling {
+            resource: "samples",
+            required: required_samples,
+            maximum: samples,
+        });
     }
     Ok(())
 }

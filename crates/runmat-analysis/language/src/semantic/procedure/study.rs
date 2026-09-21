@@ -134,26 +134,40 @@ fn formulation_requirement(
     declaration: &CheckedFeaDeclaration,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> FormulationRequirement {
-    let requirements = declaration
+    for statement in &declaration.statements {
+        if matches!(
+            &statement.kind,
+            crate::CheckedFeaStatementKind::Requirement { target, .. }
+                if target.as_slice() == ["formulation"]
+        ) {
+            lower::error(
+                declaration,
+                statement.span,
+                "study formulation uses `formulation = production` or `formulation = experimental`",
+                diagnostics,
+            );
+        }
+    }
+    let settings = declaration
         .statements
         .iter()
         .filter_map(|statement| {
-            let crate::CheckedFeaStatementKind::Requirement { target, value } = &statement.kind
+            let crate::CheckedFeaStatementKind::Assignment { target, value, .. } = &statement.kind
             else {
                 return None;
             };
             (target.as_slice() == ["formulation"]).then_some(value)
         })
         .collect::<Vec<_>>();
-    if requirements.len() > 1 {
+    if settings.len() > 1 {
         lower::error(
             declaration,
             declaration.span,
-            "study formulation requirement is declared more than once",
+            "study formulation is declared more than once",
             diagnostics,
         );
     }
-    let Some(value) = requirements.first() else {
+    let Some(value) = settings.first() else {
         return FormulationRequirement::Production;
     };
     match &value.kind {
@@ -167,7 +181,7 @@ fn formulation_requirement(
             lower::error(
                 declaration,
                 value.span,
-                "formulation requirement must be production or experimental",
+                "formulation must be `production` or `experimental`",
                 diagnostics,
             );
             FormulationRequirement::Production

@@ -158,7 +158,7 @@ model bracket(region body : region<solid>, region pad : region<face>) {
                 duration = 6 ms
             }
             sample from 0 s to 50 ms at 100 kHz
-            interpolation = piecewise_linear
+            interpolation = linear
             tolerance = 1e-5 g
         }
     }
@@ -237,7 +237,7 @@ study bracket_response {
     output metadata = { label = "response", enabled = true }
 }
 
-sweep service_envelope : study.bracket_response {
+sweep service_envelope over study.bracket_response {
     axis service_load {
         half_load = 0.5 kN
         nominal = 1.0 kN

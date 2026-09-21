@@ -1,0 +1,155 @@
+# Geometry, models, and assignments
+
+Geometry defines topology. A model assigns physical meaning to that topology. Keeping those roles
+separate allows one admitted CAD revision and mesh to support several material or loading studies.
+
+## Imported geometry and regions
+
+```fea
+geometry bracket {
+    file = "../examples/geometry/box.brep"
+    units = m
+
+    region body : solid {
+        select id "solid_000001"
+        expect exactly_one
+    }
+    region mounting_faces : face {
+        select tag "mounting"
+        expect one_or_more
+    }
+}
+```
+
+A region declares one topology role: `vertex`, `edge`, `face`, `solid`, or `cell`. Cardinality is
+stated separately with `expect exactly_one` or `expect one_or_more`; plural topology spellings are
+not accepted. Selectors may use exact inspected ids, persistent ids, imported names or tags,
+feature lineage, and governed geometric predicates. Ambiguity is an error, not a request to choose
+the first match.
+
+STEP is the preferred interchange format for exact CAD and product metadata. The compiler records
+which AP242 capabilities were actually found; a STEP schema label alone does not imply that
+parameters, materials, persistent ids, or writable regeneration are available.
+
+## Constructed and derived geometry
+
+The construction syntax defines an immutable feature graph:
+
+```fea
+geometry stock {
+    input width : length = 120 mm
+
+    construct {
+        feature body = box(width = input.width, depth = 80 mm, height = 12 mm)
+        feature hole = cylinder(
+            radius = 5 mm,
+            height = 12 mm,
+            axis = global([0, 0, 1]),
+            origin = [60, 40, 0] mm,
+        )
+        feature finished = subtract(feature.body, feature.hole)
+        result = feature.finished
+    }
+
+    region body : solid {
+        select result
+        expect exactly_one
+    }
+}
+```
+
+`geometry derived from geometry.source` creates another geometry revision with explicit lineage.
+It does not mutate its source. Parameter changes invalidate only the affected geometry and its
+downstream mesh, projection, operator, and result identities.
+
+## Mesh declarations
+
+```fea
+mesh bracket on geometry.bracket {
+    tetrahedra {
+        order = quadratic
+        target_size = 5 mm
+        maximum_deviation = 0.05 mm
+    }
+}
+```
+
+A mesh declaration contains discretization controls, not materials. The study must bind the same
+geometry for which the mesh was declared. Meshing resolves region provenance onto solver entities
+and publishes quality and construction evidence.
+
+## Materials and capability blocks
+
+```fea
+material aluminum {
+    name = "Aluminum 6061-T6"
+    mass_density = 2700 kg/m^3
+    elastic {
+        youngs_modulus = 68.9 GPa
+        poisson_ratio = 0.33
+    }
+}
+```
+
+Material blocks are capability aggregates. A consuming analysis determines which capabilities are
+required. Static elasticity needs compatible stiffness; structural dynamics also needs mass.
+Thermal, electrical, magnetic, acoustic, and fluid properties remain typed capabilities on the
+material rather than entries in an unstructured property map.
+
+## Assign physical ownership
+
+```fea
+model bracket {
+    assign material.aluminum to geometry.bracket.region.body
+
+    constraint fixed_support {
+        structural.fixed { target = geometry.bracket.region.mounting_faces }
+    }
+}
+```
+
+Bulk materials belong to solid or cell regions. Beam sections belong to edge regions; shell
+sections and layups belong to face regions. Orientations have their own assignment. A boundary face
+does not own the bulk material of the solid behind it.
+
+Before assembly, RunMat compiles these declarations into one canonical property map bound to the
+exact geometry revision, topology digest, and solver elements. Missing coverage, overlapping
+owners, an incompatible material capability, a stale topology reference, or a target with the
+wrong role fails before a solver chooses coefficients.
+
+## Loads, constraints, and excitations
+
+Known static loads may use the direct form:
+
+```fea
+load service_force {
+    force on geometry.bracket.region.mounting_faces = [0, -1, 0] kN
+}
+```
+
+Time- or frequency-dependent input separates the physical signal from its application:
+
+```fea
+signal pulse : force over time {
+    samples = [
+        { at = 0 s, value = 0 N },
+        { at = 10 ms, value = 1 kN },
+        { at = 20 ms, value = 0 N },
+    ]
+    interpolation = linear
+    extrapolation = reject
+}
+
+excitation impact {
+    force {
+        target = geometry.bracket.region.mounting_faces
+        signal = signal.pulse
+        direction = global([0, -1, 0])
+        kinematics = fixed_frame
+    }
+}
+```
+
+The signal owns quantity, independent domain, samples, and interpolation. The excitation owns the
+target, direction, frame, distribution, and kinematics. This split is also what lets the Desktop
+preview show the exact target and function or magnitude attached to it.

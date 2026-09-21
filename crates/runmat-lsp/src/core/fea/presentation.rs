@@ -160,6 +160,7 @@ pub(super) const fn import_kind_name(kind: FeaImportKind) -> &'static str {
 pub(super) const KEYWORDS: &[&str] = &[
     "import",
     "from",
+    "over",
     "geometry",
     "mesh",
     "material",
@@ -204,4 +205,4 @@ pub(super) const KEYWORDS: &[&str] = &[
     "random_excitation",
 ];
 
-const _: [(); KEYWORDS.len()] = [(); 44];
+const _: [(); KEYWORDS.len()] = [(); 45];

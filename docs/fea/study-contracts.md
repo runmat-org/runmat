@@ -17,6 +17,40 @@ The objects are immutable and portable. A sequence authored in RunMat code seria
 same solver-neutral analysis contract used by a `.fea` document, a local process, or a cluster
 job. Execution placement may change without changing the sequence identity or physical meaning.
 
+## Source authoring and the object API
+
+Most studies should be authored as `.fea` source. The source compiler constructs the sequence,
+procedure steps, state transfers, observations, and placement policy described on this page. The
+RunMat object API is useful when a program must construct those contracts dynamically; it is not a
+second study format.
+
+For example, a source study binds the physical model and declares its procedure and outputs
+directly:
+
+```fea
+study bracket_static {
+    geometry = geometry.bracket
+    mesh = mesh.bracket
+    model = model.loaded_bracket
+    formulation = experimental
+
+    analysis static {
+        structural static {}
+    }
+
+    output displacement = analysis.static.field.node.displacement
+    output von_mises = analysis.static.field.element.von_mises_stress
+    output peak_von_mises = max(
+        output.von_mises,
+        over = geometry.bracket.region.body,
+    )
+}
+```
+
+The corresponding object constructors below expose the canonical contract in more detail. See the
+[`.fea` language guide](./language) when editing a study file and use this page when you need the
+exact sequence, observation, accuracy, or restart objects.
+
 ## Complete Static Sequence
 
 The following extends a model whose geometry, material, fixed constraint, force signal, and force
@@ -136,6 +170,25 @@ object that was not active upstream.
 
 ## State Transfer and Branching
 
+In `.fea` source, ordering and typed state consumption are separate and both are visible:
+
+```fea
+analysis modes {
+    structural modal { modes = 30 }
+    retain basis
+}
+
+analysis response after analysis.modes {
+    structural modal_harmonic {
+        basis = analysis.modes.state.basis
+        frequencies = [20, 50, 100] Hz
+    }
+}
+```
+
+The compiler derives the canonical dependency and transition records. Authors do not write
+internal lifecycle or scheduler records into the file.
+
 `fea.StateOutput.new(id, kind, completeness, persistence)` declares immutable state published by a
 step. State kinds include structural primary and kinematic state, stress/strain and material or
 contact history, geometric stiffness, thermal and fluid state, static or complex electromagnetic
@@ -192,6 +245,33 @@ A checkpoint id alone is insufficient. The required state digest prevents a chec
 different model, sequence, topology, or state from being accepted accidentally.
 
 ## Observation Requests
+
+In `.fea` source, named outputs are the observation-authoring surface. A field path fixes the
+producer, physical quantity, and native location; an operation records any projection, recovery,
+sampling, or reduction:
+
+```fea
+output displacement = analysis.static.field.node.displacement
+output displacement_magnitude = magnitude(output.displacement)
+output peak_displacement = max(
+    output.displacement_magnitude,
+    over = geometry.bracket.region.body,
+)
+```
+
+Use an output block when sampling or retention policy is needed:
+
+```fea
+output tip_history {
+    value = sample(
+        analysis.response.field.node.displacement,
+        over = time,
+        at = [0 s, 10 ms, 20 ms],
+    )
+    retention = explicit_samples
+    maximum_samples = 3
+}
+```
 
 The four analysis observation forms share one explicit signature:
 
@@ -471,6 +551,23 @@ transfer. `mesh` displays geometry or solver topology and does not assign materi
 analysis region.
 
 ## Local, GPU, and Cluster Execution
+
+Source studies refer to an optional execution declaration. Cluster endpoints, credentials, and
+trust material remain project or CLI configuration:
+
+```fea
+execution qualification {
+    backend = auto
+    resources {
+        workers = 2..32
+        memory_per_worker <= 32 GiB
+        accelerators = preferred
+    }
+    fanout {
+        sweep_cases = 8
+    }
+}
+```
 
 Sequence, observation, and accuracy objects contain no host paths, device handles, worker ids, or
 live callbacks. Planning converts the validated semantic sequence into execution tasks and selects

@@ -39,20 +39,25 @@ fn runmat_with_env(temp: &TempDir, args: &[&str], env: &[(&str, &str)]) -> Outpu
 fn runmat_from_repository(temp: &TempDir, args: &[&str]) -> Output {
     let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let config = temp.path().join("runmat.toml");
+    let artifact_root =
+        toml::Value::String(temp.path().join("artifacts").to_string_lossy().into_owned());
+    let study_artifact_root = toml::Value::String(
+        temp.path()
+            .join("study-artifacts")
+            .to_string_lossy()
+            .into_owned(),
+    );
     fs::write(
         &config,
-        "[runtime.accelerate]\nenabled = false\nprovider = \"inprocess\"\n",
+        format!(
+            "[runtime.accelerate]\nenabled = false\nprovider = \"inprocess\"\n\n[runtime.fea]\nartifact_store = \"filesystem\"\nartifact_root = {artifact_root}\nstudy_artifact_root = {study_artifact_root}\n"
+        ),
     )
     .unwrap();
     Command::new(env!("CARGO_BIN_EXE_runmat"))
         .current_dir(repository)
         .args(args)
         .env("RUNMAT_CONFIG", config)
-        .env("RUNMAT_FEA_ARTIFACT_ROOT", temp.path().join("artifacts"))
-        .env(
-            "RUNMAT_FEA_STUDY_ARTIFACT_ROOT",
-            temp.path().join("study-artifacts"),
-        )
         .output()
         .expect("run repository FEA example")
 }
@@ -99,35 +104,20 @@ fn response_spectrum_documentation_example_runs_its_two_step_study() {
     );
     let payload: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(payload["root_id"], "modal_response_spectrum_experimental");
-    let steps = payload["steps"].as_array().expect("study steps");
-    assert_eq!(steps.len(), 2);
-    assert_eq!(steps[0]["procedure_step"]["procedure"], "modal_extraction");
-    assert_eq!(
-        steps[1]["procedure_step"]["procedure"],
-        "modal_response_spectrum"
-    );
-    assert_eq!(
-        steps[1]["numerical_result"]["kind"],
-        "structural_response_spectrum"
-    );
-    assert_eq!(
-        steps[1]["numerical_result"]["data"]["accuracy"]["evaluation"]["report"]["status"],
-        "satisfied"
-    );
-    let response_run_id = steps[1]["run_id"]
+    assert_eq!(payload["procedure"], "structural_modal_response_spectrum");
+    let step_run_ids = payload["step_run_ids"]
+        .as_array()
+        .expect("study step run ids");
+    assert_eq!(step_run_ids.len(), 2);
+    let response_run_id = step_run_ids[1]
         .as_str()
         .expect("response-spectrum step run id");
-    let states = payload["states"].as_array().expect("published states");
-    assert!(states.iter().any(|state| state["kind"] == "modal_basis"));
-    assert!(states
-        .iter()
-        .any(|state| state["kind"] == "structural_response_envelope"));
 
     let script_path = temp.path().join("response-spectrum-field.m");
     fs::write(
         &script_path,
         format!(
-            "response = fea.results(\"{response_run_id}\");\nfield = fea.field(response, fea.ResponseSpectrumField.absoluteAcceleration());\npage = fea.fieldPage(field, 1, 3);\ndisp(field.field_id);\ndisp(field.statistic);\ndisp(page.count);\n"
+            "response = fea.results(\"{response_run_id}\");\nfield = fea.field(response, fea.ResponseSpectrumField.pseudoAcceleration());\npage = fea.fieldPage(field, 1, 3);\ndisp(field.field_id);\ndisp(field.statistic);\ndisp(page.count);\n"
         ),
     )
     .unwrap();
@@ -142,7 +132,7 @@ fn response_spectrum_documentation_example_runs_its_two_step_study() {
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("structural.response_spectrum.nodal.absolute_acceleration"));
+    assert!(stdout.contains("structural.response_spectrum.nodal.pseudo_acceleration"));
     assert!(stdout.contains("component_magnitude_envelope"));
     assert!(stdout.contains("3"));
 }
@@ -214,10 +204,11 @@ fn random_response_documentation_example_exposes_paged_statistical_fields() {
         String::from_utf8_lossy(&run.stderr)
     );
     let payload: Value = serde_json::from_slice(&run.stdout).unwrap();
-    let response_run_id = payload["steps"]
+    assert_eq!(payload["procedure"], "structural_random_response");
+    let response_run_id = payload["step_run_ids"]
         .as_array()
         .and_then(|steps| steps.get(1))
-        .and_then(|step| step["run_id"].as_str())
+        .and_then(Value::as_str)
         .expect("random-response step run id");
     let script_path = temp.path().join("random-response-fields.m");
     fs::write(

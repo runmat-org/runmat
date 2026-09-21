@@ -117,7 +117,7 @@ fn portable_interval_tasks_are_grouping_invariant_and_bind_receipt() {
     )
     .unwrap();
 
-    let one = execute_with_group_size(
+    let (one, one_task_workspace) = execute_with_group_size(
         &model,
         &response,
         &mesh,
@@ -126,7 +126,7 @@ fn portable_interval_tasks_are_grouping_invariant_and_bind_receipt() {
         transition.clone(),
         1,
     );
-    let grouped = execute_with_group_size(
+    let (grouped, grouped_task_workspace) = execute_with_group_size(
         &model,
         &response,
         &mesh,
@@ -136,6 +136,7 @@ fn portable_interval_tasks_are_grouping_invariant_and_bind_receipt() {
         2,
     );
     assert_eq!(one.numerical(), grouped.numerical());
+    assert_eq!(one_task_workspace, grouped_task_workspace);
 
     let generic_workload = AnalysisWorkloadIdentity::for_test("modal-random").unwrap();
     let receipt =
@@ -197,7 +198,7 @@ fn execute_with_group_size(
     basis_state: &CanonicalSemanticState,
     transition: CanonicalStateTransition,
     maximum_intervals_per_task: usize,
-) -> StructuralRandomResponseSolverResult {
+) -> (StructuralRandomResponseSolverResult, u64) {
     let workload = StructuralRandomResponseWorkload::new(StructuralRandomResponseWorkloadInput {
         model: model.clone(),
         step_id: response.step_id.clone(),
@@ -225,6 +226,7 @@ fn execute_with_group_size(
             .unwrap(),
         scope
     );
+    let mut task_workspace_bytes = None;
     let mut tasks = (0..scope.task_ranges().len())
         .map(|ordinal| {
             let request =
@@ -265,6 +267,10 @@ fn execute_with_group_size(
                 demand.linear_field_value_count.0 + demand.physical_dof_count.0,
                 demand.response_value_count.0
             );
+            match task_workspace_bytes {
+                Some(expected) => assert_eq!(plan.breakdown.workspace_bytes.0, expected),
+                None => task_workspace_bytes = Some(plan.breakdown.workspace_bytes.0),
+            }
             assert_eq!(
                 FeaResourcePlan::from_canonical_bytes(&plan.canonical_bytes().unwrap()).unwrap(),
                 plan
@@ -351,7 +357,10 @@ fn execute_with_group_size(
         .unwrap(),
         result
     );
-    result
+    (
+        result,
+        task_workspace_bytes.expect("random-response task workspace"),
+    )
 }
 
 fn prepared_inputs() -> PreparedInputResourceFacts {

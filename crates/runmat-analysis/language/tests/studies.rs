@@ -64,7 +64,7 @@ study response {{
         runmat_analysis_core::FormulationRequirement::Production
     );
 
-    let experimental = check(&study("require formulation = experimental"));
+    let experimental = check(&study("formulation = experimental"));
     assert!(experimental.is_valid(), "{:#?}", experimental.diagnostics);
     let authored = experimental.studies.values().next().unwrap();
     assert_eq!(
@@ -85,11 +85,14 @@ study response {{
         runmat_analysis_core::FormulationRequirement::Experimental
     );
 
-    let invalid = check(&study("require formulation = preview"));
+    let invalid = check(&study("formulation = preview"));
     assert!(!invalid.is_valid());
     assert!(invalid.diagnostics.iter().any(|diagnostic| diagnostic
         .message
-        .contains("must be production or experimental")));
+        .contains("must be `production` or `experimental`")));
+
+    let retired_spelling = check(&study("require formulation = experimental"));
+    assert!(!retired_spelling.is_valid());
 }
 
 #[test]

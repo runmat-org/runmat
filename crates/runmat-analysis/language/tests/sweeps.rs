@@ -51,7 +51,7 @@ fn axis_sweeps_expand_product_and_zip_with_stable_case_identities() {
     let product = check(&format!(
         "{STUDY}\n{}",
         r#"
-sweep envelope : study.response {
+sweep envelope over study.response {
     axis load {
         half = 0.5 kN
         full = 1 kN
@@ -65,6 +65,7 @@ sweep envelope : study.response {
     output governing = max(case.output.peak_displacement.value, over = cases)
     output fields = retain_each(case.output.displacement)
 }
+
 "#
     ));
     assert!(product.is_valid(), "{:#?}", product.diagnostics);
@@ -86,7 +87,7 @@ sweep envelope : study.response {
     let zipped = check(&format!(
         "{STUDY}\n{}",
         r#"
-sweep envelope : study.response {
+sweep envelope over study.response {
     axis load {
         half = 0.5 kN
         full = 1 kN
@@ -113,11 +114,23 @@ sweep envelope : study.response {
 }
 
 #[test]
+fn sweep_relationship_uses_the_explicit_over_keyword() {
+    let retired_spelling = check(&format!(
+        "{STUDY}\nsweep envelope : study.response {{ case nominal {{ load = 1 kN }} }}"
+    ));
+    assert!(!retired_spelling.is_valid());
+    assert!(retired_spelling
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.message.contains("after `over`")));
+}
+
+#[test]
 fn explicit_cases_use_defaults_and_reject_missing_or_invalid_required_inputs() {
     let valid = check(&format!(
         "{STUDY}\n{}",
         r#"
-sweep qualification : study.response {
+sweep qualification over study.response {
     case nominal {
         load = 1 kN
     }
@@ -143,7 +156,7 @@ sweep qualification : study.response {
          combine = zip",
     ] {
         let invalid = check(&format!(
-            "{STUDY}\nsweep invalid : study.response {{\n{body}\n}}"
+            "{STUDY}\nsweep invalid over study.response {{\n{body}\n}}"
         ));
         assert!(!invalid.is_valid(), "invalid sweep was accepted: {body}");
     }
@@ -182,7 +195,7 @@ study response {
     model = model.structure
     analysis static { structural static {} }
 }
-sweep sizes : study.response {
+sweep sizes over study.response {
     axis stock_width {
         narrow = 0.75 m
         wide = 1.5 m

@@ -371,7 +371,7 @@ geometry part {
         select name "Part body"
         expect exactly_one
     }
-    region mounting_faces : faces {
+    region mounting_faces : face {
         select tag "mount"
         expect one_or_more
     }

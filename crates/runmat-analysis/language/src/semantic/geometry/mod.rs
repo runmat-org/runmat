@@ -526,11 +526,11 @@ fn source_format(path: &str) -> Option<GeometrySourceFormat> {
 
 fn region_role(value: &str) -> Option<GeometryRegionRole> {
     Some(match value {
-        "vertex" | "vertices" => GeometryRegionRole::Vertex,
-        "edge" | "edges" => GeometryRegionRole::Edge,
-        "face" | "faces" => GeometryRegionRole::Face,
-        "solid" | "solids" => GeometryRegionRole::Solid,
-        "cell" | "cells" => GeometryRegionRole::Cell,
+        "vertex" => GeometryRegionRole::Vertex,
+        "edge" => GeometryRegionRole::Edge,
+        "face" => GeometryRegionRole::Face,
+        "solid" => GeometryRegionRole::Solid,
+        "cell" => GeometryRegionRole::Cell,
         _ => return None,
     })
 }

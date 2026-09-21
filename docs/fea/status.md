@@ -38,7 +38,7 @@ Thermal, acoustic, electromagnetic, fluid, thermo-mechanical, electro-thermal, c
 
 The repository contains substantial structural operator, formulation, observation, history, restart, modal, frequency, spectrum, random-response, property, recovery, local/remote, and result-publication evidence. Production status remains per formulation and per execution envelope. Open gates include the items recorded by the release evidence and validation documentation, including broader independent references and convergence, exact restart state where required, distributed-value redistribution/cooperative solves, release-hardware accelerator evidence, and closure of recorded result/recovery defects.
 
-Do not infer production suitability from a successful experimental run. The study's `require formulation = ...` declaration and the resulting numerical/evidence receipts are authoritative.
+Do not infer production suitability from a successful experimental run. The study's `formulation` setting and the resulting numerical and evidence receipts are authoritative.
 
 ## Meshing Boundary
 

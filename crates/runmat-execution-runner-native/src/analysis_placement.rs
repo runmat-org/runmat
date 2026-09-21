@@ -164,9 +164,10 @@ pub async fn execute_structural_workloads_locally(
             "local accelerator allocation differs from the immutable study root".into(),
         ));
     }
-    let maximum_wall_millis = workloads
+    let authored_model = workloads
         .authored_model()
-        .map_err(|error| crate::NativeExecutionError::Configuration(error.to_string()))?
+        .map_err(|error| crate::NativeExecutionError::Configuration(error.to_string()))?;
+    let maximum_wall_millis = authored_model
         .sequence
         .steps
         .iter()
@@ -177,14 +178,27 @@ pub async fn execute_structural_workloads_locally(
                 "prepared structural study has no workloads".into(),
             )
         })?;
+    let maximum_resident_bytes = authored_model
+        .sequence
+        .steps
+        .iter()
+        .map(|step| step.accuracy.resources.maximum_resident_bytes)
+        .max()
+        .ok_or_else(|| {
+            crate::NativeExecutionError::Configuration(
+                "prepared structural study has no workloads".into(),
+            )
+        })?;
     let mut required_capabilities = BTreeSet::new();
     required_capabilities.insert(Capability::ProcessIsolation);
     execution_config.max_workers = workers.max(1);
+    execution_config.worker_memory_bytes = maximum_resident_bytes;
+    execution_config.worker_scratch_bytes = maximum_resident_bytes;
     let policy = StructuralSequenceExecutionPolicy {
         resources: ResourceRequest {
             cpu_millicores: 1_000,
-            memory_bytes: 1024 * 1024 * 1024,
-            scratch_bytes: 1024 * 1024 * 1024,
+            memory_bytes: maximum_resident_bytes,
+            scratch_bytes: maximum_resident_bytes,
             max_wall_millis: maximum_wall_millis,
             max_artifact_bytes: ObjectInventoryLimits::default().max_total_bytes,
             max_egress_bytes: 0,

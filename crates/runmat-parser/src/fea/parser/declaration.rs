@@ -146,7 +146,7 @@ impl FeaParser {
                 .is_some_and(|index| self.at(*index, FeaTokenKind::Keyword(FeaKeyword::From))),
             FeaDeclarationKind::Sweep => header
                 .first()
-                .is_some_and(|index| self.at(*index, FeaTokenKind::Colon)),
+                .is_some_and(|index| self.at(*index, FeaTokenKind::Keyword(FeaKeyword::Over))),
             _ => false,
         };
         if !prefix_matches {
@@ -161,7 +161,9 @@ impl FeaParser {
                     FeaDeclarationKind::Geometry => {
                         "expected a geometry reference after `from`".to_string()
                     }
-                    FeaDeclarationKind::Sweep => "expected a study reference after `:`".to_string(),
+                    FeaDeclarationKind::Sweep => {
+                        "expected a study reference after `over`".to_string()
+                    }
                     _ => unreachable!(),
                 },
             });

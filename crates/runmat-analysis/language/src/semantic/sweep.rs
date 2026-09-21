@@ -105,7 +105,7 @@ fn lower_sweep(
     let Some(source) = source else {
         error(
             declaration,
-            "sweep header must reference an available `study.<name>` after `:`",
+            "sweep header must reference an available `study.<name>` after `over`",
             diagnostics,
         );
         return None;

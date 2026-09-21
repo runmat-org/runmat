@@ -1,38 +1,122 @@
-# The `.fea` Language
+# The `.fea` language
 
-A `.fea` source file declares engineering-analysis intent. The language has its own lossless parser, formatter, type checker, unit system, module graph, semantic diagnostics, and editor support. RunMat lowers a valid source graph into canonical geometry, meshing, model, procedure, output, sweep, and execution contracts before any expensive work starts.
+A `.fea` file defines an engineering analysis in source form. It names the geometry, regions,
+mesh, material behavior, applied conditions, analysis sequence, requested results, and—when
+needed—how independent work may be placed. RunMat checks those declarations before it starts CAD
+translation, meshing, or a solver.
 
-The main declarations are:
+The language is declarative. It has typed declarations and expressions, physical quantities with
+units, immutable references, and explicit imports. General computation remains in `.m` functions;
+a `.fea` module can import one of those functions by file and use it through a bounded signal or
+geometry-generation contract.
 
-| Declaration | Owns |
+## The object model
+
+Seven top-level declarations divide the study into parts with clear ownership:
+
+| Declaration | What it defines |
 | --- | --- |
-| `geometry` | imported, constructed, derived, or `.m`-generated exact geometry and named topology regions |
-| `mesh` | solver-mesh family and meshing controls for one geometry |
-| `material` | typed constitutive properties |
-| `model` | material/property assignments, conditions, loads, signals, excitation cases, and reusable composition |
-| `study` | one geometry, mesh, model, ordered analyses, inputs, outputs, and optional execution policy |
-| `sweep` | an axis product, zipped axes, or explicit cases over one study |
-| `execution` | optional placement, resource, fan-out, cooperative partitioning, and resilience preferences |
+| `geometry` | An imported, constructed, derived, or generated geometric model and its named regions |
+| `mesh` | A meshing request for one geometry |
+| `material` | Constitutive properties and their physical capabilities |
+| `model` | Property assignments, constraints, loads, signals, excitations, interfaces, and initial conditions |
+| `study` | One bound geometry, mesh, model, ordered analysis sequence, inputs, and outputs |
+| `sweep` | Named input cases over one study |
+| `execution` | Optional placement, resource, fan-out, partitioning, and resilience preferences |
 
-Imports are explicit and symbol-specific. There is no file-wide include, hidden template, implicit default model, lifecycle switch, or schema version preamble.
+The declarations are peers. A study refers to a model; the model is not nested inside the study.
+This lets several studies reuse one physical model without copying it. Nesting is reserved for
+objects owned by a declaration, such as regions inside geometry and loads inside a model.
 
-## Reference
+## A first checked study
 
-- [Syntax, names, units, and modules](./syntax-and-modules)
-- [Geometry, regions, meshes, materials, and models](./geometry-and-models)
-- [Studies, analyses, sweeps, and execution](./studies-sweeps-and-execution)
-- [RunMat functions, generated inputs, and outputs](./functions-and-outputs)
+The smallest useful structural example still states its physical ownership explicitly:
 
-The checked examples under [`docs/fea/examples`](../examples) are part of the documentation contract. `runmat fea check` validates them in the release workflow.
+```fea
+geometry bracket {
+    file = "../examples/geometry/box.brep"
+    units = m
 
-## Compiler Stages
+    region body : solid {
+        select id "solid_000001"
+        expect exactly_one
+    }
+    region support : face {
+        select id "face_000001"
+        expect exactly_one
+    }
+    region load_face : face {
+        select id "face_000002"
+        expect exactly_one
+    }
+}
 
-`runmat fea check` performs these stages without meshing or solving:
+mesh bracket on geometry.bracket {
+    tetrahedra {
+        order = linear
+        target_size = 0.75 m
+        maximum_deviation = 0.05 m
+    }
+}
 
-1. Parse the root module and its exact imports.
-2. Bind declarations and qualified references.
-3. Resolve physical types, units, topology roles, and imported `.m` signatures.
-4. Validate geometry lineage, property coverage intent, procedure state flow, output expressions, sweeps, and optional execution policy.
-5. Produce a typed root inventory and canonical logical plan.
+material steel {
+    mass_density = 7850 kg/m^3
+    elastic {
+        youngs_modulus = 200 GPa
+        poisson_ratio = 0.3
+    }
+}
 
-Unavailable project facts produce an incomplete check, not runnable success. Syntax, type, unit, topology, or contract errors produce an invalid check. Only a valid selected study or sweep can run.
+model loaded_bracket {
+    assign material.steel to geometry.bracket.region.body
+
+    constraint fixed_support {
+        structural.fixed { target = geometry.bracket.region.support }
+    }
+    load service_force {
+        force on geometry.bracket.region.load_face = [0, -1, 0] kN
+    }
+    load_case service { include load.service_force }
+}
+
+study bracket_static {
+    geometry = geometry.bracket
+    mesh = mesh.bracket
+    model = model.loaded_bracket
+    formulation = experimental
+
+    analysis static { structural static {} }
+
+    output displacement = analysis.static.field.node.displacement
+    output von_mises = analysis.static.field.element.von_mises_stress
+}
+```
+
+The checked-in copy is
+[`structural-static-experimental.fea`](../examples/structural-static-experimental.fea). From the
+repository root:
+
+```sh
+runmat fea check docs/fea/examples/structural-static-experimental.fea
+runmat fea plan docs/fea/examples/structural-static-experimental.fea
+runmat fea run docs/fea/examples/structural-static-experimental.fea
+```
+
+`check` resolves imports and performs source and semantic checking. `plan` selects a study or sweep
+and reports the logical work without doing it. `run` materializes geometry and mesh, validates the
+realized model, executes the admitted numerical work, and publishes results and evidence.
+
+## Read next
+
+- [Files, modules, and imports](./files-modules-and-imports)
+- [Types, units, and expressions](./types-units-and-expressions)
+- [Geometry, models, and assignments](./geometry-models-and-assignments)
+- [Studies, analyses, and state](./studies-analyses-and-state)
+- [Inputs, sweeps, and cases](./inputs-sweeps-and-cases)
+- [Outputs, fields, and observations](./outputs-fields-and-observations)
+- [Execution, parallel work, and distributed work](./execution-parallel-and-distributed)
+- [RunMat function integration](./runmat-function-integration)
+- [Diagnostics and tooling](./diagnostics-and-tooling)
+
+Use the [first static study guide](./guides/first-static-study) for a complete task and the
+[declaration reference](./reference/declarations) for exact field rules.

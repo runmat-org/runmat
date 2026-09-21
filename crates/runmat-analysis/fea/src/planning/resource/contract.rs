@@ -1043,8 +1043,14 @@ pub enum ResourcePlanningError {
     Invalid(String),
     #[error("FEA resource arithmetic overflow: {0}")]
     Overflow(&'static str),
-    #[error("accuracy resource ceiling exceeded: {0}")]
-    AccuracyCeiling(&'static str),
+    #[error(
+        "accuracy resource ceiling exceeded for {resource}: requires {required}, maximum {maximum}"
+    )]
+    AccuracyCeiling {
+        resource: &'static str,
+        required: u64,
+        maximum: u64,
+    },
     #[error("worker inventory is insufficient: {0}")]
     Inventory(&'static str),
     #[error("worker lacks required capability `{0:?}`")]

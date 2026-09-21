@@ -53,7 +53,7 @@ geometry rounded_block {
         )
         result = feature.rounded
     }
-    region stock_edges : edges {
+    region stock_edges : edge {
         select feature.stock
         expect one_or_more
     }

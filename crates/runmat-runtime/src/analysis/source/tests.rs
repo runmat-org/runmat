@@ -94,7 +94,7 @@ study static {
     geometry = geometry.part
     mesh = mesh.volume
     model = model.structure
-    require formulation = experimental
+    formulation = experimental
     analysis solve {
         structural static {}
     }
@@ -441,7 +441,7 @@ study static {
     geometry = geometry.part
     mesh = mesh.volume
     model = model.structure
-    require formulation = experimental
+    formulation = experimental
     analysis solve { structural static {} }
     output displacement = analysis.solve.field.node.displacement
 }

@@ -66,7 +66,7 @@ study response {
         }
     }
 }
-sweep loads : study.response {
+sweep loads over study.response {
     axis load {
         low = 0.5 kN
         high = 1.5 kN

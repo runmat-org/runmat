@@ -101,11 +101,12 @@ impl LocalDriver {
             .map_err(NativeExecutionError::Configuration)?;
         let pool_id = PoolId::derive(&[scope_id.bytes(), b"local"]);
         let cpu = config.max_workers.saturating_mul(1000);
-        let memory = u64::from(config.max_workers).saturating_mul(1024 * 1024 * 1024);
+        let memory = u64::from(config.max_workers).saturating_mul(config.worker_memory_bytes);
+        let scratch = u64::from(config.max_workers).saturating_mul(config.worker_scratch_bytes);
         let resources = ResourceInventory {
             cpu_millicores: cpu,
             memory_bytes: memory,
-            scratch_bytes: memory,
+            scratch_bytes: scratch,
             accelerators: config.worker_accelerators.clone(),
             capabilities: config.worker_capabilities.clone(),
         };
@@ -133,8 +134,8 @@ impl LocalDriver {
                 pool_id,
                 resources: ResourceInventory {
                     cpu_millicores: 1000,
-                    memory_bytes: 1024 * 1024 * 1024,
-                    scratch_bytes: 1024 * 1024 * 1024,
+                    memory_bytes: config.worker_memory_bytes,
+                    scratch_bytes: config.worker_scratch_bytes,
                     accelerators: config.worker_accelerators.clone(),
                     capabilities: config.worker_capabilities.clone(),
                 },

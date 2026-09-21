@@ -56,7 +56,7 @@ study structural_static_experimental {
     geometry = geometry.bracket
     mesh = mesh.bracket
     model = model.loaded_bracket
-    require formulation = experimental
+    formulation = experimental
     analysis static { structural static {} }
     output displacement = analysis.static.field.node.displacement
     output von_mises = analysis.static.field.element.von_mises_stress
@@ -167,7 +167,7 @@ input damping : real = 0.02
 Then define axes or named cases:
 
 ```fea
-sweep envelope : study.response {
+sweep envelope over study.response {
     axis service_load {
         nominal = 1 kN
         proof = 2 kN

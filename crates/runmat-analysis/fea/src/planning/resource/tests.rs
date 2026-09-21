@@ -770,7 +770,11 @@ fn accuracy_ceiling_is_enforced_before_inventory_admission() {
     assert!(matches!(
         admit_resource_plan(memory, &inventory(10_000, 10_000)),
         ResourceAdmission::Reject {
-            reason: ResourcePlanningError::AccuracyCeiling("resident memory")
+            reason: ResourcePlanningError::AccuracyCeiling {
+                resource: "resident memory bytes",
+                required: _,
+                maximum: 1_000,
+            }
         }
     ));
 
@@ -778,7 +782,11 @@ fn accuracy_ceiling_is_enforced_before_inventory_admission() {
     operator_mut(&mut samples).accuracy_demand.samples = Count(5);
     assert!(matches!(
         build_resource_plan(samples),
-        Err(ResourcePlanningError::AccuracyCeiling("samples"))
+        Err(ResourcePlanningError::AccuracyCeiling {
+            resource: "samples",
+            required: 5,
+            maximum: 4,
+        })
     ));
 }
 

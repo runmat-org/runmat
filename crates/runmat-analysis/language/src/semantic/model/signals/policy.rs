@@ -21,7 +21,7 @@ pub(super) fn interpolation(
         return None;
     };
     match enum_name(value) {
-        Some("piecewise_linear" | "linear") => Some(SignalInterpolation::Linear),
+        Some("linear") => Some(SignalInterpolation::Linear),
         Some("left_endpoint") => Some(SignalInterpolation::LeftEndpoint),
         Some("right_endpoint") => Some(SignalInterpolation::RightEndpoint),
         _ => {

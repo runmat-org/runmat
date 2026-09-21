@@ -47,7 +47,7 @@ study structural_static_experimental {
     geometry = geometry.bracket
     mesh = mesh.bracket
     model = model.loaded_bracket
-    require formulation = experimental
+    formulation = experimental
     analysis static { structural static {} }
     output displacement = analysis.static.field.node.displacement
     output von_mises = analysis.static.field.element.von_mises_stress

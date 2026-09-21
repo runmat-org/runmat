@@ -63,8 +63,8 @@ fn fea_execution_and_feedback_file_status_signatures_are_exact_and_visible() {
         ),
         (
             "run",
-            "out = fea.run(\"study.fea\");",
-            "run = fea.run(studyOrSweepOrPath)",
+            "out = fea.run(struct());",
+            "run = fea.run(studyOrSweep)",
         ),
         (
             "modal",
@@ -73,8 +73,8 @@ fn fea_execution_and_feedback_file_status_signatures_are_exact_and_visible() {
         ),
         (
             "study",
-            "out = fea.study(\"study.fea\");",
-            "study = fea.study(path)",
+            "out = fea.study(\"bracket\", struct(), struct());",
+            "study = fea.study(id, geometry, model, Name, Value, ...)",
         ),
         (
             "sweep",
@@ -88,8 +88,8 @@ fn fea_execution_and_feedback_file_status_signatures_are_exact_and_visible() {
         ),
         (
             "validate",
-            "out = fea.validate(\"study.fea\");",
-            "result = fea.validate(studyOrSweepOrPath)",
+            "out = fea.validate(struct());",
+            "result = fea.validate(studyOrSweep)",
         ),
         ("feof", "out = feof(1);", "tf = feof(fid)"),
     ] {

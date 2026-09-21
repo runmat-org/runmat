@@ -134,13 +134,13 @@ fn explicit_excitation(
     };
     let direction = direction.map(|(direction, _)| direction);
     let kinematics = match assignment(body, "kinematics").and_then(enum_name) {
-        None | Some("fixed") | Some("fixed_frame") => ExcitationKinematics::FixedFrame,
+        None | Some("fixed_frame") => ExcitationKinematics::FixedFrame,
         Some("follower") => ExcitationKinematics::Follower,
         Some(_) => {
             diagnostic(
                 declaration,
                 declaration.span,
-                "excitation kinematics must be `fixed` or `follower`",
+                "excitation kinematics must be `fixed_frame` or `follower`",
                 diagnostics,
             );
             return None;

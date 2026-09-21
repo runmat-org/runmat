@@ -61,7 +61,7 @@ study structural_transient_experimental {
     geometry = geometry.bracket
     mesh = mesh.bracket
     model = model.impulsive_bracket
-    require formulation = experimental
+    formulation = experimental
     analysis response {
         structural transient {
             start_time = 0 s

@@ -26,7 +26,7 @@ model bracket(region body : region<solid>) {
 }
 
 study bracket_static {
-    input scale : scalar = 1.0
+    input scale : real = 1.0
     geometry = geometry.bracket_geometry
     mesh = mesh.bracket_mesh
     model = model.bracket
@@ -46,7 +46,7 @@ study bracket_static {
     )
 }
 
-sweep sizes : study.bracket_static {
+sweep sizes over study.bracket_static {
     axis scale = [0.5, 1.0, 2.0]
 }
 

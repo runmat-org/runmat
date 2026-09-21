@@ -92,7 +92,7 @@ excitation impact {
 load_case impact { include excitation.impact }
 ```
 
-Signals own physical quantity, domain, interpolation, extrapolation, discontinuity, and frame rules. Standard time waveforms include step, ramp, sine, half-sine, triangular, and rectangular pulses. Pure imported `.m` functions may generate time histories or spectral data through the bounded materialization contract described in [RunMat functions and outputs](./language/functions-and-outputs).
+Signals own physical quantity, domain, interpolation, extrapolation, discontinuity, and frame rules. Standard time waveforms include step, ramp, sine, half-sine, triangular, and rectangular pulses. Pure imported `.m` functions may generate time histories or spectral data through the bounded materialization contract described in [RunMat function integration](./language/runmat-function-integration).
 
 ## Sections, Layups, And Orientations
 

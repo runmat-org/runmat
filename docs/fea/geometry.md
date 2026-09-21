@@ -160,4 +160,4 @@ RunMat reports source capabilities honestly. Reading and sidecar change-set gene
 
 The geometry declaration owns topology. The mesh declaration owns discretization. The model assigns materials and other properties to typed geometry regions. Exact projection publishes canonical element ownership and persistent CAD provenance so every solver family consumes the same resolved property map instead of repeating selector logic.
 
-See [Meshing](./meshing), [Models](./models), and the [language geometry reference](./language/geometry-and-models).
+See [Meshing](./meshing), [Models](./models), and the [language geometry reference](./language/geometry-models-and-assignments).
