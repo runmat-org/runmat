@@ -456,7 +456,8 @@ pub use source::{
     logical_source_path, physical_source_path, prepare_fea_path_in_root,
     prepare_fea_sources_in_root, source_digest, CheckedFeaSource, FeaCheckStatus,
     FeaRootSelectionError, FeaRootSelector, FeaSourceCheckResult, FeaSourceSnapshotBuilder,
-    FeaSourceSnapshotRequests, FilesystemFeaHost, PreparedFeaSource, PreparedFeaSourceSnapshot,
+    FeaSourceSnapshotRequests, FeaStudyCheckSummary, FeaStudyObjectCounts,
+    FeaStudyProcedureSummary, FilesystemFeaHost, PreparedFeaSource, PreparedFeaSourceSnapshot,
     ProjectFeaHost, ResolvedFeaRoot,
 };
 

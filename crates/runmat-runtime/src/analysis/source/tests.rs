@@ -224,7 +224,26 @@ study second {
         .check(Vec::new(), Vec::new())
         .unwrap();
 
-    assert_eq!(checked.check_result().status, super::FeaCheckStatus::Valid);
+    let report = checked.check_result();
+    assert_eq!(report.status, super::FeaCheckStatus::Valid);
+    assert_eq!(report.studies.len(), 2);
+    assert_eq!(report.studies[0].id, "first");
+    assert_eq!(report.studies[0].geometry_id, "part");
+    assert_eq!(report.studies[0].geometry_path, None);
+    assert_eq!(report.studies[0].mesh_id, "volume");
+    assert_eq!(report.studies[0].model_id, "structure");
+    assert_eq!(report.studies[0].procedures.len(), 1);
+    assert_eq!(report.studies[0].procedures[0].step_id, "solve");
+    assert_eq!(
+        report.studies[0].procedures[0].physics_family,
+        runmat_analysis_core::PhysicsFamily::Structural
+    );
+    assert_eq!(
+        report.studies[0].procedures[0].analysis_procedure,
+        runmat_analysis_core::AnalysisProcedure::Static
+    );
+    assert_eq!(report.studies[0].counts.sequence_steps, 1);
+    assert_eq!(report.studies[0].counts.outputs, 1);
     assert!(matches!(
         checked.resolve_root(None),
         Err(super::FeaRootSelectionError::MultipleRoots { .. })
@@ -286,7 +305,13 @@ geometry bracket {
         .unwrap();
 
     let checked = prepared.check(Vec::new(), Vec::new()).unwrap();
-    assert_eq!(checked.check_result().status, super::FeaCheckStatus::Valid);
+    let report = checked.check_result();
+    assert_eq!(
+        report.status,
+        super::FeaCheckStatus::Valid,
+        "diagnostics: {:#?}",
+        report.diagnostics
+    );
     assert_eq!(checked.program.geometries.len(), 1);
 }
 

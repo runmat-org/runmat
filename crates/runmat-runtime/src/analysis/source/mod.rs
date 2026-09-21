@@ -12,7 +12,10 @@ pub use compile::{
 };
 pub use host::{logical_source_path, physical_source_path, source_digest, FilesystemFeaHost};
 pub use project_host::ProjectFeaHost;
-pub use report::{FeaCheckStatus, FeaRootSelector, FeaSourceCheckResult};
+pub use report::{
+    FeaCheckStatus, FeaRootSelector, FeaSourceCheckResult, FeaStudyCheckSummary,
+    FeaStudyObjectCounts, FeaStudyProcedureSummary,
+};
 pub use root::{FeaRootSelectionError, ResolvedFeaRoot};
 pub use snapshot::{
     FeaSourceSnapshotBuilder, FeaSourceSnapshotRequests, PreparedFeaSourceSnapshot,

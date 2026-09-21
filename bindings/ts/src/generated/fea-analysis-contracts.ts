@@ -61,10 +61,44 @@ export interface FeaDiagnostic {
   availability: FeaSourceAvailability;
 }
 
+export interface FeaStudyProcedureSummary {
+  stepId: string;
+  physicsFamily: FeaPhysicsFamily;
+  analysisProcedure: FeaAnalysisProcedure;
+}
+
+export interface FeaStudyObjectCounts {
+  materials: number;
+  materialAssignments: number;
+  constraints: number;
+  boundaries: number;
+  connectors: number;
+  interfaces: number;
+  signals: number;
+  excitationCases: number;
+  excitations: number;
+  initialConditions: number;
+  responseSpectra: number;
+  sequenceSteps: number;
+  outputs: number;
+}
+
+export interface FeaStudyCheckSummary {
+  id: string;
+  geometryId: string;
+  geometryPath?: string;
+  geometryUnits?: FeaGeometryUnits;
+  meshId: string;
+  modelId: string;
+  procedures: FeaStudyProcedureSummary[];
+  counts: FeaStudyObjectCounts;
+}
+
 export interface FeaSourceCheckResult {
   status: FeaCheckStatus;
   rootModule: string;
   roots: FeaRootSelector[];
+  studies: FeaStudyCheckSummary[];
   diagnostics: FeaDiagnostic[];
 }
 
