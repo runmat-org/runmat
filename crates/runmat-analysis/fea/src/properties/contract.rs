@@ -19,6 +19,13 @@ pub struct CompiledPropertyMapIdentity {
     pub semantic_digest: Digest,
 }
 
+pub(crate) struct CompiledPropertySource {
+    pub geometry_id: String,
+    pub geometry_revision: u32,
+    pub mesh_digest: Option<StableDigest>,
+    pub explicit_topology_digest: Option<Digest>,
+}
+
 /// Audit-only provenance for one element assignment.
 ///
 /// These fields explain how a constitutive owner was selected. They never weight or otherwise
@@ -94,10 +101,24 @@ pub struct CompiledShellProperty {
 
 /// Immutable material ownership after exact geometry-to-element projection.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(try_from = "CompiledPropertyMapData")]
 pub struct CompiledPropertyMap {
     pub identity: CompiledPropertyMapIdentity,
     pub audit_digest: Digest,
+    #[serde(with = "ordered_map_serde")]
+    solid_materials: BTreeMap<StableDigest, CompiledElementMaterial>,
+    #[serde(with = "ordered_map_serde")]
+    beam_properties: BTreeMap<StableDigest, CompiledBeamProperty>,
+    #[serde(with = "ordered_map_serde")]
+    shell_properties: BTreeMap<StableDigest, CompiledShellProperty>,
+    audit: Vec<CompiledPropertyAudit>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CompiledPropertyMapData {
+    identity: CompiledPropertyMapIdentity,
+    audit_digest: Digest,
     #[serde(with = "ordered_map_serde")]
     solid_materials: BTreeMap<StableDigest, CompiledElementMaterial>,
     #[serde(with = "ordered_map_serde")]
@@ -141,21 +162,39 @@ mod ordered_map_serde {
 
 impl CompiledPropertyMap {
     pub(crate) fn new(
-        identity: CompiledPropertyMapIdentity,
-        audit_digest: Digest,
+        source: CompiledPropertySource,
         solid_materials: BTreeMap<StableDigest, CompiledElementMaterial>,
         beam_properties: BTreeMap<StableDigest, CompiledBeamProperty>,
         shell_properties: BTreeMap<StableDigest, CompiledShellProperty>,
         audit: Vec<CompiledPropertyAudit>,
-    ) -> Self {
-        Self {
-            identity,
+    ) -> Result<Self, String> {
+        let semantic_digest = super::identity::semantic_digest(
+            &source,
+            &solid_materials,
+            &beam_properties,
+            &shell_properties,
+        )?;
+        let audit_digest = super::identity::audit_digest(semantic_digest, &audit)?;
+        let compiled = Self {
+            identity: CompiledPropertyMapIdentity {
+                geometry_id: source.geometry_id,
+                geometry_revision: source.geometry_revision,
+                mesh_digest: source.mesh_digest,
+                explicit_topology_digest: source.explicit_topology_digest,
+                semantic_digest,
+            },
             audit_digest,
             solid_materials,
             beam_properties,
             shell_properties,
             audit,
-        }
+        };
+        compiled.validate_integrity()?;
+        Ok(compiled)
+    }
+
+    pub fn validate_integrity(&self) -> Result<(), String> {
+        super::identity::validate(self)
     }
 
     pub fn solid_material(
@@ -187,5 +226,34 @@ impl CompiledPropertyMap {
 
     pub fn audit(&self) -> &[CompiledPropertyAudit] {
         &self.audit
+    }
+
+    pub(super) fn solid_entries(&self) -> &BTreeMap<StableDigest, CompiledElementMaterial> {
+        &self.solid_materials
+    }
+
+    pub(super) fn beam_entries(&self) -> &BTreeMap<StableDigest, CompiledBeamProperty> {
+        &self.beam_properties
+    }
+
+    pub(super) fn shell_entries(&self) -> &BTreeMap<StableDigest, CompiledShellProperty> {
+        &self.shell_properties
+    }
+}
+
+impl TryFrom<CompiledPropertyMapData> for CompiledPropertyMap {
+    type Error = String;
+
+    fn try_from(data: CompiledPropertyMapData) -> Result<Self, Self::Error> {
+        let compiled = Self {
+            identity: data.identity,
+            audit_digest: data.audit_digest,
+            solid_materials: data.solid_materials,
+            beam_properties: data.beam_properties,
+            shell_properties: data.shell_properties,
+            audit: data.audit,
+        };
+        compiled.validate_integrity()?;
+        Ok(compiled)
     }
 }

@@ -4,25 +4,20 @@ use runmat_analysis_core::{
     AnalysisModel, MaterialAssignment, MaterialCapability, MaterialModel, PropertyRegionScope,
     PropertyRegionTarget, ShellSectionModel, StructuralElementKind,
 };
-use runmat_canonical_codec::{encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
 use runmat_meshing_core::{
     CanonicalMeshingContract, SolverMeshArtifact, SolverVolumeElement, StableDigest,
 };
-use serde::Serialize;
 use thiserror::Error;
 
 use crate::physics::structural::topology::{explicit_element_identity, explicit_topology_digest};
+use crate::properties::contract::CompiledPropertySource;
 
 use super::{
     CompiledBeamProperty, CompiledElementMaterial, CompiledLaminatePly, CompiledPropertyAudit,
-    CompiledPropertyAuditOwner, CompiledPropertyMap, CompiledPropertyMapIdentity,
-    CompiledShellProperty, CompiledShellPropertyOwner,
+    CompiledPropertyAuditOwner, CompiledPropertyMap, CompiledShellProperty,
+    CompiledShellPropertyOwner,
 };
-
-const SEMANTIC_PREFIX: &[u8] = b"runmat-fea-compiled-properties/v1\0";
-const AUDIT_PREFIX: &[u8] = b"runmat-fea-compiled-property-audit/v1\0";
-const LIMITS: CanonicalLimits = CanonicalLimits::new(512 * 1024 * 1024, 8_000_000, 4096, 64);
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum PropertyCompilationError {
@@ -86,24 +81,6 @@ pub enum PropertyCompilationError {
     Identity(String),
 }
 
-#[derive(Serialize)]
-struct SemanticContract<'a> {
-    geometry_id: &'a str,
-    geometry_revision: u32,
-    mesh_digest: Option<StableDigest>,
-    explicit_topology_digest: Option<Digest>,
-    solids: Vec<SolidSemanticElement<'a>>,
-    beams: Vec<&'a CompiledBeamProperty>,
-    shells: Vec<&'a CompiledShellProperty>,
-}
-
-#[derive(Serialize)]
-struct SolidSemanticElement<'a> {
-    element_id: u64,
-    element_identity: StableDigest,
-    material: &'a MaterialModel,
-}
-
 type Assignment<'a> = (usize, &'a MaterialAssignment, &'a MaterialModel);
 
 pub fn compile_solid_property_map(
@@ -138,52 +115,19 @@ pub fn compile_property_map(
     let (explicit_topology_digest, beam_properties, shell_properties) =
         compile_explicit(model, &materials, &mut audit)?;
 
-    let semantic = SemanticContract {
-        geometry_id: &model.geometry_id,
-        geometry_revision: model.geometry_revision,
-        mesh_digest: mesh.map(|mesh| mesh.canonical_digest),
-        explicit_topology_digest,
-        solids: solid_materials
-            .values()
-            .map(|entry| SolidSemanticElement {
-                element_id: entry.element_id,
-                element_identity: entry.element_identity,
-                material: &entry.material,
-            })
-            .collect(),
-        beams: beam_properties.values().collect(),
-        shells: shell_properties.values().collect(),
-    };
-    let semantic_digest = encode_contract(
-        SEMANTIC_PREFIX,
-        "compiled-property-semantics",
-        &semantic,
-        LIMITS,
-    )
-    .map(Digest::sha256)
-    .map_err(|error| PropertyCompilationError::Identity(error.to_string()))?;
-    let audit_digest = encode_contract(
-        AUDIT_PREFIX,
-        "compiled-property-audit",
-        &(semantic_digest, &audit),
-        LIMITS,
-    )
-    .map(Digest::sha256)
-    .map_err(|error| PropertyCompilationError::Identity(error.to_string()))?;
-    Ok(CompiledPropertyMap::new(
-        CompiledPropertyMapIdentity {
+    CompiledPropertyMap::new(
+        CompiledPropertySource {
             geometry_id: model.geometry_id.clone(),
             geometry_revision: model.geometry_revision,
             mesh_digest: mesh.map(|mesh| mesh.canonical_digest),
             explicit_topology_digest,
-            semantic_digest,
         },
-        audit_digest,
         solid_materials,
         beam_properties,
         shell_properties,
         audit,
-    ))
+    )
+    .map_err(PropertyCompilationError::Identity)
 }
 
 fn compile_solids(

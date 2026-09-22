@@ -104,7 +104,7 @@ pub struct SolverAnalysisModel<'a> {
     pub units: UnitSystem,
     pub frame: &'a CoordinateFrame,
     pub materials: &'a [MaterialModel],
-    pub material_assignments: &'a [MaterialAssignment],
+    pub material_assignments: Vec<SolverMaterialAssignment<'a>>,
     pub structural: &'a Option<StructuralModel>,
     pub thermal: &'a Option<ThermalDomain>,
     pub thermo_mechanical: &'a Option<ThermoMechanicalDomain>,
@@ -124,6 +124,13 @@ pub struct SolverAnalysisModel<'a> {
     pub sequence: SolverAnalysisSequence<'a>,
 }
 
+/// Numerical material ownership without importer/reconciliation audit evidence.
+#[derive(Serialize)]
+pub struct SolverMaterialAssignment<'a> {
+    pub target: &'a crate::PropertyRegionTarget,
+    pub assigned_material_id: &'a str,
+}
+
 impl AnalysisModel {
     pub fn solver_identity_contract(&self) -> SolverAnalysisModel<'_> {
         SolverAnalysisModel {
@@ -133,7 +140,14 @@ impl AnalysisModel {
             units: self.units,
             frame: &self.frame,
             materials: &self.materials,
-            material_assignments: &self.material_assignments,
+            material_assignments: self
+                .material_assignments
+                .iter()
+                .map(|assignment| SolverMaterialAssignment {
+                    target: &assignment.target,
+                    assigned_material_id: &assignment.assigned_material_id,
+                })
+                .collect(),
             structural: &self.structural,
             thermal: &self.thermal,
             thermo_mechanical: &self.thermo_mechanical,

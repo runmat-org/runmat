@@ -310,9 +310,21 @@ impl StructuralTransientCheckpointScope {
             constraint_plan,
             excitations,
         )?;
+        let property_identity = input
+            .initial_assembly
+            .structural_property_map_identity
+            .as_ref()
+            .ok_or_else(|| {
+                AnalysisExecutionError::Invalid(
+                    "transient structural assembly has no compiled property-map identity".into(),
+                )
+            })?;
         let formulation_digest = contract_digest(
-            "formulation",
-            &input.initial_assembly.structural_formulations,
+            "formulation-and-properties",
+            &(
+                &input.initial_assembly.structural_formulations,
+                property_identity,
+            ),
         )?;
         let discretization = DiscretizationIdentity::new(problem, mesh_digest, formulation_digest)?;
         let operators = input.initial_assembly.operator.operators();

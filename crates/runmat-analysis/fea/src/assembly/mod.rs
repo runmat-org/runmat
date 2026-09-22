@@ -119,6 +119,8 @@ pub struct AssemblySummary {
     #[serde(default)]
     pub structural_formulations: Vec<StructuralFormulationRealization>,
     #[serde(default)]
+    pub structural_property_map_identity: Option<crate::properties::CompiledPropertyMapIdentity>,
+    #[serde(default)]
     pub structural_sources: Vec<SourceImplementation>,
     #[serde(default)]
     pub structural_boundary_transfers: Vec<BoundaryTransferImplementation>,
@@ -1317,6 +1319,9 @@ fn assemble_linear_system_impl(
                 .into_iter()
                 .collect()
         }),
+        structural_property_map_identity: solid_properties
+            .as_ref()
+            .map(|properties| properties.identity.clone()),
         structural_sources: structural_requirement.map_or_else(
             || vec![SourceImplementation::NotApplicable],
             |_| {
@@ -1762,6 +1767,7 @@ fn assemble_explicit_structural_system(
         structural_beam_recovery,
         structural_shell_recovery,
         structural_formulations,
+        structural_property_map_identity: Some(properties.identity.clone()),
         structural_sources: structural_source_implementations(
             excitations,
             StructuralProjectionBasis::ExplicitConnectivity,
@@ -2707,7 +2713,12 @@ mod tests {
             .poisson_ratio = -0.25;
         model.materials[0].mass_density_kg_per_m3 = Some(0.125);
 
-        let summary = assemble_physical_structural_system(&model, Some(tetrahedron4_mesh()))
+        let mesh = tetrahedron4_mesh();
+        let expected_property_identity =
+            crate::properties::compile_solid_property_map(&model, &mesh)
+                .expect("solid property map")
+                .identity;
+        let summary = assemble_physical_structural_system(&model, Some(mesh))
             .expect("valid low-valued auxetic material should assemble without coercion");
         let recovered_material = summary.structural_solid_recovery[0].material;
 
@@ -2717,6 +2728,10 @@ mod tests {
         assert_eq!(summary.structural_material.youngs_modulus_pa, 0.5);
         assert_eq!(summary.structural_material.poisson_ratio, -0.25);
         assert_eq!(summary.structural_material.density_kg_per_m3, 0.125);
+        assert_eq!(
+            summary.structural_property_map_identity,
+            Some(expected_property_identity)
+        );
         assert!(summary.operator.operators().damping().values().is_empty());
     }
 

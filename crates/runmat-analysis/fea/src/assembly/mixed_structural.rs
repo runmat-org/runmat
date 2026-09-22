@@ -395,6 +395,7 @@ pub(super) fn assemble_mixed_structural_system(
         structural_beam_recovery: beam_recovery,
         structural_shell_recovery: shell_recovery,
         structural_formulations: formulations,
+        structural_property_map_identity: Some(solid_properties.identity.clone()),
         structural_sources: merge_sources(
             structural_source_implementations(
                 &solid_excitations,

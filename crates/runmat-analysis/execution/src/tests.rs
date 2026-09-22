@@ -1359,7 +1359,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         branches: Vec::new(),
     };
     let step_id = producer_step.step_id.clone();
-    let solve = StructuralLinearWorkload {
+    let mut solve = StructuralLinearWorkload {
         schema_version: 1,
         model,
         step_id,
@@ -1374,6 +1374,9 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         require_solver_mesh_for_solid: true,
         initial_guess_transition: None,
     };
+    let mut audit_alias_material = solve.model.materials[0].clone();
+    audit_alias_material.material_id = "legacy_material_name".into();
+    solve.model.materials.push(audit_alias_material);
     let mut mesh =
         runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
     for (index, face) in mesh.topology.boundary_faces.iter_mut().enumerate() {
@@ -2488,6 +2491,59 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
     assert_ne!(
         prepared.program.request.arguments,
         access_variant.program.request.arguments
+    );
+
+    let mut audit_variant_workload = solve.clone();
+    audit_variant_workload.model.material_assignments[0].expected_material_id =
+        "legacy_material_name".into();
+    audit_variant_workload.model.material_assignments[0].confidence =
+        runmat_analysis_core::EvidenceConfidence::Inferred;
+    let audit_variant = prepare_structural_linear_program(StructuralLinearProgramPreparation {
+        authored_study_digest: digest("authored-study"),
+        frozen_project_digest: None,
+        program_revision: revision(),
+        artifact_access: access(),
+        workload: audit_variant_workload,
+        mesh: Some(mesh.clone()),
+        initial_guess: None,
+        chunk_bytes: 4096,
+        inventory_limits: ObjectInventoryLimits::default(),
+        required_capabilities: BTreeSet::new(),
+        accelerator_requests: Vec::new(),
+    })
+    .unwrap();
+    assert_eq!(
+        prepared.host.workload.study,
+        audit_variant.host.workload.study
+    );
+    assert_eq!(
+        prepared.host.workload.step,
+        audit_variant.host.workload.step
+    );
+    assert_eq!(
+        prepared.host.workload.execution_plan,
+        audit_variant.host.workload.execution_plan
+    );
+    assert_eq!(
+        prepared.inputs[0].manifest.logical_identity,
+        audit_variant.inputs[0].manifest.logical_identity
+    );
+    assert_ne!(
+        prepared.inputs[0].manifest.payload_digest,
+        audit_variant.inputs[0].manifest.payload_digest
+    );
+    assert_eq!(prepared.resource_plan, audit_variant.resource_plan);
+    assert_eq!(
+        prepared.program.request.recipe,
+        audit_variant.program.request.recipe
+    );
+    assert_eq!(
+        prepared.program.request.artifact,
+        audit_variant.program.request.artifact
+    );
+    assert_ne!(
+        prepared.program.request.arguments,
+        audit_variant.program.request.arguments
     );
 
     let mut backend_variant = solve.clone();

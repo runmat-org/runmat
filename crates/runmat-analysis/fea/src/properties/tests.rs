@@ -12,6 +12,7 @@ fn compiled_map_separates_semantic_identity_from_audit_confidence() {
     let mut changed_audit = model.clone();
     changed_audit.material_assignments[0].confidence =
         runmat_analysis_core::EvidenceConfidence::Inferred;
+    changed_audit.material_assignments[0].expected_material_id = "imported_steel_alias".into();
     let second = compile_solid_property_map(&changed_audit, &mesh).expect("compiled properties");
 
     assert_eq!(
@@ -34,6 +35,33 @@ fn compiled_map_has_a_canonical_json_safe_round_trip() {
     let decoded: CompiledPropertyMap =
         serde_json::from_slice(&encoded).expect("decode compiled property map");
     assert_eq!(decoded, compiled);
+}
+
+#[test]
+fn compiled_map_decode_rejects_semantic_audit_and_entry_substitution() {
+    let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+    let compiled =
+        compile_solid_property_map(&matching_model(&mesh), &mesh).expect("compiled properties");
+    let encoded = serde_json::to_value(&compiled).expect("encode compiled property map");
+
+    let mut semantic = encoded.clone();
+    semantic["identity"]["semantic_digest"] =
+        serde_json::to_value(runmat_execution::Digest::sha256(b"substituted semantics")).unwrap();
+    assert!(serde_json::from_value::<CompiledPropertyMap>(semantic).is_err());
+
+    let mut audit = encoded.clone();
+    audit["audit_digest"] =
+        serde_json::to_value(runmat_execution::Digest::sha256(b"substituted audit")).unwrap();
+    assert!(serde_json::from_value::<CompiledPropertyMap>(audit).is_err());
+
+    let mut entry = encoded.clone();
+    entry["solid_materials"][0][1]["element_identity"] =
+        serde_json::to_value(runmat_meshing_core::StableDigest::from_bytes([0xa5; 32])).unwrap();
+    assert!(serde_json::from_value::<CompiledPropertyMap>(entry).is_err());
+
+    let mut incomplete_audit = encoded;
+    incomplete_audit["audit"] = serde_json::json!([]);
+    assert!(serde_json::from_value::<CompiledPropertyMap>(incomplete_audit).is_err());
 }
 
 #[test]
@@ -231,6 +259,10 @@ fn semantic_identity_is_independent_of_assignment_order_but_audit_is_not() {
     assert_eq!(
         first.identity.semantic_digest,
         second.identity.semantic_digest
+    );
+    assert_eq!(
+        first.solid_materials().collect::<Vec<_>>(),
+        second.solid_materials().collect::<Vec<_>>()
     );
     assert_ne!(first.audit_digest, second.audit_digest);
 }

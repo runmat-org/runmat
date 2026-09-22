@@ -144,6 +144,11 @@ pub fn prepare_structural_linear_program(
         preparation.mesh.as_ref(),
     )
     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let property_map = runmat_analysis_fea::properties::compile_property_map(
+        &preparation.workload.model,
+        preparation.mesh.as_ref(),
+    )
+    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let constraint_plan_bytes = constraint_plan
         .canonical_bytes()
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
@@ -208,6 +213,7 @@ pub fn prepare_structural_linear_program(
         preparation.frozen_project_digest,
         topology_digest,
         constraint_plan_digest,
+        property_map.identity.semantic_digest,
         resource_plan.identity.digest(),
     )?;
     if let Some(transition) = preparation.workload.initial_guess_transition.as_ref() {
@@ -444,6 +450,7 @@ fn derive_identities(
     frozen_project_digest: Option<Digest>,
     topology_digest: Digest,
     constraint_plan_digest: Digest,
+    property_semantic_digest: Digest,
     resource_plan_digest: Digest,
 ) -> AnalysisBridgeResult<StructuralIdentities> {
     let step_contract = workload.procedure_step()?;
@@ -497,11 +504,7 @@ fn derive_identities(
         discretization,
         contract_digest(
             "operator",
-            &(
-                &workload.model.materials,
-                &workload.model.material_assignments,
-                &workload.model.boundaries,
-            ),
+            &(property_semantic_digest, &workload.model.boundaries),
         )?,
     )?;
     let numerical = NumericalPlanIdentity::new(

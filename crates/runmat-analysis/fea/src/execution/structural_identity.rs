@@ -77,8 +77,19 @@ where
         constraint_plan,
         excitations,
     )?;
-    let formulation_digest =
-        structural_contract_digest("formulation", &input.assembly.structural_formulations)?;
+    let property_identity = input
+        .assembly
+        .structural_property_map_identity
+        .as_ref()
+        .ok_or_else(|| {
+            super::AnalysisExecutionError::Invalid(
+                "structural assembly has no compiled property-map identity".into(),
+            )
+        })?;
+    let formulation_digest = structural_contract_digest(
+        "formulation-and-properties",
+        &(&input.assembly.structural_formulations, property_identity),
+    )?;
     let discretization = DiscretizationIdentity::new(problem, mesh_digest, formulation_digest)?;
     let operators = input.assembly.operator.operators();
     let stiffness = OperatorIdentity::new(

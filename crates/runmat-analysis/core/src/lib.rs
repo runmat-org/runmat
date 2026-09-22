@@ -378,6 +378,31 @@ mod tests {
     }
 
     #[test]
+    fn solver_identity_excludes_material_reconciliation_audit_fields() {
+        let mut first = valid_model();
+        first.material_assignments = vec![MaterialAssignment {
+            target: PropertyRegionTarget::all_solids(),
+            expected_material_id: "cad_steel".into(),
+            assigned_material_id: "mat_steel".into(),
+            confidence: EvidenceConfidence::Verified,
+        }];
+        let mut second = first.clone();
+        second.material_assignments[0].expected_material_id = "legacy_material_name".into();
+        second.material_assignments[0].confidence = EvidenceConfidence::Inferred;
+
+        assert_eq!(
+            serde_json::to_vec(&first.solver_identity_contract()).unwrap(),
+            serde_json::to_vec(&second.solver_identity_contract()).unwrap()
+        );
+
+        second.material_assignments[0].assigned_material_id = "another_material".into();
+        assert_ne!(
+            serde_json::to_vec(&first.solver_identity_contract()).unwrap(),
+            serde_json::to_vec(&second.solver_identity_contract()).unwrap()
+        );
+    }
+
+    #[test]
     fn unit_frame_mismatch_rejection() {
         let mut model = valid_model();
         model.units = UnitSystem::Inch;
