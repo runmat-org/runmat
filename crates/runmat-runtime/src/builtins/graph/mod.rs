@@ -3,7 +3,6 @@
 
 mod domain;
 
-pub use domain::{DIGRAPH_DESCRIPTOR, GRAPH_DESCRIPTOR, GRAPH_QUERY_DESCRIPTOR, GRAPH_UNARY_DESCRIPTOR};
 #[cfg(target_arch = "wasm32")]
 pub(crate) use domain::{
     __runmat_wasm_register_builtin_adjacency_builtin,
@@ -23,4 +22,7 @@ pub(crate) use domain::{
     __runmat_wasm_register_builtin_successors_builtin,
     __runmat_wasm_register_builtin_toposort_builtin,
     __runmat_wasm_register_builtin_treelayout_builtin,
+};
+pub use domain::{
+    DIGRAPH_DESCRIPTOR, GRAPH_DESCRIPTOR, GRAPH_QUERY_DESCRIPTOR, GRAPH_UNARY_DESCRIPTOR,
 };

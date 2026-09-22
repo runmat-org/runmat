@@ -36,4 +36,4 @@ pub mod uiputfile;
 mod working_directory;
 pub mod xml;
 
-pub use test_support::{REPL_FS_TEST_LOCK};
+pub use test_support::REPL_FS_TEST_LOCK;

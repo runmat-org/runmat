@@ -38,14 +38,6 @@ pub use contracts::{
     FEA_STUDY_DESCRIPTOR, FEA_SWEEP_DESCRIPTOR, FEA_TRENDS_DESCRIPTOR,
     FEA_TRENDS_INTEGER_CAPABILITIES, FEA_VALIDATE_DESCRIPTOR,
 };
-pub use entrypoints::{
-    fea_author_study_builtin, fea_boundary_condition_builtin, fea_compare_builtin,
-    fea_domain_builtin, fea_field_builtin, fea_interface_builtin, fea_load_builtin,
-    fea_load_case_builtin, fea_material_assignment_builtin, fea_material_builtin,
-    fea_model_builtin, fea_plan_builtin, fea_plot_builtin, fea_results_builtin, fea_run_builtin,
-    fea_run_options_builtin, fea_step_builtin, fea_study_builtin, fea_sweep_builtin,
-    fea_trends_builtin, fea_validate_builtin,
-};
 #[cfg(target_arch = "wasm32")]
 pub(crate) use entrypoints::{
     __runmat_wasm_register_builtin_fea_author_study_builtin,
@@ -69,4 +61,12 @@ pub(crate) use entrypoints::{
     __runmat_wasm_register_builtin_fea_sweep_builtin,
     __runmat_wasm_register_builtin_fea_trends_builtin,
     __runmat_wasm_register_builtin_fea_validate_builtin,
+};
+pub use entrypoints::{
+    fea_author_study_builtin, fea_boundary_condition_builtin, fea_compare_builtin,
+    fea_domain_builtin, fea_field_builtin, fea_interface_builtin, fea_load_builtin,
+    fea_load_case_builtin, fea_material_assignment_builtin, fea_material_builtin,
+    fea_model_builtin, fea_plan_builtin, fea_plot_builtin, fea_results_builtin, fea_run_builtin,
+    fea_run_options_builtin, fea_step_builtin, fea_study_builtin, fea_sweep_builtin,
+    fea_trends_builtin, fea_validate_builtin,
 };

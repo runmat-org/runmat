@@ -18,6 +18,6 @@ pub mod union;
 pub mod unique;
 
 use support::{
-    BINARY_SET_INTEGER_INPUTS, is_unsupported_set_gpu_integer, output_provider,
-    restore_set_outputs, set_output_provider,
+    is_unsupported_set_gpu_integer, output_provider, restore_set_outputs, set_output_provider,
+    BINARY_SET_INTEGER_INPUTS,
 };

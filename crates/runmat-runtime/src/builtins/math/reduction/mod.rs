@@ -31,13 +31,13 @@ pub(crate) mod trapz;
 pub(crate) mod type_resolvers;
 pub(crate) mod var;
 
-pub use cummax::{evaluate as evaluate_cummax};
-pub use cummin::{evaluate as evaluate_cummin};
-pub use diff::{diff_tensor_host};
+pub use cummax::evaluate as evaluate_cummax;
+pub use cummin::evaluate as evaluate_cummin;
+pub use diff::diff_tensor_host;
 pub use gradient::{
     gradient_complex_tensor_host, gradient_complex_tensor_host_with_coordinates,
     gradient_real_tensor_host, gradient_real_tensor_host_with_coordinates, matlab_gradient_shape,
 };
-pub use max::{evaluate as evaluate_max};
-pub use median::{compute_median_inplace};
-pub use min::{evaluate as evaluate_min};
+pub use max::evaluate as evaluate_max;
+pub use median::compute_median_inplace;
+pub use min::evaluate as evaluate_min;

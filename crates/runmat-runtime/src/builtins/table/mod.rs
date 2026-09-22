@@ -20,24 +20,24 @@ mod tests;
 
 pub(crate) use binary::{finish_binary, plan_binary};
 pub(crate) use containers::{
-    CategoricalComparison, categorical_categories, categorical_compare,
-    categorical_declared_levels, categorical_extrema_to_value, categorical_from_args,
-    categorical_labels, categorical_levels_for_observations, categorical_max_evaluate,
-    categorical_min_evaluate, categorical_observation_labels, timetable_row_times,
+    categorical_categories, categorical_compare, categorical_declared_levels,
+    categorical_extrema_to_value, categorical_from_args, categorical_labels,
+    categorical_levels_for_observations, categorical_max_evaluate, categorical_min_evaluate,
+    categorical_observation_labels, timetable_row_times, CategoricalComparison,
 };
-pub(crate) use display::{categorical_label_at};
+pub(crate) use display::categorical_label_at;
 pub use display::{table_display_text, table_summary_text};
 use facade::*;
 pub use metadata::*;
-pub(crate) use object::{
-    parse_variable_selector_for_object, select_rows, selected_row_names, table_from_columns_like,
-    value_row_count,
-};
 pub use object::{
     is_table_value, is_tabular_object, sortrows_table, table_from_columns, table_height,
     table_replace_variables_like, table_variable_names_from_object, table_variables, table_width,
 };
+pub(crate) use object::{
+    parse_variable_selector_for_object, select_rows, selected_row_names, table_from_columns_like,
+    value_row_count,
+};
 pub use prelude::{TABLE_CLASS, TIMETABLE_CLASS};
-pub use registry::{ensure_table_class_registered};
+pub use registry::ensure_table_class_registered;
 #[cfg(test)]
 use test_support::*;

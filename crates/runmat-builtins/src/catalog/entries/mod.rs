@@ -17,7 +17,7 @@ pub(in crate::catalog) mod structs;
 
 pub use acceleration::*;
 pub use aggregate::*;
-use aggregation::{extend_groups};
+use aggregation::extend_groups;
 pub use array::*;
 pub use cells::*;
 pub use introspection::*;
