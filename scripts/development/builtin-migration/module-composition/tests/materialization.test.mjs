@@ -384,6 +384,8 @@ test("operational materialization derives authority and writes active plus basel
     queueState: fixture.queueState, queueCheckpoint: fixture.queueCheckpoint,
     lease: fixture.lease,
   });
+  assert.deepEqual(result.selected_product_ids, moduleCompositionProductRegistry()
+    .map((entry) => entry.product_id));
   assert.deepEqual(result.product_ids, moduleCompositionProductRegistry().map((entry) => entry.product_id));
   assert.deepEqual(result.installed.map((entry) => entry.product_id), [
     "catalog-math", "catalog-root", "runtime-math", "runtime-root",
@@ -396,8 +398,6 @@ test("operational materialization rejects a selection that differs from active l
   const fixture = controlledFixture({ composition: true });
   const expected = fixture.lease.bundle.integration_outputs
     .map((entry) => entry.product_id)
-    .filter((id) => fixture.control.integrationProducts.get(id).verification.kind
-      === "rust_module_composition")
     .sort();
   assert.throws(() => materializeEffectiveModuleComposition({
     repository: fixture.repository, control: fixture.control,
@@ -409,6 +409,37 @@ test("operational materialization rejects a selection that differs from active l
     queueState: fixture.queueState, queueCheckpoint: fixture.queueCheckpoint,
     lease: fixture.lease,
   }, { productIds: ["runtime-root", ...expected] }), /canonical product-id order/);
+});
+
+test("explicit materialization authorizes every lease output and projects to Rust composition", () => {
+  const fixture = controlledFixture({ composition: true });
+  const selected = fixture.lease.bundle.integration_outputs
+    .map((entry) => entry.product_id)
+    .sort();
+  assert.ok(selected.includes("wasm-registry"));
+  const result = materializeEffectiveModuleComposition({
+    repository: fixture.repository, control: fixture.control,
+    queueState: fixture.queueState, queueCheckpoint: fixture.queueCheckpoint,
+    lease: fixture.lease,
+  }, { productIds: selected });
+  assert.deepEqual(result.selected_product_ids, selected);
+  assert.deepEqual(result.product_ids, selected.filter((id) =>
+    fixture.control.integrationProducts.get(id).verification.kind
+      === "rust_module_composition"));
+  assert.equal(result.product_ids.includes("wasm-registry"), false);
+  assert.equal(result.installed.some((entry) => entry.product_id === "wasm-registry"), false);
+});
+
+test("explicit materialization accepts a non-composition lease without crossing generator domains", () => {
+  const fixture = controlledFixture();
+  const result = materializeEffectiveModuleComposition({
+    repository: fixture.repository, control: fixture.control,
+    queueState: fixture.queueState, queueCheckpoint: fixture.queueCheckpoint,
+    lease: fixture.lease,
+  }, { productIds: ["wasm-registry"] });
+  assert.deepEqual(result.selected_product_ids, ["wasm-registry"]);
+  assert.deepEqual(result.product_ids, []);
+  assert.deepEqual(result.installed, []);
 });
 
 test("operational materialization activates absent catalog and runtime parents with their ancestor declarations", () => {

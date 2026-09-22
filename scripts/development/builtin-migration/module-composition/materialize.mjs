@@ -24,7 +24,10 @@ export function materializeEffectiveModuleComposition({
   validateReviewedModuleCompositionAuthority(control.integrationProducts, state.prior);
   validateReviewedModuleCompositionAuthority(control.integrationProducts, state.effective);
   const active = assertActiveLease(lease, control, clock);
-  const productIds = selectedProductIds(control, active.bundle, options.productIds);
+  const selection = selectMaterializationProducts(
+    control, active.bundle, options.productIds,
+  );
+  const productIds = selection.compositionProductIds;
   const effectiveById = new Map(state.effective.products
     .map((product) => [product.product_id, product]));
   const priorById = new Map(state.prior.products
@@ -102,7 +105,17 @@ export function materializeEffectiveModuleComposition({
       lock.repository, desired, before, lock, options.installHooks,
       () => { proveAuthority(initialAuthority.childStates); },
     );
-    return { product_ids: productIds, inventory, installed: transaction.installed, transaction: { recovery, cleanup: transaction.cleanup, cleanup_errors: transaction.cleanup_errors } };
+    return {
+      selected_product_ids: selection.selectedProductIds,
+      product_ids: productIds,
+      inventory,
+      installed: transaction.installed,
+      transaction: {
+        recovery,
+        cleanup: transaction.cleanup,
+        cleanup_errors: transaction.cleanup_errors,
+      },
+    };
   });
 }
 
@@ -124,7 +137,7 @@ function deriveAuthorizedPendingChildKeys(products, priorById) {
   return keys;
 }
 
-function selectedProductIds(control, bundle, requestedProductIds = null) {
+function selectMaterializationProducts(control, bundle, requestedProductIds = null) {
   if (requestedProductIds === null) {
     const implicit = new Set([...control.integrationProducts.values()]
       .filter((product) => product.verification.kind === "rust_module_composition"
@@ -137,15 +150,19 @@ function selectedProductIds(control, bundle, requestedProductIds = null) {
         implicit.add(product.product_id);
       }
     }
-    return [...implicit].sort(compareCodePoint);
+    const compositionProductIds = [...implicit].sort(compareCodePoint);
+    return {
+      selectedProductIds: compositionProductIds,
+      compositionProductIds,
+    };
   }
-  const ids = new Set();
+  const integrationProductIds = [];
   for (const output of bundle.integration_outputs) {
     const product = control.integrationProducts.get(output.product_id);
     if (!product) throw new Error(`${bundle.id}: active bundle references unknown integration product ${output.product_id}`);
-    if (product.verification.kind === "rust_module_composition") ids.add(product.product_id);
+    integrationProductIds.push(product.product_id);
   }
-  const expected = [...ids].sort(compareCodePoint);
+  const expected = [...integrationProductIds].sort(compareCodePoint);
   const requested = [...requestedProductIds];
   if (new Set(requested).size !== requested.length) {
     throw new Error("materialization product selection contains duplicates");
@@ -156,5 +173,10 @@ function selectedProductIds(control, bundle, requestedProductIds = null) {
   if (JSON.stringify(requested) !== JSON.stringify(expected)) {
     throw new Error(`${bundle.id}: materialization product selection must exactly match the active lease integration products`);
   }
-  return requested;
+  const compositionProductIds = requested.filter((id) =>
+    control.integrationProducts.get(id).verification.kind === "rust_module_composition");
+  return {
+    selectedProductIds: requested,
+    compositionProductIds,
+  };
 }
