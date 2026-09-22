@@ -21,10 +21,17 @@ use super::{
     },
     enforcement,
     frame::{require_global, translation_basis, translation_direction},
+    pairing::{pair_mixed_targets, pairing_rows},
     plan::{authored_constraints_digest, source_digest, structural_constraints},
     row,
     target::resolve_solid_target,
 };
+
+struct CompiledConstraint {
+    targets: Vec<ResolvedConstraintTarget>,
+    rows: Vec<CanonicalStructuralConstraintRow>,
+    pairings: Vec<super::ConstraintPairingEvidence>,
+}
 
 pub(super) fn compile(
     model: &AnalysisModel,
@@ -61,8 +68,11 @@ pub(super) fn compile(
     let mut plan = super::compile::compile(&solid_model, mesh)?;
     let mut enforcement_mode = plan.enforcement;
     for constraint in generic {
-        let (mut targets, rows) =
-            compile_node_constraint(model, Some(mesh), structural, &topology, constraint)?;
+        let CompiledConstraint {
+            mut targets,
+            rows,
+            pairings,
+        } = compile_node_constraint(model, Some(mesh), structural, &topology, constraint)?;
         targets.sort_by_key(|target| target.selection_digest);
         targets.dedup_by_key(|target| target.selection_digest);
         enforcement_mode = enforcement::combine(
@@ -77,7 +87,7 @@ pub(super) fn compile(
             targets,
             reference_point_identities: Vec::new(),
             coupling: None,
-            pairings: Vec::new(),
+            pairings,
             row_count: rows.len(),
         });
         plan.rows.extend(rows);
@@ -123,8 +133,11 @@ pub(super) fn compile_explicit(
     let mut rows = Vec::new();
     let mut enforcement_mode = super::contract::ConstraintEnforcement::DirectElimination;
     for constraint in &authored {
-        let (mut targets, compiled_rows) =
-            compile_node_constraint(model, None, structural, &topology, constraint)?;
+        let CompiledConstraint {
+            mut targets,
+            rows: compiled_rows,
+            pairings,
+        } = compile_node_constraint(model, None, structural, &topology, constraint)?;
         targets.sort_by_key(|target| target.selection_digest);
         targets.dedup_by_key(|target| target.selection_digest);
         enforcement_mode = enforcement::combine(
@@ -139,7 +152,7 @@ pub(super) fn compile_explicit(
             targets,
             reference_point_identities: Vec::new(),
             coupling: None,
-            pairings: Vec::new(),
+            pairings,
             row_count: compiled_rows.len(),
         });
         rows.extend(compiled_rows);
@@ -195,13 +208,7 @@ fn compile_node_constraint(
     structural: &runmat_analysis_core::StructuralModel,
     topology: &CanonicalStructuralNodeSpace,
     constraint: &StructuralConstraint,
-) -> Result<
-    (
-        Vec<ResolvedConstraintTarget>,
-        Vec<CanonicalStructuralConstraintRow>,
-    ),
-    ConstraintPlanError,
-> {
+) -> Result<CompiledConstraint, ConstraintPlanError> {
     match &constraint.kind {
         StructuralConstraintKind::Fixed { target } => {
             require_global(constraint)?;
@@ -218,7 +225,11 @@ fn compile_node_constraint(
                     )?);
                 }
             }
-            Ok((vec![resolved], rows))
+            Ok(CompiledConstraint {
+                targets: vec![resolved],
+                rows,
+                pairings: Vec::new(),
+            })
         }
         StructuralConstraintKind::Prescribed(values) => {
             compile_prescribed(model, mesh, structural, topology, constraint, values)
@@ -245,7 +256,11 @@ fn compile_node_constraint(
                     )?);
                 }
             }
-            Ok((vec![resolved], rows))
+            Ok(CompiledConstraint {
+                targets: vec![resolved],
+                rows,
+                pairings: Vec::new(),
+            })
         }
         StructuralConstraintKind::Equation(equation) => {
             require_global(constraint)?;
@@ -288,15 +303,34 @@ fn compile_node_constraint(
                     constraint_id: constraint.constraint_id.clone(),
                 });
             }
-            Ok((
+            Ok(CompiledConstraint {
                 targets,
-                vec![row::new_sparse(
+                rows: vec![row::new_sparse(
                     &constraint.constraint_id,
                     terms,
                     equation.right_hand_side.meters,
                 )?],
-            ))
+                pairings: Vec::new(),
+            })
         }
+        StructuralConstraintKind::Tie(pair) => compile_pair(
+            mesh,
+            structural,
+            topology,
+            constraint,
+            pair,
+            &runmat_analysis_core::PeriodicTransform::Identity,
+            false,
+        ),
+        StructuralConstraintKind::Periodic(periodic) => compile_pair(
+            mesh,
+            structural,
+            topology,
+            constraint,
+            &periodic.pair,
+            &periodic.transform,
+            true,
+        ),
         _ => Err(ConstraintPlanError::UnsupportedTarget {
             constraint_id: constraint.constraint_id.clone(),
             reason: "this relation is not implemented on explicit structural topology",
@@ -311,13 +345,7 @@ fn compile_prescribed(
     topology: &CanonicalStructuralNodeSpace,
     constraint: &StructuralConstraint,
     values: &PrescribedStructuralDofs,
-) -> Result<
-    (
-        Vec<ResolvedConstraintTarget>,
-        Vec<CanonicalStructuralConstraintRow>,
-    ),
-    ConstraintPlanError,
-> {
+) -> Result<CompiledConstraint, ConstraintPlanError> {
     let (resolved, nodes) = resolve_target(mesh, structural, topology, constraint, &values.target)?;
     let mut rows = Vec::new();
     for node in nodes {
@@ -371,7 +399,58 @@ fn compile_prescribed(
             )?);
         }
     }
-    Ok((vec![resolved], rows))
+    Ok(CompiledConstraint {
+        targets: vec![resolved],
+        rows,
+        pairings: Vec::new(),
+    })
+}
+
+fn compile_pair(
+    mesh: Option<&SolverMeshArtifact>,
+    structural: &runmat_analysis_core::StructuralModel,
+    topology: &CanonicalStructuralNodeSpace,
+    constraint: &StructuralConstraint,
+    pair: &runmat_analysis_core::PairedConstraint,
+    transform: &runmat_analysis_core::PeriodicTransform,
+    transform_displacement: bool,
+) -> Result<CompiledConstraint, ConstraintPlanError> {
+    require_global(constraint)?;
+    let Some(mesh) = mesh else {
+        return Err(ConstraintPlanError::UnsupportedTarget {
+            constraint_id: constraint.constraint_id.clone(),
+            reason:
+                "explicit-only tie and periodic pairing requires a qualified geometric topology",
+        });
+    };
+    let (primary, _) = resolve_target(Some(mesh), structural, topology, constraint, &pair.primary)?;
+    let (secondary, _) = resolve_target(
+        Some(mesh),
+        structural,
+        topology,
+        constraint,
+        &pair.secondary,
+    )?;
+    let pairings = pair_mixed_targets(
+        mesh,
+        topology,
+        &primary,
+        &secondary,
+        &pair.pairing,
+        transform,
+        &constraint.constraint_id,
+    )?;
+    let rows = pairing_rows(
+        &constraint.constraint_id,
+        &pairings,
+        transform,
+        transform_displacement,
+    )?;
+    Ok(CompiledConstraint {
+        targets: vec![primary, secondary],
+        rows,
+        pairings,
+    })
 }
 
 fn finite_value(value: f64, constraint: &StructuralConstraint) -> Result<f64, ConstraintPlanError> {
@@ -497,9 +576,9 @@ fn visit_targets(
 #[cfg(test)]
 mod tests {
     use runmat_analysis_core::{
-        AnalysisConstraint, CoordinateFrame, Displacement, StructuralConstraint,
-        StructuralConstraintEquation, StructuralConstraintEquationTerm, StructuralConstraintKind,
-        StructuralTranslationDof,
+        AnalysisConstraint, CoordinateFrame, Displacement, Length, PairedConstraint, PairingPolicy,
+        StructuralConstraint, StructuralConstraintEquation, StructuralConstraintEquationTerm,
+        StructuralConstraintKind, StructuralTranslationDof,
     };
     use runmat_meshing_core::{
         ElementOrder, PersistentEntityId, PersistentEntityKind, StableDigest,
@@ -583,6 +662,76 @@ mod tests {
             .unwrap();
         assert_eq!(row.terms.len(), 2);
         assert_eq!(plan.enforcement, ConstraintEnforcement::AffineReduction);
+        let result = crate::run_linear_static_with_options(
+            &model,
+            crate::ComputeBackend::Cpu,
+            crate::LinearStaticSolveOptions {
+                formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+                solver_mesh: Some(mesh),
+                ..crate::LinearStaticSolveOptions::default()
+            },
+        )
+        .unwrap();
+        assert!(result
+            .field(crate::FEA_FIELD_STRUCTURAL_BEAM_AXIAL_FORCE)
+            .is_some());
+    }
+
+    #[test]
+    fn geometric_tie_couples_a_nonconformal_beam_node_to_a_solid_face() {
+        let (mut model, mesh) = model_and_mesh();
+        let face = &mesh.topology.boundary_faces[1];
+        let mut face_center = [0.0; 3];
+        for node_id in face.node_ids.iter().take(3) {
+            let point = mesh
+                .topology
+                .nodes
+                .iter()
+                .find(|node| node.node_id == *node_id)
+                .unwrap()
+                .coordinates_m;
+            for component in 0..3 {
+                face_center[component] += point[component] / 3.0;
+            }
+        }
+        let structural = model.structural.as_mut().unwrap();
+        let root = structural
+            .nodes
+            .iter_mut()
+            .find(|node| node.node_id == 101)
+            .unwrap();
+        root.coordinates_m = face_center;
+        root.solid_attachment = None;
+        structural
+            .nodes
+            .iter_mut()
+            .find(|node| node.node_id == 102)
+            .unwrap()
+            .coordinates_m = [face_center[0] + 1.0, face_center[1], face_center[2]];
+        model
+            .constraints
+            .push(AnalysisConstraint::Structural(StructuralConstraint {
+                constraint_id: "nonconformal_beam_root_tie".into(),
+                frame: CoordinateFrame::Global,
+                kind: StructuralConstraintKind::Tie(PairedConstraint {
+                    primary: runmat_analysis_core::RegionTarget::boundary("solid_load"),
+                    secondary: runmat_analysis_core::RegionTarget::point("node:101"),
+                    pairing: PairingPolicy::GeometricTolerance(Length::new(1.0e-9)),
+                }),
+            }));
+
+        let plan = CanonicalStructuralConstraintPlan::compile(&model, &mesh).unwrap();
+        let group = plan
+            .groups
+            .iter()
+            .find(|group| group.constraint_id == "nonconformal_beam_root_tie")
+            .unwrap();
+        assert_eq!(group.row_count, 3);
+        assert_eq!(group.pairings.len(), 1);
+        assert_eq!(group.pairings[0].primary_weights.len(), 3);
+        assert!(group.pairings[0].geometric_error_meters <= 1.0e-12);
+        assert_eq!(plan.enforcement, ConstraintEnforcement::AffineReduction);
+
         let result = crate::run_linear_static_with_options(
             &model,
             crate::ComputeBackend::Cpu,

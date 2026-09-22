@@ -23,7 +23,7 @@ use super::frame::{
     translation_direction,
 };
 use super::normal::boundary_node_normals;
-use super::pairing::{displacement_transform, pair_targets};
+use super::pairing::{pair_targets, pairing_rows};
 use super::plan::{
     authored_constraints_digest, reference_point_identity, source_digest, structural_constraints,
 };
@@ -424,39 +424,12 @@ fn compile_pair(
         transform,
         &constraint.constraint_id,
     )?;
-    let basis = if transform_displacement {
-        displacement_transform(transform)
-    } else {
-        [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
-    };
-    let mut rows = Vec::with_capacity(pairings.len() * 3);
-    for pairing in &pairings {
-        for (secondary_dof, transformed_direction) in
-            CanonicalStructuralDof::TRANSLATIONS.into_iter().zip(basis)
-        {
-            let mut terms = vec![CanonicalStructuralConstraintTerm {
-                owner: CanonicalStructuralDofOwner::StructuralNode(pairing.secondary_node_identity),
-                dof: secondary_dof,
-                coefficient: 1.0,
-            }];
-            for weight in &pairing.primary_weights {
-                terms.extend(
-                    CanonicalStructuralDof::TRANSLATIONS
-                        .into_iter()
-                        .zip(transformed_direction)
-                        .filter(|(_, coefficient)| *coefficient != 0.0)
-                        .map(|(dof, coefficient)| CanonicalStructuralConstraintTerm {
-                            owner: CanonicalStructuralDofOwner::StructuralNode(
-                                weight.primary_node_identity,
-                            ),
-                            dof,
-                            coefficient: -weight.weight * coefficient,
-                        }),
-                );
-            }
-            rows.push(row::new_sparse(&constraint.constraint_id, terms, 0.0)?);
-        }
-    }
+    let rows = pairing_rows(
+        &constraint.constraint_id,
+        &pairings,
+        transform,
+        transform_displacement,
+    )?;
     Ok((vec![primary, secondary], rows, pairings, None))
 }
 

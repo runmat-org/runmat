@@ -360,6 +360,7 @@ pub(super) fn assemble_mixed_structural_system(
         structural_translational_dof_count: layout.translational_dof_count(),
         structural_rotational_dof_count: layout.rotational_dof_count(),
         structural_rotation_node_count: layout.rotation_node_count(),
+        structural_explicit_node_indices: topology.explicit_node_indices.clone(),
         structural_moment_load_count: excitations
             .iter()
             .filter(|load| {

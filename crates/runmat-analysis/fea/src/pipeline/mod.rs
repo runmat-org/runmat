@@ -65,9 +65,14 @@ pub(crate) fn validate_rotational_dof_targets(
             .expect("rotation constraint has a target");
         let target_nodes = explicit_target_node_indices(structural, &target.region_id);
         if target_nodes.is_empty()
-            || target_nodes
-                .iter()
-                .any(|node_index| !node_has_rotational_dofs(summary, *node_index))
+            || target_nodes.iter().any(|node_index| {
+                summary
+                    .structural_explicit_node_indices
+                    .get(*node_index)
+                    .is_none_or(|canonical_index| {
+                        !node_has_rotational_dofs(summary, *canonical_index)
+                    })
+            })
         {
             return Err(rotation_constraint_error(constraint));
         }

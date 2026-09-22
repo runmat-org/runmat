@@ -84,6 +84,11 @@ pub struct AssemblySummary {
     pub structural_rotational_dof_count: usize,
     #[serde(default)]
     pub structural_rotation_node_count: usize,
+    /// Canonical node-space index for each authored explicit structural node, in authored-node
+    /// order. Conformal mixed nodes may point into the solid prefix; nonconformal nodes point into
+    /// the appended explicit suffix.
+    #[serde(default)]
+    pub structural_explicit_node_indices: Vec<usize>,
     #[serde(default)]
     pub structural_moment_load_count: usize,
     #[serde(default)]
@@ -1272,6 +1277,7 @@ fn assemble_linear_system_impl(
         structural_translational_dof_count: structural_dof_layout.translational_dof_count(),
         structural_rotational_dof_count: structural_dof_layout.rotational_dof_count(),
         structural_rotation_node_count: structural_dof_layout.rotation_node_count(),
+        structural_explicit_node_indices: Vec::new(),
         structural_moment_load_count,
         structural_direct_rotational_moment_load_count,
         structural_requested_moment_norm_n_m,
@@ -1747,6 +1753,7 @@ fn assemble_explicit_structural_system(
         structural_translational_dof_count: structural_dof_layout.translational_dof_count(),
         structural_rotational_dof_count: structural_dof_layout.rotational_dof_count(),
         structural_rotation_node_count: structural_dof_layout.rotation_node_count(),
+        structural_explicit_node_indices: (0..structural.nodes.len()).collect(),
         structural_moment_load_count: excitations
             .iter()
             .filter(|load| matches!(load.kind, RealizedExcitationKind::Moment(_)))

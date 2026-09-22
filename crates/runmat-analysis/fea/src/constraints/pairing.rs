@@ -6,9 +6,11 @@ use runmat_analysis_core::{PairingPolicy, PeriodicTransform};
 use runmat_meshing_core::{BoundaryTriangleOrder, SolverMeshArtifact, StableDigest};
 
 use super::contract::{
-    ConstraintPairingEvidence, ConstraintPairingWeight, ConstraintPlanError,
-    ResolvedConstraintTarget,
+    CanonicalStructuralConstraintRow, CanonicalStructuralConstraintTerm, CanonicalStructuralDof,
+    CanonicalStructuralDofOwner, ConstraintPairingEvidence, ConstraintPairingWeight,
+    ConstraintPlanError, ResolvedConstraintTarget,
 };
+use super::row;
 use super::vector::{add, cross, dot, magnitude, scale, subtract};
 
 pub(super) fn pair_targets(
@@ -24,15 +26,60 @@ pub(super) fn pair_targets(
         .topology
         .nodes
         .iter()
-        .map(|node| (node.stable_identity, (node.node_id, node.coordinates_m)))
+        .map(|node| (node.stable_identity, node.coordinates_m))
         .collect::<BTreeMap<_, _>>();
+    pair_targets_with_nodes(
+        mesh,
+        &nodes,
+        primary,
+        secondary,
+        policy,
+        transform,
+        constraint_id,
+    )
+}
+
+pub(super) fn pair_mixed_targets(
+    mesh: &SolverMeshArtifact,
+    topology: &crate::physics::structural::topology::node_space::CanonicalStructuralNodeSpace,
+    primary: &ResolvedConstraintTarget,
+    secondary: &ResolvedConstraintTarget,
+    policy: &PairingPolicy,
+    transform: &PeriodicTransform,
+    constraint_id: &str,
+) -> Result<Vec<ConstraintPairingEvidence>, ConstraintPlanError> {
+    let nodes = topology
+        .nodes
+        .iter()
+        .map(|node| (node.identity, node.coordinates_m))
+        .collect::<BTreeMap<_, _>>();
+    pair_targets_with_nodes(
+        mesh,
+        &nodes,
+        primary,
+        secondary,
+        policy,
+        transform,
+        constraint_id,
+    )
+}
+
+fn pair_targets_with_nodes(
+    mesh: &SolverMeshArtifact,
+    nodes: &BTreeMap<StableDigest, [f64; 3]>,
+    primary: &ResolvedConstraintTarget,
+    secondary: &ResolvedConstraintTarget,
+    policy: &PairingPolicy,
+    transform: &PeriodicTransform,
+    constraint_id: &str,
+) -> Result<Vec<ConstraintPairingEvidence>, ConstraintPlanError> {
     let mut pairings = match policy {
         PairingPolicy::Matching => {
-            pair_matching(mesh, &nodes, primary, secondary, transform, constraint_id)?
+            pair_matching(mesh, nodes, primary, secondary, transform, constraint_id)?
         }
         PairingPolicy::GeometricTolerance(tolerance) => pair_geometrically(
             mesh,
-            &nodes,
+            nodes,
             primary,
             secondary,
             transform,
@@ -87,7 +134,7 @@ pub(super) fn displacement_transform(transform: &PeriodicTransform) -> [[f64; 3]
 
 fn pair_matching(
     mesh: &SolverMeshArtifact,
-    nodes: &BTreeMap<StableDigest, (u64, [f64; 3])>,
+    nodes: &BTreeMap<StableDigest, [f64; 3]>,
     primary: &ResolvedConstraintTarget,
     secondary: &ResolvedConstraintTarget,
     transform: &PeriodicTransform,
@@ -166,16 +213,18 @@ fn matching_tolerance(mesh: &SolverMeshArtifact) -> f64 {
 
 fn pair_geometrically(
     mesh: &SolverMeshArtifact,
-    nodes: &BTreeMap<StableDigest, (u64, [f64; 3])>,
+    nodes: &BTreeMap<StableDigest, [f64; 3]>,
     primary: &ResolvedConstraintTarget,
     secondary: &ResolvedConstraintTarget,
     transform: &PeriodicTransform,
     tolerance: f64,
     constraint_id: &str,
 ) -> Result<Vec<ConstraintPairingEvidence>, ConstraintPlanError> {
-    let identities_by_id = nodes
+    let identities_by_id = mesh
+        .topology
+        .nodes
         .iter()
-        .map(|(identity, (node_id, _))| (*node_id, *identity))
+        .map(|node| (node.node_id, node.stable_identity))
         .collect::<BTreeMap<_, _>>();
     let faces = mesh
         .topology
@@ -278,18 +327,60 @@ fn interpolation_weights(
 }
 
 fn node_point(
-    nodes: &BTreeMap<StableDigest, (u64, [f64; 3])>,
+    nodes: &BTreeMap<StableDigest, [f64; 3]>,
     identity: StableDigest,
     constraint_id: &str,
 ) -> Result<[f64; 3], ConstraintPlanError> {
     nodes
         .get(&identity)
-        .map(|(_, point)| *point)
+        .copied()
         .ok_or_else(|| ConstraintPlanError::PairingUnavailable {
             constraint_id: constraint_id.into(),
             secondary_node_identity: identity,
             reason: "resolved target node is absent from solver topology",
         })
+}
+
+pub(super) fn pairing_rows(
+    constraint_id: &str,
+    pairings: &[ConstraintPairingEvidence],
+    transform: &PeriodicTransform,
+    transform_displacement: bool,
+) -> Result<Vec<CanonicalStructuralConstraintRow>, ConstraintPlanError> {
+    let basis = if transform_displacement {
+        displacement_transform(transform)
+    } else {
+        identity()
+    };
+    let mut rows = Vec::with_capacity(pairings.len() * 3);
+    for pairing in pairings {
+        for (secondary_dof, transformed_direction) in
+            CanonicalStructuralDof::TRANSLATIONS.into_iter().zip(basis)
+        {
+            let mut terms = vec![CanonicalStructuralConstraintTerm {
+                owner: CanonicalStructuralDofOwner::StructuralNode(pairing.secondary_node_identity),
+                dof: secondary_dof,
+                coefficient: 1.0,
+            }];
+            for weight in &pairing.primary_weights {
+                terms.extend(
+                    CanonicalStructuralDof::TRANSLATIONS
+                        .into_iter()
+                        .zip(transformed_direction)
+                        .filter(|(_, coefficient)| *coefficient != 0.0)
+                        .map(|(dof, coefficient)| CanonicalStructuralConstraintTerm {
+                            owner: CanonicalStructuralDofOwner::StructuralNode(
+                                weight.primary_node_identity,
+                            ),
+                            dof,
+                            coefficient: -weight.weight * coefficient,
+                        }),
+                );
+            }
+            rows.push(row::new_sparse(constraint_id, terms, 0.0)?);
+        }
+    }
+    Ok(rows)
 }
 
 fn transform_position(transform: &PeriodicTransform, point: [f64; 3]) -> [f64; 3] {
