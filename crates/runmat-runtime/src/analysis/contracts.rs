@@ -8,6 +8,7 @@ use runmat_analysis_fea::execution::{SequenceIdentity, SolverResultIdentity, Sta
 use runmat_analysis_fea::{
     AnalysisRunIdentity, ComputeBackend, ExecutionBackend, FeaProgressEvent, FeaRunResult,
 };
+use runmat_analysis_language::output_operation_extension;
 use runmat_execution::Digest;
 use runmat_geometry_core::GeometryAsset;
 use runmat_meshing_core::MeshingRequestSettings;
@@ -970,6 +971,54 @@ pub struct AnalysisRuntimeCapabilities {
     pub supports_results: bool,
     pub supports_live_progress: bool,
     pub visualization_backend: String,
+    pub authoring_workflow: Vec<String>,
+    pub procedure_ids: Vec<String>,
+    pub output_operation_ids: Vec<String>,
+    pub language_reference_paths: Vec<String>,
+}
+
+pub fn analysis_authoring_workflow() -> Vec<String> {
+    vec![
+        "edit <study>.fea with workspace file tools".to_string(),
+        "runmat fea check <study>.fea [--study <id> | --sweep <id>]".to_string(),
+        "runmat fea plan <study>.fea [--study <id> | --sweep <id>] --json".to_string(),
+        "runmat fea run <study>.fea [--study <id> | --sweep <id>] [--cluster <profile>]"
+            .to_string(),
+    ]
+}
+
+pub fn analysis_procedure_ids() -> Vec<String> {
+    AnalysisProcedure::ALL
+        .into_iter()
+        .map(|procedure| {
+            serde_json::to_value(procedure)
+                .expect("analysis procedure must serialize")
+                .as_str()
+                .expect("analysis procedure must serialize as a string")
+                .to_string()
+        })
+        .collect()
+}
+
+pub fn analysis_output_operation_ids() -> Vec<String> {
+    output_operation_extension()
+        .operations
+        .into_iter()
+        .map(|operation| operation.identity.to_string())
+        .collect()
+}
+
+pub fn analysis_language_reference_paths() -> Vec<String> {
+    [
+        "docs/fea/language/index.md",
+        "docs/fea/language/reference/declarations.md",
+        "docs/fea/language/reference/procedures.md",
+        "docs/fea/language/reference/operations-and-output-queries.md",
+        "docs/fea/language/diagnostics-and-tooling.md",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect()
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -3095,6 +3144,34 @@ pub(crate) fn format_quality_policy(mode: QualityPolicy) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn agent_authoring_facts_come_from_closed_runtime_catalogs() {
+        let workflow = analysis_authoring_workflow();
+        assert_eq!(workflow.len(), 4);
+        assert!(workflow[1].starts_with("runmat fea check "));
+        assert!(workflow[2].starts_with("runmat fea plan "));
+        assert!(workflow[3].starts_with("runmat fea run "));
+
+        let procedures = analysis_procedure_ids();
+        assert_eq!(procedures.len(), 11);
+        assert!(procedures.contains(&"modal_response_spectrum".to_string()));
+        assert!(procedures.contains(&"random_response".to_string()));
+
+        let operations = analysis_output_operation_ids();
+        assert_eq!(
+            operations.len(),
+            output_operation_extension().operations.len()
+        );
+        assert!(operations.contains(&"max".to_string()));
+        assert!(operations.contains(&"von_mises".to_string()));
+        assert_eq!(operations.len(), {
+            let mut unique = operations.clone();
+            unique.sort();
+            unique.dedup();
+            unique.len()
+        });
+    }
 
     #[test]
     fn solver_defaults_admit_only_implemented_exact_procedures() {

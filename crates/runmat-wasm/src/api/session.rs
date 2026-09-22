@@ -893,6 +893,10 @@ impl RunMatWasm {
             supports_results: true,
             supports_live_progress: false,
             visualization_backend: "runmat-plot".to_string(),
+            authoring_workflow: runmat_runtime::analysis::analysis_authoring_workflow(),
+            procedure_ids: runmat_runtime::analysis::analysis_procedure_ids(),
+            output_operation_ids: runmat_runtime::analysis::analysis_output_operation_ids(),
+            language_reference_paths: runmat_runtime::analysis::analysis_language_reference_paths(),
         };
         serde_wasm_bindgen::to_value(&payload)
             .map_err(|err| js_error(&format!("Failed to serialize FEA capabilities: {err}")))

@@ -335,6 +335,10 @@ export interface FeaCapabilities {
   supportsResults: boolean;
   supportsLiveProgress: boolean;
   visualizationBackend: string;
+  authoringWorkflow: string[];
+  procedureIds: string[];
+  outputOperationIds: string[];
+  languageReferencePaths: string[];
 }
 
 export interface FeaRunResult {

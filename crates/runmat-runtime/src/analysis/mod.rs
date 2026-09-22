@@ -389,12 +389,13 @@ fn install_fea_solver_context() -> runmat_analysis_fea::FeaProgressContextGuard 
 }
 
 pub use contracts::{
-    AnalysisAcousticRunOptions, AnalysisBucklingRunOptions, AnalysisCfdRunOptions,
-    AnalysisChtRunOptions, AnalysisDiagnosticsArtifactPayload, AnalysisDocumentCheckResult,
-    AnalysisDocumentKind, AnalysisDocumentRunResult, AnalysisElectromagneticRunOptions,
-    AnalysisExecutionPlan, AnalysisExecutionStep, AnalysisFieldBinding,
-    AnalysisFieldBindingsArtifactPayload, AnalysisFieldDescriptor, AnalysisFieldKind,
-    AnalysisFieldLocation, AnalysisFieldPageResult, AnalysisFieldPageValues,
+    analysis_authoring_workflow, analysis_language_reference_paths, analysis_output_operation_ids,
+    analysis_procedure_ids, AnalysisAcousticRunOptions, AnalysisBucklingRunOptions,
+    AnalysisCfdRunOptions, AnalysisChtRunOptions, AnalysisDiagnosticsArtifactPayload,
+    AnalysisDocumentCheckResult, AnalysisDocumentKind, AnalysisDocumentRunResult,
+    AnalysisElectromagneticRunOptions, AnalysisExecutionPlan, AnalysisExecutionStep,
+    AnalysisFieldBinding, AnalysisFieldBindingsArtifactPayload, AnalysisFieldDescriptor,
+    AnalysisFieldKind, AnalysisFieldLocation, AnalysisFieldPageResult, AnalysisFieldPageValues,
     AnalysisFieldPagingDescriptor, AnalysisFieldRequestOptions, AnalysisFieldSelection,
     AnalysisFieldStatistic, AnalysisFieldStorage, AnalysisFieldStorageRef, AnalysisFsiRunOptions,
     AnalysisImmutableValueSpec, AnalysisModalRunOptions, AnalysisModelSourceEvidence,

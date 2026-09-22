@@ -36,6 +36,22 @@ pub enum AnalysisProcedure {
     Adaptive,
 }
 
+impl AnalysisProcedure {
+    pub const ALL: [Self; 11] = [
+        Self::Static,
+        Self::ModalExtraction,
+        Self::PrestressedModalExtraction,
+        Self::EigenvalueBuckling,
+        Self::TransientResponse,
+        Self::HarmonicResponse,
+        Self::PrestressedHarmonicResponse,
+        Self::ModalResponseSpectrum,
+        Self::RandomResponse,
+        Self::Nonlinear,
+        Self::Adaptive,
+    ];
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SolutionSpace {
