@@ -3386,7 +3386,7 @@ mod tests {
         .expect("a density-only material is valid for compatible formulations");
         let material: MaterialModel = object_payload(&material);
         assert_eq!(material.mass_density_kg_per_m3, Some(1.225));
-        assert!(material.mechanical.is_none());
+        assert!(material.elasticity.is_none());
 
         let empty = block_on(fea_material_builtin(vec![Value::String("empty".into())]))
             .expect_err("an empty material must fail at construction");

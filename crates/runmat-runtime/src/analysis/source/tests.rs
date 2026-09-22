@@ -806,7 +806,7 @@ study static {
         1
     );
     assert_eq!(compiled.properties.solid_materials().len(), 1);
-    assert_eq!(compiled.properties.beam_materials().len(), 1);
+    assert_eq!(compiled.properties.beam_properties().len(), 1);
     assert_ne!(compiled.definition_digest().unwrap().bytes(), &[0; 32]);
     let workloads = product.workloads;
     assert_eq!(

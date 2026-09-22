@@ -1238,7 +1238,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                 name: "Acoustic Air".to_string(),
                 provenance: runmat_analysis_core::MaterialProvenance::Authored,
                 mass_density_kg_per_m3: Some(1.225),
-                mechanical: None,
+                elasticity: None,
                 damping: None,
                 thermal: None,
                 acoustic: Some(runmat_analysis_core::MaterialAcousticModel {
@@ -1616,10 +1616,14 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                     name: "Default".to_string(),
                     provenance: runmat_analysis_core::MaterialProvenance::Authored,
                     mass_density_kg_per_m3: Some(7850.0),
-                    mechanical: Some(runmat_analysis_core::MaterialMechanicalModel {
-                        youngs_modulus_pa: 110e9,
-                        poisson_ratio: 0.31,
-                    }),
+                    elasticity: Some(
+                        runmat_analysis_core::MaterialElasticityModel::IsotropicLinear(
+                            runmat_analysis_core::MaterialMechanicalModel {
+                                youngs_modulus_pa: 110e9,
+                                poisson_ratio: 0.31,
+                            },
+                        ),
+                    ),
                     damping: None,
                     thermal: Some(runmat_analysis_core::MaterialThermalModel {
                         reference_temperature_k: 293.15,

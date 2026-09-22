@@ -117,6 +117,19 @@ pub(super) fn map_fea_run_error(
             error.to_string(),
             model_details(),
         ),
+        FeaRunError::SolverFormulationCompatibility(error) => operation_error(
+            operation.name(),
+            operation.version(),
+            context,
+            OperationErrorSpec {
+                error_code: operation.formulation_admission_error_code(),
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            error.to_string(),
+            model_details(),
+        ),
     }
 }
 

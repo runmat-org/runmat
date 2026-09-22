@@ -17,12 +17,13 @@ use runmat_analysis_core::{
     ElectricPotential, ElectromagneticDomain, EvidenceConfidence, ExcitationAction, ExcitationCase,
     ExcitationCaseActivation, ExcitationCaseId, ExcitationDistribution, ExcitationId,
     ExcitationKinematics, ExcitationTarget, Frequency, MassDensity, MaterialAssignment,
-    MaterialElectricalModel, MaterialMechanicalModel, MaterialModel, MaterialThermalModel,
-    PhysicalSignal, PhysicsFamily, ProcedureStep, ProjectionRequirement, RegionTarget, Signal,
-    SignalApproximationEvidence, SignalExtrapolation, SignalId, SignalInterpolation, SignalKnot,
-    SignalOrdinate, SignalPrecision, SignalProvenance, SignalRepresentation, SignalShape,
-    SignalValue, StructuralElement, StructuralElementKind, StructuralModel, StructuralNode,
-    TabulatedSignal, TabulatedSignalDomain, Temperature, TurbulenceIntensity, Velocity,
+    MaterialElasticityModel, MaterialElectricalModel, MaterialMechanicalModel, MaterialModel,
+    MaterialThermalModel, PhysicalSignal, PhysicsFamily, ProcedureStep, ProjectionRequirement,
+    RegionTarget, Signal, SignalApproximationEvidence, SignalExtrapolation, SignalId,
+    SignalInterpolation, SignalKnot, SignalOrdinate, SignalPrecision, SignalProvenance,
+    SignalRepresentation, SignalShape, SignalValue, StructuralElement, StructuralElementKind,
+    StructuralModel, StructuralNode, TabulatedSignal, TabulatedSignalDomain, Temperature,
+    TurbulenceIntensity, Velocity,
 };
 use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
 use runmat_analysis_fea::{
@@ -302,10 +303,12 @@ fn sample_model() -> AnalysisModel {
             name: "Steel".to_string(),
             provenance: runmat_analysis_core::MaterialProvenance::Authored,
             mass_density_kg_per_m3: Some(7850.0),
-            mechanical: Some(MaterialMechanicalModel {
-                youngs_modulus_pa: 200e9,
-                poisson_ratio: 0.3,
-            }),
+            elasticity: Some(MaterialElasticityModel::IsotropicLinear(
+                MaterialMechanicalModel {
+                    youngs_modulus_pa: 200e9,
+                    poisson_ratio: 0.3,
+                },
+            )),
             damping: None,
             thermal: Some(MaterialThermalModel {
                 reference_temperature_k: 293.15,
@@ -421,10 +424,12 @@ fn sample_model_with_material_assignment_mismatch() -> AnalysisModel {
         name: "Polymer".to_string(),
         provenance: runmat_analysis_core::MaterialProvenance::Authored,
         mass_density_kg_per_m3: Some(1150.0),
-        mechanical: Some(MaterialMechanicalModel {
-            youngs_modulus_pa: 3.2e9,
-            poisson_ratio: 0.37,
-        }),
+        elasticity: Some(MaterialElasticityModel::IsotropicLinear(
+            MaterialMechanicalModel {
+                youngs_modulus_pa: 3.2e9,
+                poisson_ratio: 0.37,
+            },
+        )),
         damping: None,
         thermal: Some(MaterialThermalModel {
             reference_temperature_k: 293.15,
@@ -6706,10 +6711,12 @@ fn analysis_run_thermal_balanced_degrades_on_high_constitutive_spread() {
         name: "High K Composite".to_string(),
         provenance: runmat_analysis_core::MaterialProvenance::Authored,
         mass_density_kg_per_m3: Some(1800.0),
-        mechanical: Some(MaterialMechanicalModel {
-            youngs_modulus_pa: 5.0e9,
-            poisson_ratio: 0.33,
-        }),
+        elasticity: Some(MaterialElasticityModel::IsotropicLinear(
+            MaterialMechanicalModel {
+                youngs_modulus_pa: 5.0e9,
+                poisson_ratio: 0.33,
+            },
+        )),
         damping: None,
         thermal: Some(MaterialThermalModel {
             reference_temperature_k: 293.15,

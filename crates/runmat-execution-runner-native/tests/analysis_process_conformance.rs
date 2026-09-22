@@ -1395,6 +1395,27 @@ fn mixed_fixture(
     mesh.topology.boundary_faces[1].provenance.sort();
 
     let mut model = mixed_solid_beam_model(attached_coordinates);
+    let mut beam_material = model.materials[0].clone();
+    beam_material.material_id = "mat_beam_alloy".into();
+    beam_material.name = "Beam alloy".into();
+    beam_material.mass_density_kg_per_m3 = Some(4_430.0);
+    beam_material
+        .require_mechanical_mut()
+        .unwrap()
+        .youngs_modulus_pa = 113.8e9;
+    model.materials.push(beam_material);
+    let beam_assignment = model
+        .material_assignments
+        .iter_mut()
+        .find(|assignment| {
+            matches!(
+                assignment.target,
+                runmat_analysis_core::PropertyRegionTarget::Beam(_)
+            )
+        })
+        .expect("mixed fixture declares a beam material assignment");
+    beam_assignment.expected_material_id = "mat_beam_alloy".into();
+    beam_assignment.assigned_material_id = "mat_beam_alloy".into();
     model
         .constraints
         .push(runmat_analysis_core::AnalysisConstraint::Structural(
@@ -1433,6 +1454,28 @@ fn mixed_fixture(
     mesh.topology.regions[0].region_id = region;
     mesh.canonical_digest = StableDigest::ZERO;
     mesh.seal_canonical_digest().unwrap();
+    let compiled_properties =
+        runmat_analysis_fea::properties::compile_property_map(&model, Some(&mesh)).unwrap();
+    assert_eq!(compiled_properties.solid_materials().len(), 1);
+    assert_eq!(compiled_properties.beam_properties().len(), 1);
+    assert_eq!(
+        compiled_properties
+            .solid_materials()
+            .next()
+            .unwrap()
+            .material
+            .material_id,
+        "mat_steel"
+    );
+    assert_eq!(
+        compiled_properties
+            .beam_properties()
+            .next()
+            .unwrap()
+            .material
+            .material_id,
+        "mat_beam_alloy"
+    );
     model.geometry_revision = mesh.geometry.geometry_revision as u32;
     let solve = StructuralLinearWorkload {
         schema_version: 1,

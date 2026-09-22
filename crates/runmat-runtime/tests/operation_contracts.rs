@@ -554,8 +554,7 @@ fn material_conflict_contract_model() -> AnalysisModel {
     polymer.material_id = "mat_polymer".to_string();
     polymer.name = "Polymer".to_string();
     polymer
-        .mechanical
-        .as_mut()
+        .require_mechanical_mut()
         .expect("structural fixture material")
         .youngs_modulus_pa = 3.0e9;
     model.materials.push(polymer);

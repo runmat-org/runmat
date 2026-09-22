@@ -3,7 +3,9 @@ use super::signals::bindings::{
     FROZEN_STUDY_GENERATORS_PROPERTY,
 };
 use super::*;
-use runmat_analysis_core::{validate_model_against_geometry, PropertyRegionTarget, ThermalDomain};
+use runmat_analysis_core::{
+    validate_model_against_geometry, MaterialElasticityModel, PropertyRegionTarget, ThermalDomain,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -611,7 +613,7 @@ pub(super) fn create_material_object_from_args(args: Vec<Value>) -> BuiltinResul
         name,
         provenance: runmat_analysis_core::MaterialProvenance::Authored,
         mass_density_kg_per_m3,
-        mechanical,
+        elasticity: mechanical.map(MaterialElasticityModel::IsotropicLinear),
         damping,
         thermal,
         acoustic,
