@@ -38,6 +38,93 @@ convection, impedance, radiation, magnetic insulation, and outlet pressure are d
 [loads and boundary conditions](../loads/), because they contribute flux or traction rather than
 directly prescribing the primary unknown.
 
+## Complete essential-constraint catalog
+
+The `.fea` language accepts the following closed set. Family pages provide complete field syntax,
+equations, examples, conflicts, and verification evidence. If a kind is absent from this table,
+`runmat fea check` rejects it; RunMat does not reinterpret an unknown constraint as a generic
+penalty.
+
+| Family | Constraint kinds | Physical role |
+| --- | --- | --- |
+| Structural supports | `structural.fixed`, `structural.symmetry`, `structural.antisymmetry` | Remove the support/symmetry DOFs defined by the formulation |
+| Structural prescribed state | `structural.prescribed`, `structural.prescribed_motion`, `structural.normal_displacement` | Prescribe selected translations, rotations, motion, or normal displacement |
+| Structural relations | `structural.rigid_coupling`, `structural.distributing_coupling`, `structural.tie`, `structural.periodic`, `structural.equation` | Relate DOFs across points or paired regions |
+| Thermal | `thermal.temperature`, `thermal.periodic`, `thermal.tie`, `thermal.affine_jump` | Prescribe temperature or relate temperature across boundaries |
+| Electrical | `electrical.potential`, `electrical.equipotential`, `electrical.floating_conductor`, `electrical.integral_current`, `electrical.potential_reference`, `electrical.periodic` | Prescribe or reference electric potential and terminal current |
+| Magnetic | `magnetic.vector_potential`, `magnetic.vector_potential_ground`, `magnetic.coulomb_gauge`, `magnetic.periodic`, `magnetic.phase_shifted_periodic` | Prescribe potential, fix gauge freedom, or relate periodic fields |
+| Acoustic | `acoustic.pressure`, `acoustic.periodic`, `acoustic.phase_shifted_periodic` | Prescribe pressure or relate periodic acoustic fields |
+| Fluid | `fluid.velocity`, `fluid.moving_wall`, `fluid.no_slip_wall`, `fluid.slip_wall`, `fluid.symmetry`, `fluid.pressure_reference`, `fluid.periodic` | Prescribe velocity/wall kinematics, gauge pressure, or periodic flow |
+
+The target must be a named geometry region. Boundary constraints reject solid and cell targets,
+except `magnetic.coulomb_gauge`, which may act on the admitted gauge domain. Paired constraints
+require distinct primary and secondary regions plus their mapping/tolerance contract. Scalar values
+retain their physical quantity: temperature cannot be used as a generic scalar, and pressure cannot
+stand in for an acoustic or fluid velocity condition.
+
+## Complete connector and interface catalog
+
+These declarations are related to constraints but assemble different mathematical objects:
+
+| Category | Closed kinds |
+| --- | --- |
+| Connector | `translational_spring`, `translational_dashpot`, `elastic_foundation` |
+| Structural contact | `contact.frictionless`, `contact.coulomb` |
+| Fluid–structure transfer | `fluid_structure.no_slip` |
+| Conjugate heat transfer | `conjugate_heat_transfer.perfect`, `conjugate_heat_transfer.conductance`, `conjugate_heat_transfer.resistance` |
+
+See [connectors](./connectors) and [interfaces](./interfaces). A six-DOF bushing, cohesive law,
+nonlinear gap spring, radiation interface, or porous jump is not implied by these names and must not
+be approximated by supplying dimensionally incompatible coefficients.
+
+## How do I prescribe a value that varies with time or frequency?
+
+Where a constraint field admits `PrescribedValue`, bind a typed signal rather than writing an
+expression inside the constraint. The signal owns domain, interpolation, extrapolation, and
+function provenance; the constraint owns target and physical meaning.
+
+```fea
+signal platen_motion : displacement over time {
+    samples = [
+        { at = 0 s, value = 0 mm },
+        { at = 1 s, value = 2 mm },
+        { at = 2 s, value = 2 mm },
+    ]
+    interpolation = linear
+    extrapolation = reject
+}
+
+model compression_fixture {
+    constraint moving_platen {
+        structural.prescribed {
+            target = geometry.specimen.region.top_platen
+            frame = global
+            uz = signal.platen_motion
+        }
+    }
+}
+```
+
+The analysis domain must be covered by the signal domain. A frequency-domain constraint also needs
+the admitted complex amplitude/phase representation; a real magnitude is not silently promoted to
+a zero-phase complex boundary.
+
+## How do I constrain an assembly without hiding its load path?
+
+Give every physical support, tie, connector, and interface its own stable name and the smallest
+region that represents its footprint. Do not place one fixed constraint on all mounting faces merely
+because it removes rigid modes. For an assembly, inspect reactions by support, connector endpoint
+forces, interface transfer, and the moment balance about a stated origin. This preserves the load
+path and makes a support-assumption comparison possible.
+
+## How do I model a boundary condition that RunMat does not list?
+
+Do not reuse the nearest-looking declaration. Write down the field, conjugate flux, equation,
+units, target topology, time/frequency dependence, and whether the relation is essential, natural,
+constitutive, unilateral, or coupled. If no catalog entry has that contract, the condition is not
+currently first class. The family guides identify common unsupported cases and the evidence a future
+typed implementation would require.
+
 ## Common form
 
 ```fea

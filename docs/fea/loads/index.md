@@ -32,6 +32,95 @@ The guides use searchable questions as headings and distinguish a directly suppo
 from a required coupled procedure or a capability that is not yet first class. An unsupported model
 is never represented by silently reusing a quantity with different dimensions.
 
+## Complete load and excitation declaration catalog
+
+The following names are the closed load/excitation action set accepted by the `.fea` checker. The
+quantity column is part of the type contract: a signal with a different quantity cannot be attached
+even when both happen to be represented by one number.
+
+| Action | Signal quantity | Valid geometry target | Default projection | Typical use |
+| --- | --- | --- | --- | --- |
+| `force` | force | vertex, edge, or face | preserve resultant | Applied mechanical force |
+| `moment` | moment | vertex, edge, or face | preserve resultant and moment | Torque or couple |
+| `traction` | traction | face | intensity per area | Vector surface traction |
+| `pressure` | pressure | face | intensity per area | Normal structural pressure |
+| `body_force` | body-force density | solid or whole model | intensity per volume | Gravity-equivalent or inertial source |
+| `heat_generation` | heat-generation density | solid or whole model | intensity per volume | Internal thermal power density |
+| `heat_flux` | heat flux | face | intensity per area | Surface heating or cooling |
+| `temperature_field` | temperature | solid | uniform kinematic or topology field | Prescribed volume temperature input |
+| `ambient_temperature` | temperature | face | uniform kinematic or topology field | Varying convection ambient |
+| `terminal_voltage` | electric potential | face | uniform kinematic or topology field | Voltage-driven terminal |
+| `electric_current` | electric current | face | preserve resultant | Total terminal current |
+| `electric_charge` | electric charge | face | preserve resultant | Total boundary charge |
+| `current_density` | electric-current density | face | intensity per area or topology field | Distributed current injection |
+| `magnetic_vector_potential` | magnetic vector potential | face | uniform kinematic or topology field | Magnetic boundary drive |
+| `acoustic_pressure` | pressure | face | uniform kinematic or topology field | Acoustic pressure source |
+| `normal_velocity` | velocity | face | uniform kinematic or topology field | Acoustic piston or normal wall velocity |
+| `inlet_velocity` | velocity | face | uniform kinematic or topology field | Fluid inlet profile |
+| `mass_flow` | mass-flow rate | face | preserve resultant | Total inlet or outlet mass flow |
+| `wall_motion` | velocity | face | uniform kinematic or topology field | Prescribed fluid-wall motion |
+
+`force`, `moment`, `electric_current`, `electric_charge`, and `mass_flow` preserve an integrated
+resultant when the mesh changes. Intensities preserve their local value. `force` and `moment` may
+also use concentrated projection. `force`, `traction`, and `pressure` may use follower kinematics;
+the other actions are fixed-frame. These rules are checked rather than inferred by a solver.
+
+Natural boundary operators use a separate closed set because they assemble an operator rather than
+a sampled excitation: `structural.pressure`, `thermal.heat_flux`, `thermal.convection`,
+`magnetic.insulation`, `acoustic.rigid_wall`, `acoustic.radiation`, `acoustic.impedance`, and
+`fluid.outlet_pressure`. The family guides show their exact fields and sign conventions.
+
+## How do I choose between a constant load and an excitation?
+
+Use `load` when the action has one value for the analysis case. Use `signal` plus `excitation` when
+the value varies over time, frequency, mode, or another admitted independent domain. Do not wrap a
+constant in a two-point signal merely to make it reusable; name the load and include it in more than
+one load case instead.
+
+```fea
+load dead_weight {
+    body_force on whole_model = [0, 0, -77.0] kN/m^3
+}
+
+signal operating_force : force over time {
+    samples = [
+        { at = 0 s, value = 0 N },
+        { at = 1 s, value = 3 kN },
+        { at = 5 s, value = 3 kN },
+    ]
+    interpolation = linear
+    extrapolation = reject
+}
+
+excitation operating_cycle {
+    force {
+        target = geometry.machine.region.load_pad
+        signal = signal.operating_force
+        direction = global([0, -1, 0])
+        kinematics = fixed_frame
+    }
+}
+```
+
+The direct load and the varying excitation remain separate named objects. A load case can include
+both without losing which contribution supplied each resultant.
+
+## How do I apply a spatially varying field instead of a uniform value?
+
+Use a topology-field distribution only for actions whose typed contract admits it. The sampled
+field must resolve onto the target topology with the declared quantity and frame. This is used for
+measured pressure maps, imported heat flux, CFD-to-structure traction, inlet profiles, and similar
+data. Preserve the source artifact, coordinate transform, interpolation rule, uncovered-region
+policy, and projection error in evidence. A list of values with no topology identity is not a field.
+
+## How do I apply a follower load in a geometrically nonlinear analysis?
+
+Follower kinematics are supported only for `force`, `traction`, and `pressure`. Their direction is
+updated from the deformed configuration according to the admitted formulation. Moments, body
+forces, thermal sources, electrical sources, and flow inputs cannot be labeled follower to bypass
+their own physical contracts. Compare external work and load direction through the increment
+history; the final arrow alone does not establish correct work conjugacy.
+
 ## Constant and varying forms
 
 ```fea
