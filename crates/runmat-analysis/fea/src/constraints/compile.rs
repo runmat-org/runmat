@@ -121,7 +121,7 @@ fn validate_unique_ids(constraints: &[&StructuralConstraint]) -> Result<(), Cons
     Ok(())
 }
 
-fn canonical_reference_points(
+pub(super) fn canonical_reference_points(
     constraints: &[&StructuralConstraint],
 ) -> Result<Vec<CanonicalStructuralReferencePoint>, ConstraintPlanError> {
     let mut by_id = BTreeMap::<String, [f64; 3]>::new();
@@ -456,7 +456,7 @@ fn compile_coupling(
     Ok((vec![target], rows, Vec::new(), Some(evidence)))
 }
 
-fn study_constant_displacement(
+pub(super) fn study_constant_displacement(
     value: &PrescribedValue<runmat_analysis_core::Displacement>,
     model: &AnalysisModel,
     constraint_id: &str,

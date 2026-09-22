@@ -20,11 +20,21 @@ pub(super) fn resolve_constraint_matrix(
     layout: &StructuralDofLayout,
 ) -> Result<ResolvedConstraintMatrix, ConstraintAlgebraError> {
     let nodes = node_indices(topology);
+    let reference_points = plan
+        .reference_points
+        .iter()
+        .enumerate()
+        .map(|(index, point)| (point.identity, index))
+        .collect::<BTreeMap<_, _>>();
     ResolvedConstraintMatrix::from_plan(plan, layout.total_dof_count(), |owner, dof| match owner {
         CanonicalStructuralDofOwner::StructuralNode(identity) => nodes
             .get(&identity)
             .and_then(|node| layout.index(*node, StructuralDofKind::from_constraint(dof))),
-        CanonicalStructuralDofOwner::ReferencePoint(_) => None,
+        CanonicalStructuralDofOwner::ReferencePoint(identity) => {
+            reference_points.get(&identity).and_then(|index| {
+                layout.reference_point_index(*index, StructuralDofKind::from_constraint(dof))
+            })
+        }
     })
 }
 

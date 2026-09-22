@@ -1,6 +1,5 @@
 use runmat_analysis_core::{
-    AnalysisModel, BoundaryTransferImplementation, CoordinateFrame, SourceImplementation,
-    StructuralConstraintKind,
+    AnalysisModel, BoundaryTransferImplementation, SourceImplementation, StructuralConstraintKind,
 };
 
 use crate::excitation::{RealizedExcitationKind, RealizedExcitationTarget, RealizedExcitations};
@@ -231,14 +230,6 @@ pub(super) fn validate_structural_inputs(
         .iter()
         .filter_map(|value| value.structural())
     {
-        if basis != StructuralProjectionBasis::CanonicalSolid
-            && constraint.frame != CoordinateFrame::Global
-        {
-            return Err(StructuralAssemblyError::UnsupportedConstraintFrame {
-                constraint_id: constraint.constraint_id.clone(),
-                frame: constraint.frame.context_label(),
-            });
-        }
         let supported = match basis {
             StructuralProjectionBasis::CanonicalSolid => matches!(
                 constraint.kind,
@@ -259,6 +250,14 @@ pub(super) fn validate_structural_inputs(
                 StructuralConstraintKind::Fixed { .. }
                     | StructuralConstraintKind::Prescribed(_)
                     | StructuralConstraintKind::PrescribedMotion(_)
+                    | StructuralConstraintKind::NormalDisplacement { .. }
+                    | StructuralConstraintKind::Symmetry { .. }
+                    | StructuralConstraintKind::Antisymmetry { .. }
+                    | StructuralConstraintKind::RigidCoupling(_)
+                    | StructuralConstraintKind::DistributingCoupling(_)
+                    | StructuralConstraintKind::Tie(_)
+                    | StructuralConstraintKind::Periodic(_)
+                    | StructuralConstraintKind::Equation(_)
             ),
             StructuralProjectionBasis::Synthetic => true,
         };

@@ -10,6 +10,7 @@ mod multiplier;
 pub mod nonlinear;
 pub mod preconditioner;
 mod reaction;
+pub(crate) use reaction::recover_structural_reaction;
 pub(crate) mod spd_linear;
 mod symmetric_eigen;
 pub mod transient;

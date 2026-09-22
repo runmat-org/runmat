@@ -222,7 +222,7 @@ fn resolve_constraint_matrix(
         CanonicalStructuralTopologyIdentity::Solid { .. } => unreachable!(),
     }
     .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
-    let layout = mixed_dof_layout(&topology);
+    let layout = mixed_dof_layout(&topology, constraints.reference_points.len());
     let nodes = topology
         .nodes
         .iter()
@@ -234,7 +234,13 @@ fn resolve_constraint_matrix(
             CanonicalStructuralDofOwner::StructuralNode(identity) => nodes
                 .get(&identity)
                 .and_then(|node| layout.index(*node, StructuralDofKind::from_constraint(dof))),
-            CanonicalStructuralDofOwner::ReferencePoint(_) => None,
+            CanonicalStructuralDofOwner::ReferencePoint(identity) => constraints
+                .reference_points
+                .iter()
+                .position(|point| point.identity == identity)
+                .and_then(|index| {
+                    layout.reference_point_index(index, StructuralDofKind::from_constraint(dof))
+                }),
         }
     })
     .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))

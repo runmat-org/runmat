@@ -1,8 +1,8 @@
 use std::collections::BTreeSet;
 
 use runmat_analysis_core::{
-    AnalysisModel, CoordinateFrame, PrescribedStructuralDofs, StructuralConstraint,
-    StructuralConstraintKind, StructuralRotationDof, TargetCardinality,
+    AnalysisModel, StructuralConstraint, StructuralConstraintKind, StructuralRotationDof,
+    TargetCardinality,
 };
 use runmat_meshing_core::SolverMeshArtifact;
 
@@ -16,21 +16,50 @@ use super::{
     contract::{
         CanonicalStructuralConstraintPlan, CanonicalStructuralConstraintRow,
         CanonicalStructuralConstraintTerm, CanonicalStructuralDof, CanonicalStructuralDofOwner,
-        ConstraintGroupEvidence, ConstraintPlanError, ConstraintPlanEvidence,
-        ResolvedConstraintTarget,
+        ConstraintCouplingEvidence, ConstraintCouplingKind, ConstraintGroupEvidence,
+        ConstraintPlanError, ConstraintPlanEvidence, ResolvedConstraintTarget,
     },
     enforcement,
-    frame::{require_global, translation_basis, translation_direction},
+    frame::require_global,
+    mixed_surface,
     pairing::{pair_mixed_targets, pairing_rows},
     plan::{authored_constraints_digest, source_digest, structural_constraints},
     row,
     target::resolve_solid_target,
 };
 
-struct CompiledConstraint {
-    targets: Vec<ResolvedConstraintTarget>,
-    rows: Vec<CanonicalStructuralConstraintRow>,
-    pairings: Vec<super::ConstraintPairingEvidence>,
+pub(super) struct CompiledConstraint {
+    pub(super) targets: Vec<ResolvedConstraintTarget>,
+    pub(super) rows: Vec<CanonicalStructuralConstraintRow>,
+    pub(super) pairings: Vec<super::ConstraintPairingEvidence>,
+    pub(super) coupling: Option<ConstraintCouplingEvidence>,
+}
+
+impl CompiledConstraint {
+    pub(super) fn rows(
+        targets: Vec<ResolvedConstraintTarget>,
+        rows: Vec<CanonicalStructuralConstraintRow>,
+    ) -> Self {
+        Self {
+            targets,
+            rows,
+            pairings: Vec::new(),
+            coupling: None,
+        }
+    }
+
+    pub(super) fn coupling(
+        target: ResolvedConstraintTarget,
+        rows: Vec<CanonicalStructuralConstraintRow>,
+        coupling: ConstraintCouplingEvidence,
+    ) -> Self {
+        Self {
+            targets: vec![target],
+            rows,
+            pairings: Vec::new(),
+            coupling: Some(coupling),
+        }
+    }
 }
 
 pub(super) fn compile(
@@ -72,6 +101,7 @@ pub(super) fn compile(
             mut targets,
             rows,
             pairings,
+            coupling,
         } = compile_node_constraint(model, Some(mesh), structural, &topology, constraint)?;
         targets.sort_by_key(|target| target.selection_digest);
         targets.dedup_by_key(|target| target.selection_digest);
@@ -79,14 +109,18 @@ pub(super) fn compile(
             enforcement_mode,
             enforcement::select(&constraint.kind, &rows),
         );
+        let reference_point_identities = coupling
+            .iter()
+            .map(|evidence| evidence.reference_point_identity)
+            .collect();
         plan.groups.push(ConstraintGroupEvidence {
             constraint_id: constraint.constraint_id.clone(),
             source_digest: source_digest(constraint)?,
             implementation:
                 runmat_analysis_core::BoundaryTransferImplementation::ExplicitRegionConnectivity,
             targets,
-            reference_point_identities: Vec::new(),
-            coupling: None,
+            reference_point_identities,
+            coupling,
             pairings,
             row_count: rows.len(),
         });
@@ -98,6 +132,7 @@ pub(super) fn compile(
     let (active_row_count, redundant_row_count) = row::classify(&mut plan.rows)?;
     plan.topology = topology.identity;
     plan.authored_constraints_digest = authored_constraints_digest(&authored)?;
+    plan.reference_points = super::compile::canonical_reference_points(&authored)?;
     plan.enforcement = enforcement_mode;
     plan.evidence = ConstraintPlanEvidence {
         authored_constraint_count: plan.groups.len(),
@@ -137,6 +172,7 @@ pub(super) fn compile_explicit(
             mut targets,
             rows: compiled_rows,
             pairings,
+            coupling,
         } = compile_node_constraint(model, None, structural, &topology, constraint)?;
         targets.sort_by_key(|target| target.selection_digest);
         targets.dedup_by_key(|target| target.selection_digest);
@@ -144,14 +180,18 @@ pub(super) fn compile_explicit(
             enforcement_mode,
             enforcement::select(&constraint.kind, &compiled_rows),
         );
+        let reference_point_identities = coupling
+            .iter()
+            .map(|evidence| evidence.reference_point_identity)
+            .collect();
         groups.push(ConstraintGroupEvidence {
             constraint_id: constraint.constraint_id.clone(),
             source_digest: source_digest(constraint)?,
             implementation:
                 runmat_analysis_core::BoundaryTransferImplementation::ExplicitRegionConnectivity,
             targets,
-            reference_point_identities: Vec::new(),
-            coupling: None,
+            reference_point_identities,
+            coupling,
             pairings,
             row_count: compiled_rows.len(),
         });
@@ -165,7 +205,7 @@ pub(super) fn compile_explicit(
         topology: topology.identity,
         authored_constraints_digest: authored_constraints_digest(&authored)?,
         enforcement: enforcement_mode,
-        reference_points: Vec::new(),
+        reference_points: super::compile::canonical_reference_points(&authored)?,
         evidence: ConstraintPlanEvidence {
             authored_constraint_count: groups.len(),
             active_row_count,
@@ -229,10 +269,11 @@ fn compile_node_constraint(
                 targets: vec![resolved],
                 rows,
                 pairings: Vec::new(),
+                coupling: None,
             })
         }
         StructuralConstraintKind::Prescribed(values) => {
-            compile_prescribed(model, mesh, structural, topology, constraint, values)
+            mixed_surface::compile_prescribed(model, mesh, structural, topology, constraint, values)
         }
         StructuralConstraintKind::PrescribedMotion(motion) => {
             require_global(constraint)?;
@@ -260,6 +301,7 @@ fn compile_node_constraint(
                 targets: vec![resolved],
                 rows,
                 pairings: Vec::new(),
+                coupling: None,
             })
         }
         StructuralConstraintKind::Equation(equation) => {
@@ -311,6 +353,7 @@ fn compile_node_constraint(
                     equation.right_hand_side.meters,
                 )?],
                 pairings: Vec::new(),
+                coupling: None,
             })
         }
         StructuralConstraintKind::Tie(pair) => compile_pair(
@@ -331,79 +374,36 @@ fn compile_node_constraint(
             &periodic.transform,
             true,
         ),
-        _ => Err(ConstraintPlanError::UnsupportedTarget {
-            constraint_id: constraint.constraint_id.clone(),
-            reason: "this relation is not implemented on explicit structural topology",
-        }),
-    }
-}
-
-fn compile_prescribed(
-    model: &AnalysisModel,
-    mesh: Option<&SolverMeshArtifact>,
-    structural: &runmat_analysis_core::StructuralModel,
-    topology: &CanonicalStructuralNodeSpace,
-    constraint: &StructuralConstraint,
-    values: &PrescribedStructuralDofs,
-) -> Result<CompiledConstraint, ConstraintPlanError> {
-    let (resolved, nodes) = resolve_target(mesh, structural, topology, constraint, &values.target)?;
-    let mut rows = Vec::new();
-    for node in nodes {
-        let canonical = &topology.nodes[node];
-        let basis = translation_basis(
-            &constraint.frame,
-            canonical.coordinates_m,
-            None,
-            &constraint.constraint_id,
-        )?;
-        for prescribed in &values.translations {
-            let value = prescribed
-                .value
-                .study_constant(&model.signals)
-                .ok_or_else(|| ConstraintPlanError::ScheduledValue {
-                    constraint_id: constraint.constraint_id.clone(),
-                })?
-                .meters;
-            rows.push(row::new_direction(
-                &constraint.constraint_id,
-                canonical.identity,
-                translation_direction(prescribed.dof.into(), basis),
-                finite_value(value, constraint)?,
-            )?);
+        StructuralConstraintKind::NormalDisplacement { target, value } => {
+            mixed_surface::compile_normal(
+                model, mesh, structural, topology, constraint, target, value,
+            )
         }
-        if !values.rotations.is_empty() && !canonical.owns_explicit_rotation {
-            return Err(ConstraintPlanError::UnavailableRotationalDof {
-                constraint_id: constraint.constraint_id.clone(),
-            });
+        StructuralConstraintKind::Symmetry { target } => {
+            mixed_surface::compile_directions(mesh, structural, topology, constraint, target, false)
         }
-        if !values.rotations.is_empty() && constraint.frame != CoordinateFrame::Global {
-            return Err(ConstraintPlanError::UnsupportedFrame {
-                constraint_id: constraint.constraint_id.clone(),
-                frame: format!("{:?}", constraint.frame),
-            });
+        StructuralConstraintKind::Antisymmetry { target } => {
+            mixed_surface::compile_directions(mesh, structural, topology, constraint, target, true)
         }
-        for prescribed in &values.rotations {
-            let value = prescribed
-                .value
-                .study_constant(&model.signals)
-                .ok_or_else(|| ConstraintPlanError::ScheduledValue {
-                    constraint_id: constraint.constraint_id.clone(),
-                })?
-                .radians;
-            rows.push(row::new_singleton(
-                &constraint.constraint_id,
-                canonical.identity,
-                CanonicalStructuralDof::Rotation(prescribed.dof),
-                1.0,
-                finite_value(value, constraint)?,
-            )?);
+        StructuralConstraintKind::RigidCoupling(coupling) => mixed_surface::compile_coupling(
+            mesh,
+            structural,
+            topology,
+            constraint,
+            coupling,
+            ConstraintCouplingKind::Rigid,
+        ),
+        StructuralConstraintKind::DistributingCoupling(coupling) => {
+            mixed_surface::compile_coupling(
+                mesh,
+                structural,
+                topology,
+                constraint,
+                coupling,
+                ConstraintCouplingKind::Distributing,
+            )
         }
     }
-    Ok(CompiledConstraint {
-        targets: vec![resolved],
-        rows,
-        pairings: Vec::new(),
-    })
 }
 
 fn compile_pair(
@@ -450,19 +450,11 @@ fn compile_pair(
         targets: vec![primary, secondary],
         rows,
         pairings,
+        coupling: None,
     })
 }
 
-fn finite_value(value: f64, constraint: &StructuralConstraint) -> Result<f64, ConstraintPlanError> {
-    value
-        .is_finite()
-        .then_some(value)
-        .ok_or_else(|| ConstraintPlanError::NonFiniteValue {
-            constraint_id: constraint.constraint_id.clone(),
-        })
-}
-
-fn resolve_target(
+pub(super) fn resolve_target(
     mesh: Option<&SolverMeshArtifact>,
     structural: &runmat_analysis_core::StructuralModel,
     topology: &CanonicalStructuralNodeSpace,
@@ -577,15 +569,19 @@ fn visit_targets(
 mod tests {
     use runmat_analysis_core::{
         AnalysisConstraint, CoordinateFrame, Displacement, Length, PairedConstraint, PairingPolicy,
-        StructuralConstraint, StructuralConstraintEquation, StructuralConstraintEquationTerm,
-        StructuralConstraintKind, StructuralTranslationDof,
+        Position, ReferencePoint, ReferencePointCoupling, StructuralConstraint,
+        StructuralConstraintEquation, StructuralConstraintEquationTerm, StructuralConstraintKind,
+        StructuralTranslationDof,
     };
     use runmat_meshing_core::{
         ElementOrder, PersistentEntityId, PersistentEntityKind, StableDigest,
     };
 
     use super::*;
-    use crate::constraints::{CanonicalStructuralTopologyIdentity, ConstraintEnforcement};
+    use crate::constraints::{
+        CanonicalStructuralConstraintResult, CanonicalStructuralTopologyIdentity,
+        ConstraintEnforcement,
+    };
 
     #[test]
     fn mixed_plan_round_trips_with_structural_rotation_rows() {
@@ -667,7 +663,7 @@ mod tests {
             crate::ComputeBackend::Cpu,
             crate::LinearStaticSolveOptions {
                 formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
-                solver_mesh: Some(mesh),
+                solver_mesh: Some(mesh.clone()),
                 ..crate::LinearStaticSolveOptions::default()
             },
         )
@@ -737,7 +733,7 @@ mod tests {
             crate::ComputeBackend::Cpu,
             crate::LinearStaticSolveOptions {
                 formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
-                solver_mesh: Some(mesh),
+                solver_mesh: Some(mesh.clone()),
                 ..crate::LinearStaticSolveOptions::default()
             },
         )
@@ -745,6 +741,175 @@ mod tests {
         assert!(result
             .field(crate::FEA_FIELD_STRUCTURAL_BEAM_AXIAL_FORCE)
             .is_some());
+    }
+
+    #[test]
+    fn explicit_shell_symmetry_uses_the_authored_surface_normal() {
+        let (mut model, mesh) = shell_model_and_mesh();
+        model
+            .constraints
+            .push(AnalysisConstraint::Structural(StructuralConstraint {
+                constraint_id: "shell_symmetry".into(),
+                frame: CoordinateFrame::BoundaryNormalTangent,
+                kind: StructuralConstraintKind::Symmetry {
+                    target: runmat_analysis_core::RegionTarget::boundary("skin"),
+                },
+            }));
+
+        let plan = CanonicalStructuralConstraintPlan::compile(&model, &mesh).unwrap();
+        let rows = plan
+            .rows
+            .iter()
+            .filter(|row| row.constraint_id == "shell_symmetry")
+            .collect::<Vec<_>>();
+        assert_eq!(rows.len(), 3);
+        assert!(rows.iter().all(|row| row.terms.len() == 1));
+        assert!(rows.iter().all(|row| {
+            row.terms[0].dof == CanonicalStructuralDof::Translation(StructuralTranslationDof::Ux)
+                && (row.terms[0].coefficient.abs() - 1.0).abs() <= 1.0e-12
+        }));
+    }
+
+    #[test]
+    fn explicit_shell_distributing_coupling_retains_reference_point_evidence() {
+        let (mut model, mesh) = shell_model_and_mesh();
+        model
+            .constraints
+            .push(AnalysisConstraint::Structural(StructuralConstraint {
+                constraint_id: "shell_reference_coupling".into(),
+                frame: CoordinateFrame::Global,
+                kind: StructuralConstraintKind::DistributingCoupling(ReferencePointCoupling {
+                    target: runmat_analysis_core::RegionTarget::boundary("skin"),
+                    reference_point: ReferencePoint {
+                        reference_point_id: "shell_control".into(),
+                        position: Position::new([0.0, 0.0, 0.0]),
+                    },
+                }),
+            }));
+
+        let plan = CanonicalStructuralConstraintPlan::compile(&model, &mesh).unwrap();
+        assert_eq!(plan.reference_points.len(), 1);
+        let group = plan
+            .groups
+            .iter()
+            .find(|group| group.constraint_id == "shell_reference_coupling")
+            .unwrap();
+        let coupling = group.coupling.as_ref().unwrap();
+        assert_eq!(coupling.kind, ConstraintCouplingKind::Distributing);
+        assert_eq!(coupling.target_weights.len(), 3);
+        assert!(
+            (coupling
+                .target_weights
+                .iter()
+                .map(|entry| entry.weight)
+                .sum::<f64>()
+                - 1.0)
+                .abs()
+                <= 1.0e-12
+        );
+        assert_eq!(group.row_count, 6);
+
+        let result = crate::run_linear_static_with_options(
+            &model,
+            crate::ComputeBackend::Cpu,
+            crate::LinearStaticSolveOptions {
+                formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+                solver_mesh: Some(mesh.clone()),
+                ..crate::LinearStaticSolveOptions::default()
+            },
+        )
+        .unwrap();
+        assert!(result
+            .field(crate::FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE)
+            .is_some());
+
+        let excitations = crate::excitation::realize_step_excitations(
+            &model,
+            &model.sequence.steps[0],
+            crate::excitation::ExcitationSamplePoint::Static,
+        )
+        .unwrap();
+        let summary = crate::assembly::assemble_structural_system(
+            &model,
+            &excitations,
+            Some(mesh.clone()),
+            crate::assembly::StructuralFormulationRequirement::PhysicalDiscretization,
+        )
+        .unwrap();
+        let solve = crate::solve::linear::solve_linear_system(
+            &summary,
+            crate::solve::preconditioner::SpdPreconditionerKind::Jacobi,
+            crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
+            &crate::solve::backend::cpu_reference::CpuReferenceBackend,
+            None,
+        );
+        assert!(solve.converged, "{:?}", solve.diagnostics);
+        let equilibrium = crate::algebra::apply_k(&summary.operator, &solve.solution)
+            .into_iter()
+            .zip(summary.operator.load())
+            .map(|(internal, applied)| internal - applied)
+            .collect::<Vec<_>>();
+        let reaction = crate::solve::recover_structural_reaction(&summary, &equilibrium).unwrap();
+        let constraint_result =
+            CanonicalStructuralConstraintResult::recover_for_model_from_solver_state(
+                &plan,
+                &model,
+                Some(&mesh),
+                &solve.solution,
+                &reaction,
+            )
+            .unwrap();
+        assert_eq!(constraint_result.reference_points.len(), 1);
+        assert!(constraint_result.reference_points[0]
+            .translation_meters
+            .iter()
+            .all(|value| value.is_finite()));
+        constraint_result
+            .validate_against_model(&plan, &model, Some(&mesh))
+            .unwrap();
+    }
+
+    #[test]
+    fn mesh_free_shell_reference_coupling_uses_the_same_generalized_dof_path() {
+        let mut model = crate::fixtures::fixture_model(
+            crate::fixtures::FixtureId::StructuralShellPlateMomentReference,
+        );
+        model
+            .constraints
+            .push(AnalysisConstraint::Structural(StructuralConstraint {
+                constraint_id: "panel_reference_coupling".into(),
+                frame: CoordinateFrame::Global,
+                kind: StructuralConstraintKind::RigidCoupling(ReferencePointCoupling {
+                    target: runmat_analysis_core::RegionTarget::boundary("shell_panel"),
+                    reference_point: ReferencePoint {
+                        reference_point_id: "panel_control".into(),
+                        position: Position::new([0.25, 0.25, 0.0]),
+                    },
+                }),
+            }));
+        let plan = CanonicalStructuralConstraintPlan::compile_for_model(&model, None).unwrap();
+        assert_eq!(plan.reference_points.len(), 1);
+        let result = crate::run_linear_static_with_options(
+            &model,
+            crate::ComputeBackend::Cpu,
+            crate::LinearStaticSolveOptions {
+                formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+                ..crate::LinearStaticSolveOptions::default()
+            },
+        )
+        .unwrap();
+        assert!(result
+            .field(crate::FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT)
+            .is_some());
+    }
+
+    fn shell_model_and_mesh() -> (AnalysisModel, SolverMeshArtifact) {
+        let (_, mesh) = model_and_mesh();
+        let attached_coordinates = mesh.topology.nodes[0].coordinates_m;
+        (
+            crate::fixtures::mixed_solid_beam_shell_model(attached_coordinates),
+            mesh,
+        )
     }
 
     fn model_and_mesh() -> (AnalysisModel, SolverMeshArtifact) {

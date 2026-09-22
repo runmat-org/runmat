@@ -115,6 +115,17 @@ pub enum NullspaceEvidenceError {
     Encoding(String),
 }
 
+pub(crate) struct ConnectorAnchoredStructuralFrameInput<'a> {
+    pub structural: &'a runmat_analysis_core::StructuralModel,
+    pub layout: &'a StructuralDofLayout,
+    pub element_operator: &'a RealSparseMatrix,
+    pub connector_operator: &'a RealSparseMatrix,
+    pub combined_operator: &'a RealSparseMatrix,
+    pub plan: &'a CanonicalStructuralConstraintPlan,
+    pub constraints: &'a ResolvedConstraintMatrix,
+    pub constrained_dofs: &'a [bool],
+}
+
 impl NullspaceEliminationEvidence {
     pub fn prove_thermal(
         projection: &AnalysisProjection,
@@ -140,30 +151,24 @@ impl NullspaceEliminationEvidence {
         structural: &runmat_analysis_core::StructuralModel,
         layout: &StructuralDofLayout,
         operator: &RealSparseMatrix,
+        plan: &CanonicalStructuralConstraintPlan,
         constraints: &ResolvedConstraintMatrix,
         constrained_dofs: &[bool],
     ) -> Result<Self, NullspaceEvidenceError> {
-        structural_frame::prove(structural, layout, operator, constraints, constrained_dofs)
-    }
-
-    pub fn prove_connector_anchored_structural_frame(
-        structural: &runmat_analysis_core::StructuralModel,
-        layout: &StructuralDofLayout,
-        element_operator: &RealSparseMatrix,
-        connector_operator: &RealSparseMatrix,
-        combined_operator: &RealSparseMatrix,
-        constraints: &ResolvedConstraintMatrix,
-        constrained_dofs: &[bool],
-    ) -> Result<Self, NullspaceEvidenceError> {
-        structural_frame::prove_with_connector_anchors(
+        structural_frame::prove(
             structural,
             layout,
-            element_operator,
-            connector_operator,
-            combined_operator,
+            operator,
+            plan,
             constraints,
             constrained_dofs,
         )
+    }
+
+    pub(crate) fn prove_connector_anchored_structural_frame(
+        input: ConnectorAnchoredStructuralFrameInput<'_>,
+    ) -> Result<Self, NullspaceEvidenceError> {
+        structural_frame::prove_with_connector_anchors(input)
     }
 
     pub(crate) fn prove_mixed_structural(
@@ -309,6 +314,7 @@ pub(crate) struct MixedStructuralNullspaceInput<'a> {
     pub connector_operator: Option<&'a RealSparseMatrix>,
     pub combined_operator: &'a RealSparseMatrix,
     pub constraints: &'a ResolvedConstraintMatrix,
+    pub constraint_plan: &'a crate::constraints::CanonicalStructuralConstraintPlan,
     pub constrained_dofs: &'a [bool],
 }
 

@@ -1,62 +1,75 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use crate::assembly::dofs::StructuralDofLayout;
-use crate::constraints::ResolvedConstraintMatrix;
+use crate::constraints::{CanonicalStructuralConstraintPlan, ResolvedConstraintMatrix};
 use crate::physics::structural::topology::node_space::CanonicalStructuralNodeSpace;
 use runmat_analysis_core::{StructuralElementKind, StructuralModel};
 
 use super::{
-    validate_operator, MatrixDefiniteness, NullspaceEliminationEvidence, NullspaceEvidenceError,
-    NullspaceKind, OperatorRole, RealSparseMatrix,
+    validate_operator, ConnectorAnchoredStructuralFrameInput, MatrixDefiniteness,
+    NullspaceEliminationEvidence, NullspaceEvidenceError, NullspaceKind, OperatorRole,
+    RealSparseMatrix,
 };
+
+struct StructuralFrameProofInput<'a> {
+    structural: &'a StructuralModel,
+    layout: &'a StructuralDofLayout,
+    element_operator: &'a RealSparseMatrix,
+    connector_operator: Option<&'a RealSparseMatrix>,
+    combined_operator: &'a RealSparseMatrix,
+    plan: &'a CanonicalStructuralConstraintPlan,
+    constraints: &'a ResolvedConstraintMatrix,
+    constrained_dofs: &'a [bool],
+}
 
 pub(super) fn prove(
     structural: &StructuralModel,
     layout: &StructuralDofLayout,
     operator: &RealSparseMatrix,
+    plan: &CanonicalStructuralConstraintPlan,
     constraints: &ResolvedConstraintMatrix,
     constrained_dofs: &[bool],
 ) -> Result<NullspaceEliminationEvidence, NullspaceEvidenceError> {
-    prove_impl(
+    prove_impl(StructuralFrameProofInput {
         structural,
         layout,
-        operator,
-        None,
-        operator,
+        element_operator: operator,
+        connector_operator: None,
+        combined_operator: operator,
+        plan,
         constraints,
         constrained_dofs,
-    )
+    })
 }
 
 pub(super) fn prove_with_connector_anchors(
-    structural: &StructuralModel,
-    layout: &StructuralDofLayout,
-    element_operator: &RealSparseMatrix,
-    connector_operator: &RealSparseMatrix,
-    combined_operator: &RealSparseMatrix,
-    constraints: &ResolvedConstraintMatrix,
-    constrained_dofs: &[bool],
+    input: ConnectorAnchoredStructuralFrameInput<'_>,
 ) -> Result<NullspaceEliminationEvidence, NullspaceEvidenceError> {
-    prove_impl(
-        structural,
-        layout,
-        element_operator,
-        Some(connector_operator),
-        combined_operator,
-        constraints,
-        constrained_dofs,
-    )
+    prove_impl(StructuralFrameProofInput {
+        structural: input.structural,
+        layout: input.layout,
+        element_operator: input.element_operator,
+        connector_operator: Some(input.connector_operator),
+        combined_operator: input.combined_operator,
+        plan: input.plan,
+        constraints: input.constraints,
+        constrained_dofs: input.constrained_dofs,
+    })
 }
 
 fn prove_impl(
-    structural: &StructuralModel,
-    layout: &StructuralDofLayout,
-    element_operator: &RealSparseMatrix,
-    connector_operator: Option<&RealSparseMatrix>,
-    combined_operator: &RealSparseMatrix,
-    constraints: &ResolvedConstraintMatrix,
-    constrained_dofs: &[bool],
+    input: StructuralFrameProofInput<'_>,
 ) -> Result<NullspaceEliminationEvidence, NullspaceEvidenceError> {
+    let StructuralFrameProofInput {
+        structural,
+        layout,
+        element_operator,
+        connector_operator,
+        combined_operator,
+        plan,
+        constraints,
+        constrained_dofs,
+    } = input;
     if structural.nodes.is_empty()
         || layout.node_count() != structural.nodes.len()
         || layout.total_dof_count() != combined_operator.rows()
@@ -69,7 +82,7 @@ fn prove_impl(
         })
         || constrained_dofs.len() != combined_operator.rows()
         || constraints.full_dof_count != combined_operator.rows()
-        || layout.reference_point_count() != 0
+        || layout.reference_point_count() != plan.reference_points.len()
         || structural.elements.iter().any(|element| {
             !matches!(
                 element.kind,
@@ -128,11 +141,14 @@ fn prove_impl(
         .iter()
         .map(|node| node.identity)
         .collect::<Vec<_>>();
+    let reference_points =
+        super::canonical_frame::reference_points(plan, &identities, &components)?;
     super::canonical_frame::prove(
         super::canonical_frame::CanonicalFrameTopology {
             positions_m: &positions,
             node_identities: &identities,
             components,
+            reference_points: &reference_points,
             topology_identity: topology.identity.discretization_digest(),
             kind: NullspaceKind::StructuralFrameRigidBody3d,
         },

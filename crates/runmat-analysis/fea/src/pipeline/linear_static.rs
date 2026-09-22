@@ -43,7 +43,7 @@ use crate::{
             ObservationLimits,
         },
     },
-    solve::{backend::build_backend, linear::solve_linear_system},
+    solve::{backend::build_backend, linear::solve_linear_system, recover_structural_reaction},
 };
 
 const VECTOR_COMPONENT_COUNT: usize = 3;
@@ -280,14 +280,21 @@ fn run_linear_static_with_constraint_plan(
                     .map_err(|error| FeaRunError::Observation(error.to_string()))?;
             &compiled_constraint_plan
         };
-        let constraint_result =
-            crate::constraints::CanonicalStructuralConstraintResult::recover_for_model(
-                observation_constraint_plan,
-                model,
-                mesh,
-                &fields,
-            )
+        let equilibrium_residual = apply_k(&summary.operator, &solve_result.solution)
+            .into_iter()
+            .zip(summary.operator.load())
+            .map(|(internal, applied)| internal - applied)
+            .collect::<Vec<_>>();
+        let reaction = recover_structural_reaction(&summary, &equilibrium_residual)
             .map_err(|error| FeaRunError::Observation(error.to_string()))?;
+        let constraint_result = crate::constraints::CanonicalStructuralConstraintResult::recover_for_model_from_solver_state(
+            observation_constraint_plan,
+            model,
+            mesh,
+            &solve_result.solution,
+            &reaction,
+        )
+        .map_err(|error| FeaRunError::Observation(error.to_string()))?;
         let mut recovered = take_structural_observable_fields(&mut fields)
             .map_err(|error| FeaRunError::Observation(error.to_string()))?;
         recovered.extend(

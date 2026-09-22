@@ -25,12 +25,13 @@ pub(super) fn prove(
         connector_operator,
         combined_operator,
         constraints,
+        constraint_plan,
         constrained_dofs,
     } = input;
     if topology.solid_node_count != mesh.topology.nodes.len()
         || topology.explicit_node_indices.len() != structural.nodes.len()
         || topology.nodes.len() != layout.node_count()
-        || layout.reference_point_count() != 0
+        || layout.reference_point_count() != constraint_plan.reference_points.len()
         || element_operator.rows() != layout.total_dof_count()
         || combined_operator.rows() != layout.total_dof_count()
         || element_operator.columns() != element_operator.rows()
@@ -79,11 +80,14 @@ pub(super) fn prove(
         .iter()
         .map(|node| node.identity)
         .collect::<Vec<_>>();
+    let reference_points =
+        canonical_frame::reference_points(constraint_plan, &identities, &components)?;
     canonical_frame::prove(
         CanonicalFrameTopology {
             positions_m: &positions,
             node_identities: &identities,
             components,
+            reference_points: &reference_points,
             topology_identity: topology.identity.discretization_digest(),
             kind: NullspaceKind::MixedStructuralRigidBody3d,
         },

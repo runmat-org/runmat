@@ -10,19 +10,16 @@ use super::{
     reaction::solve_constraint_multipliers,
     result_state::{
         dof_component, nodal_vector_field, nodal_vector_field_for_count, owner_dof_index,
-        translation_component, ConstraintNodeState,
+        resolve_model_state, translation_component, ConstraintNodeState,
     },
     CanonicalStructuralConstraintPlan, CanonicalStructuralDof, CanonicalStructuralDofOwner,
     CanonicalStructuralTopologyIdentity, ReactionRecovery,
 };
-use crate::{
-    assembly::{dofs::StructuralDofKind, mixed_dof_layout},
-    contracts::{
-        FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_REACTION_FORCE,
-        FEA_FIELD_STRUCTURAL_REACTION_MOMENT, FEA_FIELD_STRUCTURAL_ROTATION,
-    },
-    physics::structural::topology::node_space::CanonicalStructuralNodeSpace,
+use crate::contracts::{
+    FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_REACTION_FORCE,
+    FEA_FIELD_STRUCTURAL_REACTION_MOMENT, FEA_FIELD_STRUCTURAL_ROTATION,
 };
+use crate::physics::structural::topology::node_space::CanonicalStructuralNodeSpace;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -144,34 +141,8 @@ impl CanonicalStructuralConstraintResult {
         if !plan.reference_points.is_empty() {
             return Err(ConstraintResultError::GeneralizedStateRequired);
         }
-        let structural = model.structural.as_ref().ok_or_else(|| {
-            ConstraintResultError::InvalidPlan(
-                "structural constraint recovery requires explicit topology".into(),
-            )
-        })?;
-        let topology = match plan.topology {
-            CanonicalStructuralTopologyIdentity::Explicit { .. } => {
-                CanonicalStructuralNodeSpace::derive_explicit(structural)
-            }
-            CanonicalStructuralTopologyIdentity::ConformalMixed { .. } => {
-                CanonicalStructuralNodeSpace::derive(
-                    mesh.ok_or_else(|| {
-                        ConstraintResultError::InvalidPlan(
-                            "conformal mixed constraint recovery requires its canonical mesh"
-                                .into(),
-                        )
-                    })?,
-                    structural,
-                )
-            }
-            CanonicalStructuralTopologyIdentity::Solid { .. } => unreachable!(),
-        }
-        .map_err(|error| ConstraintResultError::InvalidPlan(error.to_string()))?;
-        if plan.topology != topology.identity {
-            return Err(ConstraintResultError::TopologyMismatch);
-        }
-        let layout = mixed_dof_layout(&topology);
-        let node_count = topology.nodes.len();
+        let state = resolve_model_state(plan, model, mesh)?;
+        let node_count = state.node_order.len();
         let translations =
             nodal_vector_field_for_count(fields, FEA_FIELD_STRUCTURAL_DISPLACEMENT, node_count)?;
         let rotations =
@@ -180,42 +151,67 @@ impl CanonicalStructuralConstraintResult {
             nodal_vector_field_for_count(fields, FEA_FIELD_STRUCTURAL_REACTION_FORCE, node_count)?;
         let moments =
             nodal_vector_field_for_count(fields, FEA_FIELD_STRUCTURAL_REACTION_MOMENT, node_count)?;
-        let mut displacement = vec![0.0; layout.total_dof_count()];
-        let mut reaction = vec![0.0; layout.total_dof_count()];
-        let mut nodes = BTreeMap::new();
-        for (node_index, node) in topology.nodes.iter().enumerate() {
-            let mut dof_indices = [None; 6];
-            for (component, kind) in StructuralDofKind::ORDER.into_iter().enumerate() {
-                if let Some(row) = layout.index(node_index, kind) {
-                    dof_indices[component] = Some(row);
-                    let values = if kind.is_rotational() {
+        let mut displacement = vec![0.0; state.layout.total_dof_count()];
+        let mut reaction = vec![0.0; state.layout.total_dof_count()];
+        for (node_index, identity) in state.node_order.iter().enumerate() {
+            let node = state.nodes[identity];
+            for (component, row) in node.dof_indices.into_iter().enumerate() {
+                if let Some(row) = row {
+                    let values = if component >= 3 {
                         rotations
                     } else {
                         translations
                     };
-                    let reactions = if kind.is_rotational() {
-                        moments
-                    } else {
-                        forces
-                    };
+                    let reactions = if component >= 3 { moments } else { forces };
                     displacement[row] = values[node_index * 3 + component % 3];
                     reaction[row] = reactions[node_index * 3 + component % 3];
                 }
             }
-            nodes.insert(
-                node.identity,
-                ConstraintNodeState {
-                    coordinates_m: node.coordinates_m,
-                    dof_indices,
-                },
-            );
         }
         Self::recover_resolved(
             plan,
-            &nodes,
-            layout.total_dof_count(),
+            &state.nodes,
+            state.layout.node_dof_count(),
             &displacement,
             &reaction,
+        )
+    }
+
+    pub fn recover_for_model_from_solver_state(
+        plan: &CanonicalStructuralConstraintPlan,
+        model: &AnalysisModel,
+        mesh: Option<&SolverMeshArtifact>,
+        displacement: &[f64],
+        reaction: &[f64],
+    ) -> Result<Self, ConstraintResultError> {
+        if let CanonicalStructuralTopologyIdentity::Solid { .. } = plan.topology {
+            return Self::recover_from_solver_state(
+                plan,
+                mesh.ok_or_else(|| {
+                    ConstraintResultError::InvalidPlan(
+                        "solid constraint recovery requires its canonical mesh".into(),
+                    )
+                })?,
+                displacement,
+                reaction,
+            );
+        }
+        plan.validate()
+            .map_err(|error| ConstraintResultError::InvalidPlan(error.to_string()))?;
+        let state = resolve_model_state(plan, model, mesh)?;
+        if displacement.len() != state.layout.total_dof_count()
+            || reaction.len() != state.layout.total_dof_count()
+            || !all_finite(displacement)
+            || !all_finite(reaction)
+        {
+            return Err(ConstraintResultError::GeneralizedStateRequired);
+        }
+        Self::recover_resolved(
+            plan,
+            &state.nodes,
+            state.layout.node_dof_count(),
+            displacement,
+            reaction,
         )
     }
 

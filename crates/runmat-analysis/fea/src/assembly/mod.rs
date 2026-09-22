@@ -1578,13 +1578,28 @@ fn assemble_explicit_structural_system(
     )?;
     let structural_material = structural_material_summary(model);
     let node_count = structural.nodes.len();
+    let canonical_node_indices = (0..node_count).collect::<Vec<_>>();
+    validate_explicit_topology(structural, &canonical_node_indices)?;
+    let topology = crate::physics::structural::topology::node_space::CanonicalStructuralNodeSpace::derive_explicit(structural)
+        .map_err(|error| StructuralAssemblyError::ExplicitTopologyIdentity(error.to_string()))?;
+    let compiled_constraint_plan;
+    let constraint_plan = if let Some(plan) = supplied_constraint_plan {
+        plan.validate_against_explicit(model)
+            .map_err(|error| StructuralAssemblyError::InvalidConstraintPlan(error.to_string()))?;
+        plan
+    } else {
+        compiled_constraint_plan =
+            CanonicalStructuralConstraintPlan::compile_for_model(model, None).map_err(|error| {
+                StructuralAssemblyError::InvalidConstraintPlan(error.to_string())
+            })?;
+        &compiled_constraint_plan
+    };
     let structural_dof_layout = StructuralDofLayout::from_node_sets(vec![
         StructuralNodeDofSet::translational_rotational();
         node_count
-    ]);
+    ])
+    .with_reference_points(constraint_plan.reference_points.len());
     let dof_count = structural_dof_layout.total_dof_count();
-    let canonical_node_indices = (0..node_count).collect::<Vec<_>>();
-    validate_explicit_topology(structural, &canonical_node_indices)?;
     let properties = crate::properties::compile_property_map(model, None)
         .map_err(map_explicit_property_error)?;
     let ExplicitElementAssembly {
@@ -1602,20 +1617,6 @@ fn assemble_explicit_structural_system(
         &structural_dof_layout,
         &canonical_node_indices,
     )?;
-    let topology = crate::physics::structural::topology::node_space::CanonicalStructuralNodeSpace::derive_explicit(structural)
-        .map_err(|error| StructuralAssemblyError::ExplicitTopologyIdentity(error.to_string()))?;
-    let compiled_constraint_plan;
-    let constraint_plan = if let Some(plan) = supplied_constraint_plan {
-        plan.validate_against_explicit(model)
-            .map_err(|error| StructuralAssemblyError::InvalidConstraintPlan(error.to_string()))?;
-        plan
-    } else {
-        compiled_constraint_plan =
-            CanonicalStructuralConstraintPlan::compile_for_model(model, None).map_err(|error| {
-                StructuralAssemblyError::InvalidConstraintPlan(error.to_string())
-            })?;
-        &compiled_constraint_plan
-    };
     let mut rhs = vec![0.0_f64; dof_count];
     let mut connector_stiffness_assembler = RealSparseAssembler::square(
         dof_count,
@@ -1721,18 +1722,22 @@ fn assemble_explicit_structural_system(
             structural,
             &structural_dof_layout,
             operators.stiffness(),
+            constraint_plan,
             &resolved_constraint_matrix,
             &constrained,
         )
     } else {
         NullspaceEliminationEvidence::prove_connector_anchored_structural_frame(
-            structural,
-            &structural_dof_layout,
-            &element_stiffness,
-            &connector_stiffness,
-            operators.stiffness(),
-            &resolved_constraint_matrix,
-            &constrained,
+            crate::algebra::ConnectorAnchoredStructuralFrameInput {
+                structural,
+                layout: &structural_dof_layout,
+                element_operator: &element_stiffness,
+                connector_operator: &connector_stiffness,
+                combined_operator: operators.stiffness(),
+                plan: constraint_plan,
+                constraints: &resolved_constraint_matrix,
+                constrained_dofs: &constrained,
+            },
         )
     } {
         Ok(evidence) => Some(evidence),
@@ -4385,16 +4390,17 @@ mod tests {
             model.structural.as_ref().unwrap(),
         )
         .unwrap();
-        let constraints =
+        let constraint_plan =
             CanonicalStructuralConstraintPlan::compile_for_model(&model, None).unwrap();
         let constraints =
-            resolve_constraint_matrix(&constraints, &topology, &anchored.structural_dof_layout)
+            resolve_constraint_matrix(&constraint_plan, &topology, &anchored.structural_dof_layout)
                 .unwrap();
         assert_eq!(
             NullspaceEliminationEvidence::prove_structural_frame(
                 model.structural.as_ref().unwrap(),
                 &anchored.structural_dof_layout,
                 &perturbed,
+                &constraint_plan,
                 &constraints,
                 anchored.operator.constrained_dofs(),
             ),

@@ -35,7 +35,10 @@ use crate::{
     },
 };
 
-pub(crate) fn mixed_dof_layout(topology: &CanonicalStructuralNodeSpace) -> StructuralDofLayout {
+pub(crate) fn mixed_dof_layout(
+    topology: &CanonicalStructuralNodeSpace,
+    reference_point_count: usize,
+) -> StructuralDofLayout {
     StructuralDofLayout::from_node_sets(
         topology
             .nodes
@@ -49,6 +52,7 @@ pub(crate) fn mixed_dof_layout(topology: &CanonicalStructuralNodeSpace) -> Struc
             })
             .collect(),
     )
+    .with_reference_points(reference_point_count)
 }
 
 pub(super) fn assemble_mixed_structural_system(
@@ -63,7 +67,17 @@ pub(super) fn assemble_mixed_structural_system(
     let topology = CanonicalStructuralNodeSpace::derive(mesh, structural).map_err(|error| {
         LinearAssemblyError::Structural(StructuralAssemblyError::MixedTopology(error.to_string()))
     })?;
-    let layout = mixed_dof_layout(&topology);
+    let compiled_constraint_plan;
+    let constraint_plan = if let Some(plan) = supplied_constraint_plan {
+        plan.validate_against(model, mesh)
+            .map_err(LinearAssemblyError::ConstraintPlan)?;
+        plan
+    } else {
+        compiled_constraint_plan = CanonicalStructuralConstraintPlan::compile(model, mesh)
+            .map_err(LinearAssemblyError::ConstraintPlan)?;
+        &compiled_constraint_plan
+    };
+    let layout = mixed_dof_layout(&topology, constraint_plan.reference_points.len());
     let solid_properties =
         crate::properties::compile_solid_property_map(model, mesh).map_err(|error| {
             LinearAssemblyError::SolidOperator(
@@ -235,23 +249,6 @@ pub(super) fn assemble_mixed_structural_system(
         StructuralProjectionBasis::CanonicalSolid,
     )
     .map_err(LinearAssemblyError::Structural)?;
-    let compiled_constraint_plan;
-    let constraint_plan = if let Some(plan) = supplied_constraint_plan {
-        plan.validate_against(model, mesh)
-            .map_err(LinearAssemblyError::ConstraintPlan)?;
-        plan
-    } else {
-        compiled_constraint_plan = CanonicalStructuralConstraintPlan::compile(model, mesh)
-            .map_err(LinearAssemblyError::ConstraintPlan)?;
-        &compiled_constraint_plan
-    };
-    if !constraint_plan.reference_points.is_empty() {
-        return Err(LinearAssemblyError::ConstraintPlan(
-            crate::constraints::ConstraintPlanError::Invalid(
-                "mixed reference-point DOF projection is not complete".into(),
-            ),
-        ));
-    }
     let mut direct_constraints = DirectConstraintAssignments::new(&layout);
     let solid_source_projection = super::apply_solver_mesh_structural_loads(
         &solid_excitations,
@@ -335,6 +332,7 @@ pub(super) fn assemble_mixed_structural_system(
                     .then_some(&connector_stiffness),
                 combined_operator: operators.stiffness(),
                 constraints: &resolved_constraint_matrix,
+                constraint_plan,
                 constrained_dofs: &constrained,
             },
         ) {
@@ -600,7 +598,7 @@ mod tests {
             },
         };
 
-        let layout = mixed_dof_layout(&topology);
+        let layout = mixed_dof_layout(&topology, 0);
 
         assert_eq!(layout.node_count(), 5);
         assert_eq!(layout.translational_dof_count(), 15);

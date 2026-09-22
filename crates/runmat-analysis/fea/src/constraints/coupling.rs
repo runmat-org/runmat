@@ -30,6 +30,30 @@ pub(super) fn compile_reference_coupling(
 > {
     let weights = target_weights(mesh, target, constraint_id)?;
     let coordinates = coordinates_by_identity(mesh);
+    compile_reference_coupling_for_nodes(
+        &coordinates,
+        weights,
+        reference_point,
+        reference_point_identity,
+        kind,
+        constraint_id,
+    )
+}
+
+pub(super) fn compile_reference_coupling_for_nodes(
+    coordinates: &BTreeMap<StableDigest, [f64; 3]>,
+    weights: Vec<ConstraintCouplingWeight>,
+    reference_point: &ReferencePoint,
+    reference_point_identity: Digest,
+    kind: ConstraintCouplingKind,
+    constraint_id: &str,
+) -> Result<
+    (
+        Vec<CanonicalStructuralConstraintRow>,
+        ConstraintCouplingEvidence,
+    ),
+    ConstraintPlanError,
+> {
     let characteristic_length_meters = weights
         .iter()
         .map(|weight| {
@@ -50,20 +74,20 @@ pub(super) fn compile_reference_coupling(
         .sqrt();
     validate_rotational_geometry(
         &weights,
-        &coordinates,
+        coordinates,
         characteristic_length_meters,
         constraint_id,
     )?;
     let rows = match kind {
         ConstraintCouplingKind::Rigid => rigid_rows(
-            mesh,
+            coordinates,
             &weights,
             reference_point,
             reference_point_identity,
             constraint_id,
         )?,
         ConstraintCouplingKind::Distributing => distributing_rows(
-            mesh,
+            coordinates,
             &weights,
             reference_point,
             reference_point_identity,
@@ -148,13 +172,12 @@ fn degenerate_coupling(constraint_id: &str) -> ConstraintPlanError {
 }
 
 fn rigid_rows(
-    mesh: &SolverMeshArtifact,
+    coordinates: &BTreeMap<StableDigest, [f64; 3]>,
     weights: &[ConstraintCouplingWeight],
     reference_point: &ReferencePoint,
     reference_identity: Digest,
     constraint_id: &str,
 ) -> Result<Vec<CanonicalStructuralConstraintRow>, ConstraintPlanError> {
-    let coordinates = coordinates_by_identity(mesh);
     let mut rows = Vec::with_capacity(weights.len() * 3);
     for weight in weights {
         let position = coordinates
@@ -188,13 +211,12 @@ fn rigid_rows(
 }
 
 fn distributing_rows(
-    mesh: &SolverMeshArtifact,
+    coordinates: &BTreeMap<StableDigest, [f64; 3]>,
     weights: &[ConstraintCouplingWeight],
     reference_point: &ReferencePoint,
     reference_identity: Digest,
     constraint_id: &str,
 ) -> Result<Vec<CanonicalStructuralConstraintRow>, ConstraintPlanError> {
-    let coordinates = coordinates_by_identity(mesh);
     let arms = weights
         .iter()
         .map(|weight| {

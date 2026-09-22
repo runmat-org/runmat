@@ -1,10 +1,10 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_execution::Digest;
 use runmat_meshing_core::StableDigest;
 
-use crate::assembly::dofs::StructuralDofLayout;
-use crate::constraints::ResolvedConstraintMatrix;
+use crate::assembly::dofs::{StructuralDofKind, StructuralDofLayout};
+use crate::constraints::{CanonicalStructuralConstraintPlan, ResolvedConstraintMatrix};
 
 use super::{
     digest, numerical_rank, rigid_body::RigidBodyFrame, verify_null_mode, NullspaceAnchoring,
@@ -19,8 +19,70 @@ pub(super) struct CanonicalFrameTopology<'a> {
     pub positions_m: &'a [[f64; 3]],
     pub node_identities: &'a [StableDigest],
     pub components: Vec<Vec<usize>>,
+    pub reference_points: &'a [CanonicalFrameReferencePoint],
     pub topology_identity: Digest,
     pub kind: NullspaceKind,
+}
+
+pub(super) struct CanonicalFrameReferencePoint {
+    pub position_m: [f64; 3],
+    pub component: usize,
+}
+
+pub(super) fn reference_points(
+    plan: &CanonicalStructuralConstraintPlan,
+    node_identities: &[StableDigest],
+    components: &[Vec<usize>],
+) -> Result<Vec<CanonicalFrameReferencePoint>, NullspaceEvidenceError> {
+    let component_by_node = components
+        .iter()
+        .enumerate()
+        .flat_map(|(component, nodes)| nodes.iter().map(move |node| (*node, component)))
+        .collect::<BTreeMap<_, _>>();
+    let node_by_identity = node_identities
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(index, identity)| (identity, index))
+        .collect::<BTreeMap<_, _>>();
+    let mut reference_components = BTreeMap::new();
+    for group in &plan.groups {
+        let Some(coupling) = &group.coupling else {
+            continue;
+        };
+        let associated = coupling
+            .target_weights
+            .iter()
+            .map(|weight| {
+                node_by_identity
+                    .get(&weight.node_identity)
+                    .and_then(|node| component_by_node.get(node))
+                    .copied()
+            })
+            .collect::<Option<BTreeSet<_>>>()
+            .ok_or(NullspaceEvidenceError::AmbiguousReferencePoint)?;
+        let associated = associated.into_iter().collect::<Vec<_>>();
+        let [component] = associated.as_slice() else {
+            return Err(NullspaceEvidenceError::AmbiguousReferencePoint);
+        };
+        if reference_components
+            .insert(coupling.reference_point_identity, *component)
+            .is_some_and(|existing| existing != *component)
+        {
+            return Err(NullspaceEvidenceError::AmbiguousReferencePoint);
+        }
+    }
+    plan.reference_points
+        .iter()
+        .map(|point| {
+            Ok(CanonicalFrameReferencePoint {
+                position_m: point.position_meters,
+                component: *reference_components
+                    .get(&point.identity)
+                    .ok_or(NullspaceEvidenceError::AmbiguousReferencePoint)?,
+            })
+        })
+        .collect()
 }
 
 pub(super) fn prove(
@@ -34,6 +96,7 @@ pub(super) fn prove(
 ) -> Result<NullspaceEliminationEvidence, NullspaceEvidenceError> {
     if topology.positions_m.len() != topology.node_identities.len()
         || layout.node_count() != topology.positions_m.len()
+        || layout.reference_point_count() != topology.reference_points.len()
         || layout.total_dof_count() != combined_operator.rows()
         || constraints.is_some_and(|matrix| matrix.full_dof_count != combined_operator.rows())
         || constrained_dofs.len() != combined_operator.rows()
@@ -70,6 +133,7 @@ pub(super) fn prove(
         layout,
         component_by_node: &component_by_node,
         frames: &frames,
+        reference_points: topology.reference_points,
         mode_count,
     };
     let mut modes = vec![vec![0.0; combined_operator.columns()]; mode_count];
@@ -180,6 +244,7 @@ struct FrameModeContext<'a> {
     layout: &'a StructuralDofLayout,
     component_by_node: &'a BTreeMap<usize, usize>,
     frames: &'a [RigidBodyFrame],
+    reference_points: &'a [CanonicalFrameReferencePoint],
     mode_count: usize,
 }
 
@@ -187,21 +252,39 @@ fn rigid_mode_response(
     column: usize,
     context: &FrameModeContext<'_>,
 ) -> Result<Vec<f64>, NullspaceEvidenceError> {
-    let address = context
-        .layout
-        .address(column)
-        .ok_or(NullspaceEvidenceError::DimensionMismatch)?;
-    let position = context
-        .positions_m
-        .get(address.node_index)
-        .copied()
-        .ok_or(NullspaceEvidenceError::DimensionMismatch)?;
-    let component = context
-        .component_by_node
-        .get(&address.node_index)
-        .copied()
-        .ok_or(NullspaceEvidenceError::DimensionMismatch)?;
-    let values = context.frames[component].response(position, address.kind);
+    let (position, component, kind) = if let Some(address) = context.layout.address(column) {
+        (
+            context
+                .positions_m
+                .get(address.node_index)
+                .copied()
+                .ok_or(NullspaceEvidenceError::DimensionMismatch)?,
+            context
+                .component_by_node
+                .get(&address.node_index)
+                .copied()
+                .ok_or(NullspaceEvidenceError::DimensionMismatch)?,
+            address.kind,
+        )
+    } else {
+        let relative = column
+            .checked_sub(context.layout.node_dof_count())
+            .ok_or(NullspaceEvidenceError::DimensionMismatch)?;
+        let point = context
+            .reference_points
+            .get(relative / StructuralDofKind::ORDER.len())
+            .ok_or(NullspaceEvidenceError::DimensionMismatch)?;
+        (
+            point.position_m,
+            point.component,
+            StructuralDofKind::ORDER[relative % StructuralDofKind::ORDER.len()],
+        )
+    };
+    let values = context
+        .frames
+        .get(component)
+        .ok_or(NullspaceEvidenceError::DimensionMismatch)?
+        .response(position, kind);
     let mut response = vec![0.0; context.mode_count];
     let offset = component * RIGID_MODE_COUNT;
     response[offset..offset + RIGID_MODE_COUNT].copy_from_slice(&values);

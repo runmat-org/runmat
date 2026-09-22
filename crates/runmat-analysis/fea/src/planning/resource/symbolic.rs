@@ -139,12 +139,7 @@ impl StructuralSymbolicOperators {
                 "constraint plan and explicit structural topology differ".into(),
             ));
         }
-        if !constraints.reference_points.is_empty() {
-            return Err(ResourcePlanningError::Invalid(
-                "explicit reference-point symbolic planning is not complete".into(),
-            ));
-        }
-        let layout = mixed_dof_layout(&topology);
+        let layout = mixed_dof_layout(&topology, constraints.reference_points.len());
         let total_dofs = layout.total_dof_count();
         let mut rows = (0..total_dofs)
             .map(|_| BTreeSet::<usize>::new())
@@ -240,12 +235,7 @@ impl StructuralSymbolicOperators {
                 "constraint plan and mixed structural topology differ".into(),
             ));
         }
-        if !constraints.reference_points.is_empty() {
-            return Err(ResourcePlanningError::Invalid(
-                "mixed reference-point symbolic planning is not complete".into(),
-            ));
-        }
-        let layout = mixed_dof_layout(&topology);
+        let layout = mixed_dof_layout(&topology, constraints.reference_points.len());
         let total_dofs = layout.total_dof_count();
         let mut rows = (0..total_dofs)
             .map(|_| BTreeSet::<usize>::new())

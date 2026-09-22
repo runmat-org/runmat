@@ -3,7 +3,8 @@
 use std::collections::BTreeMap;
 
 use runmat_analysis_core::{
-    AnalysisField, AnalysisFieldValues, StructuralRotationDof, StructuralTranslationDof,
+    AnalysisField, AnalysisFieldValues, AnalysisModel, StructuralRotationDof,
+    StructuralTranslationDof,
 };
 use runmat_meshing_core::{SolverMeshArtifact, StableDigest};
 
@@ -11,11 +12,87 @@ use super::{
     CanonicalStructuralConstraintPlan, CanonicalStructuralDof, CanonicalStructuralDofOwner,
     ConstraintResultError,
 };
+use crate::{
+    assembly::{
+        dofs::{StructuralDofKind, StructuralDofLayout},
+        mixed_dof_layout,
+    },
+    physics::structural::topology::{
+        node_space::CanonicalStructuralNodeSpace, CanonicalStructuralTopologyIdentity,
+    },
+};
 
 #[derive(Clone, Copy, Debug)]
 pub(super) struct ConstraintNodeState {
     pub coordinates_m: [f64; 3],
     pub dof_indices: [Option<usize>; 6],
+}
+
+pub(super) struct ResolvedModelConstraintState {
+    pub layout: StructuralDofLayout,
+    pub node_order: Vec<StableDigest>,
+    pub nodes: BTreeMap<StableDigest, ConstraintNodeState>,
+}
+
+pub(super) fn resolve_model_state(
+    plan: &CanonicalStructuralConstraintPlan,
+    model: &AnalysisModel,
+    mesh: Option<&SolverMeshArtifact>,
+) -> Result<ResolvedModelConstraintState, ConstraintResultError> {
+    let structural = model.structural.as_ref().ok_or_else(|| {
+        ConstraintResultError::InvalidPlan(
+            "structural constraint recovery requires explicit topology".into(),
+        )
+    })?;
+    let topology = match plan.topology {
+        CanonicalStructuralTopologyIdentity::Explicit { .. } => {
+            CanonicalStructuralNodeSpace::derive_explicit(structural)
+        }
+        CanonicalStructuralTopologyIdentity::ConformalMixed { .. } => {
+            CanonicalStructuralNodeSpace::derive(
+                mesh.ok_or_else(|| {
+                    ConstraintResultError::InvalidPlan(
+                        "conformal mixed constraint recovery requires its canonical mesh".into(),
+                    )
+                })?,
+                structural,
+            )
+        }
+        CanonicalStructuralTopologyIdentity::Solid { .. } => {
+            return Err(ConstraintResultError::InvalidPlan(
+                "solid constraint recovery does not use explicit model state".into(),
+            ));
+        }
+    }
+    .map_err(|error| ConstraintResultError::InvalidPlan(error.to_string()))?;
+    if plan.topology != topology.identity {
+        return Err(ConstraintResultError::TopologyMismatch);
+    }
+    let layout = mixed_dof_layout(&topology, plan.reference_points.len());
+    let node_order = topology.nodes.iter().map(|node| node.identity).collect();
+    let nodes = topology
+        .nodes
+        .iter()
+        .enumerate()
+        .map(|(node_index, node)| {
+            let mut dof_indices = [None; 6];
+            for (component, kind) in StructuralDofKind::ORDER.into_iter().enumerate() {
+                dof_indices[component] = layout.index(node_index, kind);
+            }
+            (
+                node.identity,
+                ConstraintNodeState {
+                    coordinates_m: node.coordinates_m,
+                    dof_indices,
+                },
+            )
+        })
+        .collect();
+    Ok(ResolvedModelConstraintState {
+        layout,
+        node_order,
+        nodes,
+    })
 }
 
 pub(super) fn nodal_vector_field<'a>(
