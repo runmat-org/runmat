@@ -13,9 +13,11 @@ use super::{
     dofs::{StructuralDofKind, StructuralDofLayout, StructuralNodeDofSet},
     explicit_connectors::assemble_connectors_with_resolver,
     explicit_elements::{assemble_explicit_elements, ExplicitElementAssembly},
-    explicit_loads::apply_projected_explicit_structural_loads,
     requested_moment_norm,
     solver_solid::assemble_solver_solid_operators,
+    structural_loads::{
+        apply as apply_structural_load_plan, compile_mixed as compile_mixed_load_plan,
+    },
     structural_source_implementations, validate_structural_inputs, AssemblySummary,
     LinearAssemblyError, StructuralAssemblyError, StructuralProjectionBasis,
 };
@@ -250,30 +252,37 @@ pub(super) fn assemble_mixed_structural_system(
     )
     .map_err(LinearAssemblyError::Structural)?;
     let mut direct_constraints = DirectConstraintAssignments::new(&layout);
-    let solid_source_projection = super::apply_solver_mesh_structural_loads(
-        &solid_excitations,
+    let source_projection = compile_mixed_load_plan(
+        structural,
+        &solid_properties,
+        excitations,
         mesh,
         constraint_plan,
+        &topology,
+        &layout,
+    )
+    .map_err(|error| {
+        LinearAssemblyError::Structural(StructuralAssemblyError::InvalidLoadPlan(error.to_string()))
+    })?;
+    apply_structural_load_plan(
+        &source_projection.plan,
+        &topology,
+        &constraint_plan.reference_points,
         &layout,
         &mut rhs,
-        true,
     )
-    .map_err(LinearAssemblyError::SolverMeshRegionMapping)?;
-    let canonical_node_coordinates_m = topology
-        .nodes
+    .map_err(|error| {
+        LinearAssemblyError::Structural(StructuralAssemblyError::InvalidLoadPlan(error.to_string()))
+    })?;
+    let spatial_projection_evidence = source_projection
+        .plan
+        .entries
         .iter()
-        .map(|node| node.coordinates_m)
-        .collect::<Vec<_>>();
-    let explicit_source_projection = apply_projected_explicit_structural_loads(
-        structural,
-        &explicit_excitations,
-        &layout,
-        &mut rhs,
-        topology.identity.discretization_digest(),
-        &canonical_node_coordinates_m,
-        &topology.explicit_node_indices,
-    )
-    .map_err(LinearAssemblyError::Structural)?;
+        .flat_map(|entry| entry.evidence.iter().cloned())
+        .collect();
+    let structural_load_plan_identity = Some(source_projection.plan.plan_digest);
+    let direct_rotational_moment_load_count = source_projection.direct_rotational_moment_count;
+    let structural_moment_projection = source_projection.moment_projection;
     let physical_load = rhs.clone();
     let has_general_rows =
         constraint_plan.enforcement != crate::constraints::ConstraintEnforcement::DirectElimination;
@@ -359,6 +368,7 @@ pub(super) fn assemble_mixed_structural_system(
         structural_rotational_dof_count: layout.rotational_dof_count(),
         structural_rotation_node_count: layout.rotation_node_count(),
         structural_explicit_node_indices: topology.explicit_node_indices.clone(),
+        structural_load_plan_identity,
         structural_moment_load_count: excitations
             .iter()
             .filter(|load| {
@@ -368,19 +378,10 @@ pub(super) fn assemble_mixed_structural_system(
                 )
             })
             .count(),
-        structural_direct_rotational_moment_load_count: explicit_source_projection
-            .direct_rotational_moment_count,
+        structural_direct_rotational_moment_load_count: direct_rotational_moment_load_count,
         structural_requested_moment_norm_n_m: requested_moment_norm(excitations),
-        structural_moment_projection: solid_source_projection
-            .moment_projection
-            .into_iter()
-            .chain(explicit_source_projection.moment_projection)
-            .collect(),
-        spatial_projection_evidence: solid_source_projection
-            .evidence
-            .into_iter()
-            .chain(explicit_source_projection.evidence)
-            .collect(),
+        structural_moment_projection,
+        spatial_projection_evidence,
         structural_rotational_constraint_count: rotational_constraint_count,
         structural_beam_element_count: beam_count,
         structural_shell_element_count: shell_count,

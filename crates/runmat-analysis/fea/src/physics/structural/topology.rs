@@ -7,6 +7,7 @@ use runmat_meshing_core::StableDigest;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+pub(crate) mod explicit_surface;
 pub(crate) mod node_space;
 pub(crate) mod target;
 

@@ -10,6 +10,7 @@ use crate::excitation::{
     RealizedExcitation, RealizedExcitationKind, RealizedExcitationTarget, RealizedExcitations,
     SpatialIntegrationRule, SpatialProjectionAccumulator, SpatialProjectionEvidence,
 };
+use crate::physics::structural::frame::{scale_vector, transform_vector, unit_vector};
 use crate::topology::AnalysisProjection;
 
 pub(super) fn apply_solver_mesh_structural_loads(
@@ -62,7 +63,6 @@ pub(super) fn apply_solver_mesh_structural_loads(
         let (target_nodes, target_face_count) = projection_region_nodes(&projection, target);
         match load.kind {
             RealizedExcitationKind::Force(value) => {
-                let [fx, fy, fz] = value.real;
                 if target_nodes.is_empty() {
                     if strict_region_mapping {
                         return Err(SolverMeshRegionMappingError::UnmappedLoadRegion {
@@ -75,6 +75,12 @@ pub(super) fn apply_solver_mesh_structural_loads(
                 }
                 let scale = 1.0 / target_nodes.len() as f64;
                 let point = target_centroid(&node_coordinates_m, &target_nodes);
+                let force = resolve_vector(
+                    load,
+                    value.real,
+                    point,
+                    boundary_normal(&boundary_faces_matching(&projection, target)),
+                )?;
                 let mut projection_evidence = SpatialProjectionAccumulator::new(
                     load,
                     &projection,
@@ -82,12 +88,10 @@ pub(super) fn apply_solver_mesh_structural_loads(
                     target_face_count,
                     point,
                 );
-                projection_evidence.add_requested_force(point, value.real);
+                projection_evidence.add_requested_force(point, force);
                 for node_index in target_nodes {
-                    let nodal_force = [fx * scale, fy * scale, fz * scale];
-                    add_rhs(layout, rhs, node_index, StructuralDofKind::Ux, fx * scale);
-                    add_rhs(layout, rhs, node_index, StructuralDofKind::Uy, fy * scale);
-                    add_rhs(layout, rhs, node_index, StructuralDofKind::Uz, fz * scale);
+                    let nodal_force = force.map(|component| component * scale);
+                    add_translational_rhs(layout, rhs, node_index, nodal_force);
                     projection_evidence.add_projected_force(node_index, nodal_force);
                 }
                 record_spatial_evidence(&mut evidence, projection_evidence.finish())?;
@@ -103,12 +107,19 @@ pub(super) fn apply_solver_mesh_structural_loads(
                     }
                     continue;
                 }
+                let point = target_centroid(&node_coordinates_m, &target_nodes);
+                let moment = resolve_vector(
+                    load,
+                    value.real,
+                    point,
+                    boundary_normal(&boundary_faces_matching(&projection, target)),
+                )?;
                 let mut summary = add_solver_mesh_moment_projection_rhs(
                     &node_coordinates_m,
                     layout,
                     rhs,
                     &target_nodes,
-                    value.real,
+                    moment,
                 );
                 summary.load_id.clone_from(&load.excitation_id.0);
                 summary.region_id = region_id.to_string();
@@ -120,7 +131,7 @@ pub(super) fn apply_solver_mesh_structural_loads(
                     summary.projection_point_m,
                 );
                 projection_evidence.register_nodes(target_nodes);
-                projection_evidence.add_requested_moment(value.real);
+                projection_evidence.add_requested_moment(moment);
                 projection_evidence.add_projected_moment(summary.applied_moment);
                 record_spatial_evidence(&mut evidence, projection_evidence.finish())?;
                 moment_projection.push(summary);
@@ -217,7 +228,8 @@ fn apply_reference_point_structural_loads(
         }
         match load.kind {
             RealizedExcitationKind::Force(force) => {
-                add_reference_vector(layout, rhs, point_index, force.real, false);
+                let force = resolve_vector(load, force.real, position.meters, None)?;
+                add_reference_vector(layout, rhs, point_index, force, false);
                 let mut projection_evidence = SpatialProjectionAccumulator::new(
                     load,
                     projection,
@@ -225,12 +237,13 @@ fn apply_reference_point_structural_loads(
                     1,
                     position.meters,
                 );
-                projection_evidence.add_requested_force(position.meters, force.real);
-                projection_evidence.add_projected_generalized_force(force.real);
+                projection_evidence.add_requested_force(position.meters, force);
+                projection_evidence.add_projected_generalized_force(force);
                 record_spatial_evidence(&mut evidence, projection_evidence.finish())?;
             }
             RealizedExcitationKind::Moment(moment) => {
-                add_reference_vector(layout, rhs, point_index, moment.real, true);
+                let moment = resolve_vector(load, moment.real, position.meters, None)?;
+                add_reference_vector(layout, rhs, point_index, moment, true);
                 let mut projection_evidence = SpatialProjectionAccumulator::new(
                     load,
                     projection,
@@ -238,8 +251,8 @@ fn apply_reference_point_structural_loads(
                     1,
                     position.meters,
                 );
-                projection_evidence.add_requested_moment(moment.real);
-                projection_evidence.add_projected_moment(moment.real);
+                projection_evidence.add_requested_moment(moment);
+                projection_evidence.add_projected_moment(moment);
                 record_spatial_evidence(&mut evidence, projection_evidence.finish())?;
             }
             _ => {
@@ -331,10 +344,10 @@ fn apply_projected_pressure(
     for face in faces {
         projection
             .visit_boundary_quadrature(face, |point| {
-                let integrated_traction = scale_vec(point.area_vector_weight_m2, magnitude_pa);
+                let integrated_traction = scale_vector(point.area_vector_weight_m2, magnitude_pa);
                 evidence.add_requested_force(point.position_m, integrated_traction);
                 for (&node_index, &shape) in face.node_indices.iter().zip(point.shape_values()) {
-                    let nodal_force = scale_vec(integrated_traction, shape);
+                    let nodal_force = scale_vector(integrated_traction, shape);
                     add_translational_rhs(layout, rhs, node_index, nodal_force);
                     evidence.add_projected_force(node_index, nodal_force);
                 }
@@ -352,7 +365,7 @@ fn apply_projected_traction(
     rhs: &mut [f64],
     load: &RealizedExcitation,
     target: &runmat_analysis_core::RegionTarget,
-    traction_pa: [f64; 3],
+    traction_components_pa: [f64; 3],
 ) -> Result<SpatialProjectionEvidence, SolverMeshRegionMappingError> {
     let faces = boundary_faces_matching(projection, target);
     let reference_point_m = projected_boundary_centroid(&faces);
@@ -364,12 +377,23 @@ fn apply_projected_traction(
         reference_point_m,
     );
     for face in faces {
+        let mut frame_error = None;
         projection
             .visit_boundary_quadrature(face, |point| {
-                let integrated = scale_vec(traction_pa, point.area_weight_m2);
+                let normal = unit_vector(point.area_vector_weight_m2).ok();
+                let Ok(traction_pa) = transform_vector(
+                    &load.policy.frame,
+                    traction_components_pa,
+                    point.position_m,
+                    normal,
+                ) else {
+                    frame_error = Some("coordinate frame is undefined on the selected boundary");
+                    return;
+                };
+                let integrated = scale_vector(traction_pa, point.area_weight_m2);
                 evidence.add_requested_force(point.position_m, integrated);
                 for (&node_index, &shape) in face.node_indices.iter().zip(point.shape_values()) {
-                    let nodal_force = scale_vec(integrated, shape);
+                    let nodal_force = scale_vector(integrated, shape);
                     add_translational_rhs(layout, rhs, node_index, nodal_force);
                     evidence.add_projected_force(node_index, nodal_force);
                 }
@@ -377,6 +401,11 @@ fn apply_projected_traction(
             .map_err(|error| {
                 SolverMeshRegionMappingError::InvalidAnalysisProjection(error.to_string())
             })?;
+        if let Some(error) = frame_error {
+            return Err(SolverMeshRegionMappingError::InvalidAnalysisProjection(
+                format!("excitation `{}` {error}", load.excitation_id.0),
+            ));
+        }
     }
     Ok(evidence.finish())
 }
@@ -386,7 +415,7 @@ fn apply_projected_body_force(
     layout: &StructuralDofLayout,
     rhs: &mut [f64],
     load: &RealizedExcitation,
-    density_n_per_m3: [f64; 3],
+    density_components_n_per_m3: [f64; 3],
 ) -> Result<(usize, Option<SpatialProjectionEvidence>), SolverMeshRegionMappingError> {
     let elements = projection
         .elements
@@ -411,12 +440,22 @@ fn apply_projected_body_force(
         reference_point_m,
     );
     for element in &elements {
+        let mut frame_error = None;
         projection
             .visit_element_quadrature(element, |point| {
-                let integrated = scale_vec(density_n_per_m3, point.volume_weight_m3);
+                let Ok(density_n_per_m3) = transform_vector(
+                    &load.policy.frame,
+                    density_components_n_per_m3,
+                    point.position_m,
+                    None,
+                ) else {
+                    frame_error = Some("coordinate frame is undefined in the selected volume");
+                    return;
+                };
+                let integrated = scale_vector(density_n_per_m3, point.volume_weight_m3);
                 evidence.add_requested_force(point.position_m, integrated);
                 for (&node_index, &shape) in element.node_indices.iter().zip(point.shape_values()) {
-                    let nodal_force = scale_vec(integrated, shape);
+                    let nodal_force = scale_vector(integrated, shape);
                     add_translational_rhs(layout, rhs, node_index, nodal_force);
                     evidence.add_projected_force(node_index, nodal_force);
                 }
@@ -424,6 +463,11 @@ fn apply_projected_body_force(
             .map_err(|error| {
                 SolverMeshRegionMappingError::InvalidAnalysisProjection(error.to_string())
             })?;
+        if let Some(error) = frame_error {
+            return Err(SolverMeshRegionMappingError::InvalidAnalysisProjection(
+                format!("excitation `{}` {error}", load.excitation_id.0),
+            ));
+        }
     }
     Ok((elements.len(), Some(evidence.finish())))
 }
@@ -435,7 +479,7 @@ fn projected_boundary_centroid(faces: &[&crate::topology::ProjectedBoundaryFace]
         add_scaled(&mut first_moment, face.centroid_m, face.area_m2);
         area += face.area_m2;
     }
-    scale_vec(first_moment, 1.0 / area)
+    scale_vector(first_moment, 1.0 / area)
 }
 
 fn projected_volume_centroid(elements: &[&crate::topology::ProjectedElement]) -> [f64; 3] {
@@ -449,7 +493,7 @@ fn projected_volume_centroid(elements: &[&crate::topology::ProjectedElement]) ->
         );
         volume += element.signed_volume_m3;
     }
-    scale_vec(first_moment, 1.0 / volume)
+    scale_vector(first_moment, 1.0 / volume)
 }
 
 fn add_scaled(target: &mut [f64; 3], value: [f64; 3], scale: f64) {
@@ -530,6 +574,26 @@ fn add_translational_rhs(
     add_rhs(layout, rhs, node_index, StructuralDofKind::Uz, force[2]);
 }
 
-fn scale_vec(value: [f64; 3], scale: f64) -> [f64; 3] {
-    [value[0] * scale, value[1] * scale, value[2] * scale]
+fn resolve_vector(
+    load: &RealizedExcitation,
+    components: [f64; 3],
+    point: [f64; 3],
+    normal: Option<[f64; 3]>,
+) -> Result<[f64; 3], SolverMeshRegionMappingError> {
+    transform_vector(&load.policy.frame, components, point, normal).map_err(|error| {
+        SolverMeshRegionMappingError::InvalidAnalysisProjection(format!(
+            "excitation `{}` coordinate frame is undefined: {error}",
+            load.excitation_id.0
+        ))
+    })
+}
+
+fn boundary_normal(faces: &[&crate::topology::ProjectedBoundaryFace]) -> Option<[f64; 3]> {
+    unit_vector(faces.iter().fold([0.0; 3], |mut total, face| {
+        for (component, value) in total.iter_mut().zip(face.oriented_area_vector_m2) {
+            *component += value;
+        }
+        total
+    }))
+    .ok()
 }

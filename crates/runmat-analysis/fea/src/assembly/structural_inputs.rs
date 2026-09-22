@@ -93,7 +93,11 @@ pub(super) fn structural_source_implementations(
                     StructuralProjectionBasis::CanonicalSolid,
                 ) => SourceImplementation::UniformNodeDistribution,
                 (
-                    RealizedExcitationKind::Force(_) | RealizedExcitationKind::Moment(_),
+                    RealizedExcitationKind::Force(_)
+                    | RealizedExcitationKind::Moment(_)
+                    | RealizedExcitationKind::Pressure(_)
+                    | RealizedExcitationKind::Traction(_)
+                    | RealizedExcitationKind::BodyForce(_),
                     StructuralProjectionBasis::ExplicitConnectivity,
                 ) => SourceImplementation::ExplicitRegionNodalDistribution,
                 (
@@ -162,14 +166,28 @@ pub(super) fn validate_structural_inputs(
             (RealizedExcitationKind::Traction(_), StructuralProjectionBasis::CanonicalSolid) => {
                 (StructuralLoadKind::Traction, true)
             }
+            (
+                RealizedExcitationKind::Pressure(_) | RealizedExcitationKind::Traction(_),
+                StructuralProjectionBasis::ExplicitConnectivity,
+            ) => (
+                match excitation.kind {
+                    RealizedExcitationKind::Pressure(_) => StructuralLoadKind::Pressure,
+                    _ => StructuralLoadKind::Traction,
+                },
+                true,
+            ),
+            (RealizedExcitationKind::Traction(_), StructuralProjectionBasis::Synthetic) => {
+                (StructuralLoadKind::Traction, false)
+            }
             (RealizedExcitationKind::BodyForce(_), StructuralProjectionBasis::CanonicalSolid)
+            | (
+                RealizedExcitationKind::BodyForce(_),
+                StructuralProjectionBasis::ExplicitConnectivity,
+            )
             | (RealizedExcitationKind::BodyForce(_), StructuralProjectionBasis::Synthetic) => {
                 (StructuralLoadKind::BodyForce, true)
             }
             (RealizedExcitationKind::Moment(_), _) => (StructuralLoadKind::Moment, false),
-            (RealizedExcitationKind::Traction(_), _) => (StructuralLoadKind::Traction, false),
-            (RealizedExcitationKind::Pressure(_), _) => (StructuralLoadKind::Pressure, false),
-            (RealizedExcitationKind::BodyForce(_), _) => (StructuralLoadKind::BodyForce, false),
             (RealizedExcitationKind::HeatGeneration(_), _) => {
                 (StructuralLoadKind::HeatGeneration, false)
             }

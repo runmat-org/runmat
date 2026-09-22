@@ -70,6 +70,41 @@ pub(crate) enum StructuralNodeSpaceError {
 }
 
 impl CanonicalStructuralNodeSpace {
+    pub fn derive_solid(mesh: &SolverMeshArtifact) -> Result<Self, StructuralNodeSpaceError> {
+        mesh.validate_canonical()
+            .map_err(|error| StructuralNodeSpaceError::InvalidMesh(error.to_string()))?;
+        let nodes = mesh
+            .topology
+            .nodes
+            .iter()
+            .map(|node| CanonicalStructuralNode {
+                identity: node.stable_identity,
+                coordinates_m: node.coordinates_m,
+                owns_solid_translation: true,
+                owns_explicit_rotation: false,
+            })
+            .collect::<Vec<_>>();
+        if nodes
+            .iter()
+            .map(|node| node.identity)
+            .collect::<BTreeSet<_>>()
+            .len()
+            != nodes.len()
+        {
+            return Err(StructuralNodeSpaceError::InvalidMesh(
+                "canonical solid-node identities are not unique".into(),
+            ));
+        }
+        Ok(Self {
+            solid_node_count: nodes.len(),
+            nodes,
+            explicit_node_indices: Vec::new(),
+            identity: CanonicalStructuralTopologyIdentity::Solid {
+                mesh_digest: mesh.canonical_digest,
+            },
+        })
+    }
+
     pub fn derive_explicit(structural: &StructuralModel) -> Result<Self, StructuralNodeSpaceError> {
         let structural_topology_digest = explicit_topology_digest(structural)
             .map_err(|error| StructuralNodeSpaceError::Identity(error.to_string()))?;

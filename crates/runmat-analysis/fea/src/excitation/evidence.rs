@@ -8,6 +8,7 @@ pub enum SpatialIntegrationRule {
     UniformResultant,
     BoundaryDunavantSeven,
     VolumeKeastFifteen,
+    ExplicitConsistentElement,
     ReferencePointGeneralized,
 }
 

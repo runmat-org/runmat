@@ -1,4 +1,5 @@
 pub(crate) mod dynamics;
+pub(crate) mod frame;
 pub mod material;
 pub(crate) mod topology;
 

@@ -14,6 +14,7 @@ mod solid_matrix;
 pub mod solver_solid;
 mod solver_solid_boundary;
 mod structural_inputs;
+mod structural_loads;
 
 use std::{collections::BTreeMap, fmt};
 
@@ -44,16 +45,18 @@ use self::{
     explicit_elements::{
         assemble_explicit_elements, validate_explicit_topology, ExplicitElementAssembly,
     },
-    explicit_loads::apply_explicit_structural_loads,
     solver_solid::{
         assemble_solver_solid_operators, resolve_element_material, solver_solid_topology,
         SolverSolidAssemblyError,
     },
-    solver_solid_boundary::apply_solver_mesh_structural_loads,
     structural_inputs::{
         apply_synthetic_structural_rhs, explicit_load_kind, requested_moment_norm,
         structural_boundary_implementations, structural_source_implementations,
         validate_structural_inputs, StructuralProjectionBasis,
+    },
+    structural_loads::{
+        apply as apply_structural_load_plan, compile_explicit as compile_explicit_load_plan,
+        compile_solid as compile_solid_load_plan,
     },
 };
 use crate::physics::structural::topology::explicit_target_node_indices as structural_target_nodes;
@@ -89,6 +92,8 @@ pub struct AssemblySummary {
     /// the appended explicit suffix.
     #[serde(default)]
     pub structural_explicit_node_indices: Vec<usize>,
+    #[serde(default)]
+    pub structural_load_plan_identity: Option<runmat_execution::Digest>,
     #[serde(default)]
     pub structural_moment_load_count: usize,
     #[serde(default)]
@@ -289,6 +294,7 @@ pub enum StructuralAssemblyError {
     InvalidMaterialCoverage(String),
     ExplicitTopologyIdentity(String),
     InvalidConstraintPlan(String),
+    InvalidLoadPlan(String),
     InvalidSpatialProjectionEvidence {
         load_id: String,
         reason: String,
@@ -444,6 +450,9 @@ impl fmt::Display for StructuralAssemblyError {
                 f,
                 "explicit structural constraint plan is invalid: {message}"
             ),
+            Self::InvalidLoadPlan(message) => {
+                write!(f, "canonical structural load plan is invalid: {message}")
+            }
             Self::InvalidSpatialProjectionEvidence { load_id, reason } => write!(
                 f,
                 "explicit structural load projection evidence is invalid: load_id={load_id} reason={reason}"
@@ -999,6 +1008,7 @@ fn assemble_linear_system_impl(
     }
     let mut structural_moment_projection = Vec::new();
     let mut spatial_projection_evidence = Vec::new();
+    let mut structural_load_plan_identity = None;
     let mut physical_load = rhs.clone();
     let mut constraint_matrix = None;
     let mut affine_constraint_reduction = None;
@@ -1009,17 +1019,44 @@ fn assemble_linear_system_impl(
                     "canonical solid assembly has no compiled constraint plan".into(),
                 ))
             })?;
-            let source_projection = apply_solver_mesh_structural_loads(
+            let topology = crate::physics::structural::topology::node_space::CanonicalStructuralNodeSpace::derive_solid(mesh)
+                .map_err(|error| {
+                    LinearAssemblyError::Structural(StructuralAssemblyError::InvalidLoadPlan(
+                        error.to_string(),
+                    ))
+                })?;
+            let source_projection = compile_solid_load_plan(
                 excitations,
                 mesh,
                 constraint_plan,
+                &topology,
+                &structural_dof_layout,
+            )
+            .map_err(|error| {
+                LinearAssemblyError::Structural(StructuralAssemblyError::InvalidLoadPlan(
+                    error.to_string(),
+                ))
+            })?;
+            apply_structural_load_plan(
+                &source_projection.plan,
+                &topology,
+                &constraint_plan.reference_points,
                 &structural_dof_layout,
                 &mut rhs,
-                true,
             )
-            .map_err(LinearAssemblyError::SolverMeshRegionMapping)?;
+            .map_err(|error| {
+                LinearAssemblyError::Structural(StructuralAssemblyError::InvalidLoadPlan(
+                    error.to_string(),
+                ))
+            })?;
             structural_moment_projection = source_projection.moment_projection;
-            spatial_projection_evidence = source_projection.evidence;
+            spatial_projection_evidence = source_projection
+                .plan
+                .entries
+                .iter()
+                .flat_map(|entry| entry.evidence.iter().cloned())
+                .collect();
+            structural_load_plan_identity = Some(source_projection.plan.plan_digest);
             physical_load = rhs.clone();
             constrained.fill(false);
             if constraint_plan.enforcement
@@ -1278,6 +1315,7 @@ fn assemble_linear_system_impl(
         structural_rotational_dof_count: structural_dof_layout.rotational_dof_count(),
         structural_rotation_node_count: structural_dof_layout.rotation_node_count(),
         structural_explicit_node_indices: Vec::new(),
+        structural_load_plan_identity,
         structural_moment_load_count,
         structural_direct_rotational_moment_load_count,
         structural_requested_moment_norm_n_m,
@@ -1642,12 +1680,33 @@ fn assemble_explicit_structural_system(
         .finish()
         .map_err(|error| StructuralAssemblyError::SparseOperator(format!("{error:?}")))?;
 
-    let source_projection =
-        apply_explicit_structural_loads(structural, excitations, &structural_dof_layout, &mut rhs)?;
+    let source_projection = compile_explicit_load_plan(
+        structural,
+        &properties,
+        excitations,
+        constraint_plan,
+        &topology,
+        &structural_dof_layout,
+    )
+    .map_err(|error| StructuralAssemblyError::InvalidLoadPlan(error.to_string()))?;
+    apply_structural_load_plan(
+        &source_projection.plan,
+        &topology,
+        &constraint_plan.reference_points,
+        &structural_dof_layout,
+        &mut rhs,
+    )
+    .map_err(|error| StructuralAssemblyError::InvalidLoadPlan(error.to_string()))?;
     let physical_load = rhs.clone();
     let direct_rotational_moment_load_count = source_projection.direct_rotational_moment_count;
     let structural_moment_projection = source_projection.moment_projection;
-    let spatial_projection_evidence = source_projection.evidence;
+    let spatial_projection_evidence = source_projection
+        .plan
+        .entries
+        .iter()
+        .flat_map(|entry| entry.evidence.iter().cloned())
+        .collect();
+    let structural_load_plan_identity = Some(source_projection.plan.plan_digest);
 
     let mut direct_constraints = DirectConstraintAssignments::new(&structural_dof_layout);
     let resolved_constraint_matrix =
@@ -1759,6 +1818,7 @@ fn assemble_explicit_structural_system(
         structural_rotational_dof_count: structural_dof_layout.rotational_dof_count(),
         structural_rotation_node_count: structural_dof_layout.rotation_node_count(),
         structural_explicit_node_indices: (0..structural.nodes.len()).collect(),
+        structural_load_plan_identity,
         structural_moment_load_count: excitations
             .iter()
             .filter(|load| matches!(load.kind, RealizedExcitationKind::Moment(_)))
@@ -2460,6 +2520,7 @@ mod tests {
         assert!(summary.constrained_dof_count >= 6);
         assert!(summary.operator.nullspace_evidence().is_some());
         assert_eq!(summary.spatial_projection_evidence.len(), 2);
+        assert!(summary.structural_load_plan_identity.is_some());
         assert!(summary
             .spatial_projection_evidence
             .iter()
@@ -2591,6 +2652,55 @@ mod tests {
                 && second_constraint_id == "fixed_root"
                 && identity == shared_node_identity
         ));
+    }
+
+    #[test]
+    fn whole_model_body_force_spans_solid_and_explicit_formulations_once() {
+        let mut mesh = tetrahedron4_mesh();
+        let attached_coordinates = mesh.topology.nodes[0].coordinates_m;
+        mesh.topology.nodes[0].provenance = vec![PersistentEntityId {
+            kind: PersistentEntityKind::Vertex,
+            source_topology_id: "beam_root".into(),
+            assembly_path: vec!["root".into()],
+        }];
+        set_boundary_regions(&mut mesh, 0, &["root"]);
+        reseal(&mut mesh);
+        let mut model = mixed_solid_beam_model(attached_coordinates);
+        model.constraints.clear();
+        let mut load = static_excitations(&model).iter().next().unwrap().clone();
+        load.excitation_id = runmat_analysis_core::ExcitationId("whole_body".into());
+        load.quantity = runmat_analysis_core::PhysicalQuantityKind::BodyForceDensity;
+        load.target = crate::excitation::RealizedExcitationTarget::WholeModel;
+        load.kind = RealizedExcitationKind::BodyForce(crate::excitation::ComplexVector3::real([
+            6.0, 0.0, 0.0,
+        ]));
+        load.policy.distribution = runmat_analysis_core::ExcitationDistribution::IntensityPerVolume;
+        let solid_volume = crate::topology::AnalysisProjection::derive(&mesh)
+            .unwrap()
+            .elements[0]
+            .signed_volume_m3;
+
+        let summary = assemble_structural_system(
+            &model,
+            &RealizedExcitations::new(vec![load]),
+            Some(mesh),
+            StructuralFormulationRequirement::PhysicalDiscretization,
+        )
+        .expect("whole-model density must project into both mixed formulation domains");
+        let resultant_x = (0..summary.structural_node_count)
+            .map(|node| {
+                summary.operator.load()[summary
+                    .structural_dof_layout
+                    .index(node, StructuralDofKind::Ux)
+                    .unwrap()]
+            })
+            .sum::<f64>();
+        assert_relative(resultant_x, 6.0 * (solid_volume + 1.0e-4), 1.0e-12);
+        assert_eq!(summary.spatial_projection_evidence.len(), 2);
+        assert!(summary
+            .spatial_projection_evidence
+            .iter()
+            .all(|evidence| evidence.excitation_id == "whole_body" && evidence.accepted));
     }
 
     #[test]
@@ -3223,12 +3333,14 @@ mod tests {
             "strict solver mesh assembly should reject inverted Tetrahedron4 stiffness",
         );
 
-        assert!(matches!(
-            err,
-            LinearAssemblyError::SolverMeshRegionMapping(
-                SolverMeshRegionMappingError::InvalidAnalysisProjection(_)
-            )
-        ));
+        assert!(
+            matches!(
+                &err,
+                LinearAssemblyError::Structural(StructuralAssemblyError::InvalidLoadPlan(message))
+                    if message.contains("tip_load") && message.contains("projection")
+            ),
+            "{err:?}"
+        );
     }
 
     #[test]
@@ -3277,6 +3389,7 @@ mod tests {
         assert!(summary.operator.constrained_dofs()[1]);
         assert!(summary.operator.constrained_dofs()[2]);
         assert_eq!(summary.operator.load()[10], -4.0);
+        assert!(summary.structural_load_plan_identity.is_some());
         assert!(summary.operator.nullspace_evidence().is_some());
     }
 
@@ -3340,9 +3453,8 @@ mod tests {
 
         assert!(matches!(
             err,
-            LinearAssemblyError::SolverMeshRegionMapping(
-                SolverMeshRegionMappingError::UnmappedLoadRegion { .. }
-            )
+            LinearAssemblyError::Structural(StructuralAssemblyError::InvalidLoadPlan(ref message))
+                if message.contains("load_tip") && message.contains("missing_tip")
         ));
         let message = err.to_string();
         assert!(message.contains("load_id=load_tip"));
@@ -3851,6 +3963,7 @@ mod tests {
         assert_eq!(summary.structural_beam_element_count, 1);
         assert_eq!(summary.structural_shell_element_count, 1);
         assert_eq!(summary.structural_formulations.len(), 2);
+        assert!(summary.structural_load_plan_identity.is_some());
         assert!(summary.operator.nullspace_evidence().is_some());
         summary.operator.prepare_linear().unwrap();
     }
@@ -3960,41 +4073,204 @@ mod tests {
     }
 
     #[test]
-    fn explicit_connectivity_rejects_unimplemented_sources_without_fallback() {
-        let cases = [
+    fn explicit_shell_pressure_and_traction_integrate_physical_area() {
+        for (kind, expected) in [
+            (FixtureExcitationKind::Pressure(12.0), [0.0, 0.0, 6.0]),
             (
-                FixtureExcitationKind::Pressure(12.0),
-                StructuralLoadKind::Pressure,
+                FixtureExcitationKind::Traction([2.0, 4.0, 6.0]),
+                [1.0, 2.0, 3.0],
             ),
-            (
-                FixtureExcitationKind::BodyForce([0.0, -9.81, 0.0]),
-                StructuralLoadKind::BodyForce,
-            ),
-        ];
-        for (kind, expected_kind) in cases {
-            let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
+        ] {
+            let mut model = fixture_model(FixtureId::StructuralShellPlateMomentReference);
+            model.constraints.clear();
             replace_fixture_excitations(
                 &mut model,
                 vec![FixtureExcitation {
-                    id: format!("unsupported_{expected_kind}"),
-                    region_id: "tip".to_string(),
+                    id: "shell_surface_load".into(),
+                    region_id: "shell_panel".into(),
                     kind,
                 }],
             );
-            let error = assemble_structural_system(
+            let summary = assemble_structural_system(
                 &model,
                 &static_excitations(&model),
                 None,
                 StructuralFormulationRequirement::PhysicalDiscretization,
             )
-            .expect_err("unsupported explicit sources must not silently disappear");
-            assert!(matches!(
-                error,
-                LinearAssemblyError::Structural(
-                    StructuralAssemblyError::UnsupportedStructuralLoad { load_kind, .. }
-                ) if load_kind == expected_kind
-            ));
+            .expect("explicit shell surface intensity must integrate over authored area");
+            let resultant = [
+                StructuralDofKind::Ux,
+                StructuralDofKind::Uy,
+                StructuralDofKind::Uz,
+            ]
+            .map(|kind| {
+                (0..3)
+                    .map(|node| {
+                        summary.operator.load()
+                            [summary.structural_dof_layout.index(node, kind).unwrap()]
+                    })
+                    .sum::<f64>()
+            });
+            for (actual, expected) in resultant.into_iter().zip(expected) {
+                assert_close(actual, expected);
+            }
+            assert_eq!(
+                summary.spatial_projection_evidence[0].integration_rule,
+                crate::excitation::SpatialIntegrationRule::ExplicitConsistentElement
+            );
+            assert!(summary.spatial_projection_evidence[0].accepted);
         }
+    }
+
+    #[test]
+    fn explicit_body_force_density_integrates_beam_and_shell_volume() {
+        let cases = [
+            (
+                FixtureId::StructuralBeamCantileverEndMomentReference,
+                "beam_span",
+                [100.0, 0.0, 0.0],
+                [0.02, 0.0, 0.0],
+            ),
+            (
+                FixtureId::StructuralShellPlateMomentReference,
+                "shell_panel",
+                [0.0, 0.0, -1_000.0],
+                [0.0, 0.0, -1.0],
+            ),
+        ];
+        for (fixture, region_id, density, expected) in cases {
+            let mut model = fixture_model(fixture);
+            model.constraints.clear();
+            replace_fixture_excitations(
+                &mut model,
+                vec![FixtureExcitation {
+                    id: "body_density".into(),
+                    region_id: region_id.into(),
+                    kind: FixtureExcitationKind::BodyForce(density),
+                }],
+            );
+            let summary = assemble_structural_system(
+                &model,
+                &static_excitations(&model),
+                None,
+                StructuralFormulationRequirement::PhysicalDiscretization,
+            )
+            .expect("explicit body-force density must integrate formulation volume");
+            let resultant = [
+                StructuralDofKind::Ux,
+                StructuralDofKind::Uy,
+                StructuralDofKind::Uz,
+            ]
+            .map(|kind| {
+                (0..summary.structural_node_count)
+                    .map(|node| {
+                        summary.operator.load()
+                            [summary.structural_dof_layout.index(node, kind).unwrap()]
+                    })
+                    .sum::<f64>()
+            });
+            for (actual, expected) in resultant.into_iter().zip(expected) {
+                assert_close(actual, expected);
+            }
+            assert!(summary.spatial_projection_evidence[0].accepted);
+        }
+    }
+
+    #[test]
+    fn structural_load_frames_resolve_against_boundary_and_authored_axes() {
+        let mut shell = fixture_model(FixtureId::StructuralShellPlateMomentReference);
+        shell.constraints.clear();
+        replace_fixture_excitations(
+            &mut shell,
+            vec![FixtureExcitation {
+                id: "normal_traction".into(),
+                region_id: "shell_panel".into(),
+                kind: FixtureExcitationKind::Traction([2.0, 0.0, 0.0]),
+            }],
+        );
+        let shell_loads = RealizedExcitations::new(
+            static_excitations(&shell)
+                .iter()
+                .cloned()
+                .map(|mut load| {
+                    load.policy.frame =
+                        runmat_analysis_core::CoordinateFrame::BoundaryNormalTangent;
+                    load
+                })
+                .collect(),
+        );
+        let shell_summary = assemble_structural_system(
+            &shell,
+            &shell_loads,
+            None,
+            StructuralFormulationRequirement::PhysicalDiscretization,
+        )
+        .expect("boundary-normal shell traction must resolve through oriented shell geometry");
+        let shell_resultant = [
+            StructuralDofKind::Ux,
+            StructuralDofKind::Uy,
+            StructuralDofKind::Uz,
+        ]
+        .map(|kind| {
+            (0..3)
+                .map(|node| {
+                    shell_summary.operator.load()[shell_summary
+                        .structural_dof_layout
+                        .index(node, kind)
+                        .unwrap()]
+                })
+                .sum::<f64>()
+        });
+        assert_eq!(shell_resultant, [0.0, 0.0, 1.0]);
+
+        let mut solid = fixture_model(FixtureId::CantileverLinearStatic);
+        solid.constraints.clear();
+        let solid_loads = RealizedExcitations::new(
+            static_excitations(&solid)
+                .iter()
+                .cloned()
+                .map(|mut load| {
+                    load.policy.frame = runmat_analysis_core::CoordinateFrame::Cartesian(
+                        runmat_analysis_core::CartesianFrame {
+                            frame_id: "rotated".into(),
+                            origin: runmat_analysis_core::Position::new([0.0; 3]),
+                            x_axis: [0.0, 1.0, 0.0],
+                            y_axis: [-1.0, 0.0, 0.0],
+                        },
+                    );
+                    if let RealizedExcitationKind::Force(value) = &mut load.kind {
+                        value.real = [2.0, 0.0, 0.0];
+                    }
+                    load
+                })
+                .collect(),
+        );
+        let mut mesh = tetrahedron4_mesh();
+        set_boundary_regions(&mut mesh, 1, &["tip"]);
+        reseal(&mut mesh);
+        let solid_summary = assemble_structural_system(
+            &solid,
+            &solid_loads,
+            Some(mesh),
+            StructuralFormulationRequirement::PhysicalDiscretization,
+        )
+        .expect("Cartesian load components must resolve into global solver rows");
+        let solid_resultant = [
+            StructuralDofKind::Ux,
+            StructuralDofKind::Uy,
+            StructuralDofKind::Uz,
+        ]
+        .map(|kind| {
+            (0..solid_summary.structural_node_count)
+                .map(|node| {
+                    solid_summary.operator.load()[solid_summary
+                        .structural_dof_layout
+                        .index(node, kind)
+                        .unwrap()]
+                })
+                .sum::<f64>()
+        });
+        assert_eq!(solid_resultant, [0.0, 2.0, 0.0]);
     }
 
     #[test]
@@ -4077,6 +4353,60 @@ mod tests {
     }
 
     #[test]
+    fn structural_load_plan_rejects_unimplemented_policy_semantics_by_excitation() {
+        let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+        model.constraints.clear();
+        let baseline = static_excitations(&model);
+        let cases = [
+            (
+                "kinematics",
+                runmat_analysis_core::CoordinateFrame::Global,
+                runmat_analysis_core::ExcitationDistribution::PreserveResultant,
+                runmat_analysis_core::ExcitationKinematics::Follower,
+            ),
+            (
+                "distribution",
+                runmat_analysis_core::CoordinateFrame::Global,
+                runmat_analysis_core::ExcitationDistribution::TopologyField,
+                runmat_analysis_core::ExcitationKinematics::FixedFrame,
+            ),
+            (
+                "frame",
+                runmat_analysis_core::CoordinateFrame::Material,
+                runmat_analysis_core::ExcitationDistribution::PreserveResultant,
+                runmat_analysis_core::ExcitationKinematics::FixedFrame,
+            ),
+        ];
+        for (expected_policy, frame, distribution, kinematics) in cases {
+            let entries = baseline
+                .iter()
+                .cloned()
+                .map(|mut load| {
+                    load.policy.frame = frame.clone();
+                    load.policy.distribution = distribution;
+                    load.policy.kinematics = kinematics;
+                    load
+                })
+                .collect();
+            let error = assemble_structural_system(
+                &model,
+                &RealizedExcitations::new(entries),
+                Some(tetrahedron4_mesh()),
+                StructuralFormulationRequirement::PhysicalDiscretization,
+            )
+            .expect_err("unsupported load semantics must fail before solver assembly");
+            assert!(
+                matches!(
+                    &error,
+                    LinearAssemblyError::Structural(StructuralAssemblyError::InvalidLoadPlan(message))
+                        if message.contains("tip_load") && message.contains(expected_policy)
+                ),
+                "{error:?}"
+            );
+        }
+    }
+
+    #[test]
     fn nonstructural_scaffolding_ignores_explicit_structural_connectivity() {
         let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
         replace_fixture_with_electric_current(&mut model, "coil_current", "beam_span", 4.0);
@@ -4133,10 +4463,9 @@ mod tests {
         .expect_err("unmapped explicit source must not be dropped");
         assert!(matches!(
             error,
-            LinearAssemblyError::Structural(StructuralAssemblyError::UnmappedStructuralLoad {
-                load_kind: StructuralLoadKind::Force,
-                ..
-            })
+            LinearAssemblyError::Structural(StructuralAssemblyError::InvalidLoadPlan(message))
+                if message.contains("missing_tip")
+                    && message.contains("not_a_connectivity_region")
         ));
     }
 

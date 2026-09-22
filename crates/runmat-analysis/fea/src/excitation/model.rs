@@ -2,10 +2,11 @@ use runmat_analysis_core::{
     CoordinateFrame, ExcitationCaseId, ExcitationDistribution, ExcitationId, ExcitationKinematics,
     PhysicalQuantityKind, Position, ProjectionRequirement, RegionTarget, SignalId,
 };
+use serde::{Deserialize, Serialize};
 
 use super::ProjectionSample;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub(crate) struct ComplexScalar {
     pub real: f64,
     pub imaginary: f64,
@@ -27,7 +28,7 @@ impl ComplexScalar {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub(crate) struct ComplexVector3 {
     pub real: [f64; 3],
     pub imaginary: [f64; 3],
@@ -55,7 +56,8 @@ pub(crate) enum ComplexComponent {
     Imaginary,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind", content = "value")]
 pub(crate) enum RealizedExcitationTarget {
     Region(RegionTarget),
     ReferencePoint {
@@ -79,7 +81,8 @@ impl RealizedExcitationTarget {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case", tag = "kind", content = "value")]
 pub(crate) enum RealizedExcitationKind {
     Force(ComplexVector3),
     Moment(ComplexVector3),

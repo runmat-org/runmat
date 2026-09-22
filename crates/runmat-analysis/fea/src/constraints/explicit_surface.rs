@@ -1,16 +1,16 @@
-//! Geometry owned by explicit structural shell regions.
+//! Constraint admissibility over shared explicit-shell geometry.
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use runmat_analysis_core::{StructuralElementKind, StructuralModel};
+use runmat_analysis_core::StructuralModel;
 use runmat_meshing_core::StableDigest;
 
-use crate::physics::structural::topology::node_space::CanonicalStructuralNodeSpace;
-
-use super::{
-    vector::{add, cross, magnitude, scale, subtract},
-    ConstraintCouplingWeight, ConstraintPlanError, ResolvedConstraintTarget,
+use crate::physics::structural::topology::{
+    explicit_surface::{explicit_shell_surface_geometry, ExplicitShellSurfaceError},
+    node_space::CanonicalStructuralNodeSpace,
 };
+
+use super::{ConstraintCouplingWeight, ConstraintPlanError, ResolvedConstraintTarget};
 
 pub(super) struct ExplicitSurfaceGeometry {
     pub coordinates: BTreeMap<StableDigest, [f64; 3]>,
@@ -24,106 +24,63 @@ pub(super) fn resolve_explicit_surface(
     target: &ResolvedConstraintTarget,
     constraint_id: &str,
 ) -> Result<ExplicitSurfaceGeometry, ConstraintPlanError> {
-    let authored_nodes = structural
-        .nodes
-        .iter()
-        .enumerate()
-        .map(|(index, node)| (node.node_id, index))
-        .collect::<BTreeMap<_, _>>();
-    let coordinates = topology
-        .nodes
-        .iter()
-        .map(|node| (node.identity, node.coordinates_m))
-        .collect::<BTreeMap<_, _>>();
-    let mut measures = BTreeMap::<StableDigest, f64>::new();
-    let mut normal_sums = BTreeMap::<StableDigest, [f64; 3]>::new();
-    let mut selected = BTreeSet::new();
-    let mut shell_count = 0_usize;
-
-    for element in structural
-        .elements
-        .iter()
-        .filter(|element| element.region_id == target.authored.region_id)
-    {
-        let StructuralElementKind::Shell(shell) = &element.kind else {
-            return Err(ConstraintPlanError::UnsupportedTarget {
-                constraint_id: constraint_id.into(),
-                reason: "normal and reference-point surface constraints require an explicit shell region",
-            });
-        };
-        shell_count += 1;
-        let identities = shell.node_ids.map(|node_id| {
-            authored_nodes
-                .get(&node_id)
-                .and_then(|index| topology.explicit_node_indices.get(*index))
-                .and_then(|index| topology.nodes.get(*index))
-                .map(|node| node.identity)
-                .ok_or_else(|| {
-                    ConstraintPlanError::Invalid(format!(
-                        "constraint `{constraint_id}` shell `{}` references absent node {node_id}",
-                        element.element_id
-                    ))
-                })
-        });
-        let [a, b, c] = identities;
-        let [a, b, c] = [a?, b?, c?];
-        let points = [coordinates[&a], coordinates[&b], coordinates[&c]];
-        let area_vector = cross(
-            subtract(points[1], points[0]),
-            subtract(points[2], points[0]),
-        );
-        let double_area = magnitude(area_vector);
-        if !double_area.is_finite() || double_area <= 1.0e-18 {
-            return Err(ConstraintPlanError::Invalid(format!(
-                "constraint `{constraint_id}` shell `{}` has zero area",
-                element.element_id
-            )));
-        }
-        let nodal_measure = double_area / 6.0;
-        for identity in [a, b, c] {
-            selected.insert(identity);
-            *measures.entry(identity).or_insert(0.0) += nodal_measure;
-            normal_sums
-                .entry(identity)
-                .and_modify(|normal| *normal = add(*normal, area_vector))
-                .or_insert(area_vector);
-        }
-    }
-
-    if shell_count == 0 || selected != target.matched_node_identities.iter().copied().collect() {
+    let surface = explicit_shell_surface_geometry(structural, topology, &target.authored.region_id)
+        .map_err(|error| map_surface_error(error, constraint_id))?;
+    let selected = surface
+        .coordinates_m
+        .keys()
+        .copied()
+        .collect::<BTreeSet<_>>();
+    if selected != target.matched_node_identities.iter().copied().collect() {
         return Err(ConstraintPlanError::UnsupportedTarget {
             constraint_id: constraint_id.into(),
             reason: "constraint target is not one complete explicit shell region",
         });
     }
-    let total_measure = measures.values().sum::<f64>();
+    let total_measure = surface.area_m2;
     if !total_measure.is_finite() || total_measure <= 0.0 {
         return Err(ConstraintPlanError::NormalUnavailable {
             constraint_id: constraint_id.into(),
         });
     }
-    let weights = measures
+    let weights = surface
+        .nodal_measures_m2
         .into_iter()
         .map(|(node_identity, measure)| ConstraintCouplingWeight {
             node_identity,
             weight: measure / total_measure,
         })
         .collect();
-    let normals = normal_sums
-        .into_iter()
-        .map(|(identity, normal)| {
-            let length = magnitude(normal);
-            if !length.is_finite() || length <= 1.0e-12 {
-                return Err(ConstraintPlanError::NormalUnavailable {
-                    constraint_id: constraint_id.into(),
-                });
-            }
-            Ok((identity, scale(normal, length.recip())))
-        })
-        .collect::<Result<_, _>>()?;
     Ok(ExplicitSurfaceGeometry {
-        coordinates,
+        coordinates: surface.coordinates_m,
         weights,
-        normals,
+        normals: surface.oriented_node_normals,
     })
+}
+
+fn map_surface_error(error: ExplicitShellSurfaceError, constraint_id: &str) -> ConstraintPlanError {
+    match error {
+        ExplicitShellSurfaceError::NonShellElement { .. }
+        | ExplicitShellSurfaceError::EmptyRegion { .. } => ConstraintPlanError::UnsupportedTarget {
+            constraint_id: constraint_id.into(),
+            reason:
+                "normal and reference-point surface constraints require an explicit shell region",
+        },
+        ExplicitShellSurfaceError::MissingNode {
+            element_id,
+            node_id,
+        } => ConstraintPlanError::Invalid(format!(
+            "constraint `{constraint_id}` shell `{element_id}` references absent node {node_id}"
+        )),
+        ExplicitShellSurfaceError::DegenerateTriangle { element_id } => {
+            ConstraintPlanError::Invalid(format!(
+                "constraint `{constraint_id}` shell `{element_id}` has zero area"
+            ))
+        }
+        ExplicitShellSurfaceError::UndefinedNodeNormal { .. } => {
+            ConstraintPlanError::NormalUnavailable {
+                constraint_id: constraint_id.into(),
+            }
+        }
+    }
 }
