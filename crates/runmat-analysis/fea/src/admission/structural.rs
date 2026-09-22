@@ -82,7 +82,9 @@ fn structural_component(
         ),
         StructuralOperatorImplementation::Tet10LinearElasticity => (
             vec![TopologyImplementation::CanonicalSolverMeshTet10],
-            RecoveryImplementation::Unavailable,
+            RecoveryImplementation::Structural(
+                StructuralRecoveryImplementation::Tet10VolumeAverageStrain,
+            ),
         ),
         StructuralOperatorImplementation::EulerBernoulliBeam3d => (
             vec![TopologyImplementation::ExplicitStructuralConnectivityBeam],

@@ -280,7 +280,7 @@ fn thermomechanical_realizations(procedure: AnalysisProcedure) -> Vec<ExactFormu
         ),
         (
             StructuralOperatorImplementation::Tet10LinearElasticity,
-            None,
+            Some(StructuralRecoveryImplementation::Tet10VolumeAverageStrain),
         ),
         (
             StructuralOperatorImplementation::EulerBernoulliBeam3d,

@@ -1593,7 +1593,16 @@ fn single_tetrahedron_solver_mesh() -> SolverMeshArtifact {
 pub(crate) fn single_tetrahedron_solver_mesh_for_model(
     model: &runmat_analysis_core::AnalysisModel,
 ) -> SolverMeshArtifact {
-    let mut mesh = single_tetrahedron_solver_mesh();
+    single_tetrahedron_solver_mesh_with_order_for_model(model, ElementOrder::Tet4)
+}
+
+fn single_tetrahedron_solver_mesh_with_order_for_model(
+    model: &runmat_analysis_core::AnalysisModel,
+    order: ElementOrder,
+) -> SolverMeshArtifact {
+    let mut mesh = crate::assembly::solver_solid::tests::artifact(order);
+    add_face_region(&mut mesh, 0, "root");
+    add_face_region(&mut mesh, 1, "tip");
     if let Some(assignment) = model.material_assignments.first() {
         let region = PersistentEntityId {
             kind: PersistentEntityKind::Region,
@@ -1661,6 +1670,41 @@ pub(crate) fn single_tetrahedron_solver_mesh_for_model(
     }
     reseal_solver_mesh(&mut mesh);
     mesh
+}
+
+#[test]
+fn tet10_linear_static_admits_its_assembled_recovery_contract() {
+    let model = fixture_model(FixtureId::CantileverLinearStatic);
+    let result = crate::run_linear_static_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        LinearStaticSolveOptions {
+            solver_mesh: Some(single_tetrahedron_solver_mesh_with_order_for_model(
+                &model,
+                ElementOrder::Tet10,
+            )),
+            require_solver_mesh_for_solid: true,
+            ..experimental_linear_static_options()
+        },
+    )
+    .expect("a physical Tet10 solve must admit the recovery implementation it assembled");
+
+    assert!(result.identity.realization().components.iter().any(|component| {
+        component.spatial_operator
+            == runmat_analysis_core::SpatialOperatorImplementation::Structural(
+                runmat_analysis_core::StructuralOperatorImplementation::Tet10LinearElasticity,
+            )
+            && component.recovery
+                == runmat_analysis_core::RecoveryImplementation::Structural(
+                    runmat_analysis_core::StructuralRecoveryImplementation::Tet10VolumeAverageStrain,
+                )
+    }));
+    assert!(result
+        .field(FEA_FIELD_STRUCTURAL_STRAIN)
+        .is_some_and(|field| field.shape == vec![1, 6]));
+    assert!(result
+        .field(FEA_FIELD_STRUCTURAL_STRESS)
+        .is_some_and(|field| field.shape == vec![1, 6]));
 }
 
 #[test]

@@ -602,17 +602,11 @@ mod tests {
 
         let mut missing_balance = serde_json::to_value(&run).unwrap();
         missing_balance["structural_static_balance"] = serde_json::Value::Null;
-        assert!(matches!(
-            serde_json::from_value::<FeaRunResult>(missing_balance),
-            Err(_)
-        ));
+        assert!(serde_json::from_value::<FeaRunResult>(missing_balance).is_err());
 
         let mut missing_constraints = serde_json::to_value(&run).unwrap();
         missing_constraints["structural_constraint_result"] = serde_json::Value::Null;
-        assert!(matches!(
-            serde_json::from_value::<FeaRunResult>(missing_constraints),
-            Err(_)
-        ));
+        assert!(serde_json::from_value::<FeaRunResult>(missing_constraints).is_err());
 
         let mut unexpected_static_evidence = run.clone();
         unexpected_static_evidence.identity =

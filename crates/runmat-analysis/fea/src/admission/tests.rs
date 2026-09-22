@@ -121,7 +121,7 @@ fn structural_assembly_realizations() -> Vec<StructuralFormulationRealization> {
         ),
         StructuralFormulationRealization::new(
             StructuralOperatorImplementation::Tet10LinearElasticity,
-            None,
+            Some(StructuralRecoveryImplementation::Tet10VolumeAverageStrain),
         ),
         StructuralFormulationRealization::new(
             StructuralOperatorImplementation::EulerBernoulliBeam3d,
@@ -274,7 +274,9 @@ fn structural_exact_identity_distinguishes_operator_topology_and_recovery() {
         (
             StructuralOperatorImplementation::Tet10LinearElasticity,
             TopologyImplementation::CanonicalSolverMeshTet10,
-            RecoveryImplementation::Unavailable,
+            RecoveryImplementation::Structural(
+                StructuralRecoveryImplementation::Tet10VolumeAverageStrain,
+            ),
         ),
         (
             StructuralOperatorImplementation::EulerBernoulliBeam3d,
