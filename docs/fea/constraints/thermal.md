@@ -291,3 +291,64 @@ Request prescribed-temperature reaction heat flow, mean/minimum/maximum temperat
 tie or periodic residual, pair coverage, and global energy balance. For affine jumps, also request
 the volume-averaged gradient and heat flux. A temperature contour cannot reveal whether a fixed wall
 supplied an unrealistic amount of heat.
+
+## How do I choose between fixed temperature, convection, heat flux, and insulation?
+
+Use `thermal.temperature` only for a boundary held at known temperature by a sufficiently strong
+reservoir or controller. Use `thermal.convection` when heat flow depends on unknown wall temperature
+and known bulk-fluid temperature. Use `thermal.heat_flux` for known power per area. Insulation is the
+natural zero-flux condition and normally needs no explicit declaration unless naming it improves
+review or the procedure requires complete boundary classification.
+
+These are different mathematical conditions. Replacing convection with a fixed ambient temperature
+removes the film resistance and usually underpredicts wall temperature; replacing a known heat flux
+with fixed temperature changes the energy input.
+
+## How do I model a cold plate, heat sink, or temperature-controlled mounting surface?
+
+Choose the boundary at the level represented by the geometry. If the cold plate is omitted and its
+interface temperature is measured, prescribe `thermal.temperature`. If coolant-to-wall resistance
+matters, model the wall and use convection or conjugate heat transfer. If a thermal interface
+material separates two solids, use a conductance/resistance interface rather than one shared
+temperature constraint.
+
+Report reaction heat flow at controlled-temperature boundaries. That reaction is the cooling power
+the ideal reservoir must supply; compare it with the real cold plate or controller capacity.
+
+## How do I represent a measured boundary-temperature history?
+
+Attach a temperature signal to `thermal.temperature` and state interpolation and extrapolation
+explicitly. Sampling cadence must resolve the fastest thermal input relevant to the model.
+
+```fea
+signal measured_wall : temperature over time {
+    samples = [
+        { at = 0 s, value = 293.15 K },
+        { at = 60 s, value = 323.15 K },
+        { at = 300 s, value = 318.15 K },
+    ]
+    interpolation = linear
+    extrapolation = reject
+}
+
+constraint instrumented_wall {
+    thermal.temperature {
+        target = geometry.test_article.region.instrumented_wall
+        value = signal.measured_wall
+    }
+}
+```
+
+Do not extend a short measurement implicitly. Retain source file identity, units, timestamps,
+sensor-to-boundary interpretation, and the boundary reaction heat flow.
+
+## How do I avoid an overconstrained thermal assembly?
+
+Each connected conducting component needs enough boundary physics to establish temperature, but
+overlapping fixed temperatures, ties, and finite-conductance interfaces can assign two owners to the
+same thermal DOFs. Use exactly one relation across each physical interface. A tie represents zero
+temperature jump; conductance represents a finite jump; two independent temperatures represent two
+reservoirs, not contact.
+
+Inspect connected components after contact/interface resolution, then review prescribed-DOF overlap,
+pair coverage, reaction heat flow, and the global energy balance.

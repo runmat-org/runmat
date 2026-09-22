@@ -293,6 +293,62 @@ reference/gauge ownership, magnetic/electric energy, and dissipated power. For c
 compare transferred total heat, force, and moment. Current-density contours can change with edge
 resolution; the terminal resultant and global conservation law must remain within tolerance.
 
+## How do I excite a capacitor or electrostatic actuator?
+
+Name both electrodes. Prescribe a potential difference by grounding one electrode with
+`electrical.potential_reference` and driving the other with `terminal_voltage` or
+`electrical.potential`. Leave the dielectric as a material region; do not apply voltage to it.
+
+```fea
+constraint grounded_plate {
+    electrical.potential_reference {
+        target = geometry.capacitor.region.lower_electrode
+    }
+}
+
+load driven_plate {
+    terminal_voltage on geometry.capacitor.region.upper_electrode = 250 V
+}
+```
+
+Check electrode charge balance, electric energy, field concentration at edges, and force/traction
+transfer if the field drives a structure. Mesh refinement near sharp electrode edges will increase
+the idealized peak field; use rounded geometry when breakdown or local stress matters.
+
+## How do I excite a resistive conductor and compute Joule loss?
+
+Drive the conductor with either a terminal voltage difference or a total current plus a potential
+reference. The conduction law then determines $\mathbf J$ and volumetric loss
+$q'''=\mathbf J\cdot\mathbf E$. Do not prescribe voltage and current simultaneously unless an
+external circuit equation makes them compatible.
+
+For electrothermal work, request terminal voltage/current, electrical power
+$P=\int_V\mathbf J\cdot\mathbf E\,dV$, transferred thermal power, and the temperature-dependent
+material state. The electrical and thermal meshes may differ, but total transferred power must not.
+
+## How do I excite a coil in a harmonic magnetic analysis?
+
+Use total current when the winding representation owns the current distribution, or current density
+when the distribution is itself known. State whether the value is peak, RMS, or complex phasor and
+use one convention throughout power and force recovery. For $N$ identical turns represented by a
+reduced winding, the magnetomotive force is $NI$; do not enter $NI$ as amperes unless the declared
+winding contract explicitly requests ampere-turns.
+
+Inspect current conservation, flux linkage, magnetic energy, loss, and phase. Skin and proximity
+effects require a formulation and mesh that resolve conductor fields; a uniform stranded-coil
+source cannot also claim resolved eddy-current loss.
+
+## How do I model several electrical terminals or conductor branches?
+
+Give every driven/return terminal a distinct persistent region. Apply signed total currents whose
+algebraic sum closes, or prescribe potentials and allow the conductivity network to determine the
+split. Floating conductor islands need `electrical.floating_conductor`, not an arbitrary zero
+voltage.
+
+After solve, report current for every terminal and every disconnected conductor component. A field
+plot can look plausible while a missing return or duplicate terminal injects nonphysical net
+current.
+
 Further reading: [electromagnetic constraints](../constraints/electromagnetic),
 [electromagnetic studies](../physics/electromagnetic), and
 [electrothermal analysis](../physics/electrothermal).

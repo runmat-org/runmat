@@ -219,6 +219,45 @@ and dashpot dissipation by connector identity. Also request support reactions an
 balance. A displacement contour alone cannot show whether a mount used the intended coefficient or
 whether several mounts accidentally acted in parallel on the same projected entities.
 
+## How do I model an equipment mount with stiffness and damping?
+
+Use one translational spring and one translational dashpot per physical mount direction. Their forces
+act in parallel: $F=k\Delta u+c\Delta\dot u$. Give each mount a separate region or reference point so
+its load path and reaction remain identifiable. A single broad foundation is a different model.
+
+Choose coefficients from test data or a stated reduction. For a supported mass $m$ and target
+undamped frequency $f_n$, $k=(2\pi f_n)^2m$; for damping ratio $\zeta$,
+$c=2\zeta\sqrt{km}$. Multi-axis coupling or rotational stiffness needs a typed matrix/bushing
+contract and must not be approximated by unlabeled scalar springs.
+
+## How do I model several isolators under one rigid machine?
+
+Couple the machine attachment points only if the machine is intended to behave rigidly, then declare
+each isolator separately at its actual location. Off-axis mount forces create moments and rocking
+modes, so preserving only total vertical stiffness is insufficient. Retain mount coordinates,
+direction frames, preload assumptions, and force by mount.
+
+Compare rigid-body frequencies and mode shapes with a hand or reduced-order model. An accidental
+duplicate selector can put two connectors in parallel and shift every mode.
+
+## How do I decide between a spring, elastic foundation, tie, and contact?
+
+Use a spring for a discrete compliant path, an elastic foundation for distributed traction
+proportional to local displacement, a tie for zero relative motion, and contact for unilateral
+opening/sliding. These are not interchangeable ways to stabilize a matrix. Select the representation
+from the physical load path and expected relative motion.
+
+For sensitivity work, vary the uncertain physical coefficient explicitly and compare reaction,
+strain energy, modal frequency, and local stress away from idealized attachment singularities.
+
+## How do connector coefficients scale in a symmetry model?
+
+A discrete physical mount included in the sector retains its full coefficient. A smeared ring or
+distributed support represented by a sector uses the coefficient associated with that sector's
+physical share. Never divide stiffness merely because the mesh contains fewer nodes. State whether
+the input is per mount, per unit area/length, or total assembly stiffness, then verify total stored
+energy under a known rigid displacement.
+
 Use springs for elastic compliance, dashpots for rate-dependent force, and a foundation for a
 distributed support law. Use [structural constraints](./structural) for kinematic restrictions and
 [interfaces](./interfaces) for contact or multiphysics transfer.

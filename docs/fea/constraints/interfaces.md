@@ -217,6 +217,48 @@ integrated energy conservation. For FSI, inspect displacement/velocity transfer,
 and coupling residual by iteration. Report these against the named interface, not only as one global
 solver norm.
 
+## How do I model bolted or clamped contact between parts?
+
+Contact defines possible separation and slip; it does not create clamp load. Supply bolt preload or
+resolved fastener loading through a supported structural representation, then use frictionless or
+Coulomb contact on the mating surfaces. If preload is outside the current closed load set, do not
+substitute a tuned friction coefficient or interference without documenting the approximation.
+
+Check normal contact pressure, open/stick/slip area, bolt or clamp resultant, friction work, and
+reaction balance through the preload and service steps. Mesh refinement should preserve total
+contact force while resolving pressure gradients.
+
+## How do I model a bonded joint, adhesive layer, or weld?
+
+Use `structural.tie` only when relative motion is negligible and failure is out of scope. Model a
+resolved adhesive solid when thickness and constitutive response matter. A cohesive interface is
+required for traction-separation and damage; the current tie/contact pair must not be relabeled as
+cohesive behavior.
+
+For a tie, retain pair coverage, transfer residual, and interface resultants. For a resolved layer,
+retain thickness, material axes, mesh through thickness, peel/shear stress, and energy convergence.
+
+## How do I model thermal contact in a bolted assembly?
+
+Use conductance when the interface law is $q_n=h_c\Delta T$ or resistance when
+$q_n=\Delta T/R''$. Choose the coefficient from surface finish, pressure, interstitial material, and
+temperature data. If conductance must evolve with solved contact pressure, use an admitted coupled
+law; one constant value is an explicit approximation.
+
+Report interface temperature jump, integrated heat flow on both sides, unmatched area, and global
+energy balance. A shared temperature contour can hide an accidentally perfect tie.
+
+## How do I verify fluid–structure and conjugate-heat-transfer mapping?
+
+For FSI, compare integrated fluid traction with equal-and-opposite structural load, plus mapped wall
+velocity/displacement and coupling residual. For CHT, compare integrated heat flux on both sides,
+temperature continuity or the declared jump, and energy storage. Perform these checks by named
+interface and iteration/time step, not only globally.
+
+Repeat the transfer check after independent mesh refinement on each side. Conservation must survive
+nonmatching discretizations; nearest-node agreement is not a substitute for resultant-preserving
+projection.
+
 Primary and secondary are part of the contract. The compiler checks topology roles; realization
 checks coverage and projection; execution evidence records the resolved interface. Never rely on
 geometric proximity to create contact or transfer automatically.

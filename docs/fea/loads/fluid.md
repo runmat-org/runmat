@@ -287,6 +287,63 @@ steady closed control volume, the algebraic sum must close within tolerance. For
 compressible work, include storage. Compare each boundary's resolved area, normal, and resultant
 after remeshing; a plausible velocity field does not compensate for a nonclosing mass balance.
 
+## How do I choose a well-posed inlet and outlet combination?
+
+For a single-path incompressible domain, a common setup is one known inlet velocity or mass flow,
+wall conditions on every impermeable face, one outlet pressure, and one pressure datum if the
+formulation requires it. Do not prescribe both complete velocity and pressure on the same open face.
+For several outlets, pressure conditions let the resistance determine flow split; fixed outlet flows
+instead prescribe that split.
+
+Before solving, classify every boundary face as inlet, outlet/opening, wall, symmetry, periodic, or
+coupled interface. Unclassified faces must not acquire a solver default silently. After solving,
+report signed mass flux for each named region and the pressure-reference owner.
+
+## How do I model pipe or duct flow from a known flow rate?
+
+Use `mass_flow` when mass rate is known. For a constant-density fluid, convert a specified volume
+rate with $\dot m=\rho\dot V$. If using a uniform velocity approximation, compute
+$\bar u=\dot V/A$ from the resolved inlet area and record the assumption.
+
+```fea
+load duct_flow {
+    mass_flow on geometry.duct.region.inlet = 0.36 kg/s
+}
+
+load duct_outlet {
+    fluid.outlet_pressure {
+        target = geometry.duct.region.outlet
+        value = 0 Pa
+    }
+}
+```
+
+Compare the solved pressure drop with an analytic or correlation-based estimate in its valid
+Reynolds-number and roughness range. Entrance length, bends, and developing profiles can make a
+fully developed reference inapplicable.
+
+## How do I model external aerodynamics around a vehicle or component?
+
+Use a sufficiently remote outer fluid domain, prescribe freestream velocity at the inlet/far-field
+portion, pressure/open behavior downstream, and no-slip or moving-wall behavior on the body. Side
+and top boundaries may use symmetry only when that approximation is physically intended. The
+current boundary set does not turn a small enclosure into a far field automatically.
+
+Report blockage ratio, boundary distances, drag/lift from integrated traction, wake development,
+mass balance, and sensitivity to domain extent. To transfer aerodynamic loading into structural
+FEA, use the governed fluid-to-structure state edge and preserve total force and moment.
+
+## How do I model a manifold with several inlets and outlets?
+
+Name each port separately. Apply only the quantities known from the surrounding system: prescribed
+flows at controlled branches, pressures at reservoir-connected branches, or a network/device law
+when neither is fixed. Signed flows must close across all ports, including any porous or moving
+boundary contribution.
+
+Avoid one broad `ports` region for different conditions. Separate identities make reversed flow,
+incorrect normals, and unintended flow split visible in the evidence rather than hidden in a single
+net resultant.
+
 Further reading: [fluid constraints](../constraints/fluid), [fluid studies](../physics/fluid),
 [conjugate heat transfer](../physics/conjugate-heat-transfer), and
 [fluid–structure interaction](../physics/fluid-structure-interaction).

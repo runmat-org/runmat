@@ -348,6 +348,74 @@ local refinement even when total energy closes. A stable peak temperature with a
 balance is not convergence; neither is energy closure with an unresolved local gradient at a
 material or contact interface.
 
+## How do I model a thermal soak followed by cooldown?
+
+Use an ambient-temperature signal for the chamber or fluid history and a convection boundary for
+the heat-transfer law. Do not prescribe the part temperature unless the test fixture actually
+controls the part surface to that temperature.
+
+```fea
+signal chamber_cycle : temperature over time {
+    samples = [
+        { at = 0 s, value = 293.15 K },
+        { at = 1800 s, value = 393.15 K },
+        { at = 5400 s, value = 393.15 K },
+        { at = 7200 s, value = 293.15 K },
+    ]
+    interpolation = linear
+    extrapolation = hold
+}
+
+excitation chamber_air {
+    ambient_temperature {
+        target = geometry.part.region.exposed_faces
+        signal = signal.chamber_cycle
+    }
+}
+
+```
+
+The selected transient formulation must admit `ambient_temperature` as the varying film ambient and
+must provide the corresponding heat-transfer coefficient. The direct `thermal.convection` boundary
+currently accepts a constant `ambient_temperature`; do not write a signal reference there and assume
+it was consumed. The thermal time constant depends on heat capacity, conduction, exposed area, and
+film coefficient. Check energy stored during heat-up, energy rejected during cooldown, and time-step
+convergence at the ramps.
+
+## How do I model heat from a chip, winding, battery cell, or resistor?
+
+Start from the known power definition. Use `heat_generation` on the actual dissipating volume when
+loss is volumetric, `thermal.heat_flux` for a thin resolved heater, or an electrothermal procedure
+when current distribution must determine $q'''=\mathbf J\cdot\mathbf E$. If a component dissipates
+total power $P$ uniformly in selected volume $V$, the source density is $q'''=P/V$.
+
+Do not apply $P$ as though it were $q'''$: watts and watts per cubic metre are different typed
+quantities. After projection, verify that $\int_V q'''\,dV=P$ and that the source did not spread into
+non-dissipating encapsulant, substrate, or coolant.
+
+## How do I model a prescribed temperature map from test or another solver?
+
+Use `temperature_field` only when the temperature field is an input to a consuming procedure, such
+as thermal-strain loading. A steady or transient thermal solve normally solves temperature; fixing
+the same field as a load would remove that unknown. Bind imported data to coordinates, units,
+interpolation, out-of-domain behavior, and source identity, then retain projection error and
+coverage.
+
+For thermomechanical work, map the thermal result through the typed state edge so the structural
+procedure can prove which mesh, time/frequency case, and temperature reference produced thermal
+strain. Avoid exporting anonymous nodal CSV data and reattaching it by row order.
+
+## How do I represent a heater controlled to constant power or constant temperature?
+
+Constant power is a source (`heat_generation` or `thermal.heat_flux`). Constant temperature is an
+essential constraint (`thermal.temperature`). A thermostatic controller is neither: it is a
+feedback law that switches or modulates power from measured temperature. Model that controller with
+an admitted function/coupling contract; do not alternate between power and fixed temperature to
+force the desired curve.
+
+For every control representation, report commanded power, delivered power, sensor temperature,
+switching or saturation state, and global energy balance.
+
 Further reading: [thermal constraints](../constraints/thermal),
 [heat-transfer studies](../physics/thermal), and
 [electrothermal analysis](../physics/electrothermal).

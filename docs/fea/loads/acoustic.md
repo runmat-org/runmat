@@ -312,6 +312,67 @@ Inspect reflected flux at truncations and phase at probes, not only pressure mag
 frequency refinement must resolve wavelength and boundary layers required by the formulation; a
 stable-looking SPL plot with nonclosing power balance is not sufficient evidence.
 
+## How do I choose between pressure and normal-velocity excitation?
+
+Use `acoustic_pressure` when boundary pressure is the controlled source. Use `normal_velocity` when
+the normal motion of a piston, diaphragm, or wall is known. Pressure is effort-like and normal
+velocity is flow-like; prescribing both on the same boundary generally overconstrains the acoustic
+port.
+
+For a source face $\Gamma$, time-averaged complex power is
+$\bar P=\tfrac12\operatorname{Re}\int_\Gamma p\,v_n^*\,d\Gamma$. Request both conjugate quantities
+from the solution even when only one is prescribed, then check sign and delivered power.
+
+## How do I drive a speaker diaphragm from measured motion?
+
+Convert the measured normal surface velocity into a typed velocity signal, retaining whether the
+measurement is peak, RMS, or complex amplitude. Apply it only to the radiating diaphragm region.
+
+```fea
+signal diaphragm_velocity : velocity over frequency {
+    samples = [
+        { at = 100 Hz, value = { real = 0.01 m/s, imaginary = 0 m/s } },
+        { at = 1000 Hz, value = { real = 0.004 m/s, imaginary = -0.003 m/s } },
+    ]
+    interpolation = linear
+    extrapolation = reject
+}
+
+excitation speaker_motion {
+    normal_velocity {
+        target = geometry.enclosure.region.diaphragm
+        signal = signal.diaphragm_velocity
+    }
+}
+```
+
+Confirm face-normal orientation and compare integrated volume velocity
+$Q=\int_\Gamma v_n\,d\Gamma$ with the measurement. A single uniform value is an approximation when
+the diaphragm bends; use a spatial field only through a contract that preserves its coordinates and
+phase.
+
+## How do I model a muffler, silencer, or lined duct?
+
+Drive the inlet with pressure or normal velocity, apply `acoustic.impedance` to the lined faces, and
+terminate the outlet with `acoustic.radiation` or a validated impedance. Keep rigid casing walls as
+`acoustic.rigid_wall`. Compute incident and transmitted power or a two-port quantity; pressure level
+at one point is not insertion loss.
+
+Check wavelength resolution, liner impedance convention, reflected power at the outlet, and energy
+absorbed by the liner. If mean flow materially changes propagation, use a formulation that owns that
+coupling rather than modifying sound speed by hand.
+
+## How do I model two coherent acoustic sources?
+
+Create one excitation and complex signal per independently controlled source. Their phases determine
+interference. A 180-degree phase difference is represented by the complex signal, not by reversing
+the target face normal. Include both excitations in the same case and inspect complex pressure and
+power before converting to SPL.
+
+For incoherent or partially coherent sources, deterministic phasor addition is not valid. The study
+needs cross-spectral density or an admitted random-acoustic contract; do not approximate
+incoherence by choosing arbitrary phases.
+
 Further reading: [acoustic constraints](../constraints/acoustic),
 [acoustic studies](../physics/acoustic), and
 [fluid–structure interaction](../physics/fluid-structure-interaction).

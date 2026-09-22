@@ -245,3 +245,44 @@ Retain resolved boundary areas and normals, prescribed velocity frames, wall-rel
 pressure-reference ownership by connected component, periodic mapping coverage, constraint
 residuals, and signed mass flux. For moving walls, also retain the motion signal or producing FSI
 state identity.
+
+## How do I choose CFD boundary conditions that are mathematically well posed?
+
+For each connected incompressible domain, prescribe enough velocity/flow information to drive the
+problem and exactly one independent pressure datum or outlet relation to remove constant-pressure
+freedom. Classify every remaining face as wall, symmetry, periodic, opening, or coupled interface.
+Do not prescribe all velocity components and pressure on the same boundary unless the formulation
+explicitly defines that mixed condition.
+
+Run the boundary audit before meshing: report face coverage, overlaps, unclassified faces, connected
+fluid components, and pressure-reference ownership. After solving, check signed mass conservation.
+
+## How do I model a stationary pipe or duct wall?
+
+Use `fluid.no_slip_wall` for viscous stationary walls. Use `fluid.slip_wall` only for an inviscid or
+intentional zero-normal-flow approximation. A symmetry plane also imposes symmetry on transported
+fields and gradients; it is not merely a low-friction wall.
+
+Near-wall mesh and turbulence treatment remain formulation choices. A no-slip declaration does not
+prove that wall shear or heat transfer is resolved; retain $y^+$ or the applicable near-wall metric,
+wall force, and mesh-convergence evidence.
+
+## How do I constrain a rotating or translating reference-frame model?
+
+Prescribe wall velocity in the inertial frame with `fluid.moving_wall`, or use a rotating-domain
+formulation whose frame owns Coriolis/centrifugal terms. Do not combine a rotating frame and the same
+absolute wall motion without transforming velocities explicitly. At an interface between frames,
+use the admitted sliding/mixing relation rather than a generic periodic pair.
+
+Archive frame identity, axis, origin, angular speed, relative wall velocity, and torque/power. Check
+that a wall intended to be stationary relative to the rotor has zero relative velocity.
+
+## How do I constrain an internal-flow periodic cell?
+
+Pair inlet and outlet geometry with `fluid.periodic`, declare the exact translation/rotation, and
+supply the driving pressure-gradient, body-force, or mass-flow contract separately. Periodicity only
+relates fields; it does not create pressure drop or flow.
+
+Validate pair coverage and transformed normals, then compare mass flux and transported quantities on
+both faces. The pressure decomposition (periodic fluctuation plus imposed mean gradient) must belong
+to the selected formulation and be visible in evidence.

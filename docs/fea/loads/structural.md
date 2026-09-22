@@ -374,5 +374,86 @@ changes; a pressure should retain intensity while its total follows the admitted
 invariant drifts, the projection or region selection changed and the response comparison is not a
 clean convergence study.
 
+## How do I load a pressure vessel correctly?
+
+Apply `structural.pressure` to every wetted face, with the sign checked against the outward CAD
+normal. A cut model also needs the axial resultant that the omitted end cap would have carried. For
+a closed circular vessel with internal pressure $p$ and internal radius $r_i$, that resultant is
+$F_z=p\pi r_i^2$. Apply it through a physically justified end-face traction, coupling, or modeled end
+cap; pressure on the cylindrical wall alone produces hoop loading but omits the closed-end load path.
+
+```fea
+load internal_pressure {
+    structural.pressure {
+        target = geometry.vessel.region.wetted_faces
+        value = 2.5 MPa
+    }
+}
+
+load omitted_end_cap {
+    force on geometry.vessel.region.cut_end = [0, 0, 314159] N
+}
+```
+
+For a symmetry sector, scale only resultants applied to the cut representation; pressure remains an
+intensity. Check integrated pressure force, end-cap force, reactions, membrane stress away from
+discontinuities, and sensitivity to end-condition idealization.
+
+## How do I apply a harmonic load with amplitude and phase?
+
+Represent each independently phased component with its own frequency-domain signal. The structural
+harmonic procedure consumes complex forcing; a real scalar without an explicit convention means
+zero phase, not an unknown phase. Do not replace two out-of-phase shakers with the algebraic sum of
+their amplitudes.
+
+```fea
+signal shaker_a : force over frequency {
+    samples = [
+        { at = 100 Hz, value = { real = 100 N, imaginary = 0 N } },
+        { at = 500 Hz, value = { real = 100 N, imaginary = 0 N } },
+    ]
+    interpolation = linear
+    extrapolation = reject
+}
+
+excitation shaker_a_drive {
+    force {
+        target = geometry.bracket.region.shaker_a
+        signal = signal.shaker_a
+        direction = global([0, 0, 1])
+        kinematics = fixed_frame
+    }
+}
+```
+
+Use a second signal for the second phase. Inspect complex reaction balance and phase at response
+probes; magnitude alone cannot reveal a reversed phase or coordinate axis.
+
+## How do I run a base-shake, response-spectrum, or random-vibration study?
+
+These inputs act through the constrained support, not as equivalent point forces:
+
+- For a time-history base shake, use `structural.prescribed_motion` with an acceleration signal.
+- For modal response spectrum, supply the spectrum and direction to the response-spectrum procedure;
+  retain modal participation, missing-mass, and combination evidence.
+- For random response, supply the admitted acceleration or force PSD and its normalization; retain
+  frequency integration and modal truncation evidence.
+
+A PSD has squared quantity per hertz (for example $(m/s^2)^2/Hz$); an SRS or response spectrum is a
+peak response versus natural frequency and damping. They are not interchangeable load tables. See
+[structural studies](../physics/structural) for the procedure declarations and use this page for the
+underlying force, pressure, and support-motion semantics.
+
+## How do I load a hole, pin, clevis, or lug without creating a point singularity?
+
+Prefer resolved contact when the pressure distribution matters. For a reduced model, distribute the
+known resultant over the bearing arc or couple the hole surface to a reference point and load that
+point. Preserve both force and moment about the chosen reference. A uniform pressure over the full
+cylindrical hole generally creates the wrong direction and may cancel its own resultant.
+
+Archive the selected arc, reference point, coupling weights, integrated force/moment, and stress
+exclusion distance. Compare the reduced representation with a contact model when local bearing,
+fretting, or peak stress drives the decision.
+
 Further reading: [structural constraints](../constraints/structural) and
 [structural studies](../physics/structural).

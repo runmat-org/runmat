@@ -280,5 +280,49 @@ accumulated dissipation, or a reduced-order basis. Use initial declarations for 
 study whose required state is completely described by the authored fields. A restart must bind to
 the exact producing topology and operator contract or pass an explicit governed transfer.
 
+## How do I choose initial conditions for a static-to-transient release?
+
+Use the converged static result as the initial displacement and internal state, and state whether
+initial velocity is zero. If preload, plasticity, contact, or another history variable matters, use
+a typed restart/state edge rather than copying displacement alone. The first transient step should
+recover static equilibrium when the same loads remain active.
+
+For a sudden release, make the removed load or constraint transition explicit at $t_0$ and refine
+the time step around it. Check the initial force residual and the exchange between strain and kinetic
+energy.
+
+## How do I initialize a thermally equilibrated assembly?
+
+Use a uniform or mapped initial temperature only when it describes the complete thermal state needed
+by the procedure. If the assembly begins in a nonuniform steady state, compute or import that state
+with provenance and then start the transient from it. Do not impose the same map as continuing
+`thermal.temperature` constraints unless reservoirs actually hold those boundaries.
+
+Verify initial stored energy and the first-step energy residual. An unexplained spike usually means
+the initial field is incompatible with boundary conditions, contact, or temperature-dependent
+material properties.
+
+## How do I initialize CFD from rest or from a developed flow?
+
+Rest means zero velocity plus a pressure field compatible with gravity/reference conditions. For a
+developed-flow start, initialize velocity and pressure together from a compatible analytic,
+precursor, or restart solution. Projecting velocity alone can create a large divergence correction
+and misleading startup transient.
+
+Inspect divergence, boundary compatibility, mass imbalance, and kinetic energy at the first accepted
+step. For turbulence or other transported models, their internal fields also belong to the restart
+state; they cannot be inferred from velocity without an explicit initialization law.
+
+## How do I initialize a harmonic or frequency-domain analysis?
+
+Frequency-domain procedures solve complex steady response and normally do not consume time-domain
+initial conditions. Their state comes from frequency, phase convention, material/operator state, and
+possibly a preload result. Use a state edge for prestress or temperature dependence; do not add an
+initial displacement hoping to bias a harmonic solution.
+
+If a procedure accepts continuation between frequency points, that is a solver initialization aid,
+not physical initial data. It must not change the converged branch without explicit nonlinear path
+semantics.
+
 See [study state flow](../language/studies-analyses-and-state),
 [transient structural analysis](../physics/structural), and [transient heat transfer](../physics/thermal).

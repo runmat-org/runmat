@@ -248,3 +248,92 @@ fn load_and_constraint_guides_retain_task_depth_and_runmat_examples() {
         );
     }
 }
+
+#[test]
+fn load_guides_answer_recognizable_engineering_tasks() {
+    let required = [
+        (
+            include_str!("../../../../docs/fea/loads/structural.md"),
+            [
+                "How do I load a pressure vessel correctly?",
+                "How do I apply a harmonic load with amplitude and phase?",
+                "How do I run a base-shake, response-spectrum, or random-vibration study?",
+                "How do I load a hole, pin, clevis, or lug without creating a point singularity?",
+            ],
+        ),
+        (
+            include_str!("../../../../docs/fea/loads/thermal.md"),
+            [
+                "How do I model a thermal soak followed by cooldown?",
+                "How do I model heat from a chip, winding, battery cell, or resistor?",
+                "How do I model a prescribed temperature map from test or another solver?",
+                "How do I represent a heater controlled to constant power or constant temperature?",
+            ],
+        ),
+        (
+            include_str!("../../../../docs/fea/loads/electromagnetic.md"),
+            [
+                "How do I excite a capacitor or electrostatic actuator?",
+                "How do I excite a resistive conductor and compute Joule loss?",
+                "How do I excite a coil in a harmonic magnetic analysis?",
+                "How do I model several electrical terminals or conductor branches?",
+            ],
+        ),
+        (
+            include_str!("../../../../docs/fea/loads/acoustic.md"),
+            [
+                "How do I choose between pressure and normal-velocity excitation?",
+                "How do I drive a speaker diaphragm from measured motion?",
+                "How do I model a muffler, silencer, or lined duct?",
+                "How do I model two coherent acoustic sources?",
+            ],
+        ),
+        (
+            include_str!("../../../../docs/fea/loads/fluid.md"),
+            [
+                "How do I choose a well-posed inlet and outlet combination?",
+                "How do I model pipe or duct flow from a known flow rate?",
+                "How do I model external aerodynamics around a vehicle or component?",
+                "How do I model a manifold with several inlets and outlets?",
+            ],
+        ),
+    ];
+    for (guide, tasks) in required {
+        for task in tasks {
+            assert!(
+                guide.contains(task),
+                "load guide no longer answers `{task}`"
+            );
+        }
+    }
+}
+
+#[test]
+fn constraint_guides_answer_recognizable_engineering_tasks() {
+    let guides = combined(&[
+        include_str!("../../../../docs/fea/constraints/structural.md"),
+        include_str!("../../../../docs/fea/constraints/thermal.md"),
+        include_str!("../../../../docs/fea/constraints/electromagnetic.md"),
+        include_str!("../../../../docs/fea/constraints/acoustic.md"),
+        include_str!("../../../../docs/fea/constraints/fluid.md"),
+        include_str!("../../../../docs/fea/constraints/connectors.md"),
+        include_str!("../../../../docs/fea/constraints/interfaces.md"),
+        include_str!("../../../../docs/fea/constraints/initial-conditions.md"),
+    ]);
+    for task in [
+        "How do I choose the minimum constraints for a 3D solid?",
+        "How do I constrain thermal expansion without creating artificial thermal stress?",
+        "How do I model a cold plate, heat sink, or temperature-controlled mounting surface?",
+        "How do I distinguish magnetic insulation, vector-potential ground, and Coulomb gauge?",
+        "How do I constrain an acoustic exterior domain?",
+        "How do I choose CFD boundary conditions that are mathematically well posed?",
+        "How do I model an equipment mount with stiffness and damping?",
+        "How do I model bolted or clamped contact between parts?",
+        "How do I choose initial conditions for a static-to-transient release?",
+    ] {
+        assert!(
+            guides.contains(task),
+            "constraint guides no longer answer `{task}`"
+        );
+    }
+}

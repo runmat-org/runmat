@@ -234,4 +234,44 @@ normal velocity on paired faces, and acoustic power flux. For phase-shifted pair
 and phase after applying the declared mapping. A magnitude-only contour can hide an incorrect Bloch
 phase or reversed face normal.
 
+## How do I choose a rigid, pressure-release, impedance, or radiating boundary?
+
+- Use `acoustic.rigid_wall` when normal velocity is zero.
+- Use `acoustic.pressure` with zero pressure for an ideal pressure-release surface.
+- Use `acoustic.impedance` when pressure and normal velocity follow a known local relation.
+- Use `acoustic.radiation` to truncate an exterior domain with the admitted radiation model.
+
+These choices produce different reflection magnitude and phase. A rigid wall is not an open
+boundary, and zero pressure is not a generic far field. Compare reflected acoustic power for the
+frequency and incidence range that matters.
+
+## How do I constrain a closed acoustic cavity?
+
+Apply rigid or impedance conditions to the physical walls, then add the source as pressure or normal
+velocity on its own patch. A purely rigid cavity at zero frequency has a constant-pressure
+nullspace; the selected harmonic/transient formulation must own its datum treatment rather than
+adding a pressure constraint that changes finite-frequency modes.
+
+Check cavity volume, wall coverage, source area, modal frequencies, and energy balance. A missing
+wall region can look like an unintended pressure-release opening.
+
+## How do I constrain an acoustic exterior domain?
+
+Surround the scatterer/source with a fluid region and place a radiation boundary far enough away for
+the chosen local approximation, or use a supported absorbing-layer formulation. Apply rigid,
+impedance, or coupled structural conditions on the actual body. Do not apply radiation directly to
+the vibrating body surface.
+
+Refine both mesh and truncation distance. Inspect reflected power and compare near-field pressure and
+radiated power across domain sizes; a smooth contour does not establish nonreflection.
+
+## How do I use acoustic symmetry without removing the mode I need?
+
+Choose the mirrored field parity. A rigid symmetry plane imposes zero normal velocity; a
+pressure-release plane imposes zero pressure. Which one is correct depends on the acoustic mode and
+source symmetry. For antisymmetric excitation, a rigid plane can suppress the intended solution.
+
+Validate a reduced model against the full domain or known modal parity, comparing frequency,
+pressure phase, and power after applying the symmetry scale factor.
+
 Further reading: [acoustic studies](../physics/acoustic) and [geometry regions](../geometry).

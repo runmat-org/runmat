@@ -475,5 +475,65 @@ diagnostics, reference frames, pair coverage and transforms, reaction force and 
 and normalized residual. For moving constraints, also retain signal identity and support work. This
 evidence explains why geometrically similar runs can have different load paths.
 
+## How do I choose the minimum constraints for a 3D solid?
+
+A free 3D solid has six rigid-body modes. Remove only the motions excluded by the physical fixture.
+One common minimal stabilization pattern fixes three translations at one point, two at a second
+point, and one at a third non-collinear point, but that pattern is valid only when those locations
+represent the fixture. A face clamp is not a generic numerical remedy: it changes local strain and
+load path.
+
+Before accepting the model, inspect the operator nullspace and the reaction distribution. A
+zero-pivot message identifies missing or dependent equations; it does not tell you which support is
+physical. For an intentionally free-free modal analysis, retain the six near-zero rigid modes rather
+than adding supports.
+
+## How do I constrain a shell or beam model without suppressing rotations?
+
+Shell and beam nodes can own rotational degrees of freedom that solid nodes do not. State the exact
+translation and rotation components with `structural.prescribed`; do not use `structural.fixed` when
+the physical joint is pinned or releases bending. A hinge commonly restrains translations while
+leaving rotation about its axis free.
+
+```fea
+constraint beam_hinge {
+    structural.prescribed {
+        target = geometry.frame.region.hinge
+        frame = global
+        ux = 0 mm
+        uy = 0 mm
+        uz = 0 mm
+        rx = 0 rad
+        ry = 0 rad
+    }
+}
+```
+
+The omitted `rz` remains free in this example. Confirm that the selected element basis owns
+those rotations and inspect hinge moment; a solid target must reject independent rotational DOFs.
+
+## How do I model a remote support or remote load point?
+
+Create a reference point and use `structural.rigid_coupling` when the attached region should move as
+a rigid section, or `structural.distributing_coupling` when the resultant should be distributed
+without rigidifying all in-plane deformation. Apply the support or load to the reference point, and
+retain the coupling's force and moment transfer.
+
+Do not couple an entire flexible flange merely because the remote point is convenient. Compare
+coupled-area deformation, reaction moment, and strain energy with a resolved fixture or a smaller
+attachment patch.
+
+## How do I constrain thermal expansion without creating artificial thermal stress?
+
+Use a kinematic scheme that removes rigid motion while allowing the intended expansion: for example,
+one datum point, one sliding direction at a second point, and one plane-normal restraint at a third.
+A fully fixed face creates real restraint stress only when the assembly is actually clamped that
+way. For symmetry sectors, constrain the symmetry-normal displacement and leave compatible
+tangential expansion free.
+
+Run a uniform-temperature-change check. A freely expanding homogeneous body should recover nearly
+zero stress; nonzero reaction or strain energy identifies unintended restraint, mismatched thermal
+expansion, or an inconsistent temperature reference.
+
 Further reading: [structural studies](../physics/structural), [structural loads](../loads/structural),
 and [geometry regions](../geometry).

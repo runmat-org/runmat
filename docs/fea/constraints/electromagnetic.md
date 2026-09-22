@@ -247,5 +247,47 @@ floating/equipotential integral residuals, magnetic gauge rank, periodic mapping
 convention. These facts distinguish a physical field solution from one stabilized by an unintended
 datum or gauge.
 
+## How do I constrain an electrostatic capacitor model?
+
+Ground one electrode with `electrical.potential_reference` and prescribe or excite the other
+electrode. Mark each conductor surface `electrical.equipotential` when the conductor is represented
+only by its boundary. Do not ground the dielectric exterior or every conductor; that suppresses the
+potential difference being solved.
+
+Check the applied voltage difference, equal-and-opposite electrode charge, electric energy, and
+normal displacement flux. Edge-field peaks require geometric radius and mesh convergence rather
+than additional constraints.
+
+## How do I constrain a DC conduction model with several terminals?
+
+Give the conductor network one potential reference, then use prescribed terminal potential or
+integral current on the remaining terminals. Every disconnected conducting component must be
+grounded, driven, or explicitly floating. Do not add one arbitrary zero-potential node per mesh
+partition; the constraint belongs to the physical connected component.
+
+The algebraic sum of terminal currents must close. Archive current by terminal, Joule power, and the
+reference/floating ownership of every conductor island.
+
+## How do I distinguish magnetic insulation, vector-potential ground, and Coulomb gauge?
+
+`magnetic.insulation` is a physical boundary condition on magnetic flux. A
+`magnetic.vector_potential_ground` removes boundary freedom in the vector potential. A
+`magnetic.coulomb_gauge` removes nonphysical gauge freedom in the domain. They are not aliases and
+should not be stacked until the matrix factors.
+
+Choose the physical truncation first, then the gauge required by the formulation. Verify boundary
+flux, gauge residual, operator rank, and invariance of observable $\mathbf B=\nabla\times\mathbf A$
+under admissible gauge choices.
+
+## How do I model a periodic motor, generator, or transformer sector?
+
+Pair geometrically corresponding sector faces with `magnetic.periodic` for equal fields or
+`magnetic.phase_shifted_periodic` for a declared electrical/spatial phase. State the rotation axis,
+origin, angle, and primary/secondary direction. The phase relation must match pole count, winding
+harmonic, and sector angle; geometry alone cannot infer it.
+
+Validate the sector against a larger-angle or full model at representative operating points. Compare
+pair residual, integrated flux, torque/force, stored energy, and transformed vector orientation.
+
 See [electromagnetic studies](../physics/electromagnetic) and
 [electromagnetic loads](../loads/electromagnetic).
