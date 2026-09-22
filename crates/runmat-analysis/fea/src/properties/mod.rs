@@ -6,8 +6,9 @@ mod realize;
 
 pub use compile::{compile_property_map, compile_solid_property_map, PropertyCompilationError};
 pub use contract::{
-    CompiledElementMaterial, CompiledExplicitElementMaterial, CompiledPropertyAudit,
-    CompiledPropertyMap, CompiledPropertyMapIdentity,
+    CompiledBeamProperty, CompiledElementMaterial, CompiledLaminatePly, CompiledPropertyAudit,
+    CompiledPropertyAuditOwner, CompiledPropertyMap, CompiledPropertyMapIdentity,
+    CompiledShellProperty, CompiledShellPropertyOwner,
 };
 pub use realize::{realize_formulation_properties, PropertyRealizationError};
 

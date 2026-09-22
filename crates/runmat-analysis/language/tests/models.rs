@@ -187,20 +187,27 @@ model airframe {
             height = 40 mm
         }
     }
+    section inspection_skin {
+        homogeneous_shell {
+            thickness = 2 mm
+            reference_surface = offset_from_mid_surface
+            reference_offset = 0.25 mm
+            shear_correction = 0.8333333333333333
+        }
+    }
     layup skin_laminate {
         reference_orientation = orientation.laminate_axes
-        stacking_direction = 1
+        ply_order = along_surface_normal
+        reference_surface = mid_surface
         ply zero {
             material = material.carbon
             thickness = 0.2 mm
             angle = 0 deg
-            integration_points = 3
         }
         ply ninety {
             material = material.carbon
             thickness = 0.2 mm
             angle = 90 deg
-            integration_points = 3
         }
     }
     assign material.aluminum to geometry.part.region.rail
@@ -217,7 +224,7 @@ model airframe {
     });
     assert!(program.is_valid(), "{:#?}", program.diagnostics);
     let model = program.models.values().next().unwrap();
-    assert_eq!(model.sections.len(), 1);
+    assert_eq!(model.sections.len(), 2);
     assert_eq!(model.orientations.len(), 1);
     assert_eq!(model.layups.len(), 1);
     assert_eq!(model.layups[0].plies.len(), 2);
@@ -230,6 +237,15 @@ model airframe {
         model.sections[0],
         runmat_analysis_core::AuthoredSectionDefinition::RectangularBeam(_)
     ));
+    let runmat_analysis_core::AuthoredSectionDefinition::HomogeneousShell(shell) =
+        &model.sections[1]
+    else {
+        panic!("second section must be the homogeneous shell")
+    };
+    assert_eq!(
+        shell.reference_surface,
+        runmat_analysis_core::HomogeneousShellReferenceSurface::OffsetFromMidSurface(0.00025)
+    );
 }
 
 #[test]
@@ -259,12 +275,12 @@ model invalid {
     }
     layup skin_laminate {
         reference_orientation = orientation.axes
-        stacking_direction = 1
+        ply_order = along_surface_normal
+        reference_surface = mid_surface
         ply one {
             material = material.carbon
             thickness = 0.1 mm
             angle = 0 deg
-            integration_points = 1
         }
     }
     assign material.carbon to geometry.part.region.skin

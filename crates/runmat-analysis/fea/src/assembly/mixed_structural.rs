@@ -21,9 +21,8 @@ use super::{
 };
 use crate::{
     algebra::{
-        AssembledRealSystem, CanonicalRealOperators, ContributionDomain, ContributionId,
-        ContributionProvenance, MatrixProperties, OperatorRole, RealSparseAssembler,
-        RealSparseMatrix,
+        AssembledRealSystem, CanonicalRealOperators, MatrixProperties, OperatorRole,
+        RealSparseAssembler, RealSparseMatrix,
     },
     constraints::CanonicalStructuralConstraintPlan,
     excitation::{RealizedExcitationKind, RealizedExcitations},
@@ -78,7 +77,7 @@ pub(super) fn assemble_mixed_structural_system(
     let ExplicitElementAssembly {
         stiffness: explicit_stiffness,
         damping: explicit_damping,
-        lumped_mass: explicit_lumped_mass,
+        mass: explicit_mass,
         beam_recovery,
         shell_recovery,
         mut formulations,
@@ -101,16 +100,6 @@ pub(super) fn assemble_mixed_structural_system(
         OperatorRole::Stiffness,
         MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
     )?;
-    let explicit_mass = RealSparseMatrix::diagonal(
-        explicit_lumped_mass.clone(),
-        OperatorRole::Mass,
-        MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
-    )
-    .map_err(sparse_error)?
-    .with_contribution(ContributionProvenance {
-        domain: ContributionDomain::Structural,
-        contribution_id: ContributionId("explicit_beam_shell_lumped_mass".into()),
-    });
     let mass = sum(
         &solid_mass,
         &explicit_mass,

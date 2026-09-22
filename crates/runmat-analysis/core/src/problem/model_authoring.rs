@@ -39,6 +39,12 @@ pub struct AuthoredMaterialRef {
     pub material_id: String,
 }
 
+impl AuthoredMaterialRef {
+    pub fn qualified_id(&self) -> String {
+        format!("{}::{}", self.module_path, self.material_id)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AuthoredModelInputRef {

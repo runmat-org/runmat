@@ -87,7 +87,7 @@ fn validate_material(material: &MaterialModel) -> Result<(), AnalysisValidationE
     }
     validate_provenance(material)?;
     if material.mass_density_kg_per_m3.is_none()
-        && material.mechanical.is_none()
+        && material.elasticity.is_none()
         && material.damping.is_none()
         && material.thermal.is_none()
         && material.acoustic.is_none()
@@ -102,7 +102,8 @@ fn validate_material(material: &MaterialModel) -> Result<(), AnalysisValidationE
     if let Some(density) = material.mass_density_kg_per_m3 {
         require_positive(material, "mass density", density)?;
     }
-    if let Some(mechanical) = &material.mechanical {
+    if let Some(crate::MaterialElasticityModel::IsotropicLinear(mechanical)) = &material.elasticity
+    {
         require_positive(material, "Young's modulus", mechanical.youngs_modulus_pa)?;
         if !mechanical.poisson_ratio.is_finite()
             || mechanical.poisson_ratio <= -1.0
@@ -111,6 +112,47 @@ fn validate_material(material: &MaterialModel) -> Result<(), AnalysisValidationE
             return Err(invalid_material(
                 material,
                 "Poisson ratio must be finite and in (-1, 0.5)",
+            ));
+        }
+    }
+    if let Some(crate::MaterialElasticityModel::OrthotropicLamina(lamina)) = &material.elasticity {
+        require_positive(
+            material,
+            "lamina longitudinal modulus",
+            lamina.longitudinal_modulus_pa,
+        )?;
+        require_positive(
+            material,
+            "lamina transverse modulus",
+            lamina.transverse_modulus_pa,
+        )?;
+        require_positive(
+            material,
+            "lamina in-plane shear modulus",
+            lamina.in_plane_shear_modulus_pa,
+        )?;
+        require_positive(
+            material,
+            "lamina transverse shear modulus 13",
+            lamina.transverse_shear_modulus_13_pa,
+        )?;
+        require_positive(
+            material,
+            "lamina transverse shear modulus 23",
+            lamina.transverse_shear_modulus_23_pa,
+        )?;
+        if !lamina.major_poisson_ratio.is_finite() {
+            return Err(invalid_material(
+                material,
+                "lamina major Poisson ratio must be finite",
+            ));
+        }
+        let reciprocal = lamina.major_poisson_ratio * lamina.transverse_modulus_pa
+            / lamina.longitudinal_modulus_pa;
+        if 1.0 - lamina.major_poisson_ratio * reciprocal <= 0.0 {
+            return Err(invalid_material(
+                material,
+                "lamina plane-stress compliance must be positive definite",
             ));
         }
     }
@@ -289,12 +331,12 @@ fn validate_provenance(material: &MaterialModel) -> Result<(), AnalysisValidatio
         let canonical = match property.property {
             ImportedCadMaterialPropertyKind::MassDensity => material.mass_density_kg_per_m3,
             ImportedCadMaterialPropertyKind::YoungsModulus => material
-                .mechanical
-                .as_ref()
+                .require_mechanical()
+                .ok()
                 .map(|mechanical| mechanical.youngs_modulus_pa),
             ImportedCadMaterialPropertyKind::PoissonRatio => material
-                .mechanical
-                .as_ref()
+                .require_mechanical()
+                .ok()
                 .map(|mechanical| mechanical.poisson_ratio),
             _ => None,
         };
@@ -410,8 +452,9 @@ fn invalid_assignment(region_id: &str, detail: impl Into<String>) -> AnalysisVal
 mod tests {
     use super::*;
     use crate::{
-        EvidenceConfidence, MaterialElectricalModel, MaterialMechanicalModel, MaterialThermalModel,
-        MechanicalDampingModel, RayleighMassCoefficient, RayleighStiffnessCoefficient,
+        EvidenceConfidence, MaterialElasticityModel, MaterialElectricalModel,
+        MaterialMechanicalModel, MaterialThermalModel, MechanicalDampingModel,
+        RayleighMassCoefficient, RayleighStiffnessCoefficient,
     };
 
     fn material() -> MaterialModel {
@@ -420,10 +463,12 @@ mod tests {
             name: "Steel".to_string(),
             provenance: crate::MaterialProvenance::Authored,
             mass_density_kg_per_m3: Some(7850.0),
-            mechanical: Some(MaterialMechanicalModel {
-                youngs_modulus_pa: 200.0e9,
-                poisson_ratio: 0.3,
-            }),
+            elasticity: Some(MaterialElasticityModel::IsotropicLinear(
+                MaterialMechanicalModel {
+                    youngs_modulus_pa: 200.0e9,
+                    poisson_ratio: 0.3,
+                },
+            )),
             damping: None,
             thermal: Some(MaterialThermalModel {
                 reference_temperature_k: 293.15,
@@ -455,21 +500,21 @@ mod tests {
         ));
 
         let mut invalid = material();
-        invalid.mechanical.as_mut().unwrap().poisson_ratio = 0.5;
+        invalid.require_mechanical_mut().unwrap().poisson_ratio = 0.5;
         assert!(matches!(
             validate_materials(&[invalid], &[]),
             Err(AnalysisValidationError::InvalidMaterial { .. })
         ));
 
         let mut invalid = material();
-        invalid.mechanical.as_mut().unwrap().poisson_ratio = -1.0;
+        invalid.require_mechanical_mut().unwrap().poisson_ratio = -1.0;
         assert!(matches!(
             validate_materials(&[invalid], &[]),
             Err(AnalysisValidationError::InvalidMaterial { .. })
         ));
 
         let mut auxetic = material();
-        auxetic.mechanical.as_mut().unwrap().poisson_ratio = -0.25;
+        auxetic.require_mechanical_mut().unwrap().poisson_ratio = -0.25;
         validate_materials(&[auxetic], &[]).expect("finite auxetic material should be valid");
 
         let mut damped = material();
@@ -493,7 +538,7 @@ mod tests {
     #[test]
     fn accepts_partial_capabilities_and_rejects_an_empty_material() {
         let mut density_only = material();
-        density_only.mechanical = None;
+        density_only.elasticity = None;
         density_only.damping = None;
         density_only.thermal = None;
         density_only.acoustic = None;

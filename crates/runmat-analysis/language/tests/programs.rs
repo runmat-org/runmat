@@ -220,7 +220,7 @@ material steel {
     assert!(program.is_valid(), "{:#?}", program.diagnostics);
     let material = program.materials.values().next().unwrap();
     assert_eq!(material.mass_density_kg_per_m3, Some(7850.0));
-    let mechanical = material.mechanical.as_ref().unwrap();
+    let mechanical = material.require_mechanical().unwrap();
     assert_eq!(mechanical.youngs_modulus_pa, 200.0e9);
     assert_eq!(mechanical.poisson_ratio, 0.3);
 }

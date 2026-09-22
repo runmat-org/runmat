@@ -163,8 +163,8 @@ fn navier_center_deflection() -> f64 {
 fn section() -> ShellSection {
     ShellSection {
         thickness_m: 0.01,
+        reference_offset_m: 0.0,
         shear_correction: 5.0 / 6.0,
-        drilling_stiffness_scale: 1.0e-4,
     }
 }
 

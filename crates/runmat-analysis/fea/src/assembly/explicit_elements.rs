@@ -1,8 +1,14 @@
 use std::collections::BTreeSet;
 
+mod beam_inertia;
+mod laminate_property;
+
+use beam_inertia::{add_rayleigh_element_damping, lumped_beam_mass};
+
 use runmat_analysis_core::{
-    BeamSectionModel, ShellSectionModel, StructuralElementKind, StructuralFormulationRealization,
-    StructuralModel, StructuralOperatorImplementation, StructuralRecoveryImplementation,
+    BeamSectionModel, HomogeneousShellReferenceSurface, HomogeneousShellSectionModel,
+    StructuralElementKind, StructuralFormulationRealization, StructuralModel,
+    StructuralOperatorImplementation, StructuralRecoveryImplementation,
 };
 
 use super::{
@@ -10,12 +16,15 @@ use super::{
     elements::{
         beam::{
             global_stiffness_matrix as beam_global_stiffness_matrix, transformation_matrix,
-            BeamElementGeometry, BeamMaterial, BeamSection, BeamTransform12,
-            BEAM_ELEMENT_DOF_COUNT,
+            BeamElementGeometry, BeamMaterial, BeamSection, BEAM_ELEMENT_DOF_COUNT,
         },
         shell::{
-            global_stiffness_matrix as shell_global_stiffness_matrix, ShellElementGeometry,
-            ShellMaterial, ShellSection, SHELL_ELEMENT_DOF_COUNT, SHELL_NODE_DOF_COUNT,
+            global_lumped_mass_matrix, global_matrix_for_constitutive_matrices,
+            global_stiffness_matrix as shell_global_stiffness_matrix,
+            global_stiffness_matrix_for_constitutive,
+            homogeneous_constitutive as homogeneous_shell_constitutive, homogeneous_mass_moments,
+            ShellElementGeometry, ShellMassMoments, ShellMaterial, ShellSection,
+            SHELL_ELEMENT_DOF_COUNT, SHELL_NODE_DOF_COUNT,
         },
     },
     BeamRecoveryElementSummary, ShellRecoveryElementSummary, StructuralAssemblyError,
@@ -28,13 +37,13 @@ use crate::{
     physics::structural::{
         material::StructuralElementMaterial, topology::explicit_element_identity,
     },
-    properties::CompiledPropertyMap,
+    properties::{CompiledPropertyMap, CompiledShellPropertyOwner},
 };
 
 pub(super) struct ExplicitElementAssembly {
     pub stiffness: RealSparseMatrix,
     pub damping: RealSparseMatrix,
-    pub lumped_mass: Vec<f64>,
+    pub mass: RealSparseMatrix,
     pub beam_recovery: Vec<BeamRecoveryElementSummary>,
     pub shell_recovery: Vec<ShellRecoveryElementSummary>,
     pub formulations: Vec<StructuralFormulationRealization>,
@@ -86,8 +95,16 @@ pub(super) fn assemble_explicit_elements(
         OperatorRole::Damping,
         MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
     );
+    let mut mass = RealSparseAssembler::square(
+        dof_count,
+        OperatorRole::Mass,
+        MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+    );
+    mass.add_contribution(ContributionProvenance {
+        domain: ContributionDomain::Structural,
+        contribution_id: ContributionId("explicit_beam_shell_lumped_mass".into()),
+    });
     let mut has_rayleigh_damping = false;
-    let mut lumped_mass = vec![0.0; dof_count];
     let mut beam_recovery = Vec::with_capacity(beam_count);
     let mut shell_recovery = Vec::with_capacity(shell_count);
 
@@ -98,13 +115,6 @@ pub(super) fn assemble_explicit_elements(
                 let explicit_j = structural_node_index(structural, beam.node_ids[1], element)?;
                 let node_i = canonical_node_indices[explicit_i];
                 let node_j = canonical_node_indices[explicit_j];
-                let section =
-                    structural_beam_section(structural, &beam.section_id).ok_or_else(|| {
-                        StructuralAssemblyError::UnknownBeamSection {
-                            element_id: element.element_id.clone(),
-                            section_id: beam.section_id.clone(),
-                        }
-                    })?;
                 let element_identity = explicit_element_identity(
                     topology_digest,
                     &element.element_id,
@@ -114,16 +124,16 @@ pub(super) fn assemble_explicit_elements(
                 .map_err(|error| {
                     StructuralAssemblyError::InvalidMaterialCoverage(error.to_string())
                 })?;
-                let material = properties
-                    .beam_material(element_identity)
-                    .ok_or_else(|| StructuralAssemblyError::UnassignedExplicitRegion {
+                let property = properties.beam_property(element_identity).ok_or_else(|| {
+                    StructuralAssemblyError::UnassignedExplicitRegion {
                         element_id: element.element_id.clone(),
                         region_id: element.region_id.clone(),
-                    })
-                    .and_then(|entry| {
-                        StructuralElementMaterial::from_model(&entry.material).map_err(|error| {
-                            StructuralAssemblyError::InvalidMaterialCoverage(error.to_string())
-                        })
+                    }
+                })?;
+                let section = section_from_model(&property.section);
+                let material =
+                    StructuralElementMaterial::from_model(&property.material).map_err(|error| {
+                        StructuralAssemblyError::InvalidMaterialCoverage(error.to_string())
                     })?;
                 let beam_material = BeamMaterial {
                     youngs_modulus_pa: material.youngs_modulus_pa,
@@ -161,7 +171,7 @@ pub(super) fn assemble_explicit_elements(
                     frame.length_m,
                     &transform_global_to_local,
                 );
-                scatter_lumped_mass(&mut lumped_mass, &element_dofs, &element_mass);
+                scatter_diagonal(&mut mass, &element_dofs, &element_mass);
                 has_rayleigh_damping |= add_rayleigh_element_damping(
                     &mut damping,
                     &element_dofs,
@@ -186,13 +196,6 @@ pub(super) fn assemble_explicit_elements(
                     explicit_nodes[local] = structural_node_index(structural, node_id, element)?;
                 }
                 let node_indices = explicit_nodes.map(|node| canonical_node_indices[node]);
-                let section =
-                    structural_shell_section(structural, &shell.section_id).ok_or_else(|| {
-                        StructuralAssemblyError::UnknownShellSection {
-                            element_id: element.element_id.clone(),
-                            section_id: shell.section_id.clone(),
-                        }
-                    })?;
                 let element_identity = explicit_element_identity(
                     topology_digest,
                     &element.element_id,
@@ -202,22 +205,12 @@ pub(super) fn assemble_explicit_elements(
                 .map_err(|error| {
                     StructuralAssemblyError::InvalidMaterialCoverage(error.to_string())
                 })?;
-                let material = properties
-                    .shell_material(element_identity)
-                    .ok_or_else(|| StructuralAssemblyError::UnassignedExplicitRegion {
+                let property = properties.shell_property(element_identity).ok_or_else(|| {
+                    StructuralAssemblyError::UnassignedExplicitRegion {
                         element_id: element.element_id.clone(),
                         region_id: element.region_id.clone(),
-                    })
-                    .and_then(|entry| {
-                        StructuralElementMaterial::from_model(&entry.material).map_err(|error| {
-                            StructuralAssemblyError::InvalidMaterialCoverage(error.to_string())
-                        })
-                    })?;
-                let shell_material = ShellMaterial {
-                    youngs_modulus_pa: material.youngs_modulus_pa,
-                    poisson_ratio: material.poisson_ratio,
-                    shear_modulus_pa: material.shear_modulus_pa(),
-                };
+                    }
+                })?;
                 let geometry = ShellElementGeometry {
                     nodes_m: explicit_nodes.map(|node| structural.nodes[node].coordinates_m),
                     reference_axis: shell.reference_axis,
@@ -228,37 +221,135 @@ pub(super) fn assemble_explicit_elements(
                         error,
                     }
                 })?;
-                let element_stiffness =
-                    shell_global_stiffness_matrix(section, shell_material, geometry).map_err(
-                        |error| StructuralAssemblyError::ShellElement {
-                            element_id: element.element_id.clone(),
-                            error,
-                        },
-                    )?;
                 let element_dofs =
                     shell_element_dof_indices(layout, node_indices).ok_or_else(|| {
                         StructuralAssemblyError::MissingRotationalDof {
                             element_id: element.element_id.clone(),
                         }
                     })?;
+                let (element_stiffness, element_mass, constitutive) =
+                    match &property.owner {
+                        CompiledShellPropertyOwner::Homogeneous { material, section } => {
+                            let section = shell_section_from_model(section);
+                            let material = StructuralElementMaterial::from_model(material)
+                                .map_err(|error| {
+                                    StructuralAssemblyError::InvalidMaterialCoverage(
+                                        error.to_string(),
+                                    )
+                                })?;
+                            let shell_material = ShellMaterial {
+                                youngs_modulus_pa: material.youngs_modulus_pa,
+                                poisson_ratio: material.poisson_ratio,
+                                shear_modulus_pa: material.shear_modulus_pa(),
+                            };
+                            let constitutive =
+                                homogeneous_shell_constitutive(section, shell_material);
+                            let element_stiffness =
+                                shell_global_stiffness_matrix(section, shell_material, geometry)
+                                    .map_err(|error| StructuralAssemblyError::ShellElement {
+                                        element_id: element.element_id.clone(),
+                                        error,
+                                    })?;
+                            let mass_moments =
+                                homogeneous_mass_moments(section, material.density_kg_per_m3)
+                                    .map_err(|error| StructuralAssemblyError::ShellElement {
+                                        element_id: element.element_id.clone(),
+                                        error,
+                                    })?;
+                            let element_mass = global_lumped_mass_matrix(mass_moments, frame)
+                                .map_err(|error| StructuralAssemblyError::ShellElement {
+                                    element_id: element.element_id.clone(),
+                                    error,
+                                })?;
+                            if let runmat_analysis_core::MechanicalDampingModel::Rayleigh {
+                                mass_coefficient,
+                                stiffness_coefficient,
+                            } = material.damping
+                            {
+                                let mass_damping = global_lumped_mass_matrix(
+                                    scale_mass_moments(mass_moments, mass_coefficient.per_second),
+                                    frame,
+                                )
+                                .map_err(|error| StructuralAssemblyError::ShellElement {
+                                    element_id: element.element_id.clone(),
+                                    error,
+                                })?;
+                                add_combined_element_damping(
+                                    &mut damping,
+                                    &element_dofs,
+                                    &mass_damping,
+                                    &element_stiffness,
+                                    stiffness_coefficient.seconds,
+                                );
+                                has_rayleigh_damping = true;
+                            }
+                            (element_stiffness, element_mass, constitutive)
+                        }
+                        CompiledShellPropertyOwner::Laminate { section, plies } => {
+                            let response = laminate_property::definition(section, plies)
+                                .map_err(StructuralAssemblyError::InvalidMaterialCoverage)?
+                                .integrate()
+                                .map_err(|error| StructuralAssemblyError::ShellElement {
+                                    element_id: element.element_id.clone(),
+                                    error,
+                                })?;
+                            let element_stiffness = global_stiffness_matrix_for_constitutive(
+                                &response.elastic,
+                                geometry,
+                            )
+                            .map_err(|error| StructuralAssemblyError::ShellElement {
+                                element_id: element.element_id.clone(),
+                                error,
+                            })?;
+                            let (mass_moments, mass_damping_moments) =
+                                laminate_property::mass_moments(response.mass);
+                            let element_mass = global_lumped_mass_matrix(mass_moments, frame)
+                                .map_err(|error| StructuralAssemblyError::ShellElement {
+                                    element_id: element.element_id.clone(),
+                                    error,
+                                })?;
+                            let stiffness_damping = global_matrix_for_constitutive_matrices(
+                                &response.stiffness_damping,
+                                geometry,
+                            )
+                            .map_err(|error| StructuralAssemblyError::ShellElement {
+                                element_id: element.element_id.clone(),
+                                error,
+                            })?;
+                            let mass_damping =
+                                global_lumped_mass_matrix(mass_damping_moments, frame).map_err(
+                                    |error| StructuralAssemblyError::ShellElement {
+                                        element_id: element.element_id.clone(),
+                                        error,
+                                    },
+                                )?;
+                            let laminate_has_damping = mass_damping_moments
+                                != ShellMassMoments::ZERO
+                                || stiffness_damping
+                                    .iter()
+                                    .flatten()
+                                    .any(|value| *value != 0.0);
+                            if laminate_has_damping {
+                                add_combined_element_damping(
+                                    &mut damping,
+                                    &element_dofs,
+                                    &mass_damping,
+                                    &stiffness_damping,
+                                    1.0,
+                                );
+                                has_rayleigh_damping = true;
+                            }
+                            (element_stiffness, element_mass, response.elastic)
+                        }
+                    };
                 scatter(&mut stiffness, &element_dofs, &element_stiffness);
-                let element_mass =
-                    lumped_shell_mass(section, material.density_kg_per_m3, frame.area_m2);
-                scatter_lumped_mass(&mut lumped_mass, &element_dofs, &element_mass);
-                has_rayleigh_damping |= add_rayleigh_element_damping(
-                    &mut damping,
-                    &element_dofs,
-                    &element_stiffness,
-                    &element_mass,
-                    material.damping,
-                );
+                scatter(&mut mass, &element_dofs, &element_mass);
                 shell_recovery.push(ShellRecoveryElementSummary {
                     element_id: element.element_id.clone(),
                     region_id: element.region_id.clone(),
                     node_indices,
                     geometry,
-                    section,
-                    material: shell_material,
+                    constitutive,
                 });
             }
         }
@@ -288,7 +379,7 @@ pub(super) fn assemble_explicit_elements(
     Ok(ExplicitElementAssembly {
         stiffness: finish(stiffness)?,
         damping: finish(damping)?,
-        lumped_mass,
+        mass: finish(mass)?,
         beam_recovery,
         shell_recovery,
         formulations,
@@ -357,25 +448,6 @@ fn structural_node_index(
         })
 }
 
-fn structural_beam_section(structural: &StructuralModel, section_id: &str) -> Option<BeamSection> {
-    structural
-        .beam_sections
-        .iter()
-        .find(|section| section.section_id == section_id)
-        .map(section_from_model)
-}
-
-fn structural_shell_section(
-    structural: &StructuralModel,
-    section_id: &str,
-) -> Option<ShellSection> {
-    structural
-        .shell_sections
-        .iter()
-        .find(|section| section.section_id == section_id)
-        .map(shell_section_from_model)
-}
-
 fn section_from_model(section: &BeamSectionModel) -> BeamSection {
     BeamSection {
         area_m2: section.area_m2,
@@ -388,11 +460,17 @@ fn section_from_model(section: &BeamSectionModel) -> BeamSection {
     }
 }
 
-fn shell_section_from_model(section: &ShellSectionModel) -> ShellSection {
+fn shell_section_from_model(section: &HomogeneousShellSectionModel) -> ShellSection {
+    let half_thickness = 0.5 * section.thickness_m;
     ShellSection {
         thickness_m: section.thickness_m,
+        reference_offset_m: match section.reference_surface {
+            HomogeneousShellReferenceSurface::MidSurface => 0.0,
+            HomogeneousShellReferenceSurface::NegativeNormalSurface => -half_thickness,
+            HomogeneousShellReferenceSurface::PositiveNormalSurface => half_thickness,
+            HomogeneousShellReferenceSurface::OffsetFromMidSurface(offset) => offset,
+        },
         shear_correction: section.shear_correction,
-        drilling_stiffness_scale: section.drilling_stiffness_scale,
     }
 }
 
@@ -435,97 +513,41 @@ fn scatter<const D: usize>(
     }
 }
 
-fn scatter_lumped_mass<const D: usize>(
-    global: &mut [f64],
+fn scatter_diagonal<const D: usize>(
+    global: &mut RealSparseAssembler,
     element_dofs: &[usize; D],
     element: &[f64; D],
 ) {
     for (local, global_dof) in element_dofs.iter().copied().enumerate() {
-        global[global_dof] += element[local];
+        global.add(global_dof, global_dof, element[local]);
     }
 }
 
-fn lumped_beam_mass(
-    section: BeamSection,
-    density_kg_per_m3: f64,
-    length_m: f64,
-    transform_global_to_local: &BeamTransform12,
-) -> [f64; BEAM_ELEMENT_DOF_COUNT] {
-    let nodal_mass = density_kg_per_m3 * section.area_m2 * length_m / 2.0;
-    let local_rotational_inertia = [
-        density_kg_per_m3 * section.torsion_j_m4 * length_m / 2.0,
-        density_kg_per_m3 * section.iy_m4 * length_m / 2.0,
-        density_kg_per_m3 * section.iz_m4 * length_m / 2.0,
-    ];
-    let mut element_mass = [0.0; BEAM_ELEMENT_DOF_COUNT];
-    for node_offset in [0usize, 6] {
-        for component in 0..3 {
-            element_mass[node_offset + component] = nodal_mass;
-        }
-        for global_component in 0..3 {
-            let local_col = node_offset + 3 + global_component;
-            element_mass[node_offset + 3 + global_component] = local_rotational_inertia
-                .iter()
-                .enumerate()
-                .map(|(local_component, local_inertia)| {
-                    let row = node_offset + 3 + local_component;
-                    local_inertia * transform_global_to_local[row][local_col].powi(2)
-                })
-                .sum();
-        }
+fn scale_mass_moments(moments: ShellMassMoments, scale: f64) -> ShellMassMoments {
+    ShellMassMoments {
+        zeroth_kg_per_m2: scale * moments.zeroth_kg_per_m2,
+        first_kg_per_m: scale * moments.first_kg_per_m,
+        second_kg: scale * moments.second_kg,
     }
-    element_mass
 }
 
-fn lumped_shell_mass(
-    section: ShellSection,
-    density_kg_per_m3: f64,
-    area_m2: f64,
-) -> [f64; SHELL_ELEMENT_DOF_COUNT] {
-    let nodal_mass = density_kg_per_m3 * section.thickness_m * area_m2 / 3.0;
-    let nodal_rotary_inertia = nodal_mass * section.thickness_m.powi(2) / 12.0;
-    let mut element_mass = [0.0; SHELL_ELEMENT_DOF_COUNT];
-    for node_offset in [0usize, 6, 12] {
-        for component in 0..3 {
-            element_mass[node_offset + component] = nodal_mass;
-        }
-        for component in 3..6 {
-            element_mass[node_offset + component] = nodal_rotary_inertia;
-        }
-    }
-    element_mass
-}
-
-fn add_rayleigh_element_damping<const D: usize>(
+fn add_combined_element_damping<const D: usize>(
     damping: &mut RealSparseAssembler,
     element_dofs: &[usize; D],
+    mass_damping: &[[f64; D]; D],
     stiffness: &[[f64; D]; D],
-    lumped_mass: &[f64; D],
-    law: runmat_analysis_core::MechanicalDampingModel,
-) -> bool {
-    let runmat_analysis_core::MechanicalDampingModel::Rayleigh {
-        mass_coefficient,
-        stiffness_coefficient,
-    } = law
-    else {
-        return false;
-    };
+    stiffness_scale: f64,
+) {
     for (local_row, global_row) in element_dofs.iter().copied().enumerate() {
         for (local_column, global_column) in element_dofs.iter().copied().enumerate() {
-            let mass = if local_row == local_column {
-                lumped_mass[local_row]
-            } else {
-                0.0
-            };
             damping.add(
                 global_row,
                 global_column,
-                mass_coefficient.per_second * mass
-                    + stiffness_coefficient.seconds * stiffness[local_row][local_column],
+                mass_damping[local_row][local_column]
+                    + stiffness_scale * stiffness[local_row][local_column],
             );
         }
     }
-    true
 }
 
 fn finish(assembler: RealSparseAssembler) -> Result<RealSparseMatrix, StructuralAssemblyError> {

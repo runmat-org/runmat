@@ -136,14 +136,18 @@ pub(super) fn lower(
             .find(|property| property_kind(property.kind) == kind)
             .map(|property| property.value.value_si)
     };
-    let mechanical = match (
+    let elasticity = match (
         value(ImportedCadMaterialPropertyKind::YoungsModulus),
         value(ImportedCadMaterialPropertyKind::PoissonRatio),
     ) {
-        (Some(youngs_modulus_pa), Some(poisson_ratio)) => Some(MaterialMechanicalModel {
-            youngs_modulus_pa,
-            poisson_ratio,
-        }),
+        (Some(youngs_modulus_pa), Some(poisson_ratio)) => Some(
+            runmat_analysis_core::MaterialElasticityModel::IsotropicLinear(
+                MaterialMechanicalModel {
+                    youngs_modulus_pa,
+                    poisson_ratio,
+                },
+            ),
+        ),
         (None, None) => None,
         _ => {
             error(
@@ -169,7 +173,7 @@ pub(super) fn lower(
             adopted_properties: adopted.iter().map(provenance).collect(),
         }),
         mass_density_kg_per_m3: value(ImportedCadMaterialPropertyKind::MassDensity),
-        mechanical,
+        elasticity,
         damping: None,
         thermal: None,
         acoustic: None,

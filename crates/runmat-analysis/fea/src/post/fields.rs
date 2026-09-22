@@ -23,7 +23,7 @@ use crate::{
         dofs::StructuralDofKind,
         elements::{
             beam::{local_stiffness_matrix, BEAM_ELEMENT_DOF_COUNT},
-            shell::{recover_resultants as recover_shell_resultants, SHELL_ELEMENT_DOF_COUNT},
+            shell::SHELL_ELEMENT_DOF_COUNT,
         },
         AssemblySummary, BeamRecoveryElementSummary, ShellRecoveryElementSummary,
         StructuralMaterialSummary,
@@ -1067,9 +1067,8 @@ fn recover_shell_result_values(
         let q = shell_node_values(summary, solution, shell);
         let global_displacement =
             std::array::from_fn::<_, SHELL_ELEMENT_DOF_COUNT, _>(|index| q[index / 6][index % 6]);
-        let result = recover_shell_resultants(
-            shell.section,
-            shell.material,
+        let result = crate::assembly::elements::shell::recover_resultants_for_constitutive(
+            &shell.constitutive,
             shell.geometry,
             global_displacement,
         )

@@ -4,7 +4,8 @@ use runmat_analysis_core::{
     BodyForceDensity, ConformalSolidAttachment, ConnectorKind, CoordinateFrame, Direction,
     Displacement, EvidenceConfidence, ExcitationAction, ExcitationCase, ExcitationCaseActivation,
     ExcitationCaseId, ExcitationDistribution, ExcitationId, ExcitationKinematics, ExcitationTarget,
-    Force, MaterialAssignment, MaterialMechanicalModel, MaterialModel, MaterialThermalModel,
+    Force, HomogeneousShellReferenceSurface, HomogeneousShellSectionModel, MaterialAssignment,
+    MaterialElasticityModel, MaterialMechanicalModel, MaterialModel, MaterialThermalModel,
     MechanicalDampingModel, Moment, PhysicalSignal, PrescribedStructuralDofs,
     PrescribedStructuralMotion, PrescribedValue, Pressure, ProcedureStep, ProjectionRequirement,
     PropertyRegionTarget, RayleighMassCoefficient, RayleighStiffnessCoefficient, RegionTarget,
@@ -649,10 +650,12 @@ fn isotropic_material(
         name: name.to_string(),
         provenance: runmat_analysis_core::MaterialProvenance::Authored,
         mass_density_kg_per_m3: Some(mass_density_kg_per_m3),
-        mechanical: Some(MaterialMechanicalModel {
-            youngs_modulus_pa,
-            poisson_ratio,
-        }),
+        elasticity: Some(MaterialElasticityModel::IsotropicLinear(
+            MaterialMechanicalModel {
+                youngs_modulus_pa,
+                poisson_ratio,
+            },
+        )),
         damping: None,
         thermal: Some(MaterialThermalModel {
             reference_temperature_k: 293.15,
@@ -904,13 +907,14 @@ fn structural_shell_plate_moment_reference() -> AnalysisModel {
             }),
         }],
         beam_sections: Vec::new(),
-        shell_sections: vec![ShellSectionModel {
-            section_id: "panel_2mm".to_string(),
-            thickness_m: 0.002,
-            integration_points: 3,
-            shear_correction: 5.0 / 6.0,
-            drilling_stiffness_scale: 1.0e-4,
-        }],
+        shell_sections: vec![ShellSectionModel::Homogeneous(
+            HomogeneousShellSectionModel {
+                section_id: "panel_2mm".to_string(),
+                thickness_m: 0.002,
+                reference_surface: HomogeneousShellReferenceSurface::MidSurface,
+                shear_correction: 5.0 / 6.0,
+            },
+        )],
     });
     model
 }
@@ -1013,10 +1017,13 @@ fn structural_transient_tet4_reference() -> AnalysisModel {
     let mut model = cantilever_linear_static();
     model.model_id = AnalysisModelId("structural_transient_tet4_reference".into());
     model.geometry_id = "geo:structural_transient_tet4_reference".into();
-    let mechanical = model.materials[0]
-        .mechanical
+    let MaterialElasticityModel::IsotropicLinear(mechanical) = model.materials[0]
+        .elasticity
         .as_mut()
-        .expect("cantilever fixture declares linear elasticity");
+        .expect("cantilever fixture declares linear elasticity")
+    else {
+        unreachable!("cantilever fixture declares isotropic linear elasticity")
+    };
     mechanical.youngs_modulus_pa = 1.0e5;
     mechanical.poisson_ratio = 0.25;
     model.materials[0].mass_density_kg_per_m3 = Some(1_000.0);

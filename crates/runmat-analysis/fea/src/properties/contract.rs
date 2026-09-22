@@ -1,6 +1,9 @@
 use std::collections::BTreeMap;
 
-use runmat_analysis_core::{EvidenceConfidence, MaterialModel};
+use runmat_analysis_core::{
+    BeamSectionModel, EvidenceConfidence, LaminatePlyModel, LaminateShellSectionModel,
+    MaterialModel,
+};
 use runmat_execution::Digest;
 use runmat_meshing_core::StableDigest;
 use serde::{Deserialize, Serialize};
@@ -24,10 +27,22 @@ pub struct CompiledPropertyMapIdentity {
 #[serde(deny_unknown_fields)]
 pub struct CompiledPropertyAudit {
     pub element_identity: StableDigest,
-    pub assignment_index: u64,
-    pub expected_material_id: String,
-    pub assigned_material_id: String,
-    pub confidence: EvidenceConfidence,
+    pub owner: CompiledPropertyAuditOwner,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum CompiledPropertyAuditOwner {
+    MaterialAssignment {
+        assignment_index: u64,
+        expected_material_id: String,
+        assigned_material_id: String,
+        confidence: EvidenceConfidence,
+    },
+    Laminate {
+        section_id: String,
+        ordered_ply_material_ids: Vec<String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -40,10 +55,41 @@ pub struct CompiledElementMaterial {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct CompiledExplicitElementMaterial {
+pub struct CompiledBeamProperty {
     pub element_id: String,
     pub element_identity: StableDigest,
     pub material: MaterialModel,
+    pub section: BeamSectionModel,
+    pub reference_axis: [f64; 3],
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CompiledLaminatePly {
+    pub definition: LaminatePlyModel,
+    pub material: MaterialModel,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum CompiledShellPropertyOwner {
+    Homogeneous {
+        material: Box<MaterialModel>,
+        section: runmat_analysis_core::HomogeneousShellSectionModel,
+    },
+    Laminate {
+        section: LaminateShellSectionModel,
+        plies: Vec<CompiledLaminatePly>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CompiledShellProperty {
+    pub element_id: String,
+    pub element_identity: StableDigest,
+    pub reference_axis: [f64; 3],
+    pub owner: CompiledShellPropertyOwner,
 }
 
 /// Immutable material ownership after exact geometry-to-element projection.
@@ -55,9 +101,9 @@ pub struct CompiledPropertyMap {
     #[serde(with = "ordered_map_serde")]
     solid_materials: BTreeMap<StableDigest, CompiledElementMaterial>,
     #[serde(with = "ordered_map_serde")]
-    beam_materials: BTreeMap<StableDigest, CompiledExplicitElementMaterial>,
+    beam_properties: BTreeMap<StableDigest, CompiledBeamProperty>,
     #[serde(with = "ordered_map_serde")]
-    shell_materials: BTreeMap<StableDigest, CompiledExplicitElementMaterial>,
+    shell_properties: BTreeMap<StableDigest, CompiledShellProperty>,
     audit: Vec<CompiledPropertyAudit>,
 }
 
@@ -98,16 +144,16 @@ impl CompiledPropertyMap {
         identity: CompiledPropertyMapIdentity,
         audit_digest: Digest,
         solid_materials: BTreeMap<StableDigest, CompiledElementMaterial>,
-        beam_materials: BTreeMap<StableDigest, CompiledExplicitElementMaterial>,
-        shell_materials: BTreeMap<StableDigest, CompiledExplicitElementMaterial>,
+        beam_properties: BTreeMap<StableDigest, CompiledBeamProperty>,
+        shell_properties: BTreeMap<StableDigest, CompiledShellProperty>,
         audit: Vec<CompiledPropertyAudit>,
     ) -> Self {
         Self {
             identity,
             audit_digest,
             solid_materials,
-            beam_materials,
-            shell_materials,
+            beam_properties,
+            shell_properties,
             audit,
         }
     }
@@ -123,30 +169,20 @@ impl CompiledPropertyMap {
         self.solid_materials.values()
     }
 
-    pub fn beam_material(
-        &self,
-        element_identity: StableDigest,
-    ) -> Option<&CompiledExplicitElementMaterial> {
-        self.beam_materials.get(&element_identity)
+    pub fn beam_property(&self, element_identity: StableDigest) -> Option<&CompiledBeamProperty> {
+        self.beam_properties.get(&element_identity)
     }
 
-    pub fn beam_materials(
-        &self,
-    ) -> impl ExactSizeIterator<Item = &CompiledExplicitElementMaterial> + '_ {
-        self.beam_materials.values()
+    pub fn beam_properties(&self) -> impl ExactSizeIterator<Item = &CompiledBeamProperty> + '_ {
+        self.beam_properties.values()
     }
 
-    pub fn shell_material(
-        &self,
-        element_identity: StableDigest,
-    ) -> Option<&CompiledExplicitElementMaterial> {
-        self.shell_materials.get(&element_identity)
+    pub fn shell_property(&self, element_identity: StableDigest) -> Option<&CompiledShellProperty> {
+        self.shell_properties.get(&element_identity)
     }
 
-    pub fn shell_materials(
-        &self,
-    ) -> impl ExactSizeIterator<Item = &CompiledExplicitElementMaterial> + '_ {
-        self.shell_materials.values()
+    pub fn shell_properties(&self) -> impl ExactSizeIterator<Item = &CompiledShellProperty> + '_ {
+        self.shell_properties.values()
     }
 
     pub fn audit(&self) -> &[CompiledPropertyAudit] {

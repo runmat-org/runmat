@@ -155,9 +155,9 @@ pub use problem::materials::{
     ConductivityFrequencyPoint, ImportedCadEnvironmentCondition, ImportedCadMaterialAssociation,
     ImportedCadMaterialAssociationTarget, ImportedCadMaterialProperty,
     ImportedCadMaterialPropertyKind, ImportedCadMaterialProvenance, MaterialAcousticModel,
-    MaterialCapability, MaterialElectricalModel, MaterialMechanicalModel, MaterialModel,
-    MaterialPlasticModel, MaterialProvenance, MaterialThermalModel, MechanicalDampingModel,
-    MissingMaterialCapability,
+    MaterialCapability, MaterialElasticityModel, MaterialElectricalModel, MaterialMechanicalModel,
+    MaterialModel, MaterialOrthotropicLaminaModel, MaterialPlasticModel, MaterialProvenance,
+    MaterialThermalModel, MechanicalDampingModel, MissingMaterialCapability,
 };
 pub use problem::model::{
     AnalysisModel, AnalysisModelId, SolverAnalysisModel, SolverAnalysisSequence,
@@ -211,8 +211,10 @@ pub use problem::signal::{
     StandardWaveformKind, TabulatedSignal, TabulatedSignalDomain,
 };
 pub use problem::structure::{
-    BeamElementModel, BeamSectionModel, ConformalSolidAttachment, ShellElementModel,
-    ShellSectionModel, StructuralElement, StructuralElementKind, StructuralModel, StructuralNode,
+    BeamElementModel, BeamSectionModel, ConformalSolidAttachment, HomogeneousShellReferenceSurface,
+    HomogeneousShellSectionModel, LaminatePlyModel, LaminateShellSectionModel, PlyOrderDirection,
+    ShellElementModel, ShellReferenceSurface, ShellSectionModel, StructuralElement,
+    StructuralElementKind, StructuralModel, StructuralNode,
 };
 pub use problem::target::{
     EntityDimension, ExpectedTopology, RegionTarget, ResolvedTopologyTarget, TargetCardinality,
@@ -274,10 +276,12 @@ mod tests {
                 name: "Steel".to_string(),
                 provenance: MaterialProvenance::Authored,
                 mass_density_kg_per_m3: Some(7850.0),
-                mechanical: Some(MaterialMechanicalModel {
-                    youngs_modulus_pa: 200e9,
-                    poisson_ratio: 0.3,
-                }),
+                elasticity: Some(MaterialElasticityModel::IsotropicLinear(
+                    MaterialMechanicalModel {
+                        youngs_modulus_pa: 200e9,
+                        poisson_ratio: 0.3,
+                    },
+                )),
                 damping: None,
                 thermal: Some(MaterialThermalModel {
                     reference_temperature_k: 293.15,
@@ -520,13 +524,14 @@ mod tests {
                 }),
             }],
             beam_sections: Vec::new(),
-            shell_sections: vec![ShellSectionModel {
-                section_id: "panel_2mm".to_string(),
-                thickness_m: 0.002,
-                integration_points: 3,
-                shear_correction: 5.0 / 6.0,
-                drilling_stiffness_scale: 1.0e-4,
-            }],
+            shell_sections: vec![ShellSectionModel::Homogeneous(
+                HomogeneousShellSectionModel {
+                    section_id: "panel_2mm".to_string(),
+                    thickness_m: 0.002,
+                    reference_surface: HomogeneousShellReferenceSurface::MidSurface,
+                    shear_correction: 5.0 / 6.0,
+                },
+            )],
         });
 
         let json = serde_json::to_value(&model).expect("model should serialize");

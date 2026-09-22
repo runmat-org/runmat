@@ -1,20 +1,23 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 mod geometry;
+mod topology_merge;
 
 use geometry::{
     centroid, cross, edge_segments, face_triangles, least_aligned_cartesian_axis, mesh_node,
     midpoint, orientation_axis, structural_node, subtract, FormulationOrientationRole,
 };
 use runmat_analysis_core::{
-    AnalysisModel, AuthoredOrientationDefinition, AuthoredPropertyDefinitionRef,
-    AuthoredSectionDefinition, BeamElementModel, BeamSectionModel, PropertyRegionScope,
+    AnalysisModel, AuthoredLayupDefinition, AuthoredMaterialSource, AuthoredOrientationDefinition,
+    AuthoredPropertyDefinitionRef, AuthoredSectionDefinition, BeamElementModel, BeamSectionModel,
+    HomogeneousShellSectionModel, LaminatePlyModel, LaminateShellSectionModel, PropertyRegionScope,
     PropertyRegionTarget, RealizedAnalysisModel, RealizedModelProperties,
     RealizedPropertyAssignment, ShellElementModel, ShellSectionModel, StructuralElement,
     StructuralElementKind, StructuralModel,
 };
 use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
 use thiserror::Error;
+use topology_merge::merge_structural_topology;
 
 #[derive(Debug, Clone, PartialEq, Error)]
 pub enum PropertyRealizationError {
@@ -30,16 +33,26 @@ pub enum PropertyRealizationError {
     SectionCoverage { entity: String, count: usize },
     #[error("mesh entity `{entity}` has {count} orientation assignments")]
     OrientationOverlap { entity: String, count: usize },
+    #[error(
+        "mesh entity `{entity}` assigns orientation `{assigned}` but layup requires `{required}`"
+    )]
+    LaminateOrientationConflict {
+        entity: String,
+        assigned: String,
+        required: String,
+    },
     #[error("mesh entity `{0}` has a degenerate formulation orientation")]
     DegenerateOrientation(String),
     #[error("solver mesh node id {0} exceeds the structural topology id range")]
     NodeIdOverflow(u64),
     #[error("{entity} has unsupported {node_count}-node boundary topology")]
     UnsupportedBoundaryTopology { entity: String, node_count: usize },
-    #[error("layup `{0}` requires the laminate shell formulation")]
-    LaminateUnavailable(String),
-    #[error("shell section `{0}` uses an offset not supported by the current shell formulation")]
-    ShellOffsetUnavailable(String),
+    #[error(
+        "boundary face `{entity}` has {count} competing homogeneous-section or laminate owners"
+    )]
+    ShellPropertyCoverage { entity: String, count: usize },
+    #[error("layup `{layup}` references unresolved material input in ply `{ply}`")]
+    UnboundPlyMaterial { layup: String, ply: String },
 }
 
 pub fn realize_formulation_properties(
@@ -66,16 +79,6 @@ fn realize_structural_topology(
     properties: &RealizedModelProperties,
     mesh: &SolverMeshArtifact,
 ) -> Result<StructuralModel, PropertyRealizationError> {
-    if let Some(layup) = properties.assignments.iter().find_map(|assignment| {
-        let RealizedPropertyAssignment::Layup { layup, .. } = assignment else {
-            return None;
-        };
-        Some(layup)
-    }) {
-        return Err(PropertyRealizationError::LaminateUnavailable(display_id(
-            layup,
-        )));
-    }
     let sections = inventory(
         properties
             .sections
@@ -85,6 +88,12 @@ fn realize_structural_topology(
     let orientations = inventory(
         properties
             .orientations
+            .iter()
+            .map(|value| (&value.definition_id, &value.definition)),
+    )?;
+    let layups = inventory(
+        properties
+            .layups
             .iter()
             .map(|value| (&value.definition_id, &value.definition)),
     )?;
@@ -107,12 +116,22 @@ fn realize_structural_topology(
             _ => None,
         })
         .collect::<Vec<_>>();
+    let layup_assignments = properties
+        .assignments
+        .iter()
+        .filter_map(|assignment| match assignment {
+            RealizedPropertyAssignment::Layup { layup, target } => Some((layup, target)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
 
     let mut topology = StructuralModel::default();
     let mut node_ids = BTreeMap::new();
     let mut used_sections = BTreeSet::new();
+    let mut used_layups = BTreeSet::new();
     let mut matched_section_assignments = BTreeSet::new();
     let mut matched_orientation_assignments = BTreeSet::new();
+    let mut matched_layup_assignments = BTreeSet::new();
 
     for edge in &mesh.topology.boundary_edges {
         let matching = section_assignments
@@ -183,7 +202,7 @@ fn realize_structural_topology(
     }
 
     for face in &mesh.topology.boundary_faces {
-        let matching = section_assignments
+        let matching_sections = section_assignments
             .iter()
             .enumerate()
             .filter(|(_, (_, target))| {
@@ -191,38 +210,77 @@ fn realize_structural_topology(
                     && target_matches(target, &face.provenance)
             })
             .collect::<Vec<_>>();
-        if matching.is_empty() {
+        let matching_layups = layup_assignments
+            .iter()
+            .enumerate()
+            .filter(|(_, (_, target))| target_matches(target, &face.provenance))
+            .collect::<Vec<_>>();
+        let owner_count = matching_sections.len() + matching_layups.len();
+        if owner_count == 0 {
             continue;
         }
-        if matching.len() != 1 {
-            return Err(PropertyRealizationError::SectionCoverage {
+        if owner_count != 1 {
+            return Err(PropertyRealizationError::ShellPropertyCoverage {
                 entity: format!("boundary face {}", face.face_id),
-                count: matching.len(),
+                count: owner_count,
             });
         }
-        let (assignment_index, (section_id, target)) = matching[0];
-        let definition = sections
-            .get(*section_id)
-            .ok_or_else(|| PropertyRealizationError::MissingDefinition(display_id(section_id)))?;
-        let AuthoredSectionDefinition::HomogeneousShell(section) = definition else {
-            return Err(PropertyRealizationError::SectionCoverage {
-                entity: format!("boundary face {}", face.face_id),
-                count: 0,
-            });
-        };
-        if section.offset_fraction != 0.0 {
-            return Err(PropertyRealizationError::ShellOffsetUnavailable(
-                display_id(section_id),
-            ));
-        }
-        let orientation = matching_orientation(
-            &orientation_assignments,
-            &orientations,
-            target,
-            &face.provenance,
-            &mut matched_orientation_assignments,
-            format!("boundary face {}", face.face_id),
-        )?;
+        let (section_id, region_id, orientation) =
+            if let Some((assignment_index, (section_id, target))) =
+                matching_sections.first().copied()
+            {
+                let definition = sections.get(section_id).ok_or_else(|| {
+                    PropertyRealizationError::MissingDefinition(display_id(section_id))
+                })?;
+                let AuthoredSectionDefinition::HomogeneousShell(_) = definition else {
+                    return Err(PropertyRealizationError::SectionCoverage {
+                        entity: format!("boundary face {}", face.face_id),
+                        count: 0,
+                    });
+                };
+                let orientation = matching_orientation(
+                    &orientation_assignments,
+                    &orientations,
+                    target,
+                    &face.provenance,
+                    &mut matched_orientation_assignments,
+                    format!("boundary face {}", face.face_id),
+                )?;
+                matched_section_assignments.insert(assignment_index);
+                used_sections.insert((*section_id).clone());
+                (
+                    display_id(section_id),
+                    formulation_region_id(target),
+                    orientation,
+                )
+            } else {
+                let (assignment_index, (layup_id, target)) = matching_layups[0];
+                let layup = layups.get(layup_id).ok_or_else(|| {
+                    PropertyRealizationError::MissingDefinition(display_id(layup_id))
+                })?;
+                let orientation = orientations
+                    .get(&layup.reference_orientation)
+                    .copied()
+                    .ok_or_else(|| {
+                        PropertyRealizationError::MissingDefinition(display_id(
+                            &layup.reference_orientation,
+                        ))
+                    })?;
+                mark_matching_layup_orientation(
+                    &orientation_assignments,
+                    layup,
+                    &face.provenance,
+                    &mut matched_orientation_assignments,
+                    format!("boundary face {}", face.face_id),
+                )?;
+                matched_layup_assignments.insert(assignment_index);
+                used_layups.insert((*layup_id).clone());
+                (
+                    display_id(layup_id),
+                    formulation_region_id(target),
+                    Some(orientation),
+                )
+            };
         let entity_label = format!("boundary face {}", face.face_id);
         for (triangle_index, triangle) in face_triangles(&face.node_ids, &entity_label)?
             .into_iter()
@@ -252,33 +310,41 @@ fn realize_structural_topology(
             )?;
             topology.elements.push(StructuralElement {
                 element_id: format!("mesh-face:{}:{triangle_index}", face.face_id),
-                region_id: formulation_region_id(target),
+                region_id: region_id.clone(),
                 kind: StructuralElementKind::Shell(ShellElementModel {
                     node_ids,
-                    section_id: display_id(section_id),
+                    section_id: section_id.clone(),
                     reference_axis,
                 }),
             });
         }
-        matched_section_assignments.insert(assignment_index);
-        used_sections.insert((*section_id).clone());
     }
 
     reject_unmatched(&section_assignments, &matched_section_assignments)?;
+    reject_unmatched(&layup_assignments, &matched_layup_assignments)?;
     reject_unmatched(&orientation_assignments, &matched_orientation_assignments)?;
     for id in used_sections {
         match sections[&id] {
             AuthoredSectionDefinition::HomogeneousShell(value) => {
-                topology.shell_sections.push(ShellSectionModel {
-                    section_id: display_id(&id),
-                    thickness_m: value.thickness_m,
-                    integration_points: value.integration_points,
-                    shear_correction: value.shear_correction,
-                    drilling_stiffness_scale: value.drilling_stiffness_scale,
-                });
+                topology.shell_sections.push(ShellSectionModel::Homogeneous(
+                    HomogeneousShellSectionModel {
+                        section_id: display_id(&id),
+                        thickness_m: value.thickness_m,
+                        reference_surface: value.reference_surface,
+                        shear_correction: value.shear_correction,
+                    },
+                ));
             }
             value => topology.beam_sections.push(beam_section(&id, value)),
         }
+    }
+    for id in used_layups {
+        topology
+            .shell_sections
+            .push(ShellSectionModel::Laminate(laminate_section(
+                &id,
+                layups[&id],
+            )?));
     }
     Ok(topology)
 }
@@ -355,6 +421,40 @@ fn matching_orientation<'a>(
         .copied()
         .map(Some)
         .ok_or_else(|| PropertyRealizationError::MissingDefinition(display_id(id)))
+}
+
+fn mark_matching_layup_orientation(
+    assignments: &[(&AuthoredPropertyDefinitionRef, &PropertyRegionTarget)],
+    layup: &AuthoredLayupDefinition,
+    provenance: &[runmat_geometry_core::PersistentEntityId],
+    matched: &mut BTreeSet<usize>,
+    entity: String,
+) -> Result<(), PropertyRealizationError> {
+    let matches = assignments
+        .iter()
+        .enumerate()
+        .filter(|(_, (_, target))| {
+            matches!(target, PropertyRegionTarget::Shell(_)) && target_matches(target, provenance)
+        })
+        .collect::<Vec<_>>();
+    if matches.len() > 1 {
+        return Err(PropertyRealizationError::OrientationOverlap {
+            entity,
+            count: matches.len(),
+        });
+    }
+    let Some((index, (assigned, _))) = matches.first().copied() else {
+        return Ok(());
+    };
+    if *assigned != &layup.reference_orientation {
+        return Err(PropertyRealizationError::LaminateOrientationConflict {
+            entity,
+            assigned: display_id(assigned),
+            required: display_id(&layup.reference_orientation),
+        });
+    }
+    matched.insert(index);
+    Ok(())
 }
 
 fn reject_unmatched<T>(
@@ -454,24 +554,38 @@ fn beam_section(
     }
 }
 
-fn display_id(id: &AuthoredPropertyDefinitionRef) -> String {
-    format!("{}::{}::{}", id.module_path, id.model_id, id.property_id)
+fn laminate_section(
+    id: &AuthoredPropertyDefinitionRef,
+    value: &AuthoredLayupDefinition,
+) -> Result<LaminateShellSectionModel, PropertyRealizationError> {
+    let plies = value
+        .plies
+        .iter()
+        .map(|ply| {
+            let AuthoredMaterialSource::Declaration(material) = &ply.material else {
+                return Err(PropertyRealizationError::UnboundPlyMaterial {
+                    layup: display_id(id),
+                    ply: ply.ply_id.clone(),
+                });
+            };
+            Ok(LaminatePlyModel {
+                ply_id: ply.ply_id.clone(),
+                material_id: material.qualified_id(),
+                thickness_m: ply.thickness_m,
+                angle_rad: ply.angle_rad,
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(LaminateShellSectionModel {
+        section_id: display_id(id),
+        reference_orientation_id: display_id(&value.reference_orientation),
+        ply_order: value.ply_order,
+        reference_surface: value.reference_surface,
+        plies,
+        shear_correction: value.shear_correction,
+    })
 }
 
-fn merge_structural_topology(
-    target: &mut StructuralModel,
-    generated: StructuralModel,
-) -> Result<(), PropertyRealizationError> {
-    if !target.elements.is_empty()
-        || !target.nodes.is_empty()
-        || !target.beam_sections.is_empty()
-        || !target.shell_sections.is_empty()
-    {
-        return Err(PropertyRealizationError::InvalidMesh(
-            "authored explicit topology cannot be combined with geometry-derived property topology"
-                .into(),
-        ));
-    }
-    *target = generated;
-    Ok(())
+fn display_id(id: &AuthoredPropertyDefinitionRef) -> String {
+    format!("{}::{}::{}", id.module_path, id.model_id, id.property_id)
 }

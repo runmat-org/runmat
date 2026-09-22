@@ -121,15 +121,15 @@ fn compiled_map_uses_bound_entity_sets_instead_of_logical_region_names() {
 fn compiled_map_projects_explicit_beam_and_shell_domains_without_cross_role_fallback() {
     let beam_model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
     let beam = compile_property_map(&beam_model, None).expect("compiled beam properties");
-    assert_eq!(beam.beam_materials().len(), 1);
-    assert_eq!(beam.shell_materials().len(), 0);
+    assert_eq!(beam.beam_properties().len(), 1);
+    assert_eq!(beam.shell_properties().len(), 0);
     assert!(beam.identity.mesh_digest.is_none());
     assert!(beam.identity.explicit_topology_digest.is_some());
 
     let shell_model = fixture_model(FixtureId::StructuralShellPlateMomentReference);
     let shell = compile_property_map(&shell_model, None).expect("compiled shell properties");
-    assert_eq!(shell.beam_materials().len(), 0);
-    assert_eq!(shell.shell_materials().len(), 1);
+    assert_eq!(shell.beam_properties().len(), 0);
+    assert_eq!(shell.shell_properties().len(), 1);
 
     let mut wrong_role = beam_model;
     wrong_role.material_assignments[0].target =
@@ -139,6 +139,78 @@ fn compiled_map_projects_explicit_beam_and_shell_domains_without_cross_role_fall
         Err(PropertyCompilationError::InvalidCoverage {
             role: "beam",
             assignment_count: 0,
+            ..
+        })
+    ));
+}
+
+#[test]
+fn laminate_property_identity_round_trips_and_rejects_competing_homogeneous_ownership() {
+    use runmat_analysis_core::{
+        LaminatePlyModel, LaminateShellSectionModel, PlyOrderDirection, ShellReferenceSurface,
+        ShellSectionModel,
+    };
+
+    let mut model = fixture_model(FixtureId::StructuralShellPlateMomentReference);
+    model.material_assignments.clear();
+    model
+        .structural
+        .as_mut()
+        .expect("shell fixture")
+        .shell_sections = vec![ShellSectionModel::Laminate(LaminateShellSectionModel {
+        section_id: "panel_2mm".into(),
+        reference_orientation_id: "global_x".into(),
+        ply_order: PlyOrderDirection::AlongSurfaceNormal,
+        reference_surface: ShellReferenceSurface::MidSurface,
+        plies: ["lower", "upper"]
+            .map(|ply_id| LaminatePlyModel {
+                ply_id: ply_id.into(),
+                material_id: "mat_steel".into(),
+                thickness_m: 0.001,
+                angle_rad: 0.0,
+            })
+            .to_vec(),
+        shear_correction: Some(5.0 / 6.0),
+    })];
+
+    let compiled = compile_property_map(&model, None).expect("compiled laminate property map");
+    assert_eq!(compiled.shell_properties().len(), 1);
+    assert!(matches!(
+        compiled.shell_properties().next().unwrap().owner,
+        CompiledShellPropertyOwner::Laminate { .. }
+    ));
+    assert!(matches!(
+        compiled.audit()[0].owner,
+        CompiledPropertyAuditOwner::Laminate { .. }
+    ));
+    let encoded = serde_json::to_vec(&compiled).expect("encode laminate property map");
+    let decoded: CompiledPropertyMap =
+        serde_json::from_slice(&encoded).expect("decode laminate property map");
+    assert_eq!(decoded, compiled);
+
+    let mut missing_elasticity = model.clone();
+    missing_elasticity.materials[0].elasticity = None;
+    assert!(matches!(
+        compile_property_map(&missing_elasticity, None),
+        Err(PropertyCompilationError::MissingCapability {
+            capability: runmat_analysis_core::MaterialCapability::LaminaElasticity,
+            ..
+        })
+    ));
+
+    let mut overlap = model;
+    overlap
+        .material_assignments
+        .push(runmat_analysis_core::MaterialAssignment {
+            target: runmat_analysis_core::PropertyRegionTarget::all_shells(),
+            expected_material_id: "mat_steel".into(),
+            assigned_material_id: "mat_steel".into(),
+            confidence: runmat_analysis_core::EvidenceConfidence::Verified,
+        });
+    assert!(matches!(
+        compile_property_map(&overlap, None),
+        Err(PropertyCompilationError::LaminateMaterialOverlap {
+            assignment_count: 1,
             ..
         })
     ));

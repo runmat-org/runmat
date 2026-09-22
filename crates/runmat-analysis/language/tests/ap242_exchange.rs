@@ -198,7 +198,7 @@ material cad_steel from geometry.part.cad_material("material-steel") {
     let material = program.materials.values().next().unwrap();
     assert_eq!(material.mass_density_kg_per_m3, Some(7850.0));
     assert_eq!(
-        material.mechanical.as_ref().unwrap().youngs_modulus_pa,
+        material.require_mechanical().unwrap().youngs_modulus_pa,
         200e9
     );
     let runmat_analysis_core::MaterialProvenance::ImportedCad(provenance) = &material.provenance

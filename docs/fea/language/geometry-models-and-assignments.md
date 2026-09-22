@@ -117,6 +117,59 @@ exact geometry revision, topology digest, and solver elements. Missing coverage,
 owners, an incompatible material capability, a stale topology reference, or a target with the
 wrong role fails before a solver chooses coefficients.
 
+### Shell section and laminate ownership
+
+A homogeneous shell face receives three independent assignments: material, section, and
+orientation. A composite face receives a layup and orientation; each ply names its own material,
+so a second face-level material assignment would be competing constitutive ownership.
+
+```fea
+material carbon_epoxy {
+    mass_density = 1600 kg/m^3
+    orthotropic_lamina {
+        longitudinal_modulus = 135 GPa
+        transverse_modulus = 10 GPa
+        major_poisson_ratio = 0.30
+        in_plane_shear_modulus = 5 GPa
+        transverse_shear_modulus_13 = 5 GPa
+        transverse_shear_modulus_23 = 3.8 GPa
+    }
+}
+
+model panel {
+    orientation fibers {
+        cartesian {
+            origin = [0, 0, 0] m
+            x_axis = [1, 0, 0]
+            y_axis = [0, 1, 0]
+        }
+    }
+
+    layup skin {
+        reference_orientation = orientation.fibers
+        ply_order = along_surface_normal
+        reference_surface = mid_surface
+        ply lower {
+            material = material.carbon_epoxy
+            thickness = 0.2 mm
+            angle = 0 deg
+        }
+        ply upper {
+            material = material.carbon_epoxy
+            thickness = 0.2 mm
+            angle = 90 deg
+        }
+    }
+
+    assign layup.skin to geometry.bracket.region.skin
+    assign orientation.fibers to geometry.bracket.region.skin
+}
+```
+
+Ply order, ply angle, and reference surface are typed declarations, not signed numeric
+conventions. See [Models](../models#composite-layups) for the complete surface choices, laminate
+equations, mass and damping treatment, and recovery behavior.
+
 ## Loads, constraints, and excitations
 
 Known static loads may use the direct form:

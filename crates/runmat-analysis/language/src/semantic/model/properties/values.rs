@@ -139,6 +139,32 @@ pub(in crate::semantic::model) fn required_assignment<'a>(
     value
 }
 
+pub(in crate::semantic::model) fn optional_property_assignment<'a>(
+    statements: &'a [CheckedFeaStatement],
+    name: &str,
+) -> Option<&'a CheckedExpression> {
+    statements.iter().find_map(|statement| {
+        let CheckedFeaStatementKind::Assignment { target, value, .. } = &statement.kind else {
+            return None;
+        };
+        (target.as_slice() == [name]).then_some(value)
+    })
+}
+
+pub(in crate::semantic::model) fn required_enum<'a>(
+    declaration: &CheckedFeaDeclaration,
+    statements: &'a [CheckedFeaStatement],
+    name: &str,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Option<&'a str> {
+    let value = required_assignment(declaration, statements, name, diagnostics)?;
+    let CheckedExpressionKind::Enum(value) = &value.kind else {
+        invalid(declaration, value, name, "enum value", diagnostics);
+        return None;
+    };
+    Some(value)
+}
+
 pub(in crate::semantic::model) fn required_quantity(
     declaration: &CheckedFeaDeclaration,
     statements: &[CheckedFeaStatement],
@@ -161,6 +187,47 @@ pub(in crate::semantic::model) fn required_quantity(
         invalid(declaration, value, name, "constant quantity", diagnostics);
         None
     })
+}
+
+pub(in crate::semantic::model) fn optional_property_quantity(
+    declaration: &CheckedFeaDeclaration,
+    statements: &[CheckedFeaStatement],
+    name: &str,
+    dimension: PhysicalDimension,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Option<Option<f64>> {
+    let Some(value) = optional_property_assignment(statements, name) else {
+        return Some(None);
+    };
+    if value.value_type != FeaType::Quantity(dimension) {
+        invalid(
+            declaration,
+            value,
+            name,
+            "quantity of the required dimension",
+            diagnostics,
+        );
+        return None;
+    }
+    scalar(value).map(Some).or_else(|| {
+        invalid(declaration, value, name, "constant quantity", diagnostics);
+        None
+    })
+}
+
+pub(in crate::semantic::model) fn optional_property_scalar(
+    declaration: &CheckedFeaDeclaration,
+    statements: &[CheckedFeaStatement],
+    name: &str,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Option<Option<f64>> {
+    optional_property_quantity(
+        declaration,
+        statements,
+        name,
+        PhysicalDimension::DIMENSIONLESS,
+        diagnostics,
+    )
 }
 
 pub(in crate::semantic::model) fn required_length(
@@ -211,46 +278,6 @@ pub(in crate::semantic::model) fn required_scalar(
         return None;
     }
     scalar(value)
-}
-
-pub(in crate::semantic::model) fn required_u32(
-    declaration: &CheckedFeaDeclaration,
-    statements: &[CheckedFeaStatement],
-    name: &str,
-    diagnostics: &mut Vec<FeaDiagnostic>,
-) -> Option<u32> {
-    let value = required_assignment(declaration, statements, name, diagnostics)?;
-    let CheckedExpressionKind::Number(source) = &value.kind else {
-        invalid(declaration, value, name, "positive integer", diagnostics);
-        return None;
-    };
-    source.parse().ok().or_else(|| {
-        invalid(
-            declaration,
-            value,
-            name,
-            "32-bit positive integer",
-            diagnostics,
-        );
-        None
-    })
-}
-
-pub(in crate::semantic::model) fn required_i8(
-    declaration: &CheckedFeaDeclaration,
-    statements: &[CheckedFeaStatement],
-    name: &str,
-    diagnostics: &mut Vec<FeaDiagnostic>,
-) -> Option<i8> {
-    let value = required_assignment(declaration, statements, name, diagnostics)?;
-    scalar(value).and_then(|scalar| {
-        if scalar.fract() == 0.0 && scalar >= i8::MIN as f64 && scalar <= i8::MAX as f64 {
-            Some(scalar as i8)
-        } else {
-            invalid(declaration, value, name, "small integer", diagnostics);
-            None
-        }
-    })
 }
 
 pub(in crate::semantic::model) fn required_vector(

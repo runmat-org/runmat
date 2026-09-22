@@ -1,8 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_analysis_core::{
-    AnalysisModel, MaterialAssignment, MaterialModel, PropertyRegionScope, PropertyRegionTarget,
-    StructuralElementKind,
+    AnalysisModel, MaterialAssignment, MaterialCapability, MaterialModel, PropertyRegionScope,
+    PropertyRegionTarget, ShellSectionModel, StructuralElementKind,
 };
 use runmat_canonical_codec::{encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
@@ -15,8 +15,9 @@ use thiserror::Error;
 use crate::physics::structural::topology::{explicit_element_identity, explicit_topology_digest};
 
 use super::{
-    CompiledElementMaterial, CompiledExplicitElementMaterial, CompiledPropertyAudit,
-    CompiledPropertyMap, CompiledPropertyMapIdentity,
+    CompiledBeamProperty, CompiledElementMaterial, CompiledLaminatePly, CompiledPropertyAudit,
+    CompiledPropertyAuditOwner, CompiledPropertyMap, CompiledPropertyMapIdentity,
+    CompiledShellProperty, CompiledShellPropertyOwner,
 };
 
 const SEMANTIC_PREFIX: &[u8] = b"runmat-fea-compiled-properties/v1\0";
@@ -56,6 +57,31 @@ pub enum PropertyCompilationError {
     },
     #[error("explicit structural topology is invalid: {0}")]
     InvalidExplicitTopology(String),
+    #[error(
+        "{role} element `{element_id}` references missing or duplicate section `{section_id}`"
+    )]
+    InvalidSection {
+        role: &'static str,
+        element_id: String,
+        section_id: String,
+    },
+    #[error("laminate section `{section_id}` references absent ply material `{material_id}`")]
+    UnknownPlyMaterial {
+        section_id: String,
+        material_id: String,
+    },
+    #[error("laminate shell element `{element_id}` must not also have a homogeneous material assignment; found {assignment_count}")]
+    LaminateMaterialOverlap {
+        element_id: String,
+        assignment_count: usize,
+    },
+    #[error("{role} element `{element_id}` uses material `{material_id}` without required `{capability:?}` capability")]
+    MissingCapability {
+        role: &'static str,
+        element_id: String,
+        material_id: String,
+        capability: MaterialCapability,
+    },
     #[error("compiled property identity encoding failed: {0}")]
     Identity(String),
 }
@@ -67,20 +93,13 @@ struct SemanticContract<'a> {
     mesh_digest: Option<StableDigest>,
     explicit_topology_digest: Option<Digest>,
     solids: Vec<SolidSemanticElement<'a>>,
-    beams: Vec<ExplicitSemanticElement<'a>>,
-    shells: Vec<ExplicitSemanticElement<'a>>,
+    beams: Vec<&'a CompiledBeamProperty>,
+    shells: Vec<&'a CompiledShellProperty>,
 }
 
 #[derive(Serialize)]
 struct SolidSemanticElement<'a> {
     element_id: u64,
-    element_identity: StableDigest,
-    material: &'a MaterialModel,
-}
-
-#[derive(Serialize)]
-struct ExplicitSemanticElement<'a> {
-    element_id: &'a str,
     element_identity: StableDigest,
     material: &'a MaterialModel,
 }
@@ -116,7 +135,7 @@ pub fn compile_property_map(
     } else {
         BTreeMap::new()
     };
-    let (explicit_topology_digest, beam_materials, shell_materials) =
+    let (explicit_topology_digest, beam_properties, shell_properties) =
         compile_explicit(model, &materials, &mut audit)?;
 
     let semantic = SemanticContract {
@@ -132,22 +151,8 @@ pub fn compile_property_map(
                 material: &entry.material,
             })
             .collect(),
-        beams: beam_materials
-            .values()
-            .map(|entry| ExplicitSemanticElement {
-                element_id: &entry.element_id,
-                element_identity: entry.element_identity,
-                material: &entry.material,
-            })
-            .collect(),
-        shells: shell_materials
-            .values()
-            .map(|entry| ExplicitSemanticElement {
-                element_id: &entry.element_id,
-                element_identity: entry.element_identity,
-                material: &entry.material,
-            })
-            .collect(),
+        beams: beam_properties.values().collect(),
+        shells: shell_properties.values().collect(),
     };
     let semantic_digest = encode_contract(
         SEMANTIC_PREFIX,
@@ -175,8 +180,8 @@ pub fn compile_property_map(
         },
         audit_digest,
         solid_materials,
-        beam_materials,
-        shell_materials,
+        beam_properties,
+        shell_properties,
         audit,
     ))
 }
@@ -224,8 +229,8 @@ fn compile_solids(
 
 type ExplicitMaps = (
     Option<Digest>,
-    BTreeMap<StableDigest, CompiledExplicitElementMaterial>,
-    BTreeMap<StableDigest, CompiledExplicitElementMaterial>,
+    BTreeMap<StableDigest, CompiledBeamProperty>,
+    BTreeMap<StableDigest, CompiledShellProperty>,
 );
 
 fn compile_explicit(
@@ -246,31 +251,10 @@ fn compile_explicit(
     })?;
     let mut matched_beams = BTreeSet::new();
     let mut matched_shells = BTreeSet::new();
-    let mut beam_materials = BTreeMap::new();
-    let mut shell_materials = BTreeMap::new();
+    let mut beam_properties = BTreeMap::new();
+    let mut shell_properties = BTreeMap::new();
 
     for element in &structural.elements {
-        let (role, assignments, matched, output) = match &element.kind {
-            StructuralElementKind::Beam(_) => {
-                ("beam", &beams, &mut matched_beams, &mut beam_materials)
-            }
-            StructuralElementKind::Shell(_) => {
-                ("shell", &shells, &mut matched_shells, &mut shell_materials)
-            }
-        };
-        let matching = assignments
-            .iter()
-            .filter(|(_, assignment, _)| {
-                explicit_scope_matches(assignment.target.scope(), &element.region_id)
-            })
-            .collect::<Vec<_>>();
-        let (assignment_index, assignment, material) = require_one(
-            role,
-            element.element_id.clone(),
-            &element.region_id,
-            matching,
-        )?;
-        matched.insert(*assignment_index);
         let identity = explicit_element_identity(
             topology_digest,
             &element.element_id,
@@ -278,19 +262,185 @@ fn compile_explicit(
             &element.kind,
         )
         .map_err(|error| PropertyCompilationError::InvalidExplicitTopology(error.to_string()))?;
-        output.insert(
-            identity,
-            CompiledExplicitElementMaterial {
-                element_id: element.element_id.clone(),
-                element_identity: identity,
-                material: (*material).clone(),
-            },
-        );
-        audit.push(audit_entry(identity, *assignment_index, assignment)?);
+        match &element.kind {
+            StructuralElementKind::Beam(beam) => {
+                let matching = beams
+                    .iter()
+                    .filter(|(_, assignment, _)| {
+                        explicit_scope_matches(assignment.target.scope(), &element.region_id)
+                    })
+                    .collect::<Vec<_>>();
+                let (assignment_index, assignment, material) = require_one(
+                    "beam",
+                    element.element_id.clone(),
+                    &element.region_id,
+                    matching,
+                )?;
+                require_capabilities(
+                    "beam",
+                    &element.element_id,
+                    material,
+                    &[
+                        MaterialCapability::IsotropicLinearElasticity,
+                        MaterialCapability::MassDensity,
+                    ],
+                )?;
+                let sections = structural
+                    .beam_sections
+                    .iter()
+                    .filter(|section| section.section_id == beam.section_id)
+                    .collect::<Vec<_>>();
+                let [section] = sections.as_slice() else {
+                    return Err(PropertyCompilationError::InvalidSection {
+                        role: "beam",
+                        element_id: element.element_id.clone(),
+                        section_id: beam.section_id.clone(),
+                    });
+                };
+                matched_beams.insert(*assignment_index);
+                beam_properties.insert(
+                    identity,
+                    CompiledBeamProperty {
+                        element_id: element.element_id.clone(),
+                        element_identity: identity,
+                        material: (*material).clone(),
+                        section: (*section).clone(),
+                        reference_axis: beam.reference_axis,
+                    },
+                );
+                audit.push(audit_entry(identity, *assignment_index, assignment)?);
+            }
+            StructuralElementKind::Shell(shell) => {
+                let sections = structural
+                    .shell_sections
+                    .iter()
+                    .filter(|section| section.section_id() == shell.section_id)
+                    .collect::<Vec<_>>();
+                let [section] = sections.as_slice() else {
+                    return Err(PropertyCompilationError::InvalidSection {
+                        role: "shell",
+                        element_id: element.element_id.clone(),
+                        section_id: shell.section_id.clone(),
+                    });
+                };
+                let matching = shells
+                    .iter()
+                    .filter(|(_, assignment, _)| {
+                        explicit_scope_matches(assignment.target.scope(), &element.region_id)
+                    })
+                    .collect::<Vec<_>>();
+                let owner = match section {
+                    ShellSectionModel::Homogeneous(section) => {
+                        let (assignment_index, assignment, material) = require_one(
+                            "shell",
+                            element.element_id.clone(),
+                            &element.region_id,
+                            matching,
+                        )?;
+                        require_capabilities(
+                            "homogeneous shell",
+                            &element.element_id,
+                            material,
+                            &[
+                                MaterialCapability::IsotropicLinearElasticity,
+                                MaterialCapability::MassDensity,
+                            ],
+                        )?;
+                        matched_shells.insert(*assignment_index);
+                        audit.push(audit_entry(identity, *assignment_index, assignment)?);
+                        CompiledShellPropertyOwner::Homogeneous {
+                            material: Box::new((*material).clone()),
+                            section: section.clone(),
+                        }
+                    }
+                    ShellSectionModel::Laminate(section) => {
+                        if !matching.is_empty() {
+                            return Err(PropertyCompilationError::LaminateMaterialOverlap {
+                                element_id: element.element_id.clone(),
+                                assignment_count: matching.len(),
+                            });
+                        }
+                        let plies = section
+                            .plies
+                            .iter()
+                            .map(|definition| {
+                                let material = materials
+                                    .get(definition.material_id.as_str())
+                                    .copied()
+                                    .ok_or_else(|| {
+                                        PropertyCompilationError::UnknownPlyMaterial {
+                                            section_id: section.section_id.clone(),
+                                            material_id: definition.material_id.clone(),
+                                        }
+                                    })?;
+                                require_capabilities(
+                                    "laminate ply",
+                                    &element.element_id,
+                                    material,
+                                    &[
+                                        MaterialCapability::LaminaElasticity,
+                                        MaterialCapability::MassDensity,
+                                    ],
+                                )?;
+                                Ok(CompiledLaminatePly {
+                                    definition: definition.clone(),
+                                    material: material.clone(),
+                                })
+                            })
+                            .collect::<Result<Vec<_>, _>>()?;
+                        audit.push(CompiledPropertyAudit {
+                            element_identity: identity,
+                            owner: CompiledPropertyAuditOwner::Laminate {
+                                section_id: section.section_id.clone(),
+                                ordered_ply_material_ids: section
+                                    .plies
+                                    .iter()
+                                    .map(|ply| ply.material_id.clone())
+                                    .collect(),
+                            },
+                        });
+                        CompiledShellPropertyOwner::Laminate {
+                            section: section.clone(),
+                            plies,
+                        }
+                    }
+                };
+                shell_properties.insert(
+                    identity,
+                    CompiledShellProperty {
+                        element_id: element.element_id.clone(),
+                        element_identity: identity,
+                        reference_axis: shell.reference_axis,
+                        owner,
+                    },
+                );
+            }
+        }
     }
     reject_unmatched("beam", &beams, &matched_beams)?;
     reject_unmatched("shell", &shells, &matched_shells)?;
-    Ok((Some(topology_digest), beam_materials, shell_materials))
+    Ok((Some(topology_digest), beam_properties, shell_properties))
+}
+
+fn require_capabilities(
+    role: &'static str,
+    element_id: &str,
+    material: &MaterialModel,
+    capabilities: &[MaterialCapability],
+) -> Result<(), PropertyCompilationError> {
+    if let Some(capability) = capabilities
+        .iter()
+        .copied()
+        .find(|capability| !material.has_capability(*capability))
+    {
+        return Err(PropertyCompilationError::MissingCapability {
+            role,
+            element_id: element_id.into(),
+            material_id: material.material_id.clone(),
+            capability,
+        });
+    }
+    Ok(())
 }
 
 fn material_inventory(
@@ -375,12 +525,14 @@ fn audit_entry(
 ) -> Result<CompiledPropertyAudit, PropertyCompilationError> {
     Ok(CompiledPropertyAudit {
         element_identity: identity,
-        assignment_index: u64::try_from(assignment_index).map_err(|_| {
-            PropertyCompilationError::Identity("assignment index exceeds u64".into())
-        })?,
-        expected_material_id: assignment.expected_material_id.clone(),
-        assigned_material_id: assignment.assigned_material_id.clone(),
-        confidence: assignment.confidence,
+        owner: CompiledPropertyAuditOwner::MaterialAssignment {
+            assignment_index: u64::try_from(assignment_index).map_err(|_| {
+                PropertyCompilationError::Identity("assignment index exceeds u64".into())
+            })?,
+            expected_material_id: assignment.expected_material_id.clone(),
+            assigned_material_id: assignment.assigned_material_id.clone(),
+            confidence: assignment.confidence,
+        },
     })
 }
 

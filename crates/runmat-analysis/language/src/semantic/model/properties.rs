@@ -8,7 +8,8 @@ use runmat_analysis_core::{
     AuthoredOrientationSource, AuthoredPly, AuthoredPropertyAssignment,
     AuthoredPropertyDefinitionRef, AuthoredSectionDefinition, AuthoredSectionSource,
     AxisOrientation, CartesianOrientation, CircularBeamSection, GeneralBeamSection,
-    HomogeneousShellSection, RectangularBeamSection, TubularBeamSection,
+    HomogeneousShellReferenceSurface, HomogeneousShellSection, PlyOrderDirection,
+    RectangularBeamSection, ShellReferenceSurface, TubularBeamSection,
 };
 use runmat_parser::fea::FeaModelDefinitionKind;
 
@@ -131,10 +132,9 @@ fn section(
         "tubular_beam" => &["outer_radius", "inner_radius"][..],
         "homogeneous_shell" => &[
             "thickness",
-            "offset_fraction",
+            "reference_surface",
+            "reference_offset",
             "shear_correction",
-            "drilling_stiffness_scale",
-            "integration_points",
         ][..],
         _ => {
             diagnostic(
@@ -192,34 +192,70 @@ fn section(
             AuthoredSectionDefinition::HomogeneousShell(HomogeneousShellSection {
                 section_id: id.into(),
                 thickness_m: required_length(declaration, body, "thickness", diagnostics)?,
-                offset_fraction: required_scalar(
-                    declaration,
-                    body,
-                    "offset_fraction",
-                    diagnostics,
-                )?,
+                reference_surface: homogeneous_reference_surface(declaration, body, diagnostics)?,
                 shear_correction: required_scalar(
                     declaration,
                     body,
                     "shear_correction",
                     diagnostics,
                 )?,
-                drilling_stiffness_scale: required_scalar(
-                    declaration,
-                    body,
-                    "drilling_stiffness_scale",
-                    diagnostics,
-                )?,
-                integration_points: required_u32(
-                    declaration,
-                    body,
-                    "integration_points",
-                    diagnostics,
-                )?,
             })
         }
         _ => return None,
     })
+}
+
+fn homogeneous_reference_surface(
+    declaration: &CheckedFeaDeclaration,
+    statements: &[CheckedFeaStatement],
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Option<HomogeneousShellReferenceSurface> {
+    let surface = match required_enum(declaration, statements, "reference_surface", diagnostics)? {
+        "mid_surface" => HomogeneousShellReferenceSurface::MidSurface,
+        "negative_normal_surface" => HomogeneousShellReferenceSurface::NegativeNormalSurface,
+        "positive_normal_surface" => HomogeneousShellReferenceSurface::PositiveNormalSurface,
+        "offset_from_mid_surface" => HomogeneousShellReferenceSurface::OffsetFromMidSurface(
+            optional_property_quantity(
+                declaration,
+                statements,
+                "reference_offset",
+                PhysicalDimension::LENGTH,
+                diagnostics,
+            )?
+            .or_else(|| {
+                diagnostic(
+                    declaration,
+                    declaration.span,
+                    "offset reference surface requires `reference_offset`",
+                    diagnostics,
+                );
+                None
+            })?,
+        ),
+        value => {
+            diagnostic(
+                declaration,
+                declaration.span,
+                format!("unsupported homogeneous shell reference surface `{value}`"),
+                diagnostics,
+            );
+            return None;
+        }
+    };
+    if !matches!(
+        surface,
+        HomogeneousShellReferenceSurface::OffsetFromMidSurface(_)
+    ) && optional_property_assignment(statements, "reference_offset").is_some()
+    {
+        diagnostic(
+            declaration,
+            declaration.span,
+            "`reference_offset` is valid only with `offset_from_mid_surface`",
+            diagnostics,
+        );
+        return None;
+    }
+    Some(surface)
 }
 
 fn orientation(
@@ -335,7 +371,67 @@ fn layup(
         declaration,
         reference_name(declaration, reference, "orientation", diagnostics)?,
     );
-    let stacking = required_i8(declaration, statements, "stacking_direction", diagnostics)?;
+    let ply_order = match required_enum(declaration, statements, "ply_order", diagnostics)? {
+        "along_surface_normal" => PlyOrderDirection::AlongSurfaceNormal,
+        "opposite_surface_normal" => PlyOrderDirection::OppositeSurfaceNormal,
+        value => {
+            diagnostic(
+                declaration,
+                declaration.span,
+                format!("unsupported ply order `{value}`"),
+                diagnostics,
+            );
+            return None;
+        }
+    };
+    let reference_surface =
+        match required_enum(declaration, statements, "reference_surface", diagnostics)? {
+            "mid_surface" => ShellReferenceSurface::MidSurface,
+            "first_ply_surface" => ShellReferenceSurface::FirstPlySurface,
+            "last_ply_surface" => ShellReferenceSurface::LastPlySurface,
+            "offset_from_mid_surface" => ShellReferenceSurface::OffsetFromMidSurface(
+                optional_property_quantity(
+                    declaration,
+                    statements,
+                    "reference_offset",
+                    PhysicalDimension::LENGTH,
+                    diagnostics,
+                )?
+                .or_else(|| {
+                    diagnostic(
+                        declaration,
+                        declaration.span,
+                        "offset reference surface requires `reference_offset`",
+                        diagnostics,
+                    );
+                    None
+                })?,
+            ),
+            value => {
+                diagnostic(
+                    declaration,
+                    declaration.span,
+                    format!("unsupported shell reference surface `{value}`"),
+                    diagnostics,
+                );
+                return None;
+            }
+        };
+    if !matches!(
+        reference_surface,
+        ShellReferenceSurface::OffsetFromMidSurface(_)
+    ) && optional_property_assignment(statements, "reference_offset").is_some()
+    {
+        diagnostic(
+            declaration,
+            declaration.span,
+            "`reference_offset` is valid only with `offset_from_mid_surface`",
+            diagnostics,
+        );
+        return None;
+    }
+    let shear_correction =
+        optional_property_scalar(declaration, statements, "shear_correction", diagnostics)?;
     let mut plies = Vec::new();
     for statement in statements {
         let CheckedFeaStatementKind::Block {
@@ -358,7 +454,7 @@ fn layup(
         validate_assignments(
             declaration,
             body,
-            &["material", "thickness", "angle", "integration_points"],
+            &["material", "thickness", "angle"],
             diagnostics,
         );
         let material = required_assignment(declaration, body, "material", diagnostics)?;
@@ -373,13 +469,14 @@ fn layup(
                 PhysicalDimension::DIMENSIONLESS,
                 diagnostics,
             )?,
-            integration_points: required_u32(declaration, body, "integration_points", diagnostics)?,
         });
     }
     Some(AuthoredLayupDefinition {
         layup_id: id.into(),
         reference_orientation,
-        stacking_direction: stacking,
+        ply_order,
+        reference_surface,
+        shear_correction,
         plies,
     })
 }
@@ -408,7 +505,11 @@ fn validate_layup_members(
                 if *relation != runmat_parser::fea::FeaAssignmentRelation::Equal
                     || !matches!(
                         name.as_str(),
-                        "reference_orientation" | "stacking_direction"
+                        "reference_orientation"
+                            | "ply_order"
+                            | "reference_surface"
+                            | "reference_offset"
+                            | "shear_correction"
                     )
                     || !assignments.insert(name)
                 {
@@ -442,7 +543,7 @@ fn validate_layup_members(
             _ => diagnostic(
                 declaration,
                 statement.span,
-                "layup accepts only its two settings and ordered ply blocks",
+                "layup accepts only its declared settings and ordered ply blocks",
                 diagnostics,
             ),
         }

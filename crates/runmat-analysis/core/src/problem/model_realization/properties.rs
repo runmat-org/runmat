@@ -1,8 +1,7 @@
 use crate::{
     AuthoredLayupDefinition, AuthoredLayupSource, AuthoredModel, AuthoredOrientationDefinition,
     AuthoredOrientationSource, AuthoredPropertyAssignment, AuthoredPropertyDefinitionRef,
-    AuthoredSectionDefinition, AuthoredSectionSource, PropertyRegionTarget, RegionTarget,
-    TargetCardinality,
+    AuthoredSectionDefinition, AuthoredSectionSource, PropertyRegionTarget,
 };
 
 use super::{targets::TargetResolver, AnalysisModelRealizationError};
@@ -46,7 +45,7 @@ pub enum RealizedPropertyAssignment {
     },
     Layup {
         layup: AuthoredPropertyDefinitionRef,
-        target: RegionTarget,
+        target: PropertyRegionTarget,
     },
     Orientation {
         orientation: AuthoredPropertyDefinitionRef,
@@ -105,7 +104,7 @@ pub(super) fn realize_model_properties(
                     let AuthoredLayupSource::Definition(layup) = layup;
                     RealizedPropertyAssignment::Layup {
                         layup: layup.clone(),
-                        target: targets.region_target(target, TargetCardinality::OneOrMore)?,
+                        target: targets.shell_property_target(target)?,
                     }
                 }
                 AuthoredPropertyAssignment::Orientation {

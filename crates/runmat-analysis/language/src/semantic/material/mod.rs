@@ -7,8 +7,9 @@ use crate::{
     FeaSymbolKind, LogicalSourcePath,
 };
 use runmat_analysis_core::{
-    validate_material_definitions, MaterialAcousticModel, MaterialElectricalModel,
-    MaterialMechanicalModel, MaterialModel, MaterialPlasticModel, MaterialThermalModel,
+    validate_material_definitions, MaterialAcousticModel, MaterialElasticityModel,
+    MaterialElectricalModel, MaterialMechanicalModel, MaterialModel,
+    MaterialOrthotropicLaminaModel, MaterialPlasticModel, MaterialThermalModel,
     MechanicalDampingModel, RayleighMassCoefficient, RayleighStiffnessCoefficient,
 };
 use std::collections::{BTreeMap, BTreeSet};
@@ -59,7 +60,7 @@ fn lower_material(
         PhysicalDimension::DENSITY,
         diagnostics,
     );
-    let mechanical = values::block(&declaration.statements, "elastic").and_then(|statements| {
+    let isotropic = values::block(&declaration.statements, "elastic").and_then(|statements| {
         Some(MaterialMechanicalModel {
             youngs_modulus_pa: values::required_quantity(
                 declaration,
@@ -76,6 +77,65 @@ fn lower_material(
             )?,
         })
     });
+    let orthotropic =
+        values::block(&declaration.statements, "orthotropic_lamina").and_then(|statements| {
+            Some(MaterialOrthotropicLaminaModel {
+                longitudinal_modulus_pa: values::required_quantity(
+                    declaration,
+                    statements,
+                    "longitudinal_modulus",
+                    PhysicalDimension::PRESSURE,
+                    diagnostics,
+                )?,
+                transverse_modulus_pa: values::required_quantity(
+                    declaration,
+                    statements,
+                    "transverse_modulus",
+                    PhysicalDimension::PRESSURE,
+                    diagnostics,
+                )?,
+                major_poisson_ratio: values::required_ratio(
+                    declaration,
+                    statements,
+                    "major_poisson_ratio",
+                    diagnostics,
+                )?,
+                in_plane_shear_modulus_pa: values::required_quantity(
+                    declaration,
+                    statements,
+                    "in_plane_shear_modulus",
+                    PhysicalDimension::PRESSURE,
+                    diagnostics,
+                )?,
+                transverse_shear_modulus_13_pa: values::required_quantity(
+                    declaration,
+                    statements,
+                    "transverse_shear_modulus_13",
+                    PhysicalDimension::PRESSURE,
+                    diagnostics,
+                )?,
+                transverse_shear_modulus_23_pa: values::required_quantity(
+                    declaration,
+                    statements,
+                    "transverse_shear_modulus_23",
+                    PhysicalDimension::PRESSURE,
+                    diagnostics,
+                )?,
+            })
+        });
+    let elasticity = match (isotropic, orthotropic) {
+        (Some(value), None) => Some(MaterialElasticityModel::IsotropicLinear(value)),
+        (None, Some(value)) => Some(MaterialElasticityModel::OrthotropicLamina(value)),
+        (None, None) => None,
+        (Some(_), Some(_)) => {
+            error(
+                declaration,
+                "material must declare at most one elasticity law",
+                diagnostics,
+            );
+            None
+        }
+    };
     let damping =
         values::block(&declaration.statements, "rayleigh_damping").and_then(|statements| {
             Some(MechanicalDampingModel::Rayleigh {
@@ -218,7 +278,7 @@ fn lower_material(
         name,
         provenance: runmat_analysis_core::MaterialProvenance::Authored,
         mass_density_kg_per_m3,
-        mechanical,
+        elasticity,
         damping,
         thermal,
         acoustic,
@@ -234,6 +294,17 @@ fn validate_authored_shape(
     const ASSIGNMENTS: &[&str] = &["name", "mass_density"];
     const BLOCKS: &[(&str, &[&str])] = &[
         ("elastic", &["youngs_modulus", "poisson_ratio"]),
+        (
+            "orthotropic_lamina",
+            &[
+                "longitudinal_modulus",
+                "transverse_modulus",
+                "major_poisson_ratio",
+                "in_plane_shear_modulus",
+                "transverse_shear_modulus_13",
+                "transverse_shear_modulus_23",
+            ],
+        ),
         (
             "rayleigh_damping",
             &["mass_coefficient", "stiffness_coefficient"],

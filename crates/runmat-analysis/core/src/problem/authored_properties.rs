@@ -5,6 +5,9 @@ use serde::{Deserialize, Serialize};
 use super::model_authoring::{
     AuthoredMaterialSource, AuthoredPropertyTarget, AuthoredRegionSource,
 };
+use super::structure::{
+    HomogeneousShellReferenceSurface, PlyOrderDirection, ShellReferenceSurface,
+};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind")]
@@ -57,10 +60,8 @@ pub struct TubularBeamSection {
 pub struct HomogeneousShellSection {
     pub section_id: String,
     pub thickness_m: f64,
-    pub offset_fraction: f64,
+    pub reference_surface: HomogeneousShellReferenceSurface,
     pub shear_correction: f64,
-    pub drilling_stiffness_scale: f64,
-    pub integration_points: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -68,7 +69,9 @@ pub struct HomogeneousShellSection {
 pub struct AuthoredLayupDefinition {
     pub layup_id: String,
     pub reference_orientation: AuthoredPropertyDefinitionRef,
-    pub stacking_direction: i8,
+    pub ply_order: PlyOrderDirection,
+    pub reference_surface: ShellReferenceSurface,
+    pub shear_correction: Option<f64>,
     pub plies: Vec<AuthoredPly>,
 }
 
@@ -79,7 +82,6 @@ pub struct AuthoredPly {
     pub material: AuthoredMaterialSource,
     pub thickness_m: f64,
     pub angle_rad: f64,
-    pub integration_points: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -190,16 +192,12 @@ impl AuthoredSectionDefinition {
             }
             Self::HomogeneousShell(value) => {
                 positive("thickness", value.thickness_m)?;
-                finite("offset fraction", value.offset_fraction)?;
-                if !(-1.0..=1.0).contains(&value.offset_fraction) {
-                    return Err(AuthoredPropertyError::InvalidShellOffset);
+                if let HomogeneousShellReferenceSurface::OffsetFromMidSurface(value) =
+                    value.reference_surface
+                {
+                    finite("shell reference-surface offset", value)?;
                 }
-                positive("shear correction", value.shear_correction)?;
-                positive("drilling stiffness scale", value.drilling_stiffness_scale)?;
-                if value.integration_points == 0 {
-                    return Err(AuthoredPropertyError::InvalidIntegrationPoints);
-                }
-                Ok(())
+                positive("shear correction", value.shear_correction)
             }
         }
     }
@@ -213,8 +211,11 @@ impl AuthoredLayupDefinition {
     pub fn validate(&self) -> Result<(), AuthoredPropertyError> {
         token("layup id", &self.layup_id)?;
         self.reference_orientation.validate()?;
-        if !matches!(self.stacking_direction, -1 | 1) {
-            return Err(AuthoredPropertyError::InvalidStackingDirection);
+        if let Some(value) = self.shear_correction {
+            positive("layup shear correction", value)?;
+        }
+        if let ShellReferenceSurface::OffsetFromMidSurface(value) = self.reference_surface {
+            finite("layup reference-surface offset", value)?;
         }
         if self.plies.is_empty() {
             return Err(AuthoredPropertyError::EmptyLayup);
@@ -227,9 +228,6 @@ impl AuthoredLayupDefinition {
             }
             positive("ply thickness", ply.thickness_m)?;
             finite("ply angle", ply.angle_rad)?;
-            if ply.integration_points == 0 {
-                return Err(AuthoredPropertyError::InvalidIntegrationPoints);
-            }
         }
         Ok(())
     }
@@ -343,12 +341,6 @@ pub enum AuthoredPropertyError {
     Negative(&'static str),
     #[error("tube inner radius must be less than its outer radius")]
     InvalidTubeRadii,
-    #[error("shell offset fraction must be in [-1, 1]")]
-    InvalidShellOffset,
-    #[error("through-thickness integration points must be positive")]
-    InvalidIntegrationPoints,
-    #[error("layup stacking direction must be -1 or 1")]
-    InvalidStackingDirection,
     #[error("layup must contain at least one ply")]
     EmptyLayup,
     #[error("layup contains duplicate ply `{0}`")]

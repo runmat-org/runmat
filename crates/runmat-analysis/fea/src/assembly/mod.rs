@@ -38,7 +38,7 @@ use self::{
     dofs::{StructuralDofKind, StructuralDofLayout, StructuralNodeDofSet},
     elements::{
         beam::{BeamElementError, BeamMaterial, BeamSection, BeamTransform12},
-        shell::{ShellElementError, ShellElementGeometry, ShellMaterial, ShellSection},
+        shell::{ShellConstitutive, ShellElementError, ShellElementGeometry},
     },
     explicit_connectors::assemble_explicit_connectors,
     explicit_elements::{
@@ -655,8 +655,7 @@ pub struct ShellRecoveryElementSummary {
     pub region_id: String,
     pub node_indices: [usize; 3],
     pub geometry: ShellElementGeometry,
-    pub section: ShellSection,
-    pub material: ShellMaterial,
+    pub constitutive: ShellConstitutive,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -902,15 +901,15 @@ fn assemble_linear_system_impl(
     let dof_count = mesh_dof_count + reference_point_count * 6;
     let avg_youngs_modulus = mean(model.materials.iter().filter_map(|material| {
         material
-            .mechanical
-            .as_ref()
+            .require_mechanical()
+            .ok()
             .map(|mechanical| mechanical.youngs_modulus_pa)
     }))
     .unwrap_or(1.0e9);
     let avg_poisson_ratio = mean(model.materials.iter().filter_map(|material| {
         material
-            .mechanical
-            .as_ref()
+            .require_mechanical()
+            .ok()
             .map(|mechanical| mechanical.poisson_ratio)
     }))
     .unwrap_or(0.3);
@@ -1576,11 +1575,11 @@ fn assemble_explicit_structural_system(
     let canonical_node_indices = (0..node_count).collect::<Vec<_>>();
     validate_explicit_topology(structural, &canonical_node_indices)?;
     let properties = crate::properties::compile_property_map(model, None)
-        .map_err(|error| StructuralAssemblyError::InvalidMaterialCoverage(error.to_string()))?;
+        .map_err(map_explicit_property_error)?;
     let ExplicitElementAssembly {
         stiffness: element_stiffness,
         damping: element_damping,
-        lumped_mass: mass_diag,
+        mass,
         beam_recovery: structural_beam_recovery,
         shell_recovery: structural_shell_recovery,
         formulations: structural_formulations,
@@ -1694,16 +1693,6 @@ fn assemble_explicit_structural_system(
         )
         .map_err(|error| StructuralAssemblyError::SparseOperator(format!("{error:?}")))?
     };
-    let mass = RealSparseMatrix::diagonal(
-        mass_diag,
-        OperatorRole::Mass,
-        MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
-    )
-    .map_err(|error| StructuralAssemblyError::SparseOperator(format!("{error:?}")))?
-    .with_contribution(ContributionProvenance {
-        domain: ContributionDomain::Structural,
-        contribution_id: ContributionId("explicit_beam_shell_mass".to_string()),
-    });
     let damping = if connector_summary.damping_count == 0 {
         element_damping
     } else {
@@ -1794,18 +1783,42 @@ fn assemble_explicit_structural_system(
     })
 }
 
+fn map_explicit_property_error(
+    error: crate::properties::PropertyCompilationError,
+) -> StructuralAssemblyError {
+    match error {
+        crate::properties::PropertyCompilationError::InvalidSection {
+            role: "beam",
+            element_id,
+            section_id,
+        } => StructuralAssemblyError::UnknownBeamSection {
+            element_id,
+            section_id,
+        },
+        crate::properties::PropertyCompilationError::InvalidSection {
+            role: "shell",
+            element_id,
+            section_id,
+        } => StructuralAssemblyError::UnknownShellSection {
+            element_id,
+            section_id,
+        },
+        error => StructuralAssemblyError::InvalidMaterialCoverage(error.to_string()),
+    }
+}
+
 fn structural_material_summary(model: &AnalysisModel) -> StructuralMaterialSummary {
     let avg_youngs_modulus = mean(model.materials.iter().filter_map(|material| {
         material
-            .mechanical
-            .as_ref()
+            .require_mechanical()
+            .ok()
             .map(|mechanical| mechanical.youngs_modulus_pa)
     }))
     .unwrap_or(1.0e9);
     let avg_poisson_ratio = mean(model.materials.iter().filter_map(|material| {
         material
-            .mechanical
-            .as_ref()
+            .require_mechanical()
+            .ok()
             .map(|mechanical| mechanical.poisson_ratio)
     }))
     .unwrap_or(0.3);
@@ -2086,7 +2099,7 @@ fn apply_thermo_material_heterogeneity(
             .materials
             .iter()
             .find(|material| material.material_id == assignment.expected_material_id)
-            .and_then(|material| material.mechanical.as_ref())
+            .and_then(|material| material.require_mechanical().ok())
             .map(|mechanical| mechanical.youngs_modulus_pa)
             .unwrap_or(1.0e9)
             .max(1.0);
@@ -2094,7 +2107,7 @@ fn apply_thermo_material_heterogeneity(
             .materials
             .iter()
             .find(|material| material.material_id == assignment.assigned_material_id)
-            .and_then(|material| material.mechanical.as_ref())
+            .and_then(|material| material.require_mechanical().ok())
             .map(|mechanical| mechanical.youngs_modulus_pa)
             .unwrap_or(expected_modulus)
             .max(1.0);
@@ -2627,11 +2640,11 @@ mod tests {
         soft_model.constraints.clear();
         let mut hard = soft_model.materials[0].clone();
         hard.material_id = "mat_hard".to_string();
-        hard.mechanical.as_mut().unwrap().youngs_modulus_pa = 200.0e9;
-        hard.mechanical.as_mut().unwrap().poisson_ratio = 0.3;
+        hard.require_mechanical_mut().unwrap().youngs_modulus_pa = 200.0e9;
+        hard.require_mechanical_mut().unwrap().poisson_ratio = 0.3;
         let mut soft = hard.clone();
         soft.material_id = "mat_soft".to_string();
-        soft.mechanical.as_mut().unwrap().youngs_modulus_pa = 20.0e9;
+        soft.require_mechanical_mut().unwrap().youngs_modulus_pa = 20.0e9;
         soft_model.materials = vec![hard.clone(), soft.clone()];
         soft_model.material_assignments = vec![runmat_analysis_core::MaterialAssignment {
             target: runmat_analysis_core::PropertyRegionTarget::solid("soft_region"),
@@ -2685,13 +2698,11 @@ mod tests {
         model.excitations.clear();
         model.constraints.clear();
         model.materials[0]
-            .mechanical
-            .as_mut()
+            .require_mechanical_mut()
             .unwrap()
             .youngs_modulus_pa = 0.5;
         model.materials[0]
-            .mechanical
-            .as_mut()
+            .require_mechanical_mut()
             .unwrap()
             .poisson_ratio = -0.25;
         model.materials[0].mass_density_kg_per_m3 = Some(0.125);
@@ -3020,8 +3031,7 @@ mod tests {
     fn explicit_beam_elements_use_their_exact_region_materials() {
         let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
         model.materials[0]
-            .mechanical
-            .as_mut()
+            .require_mechanical_mut()
             .unwrap()
             .youngs_modulus_pa = 100.0e9;
         model.materials[0].mass_density_kg_per_m3 = Some(1_000.0);
@@ -3032,8 +3042,7 @@ mod tests {
         let mut second_material = model.materials[0].clone();
         second_material.material_id = "mat_second".into();
         second_material
-            .mechanical
-            .as_mut()
+            .require_mechanical_mut()
             .unwrap()
             .youngs_modulus_pa = 200.0e9;
         second_material.mass_density_kg_per_m3 = Some(2_000.0);
@@ -3780,6 +3789,93 @@ mod tests {
         assert_eq!(summary.structural_formulations.len(), 2);
         assert!(summary.operator.nullspace_evidence().is_some());
         summary.operator.prepare_linear().unwrap();
+    }
+
+    #[test]
+    fn symmetric_orthotropic_laminate_assembles_without_homogeneous_material_fallback() {
+        use runmat_analysis_core::{
+            LaminatePlyModel, LaminateShellSectionModel, MaterialElasticityModel,
+            MaterialOrthotropicLaminaModel, PlyOrderDirection, ShellReferenceSurface,
+            ShellSectionModel,
+        };
+
+        let mut model = fixture_model(FixtureId::StructuralShellPlateMomentReference);
+        let mut zero = model.materials[0].clone();
+        zero.material_id = "carbon_epoxy_0".into();
+        zero.name = "Carbon/epoxy 0 degree lamina".into();
+        zero.mass_density_kg_per_m3 = Some(1_600.0);
+        zero.elasticity = Some(MaterialElasticityModel::OrthotropicLamina(
+            MaterialOrthotropicLaminaModel {
+                longitudinal_modulus_pa: 135.0e9,
+                transverse_modulus_pa: 10.0e9,
+                major_poisson_ratio: 0.3,
+                in_plane_shear_modulus_pa: 5.0e9,
+                transverse_shear_modulus_13_pa: 5.0e9,
+                transverse_shear_modulus_23_pa: 3.8e9,
+            },
+        ));
+        zero.damping = Some(runmat_analysis_core::MechanicalDampingModel::Rayleigh {
+            mass_coefficient: runmat_analysis_core::RayleighMassCoefficient::new(0.2),
+            stiffness_coefficient: runmat_analysis_core::RayleighStiffnessCoefficient::new(2.0e-5),
+        });
+        let mut ninety = zero.clone();
+        ninety.material_id = "carbon_epoxy_90".into();
+        ninety.name = "Carbon/epoxy 90 degree lamina".into();
+        model.materials = vec![zero, ninety];
+        model.material_assignments.clear();
+        let structural = model.structural.as_mut().expect("shell topology");
+        let ply_thickness = 0.000_125;
+        structural.shell_sections = vec![ShellSectionModel::Laminate(LaminateShellSectionModel {
+            section_id: "panel_2mm".into(),
+            reference_orientation_id: "global_x".into(),
+            ply_order: PlyOrderDirection::AlongSurfaceNormal,
+            reference_surface: ShellReferenceSurface::MidSurface,
+            plies: [
+                ("outer_bottom", "carbon_epoxy_0", 0.0),
+                (
+                    "inner_bottom",
+                    "carbon_epoxy_90",
+                    std::f64::consts::FRAC_PI_2,
+                ),
+                ("inner_top", "carbon_epoxy_90", std::f64::consts::FRAC_PI_2),
+                ("outer_top", "carbon_epoxy_0", 0.0),
+            ]
+            .into_iter()
+            .map(|(ply_id, material_id, angle_rad)| LaminatePlyModel {
+                ply_id: ply_id.into(),
+                material_id: material_id.into(),
+                thickness_m: ply_thickness,
+                angle_rad,
+            })
+            .collect(),
+            shear_correction: None,
+        })];
+
+        let summary = assemble_structural_system(
+            &model,
+            &static_excitations(&model),
+            None,
+            StructuralFormulationRequirement::PhysicalDiscretization,
+        )
+        .expect("symmetric laminate shell must assemble through the physical formulation");
+
+        assert_eq!(summary.structural_shell_element_count, 1);
+        assert_eq!(summary.structural_shell_recovery.len(), 1);
+        let constitutive = &summary.structural_shell_recovery[0].constitutive;
+        for row in constitutive.matrices.coupling {
+            for value in row {
+                assert!(value.abs() < 1.0e-8, "symmetric laminate B={value:e}");
+            }
+        }
+        assert_eq!(constitutive.recovery_layers.len(), 4);
+        assert!(summary.operator.prepare_linear().is_ok());
+        assert!(summary
+            .operator
+            .operators()
+            .damping()
+            .values()
+            .iter()
+            .any(|value| *value != 0.0));
     }
 
     #[test]

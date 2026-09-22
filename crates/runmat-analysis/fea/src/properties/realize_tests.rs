@@ -1,8 +1,9 @@
 use runmat_analysis_core::{
     AuthoredOrientationDefinition, AuthoredPropertyDefinitionRef, AuthoredSectionDefinition,
-    CartesianOrientation, HomogeneousShellSection, PropertyRegionTarget, RealizedAnalysisModel,
-    RealizedModelProperties, RealizedOrientationDefinition, RealizedPropertyAssignment,
-    RealizedSectionDefinition, RectangularBeamSection,
+    CartesianOrientation, HomogeneousShellReferenceSurface, HomogeneousShellSection,
+    PropertyRegionTarget, RealizedAnalysisModel, RealizedModelProperties,
+    RealizedOrientationDefinition, RealizedPropertyAssignment, RealizedSectionDefinition,
+    RectangularBeamSection,
 };
 use runmat_geometry_core::{PersistentEntityId, PersistentEntityKind};
 use runmat_meshing_core::{ElementOrder, StableDigest};
@@ -44,10 +45,8 @@ fn exact_edge_and_face_properties_generate_attached_formulation_topology() {
                 definition: AuthoredSectionDefinition::HomogeneousShell(HomogeneousShellSection {
                     section_id: "skin-section".into(),
                     thickness_m: 0.002,
-                    offset_fraction: 0.0,
+                    reference_surface: HomogeneousShellReferenceSurface::MidSurface,
                     shear_correction: 5.0 / 6.0,
-                    drilling_stiffness_scale: 1.0e-4,
-                    integration_points: 3,
                 }),
             },
         ],
@@ -110,19 +109,24 @@ fn exact_edge_and_face_properties_generate_attached_formulation_topology() {
     else {
         panic!("fixture shell section changed kind");
     };
-    shell.offset_fraction = 0.5;
-    let error = realize_formulation_properties(
+    shell.reference_surface = HomogeneousShellReferenceSurface::OffsetFromMidSurface(0.0005);
+    let offset_model = realize_formulation_properties(
         RealizedAnalysisModel {
             model: model.clone(),
             properties: offset,
         },
         &mesh,
     )
-    .expect_err("unsupported shell offset must fail closed");
-    assert!(matches!(
-        error,
-        super::realize::PropertyRealizationError::ShellOffsetUnavailable(_)
-    ));
+    .expect("homogeneous shell offset must be retained");
+    let runmat_analysis_core::ShellSectionModel::Homogeneous(offset_section) =
+        &offset_model.structural.as_ref().unwrap().shell_sections[0]
+    else {
+        panic!("offset shell must remain homogeneous")
+    };
+    assert_eq!(
+        offset_section.reference_surface,
+        HomogeneousShellReferenceSurface::OffsetFromMidSurface(0.0005)
+    );
 
     let mut degenerate = properties.clone();
     let AuthoredOrientationDefinition::Cartesian(orientation) =
@@ -167,7 +171,15 @@ fn exact_edge_and_face_properties_generate_attached_formulation_topology() {
     assert_eq!(structural.elements.len(), 2);
     assert_eq!(structural.beam_sections.len(), 1);
     assert_eq!(structural.shell_sections.len(), 1);
-    assert_eq!(structural.shell_sections[0].integration_points, 3);
+    let runmat_analysis_core::ShellSectionModel::Homogeneous(shell_section) =
+        &structural.shell_sections[0]
+    else {
+        panic!("fixture should realize a homogeneous shell section")
+    };
+    assert_eq!(
+        shell_section.reference_surface,
+        HomogeneousShellReferenceSurface::MidSurface
+    );
     assert!(structural.nodes.iter().all(|node| matches!(
         node.solid_attachment,
         Some(runmat_analysis_core::ConformalSolidAttachment::SolverNode { .. })
@@ -175,8 +187,8 @@ fn exact_edge_and_face_properties_generate_attached_formulation_topology() {
     assert_eq!(structural.beam_sections[0].area_m2, 0.0008);
     let compiled = super::compile::compile_property_map(&model, Some(&mesh))
         .expect("derived elements should consume the canonical material compiler");
-    assert_eq!(compiled.beam_materials().len(), 1);
-    assert_eq!(compiled.shell_materials().len(), 1);
+    assert_eq!(compiled.beam_properties().len(), 1);
+    assert_eq!(compiled.shell_properties().len(), 1);
 }
 
 fn definition(property_id: &str) -> AuthoredPropertyDefinitionRef {

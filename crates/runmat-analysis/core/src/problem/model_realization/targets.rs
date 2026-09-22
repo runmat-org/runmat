@@ -37,7 +37,7 @@ impl MaterialResolution {
                     });
                 }
                 used.insert(reference.clone());
-                let material_id = qualified_material_id(reference);
+                let material_id = reference.qualified_id();
                 assignments.push(MaterialAssignment {
                     target: targets.property_target(&assignment.target)?,
                     expected_material_id: material_id.clone(),
@@ -45,12 +45,28 @@ impl MaterialResolution {
                     confidence: EvidenceConfidence::Verified,
                 });
             }
+            for layup in &model.layups {
+                for ply in &layup.plies {
+                    let AuthoredMaterialSource::Declaration(reference) = &ply.material else {
+                        return Err(AnalysisModelRealizationError::UnboundModel(
+                            model.model_id.clone(),
+                        ));
+                    };
+                    if !catalog.contains_key(reference) {
+                        return Err(AnalysisModelRealizationError::MissingMaterial {
+                            module_path: reference.module_path.clone(),
+                            material_id: reference.material_id.clone(),
+                        });
+                    }
+                    used.insert(reference.clone());
+                }
+            }
         }
         let materials = used
             .into_iter()
             .map(|reference| {
                 let mut material = catalog[&reference].clone();
-                material.material_id = qualified_material_id(&reference);
+                material.material_id = reference.qualified_id();
                 material
             })
             .collect();
@@ -59,10 +75,6 @@ impl MaterialResolution {
             assignments,
         })
     }
-}
-
-fn qualified_material_id(reference: &AuthoredMaterialRef) -> String {
-    format!("{}::{}", reference.module_path, reference.material_id)
 }
 
 pub(super) struct TargetResolver<'a> {
@@ -105,6 +117,25 @@ impl<'a> TargetResolver<'a> {
             .to_owned();
         let entities = self
             .resolved_region(&region_id, expected_role)?
+            .entity_ids
+            .clone();
+        target.bind_resolved_entities(entities).map_err(|error| {
+            AnalysisModelRealizationError::InvalidRegionResolution(error.to_string())
+        })?;
+        Ok(target)
+    }
+
+    pub(super) fn shell_property_target(
+        &self,
+        target: &AuthoredRegionSource,
+    ) -> Result<PropertyRegionTarget, AnalysisModelRealizationError> {
+        let mut target = PropertyRegionTarget::shell(self.region_id(target)?);
+        let region_id = target
+            .selected_region_id()
+            .expect("authored layup targets select one named region")
+            .to_owned();
+        let entities = self
+            .resolved_region(&region_id, GeometryRegionRole::Face)?
             .entity_ids
             .clone();
         target.bind_resolved_entities(entities).map_err(|error| {

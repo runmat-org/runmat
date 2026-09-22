@@ -24,6 +24,33 @@ pub struct MaterialMechanicalModel {
     pub poisson_ratio: f64,
 }
 
+/// Orthotropic plane-stress and transverse-shear law for one shell laminate ply.
+///
+/// Axes 1 and 2 are the ply material axes. The 13 and 23 shear moduli govern transverse shear in
+/// first-order shear-deformation shells; this is deliberately not a generic three-dimensional
+/// orthotropic solid law.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MaterialOrthotropicLaminaModel {
+    pub longitudinal_modulus_pa: f64,
+    pub transverse_modulus_pa: f64,
+    pub major_poisson_ratio: f64,
+    pub in_plane_shear_modulus_pa: f64,
+    pub transverse_shear_modulus_13_pa: f64,
+    pub transverse_shear_modulus_23_pa: f64,
+}
+
+/// Closed mechanical elasticity law owned by a material.
+///
+/// A material has at most one elasticity law. Isotropic linear elasticity is also a valid
+/// degenerate lamina law; the consuming formulation decides which variants it admits.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind", content = "properties")]
+pub enum MaterialElasticityModel {
+    IsotropicLinear(MaterialMechanicalModel),
+    OrthotropicLamina(MaterialOrthotropicLaminaModel),
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum MechanicalDampingModel {
@@ -80,7 +107,7 @@ pub struct MaterialModel {
     #[serde(default)]
     pub mass_density_kg_per_m3: Option<f64>,
     #[serde(default)]
-    pub mechanical: Option<MaterialMechanicalModel>,
+    pub elasticity: Option<MaterialElasticityModel>,
     #[serde(default)]
     pub damping: Option<MechanicalDampingModel>,
     #[serde(default)]
@@ -180,7 +207,8 @@ pub struct ImportedCadEnvironmentCondition {
 #[serde(rename_all = "snake_case")]
 pub enum MaterialCapability {
     MassDensity,
-    LinearElasticity,
+    IsotropicLinearElasticity,
+    LaminaElasticity,
     MechanicalDamping,
     Thermal,
     Acoustic,
@@ -199,7 +227,11 @@ impl MaterialModel {
     pub fn has_capability(&self, capability: MaterialCapability) -> bool {
         match capability {
             MaterialCapability::MassDensity => self.mass_density_kg_per_m3.is_some(),
-            MaterialCapability::LinearElasticity => self.mechanical.is_some(),
+            MaterialCapability::IsotropicLinearElasticity => matches!(
+                self.elasticity,
+                Some(MaterialElasticityModel::IsotropicLinear(_))
+            ),
+            MaterialCapability::LaminaElasticity => self.elasticity.is_some(),
             MaterialCapability::MechanicalDamping => self.damping.is_some(),
             MaterialCapability::Thermal => self.thermal.is_some(),
             MaterialCapability::Acoustic => self.acoustic.is_some(),
@@ -216,9 +248,33 @@ impl MaterialModel {
     pub fn require_mechanical(
         &self,
     ) -> Result<&MaterialMechanicalModel, MissingMaterialCapability> {
-        self.mechanical
+        match self.elasticity.as_ref() {
+            Some(MaterialElasticityModel::IsotropicLinear(value)) => Ok(value),
+            _ => Err(self.missing(MaterialCapability::IsotropicLinearElasticity)),
+        }
+    }
+
+    pub fn require_mechanical_mut(
+        &mut self,
+    ) -> Result<&mut MaterialMechanicalModel, MissingMaterialCapability> {
+        if !matches!(
+            self.elasticity,
+            Some(MaterialElasticityModel::IsotropicLinear(_))
+        ) {
+            return Err(self.missing(MaterialCapability::IsotropicLinearElasticity));
+        }
+        match self.elasticity.as_mut() {
+            Some(MaterialElasticityModel::IsotropicLinear(value)) => Ok(value),
+            _ => unreachable!("isotropic elasticity was checked above"),
+        }
+    }
+
+    pub fn require_lamina_elasticity(
+        &self,
+    ) -> Result<&MaterialElasticityModel, MissingMaterialCapability> {
+        self.elasticity
             .as_ref()
-            .ok_or_else(|| self.missing(MaterialCapability::LinearElasticity))
+            .ok_or_else(|| self.missing(MaterialCapability::LaminaElasticity))
     }
 
     pub fn damping_or_undamped(&self) -> MechanicalDampingModel {
@@ -269,7 +325,7 @@ mod tests {
             name: "Fluid".into(),
             provenance: MaterialProvenance::Authored,
             mass_density_kg_per_m3: Some(997.0),
-            mechanical: None,
+            elasticity: None,
             damping: None,
             thermal: None,
             acoustic: None,
@@ -282,13 +338,13 @@ mod tests {
     fn capability_queries_do_not_invent_constitutive_data() {
         let material = density_only_material();
         assert!(material.has_capability(MaterialCapability::MassDensity));
-        assert!(!material.has_capability(MaterialCapability::LinearElasticity));
+        assert!(!material.has_capability(MaterialCapability::IsotropicLinearElasticity));
         assert_eq!(material.require_mass_density(), Ok(997.0));
         assert_eq!(
             material.require_mechanical(),
             Err(MissingMaterialCapability {
                 material_id: "fluid".into(),
-                capability: MaterialCapability::LinearElasticity,
+                capability: MaterialCapability::IsotropicLinearElasticity,
             })
         );
     }

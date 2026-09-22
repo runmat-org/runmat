@@ -1,6 +1,17 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+mod constitutive;
+mod frame_math;
+mod inertia;
+pub(crate) mod laminate;
+
+use frame_math::{cross, dot, norm, positive_finite, scale, sub};
+
+pub(crate) use constitutive::homogeneous_constitutive;
+pub use constitutive::{ShellConstitutive, ShellConstitutiveMatrices};
+pub(crate) use inertia::{global_lumped_mass_matrix, homogeneous_mass_moments, ShellMassMoments};
+
 pub const SHELL_NODE_DOF_COUNT: usize = 6;
 pub const SHELL_ELEMENT_NODE_COUNT: usize = 3;
 pub const SHELL_ELEMENT_DOF_COUNT: usize = SHELL_NODE_DOF_COUNT * SHELL_ELEMENT_NODE_COUNT;
@@ -10,8 +21,8 @@ pub type ShellMatrix18 = [[f64; SHELL_ELEMENT_DOF_COUNT]; SHELL_ELEMENT_DOF_COUN
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct ShellSection {
     pub thickness_m: f64,
+    pub reference_offset_m: f64,
     pub shear_correction: f64,
-    pub drilling_stiffness_scale: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -49,17 +60,19 @@ pub enum ShellElementError {
     DegenerateArea,
     #[error("shell reference axis must be finite and non-parallel to the shell normal")]
     DegenerateReferenceAxis,
-    #[error("shell thickness, shear correction, and drilling scale must be positive and finite")]
+    #[error("shell thickness and shear correction must be positive and finite, and reference offset finite")]
     InvalidSection,
     #[error("shell material properties must be positive and finite")]
     InvalidMaterial,
+    #[error("shell constitutive matrices, recovery layers, or mass properties are invalid")]
+    InvalidConstitutive,
 }
 
 impl ShellSection {
     pub fn validate(self) -> Result<(), ShellElementError> {
         if positive_finite(self.thickness_m)
+            && self.reference_offset_m.is_finite()
             && positive_finite(self.shear_correction)
-            && positive_finite(self.drilling_stiffness_scale)
         {
             Ok(())
         } else {
@@ -124,19 +137,62 @@ pub fn global_stiffness_matrix(
 ) -> Result<ShellMatrix18, ShellElementError> {
     section.validate()?;
     material.validate()?;
+    global_stiffness_matrix_for_constitutive(
+        &constitutive::homogeneous_constitutive(section, material),
+        geometry,
+    )
+}
+
+pub(crate) fn global_stiffness_matrix_for_constitutive(
+    constitutive: &ShellConstitutive,
+    geometry: ShellElementGeometry,
+) -> Result<ShellMatrix18, ShellElementError> {
+    constitutive.validate()?;
     let frame = geometry.local_frame()?;
-    let operators = local_operators(section, material, geometry, frame)?;
+    let operators = local_operators(geometry, frame)?;
+    global_stiffness_from_operators(&constitutive.matrices, &operators, frame)
+}
+
+pub(crate) fn global_matrix_for_constitutive_matrices(
+    matrices: &ShellConstitutiveMatrices,
+    geometry: ShellElementGeometry,
+) -> Result<ShellMatrix18, ShellElementError> {
+    matrices.validate_damping()?;
+    let frame = geometry.local_frame()?;
+    let operators = local_operators(geometry, frame)?;
+    global_stiffness_from_operators(matrices, &operators, frame)
+}
+
+fn global_stiffness_from_operators(
+    matrices: &ShellConstitutiveMatrices,
+    operators: &LocalOperators,
+    frame: ShellLocalFrame,
+) -> Result<ShellMatrix18, ShellElementError> {
     let mut local = [[0.0; SHELL_ELEMENT_DOF_COUNT]; SHELL_ELEMENT_DOF_COUNT];
     add_bdb3(
         &mut local,
         &operators.membrane,
-        membrane_constitutive(section, material),
+        matrices.extensional,
+        frame.area_m2,
+    );
+    add_bdb3_pair(
+        &mut local,
+        &operators.membrane,
+        matrices.coupling,
+        &operators.bending,
+        frame.area_m2,
+    );
+    add_bdb3_pair(
+        &mut local,
+        &operators.bending,
+        matrices.coupling,
+        &operators.membrane,
         frame.area_m2,
     );
     add_bdb3(
         &mut local,
         &operators.bending,
-        bending_constitutive(section, material),
+        matrices.bending,
         frame.area_m2,
     );
     for shape in [
@@ -147,14 +203,11 @@ pub fn global_stiffness_matrix(
         add_bdb2(
             &mut local,
             &assumed_shear_operator(operators.dx, operators.dy, operators.jacobian, shape),
-            shear_constitutive(section, material),
+            matrices.transverse_shear,
             frame.area_m2 / 3.0,
         );
     }
-    let drilling_stiffness = section.drilling_stiffness_scale
-        * material.youngs_modulus_pa
-        * section.thickness_m
-        * frame.area_m2;
+    let drilling_stiffness = matrices.drilling_stiffness_per_area * frame.area_m2;
     for drilling in &operators.drilling {
         add_outer(
             &mut local,
@@ -176,30 +229,44 @@ pub fn recover_resultants(
 ) -> Result<ShellResultants, ShellElementError> {
     section.validate()?;
     material.validate()?;
+    recover_resultants_for_constitutive(
+        &constitutive::homogeneous_constitutive(section, material),
+        geometry,
+        global_displacement,
+    )
+}
+
+pub(crate) fn recover_resultants_for_constitutive(
+    constitutive: &ShellConstitutive,
+    geometry: ShellElementGeometry,
+    global_displacement: [f64; SHELL_ELEMENT_DOF_COUNT],
+) -> Result<ShellResultants, ShellElementError> {
+    constitutive.validate()?;
     let frame = geometry.local_frame()?;
-    let operators = local_operators(section, material, geometry, frame)?;
+    let operators = local_operators(geometry, frame)?;
     let local_displacement = transform_vector_to_local(global_displacement, frame);
     let membrane_strain = apply_b3(&operators.membrane, &local_displacement);
     let curvature = apply_b3(&operators.bending, &local_displacement);
     let transverse_shear_strain = apply_b2(&operators.shear, &local_displacement);
-    let membrane_force = apply_d3(membrane_constitutive(section, material), membrane_strain);
-    let bending_moment = apply_d3(bending_constitutive(section, material), curvature);
+    let membrane_force = add3(
+        apply_d3(constitutive.matrices.extensional, membrane_strain),
+        apply_d3(constitutive.matrices.coupling, curvature),
+    );
+    let bending_moment = add3(
+        apply_d3(constitutive.matrices.coupling, membrane_strain),
+        apply_d3(constitutive.matrices.bending, curvature),
+    );
     let transverse_shear = apply_d2(
-        shear_constitutive(section, material),
+        constitutive.matrices.transverse_shear,
         transverse_shear_strain,
     );
-    let surface_von_mises_pa = [-1.0, 1.0]
-        .into_iter()
-        .map(|surface| {
-            let stress = std::array::from_fn::<_, 3, _>(|component| {
-                membrane_force[component] / section.thickness_m
-                    + surface * 6.0 * bending_moment[component] / section.thickness_m.powi(2)
-            });
-            (stress[0].powi(2) - stress[0] * stress[1]
-                + stress[1].powi(2)
-                + 3.0 * stress[2].powi(2))
-            .max(0.0)
-            .sqrt()
+    let surface_von_mises_pa = constitutive
+        .recovery_layers
+        .iter()
+        .flat_map(|layer| [layer.bottom_m, layer.top_m].map(|z| (layer, z)))
+        .map(|(layer, z)| {
+            let strain = add3(membrane_strain, scale3(curvature, z));
+            plane_stress_von_mises(apply_d3(layer.plane_stress, strain))
         })
         .fold(0.0, f64::max);
     Ok(ShellResultants {
@@ -221,8 +288,6 @@ struct LocalOperators {
 }
 
 fn local_operators(
-    _section: ShellSection,
-    _material: ShellMaterial,
     geometry: ShellElementGeometry,
     frame: ShellLocalFrame,
 ) -> Result<LocalOperators, ShellElementError> {
@@ -355,34 +420,6 @@ fn physical_shear_operator(
     })
 }
 
-fn membrane_constitutive(section: ShellSection, material: ShellMaterial) -> [[f64; 3]; 3] {
-    plane_stress_constitutive(
-        material.youngs_modulus_pa * section.thickness_m,
-        material.poisson_ratio,
-    )
-}
-
-fn bending_constitutive(section: ShellSection, material: ShellMaterial) -> [[f64; 3]; 3] {
-    plane_stress_constitutive(
-        material.youngs_modulus_pa * section.thickness_m.powi(3) / 12.0,
-        material.poisson_ratio,
-    )
-}
-
-fn plane_stress_constitutive(scale: f64, poisson_ratio: f64) -> [[f64; 3]; 3] {
-    let factor = scale / (1.0 - poisson_ratio.powi(2));
-    [
-        [factor, factor * poisson_ratio, 0.0],
-        [factor * poisson_ratio, factor, 0.0],
-        [0.0, 0.0, factor * (1.0 - poisson_ratio) / 2.0],
-    ]
-}
-
-fn shear_constitutive(section: ShellSection, material: ShellMaterial) -> [[f64; 2]; 2] {
-    let value = material.shear_modulus_pa * section.thickness_m * section.shear_correction;
-    [[value, 0.0], [0.0, value]]
-}
-
 fn add_bdb3(
     matrix: &mut ShellMatrix18,
     b: &[[f64; SHELL_ELEMENT_DOF_COUNT]; 3],
@@ -394,6 +431,24 @@ fn add_bdb3(
             for alpha in 0..3 {
                 for beta in 0..3 {
                     *value += measure * b[alpha][row] * d[alpha][beta] * b[beta][column];
+                }
+            }
+        }
+    }
+}
+
+fn add_bdb3_pair(
+    matrix: &mut ShellMatrix18,
+    left: &[[f64; SHELL_ELEMENT_DOF_COUNT]; 3],
+    d: [[f64; 3]; 3],
+    right: &[[f64; SHELL_ELEMENT_DOF_COUNT]; 3],
+    measure: f64,
+) {
+    for (row, matrix_row) in matrix.iter_mut().enumerate() {
+        for (column, value) in matrix_row.iter_mut().enumerate() {
+            for (alpha, left_values) in left.iter().enumerate() {
+                for (beta, right_values) in right.iter().enumerate() {
+                    *value += measure * left_values[row] * d[alpha][beta] * right_values[column];
                 }
             }
         }
@@ -454,7 +509,10 @@ fn transform_vector_to_local(
     local
 }
 
-fn transform_matrix_to_global(local: ShellMatrix18, frame: ShellLocalFrame) -> ShellMatrix18 {
+pub(super) fn transform_matrix_to_global(
+    local: ShellMatrix18,
+    frame: ShellLocalFrame,
+) -> ShellMatrix18 {
     let rotation = [frame.x, frame.y, frame.z];
     let mut global = [[0.0; SHELL_ELEMENT_DOF_COUNT]; SHELL_ELEMENT_DOF_COUNT];
     for (global_row, global_row_values) in global.iter_mut().enumerate() {
@@ -499,355 +557,22 @@ fn apply_d2(d: [[f64; 2]; 2], value: [f64; 2]) -> [f64; 2] {
     std::array::from_fn(|row| (0..2).map(|column| d[row][column] * value[column]).sum())
 }
 
-fn positive_finite(value: f64) -> bool {
-    value.is_finite() && value > 0.0
+fn add3(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
+    std::array::from_fn(|index| left[index] + right[index])
 }
 
-fn sub(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
-    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+fn scale3(value: [f64; 3], factor: f64) -> [f64; 3] {
+    value.map(|component| component * factor)
 }
 
-fn scale(a: [f64; 3], factor: f64) -> [f64; 3] {
-    [a[0] * factor, a[1] * factor, a[2] * factor]
-}
-
-fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
-    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-}
-
-fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
-    [
-        a[1] * b[2] - a[2] * b[1],
-        a[2] * b[0] - a[0] * b[2],
-        a[0] * b[1] - a[1] * b[0],
-    ]
-}
-
-fn norm(a: [f64; 3]) -> f64 {
-    dot(a, a).sqrt()
+fn plane_stress_von_mises(stress: [f64; 3]) -> f64 {
+    (stress[0].powi(2) - stress[0] * stress[1] + stress[1].powi(2) + 3.0 * stress[2].powi(2))
+        .max(0.0)
+        .sqrt()
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn section() -> ShellSection {
-        ShellSection {
-            thickness_m: 0.002,
-            shear_correction: 5.0 / 6.0,
-            drilling_stiffness_scale: 1.0e-4,
-        }
-    }
-
-    fn material() -> ShellMaterial {
-        ShellMaterial {
-            youngs_modulus_pa: 200.0e9,
-            poisson_ratio: 0.3,
-            shear_modulus_pa: 76.9e9,
-        }
-    }
-
-    fn geometry() -> ShellElementGeometry {
-        ShellElementGeometry {
-            nodes_m: [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
-            reference_axis: [1.0, 0.0, 0.0],
-        }
-    }
-
-    #[test]
-    fn shell_local_frame_is_orthonormal() {
-        let frame = geometry().local_frame().expect("frame should build");
-        assert_close(frame.area_m2, 0.5, 1.0e-12);
-        assert_close(dot(frame.x, frame.y), 0.0, 1.0e-12);
-        assert_close(dot(frame.x, frame.z), 0.0, 1.0e-12);
-        assert_close(dot(frame.y, frame.z), 0.0, 1.0e-12);
-        assert_close(norm(frame.x), 1.0, 1.0e-12);
-        assert_close(norm(frame.y), 1.0, 1.0e-12);
-        assert_close(norm(frame.z), 1.0, 1.0e-12);
-    }
-
-    #[test]
-    fn shell_global_stiffness_is_symmetric() {
-        let k = global_stiffness_matrix(section(), material(), geometry())
-            .expect("stiffness should build");
-        for row in 0..SHELL_ELEMENT_DOF_COUNT {
-            for col in 0..SHELL_ELEMENT_DOF_COUNT {
-                assert_close(k[row][col], k[col][row], 1.0e-6);
-            }
-        }
-    }
-
-    #[test]
-    fn shell_has_exact_six_rigid_body_modes() {
-        let stiffness = global_stiffness_matrix(section(), material(), geometry()).unwrap();
-        for mode_index in 0..6 {
-            let mut mode = [0.0; SHELL_ELEMENT_DOF_COUNT];
-            for node in 0..SHELL_ELEMENT_NODE_COUNT {
-                let base = node * SHELL_NODE_DOF_COUNT;
-                if mode_index < 3 {
-                    mode[base + mode_index] = 1.0;
-                } else {
-                    let mut rotation = [0.0; 3];
-                    rotation[mode_index - 3] = 1.0;
-                    let translation = cross(rotation, geometry().nodes_m[node]);
-                    mode[base..base + 3].copy_from_slice(&translation);
-                    mode[base + 3..base + 6].copy_from_slice(&rotation);
-                }
-            }
-            for row in &stiffness {
-                let residual = row
-                    .iter()
-                    .zip(mode)
-                    .map(|(value, mode)| value * mode)
-                    .sum::<f64>();
-                assert_close(residual, 0.0, 1.0e-5);
-            }
-        }
-    }
-
-    #[test]
-    fn shell_constant_membrane_strain_matches_plane_stress_resultants() {
-        let geometry = geometry();
-        let epsilon_x = 2.0e-4;
-        let mut displacement = [0.0; SHELL_ELEMENT_DOF_COUNT];
-        for (node, position) in geometry.nodes_m.iter().enumerate() {
-            displacement[node * SHELL_NODE_DOF_COUNT] = epsilon_x * position[0];
-        }
-        let result = recover_resultants(section(), material(), geometry, displacement).unwrap();
-        let factor = material().youngs_modulus_pa * section().thickness_m
-            / (1.0 - material().poisson_ratio.powi(2));
-        assert_close(
-            result.membrane_force_n_per_m[0],
-            factor * epsilon_x,
-            1.0e-8 * factor,
-        );
-        assert_close(
-            result.membrane_force_n_per_m[1],
-            factor * material().poisson_ratio * epsilon_x,
-            1.0e-8 * factor,
-        );
-        assert_close(result.membrane_force_n_per_m[2], 0.0, 1.0e-8 * factor);
-        assert!(result.bending_moment_n.iter().all(|value| *value == 0.0));
-        assert!(result
-            .transverse_shear_n_per_m
-            .iter()
-            .all(|value| *value == 0.0));
-    }
-
-    #[test]
-    fn shell_energy_is_invariant_under_rigid_frame_rotation() {
-        let original_geometry = geometry();
-        let rotated_geometry = ShellElementGeometry {
-            nodes_m: original_geometry.nodes_m.map(cyclic_rotation),
-            reference_axis: cyclic_rotation(original_geometry.reference_axis),
-        };
-        let original_displacement = [
-            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0e-4, -1.0e-4, 4.0e-5, 3.0e-4, -2.0e-4, 1.0e-4,
-            -1.0e-4, 3.0e-4, -2.0e-5, -4.0e-4, 1.0e-4, 2.0e-4,
-        ];
-        let mut rotated_displacement = [0.0; SHELL_ELEMENT_DOF_COUNT];
-        for node in 0..SHELL_ELEMENT_NODE_COUNT {
-            let base = node * SHELL_NODE_DOF_COUNT;
-            for block in 0..2 {
-                let offset = base + block * 3;
-                rotated_displacement[offset..offset + 3].copy_from_slice(&cyclic_rotation([
-                    original_displacement[offset],
-                    original_displacement[offset + 1],
-                    original_displacement[offset + 2],
-                ]));
-            }
-        }
-        let original_stiffness =
-            global_stiffness_matrix(section(), material(), original_geometry).unwrap();
-        let rotated_stiffness =
-            global_stiffness_matrix(section(), material(), rotated_geometry).unwrap();
-        assert_close(
-            quadratic_energy(&original_stiffness, &original_displacement),
-            quadratic_energy(&rotated_stiffness, &rotated_displacement),
-            1.0e-9,
-        );
-        assert_eq!(
-            recover_resultants(
-                section(),
-                material(),
-                original_geometry,
-                original_displacement,
-            )
-            .unwrap(),
-            recover_resultants(
-                section(),
-                material(),
-                rotated_geometry,
-                rotated_displacement,
-            )
-            .unwrap()
-        );
-    }
-
-    #[test]
-    fn shell_energy_is_invariant_to_cyclic_and_reversed_node_order() {
-        let original_geometry = ShellElementGeometry {
-            nodes_m: [[0.0, 0.0, 0.0], [1.4, 0.2, 0.0], [0.1, 0.9, 0.0]],
-            reference_axis: [1.0, 0.0, 0.0],
-        };
-        let original_displacement = [
-            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0e-4, -1.0e-4, 4.0e-5, 3.0e-4, -2.0e-4, 1.0e-4,
-            -1.0e-4, 3.0e-4, -2.0e-5, -4.0e-4, 1.0e-4, 2.0e-4,
-        ];
-        let original_energy = quadratic_energy(
-            &global_stiffness_matrix(section(), material(), original_geometry).unwrap(),
-            &original_displacement,
-        );
-        for permutation in [[1, 2, 0], [0, 2, 1]] {
-            let permuted_geometry = ShellElementGeometry {
-                nodes_m: permutation.map(|node| original_geometry.nodes_m[node]),
-                ..original_geometry
-            };
-            let mut permuted_displacement = [0.0; SHELL_ELEMENT_DOF_COUNT];
-            for (permuted_node, original_node) in permutation.into_iter().enumerate() {
-                let target = permuted_node * SHELL_NODE_DOF_COUNT;
-                let source = original_node * SHELL_NODE_DOF_COUNT;
-                permuted_displacement[target..target + SHELL_NODE_DOF_COUNT]
-                    .copy_from_slice(&original_displacement[source..source + SHELL_NODE_DOF_COUNT]);
-            }
-            let permuted_energy = quadratic_energy(
-                &global_stiffness_matrix(section(), material(), permuted_geometry).unwrap(),
-                &permuted_displacement,
-            );
-            assert_close(permuted_energy / original_energy, 1.0, 1.0e-12);
-        }
-    }
-
-    #[test]
-    fn shell_resultant_thickness_scaling_separates_membrane_bending_and_shear() {
-        let mut displacement = [0.0; SHELL_ELEMENT_DOF_COUNT];
-        for (node, position) in geometry().nodes_m.iter().enumerate() {
-            let base = node * SHELL_NODE_DOF_COUNT;
-            displacement[base] = 2.0e-4 * position[0];
-            displacement[base + 4] = 3.0e-4 * position[0];
-        }
-        let thin = recover_resultants(section(), material(), geometry(), displacement).unwrap();
-        let thick = recover_resultants(
-            ShellSection {
-                thickness_m: section().thickness_m * 2.0,
-                ..section()
-            },
-            material(),
-            geometry(),
-            displacement,
-        )
-        .unwrap();
-        for component in 0..3 {
-            if thin.membrane_force_n_per_m[component].abs() > 0.0 {
-                assert_close(
-                    thick.membrane_force_n_per_m[component]
-                        / thin.membrane_force_n_per_m[component],
-                    2.0,
-                    1.0e-12,
-                );
-            }
-            if thin.bending_moment_n[component].abs() > 0.0 {
-                assert_close(
-                    thick.bending_moment_n[component] / thin.bending_moment_n[component],
-                    8.0,
-                    1.0e-12,
-                );
-            }
-        }
-        for component in 0..2 {
-            if thin.transverse_shear_n_per_m[component].abs() > 0.0 {
-                assert_close(
-                    thick.transverse_shear_n_per_m[component]
-                        / thin.transverse_shear_n_per_m[component],
-                    2.0,
-                    1.0e-12,
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn assumed_shear_field_preserves_pure_bending_in_the_thin_limit() {
-        let curvature = 3.0e-4;
-        let mut displacement = [0.0; SHELL_ELEMENT_DOF_COUNT];
-        for (node, position) in geometry().nodes_m.iter().enumerate() {
-            let base = node * SHELL_NODE_DOF_COUNT;
-            displacement[base + 2] = -0.5 * curvature * position[0].powi(2);
-            displacement[base + 4] = curvature * position[0];
-        }
-
-        let thin_section = section();
-        let thick_section = ShellSection {
-            thickness_m: thin_section.thickness_m * 2.0,
-            ..thin_section
-        };
-        let result =
-            recover_resultants(thin_section, material(), geometry(), displacement).unwrap();
-        let bending_factor = material().youngs_modulus_pa * thin_section.thickness_m.powi(3)
-            / (12.0 * (1.0 - material().poisson_ratio.powi(2)));
-        assert_close(
-            result.bending_moment_n[0],
-            bending_factor * curvature,
-            1.0e-12,
-        );
-        assert!(result
-            .transverse_shear_n_per_m
-            .iter()
-            .all(|value| value.abs() < 1.0e-12));
-
-        let thin_stiffness = global_stiffness_matrix(thin_section, material(), geometry()).unwrap();
-        let thick_stiffness =
-            global_stiffness_matrix(thick_section, material(), geometry()).unwrap();
-        assert_close(
-            quadratic_energy(&thick_stiffness, &displacement)
-                / quadratic_energy(&thin_stiffness, &displacement),
-            8.0,
-            1.0e-9,
-        );
-    }
-
-    #[test]
-    fn shell_frame_rejects_degenerate_inputs() {
-        assert_eq!(
-            ShellElementGeometry {
-                nodes_m: [[0.0, 0.0, 0.0]; 3],
-                reference_axis: [1.0, 0.0, 0.0],
-            }
-            .local_frame()
-            .expect_err("zero-area shell should fail"),
-            ShellElementError::DegenerateArea
-        );
-    }
-
-    fn cyclic_rotation(vector: [f64; 3]) -> [f64; 3] {
-        [vector[2], vector[0], vector[1]]
-    }
-
-    fn quadratic_energy(
-        stiffness: &ShellMatrix18,
-        displacement: &[f64; SHELL_ELEMENT_DOF_COUNT],
-    ) -> f64 {
-        0.5 * stiffness
-            .iter()
-            .zip(displacement)
-            .map(|(row, value)| {
-                value
-                    * row
-                        .iter()
-                        .zip(displacement)
-                        .map(|(coefficient, displacement)| coefficient * displacement)
-                        .sum::<f64>()
-            })
-            .sum::<f64>()
-    }
-
-    fn assert_close(actual: f64, expected: f64, tolerance: f64) {
-        assert!(
-            (actual - expected).abs() <= tolerance,
-            "actual={actual} expected={expected} tolerance={tolerance}",
-        );
-    }
-}
+mod tests;
 
 #[cfg(test)]
 mod qualification_tests;

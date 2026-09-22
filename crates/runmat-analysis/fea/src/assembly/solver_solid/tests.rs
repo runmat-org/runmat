@@ -286,10 +286,14 @@ fn apply_structural_material(
     target: &mut runmat_analysis_core::MaterialModel,
     source: StructuralElementMaterial,
 ) {
-    target.mechanical = Some(runmat_analysis_core::MaterialMechanicalModel {
-        youngs_modulus_pa: source.youngs_modulus_pa,
-        poisson_ratio: source.poisson_ratio,
-    });
+    target.elasticity = Some(
+        runmat_analysis_core::MaterialElasticityModel::IsotropicLinear(
+            runmat_analysis_core::MaterialMechanicalModel {
+                youngs_modulus_pa: source.youngs_modulus_pa,
+                poisson_ratio: source.poisson_ratio,
+            },
+        ),
+    );
     target.mass_density_kg_per_m3 = Some(source.density_kg_per_m3);
     target.damping = Some(source.damping);
 }
