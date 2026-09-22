@@ -270,17 +270,13 @@ fn run_linear_static_with_constraint_plan(
     let observations = if execution_step.observations.is_empty() {
         Vec::new()
     } else {
-        let mesh = options.solver_mesh.as_ref().ok_or_else(|| {
-            FeaRunError::Observation(
-                "spatial observations require the canonical solver mesh used by assembly".into(),
-            )
-        })?;
+        let mesh = options.solver_mesh.as_ref();
         let compiled_constraint_plan;
         let observation_constraint_plan = if let Some(plan) = constraint_plan {
             plan
         } else {
             compiled_constraint_plan =
-                CanonicalStructuralConstraintPlan::compile_for_model(model, Some(mesh))
+                CanonicalStructuralConstraintPlan::compile_for_model(model, mesh)
                     .map_err(|error| FeaRunError::Observation(error.to_string()))?;
             &compiled_constraint_plan
         };
@@ -288,7 +284,7 @@ fn run_linear_static_with_constraint_plan(
             crate::constraints::CanonicalStructuralConstraintResult::recover_for_model(
                 observation_constraint_plan,
                 model,
-                Some(mesh),
+                mesh,
                 &fields,
             )
             .map_err(|error| FeaRunError::Observation(error.to_string()))?;
@@ -298,7 +294,7 @@ fn run_linear_static_with_constraint_plan(
             recover_constraint_group_observable_fields(&constraint_result)
                 .map_err(|error| FeaRunError::Observation(error.to_string()))?,
         );
-        let mut topology = StructuralRecoveredFieldTopology::derive(model, Some(mesh))
+        let mut topology = StructuralRecoveredFieldTopology::derive(model, mesh)
             .map_err(|error| FeaRunError::Observation(error.to_string()))?;
         topology.entity_counts.constraint_groups = constraint_result.groups.len();
         let catalog = RecoveredFieldCatalog::new_for_topology(
@@ -315,13 +311,13 @@ fn run_linear_static_with_constraint_plan(
         let plan = resolve_structural_observation_plan(
             execution_step,
             model,
-            Some(mesh),
+            mesh,
             observation_constraint_plan,
             &definitions,
             ObservationLimits::default(),
         )
         .map_err(|error| FeaRunError::Observation(error.to_string()))?;
-        let observations = evaluate_structural_observations(&plan, model, Some(mesh), &catalog)
+        let observations = evaluate_structural_observations(&plan, model, mesh, &catalog)
             .map_err(|error| FeaRunError::Observation(error.to_string()))?;
         fields.extend(
             catalog

@@ -55,6 +55,20 @@ pub(super) fn execute(solved: &SolvedPipeline) -> RecoveredPipeline {
     assert!(artifact.fields().iter().any(|field| {
         field.storage().field_id == runmat_analysis_fea::FEA_FIELD_STRUCTURAL_DISPLACEMENT
     }));
+    for field_id in [
+        runmat_analysis_fea::FEA_FIELD_STRUCTURAL_CONSTRAINT_REACTION_FORCE,
+        runmat_analysis_fea::FEA_FIELD_STRUCTURAL_CONSTRAINT_REACTION_MOMENT_ABOUT_GLOBAL_ORIGIN,
+    ] {
+        assert_eq!(
+            artifact
+                .fields()
+                .iter()
+                .filter(|field| field.definition().field_id() == field_id)
+                .count(),
+            1,
+            "constraint-group fields have one canonical recovery authority"
+        );
+    }
 
     let mut substituted = inputs.clone();
     substituted[2].manifest.logical_identity = digest("substituted-mesh");

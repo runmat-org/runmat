@@ -241,10 +241,16 @@ fn native_buckling_task_round_trips_the_preload_bound_result() {
         .run
         .field(runmat_analysis_fea::FEA_FIELD_BUCKLING_LOAD_FACTOR)
         .is_some());
-    assert!(recovered
-        .run
-        .field(&runmat_analysis_fea::fea_buckling_mode_shape_field_id(1))
-        .is_some());
+    let translation_field_id = runmat_analysis_fea::fea_buckling_mode_shape_field_id(1);
+    assert_eq!(
+        recovered.run.field(&translation_field_id),
+        recovered.mode_shapes.first()
+    );
+    let rotation_field_id = runmat_analysis_fea::fea_buckling_rotation_shape_field_id(1);
+    assert_eq!(
+        recovered.run.field(&rotation_field_id),
+        recovered.rotation_mode_shapes.first()
+    );
 }
 
 fn assert_substituted_inputs_are_rejected(

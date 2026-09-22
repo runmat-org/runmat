@@ -272,16 +272,22 @@ fn publishes_continuum_fields(summary: &AssemblySummary) -> bool {
     !summary.structural_solid_recovery.is_empty()
 }
 
-/// Moves spatial fields with stable physical semantics into the observation domain.
+/// Moves formulation-owned spatial fields with stable physical semantics into the observation
+/// domain.
 ///
 /// Diagnostics, global summaries, derived display conveniences, and unsupported beam/shell
 /// resultants remain in `fields`; they are not mislabeled merely to make them observable.
+/// Constraint-group reactions also remain here because their canonical values are recovered from
+/// [`crate::constraints::CanonicalStructuralConstraintResult`], which preserves authored
+/// constraint ownership when constraints share nodes or degrees of freedom.
 pub fn take_structural_observable_fields(
     fields: &mut Vec<AnalysisField>,
 ) -> Result<Vec<RecoveredField>, RecoveredFieldError> {
     let declarations = structural_observable_field_definitions()?;
     let mut recovered = Vec::with_capacity(declarations.len());
-    for definition in declarations {
+    for definition in declarations.into_iter().filter(|definition| {
+        definition.entity_domain() != RecoveredFieldEntityDomain::ConstraintGroups
+    }) {
         let Some(index) = fields.iter().position(|field| {
             field.field_id == definition.field_id()
                 && field
@@ -1360,6 +1366,35 @@ mod tests {
                 "synthetic topology cannot support physical field `{field_id}`"
             );
         }
+    }
+
+    #[test]
+    fn generic_field_take_does_not_claim_constraint_group_reaction_ownership() {
+        let mut fields = vec![
+            AnalysisField::host_f64(
+                FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+                vec![1, VECTOR_COMPONENT_COUNT],
+                vec![1.0, 2.0, 3.0],
+            ),
+            AnalysisField::host_f64(
+                FEA_FIELD_STRUCTURAL_CONSTRAINT_REACTION_FORCE,
+                vec![1, VECTOR_COMPONENT_COUNT],
+                vec![4.0, 5.0, 6.0],
+            ),
+        ];
+
+        let recovered = take_structural_observable_fields(&mut fields).unwrap();
+
+        assert_eq!(recovered.len(), 1);
+        assert_eq!(
+            recovered[0].definition().field_id(),
+            FEA_FIELD_STRUCTURAL_DISPLACEMENT
+        );
+        assert_eq!(fields.len(), 1);
+        assert_eq!(
+            fields[0].field_id,
+            FEA_FIELD_STRUCTURAL_CONSTRAINT_REACTION_FORCE
+        );
     }
 
     #[test]
