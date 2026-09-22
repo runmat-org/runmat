@@ -41,7 +41,10 @@ use self::{
         beam::{BeamElementError, BeamMaterial, BeamSection, BeamTransform12},
         shell::{ShellConstitutive, ShellElementError, ShellElementGeometry},
     },
-    explicit_connectors::assemble_explicit_connectors,
+    explicit_connectors::{
+        assemble_connectors_with_resolver, assemble_explicit_connectors, resolve_projected_surface,
+        ConnectorTargetRole, ResolvedConnectorTarget,
+    },
     explicit_elements::{
         assemble_explicit_elements, validate_explicit_topology, ExplicitElementAssembly,
     },
@@ -314,9 +317,6 @@ pub enum StructuralAssemblyError {
         connector_id: String,
         reason: &'static str,
     },
-    UnsupportedSolidConnector {
-        connector_count: usize,
-    },
     BeamElement {
         element_id: String,
         error: BeamElementError,
@@ -480,10 +480,6 @@ impl fmt::Display for StructuralAssemblyError {
             } => write!(
                 f,
                 "explicit structural connector is invalid: connector_id={connector_id} reason={reason}"
-            ),
-            Self::UnsupportedSolidConnector { connector_count } => write!(
-                f,
-                "solid structural connectors require canonical mixed-topology coupling: connector_count={connector_count}"
             ),
             Self::BeamElement { element_id, error } => {
                 write!(f, "beam element assembly failed: element_id={element_id} error={error}")
@@ -871,14 +867,6 @@ fn assemble_linear_system_impl(
         .map(solver_solid_topology)
         .transpose()
         .map_err(LinearAssemblyError::SolidOperator)?;
-    if structural_requirement.is_some() && solid_topology.is_some() && !model.connectors.is_empty()
-    {
-        return Err(LinearAssemblyError::Structural(
-            StructuralAssemblyError::UnsupportedSolidConnector {
-                connector_count: model.connectors.len(),
-            },
-        ));
-    }
     if structural_requirement.is_some() {
         validate_structural_inputs(
             model,
@@ -1287,6 +1275,104 @@ fn assemble_linear_system_impl(
             .expanded_square(dof_count)
             .expect("structural DOF expansion is valid")
     });
+    let mut structural_connector_stiffness_count = 0;
+    let mut structural_connector_damping_count = 0;
+    if structural_requirement.is_some() && !model.connectors.is_empty() {
+        let mesh = solver_mesh.as_ref().ok_or({
+            LinearAssemblyError::Structural(StructuralAssemblyError::MissingDiscretization)
+        })?;
+        let topology = crate::physics::structural::topology::node_space::CanonicalStructuralNodeSpace::derive_solid(mesh)
+            .map_err(|error| {
+                LinearAssemblyError::Structural(StructuralAssemblyError::MixedTopology(
+                    error.to_string(),
+                ))
+            })?;
+        let projection = crate::topology::AnalysisProjection::derive(mesh).map_err(|error| {
+            LinearAssemblyError::Structural(StructuralAssemblyError::MixedTopology(
+                error.to_string(),
+            ))
+        })?;
+        let coordinates_m = topology
+            .nodes
+            .iter()
+            .map(|node| node.coordinates_m)
+            .collect::<Vec<_>>();
+        let empty_explicit = runmat_analysis_core::StructuralModel::default();
+        let mut connector_stiffness = RealSparseAssembler::square(
+            dof_count,
+            OperatorRole::Stiffness,
+            MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+        );
+        let mut connector_damping = RealSparseAssembler::square(
+            dof_count,
+            OperatorRole::Damping,
+            MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+        );
+        let summary = assemble_connectors_with_resolver(
+            &model.connectors,
+            &structural_dof_layout,
+            &coordinates_m,
+            &mut connector_stiffness,
+            &mut connector_damping,
+            |connector, target, role| match role {
+                ConnectorTargetRole::Point => {
+                    let ownership = crate::physics::structural::topology::target::resolve_mixed_structural_target(
+                        target,
+                        mesh,
+                        &empty_explicit,
+                        &topology,
+                    )
+                    .map_err(|_| StructuralAssemblyError::UnmappedExplicitConnector {
+                        connector_id: connector.connector_id.clone(),
+                        target: "point",
+                        region_id: target.region_id.clone(),
+                    })?;
+                    Ok(ResolvedConnectorTarget {
+                        node_indices: ownership.canonical_nodes().to_vec(),
+                        surface_samples: Vec::new(),
+                    })
+                }
+                ConnectorTargetRole::Surface => {
+                    resolve_projected_surface(connector, target, &projection)
+                }
+            },
+        )
+        .map_err(LinearAssemblyError::Structural)?;
+        structural_connector_stiffness_count = summary.stiffness_count;
+        structural_connector_damping_count = summary.damping_count;
+        if summary.stiffness_count > 0 {
+            let connector = connector_stiffness
+                .finish()
+                .map_err(|error| LinearAssemblyError::SparseOperator(format!("{error:?}")))?;
+            let solid = stiffness_csr.as_ref().ok_or({
+                LinearAssemblyError::Structural(StructuralAssemblyError::MissingDiscretization)
+            })?;
+            stiffness_csr = Some(
+                RealSparseMatrix::scaled_sum(
+                    &[(1.0, solid), (1.0, &connector)],
+                    OperatorRole::Stiffness,
+                    MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+                )
+                .map_err(|error| LinearAssemblyError::SparseOperator(format!("{error:?}")))?,
+            );
+        }
+        if summary.damping_count > 0 {
+            let connector = connector_damping
+                .finish()
+                .map_err(|error| LinearAssemblyError::SparseOperator(format!("{error:?}")))?;
+            let solid = damping_csr.as_ref().ok_or({
+                LinearAssemblyError::Structural(StructuralAssemblyError::MissingDiscretization)
+            })?;
+            damping_csr = Some(
+                RealSparseMatrix::scaled_sum(
+                    &[(1.0, solid), (1.0, &connector)],
+                    OperatorRole::Damping,
+                    MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+                )
+                .map_err(|error| LinearAssemblyError::SparseOperator(format!("{error:?}")))?,
+            );
+        }
+    }
     if let Some(csr) = stiffness_csr.as_ref() {
         for (i, diagonal) in stiffness_diag.iter_mut().enumerate().take(dof_count) {
             if i >= mesh_dof_count {
@@ -1324,8 +1410,8 @@ fn assemble_linear_system_impl(
         structural_rotational_constraint_count: 0,
         structural_beam_element_count: 0,
         structural_shell_element_count: 0,
-        structural_connector_stiffness_count: 0,
-        structural_connector_damping_count: 0,
+        structural_connector_stiffness_count,
+        structural_connector_damping_count,
         structural_solid_element_count: solid_topology
             .as_ref()
             .map(|topology| topology.volume_element_count)
@@ -1669,6 +1755,7 @@ fn assemble_explicit_structural_system(
     let connector_summary = assemble_explicit_connectors(
         &model.connectors,
         structural,
+        &topology,
         &structural_dof_layout,
         &mut connector_stiffness_assembler,
         &mut connector_damping_assembler,
@@ -3018,9 +3105,9 @@ mod tests {
         let mut spring_model = base.clone();
         spring_model.connectors = vec![runmat_analysis_core::AnalysisConnector {
             connector_id: "span_spring".into(),
-            primary: runmat_analysis_core::RegionTarget::point("node:1"),
-            secondary: Some(runmat_analysis_core::RegionTarget::point("node:2")),
-            kind: runmat_analysis_core::ConnectorKind::TranslationalSpring {
+            kind: runmat_analysis_core::ConnectorKind::AxialSpring {
+                primary: runmat_analysis_core::RegionTarget::point("node:1"),
+                secondary: runmat_analysis_core::RegionTarget::point("node:2"),
                 stiffness: runmat_analysis_core::Stiffness::new(4_000.0),
             },
         }];
@@ -3049,10 +3136,10 @@ mod tests {
 
         let mut dashpot_model = base.clone();
         dashpot_model.connectors = vec![runmat_analysis_core::AnalysisConnector {
-            connector_id: "ground_dashpot".into(),
-            primary: runmat_analysis_core::RegionTarget::point("node:2"),
-            secondary: None,
-            kind: runmat_analysis_core::ConnectorKind::TranslationalDashpot {
+            connector_id: "span_dashpot".into(),
+            kind: runmat_analysis_core::ConnectorKind::AxialDashpot {
+                primary: runmat_analysis_core::RegionTarget::point("node:1"),
+                secondary: runmat_analysis_core::RegionTarget::point("node:2"),
                 damping: runmat_analysis_core::Damping::new(75.0),
             },
         }];
@@ -3073,10 +3160,9 @@ mod tests {
 
         let mut foundation_model = base;
         foundation_model.connectors = vec![runmat_analysis_core::AnalysisConnector {
-            connector_id: "distributed_foundation".into(),
-            primary: runmat_analysis_core::RegionTarget::authored("beam_span"),
-            secondary: None,
-            kind: runmat_analysis_core::ConnectorKind::ElasticFoundation {
+            connector_id: "tip_ground_spring".into(),
+            kind: runmat_analysis_core::ConnectorKind::IsotropicGroundSpring {
+                target: runmat_analysis_core::RegionTarget::point("node:2"),
                 stiffness: runmat_analysis_core::Stiffness::new(2_000.0),
             },
         }];
@@ -3086,16 +3172,14 @@ mod tests {
             None,
             StructuralFormulationRequirement::PhysicalDiscretization,
         )
-        .expect("distributed foundation assembly");
-        for node in 0..2 {
-            let row = ux(&foundation, node);
-            assert_relative(
-                foundation.operator.operators().stiffness().get(row, row)
-                    - baseline.operator.operators().stiffness().get(row, row),
-                1_000.0,
-                1.0e-12,
-            );
-        }
+        .expect("ground spring assembly");
+        let row = ux(&foundation, 1);
+        assert_relative(
+            foundation.operator.operators().stiffness().get(row, row)
+                - baseline.operator.operators().stiffness().get(row, row),
+            2_000.0,
+            1.0e-12,
+        );
     }
 
     #[test]
@@ -3103,9 +3187,9 @@ mod tests {
         let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
         model.connectors = vec![runmat_analysis_core::AnalysisConnector {
             connector_id: "missing".into(),
-            primary: runmat_analysis_core::RegionTarget::authored("missing_region"),
-            secondary: None,
-            kind: runmat_analysis_core::ConnectorKind::TranslationalSpring {
+            kind: runmat_analysis_core::ConnectorKind::AxialSpring {
+                primary: runmat_analysis_core::RegionTarget::point("missing_region"),
+                secondary: runmat_analysis_core::RegionTarget::point("node:2"),
                 stiffness: runmat_analysis_core::Stiffness::new(1.0),
             },
         }];
@@ -3120,17 +3204,16 @@ mod tests {
             error,
             LinearAssemblyError::Structural(StructuralAssemblyError::UnmappedExplicitConnector {
                 connector_id: "missing".into(),
-                target: "primary",
+                target: "point",
                 region_id: "missing_region".into(),
             })
         );
 
         model.connectors[0] = runmat_analysis_core::AnalysisConnector {
             connector_id: "invalid_foundation".into(),
-            primary: runmat_analysis_core::RegionTarget::point("node:1"),
-            secondary: Some(runmat_analysis_core::RegionTarget::point("node:2")),
-            kind: runmat_analysis_core::ConnectorKind::ElasticFoundation {
-                stiffness: runmat_analysis_core::Stiffness::new(1.0),
+            kind: runmat_analysis_core::ConnectorKind::SurfaceNormalFoundation {
+                target: runmat_analysis_core::RegionTarget::point("node:1"),
+                modulus: runmat_analysis_core::FoundationModulus::new(1.0),
             },
         };
         let error = assemble_structural_system(
@@ -3139,7 +3222,7 @@ mod tests {
             None,
             StructuralFormulationRequirement::PhysicalDiscretization,
         )
-        .expect_err("foundation secondary must fail");
+        .expect_err("foundation point target must fail");
         assert!(matches!(
             error,
             LinearAssemblyError::Structural(
@@ -3149,29 +3232,25 @@ mod tests {
     }
 
     #[test]
-    fn solid_connectors_fail_before_they_can_be_silently_ignored() {
+    fn solid_point_connectors_contribute_to_the_canonical_operator() {
         let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+        model.constraints.clear();
         model.connectors = vec![runmat_analysis_core::AnalysisConnector {
-            connector_id: "unsupported_solid_spring".into(),
-            primary: runmat_analysis_core::RegionTarget::authored("tip"),
-            secondary: None,
-            kind: runmat_analysis_core::ConnectorKind::TranslationalSpring {
+            connector_id: "solid_ground_spring".into(),
+            kind: runmat_analysis_core::ConnectorKind::IsotropicGroundSpring {
+                target: runmat_analysis_core::RegionTarget::point("node:2"),
                 stiffness: runmat_analysis_core::Stiffness::new(1.0),
             },
         }];
-        let error = assemble_structural_system(
+        let summary = assemble_structural_system(
             &model,
-            &static_excitations(&model),
+            &RealizedExcitations::new(Vec::new()),
             Some(tetrahedron4_mesh()),
             StructuralFormulationRequirement::PhysicalDiscretization,
         )
-        .expect_err("solid connector support requires mixed-topology coupling");
-        assert_eq!(
-            error,
-            LinearAssemblyError::Structural(StructuralAssemblyError::UnsupportedSolidConnector {
-                connector_count: 1
-            })
-        );
+        .expect("solid connector must share canonical solid DOFs");
+        assert_eq!(summary.structural_connector_stiffness_count, 1);
+        assert_eq!(summary.structural_connector_damping_count, 0);
     }
 
     #[test]

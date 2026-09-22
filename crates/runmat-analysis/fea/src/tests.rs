@@ -1115,9 +1115,8 @@ fn grounded_explicit_spring_changes_the_completed_physical_solution() {
     let mut supported_model = baseline_model;
     supported_model.connectors = vec![runmat_analysis_core::AnalysisConnector {
         connector_id: "tip_support_spring".into(),
-        primary: runmat_analysis_core::RegionTarget::point("node:2"),
-        secondary: None,
-        kind: runmat_analysis_core::ConnectorKind::TranslationalSpring {
+        kind: runmat_analysis_core::ConnectorKind::IsotropicGroundSpring {
+            target: runmat_analysis_core::RegionTarget::point("node:2"),
             stiffness: runmat_analysis_core::Stiffness::new(1.0e6),
         },
     }];

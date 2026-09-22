@@ -140,9 +140,14 @@ fn visit_region_targets(
         visit(&mut boundary.target)?;
     }
     for connector in &mut model.connectors {
-        visit(&mut connector.primary)?;
-        if let Some(secondary) = &mut connector.secondary {
-            visit(secondary)?;
+        let mut failure = None;
+        connector.kind.visit_targets_mut(|target| {
+            if failure.is_none() {
+                failure = visit(target).err();
+            }
+        });
+        if let Some(error) = failure {
+            return Err(error);
         }
     }
     for interface in &mut model.interfaces {
@@ -342,9 +347,9 @@ mod tests {
             }],
             connectors: vec![AnalysisConnector {
                 connector_id: "connector".into(),
-                primary: RegionTarget::boundary("face_000003"),
-                secondary: Some(RegionTarget::boundary("face_000004")),
-                kind: ConnectorKind::TranslationalSpring {
+                kind: ConnectorKind::AxialSpring {
+                    primary: RegionTarget::point("anchor_vertex"),
+                    secondary: RegionTarget::point("attachment_vertex"),
                     stiffness: crate::Stiffness::new(1.0),
                 },
             }],
@@ -408,14 +413,14 @@ mod tests {
             resolved.boundaries[0].target.region_id,
             selection("persistent-2")
         );
-        assert_eq!(
-            resolved.connectors[0].primary.region_id,
-            selection("persistent-3")
-        );
-        assert_eq!(
-            resolved.connectors[0].secondary.as_ref().unwrap().region_id,
-            selection("persistent-4")
-        );
+        let ConnectorKind::AxialSpring {
+            primary, secondary, ..
+        } = &resolved.connectors[0].kind
+        else {
+            panic!("expected axial spring")
+        };
+        assert_eq!(primary.region_id, "anchor_vertex");
+        assert_eq!(secondary.region_id, "attachment_vertex");
         assert_eq!(
             resolved.interfaces[0].primary.region_id,
             selection("persistent-5")
@@ -455,7 +460,7 @@ mod tests {
         assert_eq!(
             error,
             GeometryRegionResolutionError::UnresolvedImporterAlias {
-                alias: "face_000003".into()
+                alias: "face_000005".into()
             }
         );
         assert_eq!(model.boundaries[0].target.region_id, "authored-wall");

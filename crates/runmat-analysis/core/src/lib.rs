@@ -177,9 +177,9 @@ pub use problem::prescribed_value::{PrescribedQuantity, PrescribedValue};
 pub use problem::quantity::{
     Acceleration, AngularAcceleration, AngularVelocity, BodyForceDensity, CanonicalQuantity,
     ComplexPhase, Damping, Displacement, DynamicViscosity, ElectricCharge, ElectricChargeDensity,
-    ElectricCurrent, ElectricCurrentDensity, ElectricPotential, Force, Frequency,
-    FrictionCoefficient, HeatFlux, HeatGenerationDensity, HeatTransferCoefficient, Length,
-    MagneticVectorPotential, MassDensity, MassFlowRate, Moment, Position, Pressure,
+    ElectricCurrent, ElectricCurrentDensity, ElectricPotential, Force, FoundationModulus,
+    Frequency, FrictionCoefficient, HeatFlux, HeatGenerationDensity, HeatTransferCoefficient,
+    Length, MagneticVectorPotential, MassDensity, MassFlowRate, Moment, Position, Pressure,
     RayleighMassCoefficient, RayleighStiffnessCoefficient, Rotation, SpecificAcousticImpedance,
     Stiffness, Temperature, TemperatureDifference, ThermalContactResistance, Traction, Translation,
     TurbulenceIntensity, Velocity,

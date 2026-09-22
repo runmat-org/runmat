@@ -191,9 +191,9 @@ fn mixed_structural_fixture() -> (
     model.geometry_revision = mesh.geometry.geometry_revision as u32;
     model.connectors = vec![runmat_analysis_core::AnalysisConnector {
         connector_id: "solid_to_beam_spring".into(),
-        primary: runmat_analysis_core::RegionTarget::authored("root"),
-        secondary: Some(runmat_analysis_core::RegionTarget::authored("span")),
-        kind: runmat_analysis_core::ConnectorKind::TranslationalSpring {
+        kind: runmat_analysis_core::ConnectorKind::AxialSpring {
+            primary: runmat_analysis_core::RegionTarget::point("node:102"),
+            secondary: runmat_analysis_core::RegionTarget::point("node:2"),
             stiffness: runmat_analysis_core::Stiffness::new(2_000.0),
         },
     }];

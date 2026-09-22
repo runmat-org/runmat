@@ -496,16 +496,29 @@ model coupled {
         }
     }
     connector spring {
-        translational_spring {
+        axial_spring {
             primary = geometry.part.region.anchor
             secondary = geometry.part.region.attachment
             stiffness = 4 kN/m
         }
     }
-    connector foundation {
-        elastic_foundation {
+    connector dashpot {
+        axial_dashpot {
             primary = geometry.part.region.anchor
+            secondary = geometry.part.region.attachment
+            damping = 6 N*s/m
+        }
+    }
+    connector ground_spring {
+        isotropic_ground_spring {
+            target = geometry.part.region.anchor
             stiffness = 8 kN/m
+        }
+    }
+    connector foundation {
+        surface_normal_foundation {
+            target = geometry.part.region.wall
+            modulus = 10000 kN/m^3
         }
     }
     interface contact {
@@ -539,10 +552,82 @@ model coupled {
     assert!(program.is_valid(), "{:#?}", program.diagnostics);
     let model = program.models.values().next().unwrap();
     assert_eq!(model.boundaries.len(), 7);
-    assert_eq!(model.connectors.len(), 2);
+    assert_eq!(model.connectors.len(), 4);
+    assert!(matches!(
+        model.connectors[0].kind,
+        runmat_analysis_core::AuthoredConnectorKind::AxialSpring { .. }
+    ));
+    assert!(matches!(
+        model.connectors[1].kind,
+        runmat_analysis_core::AuthoredConnectorKind::AxialDashpot { .. }
+    ));
+    assert!(matches!(
+        model.connectors[2].kind,
+        runmat_analysis_core::AuthoredConnectorKind::IsotropicGroundSpring { .. }
+    ));
+    assert!(matches!(
+        model.connectors[3].kind,
+        runmat_analysis_core::AuthoredConnectorKind::SurfaceNormalFoundation { .. }
+    ));
     assert_eq!(model.interfaces.len(), 3);
     assert!(matches!(
         model.interfaces[0].kind,
         runmat_analysis_core::AuthoredInterfaceKind::ContactCoulomb { .. }
     ));
+}
+
+#[test]
+fn connector_language_rejects_legacy_names_and_incompatible_topology() {
+    let legacy = r#"
+model assembly {
+    connector obsolete {
+        translational_spring {}
+    }
+}
+"#;
+    let program = FeaCompiler::new(&TestHost::default()).check(CheckRequest {
+        modules: ModuleGraphRequest {
+            source_root: LogicalSourcePath::new("project").unwrap(),
+            root: source_module("project/main.fea", legacy, 1),
+        },
+    });
+    assert!(!program.is_valid());
+    assert!(program.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "fea.semantic.model"
+            && diagnostic
+                .message
+                .contains("unsupported connector formulation `translational_spring`")
+    }));
+
+    let invalid_topology = r#"
+geometry part {
+    construct {
+        feature body = box(width = 1 m, depth = 1 m, height = 1 m)
+        result = feature.body
+    }
+    region wall : face {
+        select result
+        expect one_or_more
+    }
+}
+model assembly {
+    connector invalid_ground_support {
+        isotropic_ground_spring {
+            target = geometry.part.region.wall
+            stiffness = 1 kN/m
+        }
+    }
+}
+"#;
+    let program = FeaCompiler::new(&TestHost::default()).check(CheckRequest {
+        modules: ModuleGraphRequest {
+            source_root: LogicalSourcePath::new("project").unwrap(),
+            root: source_module("project/main.fea", invalid_topology, 1),
+        },
+    });
+    assert!(!program.is_valid());
+    assert!(program.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "fea.semantic.model"
+            && diagnostic.message.contains("incompatible topology")
+    }));
 }

@@ -343,9 +343,14 @@ fn substitute_model_inputs(
         substitute_region(&mut boundary.target, inputs)?;
     }
     for connector in &mut model.connectors {
-        substitute_region(&mut connector.primary, inputs)?;
-        if let Some(secondary) = &mut connector.secondary {
-            substitute_region(secondary, inputs)?;
+        let mut error = None;
+        connector.kind.visit_targets_mut(|target| {
+            if error.is_none() {
+                error = substitute_region(target, inputs).err();
+            }
+        });
+        if let Some(error) = error {
+            return Err(error);
         }
     }
     for interface in &mut model.interfaces {

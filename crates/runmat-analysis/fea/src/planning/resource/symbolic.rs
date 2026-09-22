@@ -171,19 +171,15 @@ impl StructuralSymbolicOperators {
             add_dense_element_pattern(&mut rows, &element_dofs);
         }
         for connector in &model.connectors {
-            let mut connector_nodes =
-                crate::physics::structural::topology::explicit_target_node_indices(
-                    structural,
-                    &connector.primary.region_id,
-                );
-            if let Some(secondary) = &connector.secondary {
+            let mut connector_nodes = Vec::new();
+            connector.kind.visit_targets(|target| {
                 connector_nodes.extend(
                     crate::physics::structural::topology::explicit_target_node_indices(
                         structural,
-                        &secondary.region_id,
+                        &target.region_id,
                     ),
                 );
-            }
+            });
             connector_nodes.sort_unstable();
             connector_nodes.dedup();
             if connector_nodes.is_empty() {
@@ -283,17 +279,16 @@ impl StructuralSymbolicOperators {
             add_dense_element_pattern(&mut rows, &element_dofs);
         }
         for connector in &model.connectors {
-            let mut connector_nodes =
-                resolve_mixed_structural_target(&connector.primary, mesh, structural, &topology)
-                    .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?
-                    .canonical_nodes()
-                    .to_vec();
-            if let Some(secondary) = &connector.secondary {
-                connector_nodes.extend_from_slice(
-                    resolve_mixed_structural_target(secondary, mesh, structural, &topology)
-                        .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?
-                        .canonical_nodes(),
-                );
+            let mut connector_nodes = Vec::new();
+            let mut resolution_error = None;
+            connector.kind.visit_targets(|target| {
+                match resolve_mixed_structural_target(target, mesh, structural, &topology) {
+                    Ok(ownership) => connector_nodes.extend_from_slice(ownership.canonical_nodes()),
+                    Err(error) => resolution_error = Some(error),
+                }
+            });
+            if let Some(error) = resolution_error {
+                return Err(ResourcePlanningError::Invalid(error.to_string()));
             }
             connector_nodes.sort_unstable();
             connector_nodes.dedup();

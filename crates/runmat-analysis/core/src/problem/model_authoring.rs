@@ -282,22 +282,25 @@ impl AuthoredModel {
             |value| value.validate(),
             "interface",
         )?;
-        for source in
-            self.boundaries
+        for source in self.boundaries.iter().map(|value| &value.target).chain(
+            self.interfaces
                 .iter()
-                .map(|value| &value.target)
-                .chain(self.connectors.iter().flat_map(|value| {
-                    std::iter::once(&value.primary).chain(value.secondary.iter())
-                }))
-                .chain(
-                    self.interfaces
-                        .iter()
-                        .flat_map(|value| [&value.primary, &value.secondary]),
-                )
-        {
+                .flat_map(|value| [&value.primary, &value.secondary]),
+        ) {
             if let AuthoredRegionSource::ModelInput(input) = source {
                 require_input(input, &inputs)?;
             }
+        }
+        for connector in &self.connectors {
+            let mut result = Ok(());
+            connector.kind.visit_targets(|source| {
+                if result.is_ok() {
+                    if let AuthoredRegionSource::ModelInput(input) = source {
+                        result = require_input(input, &inputs);
+                    }
+                }
+            });
+            result?;
         }
         crate::validate_physical_signals(&self.signals).map_err(|error| {
             AuthoredModelError::InvalidPhysics {

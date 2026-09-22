@@ -1,302 +1,359 @@
 # Structural connectors
 
-Connectors attach regions through a localized constitutive relation. They are not mesh elements
-chosen by the mesher and not substitutes for contact.
+Connectors add a localized stiffness or damping law to a structural model. They are distinct from
+mesh elements, kinematic constraints, and contact. RunMat exposes four connector kinds whose names
+state both the supported topology and the constitutive law.
 
-For relative displacement $\Delta\mathbf u$ and relative velocity $\Delta\dot{\mathbf u}$, the
-implemented connector contracts represent $\mathbf f=k\Delta\mathbf u$ and
-$\mathbf f=c\Delta\dot{\mathbf u}$. An elastic foundation distributes the same stiffness law over
-the measure of its target region.
+| Kind | Target topology | Coefficient | Contribution |
+| --- | --- | --- | --- |
+| `axial_spring` | two vertices, each resolving to one structural node | `N/m` | stiffness |
+| `axial_dashpot` | two vertices, each resolving to one structural node | `N*s/m` | damping |
+| `isotropic_ground_spring` | one vertex resolving to one structural node | `N/m` | stiffness |
+| `surface_normal_foundation` | one face region | `N/m^3` | stiffness integrated over area |
 
-| Kind | Required fields | Use |
-| --- | --- | --- |
-| `translational_spring` | `primary`, optional `secondary`, `stiffness` | Relative translation to force |
-| `translational_dashpot` | `primary`, optional `secondary`, `damping` | Relative velocity to force |
-| `elastic_foundation` | `primary`, `stiffness` | Distributed foundation stiffness |
+Targets are named geometry regions, not mesh-node numbers. Region realization maps persistent CAD
+entities to canonical solver nodes and faces. A missing, stale, ambiguous, or dimensionally invalid
+target is an error; a connector is never silently omitted.
 
-Each connector names a primary target and, for a two-ended device, a secondary target. Coefficients
-carry physical units. The current source contract has no `frame`, `direction`, local-axis, or matrix
-field: its scalar law is interpreted only through the connector basis admitted by the consuming
-formulation. A connector should appear in the Desktop study preview as a relation between the exact
-target regions, not as a generic label on the model.
+## Axial spring equation and `.fea` syntax
 
-Targets are CAD region references such as `geometry.assembly.region.part_mount`; they are not mesh
-node IDs. Spring and dashpot `secondary` is optional. `elastic_foundation` accepts only `primary`
-and `stiffness`. Stiffness has force-per-length units and damping has force-time-per-length units.
-Unknown members are rejected rather than becoming solver options.
+For endpoint positions $\mathbf x_1,\mathbf x_2$, RunMat forms the undeformed unit axis
 
-## How do I add a translational spring between two regions?
+$$
+\mathbf a=\frac{\mathbf x_2-\mathbf x_1}{\|\mathbf x_2-\mathbf x_1\|}.
+$$
+
+With endpoint displacements $\mathbf u_1,\mathbf u_2$, the extension, axial force, and stored energy
+are
+
+$$
+\delta=\mathbf a^T(\mathbf u_2-\mathbf u_1),\qquad
+F=k\delta,\qquad U=\frac12k\delta^2.
+$$
+
+The two endpoints receive equal-and-opposite forces $\mp F\mathbf a$. Motion perpendicular to
+$\mathbf a$ does not stretch the small-displacement connector.
 
 ```fea
-connector mount_spring {
-    translational_spring {
-        primary = geometry.assembly.region.part_mount
-        secondary = geometry.assembly.region.frame_mount
-        stiffness = 25 kN/m
+geometry bracket {
+    file = "./geometry/bracket.step"
+    units = mm
+
+    region mount_pin : vertex {
+        select persistent_id "mount-pin-center"
+        expect exactly_one
+    }
+
+    region frame_pin : vertex {
+        select persistent_id "frame-pin-center"
+        expect exactly_one
+    }
+}
+
+model supported_bracket {
+    connector mount_stiffness {
+        axial_spring {
+            primary = geometry.bracket.region.mount_pin
+            secondary = geometry.bracket.region.frame_pin
+            stiffness = 220 kN/m
+        }
     }
 }
 ```
 
-The spring force follows $\mathbf f=k(\mathbf u_p-\mathbf u_s)$ under the connector's supported
-translation contract. Omitting `secondary` requests the one-ended/fixed-reference form. A
-single scalar stiffness is not a full anisotropic bushing; do not use it where directional/coupled
-stiffness is required but unsupported.
+Both endpoints are required. To model a connection to a fixed environment, use
+`isotropic_ground_spring`; do not omit an endpoint or create an unmeshed dummy part.
 
-## How do I add viscous damping with a dashpot?
+## Axial dashpot equation and `.fea` syntax
+
+An axial dashpot uses the same geometric axis and the relative axial velocity
+
+$$
+\dot\delta=\mathbf a^T(\dot{\mathbf u}_2-\dot{\mathbf u}_1),\qquad F=c\dot\delta.
+$$
+
+It contributes to the damping operator. It adds no static stiffness and stores no elastic energy.
 
 ```fea
-connector mount_damper {
-    translational_dashpot {
-        primary = geometry.assembly.region.part_mount
-        secondary = geometry.assembly.region.frame_mount
-        damping = 250 N*s/m
+model supported_bracket {
+    connector mount_damping {
+        axial_dashpot {
+            primary = geometry.bracket.region.mount_pin
+            secondary = geometry.bracket.region.frame_pin
+            damping = 1.4 kN*s/m
+        }
     }
 }
 ```
 
-Dashpot force follows relative velocity, $\mathbf f=c(\dot{\mathbf u}_p-
-\dot{\mathbf u}_s)$. It contributes to dynamic response and dissipated energy; it does not add
-static stiffness. Verify the coefficient against the modeled DOF basis and units. This declaration
-does not select a Cartesian component; a directional dashpot is unsupported by the current source
-contract.
+To put a spring and dashpot in parallel, declare both with the same two endpoint regions. Keeping
+them as separate named objects preserves their coefficients and result identities.
 
-## How do I model an elastic foundation?
+## Point spring to ground
+
+An isotropic ground spring resists all three translations at one point:
+
+$$
+\mathbf f=-k\mathbf u,\qquad U=\frac12k\mathbf u^T\mathbf u.
+$$
 
 ```fea
-connector compliant_bed {
-    elastic_foundation {
-        primary = geometry.plate.region.supported_face
-        stiffness = 5 MN/m
+model supported_bracket {
+    connector grounded_mount {
+        isotropic_ground_spring {
+            target = geometry.bracket.region.mount_pin
+            stiffness = 75 kN/m
+        }
     }
 }
 ```
 
-The current typed contract uses force-per-length stiffness. Confirm how the admitted formulation
-distributes that scalar over the selected region and inspect the resolved contribution evidence;
-do not assume an unimplemented Winkler modulus per area.
+This is three equal uncoupled Cartesian springs, not an axial spring and not a six-degree-of-freedom
+bushing. The target must resolve to exactly one structural node.
 
-## How do I model a compliant mount or isolator?
+## Surface-normal elastic foundation
 
-Use a translational spring for static/dynamic compliance and a dashpot for viscous damping, with the
-same physical attachment regions. If both are present, declare both connectors so stiffness and
-damping remain separately inspectable. A real elastomer may be nonlinear, frequency dependent, and
-multiaxial; the scalar linear contracts are appropriate only when that reduction is justified.
+A surface-normal foundation implements a Winkler law. At each quadrature point on the selected
+face, with outward unit normal $\mathbf n$ and interpolated displacement $\mathbf u$, the normal
+displacement and traction are
 
-## How do I attach a lumped component to a structure?
+$$
+u_n=\mathbf n^T\mathbf u,\qquad \mathbf t=-k_w u_n\mathbf n,
+$$
 
-Couple the attachment face to a reference point with the appropriate structural coupling, place the
-lumped inertia at that reference point through the admitted mass model, and connect it with spring/
-dashpot relations as required. Do not spread a point mass across arbitrary face nodes without
-preserving its center of mass and rotational inertia.
+where $k_w$ has units `N/m^3`. RunMat assembles
 
-## How do I model a foundation under a plate or machine base?
+$$
+\mathbf K_f=\int_A k_w\mathbf N^T\mathbf n\mathbf n^T\mathbf N\,dA.
+$$
 
-Use `elastic_foundation` only when its admitted stiffness measure matches the engineering foundation
-law. A scalar `N/m` connector and a Winkler modulus in `N/m^3` have different dimensions. If the
-support pressure is $p=k_w u_n$, use a formulation that explicitly accepts $k_w$ per area/volume;
-do not enter the same number into a scalar spring field.
-
-## How do I model a spring or damper to ground?
-
-Omit `secondary` to request the supported one-ended/fixed-reference form. The primary target still
-needs a physical region and the resulting force/reaction must be
-reported against that reference. Do not create a dummy geometry region merely to imitate ground.
-
-## How do I model a directional spring, bushing, or coupled stiffness matrix?
-
-The current connector contract exposes scalar translational stiffness/damping. It does not claim a
-six-DOF bushing, local-axis stiffness vector, nonlinear force-displacement curve, gap, or coupled
-matrix. Those need a first-class typed connector with an explicit frame and positive-definiteness/
-stability validation; a scalar spring should not be duplicated in coincident regions to imply
-unimplemented coupling.
-
-## How do I model a rotational spring or torsional damper?
-
-The current closed connector set is translational. A rotational connector needs moment-per-angle
-stiffness, moment-per-angular-velocity damping, an axis/frame, and rotational DOF support. Do not
-enter `N*m/rad` into `translational_spring`, whose quantity is force per translation.
-
-## How do I model a nonlinear spring, gap, stop, or one-way support?
-
-A linear translational spring acts in tension and compression with constant tangent. Gaps, stops,
-piecewise curves, preload, hysteresis, and unilateral response require a typed nonlinear connector or
-contact law with state and convergence behavior. Do not approximate a gap by an enormous linear
-stiffness that is active everywhere.
-
-## How do I model frequency-dependent mount stiffness or damping?
-
-The scalar connector values are constant. Viscoelastic or measured dynamic properties need a typed
-frequency/temperature-dependent constitutive model with interpolation and causality/passivity checks.
-Running a sweep while manually changing constants creates separate models and should retain the
-parameter tuple explicitly if used as an approximation.
-
-## How do springs combine in series or parallel?
-
-For one-dimensional ideal springs, $k_{parallel}=\sum_i k_i$ and
-$1/k_{series}=\sum_i1/k_i$. In a finite-element assembly, geometry, direction, reference points, and
-couplings decide whether connectors are actually in series or parallel. Prefer declaring the physical
-connectors and verifying modal/static response over collapsing a multiaxial assembly by arithmetic.
-
-## How do I choose spring and dashpot coefficients for a target natural frequency?
-
-For a one-DOF estimate, $\omega_n=\sqrt{k/m}$ and damping ratio
-$\zeta=c/(2\sqrt{km})$. Use the effective participating mass and connector direction of the actual
-model, then verify the assembled modal result. This estimate does not replace eigenanalysis when the
-attachment excites several structural modes.
-
-## Why does a connector make the model singular?
-
-A translational connector only restrains the relative motion represented by its admitted basis. It
-may leave rigid rotation or orthogonal translations free. Inspect connector target coverage and the
-remaining rigid-body modes; add only the physical constraints the assembly really has.
-
-## Why did a connector make the model too stiff?
-
-Check for duplicate connectors, an unintended spring to ground, a rigid coupling that suppresses
-face deformation, incorrect units, and several connectors acting in parallel on the same DOF. Inspect
-strain energy by connector and run a limiting check with the coefficient reduced/increased by a known
-factor.
-
-## How do I verify connector forces and energy?
-
-For a linear spring, verify $F=k\Delta u$ and stored energy
-$U=\tfrac12k(\Delta u)^2$. For a dashpot, verify $F=c\Delta\dot u$ and nonnegative dissipated energy
-under the stated sign convention. Check equal-and-opposite endpoint resultants and the actual relative
-motion in the formulation's resolved connector basis. Because no frame or axis is authored in the
-current contract, the evidence must expose that realized basis; otherwise the scalar result is not
-auditable.
-
-## What should I inspect in the study preview?
-
-The preview should show both endpoint regions, connector kind, coefficient with units, ground status
-when secondary is absent, and the formulation-resolved basis. A label anchored to only one face is
-insufficient for a two-ended connector; use the study graph to inspect the complete relation.
-
-## How do I put a spring and dashpot in parallel in RunMat?
-
-Declare two connectors on the same named endpoint regions. They remain separate physical objects,
-so static stiffness and transient dissipation can be reviewed independently:
+The physical face area therefore controls total stiffness; refining the mesh does not multiply the
+foundation stiffness.
 
 ```fea
-connector isolator_stiffness {
-    translational_spring {
-        primary = geometry.machine.region.mount
-        secondary = geometry.frame.region.mount
-        stiffness = 180 kN/m
+geometry base {
+    file = "./geometry/machine-base.step"
+    units = mm
+
+    region grout_bearing_face : face {
+        select persistent_id "grout-bearing-face"
+        expect exactly_one
     }
 }
 
-connector isolator_damping {
-    translational_dashpot {
-        primary = geometry.machine.region.mount
-        secondary = geometry.frame.region.mount
-        damping = 1.8 kN*s/m
+model mounted_base {
+    connector grout_support {
+        surface_normal_foundation {
+            target = geometry.base.region.grout_bearing_face
+            modulus = 35 MN/m^3
+        }
     }
 }
 ```
 
-The pair implements $\mathbf f=k\Delta\mathbf u+c\Delta\dot{\mathbf u}$ on the admitted connector
-basis. Do not add coefficients before authoring unless the physical devices truly share the same
-endpoints and realized basis; separate declarations retain the contribution of each device.
+A coefficient in `N/m` is a discrete spring stiffness and is dimensionally invalid here. Convert
+soil, grout, or bedding data to the area-distributed modulus required by the physical model rather
+than dividing a total spring stiffness by the mesh-node count.
 
-## How do I model several mounts under one machine?
+## Choosing the correct relationship
 
-Create one connector pair per physical mount and give every attachment its own CAD region. This
-preserves lever arms and allows unequal reactions. A single spring attached to an all-mounts region
-can preserve total translational stiffness while losing pitch, roll, and load-sharing behavior.
-For each mount, check the actual endpoint displacement difference and equal-and-opposite connector
-forces.
+Use an axial spring or dashpot for a discrete two-point load path. Use an isotropic ground spring
+when one point is elastically supported in all translations. Use a surface-normal foundation for a
+distributed support pressure proportional to normal displacement. Use a tie when relative motion
+must be zero, and contact when separation or sliding is part of the model.
 
-## How do I choose connector regions on CAD geometry?
+These connector kinds do not imply any of the following:
 
-Select the physical attachment footprints, not entire parts. A face region can be coupled to a
-reference point when the reduced connector acts at a mount center; the coupling determines how face
-motion becomes connector motion. Keep the coupling and connector as separate named objects. If two
-mounts share one broad selector, RunMat cannot infer their separate locations or load paths.
+- a directional point spring to ground;
+- a local three-axis or six-degree-of-freedom bushing;
+- rotational stiffness or damping;
+- preload, a gap, a stop, unilateral behavior, or a nonlinear force curve;
+- frequency- or temperature-dependent viscoelastic behavior.
 
-## Which analyses use springs, dashpots, and foundations?
-
-Springs contribute stiffness to static, buckling base-state, modal, harmonic, and transient
-operators when those procedures admit the connector basis. Dashpots contribute damping to harmonic
-and transient response but do not change an undamped static solution. Foundations contribute their
-distributed stiffness only on the resolved target. A study must reject a connector when its
-procedure, topology, or degrees of freedom cannot represent it; silently dropping a connector is
-never a valid fallback.
-
-## What connector results should I request?
-
-Request relative displacement, relative velocity where applicable, connector force, spring energy,
-and dashpot dissipation by connector identity. Also request support reactions and global energy
-balance. A displacement contour alone cannot show whether a mount used the intended coefficient or
-whether several mounts accidentally acted in parallel on the same projected entities.
+Those behaviors require their own typed constitutive contracts. Supplying a coefficient with the
+wrong units or duplicating coincident scalar connectors does not create them.
 
 ## How do I model an equipment mount with stiffness and damping?
 
-Use one translational spring and one translational dashpot per physical scalar mount relation. Their forces
-act in parallel: $F=k\Delta u+c\Delta\dot u$. Give each mount a separate region or reference point so
-its load path and reaction remain identifiable. A single broad foundation is a different model.
-
-Choose coefficients from test data or a stated reduction. For a supported mass $m$ and target
-undamped frequency $f_n$, $k=(2\pi f_n)^2m$; for damping ratio $\zeta$,
-$c=2\zeta\sqrt{km}$. The current DSL cannot author a mount direction. Multi-axis coupling,
-directional stiffness, or rotational stiffness needs a typed matrix/bushing contract and must not
-be approximated by unlabeled scalar springs.
-
-An exact two-ended linear mount in the current source language is:
+Represent one scalar mount by an axial spring and axial dashpot between the same two point regions.
+For supported mass $m$, target undamped frequency $f_n$, and damping ratio $\zeta$, an initial
+reduction is $k=(2\pi f_n)^2m$ and $c=2\zeta\sqrt{km}$. The participating mass must be the mass seen
+along the connector axis, not necessarily the assembly's total mass.
 
 ```fea
-connector mount_stiffness {
-    translational_spring {
-        primary = geometry.machine.region.front_mount
-        secondary = geometry.frame.region.front_mount
-        stiffness = 220 kN/m
+model isolated_equipment {
+    connector mount_elasticity {
+        axial_spring {
+            primary = geometry.equipment.region.mount_center
+            secondary = geometry.frame.region.mount_center
+            stiffness = 180 kN/m
+        }
     }
-}
 
-connector mount_damping {
-    translational_dashpot {
-        primary = geometry.machine.region.front_mount
-        secondary = geometry.frame.region.front_mount
-        damping = 1.4 kN*s/m
+    connector mount_dissipation {
+        axial_dashpot {
+            primary = geometry.equipment.region.mount_center
+            secondary = geometry.frame.region.mount_center
+            damping = 1.8 kN*s/m
+        }
     }
 }
 ```
 
-Do not add `direction`, `frame`, preload, or nonlinear curve members: none is accepted here. Before
-using this reduction, confirm that the consuming formulation exposes the intended scalar relative
-coordinate. Verify $F_s/k=\Delta u$ and $F_d/c=\Delta\dot u$, equal-and-opposite endpoint
-resultants, nonnegative dashpot dissipation, and the predicted one-DOF frequency/damping ratio
-against an assembled modal/transient result.
+Measured elastomer data can depend on preload, temperature, amplitude, and frequency. A constant
+linear coefficient is appropriate only when the intended operating range supports that reduction.
 
-## How do I model several isolators under one rigid machine?
+## How do I model a foundation under a plate or machine base?
 
-Couple the machine attachment points only if the machine is intended to behave rigidly, then declare
-each isolator separately at its actual location. Off-axis mount forces create moments and rocking
-modes, so preserving only total vertical stiffness is insufficient. Retain mount coordinates, the
-formulation-resolved scalar bases, preload assumptions, and force by mount. If authored directional
-bases are required, the current connector contract is insufficient.
+Select the physical bearing face and use `surface_normal_foundation`. The input is the pressure per
+normal displacement, not the total vertical stiffness of the machine. For a flat face of area $A$
+under uniform normal motion, total tangent stiffness is $k_wA$.
 
-Compare rigid-body frequencies and mode shapes with a hand or reduced-order model. An accidental
-duplicate selector can put two connectors in parallel and shift every mode.
+## How do I attach a lumped component to a structure?
 
-## How do I decide between a spring, elastic foundation, tie, and contact?
+First use a structural coupling to relate the attachment face to a reference point. Place the
+lumped mass and inertia at that reference point, then connect physical point locations as required.
+The coupling defines how face motion reaches the reduced point; the connector defines compliance.
+Do not distribute a point mass over arbitrary face nodes without preserving center of mass and
+rotational inertia.
 
-Use a spring for a discrete compliant path, an elastic foundation for distributed traction
-proportional to local displacement, a tie for zero relative motion, and contact for unilateral
-opening/sliding. These are not interchangeable ways to stabilize a matrix. Select the representation
-from the physical load path and expected relative motion.
+## How do axial springs combine in series or parallel?
 
-For sensitivity work, vary the uncertain physical coefficient explicitly and compare reaction,
-strain energy, modal frequency, and local stress away from idealized attachment singularities.
+Ideal collinear springs use $k_\mathrm{parallel}=\sum_i k_i$ and
+$1/k_\mathrm{series}=\sum_i1/k_i$. In a three-dimensional assembly, endpoint positions and axes
+determine whether that reduction applies. Declaring the physical connectors retains load paths and
+individual results and is preferable when geometry matters.
 
-## How do connector coefficients scale in a symmetry model?
+## How do I choose a connector coefficient from test data?
 
-A discrete physical mount included in the sector retains its full coefficient. A smeared ring or
-distributed support represented by a sector uses the coefficient associated with that sector's
-physical share. Never divide stiffness merely because the mesh contains fewer nodes. State whether
-the input is per mount, per unit area/length, or total assembly stiffness, then verify total stored
-energy under a known rigid displacement.
+Use the slope of the measured force-displacement or force-velocity curve over the stated operating
+range, convert it to `N/m` or `N*s/m`, and record the test conditions. Compare a RunMat single-
+connector calculation with the measured slope before placing the connector in a larger assembly.
+Do not infer a Winkler modulus from a point test without an explicit effective-area model.
 
-Use springs for elastic compliance, dashpots for rate-dependent force, and a foundation for a
-distributed support law. Use [structural constraints](./structural) for kinematic restrictions and
-[interfaces](./interfaces) for contact or multiphysics transfer.
+## How do I model a directional spring to ground?
+
+`isotropic_ground_spring` acts equally in global $x$, $y$, and $z$. It cannot represent one selected
+direction. A directional ground spring needs a typed axis or coordinate frame and is not part of
+the current closed connector set. An axial spring may provide directional compliance only when its
+second endpoint is a real modeled point.
+
+## How do I model a six-degree-of-freedom bushing?
+
+The four connector kinds do not accept translational-rotational coupling matrices. A bushing needs
+a local frame, a dimensionally typed $6\times6$ stiffness or damping operator, symmetry/passivity
+validation, and rotational DOFs at both endpoints. Do not approximate cross-coupling by stacking
+unlabeled scalar connectors.
+
+## How do I model a rotational spring or torsional damper?
+
+Rotational connectors require moment-per-angle or moment-per-angular-velocity coefficients plus a
+defined axis. `N*m/rad` is invalid for every connector on this page. Use a formulation with a typed
+rotational connector when that capability is available.
+
+## How do I model a nonlinear spring, gap, or stop?
+
+The current spring laws are linear and bilateral. A gap, stop, one-way support, preload, hysteresis,
+or piecewise force curve needs state, tangent updates, event handling, and nonlinear convergence
+evidence. A very large linear stiffness that remains active in both directions is not a gap model.
+
+## How do I model frequency-dependent mount properties?
+
+Constant `stiffness` and `damping` values do not encode viscoelastic frequency dependence. A sweep
+of manually changed constants is a family of linear approximations; retain the parameter tuple and
+test provenance for every case. A causal frequency-dependent material or connector needs an
+explicit typed constitutive model.
+
+## Can a face be an axial connector endpoint?
+
+No. An axial endpoint must resolve to one vertex and one canonical structural node. If a physical
+mount occupies a face, introduce the appropriate distributing or rigid coupling to a point and
+connect that point. This keeps face-to-point kinematics separate from connector compliance.
+
+## What happens when both endpoints resolve to the same node?
+
+RunMat rejects the connector. Its axis would have zero length and no physical direction. This often
+indicates that two CAD aliases collapsed onto one persistent vertex or that a conformal interface
+merged endpoints that were intended to remain distinct.
+
+## How are shell and solid foundation faces integrated?
+
+Explicit linear shell faces use physical triangle quadrature. Solid boundary faces, including
+quadratic faces, use the canonical analysis projection and its physical boundary quadrature. Mixed
+models select the owning surface representation rather than integrating the same shared face twice.
+
+## How do I check connector mesh convergence?
+
+For axial and point-ground connectors, refine the surrounding structure while preserving the same
+persistent endpoint identity. For foundations, refine the selected face and confirm that integrated
+reaction and foundation energy converge without growing in proportion to node count. Also inspect
+nearby continuum stress separately from the connector resultant.
+
+## Which procedures use dashpot damping?
+
+Transient and harmonic procedures use the damping operator when their admitted formulation includes
+connectors. A static solve has zero velocity and therefore no dashpot force. Modal procedures must
+state whether damping participates in eigenvalue extraction rather than implying it from the mere
+presence of a dashpot.
+
+## What connector results should I request?
+
+Request connector resultant force, relative deformation or velocity appropriate to the connector
+kind, and stored energy for elastic connectors. Pair those with support reactions and whole-model
+energy balance. A displacement contour alone cannot prove that a connector used the intended
+coefficient or target.
+
+## What should the Desktop preview show?
+
+The study preview should identify every connector, both endpoints for axial devices, the foundation
+face, coefficient and units, and the realized axis or normal basis. At lower zoom levels it may
+simplify labels, but it must preserve kind, location, and load-path identity. The study graph should
+link the declaration to its geometry regions and result fields.
+
+## Modeling several mounts
+
+Give every physical mount its own point regions and connector declarations. Preserving mount
+locations retains the moment arms, load sharing, pitch and roll modes, and force result for each
+mount. Replacing several mounts with one connector on a broad region changes the model even when
+the sum of the scalar coefficients is unchanged.
+
+For a first estimate of a one-degree-of-freedom supported mass,
+$\omega_n=\sqrt{k/m}$ and $\zeta=c/(2\sqrt{km})$. Use the participating mass along the connector
+axis, then verify the assembled modes and transient or harmonic response.
+
+## Symmetry and sector models
+
+A discrete mount that is physically present in the modeled sector retains its full coefficient. A
+smeared support uses the coefficient belonging to the represented area or circumference. State
+whether input data is per mount, per unit area, or for the full assembly. Do not scale a connector
+because the mesh happens to contain fewer nodes.
+
+## Diagnosing singular or over-stiff models
+
+An axial connector restrains only relative motion along one axis. Orthogonal translations and rigid
+rotations remain free unless other physical supports restrain them. If the model is singular,
+inspect its remaining rigid-body modes rather than increasing the connector coefficient.
+
+If the assembly is too stiff, check for duplicate connector declarations, an unintended ground
+spring, a rigid coupling that suppresses attachment-face deformation, incorrect units, and multiple
+devices acting in parallel. Vary one coefficient by a known factor and compare connector force,
+stored energy, reactions, and modal frequency.
+
+## Verification checks
+
+For each axial spring, compare reported extension and force with $F=k\delta$, check
+equal-and-opposite endpoint resultants, and compare stored energy with $k\delta^2/2$. For each
+ground spring, verify the three force components against $-k\mathbf u$. For each foundation,
+check integrated reaction and $k_w\int_Au_n^2/2\,dA$ under a simple prescribed displacement.
+
+A rigid transverse motion of an axial connector must produce zero axial energy. A uniform normal
+translation of a flat foundation must produce total tangent stiffness $k_w A$, independent of mesh
+density. These limiting cases catch target, direction, unit, and quadrature errors before a complex
+study obscures them.
+
+Spring stiffness contributes to static, preload, modal, harmonic, and transient operators when the
+procedure admits structural connectors. Dashpot damping affects velocity-dependent procedures but
+not a static solution. A procedure that cannot execute a connector kind must reject the study.
+
+Use [structural constraints](./structural) for prescribed kinematics and
+[interfaces](./interfaces) for contact and multiphysics transfer.

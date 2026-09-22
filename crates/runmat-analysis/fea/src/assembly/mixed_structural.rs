@@ -11,7 +11,10 @@ use super::{
     },
     direct_constraints::DirectConstraintAssignments,
     dofs::{StructuralDofKind, StructuralDofLayout, StructuralNodeDofSet},
-    explicit_connectors::assemble_connectors_with_resolver,
+    explicit_connectors::{
+        assemble_connectors_with_resolver, resolve_explicit_surface, resolve_projected_surface,
+        ConnectorTargetRole, ResolvedConnectorTarget,
+    },
     explicit_elements::{assemble_explicit_elements, ExplicitElementAssembly},
     requested_moment_norm,
     solver_solid::assemble_solver_solid_operators,
@@ -138,27 +141,41 @@ pub(super) fn assemble_mixed_structural_system(
         OperatorRole::Damping,
         MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
     );
+    let connector_projection =
+        crate::topology::AnalysisProjection::derive(mesh).map_err(|error| {
+            LinearAssemblyError::Structural(StructuralAssemblyError::MixedTopology(
+                error.to_string(),
+            ))
+        })?;
+    let connector_coordinates_m = topology
+        .nodes
+        .iter()
+        .map(|node| node.coordinates_m)
+        .collect::<Vec<_>>();
     let connector_summary = assemble_connectors_with_resolver(
         &model.connectors,
         &layout,
+        &connector_coordinates_m,
         &mut connector_stiffness_assembler,
         &mut connector_damping_assembler,
-        |connector, primary| {
-            let target = if primary {
-                &connector.primary
-            } else {
-                connector
-                    .secondary
-                    .as_ref()
-                    .expect("secondary connector target was requested")
-            };
-            resolve_target(&connector.connector_id, target, mesh, structural, &topology).map(
-                |ownership| match ownership {
-                    MixedStructuralTargetOwnership::Solid { canonical_nodes }
-                    | MixedStructuralTargetOwnership::Explicit { canonical_nodes }
-                    | MixedStructuralTargetOwnership::Shared { canonical_nodes } => canonical_nodes,
+        |connector, target, role| {
+            let ownership =
+                resolve_target(&connector.connector_id, target, mesh, structural, &topology)?;
+            match role {
+                ConnectorTargetRole::Point => Ok(ResolvedConnectorTarget {
+                    node_indices: ownership.canonical_nodes().to_vec(),
+                    surface_samples: Vec::new(),
+                }),
+                ConnectorTargetRole::Surface => match ownership {
+                    MixedStructuralTargetOwnership::Solid { .. }
+                    | MixedStructuralTargetOwnership::Shared { .. } => {
+                        resolve_projected_surface(connector, target, &connector_projection)
+                    }
+                    MixedStructuralTargetOwnership::Explicit { .. } => {
+                        resolve_explicit_surface(connector, target, structural, &topology)
+                    }
                 },
-            )
+            }
         },
     )
     .map_err(LinearAssemblyError::Structural)?;

@@ -5,9 +5,9 @@ use crate::{
 };
 use runmat_analysis_core::{
     AuthoredBoundary, AuthoredBoundaryKind, AuthoredConnector, AuthoredConnectorKind,
-    AuthoredInterface, AuthoredInterfaceKind, Damping, FrictionCoefficient, HeatFlux,
-    HeatTransferCoefficient, PrescribedValue, Pressure, SpecificAcousticImpedance, Stiffness,
-    Temperature, ThermalContactResistance,
+    AuthoredInterface, AuthoredInterfaceKind, Damping, FoundationModulus, FrictionCoefficient,
+    HeatFlux, HeatTransferCoefficient, PrescribedValue, Pressure, SpecificAcousticImpedance,
+    Stiffness, Temperature, ThermalContactResistance,
 };
 use runmat_parser::fea::FeaModelDefinitionKind;
 
@@ -180,20 +180,24 @@ fn connector(
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<AuthoredConnector> {
     let (kind, body) = sole_kind_block(declaration, statements, "connector", diagnostics)?;
-    let primary = region_source(
-        bound,
-        declaration,
-        required_assignment(declaration, body, "primary", diagnostics)?,
-        diagnostics,
-    )?;
-    let secondary = match optional_assignment(body, "secondary") {
-        Some(value) => Some(region_source(bound, declaration, value, diagnostics)?),
-        None => None,
-    };
     let (supported, kind) = match kind {
-        "translational_spring" => (
+        "axial_spring" => (
             &["primary", "secondary", "stiffness"][..],
-            AuthoredConnectorKind::TranslationalSpring {
+            AuthoredConnectorKind::AxialSpring {
+                primary: required_connector_target(
+                    declaration,
+                    bound,
+                    body,
+                    "primary",
+                    diagnostics,
+                )?,
+                secondary: required_connector_target(
+                    declaration,
+                    bound,
+                    body,
+                    "secondary",
+                    diagnostics,
+                )?,
                 stiffness: Stiffness::new(required_quantity(
                     declaration,
                     body,
@@ -203,9 +207,23 @@ fn connector(
                 )?),
             },
         ),
-        "translational_dashpot" => (
+        "axial_dashpot" => (
             &["primary", "secondary", "damping"][..],
-            AuthoredConnectorKind::TranslationalDashpot {
+            AuthoredConnectorKind::AxialDashpot {
+                primary: required_connector_target(
+                    declaration,
+                    bound,
+                    body,
+                    "primary",
+                    diagnostics,
+                )?,
+                secondary: required_connector_target(
+                    declaration,
+                    bound,
+                    body,
+                    "secondary",
+                    diagnostics,
+                )?,
                 damping: Damping::new(required_quantity(
                     declaration,
                     body,
@@ -217,14 +235,28 @@ fn connector(
                 )?),
             },
         ),
-        "elastic_foundation" => (
-            &["primary", "stiffness"][..],
-            AuthoredConnectorKind::ElasticFoundation {
+        "isotropic_ground_spring" => (
+            &["target", "stiffness"][..],
+            AuthoredConnectorKind::IsotropicGroundSpring {
+                target: required_connector_target(declaration, bound, body, "target", diagnostics)?,
                 stiffness: Stiffness::new(required_quantity(
                     declaration,
                     body,
                     "stiffness",
                     PhysicalDimension::FORCE.divide(PhysicalDimension::LENGTH)?,
+                    diagnostics,
+                )?),
+            },
+        ),
+        "surface_normal_foundation" => (
+            &["target", "modulus"][..],
+            AuthoredConnectorKind::SurfaceNormalFoundation {
+                target: required_connector_target(declaration, bound, body, "target", diagnostics)?,
+                modulus: FoundationModulus::new(required_quantity(
+                    declaration,
+                    body,
+                    "modulus",
+                    PhysicalDimension::FORCE.divide(PhysicalDimension::VOLUME)?,
                     diagnostics,
                 )?),
             },
@@ -242,12 +274,25 @@ fn connector(
     validate_assignments(declaration, body, supported, diagnostics);
     let value = AuthoredConnector {
         connector_id: id.into(),
-        primary,
-        secondary,
         kind,
     };
     validate_physics(declaration, value.validate(), diagnostics)?;
     Some(value)
+}
+
+fn required_connector_target(
+    declaration: &CheckedFeaDeclaration,
+    bound: &BoundFeaProgram,
+    body: &[CheckedFeaStatement],
+    name: &str,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Option<runmat_analysis_core::AuthoredRegionSource> {
+    region_source(
+        bound,
+        declaration,
+        required_assignment(declaration, body, name, diagnostics)?,
+        diagnostics,
+    )
 }
 
 fn interface(
@@ -337,18 +382,6 @@ fn interface(
     };
     validate_physics(declaration, value.validate(), diagnostics)?;
     Some(value)
-}
-
-fn optional_assignment<'a>(
-    statements: &'a [CheckedFeaStatement],
-    name: &str,
-) -> Option<&'a crate::CheckedExpression> {
-    statements.iter().find_map(|statement| {
-        let CheckedFeaStatementKind::Assignment { target, value, .. } = &statement.kind else {
-            return None;
-        };
-        (target.as_slice() == [name]).then_some(value)
-    })
 }
 
 fn validate_physics<E: std::fmt::Display>(

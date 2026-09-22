@@ -82,12 +82,13 @@ These declarations are related to constraints but assemble different mathematica
 
 | Category | Closed kinds |
 | --- | --- |
-| Connector | `translational_spring`, `translational_dashpot`, `elastic_foundation` |
+| Connector | `axial_spring`, `axial_dashpot`, `isotropic_ground_spring`, `surface_normal_foundation` |
 | Structural contact | `contact.frictionless`, `contact.coulomb` |
 | Fluid–structure transfer | `fluid_structure.no_slip` |
 | Conjugate heat transfer | `conjugate_heat_transfer.perfect`, `conjugate_heat_transfer.conductance`, `conjugate_heat_transfer.resistance` |
 
-See [connectors](./connectors) and [interfaces](./interfaces). A six-DOF bushing, cohesive law,
+See [connectors](./connectors) and [interfaces](./interfaces). A directional point spring,
+six-DOF bushing, cohesive law,
 nonlinear gap spring, radiation interface, or porous jump is not implied by these names and must not
 be approximated by supplying dimensionally incompatible coefficients.
 

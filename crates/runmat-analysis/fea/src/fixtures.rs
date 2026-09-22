@@ -149,10 +149,9 @@ pub fn mixed_solid_beam_model(attached_coordinates_m: [f64; 3]) -> AnalysisModel
         ],
     );
     model.connectors = vec![AnalysisConnector {
-        connector_id: "mixed_span_foundation".into(),
-        primary: RegionTarget::authored("span"),
-        secondary: None,
-        kind: ConnectorKind::ElasticFoundation {
+        connector_id: "mixed_tip_ground_spring".into(),
+        kind: ConnectorKind::IsotropicGroundSpring {
+            target: RegionTarget::point("node:102"),
             stiffness: Stiffness::new(2_000.0),
         },
     }];

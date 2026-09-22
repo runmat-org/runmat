@@ -4,8 +4,8 @@ use super::{
     model_authoring::{AuthoredModelError, AuthoredRegionSource},
     prescribed_value::PrescribedValue,
     quantity::{
-        Damping, FrictionCoefficient, HeatFlux, HeatTransferCoefficient, Pressure,
-        SpecificAcousticImpedance, Stiffness, Temperature, ThermalContactResistance,
+        Damping, FoundationModulus, FrictionCoefficient, HeatFlux, HeatTransferCoefficient,
+        Pressure, SpecificAcousticImpedance, Stiffness, Temperature, ThermalContactResistance,
     },
 };
 use runmat_geometry_core::GeometryRegionRole;
@@ -47,17 +47,30 @@ pub enum AuthoredBoundaryKind {
 #[serde(deny_unknown_fields)]
 pub struct AuthoredConnector {
     pub connector_id: String,
-    pub primary: AuthoredRegionSource,
-    pub secondary: Option<AuthoredRegionSource>,
     pub kind: AuthoredConnectorKind,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AuthoredConnectorKind {
-    TranslationalSpring { stiffness: Stiffness },
-    TranslationalDashpot { damping: Damping },
-    ElasticFoundation { stiffness: Stiffness },
+    AxialSpring {
+        primary: AuthoredRegionSource,
+        secondary: AuthoredRegionSource,
+        stiffness: Stiffness,
+    },
+    AxialDashpot {
+        primary: AuthoredRegionSource,
+        secondary: AuthoredRegionSource,
+        damping: Damping,
+    },
+    IsotropicGroundSpring {
+        target: AuthoredRegionSource,
+        stiffness: Stiffness,
+    },
+    SurfaceNormalFoundation {
+        target: AuthoredRegionSource,
+        modulus: FoundationModulus,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -123,32 +136,80 @@ impl AuthoredBoundary {
 impl AuthoredConnector {
     pub fn validate(&self) -> Result<(), AuthoredModelPhysicsError> {
         id(&self.connector_id)?;
-        let attachment_roles = [
-            GeometryRegionRole::Vertex,
-            GeometryRegionRole::Edge,
-            GeometryRegionRole::Face,
-        ];
-        require_role(&self.primary, &attachment_roles)?;
-        if let Some(secondary) = &self.secondary {
-            require_role(secondary, &attachment_roles)?;
-            if secondary == &self.primary {
-                return Err(AuthoredModelPhysicsError::IdenticalTargets);
+        match &self.kind {
+            AuthoredConnectorKind::AxialSpring {
+                primary,
+                secondary,
+                stiffness,
+            } => {
+                require_distinct_vertices(primary, secondary)?;
+                finite_nonnegative(stiffness.newtons_per_meter)?;
             }
-        }
-        match (&self.kind, &self.secondary) {
-            (AuthoredConnectorKind::ElasticFoundation { .. }, Some(_)) => {
-                return Err(AuthoredModelPhysicsError::UnexpectedSecondary)
+            AuthoredConnectorKind::AxialDashpot {
+                primary,
+                secondary,
+                damping,
+            } => {
+                require_distinct_vertices(primary, secondary)?;
+                finite_nonnegative(damping.newton_seconds_per_meter)?;
             }
-            (AuthoredConnectorKind::TranslationalSpring { stiffness }, _)
-            | (AuthoredConnectorKind::ElasticFoundation { stiffness }, _) => {
-                finite_nonnegative(stiffness.newtons_per_meter)?
+            AuthoredConnectorKind::IsotropicGroundSpring { target, stiffness } => {
+                require_role(target, &[GeometryRegionRole::Vertex])?;
+                finite_nonnegative(stiffness.newtons_per_meter)?;
             }
-            (AuthoredConnectorKind::TranslationalDashpot { damping }, _) => {
-                finite_nonnegative(damping.newton_seconds_per_meter)?
+            AuthoredConnectorKind::SurfaceNormalFoundation { target, modulus } => {
+                require_role(target, &[GeometryRegionRole::Face])?;
+                finite_nonnegative(modulus.newtons_per_cubic_meter)?;
             }
         }
         Ok(())
     }
+}
+
+impl AuthoredConnectorKind {
+    pub fn visit_targets(&self, mut visit: impl FnMut(&AuthoredRegionSource)) {
+        match self {
+            Self::AxialSpring {
+                primary, secondary, ..
+            }
+            | Self::AxialDashpot {
+                primary, secondary, ..
+            } => {
+                visit(primary);
+                visit(secondary);
+            }
+            Self::IsotropicGroundSpring { target, .. }
+            | Self::SurfaceNormalFoundation { target, .. } => visit(target),
+        }
+    }
+
+    pub fn visit_targets_mut(&mut self, mut visit: impl FnMut(&mut AuthoredRegionSource)) {
+        match self {
+            Self::AxialSpring {
+                primary, secondary, ..
+            }
+            | Self::AxialDashpot {
+                primary, secondary, ..
+            } => {
+                visit(primary);
+                visit(secondary);
+            }
+            Self::IsotropicGroundSpring { target, .. }
+            | Self::SurfaceNormalFoundation { target, .. } => visit(target),
+        }
+    }
+}
+
+fn require_distinct_vertices(
+    primary: &AuthoredRegionSource,
+    secondary: &AuthoredRegionSource,
+) -> Result<(), AuthoredModelPhysicsError> {
+    require_role(primary, &[GeometryRegionRole::Vertex])?;
+    require_role(secondary, &[GeometryRegionRole::Vertex])?;
+    if primary == secondary {
+        return Err(AuthoredModelPhysicsError::IdenticalTargets);
+    }
+    Ok(())
 }
 
 impl AuthoredInterface {
@@ -223,8 +284,6 @@ pub enum AuthoredModelPhysicsError {
     InvalidTopology,
     #[error("primary and secondary targets must be distinct")]
     IdenticalTargets,
-    #[error("this connector kind cannot have a secondary target")]
-    UnexpectedSecondary,
     #[error("physical value is non-finite or outside its admissible range")]
     InvalidValue,
 }

@@ -44,21 +44,37 @@ pub(super) fn extend_model_physics(
             .map(|value| {
                 Ok(AnalysisConnector {
                     connector_id: value.connector_id.clone(),
-                    primary: targets.region_target(&value.primary, TargetCardinality::OneOrMore)?,
-                    secondary: value
-                        .secondary
-                        .as_ref()
-                        .map(|source| targets.region_target(source, TargetCardinality::OneOrMore))
-                        .transpose()?,
-                    kind: match value.kind {
-                        AuthoredConnectorKind::TranslationalSpring { stiffness } => {
-                            ConnectorKind::TranslationalSpring { stiffness }
+                    kind: match &value.kind {
+                        AuthoredConnectorKind::AxialSpring {
+                            primary,
+                            secondary,
+                            stiffness,
+                        } => ConnectorKind::AxialSpring {
+                            primary: targets.region_target(primary, TargetCardinality::One)?,
+                            secondary: targets.region_target(secondary, TargetCardinality::One)?,
+                            stiffness: *stiffness,
+                        },
+                        AuthoredConnectorKind::AxialDashpot {
+                            primary,
+                            secondary,
+                            damping,
+                        } => ConnectorKind::AxialDashpot {
+                            primary: targets.region_target(primary, TargetCardinality::One)?,
+                            secondary: targets.region_target(secondary, TargetCardinality::One)?,
+                            damping: *damping,
+                        },
+                        AuthoredConnectorKind::IsotropicGroundSpring { target, stiffness } => {
+                            ConnectorKind::IsotropicGroundSpring {
+                                target: targets.region_target(target, TargetCardinality::One)?,
+                                stiffness: *stiffness,
+                            }
                         }
-                        AuthoredConnectorKind::TranslationalDashpot { damping } => {
-                            ConnectorKind::TranslationalDashpot { damping }
-                        }
-                        AuthoredConnectorKind::ElasticFoundation { stiffness } => {
-                            ConnectorKind::ElasticFoundation { stiffness }
+                        AuthoredConnectorKind::SurfaceNormalFoundation { target, modulus } => {
+                            ConnectorKind::SurfaceNormalFoundation {
+                                target: targets
+                                    .region_target(target, TargetCardinality::OneOrMore)?,
+                                modulus: *modulus,
+                            }
                         }
                     },
                 })

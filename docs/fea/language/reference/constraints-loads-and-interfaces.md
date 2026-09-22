@@ -116,7 +116,7 @@ initial warm_start {
 }
 
 connector mount_spring {
-    translational_spring {
+    axial_spring {
         primary = geometry.assembly.region.mount
         secondary = geometry.assembly.region.frame
         stiffness = 18 kN/m
