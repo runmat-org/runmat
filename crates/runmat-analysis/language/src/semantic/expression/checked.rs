@@ -23,6 +23,7 @@ pub enum CheckedCallArgument {
     Positional(CheckedExpression),
     Named {
         name: String,
+        name_span: runmat_types::Span,
         value: CheckedExpression,
     },
 }

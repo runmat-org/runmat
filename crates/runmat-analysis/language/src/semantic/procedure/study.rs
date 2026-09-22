@@ -254,7 +254,7 @@ fn geometry_arguments(
     arguments
         .iter()
         .filter_map(|argument| {
-            let CheckedCallArgument::Named { name, value } = argument else {
+            let CheckedCallArgument::Named { name, value, .. } = argument else {
                 lower::error(
                     declaration,
                     expression.span,
@@ -411,7 +411,7 @@ fn model_arguments(
     arguments
         .iter()
         .filter_map(|argument| {
-            let CheckedCallArgument::Named { name, value } = argument else {
+            let CheckedCallArgument::Named { name, value, .. } = argument else {
                 lower::error(
                     declaration,
                     expression.span,

@@ -289,6 +289,7 @@ fn argument<'a>(
             CheckedCallArgument::Named {
                 name: candidate,
                 value,
+                ..
             } if candidate == name => Some(value),
             _ => None,
         })

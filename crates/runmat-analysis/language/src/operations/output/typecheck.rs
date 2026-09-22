@@ -291,6 +291,7 @@ fn argument_expression<'a>(
             CheckedCallArgument::Named {
                 name: candidate,
                 value,
+                ..
             } if candidate == name => Some(value),
             _ => None,
         })
@@ -324,6 +325,7 @@ fn argument_type<'a>(
             CheckedCallArgument::Named {
                 name: candidate,
                 value,
+                ..
             } if candidate == name => Some(&value.value_type),
             _ => None,
         })

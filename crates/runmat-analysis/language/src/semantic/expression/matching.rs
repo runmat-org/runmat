@@ -29,7 +29,7 @@ pub(super) fn arguments_match(
                 }
                 (positional, value)
             }
-            CheckedCallArgument::Named { name, value } => {
+            CheckedCallArgument::Named { name, value, .. } => {
                 let Some(index) = parameters
                     .iter()
                     .position(|parameter| &parameter.name == name)
@@ -78,7 +78,7 @@ pub(super) fn declaration_arguments_match(
                 positional += 1;
                 ((*name).clone(), value)
             }
-            CheckedCallArgument::Named { name, value } => (name.clone(), value),
+            CheckedCallArgument::Named { name, value, .. } => (name.clone(), value),
         };
         let Some(input) = signature.inputs.get(&name) else {
             return false;

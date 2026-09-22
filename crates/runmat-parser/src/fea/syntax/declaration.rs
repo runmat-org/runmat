@@ -18,6 +18,7 @@ pub struct FeaImport {
     pub kind: FeaImportKind,
     pub name: FeaName,
     pub source: String,
+    pub source_span: Span,
     pub span: Span,
 }
 

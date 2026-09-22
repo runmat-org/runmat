@@ -18,11 +18,13 @@ use super::position::{offset_to_position, position_to_offset};
 mod navigation;
 mod presentation;
 mod project;
+mod rename;
 #[cfg(test)]
 mod tests;
 
 use presentation::*;
 pub(crate) use project::resolve_project_facts;
+pub(crate) use rename::{FeaFunctionImportPath, FeaRenameTarget};
 
 #[derive(Clone)]
 pub struct FeaDocumentAnalysis {

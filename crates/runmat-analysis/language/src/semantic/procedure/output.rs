@@ -451,6 +451,7 @@ fn positional_or_named<'a>(
             CheckedCallArgument::Named {
                 name: argument_name,
                 value,
+                ..
             } if argument_name == name => Some(value),
             _ => None,
         })

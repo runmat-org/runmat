@@ -6,8 +6,8 @@ use crate::core::analysis::{
     analyze_document_with_compat_and_source, completion_at, definition_locations_at,
     diagnostics_for_document, document_symbols, formatting_edits, function_definitions_in_document,
     function_references_in_document, hover_at, quick_information_at, references_locations_at,
-    semantic_document_facts, semantic_tokens_full, semantic_tokens_legend, signature_help_at,
-    CompatMode, DocumentAnalysis,
+    rename_subject_at, rename_subject_has_collision, semantic_document_facts, semantic_tokens_full,
+    semantic_tokens_legend, signature_help_at, CompatMode, DocumentAnalysis,
 };
 use crate::core::fea::FeaDocumentAnalysis;
 use crate::core::position::position_to_offset;
@@ -37,6 +37,7 @@ use tower_lsp::lsp_types::{
 use tower_lsp::{async_trait, Client, LanguageServer};
 
 mod fea;
+mod rename;
 // Cargo substitutes this at compile time so we can surface the precise build version in logs.
 const SERVER_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -531,6 +532,10 @@ impl LanguageServer for RunMatLanguageServer {
             hover_provider: Some(HoverProviderCapability::Simple(true)),
             definition_provider: Some(OneOf::Left(true)),
             references_provider: Some(OneOf::Left(true)),
+            rename_provider: Some(OneOf::Right(tower_lsp::lsp_types::RenameOptions {
+                prepare_provider: Some(true),
+                work_done_progress_options: Default::default(),
+            })),
             signature_help_provider: Some(SignatureHelpOptions::default()),
             semantic_tokens_provider: Some(
                 SemanticTokensServerCapabilities::SemanticTokensOptions(SemanticTokensOptions {
@@ -763,6 +768,20 @@ impl LanguageServer for RunMatLanguageServer {
         } else {
             Ok(Some(locations))
         }
+    }
+
+    async fn prepare_rename(
+        &self,
+        params: TextDocumentPositionParams,
+    ) -> RpcResult<Option<tower_lsp::lsp_types::PrepareRenameResponse>> {
+        rename::prepare(self, params).await
+    }
+
+    async fn rename(
+        &self,
+        params: tower_lsp::lsp_types::RenameParams,
+    ) -> RpcResult<Option<tower_lsp::lsp_types::WorkspaceEdit>> {
+        rename::rename(self, params).await
     }
 
     async fn signature_help(

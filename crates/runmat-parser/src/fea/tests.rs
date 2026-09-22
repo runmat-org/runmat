@@ -65,6 +65,13 @@ fn parses_representative_language_surface() {
     assert_eq!(module.items.len(), 8);
     assert_eq!(module.source(), STUDY);
     assert!(module.is_valid());
+    let FeaModuleItem::Import(function_import) = &module.items[1] else {
+        panic!("expected function import");
+    };
+    assert_eq!(
+        &STUDY[function_import.source_span.start..function_import.source_span.end],
+        "\"./impactPulse.m\""
+    );
 }
 
 #[test]

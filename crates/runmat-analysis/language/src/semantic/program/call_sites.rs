@@ -102,6 +102,7 @@ fn expression(
                     overload: overload.clone(),
                     signature: signature.clone(),
                 },
+                named_arguments: named_arguments(arguments),
             });
             call_arguments(module, arguments, sites);
         }
@@ -117,6 +118,7 @@ fn expression(
                     path: function.clone(),
                     signature: signature.clone(),
                 },
+                named_arguments: named_arguments(arguments),
             });
             call_arguments(module, arguments, sites);
         }
@@ -146,6 +148,18 @@ fn expression(
         | CheckedExpressionKind::CadParameterValue(_)
         | CheckedExpressionKind::Missing => {}
     }
+}
+
+fn named_arguments(arguments: &[CheckedCallArgument]) -> Vec<(String, runmat_types::Span)> {
+    arguments
+        .iter()
+        .filter_map(|argument| match argument {
+            CheckedCallArgument::Named {
+                name, name_span, ..
+            } => Some((name.clone(), *name_span)),
+            CheckedCallArgument::Positional(_) => None,
+        })
+        .collect()
 }
 
 fn call_arguments(

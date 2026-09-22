@@ -317,6 +317,7 @@ impl<C: AnalysisOperationCatalog + ?Sized> ExpressionChecker<'_, C> {
                 }
                 FeaCallArgument::Named { name, value, .. } => CheckedCallArgument::Named {
                     name: name.text.clone(),
+                    name_span: name.span,
                     value: self.check(value),
                 },
             })

@@ -33,7 +33,7 @@ impl FeaParser {
         }
         let source = significant.get(4).and_then(|index| {
             if self.at(*index, FeaTokenKind::String) {
-                Some(decode_string(self.lexeme(*index)))
+                Some((decode_string(self.lexeme(*index)), self.token(*index).span))
             } else {
                 self.diagnostics.push(FeaSyntaxDiagnostic {
                     kind: FeaSyntaxDiagnosticKind::ExpectedString,
@@ -52,10 +52,11 @@ impl FeaParser {
             });
         }
         match (kind, name, source) {
-            (Some(kind), Some(name), Some(source)) => Some(FeaImport {
+            (Some(kind), Some(name), Some((source, source_span))) => Some(FeaImport {
                 kind,
                 name,
                 source,
+                source_span,
                 span: fallback,
             }),
             _ => None,

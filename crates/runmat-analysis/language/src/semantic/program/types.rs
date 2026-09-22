@@ -38,6 +38,7 @@ pub struct CheckedFeaCallSite {
     pub module: LogicalSourcePath,
     pub span: Span,
     pub callable: CheckedFeaCallable,
+    pub named_arguments: Vec<(String, Span)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

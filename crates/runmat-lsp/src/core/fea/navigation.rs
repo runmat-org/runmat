@@ -149,7 +149,7 @@ impl FeaDocumentAnalysis {
         }
     }
 
-    fn target_at(
+    pub(super) fn target_at(
         &self,
         source: &str,
         position: &Position,
