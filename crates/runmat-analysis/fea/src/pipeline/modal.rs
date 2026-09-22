@@ -350,6 +350,7 @@ fn execute_modal_core(
         series_reductions: Vec::new(),
         fields: modal_result_fields(&basis),
     };
+    run.validate_solver_formulation()?;
     Ok(CompletedModalCore {
         run,
         basis,

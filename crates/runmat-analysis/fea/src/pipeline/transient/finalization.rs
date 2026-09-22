@@ -319,6 +319,7 @@ pub(super) fn finish_transient_run(
         Some(5),
     );
 
+    run.validate_solver_formulation()?;
     Ok(FeaTransientRunResult {
         run,
         initial_state,

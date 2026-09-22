@@ -1,3 +1,9 @@
+mod solver_compatibility;
+
+pub use solver_compatibility::{
+    validate_solver_formulation_compatibility, SolverFormulationCompatibilityError,
+};
+
 use runmat_analysis_core::{
     AnalysisField, AnalysisProcedure, FormulationRequirement, InitialConditionTarget, SignalId,
     SignalSampleApproach,
@@ -654,6 +660,7 @@ impl std::fmt::Display for SolverPreconditioner {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "solver_compatibility::FeaRunResultWire")]
 pub struct FeaRunResult {
     pub identity: crate::admission::AnalysisRunIdentity,
     pub requested_backend: ComputeBackend,
@@ -1272,6 +1279,8 @@ pub enum FeaRunError {
     FormulationAdmission(#[from] crate::admission::FormulationAdmissionRejection),
     #[error(transparent)]
     FormulationAvailability(#[from] crate::admission::FormulationAvailabilityRejection),
+    #[error(transparent)]
+    SolverFormulationCompatibility(#[from] SolverFormulationCompatibilityError),
     #[error("FEA_CANCELLED: execution cancelled by user")]
     Cancelled,
 }

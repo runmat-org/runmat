@@ -263,6 +263,7 @@ pub(super) fn run(
         Some(5),
         Some(5),
     );
+    run.validate_solver_formulation()?;
     Ok(FeaThermalRunResult {
         run,
         time_points_s,

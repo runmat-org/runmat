@@ -1486,6 +1486,7 @@ pub fn run_electromagnetic_with_options(
         series_reductions: Vec::new(),
         fields: Vec::new(),
     };
+    run.validate_solver_formulation()?;
 
     emit_phase(
         "fea.run_electromagnetic",

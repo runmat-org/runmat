@@ -256,33 +256,35 @@ pub fn recover_completed_structural_buckling_run(
     ];
     fields.extend(mode_shapes.iter().cloned());
     fields.extend(rotation_mode_shapes.iter().cloned());
+    let run = FeaRunResult {
+        identity: expected_run,
+        requested_backend: result.requested_backend(),
+        execution_backend: ExecutionBackend::from_solver_backend(result.solver_backend()),
+        solver_backend: result.solver_backend(),
+        solver_device_apply_k_ratio: 0.0,
+        solver_method: result.solver_method(),
+        preconditioner: result.preconditioner(),
+        solver_host_sync_count: 0,
+        accelerator_evidence: Vec::new(),
+        diagnostics: vec![FeaDiagnostic {
+            code: "FEA_BUCKLING_CONVERGENCE".into(),
+            severity: FeaDiagnosticSeverity::Info,
+            message: format!(
+                "qualified {} positive buckling modes in {} iterations; maximum residual={}",
+                result.modes().len(),
+                result.iteration_count(),
+                numerical_receipt.maximum_residual_norm(),
+            ),
+        }],
+        spatial_projection_evidence: summary.spatial_projection_evidence,
+        observations: Vec::new(),
+        observation_histories: Vec::new(),
+        series_reductions: Vec::new(),
+        fields,
+    };
+    run.validate_solver_formulation()?;
     Ok(FeaBucklingRunResult {
-        run: FeaRunResult {
-            identity: expected_run,
-            requested_backend: result.requested_backend(),
-            execution_backend: ExecutionBackend::from_solver_backend(result.solver_backend()),
-            solver_backend: result.solver_backend(),
-            solver_device_apply_k_ratio: 0.0,
-            solver_method: result.solver_method(),
-            preconditioner: result.preconditioner(),
-            solver_host_sync_count: 0,
-            accelerator_evidence: Vec::new(),
-            diagnostics: vec![FeaDiagnostic {
-                code: "FEA_BUCKLING_CONVERGENCE".into(),
-                severity: FeaDiagnosticSeverity::Info,
-                message: format!(
-                    "qualified {} positive buckling modes in {} iterations; maximum residual={}",
-                    result.modes().len(),
-                    result.iteration_count(),
-                    numerical_receipt.maximum_residual_norm(),
-                ),
-            }],
-            spatial_projection_evidence: summary.spatial_projection_evidence,
-            observations: Vec::new(),
-            observation_histories: Vec::new(),
-            series_reductions: Vec::new(),
-            fields,
-        },
+        run,
         load_factors,
         residual_norms,
         mode_shapes,

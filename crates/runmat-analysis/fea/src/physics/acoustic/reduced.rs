@@ -151,7 +151,7 @@ pub fn solve_reduced_harmonic(
     ];
     let acoustic_field_count = fields.len() + frequency_response_fields.len();
     fields.extend(frequency_response_fields);
-    Ok(FeaRunResult {
+    let run = FeaRunResult {
         identity,
         requested_backend: backend,
         execution_backend: ExecutionBackend::Cpu,
@@ -184,7 +184,10 @@ pub fn solve_reduced_harmonic(
             known_answer,
         }),
         fields,
-    })
+    };
+    run.validate_solver_formulation()
+        .map_err(|error| error.to_string())?;
+    Ok(run)
 }
 
 struct DiagnosticInputs<'a> {

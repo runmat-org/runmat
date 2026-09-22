@@ -93,7 +93,7 @@ pub fn solve_reduced_finite_volume(
             residual_warn_threshold: options.residual_warn_threshold,
         },
     );
-    Ok(FeaRunResult {
+    let run = FeaRunResult {
         identity,
         requested_backend: backend,
         execution_backend: ExecutionBackend::Cpu,
@@ -176,5 +176,8 @@ pub fn solve_reduced_finite_volume(
             run_diagnostics
         },
         fields,
-    })
+    };
+    run.validate_solver_formulation()
+        .map_err(|error| error.to_string())?;
+    Ok(run)
 }

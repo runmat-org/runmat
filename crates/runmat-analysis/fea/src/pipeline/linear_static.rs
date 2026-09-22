@@ -501,6 +501,7 @@ fn run_linear_static_with_constraint_plan(
         series_reductions: Vec::new(),
         fields,
     };
+    run.validate_solver_formulation()?;
     Ok(LinearStaticComputation {
         run,
         summary,

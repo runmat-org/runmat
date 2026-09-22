@@ -453,6 +453,7 @@ pub fn run_nonlinear_with_options(
         Some(5),
     );
 
+    run.validate_solver_formulation()?;
     Ok(FeaNonlinearRunResult {
         run,
         load_factors: nonlinear.load_factors,

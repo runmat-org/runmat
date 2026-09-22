@@ -10,7 +10,7 @@ use crate::{
         identity::structural_operator_digest,
         StructuralFormulationRequirement,
     },
-    contracts::{SolverMethod, SolverPreconditioner},
+    contracts::{validate_solver_formulation_compatibility, SolverMethod, SolverPreconditioner},
     execution::{
         structural_identity::{
             derive_structural_prepared_identities, structural_contract_digest,
@@ -160,6 +160,14 @@ fn admit_structural_frequency_publication_with_state(
         return Err(AnalysisExecutionError::Identity(
             "admitted structural frequency formulation has another solution space",
         ));
+    }
+    for evidence in publication.receipt().samples() {
+        validate_solver_formulation_compatibility(
+            &identity,
+            evidence.solver_method(),
+            evidence.preconditioner(),
+        )
+        .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
     }
     Ok(identity)
 }
