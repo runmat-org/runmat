@@ -9,6 +9,7 @@ import { contentDigest, evidenceDigest } from "./evidence.mjs";
 import { GATE_PRODUCERS, parseGateResult } from "./gate-result.mjs";
 import { prepareGateProcessInput } from "./gate-input.mjs";
 import { gatePlanEvidence } from "./gate-plan.mjs";
+import { parseCompiledInventory } from "./compiled-inventory.mjs";
 import { parseInventoryEvidence } from "./inventory.mjs";
 import { assertActiveLease, assertLeaseBaseInventory } from "./lease.mjs";
 import { reviewedIntegrationProducts } from "./integration-products.mjs";
@@ -26,10 +27,15 @@ const REPOSITORY = fs.realpathSync(
 // The reviewed control owns the complete command. Callers select only a bundle
 // and gate; they cannot supply executable, argv, cwd, checks, or process facts.
 export function runGateProducer(input, clock = Date.now) {
-  exact(input, ["control", "lease", "queue_state", "queue_checkpoint", "control_baseline_inventory", "lease_base_inventory", "subject_inventory", "bundle_id", "gate", "artifact_id", "inputs"], "gate producer request");
+  exact(input, ["control", "lease", "queue_state", "queue_checkpoint", "control_baseline_inventory", "lease_base_inventory", "subject_inventory", "subject_compiled_inventory", "bundle_id", "gate", "artifact_id", "inputs"], "gate producer request");
   const controlBaseline = parseInventoryEvidence(input.control_baseline_inventory);
   const leaseBase = parseInventoryEvidence(input.lease_base_inventory);
   const subject = parseInventoryEvidence(input.subject_inventory);
+  const subjectCompiled = parseCompiledInventory(input.subject_compiled_inventory);
+  if (subject.compiled_inventory.digest !== subjectCompiled.digest
+    || JSON.stringify(subject.compiled_inventory.build) !== JSON.stringify(subjectCompiled.snapshot.build)) {
+    throw new Error("gate subject compiled inventory differs from its inventory evidence");
+  }
   if (subject.source.dirty !== false) throw new Error("gate subject must be a clean committed source snapshot");
   const control = input.control;
   assertControlBaseline(control, controlBaseline);
@@ -78,7 +84,7 @@ export function runGateProducer(input, clock = Date.now) {
     source_revision: subject.source.revision,
     identities: bundle.identities,
     integration_products: integrationProducts,
-    native_registration_manifest: subject.compiled_inventory.snapshot.observed.registration_manifest,
+    native_registration_manifest: subjectCompiled.snapshot.observed.registration_manifest,
     evidence_storage: evidenceStorage,
   }, moduleCompositionProjection);
   const parser = parserFor(plan.parser, input.gate, {

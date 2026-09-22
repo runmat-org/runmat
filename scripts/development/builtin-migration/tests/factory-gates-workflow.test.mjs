@@ -24,7 +24,7 @@ test.afterEach(cleanupRepositoryFixtures);
 
 test("gate producer requests cannot inject commands, results, checks, or storage", () => {
   const fixture = controlledFixture();
-  const request = { control: fixture.controlValue, lease: fixture.lease, queue_state: fixture.queueState, queue_checkpoint: fixture.queueCheckpoint, control_baseline_inventory: fixture.inventory, lease_base_inventory: fixture.inventory, subject_inventory: fixture.inventory, bundle_id: fixture.bundleId, gate: "architecture", artifact_id: "forged", inputs: null };
+  const request = { control: fixture.controlValue, lease: fixture.lease, queue_state: fixture.queueState, queue_checkpoint: fixture.queueCheckpoint, control_baseline_inventory: fixture.inventory, lease_base_inventory: fixture.inventory, subject_inventory: fixture.inventory, subject_compiled_inventory: fixture.compiledInventory, bundle_id: fixture.bundleId, gate: "architecture", artifact_id: "forged", inputs: null };
   assert.throws(() => runGateProducer({ ...request, command: { executable: "/private/tmp/fake", arguments: [], cwd: "/private/tmp" } }), /fields must be exactly/);
   assert.throws(() => runGateProducer({ ...request, control: { value: fixture.controlValue, digest: fixture.control.digest, bundles: new Map() } }), /exact validated control manifest/);
   assert.throws(
@@ -34,6 +34,17 @@ test("gate producer requests cannot inject commands, results, checks, or storage
       inputs: { module_composition_projection: { products: [] } },
     }),
     /derived authority/,
+  );
+  const mismatchedCompiled = structuredClone(fixture.compiledInventory);
+  mismatchedCompiled.snapshot.build.pointer_width = 32;
+  mismatchedCompiled.digest.value = contentDigest(Buffer.from(JSON.stringify(mismatchedCompiled.snapshot))).slice("sha256:".length);
+  assert.throws(
+    () => runGateProducer({
+      ...request,
+      control: fixture.control,
+      subject_compiled_inventory: mismatchedCompiled,
+    }),
+    /compiled inventory differs from its inventory evidence/,
   );
   const fake = structuredClone(fixture.controlValue);
   fake.bundle_controls[fixture.bundleId].gate_plans[0].program.path = "scripts/fake.mjs";
