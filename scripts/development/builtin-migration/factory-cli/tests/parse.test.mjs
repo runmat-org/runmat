@@ -165,6 +165,41 @@ test("all factory commands reject duplicate option spellings", () => {
   ]), /inventory does not accept repeated options/);
 });
 
+test("materialization accepts only an explicit, typed product selection", () => {
+  const common = [
+    ...controlAuthorityArguments(), "--lease-base-inventory", "lease-base.json",
+    "--lease", "lease.json", "--state", "state.json",
+    "--queue-checkpoint", "checkpoint.json",
+    "--trusted-queue-checkpoint-digest", "sha256:abc",
+  ];
+  const selected = parseFactoryCliArguments([
+    "materialize-composition", "--product", "catalog-array-creation",
+    "--product", "runtime-array-creation", ...common,
+  ]);
+  assert.deepEqual(selected.productIds, [
+    "catalog-array-creation", "runtime-array-creation",
+  ]);
+  assert.equal(selected.noProducts, false);
+
+  const empty = parseFactoryCliArguments([
+    "materialize-composition", "--no-products", ...common,
+  ]);
+  assert.deepEqual(empty.productIds, []);
+  assert.equal(empty.noProducts, true);
+
+  assert.throws(() => parseFactoryCliArguments([
+    "materialize-composition", ...common,
+  ]), /requires exactly one of --product or --no-products/);
+  assert.throws(() => parseFactoryCliArguments([
+    "materialize-composition", "--no-products", "--product", "catalog-array-creation",
+    ...common,
+  ]), /requires exactly one of --product or --no-products/);
+  assert.throws(() => parseFactoryCliArguments([
+    "materialize-composition", "--product", "catalog-array-creation",
+    "--product", "catalog-array-creation", ...common,
+  ]), /does not accept duplicate --product values/);
+});
+
 test("initial queue review options are rejected outside their owning command", () => {
   for (const option of ["--initial-queue-review", "--initial-queue-review-digest"]) {
     assert.throws(() => parseFactoryCliArguments([

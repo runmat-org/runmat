@@ -1,5 +1,6 @@
 import {
-  COMMANDS, newCommandOptions, OPTION_FIELDS, validateCommandOptions,
+  COMMANDS, FLAG_FIELDS, newCommandOptions, OPTION_FIELDS, REPEATABLE_OPTION_FIELDS,
+  validateCommandOptions,
 } from "./contract.mjs";
 
 export function parseFactoryCliArguments(arguments_) {
@@ -12,6 +13,21 @@ export function parseFactoryCliArguments(arguments_) {
   if (command === "prepare") options.identity = requireValue(remaining, "prepare identity");
   while (remaining.length) {
     const option = remaining.shift();
+    const repeatableField = REPEATABLE_OPTION_FIELDS[option];
+    if (repeatableField) {
+      suppliedOptions.push(option);
+      options[repeatableField].push(requireValue(remaining, option));
+      continue;
+    }
+    const flagField = FLAG_FIELDS[option];
+    if (flagField) {
+      if (suppliedOptions.includes(option)) {
+        throw new Error(`${command} does not accept repeated ${option}`);
+      }
+      suppliedOptions.push(option);
+      options[flagField] = true;
+      continue;
+    }
     const field = OPTION_FIELDS[option];
     if (!field) throw new Error(`unknown option ${option}`);
     if (suppliedOptions.includes(option)) {

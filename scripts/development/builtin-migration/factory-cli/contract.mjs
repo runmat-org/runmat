@@ -59,6 +59,14 @@ export const OPTION_FIELDS = Object.freeze({
   ...PILOT_OPTION_FIELDS,
 });
 
+export const REPEATABLE_OPTION_FIELDS = Object.freeze({
+  "--product": "productIds",
+});
+
+export const FLAG_FIELDS = Object.freeze({
+  "--no-products": "noProducts",
+});
+
 const CONTROL_COMMANDS = Object.freeze([
   "queue", "prepare", "audit", "freeze-control", "validate-control", "issue-lease",
   "initialize-queue",
@@ -87,6 +95,8 @@ export function newCommandOptions(command) {
     command,
     ...Object.fromEntries(Object.values(OPTION_FIELDS).map((field) => [field, null])),
     identity: null,
+    productIds: [],
+    noProducts: false,
     help: false,
   };
 }
@@ -118,6 +128,7 @@ export function validateCommandOptions(options, suppliedOptions) {
   if (command === "index-control-reviews" && !options.reviewSetDirectory) throw new Error("index-control-reviews requires --review-set-directory");
   if (command === "seal-control-attestation" && !options.attestationReview) throw new Error("seal-control-attestation requires --attestation-review");
   validateQueueAndLeaseOptions(options);
+  validateMaterializationSelection(options);
   validatePilotCommandOptions(options);
   if (["prepare", "audit"].includes(command) && !options.lease) throw new Error(`${command} requires --lease`);
   if (["prepare", "audit", "produce-gate"].includes(command) && !options.leaseBaseInventory) throw new Error(`${command} requires --lease-base-inventory`);
@@ -126,6 +137,22 @@ export function validateCommandOptions(options, suppliedOptions) {
   if (command === "audit" && (!options.batch || !options.evidence)) throw new Error("audit requires --batch and --evidence");
   if (["verify", "seal"].includes(command) && !options.manifest) throw new Error(`${command} requires --manifest`);
   if (command === "seal" && (!options.control || !options.lease)) throw new Error("seal requires --control and --lease");
+}
+
+function validateMaterializationSelection(options) {
+  const selected = options.productIds.length > 0;
+  if (options.command !== "materialize-composition") {
+    if (selected || options.noProducts) {
+      throw new Error("--product and --no-products are accepted only by materialize-composition");
+    }
+    return;
+  }
+  if (selected === options.noProducts) {
+    throw new Error("materialize-composition requires exactly one of --product or --no-products");
+  }
+  if (new Set(options.productIds).size !== options.productIds.length) {
+    throw new Error("materialize-composition does not accept duplicate --product values");
+  }
 }
 
 function assertCommandOwnedOptions(command, suppliedOptions) {
