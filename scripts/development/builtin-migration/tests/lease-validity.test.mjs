@@ -110,6 +110,7 @@ test("live prepare, gate, audit, phase capture, and seal reject an expired lease
     control_baseline_inventory: fixture.inventory,
     lease_base_inventory: fixture.inventory,
     subject_inventory: fixture.inventory,
+    subject_compiled_inventory: fixture.compiledInventory,
     bundle_id: fixture.bundleId,
     gate: "architecture",
     artifact_id: "expired-gate",

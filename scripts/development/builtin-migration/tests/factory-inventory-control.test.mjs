@@ -568,6 +568,7 @@ test("validated controls remain bound to their exact baseline and subject target
     control_baseline_inventory: foreign.inventory,
     lease_base_inventory: foreign.inventory,
     subject_inventory: foreign.inventory,
+    subject_compiled_inventory: foreign.compiledInventory,
     bundle_id: fixture.bundleId,
     gate: "architecture",
     artifact_id: "foreign-baseline",
@@ -576,6 +577,10 @@ test("validated controls remain bound to their exact baseline and subject target
 
   const subject = structuredClone(fixture.inventory);
   subject.compiled_inventory.build.architecture = "other-architecture";
+  const subjectCompiled = structuredClone(fixture.compiledInventory);
+  subjectCompiled.snapshot.build.architecture = "other-architecture";
+  subjectCompiled.digest.value = contentDigest(Buffer.from(JSON.stringify(subjectCompiled.snapshot))).slice("sha256:".length);
+  subject.compiled_inventory.digest = `sha256:${subjectCompiled.digest.value}`;
   resealEvidence(subject);
   assert.throws(() => runGateProducer({
     control: fixture.control,
@@ -585,6 +590,7 @@ test("validated controls remain bound to their exact baseline and subject target
     control_baseline_inventory: fixture.inventory,
     lease_base_inventory: fixture.inventory,
     subject_inventory: subject,
+    subject_compiled_inventory: subjectCompiled,
     bundle_id: fixture.bundleId,
     gate: "architecture",
     artifact_id: "foreign-target",

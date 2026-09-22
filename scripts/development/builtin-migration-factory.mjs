@@ -177,10 +177,11 @@ function run(options) {
     const lease = parseLease(readJson(options.lease), control, repository);
     assertLeaseBaseInventory(lease, control, leaseBase);
     const queue = queueAuthorityFromOptions(options, control);
+    const subjectCompiledInventory = readJson(options.compiledInventory);
     const subject = buildInventory(repository, dispositionInputFromControl(control), {
-      compiledInventory: readJson(options.compiledInventory),
+      compiledInventory: subjectCompiledInventory,
     });
-    emit(runGateProducer({ control, lease, queue_state: queue.state, queue_checkpoint: queue.checkpoint, control_baseline_inventory: controlBaseline, lease_base_inventory: leaseBase, subject_inventory: subject, bundle_id: options.bundle, gate: options.gate, artifact_id: options.artifact, inputs: options.inputs ? readJson(options.inputs) : null }), options.output);
+    emit(runGateProducer({ control, lease, queue_state: queue.state, queue_checkpoint: queue.checkpoint, control_baseline_inventory: controlBaseline, lease_base_inventory: leaseBase, subject_inventory: subject, subject_compiled_inventory: subjectCompiledInventory, bundle_id: options.bundle, gate: options.gate, artifact_id: options.artifact, inputs: options.inputs ? readJson(options.inputs) : null }), options.output);
     return;
   }
   if (options.command === "materialize-composition") {
