@@ -60,6 +60,7 @@ pub(in crate::analysis) fn study_evidence_root() -> PathBuf {
         })
 }
 
+#[cfg(test)]
 pub(in crate::analysis) fn persist_immutable_study_evidence(
     study_fingerprint: &str,
     stage: &str,
@@ -469,7 +470,7 @@ pub(in crate::analysis) fn complete_study_run(
             requirement: authored.authored_execution.requirement,
             solver_options: completed.resolved_solver_options,
         };
-        let evidence_artifact_path = persist_immutable_study_evidence(
+        let evidence_artifact_path = persist_content_addressed_study_evidence(
             &study_fingerprint,
             &run_evidence_stage(&run.run_id),
             serde_json::json!({

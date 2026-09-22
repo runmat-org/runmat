@@ -76,6 +76,41 @@ fn assert_fea_checks(temp: &TempDir, path: &str) {
     assert_eq!(payload["diagnostics"], serde_json::json!([]), "{path}");
 }
 
+fn fea_plan(temp: &TempDir, path: &str) -> Value {
+    let output = runmat_from_repository(temp, &["fea", "plan", path, "--json"]);
+    assert!(
+        output.status.success(),
+        "{path} failed plan:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+
+fn assert_repeated_result_identity(temp: &TempDir, path: &str, first: &Value) {
+    let repeated = runmat_from_repository(temp, &["run", path, "--json"]);
+    assert!(
+        repeated.status.success(),
+        "{path} failed repeated run:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&repeated.stdout),
+        String::from_utf8_lossy(&repeated.stderr)
+    );
+    let repeated: Value = serde_json::from_slice(&repeated.stdout).unwrap();
+    for field in [
+        "study_definition_digest",
+        "mesh_digest",
+        "nodes",
+        "elements",
+        "boundary_faces",
+        "step_run_ids",
+    ] {
+        assert_eq!(
+            repeated[field], first[field],
+            "{path} changed verified result field `{field}` on repeat"
+        );
+    }
+}
+
 #[test]
 fn canonical_fea_documentation_examples_check_cleanly() {
     let temp = TempDir::new().unwrap();
@@ -88,6 +123,133 @@ fn canonical_fea_documentation_examples_check_cleanly() {
     ] {
         let path = format!("docs/fea/examples/{name}");
         assert_fea_checks(&temp, &path);
+    }
+}
+
+#[test]
+fn representative_documentation_plans_expose_the_complete_resolved_contract() {
+    struct Expected<'a> {
+        file: &'a str,
+        root: &'a str,
+        model: &'a str,
+        steps: &'a [(&'a str, &'a str)],
+        outputs: &'a [&'a str],
+        material_assignments: usize,
+        response_spectra: usize,
+        random_excitations: usize,
+    }
+
+    let cases = [
+        Expected {
+            file: "structural-static-experimental.fea",
+            root: "structural_static_experimental",
+            model: "loaded_bracket",
+            steps: &[("static", "static")],
+            outputs: &["displacement", "von_mises"],
+            material_assignments: 2,
+            response_spectra: 0,
+            random_excitations: 0,
+        },
+        Expected {
+            file: "structural-transient-experimental.fea",
+            root: "structural_transient_experimental",
+            model: "impulsive_bracket",
+            steps: &[("response", "transient_response")],
+            outputs: &["displacement"],
+            material_assignments: 1,
+            response_spectra: 0,
+            random_excitations: 0,
+        },
+        Expected {
+            file: "modal-response-spectrum-experimental.fea",
+            root: "modal_response_spectrum_experimental",
+            model: "launch_bracket",
+            steps: &[
+                ("modes", "modal_extraction"),
+                ("response_spectrum", "modal_response_spectrum"),
+            ],
+            outputs: &["displacement"],
+            material_assignments: 1,
+            response_spectra: 1,
+            random_excitations: 0,
+        },
+        Expected {
+            file: "modal-random-response-experimental.fea",
+            root: "modal_random_response_experimental",
+            model: "random_environment",
+            steps: &[
+                ("modes", "modal_extraction"),
+                ("random_response", "random_response"),
+            ],
+            outputs: &["displacement"],
+            material_assignments: 1,
+            response_spectra: 0,
+            random_excitations: 1,
+        },
+        Expected {
+            file: "acoustic-production-rejected.fea",
+            root: "acoustic_production_rejected",
+            model: "cavity",
+            steps: &[("harmonic", "harmonic_response")],
+            outputs: &["pressure"],
+            material_assignments: 1,
+            response_spectra: 0,
+            random_excitations: 0,
+        },
+    ];
+    let temp = TempDir::new().unwrap();
+    for expected in cases {
+        let path = format!("docs/fea/examples/{}", expected.file);
+        let plan = fea_plan(&temp, &path);
+        assert_eq!(plan["schema_version"], 1, "{path}");
+        assert_eq!(plan["root_kind"], "study", "{path}");
+        assert_eq!(plan["root_id"], expected.root, "{path}");
+        assert!(plan["geometry_dependencies"].as_array().is_some(), "{path}");
+
+        let models = plan["model_closure"].as_array().expect("model closure");
+        assert_eq!(models.len(), 1, "{path}");
+        let model = &models[0];
+        assert_eq!(model["model_id"], expected.model, "{path}");
+        assert_eq!(
+            model["response_spectra"].as_array().unwrap().len(),
+            expected.response_spectra,
+            "{path}"
+        );
+        assert_eq!(
+            model["random_excitations"].as_array().unwrap().len(),
+            expected.random_excitations,
+            "{path}"
+        );
+        assert_eq!(
+            plan["material_catalog"].as_array().unwrap().len(),
+            1,
+            "{path}"
+        );
+        assert_eq!(
+            model["material_assignments"].as_array().unwrap().len(),
+            expected.material_assignments,
+            "{path}"
+        );
+
+        let steps = plan["study"]["sequence"]["steps"]
+            .as_array()
+            .expect("procedure steps");
+        assert_eq!(steps.len(), expected.steps.len(), "{path}");
+        for (step, (step_id, procedure)) in steps.iter().zip(expected.steps) {
+            assert_eq!(step["step_id"], *step_id, "{path}");
+            assert_eq!(step["procedure"], *procedure, "{path}");
+        }
+        let outputs = plan["study"]["outputs"]
+            .as_array()
+            .expect("authored outputs")
+            .iter()
+            .map(|output| output["output_id"].as_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(outputs, expected.outputs, "{path}");
+        assert_eq!(
+            plan["mesh"]["geometry"], plan["study"]["geometry"]["definition"],
+            "{path}"
+        );
     }
 }
 
@@ -110,6 +272,7 @@ fn structural_static_step_documentation_example_runs_and_publishes_fields() {
         .and_then(|steps| steps.first())
         .and_then(Value::as_str)
         .expect("static step run id");
+    assert_repeated_result_identity(&temp, path, &payload);
 
     let script_path = temp.path().join("static-fields.m");
     fs::write(

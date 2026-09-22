@@ -36,26 +36,40 @@ fn repeatable_study_evidence_is_addressed_by_its_validated_content() {
 }
 
 #[test]
-fn study_run_evidence_is_immutable_per_run_identity() {
+fn study_run_evidence_separates_logical_run_identity_from_attempt_content() {
     let _guard = analysis_test_guard();
     let root = temp_artifact_root("run-addressed-study-evidence");
     let _ = fs::remove_dir_all(&root);
     let _runtime_guard = scoped_fea_artifact_roots(&root);
 
     let study_fingerprint = runmat_execution::Digest::sha256(b"same-study").to_string();
-    let first = persist_immutable_study_evidence(
+    let first = persist_content_addressed_study_evidence(
         &study_fingerprint,
         &run_evidence_stage("server-run-a"),
-        serde_json::json!({"run_id": "server-run-a"}),
+        serde_json::json!({"run_id": "server-run-a", "attempt": "worker-a"}),
     )
     .unwrap();
-    let second = persist_immutable_study_evidence(
+    let repeated = persist_content_addressed_study_evidence(
+        &study_fingerprint,
+        &run_evidence_stage("server-run-a"),
+        serde_json::json!({"run_id": "server-run-a", "attempt": "worker-a"}),
+    )
+    .unwrap();
+    let retried = persist_content_addressed_study_evidence(
+        &study_fingerprint,
+        &run_evidence_stage("server-run-a"),
+        serde_json::json!({"run_id": "server-run-a", "attempt": "worker-b"}),
+    )
+    .unwrap();
+    let second = persist_content_addressed_study_evidence(
         &study_fingerprint,
         &run_evidence_stage("server-run-b"),
         serde_json::json!({"run_id": "server-run-b"}),
     )
     .unwrap();
 
+    assert_eq!(first, repeated);
+    assert_ne!(first, retried);
     assert_ne!(first, second);
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(&fs::read(&first).unwrap()).unwrap()["run_id"],
@@ -71,12 +85,11 @@ fn study_run_evidence_is_immutable_per_run_identity() {
         serde_json::from_slice::<serde_json::Value>(&fs::read(second).unwrap()).unwrap()["run_id"],
         "server-run-b"
     );
-    assert!(persist_immutable_study_evidence(
-        &study_fingerprint,
-        &run_evidence_stage("server-run-a"),
-        serde_json::json!({"run_id": "different-content"}),
-    )
-    .is_err());
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&fs::read(retried).unwrap()).unwrap()
+            ["attempt"],
+        "worker-b"
+    );
     drop(_runtime_guard);
     let _ = fs::remove_dir_all(&root);
 }

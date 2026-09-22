@@ -1,5 +1,8 @@
 use anyhow::Result;
-use runmat_analysis_core::{AuthoredExecutionPolicy, AuthoredStudy, AuthoredSweep};
+use runmat_analysis_core::{
+    AuthoredExecutionPolicy, AuthoredMaterialRef, AuthoredModel, AuthoredStudy, AuthoredSweep,
+    MaterialModel,
+};
 use runmat_geometry_core::GeometryDefinition;
 use runmat_meshing_core::MeshDefinition;
 use runmat_runtime::analysis::ResolvedFeaRoot;
@@ -29,9 +32,19 @@ struct FeaLogicalPlan {
     sweep: Option<AuthoredSweep>,
     sweep_case_count: Option<usize>,
     geometry: GeometryDefinition,
+    geometry_dependencies: Vec<GeometryDefinition>,
     mesh: MeshDefinition,
+    model_closure: Vec<AuthoredModel>,
+    material_catalog: Vec<FeaPlanMaterial>,
     execution: Option<AuthoredExecutionPolicy>,
     phases: Vec<FeaPlanPhase>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(deny_unknown_fields)]
+struct FeaPlanMaterial {
+    source: AuthoredMaterialRef,
+    definition: MaterialModel,
 }
 
 pub(super) fn print(root: &ResolvedFeaRoot, json: bool) -> Result<()> {
@@ -70,13 +83,32 @@ pub(super) fn print(root: &ResolvedFeaRoot, json: bool) -> Result<()> {
 }
 
 fn logical_plan(root: &ResolvedFeaRoot) -> Result<FeaLogicalPlan> {
-    let (study, sweep, sweep_case_count, geometry, mesh, execution) = match root {
+    let (
+        study,
+        sweep,
+        sweep_case_count,
+        geometry,
+        geometry_dependencies,
+        mesh,
+        model_closure,
+        material_catalog,
+        execution,
+    ) = match root {
         ResolvedFeaRoot::Study(root) => (
             root.study.clone(),
             None,
             None,
             root.geometry.clone(),
+            root.geometry_dependencies.clone(),
             root.mesh.clone(),
+            root.models.values().cloned().collect(),
+            root.material_catalog
+                .iter()
+                .map(|(source, definition)| FeaPlanMaterial {
+                    source: source.clone(),
+                    definition: definition.clone(),
+                })
+                .collect(),
             root.execution_policy.clone(),
         ),
         ResolvedFeaRoot::Sweep(root) => (
@@ -84,7 +116,17 @@ fn logical_plan(root: &ResolvedFeaRoot) -> Result<FeaLogicalPlan> {
             Some(root.sweep.clone()),
             Some(root.sweep.expand_cases(&root.study.study)?.len()),
             root.study.geometry.clone(),
+            root.study.geometry_dependencies.clone(),
             root.study.mesh.clone(),
+            root.study.models.values().cloned().collect(),
+            root.study
+                .material_catalog
+                .iter()
+                .map(|(source, definition)| FeaPlanMaterial {
+                    source: source.clone(),
+                    definition: definition.clone(),
+                })
+                .collect(),
             root.study.execution_policy.clone(),
         ),
     };
@@ -96,7 +138,10 @@ fn logical_plan(root: &ResolvedFeaRoot) -> Result<FeaLogicalPlan> {
         sweep,
         sweep_case_count,
         geometry,
+        geometry_dependencies,
         mesh,
+        model_closure,
+        material_catalog,
         execution,
         phases: vec![
             FeaPlanPhase::MaterializeGeometry,
