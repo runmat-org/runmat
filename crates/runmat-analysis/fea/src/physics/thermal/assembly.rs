@@ -17,6 +17,8 @@ use crate::{
     topology::{AnalysisProjection, ProjectedElement},
 };
 
+use super::{constitutive_stats, ThermalConstitutiveStats};
+
 #[cfg(test)]
 mod convergence_tests;
 mod recovery;
@@ -26,6 +28,8 @@ pub(crate) use recovery::ThermalEnergyBalance;
 
 #[derive(Debug, Clone)]
 pub(crate) struct ThermalOperatorAssembly {
+    pub property_identity: crate::properties::CompiledPropertyMapIdentity,
+    pub constitutive_stats: ThermalConstitutiveStats,
     pub projection: AnalysisProjection,
     pub conductivity: RealSparseMatrix,
     pub capacity: RealSparseMatrix,
@@ -193,6 +197,8 @@ pub(crate) fn assemble(
     });
     let mut element_conductivity_w_per_mk = Vec::with_capacity(projection.elements.len());
     let mut element_volumetric_capacity_j_per_m3k = Vec::with_capacity(projection.elements.len());
+    let mut element_specific_heat_j_per_kgk = Vec::with_capacity(projection.elements.len());
+    let mut element_density_kg_per_m3 = Vec::with_capacity(projection.elements.len());
 
     for element in &projection.elements {
         let material = &properties
@@ -208,6 +214,8 @@ pub(crate) fn assemble(
             .require_mass_density()
             .map_err(|error| ThermalAssemblyError::InvalidMaterialCoverage(error.to_string()))?;
         element_conductivity_w_per_mk.push(thermal.conductivity_w_per_mk);
+        element_specific_heat_j_per_kgk.push(thermal.specific_heat_j_per_kgk);
+        element_density_kg_per_m3.push(mass_density_kg_per_m3);
         element_volumetric_capacity_j_per_m3k
             .push(mass_density_kg_per_m3 * thermal.specific_heat_j_per_kgk);
         projection
@@ -475,7 +483,20 @@ pub(crate) fn assemble(
         }
     }
 
+    let constitutive_stats = constitutive_stats(
+        &element_conductivity_w_per_mk,
+        &element_specific_heat_j_per_kgk,
+        &element_density_kg_per_m3,
+    )
+    .ok_or_else(|| {
+        ThermalAssemblyError::InvalidMaterialCoverage(
+            "thermal property projection produced no complete element coefficients".into(),
+        )
+    })?;
+
     Ok(ThermalOperatorAssembly {
+        property_identity: properties.identity.clone(),
+        constitutive_stats,
         projection,
         conductivity: conductivity
             .finish()
@@ -652,6 +673,40 @@ mod tests {
             .unwrap();
         mesh.seal_canonical_digest().unwrap();
         (model, mesh, free_node_index, base_region.source_topology_id)
+    }
+
+    #[test]
+    fn unused_material_declarations_do_not_change_thermal_operators_or_diagnostics() {
+        let (model, mesh, _, _) = thermal_reference_model();
+        let mut with_unused_material = model.clone();
+        let mut unused = with_unused_material.materials[0].clone();
+        unused.material_id = "unused_extreme_material".into();
+        unused.name = "Unused extreme material".into();
+        unused.mass_density_kg_per_m3 = Some(9.0e8);
+        let thermal = unused.thermal.as_mut().unwrap();
+        thermal.conductivity_w_per_mk = 7.0e11;
+        thermal.specific_heat_j_per_kgk = 3.0e10;
+        with_unused_material.materials.push(unused);
+
+        let baseline = assemble(
+            &model,
+            &mesh,
+            &RealizedExcitations::default(),
+            ExcitationSamplePoint::Static,
+        )
+        .unwrap();
+        let changed = assemble(
+            &with_unused_material,
+            &mesh,
+            &RealizedExcitations::default(),
+            ExcitationSamplePoint::Static,
+        )
+        .unwrap();
+
+        assert_eq!(baseline.property_identity, changed.property_identity);
+        assert_eq!(baseline.constitutive_stats, changed.constitutive_stats);
+        assert_eq!(baseline.conductivity, changed.conductivity);
+        assert_eq!(baseline.capacity, changed.capacity);
     }
 
     fn prescribe_base(model: &mut AnalysisModel, base_region: String, temperature_k: f64) {

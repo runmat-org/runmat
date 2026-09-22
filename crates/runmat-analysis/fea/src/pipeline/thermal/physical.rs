@@ -16,7 +16,7 @@ use crate::{
     excitation::{realize_step_excitations, time_breakpoints, ExcitationSamplePoint},
     physics::thermal::{
         assembly::{assemble as assemble_thermal_operator, ThermalEnergyBalance},
-        constitutive_stats, initial_state,
+        initial_state,
     },
     pipeline::observation_history::{
         evaluate_field_histories, required_time_history_samples, HistoryFieldSeries,
@@ -641,7 +641,7 @@ fn diagnostics(input: ThermalDiagnosticsInput<'_>) -> Vec<FeaDiagnostic> {
             residual_w: 0.0,
             relative_residual: 0.0,
         });
-    let constitutive = constitutive_stats(model);
+    let constitutive = assembly.constitutive_stats;
     let mut diagnostics = vec![
         FeaDiagnostic {
             code: "FEA_THERMAL_INITIAL_STATE".into(),
@@ -678,7 +678,8 @@ fn diagnostics(input: ThermalDiagnosticsInput<'_>) -> Vec<FeaDiagnostic> {
             code: "FEA_THERMAL_CONSTITUTIVE".into(),
             severity: FeaDiagnosticSeverity::Info,
             message: format!(
-                "conductivity_mean={} heat_capacity_mean={} density_mean={} conductivity_spread_ratio={} heat_capacity_spread_ratio={}",
+                "property_semantic_digest={} conductivity_mean={} heat_capacity_mean={} density_mean={} conductivity_spread_ratio={} heat_capacity_spread_ratio={}",
+                assembly.property_identity.semantic_digest,
                 constitutive.conductivity_mean,
                 constitutive.heat_capacity_mean,
                 constitutive.density_mean,
