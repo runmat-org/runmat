@@ -4282,6 +4282,8 @@ pub fn analysis_run_fsi_with_options_op(
         accelerator_evidence: Vec::new(),
         diagnostics: coupling.diagnostics,
         spatial_projection_evidence: Vec::new(),
+        structural_static_balance: None,
+        structural_constraint_result: None,
         observations: Vec::new(),
         observation_histories: Vec::new(),
         series_reductions: Vec::new(),

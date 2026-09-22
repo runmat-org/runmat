@@ -10,7 +10,7 @@ use crate::{
         assemble_structural_system, assemble_structural_system_with_constraint_plan,
         AssemblySummary, StructuralFormulationRequirement,
     },
-    constraints::CanonicalStructuralConstraintPlan,
+    constraints::{CanonicalStructuralConstraintPlan, CanonicalStructuralConstraintResult},
     contracts::{
         ComputeBackend, FeaRunError, FeaRunResult, LinearStaticSolveOptions,
         FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_EQUATION_SCALE,
@@ -43,7 +43,10 @@ use crate::{
             ObservationLimits,
         },
     },
-    solve::{backend::build_backend, linear::solve_linear_system, recover_structural_reaction},
+    solve::{
+        backend::build_backend, linear::solve_linear_system, recover_structural_static_balance,
+        StructuralStaticBalanceEvidence,
+    },
 };
 
 const VECTOR_COMPONENT_COUNT: usize = 3;
@@ -147,7 +150,6 @@ fn run_linear_static_with_constraint_plan(
     let excitations =
         realize_step_excitations(model, execution_step, ExcitationSamplePoint::Static)
             .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
-
     emit_phase(
         "fea.run_linear_static",
         FeaProgressPhase::ModelAssembly,
@@ -187,6 +189,18 @@ fn run_linear_static_with_constraint_plan(
             "linear static solid continuum studies require a canonical solver mesh".to_string(),
         ));
     }
+    let compiled_constraint_plan;
+    let executed_constraint_plan = match constraint_plan {
+        Some(plan) => plan,
+        None => {
+            compiled_constraint_plan = CanonicalStructuralConstraintPlan::compile_for_model(
+                model,
+                options.solver_mesh.as_ref(),
+            )
+            .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+            &compiled_constraint_plan
+        }
+    };
     emit_phase(
         "fea.run_linear_static",
         FeaProgressPhase::ModelAssembly,
@@ -221,6 +235,24 @@ fn run_linear_static_with_constraint_plan(
         algebra_backend.as_ref(),
         options.initial_displacement.as_deref(),
     );
+    let static_balance = recover_structural_static_balance(&summary, &solve_result.solution)
+        .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+    let structural_constraint_result =
+        CanonicalStructuralConstraintResult::recover_for_model_from_solver_state(
+            executed_constraint_plan,
+            model,
+            options.solver_mesh.as_ref(),
+            &solve_result.solution,
+            &static_balance.reaction,
+        )
+        .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+    structural_constraint_result
+        .validate_against_model(
+            executed_constraint_plan,
+            model,
+            options.solver_mesh.as_ref(),
+        )
+        .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
     emit_phase(
         "fea.run_linear_static",
         FeaProgressPhase::Solve,
@@ -271,39 +303,15 @@ fn run_linear_static_with_constraint_plan(
         Vec::new()
     } else {
         let mesh = options.solver_mesh.as_ref();
-        let compiled_constraint_plan;
-        let observation_constraint_plan = if let Some(plan) = constraint_plan {
-            plan
-        } else {
-            compiled_constraint_plan =
-                CanonicalStructuralConstraintPlan::compile_for_model(model, mesh)
-                    .map_err(|error| FeaRunError::Observation(error.to_string()))?;
-            &compiled_constraint_plan
-        };
-        let equilibrium_residual = apply_k(&summary.operator, &solve_result.solution)
-            .into_iter()
-            .zip(summary.operator.load())
-            .map(|(internal, applied)| internal - applied)
-            .collect::<Vec<_>>();
-        let reaction = recover_structural_reaction(&summary, &equilibrium_residual)
-            .map_err(|error| FeaRunError::Observation(error.to_string()))?;
-        let constraint_result = crate::constraints::CanonicalStructuralConstraintResult::recover_for_model_from_solver_state(
-            observation_constraint_plan,
-            model,
-            mesh,
-            &solve_result.solution,
-            &reaction,
-        )
-        .map_err(|error| FeaRunError::Observation(error.to_string()))?;
         let mut recovered = take_structural_observable_fields(&mut fields)
             .map_err(|error| FeaRunError::Observation(error.to_string()))?;
         recovered.extend(
-            recover_constraint_group_observable_fields(&constraint_result)
+            recover_constraint_group_observable_fields(&structural_constraint_result)
                 .map_err(|error| FeaRunError::Observation(error.to_string()))?,
         );
         let mut topology = StructuralRecoveredFieldTopology::derive(model, mesh)
             .map_err(|error| FeaRunError::Observation(error.to_string()))?;
-        topology.entity_counts.constraint_groups = constraint_result.groups.len();
+        topology.entity_counts.constraint_groups = structural_constraint_result.groups.len();
         let catalog = RecoveredFieldCatalog::new_for_topology(
             topology.identity.discretization_digest(),
             topology.entity_counts,
@@ -319,7 +327,7 @@ fn run_linear_static_with_constraint_plan(
             execution_step,
             model,
             mesh,
-            observation_constraint_plan,
+            executed_constraint_plan,
             &definitions,
             ObservationLimits::default(),
         )
@@ -418,8 +426,7 @@ fn run_linear_static_with_constraint_plan(
         });
         diagnostics.push(structural_linear_known_answer_diagnostic(
             total_strain_energy,
-            summary.operator.load(),
-            &solve_result.solution,
+            &static_balance.evidence,
         ));
         if let Some(reference_diagnostic) = structural_reference_kinematics_diagnostic(
             model,
@@ -503,6 +510,8 @@ fn run_linear_static_with_constraint_plan(
         accelerator_evidence: solve_result.accelerator_evidence.into_iter().collect(),
         diagnostics,
         spatial_projection_evidence: summary.spatial_projection_evidence.clone(),
+        structural_static_balance: Some(Box::new(static_balance.evidence)),
+        structural_constraint_result: Some(Box::new(structural_constraint_result)),
         observations,
         observation_histories: Vec::new(),
         series_reductions: Vec::new(),
@@ -583,31 +592,23 @@ fn structural_solid_assembly_diagnostic(summary: &AssemblySummary) -> Option<Fea
 
 fn structural_linear_known_answer_diagnostic(
     total_strain_energy: f64,
-    rhs: &[f64],
-    displacement: &[f64],
+    balance: &StructuralStaticBalanceEvidence,
 ) -> FeaDiagnostic {
-    let external_work = rhs
-        .iter()
-        .zip(displacement.iter())
-        .map(|(force, displacement)| force * displacement)
-        .sum::<f64>();
-    let work_energy_ratio = if external_work.abs() > 1.0e-12 {
-        (2.0 * total_strain_energy) / external_work
+    let total_external_work = balance.applied_load_work_joules + balance.constraint_work_joules;
+    let work_energy_ratio = if total_external_work.abs() > 1.0e-12 {
+        (2.0 * total_strain_energy) / total_external_work
     } else if total_strain_energy.abs() <= 1.0e-12 {
         1.0
     } else {
         0.0
     };
     let work_energy_residual_ratio = (work_energy_ratio - 1.0).abs();
-    let known_answer_coverage_ratio = if rhs.len() == displacement.len()
-        && !rhs.is_empty()
-        && total_strain_energy.is_finite()
-        && external_work.is_finite()
-    {
-        1.0
-    } else {
-        0.0
-    };
+    let known_answer_coverage_ratio =
+        if total_strain_energy.is_finite() && total_external_work.is_finite() && balance.accepted {
+            1.0
+        } else {
+            0.0
+        };
     let severity = if known_answer_coverage_ratio >= 1.0
         && total_strain_energy >= 0.0
         && work_energy_residual_ratio <= 1.0e-8
@@ -621,11 +622,15 @@ fn structural_linear_known_answer_diagnostic(
         code: "FEA_STRUCTURAL_LINEAR_KNOWN_ANSWER".to_string(),
         severity,
         message: format!(
-            "identity=linear_work_energy external_work={} total_strain_energy={} work_energy_ratio={} work_energy_residual_ratio={} known_answer_coverage_ratio={}",
-            external_work,
+            "identity=linear_work_energy applied_load_work_joules={} constraint_work_joules={} total_external_work_joules={} total_strain_energy={} work_energy_ratio={} work_energy_residual_ratio={} equilibrium_relative_error={} balance_accepted={} known_answer_coverage_ratio={}",
+            balance.applied_load_work_joules,
+            balance.constraint_work_joules,
+            total_external_work,
             total_strain_energy,
             work_energy_ratio,
             work_energy_residual_ratio,
+            balance.equilibrium_relative_error,
+            balance.accepted,
             known_answer_coverage_ratio
         ),
     }
@@ -661,15 +666,14 @@ fn structural_reference_kinematics_diagnostic(
     let applied = apply_k(&summary.operator, solution);
     let free_residual_norm = applied
         .iter()
-        .zip(summary.operator.load())
+        .zip(&summary.physical_load)
         .zip(summary.operator.constrained_dofs())
         .filter(|(_, constrained)| !**constrained)
         .map(|((lhs, rhs), _)| (lhs - rhs) * (lhs - rhs))
         .sum::<f64>()
         .sqrt();
     let load_norm = summary
-        .operator
-        .load()
+        .physical_load
         .iter()
         .map(|value| value * value)
         .sum::<f64>()

@@ -1128,7 +1128,7 @@ fn recover_reaction_force(
         if target >= reactions.len() {
             continue;
         }
-        let rhs = summary.operator.load().get(dof).copied().unwrap_or(0.0);
+        let rhs = summary.physical_load.get(dof).copied().unwrap_or(0.0);
         let internal = internal_force.get(dof).copied().unwrap_or(0.0);
         reactions[target] = internal - rhs;
     }
@@ -1208,7 +1208,7 @@ fn recover_reaction_moment(summary: &AssemblySummary, internal_force: &[f64]) ->
         };
         let target = address.node_index * VECTOR_COMPONENT_COUNT + component;
         if target < reactions.len() {
-            let rhs = summary.operator.load().get(dof).copied().unwrap_or(0.0);
+            let rhs = summary.physical_load.get(dof).copied().unwrap_or(0.0);
             let internal = internal_force.get(dof).copied().unwrap_or(0.0);
             reactions[target] = internal - rhs;
         }
@@ -1265,7 +1265,7 @@ fn recover_residual_metrics(
     let applied = apply_k(&summary.operator, &solution);
     let mut full_residual = applied
         .iter()
-        .zip(summary.operator.load().iter())
+        .zip(summary.physical_load.iter())
         .map(|(lhs, rhs)| lhs - rhs)
         .collect::<Vec<_>>();
     if summary.constraint_matrix.is_none() && summary.affine_constraint_reduction.is_none() {
@@ -1286,8 +1286,8 @@ fn recover_residual_metrics(
     let scaled_rhs = summary
         .affine_constraint_reduction
         .as_ref()
-        .and_then(|reduction| reduction.transpose_apply(summary.operator.load()).ok())
-        .unwrap_or_else(|| summary.operator.load().to_vec());
+        .and_then(|reduction| reduction.transpose_apply(&summary.physical_load).ok())
+        .unwrap_or_else(|| summary.physical_load.clone());
     let residual_norm = residual
         .iter()
         .map(|value| value * value)

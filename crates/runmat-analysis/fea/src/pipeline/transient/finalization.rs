@@ -88,6 +88,8 @@ pub(super) fn finish_transient_run(
             .iter()
             .flat_map(|summary| summary.spatial_projection_evidence.iter().cloned())
             .collect(),
+        structural_static_balance: None,
+        structural_constraint_result: None,
         observations: Vec::new(),
         observation_histories: Vec::new(),
         series_reductions: Vec::new(),

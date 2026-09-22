@@ -675,6 +675,11 @@ pub struct FeaRunResult {
     #[serde(default)]
     pub spatial_projection_evidence: Vec<crate::excitation::SpatialProjectionEvidence>,
     #[serde(default)]
+    pub structural_static_balance: Option<Box<crate::solve::StructuralStaticBalanceEvidence>>,
+    #[serde(default)]
+    pub structural_constraint_result:
+        Option<Box<crate::constraints::CanonicalStructuralConstraintResult>>,
+    #[serde(default)]
     pub observations: Vec<crate::results::observation::ObservationResult>,
     pub observation_histories: Vec<crate::results::observation::ObservationHistory>,
     pub series_reductions: Vec<crate::results::observation::SeriesReductionResult>,

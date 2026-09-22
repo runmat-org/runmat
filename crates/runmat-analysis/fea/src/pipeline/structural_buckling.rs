@@ -277,6 +277,8 @@ pub fn recover_completed_structural_buckling_run(
             ),
         }],
         spatial_projection_evidence: summary.spatial_projection_evidence,
+        structural_static_balance: None,
+        structural_constraint_result: None,
         observations: Vec::new(),
         observation_histories: Vec::new(),
         series_reductions: Vec::new(),

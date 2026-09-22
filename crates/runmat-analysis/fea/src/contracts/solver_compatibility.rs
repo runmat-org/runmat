@@ -23,6 +23,11 @@ pub(super) struct FeaRunResultWire {
     #[serde(default)]
     spatial_projection_evidence: Vec<crate::excitation::SpatialProjectionEvidence>,
     #[serde(default)]
+    structural_static_balance: Option<Box<crate::solve::StructuralStaticBalanceEvidence>>,
+    #[serde(default)]
+    structural_constraint_result:
+        Option<Box<crate::constraints::CanonicalStructuralConstraintResult>>,
+    #[serde(default)]
     observations: Vec<crate::results::observation::ObservationResult>,
     observation_histories: Vec<crate::results::observation::ObservationHistory>,
     series_reductions: Vec<crate::results::observation::SeriesReductionResult>,
@@ -45,6 +50,8 @@ impl TryFrom<FeaRunResultWire> for FeaRunResult {
             accelerator_evidence: wire.accelerator_evidence,
             diagnostics: wire.diagnostics,
             spatial_projection_evidence: wire.spatial_projection_evidence,
+            structural_static_balance: wire.structural_static_balance,
+            structural_constraint_result: wire.structural_constraint_result,
             observations: wire.observations,
             observation_histories: wire.observation_histories,
             series_reductions: wire.series_reductions,
@@ -61,12 +68,56 @@ impl FeaRunResult {
             &self.identity,
             self.solver_method,
             self.preconditioner,
-        )
+        )?;
+        let is_structural_static = self
+            .identity
+            .realization()
+            .temporals
+            .contains(&TemporalImplementation::StructuralStaticLinearSolve);
+        match (is_structural_static, &self.structural_static_balance) {
+            (true, Some(evidence)) => evidence
+                .validate()
+                .map_err(|_| SolverFormulationCompatibilityError::InvalidStructuralStaticBalance)?,
+            (true, None) => {
+                return Err(SolverFormulationCompatibilityError::MissingStructuralStaticBalance)
+            }
+            (false, Some(_)) => {
+                return Err(SolverFormulationCompatibilityError::UnexpectedStructuralStaticBalance)
+            }
+            (false, None) => {}
+        }
+        match (is_structural_static, &self.structural_constraint_result) {
+            (true, Some(result)) => result.validate().map_err(|_| {
+                SolverFormulationCompatibilityError::InvalidStructuralConstraintResult
+            })?,
+            (true, None) => {
+                return Err(SolverFormulationCompatibilityError::MissingStructuralConstraintResult)
+            }
+            (false, Some(_)) => {
+                return Err(
+                    SolverFormulationCompatibilityError::UnexpectedStructuralConstraintResult,
+                )
+            }
+            (false, None) => {}
+        }
+        Ok(())
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum SolverFormulationCompatibilityError {
+    #[error("structural static balance evidence is invalid")]
+    InvalidStructuralStaticBalance,
+    #[error("a structural static result is missing mandatory physical balance evidence")]
+    MissingStructuralStaticBalance,
+    #[error("structural static balance evidence is attached to a non-static result")]
+    UnexpectedStructuralStaticBalance,
+    #[error("structural static constraint result is invalid")]
+    InvalidStructuralConstraintResult,
+    #[error("a structural static result is missing its canonical constraint result")]
+    MissingStructuralConstraintResult,
+    #[error("a structural static constraint result is attached to a non-static result")]
+    UnexpectedStructuralConstraintResult,
     #[error("the admitted formulation has no solver-owning temporal implementation")]
     MissingSolverTemporal,
     #[error(
@@ -502,6 +553,35 @@ mod tests {
             accelerator_evidence: Vec::new(),
             diagnostics: Vec::new(),
             spatial_projection_evidence: Vec::new(),
+            structural_static_balance: Some(Box::new(crate::solve::StructuralStaticBalanceEvidence {
+                internal_work_joules: 0.0,
+                applied_load_work_joules: 0.0,
+                constraint_work_joules: 0.0,
+                work_balance_residual_joules: 0.0,
+                work_balance_relative_error: 0.0,
+                equilibrium_residual_norm_newtons: 0.0,
+                equilibrium_scale_newtons: 1.0,
+                equilibrium_relative_error: 0.0,
+                relative_tolerance: 1.0e-8,
+                accepted: true,
+            })),
+            structural_constraint_result: Some(Box::new(
+                crate::constraints::CanonicalStructuralConstraintResult {
+                    schema_version: 1,
+                    constraint_plan_digest: runmat_execution::Digest::sha256(b"plan"),
+                    topology:
+                        crate::physics::structural::topology::CanonicalStructuralTopologyIdentity::Solid {
+                            mesh_digest: runmat_meshing_core::StableDigest::from_bytes([7; 32]),
+                        },
+                    reference_points: Vec::new(),
+                    groups: Vec::new(),
+                    resultant_force_newtons: [0.0; 3],
+                    resultant_moment_about_global_origin_newton_meters: [0.0; 3],
+                    constraint_work_joules: 0.0,
+                    maximum_displacement_error_meters: 0.0,
+                    maximum_rotation_error_radians: 0.0,
+                },
+            )),
             observations: Vec::new(),
             observation_histories: Vec::new(),
             series_reductions: Vec::new(),
@@ -519,5 +599,35 @@ mod tests {
         substituted_preconditioner["preconditioner"] =
             serde_json::json!(SolverPreconditioner::BlockJacobi);
         assert!(serde_json::from_value::<FeaRunResult>(substituted_preconditioner).is_err());
+
+        let mut missing_balance = serde_json::to_value(&run).unwrap();
+        missing_balance["structural_static_balance"] = serde_json::Value::Null;
+        assert!(matches!(
+            serde_json::from_value::<FeaRunResult>(missing_balance),
+            Err(_)
+        ));
+
+        let mut missing_constraints = serde_json::to_value(&run).unwrap();
+        missing_constraints["structural_constraint_result"] = serde_json::Value::Null;
+        assert!(matches!(
+            serde_json::from_value::<FeaRunResult>(missing_constraints),
+            Err(_)
+        ));
+
+        let mut unexpected_static_evidence = run.clone();
+        unexpected_static_evidence.identity =
+            structural_identity(AnalysisProcedure::ModalExtraction, SolutionSpace::Direct);
+        unexpected_static_evidence.solver_method = SolverMethod::MatrixFreeSubspaceIteration;
+        unexpected_static_evidence.preconditioner = SolverPreconditioner::Ilu0;
+        assert_eq!(
+            unexpected_static_evidence.validate_solver_formulation(),
+            Err(SolverFormulationCompatibilityError::UnexpectedStructuralStaticBalance)
+        );
+
+        unexpected_static_evidence.structural_static_balance = None;
+        assert_eq!(
+            unexpected_static_evidence.validate_solver_formulation(),
+            Err(SolverFormulationCompatibilityError::UnexpectedStructuralConstraintResult)
+        );
     }
 }

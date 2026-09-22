@@ -1481,6 +1481,8 @@ pub fn run_electromagnetic_with_options(
         accelerator_evidence: Vec::new(),
         diagnostics,
         spatial_projection_evidence: summary.spatial_projection_evidence.clone(),
+        structural_static_balance: None,
+        structural_constraint_result: None,
         observations: Vec::new(),
         observation_histories: Vec::new(),
         series_reductions: Vec::new(),
