@@ -295,6 +295,10 @@ fn source_root(path: &Path, workspace_roots: &[PathBuf]) -> PathBuf {
         .filter(|root| path.starts_with(root))
         .max_by_key(|root| root.components().count())
         .cloned()
+        .or_else(|| {
+            super::project::ProjectContext::discover_from_source_name(path.to_str())
+                .and_then(|project| project.manifest_path().parent().map(Path::to_path_buf))
+        })
         .or_else(|| path.parent().map(Path::to_path_buf))
         .unwrap_or_else(|| PathBuf::from("."))
 }
