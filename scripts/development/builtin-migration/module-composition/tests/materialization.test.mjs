@@ -359,9 +359,22 @@ test("factory materialization requires the lease-base inventory authority", () =
   const factory = path.resolve("scripts/development/builtin-migration-factory.mjs");
   const common = ["--control", "x", "--baseline-inventory", "x", "--lease", "x", "--state", "x", "--queue-checkpoint", "x", "--trusted-queue-checkpoint-digest", `sha256:${"1".repeat(64)}`,
     "--component-graph", "x", "--draft", "x", "--c01-c03-review", "x", "--c04-c05-review", "x", "--c06-c07-review", "x", "--reconciliation", "x", "--stability-corrections", "x", "--candidate", "x", "--attestation", "x", "--topology", "x", "--control-scaffold", "x", "--control-review-set", "x", "--control-candidate", "x", "--control-attestation", "x"];
-  const result = spawnSync(process.execPath, [factory, "materialize-composition", ...common], { encoding: "utf8" });
+  const result = spawnSync(process.execPath, [factory, "materialize-composition", "--no-products", ...common], { encoding: "utf8" });
   assert.equal(result.status, 2);
   assert.match(result.stderr, /requires --control, --lease-base-inventory/);
+});
+
+test("factory materialization requires one explicit product-selection form", () => {
+  const factory = path.resolve("scripts/development/builtin-migration-factory.mjs");
+  for (const argumentsList of [
+    ["materialize-composition"],
+    ["materialize-composition", "--no-products", "--product", "catalog-math"],
+    ["materialize-composition", "--product", "catalog-math", "--product", "catalog-math"],
+  ]) {
+    const result = spawnSync(process.execPath, [factory, ...argumentsList], { encoding: "utf8" });
+    assert.equal(result.status, 2);
+    assert.match(result.stderr, /product|requires/);
+  }
 });
 
 test("operational materialization derives authority and writes active plus baseline-only products as one set", () => {
@@ -377,6 +390,25 @@ test("operational materialization derives authority and writes active plus basel
   ]);
   const effective = fixture.control.moduleComposition.transitions.get(fixture.bundleId).changes[0].after;
   assert.match(fs.readFileSync(path.join(fixture.repository, "crates/runmat-runtime/src/builtins/math/mod.rs"), "utf8"), new RegExp(`mod ${effective.module};`));
+});
+
+test("operational materialization rejects a selection that differs from active lease authority", () => {
+  const fixture = controlledFixture({ composition: true });
+  const expected = fixture.lease.bundle.integration_outputs
+    .map((entry) => entry.product_id)
+    .filter((id) => fixture.control.integrationProducts.get(id).verification.kind
+      === "rust_module_composition")
+    .sort();
+  assert.throws(() => materializeEffectiveModuleComposition({
+    repository: fixture.repository, control: fixture.control,
+    queueState: fixture.queueState, queueCheckpoint: fixture.queueCheckpoint,
+    lease: fixture.lease,
+  }, { productIds: expected.slice(1) }), /must exactly match/);
+  assert.throws(() => materializeEffectiveModuleComposition({
+    repository: fixture.repository, control: fixture.control,
+    queueState: fixture.queueState, queueCheckpoint: fixture.queueCheckpoint,
+    lease: fixture.lease,
+  }, { productIds: ["runtime-root", ...expected] }), /canonical product-id order/);
 });
 
 test("operational materialization activates absent catalog and runtime parents with their ancestor declarations", () => {

@@ -24,7 +24,7 @@ export function materializeEffectiveModuleComposition({
   validateReviewedModuleCompositionAuthority(control.integrationProducts, state.prior);
   validateReviewedModuleCompositionAuthority(control.integrationProducts, state.effective);
   const active = assertActiveLease(lease, control, clock);
-  const productIds = selectedProductIds(control, active.bundle);
+  const productIds = selectedProductIds(control, active.bundle, options.productIds);
   const effectiveById = new Map(state.effective.products
     .map((product) => [product.product_id, product]));
   const priorById = new Map(state.prior.products
@@ -124,15 +124,37 @@ function deriveAuthorizedPendingChildKeys(products, priorById) {
   return keys;
 }
 
-function selectedProductIds(control, bundle) {
-  const ids = new Set([...control.integrationProducts.values()]
-    .filter((product) => product.verification.kind === "rust_module_composition"
-      && product.lifecycle.kind === "reviewed-baseline-only")
-    .map((product) => product.product_id));
+function selectedProductIds(control, bundle, requestedProductIds = null) {
+  if (requestedProductIds === null) {
+    const implicit = new Set([...control.integrationProducts.values()]
+      .filter((product) => product.verification.kind === "rust_module_composition"
+        && product.lifecycle.kind === "reviewed-baseline-only")
+      .map((product) => product.product_id));
+    for (const output of bundle.integration_outputs) {
+      const product = control.integrationProducts.get(output.product_id);
+      if (!product) throw new Error(`${bundle.id}: active bundle references unknown integration product ${output.product_id}`);
+      if (product.verification.kind === "rust_module_composition") {
+        implicit.add(product.product_id);
+      }
+    }
+    return [...implicit].sort(compareCodePoint);
+  }
+  const ids = new Set();
   for (const output of bundle.integration_outputs) {
     const product = control.integrationProducts.get(output.product_id);
     if (!product) throw new Error(`${bundle.id}: active bundle references unknown integration product ${output.product_id}`);
     if (product.verification.kind === "rust_module_composition") ids.add(product.product_id);
   }
-  return [...ids].sort(compareCodePoint);
+  const expected = [...ids].sort(compareCodePoint);
+  const requested = [...requestedProductIds];
+  if (new Set(requested).size !== requested.length) {
+    throw new Error("materialization product selection contains duplicates");
+  }
+  if (JSON.stringify(requested) !== JSON.stringify([...requested].sort(compareCodePoint))) {
+    throw new Error("materialization product selection must use canonical product-id order");
+  }
+  if (JSON.stringify(requested) !== JSON.stringify(expected)) {
+    throw new Error(`${bundle.id}: materialization product selection must exactly match the active lease integration products`);
+  }
+  return requested;
 }

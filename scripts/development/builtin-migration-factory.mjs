@@ -192,7 +192,7 @@ function run(options) {
     const queue = queueAuthorityFromOptions(options, control);
     emit(materializeEffectiveModuleComposition({
       repository, control, queueState: queue.state, queueCheckpoint: queue.checkpoint, lease,
-    }), options.output);
+    }, { productIds: options.productIds }), options.output);
     return;
   }
   if (options.command === "verify") { runVerify(options); return; }
