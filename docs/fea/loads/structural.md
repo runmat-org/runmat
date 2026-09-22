@@ -10,13 +10,19 @@ $$
 Pressure uses $\bar{\mathbf t}=-p\mathbf n$. A resultant force/moment is projected so its integrated
 resultant is conserved; traction, pressure, and body-force density preserve intensity.
 
+These declarations are accepted by the typed `.fea` checker and structural procedure graphs are the
+family currently admitted by the native whole-study executor. The direct form
+`<kind> on <region> = <value>` creates a constant signal and excitation. The block form
+`structural.pressure` creates a constant natural boundary; it is not an excitation and is not a
+member of a `load_case`.
+
 | Kind | Quantity and typical target | Projection invariant |
 | --- | --- | --- |
 | `force` | Resultant force; compatible point/edge/face target | $\sum\mathbf f_i=\mathbf F$ |
 | `moment` | Resultant moment on a compatible target | resultant moment |
 | `traction` | Force per area on faces | traction intensity |
 | `pressure` | Normal pressure on faces | scalar pressure intensity |
-| `body_force` | Force per volume on solid/cell regions | body-force density |
+| `body_force` | Force per volume on a solid region, or an explicit whole-model excitation | body-force density |
 | `structural.pressure` | Constant natural pressure boundary on faces | pressure intensity |
 
 ```fea
@@ -80,10 +86,17 @@ unchanged traction.
 
 ## How do I apply a force at a remote point?
 
-Create a reference-point coupling from the attachment region to the physical load application point,
-then apply the resultant through that admitted reference-point target. Choose rigid coupling only if
-the attachment truly moves rigidly; use distributing coupling when the face may deform. Applying the
-same force directly to the face omits the moment $\mathbf r\times\mathbf F$ created by the offset.
+The current `.fea` excitation target is a geometry region or `whole_model`; it does not accept a
+reference-point object as a load target. A coupling can define kinematics, but that does not create
+an authorable reference-point force. Until that target contract is added, resolve the remote wrench
+into an equivalent force and moment on the attachment region, or model the load-introduction
+hardware. Preserve the moment about the stated application point:
+
+$$
+\mathbf M_O=\mathbf M_P+(\mathbf r_P-\mathbf r_O)\times\mathbf F.
+$$
+
+Do not describe a face force alone as a remote load when the offset moment is nonzero.
 
 ## How do I ramp, pulse, or cycle a force?
 
@@ -188,9 +201,37 @@ load vertical_body_force {
 }
 ```
 
-`body_force` carries force per volume and targets solid/cell regions. For gravity, the density-
+`body_force` carries force per volume and targets solid regions. For gravity, the density-
 dependent value is $\mathbf b=\rho\mathbf g$; if density varies by material region, author the
 appropriate typed gravity/body-force model rather than using one averaged density.
+
+## How do I apply one body-force density to the whole model?
+
+`whole_model` is supported only by the explicit excitation form, not by
+`body_force on whole_model = ...`. Use a vector signal with an explicit frame:
+
+```fea
+signal uniform_gravity_density : body_force_density over constant {
+    value = [0, -77.0, 0] kN/m^3
+    frame = global
+}
+
+excitation uniform_gravity {
+    body_force {
+        target = whole_model
+        signal = signal.uniform_gravity_density
+        kinematics = fixed_frame
+    }
+}
+
+load_case gravity_case {
+    include excitation.uniform_gravity
+}
+```
+
+This is physically correct only when the same force density applies to every solid. For actual
+gravity in a multi-material model, use region-specific $\rho_r\mathbf g$ values until a typed
+density-aware gravity action is available.
 
 ## How do I apply self-weight to a multi-material assembly?
 
@@ -232,11 +273,13 @@ its own resultant and is not equivalent to a pin bearing load.
 
 ## How do I apply hydrostatic pressure?
 
-Hydrostatic pressure varies with position. Represent it with a pressure signal/function over the
-spatial field when the selected formulation admits spatial functions; a constant
-`structural.pressure` is valid only when the pressure variation is negligible. Keep density,
-gravity, free-surface location, and pressure datum explicit in the RunMat function so the field is
-reproducible and unit checked.
+Hydrostatic pressure varies with position,
+$p(\mathbf x)=p_0+\rho g\max(0,h-z)$. The current `.fea` load grammar has constant, time,
+frequency, and study-parameter signals, but no spatial pressure-field declaration. Partitioning a
+wall into named bands and applying a documented piecewise-constant pressure is an explicit
+approximation; otherwise this load is not yet first class. A constant `structural.pressure` is valid
+only when the variation is negligible. Retain density, gravity, free-surface elevation, pressure
+datum, band areas, and the integrated force and moment used to qualify the approximation.
 
 ## How do I apply a follower pressure in a nonlinear analysis?
 
@@ -249,8 +292,9 @@ it. The analysis must reject follower kinematics for a formulation that cannot a
 
 For constant angular speed, the continuum source is
 $\mathbf b=\rho\,\boldsymbol\omega\times(\boldsymbol\omega\times\mathbf r)$.
-Use a spatial body-force field when that field contract is admitted, with an explicit axis, origin,
-frame, density source, and angular speed. A uniform `body_force` vector is not centrifugal loading.
+The current source language has no spatial body-force-field declaration. Such a contract must carry
+axis, origin, frame, density source, and angular speed. A uniform `body_force` vector is not
+centrifugal loading; use it only for a separately justified reduced model.
 For prestressed modal or harmonic response, solve the rotational preload first and consume its
 retained structural state in the downstream procedure.
 
@@ -322,11 +366,18 @@ kinematics are available only where the formulation can update direction with de
 Group alternatives or combinations explicitly:
 
 ```fea
+load vessel_pressure_excitation {
+    pressure on geometry.vessel.region.inner_wall = 2 MPa
+}
+
 load_case operating {
     include load.bearing_force
-    include load.vessel_pressure
+    include load.vessel_pressure_excitation
 }
 ```
+
+Use the direct `pressure` action when pressure must belong to a `load_case`. A
+`structural.pressure` block is a natural boundary and cannot be referenced by that case syntax.
 
 Check the resolved resultant, moment, target area/volume, sign convention, active analysis steps,
 and reaction balance.
@@ -351,11 +402,29 @@ For code combinations, keep the characteristic load and combination factor separ
 
 ## How do I apply a load in a local coordinate system?
 
-Direct vector loads are expressed in the vector's declared frame. For signal-driven scalar force,
-keep amplitude in the signal and direction in the excitation. Use an admitted local frame when the
-load follows a shaft, beam, or fixture axis; otherwise use `global([x, y, z])`. The checker must
-reject a frame that is unavailable at the target. Review the transformed vector and resultant in
-global coordinates before interpreting reactions.
+Direct vector loads are global. The `direction = global([x, y, z])` expression also accepts only a
+finite unit vector in the global frame. For a supported non-global vector signal, put the frame on
+the signal and omit `direction` from the excitation:
+
+```fea
+signal bearing_traction : traction over constant {
+    value = [2 MPa, 0 MPa, 0 MPa]
+    frame = boundary_normal_tangent
+}
+
+excitation bearing_patch {
+    traction {
+        target = geometry.bracket.region.bearing_patch
+        signal = signal.bearing_traction
+        kinematics = fixed_frame
+    }
+}
+```
+
+The accepted signal frames are `global`, `material`, `element`, and
+`boundary_normal_tangent`; admission still depends on the target and formulation providing that
+frame. There is no arbitrary named-coordinate-system reference in the current excitation syntax.
+Review the transformed vector and resultant in global coordinates before interpreting reactions.
 
 ## How do I model a line load on a beam or edge?
 
@@ -428,6 +497,21 @@ excitation shaker_a_drive {
 
 Use a second signal for the second phase. Inspect complex reaction balance and phase at response
 probes; magnitude alone cannot reveal a reversed phase or coordinate axis.
+
+## How do I verify a complete static load path?
+
+For a static test case, retain four independent checks:
+
+1. integrate every projected force, traction, pressure, and body source about one stated origin;
+2. compare those totals with support reactions in the same frame;
+3. compare external work $\mathbf f^{\mathsf T}\mathbf u$ with twice the linear strain energy;
+4. repeat after mesh refinement while keeping persistent region identities fixed.
+
+For a linear static solve without omitted interface loads, the force residual
+$\lVert\mathbf F_{ext}+\mathbf R\rVert$ and moment residual about the chosen origin should meet the
+study tolerance. A balanced force with an unbalanced moment usually indicates an offset load,
+missing rotational reaction, or an incorrect pressure patch. A converged contour without these
+balances is not load verification.
 
 ## How do I run a base-shake, response-spectrum, or random-vibration study?
 

@@ -14,9 +14,16 @@ the measure of its target region.
 | `translational_dashpot` | `primary`, optional `secondary`, `damping` | Relative velocity to force |
 | `elastic_foundation` | `primary`, `stiffness` | Distributed foundation stiffness |
 
-Each connector names a primary target and, where required, a secondary target. Its coefficients
-carry physical units and its frame/direction are explicit. A connector should appear in the Desktop
-study preview as a relation between the exact target regions, not as a generic label on the model.
+Each connector names a primary target and, for a two-ended device, a secondary target. Coefficients
+carry physical units. The current source contract has no `frame`, `direction`, local-axis, or matrix
+field: its scalar law is interpreted only through the connector basis admitted by the consuming
+formulation. A connector should appear in the Desktop study preview as a relation between the exact
+target regions, not as a generic label on the model.
+
+Targets are CAD region references such as `geometry.assembly.region.part_mount`; they are not mesh
+node IDs. Spring and dashpot `secondary` is optional. `elastic_foundation` accepts only `primary`
+and `stiffness`. Stiffness has force-per-length units and damping has force-time-per-length units.
+Unknown members are rejected rather than becoming solver options.
 
 ## How do I add a translational spring between two regions?
 
@@ -31,7 +38,7 @@ connector mount_spring {
 ```
 
 The spring force follows $\mathbf f=k(\mathbf u_p-\mathbf u_s)$ under the connector's supported
-translation contract. Omit `secondary` only for a spring to the formulation's fixed reference. A
+translation contract. Omitting `secondary` requests the one-ended/fixed-reference form. A
 single scalar stiffness is not a full anisotropic bushing; do not use it where directional/coupled
 stiffness is required but unsupported.
 
@@ -49,7 +56,9 @@ connector mount_damper {
 
 Dashpot force follows relative velocity, $\mathbf f=c(\dot{\mathbf u}_p-
 \dot{\mathbf u}_s)$. It contributes to dynamic response and dissipated energy; it does not add
-static stiffness. Verify the coefficient against the modeled DOF basis and units.
+static stiffness. Verify the coefficient against the modeled DOF basis and units. This declaration
+does not select a Cartesian component; a directional dashpot is unsupported by the current source
+contract.
 
 ## How do I model an elastic foundation?
 
@@ -89,8 +98,8 @@ do not enter the same number into a scalar spring field.
 
 ## How do I model a spring or damper to ground?
 
-Omit `secondary` only when the admitted connector explicitly interprets omission as the fixed
-reference. The primary target still needs a physical region and the resulting force/reaction must be
+Omit `secondary` to request the supported one-ended/fixed-reference form. The primary target still
+needs a physical region and the resulting force/reaction must be
 reported against that reference. Do not create a dummy geometry region merely to imitate ground.
 
 ## How do I model a directional spring, bushing, or coupled stiffness matrix?
@@ -153,12 +162,14 @@ factor.
 For a linear spring, verify $F=k\Delta u$ and stored energy
 $U=\tfrac12k(\Delta u)^2$. For a dashpot, verify $F=c\Delta\dot u$ and nonnegative dissipated energy
 under the stated sign convention. Check equal-and-opposite endpoint resultants and the actual relative
-motion in the connector frame.
+motion in the formulation's resolved connector basis. Because no frame or axis is authored in the
+current contract, the evidence must expose that realized basis; otherwise the scalar result is not
+auditable.
 
 ## What should I inspect in the study preview?
 
 The preview should show both endpoint regions, connector kind, coefficient with units, ground status
-when secondary is absent, and direction/frame when supported. A label anchored to only one face is
+when secondary is absent, and the formulation-resolved basis. A label anchored to only one face is
 insufficient for a two-ended connector; use the study graph to inspect the complete relation.
 
 ## How do I put a spring and dashpot in parallel in RunMat?
@@ -186,7 +197,7 @@ connector isolator_damping {
 
 The pair implements $\mathbf f=k\Delta\mathbf u+c\Delta\dot{\mathbf u}$ on the admitted connector
 basis. Do not add coefficients before authoring unless the physical devices truly share the same
-endpoints and direction; separate declarations retain the contribution of each device.
+endpoints and realized basis; separate declarations retain the contribution of each device.
 
 ## How do I model several mounts under one machine?
 
@@ -221,21 +232,49 @@ whether several mounts accidentally acted in parallel on the same projected enti
 
 ## How do I model an equipment mount with stiffness and damping?
 
-Use one translational spring and one translational dashpot per physical mount direction. Their forces
+Use one translational spring and one translational dashpot per physical scalar mount relation. Their forces
 act in parallel: $F=k\Delta u+c\Delta\dot u$. Give each mount a separate region or reference point so
 its load path and reaction remain identifiable. A single broad foundation is a different model.
 
 Choose coefficients from test data or a stated reduction. For a supported mass $m$ and target
 undamped frequency $f_n$, $k=(2\pi f_n)^2m$; for damping ratio $\zeta$,
-$c=2\zeta\sqrt{km}$. Multi-axis coupling or rotational stiffness needs a typed matrix/bushing
-contract and must not be approximated by unlabeled scalar springs.
+$c=2\zeta\sqrt{km}$. The current DSL cannot author a mount direction. Multi-axis coupling,
+directional stiffness, or rotational stiffness needs a typed matrix/bushing contract and must not
+be approximated by unlabeled scalar springs.
+
+An exact two-ended linear mount in the current source language is:
+
+```fea
+connector mount_stiffness {
+    translational_spring {
+        primary = geometry.machine.region.front_mount
+        secondary = geometry.frame.region.front_mount
+        stiffness = 220 kN/m
+    }
+}
+
+connector mount_damping {
+    translational_dashpot {
+        primary = geometry.machine.region.front_mount
+        secondary = geometry.frame.region.front_mount
+        damping = 1.4 kN*s/m
+    }
+}
+```
+
+Do not add `direction`, `frame`, preload, or nonlinear curve members: none is accepted here. Before
+using this reduction, confirm that the consuming formulation exposes the intended scalar relative
+coordinate. Verify $F_s/k=\Delta u$ and $F_d/c=\Delta\dot u$, equal-and-opposite endpoint
+resultants, nonnegative dashpot dissipation, and the predicted one-DOF frequency/damping ratio
+against an assembled modal/transient result.
 
 ## How do I model several isolators under one rigid machine?
 
 Couple the machine attachment points only if the machine is intended to behave rigidly, then declare
 each isolator separately at its actual location. Off-axis mount forces create moments and rocking
-modes, so preserving only total vertical stiffness is insufficient. Retain mount coordinates,
-direction frames, preload assumptions, and force by mount.
+modes, so preserving only total vertical stiffness is insufficient. Retain mount coordinates, the
+formulation-resolved scalar bases, preload assumptions, and force by mount. If authored directional
+bases are required, the current connector contract is insufficient.
 
 Compare rigid-body frequencies and mode shapes with a hand or reduced-order model. An accidental
 duplicate selector can put two connectors in parallel and shift every mode.

@@ -4,12 +4,21 @@ Mass flow is the conserved boundary resultant
 $\dot m=\int_\Gamma\rho\mathbf u\cdot\mathbf n\,d\Gamma$. Inlet velocity and wall motion prescribe
 kinematics; outlet pressure contributes the natural traction associated with the momentum equation.
 
+The typed language accepts steady and transient fluid procedure contracts and the declarations on
+this page. The native typed whole-study executor currently rejects non-structural procedure graphs,
+so these sources can be checked but not run through `runmat fea run` yet. Low-level CFD operations
+remain a separate surface.
+
 | Kind | Quantity/fields | Use |
 | --- | --- | --- |
 | `inlet_velocity` | m/s | Apply an inlet-velocity signal |
 | `mass_flow` | kg/s | Preserve total mass-flow rate |
 | `wall_motion` | m/s | Drive wall velocity |
 | `fluid.outlet_pressure` | `target`, `value` in Pa | Natural outlet pressure |
+
+All implemented fluid actions and boundaries on this page target face regions. `mass_flow` and
+outlet pressure are scalar; inlet velocity and wall motion are directed vectors, either supplied as
+a vector signal or as a scalar signal plus normalized `global([x, y, z])` direction.
 
 ```fea
 load flow_rate {
@@ -52,25 +61,25 @@ pressure drop and entrance behavior; the current contract must not imply a profi
 
 ## How do I prescribe a steady uniform inlet velocity?
 
-Use the `fluid.velocity` essential constraint when the complete vector is known and constant:
+Use a constant `inlet_velocity` action when the complete global vector is known:
 
 ```fea
-constraint steady_inlet {
-    fluid.velocity {
-        target = geometry.channel.region.inlet
-        value = [2 m/s, 0 m/s, 0 m/s]
-    }
+load steady_inlet {
+    inlet_velocity on geometry.channel.region.inlet = [2, 0, 0] m/s
 }
 ```
 
-Use `inlet_velocity` for a signal-driven magnitude/direction. Do not apply both declarations to the
-same target.
+The current `fluid.velocity` essential-constraint contract carries a scalar `Velocity`; it does not
+encode a complete three-component direction. Use `inlet_velocity` for the directed inlet vector or
+a signal-driven magnitude/direction. Do not apply both declarations to the same target.
 
 ## How do I apply a parabolic or fully developed inlet profile?
 
 A scalar `inlet_velocity` excitation does not silently invent a parabolic profile. Define the
-spatial profile through a topology field or a RunMat function only when the admitted inlet contract
-accepts that field shape, or extend the formulation with a typed developed-profile declaration.
+spatial profile through a topology field only after that field contract is implemented. The current
+`.fea` signal function is sampled over time, frequency, or a study parameter; it is not called with
+boundary coordinates. Therefore a generated `.m` signal cannot currently author a parabolic inlet
+profile. Extend the formulation with a typed developed-profile or topology-field declaration.
 For a circular laminar pipe, the analytic profile is
 $u(r)=2\bar u[1-(r/R)^2]$; its mean, maximum, radius, axis, and coordinate frame must all remain
 explicit.
@@ -138,13 +147,39 @@ excitation moving_belt {
 This is prescribed kinematics. Use `fluid_structure.no_slip` when wall motion must come from and feed
 back into a structural solution.
 
+## How do I set up a Couette-flow moving-wall check?
+
+Use a channel of height $H$, a stationary no-slip lower wall, and a constant upper-wall velocity.
+The direct `wall_motion` action carries the global vector:
+
+```fea
+constraint stationary_wall {
+    fluid.no_slip_wall {
+        target = geometry.channel.region.lower_wall
+    }
+}
+
+load moving_wall {
+    wall_motion on geometry.channel.region.upper_wall = [1, 0, 0] m/s
+}
+
+load_case couette {
+    include load.moving_wall
+}
+```
+
+With no pressure gradient and a Newtonian fluid, the developed solution is
+$u_x(y)=Uy/H$ and the wall shear is $\tau=\mu U/H$. Compare the velocity profile, wall shear, and
+mass balance after refining cells across the gap. This separates moving-wall semantics from inlet
+or pressure-boundary behavior.
+
 ## How do I model a rotating wall, impeller, or cylinder?
 
 A single `wall_motion` direction describes translational velocity, not rigid rotation over a
 surface. Rotating-wall kinematics require axis, origin, angular speed and the spatial law
-$\mathbf u=\boldsymbol\omega\times(\mathbf x-\mathbf x_0)$. Use a compatible generated field or
-rotating-domain formulation when admitted. Do not assign one tangential vector to an entire curved
-rotor.
+$\mathbf u=\boldsymbol\omega\times(\mathbf x-\mathbf x_0)$. The current source language does not
+expose a coordinate-dependent wall field or rotating-domain load. Do not assign one tangential
+vector to an entire curved rotor.
 
 ## How do I model suction or blowing through a wall?
 
@@ -343,6 +378,28 @@ boundary contribution.
 Avoid one broad `ports` region for different conditions. Separate identities make reversed flow,
 incorrect normals, and unintended flow split visible in the evidence rather than hidden in a single
 net resultant.
+
+## How do I verify a laminar pipe-flow load case?
+
+Use a straight circular pipe and compare with Hagen–Poiseuille flow in its valid regime:
+
+$$
+\Delta p=\frac{128\mu L\dot V}{\pi D^4},\qquad
+u(r)=2\bar u\left(1-\frac{r^2}{R^2}\right).
+$$
+
+Prescribe either the admitted mass flow or inlet velocity and one outlet pressure; do not prescribe
+both flow resultants. Confirm Reynolds number, entrance length, signed mass balance, pressure drop,
+and wall shear. Refine the mesh radially and axially and move the measurement sections away from the
+inlet. If a uniform inlet is used, compare only after the profile has developed.
+
+## What does RunMat preserve when the fluid mesh changes?
+
+`mass_flow` preserves the signed integrated kilograms per second. `inlet_velocity` and
+`wall_motion` preserve the authored velocity field, so their integrated flow changes with resolved
+area and density. `fluid.outlet_pressure` preserves pressure intensity, not outlet flow. After every
+geometry or mesh revision, compare region identity, area, normal orientation, each port resultant,
+and the global continuity residual before comparing pressure or force outputs.
 
 Further reading: [fluid constraints](../constraints/fluid), [fluid studies](../physics/fluid),
 [conjugate heat transfer](../physics/conjugate-heat-transfer), and

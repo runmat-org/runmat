@@ -16,6 +16,13 @@ conductance uses $q_n=h_c(T_p-T_s)$. FSI no-slip enforces velocity continuity an
 | `conjugate_heat_transfer.conductance` | pair plus `coefficient` | Finite conductance law |
 | `conjugate_heat_transfer.resistance` | pair plus `resistance` | Finite contact resistance law |
 
+The table is the complete current authored member set. Interface targets are CAD region references;
+the source language does not accept mesh IDs. Unlike `structural.tie` and `thermal.tie`, interface
+declarations have no `tolerance`, search-distance, penalty, enforcement, stabilization, or pairing-
+policy member. Pair realization and its evidence belong to the admitted formulation. If the two
+regions cannot be paired under that contract, change the geometry/regions or use a formulation that
+exposes the needed policy—do not add undocumented members.
+
 ```fea
 interface bonded_heat_path {
     conjugate_heat_transfer.conductance {
@@ -56,7 +63,8 @@ interface frictional_joint {
 
 The coefficient is dimensionless and nonnegative. Coulomb friction limits tangential traction by
 $\mu|t_n|$ but does not by itself define adhesion, wear, velocity dependence, or regularization.
-Inspect penetration, active-set/slip status, contact work, and penalty/multiplier evidence.
+Inspect penetration, active-set/slip status, contact work, and enforcement evidence produced by the
+formulation. Penalty or multiplier selection is not authored in this interface block.
 
 ## How do I couple a no-slip fluid boundary to a moving structure?
 
@@ -204,10 +212,10 @@ temperature jump for finite conductance/resistance.
 ## Why does an interface leave unmatched faces or nodes?
 
 Check that both named regions cover the same physical patch, the primary-to-secondary orientation
-is correct, assembly transforms were applied, and the requested tolerance reflects geometric
-discretization error. A large tolerance may hide a missing fillet, gap, offset, or incorrect part
-occurrence. Inspect unmatched area and maximum projection distance in physical units before changing
-mesh size or pairing policy.
+is correct, and assembly transforms were applied. This interface syntax has no authorable tolerance
+or pairing policy. Inspect unmatched area and maximum projection distance in physical units before
+changing mesh size. If the admitted realization cannot pair the surfaces, it must fail explicitly;
+there is no source-level tolerance knob to widen.
 
 ## What results establish interface convergence?
 
@@ -227,6 +235,26 @@ substitute a tuned friction coefficient or interference without documenting the 
 Check normal contact pressure, open/stick/slip area, bolt or clamp resultant, friction work, and
 reaction balance through the preload and service steps. Mesh refinement should preserve total
 contact force while resolving pressure gradients.
+
+For a clamped lap joint whose preload is supplied by a separately supported bolt representation,
+the mating interface itself remains explicit:
+
+```fea
+interface faying_surface {
+    contact.coulomb {
+        primary = geometry.joint.region.upper_faying_face
+        secondary = geometry.joint.region.lower_faying_face
+        coefficient = 0.18
+    }
+}
+```
+
+This declaration does not create bolt preload, initial closure, interference, or contact
+stabilization. The current interface block also has no search tolerance. Before accepting service
+stress, require pair coverage evidence, compressive normal resultant consistent with preload,
+stick/slip/open area by load step, tangential/normal reaction balance, and contact-work convergence.
+Refine both surfaces independently; total transferred force should converge even when local edge
+pressure remains singular.
 
 ## How do I model a bonded joint, adhesive layer, or weld?
 
@@ -259,9 +287,11 @@ Repeat the transfer check after independent mesh refinement on each side. Conser
 nonmatching discretizations; nearest-node agreement is not a substitute for resultant-preserving
 projection.
 
-Primary and secondary are part of the contract. The compiler checks topology roles; realization
-checks coverage and projection; execution evidence records the resolved interface. Never rely on
-geometric proximity to create contact or transfer automatically.
+Primary and secondary are part of the contract. Use boundary-face regions for the two sides; volume
+regions and incidental geometric proximity do not create an interface. Semantic admission checks
+family/topology roles, realization checks coverage and projection, and execution evidence records
+the resolved interface. Never rely on geometric proximity to create contact or transfer
+automatically.
 
 Further reading: [conjugate heat transfer](../physics/conjugate-heat-transfer),
 [fluid–structure interaction](../physics/fluid-structure-interaction), and [meshing](../meshing).

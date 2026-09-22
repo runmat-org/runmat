@@ -10,6 +10,12 @@ $p_s=e^{i\phi}p_p\circ\mathcal T^{-1}$.
 | `acoustic.periodic` | periodic pair/transform | Pair periodic acoustic regions |
 | `acoustic.phase_shifted_periodic` | periodic pair/transform plus `phase` | Apply a complex phase shift |
 
+This is the complete essential acoustic constraint set. `acoustic.pressure` accepts a scalar
+pressure constant or compatible scalar pressure signal; it has no direction or frame. Periodic pair
+members are CAD region references, not mesh node sets. Rigid-wall, impedance, and radiation forms
+are `load` declarations because they contribute natural boundary operators; writing them as
+`constraint` kinds is rejected.
+
 ```fea
 constraint pressure_reference {
     acoustic.pressure {
@@ -101,7 +107,9 @@ excitation driven_inlet {
 ```
 
 Use the excitation in the analysis load case. Do not encode phase by placing degrees in a pressure
-field; pressure and phase are different quantities.
+field; pressure and phase are different quantities. This example provides real-valued spectral
+samples. Do not infer an arbitrary complex-amplitude literal syntax from it; use only complex signal
+forms admitted by the signal reference for the selected procedure.
 
 ## How do I model a periodic acoustic unit cell?
 
@@ -117,7 +125,10 @@ constraint repeating_duct {
 ```
 
 This enforces equal pressure after mapping. The geometry pair must cover corresponding faces and
-their normals/orientations must be consistent with the formulation.
+their normals/orientations must be consistent with the formulation. Omitting `tolerance` requests
+matching pairing; a supplied tolerance has length units and requests geometric-tolerance pairing.
+The transform may be absent, one translation, or a complete rotation (`rotation_origin`,
+`rotation_axis`, `rotation_angle`), never a translation/rotation mixture.
 
 ## How do I model Bloch or phase-shifted acoustic periodicity?
 
@@ -264,6 +275,49 @@ the vibrating body surface.
 
 Refine both mesh and truncation distance. Inspect reflected power and compare near-field pressure and
 radiated power across domain sizes; a smooth contour does not establish nonreflection.
+
+## How do I author a driven duct with rigid walls and a radiating outlet?
+
+Keep the essential/natural roles separate: the source is an excitation, rigid walls and radiation
+are loads, and no pressure constraint is placed on the radiating face.
+
+```fea
+signal source_level : pressure over frequency {
+    samples = [
+        { at = 100 Hz, value = 1 Pa },
+        { at = 1 kHz, value = 1 Pa },
+    ]
+    interpolation = linear
+    extrapolation = reject
+}
+
+excitation inlet_source {
+    acoustic_pressure {
+        target = geometry.duct.region.inlet
+        signal = signal.source_level
+    }
+}
+
+load duct_wall {
+    acoustic.rigid_wall { target = geometry.duct.region.wall }
+}
+
+load open_end {
+    acoustic.radiation { target = geometry.duct.region.outlet }
+}
+
+load_case driven {
+    include excitation.inlet_source
+    include load.duct_wall
+    include load.open_end
+}
+```
+
+Verify that inlet, wall, and outlet regions have no unintended overlap and cover the intended
+boundary. Across a frequency sweep, report complex pressure and normal velocity at both ends,
+incident/reflected or net acoustic power under the chosen convention, and global power balance.
+Repeat with a longer exterior/truncation distance or a better radiation model; unchanged near-field
+response and radiated power are stronger evidence than a visually smooth pressure contour.
 
 ## How do I use acoustic symmetry without removing the mode I need?
 

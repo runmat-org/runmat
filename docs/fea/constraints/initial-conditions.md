@@ -15,15 +15,15 @@ match the state type and solution space of the consuming procedure.
 
 | Kind | Quantity | Typical target |
 | --- | --- | --- |
-| `displacement` | vector length | structural region or whole model |
-| `velocity` | vector velocity | structural region or whole model |
-| `angular_velocity` | vector angular velocity | structural region or whole model |
-| `temperature` | scalar temperature | thermal region or whole model |
-| `electric_potential` | scalar potential | electrical region or whole model |
-| `magnetic_vector_potential` | vector potential | magnetic region or whole model |
-| `acoustic_pressure` | scalar pressure | acoustic region or whole model |
-| `fluid_pressure` | scalar pressure | fluid region or whole model |
-| `fluid_velocity` | vector velocity | fluid region or whole model |
+| `structural.displacement` | vector length | structural region or whole model |
+| `structural.velocity` | vector velocity | structural region or whole model |
+| `structural.angular_velocity` | vector angular velocity | structural region or whole model |
+| `thermal.temperature` | scalar temperature | thermal region or whole model |
+| `electrical.potential` | scalar potential | electrical region or whole model |
+| `magnetic.vector_potential` | vector potential | magnetic region or whole model |
+| `acoustic.pressure` | scalar pressure | acoustic region or whole model |
+| `fluid.pressure` | scalar pressure | fluid region or whole model |
+| `fluid.velocity` | vector velocity | fluid region or whole model |
 
 ```fea
 model warmed_part {
@@ -42,6 +42,83 @@ model warmed_part {
     }
 }
 ```
+
+Declaring an initial condition does not activate it. The consuming procedure selects one or more
+unique `model.initial.<name>` references:
+
+```fea
+study release_test {
+    geometry = geometry.part
+    mesh = mesh.part
+    model = model.warmed_part
+
+    analysis response {
+        structural transient {
+            start_time = 0 s
+            end_time = 20 ms
+            time_step = 0.1 ms
+            initial_conditions = [model.initial.at_rest]
+        }
+    }
+}
+```
+
+The compiler checks that the procedure's physics family can consume every selected state kind and
+rejects duplicate references. An unselected declaration has no effect on the solve.
+
+## What exact value sources can an initial condition use?
+
+Every initial condition requires exactly one source: `uniform`, a `sample { ... }` block, or a
+`field_artifact { ... }` block. Vector kinds also require `frame = global`, `material`, `element`,
+or `boundary_normal_tangent`; scalar kinds cannot declare a frame. `target` is either `whole_model`
+or a CAD region reference.
+
+Sampling is explicit about the signal, sample coordinate, and side limit:
+
+```fea
+signal measured_temperature : temperature over time {
+    samples = [
+        { at = 0 s, value = 293.15 K },
+        { at = 10 s, value = 323.15 K },
+    ]
+    interpolation = linear
+    extrapolation = reject
+}
+
+initial measured_start {
+    thermal.temperature {
+        target = geometry.part.region.body
+        sample {
+            signal = signal.measured_temperature
+            at = 10 s
+            approach = left_limit
+        }
+    }
+}
+```
+
+`approach` is exactly `at`, `left_limit`, or `right_limit`. Signal quantity and scalar/vector shape
+must match the initial-condition kind. Time-domain signals use a time-valued `at`; constant and
+study-parameter signals use a dimensionless value. Frequency-domain signals cannot define physical
+initial state and are rejected.
+
+```fea
+initial mapped_temperature {
+    thermal.temperature {
+        target = geometry.part.region.body
+        field_artifact {
+            artifact_id = "thermal-preload-042"
+            content_digest = "sha256:..."
+            topology_digest = "sha256:..."
+            field_id = "temperature"
+        }
+    }
+}
+```
+
+All four artifact strings are required and nonempty. The declaration binds identity; realization
+must still verify field quantity, units, topology compatibility, coverage, and interpolation before
+the procedure consumes it.
 
 ## How do I start a structural transient analysis from a displaced shape?
 
@@ -204,6 +281,12 @@ The source spelling is family-qualified—`structural.displacement`, `structural
 `magnetic.vector_potential`, `acoustic.pressure`, `fluid.pressure`, or `fluid.velocity`. Vector
 kinds require `frame`; scalar kinds use the global frame implicitly. Values may be uniform, sampled
 from a compatible signal at an explicit side limit, or loaded from a topology-bound field artifact.
+
+The current authored initial-condition set does not include acceleration, stress, strain,
+pressure-rate, turbulence variables, plastic/internal variables, contact status, or integrator
+history. A `field_artifact` containing one visible primary field is therefore not a complete restart.
+Where any omitted state affects the continuation, use a typed state edge/checkpoint supported by the
+procedure; if none exists, restart is unsupported for that case.
 
 Initial declarations carry an explicit frame for vector quantities and target either a typed region
 or `whole_model`. Overlapping initial conditions must agree on shared DOFs; an unspecified field

@@ -70,6 +70,20 @@ a sampled excitation: `structural.pressure`, `thermal.heat_flux`, `thermal.conve
 `magnetic.insulation`, `acoustic.rigid_wall`, `acoustic.radiation`, `acoustic.impedance`, and
 `fluid.outlet_pressure`. The family guides show their exact fields and sign conventions.
 
+## Which load families can I execute today?
+
+The source checker understands every declaration in the catalog above, but a checked declaration is
+not by itself an executable end-to-end study. The native whole-study executor currently admits
+structural procedure graphs. Thermal, electromagnetic, acoustic, and fluid load contracts can be
+authored and checked, but their complete geometry-to-publication `.fea` execution paths are not yet
+admitted. `runmat fea check` therefore answers “is this a valid typed study definition?”; it does
+not promote a physics family to production execution.
+
+The family pages mark that boundary where it matters. See [FEA capability status](../status) for the
+current execution envelope and [verification and validation](../validation) for the evidence needed
+before a family is promoted. Do not replace a rejected nonstructural procedure with a structural
+load that happens to share the same unit.
+
 ## How do I choose between a constant load and an excitation?
 
 Use `load` when the action has one value for the analysis case. Use `signal` plus `excitation` when

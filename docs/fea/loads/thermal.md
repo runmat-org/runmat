@@ -13,14 +13,24 @@ $$
 \mathbf q_h=\int_\Gamma\mathsf N^{\mathsf T}hT_\infty\,d\Gamma.
 $$
 
+The typed source checker accepts the declarations on this page. The native typed whole-study runner
+currently rejects non-structural procedure graphs, so thermal `.fea` studies are authorable and
+checkable but are not yet runnable through `runmat fea run`. Low-level thermal operations do not
+remove that public entrypoint boundary.
+
 | Kind | Quantity/fields | Use |
 | --- | --- | --- |
-| `heat_generation` | $\mathrm{W/m^3}$ | Volumetric source in solid/cell regions |
+| `heat_generation` | $\mathrm{W/m^3}$ | Volumetric source in a solid region or explicit whole-model excitation |
 | `heat_flux` | $\mathrm{W/m^2}$ | Signal-driven surface flux |
-| `temperature_field` | K | Spatial or varying imposed field |
+| `temperature_field` | K | Uniform imposed temperature input on a solid region |
 | `ambient_temperature` | K | Ambient-temperature excitation for a compatible formulation |
 | `thermal.heat_flux` | `target`, `value` | Constant natural surface flux |
 | `thermal.convection` | `target`, `ambient_temperature`, `coefficient` | Robin boundary $q=h(T-T_\infty)$ |
+
+`heat_generation` targets a solid or, in explicit excitation form, `whole_model`.
+`temperature_field` targets a solid. Heat flux, ambient temperature, and the natural boundary
+blocks target faces. Every implemented thermal quantity here is scalar, so normal orientation—not
+an authored direction vector—sets the sign of a surface flux.
 
 ```fea
 load chip_loss {
@@ -44,7 +54,7 @@ load winding_loss {
 }
 ```
 
-This targets a solid/cell volume and preserves source intensity. Integrated power is
+This targets a solid region and preserves source intensity. Integrated power is
 $P=\int_\Omega Q\,d\Omega$; compare it with the expected electrical, chemical, or mechanical loss.
 For temperature-dependent or spatially nonuniform loss, use a compatible signal/function or coupled
 physics state rather than one averaged constant.
@@ -104,7 +114,10 @@ versus-current configuration convention.
 
 A constant `heat_flux` models a stationary uniform spot only. A moving Gaussian source needs beam
 power, absorptivity, radius, path, coordinate frame, and time dependence in a typed spatial function.
-Do not approximate it by turning an entire face on and off unless that is the intended reduced model.
+The current `.fea` signal domain is time, frequency, study parameter, or constant; it does not expose
+the coordinates of each target point to a source function. A moving spatial source is therefore not
+first class. Do not approximate it by turning an entire face on and off unless that is the intended
+reduced model and its deposited-power integral is verified.
 
 ## Why is my heat-flux sign reversed?
 
@@ -209,6 +222,35 @@ excitation cycling_loss {
     }
 }
 ```
+
+## How do I apply a measured transient surface heat flux?
+
+Use `heat_flux` rather than `heat_generation` when the measurement is power per unit area. The
+signal is scalar; its sign is resolved against the selected face's outward normal:
+
+```fea
+signal measured_flux : heat_flux over time {
+    samples = [
+        { at = 0 s, value = 0 W/m^2 },
+        { at = 2 s, value = 12 kW/m^2 },
+        { at = 8 s, value = 4 kW/m^2 },
+        { at = 10 s, value = 0 W/m^2 },
+    ]
+    interpolation = linear
+    extrapolation = reject
+}
+
+excitation measured_surface_heating {
+    heat_flux {
+        target = geometry.calorimeter.region.heater_footprint
+        signal = signal.measured_flux
+    }
+}
+```
+
+Verify the delivered history
+$P(t)=\int_{\Gamma_q}q''(t)\,d\Gamma$. If the measurement is total watts, divide by the admitted
+footprint area only for a justified uniform-flux approximation.
 
 ## How do I convert total component power into heat generation?
 
@@ -363,7 +405,7 @@ signal chamber_cycle : temperature over time {
         { at = 7200 s, value = 293.15 K },
     ]
     interpolation = linear
-    extrapolation = hold
+    extrapolation = hold_endpoint
 }
 
 excitation chamber_air {
@@ -405,6 +447,10 @@ For thermomechanical work, map the thermal result through the typed state edge s
 procedure can prove which mesh, time/frequency case, and temperature reference produced thermal
 strain. Avoid exporting anonymous nodal CSV data and reattaching it by row order.
 
+The current `.fea` grammar does not yet accept an imported topology field for `temperature_field`.
+It accepts a uniform scalar signal on a solid region. The mapping contract described above is the
+required future boundary, not syntax that can be authored today.
+
 ## How do I represent a heater controlled to constant power or constant temperature?
 
 Constant power is a source (`heat_generation` or `thermal.heat_flux`). Constant temperature is an
@@ -415,6 +461,22 @@ force the desired curve.
 
 For every control representation, report commanded power, delivered power, sensor temperature,
 switching or saturation state, and global energy balance.
+
+## How do I verify a complete steady thermal model?
+
+Compute each contribution in watts rather than comparing temperature contours:
+
+$$
+P_{volume}=\int_\Omega Q\,d\Omega,\qquad
+P_{flux}=\int_{\Gamma_q}\bar q\,d\Gamma,\qquad
+P_{conv}=\int_{\Gamma_h}h(T-T_\infty)\,d\Gamma.
+$$
+
+At steady state, signed source and sink power must close, including every interface transfer. Then
+refine the mesh and compare integrated powers, mean temperature, and the temperature at engineering
+probe locations. A peak at a point source or sharp material corner may not converge; qualify it by
+distance or averaged region. For transient work, add the stored-energy rate
+$d\int_\Omega \rho c_pT\,d\Omega/dt$ and repeat with a smaller time step.
 
 Further reading: [thermal constraints](../constraints/thermal),
 [heat-transfer studies](../physics/thermal), and

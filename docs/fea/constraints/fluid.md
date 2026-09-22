@@ -7,8 +7,8 @@ outlet flux law.
 
 | Kind | Required fields | Meaning |
 | --- | --- | --- |
-| `fluid.velocity` | `target`, `value` | Prescribe fluid velocity |
-| `fluid.moving_wall` | `target`, `value` | Prescribe wall velocity |
+| `fluid.velocity` | `target`, scalar `value` in m/s | Prescribe the formulation's scalar velocity boundary value |
+| `fluid.moving_wall` | `target`, scalar `value` in m/s | Prescribe the formulation's scalar wall-speed value |
 | `fluid.no_slip_wall` | `target` | Match velocity to a stationary wall |
 | `fluid.slip_wall` | `target` | Prevent normal flow while permitting tangential slip |
 | `fluid.symmetry` | `target` | Apply a symmetry-plane condition |
@@ -16,10 +16,16 @@ outlet flux law.
 | `fluid.periodic` | periodic pair/transform | Pair periodic flow boundaries |
 
 ```fea
-constraint inlet_velocity {
-    fluid.velocity {
+signal inlet_speed : velocity over constant {
+    value = 1.5 m/s
+}
+
+excitation inlet_velocity {
+    inlet_velocity {
         target = geometry.channel.region.inlet
-        value = [1.5 m/s, 0 m/s, 0 m/s]
+        signal = signal.inlet_speed
+        direction = global([1, 0, 0])
+        kinematics = fixed_frame
     }
 }
 
@@ -37,30 +43,44 @@ constraint pressure_datum {
 
 ## How do I prescribe an inlet velocity profile?
 
-Use `fluid.velocity` for a known velocity vector on a region:
+The current `fluid.velocity` constraint accepts one scalar value; it does not accept a vector,
+frame, direction, or spatial profile. For a directed uniform inlet, use a scalar velocity signal and
+an `inlet_velocity` excitation:
 
 ```fea
-constraint uniform_inlet {
-    fluid.velocity {
+signal inlet_speed : velocity over constant {
+    value = 1.5 m/s
+}
+
+excitation uniform_inlet {
+    inlet_velocity {
         target = geometry.channel.region.inlet
-        value = [1.5 m/s, 0 m/s, 0 m/s]
+        signal = signal.inlet_speed
+        direction = global([1, 0, 0])
+        kinematics = fixed_frame
     }
 }
+
+load_case operating { include excitation.uniform_inlet }
 ```
 
-This is a uniform prescribed value. Use a signal-driven `inlet_velocity` excitation for time or
-frequency dependence. Use `mass_flow` when the total flow is known but its spatial profile is not.
+`direction` is a dimensionless global vector. The signal carries m/s and may instead be defined over
+time when a transient procedure consumes it. Use `mass_flow` when the total flow is known but its
+spatial profile is not. The scalar `fluid.velocity` form remains available to formulations that
+define what that scalar component means; it must not be documented or read as a three-component
+Cartesian vector.
 
 ## How do I prescribe only the normal inlet speed?
 
-Use the signal-driven `inlet_velocity` form when the scalar speed and direction are the controlled
-inputs. `fluid.velocity` prescribes the complete vector and can unintentionally suppress tangential
-components. For a curved inlet, a single global vector is not the same as a uniform normal speed;
-use a normal/spatial field contract admitted by the formulation.
+Use the signal-driven `inlet_velocity` form above when scalar speed and a global direction are the
+controlled inputs. For a curved inlet, one global direction is not a uniform local-normal field.
+The current source surface has no `normal(...)` direction or spatial-profile expression; use an
+admitted topology field/generator when the selected formulation provides one. Otherwise that case
+is not expressible by the current typed input and must be rejected, not approximated implicitly.
 
 ## How do I apply a developed inlet profile?
 
-The constant vector form is uniform. A parabolic, turbulent, measured, or mapped profile must enter
+The directed excitation is uniform. A parabolic, turbulent, measured, or mapped profile must enter
 through a typed topology field or function that preserves coordinates, units, and interpolation.
 RunMat does not infer “fully developed” from a region name. See
 [fluid loads](../loads/fluid#how-do-i-apply-a-parabolic-or-fully-developed-inlet-profile).
@@ -71,21 +91,24 @@ RunMat does not infer “fully developed” from a region name. See
 constraint moving_lid {
     fluid.moving_wall {
         target = geometry.cavity.region.lid
-        value = [1 m/s, 0 m/s, 0 m/s]
+        value = 1 m/s
     }
 }
 ```
 
-This prescribes wall velocity and no-slip relative to that wall. For a time-varying wall use a
-`wall_motion` excitation. For motion supplied by a structural solution use an FSI interface instead
-of duplicating the displacement history manually.
+This is the exact current constraint shape: it carries a scalar speed and no authorable direction
+or frame. Use it only when the consuming formulation gives that scalar an unambiguous wall-motion
+meaning. For directed or time-varying translation, use a `wall_motion` excitation with a scalar
+velocity signal and `direction = global([x, y, z])`. For motion supplied by a structural solution,
+use an FSI interface instead of duplicating the displacement history manually.
 
 ## How do I model a rotating no-slip wall?
 
-The wall field must satisfy $\mathbf u_w=\boldsymbol\omega\times(\mathbf x-\mathbf x_0)$. A constant
-`fluid.moving_wall` vector only represents translation. Use an admitted generated field or rotating
-domain contract with explicit axis, origin, angular velocity, and frame; do not assign one tangent
-vector across an entire cylindrical rotor.
+The wall field must satisfy $\mathbf u_w=\boldsymbol\omega\times(\mathbf x-\mathbf x_0)$. Neither
+the scalar `fluid.moving_wall` constraint nor a single-direction `wall_motion` excitation expresses
+that spatial law. A rotating-wall generator with axis, origin, angular speed, and frame is not in
+the current closed source surface. Use a rotating-domain/formulation input that explicitly admits
+the law; otherwise rotating-wall kinematics are unsupported.
 
 ## How do I apply a no-slip wall?
 
@@ -101,9 +124,10 @@ can overconstrain boundary DOFs.
 
 ## How do I model a stationary solid wall in a moving reference frame?
 
-State wall velocity in the formulation's declared frame. “Stationary” in the laboratory frame can
-be nonzero in a rotating frame. Do not mix global and rotating-frame values without the explicit
-frame transformation and angular velocity.
+The current scalar wall constraint cannot author a rotating or translating coordinate frame.
+“Stationary” in the laboratory frame can be nonzero in a rotating frame, so a moving-reference-frame
+procedure must own that transformation explicitly. Do not infer a frame from the CAD orientation or
+the region name.
 
 ## How do I apply a slip wall?
 
@@ -197,11 +221,11 @@ physics contract when admitted rather than weakening a no-slip or velocity const
 An inlet face and adjacent no-slip wall share edge nodes. The formulation must reconcile the inlet
 profile with zero wall-relative velocity; a uniform nonzero profile has a discontinuity at the
 corner. Use a compatible developed profile or documented weak enforcement and inspect localized
-residuals. Do not apply duplicate complete vectors to the same boundary entities.
+residuals. Do not assign duplicate kinematic owners to the same boundary entities.
 
 ## What should I inspect after applying fluid constraints?
 
-Inspect exact target faces, wall/inlet overlap, prescribed velocity frame, normal flux, pressure
+Inspect exact target faces, wall/inlet overlap, excitation direction, normal flux, pressure
 datum ownership, periodic pair coverage, mass conservation, wall-relative velocity, and constraint
 residuals. In the Desktop preview, verify motion vectors and periodic pair annotations before the
 solve.
@@ -212,10 +236,52 @@ velocity and pressure data on the same boundary.
 
 ## How do I combine an inlet, walls, and outlet in one RunMat fluid model?
 
-Use `fluid.velocity` on the inlet, `fluid.no_slip_wall` on stationary viscous walls, one physical
-pressure reference when required, and `fluid.outlet_pressure` as the outlet natural boundary. Give
-each role a nonoverlapping CAD region. Do not prescribe full velocity and outlet pressure on the same
-face or place a wall constraint over inlet edge entities without a compatible profile.
+Use a directed `inlet_velocity` excitation on the inlet, `fluid.no_slip_wall` on stationary viscous
+walls, one physical pressure reference when required, and `fluid.outlet_pressure` as the outlet
+natural boundary. Give each role a nonoverlapping CAD region:
+
+```fea
+signal bulk_speed : velocity over constant { value = 2 m/s }
+
+excitation pipe_inlet {
+    inlet_velocity {
+        target = geometry.pipe.region.inlet
+        signal = signal.bulk_speed
+        direction = global([1, 0, 0])
+        kinematics = fixed_frame
+    }
+}
+
+constraint pipe_wall {
+    fluid.no_slip_wall { target = geometry.pipe.region.wall }
+}
+
+constraint outlet_gauge {
+    fluid.pressure_reference {
+        target = geometry.pipe.region.outlet
+        value = 0 Pa
+    }
+}
+
+load outlet_traction {
+    fluid.outlet_pressure {
+        target = geometry.pipe.region.outlet
+        value = 0 Pa
+    }
+}
+
+load_case operating {
+    include excitation.pipe_inlet
+    include load.outlet_traction
+}
+```
+
+The pressure reference removes the algebraic gauge; the outlet load supplies the physical natural
+boundary. Whether both are needed on the same outlet is formulation-dependent and must be admitted
+explicitly. Before solving, require zero unclassified boundary area and no overlap among inlet,
+wall, and outlet regions. After solving, check
+$\left|\sum_\Gamma\dot m_\Gamma\right|/\sum_{in}|\dot m|$ against the study tolerance, report the
+pressure drop, and compare wall shear/resultant with a mesh-refined run.
 
 ## Should I use a slip wall or a symmetry plane?
 
@@ -227,7 +293,8 @@ and normal flux.
 
 ## How do I model wall motion from a prescribed mechanical motion?
 
-Use `fluid.moving_wall` when wall velocity is a known input. Use
+Use scalar `fluid.moving_wall` only when the consuming formulation defines its wall-speed direction
+unambiguously; use directed `wall_motion` for supported prescribed translation. Use
 `fluid_structure.no_slip` when structural displacement and velocity are solved and must feed back
 with fluid traction. Applying both to the same face creates two owners for wall kinematics unless the
 coupling procedure explicitly defines one as an override.
@@ -241,7 +308,7 @@ arbitrary point references until the linear system happens to factor.
 
 ## What fluid constraint evidence should be archived?
 
-Retain resolved boundary areas and normals, prescribed velocity frames, wall-relative velocity,
+Retain resolved boundary areas and normals, excitation directions, wall-relative velocity,
 pressure-reference ownership by connected component, periodic mapping coverage, constraint
 residuals, and signed mass flux. For moving walls, also retain the motion signal or producing FSI
 state identity.
@@ -269,9 +336,10 @@ wall force, and mesh-convergence evidence.
 
 ## How do I constrain a rotating or translating reference-frame model?
 
-Prescribe wall velocity in the inertial frame with `fluid.moving_wall`, or use a rotating-domain
-formulation whose frame owns Coriolis/centrifugal terms. Do not combine a rotating frame and the same
-absolute wall motion without transforming velocities explicitly. At an interface between frames,
+Use a rotating-domain formulation whose frame owns Coriolis/centrifugal terms. The current scalar
+`fluid.moving_wall` syntax has no frame, axis, or origin and therefore cannot by itself establish an
+inertial-frame rotating wall. Do not combine a rotating frame and an independently prescribed
+absolute wall motion without an explicit supported transformation. At an interface between frames,
 use the admitted sliding/mixing relation rather than a generic periodic pair.
 
 Archive frame identity, axis, origin, angular speed, relative wall velocity, and torque/power. Check

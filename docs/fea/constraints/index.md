@@ -62,6 +62,20 @@ require distinct primary and secondary regions plus their mapping/tolerance cont
 retain their physical quantity: temperature cannot be used as a generic scalar, and pressure cannot
 stand in for an acoustic or fluid velocity condition.
 
+## Which constraint families can I execute today?
+
+All cataloged constraints are part of the typed source contract and are available to `runmat fea
+check`. Native whole-study execution currently admits structural procedure graphs; thermal,
+electromagnetic, acoustic, fluid, and coupled procedure graphs remain checkable definitions rather
+than admitted end-to-end solves. A parser or semantic-check success proves that names, quantities,
+targets, and relations are coherent. It does not prove that the requested formulation has an
+execution, recovery, and publication path.
+
+Each family guide states the relevant limitation next to its examples. The authoritative summary is
+[FEA capability status](../status). Production claims require the evidence described in
+[verification and validation](../validation), including formulation-specific references and
+fail-closed negative cases.
+
 ## Complete connector and interface catalog
 
 These declarations are related to constraints but assemble different mathematical objects:

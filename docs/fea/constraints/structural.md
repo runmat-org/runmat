@@ -53,6 +53,13 @@ constraint guided_edge {
 `structural.prescribed` requires an explicit frame and at least one of `ux`, `uy`, `uz`, `rx`,
 `ry`, or `rz`. Translational values carry length units; rotations are dimensionless angles.
 
+The accepted frame values are the closed enums `global`, `material`, `element`, and
+`boundary_normal_tangent`. This block does not accept an inline Cartesian/cylindrical frame
+definition or an arbitrary frame name. Region references resolve from CAD declarations; mesh node
+and element IDs are not valid targets. Every structural constraint target has one-or-more
+cardinality, while the region declaration's own `expect` controls whether its CAD selector must
+resolve exactly once or may resolve several entities.
+
 Prescribed values may be constants or compatible typed signals where the constraint kind admits
 them. `structural.prescribed_motion` accepts records containing exactly `dof`, `acceleration`,
 `initial_displacement`, `initial_velocity`, and
@@ -164,10 +171,13 @@ dimensionless angle. The frame is part of the constraint identity—changing it 
 
 ## How do I constrain motion in a local coordinate system?
 
-Declare the supported local frame and use it in `structural.prescribed`. A cylindrical radial guide,
-for example, is not correctly represented by setting one global Cartesian component to zero over a
-curved surface. Use `structural.normal_displacement` when the desired direction is the local surface
-normal; use a true local coordinate frame when one fixed oriented basis applies.
+Choose one of the supported frame enums: `material`, `element`, or `boundary_normal_tangent` (or
+`global`). The current constraint syntax does not declare a new coordinate frame and does not accept
+a user-chosen frame identifier. A cylindrical radial guide is not correctly represented by setting
+one global Cartesian component to zero over a curved surface. Use
+`structural.normal_displacement` when the desired direction is the local surface normal. If the
+required basis cannot be represented by the four supported enums, that constraint is currently
+unsupported rather than inferred from CAD axes.
 
 ## How do I prescribe a nonzero displacement?
 
@@ -397,7 +407,9 @@ constraint equal_vertical_motion {
 The relation is $\sum_i a_i u_i=b$. Each term has exactly `target`, `dof`, and dimensionless
 `coefficient`; the right-hand side has length. Equations can create redundant or contradictory rows,
 so review rank/nullspace diagnostics and avoid duplicating relations already imposed by ties or
-fixed supports.
+fixed supports. The current equation contract accepts only `ux`, `uy`, and `uz`; rotational equation
+terms (`rx`, `ry`, `rz`) are unsupported and must not be approximated with dimensionally ambiguous
+translation coefficients.
 
 ## Why is my structural model singular?
 
@@ -446,12 +458,13 @@ chassis distortion and erase the moments created by their spacing.
 
 ## How do I model a cylindrical bearing support?
 
-Express restrained components in a cylindrical frame aligned with the bearing axis. A radial
-support normally blocks radial motion while allowing axial translation and rotation according to the
-real bearing; a thrust bearing also restrains an axial component. Use component-wise
-`structural.prescribed` or an admitted normal-displacement relation rather than `structural.fixed`.
-Verify the local frame at every target and inspect reactions by radial, tangential, and axial
-component.
+A radial support normally blocks radial motion while allowing axial translation and rotation; a
+thrust bearing also restrains an axial component. The current source surface cannot declare a
+cylindrical frame. Use `structural.normal_displacement` on a cylindrical bearing surface only when
+its local-normal bilateral idealization matches the support. Otherwise use a contact/coupling
+formulation that explicitly owns cylindrical kinematics. Do not label a global component as
+“radial.” Verify reactions decomposed about the actual bearing axis and check that allowed axial and
+circumferential motions remain free.
 
 ## How do I prescribe a rotation without fixing translation?
 
@@ -534,6 +547,44 @@ tangential expansion free.
 Run a uniform-temperature-change check. A freely expanding homogeneous body should recover nearly
 zero stress; nonzero reaction or strain energy identifies unintended restraint, mismatched thermal
 expansion, or an inconsistent temperature reference.
+
+## How do I author a three-direction guide without clamping the part?
+
+Name separate CAD regions for the physical guide surfaces and prescribe only the components each
+surface transmits:
+
+```fea
+constraint axial_datum {
+    structural.prescribed {
+        target = geometry.carriage.region.datum
+        frame = global
+        ux = 0 mm
+        uy = 0 mm
+        uz = 0 mm
+    }
+}
+
+constraint lateral_guide {
+    structural.prescribed {
+        target = geometry.carriage.region.lateral_guide
+        frame = global
+        uy = 0 mm
+        uz = 0 mm
+    }
+}
+
+constraint vertical_roller {
+    structural.normal_displacement {
+        target = geometry.carriage.region.roller_track
+        value = 0 mm
+    }
+}
+```
+
+This is a bilateral idealization: the normal-displacement roller cannot lift off. Check the
+constraint-rank report, then verify that axial thermal expansion produces the intended free motion
+and that reactions appear only in transmitted directions. If separation is physical, replace the
+bilateral normal condition with frictionless contact.
 
 Further reading: [structural studies](../physics/structural), [structural loads](../loads/structural),
 and [geometry regions](../geometry).

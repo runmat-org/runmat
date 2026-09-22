@@ -14,6 +14,13 @@ T_p-T_s=\Delta T\quad\text{(affine jump)}.$$
 | `thermal.periodic` | pair plus optional periodic transform | Enforce periodic temperature across mapped regions |
 | `thermal.affine_jump` | periodic pair/transform plus `jump` | Enforce a declared temperature difference |
 
+Every `primary` and `secondary` is a CAD region reference, not a mesh-entity list. Omitting
+`tolerance` requests matching pairing; specifying it selects geometric pairing with a typed length.
+A periodic transform is exactly one of: identity (no transform members), `translation = [x,y,z]`,
+or the complete set `rotation_origin`, `rotation_axis`, and `rotation_angle`. Translation and
+rotation cannot be combined, and a partial rotation is rejected. `rotation_origin` and translation
+carry length, the axis is dimensionless, and the angle is a dimensionless angle.
+
 ```fea
 constraint cold_plate {
     thermal.temperature {
@@ -182,7 +189,8 @@ $$T(\mathbf x+\mathbf L)-T(\mathbf x)=\Delta T.$$
 
 The `jump` has temperature-difference units. Its sign follows primary-to-secondary mapping, so verify
 the transform and expected heat-flow direction. A jump without a compatible periodic pair is
-rejected.
+rejected. `jump` may be a constant or a compatible scalar temperature-difference signal admitted by
+the procedure; it is never inferred from heat flux or material conductivity.
 
 ## How do I model a repeating thermal sector around an axis?
 
@@ -276,6 +284,36 @@ time-varying `thermal.temperature`. If heat transfer is limited by a film, use t
 temperature with `thermal.convection`; the wall remains unknown. Initialize the body separately at
 its pre-shock temperature. The initial field, boundary signal, and first-step side limit determine
 whether the shock is intentional or an input discontinuity.
+
+## How do I author a hot-part cooldown without accidentally clamping its temperature?
+
+Put the starting temperature in an `initial` declaration and the finite cooling law in a
+convection load. Do not replace either with a continuing fixed-temperature constraint:
+
+```fea
+initial hot_start {
+    thermal.temperature {
+        target = geometry.housing.region.body
+        uniform = 423.15 K
+    }
+}
+
+load ambient_cooling {
+    thermal.convection {
+        target = geometry.housing.region.exposed_faces
+        ambient_temperature = 293.15 K
+        coefficient = 18 W/(m^2*K)
+    }
+}
+
+load_case cooldown { include load.ambient_cooling }
+```
+
+Select `model.initial.hot_start` through the transient procedure's `initial_conditions` field. The
+initial state contributes stored energy; convection leaves wall temperature unknown. Verify at each
+accepted time that applied heat plus boundary heat equals stored-energy change to the procedure's
+tolerance. Repeat with smaller time steps around the fastest initial decay and refine the boundary
+layer until surface heat flow and the temperatures of interest are stable.
 
 ## How do I constrain a thermally periodic representative volume element?
 

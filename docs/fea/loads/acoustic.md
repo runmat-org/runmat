@@ -4,6 +4,11 @@ Acoustic pressure and normal velocity are conjugate boundary variables. A rigid 
 $v_n=0$; an impedance boundary imposes $p=Zv_n$; a radiation boundary approximates an outgoing-wave
 relation. They change the Helmholtz boundary operator in different ways.
 
+The typed language currently defines acoustic harmonic procedures. It can check the declarations
+below, but the native typed whole-study executor currently admits structural procedure graphs only;
+an acoustic `.fea` run fails closed at that boundary. The page therefore documents authoring and
+physics semantics, not a claim that `runmat fea run` executes acoustic studies today.
+
 | Kind | Quantity/fields | Use |
 | --- | --- | --- |
 | `acoustic_pressure` | Pa | Pressure signal on an acoustic boundary |
@@ -11,6 +16,9 @@ relation. They change the Helmholtz boundary operator in different ways.
 | `acoustic.rigid_wall` | `target` | Zero normal velocity |
 | `acoustic.radiation` | `target` | Outgoing-wave truncation |
 | `acoustic.impedance` | `target`, `impedance` | $p=Zv_n$ |
+
+Every implemented acoustic action and boundary on this page targets a face region. Pressure and
+normal velocity are scalar normal quantities; they do not accept a separate global direction.
 
 ```fea
 load driver_velocity {
@@ -49,10 +57,37 @@ The signal owns frequency/amplitude data; the excitation owns the boundary targe
 use the complex signal shape supported by the procedure instead of treating magnitude as a complete
 complex pressure.
 
+## How do I apply acoustic pressure with phase?
+
+Use complex pressure samples. A negative real scalar represents a $180^\circ$ phase change; other
+phases require both components:
+
+```fea
+signal phased_pressure : pressure over frequency {
+    samples = [
+        { at = 250 Hz, value = { real = 1 Pa, imaginary = 0 Pa } },
+        { at = 500 Hz, value = { real = 0 Pa, imaginary = -1 Pa } },
+    ]
+    interpolation = linear
+    extrapolation = reject
+}
+
+excitation phased_driver {
+    acoustic_pressure {
+        target = geometry.cavity.region.driver
+        signal = signal.phased_pressure
+    }
+}
+```
+
+The second sample has phase $-90^\circ$ under the declared harmonic convention. Preserve that
+convention when comparing source power, pressure, and particle velocity.
+
 ## How do I apply a transient pressure pulse?
 
-Use a pressure signal over `time` and bind it to `acoustic_pressure`. State interpolation and
-extrapolation so samples outside the authored interval cannot acquire an accidental value:
+The signal language can represent pressure over `time`, but the current typed procedure set has no
+acoustic transient procedure to consume it. The following declaration is typeable signal/excitation
+data, not a runnable acoustic analysis today:
 
 ```fea
 signal pressure_pulse : pressure over time {
@@ -73,7 +108,7 @@ excitation pulsed_source {
 }
 ```
 
-The transient procedure must resolve the pulse bandwidth. A short rise time can require a much
+A future transient procedure must resolve the pulse bandwidth. A short rise time can require a much
 smaller time step and finer acoustic mesh than its total duration suggests.
 
 ## How do I drive an acoustic boundary with normal velocity?
@@ -199,6 +234,10 @@ Use a coupled acoustic-structure interface so structural normal velocity is tran
 acoustic boundary and acoustic pressure returns traction to the structure when two-way coupling is
 admitted. A copied `normal_velocity` trace is a one-way imposed approximation; if used, document the
 source run and topology mapping as evidence rather than presenting it as coupled response.
+
+The current interface catalog exposes a fluid-structure interface, not a dedicated
+acoustic-structure interface declaration. Do not present that interface as acoustic coupling
+without a procedure that explicitly binds structural and acoustic states.
 
 ## How do I model a monopole or point acoustic source?
 
@@ -348,8 +387,9 @@ excitation speaker_motion {
 
 Confirm face-normal orientation and compare integrated volume velocity
 $Q=\int_\Gamma v_n\,d\Gamma$ with the measurement. A single uniform value is an approximation when
-the diaphragm bends; use a spatial field only through a contract that preserves its coordinates and
-phase.
+the diaphragm bends. The current `.fea` excitation grammar does not accept a spatial complex
+velocity field, so measured nonuniform motion needs a future topology-field contract that preserves
+coordinates and phase.
 
 ## How do I model a muffler, silencer, or lined duct?
 
@@ -372,6 +412,21 @@ power before converting to SPL.
 For incoherent or partially coherent sources, deterministic phasor addition is not valid. The study
 needs cross-spectral density or an admitted random-acoustic contract; do not approximate
 incoherence by choosing arbitrary phases.
+
+## How do I verify a one-dimensional duct source and termination?
+
+Use a straight, constant-area duct with a source at one end and the chosen radiation or impedance
+condition at the other. Request complex pressure and normal velocity on at least two sections. Check
+the time-averaged power
+
+$$
+\bar P=\tfrac12\operatorname{Re}\int_\Gamma p v_n^*\,d\Gamma
+$$
+
+and compare the measured reflection coefficient with the analytic termination value. Repeat with a
+finer mesh and a longer duct or moved truncation plane. Pressure magnitude alone cannot distinguish
+a correct traveling wave from a standing wave produced by the wrong normal, impedance, or phasor
+sign convention.
 
 Further reading: [acoustic constraints](../constraints/acoustic),
 [acoustic studies](../physics/acoustic), and

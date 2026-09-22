@@ -1,8 +1,16 @@
 # Electromagnetic loads and boundaries
 
 Current density appears as source $\mathbf J_s$ in the electromagnetic weak form. Total current is
-its surface integral $I=\int_\Gamma\mathbf J\cdot\mathbf n\,d\Gamma$; total charge is
-$Q=\int_\Omega\rho_q\,d\Omega$. RunMat keeps these measures distinct during projection.
+its surface integral $I=\int_\Gamma\mathbf J\cdot\mathbf n\,d\Gamma$. The implemented
+`electric_charge` action is a boundary resultant,
+$Q_\Gamma=\int_\Gamma\sigma_q\,d\Gamma$; the source language does not currently expose a volume
+charge-density load $\int_\Omega\rho_q\,d\Omega$. RunMat keeps these measures distinct during
+projection.
+
+The declarations below are implemented in the typed source checker. Electromagnetic procedure
+graphs are not yet admitted by the native typed whole-study executor; `runmat fea check` can verify
+the source contract, while `runmat fea run` currently fails closed at the non-structural execution
+boundary. The lower-level electromagnetic operation is a separate API surface.
 
 | Kind | Quantity | Projection/boundary meaning |
 | --- | --- | --- |
@@ -12,6 +20,11 @@ $Q=\int_\Omega\rho_q\,d\Omega$. RunMat keeps these measures distinct during proj
 | `current_density` | $\mathrm{A/m^2}$ | Preserve source intensity |
 | `magnetic_vector_potential` | $\mathrm{Wb/m}$ | Vector-potential signal |
 | `magnetic.insulation` | no scalar value | Natural magnetic boundary |
+
+Every implemented electromagnetic action in this table targets a face region. `terminal_voltage`,
+`electric_current`, and `electric_charge` are scalar. `current_density` and
+`magnetic_vector_potential` are three-component vectors and require an explicit frame when authored
+as named vector signals; direct vector loads use the global frame.
 
 ```fea
 load terminal_current {
@@ -98,9 +111,9 @@ load electrode_charge {
 }
 ```
 
-Charge preserves the declared total coulombs over the target. Verify whether the intended
-formulation expects surface or volume charge and that the selected region role is compatible; the
-typed admission path must reject an unsupported target rather than reinterpret it.
+Charge preserves the declared total coulombs over the target face. A volume charge density needs a
+different quantity and a solid target and is not currently authorable. The checker rejects that
+unsupported target rather than reinterpreting it.
 
 ## How do I model an electrostatic electrode with fixed charge?
 
@@ -113,7 +126,7 @@ a potential would remove the unknown electrode voltage.
 
 ```fea
 load distributed_current {
-    current_density on geometry.busbar.region.input_face = 5e6 A/m^2
+    current_density on geometry.busbar.region.input_face = [5e6, 0, 0] A/m^2
 }
 ```
 
@@ -126,11 +139,16 @@ Use a typed topology field whose coordinate frame, units, mesh/CAD association, 
 resultant error are retained. Do not paste a vector table without its source topology. Verify
 $\int_\Gamma\mathbf J\cdot\mathbf n\,d\Gamma$ against the expected terminal current.
 
+That topology-field import is not authorable in the current `.fea` load grammar. Today,
+`current_density` accepts a uniform three-component vector signal on a face. Treat the paragraph
+above as the admission requirements for the missing field-mapping capability, not as accepted
+syntax.
+
 ## How do I apply magnetic vector potential as an excitation?
 
 ```fea
 load imposed_potential {
-    magnetic_vector_potential on geometry.motor.region.outer_boundary = 1e-6 T*m
+    magnetic_vector_potential on geometry.motor.region.outer_boundary = [0, 0, 1e-6] T*m
 }
 ```
 
@@ -174,6 +192,31 @@ excitation coil_drive {
 
 Frequency samples in the analysis and signal must cover the same requested domain. Complex source
 shape/phase must be explicit when required; a real amplitude does not silently define phase.
+
+## How do I author current magnitude and phase for a harmonic sweep?
+
+Use complex sample ordinates. Real and imaginary values must carry the same current unit:
+
+```fea
+signal phased_current : electric_current over frequency {
+    samples = [
+        { at = 50 Hz, value = { real = 10 A, imaginary = 0 A } },
+        { at = 400 Hz, value = { real = 6 A, imaginary = -6 A } },
+    ]
+    interpolation = linear
+    extrapolation = reject
+}
+
+excitation phased_coil {
+    electric_current {
+        target = geometry.motor.region.phase_a_terminal
+        signal = signal.phased_current
+    }
+}
+```
+
+The second sample is not “6 A at minus 45 degrees”; its magnitude is $6\sqrt2$ A and its phase is
+$-45^\circ$. State whether phasor ordinates are peak or RMS before comparing complex power or loss.
 
 ## How do I drive a three-phase winding?
 
@@ -337,6 +380,30 @@ winding contract explicitly requests ampere-turns.
 Inspect current conservation, flux linkage, magnetic energy, loss, and phase. Skin and proximity
 effects require a formulation and mesh that resolve conductor fields; a uniform stranded-coil
 source cannot also claim resolved eddy-current loss.
+
+## What is the exact sign convention for terminal current?
+
+`electric_current` is a signed resultant on a face. Its physical sign must be interpreted against
+the resolved outward face normal and the conductor-domain orientation. `current_density` is a
+global-frame vector unless a vector signal explicitly declares another supported frame. Verify the
+terminal current by integrating $\mathbf J\cdot\mathbf n$ on the realized face; do not infer it from
+the arrow displayed at one mesh node. For a steady closed conductor network, the algebraic sum of
+all terminal currents must vanish. In transient electromagnetics, include stored charge.
+
+## How do I verify a harmonic electromagnetic load case?
+
+For each frequency, retain source phasors rather than magnitudes alone. Check terminal complex
+power
+
+$$
+S=\tfrac12VI^*
+$$
+
+under the solver's peak-phasor convention, conductor loss
+$P_J=\tfrac12\int_\Omega\operatorname{Re}(\mathbf J\cdot\mathbf E^*)\,d\Omega$, stored electric and
+magnetic energy, gauge residual, and terminal-current balance. Repeat at a finer skin-depth mesh.
+If RMS phasors are used instead, the factor of one half changes; the study must state which
+convention it admits.
 
 ## How do I model several electrical terminals or conductor branches?
 

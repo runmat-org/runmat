@@ -13,6 +13,27 @@ fn count_fea_examples(document: &str) -> usize {
     document.lines().filter(|line| *line == "```fea").count()
 }
 
+fn fea_examples(document: &str) -> String {
+    let mut examples = String::new();
+    let mut in_fea = false;
+    for line in document.lines() {
+        if line == "```fea" {
+            in_fea = true;
+            continue;
+        }
+        if in_fea && line == "```" {
+            in_fea = false;
+            examples.push('\n');
+            continue;
+        }
+        if in_fea {
+            examples.push_str(line);
+            examples.push('\n');
+        }
+    }
+    examples
+}
+
 #[test]
 fn physics_guides_cover_every_checked_family_and_procedure() {
     let docs = combined(&[
@@ -117,10 +138,10 @@ fn constraint_guides_cover_every_closed_constraint_and_interface_kind() {
         "conjugate_heat_transfer.conductance",
         "conjugate_heat_transfer.resistance",
         "angular_velocity",
-        "electric_potential",
-        "magnetic_vector_potential",
-        "fluid_pressure",
-        "fluid_velocity",
+        "electrical.potential",
+        "magnetic.vector_potential",
+        "fluid.pressure",
+        "fluid.velocity",
     ] {
         assert!(
             docs.contains(term),
@@ -169,6 +190,114 @@ fn load_guides_cover_every_closed_excitation_and_natural_boundary_kind() {
     ] {
         assert!(docs.contains(term), "FEA load docs do not cover `{term}`");
     }
+
+    let examples = fea_examples(&docs);
+    for term in [
+        "force",
+        "moment",
+        "traction",
+        "pressure",
+        "body_force",
+        "heat_generation",
+        "heat_flux",
+        "temperature_field",
+        "ambient_temperature",
+        "terminal_voltage",
+        "electric_current",
+        "electric_charge",
+        "current_density",
+        "magnetic_vector_potential",
+        "acoustic_pressure",
+        "normal_velocity",
+        "inlet_velocity",
+        "mass_flow",
+        "wall_motion",
+        "structural.pressure",
+        "thermal.heat_flux",
+        "thermal.convection",
+        "magnetic.insulation",
+        "acoustic.rigid_wall",
+        "acoustic.radiation",
+        "acoustic.impedance",
+        "fluid.outlet_pressure",
+    ] {
+        assert!(
+            examples.contains(term),
+            "FEA load docs name `{term}` but do not show it in a .fea example"
+        );
+    }
+}
+
+#[test]
+fn constraint_guides_show_every_closed_kind_in_fea_syntax() {
+    let docs = combined(&[
+        include_str!("../../../../docs/fea/constraints/structural.md"),
+        include_str!("../../../../docs/fea/constraints/thermal.md"),
+        include_str!("../../../../docs/fea/constraints/electromagnetic.md"),
+        include_str!("../../../../docs/fea/constraints/acoustic.md"),
+        include_str!("../../../../docs/fea/constraints/fluid.md"),
+        include_str!("../../../../docs/fea/constraints/connectors.md"),
+        include_str!("../../../../docs/fea/constraints/interfaces.md"),
+        include_str!("../../../../docs/fea/constraints/initial-conditions.md"),
+    ]);
+    let examples = fea_examples(&docs);
+    for term in [
+        "structural.fixed",
+        "structural.symmetry",
+        "structural.antisymmetry",
+        "structural.prescribed",
+        "structural.prescribed_motion",
+        "structural.normal_displacement",
+        "structural.rigid_coupling",
+        "structural.distributing_coupling",
+        "structural.tie",
+        "structural.periodic",
+        "structural.equation",
+        "thermal.temperature",
+        "thermal.periodic",
+        "thermal.tie",
+        "thermal.affine_jump",
+        "electrical.potential",
+        "electrical.equipotential",
+        "electrical.floating_conductor",
+        "electrical.integral_current",
+        "electrical.potential_reference",
+        "electrical.periodic",
+        "magnetic.vector_potential",
+        "magnetic.vector_potential_ground",
+        "magnetic.coulomb_gauge",
+        "magnetic.periodic",
+        "magnetic.phase_shifted_periodic",
+        "acoustic.pressure",
+        "acoustic.periodic",
+        "acoustic.phase_shifted_periodic",
+        "fluid.velocity",
+        "fluid.moving_wall",
+        "fluid.no_slip_wall",
+        "fluid.slip_wall",
+        "fluid.symmetry",
+        "fluid.pressure_reference",
+        "fluid.periodic",
+        "translational_spring",
+        "translational_dashpot",
+        "elastic_foundation",
+        "contact.frictionless",
+        "contact.coulomb",
+        "fluid_structure.no_slip",
+        "conjugate_heat_transfer.perfect",
+        "conjugate_heat_transfer.conductance",
+        "conjugate_heat_transfer.resistance",
+        "angular_velocity",
+        "electrical.potential",
+        "magnetic.vector_potential",
+        "fluid.pressure",
+        "fluid.velocity",
+    ] {
+        assert!(
+            examples.contains(term),
+            "FEA constraint docs name `{term}` but do not show it in a .fea example"
+        );
+    }
 }
 
 #[test]
@@ -177,28 +306,41 @@ fn load_and_constraint_guides_retain_task_depth_and_runmat_examples() {
         (
             "structural",
             include_str!("../../../../docs/fea/loads/structural.md"),
+            38,
+            15,
         ),
         (
             "thermal",
             include_str!("../../../../docs/fea/loads/thermal.md"),
+            35,
+            12,
         ),
         (
             "electromagnetic",
             include_str!("../../../../docs/fea/loads/electromagnetic.md"),
+            36,
+            11,
         ),
         (
             "acoustic",
             include_str!("../../../../docs/fea/loads/acoustic.md"),
+            31,
+            12,
         ),
-        ("fluid", include_str!("../../../../docs/fea/loads/fluid.md")),
+        (
+            "fluid",
+            include_str!("../../../../docs/fea/loads/fluid.md"),
+            33,
+            9,
+        ),
     ];
-    for (family, guide) in load_guides {
+    for (family, guide, minimum_sections, minimum_examples) in load_guides {
         assert!(
-            count_sections(guide) >= 20,
+            count_sections(guide) >= minimum_sections,
             "{family} load guide lost task-oriented coverage"
         );
         assert!(
-            count_fea_examples(guide) >= 7,
+            count_fea_examples(guide) >= minimum_examples,
             "{family} load guide lost concrete .fea examples"
         );
     }
@@ -207,43 +349,59 @@ fn load_and_constraint_guides_retain_task_depth_and_runmat_examples() {
         (
             "structural",
             include_str!("../../../../docs/fea/constraints/structural.md"),
+            41,
+            17,
         ),
         (
             "thermal",
             include_str!("../../../../docs/fea/constraints/thermal.md"),
+            27,
+            9,
         ),
         (
             "electromagnetic",
             include_str!("../../../../docs/fea/constraints/electromagnetic.md"),
+            21,
+            13,
         ),
         (
             "acoustic",
             include_str!("../../../../docs/fea/constraints/acoustic.md"),
+            21,
+            9,
         ),
         (
             "fluid",
             include_str!("../../../../docs/fea/constraints/fluid.md"),
+            27,
+            9,
         ),
         (
             "connectors",
             include_str!("../../../../docs/fea/constraints/connectors.md"),
+            26,
+            5,
         ),
         (
             "interfaces",
             include_str!("../../../../docs/fea/constraints/interfaces.md"),
+            20,
+            10,
         ),
         (
             "initial conditions",
             include_str!("../../../../docs/fea/constraints/initial-conditions.md"),
+            21,
+            14,
         ),
     ];
-    for (family, guide) in constraint_guides {
+    for (family, guide, minimum_sections, minimum_examples) in constraint_guides {
         assert!(
-            count_sections(guide) >= 15,
+            count_sections(guide) >= minimum_sections,
             "{family} constraint guide lost task-oriented coverage"
         );
         assert!(
-            count_fea_examples(guide) >= 4,
+            count_fea_examples(guide) >= minimum_examples,
             "{family} constraint guide lost concrete .fea examples"
         );
     }

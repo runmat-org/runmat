@@ -19,6 +19,12 @@ phase-shifted pair enforces $\mathbf A_s=e^{i\phi}\mathcal T(\mathbf A_p)$.
 | `magnetic.periodic` | periodic pair/transform | Pair periodic magnetic regions |
 | `magnetic.phase_shifted_periodic` | periodic pair/transform plus `phase` | Complex phase relation across the pair |
 
+All targets and pair members are CAD region references. `value` on the current
+`magnetic.vector_potential` essential constraint is a scalar quantity in T·m; this declaration does
+not accept a three-component vector or a coordinate frame. That is the exact present source
+contract, not a shorthand for an arbitrary vector boundary. The magnetic initial-condition
+contract is different and does accept a framed three-component vector.
+
 ```fea
 constraint ground_terminal {
     electrical.potential {
@@ -138,7 +144,9 @@ constraint imposed_vector_potential {
 ```
 
 The value has magnetic-vector-potential units. Use this only when the field value itself is known;
-insulation is a different natural boundary.
+insulation is a different natural boundary. The current essential-constraint syntax prescribes one
+scalar potential quantity. A general vector-valued Dirichlet boundary with authored component/frame
+semantics is unsupported; do not supply `[Ax, Ay, Az]` here.
 
 ## How do I ground magnetic vector potential?
 
@@ -184,7 +192,10 @@ constraint magnetic_sector {
 ```
 
 Rotation axis is dimensionless; origin carries length; angle is dimensionless. Validate field
-orientation/sign under the map, not only geometric face pairing.
+orientation/sign under the map, not only geometric face pairing. The accepted transform is either
+identity, one translation, or this complete rotation. Translation and rotation cannot be combined;
+partial rotations are rejected. Optional `tolerance` is a length and changes pairing from matching
+to geometric-tolerance pairing.
 
 ## How do I apply phase-shifted magnetic periodicity?
 
@@ -267,6 +278,40 @@ partition; the constraint belongs to the physical connected component.
 
 The algebraic sum of terminal currents must close. Archive current by terminal, Joule power, and the
 reference/floating ownership of every conductor island.
+
+## How do I set up a current-driven busbar with an unknown terminal voltage?
+
+Use an equipotential input terminal, prescribe its integrated current, and provide one return
+reference. Keep the equipotential and current constraints separate so each physical role remains
+visible:
+
+```fea
+constraint input_is_equipotential {
+    electrical.equipotential {
+        target = geometry.busbar.region.input_terminal
+    }
+}
+
+constraint input_current {
+    electrical.integral_current {
+        target = geometry.busbar.region.input_terminal
+        value = 250 A
+    }
+}
+
+constraint grounded_return {
+    electrical.potential {
+        target = geometry.busbar.region.return_terminal
+        value = 0 V
+    }
+}
+```
+
+The solved input voltage is an output; prescribing it as well would generally overdetermine the
+terminal. Verify that terminal currents sum to zero under the sign convention, compare
+$P=IV$ with $\int_\Omega \mathbf J\cdot\mathbf E\,d\Omega$, and inspect voltage drop and current
+density through at least one mesh refinement. Corner current-density peaks are not qualified by
+terminal balance alone.
 
 ## How do I distinguish magnetic insulation, vector-potential ground, and Coulomb gauge?
 
