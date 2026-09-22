@@ -38,6 +38,22 @@ fn compiled_map_has_a_canonical_json_safe_round_trip() {
 }
 
 #[test]
+fn material_display_evidence_changes_audit_but_not_numerical_semantics() {
+    let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+    let model = matching_model(&mesh);
+    let first = compile_solid_property_map(&model, &mesh).expect("compiled properties");
+    let mut changed_evidence = model;
+    changed_evidence.materials[0].name = "Imported display label".into();
+    let second = compile_solid_property_map(&changed_evidence, &mesh).expect("compiled properties");
+
+    assert_eq!(
+        first.identity.semantic_digest,
+        second.identity.semantic_digest
+    );
+    assert_ne!(first.audit_digest, second.audit_digest);
+}
+
+#[test]
 fn compiled_map_decode_rejects_semantic_audit_and_entry_substitution() {
     let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
     let compiled =
@@ -62,6 +78,11 @@ fn compiled_map_decode_rejects_semantic_audit_and_entry_substitution() {
     let mut incomplete_audit = encoded;
     incomplete_audit["audit"] = serde_json::json!([]);
     assert!(serde_json::from_value::<CompiledPropertyMap>(incomplete_audit).is_err());
+
+    let mut material_evidence = serde_json::to_value(&compiled).unwrap();
+    material_evidence["solid_materials"][0][1]["material"]["name"] =
+        serde_json::json!("substituted material display name");
+    assert!(serde_json::from_value::<CompiledPropertyMap>(material_evidence).is_err());
 }
 
 #[test]

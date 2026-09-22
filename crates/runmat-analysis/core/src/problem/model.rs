@@ -14,7 +14,7 @@ use super::{
     initial_condition::InitialCondition,
     interfaces::AnalysisInterface,
     material_assignment::MaterialAssignment,
-    materials::MaterialModel,
+    materials::{MaterialModel, SolverMaterialModel},
     random_vibration::RandomExcitationSpectrum,
     response_spectrum::ResponseSpectrum,
     signal::PhysicalSignal,
@@ -103,7 +103,7 @@ pub struct SolverAnalysisModel<'a> {
     pub geometry_revision: u32,
     pub units: UnitSystem,
     pub frame: &'a CoordinateFrame,
-    pub materials: &'a [MaterialModel],
+    pub materials: Vec<SolverMaterialModel<'a>>,
     pub material_assignments: Vec<SolverMaterialAssignment<'a>>,
     pub structural: &'a Option<StructuralModel>,
     pub thermal: &'a Option<ThermalDomain>,
@@ -139,7 +139,11 @@ impl AnalysisModel {
             geometry_revision: self.geometry_revision,
             units: self.units,
             frame: &self.frame,
-            materials: &self.materials,
+            materials: self
+                .materials
+                .iter()
+                .map(MaterialModel::solver_identity_contract)
+                .collect(),
             material_assignments: self
                 .material_assignments
                 .iter()

@@ -1,6 +1,9 @@
 use std::collections::BTreeMap;
 
-use runmat_analysis_core::MaterialModel;
+use runmat_analysis_core::{
+    BeamSectionModel, HomogeneousShellSectionModel, LaminatePlyModel, LaminateShellSectionModel,
+    SolverMaterialModel,
+};
 use runmat_canonical_codec::{encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
 use runmat_meshing_core::StableDigest;
@@ -9,7 +12,7 @@ use serde::Serialize;
 use super::contract::CompiledPropertySource;
 use super::{
     CompiledBeamProperty, CompiledElementMaterial, CompiledPropertyAudit, CompiledPropertyMap,
-    CompiledShellProperty,
+    CompiledShellProperty, CompiledShellPropertyOwner,
 };
 
 const SEMANTIC_PREFIX: &[u8] = b"runmat-fea-compiled-properties/v1\0";
@@ -23,15 +26,60 @@ struct SemanticContract<'a> {
     mesh_digest: Option<StableDigest>,
     explicit_topology_digest: Option<Digest>,
     solids: Vec<SolidSemanticElement<'a>>,
-    beams: Vec<&'a CompiledBeamProperty>,
-    shells: Vec<&'a CompiledShellProperty>,
+    beams: Vec<BeamSemanticElement<'a>>,
+    shells: Vec<ShellSemanticElement<'a>>,
 }
 
 #[derive(Serialize)]
 struct SolidSemanticElement<'a> {
     element_id: u64,
     element_identity: StableDigest,
-    material: &'a MaterialModel,
+    material: SolverMaterialModel<'a>,
+}
+
+#[derive(Serialize)]
+struct BeamSemanticElement<'a> {
+    element_id: &'a str,
+    element_identity: StableDigest,
+    material: SolverMaterialModel<'a>,
+    section: &'a BeamSectionModel,
+    reference_axis: [f64; 3],
+}
+
+#[derive(Serialize)]
+struct ShellSemanticElement<'a> {
+    element_id: &'a str,
+    element_identity: StableDigest,
+    reference_axis: [f64; 3],
+    owner: ShellSemanticOwner<'a>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+enum ShellSemanticOwner<'a> {
+    Homogeneous {
+        material: SolverMaterialModel<'a>,
+        section: &'a HomogeneousShellSectionModel,
+    },
+    Laminate {
+        section: &'a LaminateShellSectionModel,
+        plies: Vec<LaminatePlySemantic<'a>>,
+    },
+}
+
+#[derive(Serialize)]
+struct LaminatePlySemantic<'a> {
+    definition: &'a LaminatePlyModel,
+    material: SolverMaterialModel<'a>,
+}
+
+#[derive(Serialize)]
+struct AuditContract<'a> {
+    semantic_digest: Digest,
+    solids: Vec<&'a CompiledElementMaterial>,
+    beams: Vec<&'a CompiledBeamProperty>,
+    shells: Vec<&'a CompiledShellProperty>,
+    assignments: &'a [CompiledPropertyAudit],
 }
 
 pub(super) fn validate(compiled: &CompiledPropertyMap) -> Result<(), String> {
@@ -87,7 +135,14 @@ pub(super) fn validate(compiled: &CompiledPropertyMap) -> Result<(), String> {
     if semantic != compiled.identity.semantic_digest {
         return Err("compiled property semantic digest does not match its contents".into());
     }
-    if audit_digest(semantic, compiled.audit())? != compiled.audit_digest {
+    if audit_digest(
+        semantic,
+        compiled.solid_entries(),
+        compiled.beam_entries(),
+        compiled.shell_entries(),
+        compiled.audit(),
+    )? != compiled.audit_digest
+    {
         return Err("compiled property audit digest does not match its contents".into());
     }
     Ok(())
@@ -126,11 +181,20 @@ pub(super) fn semantic_digest(
                 .map(|entry| SolidSemanticElement {
                     element_id: entry.element_id,
                     element_identity: entry.element_identity,
-                    material: &entry.material,
+                    material: entry.material.solver_identity_contract(),
                 })
                 .collect(),
-            beams: beam_properties.values().collect(),
-            shells: shell_properties.values().collect(),
+            beams: beam_properties
+                .values()
+                .map(|entry| BeamSemanticElement {
+                    element_id: &entry.element_id,
+                    element_identity: entry.element_identity,
+                    material: entry.material.solver_identity_contract(),
+                    section: &entry.section,
+                    reference_axis: entry.reference_axis,
+                })
+                .collect(),
+            shells: shell_properties.values().map(shell_semantics).collect(),
         },
         LIMITS,
     )
@@ -140,14 +204,50 @@ pub(super) fn semantic_digest(
 
 pub(super) fn audit_digest(
     semantic_digest: Digest,
+    solid_materials: &BTreeMap<StableDigest, CompiledElementMaterial>,
+    beam_properties: &BTreeMap<StableDigest, CompiledBeamProperty>,
+    shell_properties: &BTreeMap<StableDigest, CompiledShellProperty>,
     audit: &[CompiledPropertyAudit],
 ) -> Result<Digest, String> {
     encode_contract(
         AUDIT_PREFIX,
         "compiled-property-audit",
-        &(semantic_digest, audit),
+        &AuditContract {
+            semantic_digest,
+            solids: solid_materials.values().collect(),
+            beams: beam_properties.values().collect(),
+            shells: shell_properties.values().collect(),
+            assignments: audit,
+        },
         LIMITS,
     )
     .map(Digest::sha256)
     .map_err(|error| error.to_string())
+}
+
+fn shell_semantics(entry: &CompiledShellProperty) -> ShellSemanticElement<'_> {
+    let owner = match &entry.owner {
+        CompiledShellPropertyOwner::Homogeneous { material, section } => {
+            ShellSemanticOwner::Homogeneous {
+                material: material.solver_identity_contract(),
+                section,
+            }
+        }
+        CompiledShellPropertyOwner::Laminate { section, plies } => ShellSemanticOwner::Laminate {
+            section,
+            plies: plies
+                .iter()
+                .map(|ply| LaminatePlySemantic {
+                    definition: &ply.definition,
+                    material: ply.material.solver_identity_contract(),
+                })
+                .collect(),
+        },
+    };
+    ShellSemanticElement {
+        element_id: &entry.element_id,
+        element_identity: entry.element_identity,
+        reference_axis: entry.reference_axis,
+        owner,
+    }
 }

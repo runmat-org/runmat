@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use runmat_analysis_core::{
     validate_model, AnalysisField, AnalysisModel, AnalysisProcedure, BoundaryOperator,
-    EvidenceConfidence, MagneticConstraintKind, ProcedureStep,
+    MagneticConstraintKind, ProcedureStep,
 };
 
 use crate::{
@@ -1572,7 +1572,6 @@ struct RegionElectromagneticCoefficients {
     dispersive_phase_attenuation: f64,
     relative_permittivity: f64,
     relative_permeability: f64,
-    weight: f64,
     covered: bool,
     has_frequency_response: bool,
     has_relative_permittivity_frequency_response: bool,
@@ -1722,7 +1721,6 @@ fn electromagnetic_coefficient_profile(
             dispersive_phase_attenuation,
             relative_permittivity: permittivity,
             relative_permeability: permeability,
-            weight: confidence_weight(assignment.confidence),
             covered,
             has_frequency_response,
             has_relative_permittivity_frequency_response,
@@ -1751,7 +1749,6 @@ fn electromagnetic_coefficient_profile(
                 relative_permeability: (electrical.relative_permeability
                     * freq_sample.relative_permeability_scale)
                     .max(1.0e-9),
-                weight: 1.0,
                 covered: true,
                 has_frequency_response: freq_sample.has_frequency_response,
                 has_relative_permittivity_frequency_response: freq_sample
@@ -1801,19 +1798,7 @@ fn electromagnetic_coefficient_profile(
         .map(|sample| sample.dispersive_phase_attenuation)
         .collect::<Vec<_>>();
 
-    let weighted_mean = |values: &[f64]| -> f64 {
-        let weighted_sum = samples
-            .iter()
-            .zip(values.iter())
-            .map(|(sample, value)| value * sample.weight)
-            .sum::<f64>();
-        let weight_sum = samples
-            .iter()
-            .map(|sample| sample.weight)
-            .sum::<f64>()
-            .max(1.0e-9);
-        weighted_sum / weight_sum
-    };
+    let mean = |values: &[f64]| -> f64 { values.iter().sum::<f64>() / values.len().max(1) as f64 };
     let spread_ratio = |values: &[f64]| -> f64 {
         let min = values.iter().copied().fold(f64::INFINITY, f64::min);
         let max = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
@@ -1824,11 +1809,11 @@ fn electromagnetic_coefficient_profile(
         }
     };
 
-    let conductivity_mean = weighted_mean(&conductivity_values);
-    let relative_permittivity_mean = weighted_mean(&relative_permittivity_values);
-    let relative_permeability_mean = weighted_mean(&relative_permeability_values);
+    let conductivity_mean = mean(&conductivity_values);
+    let relative_permittivity_mean = mean(&relative_permittivity_values);
+    let relative_permeability_mean = mean(&relative_permeability_values);
     let conductivity_spread_ratio = spread_ratio(&conductivity_values);
-    let conductivity_frequency_scale_mean = weighted_mean(&conductivity_frequency_scale_values);
+    let conductivity_frequency_scale_mean = mean(&conductivity_frequency_scale_values);
     let conductivity_frequency_scale_spread_ratio =
         spread_ratio(&conductivity_frequency_scale_values);
     let conductivity_frequency_response_coverage_ratio = samples
@@ -1837,7 +1822,7 @@ fn electromagnetic_coefficient_profile(
         .count() as f64
         / samples.len().max(1) as f64;
     let relative_permittivity_frequency_scale_mean =
-        weighted_mean(&relative_permittivity_frequency_scale_values);
+        mean(&relative_permittivity_frequency_scale_values);
     let relative_permittivity_frequency_scale_spread_ratio =
         spread_ratio(&relative_permittivity_frequency_scale_values);
     let relative_permittivity_frequency_response_coverage_ratio = samples
@@ -1846,7 +1831,7 @@ fn electromagnetic_coefficient_profile(
         .count() as f64
         / samples.len().max(1) as f64;
     let relative_permeability_frequency_scale_mean =
-        weighted_mean(&relative_permeability_frequency_scale_values);
+        mean(&relative_permeability_frequency_scale_values);
     let relative_permeability_frequency_scale_spread_ratio =
         spread_ratio(&relative_permeability_frequency_scale_values);
     let relative_permeability_frequency_response_coverage_ratio = samples
@@ -1854,35 +1839,31 @@ fn electromagnetic_coefficient_profile(
         .filter(|sample| sample.has_relative_permeability_frequency_response)
         .count() as f64
         / samples.len().max(1) as f64;
-    let dispersive_loss_scale_mean = weighted_mean(&dispersive_loss_scale_values);
+    let dispersive_loss_scale_mean = mean(&dispersive_loss_scale_values);
     let dispersive_loss_scale_spread_ratio = spread_ratio(&dispersive_loss_scale_values);
-    let dispersive_phase_attenuation_mean = weighted_mean(&dispersive_phase_attenuation_values);
+    let dispersive_phase_attenuation_mean = mean(&dispersive_phase_attenuation_values);
     let dispersive_phase_attenuation_spread_ratio =
         spread_ratio(&dispersive_phase_attenuation_values);
     let relative_permittivity_spread_ratio = spread_ratio(&relative_permittivity_values);
     let relative_permeability_spread_ratio = spread_ratio(&relative_permeability_values);
 
-    let weighted_cv = |values: &[f64], mean: f64| -> f64 {
+    let coefficient_of_variation = |values: &[f64], mean: f64| -> f64 {
         if mean <= 1.0e-12 {
             return 0.0;
         }
-        let variance_weighted_sum = samples
+        let variance = values
             .iter()
-            .zip(values.iter())
-            .map(|(sample, value)| sample.weight * (value - mean).powi(2))
-            .sum::<f64>();
-        let weight_sum = samples
-            .iter()
-            .map(|sample| sample.weight)
+            .map(|value| (value - mean).powi(2))
             .sum::<f64>()
-            .max(1.0e-9);
-        let std_dev = (variance_weighted_sum / weight_sum).sqrt();
+            / values.len().max(1) as f64;
+        let std_dev = variance.sqrt();
         (std_dev / mean).max(0.0)
     };
-    let assignment_heterogeneity_index = (weighted_cv(&conductivity_values, conductivity_mean)
-        + weighted_cv(&relative_permittivity_values, relative_permittivity_mean)
-        + weighted_cv(&relative_permeability_values, relative_permeability_mean))
-        / 3.0;
+    let assignment_heterogeneity_index =
+        (coefficient_of_variation(&conductivity_values, conductivity_mean)
+            + coefficient_of_variation(&relative_permittivity_values, relative_permittivity_mean)
+            + coefficient_of_variation(&relative_permeability_values, relative_permeability_mean))
+            / 3.0;
     let assignment_coverage_ratio = if model.material_assignments.is_empty() {
         1.0
     } else {
@@ -2073,14 +2054,6 @@ where
         }
     }
     Some(points[points.len() - 1].1)
-}
-
-fn confidence_weight(confidence: EvidenceConfidence) -> f64 {
-    match confidence {
-        EvidenceConfidence::Verified => 1.0,
-        EvidenceConfidence::Probable => 0.75,
-        EvidenceConfidence::Inferred => 0.5,
-    }
 }
 
 fn complex_vector_magnitude(value: ComplexVector3) -> f64 {

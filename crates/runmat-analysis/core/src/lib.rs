@@ -157,7 +157,7 @@ pub use problem::materials::{
     ImportedCadMaterialPropertyKind, ImportedCadMaterialProvenance, MaterialAcousticModel,
     MaterialCapability, MaterialElasticityModel, MaterialElectricalModel, MaterialMechanicalModel,
     MaterialModel, MaterialOrthotropicLaminaModel, MaterialPlasticModel, MaterialProvenance,
-    MaterialThermalModel, MechanicalDampingModel, MissingMaterialCapability,
+    MaterialThermalModel, MechanicalDampingModel, MissingMaterialCapability, SolverMaterialModel,
 };
 pub use problem::model::{
     AnalysisModel, AnalysisModelId, SolverAnalysisModel, SolverAnalysisSequence,
@@ -389,6 +389,19 @@ mod tests {
         let mut second = first.clone();
         second.material_assignments[0].expected_material_id = "legacy_material_name".into();
         second.material_assignments[0].confidence = EvidenceConfidence::Inferred;
+        second.materials[0].name = "Imported steel display name".into();
+        second.materials[0].provenance =
+            MaterialProvenance::ImportedCad(ImportedCadMaterialProvenance {
+                geometry_module_path: "parts/bracket.fea".into(),
+                geometry_id: "bracket".into(),
+                source_material_id: "cad-material-17".into(),
+                source_material_name: "STEEL-GENERIC".into(),
+                source_entity_id: 17,
+                persistent_id: Some("material:steel".into()),
+                specification: Some("imported evidence only".into()),
+                associations: Vec::new(),
+                adopted_properties: Vec::new(),
+            });
 
         assert_eq!(
             serde_json::to_vec(&first.solver_identity_contract()).unwrap(),

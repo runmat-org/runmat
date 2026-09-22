@@ -174,7 +174,13 @@ impl CompiledPropertyMap {
             &beam_properties,
             &shell_properties,
         )?;
-        let audit_digest = super::identity::audit_digest(semantic_digest, &audit)?;
+        let audit_digest = super::identity::audit_digest(
+            semantic_digest,
+            &solid_materials,
+            &beam_properties,
+            &shell_properties,
+            &audit,
+        )?;
         let compiled = Self {
             identity: CompiledPropertyMapIdentity {
                 geometry_id: source.geometry_id,

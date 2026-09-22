@@ -4953,6 +4953,44 @@ fn multi_material_fixture_has_distinct_response_profile() {
         .any(|diag| diag.code == "ANALYSIS_MATERIAL_ASSIGNMENT_CONFLICT_INFERRED"));
 }
 
+#[test]
+fn electromagnetic_coefficients_are_independent_of_assignment_confidence() {
+    let mut audited_model = fixture_model(FixtureId::MultiMaterialAssembly);
+    replace_fixture_with_electric_current(&mut audited_model, "coil_current", "tip", 120.0);
+    audited_model.electromagnetic = Some(ElectromagneticDomain {
+        reference_frequency: Frequency::new(60.0),
+    });
+    audited_model.sequence.steps = vec![ProcedureStep::electromagnetic_harmonic("em")];
+    for (index, material) in audited_model.materials.iter_mut().enumerate() {
+        let mut electrical = test_electrical_material();
+        electrical.conductivity_s_per_m *= (index + 1) as f64;
+        electrical.relative_permittivity += index as f64;
+        electrical.relative_permeability += 0.25 * index as f64;
+        material.electrical = Some(electrical);
+    }
+    let mut verified_model = audited_model.clone();
+    for assignment in &mut verified_model.material_assignments {
+        assignment.confidence = runmat_analysis_core::EvidenceConfidence::Verified;
+    }
+    let mesh = multi_region_tetrahedron_solver_mesh();
+    let options = || ElectromagneticSolveOptions {
+        solver_mesh: Some(mesh.clone()),
+        ..experimental_electromagnetic_options()
+    };
+
+    let mut audited =
+        crate::run_electromagnetic_with_options(&audited_model, ComputeBackend::Cpu, options())
+            .expect("heterogeneous electromagnetic solve with audited assignments");
+    let mut verified =
+        crate::run_electromagnetic_with_options(&verified_model, ComputeBackend::Cpu, options())
+            .expect("heterogeneous electromagnetic solve with verified assignments");
+
+    assert_eq!(audited.run.identity, verified.run.identity);
+    audited.run.diagnostics.clear();
+    verified.run.diagnostics.clear();
+    assert_eq!(audited, verified);
+}
+
 fn component_peak(values: &[f64], component: usize) -> f64 {
     values
         .chunks_exact(3)

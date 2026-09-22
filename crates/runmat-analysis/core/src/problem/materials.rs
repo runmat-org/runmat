@@ -120,6 +120,19 @@ pub struct MaterialModel {
     pub plastic: Option<MaterialPlasticModel>,
 }
 
+/// Numerical material semantics without display or importer provenance.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SolverMaterialModel<'a> {
+    pub material_id: &'a str,
+    pub mass_density_kg_per_m3: Option<f64>,
+    pub elasticity: &'a Option<MaterialElasticityModel>,
+    pub damping: Option<MechanicalDampingModel>,
+    pub thermal: &'a Option<MaterialThermalModel>,
+    pub acoustic: &'a Option<MaterialAcousticModel>,
+    pub electrical: &'a Option<MaterialElectricalModel>,
+    pub plastic: &'a Option<MaterialPlasticModel>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case", tag = "kind")]
 pub enum MaterialProvenance {
@@ -224,6 +237,19 @@ pub struct MissingMaterialCapability {
 }
 
 impl MaterialModel {
+    pub fn solver_identity_contract(&self) -> SolverMaterialModel<'_> {
+        SolverMaterialModel {
+            material_id: &self.material_id,
+            mass_density_kg_per_m3: self.mass_density_kg_per_m3,
+            elasticity: &self.elasticity,
+            damping: self.damping,
+            thermal: &self.thermal,
+            acoustic: &self.acoustic,
+            electrical: &self.electrical,
+            plastic: &self.plastic,
+        }
+    }
+
     pub fn has_capability(&self, capability: MaterialCapability) -> bool {
         match capability {
             MaterialCapability::MassDensity => self.mass_density_kg_per_m3.is_some(),

@@ -2099,51 +2099,55 @@ fn apply_thermo_material_heterogeneity(
     if base_amplitude <= 0.0 {
         return 0.0;
     }
+    let assigned_properties = model
+        .material_assignments
+        .iter()
+        .map(|assignment| {
+            model
+                .materials
+                .iter()
+                .find(|material| material.material_id == assignment.assigned_material_id)
+                .map(|material| {
+                    let modulus = material
+                        .require_mechanical()
+                        .map(|mechanical| mechanical.youngs_modulus_pa)
+                        .unwrap_or(1.0e9)
+                        .max(1.0);
+                    let temperature_response = material
+                        .thermal
+                        .as_ref()
+                        .map(|thermal| {
+                            thermal.modulus_temp_coeff_per_k
+                                * (applied_temperature_delta_k
+                                    + (reference_temperature_k - thermal.reference_temperature_k))
+                        })
+                        .unwrap_or(constitutive_temperature_factor)
+                        .clamp(-0.4, 0.2);
+                    (modulus, temperature_response)
+                })
+                .unwrap_or((1.0e9, constitutive_temperature_factor))
+        })
+        .collect::<Vec<_>>();
+    let mean_modulus = mean(assigned_properties.iter().map(|(modulus, _)| *modulus))
+        .unwrap_or(1.0e9)
+        .max(1.0);
+    let mean_temperature_response = mean(
+        assigned_properties
+            .iter()
+            .map(|(_, temperature_response)| *temperature_response),
+    )
+    .unwrap_or(constitutive_temperature_factor);
     let mut activity_sum = 0.0_f64;
-    for (idx, assignment) in model.material_assignments.iter().enumerate() {
-        let expected_modulus = model
-            .materials
-            .iter()
-            .find(|material| material.material_id == assignment.expected_material_id)
-            .and_then(|material| material.require_mechanical().ok())
-            .map(|mechanical| mechanical.youngs_modulus_pa)
-            .unwrap_or(1.0e9)
-            .max(1.0);
-        let assigned_modulus = model
-            .materials
-            .iter()
-            .find(|material| material.material_id == assignment.assigned_material_id)
-            .and_then(|material| material.require_mechanical().ok())
-            .map(|mechanical| mechanical.youngs_modulus_pa)
-            .unwrap_or(expected_modulus)
-            .max(1.0);
+    for (idx, (assignment, (assigned_modulus, assigned_temperature_response))) in model
+        .material_assignments
+        .iter()
+        .zip(assigned_properties)
+        .enumerate()
+    {
         let modulus_delta_ratio =
-            ((assigned_modulus - expected_modulus) / expected_modulus).clamp(-0.6, 0.6);
-        let expected_temp_response = model
-            .materials
-            .iter()
-            .find(|material| material.material_id == assignment.expected_material_id)
-            .and_then(|material| material.thermal.as_ref())
-            .map(|thermal| {
-                thermal.modulus_temp_coeff_per_k
-                    * (applied_temperature_delta_k
-                        + (reference_temperature_k - thermal.reference_temperature_k))
-            })
-            .unwrap_or(constitutive_temperature_factor)
-            .clamp(-0.4, 0.2);
-        let assigned_temp_response = model
-            .materials
-            .iter()
-            .find(|material| material.material_id == assignment.assigned_material_id)
-            .and_then(|material| material.thermal.as_ref())
-            .map(|thermal| {
-                thermal.modulus_temp_coeff_per_k
-                    * (applied_temperature_delta_k
-                        + (reference_temperature_k - thermal.reference_temperature_k))
-            })
-            .unwrap_or(expected_temp_response)
-            .clamp(-0.4, 0.2);
-        let response_delta = (assigned_temp_response - expected_temp_response).clamp(-0.35, 0.35);
+            ((assigned_modulus - mean_modulus) / mean_modulus).clamp(-0.6, 0.6);
+        let response_delta =
+            (assigned_temperature_response - mean_temperature_response).clamp(-0.35, 0.35);
         let region_phase = ((region_hash(assignment.target_label()) % 11) as f64) / 10.0;
         let activity =
             (0.7 * modulus_delta_ratio.abs() + 0.3 * response_delta.abs()).clamp(0.0, 1.0);
@@ -2733,6 +2737,39 @@ mod tests {
             Some(expected_property_identity)
         );
         assert!(summary.operator.operators().damping().values().is_empty());
+    }
+
+    #[test]
+    fn thermo_material_heterogeneity_uses_assigned_physics_not_reconciliation_evidence() {
+        let model = fixture_model(FixtureId::MultiMaterialAssembly);
+        let mut changed_audit = model.clone();
+        for assignment in &mut changed_audit.material_assignments {
+            assignment.expected_material_id = "mat_aluminum".into();
+            assignment.confidence = runmat_analysis_core::EvidenceConfidence::Inferred;
+        }
+        let mut first_adjustments = vec![0.0; 27];
+        let first = apply_thermo_material_heterogeneity(
+            &model,
+            first_adjustments.len(),
+            -0.02,
+            293.15,
+            80.0,
+            &mut first_adjustments,
+        );
+        let mut second_adjustments = vec![0.0; 27];
+        let second = apply_thermo_material_heterogeneity(
+            &changed_audit,
+            second_adjustments.len(),
+            -0.02,
+            293.15,
+            80.0,
+            &mut second_adjustments,
+        );
+
+        assert_eq!(first, second);
+        assert_eq!(first_adjustments, second_adjustments);
+        assert!(first > 0.0);
+        assert!(first_adjustments.iter().any(|value| *value != 0.0));
     }
 
     #[test]
