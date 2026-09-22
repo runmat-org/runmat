@@ -18,12 +18,16 @@ use runmat_analysis_execution::{
 use runmat_analysis_fea::constraints::{
     CanonicalStructuralConstraintPlan, CanonicalStructuralTopologyIdentity, ConstraintEnforcement,
 };
+use runmat_analysis_fea::contracts::{
+    FEA_FIELD_STRUCTURAL_BEAM_AXIAL_FORCE, FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT,
+    FEA_FIELD_STRUCTURAL_STRESS,
+};
 use runmat_analysis_fea::execution::{
     AnalysisNumericalObjectKind, StructuralFrequencySolverPlan, StructuralFrequencyWorkload,
     StructuralFrequencyWorkloadInput, StructuralLinearWorkload, StructuralLinearWorkloadResult,
     DEFAULT_ANALYSIS_CHUNK_BYTES,
 };
-use runmat_analysis_fea::fixtures::{fixture_model, mixed_solid_beam_model, FixtureId};
+use runmat_analysis_fea::fixtures::{fixture_model, mixed_solid_beam_shell_model, FixtureId};
 use runmat_analysis_fea::frequency::FrequencyResponsePlan;
 use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
 use runmat_analysis_fea::solve::preconditioner::SpdPreconditionerKind;
@@ -211,6 +215,30 @@ async fn parent() {
         mixed_decoded.constraint_result.topology,
         CanonicalStructuralTopologyIdentity::ConformalMixed { .. }
     ));
+    assert_eq!(
+        mixed_decoded
+            .run
+            .field(FEA_FIELD_STRUCTURAL_STRESS)
+            .expect("mixed result retains solid stress")
+            .shape,
+        vec![1, 6]
+    );
+    assert_eq!(
+        mixed_decoded
+            .run
+            .field(FEA_FIELD_STRUCTURAL_BEAM_AXIAL_FORCE)
+            .expect("mixed result retains beam axial force")
+            .shape,
+        vec![1]
+    );
+    assert_eq!(
+        mixed_decoded
+            .run
+            .field(FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT)
+            .expect("mixed result retains shell bending moment")
+            .shape,
+        vec![1, 3]
+    );
     let mut mixed_inline_store = store.clone();
     let mixed_inline = execute_analysis_program_request(
         &mixed_request,
@@ -1394,7 +1422,7 @@ fn mixed_fixture(
         });
     mesh.topology.boundary_faces[1].provenance.sort();
 
-    let mut model = mixed_solid_beam_model(attached_coordinates);
+    let mut model = mixed_solid_beam_shell_model(attached_coordinates);
     let mut beam_material = model.materials[0].clone();
     beam_material.material_id = "mat_beam_alloy".into();
     beam_material.name = "Beam alloy".into();
@@ -1416,6 +1444,27 @@ fn mixed_fixture(
         .expect("mixed fixture declares a beam material assignment");
     beam_assignment.expected_material_id = "mat_beam_alloy".into();
     beam_assignment.assigned_material_id = "mat_beam_alloy".into();
+    let mut shell_material = model.materials[0].clone();
+    shell_material.material_id = "mat_shell_alloy".into();
+    shell_material.name = "Shell alloy".into();
+    shell_material.mass_density_kg_per_m3 = Some(2_700.0);
+    shell_material
+        .require_mechanical_mut()
+        .unwrap()
+        .youngs_modulus_pa = 69.0e9;
+    model.materials.push(shell_material);
+    let shell_assignment = model
+        .material_assignments
+        .iter_mut()
+        .find(|assignment| {
+            matches!(
+                assignment.target,
+                runmat_analysis_core::PropertyRegionTarget::Shell(_)
+            )
+        })
+        .expect("mixed fixture declares a shell material assignment");
+    shell_assignment.expected_material_id = "mat_shell_alloy".into();
+    shell_assignment.assigned_material_id = "mat_shell_alloy".into();
     model
         .constraints
         .push(runmat_analysis_core::AnalysisConstraint::Structural(
@@ -1458,6 +1507,7 @@ fn mixed_fixture(
         runmat_analysis_fea::properties::compile_property_map(&model, Some(&mesh)).unwrap();
     assert_eq!(compiled_properties.solid_materials().len(), 1);
     assert_eq!(compiled_properties.beam_properties().len(), 1);
+    assert_eq!(compiled_properties.shell_properties().len(), 1);
     assert_eq!(
         compiled_properties
             .solid_materials()
@@ -1476,6 +1526,14 @@ fn mixed_fixture(
             .material_id,
         "mat_beam_alloy"
     );
+    let shell = compiled_properties.shell_properties().next().unwrap();
+    let runmat_analysis_fea::properties::CompiledShellPropertyOwner::Homogeneous {
+        material, ..
+    } = &shell.owner
+    else {
+        panic!("mixed fixture uses a homogeneous shell");
+    };
+    assert_eq!(material.material_id, "mat_shell_alloy");
     model.geometry_revision = mesh.geometry.geometry_revision as u32;
     let solve = StructuralLinearWorkload {
         schema_version: 1,

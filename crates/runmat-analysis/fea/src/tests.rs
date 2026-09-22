@@ -16,8 +16,8 @@ use crate::{
     fea_transient_strain_energy_field_id, fea_transient_velocity_field_id,
     fixtures::{
         append_fixture_temperature_field, append_fixture_terminal_voltage, fixture_model,
-        mixed_solid_beam_model, replace_fixture_excitations, replace_fixture_with_electric_current,
-        FixtureExcitation, FixtureExcitationKind, FixtureId,
+        mixed_solid_beam_model, mixed_solid_beam_shell_model, replace_fixture_excitations,
+        replace_fixture_with_electric_current, FixtureExcitation, FixtureExcitationKind, FixtureId,
     },
     parity::{assert_vectors_within_tolerance, ParityTolerance},
     solve::{
@@ -854,6 +854,63 @@ fn mixed_solid_beam_pipeline_is_deterministic_and_recovers_both_formulations() {
         .iter()
         .all(|value| value.is_finite()));
     assert!(host_field(&first, FEA_FIELD_STRUCTURAL_BEAM_AXIAL_FORCE)[0].abs() > 0.0);
+}
+
+#[test]
+fn conformal_solid_beam_shell_pipeline_recovers_every_formulation() {
+    let mut mesh = single_tetrahedron_solver_mesh();
+    let attached_coordinates = mesh.topology.nodes[0].coordinates_m;
+    mesh.topology.nodes[0].provenance.push(PersistentEntityId {
+        kind: PersistentEntityKind::Vertex,
+        source_topology_id: "beam_root".into(),
+        assembly_path: vec!["root".into()],
+    });
+    mesh.topology.nodes[0].provenance.sort();
+    add_face_region(&mut mesh, 1, "solid_load");
+    reseal_solver_mesh(&mut mesh);
+    let model = mixed_solid_beam_shell_model(attached_coordinates);
+    let options = LinearStaticSolveOptions {
+        solver_mesh: Some(mesh),
+        solver_mesh_artifact_path: Some("mixed-solid-beam-shell.rmmesh".into()),
+        ..experimental_linear_static_options()
+    };
+
+    let result = crate::run_linear_static_with_options(&model, ComputeBackend::Cpu, options)
+        .expect("conformal solid-beam-shell pipeline");
+
+    assert_eq!(
+        field(&result, FEA_FIELD_STRUCTURAL_DISPLACEMENT).shape,
+        vec![7, 3]
+    );
+    assert_eq!(
+        field(&result, FEA_FIELD_STRUCTURAL_ROTATION).shape,
+        vec![7, 3]
+    );
+    assert_eq!(
+        field(&result, FEA_FIELD_STRUCTURAL_STRESS).shape,
+        vec![1, 6]
+    );
+    assert_eq!(
+        field(&result, FEA_FIELD_STRUCTURAL_BEAM_AXIAL_FORCE).shape,
+        vec![1]
+    );
+    assert_eq!(
+        field(&result, FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE).shape,
+        vec![1, 3]
+    );
+    assert_eq!(
+        field(&result, FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT).shape,
+        vec![1, 3]
+    );
+    assert!(host_field(&result, FEA_FIELD_STRUCTURAL_STRESS)
+        .iter()
+        .all(|value| value.is_finite()));
+    assert!(host_field(&result, FEA_FIELD_STRUCTURAL_BEAM_AXIAL_FORCE)[0].is_finite());
+    assert!(
+        host_field(&result, FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE)
+            .iter()
+            .all(|value| value.is_finite())
+    );
 }
 
 #[test]

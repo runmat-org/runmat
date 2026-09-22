@@ -159,6 +159,68 @@ pub fn mixed_solid_beam_model(attached_coordinates_m: [f64; 3]) -> AnalysisModel
     model
 }
 
+pub fn mixed_solid_beam_shell_model(attached_coordinates_m: [f64; 3]) -> AnalysisModel {
+    let mut model = mixed_solid_beam_model(attached_coordinates_m);
+    model.material_assignments.push(MaterialAssignment {
+        target: PropertyRegionTarget::shell("skin"),
+        expected_material_id: "mat_steel".into(),
+        assigned_material_id: "mat_steel".into(),
+        confidence: EvidenceConfidence::Verified,
+    });
+    let structural = model
+        .structural
+        .as_mut()
+        .expect("mixed solid-beam fixture owns explicit topology");
+    structural.nodes.extend([
+        StructuralNode {
+            node_id: 103,
+            coordinates_m: [
+                attached_coordinates_m[0],
+                attached_coordinates_m[1] + 1.0,
+                attached_coordinates_m[2],
+            ],
+            solid_attachment: None,
+        },
+        StructuralNode {
+            node_id: 104,
+            coordinates_m: [
+                attached_coordinates_m[0],
+                attached_coordinates_m[1],
+                attached_coordinates_m[2] + 1.0,
+            ],
+            solid_attachment: None,
+        },
+    ]);
+    structural.elements.push(StructuralElement {
+        element_id: "shell_1".into(),
+        region_id: "skin".into(),
+        kind: StructuralElementKind::Shell(ShellElementModel {
+            node_ids: [101, 103, 104],
+            section_id: "skin_2mm".into(),
+            reference_axis: [0.0, 1.0, 0.0],
+        }),
+    });
+    structural
+        .shell_sections
+        .push(ShellSectionModel::Homogeneous(
+            HomogeneousShellSectionModel {
+                section_id: "skin_2mm".into(),
+                thickness_m: 0.002,
+                reference_surface: HomogeneousShellReferenceSurface::MidSurface,
+                shear_correction: 5.0 / 6.0,
+            },
+        ));
+    append_fixture_excitation(
+        &mut model,
+        FixtureExcitation {
+            id: "shell_skin_force".into(),
+            region_id: "skin".into(),
+            kind: FixtureExcitationKind::Force([125.0, 0.0, 0.0]),
+        },
+    );
+    model
+}
+
 #[cfg(test)]
 pub(crate) fn replace_fixture_with_electric_current(
     model: &mut AnalysisModel,
