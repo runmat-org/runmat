@@ -35,11 +35,11 @@ pub(crate) use business_day_builtins::{
     __runmat_wasm_register_builtin_isbusday_builtin,
     __runmat_wasm_register_builtin_lbusdate_builtin,
 };
+use calendar_duration::*;
 pub(crate) use calendar_duration::{
     calendar_duration_object_from_tensors, calendar_duration_tensors_from_value,
     datetime_format_from_value, datetime_row_times_from_calendar_step, serials_from_datetime_value,
 };
-use calendar_duration::*;
 pub use calendar_duration::{
     datetime_display_text, datetime_string_array, is_calendar_duration_object, is_datetime_object,
 };
@@ -57,7 +57,7 @@ pub use capabilities::{
     DATESHIFT_EXTENSIONS, DATETIME_EXTENSIONS, DATETIME_INTEGER_CAPABILITIES, DAY_EXTENSIONS,
     HOUR_EXTENSIONS, MINUTE_EXTENSIONS, MONTH_EXTENSIONS, YEAR_EXTENSIONS,
 };
-pub use char_conversion::{datetime_char_array};
+pub use char_conversion::datetime_char_array;
 #[cfg(target_arch = "wasm32")]
 pub(crate) use component_builtins::{
     __runmat_wasm_register_builtin_clock_builtin, __runmat_wasm_register_builtin_day_builtin,
@@ -68,11 +68,11 @@ pub(crate) use component_builtins::{
 };
 use construction::*;
 #[cfg(target_arch = "wasm32")]
-pub(crate) use constructor_builtin::{__runmat_wasm_register_builtin_datetime_builtin};
+pub(crate) use constructor_builtin::__runmat_wasm_register_builtin_datetime_builtin;
+pub use conversion::datetime_summary;
 use conversion::*;
-pub use conversion::{datetime_summary};
 #[cfg(target_arch = "wasm32")]
-pub(crate) use dateshift_builtin::{__runmat_wasm_register_builtin_dateshift_builtin};
+pub(crate) use dateshift_builtin::__runmat_wasm_register_builtin_dateshift_builtin;
 use dateshift_model::*;
 pub use descriptors::{
     DATESHIFT_DESCRIPTOR, DATESHIFT_INTEGER_CAPABILITIES, DATETIME_BINARY_DESCRIPTOR,
@@ -91,11 +91,11 @@ pub(crate) use legacy_builtins::{
     __runmat_wasm_register_builtin_weekday_builtin,
 };
 use metadata::*;
+use model::*;
 pub(crate) use model::{
     datenum_from_naive, datetime_object_from_serial_tensor, naive_from_datenum,
     serial_tensor_for_object,
 };
-use model::*;
 #[cfg(target_arch = "wasm32")]
 pub(crate) use operators::{
     __runmat_wasm_register_builtin_calendar_duration_eq,

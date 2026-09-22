@@ -539,7 +539,10 @@ fn catalog_entry_families_own_registration_without_domain_builtin_lists() {
                     "pub(super) fn extend_entries(values: &mut Vec<&'static BuiltinCatalogEntry>)",
                 );
                 if local_extension {
-                    let module = path.file_stem().and_then(|name| name.to_str()).expect("module");
+                    let module = path
+                        .file_stem()
+                        .and_then(|name| name.to_str())
+                        .expect("module");
                     assert!(
                         family_module.contains(&format!("{module}::extend_entries(values);")),
                         "{} does not compose the typed local entry extension from {}",

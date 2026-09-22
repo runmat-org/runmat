@@ -13,16 +13,16 @@ mod tests;
 
 use class_registration::*;
 use conversion::*;
-pub use entrypoints::{
-    geometry_inspect_builtin, geometry_list_regions_builtin, geometry_load_builtin,
-    geometry_meshes_builtin,
-};
 #[cfg(target_arch = "wasm32")]
 pub(crate) use entrypoints::{
     __runmat_wasm_register_builtin_geometry_inspect_builtin,
     __runmat_wasm_register_builtin_geometry_list_regions_builtin,
     __runmat_wasm_register_builtin_geometry_load_builtin,
     __runmat_wasm_register_builtin_geometry_meshes_builtin,
+};
+pub use entrypoints::{
+    geometry_inspect_builtin, geometry_list_regions_builtin, geometry_load_builtin,
+    geometry_meshes_builtin,
 };
 use errors::*;
 use metadata::*;

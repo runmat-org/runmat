@@ -274,7 +274,7 @@ pub use engine::{
     render_geometry_scene_snapshot,
 };
 pub(crate) use error::{plotting_error, plotting_error_with_source};
-pub use figure_scene::{present_figure_on_surface};
+pub use figure_scene::present_figure_on_surface;
 #[cfg(feature = "plot-core")]
 pub use figure_scene::{
     export_figure_scene, export_figure_scene_with_policy, import_figure_scene,
@@ -287,25 +287,29 @@ pub use geometry_scene::{
     present_geometry_scene_on_surface,
 };
 #[cfg(feature = "plot-core")]
-pub use import_registry::{register_imported_geometry_scene};
-pub use perf::{set_scatter_target_points, set_scene_export_budget_bytes, set_surface_vertex_budget};
-pub use properties::{resolve_plot_handle};
-pub use runtime_mode::{RuntimePlottingMode, set_runtime_plotting_mode};
+pub use import_registry::register_imported_geometry_scene;
+pub use perf::{
+    set_scatter_target_points, set_scene_export_budget_bytes, set_surface_vertex_budget,
+};
+pub use properties::resolve_plot_handle;
+pub use runtime_mode::{set_runtime_plotting_mode, RuntimePlottingMode};
 pub use state::{
-    FigureAxesState, FigureError, FigureEventKind, FigureEventView, FigureHandle, HoldMode,
-    LinkAxesMode, clear_figure, clone_figure, close_figure, configure_subplot, current_axes_state,
+    clear_figure, clone_figure, close_figure, configure_subplot, current_axes_state,
     current_figure_handle, figure_handles, import_figure, install_figure_observer, link_axes,
     new_figure_handle, record_recent_figure, reset_hold_state_for_run, reset_plot_state,
     reset_recent_figures, select_axes_for_figure, select_figure, set_hold, take_recent_figures,
+    FigureAxesState, FigureError, FigureEventKind, FigureEventView, FigureHandle, HoldMode,
+    LinkAxesMode,
 };
 #[doc(hidden)]
-pub use test_support::{PlotTestLockGuard, lock_plot_test_context};
+pub use test_support::{lock_plot_test_context, PlotTestLockGuard};
 pub use web::{
-    PlotCameraProjection, PlotCameraState, PlotSurfaceCameraState, bind_surface_to_figure,
-    clear_closed_figure_surfaces, detach_surface, fit_surface_extents, get_surface_camera_state,
-    install_surface, invalidate_surface_revisions, pick_geometry_scene_region, present_surface,
-    render_current_scene, reset_surface_camera, resize_surface, set_geometry_scene_presentation,
-    set_plot_theme_config, set_surface_camera_state, web_renderer_ready,
+    bind_surface_to_figure, clear_closed_figure_surfaces, detach_surface, fit_surface_extents,
+    get_surface_camera_state, install_surface, invalidate_surface_revisions,
+    pick_geometry_scene_region, present_surface, render_current_scene, reset_surface_camera,
+    resize_surface, set_geometry_scene_presentation, set_plot_theme_config,
+    set_surface_camera_state, web_renderer_ready, PlotCameraProjection, PlotCameraState,
+    PlotSurfaceCameraState,
 };
 #[cfg(all(target_arch = "wasm32", feature = "plot-web"))]
-pub use web::{PlotSurfaceHostAction, handle_plot_surface_event, take_surface_host_actions};
+pub use web::{handle_plot_surface_event, take_surface_host_actions, PlotSurfaceHostAction};

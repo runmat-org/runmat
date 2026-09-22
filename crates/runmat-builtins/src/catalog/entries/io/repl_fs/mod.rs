@@ -24,6 +24,6 @@ mod temporary_path;
 mod text_input;
 
 pub use exports::*;
-pub(super) use inference::{infer};
+pub(super) use inference::infer;
 
 pub(super) use registry::extend_entries;

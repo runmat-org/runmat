@@ -25,7 +25,7 @@ pub(super) use arguments::{
     object_with_identity, positive_i64, positive_usize, scalar_text, string_array, tensor_value,
     text_or_missing,
 };
-pub(super) use class_registration::{ensure_dlarray_class_registered};
+pub(super) use class_registration::ensure_dlarray_class_registered;
 pub use contracts::{
     ADAMUPDATE_DESCRIPTOR, ARRAY_DESCRIPTOR, DLFEVAL_DESCRIPTOR, DLGRADIENT_DESCRIPTOR,
     DLUPDATE_DESCRIPTOR, OBJECT_DESCRIPTOR,

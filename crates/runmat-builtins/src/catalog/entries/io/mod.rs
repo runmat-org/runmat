@@ -6,7 +6,7 @@ mod inference;
 mod repl_fs;
 
 pub use console::*;
-pub(in crate::catalog) use inference::{infer};
+pub(in crate::catalog) use inference::infer;
 pub use repl_fs::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
