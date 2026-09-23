@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from "node:util";
+
 import { parseHandwrittenComposition } from "./handwritten-parser.mjs";
 import { generatedHeader, renderModuleCompositionProduct } from "./generate.mjs";
 import { parseCompositionProduct } from "./schema.mjs";
@@ -7,7 +9,7 @@ export function verifyModuleCompositionProduct(productValue, source) {
   const product = parseCompositionProduct(productValue);
   const observed = parseGeneratedModuleComposition(source);
   const expected = expectedCompositionSurface(product);
-  if (JSON.stringify(observed) !== JSON.stringify(expected)) {
+  if (!isDeepStrictEqual(observed, expected)) {
     throw new Error(`${product.product_id}: generated Rust topology differs from its typed projection`);
   }
   if (source !== renderModuleCompositionProduct(product)) {
