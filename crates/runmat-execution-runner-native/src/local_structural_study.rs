@@ -1,6 +1,7 @@
 //! Local composition of the same portable whole-study root used by remote execution.
 
 use runmat_analysis_fea::study::StructuralStudyProductInput;
+use runmat_analysis_fea::{emit_fea_progress_phase, FeaProgressPhase, FeaProgressStatus};
 use runmat_execution::value::{ValuePayload, ValueRefKind};
 use runmat_execution_artifact::cache::CacheExport;
 use runmat_execution_artifact::object::ObjectInventoryLimits;
@@ -26,6 +27,15 @@ pub async fn execute_prepared_structural_study_locally(
     prepared: PreparedStructuralStudyRoot,
     workers: u32,
 ) -> NativeExecutionResult<runmat_runtime::analysis::StructuralStudyResult> {
+    const OPERATION: &str = "fea.typed_study";
+    emit_fea_progress_phase(
+        OPERATION,
+        FeaProgressPhase::GeometryLoad,
+        FeaProgressStatus::Started,
+        "Loading and validating study geometry",
+        None,
+        None,
+    );
     let request = prepared.request().clone();
     let inventory = ObjectInventoryLimits::default();
     let composition_root = config
@@ -61,7 +71,31 @@ pub async fn execute_prepared_structural_study_locally(
     output
         .validate_against(&geometry_request)
         .map_err(protocol)?;
+    emit_fea_progress_phase(
+        OPERATION,
+        FeaProgressPhase::GeometryLoad,
+        FeaProgressStatus::Completed,
+        "Study geometry loaded",
+        Some(1),
+        Some(1),
+    );
+    emit_fea_progress_phase(
+        OPERATION,
+        FeaProgressPhase::RegionResolution,
+        FeaProgressStatus::Completed,
+        "Geometry regions resolved against admitted topology",
+        Some(output.regions.len() as u64),
+        Some(output.regions.len() as u64),
+    );
 
+    emit_fea_progress_phase(
+        OPERATION,
+        FeaProgressPhase::MeshPrep,
+        FeaProgressStatus::Started,
+        "Generating the analysis mesh",
+        None,
+        None,
+    );
     let exact = import_exact_geometry_input(
         &composition_store,
         output.document.clone(),
@@ -121,7 +155,27 @@ pub async fn execute_prepared_structural_study_locally(
     )
     .await
     .map_err(protocol)?;
+    emit_fea_progress_phase(
+        OPERATION,
+        FeaProgressPhase::MeshPrep,
+        FeaProgressStatus::Completed,
+        format!(
+            "Analysis mesh ready: {} nodes, {} elements",
+            meshing.artifact.topology.nodes.len(),
+            meshing.artifact.topology.volume_elements.len()
+        ),
+        Some(meshing.artifact.topology.volume_elements.len() as u64),
+        Some(meshing.artifact.topology.volume_elements.len() as u64),
+    );
 
+    emit_fea_progress_phase(
+        OPERATION,
+        FeaProgressPhase::ModelAssembly,
+        FeaProgressStatus::Started,
+        "Assembling typed study operators and inputs",
+        None,
+        None,
+    );
     let product =
         runmat_analysis_fea::study::build_structural_study_product(StructuralStudyProductInput {
             study: &decoded.study,
@@ -148,6 +202,22 @@ pub async fn execute_prepared_structural_study_locally(
         .replace_model(resolved_model.clone())
         .map_err(protocol)?;
     compiled.model = resolved_model;
+    emit_fea_progress_phase(
+        OPERATION,
+        FeaProgressPhase::ModelAssembly,
+        FeaProgressStatus::Completed,
+        "Study operators and inputs assembled",
+        Some(1),
+        Some(1),
+    );
+    emit_fea_progress_phase(
+        OPERATION,
+        FeaProgressPhase::Solve,
+        FeaProgressStatus::Started,
+        "Executing the analysis sequence",
+        None,
+        None,
+    );
     let numerical = execute_structural_workloads_locally(crate::StructuralWorkloadLocalExecution {
         execution_config: analysis_config,
         program_environment: request.recipe.program_revision.environment(),
@@ -159,14 +229,39 @@ pub async fn execute_prepared_structural_study_locally(
         admitted_accelerators: Some(&decoded.analysis_accelerator_requests),
     })
     .await?;
-    runmat_runtime::analysis::StructuralStudyResult::new(
+    emit_fea_progress_phase(
+        OPERATION,
+        FeaProgressPhase::Solve,
+        FeaProgressStatus::Completed,
+        "Analysis sequence completed",
+        Some(1),
+        Some(1),
+    );
+    emit_fea_progress_phase(
+        OPERATION,
+        FeaProgressPhase::Postprocess,
+        FeaProgressStatus::Started,
+        "Recovering fields and assembling study results",
+        None,
+        None,
+    );
+    let result = runmat_runtime::analysis::StructuralStudyResult::new(
         compiled,
         meshing.artifact,
         meshing.evidence,
         workloads,
         numerical,
     )
-    .map_err(protocol)
+    .map_err(protocol)?;
+    emit_fea_progress_phase(
+        OPERATION,
+        FeaProgressPhase::Postprocess,
+        FeaProgressStatus::Completed,
+        "Study results are ready for publication",
+        Some(1),
+        Some(1),
+    );
+    Ok(result)
 }
 
 fn materialization_output_root(

@@ -2982,6 +2982,36 @@ fn analysis_run_linear_static_emits_solver_and_artifact_progress_events() {
 }
 
 #[test]
+fn host_progress_handler_observes_direct_solver_progress() {
+    let _guard = analysis_test_guard();
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let events_for_handler = Arc::clone(&events);
+    let _progress_guard = replace_fea_progress_handler(Some(Arc::new(move |event| {
+        events_for_handler
+            .lock()
+            .expect("progress event lock should not be poisoned")
+            .push(event);
+    })));
+
+    runmat_analysis_fea::emit_fea_progress_phase(
+        "fea.run_checked_study",
+        FeaProgressPhase::MeshPrep,
+        FeaProgressStatus::Advanced,
+        "Generated 42 elements",
+        Some(42),
+        Some(100),
+    );
+
+    let events = events
+        .lock()
+        .expect("progress event lock should not be poisoned");
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].operation, "fea.run_checked_study");
+    assert_eq!(events[0].phase, FeaProgressPhase::MeshPrep);
+    assert_eq!(events[0].fraction, Some(0.42));
+}
+
+#[test]
 fn gpu_run_without_provider_records_fallback_event() {
     let _guard = analysis_test_guard();
     let _guard = runmat_accelerate_api::ThreadProviderGuard::set(None);

@@ -345,6 +345,7 @@ thread_local! {
 
 pub struct FeaProgressHandlerGuard {
     previous: Option<FeaProgressHandler>,
+    _solver_context: runmat_analysis_fea::FeaProgressContextGuard,
 }
 
 impl Drop for FeaProgressHandlerGuard {
@@ -359,7 +360,11 @@ pub fn replace_fea_progress_handler(
     handler: Option<FeaProgressHandler>,
 ) -> FeaProgressHandlerGuard {
     let previous = FEA_PROGRESS_HANDLER.with(|slot| slot.replace(handler));
-    FeaProgressHandlerGuard { previous }
+    let solver_context = install_fea_solver_context();
+    FeaProgressHandlerGuard {
+        previous,
+        _solver_context: solver_context,
+    }
 }
 
 fn install_fea_solver_context() -> runmat_analysis_fea::FeaProgressContextGuard {

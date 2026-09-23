@@ -120,7 +120,10 @@ impl GeometryScene {
                 "FEA study symbols",
                 "__fea_annotations:vectors",
                 self.chunks.len() + 1,
-                PipelineType::Lines,
+                // Engineering symbols must remain legible on the selected CAD face. A regular
+                // depth-tested line list z-fights with that face and can collapse to a few bright
+                // pixels at ordinary camera distances.
+                PipelineType::LinesNoDepth,
                 line_vertices,
             ));
         }
