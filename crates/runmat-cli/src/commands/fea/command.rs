@@ -34,18 +34,20 @@ pub(super) async fn execute(
                     "  {} {}",
                     styles.label("studies:"),
                     report
-                        .roots
+                        .program
+                        .studies
                         .iter()
-                        .filter(|root| matches!(root, FeaRootSelector::Study { .. }))
+                        .filter(|study| study.module_path == report.root_module.as_str())
                         .count()
                 );
                 println!(
                     "  {} {}",
                     styles.label("sweeps:"),
                     report
-                        .roots
+                        .program
+                        .sweeps
                         .iter()
-                        .filter(|root| matches!(root, FeaRootSelector::Sweep { .. }))
+                        .filter(|sweep| sweep.module_path == report.root_module.as_str())
                         .count()
                 );
                 if let Some(root) = selected {

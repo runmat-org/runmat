@@ -150,7 +150,21 @@ study static {
     let HoverContents::Markup(quantity_hover) = quantity_hover.contents else {
         panic!("expected markdown hover");
     };
-    assert!(quantity_hover.value.contains("Physical quantity `0.1 m`"));
+    assert!(quantity_hover.value.contains("**Physical quantity**"));
+    assert!(quantity_hover.value.contains("0.1 m"));
+
+    let target_size_offset = source.find("target_size").unwrap() + 2;
+    let target_size_hover = analysis
+        .hover(source, &offset_to_position(source, target_size_offset))
+        .unwrap();
+    let HoverContents::Markup(target_size_hover) = target_size_hover.contents else {
+        panic!("expected markdown hover");
+    };
+    assert!(target_size_hover
+        .value
+        .contains("characteristic edge length"));
+    assert!(target_size_hover.value.contains("| Dimension | length |"));
+    assert!(target_size_hover.value.contains("| Canonical SI | `m` |"));
 }
 
 #[test]

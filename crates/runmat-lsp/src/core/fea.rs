@@ -17,6 +17,7 @@ use super::analysis::make_document_symbol;
 use super::position::{offset_to_position, position_to_offset};
 
 mod hover;
+mod hover_docs;
 mod navigation;
 mod presentation;
 mod project;

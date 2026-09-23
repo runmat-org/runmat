@@ -1,4 +1,5 @@
 use lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position};
+use runmat_analysis_language::{CheckedFeaStatement, CheckedFeaStatementKind, FeaType};
 use runmat_lexer::fea::{FeaKeyword, FeaToken, FeaTokenKind};
 use runmat_parser::fea::{
     FeaBlock, FeaExpression, FeaExpressionKind, FeaModuleItem, FeaStatement, FeaStatementKind,
@@ -15,8 +16,8 @@ impl FeaDocumentAnalysis {
         let contents = match token.kind {
             FeaTokenKind::Keyword(keyword) => keyword_markdown(keyword),
             FeaTokenKind::Identifier => self.identifier_hover(syntax, source, position, token),
-            FeaTokenKind::Number => literal_hover(syntax, token, "Numeric literal"),
-            FeaTokenKind::String => literal_hover(syntax, token, "String or path literal"),
+            FeaTokenKind::Number => self.literal_hover(syntax, token, "Numeric literal"),
+            FeaTokenKind::String => self.literal_hover(syntax, token, "String or path literal"),
             _ => return None,
         };
         Some(Hover {
@@ -54,10 +55,15 @@ impl FeaDocumentAnalysis {
             return format!("**`{lexeme}`**\n\n{role}");
         }
         if let Some(quantity) = quantity_at(syntax, token.span.start) {
-            return format!(
-                "**Unit expression `{}`**\n\nSets the physical dimension and scale of this quantity literal. Units are checked during FEA semantic analysis.",
-                &syntax.source()[quantity.start..quantity.end]
+            return super::hover_docs::quantity_markdown(
+                "Unit expression",
+                &syntax.source()[quantity.start..quantity.end],
+                self.assignment_value_type_at(token.span.start),
             );
+        }
+        if let Some(documentation) = super::hover_docs::authoring_doc(lexeme) {
+            let value_type = self.assignment_value_type_at(token.span.start);
+            return super::hover_docs::property_markdown(lexeme, value_type, documentation);
         }
         if let Some(context) = containing_statement(syntax, token.span.start) {
             return format!("**`{lexeme}`**\n\n{context}");
@@ -66,16 +72,66 @@ impl FeaDocumentAnalysis {
             "**`{lexeme}`**\n\nFEA identifier. Names are resolved and type-checked within their declaration scope."
         )
     }
+
+    fn assignment_value_type_at(&self, offset: usize) -> Option<&FeaType> {
+        self.program
+            .declarations
+            .iter()
+            .filter(|((module, _), declaration)| {
+                module == &self.root
+                    && declaration.span.start <= offset
+                    && offset < declaration.span.end
+            })
+            .filter_map(|(_, declaration)| checked_statement_at(&declaration.statements, offset))
+            .min_by_key(|statement| statement.span.end.saturating_sub(statement.span.start))
+            .and_then(statement_value_type)
+    }
+
+    fn literal_hover(&self, syntax: &FeaSyntaxModule, token: FeaToken, label: &str) -> String {
+        if let Some(quantity) = quantity_at(syntax, token.span.start) {
+            return super::hover_docs::quantity_markdown(
+                "Physical quantity",
+                &syntax.source()[quantity.start..quantity.end],
+                self.assignment_value_type_at(token.span.start),
+            );
+        }
+        format!("**{label} `{}`**", syntax.tokens.lexeme(token))
+    }
 }
 
-fn literal_hover(syntax: &FeaSyntaxModule, token: FeaToken, label: &str) -> String {
-    if let Some(quantity) = quantity_at(syntax, token.span.start) {
-        return format!(
-            "**Physical quantity `{}`**\n\nA numeric value with an explicit unit. Its dimension is checked against the receiving property.",
-            &syntax.source()[quantity.start..quantity.end]
-        );
+fn checked_statement_at(
+    statements: &[CheckedFeaStatement],
+    offset: usize,
+) -> Option<&CheckedFeaStatement> {
+    statements
+        .iter()
+        .filter(|statement| statement.span.start <= offset && offset < statement.span.end)
+        .flat_map(|statement| {
+            let nested = match &statement.kind {
+                CheckedFeaStatementKind::GeneratedByFunction { statements, .. }
+                | CheckedFeaStatementKind::SignalDefinition { statements, .. }
+                | CheckedFeaStatementKind::ModelDefinition { statements, .. }
+                | CheckedFeaStatementKind::Block { statements, .. }
+                | CheckedFeaStatementKind::OutputDefinition { statements, .. } => {
+                    checked_statement_at(statements, offset)
+                }
+                _ => None,
+            };
+            std::iter::once(statement).chain(nested)
+        })
+        .min_by_key(|statement| statement.span.end.saturating_sub(statement.span.start))
+}
+
+fn statement_value_type(statement: &CheckedFeaStatement) -> Option<&FeaType> {
+    match &statement.kind {
+        CheckedFeaStatementKind::Assignment { value, .. }
+        | CheckedFeaStatementKind::Let { value, .. }
+        | CheckedFeaStatementKind::Feature { value, .. }
+        | CheckedFeaStatementKind::SourceParameterUpdate { value, .. }
+        | CheckedFeaStatementKind::Requirement { value, .. }
+        | CheckedFeaStatementKind::Output { value, .. } => Some(&value.value_type),
+        _ => None,
     }
-    format!("**{label} `{}`**", syntax.tokens.lexeme(token))
 }
 
 fn declared_name_role(syntax: &FeaSyntaxModule, span: Span) -> Option<String> {
