@@ -165,6 +165,27 @@ study static {
         .contains("characteristic edge length"));
     assert!(target_size_hover.value.contains("| Dimension | length |"));
     assert!(target_size_hover.value.contains("| Canonical SI | `m` |"));
+
+    let formulation_offset = source.find("formulation =").unwrap() + 2;
+    let formulation_hover = analysis
+        .hover(source, &offset_to_position(source, formulation_offset))
+        .unwrap();
+    let HoverContents::Markup(formulation_hover) = formulation_hover.contents else {
+        panic!("expected markdown hover");
+    };
+    assert!(formulation_hover.value.contains("formulation: enum"));
+    assert!(formulation_hover
+        .value
+        .contains("canonical authoring contract"));
+
+    let linear_offset = source.find("linear").unwrap() + 2;
+    let linear_hover = analysis
+        .hover(source, &offset_to_position(source, linear_offset))
+        .unwrap();
+    let HoverContents::Markup(linear_hover) = linear_hover.contents else {
+        panic!("expected markdown hover");
+    };
+    assert!(!linear_hover.value.contains("linear: enum"));
 }
 
 #[test]

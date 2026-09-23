@@ -65,6 +65,14 @@ impl FeaDocumentAnalysis {
             let value_type = self.assignment_value_type_at(token.span.start);
             return super::hover_docs::property_markdown(lexeme, value_type, documentation);
         }
+        if assignment_name_at(syntax, token.span) {
+            let value_type = self.assignment_value_type_at(token.span.start);
+            return super::hover_docs::property_markdown(
+                lexeme,
+                value_type,
+                super::hover_docs::fallback_authoring_doc(),
+            );
+        }
         if let Some(context) = containing_statement(syntax, token.span.start) {
             return format!("**`{lexeme}`**\n\n{context}");
         }
@@ -132,6 +140,37 @@ fn statement_value_type(statement: &CheckedFeaStatement) -> Option<&FeaType> {
         | CheckedFeaStatementKind::Output { value, .. } => Some(&value.value_type),
         _ => None,
     }
+}
+
+fn assignment_name_at(syntax: &FeaSyntaxModule, span: Span) -> bool {
+    syntax.items.iter().any(|item| {
+        let FeaModuleItem::Declaration(declaration) = item else {
+            return false;
+        };
+        block_has_assignment_name(&declaration.body, span)
+    })
+}
+
+fn block_has_assignment_name(block: &FeaBlock, span: Span) -> bool {
+    block.statements.iter().any(|statement| {
+        if matches!(
+            &statement.kind,
+            FeaStatementKind::Assignment { target, .. }
+                if target.segments.iter().any(|segment| segment.span == span)
+        ) {
+            return true;
+        }
+        match &statement.kind {
+            FeaStatementKind::GeneratedByFunction { body, .. }
+            | FeaStatementKind::SignalDefinition { body, .. }
+            | FeaStatementKind::ModelDefinition { body, .. }
+            | FeaStatementKind::Block { body, .. }
+            | FeaStatementKind::OutputDefinition { body, .. } => {
+                block_has_assignment_name(body, span)
+            }
+            _ => false,
+        }
+    })
 }
 
 fn declared_name_role(syntax: &FeaSyntaxModule, span: Span) -> Option<String> {

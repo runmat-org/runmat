@@ -10,6 +10,13 @@ pub(super) struct AuthoringDoc {
     pub detail: &'static str,
 }
 
+pub(super) fn fallback_authoring_doc() -> AuthoringDoc {
+    AuthoringDoc {
+        summary: "Checked property of the enclosing typed FEA resource.",
+        detail: "RunMat derives this property's value type from the canonical authoring contract and validates its shape, physical dimension, and admissibility before execution.",
+    }
+}
+
 pub(super) fn authoring_doc(name: &str) -> Option<AuthoringDoc> {
     let (summary, detail) = match name {
         "mass_density" => (
