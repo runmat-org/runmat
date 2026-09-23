@@ -3,27 +3,31 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use lsp_types::{
-    CompletionItem, CompletionItemKind, Diagnostic, DiagnosticSeverity, DocumentSymbol, Hover,
-    HoverContents, MarkupContent, MarkupKind, Position, Range, SemanticToken, SemanticTokens,
-    SymbolInformation, TextEdit, Url,
+    CompletionItem, CompletionItemKind, Diagnostic, DiagnosticSeverity, DocumentSymbol, Position,
+    Range, SemanticToken, SemanticTokens, SymbolInformation, TextEdit, Url,
 };
 use runmat_analysis_language::{CheckedFeaProgram, FeaDiagnosticSeverity, LogicalSourcePath};
-use runmat_lexer::fea::{FeaToken, FeaTokenKind};
+use runmat_lexer::fea::FeaToken;
+#[cfg(target_arch = "wasm32")]
+use runmat_parser::fea::parse_fea;
 use runmat_parser::fea::{format_fea, FeaFormatOptions, FeaModuleItem, FeaSyntaxModule};
 use runmat_types::Span;
 
 use super::analysis::make_document_symbol;
 use super::position::{offset_to_position, position_to_offset};
 
+mod hover;
 mod navigation;
 mod presentation;
 mod project;
+#[cfg(not(target_arch = "wasm32"))]
 mod rename;
 #[cfg(test)]
 mod tests;
 
 use presentation::*;
 pub(crate) use project::resolve_project_facts;
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) use rename::{FeaFunctionImportPath, FeaRenameTarget};
 
 #[derive(Clone)]
@@ -223,65 +227,49 @@ impl FeaDocumentAnalysis {
         items
     }
 
-    pub fn hover(&self, source: &str, position: &Position) -> Option<Hover> {
-        let token = token_at(self.syntax()?, source, position)?;
-        let lexeme = self.syntax()?.tokens.lexeme(token);
-        let contents = match token.kind {
-            FeaTokenKind::Keyword(_) => format!("`{lexeme}` — FEA language keyword"),
-            FeaTokenKind::Identifier => {
-                let symbol = self.symbol_at(source, position)?;
-                format!(
-                    "`{}.{}` — {} declaration",
-                    symbol_kind_name(symbol.kind),
-                    symbol.name,
-                    symbol_kind_name(symbol.kind)
-                )
-            }
-            _ => return None,
-        };
-        Some(Hover {
-            contents: HoverContents::Markup(MarkupContent {
-                kind: MarkupKind::Markdown,
-                value: contents,
-            }),
-            range: Some(span_range(source, token.span)),
-        })
-    }
-
     pub fn semantic_tokens(&self, source: &str) -> Option<SemanticTokens> {
         let syntax = self.syntax()?;
-        let mut encoded = Vec::new();
-        let mut previous = Position::new(0, 0);
-        let mut first = true;
-        for token in &syntax.tokens.tokens {
-            let Some(token_type) = semantic_token_type(token.kind) else {
-                continue;
-            };
-            let position = offset_to_position(source, token.span.start);
-            let delta_line = if first {
-                position.line
-            } else {
-                position.line.saturating_sub(previous.line)
-            };
-            let delta_start = if first || delta_line > 0 {
-                position.character
-            } else {
-                position.character.saturating_sub(previous.character)
-            };
-            encoded.push(SemanticToken {
-                delta_line,
-                delta_start,
-                length: token.span.end.saturating_sub(token.span.start) as u32,
-                token_type,
-                token_modifiers_bitset: 0,
-            });
-            previous = position;
-            first = false;
-        }
-        Some(SemanticTokens {
-            result_id: None,
-            data: encoded,
-        })
+        Some(semantic_tokens_for_syntax(source, syntax))
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn lexical_semantic_tokens(source: &str) -> SemanticTokens {
+        semantic_tokens_for_syntax(source, &parse_fea(source.to_string()))
+    }
+}
+
+fn semantic_tokens_for_syntax(source: &str, syntax: &FeaSyntaxModule) -> SemanticTokens {
+    let mut encoded = Vec::new();
+    let mut previous = Position::new(0, 0);
+    let mut first = true;
+    for token in &syntax.tokens.tokens {
+        let Some(token_type) = semantic_token_type(token.kind) else {
+            continue;
+        };
+        let position = offset_to_position(source, token.span.start);
+        let delta_line = if first {
+            position.line
+        } else {
+            position.line.saturating_sub(previous.line)
+        };
+        let delta_start = if first || delta_line > 0 {
+            position.character
+        } else {
+            position.character.saturating_sub(previous.character)
+        };
+        encoded.push(SemanticToken {
+            delta_line,
+            delta_start,
+            length: token.span.end.saturating_sub(token.span.start) as u32,
+            token_type,
+            token_modifiers_bitset: 0,
+        });
+        previous = position;
+        first = false;
+    }
+    SemanticTokens {
+        result_id: None,
+        data: encoded,
     }
 }
 

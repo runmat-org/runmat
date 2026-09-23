@@ -1,4 +1,4 @@
-use lsp_types::Url;
+use lsp_types::{HoverContents, Url};
 use runmat_lexer::fea::FeaKeyword;
 
 use super::*;
@@ -128,6 +128,29 @@ study static {
         .unwrap();
     assert!(signature.signatures[0].label.starts_with("box("));
     assert!(signature.signatures[0].label.contains("width"));
+
+    let study_keyword = offset_to_position(source, source.find("study static").unwrap() + 2);
+    let study_hover = analysis.hover(source, &study_keyword).unwrap();
+    let HoverContents::Markup(study_hover) = study_hover.contents else {
+        panic!("expected markdown hover");
+    };
+    assert!(study_hover.value.contains("executable analysis"));
+
+    let material_hover = analysis.hover(source, &material_position).unwrap();
+    let HoverContents::Markup(material_hover) = material_hover.contents else {
+        panic!("expected markdown hover");
+    };
+    assert!(material_hover.value.contains("material.steel"));
+    assert!(material_hover.value.contains("project/materials.fea"));
+
+    let quantity_offset = source.find("0.1 m").unwrap() + 1;
+    let quantity_hover = analysis
+        .hover(source, &offset_to_position(source, quantity_offset))
+        .unwrap();
+    let HoverContents::Markup(quantity_hover) = quantity_hover.contents else {
+        panic!("expected markdown hover");
+    };
+    assert!(quantity_hover.value.contains("Physical quantity `0.1 m`"));
 }
 
 #[test]

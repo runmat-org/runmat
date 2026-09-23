@@ -645,6 +645,7 @@ pub fn references_locations_at(
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) struct RenameSubject {
     pub name: String,
     pub is_local: bool,
@@ -652,6 +653,7 @@ pub(crate) struct RenameSubject {
     pub range: Range,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn rename_subject_at(
     text: &str,
     analysis: &DocumentAnalysis,
@@ -680,6 +682,7 @@ pub(crate) fn rename_subject_at(
     })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn rename_subject_has_collision(
     text: &str,
     analysis: &DocumentAnalysis,
@@ -1389,6 +1392,7 @@ pub fn function_references_in_document(
         .collect()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn function_rename_references_in_document(
     text: &str,
     analysis: &DocumentAnalysis,

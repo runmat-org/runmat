@@ -1,8 +1,10 @@
 use crate::{FeaDiagnostic, FeaModuleGraph, FunctionFacts, LogicalSourcePath};
 use runmat_types::Span;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum FeaSymbolKind {
     Geometry,
     Mesh,
@@ -29,7 +31,8 @@ impl FeaSymbolKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct FeaSymbolKey {
     pub kind: FeaSymbolKind,
     pub name: String,

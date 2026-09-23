@@ -17,10 +17,6 @@ const rustFeaSourceReportPath = path.resolve(
   repoRoot,
   "crates/runmat-runtime/src/analysis/source/report.rs"
 );
-const rustFeaPresentationPath = path.resolve(
-  repoRoot,
-  "crates/runmat-runtime/src/analysis/source/presentation/contract.rs"
-);
 const rustFeaDiagnosticPath = path.resolve(
   repoRoot,
   "crates/runmat-analysis/language/src/diagnostic.rs"
@@ -39,10 +35,6 @@ const rustCoreOutputPath = path.resolve(
 );
 const rustSignalPath = path.resolve(repoRoot, "crates/runmat-analysis/core/src/problem/signal.rs");
 const rustExcitationPath = path.resolve(repoRoot, "crates/runmat-analysis/core/src/problem/excitation.rs");
-const rustAuthoredExcitationPath = path.resolve(
-  repoRoot,
-  "crates/runmat-analysis/core/src/problem/authored_excitations.rs"
-);
 const rustGeometryUnitsPath = path.resolve(
   repoRoot,
   "crates/runmat-geometry/core/src/model/units.rs"
@@ -403,14 +395,12 @@ function main() {
   const analysisSource = fs.readFileSync(rustAnalysisContractsPath, "utf8");
   const progressSource = fs.readFileSync(rustFeaProgressPath, "utf8");
   const sourceReportSource = fs.readFileSync(rustFeaSourceReportPath, "utf8");
-  const presentationSource = fs.readFileSync(rustFeaPresentationPath, "utf8");
   const diagnosticSource = fs.readFileSync(rustFeaDiagnosticPath, "utf8");
   const coreIdentitySource = fs.readFileSync(rustCoreIdentityPath, "utf8");
   const coreFormulationSource = fs.readFileSync(rustCoreFormulationPath, "utf8");
   const coreOutputSource = fs.readFileSync(rustCoreOutputPath, "utf8");
   const signalSource = fs.readFileSync(rustSignalPath, "utf8");
   const excitationSource = fs.readFileSync(rustExcitationPath, "utf8");
-  const authoredExcitationSource = fs.readFileSync(rustAuthoredExcitationPath, "utf8");
   const geometryUnitsSource = fs.readFileSync(rustGeometryUnitsPath, "utf8");
   const geometryAuthoringSource = fs.readFileSync(rustGeometryAuthoringPath, "utf8");
   const meshingRequestSource = fs.readFileSync(rustMeshingRequestPath, "utf8");
@@ -442,9 +432,6 @@ function main() {
       "FeaDiagnosticPhase",
       readEnumValues(diagnosticSource, "FeaDiagnosticPhase").map(snakeToPascal)
     ),
-    `export type FeaRootSelector = ${readStringIdStructEnumValues(sourceReportSource, "FeaRootSelector")
-      .map((variant) => `{ kind: ${JSON.stringify(variant)}; id: string }`)
-      .join(" | ")};`,
     `export interface FeaSourceLocation {
   path: string;
   span: { start: number; end: number };
@@ -462,166 +449,11 @@ function main() {
   related: FeaRelatedDiagnostic[];
   availability: FeaSourceAvailability;
 }`,
-    `export interface FeaStudyProcedureSummary {
-  stepId: string;
-  physicsFamily: FeaPhysicsFamily;
-  analysisProcedure: FeaAnalysisProcedure;
-}`,
-    `export interface FeaStudyObjectCounts {
-  materials: number;
-  materialAssignments: number;
-  constraints: number;
-  boundaries: number;
-  connectors: number;
-  interfaces: number;
-  signals: number;
-  excitationCases: number;
-  excitations: number;
-  initialConditions: number;
-  responseSpectra: number;
-  sequenceSteps: number;
-  outputs: number;
-}`,
-    `export interface FeaStudyCheckSummary {
-  id: string;
-  geometryId: string;
-  geometryPath?: string;
-  geometryUnits?: FeaGeometryUnits;
-  meshId: string;
-  modelId: string;
-  procedures: FeaStudyProcedureSummary[];
-  counts: FeaStudyObjectCounts;
-}`,
-    `export type FeaStudyObjectKind =
-  | { category: "material_assignment" }
-  | { category: "property_assignment" }
-  | { category: "constraint"; kind: ${readEnumValues(presentationSource, "FeaConstraintPresentationKind").map((value) => JSON.stringify(value)).join(" | ")} }
-  | { category: "boundary"; kind: ${readEnumValues(presentationSource, "FeaBoundaryPresentationKind").map((value) => JSON.stringify(value)).join(" | ")} }
-  | { category: "connector"; kind: ${readEnumValues(presentationSource, "FeaConnectorPresentationKind").map((value) => JSON.stringify(value)).join(" | ")} }
-  | { category: "interface"; kind: ${readEnumValues(presentationSource, "FeaInterfacePresentationKind").map((value) => JSON.stringify(value)).join(" | ")} }
-  | { category: "signal" }
-  | { category: "excitation"; kind: ${readEnumValues(authoredExcitationSource, "AuthoredExcitationKind").map((value) => JSON.stringify(value)).join(" | ")} }
-  | { category: "excitation_case" }
-  | { category: "initial_condition"; kind: ${readEnumValues(presentationSource, "FeaInitialConditionPresentationKind").map((value) => JSON.stringify(value)).join(" | ")} }
-  | { category: "response_spectrum" }
-  | { category: "random_excitation" };`,
-    `export interface FeaGeometryRegionReference {
-  module_path: string;
-  geometry_id: string;
-  region_id: string;
-  role: "vertex" | "edge" | "face" | "solid" | "cell";
-  selector: FeaRegionSelector;
-}`,
-    `export type FeaPresentationTarget =
-  | ({ target: "geometry_region" } & FeaGeometryRegionReference)
-  | { target: "model_input"; input_id: string; role: "vertex" | "edge" | "face" | "solid" | "cell" }
-  | { target: "whole_model" };`,
-    `export type FeaPresentationSignalRepresentation =
-  | { kind: "constant" }
-  | { kind: "tabulated" }
-  | { kind: "waveform" }
-  | { kind: "artifact" }
-  | { kind: "parameterized"; input_ids: string[] }
-  | { kind: "function"; name: string; module_path?: string; source_digest?: string };`,
-    `export interface FeaSignalPresentation {
-  signalId: string;
-  quantity: ${readEnumValues(signalSource, "PhysicalQuantityKind").map((value) => JSON.stringify(value)).join(" | ")};
-  domain: ${readEnumValues(signalSource, "SignalDomainKind").map((value) => JSON.stringify(value)).join(" | ")};
-  shape: FeaSignalShape;
-  representation: FeaPresentationSignalRepresentation;
-  constant?: { values: number[]; canonicalUnit: string };
-}`,
-    `export type FeaAuthoredInputType =
-  | { kind: "boolean" } | { kind: "integer" } | { kind: "real" }
-  | { kind: "complex" } | { kind: "string" }
-  | { kind: "quantity"; detail: string }
-  | { kind: "material" }
-  | { kind: "region"; detail: "vertex" | "edge" | "face" | "solid" | "cell" };`,
-    `export type FeaAuthoredInputValue =
-  | { kind: "boolean"; value: boolean }
-  | { kind: "integer"; value: number }
-  | { kind: "real"; value: number }
-  | { kind: "complex"; value: { real: number; imaginary: number } }
-  | { kind: "string"; value: string }
-  | { kind: "quantity"; value: { dimension: string; value_si: number } }
-  | { kind: "material"; value: { module_path: string; material_id: string } }
-  | { kind: "region"; value: FeaGeometryRegionReference };`,
-    `export interface FeaStudyInputPresentation {
-  inputId: string;
-  valueType: FeaAuthoredInputType;
-  default?: FeaAuthoredInputValue;
-  minimum?: FeaAuthoredInputValue;
-  maximum?: FeaAuthoredInputValue;
-  required: boolean;
-  source?: FeaSourceLocation;
-}`,
-    `export type FeaStudyObjectDetails =
-  | { category: "material_assignment"; definition: unknown }
-  | { category: "property_assignment"; definition: unknown }
-  | { category: "constraint"; definition: unknown }
-  | { category: "boundary"; definition: unknown }
-  | { category: "connector"; definition: unknown }
-  | { category: "interface"; definition: unknown }
-  | { category: "signal"; definition: FeaSignalPresentation }
-  | { category: "excitation"; definition: unknown }
-  | { category: "excitation_case"; definition: unknown }
-  | { category: "initial_condition"; definition: unknown }
-  | { category: "response_spectrum"; definition: { spectrumId: string; sampleCount: number; frame: FeaCoordinateFrame; direction: [number, number, number] } }
-  | { category: "random_excitation"; definition: { excitationId: string; frequencySampleCount: number; channelCount: number } };`,
-    `export interface FeaStudyObjectPresentation {
-  objectId: string;
-  modelId: string;
-  kind: FeaStudyObjectKind;
-  details: FeaStudyObjectDetails;
-  targets: FeaPresentationTarget[];
-  frame?: FeaCoordinateFrame;
-  direction?: [number, number, number];
-  distribution?: ${readEnumValues(excitationSource, "ExcitationDistribution").map((value) => JSON.stringify(value)).join(" | ")};
-  kinematics?: ${readEnumValues(excitationSource, "ExcitationKinematics").map((value) => JSON.stringify(value)).join(" | ")};
-  signal?: FeaSignalPresentation;
-  activeStepIds: string[];
-  activeCaseIds: string[];
-  source?: FeaSourceLocation;
-}`,
-    `export interface FeaProcedurePresentation {
-  stepId: string;
-  physicsFamily: FeaPhysicsFamily;
-  analysisProcedure: FeaAnalysisProcedure;
-  dependsOn: string[];
-  activeObjectIds: string[];
-  source?: FeaSourceLocation;
-}`,
-    `export interface FeaOutputPresentation {
-  outputId: string;
-  attributed: boolean;
-  source?: FeaSourceLocation;
-}`,
-    formatTypeUnion(
-      "FeaStudySectionKind",
-      readEnumValues(presentationSource, "FeaStudySectionKind"),
-    ),
-    `export interface FeaStudySectionPresentation {
-  section: FeaStudySectionKind;
-  configuredCount: number;
-}`,
-    `export interface FeaStudyPresentation {
-  studyId: string;
-  geometryId: string;
-  meshId: string;
-  modelId: string;
-  geometryUnits?: FeaGeometryUnits;
-  inputs: FeaStudyInputPresentation[];
-  objects: FeaStudyObjectPresentation[];
-  procedures: FeaProcedurePresentation[];
-  outputs: FeaOutputPresentation[];
-  availableSections: FeaStudySectionPresentation[];
-}`,
     `export interface FeaSourceCheckResult {
   status: FeaCheckStatus;
   rootModule: string;
-  roots: FeaRootSelector[];
-  studies: FeaStudyCheckSummary[];
-  presentations: FeaStudyPresentation[];
+  program: FeaSemanticProgram;
+  sourceIndex: FeaSourceIndex;
   diagnostics: FeaDiagnostic[];
 }`,
   ];
@@ -778,6 +610,8 @@ export interface FeaSequenceBranch { branch_id: string; producer_step: string; s
   const contents = [
     "// @generated by scripts/generate-fea-contracts.cjs",
     "// Do not edit by hand.",
+    "",
+    'import type { FeaSemanticProgram, FeaSourceIndex } from "./fea-semantic-contracts.js";',
     "",
     ...constants.map(({ tsName, value }) => `export const ${tsName} = ${value} as const;`),
     "",

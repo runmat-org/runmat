@@ -449,16 +449,11 @@ pub use runmat_analysis_language::{
 pub use source::{
     check_fea_path, check_fea_path_in_root, check_fea_source_in_root, check_fea_sources_in_root,
     logical_source_path, physical_source_path, prepare_fea_path_in_root,
-    prepare_fea_sources_in_root, source_digest, CheckedFeaSource, FeaBoundaryPresentationKind,
-    FeaCheckStatus, FeaConnectorPresentationKind, FeaConstraintPresentationKind,
-    FeaInitialConditionPresentationKind, FeaInterfacePresentationKind, FeaOutputPresentation,
-    FeaPresentationTarget, FeaProcedurePresentation, FeaRandomExcitationPresentation,
-    FeaResponseSpectrumPresentation, FeaRootSelectionError, FeaRootSelector, FeaSignalPresentation,
-    FeaSignalRepresentation, FeaSourceCheckResult, FeaSourceSnapshotBuilder,
-    FeaSourceSnapshotRequests, FeaStudyCheckSummary, FeaStudyInputPresentation,
-    FeaStudyObjectCounts, FeaStudyObjectDetails, FeaStudyObjectKind, FeaStudyObjectPresentation,
-    FeaStudyPresentation, FeaStudyProcedureSummary, FeaStudySectionKind,
-    FeaStudySectionPresentation, FilesystemFeaHost, PreparedFeaSource, PreparedFeaSourceSnapshot,
+    prepare_fea_sources_in_root, source_digest, CheckedFeaSource, FeaCheckStatus,
+    FeaDeclaredMaterial, FeaExecutionBinding, FeaExecutionTarget, FeaModelMemberKind,
+    FeaRootSelectionError, FeaRootSelector, FeaSemanticProgram, FeaSourceCheckResult,
+    FeaSourceIdentity, FeaSourceIndex, FeaSourceIndexEntry, FeaSourceSnapshotBuilder,
+    FeaSourceSnapshotRequests, FilesystemFeaHost, PreparedFeaSource, PreparedFeaSourceSnapshot,
     ProjectFeaHost, ResolvedFeaRoot,
 };
 

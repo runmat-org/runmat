@@ -187,12 +187,19 @@ impl FeaDocumentAnalysis {
 
     pub(super) fn logical_uri(&self, path: &LogicalSourcePath) -> Option<Url> {
         let relative = path.as_str().strip_prefix("project/")?;
-        Url::from_file_path(
-            relative
-                .split('/')
-                .fold(self.source_root.clone(), |path, part| path.join(part)),
-        )
-        .ok()
+        let physical_path = relative
+            .split('/')
+            .fold(self.source_root.clone(), |path, part| path.join(part));
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            Url::from_file_path(physical_path).ok()
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let mut uri = Url::parse("file:///").ok()?;
+            uri.set_path(physical_path.to_str()?);
+            Some(uri)
+        }
     }
 
     fn logical_span(&self, path: &LogicalSourcePath, span: Span) -> Option<Range> {

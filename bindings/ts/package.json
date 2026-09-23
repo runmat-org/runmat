@@ -30,7 +30,7 @@
   "scripts": {
     "clean": "rimraf dist artifacts pkg pkg-web lsp-web ../../crates/runmat-wasm/pkg ../../crates/runmat-wasm/pkg-web ../../crates/runmat-lsp/pkg ../../crates/runmat-lsp/pkg-web",
     "generate:builtins": "node ./scripts/generate-builtins.cjs",
-    "generate:fea-contracts": "node ./scripts/generate-fea-contracts.cjs",
+    "generate:fea-contracts": "node ./scripts/test-fea-semantic-typegen.cjs && node ./scripts/generate-fea-contracts.cjs && node ./scripts/generate-fea-semantic-contracts.cjs",
     "build:registry": "node ../../scripts/regenerate-wasm-registry.mjs",
     "build:wasm:bundler": "wasm-pack build ../../crates/runmat-wasm --target bundler --out-dir ../../bindings/ts/pkg --out-name runmat_wasm --release -- --features occt-wasm-host",
     "build:wasm:web": "wasm-pack build ../../crates/runmat-wasm --target web --out-dir ../../bindings/ts/pkg-web --out-name runmat_wasm_web --release -- --features occt-wasm-host",

@@ -54,7 +54,7 @@ study static {
 }
 
 #[test]
-fn source_check_presents_typed_study_objects_without_losing_targets_or_case_membership() {
+fn source_check_returns_canonical_typed_objects_and_source_locations() {
     let temporary = tempdir().unwrap();
     let source = r#"
 geometry bracket {
@@ -107,76 +107,52 @@ study static {
         checked.program.diagnostics
     );
     let report = checked.check_result();
-    let presentation = report.presentations.first().unwrap();
-    assert_eq!(presentation.study_id, "static");
-    assert_eq!(presentation.procedures.len(), 1);
-    assert_eq!(presentation.outputs[0].output_id, "displacement");
-    assert_eq!(presentation.available_sections.len(), 14);
+    assert_eq!(report.program.studies.len(), 1);
     assert_eq!(
-        presentation
-            .available_sections
-            .iter()
-            .find(|section| section.section == super::FeaStudySectionKind::Constraints)
-            .unwrap()
-            .configured_count,
-        1
+        report.program.studies[0],
+        *checked.program.studies.values().next().unwrap()
+    );
+    assert_eq!(report.program.models.len(), 1);
+    assert_eq!(
+        report.program.models[0],
+        *checked.program.models.values().next().unwrap()
+    );
+    assert_eq!(report.program.geometries.len(), 1);
+    assert_eq!(
+        report.program.geometries[0],
+        *checked.program.geometries.values().next().unwrap()
+    );
+    assert_eq!(report.program.meshes.len(), 1);
+    assert_eq!(
+        report.program.meshes[0],
+        *checked.program.meshes.values().next().unwrap()
+    );
+    assert!(report.source_index.entries.iter().any(|entry| matches!(
+        &entry.identity,
+        super::FeaSourceIdentity::Declaration { symbol, .. }
+            if symbol.kind == runmat_analysis_language::FeaSymbolKind::Study
+                && symbol.name == "static"
+    )));
+    assert!(report.source_index.entries.iter().any(|entry| matches!(
+        &entry.identity,
+        super::FeaSourceIdentity::ModelMember {
+            member_kind: super::FeaModelMemberKind::Load,
+            member_id,
+            ..
+        } if member_id == "downward"
+    )));
+    let model = &report.program.models[0];
+    assert_eq!(model.constraints[0].constraint_id, "support");
+    assert_eq!(model.excitations[0].excitation_id, "load.downward");
+    assert_eq!(model.excitation_cases[0].case_id, "load_case.service");
+    assert_eq!(
+        report.program.studies[0].sequence.steps[0].step_id.0,
+        "solve"
     );
     assert_eq!(
-        presentation
-            .available_sections
-            .iter()
-            .find(|section| section.section == super::FeaStudySectionKind::Boundaries)
-            .unwrap()
-            .configured_count,
-        0
+        report.program.studies[0].outputs[0].output_id,
+        "displacement"
     );
-    assert_eq!(
-        presentation
-            .available_sections
-            .iter()
-            .find(|section| section.section == super::FeaStudySectionKind::Outputs)
-            .unwrap()
-            .configured_count,
-        1
-    );
-
-    let force = presentation
-        .objects
-        .iter()
-        .find(|object| object.object_id == "load.downward")
-        .unwrap();
-    assert!(matches!(
-        force.details,
-        super::FeaStudyObjectDetails::Excitation(ref excitation)
-            if excitation.kind == runmat_analysis_core::AuthoredExcitationKind::Force
-    ));
-    assert!(matches!(
-        force.targets.as_slice(),
-        [super::FeaPresentationTarget::GeometryRegion(target)]
-            if target.region.region_id == "pad"
-                && target.selector
-                    == runmat_geometry_core::GeometryRegionSelector::Result
-    ));
-    assert_eq!(force.active_case_ids, ["load_case.service"]);
-    let signal = force.signal.as_ref().unwrap();
-    assert_eq!(
-        signal.constant.as_ref().unwrap().values,
-        [0.0, -1000.0, 0.0]
-    );
-    assert_eq!(signal.constant.as_ref().unwrap().canonical_unit, "N");
-    assert!(force.source.is_some());
-
-    let case = presentation
-        .objects
-        .iter()
-        .find(|object| object.object_id == "load_case.service")
-        .unwrap();
-    assert!(matches!(
-        case.details,
-        super::FeaStudyObjectDetails::ExcitationCase(ref definition)
-            if definition.excitation_ids == ["load.downward"]
-    ));
-    assert_eq!(case.active_step_ids, ["solve"]);
 
     let encoded = serde_json::to_vec(&report).unwrap();
     let decoded: super::FeaSourceCheckResult = serde_json::from_slice(&encoded).unwrap();
@@ -357,24 +333,18 @@ study second {
 
     let report = checked.check_result();
     assert_eq!(report.status, super::FeaCheckStatus::Valid);
-    assert_eq!(report.studies.len(), 2);
-    assert_eq!(report.studies[0].id, "first");
-    assert_eq!(report.studies[0].geometry_id, "part");
-    assert_eq!(report.studies[0].geometry_path, None);
-    assert_eq!(report.studies[0].mesh_id, "volume");
-    assert_eq!(report.studies[0].model_id, "structure");
-    assert_eq!(report.studies[0].procedures.len(), 1);
-    assert_eq!(report.studies[0].procedures[0].step_id, "solve");
+    assert_eq!(report.program.studies.len(), 2);
+    assert_eq!(report.program.studies[0].study_id, "first");
     assert_eq!(
-        report.studies[0].procedures[0].physics_family,
-        runmat_analysis_core::PhysicsFamily::Structural
+        report.program.studies[0].geometry.definition.geometry_id,
+        "part"
     );
+    assert_eq!(report.program.studies[0].mesh.mesh_id, "volume");
+    assert_eq!(report.program.studies[0].model.model.model_id, "structure");
     assert_eq!(
-        report.studies[0].procedures[0].analysis_procedure,
-        runmat_analysis_core::AnalysisProcedure::Static
+        report.program.studies[0].sequence.steps[0].step_id.0,
+        "solve"
     );
-    assert_eq!(report.studies[0].counts.sequence_steps, 1);
-    assert_eq!(report.studies[0].counts.outputs, 1);
     assert!(matches!(
         checked.resolve_root(None),
         Err(super::FeaRootSelectionError::MultipleRoots { .. })
