@@ -241,6 +241,28 @@ test("case-distinct Rust item identities survive named reexport composition", ()
   assert.doesNotThrow(() => verifyModuleCompositionProduct(parsed.products[0], source));
 });
 
+test("semantic verification ignores JSON object insertion order", () => {
+  const product = fixtureProjection().products[1];
+  product.children = [child({
+    module: "definitions",
+    source_path: "crates/runmat-runtime/src/builtins/math/definitions.rs",
+    sourceKind: "file",
+    role: "support",
+  })];
+  product.children[0].reexports = [{
+    kind: "named",
+    visibility: "crate",
+    condition: { architecture: "wasm32", kind: "target-architecture" },
+    doc_hidden: false,
+    items: [
+      { alias: null, name: "Inf" },
+      { alias: null, name: "NaN" },
+    ],
+  }];
+  const source = renderModuleCompositionProduct(product);
+  assert.doesNotThrow(() => verifyModuleCompositionProduct(product, source));
+});
+
 test("module reexports retain their reviewed public alias", () => {
   const always = { kind: "always" };
   const product = {
