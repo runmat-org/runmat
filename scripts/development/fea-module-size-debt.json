@@ -63,6 +63,5 @@
   "crates/runmat-analysis/core/src/problem/region_resolution.rs": 635,
   "crates/runmat-runtime/src/analysis/frequency_result.rs": 634,
   "crates/runmat-runtime/src/analysis/operations/trends.rs": 633,
-  "crates/runmat-analysis/core/src/problem/model_authoring.rs": 628,
-  "crates/runmat-analysis/fea/src/adaptation/structural_recovery.rs": 626
+  "crates/runmat-analysis/core/src/problem/model_authoring.rs": 628
 }
