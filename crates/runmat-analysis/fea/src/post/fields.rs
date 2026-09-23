@@ -9,6 +9,7 @@ use crate::contracts::{
     FEA_FIELD_STRUCTURAL_CONSTRAINT_REACTION_FORCE,
     FEA_FIELD_STRUCTURAL_CONSTRAINT_REACTION_MOMENT_ABOUT_GLOBAL_ORIGIN,
     FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_EQUATION_SCALE,
+    FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRAIN, FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRESS,
     FEA_FIELD_STRUCTURAL_NODAL_VON_MISES, FEA_FIELD_STRUCTURAL_REACTION_FORCE,
     FEA_FIELD_STRUCTURAL_REACTION_MOMENT, FEA_FIELD_STRUCTURAL_RESIDUAL_NORM,
     FEA_FIELD_STRUCTURAL_ROTATION, FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT,
@@ -198,6 +199,8 @@ pub fn recover_deformation_result_fields(
         let strain_energy_density_values = strain_recovery
             .strain_energy_density
             .unwrap_or_else(|| recover_strain_energy_density(&strain_values, &stress_values));
+        let integration_point_strain = strain_recovery.integration_point_strain;
+        let integration_point_stress = strain_recovery.integration_point_stress;
         Some((
             element_count,
             strain_values,
@@ -205,6 +208,8 @@ pub fn recover_deformation_result_fields(
             von_mises_values,
             nodal_von_mises_values,
             strain_energy_density_values,
+            integration_point_strain,
+            integration_point_stress,
         ))
     } else {
         None
@@ -229,6 +234,8 @@ pub fn recover_deformation_result_fields(
         von_mises_values,
         nodal_von_mises_values,
         strain_energy_density_values,
+        integration_point_strain,
+        integration_point_stress,
     )) = continuum_fields
     {
         fields.extend([
@@ -251,6 +258,16 @@ pub fn recover_deformation_result_fields(
                 FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY,
                 vec![element_count],
                 strain_energy_density_values,
+            ),
+            AnalysisField::host_f64(
+                FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRAIN,
+                vec![element_count, 4, TENSOR_COMPONENT_COUNT],
+                integration_point_strain,
+            ),
+            AnalysisField::host_f64(
+                FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRESS,
+                vec![element_count, 4, TENSOR_COMPONENT_COUNT],
+                integration_point_stress,
             ),
             AnalysisField::host_f64(
                 FEA_FIELD_STRUCTURAL_NODAL_VON_MISES,
@@ -584,6 +601,8 @@ struct StructuralStrainRecovery {
     values: Vec<f64>,
     stress: Option<Vec<f64>>,
     strain_energy_density: Option<Vec<f64>>,
+    integration_point_strain: Vec<f64>,
+    integration_point_stress: Vec<f64>,
     element_count: usize,
     basis: &'static str,
 }
@@ -709,12 +728,14 @@ fn recover_structural_strain(
         }) {
             "solid_tetrahedron4_constant_strain"
         } else {
-            "solid_tetrahedron10_volume_average_strain"
+            "solid_tetrahedron10_integration_point_projection"
         };
         return Ok(StructuralStrainRecovery {
             values: recovered.strain,
             stress: Some(recovered.stress),
             strain_energy_density: Some(recovered.strain_energy_density),
+            integration_point_strain: recovered.integration_point_strain,
+            integration_point_stress: recovered.integration_point_stress,
             element_count: summary.structural_solid_recovery.len().max(1),
             basis,
         });
@@ -725,6 +746,8 @@ fn recover_structural_strain(
         values: recover_edge_strain(displacement, &recovery_edges),
         stress: None,
         strain_energy_density: None,
+        integration_point_strain: Vec::new(),
+        integration_point_stress: Vec::new(),
         element_count: recovery_edges.len().max(1),
         basis: recovery_edges
             .first()
@@ -1488,15 +1511,34 @@ mod tests {
 
         let fields = recover_result_fields(&summary, &solve).unwrap();
         let strain = host_field(&fields, FEA_FIELD_STRUCTURAL_STRAIN);
+        let integration_point_strain =
+            host_field(&fields, FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRAIN);
         assert_eq!(field_shape(&fields, FEA_FIELD_STRUCTURAL_STRAIN), &[1, 6]);
+        assert_eq!(
+            field_shape(&fields, FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRAIN),
+            &[1, 4, 6]
+        );
         assert!((strain[0] - 0.5).abs() < 1.0e-13);
         assert!(strain[1..].iter().all(|value| value.abs() < 1.0e-13));
+        let recovered_xx = integration_point_strain
+            .chunks_exact(6)
+            .map(|point| point[0])
+            .collect::<Vec<_>>();
+        assert!(recovered_xx.windows(2).any(|pair| pair[0] != pair[1]));
+        assert!(integration_point_strain
+            .chunks_exact(6)
+            .all(|point| point[1..].iter().all(|value| value.abs() < 1.0e-13)));
         assert_eq!(
             summary.structural_formulations[0].recovery,
-            Some(runmat_analysis_core::StructuralRecoveryImplementation::Tet10VolumeAverageStrain)
+            Some(
+                runmat_analysis_core::StructuralRecoveryImplementation::Tet10IntegrationPointProjection
+            )
         );
         let metrics = structural_field_recovery_metrics(&summary, &solve.solution).unwrap();
-        assert_eq!(metrics.basis, "solid_tetrahedron10_volume_average_strain");
+        assert_eq!(
+            metrics.basis,
+            "solid_tetrahedron10_integration_point_projection"
+        );
         assert_eq!(metrics.solver_mesh_node_count, 10);
     }
 

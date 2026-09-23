@@ -25,7 +25,7 @@ const BARYCENTRIC_DERIVATIVES: [[f64; 3]; 4] = [
 const QUADRATURE_A: f64 = 0.585_410_196_624_968_5;
 const QUADRATURE_B: f64 = 0.138_196_601_125_010_5;
 const QUADRATURE_WEIGHT: f64 = 1.0 / 24.0;
-const QUADRATURE: [[f64; 4]; 4] = [
+pub(crate) const QUADRATURE: [[f64; 4]; 4] = [
     [QUADRATURE_A, QUADRATURE_B, QUADRATURE_B, QUADRATURE_B],
     [QUADRATURE_B, QUADRATURE_A, QUADRATURE_B, QUADRATURE_B],
     [QUADRATURE_B, QUADRATURE_B, QUADRATURE_A, QUADRATURE_B],
@@ -149,36 +149,119 @@ impl Tetrahedron10ElementGeometry {
         }
     }
 
-    pub fn volume_average_strain(
+    /// Strain and physical integration weight at each stiffness quadrature point.
+    ///
+    /// The ordering is the canonical four-point tetrahedral rule used by stiffness assembly.
+    /// Keeping the Jacobian-weighted measure beside each value prevents recovery and error
+    /// estimation from silently treating curved isoparametric elements as affine tetrahedra.
+    pub(crate) fn quadrature_strain(
         self,
         displacement: [f64; TETRAHEDRON10_ELEMENT_DOF_COUNT],
-    ) -> Result<[f64; 6], Tetrahedron10ElementError> {
+    ) -> Result<[Tetrahedron10RecoveryPoint; 4], Tetrahedron10ElementError> {
         validate_nodes(self.nodes_m)?;
         if displacement.iter().any(|value| !value.is_finite()) {
             return Err(Tetrahedron10ElementError::NonFiniteDisplacement);
         }
-        let mut integrated = [0.0; 6];
-        let mut volume = 0.0;
-        for (barycentric, weight) in MASS_QUADRATURE {
+        let mut recovered = [Tetrahedron10RecoveryPoint {
+            barycentric: [0.0; 4],
+            integration_weight_m3: 0.0,
+            strain: [0.0; 6],
+        }; 4];
+        for (index, point) in recovered.iter_mut().enumerate() {
+            let barycentric = QUADRATURE[index];
             let gradients = physical_shape_gradients(self.nodes_m, barycentric)?;
             let b = strain_displacement_matrix(gradients);
-            let weighted_volume = weight * jacobian_determinant(self.nodes_m, barycentric)?;
-            for component in 0..6 {
-                integrated[component] += weighted_volume
-                    * b[component]
-                        .iter()
-                        .zip(displacement)
-                        .map(|(shape, value)| shape * value)
-                        .sum::<f64>();
+            let strain: [f64; 6] = std::array::from_fn(|component| {
+                b[component]
+                    .iter()
+                    .zip(displacement)
+                    .map(|(shape, value)| shape * value)
+                    .sum()
+            });
+            let integration_weight_m3 =
+                QUADRATURE_WEIGHT * jacobian_determinant(self.nodes_m, barycentric)?;
+            if strain.iter().all(|value| value.is_finite())
+                && integration_weight_m3.is_finite()
+                && integration_weight_m3 > 0.0
+            {
+                *point = Tetrahedron10RecoveryPoint {
+                    barycentric,
+                    integration_weight_m3,
+                    strain,
+                };
+            } else {
+                return Err(Tetrahedron10ElementError::DegenerateOrInverted);
             }
-            volume += weighted_volume;
         }
-        if !volume.is_finite() || volume <= 0.0 || integrated.iter().any(|value| !value.is_finite())
-        {
-            return Err(Tetrahedron10ElementError::DegenerateOrInverted);
-        }
-        Ok(integrated.map(|value| value / volume))
+        Ok(recovered)
     }
+
+    pub(crate) fn quadrature_integration_data(
+        self,
+    ) -> Result<[([f64; 4], f64); 4], Tetrahedron10ElementError> {
+        validate_nodes(self.nodes_m)?;
+        let mut data = [([0.0; 4], 0.0); 4];
+        for (index, entry) in data.iter_mut().enumerate() {
+            let barycentric = QUADRATURE[index];
+            let weight = QUADRATURE_WEIGHT * jacobian_determinant(self.nodes_m, barycentric)?;
+            if !weight.is_finite() || weight <= 0.0 {
+                return Err(Tetrahedron10ElementError::DegenerateOrInverted);
+            }
+            *entry = (barycentric, weight);
+        }
+        Ok(data)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Tetrahedron10RecoveryPoint {
+    pub barycentric: [f64; 4],
+    pub integration_weight_m3: f64,
+    pub strain: [f64; 6],
+}
+
+/// Extrapolates the canonical four integration-point samples to the ten element nodes.
+///
+/// A linear field in barycentric coordinates is fitted exactly at the four symmetric points;
+/// midside values are then evaluated from that same field. This is deliberately an element-local
+/// operation. Region-side smoothing, if requested, is performed by the estimator so material
+/// interfaces cannot be averaged together accidentally.
+pub(crate) fn extrapolate_quadrature_to_nodes(
+    samples: [[f64; 6]; 4],
+) -> [[f64; 6]; TETRAHEDRON10_ELEMENT_NODE_COUNT] {
+    let diagonal = QUADRATURE[0][0];
+    let off_diagonal = QUADRATURE[0][1];
+    let scale = diagonal - off_diagonal;
+    let corners = std::array::from_fn::<_, 4, _>(|corner| {
+        std::array::from_fn(|component| {
+            let sum = samples.iter().map(|sample| sample[component]).sum::<f64>();
+            (samples[corner][component] - off_diagonal * sum) / scale
+        })
+    });
+    std::array::from_fn(|node| {
+        if node < 4 {
+            corners[node]
+        } else {
+            let [left, right] = TETRAHEDRON_MIDSIDE_EDGE_CORNERS[node - 4];
+            std::array::from_fn(|component| {
+                0.5 * (corners[left][component] + corners[right][component])
+            })
+        }
+    })
+}
+
+pub(crate) fn interpolate_nodal_samples(
+    nodal: [[f64; 6]; TETRAHEDRON10_ELEMENT_NODE_COUNT],
+    barycentric: [f64; 4],
+) -> [f64; 6] {
+    let shape = shape_values(barycentric);
+    std::array::from_fn(|component| {
+        shape
+            .iter()
+            .zip(nodal)
+            .map(|(shape, value)| shape * value[component])
+            .sum()
+    })
 }
 
 #[derive(Debug, Error, Clone, PartialEq)]
@@ -486,6 +569,7 @@ fn cross(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::assembly::elements::solid::Tetrahedron4ElementGeometry;
 
     fn straight_unit_tetrahedron() -> Tetrahedron10ElementGeometry {
         let corners = [
@@ -613,24 +697,6 @@ mod tests {
     }
 
     #[test]
-    fn volume_average_strain_recovers_a_quadratic_displacement_field() {
-        let geometry = straight_unit_tetrahedron();
-        let displacement = std::array::from_fn(|dof| {
-            let node = dof / TETRAHEDRON10_NODE_DOF_COUNT;
-            let axis = dof % TETRAHEDRON10_NODE_DOF_COUNT;
-            if axis == 0 {
-                geometry.nodes_m[node][0].powi(2)
-            } else {
-                0.0
-            }
-        });
-        let strain = geometry.volume_average_strain(displacement).unwrap();
-        assert!((geometry.volume_m3().unwrap() - 1.0 / 6.0).abs() < 1.0e-14);
-        assert!((strain[0] - 0.5).abs() < 1.0e-13);
-        assert!(strain[1..].iter().all(|value| value.abs() < 1.0e-13));
-    }
-
-    #[test]
     fn tetrahedron10_rejects_nonfinite_and_inverted_geometry() {
         let mut nonfinite = straight_unit_tetrahedron();
         nonfinite.nodes_m[4][0] = f64::NAN;
@@ -647,6 +713,121 @@ mod tests {
             global_stiffness_matrix(steel(), inverted).unwrap_err(),
             Tetrahedron10ElementError::DegenerateOrInverted
         );
+    }
+
+    #[test]
+    fn quadratic_recovery_exhibits_expected_h_and_p_convergence() {
+        let tet4_coarse = manufactured_quadratic_recovery_error(1, false);
+        let tet4_medium = manufactured_quadratic_recovery_error(2, false);
+        let tet4_fine = manufactured_quadratic_recovery_error(4, false);
+        let tet10 = manufactured_quadratic_recovery_error(1, true);
+
+        assert!((tet4_coarse / tet4_medium - 2.0).abs() < 1.0e-12);
+        assert!((tet4_medium / tet4_fine - 2.0).abs() < 1.0e-12);
+        assert!(tet10 < 1.0e-13 * tet4_coarse);
+    }
+
+    fn manufactured_quadratic_recovery_error(divisions: usize, quadratic: bool) -> f64 {
+        let h = 1.0 / divisions as f64;
+        let mut error_squared = 0.0;
+        for i in 0..divisions {
+            for j in 0..divisions {
+                for k in 0..divisions {
+                    let origin = [i as f64 * h, j as f64 * h, k as f64 * h];
+                    let vertex = |dx: f64, dy: f64, dz: f64| {
+                        [origin[0] + dx * h, origin[1] + dy * h, origin[2] + dz * h]
+                    };
+                    let v000 = vertex(0.0, 0.0, 0.0);
+                    let v100 = vertex(1.0, 0.0, 0.0);
+                    let v010 = vertex(0.0, 1.0, 0.0);
+                    let v110 = vertex(1.0, 1.0, 0.0);
+                    let v001 = vertex(0.0, 0.0, 1.0);
+                    let v101 = vertex(1.0, 0.0, 1.0);
+                    let v011 = vertex(0.0, 1.0, 1.0);
+                    let v111 = vertex(1.0, 1.0, 1.0);
+                    for mut corners in [
+                        [v000, v100, v110, v111],
+                        [v000, v110, v010, v111],
+                        [v000, v010, v011, v111],
+                        [v000, v011, v001, v111],
+                        [v000, v001, v101, v111],
+                        [v000, v101, v100, v111],
+                    ] {
+                        if (Tetrahedron4ElementGeometry { nodes_m: corners })
+                            .volume_m3()
+                            .is_err()
+                        {
+                            corners.swap(1, 2);
+                        }
+                        error_squared += if quadratic {
+                            quadratic_element_recovery_error(corners)
+                        } else {
+                            linear_element_recovery_error(corners)
+                        };
+                    }
+                }
+            }
+        }
+        error_squared.sqrt()
+    }
+
+    fn linear_element_recovery_error(corners: [[f64; 3]; 4]) -> f64 {
+        let geometry = Tetrahedron4ElementGeometry { nodes_m: corners };
+        let b = super::super::tetrahedron4::strain_displacement_matrix(geometry).unwrap();
+        let displacement = corners
+            .into_iter()
+            .flat_map(|node| [node[0].powi(2), 0.0, 0.0])
+            .collect::<Vec<_>>();
+        let recovered = b[0]
+            .iter()
+            .zip(displacement)
+            .map(|(shape, value)| shape * value)
+            .sum::<f64>();
+        let volume = geometry.volume_m3().unwrap();
+        QUADRATURE
+            .iter()
+            .map(|barycentric| {
+                let x = (0..4)
+                    .map(|node| barycentric[node] * corners[node][0])
+                    .sum::<f64>();
+                (recovered - 2.0 * x).powi(2) * volume / 4.0
+            })
+            .sum()
+    }
+
+    fn quadratic_element_recovery_error(corners: [[f64; 3]; 4]) -> f64 {
+        let nodes_m = [
+            corners[0],
+            corners[1],
+            corners[2],
+            corners[3],
+            midpoint(corners[0], corners[1]),
+            midpoint(corners[1], corners[2]),
+            midpoint(corners[2], corners[0]),
+            midpoint(corners[0], corners[3]),
+            midpoint(corners[1], corners[3]),
+            midpoint(corners[2], corners[3]),
+        ];
+        let geometry = Tetrahedron10ElementGeometry { nodes_m };
+        let displacement = std::array::from_fn(|dof| {
+            let node = dof / 3;
+            if dof % 3 == 0 {
+                nodes_m[node][0].powi(2)
+            } else {
+                0.0
+            }
+        });
+        geometry
+            .quadrature_strain(displacement)
+            .unwrap()
+            .iter()
+            .map(|point| {
+                let x = (0..10)
+                    .map(|node| shape_values(point.barycentric)[node] * nodes_m[node][0])
+                    .sum::<f64>();
+                (point.strain[0] - 2.0 * x).powi(2) * point.integration_weight_m3
+            })
+            .sum()
     }
 
     fn midpoint(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {

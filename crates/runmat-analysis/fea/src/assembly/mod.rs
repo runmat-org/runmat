@@ -1448,7 +1448,7 @@ fn assemble_linear_system_impl(
                         ),
                         ElementOrder::Tet10 => (
                             StructuralOperatorImplementation::Tet10LinearElasticity,
-                            Some(StructuralRecoveryImplementation::Tet10VolumeAverageStrain),
+                            Some(StructuralRecoveryImplementation::Tet10IntegrationPointProjection),
                         ),
                     };
                     StructuralFormulationRealization::new(operator, recovery)
@@ -4718,7 +4718,7 @@ mod tests {
             (
                 tet10,
                 StructuralOperatorImplementation::Tet10LinearElasticity,
-                Some(StructuralRecoveryImplementation::Tet10VolumeAverageStrain),
+                Some(StructuralRecoveryImplementation::Tet10IntegrationPointProjection),
                 SourceImplementation::NotApplicable,
                 BoundaryTransferImplementation::NotApplicable,
             ),

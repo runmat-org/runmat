@@ -219,7 +219,7 @@ pub(super) fn assemble_mixed_structural_system(
         ),
         ElementOrder::Tet10 => StructuralFormulationRealization::new(
             StructuralOperatorImplementation::Tet10LinearElasticity,
-            Some(StructuralRecoveryImplementation::Tet10VolumeAverageStrain),
+            Some(StructuralRecoveryImplementation::Tet10IntegrationPointProjection),
         ),
     };
     formulations.insert(0, solid_formulation);

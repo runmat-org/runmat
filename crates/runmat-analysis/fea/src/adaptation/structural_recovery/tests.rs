@@ -221,3 +221,31 @@ fn tetrahedron10_volume_uses_curved_midside_geometry() {
     assert!((volume - 0.15).abs() < 1.0e-13);
     assert!((volume - 1.0 / 6.0).abs() > 1.0e-3);
 }
+
+#[test]
+fn tetrahedron10_integration_point_estimator_preserves_linear_recovery() {
+    let artifact = artifact(ElementOrder::Tet10);
+    let values = QUADRATURE
+        .iter()
+        .flat_map(|barycentric| {
+            let value = 2.0 * barycentric[0] - barycentric[1] + 0.5 * barycentric[3];
+            [value, 0.25 * value, 0.0, 0.0, 0.0, 0.0]
+        })
+        .collect::<Vec<_>>();
+    let stress = AnalysisField::host_f64(
+        FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRESS,
+        vec![1, 4, 6],
+        values,
+    );
+
+    let estimate = estimate_structural_recovery_error(
+        &artifact,
+        "elements",
+        &stress,
+        StructuralRecoveryEstimatorOptions::default(),
+    )
+    .unwrap();
+
+    assert!(estimate.total_error < 1.0e-13);
+    assert!(estimate.marked_element_identities.is_empty());
+}

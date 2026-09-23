@@ -1717,14 +1717,12 @@ fn single_tetrahedron_solver_mesh_with_order_for_model(
 #[test]
 fn tet10_linear_static_admits_its_assembled_recovery_contract() {
     let model = fixture_model(FixtureId::CantileverLinearStatic);
+    let mesh = single_tetrahedron_solver_mesh_with_order_for_model(&model, ElementOrder::Tet10);
     let result = crate::run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
         LinearStaticSolveOptions {
-            solver_mesh: Some(single_tetrahedron_solver_mesh_with_order_for_model(
-                &model,
-                ElementOrder::Tet10,
-            )),
+            solver_mesh: Some(mesh.clone()),
             require_solver_mesh_for_solid: true,
             ..experimental_linear_static_options()
         },
@@ -1738,7 +1736,7 @@ fn tet10_linear_static_admits_its_assembled_recovery_contract() {
             )
             && component.recovery
                 == runmat_analysis_core::RecoveryImplementation::Structural(
-                    runmat_analysis_core::StructuralRecoveryImplementation::Tet10VolumeAverageStrain,
+                    runmat_analysis_core::StructuralRecoveryImplementation::Tet10IntegrationPointProjection,
                 )
     }));
     assert!(result
@@ -1747,6 +1745,18 @@ fn tet10_linear_static_admits_its_assembled_recovery_contract() {
     assert!(result
         .field(FEA_FIELD_STRUCTURAL_STRESS)
         .is_some_and(|field| field.shape == vec![1, 6]));
+    let integration_point_stress = result
+        .field(crate::contracts::FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRESS)
+        .expect("Tet10 recovery must retain its four physical integration-point stresses");
+    assert_eq!(integration_point_stress.shape, vec![1, 4, 6]);
+    let estimate = crate::adaptation::estimate_structural_recovery_error(
+        &mesh,
+        "elements",
+        integration_point_stress,
+        crate::adaptation::StructuralRecoveryEstimatorOptions::default(),
+    )
+    .expect("the executed Tet10 field must be accepted by the recovery estimator");
+    assert_eq!(estimate.solver_artifact_digest, mesh.canonical_digest);
 }
 
 #[test]

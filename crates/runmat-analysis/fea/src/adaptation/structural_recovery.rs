@@ -6,11 +6,28 @@ use runmat_analysis_core::{AnalysisField, AnalysisFieldValues};
 use runmat_meshing_core::{ElementOrder, FieldTopologyLocation, SolverMeshArtifact, StableDigest};
 use serde::{Deserialize, Serialize};
 
-use crate::assembly::elements::solid::{Tetrahedron10ElementGeometry, Tetrahedron4ElementGeometry};
-use crate::contracts::FEA_FIELD_STRUCTURAL_STRESS;
+use crate::assembly::elements::solid::{
+    tetrahedron10::{extrapolate_quadrature_to_nodes, interpolate_nodal_samples, QUADRATURE},
+    Tetrahedron10ElementGeometry, Tetrahedron4ElementGeometry,
+};
+use crate::contracts::{
+    FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRESS, FEA_FIELD_STRUCTURAL_STRESS,
+};
 use crate::progress::is_cancelled;
 
 const STRESS_COMPONENT_COUNT: usize = 6;
+const INTEGRATION_POINT_COUNT: usize = 4;
+const RECOVERY_ROUNDOFF_RELATIVE_TOLERANCE: f64 = 128.0 * f64::EPSILON;
+
+enum ValidatedStress<'a> {
+    Element(&'a [f64]),
+    IntegrationPoint(&'a [f64]),
+}
+
+enum StressLayout {
+    Element,
+    IntegrationPoint,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -167,7 +184,18 @@ pub fn estimate_structural_recovery_error(
         .find(|topology| topology.topology_id == stress_topology_id)
         .filter(|topology| topology.location == FieldTopologyLocation::VolumeElement)
         .ok_or(StructuralRecoveryEstimatorError::MissingElementTopology)?;
-    let values = validate_stress(stress, topology.ordered_entity_ids.len())?;
+    let values = match validate_stress(stress, topology.ordered_entity_ids.len())? {
+        ValidatedStress::Element(values) => values,
+        ValidatedStress::IntegrationPoint(values) => {
+            return estimate_integration_point_recovery_error(
+                artifact,
+                stress_topology_id,
+                topology,
+                values,
+                options,
+            )
+        }
+    };
     let stress_by_element = topology
         .ordered_entity_ids
         .iter()
@@ -194,12 +222,14 @@ pub fn estimate_structural_recovery_error(
         checkpoint(&mut work, options)?;
         let volume = tetrahedron_volume(element, &coordinates)?;
         element_volumes.insert(element.element_id, volume);
-        let element_stress = stress_by_element[&element.element_id];
+        let element_stress = stress_by_element
+            .get(&element.element_id)
+            .ok_or(StructuralRecoveryEstimatorError::InvalidStressField)?;
         for node_id in &element.node_ids {
             let (sum, weight) = region_side_nodal_stress
                 .entry((*node_id, element.region_id.source_topology_id.clone()))
                 .or_insert(([0.0; STRESS_COMPONENT_COUNT], 0.0));
-            for (sum, value) in sum.iter_mut().zip(element_stress) {
+            for (sum, value) in sum.iter_mut().zip(*element_stress) {
                 *sum += volume * value;
             }
             *weight += volume;
@@ -211,18 +241,26 @@ pub fn estimate_structural_recovery_error(
         checkpoint(&mut work, options)?;
         let mut recovered = [0.0; STRESS_COMPONENT_COUNT];
         for node_id in &element.node_ids {
-            let (sum, weight) = &region_side_nodal_stress
-                [&(*node_id, element.region_id.source_topology_id.clone())];
+            let (sum, weight) = region_side_nodal_stress
+                .get(&(*node_id, element.region_id.source_topology_id.clone()))
+                .ok_or(StructuralRecoveryEstimatorError::InvalidElementGeometry)?;
+            if !weight.is_finite() || *weight <= 0.0 {
+                return Err(StructuralRecoveryEstimatorError::InvalidElementGeometry);
+            }
             for (recovered, sum) in recovered.iter_mut().zip(sum) {
                 *recovered += sum / weight / element.node_ids.len() as f64;
             }
         }
-        let error_squared = stress_by_element[&element.element_id]
+        let error_squared = stress_by_element
+            .get(&element.element_id)
+            .ok_or(StructuralRecoveryEstimatorError::InvalidStressField)?
             .iter()
             .zip(recovered)
             .map(|(value, recovered)| (value - recovered).powi(2))
             .sum::<f64>()
-            * element_volumes[&element.element_id];
+            * element_volumes
+                .get(&element.element_id)
+                .ok_or(StructuralRecoveryEstimatorError::InvalidElementGeometry)?;
         let error = error_squared.sqrt();
         if !error.is_finite() {
             return Err(StructuralRecoveryEstimatorError::InvalidStressField);
@@ -232,6 +270,20 @@ pub fn estimate_structural_recovery_error(
             error,
         });
     }
+    finish_estimate(
+        artifact.canonical_digest,
+        stress_topology_id,
+        indicators,
+        options,
+    )
+}
+
+fn finish_estimate(
+    solver_artifact_digest: StableDigest,
+    stress_topology_id: &str,
+    mut indicators: Vec<StructuralRecoveryIndicator>,
+    options: StructuralRecoveryEstimatorOptions,
+) -> Result<StructuralRecoveryEstimate, StructuralRecoveryEstimatorError> {
     indicators.sort_by_key(|indicator| indicator.element_stable_identity);
     let total_squared = indicators
         .iter()
@@ -259,7 +311,7 @@ pub fn estimate_structural_recovery_error(
         root_mean_square_error: (total_squared / count).sqrt(),
     };
     let estimate = StructuralRecoveryEstimate {
-        solver_artifact_digest: artifact.canonical_digest,
+        solver_artifact_digest,
         stress_topology_id: stress_topology_id.to_owned(),
         total_error: total_squared.sqrt(),
         indicators,
@@ -268,6 +320,174 @@ pub fn estimate_structural_recovery_error(
     };
     estimate.validate()?;
     Ok(estimate)
+}
+
+fn estimate_integration_point_recovery_error(
+    artifact: &SolverMeshArtifact,
+    stress_topology_id: &str,
+    topology: &runmat_meshing_core::FieldTopologyMap,
+    values: &[f64],
+    options: StructuralRecoveryEstimatorOptions,
+) -> Result<StructuralRecoveryEstimate, StructuralRecoveryEstimatorError> {
+    let samples_by_element = topology
+        .ordered_entity_ids
+        .iter()
+        .enumerate()
+        .map(|(index, element_id)| {
+            let offset = index * INTEGRATION_POINT_COUNT * STRESS_COMPONENT_COUNT;
+            let samples = std::array::from_fn(|point| {
+                std::array::from_fn(|component| {
+                    values[offset + point * STRESS_COMPONENT_COUNT + component]
+                })
+            });
+            (*element_id, samples)
+        })
+        .collect::<BTreeMap<_, _>>();
+    let coordinates = artifact
+        .topology
+        .nodes
+        .iter()
+        .map(|node| (node.node_id, node.coordinates_m))
+        .collect::<BTreeMap<_, _>>();
+    let mut region_side_nodal_stress =
+        BTreeMap::<(u64, String), ([f64; STRESS_COMPONENT_COUNT], f64)>::new();
+    let mut work = 0_u64;
+    for element in &artifact.topology.volume_elements {
+        checkpoint(&mut work, options)?;
+        let samples = samples_by_element
+            .get(&element.element_id)
+            .ok_or(StructuralRecoveryEstimatorError::InvalidStressField)?;
+        let volume = tetrahedron_volume(element, &coordinates)?;
+        let nodal = match element.order {
+            ElementOrder::Tet4 => {
+                let average = std::array::from_fn(|component| {
+                    samples.iter().map(|sample| sample[component]).sum::<f64>()
+                        / INTEGRATION_POINT_COUNT as f64
+                });
+                vec![average; 4]
+            }
+            ElementOrder::Tet10 => extrapolate_quadrature_to_nodes(*samples).to_vec(),
+        };
+        if nodal.len() != element.node_ids.len() {
+            return Err(StructuralRecoveryEstimatorError::InvalidElementGeometry);
+        }
+        for (&node_id, value) in element.node_ids.iter().zip(nodal) {
+            let (sum, weight) = region_side_nodal_stress
+                .entry((node_id, element.region_id.source_topology_id.clone()))
+                .or_insert(([0.0; STRESS_COMPONENT_COUNT], 0.0));
+            for (sum, value) in sum.iter_mut().zip(value) {
+                *sum += volume * value;
+            }
+            *weight += volume;
+        }
+    }
+
+    let mut indicators = Vec::with_capacity(artifact.topology.volume_elements.len());
+    for element in &artifact.topology.volume_elements {
+        checkpoint(&mut work, options)?;
+        let samples = samples_by_element
+            .get(&element.element_id)
+            .ok_or(StructuralRecoveryEstimatorError::InvalidStressField)?;
+        let nodal = element
+            .node_ids
+            .iter()
+            .map(|node_id| {
+                let (sum, weight) = region_side_nodal_stress
+                    .get(&(*node_id, element.region_id.source_topology_id.clone()))
+                    .ok_or(StructuralRecoveryEstimatorError::InvalidElementGeometry)?;
+                if !weight.is_finite() || *weight <= 0.0 {
+                    return Err(StructuralRecoveryEstimatorError::InvalidElementGeometry);
+                }
+                Ok(sum.map(|value| value / weight))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let (error_squared, reference_squared) = match element.order {
+            ElementOrder::Tet4 => {
+                if nodal.len() != 4 {
+                    return Err(StructuralRecoveryEstimatorError::InvalidElementGeometry);
+                }
+                let volume = tetrahedron_volume(element, &coordinates)?;
+                let error = QUADRATURE
+                    .iter()
+                    .zip(samples)
+                    .map(|(barycentric, sample)| {
+                        let recovered =
+                            std::array::from_fn::<_, STRESS_COMPONENT_COUNT, _>(|component| {
+                                (0..4)
+                                    .map(|node| barycentric[node] * nodal[node][component])
+                                    .sum::<f64>()
+                            });
+                        sample
+                            .iter()
+                            .zip(recovered)
+                            .map(|(value, recovered)| (value - recovered).powi(2))
+                            .sum::<f64>()
+                            * volume
+                            / INTEGRATION_POINT_COUNT as f64
+                    })
+                    .sum::<f64>();
+                let reference = samples
+                    .iter()
+                    .flat_map(|sample| sample.iter())
+                    .map(|value| value * value)
+                    .sum::<f64>()
+                    * volume
+                    / INTEGRATION_POINT_COUNT as f64;
+                (error, reference)
+            }
+            ElementOrder::Tet10 => {
+                let geometry = Tetrahedron10ElementGeometry {
+                    nodes_m: element_coordinates::<10>(element, &coordinates)?,
+                };
+                let nodal: [[f64; STRESS_COMPONENT_COUNT]; 10] = nodal
+                    .try_into()
+                    .map_err(|_| StructuralRecoveryEstimatorError::InvalidElementGeometry)?;
+                let integration = geometry
+                    .quadrature_integration_data()
+                    .map_err(|_| StructuralRecoveryEstimatorError::InvalidElementGeometry)?;
+                let error = integration
+                    .iter()
+                    .zip(samples)
+                    .map(|((barycentric, weight), sample)| {
+                        let recovered = interpolate_nodal_samples(nodal, *barycentric);
+                        sample
+                            .iter()
+                            .zip(recovered)
+                            .map(|(value, recovered)| (value - recovered).powi(2))
+                            .sum::<f64>()
+                            * weight
+                    })
+                    .sum::<f64>();
+                let reference = integration
+                    .iter()
+                    .zip(samples)
+                    .map(|((_, weight), sample)| {
+                        sample.iter().map(|value| value * value).sum::<f64>() * weight
+                    })
+                    .sum::<f64>();
+                (error, reference)
+            }
+        };
+        let noise_floor = RECOVERY_ROUNDOFF_RELATIVE_TOLERANCE.powi(2) * reference_squared;
+        let error = if error_squared <= noise_floor {
+            0.0
+        } else {
+            error_squared.sqrt()
+        };
+        if !error.is_finite() {
+            return Err(StructuralRecoveryEstimatorError::InvalidStressField);
+        }
+        indicators.push(StructuralRecoveryIndicator {
+            element_stable_identity: element.stable_identity,
+            error,
+        });
+    }
+    finish_estimate(
+        artifact.canonical_digest,
+        stress_topology_id,
+        indicators,
+        options,
+    )
 }
 
 fn validate_options(
@@ -287,18 +507,32 @@ fn validate_options(
 fn validate_stress(
     stress: &AnalysisField,
     element_count: usize,
-) -> Result<&[f64], StructuralRecoveryEstimatorError> {
-    if stress.field_id != FEA_FIELD_STRUCTURAL_STRESS
-        || stress.shape != [element_count, STRESS_COMPONENT_COUNT]
+) -> Result<ValidatedStress<'_>, StructuralRecoveryEstimatorError> {
+    let kind = if stress.field_id == FEA_FIELD_STRUCTURAL_STRESS
+        && stress.shape == [element_count, STRESS_COMPONENT_COUNT]
     {
+        StressLayout::Element
+    } else if stress.field_id == FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRESS
+        && stress.shape
+            == [
+                element_count,
+                INTEGRATION_POINT_COUNT,
+                STRESS_COMPONENT_COUNT,
+            ]
+    {
+        StressLayout::IntegrationPoint
+    } else {
         return Err(StructuralRecoveryEstimatorError::InvalidStressField);
-    }
+    };
     match &stress.values {
         AnalysisFieldValues::HostF64(values)
-            if values.len() == element_count * STRESS_COMPONENT_COUNT
+            if values.len() == stress.shape.iter().product::<usize>()
                 && values.iter().all(|value| value.is_finite()) =>
         {
-            Ok(values)
+            Ok(match kind {
+                StressLayout::Element => ValidatedStress::Element(values),
+                StressLayout::IntegrationPoint => ValidatedStress::IntegrationPoint(values),
+            })
         }
         AnalysisFieldValues::HostF64(_) => {
             Err(StructuralRecoveryEstimatorError::InvalidStressField)

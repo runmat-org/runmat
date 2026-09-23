@@ -23,6 +23,10 @@ pub const FEA_FIELD_STRUCTURAL_VON_MISES: &str = "structural.von_mises";
 pub const FEA_FIELD_STRUCTURAL_NODAL_VON_MISES: &str = "structural.nodal_von_mises";
 pub const FEA_FIELD_STRUCTURAL_STRAIN: &str = "structural.strain";
 pub const FEA_FIELD_STRUCTURAL_STRESS: &str = "structural.stress";
+pub const FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRAIN: &str =
+    "structural.integration_point_strain";
+pub const FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRESS: &str =
+    "structural.integration_point_stress";
 pub const FEA_FIELD_STRUCTURAL_REACTION_FORCE: &str = "structural.reaction_force";
 pub const FEA_FIELD_STRUCTURAL_REACTION_MOMENT: &str = "structural.reaction_moment";
 pub const FEA_FIELD_STRUCTURAL_CONSTRAINT_REACTION_FORCE: &str =

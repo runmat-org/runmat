@@ -13,6 +13,15 @@ pub(super) struct SolidRecoveredFields {
     pub strain: Vec<f64>,
     pub stress: Vec<f64>,
     pub strain_energy_density: Vec<f64>,
+    pub integration_point_strain: Vec<f64>,
+    pub integration_point_stress: Vec<f64>,
+}
+
+const RECOVERY_POINT_COUNT: usize = 4;
+
+struct ElementRecoveryPoints {
+    strain: [[f64; COMPONENT_COUNT]; RECOVERY_POINT_COUNT],
+    integration_weight_m3: [f64; RECOVERY_POINT_COUNT],
 }
 
 pub(super) fn recover_solid_fields(
@@ -22,16 +31,59 @@ pub(super) fn recover_solid_fields(
     let mut strain = Vec::with_capacity(elements.len() * COMPONENT_COUNT);
     let mut stress = Vec::with_capacity(elements.len() * COMPONENT_COUNT);
     let mut strain_energy_density = Vec::with_capacity(elements.len());
+    let mut integration_point_strain =
+        Vec::with_capacity(elements.len() * RECOVERY_POINT_COUNT * COMPONENT_COUNT);
+    let mut integration_point_stress =
+        Vec::with_capacity(elements.len() * RECOVERY_POINT_COUNT * COMPONENT_COUNT);
     for element in elements {
-        let element_strain = recover_element_strain(element, displacement)?;
-        let element_stress = recover_element_stress(element, element_strain)?;
-        let energy = 0.5
-            * element_strain
+        let recovered = recover_element_strain(element, displacement)?;
+        let point_stress = recovered
+            .strain
+            .map(|point_strain| recover_element_stress(element, point_strain))
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()?;
+        let volume = recovered.integration_weight_m3.iter().sum::<f64>();
+        if !volume.is_finite() || volume <= 0.0 {
+            return Err(StructuralFieldRecoveryError::NonFiniteResult {
+                element_id: element.element_id.clone(),
+            });
+        }
+        let element_strain = std::array::from_fn::<_, COMPONENT_COUNT, _>(|component| {
+            recovered
+                .strain
                 .iter()
-                .zip(element_stress)
-                .map(|(strain, stress)| strain * stress)
-                .sum::<f64>();
-        if !energy.is_finite() {
+                .zip(recovered.integration_weight_m3)
+                .map(|(value, weight)| value[component] * weight)
+                .sum::<f64>()
+                / volume
+        });
+        let element_stress = std::array::from_fn::<_, COMPONENT_COUNT, _>(|component| {
+            point_stress
+                .iter()
+                .zip(recovered.integration_weight_m3)
+                .map(|(value, weight)| value[component] * weight)
+                .sum::<f64>()
+                / volume
+        });
+        let energy = recovered
+            .strain
+            .iter()
+            .zip(&point_stress)
+            .zip(recovered.integration_weight_m3)
+            .map(|((point_strain, point_stress), weight)| {
+                0.5 * weight
+                    * point_strain
+                        .iter()
+                        .zip(point_stress)
+                        .map(|(strain, stress)| strain * stress)
+                        .sum::<f64>()
+            })
+            .sum::<f64>()
+            / volume;
+        if !energy.is_finite()
+            || element_strain.iter().any(|value| !value.is_finite())
+            || element_stress.iter().any(|value| !value.is_finite())
+        {
             return Err(StructuralFieldRecoveryError::NonFiniteResult {
                 element_id: element.element_id.clone(),
             });
@@ -39,18 +91,22 @@ pub(super) fn recover_solid_fields(
         strain.extend(element_strain);
         stress.extend(element_stress);
         strain_energy_density.push(energy);
+        integration_point_strain.extend(recovered.strain.into_iter().flatten());
+        integration_point_stress.extend(point_stress.into_iter().flatten());
     }
     Ok(SolidRecoveredFields {
         strain,
         stress,
         strain_energy_density,
+        integration_point_strain,
+        integration_point_stress,
     })
 }
 
 fn recover_element_strain(
     element: &SolidRecoveryElementSummary,
     displacement: &[f64],
-) -> Result<[f64; COMPONENT_COUNT], StructuralFieldRecoveryError> {
+) -> Result<ElementRecoveryPoints, StructuralFieldRecoveryError> {
     match &element.geometry {
         SolidRecoveryGeometry::Tetrahedron4 {
             node_indices,
@@ -64,13 +120,25 @@ fn recover_element_strain(
                 element_id: element.element_id.clone(),
                 source,
             })?;
-            Ok(std::array::from_fn(|component| {
+            let strain = std::array::from_fn(|component| {
                 b[component]
                     .iter()
                     .zip(element_displacement)
                     .map(|(shape, value)| shape * value)
                     .sum()
-            }))
+            });
+            let volume = Tetrahedron4ElementGeometry {
+                nodes_m: *coordinates_m,
+            }
+            .volume_m3()
+            .map_err(|source| StructuralFieldRecoveryError::Tetrahedron4 {
+                element_id: element.element_id.clone(),
+                source,
+            })?;
+            Ok(ElementRecoveryPoints {
+                strain: [strain; RECOVERY_POINT_COUNT],
+                integration_weight_m3: [volume / RECOVERY_POINT_COUNT as f64; RECOVERY_POINT_COUNT],
+            })
         }
         SolidRecoveryGeometry::Tetrahedron10 {
             node_indices,
@@ -78,7 +146,11 @@ fn recover_element_strain(
         } => Tetrahedron10ElementGeometry {
             nodes_m: *coordinates_m,
         }
-        .volume_average_strain(gather_displacement::<10, 30>(node_indices, displacement)?)
+        .quadrature_strain(gather_displacement::<10, 30>(node_indices, displacement)?)
+        .map(|points| ElementRecoveryPoints {
+            strain: points.map(|point| point.strain),
+            integration_weight_m3: points.map(|point| point.integration_weight_m3),
+        })
         .map_err(|source| StructuralFieldRecoveryError::Tetrahedron10 {
             element_id: element.element_id.clone(),
             source,
@@ -179,6 +251,73 @@ mod tests {
         assert_eq!(&recovered.strain[..6], &recovered.strain[6..]);
         for (soft, hard) in recovered.stress[..6].iter().zip(&recovered.stress[6..]) {
             assert!((*hard - 2.0 * soft).abs() <= 1.0e-14);
+        }
+        let (soft_points, hard_points) = recovered.integration_point_stress.split_at(4 * 6);
+        for (soft, hard) in soft_points.iter().zip(hard_points) {
+            assert!((*hard - 2.0 * soft).abs() <= 1.0e-14);
+        }
+        assert!(
+            (recovered.strain_energy_density[1] - 2.0 * recovered.strain_energy_density[0]).abs()
+                <= 1.0e-14
+        );
+    }
+
+    #[test]
+    fn tetrahedron10_recovery_uses_assigned_material_at_every_integration_point() {
+        let corners = [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ];
+        let midpoint = |left: [f64; 3], right: [f64; 3]| {
+            std::array::from_fn(|axis| 0.5 * (left[axis] + right[axis]))
+        };
+        let coordinates_m = [
+            corners[0],
+            corners[1],
+            corners[2],
+            corners[3],
+            midpoint(corners[0], corners[1]),
+            midpoint(corners[1], corners[2]),
+            midpoint(corners[2], corners[0]),
+            midpoint(corners[0], corners[3]),
+            midpoint(corners[1], corners[3]),
+            midpoint(corners[2], corners[3]),
+        ];
+        let material = |youngs_modulus_pa| SolidMaterial {
+            youngs_modulus_pa,
+            poisson_ratio: 0.25,
+            density_kg_per_m3: 1.0,
+        };
+        let geometry = SolidRecoveryGeometry::Tetrahedron10 {
+            node_indices: std::array::from_fn(|index| index),
+            coordinates_m,
+        };
+        let elements = [
+            SolidRecoveryElementSummary {
+                element_id: "soft".into(),
+                region_id: "soft-region".into(),
+                material: material(10.0),
+                geometry: geometry.clone(),
+            },
+            SolidRecoveryElementSummary {
+                element_id: "hard".into(),
+                region_id: "hard-region".into(),
+                material: material(30.0),
+                geometry,
+            },
+        ];
+        let displacement = coordinates_m
+            .into_iter()
+            .flat_map(|coordinate| [coordinate[0].powi(2), 0.0, 0.0])
+            .collect::<Vec<_>>();
+
+        let recovered = recover_solid_fields(&elements, &displacement).unwrap();
+
+        let (soft, hard) = recovered.integration_point_stress.split_at(4 * 6);
+        for (soft, hard) in soft.iter().zip(hard) {
+            assert!((*hard - 3.0 * soft).abs() <= 1.0e-13);
         }
     }
 }
