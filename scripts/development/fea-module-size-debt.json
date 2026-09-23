@@ -53,6 +53,5 @@
   "crates/runmat-analysis/core/src/validate_authored.rs": 683,
   "crates/runmat-analysis/fea/src/execution/observation_partition.rs": 679,
   "crates/runmat-analysis/fea/src/contracts/solver_compatibility.rs": 674,
-  "crates/runmat-analysis/core/src/validate_signals.rs": 669,
-  "crates/runmat-analysis/fea/src/planning/resource/response_spectrum.rs": 667
+  "crates/runmat-analysis/core/src/validate_signals.rs": 669
 }
