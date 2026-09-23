@@ -73,6 +73,7 @@ pub enum RecoveredFieldEntityDomain {
     SolidElements,
     BeamElements,
     ShellElements,
+    Connectors,
     ConstraintGroups,
 }
 
@@ -94,6 +95,7 @@ pub struct RecoveredFieldEntityCounts {
     pub solid_elements: usize,
     pub beam_elements: usize,
     pub shell_elements: usize,
+    pub connectors: usize,
     pub constraint_groups: usize,
 }
 
@@ -104,6 +106,7 @@ impl RecoveredFieldEntityCounts {
             RecoveredFieldEntityDomain::SolidElements => self.solid_elements,
             RecoveredFieldEntityDomain::BeamElements => self.beam_elements,
             RecoveredFieldEntityDomain::ShellElements => self.shell_elements,
+            RecoveredFieldEntityDomain::Connectors => self.connectors,
             RecoveredFieldEntityDomain::ConstraintGroups => self.constraint_groups,
         }
     }
@@ -364,6 +367,9 @@ impl RecoveredFieldDefinition {
             ) | (
                 FieldLocation::Element,
                 RecoveredFieldEntityDomain::ShellElements
+            ) | (
+                FieldLocation::Connector,
+                RecoveredFieldEntityDomain::Connectors
             ) | (
                 FieldLocation::Constraint,
                 RecoveredFieldEntityDomain::ConstraintGroups

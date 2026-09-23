@@ -365,6 +365,19 @@ fn validate_plan_targets(
                     ));
                 }
             }
+            ResolvedObservationTarget::Connectors {
+                indices,
+                identities,
+            } => {
+                if indices.len() != 1
+                    || identities.len() != 1
+                    || identities[0] == runmat_meshing_core::StableDigest::ZERO
+                {
+                    return Err(ObservationError::Identity(
+                        "resolved connector target identity is invalid",
+                    ));
+                }
+            }
         }
     }
     Ok(())

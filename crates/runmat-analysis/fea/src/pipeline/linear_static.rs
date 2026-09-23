@@ -33,15 +33,12 @@ use crate::{
             recover_result_fields, structural_field_recovery_metrics,
             take_structural_observable_fields,
         },
-        recover_constraint_group_observable_fields,
+        recover_connector_observable_fields, recover_constraint_group_observable_fields,
     },
     progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
     results::{
         field::{RecoveredFieldCatalog, StructuralRecoveredFieldTopology},
-        observation::{
-            evaluate_structural_observations, resolve_structural_observation_plan,
-            ObservationLimits,
-        },
+        observation::{evaluate_structural_observations, ObservationLimits},
     },
     solve::{
         backend::build_backend, linear::solve_linear_system, recover_structural_static_balance,
@@ -334,9 +331,14 @@ fn run_linear_static_with_constraint_plan(
             recover_constraint_group_observable_fields(&structural_constraint_result)
                 .map_err(|error| FeaRunError::Observation(error.to_string()))?,
         );
+        recovered.extend(
+            recover_connector_observable_fields(&structural_connector_result)
+                .map_err(|error| FeaRunError::Observation(error.to_string()))?,
+        );
         let mut topology = StructuralRecoveredFieldTopology::derive(model, mesh)
             .map_err(|error| FeaRunError::Observation(error.to_string()))?;
         topology.entity_counts.constraint_groups = structural_constraint_result.groups.len();
+        topology.entity_counts.connectors = structural_connector_result.responses.len();
         let catalog = RecoveredFieldCatalog::new_for_topology(
             topology.identity.discretization_digest(),
             topology.entity_counts,
@@ -348,15 +350,17 @@ fn run_linear_static_with_constraint_plan(
             .iter()
             .map(|field| field.definition().clone())
             .collect::<Vec<_>>();
-        let plan = resolve_structural_observation_plan(
-            execution_step,
-            model,
-            mesh,
-            executed_constraint_plan,
-            &definitions,
-            ObservationLimits::default(),
-        )
-        .map_err(|error| FeaRunError::Observation(error.to_string()))?;
+        let plan =
+            crate::results::observation::resolve_structural_observation_plan_with_connectors(
+                execution_step,
+                model,
+                mesh,
+                executed_constraint_plan,
+                &structural_connector_result.plan,
+                &definitions,
+                ObservationLimits::default(),
+            )
+            .map_err(|error| FeaRunError::Observation(error.to_string()))?;
         let observations = evaluate_structural_observations(&plan, model, mesh, &catalog)
             .map_err(|error| FeaRunError::Observation(error.to_string()))?;
         fields.extend(

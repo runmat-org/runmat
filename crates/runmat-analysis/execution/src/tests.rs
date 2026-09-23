@@ -1740,6 +1740,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
             solid_elements: projection.elements.len(),
             beam_elements: 0,
             shell_elements: 0,
+            connectors: 0,
             constraint_groups: constraint_result.groups.len(),
         },
         recovered_fields,

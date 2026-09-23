@@ -57,7 +57,10 @@ pub use partition::{
     DEFAULT_MAXIMUM_OBSERVATION_PARTITIONS,
 };
 pub use publish::publish_observation;
-pub use resolve::{resolve_observation_plan, resolve_structural_observation_plan};
+pub use resolve::{
+    resolve_observation_plan, resolve_structural_observation_plan,
+    resolve_structural_observation_plan_with_connectors,
+};
 pub(crate) use topology::StructuralObservationTopology;
 
 #[cfg(test)]

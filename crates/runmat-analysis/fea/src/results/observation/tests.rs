@@ -16,6 +16,9 @@ use runmat_meshing_core::{
 };
 
 use crate::{
+    connectors::{
+        CanonicalConnectorEntry, CanonicalConnectorNode, CanonicalStructuralConnectorPlan,
+    },
     execution::{
         AccuracyIdentity, AnalysisResultIdentity, AnalysisWorkKind, AnalysisWorkloadIdentity,
         ConstraintPlanIdentity, DiscretizationIdentity, ExecutionPlanIdentity,
@@ -261,6 +264,7 @@ fn constraint_reaction_resultant_uses_canonical_group_ownership() {
             solid_elements: mesh.topology.volume_elements.len(),
             beam_elements: 0,
             shell_elements: 0,
+            connectors: 0,
             constraint_groups: 1,
         },
         vec![force_field, moment_field],
@@ -290,6 +294,169 @@ fn constraint_reaction_resultant_uses_canonical_group_ownership() {
         Some(&mesh),
         &constraint_plan,
         &crate::post::fields::structural_observable_field_definitions().unwrap(),
+        ObservationLimits::default(),
+    )
+    .is_err());
+}
+
+#[test]
+fn connector_observation_binds_exact_identity_and_partition_source() {
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    let mut mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+    for face in &mut mesh.topology.boundary_faces {
+        face.provenance.push(PersistentEntityId {
+            kind: PersistentEntityKind::Face,
+            source_topology_id: "root".into(),
+            assembly_path: vec!["root".into()],
+        });
+        face.provenance.sort();
+    }
+    mesh.canonical_digest = StableDigest::ZERO;
+    mesh.seal_canonical_digest().unwrap();
+    let constraint_plan = crate::constraints::CanonicalStructuralConstraintPlan::compile_for_model(
+        &model,
+        Some(&mesh),
+    )
+    .unwrap();
+    let source_digest = Digest::sha256(b"connector-source");
+    let connector_plan = CanonicalStructuralConnectorPlan::new(
+        constraint_plan.topology,
+        mesh.topology.nodes.len(),
+        Digest::sha256(b"authored-connectors"),
+        vec![CanonicalConnectorEntry::IsotropicGroundSpring {
+            connector_id: "mount".into(),
+            source_digest,
+            target: CanonicalConnectorNode {
+                node_index: 0,
+                node_identity: mesh.topology.nodes[0].stable_identity,
+            },
+            stiffness_newtons_per_meter: 1_000.0,
+        }],
+    )
+    .unwrap();
+    let definition = RecoveredFieldDefinition::new(
+        crate::contracts::FEA_FIELD_STRUCTURAL_CONNECTOR_FORCE,
+        ObservationQuantity::ReactionForce,
+        FieldLocation::Connector,
+        RecoveredFieldEntityDomain::Connectors,
+        ObservationValueShape::Vector3,
+        RecoveredFieldNumericRepresentation::Real,
+    )
+    .unwrap();
+    let mut request = spec(
+        "mount-force",
+        ObservationTarget::Connector {
+            connector_id: "mount".into(),
+        },
+    );
+    request.quantity = ObservationQuantity::ReactionForce;
+    request.value_shape = ObservationValueShape::Vector3;
+    request.source_location = FieldLocation::Connector;
+    request.output_location = FieldLocation::Connector;
+    model.sequence.steps[0].observations = vec![ObservationRequest::Probe(request)];
+
+    let plan = resolve_structural_observation_plan_with_connectors(
+        &model.sequence.steps[0],
+        &model,
+        Some(&mesh),
+        &constraint_plan,
+        &connector_plan,
+        std::slice::from_ref(&definition),
+        ObservationLimits::default(),
+    )
+    .unwrap();
+    let connector_identity = StableDigest::from_bytes(*source_digest.bytes());
+    assert!(matches!(
+        &plan.observations[0].target,
+        ResolvedObservationTarget::Connectors { indices, identities }
+            if indices == &[0] && identities == &[connector_identity]
+    ));
+    let field = RecoveredField::new(
+        definition,
+        RecoveredFieldSample::Final,
+        runmat_analysis_core::AnalysisField::host_f64(
+            crate::contracts::FEA_FIELD_STRUCTURAL_CONNECTOR_FORCE,
+            vec![1, 3],
+            vec![10.0, -20.0, 30.0],
+        ),
+    )
+    .unwrap();
+    let catalog = RecoveredFieldCatalog::new_for_topology(
+        plan.topology_digest,
+        RecoveredFieldEntityCounts {
+            structural_nodes: mesh.topology.nodes.len(),
+            solid_elements: mesh.topology.volume_elements.len(),
+            beam_elements: 0,
+            shell_elements: 0,
+            connectors: 1,
+            constraint_groups: constraint_plan.groups.len(),
+        },
+        vec![field.clone()],
+    )
+    .unwrap();
+    let results = evaluate_structural_observations(&plan, &model, Some(&mesh), &catalog).unwrap();
+    assert_eq!(
+        results[0].field.as_host_f64().unwrap(),
+        &[10.0, -20.0, 30.0]
+    );
+    assert_eq!(
+        results[0].entities,
+        vec![ObservationEntity::Connector(connector_identity)]
+    );
+
+    let partition_plan = ObservationPartitionPlan::derive(
+        &plan,
+        &ObservationId("mount-force".into()),
+        ObservationExecutionPolicy::serial(),
+    )
+    .unwrap();
+    assert_eq!(
+        structural_observation_partition_source_indices(
+            &plan,
+            &partition_plan,
+            &partition_plan.partitions[0],
+            &model,
+            Some(&mesh),
+        )
+        .unwrap(),
+        vec![0]
+    );
+    let partition = prepare_structural_observation_field_partition(
+        &plan,
+        &partition_plan,
+        &partition_plan.partitions[0],
+        &model,
+        Some(&mesh),
+        &field,
+    )
+    .unwrap();
+    let contribution = evaluate_structural_observation_partition(
+        &plan,
+        &partition_plan,
+        &partition_plan.partitions[0],
+        &model,
+        Some(&mesh),
+        &partition,
+        None,
+    )
+    .unwrap();
+    let partitioned =
+        reduce_observation_partitions(&plan, &partition_plan, vec![contribution]).unwrap();
+    assert_eq!(partitioned.logical_identity, results[0].logical_identity);
+
+    model.sequence.steps[0].observations[0]
+        .spec_mut()
+        .unwrap()
+        .target = ObservationTarget::Connector {
+        connector_id: "missing".into(),
+    };
+    assert!(resolve_structural_observation_plan_with_connectors(
+        &model.sequence.steps[0],
+        &model,
+        Some(&mesh),
+        &constraint_plan,
+        &connector_plan,
+        std::slice::from_ref(&field.definition().clone()),
         ObservationLimits::default(),
     )
     .is_err());
@@ -1606,6 +1773,7 @@ fn observation_assembly_requires_the_exact_subset_scheduled_at_one_frequency() {
             solid_elements: projection.elements.len(),
             beam_elements: 0,
             shell_elements: 0,
+            connectors: 0,
             constraint_groups: 0,
         },
         vec![source_field.clone()],
@@ -1971,6 +2139,7 @@ fn explicit_structural_nodes_resolve_and_evaluate_without_a_solver_mesh() {
             solid_elements: 0,
             beam_elements: beam_count,
             shell_elements: shell_count,
+            connectors: 0,
             constraint_groups: 0,
         },
         vec![field],

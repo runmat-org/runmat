@@ -43,6 +43,11 @@ pub fn publish_observation(
                 source_element: sample.source_element_identity,
             })
             .collect(),
+        ResolvedObservationTarget::Connectors { identities, .. } => identities
+            .iter()
+            .copied()
+            .map(ObservationEntity::Connector)
+            .collect(),
         ResolvedObservationTarget::Volume { .. }
         | ResolvedObservationTarget::Boundary { .. }
         | ResolvedObservationTarget::ConstraintGroups { .. } => Vec::new(),

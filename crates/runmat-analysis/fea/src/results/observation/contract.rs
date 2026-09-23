@@ -89,6 +89,7 @@ impl Default for ObservationLimits {
 pub enum ObservationEntity {
     Node(StableDigest),
     Element(StableDigest),
+    Connector(StableDigest),
     Point {
         identity: StableDigest,
         ordinal: u64,
@@ -120,6 +121,10 @@ pub enum ResolvedObservationTarget {
         face_indices: Vec<usize>,
         face_identities: Vec<StableDigest>,
     },
+    Connectors {
+        indices: Vec<usize>,
+        identities: Vec<StableDigest>,
+    },
     ConstraintGroups {
         indices: Vec<usize>,
         identities: Vec<StableDigest>,
@@ -135,6 +140,7 @@ impl ResolvedObservationTarget {
                 element_indices, ..
             } => element_indices.len(),
             Self::Boundary { face_indices, .. } => face_indices.len(),
+            Self::Connectors { indices, .. } => indices.len(),
             Self::ConstraintGroups { indices, .. } => indices.len(),
         }
     }
@@ -355,6 +361,7 @@ impl ObservationResult {
             let (location, identity) = match entity {
                 ObservationEntity::Node(identity) => (FieldLocation::Node, identity),
                 ObservationEntity::Element(identity) => (FieldLocation::Element, identity),
+                ObservationEntity::Connector(identity) => (FieldLocation::Connector, identity),
                 ObservationEntity::Point {
                     identity,
                     position_m,
@@ -1025,6 +1032,32 @@ fn validate_resolved_observation(
             {
                 return Err(ObservationError::Invalid(
                     "resolved constraint target is not one canonical reaction-result group".into(),
+                ));
+            }
+        }
+        ResolvedObservationTarget::Connectors {
+            indices,
+            identities,
+        } => {
+            let reduction_is_valid = observation.spec.reduction.as_ref().is_none_or(|reduction| {
+                matches!(
+                    (observation.spec.quantity, reduction.spatial),
+                    (
+                        runmat_analysis_core::ObservationQuantity::ReactionForce,
+                        SpatialReduction::Resultant
+                    )
+                )
+            });
+            if observation.spec.source_location != FieldLocation::Connector
+                || observation.spec.output_location != FieldLocation::Connector
+                || observation.source_entity_domain != RecoveredFieldEntityDomain::Connectors
+                || !reduction_is_valid
+                || indices.len() != 1
+                || identities.len() != 1
+                || identities[0] == StableDigest::ZERO
+            {
+                return Err(ObservationError::Invalid(
+                    "resolved connector target is not one canonical connector".into(),
                 ));
             }
         }

@@ -218,6 +218,7 @@ fn structural_entity_domain(
     use ObservationQuantity as Quantity;
     let domain = match location {
         FieldLocation::Node => RecoveredFieldEntityDomain::StructuralNodes,
+        FieldLocation::Connector => RecoveredFieldEntityDomain::Connectors,
         FieldLocation::Constraint => RecoveredFieldEntityDomain::ConstraintGroups,
         FieldLocation::Element => match quantity {
             Quantity::BeamAxialForce

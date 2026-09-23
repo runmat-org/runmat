@@ -1120,6 +1120,34 @@ fn grounded_explicit_spring_changes_the_completed_physical_solution() {
             stiffness: runmat_analysis_core::Stiffness::new(1.0e6),
         },
     }];
+    supported_model.sequence.steps[0].observations =
+        vec![runmat_analysis_core::ObservationRequest::Probe(
+            runmat_analysis_core::ObservationSpec {
+                observation_id: runmat_analysis_core::ObservationId("tip_support_force".into()),
+                quantity: runmat_analysis_core::ObservationQuantity::ReactionForce,
+                value_shape: runmat_analysis_core::ObservationValueShape::Vector3,
+                target: runmat_analysis_core::ObservationTarget::Connector {
+                    connector_id: "tip_support_spring".into(),
+                },
+                source_location: runmat_analysis_core::FieldLocation::Connector,
+                output_location: runmat_analysis_core::FieldLocation::Connector,
+                recovery: runmat_analysis_core::RecoveryPolicy::Native,
+                component: runmat_analysis_core::ObservationComponent::All,
+                frame: runmat_analysis_core::CoordinateFrame::Global,
+                sign_convention: runmat_analysis_core::SignConvention::Native,
+                complex_representation: runmat_analysis_core::ComplexRepresentation::Real,
+                sampling: runmat_analysis_core::SamplingPolicy::Final,
+                reduction: None,
+                storage: runmat_analysis_core::ObservationStoragePolicy {
+                    precision: runmat_analysis_core::SignalPrecision::Real64,
+                    compression: runmat_analysis_core::CompressionPolicy::Lossless,
+                    retention: runmat_analysis_core::RetentionPolicy::Canonical,
+                    partial_access: runmat_analysis_core::PartialAccessPolicy::ManifestAndChunks,
+                },
+                purpose: runmat_analysis_core::ObservationPurpose::Publication,
+                cost: runmat_analysis_core::ObservationCostPolicy::Automatic,
+            },
+        )];
     let supported = crate::run_linear_static_with_options(
         &supported_model,
         ComputeBackend::Cpu,
@@ -1132,6 +1160,20 @@ fn grounded_explicit_spring_changes_the_completed_physical_solution() {
     assert!(
         supported_displacement < baseline_displacement,
         "supported={supported_displacement} baseline={baseline_displacement}"
+    );
+    let connector_result = supported
+        .structural_connector_result
+        .as_ref()
+        .expect("the executed connector plan must publish physical response");
+    let expected_force = connector_result.responses[0].resultant_force_newtons();
+    let observation = supported
+        .observations
+        .first()
+        .expect("the exact connector observation must be published");
+    assert_eq!(observation.observation_id.0, "tip_support_force");
+    assert_eq!(
+        observation.field.as_host_f64().unwrap(),
+        expected_force.as_slice()
     );
 }
 

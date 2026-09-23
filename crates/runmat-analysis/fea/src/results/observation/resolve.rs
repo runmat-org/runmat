@@ -11,6 +11,7 @@ use runmat_execution::Digest;
 use runmat_meshing_core::{SolverMeshArtifact, StableDigest};
 
 use crate::{
+    connectors::CanonicalStructuralConnectorPlan,
     constraints::CanonicalStructuralConstraintPlan,
     results::field::{
         RecoveredFieldDefinition, RecoveredFieldDerivation, RecoveredFieldEntityDomain,
@@ -36,7 +37,7 @@ pub fn resolve_observation_plan(
     limits: ObservationLimits,
 ) -> Result<ResolvedObservationPlan, ObservationError> {
     let topology = StructuralObservationTopology::from_projection(projection);
-    resolve_observation_plan_for_topology(step, &topology, None, fields, limits)
+    resolve_observation_plan_for_topology(step, &topology, None, None, fields, limits)
 }
 
 pub fn resolve_structural_observation_plan(
@@ -44,6 +45,30 @@ pub fn resolve_structural_observation_plan(
     model: &AnalysisModel,
     mesh: Option<&SolverMeshArtifact>,
     constraint_plan: &CanonicalStructuralConstraintPlan,
+    fields: &[RecoveredFieldDefinition],
+    limits: ObservationLimits,
+) -> Result<ResolvedObservationPlan, ObservationError> {
+    let topology = StructuralObservationTopology::derive(model, mesh)?;
+    let connector_plan =
+        CanonicalStructuralConnectorPlan::empty(constraint_plan.topology, topology.nodes.len())
+            .map_err(|error| ObservationError::Invalid(error.to_string()))?;
+    resolve_structural_observation_plan_with_connectors(
+        step,
+        model,
+        mesh,
+        constraint_plan,
+        &connector_plan,
+        fields,
+        limits,
+    )
+}
+
+pub fn resolve_structural_observation_plan_with_connectors(
+    step: &ProcedureStep,
+    model: &AnalysisModel,
+    mesh: Option<&SolverMeshArtifact>,
+    constraint_plan: &CanonicalStructuralConstraintPlan,
+    connector_plan: &CanonicalStructuralConnectorPlan,
     fields: &[RecoveredFieldDefinition],
     limits: ObservationLimits,
 ) -> Result<ResolvedObservationPlan, ObservationError> {
@@ -56,13 +81,29 @@ pub fn resolve_structural_observation_plan(
             "constraint plan topology differs from the observation topology",
         ));
     }
-    resolve_observation_plan_for_topology(step, &topology, Some(constraint_plan), fields, limits)
+    connector_plan
+        .validate()
+        .map_err(|error| ObservationError::Invalid(error.to_string()))?;
+    if connector_plan.topology != topology.identity {
+        return Err(ObservationError::Identity(
+            "connector plan topology differs from the observation topology",
+        ));
+    }
+    resolve_observation_plan_for_topology(
+        step,
+        &topology,
+        Some(constraint_plan),
+        Some(connector_plan),
+        fields,
+        limits,
+    )
 }
 
 fn resolve_observation_plan_for_topology(
     step: &ProcedureStep,
     topology: &StructuralObservationTopology,
     constraint_plan: Option<&CanonicalStructuralConstraintPlan>,
+    connector_plan: Option<&CanonicalStructuralConnectorPlan>,
     fields: &[RecoveredFieldDefinition],
     limits: ObservationLimits,
 ) -> Result<ResolvedObservationPlan, ObservationError> {
@@ -73,7 +114,17 @@ fn resolve_observation_plan_for_topology(
     let observations = step
         .observations
         .iter()
-        .map(|request| resolve_request(step, request, topology, constraint_plan, fields, limits))
+        .map(|request| {
+            resolve_request(
+                step,
+                request,
+                topology,
+                constraint_plan,
+                connector_plan,
+                fields,
+                limits,
+            )
+        })
         .collect::<Result<Vec<_>, _>>()?;
     let mut plan = ResolvedObservationPlan {
         schema_version: 1,
@@ -98,10 +149,13 @@ fn validate_field_catalog(fields: &[RecoveredFieldDefinition]) -> Result<(), Obs
         }
         if !matches!(
             field.location(),
-            FieldLocation::Node | FieldLocation::Element | FieldLocation::Constraint
+            FieldLocation::Node
+                | FieldLocation::Element
+                | FieldLocation::Connector
+                | FieldLocation::Constraint
         ) {
             return Err(ObservationError::Unsupported(
-                "this evaluator accepts only recovered nodal, element, and constraint-group fields",
+                "this evaluator accepts only recovered nodal, element, connector, and constraint-group fields",
             ));
         }
         shape_component_count(field.value_shape())?;
@@ -114,6 +168,7 @@ fn resolve_request(
     request: &ObservationRequest,
     topology: &StructuralObservationTopology,
     constraint_plan: Option<&CanonicalStructuralConstraintPlan>,
+    connector_plan: Option<&CanonicalStructuralConnectorPlan>,
     fields: &[RecoveredFieldDefinition],
     limits: ObservationLimits,
 ) -> Result<ResolvedObservation, ObservationError> {
@@ -144,6 +199,7 @@ fn resolve_request(
         source_field.entity_domain(),
         topology,
         constraint_plan,
+        connector_plan,
     )?;
     validate_resolved_spatial_reduction(spec, &source_field, &target)?;
     let component = resolve_component(spec, &source_field)?;
@@ -324,10 +380,13 @@ fn validate_supported_spec(
     }
     if !matches!(
         spec.source_location,
-        FieldLocation::Node | FieldLocation::Element | FieldLocation::Constraint
+        FieldLocation::Node
+            | FieldLocation::Element
+            | FieldLocation::Connector
+            | FieldLocation::Constraint
     ) {
         return Err(ObservationError::Unsupported(
-            "this evaluator accepts only nodal, element, and constraint-group fields",
+            "this evaluator accepts only nodal, element, connector, and constraint-group fields",
         ));
     }
     match request {
@@ -585,7 +644,11 @@ fn resolve_target(
     field_domain: RecoveredFieldEntityDomain,
     topology: &StructuralObservationTopology,
     constraint_plan: Option<&CanonicalStructuralConstraintPlan>,
+    connector_plan: Option<&CanonicalStructuralConnectorPlan>,
 ) -> Result<ResolvedObservationTarget, ObservationError> {
+    if field_domain == RecoveredFieldEntityDomain::Connectors {
+        return resolve_connector_target(spec, connector_plan);
+    }
     if spec.reduction.as_ref().is_some_and(|reduction| {
         matches!(
             reduction.spatial,
@@ -627,6 +690,53 @@ fn resolve_target(
             "unsupported observation request",
         )),
     }
+}
+
+fn resolve_connector_target(
+    spec: &ObservationSpec,
+    connector_plan: Option<&CanonicalStructuralConnectorPlan>,
+) -> Result<ResolvedObservationTarget, ObservationError> {
+    if spec.source_location != FieldLocation::Connector
+        || spec.output_location != FieldLocation::Connector
+        || !matches!(
+            spec.quantity,
+            ObservationQuantity::ReactionForce | ObservationQuantity::StrainEnergy
+        )
+        || spec.reduction.as_ref().is_some_and(|reduction| {
+            !matches!(
+                (spec.quantity, reduction.spatial),
+                (_, SpatialReduction::None)
+                    | (
+                        ObservationQuantity::ReactionForce,
+                        SpatialReduction::Resultant
+                    )
+            )
+        })
+    {
+        return Err(ObservationError::Invalid(
+            "connector fields support connector force and stored energy without spatial aggregation"
+                .into(),
+        ));
+    }
+    let ObservationTarget::Connector { connector_id } = &spec.target else {
+        return Err(target_error(
+            spec,
+            "connector fields require one authored connector target",
+        ));
+    };
+    let plan = connector_plan.ok_or(ObservationError::Unsupported(
+        "connector observations require the canonical executed connector plan",
+    ))?;
+    let (index, entry) = plan
+        .entries
+        .iter()
+        .enumerate()
+        .find(|(_, entry)| entry.connector_id() == connector_id)
+        .ok_or_else(|| target_error(spec, "connector target is absent from the canonical plan"))?;
+    Ok(ResolvedObservationTarget::Connectors {
+        indices: vec![index],
+        identities: vec![StableDigest::from_bytes(*entry.source_digest().bytes())],
+    })
 }
 
 fn resolve_extrema_target(
@@ -1166,6 +1276,7 @@ fn integration_work(
     match target {
         ResolvedObservationTarget::Nodes { indices, .. }
         | ResolvedObservationTarget::Elements { indices, .. }
+        | ResolvedObservationTarget::Connectors { indices, .. }
         | ResolvedObservationTarget::ConstraintGroups { indices, .. } => Ok(indices.len()),
         ResolvedObservationTarget::Points { samples } => {
             samples.iter().try_fold(0usize, |work, sample| {

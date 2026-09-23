@@ -728,6 +728,32 @@ fn observation_partition_payload(
                 .collect(),
             select_values(field, indices, observation)?,
         )?,
+        ObservationPartitionTarget::Connectors {
+            indices,
+            identities,
+        } => {
+            let values = select_values(field, indices, observation)?;
+            if matches!(
+                reduction_operation(observation),
+                Ok(SpatialReduction::Resultant)
+            ) {
+                ObservationPartitionPayload::WeightedReduction {
+                    square_sum: vec![0.0; values.len()],
+                    linear_sum: values,
+                    measure: indices.len() as f64,
+                }
+            } else {
+                selected_or_extrema_payload(
+                    observation,
+                    identities
+                        .iter()
+                        .copied()
+                        .map(ObservationEntity::Connector)
+                        .collect(),
+                    values,
+                )?
+            }
+        }
         ObservationPartitionTarget::Points {
             sample_ordinals, ..
         } => {
@@ -1142,6 +1168,40 @@ fn validate_contribution_payload(
                 ));
             }
         }
+        (
+            ObservationPartitionTarget::Connectors { identities, .. },
+            ObservationPartitionPayload::SelectedValues { entities, values },
+        ) => {
+            let expected = identities
+                .iter()
+                .copied()
+                .map(ObservationEntity::Connector)
+                .collect::<Vec<_>>();
+            if entities != &expected
+                || values.len()
+                    != identities
+                        .len()
+                        .checked_mul(storage_components)
+                        .ok_or(ObservationError::Limit("partition result value count"))?
+            {
+                return Err(ObservationError::Identity(
+                    "connector observation contribution differs from partition ownership",
+                ));
+            }
+        }
+        (
+            ObservationPartitionTarget::Connectors { indices, .. },
+            ObservationPartitionPayload::WeightedReduction {
+                linear_sum,
+                square_sum,
+                measure,
+            },
+        ) if matches!(
+            reduction_operation(observation),
+            Ok(SpatialReduction::Resultant)
+        ) && linear_sum.len() == storage_components
+            && square_sum.len() == storage_components
+            && *measure == indices.len() as f64 => {}
         (
             ObservationPartitionTarget::Nodes { .. }
             | ObservationPartitionTarget::Elements { .. }

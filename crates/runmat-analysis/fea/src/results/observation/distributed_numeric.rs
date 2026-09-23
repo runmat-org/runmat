@@ -27,6 +27,7 @@ pub(super) fn required_source_indices(
     let indices = match &partition.target {
         ObservationPartitionTarget::Nodes { indices, .. }
         | ObservationPartitionTarget::Elements { indices, .. }
+        | ObservationPartitionTarget::Connectors { indices, .. }
         | ObservationPartitionTarget::ConstraintGroups { indices, .. } => indices.clone(),
         ObservationPartitionTarget::Points {
             sample_ordinals, ..

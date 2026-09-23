@@ -615,6 +615,7 @@ mod tests {
                 solid_elements: projection.elements.len(),
                 beam_elements: 0,
                 shell_elements: 0,
+                connectors: 0,
                 constraint_groups: 0,
             },
             vec![field.clone()],

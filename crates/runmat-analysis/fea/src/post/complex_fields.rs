@@ -73,6 +73,7 @@ pub fn complex_structural_field_layout(
         solid_elements: cardinality.solid_elements,
         beam_elements: cardinality.beam_elements,
         shell_elements: cardinality.shell_elements,
+        connectors: 0,
         constraint_groups: cardinality.constraint_groups,
     };
     let mut definitions = structural_observable_field_definitions()?
