@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+mod selection;
 
 use runmat_analysis_fea::execution::{
     AnalysisObjectManifest, StructuralFrequencyPublicationManifest,
@@ -10,17 +10,14 @@ use runmat_analysis_fea::results::field::{
 use runmat_execution::Digest;
 
 use crate::analysis::{
-    AnalysisFieldDescriptor, AnalysisFieldPageResult, AnalysisFieldPageValues,
-    AnalysisFieldRequestOptions, AnalysisFieldSelection, StructuralFrequencyArtifactRoot,
-    StructuralFrequencyArtifactRootIndex,
+    AnalysisFieldDescriptor, AnalysisFieldPageValues, AnalysisFieldRequestOptions,
+    AnalysisFieldSelection, StructuralFrequencyArtifactRoot, StructuralFrequencyArtifactRootIndex,
 };
 
 use super::AnalysisFieldPageLookup;
-
-struct SelectedField<'a> {
-    sample_index: usize,
-    entry: &'a RecoveredFieldArtifactEntry,
-}
+use selection::{empty_values, page_result, select_field, LogicalPage};
+#[cfg(test)]
+use selection::{select_candidates, SelectedField};
 
 pub(super) fn load_page(
     run_id: &str,
@@ -66,129 +63,6 @@ pub(super) fn load_page(
             }
         },
     ))
-}
-
-fn select_field<'a>(
-    publication: &'a StructuralFrequencyPublicationManifest,
-    selection: &AnalysisFieldSelection,
-) -> Result<SelectedField<'a>, AnalysisFieldPageLookup> {
-    let candidates = publication
-        .samples()
-        .iter()
-        .enumerate()
-        .flat_map(|(sample_index, sample)| {
-            sample.fields.fields.iter().map(move |entry| SelectedField {
-                sample_index,
-                entry,
-            })
-        })
-        .collect::<Vec<_>>();
-    select_candidates(candidates, selection)
-}
-
-fn select_candidates<'a>(
-    candidates: Vec<SelectedField<'a>>,
-    selection: &AnalysisFieldSelection,
-) -> Result<SelectedField<'a>, AnalysisFieldPageLookup> {
-    let mut candidates = candidates
-        .into_iter()
-        .filter(|candidate| {
-            crate::analysis::field_selection::field_id_matches(
-                candidate.entry.definition.field_id(),
-                &selection.field_id,
-            )
-        })
-        .collect::<Vec<_>>();
-    if candidates.is_empty() {
-        return Err(AnalysisFieldPageLookup::FieldNotFound);
-    }
-
-    let has_exact = candidates
-        .iter()
-        .any(|candidate| candidate.entry.definition.field_id() == selection.field_id);
-    if has_exact {
-        candidates.retain(|candidate| candidate.entry.definition.field_id() == selection.field_id);
-    } else {
-        let field_ids = candidates
-            .iter()
-            .map(|candidate| candidate.entry.definition.field_id().to_string())
-            .collect::<BTreeSet<_>>();
-        if field_ids.len() != 1 {
-            return Err(AnalysisFieldPageLookup::FieldSelectionAmbiguous(
-                field_ids.into_iter().collect(),
-            ));
-        }
-    }
-
-    match selection.sample {
-        Some(sample) => candidates
-            .into_iter()
-            .find(|candidate| candidate.entry.sample == sample)
-            .ok_or(AnalysisFieldPageLookup::SampleNotFound),
-        None if candidates.len() == 1 => Ok(candidates.remove(0)),
-        None => {
-            let mut samples = Vec::new();
-            for candidate in candidates {
-                if !samples.contains(&candidate.entry.sample) {
-                    samples.push(candidate.entry.sample);
-                }
-            }
-            Err(AnalysisFieldPageLookup::SampleSelectionRequired(samples))
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-struct LogicalPage {
-    offset: usize,
-    count: usize,
-    total_count: usize,
-}
-
-impl LogicalPage {
-    fn new(total_count: usize, options: AnalysisFieldRequestOptions) -> Result<Self, String> {
-        let offset = options.offset.unwrap_or(0).min(total_count);
-        let limit = options
-            .limit
-            .unwrap_or(crate::analysis::ANALYSIS_FIELD_DEFAULT_MATERIALIZE_LIMIT)
-            .min(crate::analysis::ANALYSIS_FIELD_DEFAULT_PAGE_SIZE);
-        let count = limit.min(total_count.saturating_sub(offset));
-        offset
-            .checked_add(count)
-            .ok_or_else(|| "analysis field page range overflow".to_string())?;
-        Ok(Self {
-            offset,
-            count,
-            total_count,
-        })
-    }
-
-    fn end(self) -> usize {
-        self.offset + self.count
-    }
-
-    fn truncated(self) -> bool {
-        self.offset > 0 || self.end() < self.total_count
-    }
-}
-
-fn page_result(
-    run_id: &str,
-    entry: &RecoveredFieldArtifactEntry,
-    descriptor: AnalysisFieldDescriptor,
-    page: LogicalPage,
-    values: AnalysisFieldPageValues,
-) -> AnalysisFieldPageLookup {
-    AnalysisFieldPageLookup::Page(Box::new(AnalysisFieldPageResult {
-        run_id: run_id.to_string(),
-        field_id: entry.definition.field_id().to_string(),
-        descriptor,
-        values,
-        offset: page.offset,
-        count: page.count,
-        total_count: page.total_count,
-        truncated: page.truncated(),
-    }))
 }
 
 fn read_logical_values(
@@ -367,15 +241,6 @@ fn validate_field_partition(
         return Err("recovered field partition differs from its semantic manifest".into());
     }
     Ok(())
-}
-
-fn empty_values(representation: RecoveredFieldNumericRepresentation) -> AnalysisFieldPageValues {
-    match representation {
-        RecoveredFieldNumericRepresentation::Real => AnalysisFieldPageValues::Real(Vec::new()),
-        RecoveredFieldNumericRepresentation::ComplexInterleaved => {
-            AnalysisFieldPageValues::ComplexInterleaved(Vec::new())
-        }
-    }
 }
 
 #[cfg(test)]
