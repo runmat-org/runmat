@@ -16,6 +16,14 @@ fn damped_step_state(mass: f64, damping: f64, stiffness: f64, force: f64, time_s
     [displacement, velocity, acceleration]
 }
 
+fn assert_relative_close(actual: f64, expected: f64, relative_tolerance: f64) {
+    let scale = actual.abs().max(expected.abs()).max(1.0);
+    assert!(
+        (actual - expected).abs() <= relative_tolerance * scale,
+        "actual={actual}, expected={expected}, tolerance={relative_tolerance}"
+    );
+}
+
 fn physical_reference_coefficients(
     model: &runmat_analysis_core::AnalysisModel,
     mesh: &SolverMeshArtifact,
@@ -524,6 +532,140 @@ fn physical_tet4_prescribed_motion_keeps_absolute_constraint_kinematics() {
         let actual = result.displacement_snapshots[index].as_host_f64().unwrap()[root_x_dof];
         assert!((actual - expected).abs() <= 2.0e-12, "t={time_s}");
     }
+}
+
+#[test]
+fn physical_transient_publishes_velocity_dependent_dashpot_response() {
+    use runmat_analysis_core::*;
+
+    let mut model = fixture_model(FixtureId::StructuralTransientTet4Reference);
+    model.connectors = vec![AnalysisConnector {
+        connector_id: "root_to_tip_dashpot".into(),
+        kind: ConnectorKind::AxialDashpot {
+            primary: RegionTarget::point("node:2"),
+            secondary: RegionTarget::point("node:4"),
+            damping: Damping::new(75.0),
+        },
+    }];
+    let mut connector_history = history_observation(
+        "dashpot_force_history",
+        ObservationQuantity::ReactionForce,
+        SamplingPolicy::EveryAcceptedIncrement,
+        FieldLocation::Connector,
+    );
+    let ObservationRequest::History(spec) = &mut connector_history else {
+        unreachable!()
+    };
+    spec.target = ObservationTarget::Connector {
+        connector_id: "root_to_tip_dashpot".into(),
+    };
+    spec.cost = ObservationCostPolicy::Automatic;
+    model.sequence.steps[0].observations = vec![connector_history];
+    let mesh = single_tetrahedron_solver_mesh_for_model(&model);
+    let result = crate::run_transient_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        TransientSolveOptions {
+            time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 40 },
+            residual_target: 1.0e-10,
+            solver_mesh: Some(mesh),
+            ..experimental_transient_options()
+        },
+    )
+    .expect("the physical Tet4 response with an axial dashpot should solve");
+
+    assert_eq!(result.connector_results.len(), result.time_points_s.len());
+    assert_eq!(
+        result.connector_force_snapshots.len(),
+        result.time_points_s.len()
+    );
+    assert_eq!(
+        result.connector_stored_energy_snapshots.len(),
+        result.time_points_s.len()
+    );
+    assert_eq!(
+        result.run.structural_connector_result.as_deref(),
+        result.connector_results.last()
+    );
+    let history = &result.run.observation_histories[0];
+    assert_eq!(history.samples().len(), result.time_points_s.len());
+    for (sample, field) in history
+        .samples()
+        .iter()
+        .zip(&result.connector_force_snapshots)
+    {
+        assert_eq!(
+            sample.result.field.as_host_f64().unwrap(),
+            field.as_host_f64().unwrap()
+        );
+    }
+
+    let mut observed_nonzero_power = false;
+    for ((connector_result, velocity), force_field) in result
+        .connector_results
+        .iter()
+        .zip(&result.velocity_snapshots)
+        .zip(&result.connector_force_snapshots)
+    {
+        let crate::connectors::CanonicalConnectorEntry::AxialDashpot {
+            primary,
+            secondary,
+            unit_axis,
+            damping_newton_seconds_per_meter,
+            ..
+        } = &connector_result.plan.entries[0]
+        else {
+            panic!("the canonical connector entry should remain an axial dashpot")
+        };
+        let velocity = velocity.as_host_f64().unwrap();
+        let relative_velocity = (0..3)
+            .map(|component| {
+                unit_axis[component]
+                    * (velocity[secondary.node_index * 3 + component]
+                        - velocity[primary.node_index * 3 + component])
+            })
+            .sum::<f64>();
+        let expected_force = damping_newton_seconds_per_meter * relative_velocity;
+        let expected_power = damping_newton_seconds_per_meter * relative_velocity.powi(2);
+        let crate::connectors::CanonicalConnectorResponse::AxialDashpot {
+            relative_axial_velocity_meters_per_second,
+            axial_force_newtons,
+            resultant_force_newtons,
+            stored_energy_joules,
+            dissipated_power_watts,
+            ..
+        } = &connector_result.responses[0]
+        else {
+            panic!("the recovered connector response should remain an axial dashpot")
+        };
+        assert_relative_close(
+            *relative_axial_velocity_meters_per_second,
+            relative_velocity,
+            1.0e-12,
+        );
+        assert_relative_close(*axial_force_newtons, expected_force, 1.0e-12);
+        assert_relative_close(*dissipated_power_watts, expected_power, 1.0e-12);
+        assert_eq!(*stored_energy_joules, 0.0);
+        assert_eq!(connector_result.total_stored_energy_joules, 0.0);
+        assert_relative_close(
+            connector_result.total_dissipated_power_watts,
+            expected_power,
+            1.0e-12,
+        );
+        let published_force = force_field.as_host_f64().unwrap();
+        for component in 0..3 {
+            assert_relative_close(
+                published_force[component],
+                resultant_force_newtons[component],
+                1.0e-12,
+            );
+        }
+        observed_nonzero_power |= expected_power > 1.0e-18;
+    }
+    assert!(
+        observed_nonzero_power,
+        "the physical transient must exercise a nonzero dashpot state"
+    );
 }
 
 #[test]

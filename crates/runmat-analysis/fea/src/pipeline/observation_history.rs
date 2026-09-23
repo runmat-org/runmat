@@ -14,10 +14,11 @@ use crate::{
             evaluate_observation_event_sample, evaluate_observation_sample,
             evaluate_structural_observation_event_sample, evaluate_structural_observation_sample,
             exact_scheduled_coordinates, reduce_observation_history, resolve_observation_plan,
-            resolve_structural_observation_plan, sample_matches_policy, BoundedObservationHistory,
-            ObservationError, ObservationEventAttribution, ObservationExecutionPolicy,
-            ObservationHistory, ObservationLimits, SeriesReductionResult,
-            StructuralObservationTopology,
+            resolve_structural_observation_plan,
+            resolve_structural_observation_plan_with_connectors, sample_matches_policy,
+            BoundedObservationHistory, ObservationError, ObservationEventAttribution,
+            ObservationExecutionPolicy, ObservationHistory, ObservationLimits,
+            SeriesReductionResult, StructuralObservationTopology,
         },
     },
     topology::AnalysisProjection,
@@ -188,6 +189,7 @@ pub(crate) enum HistoryTopology<'a> {
     Structural {
         model: &'a AnalysisModel,
         mesh: Option<&'a SolverMeshArtifact>,
+        connector_plan: Option<&'a crate::connectors::CanonicalStructuralConnectorPlan>,
     },
 }
 
@@ -283,14 +285,31 @@ pub(crate) fn evaluate_field_histories(
                 topology.entity_counts(),
             )
         }
-        HistoryTopology::Structural { model, mesh } => {
+        HistoryTopology::Structural {
+            model,
+            mesh,
+            connector_plan,
+        } => {
             let topology = StructuralObservationTopology::derive(model, mesh)?;
             let constraint_plan =
                 crate::constraints::CanonicalStructuralConstraintPlan::compile_for_model(
                     model, mesh,
                 )
                 .map_err(|error| ObservationError::Invalid(error.to_string()))?;
-            (
+            let mut entity_counts = topology.entity_counts();
+            entity_counts.constraint_groups = constraint_plan.groups.len();
+            entity_counts.connectors = connector_plan.map_or(0, |plan| plan.entries.len());
+            let plan = if let Some(connector_plan) = connector_plan {
+                resolve_structural_observation_plan_with_connectors(
+                    &history_step,
+                    model,
+                    mesh,
+                    &constraint_plan,
+                    connector_plan,
+                    &definitions,
+                    ObservationLimits::default(),
+                )?
+            } else {
                 resolve_structural_observation_plan(
                     &history_step,
                     model,
@@ -298,10 +317,9 @@ pub(crate) fn evaluate_field_histories(
                     &constraint_plan,
                     &definitions,
                     ObservationLimits::default(),
-                )?,
-                topology.digest(),
-                topology.entity_counts(),
-            )
+                )?
+            };
+            (plan, topology.digest(), entity_counts)
         }
     };
     let mut histories = plan
@@ -347,7 +365,7 @@ pub(crate) fn evaluate_field_histories(
                             &catalog,
                             attribution,
                         )?,
-                        HistoryTopology::Structural { model, mesh } => {
+                        HistoryTopology::Structural { model, mesh, .. } => {
                             evaluate_structural_observation_event_sample(
                                 &plan,
                                 observation_id,
@@ -369,7 +387,7 @@ pub(crate) fn evaluate_field_histories(
                         &catalog,
                         coordinate,
                     )?,
-                    HistoryTopology::Structural { model, mesh } => {
+                    HistoryTopology::Structural { model, mesh, .. } => {
                         evaluate_structural_observation_sample(
                             &plan,
                             observation_id,

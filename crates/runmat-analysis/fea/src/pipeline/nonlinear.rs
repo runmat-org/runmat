@@ -403,6 +403,7 @@ pub fn run_nonlinear_with_options(
             HistoryTopology::Structural {
                 model,
                 mesh: options.solver_mesh.as_ref(),
+                connector_plan: None,
             },
             &coordinates,
             Some(&event_attributions),

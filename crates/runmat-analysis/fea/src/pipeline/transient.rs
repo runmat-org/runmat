@@ -62,6 +62,9 @@ const TRANSIENT_STRAIN_HISTORY_SOURCE: &str = "structural.transient.strain";
 const TRANSIENT_STRESS_HISTORY_SOURCE: &str = "structural.transient.stress";
 const TRANSIENT_STRAIN_ENERGY_DENSITY_HISTORY_SOURCE: &str =
     "structural.transient.strain_energy_density";
+const TRANSIENT_CONNECTOR_FORCE_HISTORY_SOURCE: &str = "structural.transient.connector_force";
+const TRANSIENT_CONNECTOR_STORED_ENERGY_HISTORY_SOURCE: &str =
+    "structural.transient.connector_stored_energy";
 
 pub fn run_transient(
     model: &AnalysisModel,

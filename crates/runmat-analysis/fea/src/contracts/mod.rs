@@ -452,6 +452,14 @@ pub fn fea_transient_reaction_moment_field_id(snapshot_index: usize) -> String {
     format!("transient.reaction_moment.{snapshot_index}")
 }
 
+pub fn fea_transient_connector_force_field_id(snapshot_index: usize) -> String {
+    format!("transient.connector_force.{snapshot_index}")
+}
+
+pub fn fea_transient_connector_stored_energy_field_id(snapshot_index: usize) -> String {
+    format!("transient.connector_stored_energy.{snapshot_index}")
+}
+
 pub fn fea_transient_external_work_field_id(snapshot_index: usize) -> String {
     format!("transient.external_work.{snapshot_index}")
 }
@@ -886,6 +894,9 @@ pub struct FeaTransientRunResult {
     pub residual_norm_snapshots: Vec<AnalysisField>,
     pub reaction_force_snapshots: Vec<AnalysisField>,
     pub reaction_moment_snapshots: Vec<AnalysisField>,
+    pub connector_results: Vec<crate::connectors::CanonicalStructuralConnectorResult>,
+    pub connector_force_snapshots: Vec<AnalysisField>,
+    pub connector_stored_energy_snapshots: Vec<AnalysisField>,
     pub external_work_snapshots: Vec<AnalysisField>,
     pub support_work_snapshots: Vec<AnalysisField>,
     pub damping_dissipation_snapshots: Vec<AnalysisField>,

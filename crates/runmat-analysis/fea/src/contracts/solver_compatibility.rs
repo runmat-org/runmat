@@ -77,6 +77,12 @@ impl FeaRunResult {
             .realization()
             .temporals
             .contains(&TemporalImplementation::StructuralStaticLinearSolve);
+        let has_structural_connector_state = is_structural_static
+            || self
+                .identity
+                .realization()
+                .temporals
+                .contains(&TemporalImplementation::StructuralNewmarkAverageAcceleration);
         match (is_structural_static, &self.structural_static_balance) {
             (true, Some(evidence)) => evidence
                 .validate()
@@ -103,7 +109,10 @@ impl FeaRunResult {
             }
             (false, None) => {}
         }
-        match (is_structural_static, &self.structural_connector_result) {
+        match (
+            has_structural_connector_state,
+            &self.structural_connector_result,
+        ) {
             (true, Some(result)) => result.validate().map_err(|_| {
                 SolverFormulationCompatibilityError::InvalidStructuralConnectorResult
             })?,
@@ -135,11 +144,11 @@ pub enum SolverFormulationCompatibilityError {
     MissingStructuralConstraintResult,
     #[error("a structural static constraint result is attached to a non-static result")]
     UnexpectedStructuralConstraintResult,
-    #[error("structural static connector result is invalid")]
+    #[error("structural connector result is invalid")]
     InvalidStructuralConnectorResult,
-    #[error("a structural static result is missing its canonical connector result")]
+    #[error("a structural result is missing its canonical connector result")]
     MissingStructuralConnectorResult,
-    #[error("a structural static connector result is attached to a non-static result")]
+    #[error("a structural connector result is attached to a formulation without structural connector state")]
     UnexpectedStructuralConnectorResult,
     #[error("the admitted formulation has no solver-owning temporal implementation")]
     MissingSolverTemporal,

@@ -57,7 +57,58 @@ pub(super) fn finish_transient_run(
         },
     );
 
-    let recovered = recovery::recover_transient_fields(&transient)?;
+    let empty_connector_plan = if reporting_summary.structural_connector_plan.is_none()
+        && active_model.connectors.is_empty()
+    {
+        let default_structural = runmat_analysis_core::StructuralModel::default();
+        let structural = active_model
+            .structural
+            .as_ref()
+            .unwrap_or(&default_structural);
+        let topology = if let Some(mesh) = options.solver_mesh.as_ref() {
+            if active_model.structural.is_some() {
+                crate::physics::structural::topology::node_space::CanonicalStructuralNodeSpace::derive(
+                    mesh,
+                    structural,
+                )
+                .map_err(|error| FeaRunError::Assembly(error.to_string()))?
+                .identity
+            } else {
+                crate::physics::structural::topology::node_space::CanonicalStructuralNodeSpace::derive_solid(
+                    mesh,
+                )
+                .map_err(|error| FeaRunError::Assembly(error.to_string()))?
+                .identity
+            }
+        } else {
+            crate::physics::structural::topology::node_space::CanonicalStructuralNodeSpace::derive_explicit(
+                structural,
+            )
+            .map_err(|error| FeaRunError::Assembly(error.to_string()))?
+            .identity
+        };
+        Some(
+            crate::connectors::CanonicalStructuralConnectorPlan::empty(
+                topology,
+                reporting_summary.structural_node_count,
+            )
+            .map_err(|error| FeaRunError::Assembly(error.to_string()))?,
+        )
+    } else {
+        None
+    };
+    let recovered = recovery::recover_transient_fields(&transient, empty_connector_plan.as_ref())?;
+    for connector_result in &recovered.connector_results {
+        connector_result
+            .plan
+            .validate_against_authored(&active_model.connectors)
+            .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+    }
+    let final_connector_result = recovered.connector_results.last().cloned().ok_or_else(|| {
+        FeaRunError::Assembly(
+            "transient solve produced no canonical connector reporting state".into(),
+        )
+    })?;
     let kinetic_energy_values = transient.kinetic_energy_snapshots.clone();
     let strain_energy_values = transient.strain_energy_snapshots.clone();
     recovery::require_snapshot_count(
@@ -90,7 +141,7 @@ pub(super) fn finish_transient_run(
             .collect(),
         structural_static_balance: None,
         structural_constraint_result: None,
-        structural_connector_result: None,
+        structural_connector_result: Some(Box::new(final_connector_result)),
         observations: Vec::new(),
         observation_histories: Vec::new(),
         series_reductions: Vec::new(),
@@ -114,6 +165,9 @@ pub(super) fn finish_transient_run(
     let angular_acceleration_snapshots = recovered.angular_acceleration_snapshots;
     let reaction_force_snapshots = recovered.reaction_force_snapshots;
     let reaction_moment_snapshots = recovered.reaction_moment_snapshots;
+    let connector_results = recovered.connector_results;
+    let connector_force_snapshots = recovered.connector_force_snapshots;
+    let connector_stored_energy_snapshots = recovered.connector_stored_energy_snapshots;
     let strain_snapshots = recovered.strain_snapshots;
     let stress_snapshots = recovered.stress_snapshots;
     let von_mises_snapshots = recovered.von_mises_snapshots;
@@ -180,6 +234,16 @@ pub(super) fn finish_transient_run(
     if let Some(field) = reaction_moment_snapshots.last() {
         let mut field = field.clone();
         field.field_id = FEA_FIELD_STRUCTURAL_REACTION_MOMENT.into();
+        run.fields.push(field);
+    }
+    if let Some(field) = connector_force_snapshots.last() {
+        let mut field = field.clone();
+        field.field_id = crate::contracts::FEA_FIELD_STRUCTURAL_CONNECTOR_FORCE.into();
+        run.fields.push(field);
+    }
+    if let Some(field) = connector_stored_energy_snapshots.last() {
+        let mut field = field.clone();
+        field.field_id = crate::contracts::FEA_FIELD_STRUCTURAL_CONNECTOR_STORED_ENERGY.into();
         run.fields.push(field);
     }
     let electro_thermal_summaries = transient
@@ -287,11 +351,36 @@ pub(super) fn finish_transient_run(
                 snapshots: &strain_energy_density_snapshots,
             });
         }
+        if connector_force_snapshots.len() == coordinates.len() {
+            series.push(HistoryFieldSeries {
+                quantity: runmat_analysis_core::ObservationQuantity::ReactionForce,
+                source_field_id: TRANSIENT_CONNECTOR_FORCE_HISTORY_SOURCE,
+                location: runmat_analysis_core::FieldLocation::Connector,
+                entity_domain: crate::results::field::RecoveredFieldEntityDomain::Connectors,
+                value_shape: runmat_analysis_core::ObservationValueShape::Vector3,
+                numeric_representation:
+                    crate::results::field::RecoveredFieldNumericRepresentation::Real,
+                snapshots: &connector_force_snapshots,
+            });
+        }
+        if connector_stored_energy_snapshots.len() == coordinates.len() {
+            series.push(HistoryFieldSeries {
+                quantity: runmat_analysis_core::ObservationQuantity::StrainEnergy,
+                source_field_id: TRANSIENT_CONNECTOR_STORED_ENERGY_HISTORY_SOURCE,
+                location: runmat_analysis_core::FieldLocation::Connector,
+                entity_domain: crate::results::field::RecoveredFieldEntityDomain::Connectors,
+                value_shape: runmat_analysis_core::ObservationValueShape::Scalar,
+                numeric_representation:
+                    crate::results::field::RecoveredFieldNumericRepresentation::Real,
+                snapshots: &connector_stored_energy_snapshots,
+            });
+        }
         evaluate_field_histories(
             execution_step,
             HistoryTopology::Structural {
                 model: active_model,
                 mesh: options.solver_mesh.as_ref(),
+                connector_plan: connector_results.last().map(|result| &result.plan),
             },
             &coordinates,
             None,
@@ -342,6 +431,9 @@ pub(super) fn finish_transient_run(
         residual_norm_snapshots,
         reaction_force_snapshots,
         reaction_moment_snapshots,
+        connector_results,
+        connector_force_snapshots,
+        connector_stored_energy_snapshots,
         external_work_snapshots,
         support_work_snapshots,
         damping_dissipation_snapshots,

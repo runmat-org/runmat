@@ -73,6 +73,10 @@ $$
 $$
 
 It contributes to the damping operator. It adds no static stiffness and stores no elastic energy.
+During a transient solve, RunMat recovers the signed relative axial velocity, signed axial force,
+global resultant-force vector, and nonnegative instantaneous dissipated power
+$P=c\dot\delta^2$ at every accepted state. The final connector force and stored-energy fields are
+published with the run, and connector-target force histories use those same recovered states.
 
 ```fea
 model supported_bracket {
@@ -298,10 +302,11 @@ presence of a dashpot.
 
 ## What connector results should I request?
 
-Request connector resultant force, relative deformation or velocity appropriate to the connector
-kind, and stored energy for elastic connectors. Pair those with support reactions and whole-model
-energy balance. A displacement contour alone cannot prove that a connector used the intended
-coefficient or target.
+Request connector resultant force and stored energy as connector-target outputs. Transient run
+results also retain each dashpot's relative axial velocity, axial force, and instantaneous
+dissipated power in the typed connector-response history. Pair those with support reactions and
+whole-model energy balance. A displacement contour alone cannot prove that a connector used the
+intended coefficient or target.
 
 ## What should the Desktop preview show?
 

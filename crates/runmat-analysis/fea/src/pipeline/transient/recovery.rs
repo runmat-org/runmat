@@ -1,9 +1,11 @@
 use runmat_analysis_core::AnalysisField;
 
 use crate::{
+    connectors::CanonicalStructuralConnectorResult,
     contracts::{
         fea_transient_acceleration_field_id, fea_transient_angular_acceleration_field_id,
-        fea_transient_angular_velocity_field_id, fea_transient_displacement_field_id,
+        fea_transient_angular_velocity_field_id, fea_transient_connector_force_field_id,
+        fea_transient_connector_stored_energy_field_id, fea_transient_displacement_field_id,
         fea_transient_reaction_force_field_id, fea_transient_reaction_moment_field_id,
         fea_transient_rotation_field_id, fea_transient_strain_energy_density_field_id,
         fea_transient_strain_field_id, fea_transient_stress_field_id,
@@ -13,7 +15,7 @@ use crate::{
         FEA_FIELD_STRUCTURAL_STRESS, FEA_FIELD_STRUCTURAL_VON_MISES,
     },
     pipeline::structural_nodal::{nodal_vector_shape, project_structural_nodal_snapshot},
-    post::fields::recover_deformation_result_fields,
+    post::{fields::recover_deformation_result_fields, recover_connector_observable_fields},
     solve::transient::TransientSolveResult,
 };
 
@@ -27,6 +29,9 @@ pub(super) struct TransientFieldRecovery {
     pub angular_acceleration_snapshots: Vec<AnalysisField>,
     pub reaction_force_snapshots: Vec<AnalysisField>,
     pub reaction_moment_snapshots: Vec<AnalysisField>,
+    pub connector_results: Vec<CanonicalStructuralConnectorResult>,
+    pub connector_force_snapshots: Vec<AnalysisField>,
+    pub connector_stored_energy_snapshots: Vec<AnalysisField>,
     pub strain_snapshots: Vec<AnalysisField>,
     pub stress_snapshots: Vec<AnalysisField>,
     pub von_mises_snapshots: Vec<AnalysisField>,
@@ -35,6 +40,7 @@ pub(super) struct TransientFieldRecovery {
 
 pub(super) fn recover_transient_fields(
     transient: &TransientSolveResult,
+    empty_connector_plan: Option<&crate::connectors::CanonicalStructuralConnectorPlan>,
 ) -> Result<TransientFieldRecovery, FeaRunError> {
     let snapshot_count = transient.time_points_s.len();
     require_snapshot_count(
@@ -119,6 +125,9 @@ pub(super) fn recover_transient_fields(
     let mut angular_acceleration_snapshots = Vec::with_capacity(snapshot_count);
     let mut reaction_force_snapshots = Vec::with_capacity(snapshot_count);
     let mut reaction_moment_snapshots = Vec::with_capacity(snapshot_count);
+    let mut connector_results = Vec::with_capacity(snapshot_count);
+    let mut connector_force_snapshots = Vec::with_capacity(snapshot_count);
+    let mut connector_stored_energy_snapshots = Vec::with_capacity(snapshot_count);
     for (index, summary) in transient.assembly_snapshots.iter().enumerate() {
         let velocity = project_structural_nodal_snapshot(
             &summary.structural_dof_layout,
@@ -148,6 +157,39 @@ pub(super) fn recover_transient_fields(
                 velocity.rotations,
             ));
         }
+        let connector_plan = summary
+            .structural_connector_plan
+            .clone()
+            .or_else(|| empty_connector_plan.cloned())
+            .ok_or_else(|| {
+                FeaRunError::Assembly(
+                    "transient structural assembly did not publish a canonical connector plan"
+                        .into(),
+                )
+            })?;
+        let connector_result = CanonicalStructuralConnectorResult::recover_dynamic(
+            connector_plan,
+            &summary.structural_dof_layout,
+            &transient.displacement_snapshots[index],
+            &transient.velocity_snapshots[index],
+        )
+        .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+        let connector_fields = recover_connector_observable_fields(&connector_result)
+            .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+        if let [force, stored_energy] = connector_fields.as_slice() {
+            let mut force = force.clone().into_storage();
+            force.field_id = fea_transient_connector_force_field_id(index);
+            connector_force_snapshots.push(force);
+            let mut stored_energy = stored_energy.clone().into_storage();
+            stored_energy.field_id = fea_transient_connector_stored_energy_field_id(index);
+            connector_stored_energy_snapshots.push(stored_energy);
+        } else if !connector_fields.is_empty() {
+            return Err(FeaRunError::Assembly(
+                "connector recovery did not publish the canonical force and energy field pair"
+                    .into(),
+            ));
+        }
+        connector_results.push(connector_result);
         acceleration_snapshots.push(AnalysisField::host_f64(
             fea_transient_acceleration_field_id(index),
             shape.clone(),
@@ -182,6 +224,9 @@ pub(super) fn recover_transient_fields(
         angular_acceleration_snapshots,
         reaction_force_snapshots,
         reaction_moment_snapshots,
+        connector_results,
+        connector_force_snapshots,
+        connector_stored_energy_snapshots,
         strain_snapshots,
         stress_snapshots,
         von_mises_snapshots,

@@ -14,12 +14,13 @@ pub enum CanonicalConnectorResponse {
         resultant_force_newtons: [f64; 3],
         stored_energy_joules: f64,
     },
-    AxialDashpotStatic {
+    AxialDashpot {
         connector_id: String,
         relative_axial_velocity_meters_per_second: f64,
         axial_force_newtons: f64,
         resultant_force_newtons: [f64; 3],
         stored_energy_joules: f64,
+        dissipated_power_watts: f64,
     },
     IsotropicGroundSpring {
         connector_id: String,
@@ -38,7 +39,7 @@ impl CanonicalConnectorResponse {
     pub fn connector_id(&self) -> &str {
         match self {
             Self::AxialSpring { connector_id, .. }
-            | Self::AxialDashpotStatic { connector_id, .. }
+            | Self::AxialDashpot { connector_id, .. }
             | Self::IsotropicGroundSpring { connector_id, .. }
             | Self::SurfaceNormalFoundation { connector_id, .. } => connector_id,
         }
@@ -50,7 +51,7 @@ impl CanonicalConnectorResponse {
                 resultant_force_newtons,
                 ..
             }
-            | Self::AxialDashpotStatic {
+            | Self::AxialDashpot {
                 resultant_force_newtons,
                 ..
             }
@@ -71,7 +72,7 @@ impl CanonicalConnectorResponse {
                 stored_energy_joules,
                 ..
             }
-            | Self::AxialDashpotStatic {
+            | Self::AxialDashpot {
                 stored_energy_joules,
                 ..
             }
@@ -85,6 +86,18 @@ impl CanonicalConnectorResponse {
             } => *stored_energy_joules,
         }
     }
+
+    pub const fn dissipated_power_watts(&self) -> f64 {
+        match self {
+            Self::AxialDashpot {
+                dissipated_power_watts,
+                ..
+            } => *dissipated_power_watts,
+            Self::AxialSpring { .. }
+            | Self::IsotropicGroundSpring { .. }
+            | Self::SurfaceNormalFoundation { .. } => 0.0,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -94,6 +107,7 @@ pub struct CanonicalStructuralConnectorResult {
     pub plan: CanonicalStructuralConnectorPlan,
     pub responses: Vec<CanonicalConnectorResponse>,
     pub total_stored_energy_joules: f64,
+    pub total_dissipated_power_watts: f64,
 }
 
 impl CanonicalStructuralConnectorResult {
@@ -102,22 +116,43 @@ impl CanonicalStructuralConnectorResult {
         layout: &StructuralDofLayout,
         solution: &[f64],
     ) -> Result<Self, ConnectorRecoveryError> {
+        Self::recover(plan, layout, solution, None)
+    }
+
+    pub fn recover_dynamic(
+        plan: CanonicalStructuralConnectorPlan,
+        layout: &StructuralDofLayout,
+        displacement: &[f64],
+        velocity: &[f64],
+    ) -> Result<Self, ConnectorRecoveryError> {
+        Self::recover(plan, layout, displacement, Some(velocity))
+    }
+
+    fn recover(
+        plan: CanonicalStructuralConnectorPlan,
+        layout: &StructuralDofLayout,
+        displacement: &[f64],
+        velocity: Option<&[f64]>,
+    ) -> Result<Self, ConnectorRecoveryError> {
         plan.validate()?;
-        if solution.len() != layout.total_dof_count() {
-            return Err(ConnectorRecoveryError::Invalid(
-                "connector recovery solution does not match the structural DOF layout".into(),
-            ));
+        validate_state_length("displacement", layout, displacement)?;
+        if let Some(velocity) = velocity {
+            validate_state_length("velocity", layout, velocity)?;
         }
         let responses = plan
             .entries
             .iter()
-            .map(|entry| recover_entry(entry, layout, solution))
+            .map(|entry| recover_entry(entry, layout, displacement, velocity))
             .collect::<Result<Vec<_>, _>>()?;
         let result = Self {
             schema_version: 1,
             total_stored_energy_joules: responses
                 .iter()
                 .map(CanonicalConnectorResponse::stored_energy_joules)
+                .sum(),
+            total_dissipated_power_watts: responses
+                .iter()
+                .map(CanonicalConnectorResponse::dissipated_power_watts)
                 .sum(),
             plan,
             responses,
@@ -142,6 +177,8 @@ impl CanonicalStructuralConnectorResult {
                     .any(|value| !value.is_finite())
                     || !response.stored_energy_joules().is_finite()
                     || response.stored_energy_joules() < 0.0
+                    || !response.dissipated_power_watts().is_finite()
+                    || response.dissipated_power_watts() < 0.0
             })
         {
             return Err(ConnectorRecoveryError::Invalid(
@@ -158,6 +195,18 @@ impl CanonicalStructuralConnectorResult {
         {
             return Err(ConnectorRecoveryError::Invalid(
                 "connector result total energy is inconsistent".into(),
+            ));
+        }
+        let total_power = self
+            .responses
+            .iter()
+            .map(CanonicalConnectorResponse::dissipated_power_watts)
+            .sum::<f64>();
+        if !self.total_dissipated_power_watts.is_finite()
+            || !approximately_equal(self.total_dissipated_power_watts, total_power)
+        {
+            return Err(ConnectorRecoveryError::Invalid(
+                "connector result total dissipated power is inconsistent".into(),
             ));
         }
         Ok(())
@@ -199,19 +248,34 @@ fn response_matches_entry(
                 )
         }
         (
-            CanonicalConnectorResponse::AxialDashpotStatic {
+            CanonicalConnectorResponse::AxialDashpot {
                 relative_axial_velocity_meters_per_second,
                 axial_force_newtons,
                 resultant_force_newtons,
                 stored_energy_joules,
+                dissipated_power_watts,
                 ..
             },
-            CanonicalConnectorEntry::AxialDashpot { .. },
+            CanonicalConnectorEntry::AxialDashpot {
+                unit_axis,
+                damping_newton_seconds_per_meter,
+                ..
+            },
         ) => {
-            *relative_axial_velocity_meters_per_second == 0.0
-                && *axial_force_newtons == 0.0
-                && *resultant_force_newtons == [0.0; 3]
+            approximately_equal(
+                *axial_force_newtons,
+                damping_newton_seconds_per_meter * relative_axial_velocity_meters_per_second,
+            ) && resultant_force_newtons
+                .iter()
+                .zip(unit_axis)
+                .all(|(force, axis)| approximately_equal(*force, axial_force_newtons * axis))
                 && *stored_energy_joules == 0.0
+                && approximately_equal(
+                    *dissipated_power_watts,
+                    damping_newton_seconds_per_meter
+                        * relative_axial_velocity_meters_per_second
+                        * relative_axial_velocity_meters_per_second,
+                )
         }
         (
             CanonicalConnectorResponse::IsotropicGroundSpring {
@@ -253,6 +317,7 @@ fn recover_entry(
     entry: &CanonicalConnectorEntry,
     layout: &StructuralDofLayout,
     solution: &[f64],
+    velocity: Option<&[f64]>,
 ) -> Result<CanonicalConnectorResponse, ConnectorRecoveryError> {
     match entry {
         CanonicalConnectorEntry::AxialSpring {
@@ -280,13 +345,36 @@ fn recover_entry(
                 stored_energy_joules: 0.5 * stiffness_newtons_per_meter * extension * extension,
             })
         }
-        CanonicalConnectorEntry::AxialDashpot { connector_id, .. } => {
-            Ok(CanonicalConnectorResponse::AxialDashpotStatic {
+        CanonicalConnectorEntry::AxialDashpot {
+            connector_id,
+            primary,
+            secondary,
+            unit_axis,
+            damping_newton_seconds_per_meter,
+            ..
+        } => {
+            let relative_velocity = if let Some(velocity) = velocity {
+                let primary_velocity = displacement(primary.node_index, layout, velocity)?;
+                let secondary_velocity = displacement(secondary.node_index, layout, velocity)?;
+                dot(
+                    *unit_axis,
+                    std::array::from_fn(|index| {
+                        secondary_velocity[index] - primary_velocity[index]
+                    }),
+                )
+            } else {
+                0.0
+            };
+            let axial_force = damping_newton_seconds_per_meter * relative_velocity;
+            Ok(CanonicalConnectorResponse::AxialDashpot {
                 connector_id: connector_id.clone(),
-                relative_axial_velocity_meters_per_second: 0.0,
-                axial_force_newtons: 0.0,
-                resultant_force_newtons: [0.0; 3],
+                relative_axial_velocity_meters_per_second: relative_velocity,
+                axial_force_newtons: axial_force,
+                resultant_force_newtons: unit_axis.map(|component| axial_force * component),
                 stored_energy_joules: 0.0,
+                dissipated_power_watts: damping_newton_seconds_per_meter
+                    * relative_velocity
+                    * relative_velocity,
             })
         }
         CanonicalConnectorEntry::IsotropicGroundSpring {
@@ -343,6 +431,20 @@ fn recover_entry(
     }
 }
 
+fn validate_state_length(
+    state_name: &str,
+    layout: &StructuralDofLayout,
+    state: &[f64],
+) -> Result<(), ConnectorRecoveryError> {
+    if state.len() == layout.total_dof_count() {
+        Ok(())
+    } else {
+        Err(ConnectorRecoveryError::Invalid(format!(
+            "connector recovery {state_name} does not match the structural DOF layout"
+        )))
+    }
+}
+
 fn displacement(
     node: usize,
     layout: &StructuralDofLayout,
@@ -382,112 +484,4 @@ pub enum ConnectorRecoveryError {
 }
 
 #[cfg(test)]
-mod tests {
-    use runmat_execution::Digest;
-    use runmat_meshing_core::StableDigest;
-
-    use super::*;
-    use crate::{
-        assembly::dofs::StructuralNodeDofSet,
-        connectors::{CanonicalConnectorNode, CanonicalStructuralConnectorPlan},
-        physics::structural::topology::CanonicalStructuralTopologyIdentity,
-    };
-
-    #[test]
-    fn static_recovery_uses_the_exact_axial_and_ground_laws() {
-        let layout = StructuralDofLayout::from_node_sets(vec![
-            StructuralNodeDofSet::translational(),
-            StructuralNodeDofSet::translational(),
-        ]);
-        let plan = CanonicalStructuralConnectorPlan::new(
-            CanonicalStructuralTopologyIdentity::Explicit {
-                structural_topology_digest: Digest::sha256(b"topology"),
-            },
-            2,
-            Digest::sha256(b"authored"),
-            vec![
-                CanonicalConnectorEntry::AxialSpring {
-                    connector_id: "axial".into(),
-                    source_digest: Digest::sha256(b"axial-source"),
-                    primary: node(0, 1),
-                    secondary: node(1, 2),
-                    unit_axis: [1.0, 0.0, 0.0],
-                    stiffness_newtons_per_meter: 100.0,
-                },
-                CanonicalConnectorEntry::IsotropicGroundSpring {
-                    connector_id: "ground".into(),
-                    source_digest: Digest::sha256(b"ground-source"),
-                    target: node(1, 2),
-                    stiffness_newtons_per_meter: 10.0,
-                },
-            ],
-        )
-        .unwrap();
-        let result = CanonicalStructuralConnectorResult::recover_static(
-            plan,
-            &layout,
-            &[0.0, 0.0, 0.0, 0.25, -0.5, 1.0],
-        )
-        .unwrap();
-        assert_eq!(result.responses.len(), 2);
-        assert!(matches!(
-            &result.responses[0],
-            CanonicalConnectorResponse::AxialSpring {
-                extension_meters: 0.25,
-                axial_force_newtons: 25.0,
-                resultant_force_newtons: [25.0, 0.0, 0.0],
-                stored_energy_joules: 3.125,
-                ..
-            }
-        ));
-        assert!(matches!(
-            &result.responses[1],
-            CanonicalConnectorResponse::IsotropicGroundSpring {
-                displacement_meters: [0.25, -0.5, 1.0],
-                resultant_force_newtons: [-2.5, 5.0, -10.0],
-                stored_energy_joules: 6.5625,
-                ..
-            }
-        ));
-        assert_eq!(result.total_stored_energy_joules, 9.6875);
-    }
-
-    #[test]
-    fn result_validation_rejects_energy_substitution() {
-        let layout = StructuralDofLayout::from_node_sets(vec![
-            StructuralNodeDofSet::translational(),
-            StructuralNodeDofSet::translational(),
-        ]);
-        let plan = CanonicalStructuralConnectorPlan::new(
-            CanonicalStructuralTopologyIdentity::Explicit {
-                structural_topology_digest: Digest::sha256(b"topology"),
-            },
-            2,
-            Digest::sha256(b"authored"),
-            vec![CanonicalConnectorEntry::AxialSpring {
-                connector_id: "axial".into(),
-                source_digest: Digest::sha256(b"source"),
-                primary: node(0, 1),
-                secondary: node(1, 2),
-                unit_axis: [1.0, 0.0, 0.0],
-                stiffness_newtons_per_meter: 100.0,
-            }],
-        )
-        .unwrap();
-        let mut result = CanonicalStructuralConnectorResult::recover_static(
-            plan,
-            &layout,
-            &[0.0, 0.0, 0.0, 0.25, 0.0, 0.0],
-        )
-        .unwrap();
-        result.total_stored_energy_joules = 99.0;
-        assert!(result.validate().is_err());
-    }
-
-    fn node(node_index: usize, byte: u8) -> CanonicalConnectorNode {
-        CanonicalConnectorNode {
-            node_index,
-            node_identity: StableDigest::from_bytes([byte; 32]),
-        }
-    }
-}
+mod tests;

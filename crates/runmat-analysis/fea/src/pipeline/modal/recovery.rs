@@ -328,6 +328,7 @@ pub(super) fn recover_modal_core(
             HistoryTopology::Structural {
                 model,
                 mesh: solver_mesh,
+                connector_plan: None,
             },
             &coordinates,
             None,
