@@ -1,134 +1,16 @@
 use runmat_analysis_core::{AnalysisModel, AnalysisSequence, ProcedureStep};
 use runmat_canonical_codec::{encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 use super::{AnalysisExecutionError, AnalysisExecutionResult, SweepDefinition};
 
+mod contract;
+
+pub use contract::*;
+
 const IDENTITY_PREFIX: &[u8] = b"runmat-analysis-identity/v1\0";
 const IDENTITY_LIMITS: CanonicalLimits = CanonicalLimits::new(1024 * 1024, 65_536, 65_536, 32);
-
-macro_rules! identity_type {
-    ($name:ident) => {
-        #[derive(
-            Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize,
-        )]
-        #[serde(transparent)]
-        pub struct $name(Digest);
-
-        impl $name {
-            pub const fn digest(self) -> Digest {
-                self.0
-            }
-
-            pub(super) fn derive<T: Serialize>(
-                domain: &'static str,
-                input: &T,
-            ) -> AnalysisExecutionResult<Self> {
-                Ok(Self(derive_digest(domain, input)?))
-            }
-        }
-    };
-}
-
-identity_type!(StudyIdentity);
-identity_type!(SweepIdentity);
-identity_type!(SequenceIdentity);
-identity_type!(StepIdentity);
-identity_type!(StateIdentity);
-identity_type!(StateTransitionIdentity);
-identity_type!(ConstraintPlanIdentity);
-identity_type!(GeneratorIdentity);
-identity_type!(NumericalMaterializationIdentity);
-identity_type!(SignalMaterializationIdentity);
-identity_type!(SignalRealizationIdentity);
-identity_type!(SolverExcitationIdentity);
-identity_type!(ProblemIdentity);
-identity_type!(DiscretizationIdentity);
-identity_type!(OperatorIdentity);
-identity_type!(NumericalPlanIdentity);
-identity_type!(ExecutionPlanIdentity);
-identity_type!(AnalysisWorkloadIdentity);
-identity_type!(AnalysisTaskIdentity);
-identity_type!(AnalysisAttemptIdentity);
-identity_type!(ObservationIdentity);
-identity_type!(AccuracyIdentity);
-identity_type!(AnalysisResultIdentity);
-identity_type!(SolverResultIdentity);
-identity_type!(NumericalReceiptIdentity);
-identity_type!(FieldRecoveryRequestIdentity);
-identity_type!(ObservationEvaluationRequestIdentity);
-identity_type!(ObservationPartitionEvaluationRequestIdentity);
-identity_type!(ObservationPartitionReductionRequestIdentity);
-identity_type!(ObservationAssemblyRequestIdentity);
-identity_type!(AccuracyEvaluationRequestIdentity);
-identity_type!(SweepResultIdentity);
-identity_type!(PublicationIdentity);
-identity_type!(PublicationRequestIdentity);
-identity_type!(ObservationHistoryCheckpointRequestIdentity);
-identity_type!(StructuralTransientScheduleIdentity);
-identity_type!(StructuralDofLayoutIdentity);
-identity_type!(StructuralFormulationIdentity);
-identity_type!(StructuralStiffnessOperatorIdentity);
-identity_type!(StructuralMassOperatorIdentity);
-identity_type!(StructuralDampingOperatorIdentity);
-identity_type!(StructuralExcitationSetIdentity);
-identity_type!(StructuralKinematicsIdentity);
-identity_type!(StructuralTransientSolverOptionsIdentity);
-identity_type!(StructuralTransientCheckpointIdentity);
-identity_type!(StructuralTransientCheckpointScopeIdentity);
-identity_type!(StructuralTransientBlockRequestIdentity);
-identity_type!(StructuralTransientSegmentIdentity);
-identity_type!(StructuralTransientSegmentSampleIdentity);
-identity_type!(StructuralTransientPhysicalSampleIdentity);
-identity_type!(StructuralTransientResultAssemblyRequestIdentity);
-identity_type!(StructuralFrequencyScopeIdentity);
-identity_type!(StructuralFrequencyProblemIdentity);
-identity_type!(StructuralFrequencyWorkloadIdentity);
-identity_type!(StructuralFrequencyPhysicalSampleIdentity);
-identity_type!(StructuralFrequencyEntryRequestIdentity);
-identity_type!(StructuralFrequencyEntryResultIdentity);
-identity_type!(StructuralFrequencyResultAssemblyRequestIdentity);
-identity_type!(StructuralFrequencyPublicationIdentity);
-identity_type!(StructuralModalWorkloadIdentity);
-identity_type!(StructuralModalResponseSpectrumWorkloadIdentity);
-identity_type!(StructuralModalResponseSpectrumScopeIdentity);
-identity_type!(StructuralModalResponseSpectrumDirectionRequestIdentity);
-identity_type!(StructuralModalResponseSpectrumDirectionResultIdentity);
-identity_type!(StructuralModalResponseSpectrumAssemblyRequestIdentity);
-identity_type!(StructuralRandomResponseWorkloadIdentity);
-identity_type!(StructuralRandomResponseScopeIdentity);
-identity_type!(StructuralRandomResponseIntervalRequestIdentity);
-identity_type!(StructuralRandomResponseIntervalResultIdentity);
-identity_type!(StructuralRandomResponseAssemblyRequestIdentity);
-identity_type!(StructuralBucklingWorkloadIdentity);
-
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AnalysisWorkKind {
-    MaterializeSignal,
-    CompileConstraints,
-    AssembleOperator,
-    Solve,
-    ExtractStructuralModes,
-    SolveStructuralModalResponseSpectrumDirection,
-    AssembleStructuralModalResponseSpectrumResult,
-    SolveStructuralRandomResponseIntervals,
-    AssembleStructuralRandomResponseResult,
-    SolveStructuralBucklingModes,
-    RecoverField,
-    PublishState,
-    CheckpointObservationHistory,
-    SolveStructuralTransientBlock,
-    AssembleStructuralTransientResult,
-    SolveStructuralFrequencyEntry,
-    AssembleStructuralFrequencyResult,
-    EvaluateObservationPartition,
-    ReduceObservationPartitions,
-    AssembleObservations,
-    EvaluateAccuracy,
-    PublishResult,
-}
 
 impl StudyIdentity {
     pub fn from_authored_digest(
