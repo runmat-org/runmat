@@ -1305,6 +1305,8 @@ export interface GeometryScenePickResult {
   regionTag: string | null;
   distance: number;
   position: [number, number, number];
+  vertexIndices?: [number, number, number];
+  barycentricCoordinates?: [number, number, number];
 }
 
 

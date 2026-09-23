@@ -405,6 +405,11 @@ pub struct GeometryScenePickResult {
     pub region_tag: Option<String>,
     pub distance: f32,
     pub position: [f32; 3],
+    /// Vertex indices of the hit tessellation triangle. These preserve stable mesh topology for
+    /// point/node and edge selection without pretending that every click is a face selection.
+    pub vertex_indices: [u32; 3],
+    /// Barycentric coordinates of `position` within `vertex_indices`.
+    pub barycentric_coordinates: [f32; 3],
 }
 
 fn default_edge_overlay_enabled() -> bool {
@@ -450,6 +455,7 @@ impl GeometryScenePickIndex {
                     mesh_id: chunk.mesh_id.clone(),
                     chunk_id: chunk.chunk_id.clone(),
                     triangle_index,
+                    vertex_indices: [triangle[0], triangle[1], triangle[2]],
                     region_id: region.map(|item| item.region_id.clone()),
                     region_label: region.and_then(|item| item.label.clone()),
                     region_tag: region.and_then(|item| item.tag.clone()),
@@ -500,6 +506,7 @@ impl GeometryScenePickIndex {
         }
         let hit = best?;
         let triangle = self.triangles.get(hit.triangle_index)?;
+        let position = ray.origin + ray.direction * hit.distance;
         Some(GeometryScenePickResult {
             mesh_id: triangle.mesh_id.clone(),
             chunk_id: triangle.chunk_id.clone(),
@@ -508,7 +515,11 @@ impl GeometryScenePickIndex {
             region_label: triangle.region_label.clone(),
             region_tag: triangle.region_tag.clone(),
             distance: hit.distance,
-            position: (ray.origin + ray.direction * hit.distance).to_array(),
+            position: position.to_array(),
+            vertex_indices: triangle.vertex_indices,
+            barycentric_coordinates: triangle_barycentric_coordinates(
+                position, triangle.a, triangle.b, triangle.c,
+            ),
         })
     }
 
@@ -1249,9 +1260,28 @@ struct IndexedTriangle {
     mesh_id: Option<String>,
     chunk_id: String,
     triangle_index: usize,
+    vertex_indices: [u32; 3],
     region_id: Option<String>,
     region_label: Option<String>,
     region_tag: Option<String>,
+}
+
+fn triangle_barycentric_coordinates(point: Vec3, a: Vec3, b: Vec3, c: Vec3) -> [f32; 3] {
+    let v0 = b - a;
+    let v1 = c - a;
+    let v2 = point - a;
+    let d00 = v0.dot(v0);
+    let d01 = v0.dot(v1);
+    let d11 = v1.dot(v1);
+    let d20 = v2.dot(v0);
+    let d21 = v2.dot(v1);
+    let denominator = d00 * d11 - d01 * d01;
+    if denominator.abs() <= f32::EPSILON {
+        return [1.0, 0.0, 0.0];
+    }
+    let v = (d11 * d20 - d01 * d21) / denominator;
+    let w = (d00 * d21 - d01 * d20) / denominator;
+    [1.0 - v - w, v, w]
 }
 
 #[derive(Debug, Clone)]
@@ -1441,10 +1471,10 @@ mod tests {
             surface_size: [800.0, 800.0],
             position: [400.0, 400.0],
         });
-        assert_eq!(
-            hit.and_then(|hit| hit.region_id),
-            Some("face_a".to_string())
-        );
+        let hit = hit.expect("center ray should hit the triangle");
+        assert_eq!(hit.region_id, Some("face_a".to_string()));
+        assert_eq!(hit.vertex_indices, [0, 1, 2]);
+        assert!((hit.barycentric_coordinates.iter().sum::<f32>() - 1.0).abs() < 1.0e-5);
     }
 
     #[test]
