@@ -1,9 +1,11 @@
 use std::collections::HashSet;
 
+mod connectors;
+mod interfaces;
+
 use crate::{
-    materialized_motion_acceleration_is_compatible, AnalysisBoundary, AnalysisConnector,
-    AnalysisConstraint, AnalysisInterface, AnalysisInterfaceKind, AnalysisModel,
-    AnalysisValidationError, BoundaryOperator, ConnectorKind, CoordinateFrame, EntityDimension,
+    materialized_motion_acceleration_is_compatible, AnalysisBoundary, AnalysisConstraint,
+    AnalysisModel, AnalysisValidationError, BoundaryOperator, CoordinateFrame, EntityDimension,
     ExpectedTopology, FluidConstraintKind, MagneticConstraintKind, PairingPolicy,
     PeriodicConstraint, PeriodicTransform, PhysicalSignal, StructuralConstraintKind,
     StructuralKinematicHistory, StructuralMotionReconstruction, ThermalConstraintKind,
@@ -19,56 +21,10 @@ pub(crate) fn validate_authored_model(
     crate::validate_domains::validate_domains(model)?;
     validate_constraints(&model.constraints, &model.signals)?;
     validate_boundaries(&model.boundaries, &model.signals)?;
-    validate_connectors(&model.connectors)?;
-    validate_interfaces(&model.interfaces)?;
+    connectors::validate_connectors(&model.connectors)?;
+    interfaces::validate_interfaces(&model.interfaces)?;
     crate::validate_excitations::validate_model_excitations(model)?;
     crate::validate_sequence::validate_sequence(model)
-}
-
-fn validate_interfaces(values: &[AnalysisInterface]) -> Result<(), AnalysisValidationError> {
-    let mut ids = HashSet::new();
-    for interface in values {
-        validate_id(&interface.interface_id, "interface", &mut ids)?;
-        validate_target(&interface.primary).map_err(|detail| {
-            AnalysisValidationError::InvalidTarget {
-                owner_id: interface.interface_id.clone(),
-                detail,
-            }
-        })?;
-        validate_target(&interface.secondary).map_err(|detail| {
-            AnalysisValidationError::InvalidTarget {
-                owner_id: interface.interface_id.clone(),
-                detail,
-            }
-        })?;
-        let valid = interface.primary.region_id != interface.secondary.region_id
-            && match &interface.kind {
-                AnalysisInterfaceKind::Contact(value) => match value.friction {
-                    crate::ContactFriction::Frictionless => true,
-                    crate::ContactFriction::Coulomb { coefficient } => {
-                        coefficient.is_finite() && coefficient.ratio > 0.0
-                    }
-                },
-                AnalysisInterfaceKind::FluidStructure(_) => true,
-                AnalysisInterfaceKind::ConjugateHeatTransfer(value) => match value.transfer {
-                    crate::ThermalInterfaceTransfer::Perfect => true,
-                    crate::ThermalInterfaceTransfer::Conductance(value) => {
-                        value.is_finite() && value.watts_per_square_meter_kelvin > 0.0
-                    }
-                    crate::ThermalInterfaceTransfer::Resistance(value) => {
-                        value.is_finite() && value.square_meter_kelvin_per_watt > 0.0
-                    }
-                },
-            };
-        if !valid {
-            return Err(AnalysisValidationError::InvalidInterface {
-                interface_id: interface.interface_id.clone(),
-                detail: "targets or interface parameters are outside their admissible range"
-                    .to_string(),
-            });
-        }
-    }
-    Ok(())
 }
 
 pub fn validate_coordinate_frame(frame: &CoordinateFrame) -> Result<(), AnalysisValidationError> {
@@ -299,94 +255,7 @@ fn validate_boundaries(
     Ok(())
 }
 
-fn validate_connectors(values: &[AnalysisConnector]) -> Result<(), AnalysisValidationError> {
-    let mut ids = HashSet::new();
-    for connector in values {
-        validate_id(&connector.connector_id, "connector", &mut ids)?;
-        match &connector.kind {
-            ConnectorKind::AxialSpring {
-                primary,
-                secondary,
-                stiffness,
-            } => {
-                validate_connector_target(connector, primary, EntityDimension::Point)?;
-                validate_connector_target(connector, secondary, EntityDimension::Point)?;
-                if primary == secondary {
-                    return Err(AnalysisValidationError::InvalidConnector {
-                        connector_id: connector.connector_id.clone(),
-                        detail:
-                            "an axial connector requires distinct primary and secondary targets"
-                                .to_string(),
-                    });
-                }
-                validate_connector_coefficient(connector, stiffness.newtons_per_meter)?;
-            }
-            ConnectorKind::AxialDashpot {
-                primary,
-                secondary,
-                damping,
-            } => {
-                validate_connector_target(connector, primary, EntityDimension::Point)?;
-                validate_connector_target(connector, secondary, EntityDimension::Point)?;
-                if primary == secondary {
-                    return Err(AnalysisValidationError::InvalidConnector {
-                        connector_id: connector.connector_id.clone(),
-                        detail:
-                            "an axial connector requires distinct primary and secondary targets"
-                                .to_string(),
-                    });
-                }
-                validate_connector_coefficient(connector, damping.newton_seconds_per_meter)?;
-            }
-            ConnectorKind::IsotropicGroundSpring { target, stiffness } => {
-                validate_connector_target(connector, target, EntityDimension::Point)?;
-                validate_connector_coefficient(connector, stiffness.newtons_per_meter)?;
-            }
-            ConnectorKind::SurfaceNormalFoundation { target, modulus } => {
-                validate_connector_target(connector, target, EntityDimension::Face)?;
-                validate_connector_coefficient(connector, modulus.newtons_per_cubic_meter)?;
-            }
-        }
-    }
-    Ok(())
-}
-
-fn validate_connector_target(
-    connector: &AnalysisConnector,
-    target: &crate::RegionTarget,
-    expected_dimension: EntityDimension,
-) -> Result<(), AnalysisValidationError> {
-    validate_target(target).map_err(|detail| AnalysisValidationError::InvalidTarget {
-        owner_id: connector.connector_id.clone(),
-        detail,
-    })?;
-    if target.entity_dimension != expected_dimension {
-        return Err(AnalysisValidationError::InvalidConnector {
-            connector_id: connector.connector_id.clone(),
-            detail: format!(
-                "connector target must have {expected_dimension:?} dimension, found {:?}",
-                target.entity_dimension
-            ),
-        });
-    }
-    Ok(())
-}
-
-fn validate_connector_coefficient(
-    connector: &AnalysisConnector,
-    coefficient: f64,
-) -> Result<(), AnalysisValidationError> {
-    if coefficient.is_finite() && coefficient >= 0.0 {
-        Ok(())
-    } else {
-        Err(AnalysisValidationError::InvalidConnector {
-            connector_id: connector.connector_id.clone(),
-            detail: "coefficient must be finite and non-negative".to_string(),
-        })
-    }
-}
-
-fn validate_id(
+pub(super) fn validate_id(
     id: &str,
     kind: &'static str,
     seen: &mut HashSet<String>,
@@ -560,124 +429,6 @@ mod prescribed_motion_tests {
         assert!(matches!(
             validate_constraint_values(&local, &[acceleration(SignalShape::Vector3)]),
             Err(AnalysisValidationError::InvalidConstraint { .. })
-        ));
-    }
-}
-
-#[cfg(test)]
-mod interface_tests {
-    use super::*;
-    use crate::{ContactFriction, ContactInterfaceModel, FrictionCoefficient, RegionTarget};
-
-    fn contact(id: &str, primary: &str, secondary: &str) -> AnalysisInterface {
-        AnalysisInterface {
-            interface_id: id.into(),
-            primary: RegionTarget::boundary(primary),
-            secondary: RegionTarget::boundary(secondary),
-            kind: AnalysisInterfaceKind::Contact(ContactInterfaceModel {
-                friction: ContactFriction::Frictionless,
-            }),
-        }
-    }
-
-    #[test]
-    fn interfaces_require_unique_ids_distinct_targets_and_valid_parameters() {
-        validate_interfaces(&[contact("contact", "left", "right")]).unwrap();
-
-        assert!(matches!(
-            validate_interfaces(&[
-                contact("contact", "left", "right"),
-                contact("contact", "top", "bottom"),
-            ]),
-            Err(AnalysisValidationError::DuplicateId {
-                kind: "interface",
-                ..
-            })
-        ));
-        assert!(matches!(
-            validate_interfaces(&[contact("contact", "left", "left")]),
-            Err(AnalysisValidationError::InvalidInterface { .. })
-        ));
-        let mut invalid = contact("contact", "left", "right");
-        let AnalysisInterfaceKind::Contact(parameters) = &mut invalid.kind else {
-            unreachable!()
-        };
-        parameters.friction = ContactFriction::Coulomb {
-            coefficient: FrictionCoefficient::new(0.0),
-        };
-        assert!(matches!(
-            validate_interfaces(&[invalid]),
-            Err(AnalysisValidationError::InvalidInterface { .. })
-        ));
-    }
-}
-
-#[cfg(test)]
-mod connector_tests {
-    use super::*;
-    use crate::{Damping, FoundationModulus, RegionTarget, Stiffness};
-
-    fn connector(kind: ConnectorKind) -> AnalysisConnector {
-        AnalysisConnector {
-            connector_id: "connector".into(),
-            kind,
-        }
-    }
-
-    #[test]
-    fn connector_attachment_semantics_are_unambiguous() {
-        validate_connectors(&[connector(ConnectorKind::AxialSpring {
-            primary: RegionTarget::point("node:1"),
-            secondary: RegionTarget::point("node:2"),
-            stiffness: Stiffness::new(1.0),
-        })])
-        .expect("distinct axial spring endpoints");
-        validate_connectors(&[connector(ConnectorKind::AxialDashpot {
-            primary: RegionTarget::point("node:1"),
-            secondary: RegionTarget::point("node:2"),
-            damping: Damping::new(1.0),
-        })])
-        .expect("distinct axial dashpot endpoints");
-        validate_connectors(&[connector(ConnectorKind::IsotropicGroundSpring {
-            target: RegionTarget::point("node:1"),
-            stiffness: Stiffness::new(1.0),
-        })])
-        .expect("point ground spring");
-        validate_connectors(&[connector(ConnectorKind::SurfaceNormalFoundation {
-            target: RegionTarget::boundary("support"),
-            modulus: FoundationModulus::new(1.0),
-        })])
-        .expect("face foundation");
-
-        assert!(matches!(
-            validate_connectors(&[connector(ConnectorKind::AxialSpring {
-                primary: RegionTarget::point("node:1"),
-                secondary: RegionTarget::point("node:1"),
-                stiffness: Stiffness::new(1.0),
-            })]),
-            Err(AnalysisValidationError::InvalidConnector { .. })
-        ));
-        assert!(matches!(
-            validate_connectors(&[connector(ConnectorKind::IsotropicGroundSpring {
-                target: RegionTarget::boundary("face"),
-                stiffness: Stiffness::new(1.0),
-            })]),
-            Err(AnalysisValidationError::InvalidConnector { .. })
-        ));
-        assert!(matches!(
-            validate_connectors(&[connector(ConnectorKind::SurfaceNormalFoundation {
-                target: RegionTarget::point("node:1"),
-                modulus: FoundationModulus::new(1.0),
-            })]),
-            Err(AnalysisValidationError::InvalidConnector { .. })
-        ));
-        assert!(matches!(
-            validate_connectors(&[connector(ConnectorKind::AxialDashpot {
-                primary: RegionTarget::point("node:1"),
-                secondary: RegionTarget::point("node:2"),
-                damping: Damping::new(f64::NAN),
-            })]),
-            Err(AnalysisValidationError::InvalidConnector { .. })
         ));
     }
 }

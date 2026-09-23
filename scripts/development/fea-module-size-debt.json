@@ -49,6 +49,5 @@
   "crates/runmat-analysis/fea/src/planning/resource/frequency.rs": 705,
   "crates/runmat-analysis/fea/src/solve/dynamics/response_spectrum/mod.rs": 696,
   "crates/runmat-analysis/fea/src/pipeline/transient/motion.rs": 695,
-  "crates/runmat-analysis/fea/src/adaptation/field_transfer.rs": 692,
-  "crates/runmat-analysis/core/src/validate_authored.rs": 683
+  "crates/runmat-analysis/fea/src/adaptation/field_transfer.rs": 692
 }
