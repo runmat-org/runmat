@@ -4,6 +4,7 @@ pub mod adaptation;
 pub mod admission;
 pub mod algebra;
 pub mod assembly;
+pub mod connectors;
 pub mod constraints;
 pub mod contracts;
 pub mod diagnostics;

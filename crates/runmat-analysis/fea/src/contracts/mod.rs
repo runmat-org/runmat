@@ -680,6 +680,9 @@ pub struct FeaRunResult {
     pub structural_constraint_result:
         Option<Box<crate::constraints::CanonicalStructuralConstraintResult>>,
     #[serde(default)]
+    pub structural_connector_result:
+        Option<Box<crate::connectors::CanonicalStructuralConnectorResult>>,
+    #[serde(default)]
     pub observations: Vec<crate::results::observation::ObservationResult>,
     pub observation_histories: Vec<crate::results::observation::ObservationHistory>,
     pub series_reductions: Vec<crate::results::observation::SeriesReductionResult>,

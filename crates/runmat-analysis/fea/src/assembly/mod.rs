@@ -43,7 +43,7 @@ use self::{
     },
     explicit_connectors::{
         assemble_connectors_with_resolver, assemble_explicit_connectors, resolve_projected_surface,
-        ConnectorTargetRole, ResolvedConnectorTarget,
+        ConnectorAssemblyContext, ConnectorTargetRole, ResolvedConnectorTarget,
     },
     explicit_elements::{
         assemble_explicit_elements, validate_explicit_topology, ExplicitElementAssembly,
@@ -117,6 +117,8 @@ pub struct AssemblySummary {
     pub structural_connector_stiffness_count: usize,
     #[serde(default)]
     pub structural_connector_damping_count: usize,
+    #[serde(default)]
+    pub structural_connector_plan: Option<crate::connectors::CanonicalStructuralConnectorPlan>,
     #[serde(default)]
     pub structural_solid_element_count: usize,
     #[serde(default)]
@@ -1277,6 +1279,7 @@ fn assemble_linear_system_impl(
     });
     let mut structural_connector_stiffness_count = 0;
     let mut structural_connector_damping_count = 0;
+    let mut structural_connector_plan = None;
     if structural_requirement.is_some() && !model.connectors.is_empty() {
         let mesh = solver_mesh.as_ref().ok_or({
             LinearAssemblyError::Structural(StructuralAssemblyError::MissingDiscretization)
@@ -1297,6 +1300,11 @@ fn assemble_linear_system_impl(
             .iter()
             .map(|node| node.coordinates_m)
             .collect::<Vec<_>>();
+        let node_identities = topology
+            .nodes
+            .iter()
+            .map(|node| node.identity)
+            .collect::<Vec<_>>();
         let empty_explicit = runmat_analysis_core::StructuralModel::default();
         let mut connector_stiffness = RealSparseAssembler::square(
             dof_count,
@@ -1310,8 +1318,12 @@ fn assemble_linear_system_impl(
         );
         let summary = assemble_connectors_with_resolver(
             &model.connectors,
-            &structural_dof_layout,
-            &coordinates_m,
+            ConnectorAssemblyContext {
+                topology_identity: topology.identity,
+                layout: &structural_dof_layout,
+                coordinates_m: &coordinates_m,
+                node_identities: &node_identities,
+            },
             &mut connector_stiffness,
             &mut connector_damping,
             |connector, target, role| match role {
@@ -1340,6 +1352,7 @@ fn assemble_linear_system_impl(
         .map_err(LinearAssemblyError::Structural)?;
         structural_connector_stiffness_count = summary.stiffness_count;
         structural_connector_damping_count = summary.damping_count;
+        structural_connector_plan = Some(summary.plan.clone());
         if summary.stiffness_count > 0 {
             let connector = connector_stiffness
                 .finish()
@@ -1412,6 +1425,7 @@ fn assemble_linear_system_impl(
         structural_shell_element_count: 0,
         structural_connector_stiffness_count,
         structural_connector_damping_count,
+        structural_connector_plan,
         structural_solid_element_count: solid_topology
             .as_ref()
             .map(|topology| topology.volume_element_count)
@@ -1919,6 +1933,7 @@ fn assemble_explicit_structural_system(
         structural_shell_element_count: shell_count,
         structural_connector_stiffness_count: connector_summary.stiffness_count,
         structural_connector_damping_count: connector_summary.damping_count,
+        structural_connector_plan: Some(connector_summary.plan),
         structural_solid_element_count: 0,
         structural_solid_total_mass_kg: 0.0,
         structural_solid_recovery: Vec::new(),

@@ -253,6 +253,31 @@ fn run_linear_static_with_constraint_plan(
             options.solver_mesh.as_ref(),
         )
         .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+    let structural_connector_result =
+        crate::connectors::CanonicalStructuralConnectorResult::recover_static(
+            match summary.structural_connector_plan.clone() {
+                Some(plan) => plan,
+                None if model.connectors.is_empty() => {
+                    crate::connectors::CanonicalStructuralConnectorPlan::empty(
+                        executed_constraint_plan.topology,
+                        summary.structural_node_count,
+                    )
+                    .map_err(|error| FeaRunError::Assembly(error.to_string()))?
+                }
+                None => {
+                    return Err(FeaRunError::Assembly(
+                        "structural assembly did not publish a canonical connector plan".into(),
+                    ))
+                }
+            },
+            &summary.structural_dof_layout,
+            &solve_result.solution,
+        )
+        .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+    structural_connector_result
+        .plan
+        .validate_against_authored(&model.connectors)
+        .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
     emit_phase(
         "fea.run_linear_static",
         FeaProgressPhase::Solve,
@@ -512,6 +537,7 @@ fn run_linear_static_with_constraint_plan(
         spatial_projection_evidence: summary.spatial_projection_evidence.clone(),
         structural_static_balance: Some(Box::new(static_balance.evidence)),
         structural_constraint_result: Some(Box::new(structural_constraint_result)),
+        structural_connector_result: Some(Box::new(structural_connector_result)),
         observations,
         observation_histories: Vec::new(),
         series_reductions: Vec::new(),

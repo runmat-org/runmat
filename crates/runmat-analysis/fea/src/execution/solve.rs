@@ -331,6 +331,9 @@ impl StructuralLinearWorkloadResult {
                 "structural linear result schema or field set is invalid".into(),
             ));
         }
+        self.run
+            .validate_solver_formulation()
+            .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
         for evidence in &self.run.spatial_projection_evidence {
             evidence
                 .validate()
@@ -339,6 +342,11 @@ impl StructuralLinearWorkloadResult {
         self.constraint_result
             .validate()
             .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+        if self.run.structural_constraint_result.as_deref() != Some(&self.constraint_result) {
+            return Err(AnalysisExecutionError::Identity(
+                "portable structural constraint result differs from its canonical run payload",
+            ));
+        }
         if let Some(linearization) = &self.linearization {
             linearization
                 .validate()

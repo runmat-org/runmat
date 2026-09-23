@@ -144,6 +144,27 @@ pub fn prepare_structural_field_recovery(
                 "field recovery constraint result differs from the canonical executed plan",
             )
         })?;
+    let connector_result =
+        result
+            .run
+            .structural_connector_result
+            .as_deref()
+            .ok_or(AnalysisBridgeError::Identity(
+                "field recovery source has no canonical connector result",
+            ))?;
+    if connector_result.plan.topology != topology.identity {
+        return Err(AnalysisBridgeError::Identity(
+            "field recovery connector topology differs from the completed solve",
+        ));
+    }
+    connector_result
+        .plan
+        .validate_against_authored(&workload.model.connectors)
+        .map_err(|_| {
+            AnalysisBridgeError::Identity(
+                "field recovery connector result differs from the authored connector contract",
+            )
+        })?;
     let recovery_plan = runmat_analysis_fea::execution::FieldRecoveryPlan::resolve(
         workload.procedure_step()?,
         topology,

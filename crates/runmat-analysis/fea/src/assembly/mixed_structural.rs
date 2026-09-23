@@ -13,7 +13,7 @@ use super::{
     dofs::{StructuralDofKind, StructuralDofLayout, StructuralNodeDofSet},
     explicit_connectors::{
         assemble_connectors_with_resolver, resolve_explicit_surface, resolve_projected_surface,
-        ConnectorTargetRole, ResolvedConnectorTarget,
+        ConnectorAssemblyContext, ConnectorTargetRole, ResolvedConnectorTarget,
     },
     explicit_elements::{assemble_explicit_elements, ExplicitElementAssembly},
     requested_moment_norm,
@@ -152,10 +152,19 @@ pub(super) fn assemble_mixed_structural_system(
         .iter()
         .map(|node| node.coordinates_m)
         .collect::<Vec<_>>();
+    let connector_node_identities = topology
+        .nodes
+        .iter()
+        .map(|node| node.identity)
+        .collect::<Vec<_>>();
     let connector_summary = assemble_connectors_with_resolver(
         &model.connectors,
-        &layout,
-        &connector_coordinates_m,
+        ConnectorAssemblyContext {
+            topology_identity: topology.identity,
+            layout: &layout,
+            coordinates_m: &connector_coordinates_m,
+            node_identities: &connector_node_identities,
+        },
         &mut connector_stiffness_assembler,
         &mut connector_damping_assembler,
         |connector, target, role| {
@@ -404,6 +413,7 @@ pub(super) fn assemble_mixed_structural_system(
         structural_shell_element_count: shell_count,
         structural_connector_stiffness_count: connector_summary.stiffness_count,
         structural_connector_damping_count: connector_summary.damping_count,
+        structural_connector_plan: Some(connector_summary.plan),
         structural_solid_element_count: mesh.topology.volume_elements.len(),
         structural_solid_total_mass_kg: solid.total_mass_kg,
         structural_solid_recovery: super::solid_recovery_from_solver_mesh(mesh, &solid_properties)

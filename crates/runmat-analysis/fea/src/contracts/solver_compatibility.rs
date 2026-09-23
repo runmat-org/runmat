@@ -28,6 +28,8 @@ pub(super) struct FeaRunResultWire {
     structural_constraint_result:
         Option<Box<crate::constraints::CanonicalStructuralConstraintResult>>,
     #[serde(default)]
+    structural_connector_result: Option<Box<crate::connectors::CanonicalStructuralConnectorResult>>,
+    #[serde(default)]
     observations: Vec<crate::results::observation::ObservationResult>,
     observation_histories: Vec<crate::results::observation::ObservationHistory>,
     series_reductions: Vec<crate::results::observation::SeriesReductionResult>,
@@ -52,6 +54,7 @@ impl TryFrom<FeaRunResultWire> for FeaRunResult {
             spatial_projection_evidence: wire.spatial_projection_evidence,
             structural_static_balance: wire.structural_static_balance,
             structural_constraint_result: wire.structural_constraint_result,
+            structural_connector_result: wire.structural_connector_result,
             observations: wire.observations,
             observation_histories: wire.observation_histories,
             series_reductions: wire.series_reductions,
@@ -100,6 +103,20 @@ impl FeaRunResult {
             }
             (false, None) => {}
         }
+        match (is_structural_static, &self.structural_connector_result) {
+            (true, Some(result)) => result.validate().map_err(|_| {
+                SolverFormulationCompatibilityError::InvalidStructuralConnectorResult
+            })?,
+            (true, None) => {
+                return Err(SolverFormulationCompatibilityError::MissingStructuralConnectorResult)
+            }
+            (false, Some(_)) => {
+                return Err(
+                    SolverFormulationCompatibilityError::UnexpectedStructuralConnectorResult,
+                )
+            }
+            (false, None) => {}
+        }
         Ok(())
     }
 }
@@ -118,6 +135,12 @@ pub enum SolverFormulationCompatibilityError {
     MissingStructuralConstraintResult,
     #[error("a structural static constraint result is attached to a non-static result")]
     UnexpectedStructuralConstraintResult,
+    #[error("structural static connector result is invalid")]
+    InvalidStructuralConnectorResult,
+    #[error("a structural static result is missing its canonical connector result")]
+    MissingStructuralConnectorResult,
+    #[error("a structural static connector result is attached to a non-static result")]
+    UnexpectedStructuralConnectorResult,
     #[error("the admitted formulation has no solver-owning temporal implementation")]
     MissingSolverTemporal,
     #[error(
@@ -541,6 +564,13 @@ mod tests {
     #[test]
     fn persisted_run_rejects_solver_or_preconditioner_substitution() {
         let identity = structural_identity(AnalysisProcedure::Static, SolutionSpace::Direct);
+        let connector_plan = crate::connectors::CanonicalStructuralConnectorPlan::empty(
+            crate::physics::structural::topology::CanonicalStructuralTopologyIdentity::Solid {
+                mesh_digest: runmat_meshing_core::StableDigest::from_bytes([7; 32]),
+            },
+            0,
+        )
+        .unwrap();
         let run = FeaRunResult {
             identity,
             requested_backend: ComputeBackend::Cpu,
@@ -581,6 +611,14 @@ mod tests {
                     maximum_displacement_error_meters: 0.0,
                     maximum_rotation_error_radians: 0.0,
                 },
+            )),
+            structural_connector_result: Some(Box::new(
+                crate::connectors::CanonicalStructuralConnectorResult::recover_static(
+                    connector_plan,
+                    &crate::assembly::dofs::StructuralDofLayout::default(),
+                    &[],
+                )
+                .unwrap(),
             )),
             observations: Vec::new(),
             observation_histories: Vec::new(),

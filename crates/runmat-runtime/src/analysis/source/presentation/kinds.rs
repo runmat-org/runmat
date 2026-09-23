@@ -76,14 +76,13 @@ pub(super) fn boundary_kind(kind: &AuthoredBoundaryKind) -> FeaBoundaryPresentat
 
 pub(super) fn connector_kind(kind: &AuthoredConnectorKind) -> FeaConnectorPresentationKind {
     match kind {
-        AuthoredConnectorKind::TranslationalSpring { .. } => {
-            FeaConnectorPresentationKind::TranslationalSpring
+        AuthoredConnectorKind::AxialSpring { .. } => FeaConnectorPresentationKind::AxialSpring,
+        AuthoredConnectorKind::AxialDashpot { .. } => FeaConnectorPresentationKind::AxialDashpot,
+        AuthoredConnectorKind::IsotropicGroundSpring { .. } => {
+            FeaConnectorPresentationKind::IsotropicGroundSpring
         }
-        AuthoredConnectorKind::TranslationalDashpot { .. } => {
-            FeaConnectorPresentationKind::TranslationalDashpot
-        }
-        AuthoredConnectorKind::ElasticFoundation { .. } => {
-            FeaConnectorPresentationKind::ElasticFoundation
+        AuthoredConnectorKind::SurfaceNormalFoundation { .. } => {
+            FeaConnectorPresentationKind::SurfaceNormalFoundation
         }
     }
 }

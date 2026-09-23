@@ -562,6 +562,27 @@ fn validate_result_semantics(
         .constraint_result
         .validate_against(&constraint_plan)
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let connector_result =
+        result
+            .run
+            .structural_connector_result
+            .as_deref()
+            .ok_or(AnalysisBridgeError::Identity(
+                "structural result has no canonical connector result",
+            ))?;
+    if connector_result.plan.topology != constraint_plan.topology {
+        return Err(AnalysisBridgeError::Identity(
+            "structural connector result topology differs from the prepared workload",
+        ));
+    }
+    connector_result
+        .plan
+        .validate_against_authored(&workload.model.connectors)
+        .map_err(|_| {
+            AnalysisBridgeError::Identity(
+                "structural connector result differs from the authored connector contract",
+            )
+        })?;
     let step = workload.procedure_step()?;
     if result.run.requested_backend != workload.backend
         || result.run.identity.family() != step.family

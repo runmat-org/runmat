@@ -185,9 +185,10 @@ pub enum FeaBoundaryPresentationKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FeaConnectorPresentationKind {
-    TranslationalSpring,
-    TranslationalDashpot,
-    ElasticFoundation,
+    AxialSpring,
+    AxialDashpot,
+    IsotropicGroundSpring,
+    SurfaceNormalFoundation,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

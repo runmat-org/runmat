@@ -75,6 +75,7 @@ pub(super) fn admit_statistical_persistence(
             spatial_projection_evidence: Vec::new(),
             structural_static_balance: None,
             structural_constraint_result: None,
+            structural_connector_result: None,
             observations: Vec::new(),
             observation_histories: Vec::new(),
             series_reductions: Vec::new(),

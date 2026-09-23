@@ -8,15 +8,20 @@ use super::{
 };
 use crate::{
     algebra::{ContributionDomain, ContributionId, ContributionProvenance, RealSparseAssembler},
+    connectors::{
+        authored_connectors_digest, CanonicalConnectorEntry, CanonicalConnectorNode,
+        CanonicalStructuralConnectorPlan, SurfaceFoundationQuadrature,
+    },
     physics::structural::topology::{
         explicit_surface::explicit_shell_surface_geometry, node_space::CanonicalStructuralNodeSpace,
     },
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(super) struct ExplicitConnectorSummary {
     pub stiffness_count: usize,
     pub damping_count: usize,
+    pub plan: CanonicalStructuralConnectorPlan,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,6 +44,14 @@ pub(super) struct ResolvedConnectorTarget {
     pub surface_samples: Vec<SurfaceFoundationSample>,
 }
 
+pub(super) struct ConnectorAssemblyContext<'a> {
+    pub topology_identity:
+        crate::physics::structural::topology::CanonicalStructuralTopologyIdentity,
+    pub layout: &'a StructuralDofLayout,
+    pub coordinates_m: &'a [[f64; 3]],
+    pub node_identities: &'a [runmat_meshing_core::StableDigest],
+}
+
 pub(super) fn assemble_explicit_connectors(
     connectors: &[AnalysisConnector],
     structural: &StructuralModel,
@@ -52,10 +65,19 @@ pub(super) fn assemble_explicit_connectors(
         .iter()
         .map(|node| node.coordinates_m)
         .collect::<Vec<_>>();
+    let node_identities = topology
+        .nodes
+        .iter()
+        .map(|node| node.identity)
+        .collect::<Vec<_>>();
     assemble_connectors_with_resolver(
         connectors,
-        layout,
-        &coordinates_m,
+        ConnectorAssemblyContext {
+            topology_identity: topology.identity,
+            layout,
+            coordinates_m: &coordinates_m,
+            node_identities: &node_identities,
+        },
         stiffness,
         damping,
         |connector, target, role| match role {
@@ -73,8 +95,7 @@ pub(super) fn assemble_explicit_connectors(
 
 pub(super) fn assemble_connectors_with_resolver(
     connectors: &[AnalysisConnector],
-    layout: &StructuralDofLayout,
-    coordinates_m: &[[f64; 3]],
+    context: ConnectorAssemblyContext<'_>,
     stiffness: &mut RealSparseAssembler,
     damping: &mut RealSparseAssembler,
     mut resolve: impl FnMut(
@@ -85,7 +106,10 @@ pub(super) fn assemble_connectors_with_resolver(
 ) -> Result<ExplicitConnectorSummary, StructuralAssemblyError> {
     let mut stiffness_count = 0;
     let mut damping_count = 0;
+    let mut entries = Vec::with_capacity(connectors.len());
     for connector in connectors {
+        let source_digest = crate::connectors::contract::source_digest(connector)
+            .map_err(|_| invalid(connector, "connector source identity could not be encoded"))?;
         match &connector.kind {
             ConnectorKind::AxialSpring {
                 primary,
@@ -96,13 +120,21 @@ pub(super) fn assemble_connectors_with_resolver(
                     resolve_axial_endpoints(connector, primary, secondary, &mut resolve)?;
                 add_axial_operator(
                     stiffness,
-                    layout,
-                    coordinates_m,
+                    context.layout,
+                    context.coordinates_m,
                     endpoints,
                     value.newtons_per_meter,
                     connector,
                 )?;
                 stiffness.add_contribution(provenance(connector));
+                entries.push(CanonicalConnectorEntry::AxialSpring {
+                    connector_id: connector.connector_id.clone(),
+                    source_digest,
+                    primary: canonical_node(endpoints[0], context.node_identities, connector)?,
+                    secondary: canonical_node(endpoints[1], context.node_identities, connector)?,
+                    unit_axis: axial_axis(context.coordinates_m, endpoints, connector)?,
+                    stiffness_newtons_per_meter: value.newtons_per_meter,
+                });
                 stiffness_count += 1;
             }
             ConnectorKind::AxialDashpot {
@@ -114,13 +146,21 @@ pub(super) fn assemble_connectors_with_resolver(
                     resolve_axial_endpoints(connector, primary, secondary, &mut resolve)?;
                 add_axial_operator(
                     damping,
-                    layout,
-                    coordinates_m,
+                    context.layout,
+                    context.coordinates_m,
                     endpoints,
                     value.newton_seconds_per_meter,
                     connector,
                 )?;
                 damping.add_contribution(provenance(connector));
+                entries.push(CanonicalConnectorEntry::AxialDashpot {
+                    connector_id: connector.connector_id.clone(),
+                    source_digest,
+                    primary: canonical_node(endpoints[0], context.node_identities, connector)?,
+                    secondary: canonical_node(endpoints[1], context.node_identities, connector)?,
+                    unit_axis: axial_axis(context.coordinates_m, endpoints, connector)?,
+                    damping_newton_seconds_per_meter: value.newton_seconds_per_meter,
+                });
                 damping_count += 1;
             }
             ConnectorKind::IsotropicGroundSpring {
@@ -129,8 +169,19 @@ pub(super) fn assemble_connectors_with_resolver(
             } => {
                 let resolved = resolve(connector, target, ConnectorTargetRole::Point)?;
                 let node = exactly_one_node(connector, target, &resolved.node_indices)?;
-                add_isotropic_ground_operator(stiffness, layout, node, value.newtons_per_meter);
+                add_isotropic_ground_operator(
+                    stiffness,
+                    context.layout,
+                    node,
+                    value.newtons_per_meter,
+                );
                 stiffness.add_contribution(provenance(connector));
+                entries.push(CanonicalConnectorEntry::IsotropicGroundSpring {
+                    connector_id: connector.connector_id.clone(),
+                    source_digest,
+                    target: canonical_node(node, context.node_identities, connector)?,
+                    stiffness_newtons_per_meter: value.newtons_per_meter,
+                });
                 stiffness_count += 1;
             }
             ConnectorKind::SurfaceNormalFoundation { target, modulus } => {
@@ -143,19 +194,90 @@ pub(super) fn assemble_connectors_with_resolver(
                 }
                 add_surface_normal_foundation(
                     stiffness,
-                    layout,
+                    context.layout,
                     &resolved.surface_samples,
                     modulus.newtons_per_cubic_meter,
                 );
                 stiffness.add_contribution(provenance(connector));
+                entries.push(CanonicalConnectorEntry::SurfaceNormalFoundation {
+                    connector_id: connector.connector_id.clone(),
+                    source_digest,
+                    modulus_newtons_per_cubic_meter: modulus.newtons_per_cubic_meter,
+                    quadrature: resolved
+                        .surface_samples
+                        .iter()
+                        .map(|sample| {
+                            Ok(SurfaceFoundationQuadrature {
+                                nodes: sample
+                                    .node_indices
+                                    .iter()
+                                    .map(|index| {
+                                        canonical_node(*index, context.node_identities, connector)
+                                    })
+                                    .collect::<Result<Vec<_>, StructuralAssemblyError>>()?,
+                                shape_values: sample.shape_values.clone(),
+                                unit_normal: sample.unit_normal,
+                                area_weight_m2: sample.area_weight_m2,
+                            })
+                        })
+                        .collect::<Result<Vec<_>, StructuralAssemblyError>>()?,
+                });
                 stiffness_count += 1;
             }
         }
     }
+    let plan = CanonicalStructuralConnectorPlan::new(
+        context.topology_identity,
+        context.coordinates_m.len(),
+        authored_connectors_digest(connectors).map_err(|_| {
+            StructuralAssemblyError::InvalidExplicitConnector {
+                connector_id: "connector-plan".into(),
+                reason: "connector source identity could not be encoded",
+            }
+        })?,
+        entries,
+    )
+    .map_err(|_| StructuralAssemblyError::InvalidExplicitConnector {
+        connector_id: "connector-plan".into(),
+        reason: "canonical connector realization is invalid",
+    })?;
     Ok(ExplicitConnectorSummary {
         stiffness_count,
         damping_count,
+        plan,
     })
+}
+
+fn canonical_node(
+    node_index: usize,
+    node_identities: &[runmat_meshing_core::StableDigest],
+    connector: &AnalysisConnector,
+) -> Result<CanonicalConnectorNode, StructuralAssemblyError> {
+    let node_identity = node_identities
+        .get(node_index)
+        .copied()
+        .ok_or_else(|| invalid(connector, "connector node identity is absent"))?;
+    Ok(CanonicalConnectorNode {
+        node_index,
+        node_identity,
+    })
+}
+
+fn axial_axis(
+    coordinates_m: &[[f64; 3]],
+    endpoints: [usize; 2],
+    connector: &AnalysisConnector,
+) -> Result<[f64; 3], StructuralAssemblyError> {
+    let primary = coordinates_m
+        .get(endpoints[0])
+        .ok_or_else(|| invalid(connector, "primary endpoint coordinate is absent"))?;
+    let secondary = coordinates_m
+        .get(endpoints[1])
+        .ok_or_else(|| invalid(connector, "secondary endpoint coordinate is absent"))?;
+    unit_vector(std::array::from_fn(|index| {
+        secondary[index] - primary[index]
+    }))
+    .ok_or_else(|| invalid(connector, "axial connector endpoints are coincident"))
 }
 
 fn resolve_axial_endpoints(
@@ -326,14 +448,7 @@ fn add_axial_operator(
     coefficient: f64,
     connector: &AnalysisConnector,
 ) -> Result<(), StructuralAssemblyError> {
-    let primary = coordinates_m
-        .get(endpoints[0])
-        .ok_or_else(|| invalid(connector, "primary endpoint coordinate is absent"))?;
-    let secondary = coordinates_m
-        .get(endpoints[1])
-        .ok_or_else(|| invalid(connector, "secondary endpoint coordinate is absent"))?;
-    let axis = unit_vector(std::array::from_fn(|i| secondary[i] - primary[i]))
-        .ok_or_else(|| invalid(connector, "axial connector endpoints are coincident"))?;
+    let axis = axial_axis(coordinates_m, endpoints, connector)?;
     let mut terms = Vec::with_capacity(6);
     for (node, sign) in [(endpoints[0], -1.0), (endpoints[1], 1.0)] {
         for (dof, component) in [
@@ -424,109 +539,4 @@ fn provenance(connector: &AnalysisConnector) -> ContributionProvenance {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{
-        algebra::{MatrixProperties, OperatorRole},
-        assembly::dofs::StructuralNodeDofSet,
-    };
-
-    #[test]
-    fn axial_operator_is_objective_under_infinitesimal_rigid_rotation() {
-        let layout = StructuralDofLayout::from_node_sets(vec![
-            StructuralNodeDofSet::translational(),
-            StructuralNodeDofSet::translational(),
-        ]);
-        let connector = AnalysisConnector {
-            connector_id: "axial".into(),
-            kind: ConnectorKind::AxialSpring {
-                primary: RegionTarget::point("node:1"),
-                secondary: RegionTarget::point("node:2"),
-                stiffness: runmat_analysis_core::Stiffness::new(100.0),
-            },
-        };
-        let mut assembler = RealSparseAssembler::square(
-            layout.total_dof_count(),
-            OperatorRole::Stiffness,
-            MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
-        );
-        add_axial_operator(
-            &mut assembler,
-            &layout,
-            &[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
-            [0, 1],
-            100.0,
-            &connector,
-        )
-        .unwrap();
-        let matrix = assembler.finish().unwrap();
-        let rigid_rotation = [0.0, 0.0, 0.0, 0.0, 1.0, 0.0];
-        assert_eq!(quadratic_form(&matrix, &rigid_rotation), 0.0);
-        let axial_extension = [0.0, 0.0, 0.0, 0.25, 0.0, 0.0];
-        assert!((quadratic_form(&matrix, &axial_extension) - 6.25).abs() < 1.0e-12);
-    }
-
-    #[test]
-    fn surface_foundation_scales_with_area_not_node_count() {
-        let coarse = foundation_rigid_normal_stiffness(
-            1,
-            vec![SurfaceFoundationSample {
-                node_indices: vec![0],
-                shape_values: vec![1.0],
-                unit_normal: [0.0, 0.0, 1.0],
-                area_weight_m2: 2.0,
-            }],
-        );
-        let refined = foundation_rigid_normal_stiffness(
-            2,
-            vec![
-                SurfaceFoundationSample {
-                    node_indices: vec![0],
-                    shape_values: vec![1.0],
-                    unit_normal: [0.0, 0.0, 1.0],
-                    area_weight_m2: 1.0,
-                },
-                SurfaceFoundationSample {
-                    node_indices: vec![1],
-                    shape_values: vec![1.0],
-                    unit_normal: [0.0, 0.0, 1.0],
-                    area_weight_m2: 1.0,
-                },
-            ],
-        );
-        assert!((coarse - 20.0).abs() < 1.0e-12);
-        assert!((refined - coarse).abs() < 1.0e-12);
-    }
-
-    fn foundation_rigid_normal_stiffness(
-        node_count: usize,
-        samples: Vec<SurfaceFoundationSample>,
-    ) -> f64 {
-        let layout = StructuralDofLayout::from_node_sets(vec![
-            StructuralNodeDofSet::translational();
-            node_count
-        ]);
-        let mut assembler = RealSparseAssembler::square(
-            layout.total_dof_count(),
-            OperatorRole::Stiffness,
-            MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
-        );
-        add_surface_normal_foundation(&mut assembler, &layout, &samples, 10.0);
-        let matrix = assembler.finish().unwrap();
-        let mut rigid_normal = vec![0.0; layout.total_dof_count()];
-        for node in 0..node_count {
-            rigid_normal[layout.index(node, StructuralDofKind::Uz).unwrap()] = 1.0;
-        }
-        quadratic_form(&matrix, &rigid_normal)
-    }
-
-    fn quadratic_form(matrix: &crate::algebra::RealSparseMatrix, vector: &[f64]) -> f64 {
-        (0..vector.len())
-            .map(|row| {
-                (0..vector.len())
-                    .map(|column| vector[row] * matrix.get(row, column) * vector[column])
-                    .sum::<f64>()
-            })
-            .sum()
-    }
-}
+mod tests;

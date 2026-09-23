@@ -99,15 +99,30 @@ pub(super) fn present_models(
             ));
         }
         for connector in &model.connectors {
-            let mut targets = region_target(&connector.primary, region_bindings, region_selectors)
+            let authored_targets = match &connector.kind {
+                runmat_analysis_core::AuthoredConnectorKind::AxialSpring {
+                    primary,
+                    secondary,
+                    ..
+                }
+                | runmat_analysis_core::AuthoredConnectorKind::AxialDashpot {
+                    primary,
+                    secondary,
+                    ..
+                } => vec![primary, secondary],
+                runmat_analysis_core::AuthoredConnectorKind::IsotropicGroundSpring {
+                    target,
+                    ..
+                }
+                | runmat_analysis_core::AuthoredConnectorKind::SurfaceNormalFoundation {
+                    target,
+                    ..
+                } => vec![target],
+            };
+            let targets = authored_targets
                 .into_iter()
-                .collect::<Vec<_>>();
-            targets.extend(
-                connector
-                    .secondary
-                    .as_ref()
-                    .and_then(|target| region_target(target, region_bindings, region_selectors)),
-            );
+                .filter_map(|target| region_target(target, region_bindings, region_selectors))
+                .collect();
             objects.push(object(
                 connector.connector_id.clone(),
                 model,

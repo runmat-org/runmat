@@ -9,8 +9,7 @@ use runmat_analysis_core::{
 use runmat_analysis_fea::execution::{
     AnalysisNumericalObjectKind, AnalysisTaskIdentity, AnalysisWorkKind, ConstraintPlanIdentity,
     DiscretizationIdentity, ExecutionPlanIdentity, NumericalPlanIdentity, OperatorIdentity,
-    ProblemIdentity, SequenceIdentity, SolverResultIdentity, StepIdentity,
-    StructuralLinearWorkloadResult, StudyIdentity,
+    ProblemIdentity, SequenceIdentity, StepIdentity, StructuralLinearWorkloadResult, StudyIdentity,
 };
 use runmat_execution::value::ValueRefKind;
 use runmat_execution::{
@@ -1666,36 +1665,43 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
     .unwrap();
     assert_eq!(decoded.run, raw);
 
-    let mut substituted_constraint_result = constraint_result.clone();
-    substituted_constraint_result.groups[0].resultant_force_newtons[0] += 1.0;
-    substituted_constraint_result.resultant_force_newtons[0] += 1.0;
-    let substituted_result =
-        StructuralLinearWorkloadResult::new(raw.clone(), substituted_constraint_result).unwrap();
-    let substituted_payload = substituted_result.canonical_bytes().unwrap();
-    let substituted_payload_digest = Digest::sha256(&substituted_payload);
-    let substituted_identity =
-        SolverResultIdentity::new(prepared.host.workload.identity, substituted_payload_digest)
+    let mut substituted_connector_run = raw.clone();
+    substituted_connector_run
+        .structural_connector_result
+        .as_deref_mut()
+        .expect("structural static result must publish connector evidence")
+        .plan
+        .authored_connectors_digest = digest("substituted-connectors");
+    let encoded =
+        StructuralLinearWorkloadResult::new(substituted_connector_run, constraint_result.clone())
+            .unwrap()
+            .canonical_bytes()
             .unwrap();
-    let substituted_objects = prepare_analysis_objects(
-        AnalysisNumericalObjectKind::SolverResult,
-        substituted_identity.digest(),
-        &substituted_payload,
+    let substituted_completed = execute_serial_analysis(
+        &prepared.program.request,
+        &mut store,
+        &StructuralResultKernel(encoded),
         4096,
-        ObjectNamespace::ResultValue,
         ObjectInventoryLimits::default(),
     )
     .unwrap();
+    let substituted_response =
+        AnalysisHostResponse::completed(&prepared.host, &substituted_completed)
+            .unwrap()
+            .program_response();
+    assert!(import_structural_linear_result(
+        &store,
+        substituted_response,
+        &prepared,
+        ObjectInventoryLimits::default(),
+    )
+    .is_err());
+
+    let mut substituted_constraint_result = constraint_result.clone();
+    substituted_constraint_result.groups[0].resultant_force_newtons[0] += 1.0;
+    substituted_constraint_result.resultant_force_newtons[0] += 1.0;
     assert!(
-        prepare_structural_field_recovery(StructuralFieldRecoveryPreparation {
-            source_host: prepared.host.clone(),
-            source_invocation: prepared.inputs[0].clone(),
-            source_result: substituted_objects,
-            mesh: Some(prepared.inputs[1].clone()),
-            program_revision: revision(),
-            chunk_bytes: 4096,
-            inventory_limits: ObjectInventoryLimits::default(),
-        })
-        .is_err()
+        StructuralLinearWorkloadResult::new(raw.clone(), substituted_constraint_result).is_err()
     );
 
     let field_prepared = prepare_structural_field_recovery(StructuralFieldRecoveryPreparation {
@@ -2619,28 +2625,9 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
 
     let mut substituted_constraint_result = constraint_result;
     substituted_constraint_result.constraint_plan_digest = digest("substituted-plan");
-    let encoded = StructuralLinearWorkloadResult::new(decoded.run, substituted_constraint_result)
-        .unwrap()
-        .canonical_bytes()
-        .unwrap();
-    let completed = execute_serial_analysis(
-        &prepared.program.request,
-        &mut store,
-        &StructuralResultKernel(encoded),
-        4096,
-        ObjectInventoryLimits::default(),
-    )
-    .unwrap();
-    let response = AnalysisHostResponse::completed(&prepared.host, &completed)
-        .unwrap()
-        .program_response();
-    assert!(import_structural_linear_result(
-        &store,
-        response,
-        &prepared,
-        ObjectInventoryLimits::default(),
-    )
-    .is_err());
+    assert!(
+        StructuralLinearWorkloadResult::new(decoded.run, substituted_constraint_result).is_err()
+    );
 }
 
 #[test]
