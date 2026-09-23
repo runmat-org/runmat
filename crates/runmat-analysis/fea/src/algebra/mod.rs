@@ -17,7 +17,10 @@ pub use matrix::{
     MatrixProperties, MatrixSymmetry, OperatorRole, RealSparseAssembler, RealSparseMatrix,
     RealSparseMatrixError, ScalarDomain, ScalarPrecision,
 };
-pub(crate) use nullspace::{ConnectorAnchoredStructuralFrameInput, MixedStructuralNullspaceInput};
+pub(crate) use nullspace::{
+    ConnectorAnchoredSolidInput, ConnectorAnchoredStructuralFrameInput,
+    MixedStructuralNullspaceInput,
+};
 pub use nullspace::{
     NullspaceEliminationEvidence, NullspaceEvidenceError, NullspaceKind, PreparedNullspaceEvidence,
 };

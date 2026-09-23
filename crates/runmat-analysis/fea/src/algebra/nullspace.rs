@@ -126,6 +126,17 @@ pub(crate) struct ConnectorAnchoredStructuralFrameInput<'a> {
     pub constrained_dofs: &'a [bool],
 }
 
+pub(crate) struct ConnectorAnchoredSolidInput<'a> {
+    pub mesh: &'a SolverMeshArtifact,
+    pub layout: &'a StructuralDofLayout,
+    pub element_operator: &'a RealSparseMatrix,
+    pub connector_operator: &'a RealSparseMatrix,
+    pub combined_operator: &'a RealSparseMatrix,
+    pub plan: &'a CanonicalStructuralConstraintPlan,
+    pub constraints: &'a ResolvedConstraintMatrix,
+    pub constrained_dofs: &'a [bool],
+}
+
 impl NullspaceEliminationEvidence {
     pub fn prove_thermal(
         projection: &AnalysisProjection,
@@ -145,6 +156,12 @@ impl NullspaceEliminationEvidence {
         constrained_dofs: &[bool],
     ) -> Result<Self, NullspaceEvidenceError> {
         solid::prove(mesh, layout, plan, constraints, operator, constrained_dofs)
+    }
+
+    pub(crate) fn prove_connector_anchored_solid(
+        input: ConnectorAnchoredSolidInput<'_>,
+    ) -> Result<Self, NullspaceEvidenceError> {
+        solid::prove_with_connector_anchors(input)
     }
 
     pub fn prove_structural_frame(
@@ -369,7 +386,9 @@ fn anchoring_matches(component: &NullspaceComponentEvidence, kind: NullspaceKind
         ) => true,
         (
             NullspaceAnchoring::OperatorAndConstraintRowSpace,
-            NullspaceKind::StructuralFrameRigidBody3d | NullspaceKind::MixedStructuralRigidBody3d,
+            NullspaceKind::SolidRigidBody3d
+            | NullspaceKind::StructuralFrameRigidBody3d
+            | NullspaceKind::MixedStructuralRigidBody3d,
         ) => true,
         _ => false,
     }

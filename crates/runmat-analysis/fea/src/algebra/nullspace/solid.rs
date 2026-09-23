@@ -9,11 +9,13 @@ use crate::{
 };
 
 use super::{
-    digest, numerical_rank, rigid_body::RigidBodyFrame,
-    solid_components::solid_face_connected_components, validate_operator, verify_null_mode,
-    MatrixDefiniteness, NullspaceAnchoring, NullspaceComponentEvidence,
-    NullspaceEliminationEvidence, NullspaceEvidenceError, NullspaceKind, OperatorRole,
-    RealSparseMatrix, CONSTRAINT_DOMAIN,
+    canonical_frame::{self, CanonicalFrameTopology},
+    digest, numerical_rank,
+    rigid_body::RigidBodyFrame,
+    solid_components::solid_face_connected_components,
+    validate_operator, verify_null_mode, ConnectorAnchoredSolidInput, MatrixDefiniteness,
+    NullspaceAnchoring, NullspaceComponentEvidence, NullspaceEliminationEvidence,
+    NullspaceEvidenceError, NullspaceKind, OperatorRole, RealSparseMatrix, CONSTRAINT_DOMAIN,
 };
 
 pub(super) fn prove(
@@ -178,6 +180,91 @@ pub(super) fn prove(
         digest(CONSTRAINT_DOMAIN, &(plan_identity, constraints))?,
         constrained_dofs,
         components,
+    )
+}
+
+pub(super) fn prove_with_connector_anchors(
+    input: ConnectorAnchoredSolidInput<'_>,
+) -> Result<NullspaceEliminationEvidence, NullspaceEvidenceError> {
+    let ConnectorAnchoredSolidInput {
+        mesh,
+        layout,
+        element_operator,
+        connector_operator,
+        combined_operator,
+        plan,
+        constraints,
+        constrained_dofs,
+    } = input;
+    constraints
+        .validate()
+        .map_err(|_| NullspaceEvidenceError::InvalidEvidence)?;
+    let expected_constraints = crate::assembly::resolve_solid_constraint_matrix(plan, mesh, layout)
+        .map_err(|_| NullspaceEvidenceError::InvalidEvidence)?;
+    if constraints != &expected_constraints
+        || layout.node_count() != mesh.topology.nodes.len()
+        || layout.total_dof_count() != combined_operator.rows()
+        || element_operator.rows() != combined_operator.rows()
+        || element_operator.columns() != combined_operator.columns()
+        || connector_operator.rows() != combined_operator.rows()
+        || connector_operator.columns() != combined_operator.columns()
+        || constraints.full_dof_count != combined_operator.rows()
+        || constrained_dofs.len() != combined_operator.rows()
+    {
+        return Err(NullspaceEvidenceError::BindingMismatch);
+    }
+    for operator in [element_operator, connector_operator, combined_operator] {
+        validate_operator(
+            operator,
+            OperatorRole::Stiffness,
+            MatrixDefiniteness::PositiveSemidefinite,
+        )?;
+    }
+    let expected = RealSparseMatrix::scaled_sum(
+        &[(1.0, element_operator), (1.0, connector_operator)],
+        OperatorRole::Stiffness,
+        combined_operator.properties(),
+    )
+    .map_err(|_| NullspaceEvidenceError::DimensionMismatch)?;
+    if expected != *combined_operator {
+        return Err(NullspaceEvidenceError::BindingMismatch);
+    }
+    let node_by_id = mesh
+        .topology
+        .nodes
+        .iter()
+        .enumerate()
+        .map(|(index, node)| (node.node_id, index))
+        .collect::<BTreeMap<_, _>>();
+    let components = solid_face_connected_components(mesh, &node_by_id)?;
+    let positions = mesh
+        .topology
+        .nodes
+        .iter()
+        .map(|node| node.coordinates_m)
+        .collect::<Vec<_>>();
+    let identities = mesh
+        .topology
+        .nodes
+        .iter()
+        .map(|node| node.stable_identity)
+        .collect::<Vec<_>>();
+    let reference_points = canonical_frame::reference_points(plan, &identities, &components)?;
+    canonical_frame::prove(
+        CanonicalFrameTopology {
+            positions_m: &positions,
+            node_identities: &identities,
+            components,
+            reference_points: &reference_points,
+            topology_identity: Digest::from_bytes(*mesh.canonical_digest.bytes()),
+            kind: NullspaceKind::SolidRigidBody3d,
+        },
+        layout,
+        element_operator,
+        Some(connector_operator),
+        combined_operator,
+        Some(constraints),
+        constrained_dofs,
     )
 }
 

@@ -1267,6 +1267,7 @@ fn assemble_linear_system_impl(
             .expanded_square(dof_count)
             .expect("structural DOF expansion is valid")
     });
+    let solid_element_stiffness_csr = stiffness_csr.clone();
     mass_csr = mass_csr.map(|matrix| {
         matrix
             .expanded_square(dof_count)
@@ -1280,6 +1281,7 @@ fn assemble_linear_system_impl(
     let mut structural_connector_stiffness_count = 0;
     let mut structural_connector_damping_count = 0;
     let mut structural_connector_plan = None;
+    let mut structural_connector_stiffness_csr = None;
     if structural_requirement.is_some() && !model.connectors.is_empty() {
         let mesh = solver_mesh.as_ref().ok_or({
             LinearAssemblyError::Structural(StructuralAssemblyError::MissingDiscretization)
@@ -1360,14 +1362,14 @@ fn assemble_linear_system_impl(
             let solid = stiffness_csr.as_ref().ok_or({
                 LinearAssemblyError::Structural(StructuralAssemblyError::MissingDiscretization)
             })?;
-            stiffness_csr = Some(
-                RealSparseMatrix::scaled_sum(
-                    &[(1.0, solid), (1.0, &connector)],
-                    OperatorRole::Stiffness,
-                    MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
-                )
-                .map_err(|error| LinearAssemblyError::SparseOperator(format!("{error:?}")))?,
-            );
+            let combined = RealSparseMatrix::scaled_sum(
+                &[(1.0, solid), (1.0, &connector)],
+                OperatorRole::Stiffness,
+                MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+            )
+            .map_err(|error| LinearAssemblyError::SparseOperator(format!("{error:?}")))?;
+            structural_connector_stiffness_csr = Some(connector);
+            stiffness_csr = Some(combined);
         }
         if summary.damping_count > 0 {
             let connector = connector_damping
@@ -1564,14 +1566,35 @@ fn assemble_linear_system_impl(
                             .map_err(LinearAssemblyError::ConstraintAlgebra)?;
                     &resolved_storage
                 };
-                match NullspaceEliminationEvidence::prove_solid(
-                    mesh,
-                    &structural_dof_layout,
-                    plan,
-                    resolved,
-                    operators.stiffness(),
-                    &constrained,
-                ) {
+                let proof = if let Some(connector) = structural_connector_stiffness_csr.as_ref() {
+                    let element = solid_element_stiffness_csr.as_ref().ok_or({
+                        LinearAssemblyError::Structural(
+                            StructuralAssemblyError::MissingDiscretization,
+                        )
+                    })?;
+                    NullspaceEliminationEvidence::prove_connector_anchored_solid(
+                        crate::algebra::ConnectorAnchoredSolidInput {
+                            mesh,
+                            layout: &structural_dof_layout,
+                            element_operator: element,
+                            connector_operator: connector,
+                            combined_operator: operators.stiffness(),
+                            plan,
+                            constraints: resolved,
+                            constrained_dofs: &constrained,
+                        },
+                    )
+                } else {
+                    NullspaceEliminationEvidence::prove_solid(
+                        mesh,
+                        &structural_dof_layout,
+                        plan,
+                        resolved,
+                        operators.stiffness(),
+                        &constrained,
+                    )
+                };
+                match proof {
                     Ok(evidence) => Some(evidence),
                     Err(crate::algebra::NullspaceEvidenceError::UnderconstrainedComponent) => None,
                     Err(error) => {
