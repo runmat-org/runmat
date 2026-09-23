@@ -1,0 +1,375 @@
+use super::*;
+use crate::{
+    assembly::{
+        assemble_structural_system, dofs::StructuralDofKind, StructuralFormulationRequirement,
+    },
+    contracts::{
+        FEA_FIELD_STRUCTURAL_BEAM_AXIAL_FORCE, FEA_FIELD_STRUCTURAL_BEAM_SHEAR_FORCE,
+        FEA_FIELD_STRUCTURAL_CONSTRAINT_REACTION_FORCE, FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT,
+        FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE,
+    },
+    excitation::{realize_step_excitations, ExcitationSamplePoint, RealizedExcitations},
+    fixtures::{fixture_model, FixtureId},
+};
+use runmat_analysis_core::{
+    AnalysisConstraint, CoordinateFrame, Displacement, ObservationQuantity,
+    PrescribedStructuralDofs, PrescribedValue, RegionTarget, StructuralConstraint,
+    StructuralConstraintKind, StructuralTranslationDof, TranslationDofValue,
+};
+use runmat_meshing_core::{ElementOrder, SolverMeshArtifact};
+
+fn static_excitations(model: &runmat_analysis_core::AnalysisModel) -> RealizedExcitations {
+    realize_step_excitations(
+        model,
+        &model.sequence.steps[0],
+        ExcitationSamplePoint::Static,
+    )
+    .expect("field-recovery fixture excitations should realize")
+}
+
+#[test]
+fn synthetic_operator_recovery_does_not_publish_continuum_fields() {
+    let model = fixture_model(FixtureId::CantileverLinearStatic);
+    let summary = assemble_structural_system(
+        &model,
+        &static_excitations(&model),
+        None,
+        StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+    )
+    .expect("the synthetic fixture operator should assemble");
+
+    let fields = recover_deformation_result_fields(&summary, &vec![0.0; summary.dof_count])
+        .expect("kinematic recovery should remain available");
+
+    assert!(fields
+        .iter()
+        .any(|field| field.field_id == FEA_FIELD_STRUCTURAL_DISPLACEMENT));
+    for field_id in [
+        FEA_FIELD_STRUCTURAL_STRAIN,
+        FEA_FIELD_STRUCTURAL_STRESS,
+        FEA_FIELD_STRUCTURAL_VON_MISES,
+        FEA_FIELD_STRUCTURAL_NODAL_VON_MISES,
+        FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY,
+    ] {
+        assert!(
+            fields.iter().all(|field| field.field_id != field_id),
+            "synthetic topology cannot support physical field `{field_id}`"
+        );
+    }
+}
+
+#[test]
+fn generic_field_take_does_not_claim_constraint_group_reaction_ownership() {
+    let mut fields = vec![
+        AnalysisField::host_f64(
+            FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+            vec![1, VECTOR_COMPONENT_COUNT],
+            vec![1.0, 2.0, 3.0],
+        ),
+        AnalysisField::host_f64(
+            FEA_FIELD_STRUCTURAL_CONSTRAINT_REACTION_FORCE,
+            vec![1, VECTOR_COMPONENT_COUNT],
+            vec![4.0, 5.0, 6.0],
+        ),
+    ];
+
+    let recovered = take_structural_observable_fields(&mut fields).unwrap();
+
+    assert_eq!(recovered.len(), 1);
+    assert_eq!(
+        recovered[0].definition().field_id(),
+        FEA_FIELD_STRUCTURAL_DISPLACEMENT
+    );
+    assert_eq!(fields.len(), 1);
+    assert_eq!(
+        fields[0].field_id,
+        FEA_FIELD_STRUCTURAL_CONSTRAINT_REACTION_FORCE
+    );
+}
+
+#[test]
+fn solid_tetrahedron4_recovery_uses_solver_mesh_field_shapes() {
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    model.excitations.clear();
+    model.constraints.clear();
+    let summary = assemble_structural_system(
+        &model,
+        &static_excitations(&model),
+        Some(tetrahedron4_mesh()),
+        StructuralFormulationRequirement::PhysicalDiscretization,
+    )
+    .expect("valid Tet4 system should assemble");
+    let solve = LinearSolveResult {
+        iterations: 1,
+        residual_norm: 0.0,
+        converged: true,
+        host_sync_count: 0,
+        solver_backend: crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
+        device_apply_k_count: 0,
+        device_apply_k_attempt_count: 0,
+        accelerator_evidence: None,
+        solution: vec![
+            0.0, 0.0, 0.0, 0.01, 0.0, 0.0, 0.0, 0.02, 0.0, 0.0, 0.0, 0.03,
+        ],
+        solver_method: crate::contracts::SolverMethod::MatrixFreePcg,
+        preconditioner: crate::contracts::SolverPreconditioner::None,
+        diagnostics: Vec::new(),
+    };
+
+    let fields = recover_result_fields(&summary, &solve).unwrap();
+    assert_eq!(
+        field_shape(&fields, FEA_FIELD_STRUCTURAL_DISPLACEMENT),
+        &[4, 3]
+    );
+    assert_eq!(field_shape(&fields, FEA_FIELD_STRUCTURAL_STRAIN), &[1, 6]);
+    assert_eq!(field_shape(&fields, FEA_FIELD_STRUCTURAL_STRESS), &[1, 6]);
+    assert_eq!(field_shape(&fields, FEA_FIELD_STRUCTURAL_VON_MISES), &[1]);
+    assert_eq!(
+        field_shape(&fields, FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY),
+        &[1]
+    );
+    assert_eq!(
+        field_shape(&fields, FEA_FIELD_STRUCTURAL_NODAL_VON_MISES),
+        &[4]
+    );
+    assert!(host_field(&fields, FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY)[0] >= 0.0);
+    let element_von_mises = host_field(&fields, FEA_FIELD_STRUCTURAL_VON_MISES)[0];
+    assert!(host_field(&fields, FEA_FIELD_STRUCTURAL_NODAL_VON_MISES)
+        .iter()
+        .all(|value| (*value - element_von_mises).abs() <= 1.0e-12));
+    let metrics = structural_field_recovery_metrics(&summary, &solve.solution).unwrap();
+    assert_eq!(metrics.basis, "solid_tetrahedron4_constant_strain");
+    assert_eq!(metrics.solver_mesh_node_count, 4);
+    assert_eq!(metrics.solver_mesh_element_count, 1);
+}
+
+#[test]
+fn solid_tetrahedron10_recovery_uses_midside_displacements() {
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    model.excitations.clear();
+    model.constraints.clear();
+    let mesh = crate::assembly::solver_solid::tests::artifact(ElementOrder::Tet10);
+    let displacement = mesh
+        .topology
+        .nodes
+        .iter()
+        .flat_map(|node| [node.coordinates_m[0].powi(2), 0.0, 0.0])
+        .collect::<Vec<_>>();
+    let summary = assemble_structural_system(
+        &model,
+        &static_excitations(&model),
+        Some(mesh),
+        StructuralFormulationRequirement::PhysicalDiscretization,
+    )
+    .expect("valid Tet10 system should assemble");
+    let solve = LinearSolveResult {
+        iterations: 1,
+        residual_norm: 0.0,
+        converged: true,
+        host_sync_count: 0,
+        solver_backend: crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
+        device_apply_k_count: 0,
+        device_apply_k_attempt_count: 0,
+        accelerator_evidence: None,
+        solution: displacement,
+        solver_method: crate::contracts::SolverMethod::MatrixFreePcg,
+        preconditioner: crate::contracts::SolverPreconditioner::None,
+        diagnostics: Vec::new(),
+    };
+
+    let fields = recover_result_fields(&summary, &solve).unwrap();
+    let strain = host_field(&fields, FEA_FIELD_STRUCTURAL_STRAIN);
+    let integration_point_strain =
+        host_field(&fields, FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRAIN);
+    assert_eq!(field_shape(&fields, FEA_FIELD_STRUCTURAL_STRAIN), &[1, 6]);
+    assert_eq!(
+        field_shape(&fields, FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRAIN),
+        &[4, 6]
+    );
+    assert!((strain[0] - 0.5).abs() < 1.0e-13);
+    assert!(strain[1..].iter().all(|value| value.abs() < 1.0e-13));
+    let recovered_xx = integration_point_strain
+        .chunks_exact(6)
+        .map(|point| point[0])
+        .collect::<Vec<_>>();
+    assert!(recovered_xx.windows(2).any(|pair| pair[0] != pair[1]));
+    assert!(integration_point_strain
+        .chunks_exact(6)
+        .all(|point| point[1..].iter().all(|value| value.abs() < 1.0e-13)));
+    assert_eq!(
+        summary.structural_formulations[0].recovery,
+        Some(
+            runmat_analysis_core::StructuralRecoveryImplementation::Tet10IntegrationPointProjection
+        )
+    );
+    let metrics = structural_field_recovery_metrics(&summary, &solve.solution).unwrap();
+    assert_eq!(
+        metrics.basis,
+        "solid_tetrahedron10_integration_point_projection"
+    );
+    assert_eq!(metrics.solver_mesh_node_count, 10);
+}
+
+#[test]
+fn reaction_force_retains_the_constrained_node_and_component() {
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    model.excitations.clear();
+    model.constraints = vec![AnalysisConstraint::Structural(StructuralConstraint {
+        constraint_id: "node_y".into(),
+        frame: CoordinateFrame::Global,
+        kind: StructuralConstraintKind::Prescribed(PrescribedStructuralDofs {
+            target: RegionTarget::point("node:2"),
+            translations: vec![TranslationDofValue {
+                dof: StructuralTranslationDof::Uy,
+                value: PrescribedValue::Constant(Displacement::new(0.0)),
+            }],
+            rotations: Vec::new(),
+        }),
+    })];
+    let mesh = tetrahedron4_mesh();
+    let node_index = mesh
+        .topology
+        .nodes
+        .iter()
+        .position(|node| node.node_id == 2)
+        .expect("fixture contains node 2");
+    let summary = assemble_structural_system(
+        &model,
+        &static_excitations(&model),
+        Some(mesh),
+        StructuralFormulationRequirement::PhysicalDiscretization,
+    )
+    .expect("component constraint should assemble");
+    let constrained_dof = summary
+        .structural_dof_layout
+        .index(node_index, StructuralDofKind::Uy)
+        .expect("node y DOF should exist");
+    let mut internal_force = vec![0.0; summary.dof_count];
+    internal_force[constrained_dof] = 42.0;
+
+    let reactions = recover_reaction_force(
+        &summary,
+        &internal_force,
+        summary.structural_dof_layout.node_count(),
+    );
+
+    assert_eq!(reactions.len(), 4 * VECTOR_COMPONENT_COUNT);
+    assert_eq!(reactions[node_index * VECTOR_COMPONENT_COUNT + 1], 42.0);
+    assert_eq!(
+        reactions
+            .iter()
+            .enumerate()
+            .filter(|(_, value)| **value != 0.0)
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>(),
+        vec![node_index * VECTOR_COMPONENT_COUNT + 1]
+    );
+}
+
+#[test]
+fn finite_nonconverged_solve_still_recovers_solver_mesh_fields() {
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    model.excitations.clear();
+    model.constraints.clear();
+    let summary = assemble_structural_system(
+        &model,
+        &static_excitations(&model),
+        Some(tetrahedron4_mesh()),
+        StructuralFormulationRequirement::PhysicalDiscretization,
+    )
+    .expect("valid Tet4 system should assemble");
+    let solve = LinearSolveResult {
+        iterations: 10,
+        residual_norm: 1.0e-4,
+        converged: false,
+        host_sync_count: 0,
+        solver_backend: crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
+        device_apply_k_count: 0,
+        device_apply_k_attempt_count: 0,
+        accelerator_evidence: None,
+        solution: vec![
+            0.0, 0.0, 0.0, 0.01, 0.0, 0.0, 0.0, 0.02, 0.0, 0.0, 0.0, 0.03,
+        ],
+        solver_method: crate::contracts::SolverMethod::MatrixFreePcg,
+        preconditioner: crate::contracts::SolverPreconditioner::None,
+        diagnostics: Vec::new(),
+    };
+
+    let fields = recover_result_fields(&summary, &solve).unwrap();
+
+    assert_eq!(field_shape(&fields, FEA_FIELD_STRUCTURAL_VON_MISES), &[1]);
+    assert_eq!(field_shape(&fields, FEA_FIELD_STRUCTURAL_STRAIN), &[1, 6]);
+    assert_eq!(
+        field_shape(&fields, FEA_FIELD_STRUCTURAL_DISPLACEMENT),
+        &[4, 3]
+    );
+}
+
+#[test]
+fn observable_catalog_types_every_structural_deformation_family() {
+    let definitions = structural_observable_field_definitions().unwrap();
+    let expected = [
+        (FEA_FIELD_STRUCTURAL_ROTATION, ObservationQuantity::Rotation),
+        (
+            FEA_FIELD_STRUCTURAL_BEAM_AXIAL_FORCE,
+            ObservationQuantity::BeamAxialForce,
+        ),
+        (
+            FEA_FIELD_STRUCTURAL_BEAM_SHEAR_FORCE,
+            ObservationQuantity::BeamShearForce,
+        ),
+        (
+            FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE,
+            ObservationQuantity::ShellMembraneForce,
+        ),
+        (
+            FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT,
+            ObservationQuantity::ShellBendingMoment,
+        ),
+    ];
+    for (field_id, quantity) in expected {
+        assert!(definitions.iter().any(|definition| {
+            definition.field_id() == field_id && definition.quantity() == quantity
+        }));
+    }
+    let mut identities = definitions
+        .iter()
+        .map(|definition| definition.identity())
+        .collect::<Vec<_>>();
+    identities.sort();
+    identities.dedup();
+    assert_eq!(identities.len(), definitions.len());
+}
+
+#[test]
+fn statistical_linear_quantities_reuse_the_observable_catalog_semantics() {
+    let definitions = structural_observable_field_definitions().unwrap();
+    for quantity in StructuralLinearFieldQuantity::ALL {
+        let definition = definitions
+            .iter()
+            .find(|definition| definition.field_id() == quantity.source_field_id())
+            .expect("every statistical linear quantity must have one observable definition");
+        assert_eq!(definition.quantity(), quantity.observation_quantity());
+        assert_eq!(definition.location(), quantity.location());
+    }
+}
+
+fn field_shape<'a>(fields: &'a [AnalysisField], field_id: &str) -> &'a [usize] {
+    fields
+        .iter()
+        .find(|field| field.field_id == field_id)
+        .map(|field| field.shape.as_slice())
+        .expect("field should be present")
+}
+
+fn host_field<'a>(fields: &'a [AnalysisField], field_id: &str) -> &'a [f64] {
+    fields
+        .iter()
+        .find(|field| field.field_id == field_id)
+        .and_then(AnalysisField::as_host_f64)
+        .expect("field should be present")
+}
+
+fn tetrahedron4_mesh() -> SolverMeshArtifact {
+    crate::assembly::solver_solid::tests::artifact(ElementOrder::Tet4)
+}

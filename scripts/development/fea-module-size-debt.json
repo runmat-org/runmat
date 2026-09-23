@@ -5,7 +5,6 @@
   "crates/runmat-analysis/fea/src/pipeline/electromagnetic.rs": 3722,
   "crates/runmat-runtime/src/analysis/contracts.rs": 3267,
   "crates/runmat-runtime/src/analysis/storage.rs": 1849,
-  "crates/runmat-analysis/fea/src/post/fields.rs": 1722,
   "crates/runmat-analysis/fea/src/fixtures.rs": 1691,
   "crates/runmat-runtime/src/analysis/operations/query.rs": 1672,
   "crates/runmat-analysis/fea/src/results/observation/resolve.rs": 1414,
