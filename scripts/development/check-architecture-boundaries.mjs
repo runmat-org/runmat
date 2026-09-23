@@ -154,6 +154,54 @@ for (const { path: sourcePath, text } of newFeaBoundarySources) {
   }
 }
 
+const feaOwnedSources = allRust.filter(
+  ({ path: sourcePath }) =>
+    sourcePath.startsWith("crates/runmat-analysis/core/") ||
+    sourcePath.startsWith("crates/runmat-analysis/language/") ||
+    sourcePath.startsWith("crates/runmat-analysis/fea/") ||
+    sourcePath.startsWith("crates/runmat-runtime/src/analysis/"),
+);
+for (const { path: sourcePath, text } of feaOwnedSources) {
+  if (/#\s*!?\s*\[\s*allow\b/.test(text)) {
+    fail(`${sourcePath} contains an allow suppression in the FEA system`);
+  }
+  if (/\b[A-Za-z_][A-Za-z0-9_]*[Vv]2\b/.test(text)) {
+    fail(`${sourcePath} contains a version-suffixed identifier in the FEA system`);
+  }
+}
+
+// Existing numerical modules predate the current domain split. This is a debt ratchet, not an
+// exemption: unlisted production modules may not exceed 600 lines, listed modules may not grow,
+// and a listing becomes an error as soon as its module is split below the limit.
+const moduleLineLimit = 600;
+const moduleSizeDebt = JSON.parse(read("scripts/development/fea-module-size-debt.json"));
+const productionFeaSources = feaOwnedSources.filter(
+  ({ path: sourcePath }) =>
+    !sourcePath.endsWith("tests.rs") && !sourcePath.includes("/tests/"),
+);
+const productionFeaPaths = new Set(productionFeaSources.map(({ path: sourcePath }) => sourcePath));
+for (const [sourcePath, ceiling] of Object.entries(moduleSizeDebt)) {
+  if (!productionFeaPaths.has(sourcePath)) {
+    fail(`module-size debt entry is missing or no longer a production FEA source: ${sourcePath}`);
+  }
+  if (!Number.isInteger(ceiling) || ceiling <= moduleLineLimit) {
+    fail(`module-size debt ceiling for ${sourcePath} must be an integer above ${moduleLineLimit}`);
+  }
+}
+for (const { path: sourcePath, text } of productionFeaSources) {
+  const lineCount = text.endsWith("\n") ? text.split("\n").length - 1 : text.split("\n").length;
+  const ceiling = moduleSizeDebt[sourcePath];
+  if (lineCount > moduleLineLimit && ceiling === undefined) {
+    fail(`${sourcePath} has ${lineCount} lines and adds untracked module-size debt`);
+  } else if (ceiling !== undefined && lineCount > ceiling) {
+    fail(`${sourcePath} grew from its ${ceiling}-line debt ceiling to ${lineCount} lines`);
+  } else if (ceiling !== undefined && lineCount < ceiling && lineCount > moduleLineLimit) {
+    fail(`${sourcePath} shrank to ${lineCount} lines; lower its ${ceiling}-line debt ceiling`);
+  } else if (ceiling !== undefined && lineCount <= moduleLineLimit) {
+    fail(`${sourcePath} is now ${lineCount} lines; remove its stale module-size debt entry`);
+  }
+}
+
 const runtimeAnalysisSource = read("crates/runmat-runtime/src/analysis/mod.rs");
 const runtimeAcousticKernelDeclarations = [
   /\bfn\s+solve_acoustic_/,
