@@ -50,8 +50,8 @@ pub use event::{
 };
 pub use geometry_scene::{
     cad_default_material, vertex as geometry_scene_vertex, GeometryScene,
-    GeometrySceneAssemblyNode, GeometrySceneCacheKey, GeometrySceneChunk,
-    GeometrySceneCompleteness, GeometrySceneDisplayMode, GeometrySceneOverlay,
+    GeometrySceneAnnotationKind, GeometrySceneAssemblyNode, GeometrySceneCacheKey,
+    GeometrySceneChunk, GeometrySceneCompleteness, GeometrySceneDisplayMode, GeometrySceneOverlay,
     GeometryScenePickIndex, GeometryScenePickRequest, GeometryScenePickResult,
     GeometryScenePresentation, GeometrySceneRegion, GeometrySceneRegionAnnotation,
     GeometrySceneRegionSummary, GeometrySceneTriangleRange,

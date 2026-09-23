@@ -8,6 +8,8 @@ use crate::core::renderer::{DirectUniforms, Vertex};
 use crate::core::{
     BoundingBox, Camera, CameraViewPreset, ClipPolicy, DepthMode, Scene, WgpuRenderer,
 };
+#[cfg(feature = "egui-overlay")]
+use crate::geometry_scene::GeometrySceneAnnotationKind;
 use crate::geometry_scene::{
     GeometryScene, GeometrySceneCacheKey, GeometrySceneOverlay, GeometryScenePresentation,
     GeometrySceneViewPreset,
@@ -39,7 +41,7 @@ struct CachedSceneBuffers {
 pub(crate) struct GeometryScreenAnnotation {
     pub position: [f32; 2],
     pub color: [f32; 4],
-    pub role: Option<String>,
+    pub kind: GeometrySceneAnnotationKind,
     pub label: String,
 }
 
@@ -3586,7 +3588,7 @@ impl PlotRenderer {
                         (1.0 - ndc.y) * 0.5 * viewport_size[1],
                     ],
                     color: annotation.color.unwrap_or([0.9, 0.9, 0.9, 1.0]),
-                    role: annotation.role.clone(),
+                    kind: annotation.kind,
                     label: label.to_string(),
                 })
             })

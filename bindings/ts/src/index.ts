@@ -1251,11 +1251,36 @@ export interface GeometrySceneRegionHighlightState {
 export interface GeometrySceneRegionAnnotationState {
   regionId: string;
   color?: [number, number, number, number] | null;
-  role?: string | null;
+  kind: GeometrySceneAnnotationKind;
   label?: string | null;
   direction?: [number, number, number] | null;
   size?: number | null;
 }
+
+export type GeometrySceneAnnotationKind =
+  | "force"
+  | "moment"
+  | "pressure"
+  | "traction"
+  | "body_force"
+  | "heat_flux"
+  | "current_density"
+  | "normal_velocity"
+  | "flow_velocity"
+  | "mass_flow"
+  | "wall_motion"
+  | "fixed_support"
+  | "symmetry_support"
+  | "prescribed_motion"
+  | "boundary_condition"
+  | "thermal_condition"
+  | "electrical_condition"
+  | "magnetic_condition"
+  | "acoustic_condition"
+  | "fluid_condition"
+  | "connector"
+  | "interface"
+  | "initial_condition";
 
 export interface GeometryScenePresentationState {
   selectedRegionId?: string | null;

@@ -1,8 +1,8 @@
 use crate::core::plot_renderer::GeometryScreenAnnotation;
 use crate::core::CameraViewPreset;
 use crate::geometry_scene::{
-    GeometrySceneAssemblyNode, GeometrySceneCompleteness, GeometrySceneOverlay,
-    GeometrySceneRegionSummary,
+    GeometrySceneAnnotationKind, GeometrySceneAssemblyNode, GeometrySceneCompleteness,
+    GeometrySceneOverlay, GeometrySceneRegionSummary,
 };
 use std::collections::BTreeSet;
 
@@ -849,15 +849,33 @@ fn annotation_label(annotation: &GeometryScreenAnnotation, detail: AnnotationDet
             .split_once(" · ")
             .map(|(_, detail)| detail.to_string())
             .unwrap_or_else(|| annotation.label.clone()),
-        AnnotationDetail::Symbol => match annotation.role.as_deref() {
-            Some("excitation") if annotation.label.contains("</>") => "</>".to_string(),
-            Some("excitation") => "→".to_string(),
-            Some("constraint") => "⌁".to_string(),
-            Some("boundary") => "▱".to_string(),
-            Some("connector") => "⟷".to_string(),
-            Some("interface") => "⇄".to_string(),
-            Some("initial_condition") => "◌".to_string(),
-            _ => "•".to_string(),
+        AnnotationDetail::Symbol if annotation.label.contains("</>") => "</>".to_string(),
+        AnnotationDetail::Symbol => match annotation.kind {
+            GeometrySceneAnnotationKind::Force | GeometrySceneAnnotationKind::BodyForce => {
+                "→".to_string()
+            }
+            GeometrySceneAnnotationKind::Moment => "↻".to_string(),
+            GeometrySceneAnnotationKind::Pressure | GeometrySceneAnnotationKind::Traction => {
+                "⇥".to_string()
+            }
+            GeometrySceneAnnotationKind::HeatFlux => "⇥♨".to_string(),
+            GeometrySceneAnnotationKind::CurrentDensity => "⇥ϟ".to_string(),
+            GeometrySceneAnnotationKind::NormalVelocity => "⇥)))".to_string(),
+            GeometrySceneAnnotationKind::FlowVelocity => "⇥≈".to_string(),
+            GeometrySceneAnnotationKind::MassFlow => "⇥m".to_string(),
+            GeometrySceneAnnotationKind::WallMotion => "⇆".to_string(),
+            GeometrySceneAnnotationKind::FixedSupport => "▰".to_string(),
+            GeometrySceneAnnotationKind::SymmetrySupport => "║".to_string(),
+            GeometrySceneAnnotationKind::PrescribedMotion => "⇢".to_string(),
+            GeometrySceneAnnotationKind::ThermalCondition => "♨".to_string(),
+            GeometrySceneAnnotationKind::ElectricalCondition => "ϟ".to_string(),
+            GeometrySceneAnnotationKind::MagneticCondition => "⊙".to_string(),
+            GeometrySceneAnnotationKind::AcousticCondition => ")))".to_string(),
+            GeometrySceneAnnotationKind::FluidCondition => "≈".to_string(),
+            GeometrySceneAnnotationKind::Connector => "⟷".to_string(),
+            GeometrySceneAnnotationKind::Interface => "⇄".to_string(),
+            GeometrySceneAnnotationKind::BoundaryCondition => "▱".to_string(),
+            GeometrySceneAnnotationKind::InitialCondition => "◌".to_string(),
         },
     }
 }
@@ -1267,7 +1285,7 @@ mod tests {
         let function = GeometryScreenAnnotation {
             position: [10.0, 20.0],
             color: [1.0, 0.0, 0.0, 1.0],
-            role: Some("excitation".to_string()),
+            kind: GeometrySceneAnnotationKind::Force,
             label: "Force · </> impactPulse".to_string(),
         };
         assert_eq!(
