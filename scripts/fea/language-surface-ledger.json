@@ -359,6 +359,15 @@
           "positive_coverage": "solve.static_balance.prescribed_beam_constraint_result",
           "negative_coverage": "contracts.fea_run.rejects_missing_tampered_or_unexpected_constraint_result"
         },
+        "structural_connector_result": {
+          "cardinality": "required_once_for_structural_static_solve_only",
+          "default": "absent_for_every_other_procedure",
+          "target": "canonical per-connector structural response and stored energy",
+          "identity": "numerical-result evidence bound to canonical connector-plan and topology identity",
+          "validation": "canonical response is rederived from the executed plan and validated against authored connector sources",
+          "positive_coverage": "solve.connector.grounded_spring_observation",
+          "negative_coverage": "contracts.fea_run.rejects_missing_tampered_or_unexpected_connector_result"
+        },
         "observations": {
           "identity": "numerical-result identity"
         },
