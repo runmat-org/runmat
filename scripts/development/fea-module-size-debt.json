@@ -64,10 +64,6 @@
   "crates/runmat-runtime/src/analysis/frequency_result.rs": 634,
   "crates/runmat-runtime/src/analysis/operations/trends.rs": 633,
   "crates/runmat-analysis/core/src/problem/model_authoring.rs": 628,
-  "crates/runmat-analysis/fea/src/solve/transient/effective_solve.rs": 627,
-  "crates/runmat-analysis/fea/src/execution/modal_workload.rs": 626,
   "crates/runmat-analysis/fea/src/adaptation/structural_recovery.rs": 626,
-  "crates/runmat-analysis/fea/src/execution/modal_result.rs": 612,
-  "crates/runmat-analysis/fea/src/solve/transient/mod.rs": 608,
-  "crates/runmat-analysis/core/src/validate_excitations.rs": 606
+  "crates/runmat-analysis/fea/src/solve/transient/mod.rs": 608
 }
