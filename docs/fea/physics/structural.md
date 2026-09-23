@@ -315,6 +315,37 @@ the implemented material/contact formulation is qualified for the intended use.
 - [Outputs](../language/outputs-fields-and-observations) covers typed fields, projections, spatial
   reductions, probes, histories, sampling, retention, and partial access.
 
+## How do I inspect Tet10 stress without hiding its within-element variation?
+
+Quadratic tetrahedra recover strain and stress at the same four physical integration points used
+by stiffness assembly. Each point is a first-class result entity with a stable identity and physical
+position. Element strain, stress, von Mises stress, and strain-energy density remain available as
+Jacobian-weighted projections for summaries and element plots; use the integration-point field when
+within-element variation or recovery error is the engineering question.
+
+Retain both views in the study when you need to compare them:
+
+```fea
+study bracket_check {
+    analyze static using model.loaded_bracket
+
+    output stress_at_quadrature = analysis.static.field.integration_point.stress
+    output element_stress = analysis.static.field.element.stress
+}
+```
+
+The corresponding RunMat selectors are typed:
+
+```matlab
+pointStress = stepResult.field(fea.StructuralField.integrationPointStress());
+elementStress = stepResult.field(fea.StructuralField.stress());
+```
+
+Tet4 publishes the same four-entity layout with its constant tensor repeated. That keeps mixed-order
+partitioning and paging uniform without implying four independent Tet4 stress states. Recovery
+smoothing is region-side aware: integration points extrapolate to element nodes, but nodes shared
+by different material regions do not erase a legitimate stress jump.
+
 ## How do I know a structural FEA result is credible?
 
 At minimum, review geometry and units, material and section coverage, load resultants, support

@@ -220,6 +220,7 @@ fn structural_entity_domain(
         FieldLocation::Node => RecoveredFieldEntityDomain::StructuralNodes,
         FieldLocation::Connector => RecoveredFieldEntityDomain::Connectors,
         FieldLocation::Constraint => RecoveredFieldEntityDomain::ConstraintGroups,
+        FieldLocation::IntegrationPoint => RecoveredFieldEntityDomain::SolidIntegrationPoints,
         FieldLocation::Element => match quantity {
             Quantity::BeamAxialForce
             | Quantity::BeamShearForce

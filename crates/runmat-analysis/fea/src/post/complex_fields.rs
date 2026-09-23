@@ -71,6 +71,7 @@ pub fn complex_structural_field_layout(
     let entity_counts = RecoveredFieldEntityCounts {
         structural_nodes: cardinality.structural_nodes,
         solid_elements: cardinality.solid_elements,
+        solid_integration_points: cardinality.solid_elements.saturating_mul(4),
         beam_elements: cardinality.beam_elements,
         shell_elements: cardinality.shell_elements,
         connectors: 0,

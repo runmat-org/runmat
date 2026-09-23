@@ -7,13 +7,14 @@ use runmat_meshing_core::{ElementOrder, FieldTopologyLocation, SolverMeshArtifac
 use serde::{Deserialize, Serialize};
 
 use crate::assembly::elements::solid::{
-    tetrahedron10::{extrapolate_quadrature_to_nodes, interpolate_nodal_samples, QUADRATURE},
+    tetrahedron10::{extrapolate_quadrature_to_nodes, interpolate_nodal_samples},
     Tetrahedron10ElementGeometry, Tetrahedron4ElementGeometry,
 };
 use crate::contracts::{
     FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRESS, FEA_FIELD_STRUCTURAL_STRESS,
 };
 use crate::progress::is_cancelled;
+use crate::topology::quadrature::TETRAHEDRON_FOUR_POINT_RULE as QUADRATURE;
 
 const STRESS_COMPONENT_COUNT: usize = 6;
 const INTEGRATION_POINT_COUNT: usize = 4;
@@ -515,8 +516,7 @@ fn validate_stress(
     } else if stress.field_id == FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRESS
         && stress.shape
             == [
-                element_count,
-                INTEGRATION_POINT_COUNT,
+                element_count * INTEGRATION_POINT_COUNT,
                 STRESS_COMPONENT_COUNT,
             ]
     {

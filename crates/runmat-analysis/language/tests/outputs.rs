@@ -124,6 +124,28 @@ fn complex_outputs_require_explicit_representations_before_physical_reductions()
 }
 
 #[test]
+fn integration_point_fields_are_typed_output_locations() {
+    let source = HARMONIC_STUDY.replacen(
+        "analysis.harmonic.field.element.stress",
+        "analysis.harmonic.field.integration_point.stress",
+        1,
+    );
+    let program = check(&source);
+    assert!(program.is_valid(), "{:#?}", program.diagnostics);
+    let stress = program.studies.values().next().unwrap().sequence.steps[0].observations[0]
+        .spec()
+        .unwrap();
+    assert_eq!(
+        stress.source_location,
+        runmat_analysis_core::FieldLocation::IntegrationPoint
+    );
+    assert_eq!(
+        stress.output_location,
+        runmat_analysis_core::FieldLocation::IntegrationPoint
+    );
+}
+
+#[test]
 fn complex_stress_cannot_claim_a_real_von_mises_invariant() {
     let source =
         HARMONIC_STUDY.replace("von_mises(output.real_stress)", "von_mises(output.stress)");

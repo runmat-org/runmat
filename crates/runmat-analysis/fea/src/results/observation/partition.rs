@@ -6,6 +6,8 @@ use runmat_execution::Digest;
 use runmat_meshing_core::StableDigest;
 use serde::{Deserialize, Serialize};
 
+use crate::results::field::RecoveredFieldEntityDomain;
+
 use super::{
     contract::{OBSERVATION_LIMITS, OBSERVATION_PREFIX},
     ObservationError, ResolvedObservationPlan, ResolvedObservationTarget,
@@ -75,6 +77,7 @@ pub enum ObservationPartitionTarget {
         identities: Vec<StableDigest>,
     },
     Elements {
+        domain: RecoveredFieldEntityDomain,
         indices: Vec<usize>,
         identities: Vec<StableDigest>,
     },
@@ -442,10 +445,11 @@ fn partition_target(
             identities: identities[start..end].to_vec(),
         },
         ResolvedObservationTarget::Elements {
+            domain,
             indices,
             identities,
-            ..
         } => ObservationPartitionTarget::Elements {
+            domain: *domain,
             indices: indices[start..end].to_vec(),
             identities: identities[start..end].to_vec(),
         },

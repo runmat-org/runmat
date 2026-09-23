@@ -23,10 +23,22 @@ use super::{
     distributed::{combine_observation_partitions, evaluate_partitioned_observation},
     evaluate_solid_observation_partition, prepare_solid_observation_field_partition,
     topology::StructuralObservationTopology,
-    BoundedObservationHistory, ObservationEventAttribution, ObservationExecutionPolicy,
-    ObservationLimits, ObservationPartitionContribution, ObservationPartitionPlan,
-    SolverEventAttribution, SolverEventSource,
+    BoundedObservationHistory, ObservationEntity, ObservationEventAttribution,
+    ObservationExecutionPolicy, ObservationLimits, ObservationPartitionContribution,
+    ObservationPartitionPlan, SolverEventAttribution, SolverEventSource,
 };
+
+fn integration_point_stress_definition() -> RecoveredFieldDefinition {
+    RecoveredFieldDefinition::new(
+        crate::contracts::FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRESS,
+        ObservationQuantity::Stress,
+        FieldLocation::IntegrationPoint,
+        RecoveredFieldEntityDomain::SolidIntegrationPoints,
+        ObservationValueShape::SymmetricTensor3,
+        RecoveredFieldNumericRepresentation::Real,
+    )
+    .unwrap()
+}
 
 fn definition() -> RecoveredFieldDefinition {
     RecoveredFieldDefinition::new(
@@ -185,6 +197,68 @@ fn canonical_partition_plan_covers_a_selected_field_once() {
         single.partition_evidence.identity,
         split.partition_evidence.identity
     );
+}
+
+#[test]
+fn integration_point_partitions_reconstruct_exact_entities_and_values() {
+    let projection =
+        AnalysisProjection::derive(&canonical_tetrahedron_solver_mesh(ElementOrder::Tet10))
+            .unwrap();
+    let definition = integration_point_stress_definition();
+    let mut request = spec("integration_point_stress", ObservationTarget::WholeModel);
+    request.quantity = ObservationQuantity::Stress;
+    request.value_shape = ObservationValueShape::SymmetricTensor3;
+    request.source_location = FieldLocation::IntegrationPoint;
+    request.output_location = FieldLocation::IntegrationPoint;
+    let mut step = ProcedureStep::structural_static("static");
+    step.observations = vec![ObservationRequest::Field(request)];
+    let plan = super::resolve_observation_plan(
+        &step,
+        &projection,
+        std::slice::from_ref(&definition),
+        ObservationLimits::default(),
+    )
+    .unwrap();
+    let values = (0..24).map(|value| value as f64).collect::<Vec<_>>();
+    let field = RecoveredField::new(
+        definition,
+        RecoveredFieldSample::Final,
+        AnalysisField::host_f64(
+            crate::contracts::FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRESS,
+            vec![4, 6],
+            values.clone(),
+        ),
+    )
+    .unwrap();
+    let topology = StructuralObservationTopology::from_projection(&projection);
+
+    let serial = evaluate_partitioned_observation(
+        &plan,
+        &plan.observations[0],
+        &field,
+        &topology,
+        ObservationExecutionPolicy::serial(),
+        None,
+    )
+    .unwrap();
+    let partitioned = evaluate_partitioned_observation(
+        &plan,
+        &plan.observations[0],
+        &field,
+        &topology,
+        ObservationExecutionPolicy::canonical(std::num::NonZeroU32::new(3).unwrap()),
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(partitioned.logical_identity, serial.logical_identity);
+    assert_eq!(partitioned.field.as_host_f64().unwrap(), values);
+    assert_eq!(partitioned.entities, serial.entities);
+    assert_eq!(partitioned.entities.len(), 4);
+    assert!(partitioned
+        .entities
+        .iter()
+        .all(|entity| matches!(entity, ObservationEntity::IntegrationPoint(_))));
 }
 
 #[test]

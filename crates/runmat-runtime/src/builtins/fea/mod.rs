@@ -3552,6 +3552,21 @@ mod tests {
             .expect("portable structural field selector should decode");
         assert_eq!(selector, decoded);
         assert!(field_selectors::from_value("test", &Value::String("stress".into())).is_err());
+
+        let integration_point = block_on(field_selectors::integration_point_stress())
+            .expect("typed integration-point field");
+        assert_eq!(
+            field_selectors::from_value("test", &integration_point).unwrap(),
+            field_selectors::FieldSelector::Structural(
+                runmat_analysis_fea::contracts::StructuralFieldSelector::IntegrationPointStress
+            )
+        );
+        assert_eq!(
+            field_selectors::from_value("test", &integration_point)
+                .unwrap()
+                .field_id(),
+            runmat_analysis_fea::contracts::FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRESS
+        );
     }
 
     #[test]

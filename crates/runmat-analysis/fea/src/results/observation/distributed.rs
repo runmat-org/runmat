@@ -717,6 +717,7 @@ fn observation_partition_payload(
             }
         }
         ObservationPartitionTarget::Elements {
+            domain,
             indices,
             identities,
         } => selected_or_extrema_payload(
@@ -724,7 +725,7 @@ fn observation_partition_payload(
             identities
                 .iter()
                 .copied()
-                .map(ObservationEntity::Element)
+                .map(|identity| super::contract::observation_element_entity(*domain, identity))
                 .collect(),
             select_values(field, indices, observation)?,
         )?,
@@ -1102,13 +1103,15 @@ fn validate_contribution_payload(
             && square_sum.len() == storage_components
             && *measure == indices.len() as f64 => {}
         (
-            ObservationPartitionTarget::Elements { identities, .. },
+            ObservationPartitionTarget::Elements {
+                domain, identities, ..
+            },
             ObservationPartitionPayload::SelectedValues { entities, values },
         ) => {
             let expected = identities
                 .iter()
                 .copied()
-                .map(ObservationEntity::Element)
+                .map(|identity| super::contract::observation_element_entity(*domain, identity))
                 .collect::<Vec<_>>();
             if entities != &expected
                 || values.len()

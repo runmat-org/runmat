@@ -298,6 +298,7 @@ fn governed_extrema_input<'a>(
                 .collect(),
         ),
         ObservationPartitionTarget::Elements {
+            domain,
             indices,
             identities,
         } => (
@@ -305,7 +306,7 @@ fn governed_extrema_input<'a>(
             identities
                 .iter()
                 .copied()
-                .map(ObservationEntity::Element)
+                .map(|identity| super::contract::observation_element_entity(*domain, identity))
                 .collect(),
         ),
         _ => return Ok(None),

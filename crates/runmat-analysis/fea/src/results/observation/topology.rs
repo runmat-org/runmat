@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use runmat_analysis_core::{AnalysisModel, StructuralElementKind};
 use runmat_execution::Digest;
-use runmat_meshing_core::{SolverMeshArtifact, StableDigest};
+use runmat_meshing_core::{ElementOrder, SolverMeshArtifact, StableDigest};
 
 use crate::{
     physics::structural::topology::{
@@ -10,7 +10,7 @@ use crate::{
         CanonicalStructuralTopologyIdentity,
     },
     results::field::{RecoveredFieldEntityCounts, RecoveredFieldEntityDomain},
-    topology::AnalysisProjection,
+    topology::{quadrature::TETRAHEDRON_FOUR_POINT_RULE, AnalysisProjection},
 };
 
 use super::ObservationError;
@@ -34,6 +34,7 @@ pub(crate) struct StructuralObservationTopology {
     topology_digest: Digest,
     pub nodes: Vec<StructuralObservationNode>,
     pub solid_elements: Vec<StructuralObservationElement>,
+    pub solid_integration_points: Vec<StructuralObservationElement>,
     pub beam_elements: Vec<StructuralObservationElement>,
     pub shell_elements: Vec<StructuralObservationElement>,
     pub solid_projection: Option<AnalysisProjection>,
@@ -48,6 +49,7 @@ impl StructuralObservationTopology {
             .enumerate()
             .map(|(index, node)| (node.node_id, vec![index]))
             .collect();
+        let solid_integration_points = integration_point_elements(projection);
         Self {
             identity: CanonicalStructuralTopologyIdentity::Solid {
                 mesh_digest: projection.mesh_digest,
@@ -70,6 +72,7 @@ impl StructuralObservationTopology {
                     centroid_m: element.centroid_m,
                 })
                 .collect(),
+            solid_integration_points,
             beam_elements: Vec::new(),
             shell_elements: Vec::new(),
             solid_projection: Some(projection.clone()),
@@ -81,6 +84,7 @@ impl StructuralObservationTopology {
         RecoveredFieldEntityCounts {
             structural_nodes: self.nodes.len(),
             solid_elements: self.solid_elements.len(),
+            solid_integration_points: self.solid_integration_points.len(),
             beam_elements: self.beam_elements.len(),
             shell_elements: self.shell_elements.len(),
             connectors: 0,
@@ -173,6 +177,10 @@ impl StructuralObservationTopology {
                         .collect()
                 })
                 .unwrap_or_default(),
+            solid_integration_points: projection
+                .as_ref()
+                .map(integration_point_elements)
+                .unwrap_or_default(),
             beam_elements: Vec::new(),
             shell_elements: Vec::new(),
             solid_projection: projection,
@@ -239,6 +247,9 @@ impl StructuralObservationTopology {
     ) -> Result<&[StructuralObservationElement], ObservationError> {
         match domain {
             RecoveredFieldEntityDomain::SolidElements => Ok(&self.solid_elements),
+            RecoveredFieldEntityDomain::SolidIntegrationPoints => {
+                Ok(&self.solid_integration_points)
+            }
             RecoveredFieldEntityDomain::BeamElements => Ok(&self.beam_elements),
             RecoveredFieldEntityDomain::ShellElements => Ok(&self.shell_elements),
             RecoveredFieldEntityDomain::Connectors => Err(ObservationError::Unsupported(
@@ -252,6 +263,65 @@ impl StructuralObservationTopology {
             )),
         }
     }
+}
+
+fn integration_point_elements(
+    projection: &AnalysisProjection,
+) -> Vec<StructuralObservationElement> {
+    projection
+        .elements
+        .iter()
+        .flat_map(|element| {
+            let coordinates = element
+                .node_indices
+                .iter()
+                .map(|index| projection.nodes[*index].coordinates_m)
+                .collect::<Vec<_>>();
+            TETRAHEDRON_FOUR_POINT_RULE.into_iter().enumerate().map(
+                move |(ordinal, barycentric)| {
+                    let shape = recovery_shape_values(element.order, barycentric);
+                    let position_m = std::array::from_fn(|axis| {
+                        shape
+                            .iter()
+                            .zip(&coordinates)
+                            .map(|(shape, node)| shape * node[axis])
+                            .sum()
+                    });
+                    StructuralObservationElement {
+                        identity: integration_point_identity(element.stable_identity, ordinal),
+                        region_id: element.region_id.source_topology_id.clone(),
+                        centroid_m: position_m,
+                    }
+                },
+            )
+        })
+        .collect()
+}
+
+fn recovery_shape_values(order: ElementOrder, barycentric: [f64; 4]) -> Vec<f64> {
+    match order {
+        ElementOrder::Tet4 => barycentric.to_vec(),
+        ElementOrder::Tet10 => {
+            let mut values = vec![0.0; 10];
+            for node in 0..4 {
+                values[node] = barycentric[node] * (2.0 * barycentric[node] - 1.0);
+            }
+            for (edge, [left, right]) in [[0, 1], [1, 2], [2, 0], [0, 3], [1, 3], [2, 3]]
+                .into_iter()
+                .enumerate()
+            {
+                values[4 + edge] = 4.0 * barycentric[left] * barycentric[right];
+            }
+            values
+        }
+    }
+}
+
+fn integration_point_identity(element: StableDigest, ordinal: usize) -> StableDigest {
+    let mut bytes = b"runmat.fea.structural.integration-point\0".to_vec();
+    bytes.extend_from_slice(element.bytes());
+    bytes.extend_from_slice(&(ordinal as u64).to_le_bytes());
+    StableDigest::from_bytes(*Digest::sha256(bytes).bytes())
 }
 
 fn centroid(

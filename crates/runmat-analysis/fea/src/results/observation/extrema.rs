@@ -81,10 +81,12 @@ pub(super) fn partition_selected_entities(
             .copied()
             .map(ObservationEntity::Node)
             .collect()),
-        ObservationPartitionTarget::Elements { identities, .. } => Ok(identities
+        ObservationPartitionTarget::Elements {
+            domain, identities, ..
+        } => Ok(identities
             .iter()
             .copied()
-            .map(ObservationEntity::Element)
+            .map(|identity| super::contract::observation_element_entity(*domain, identity))
             .collect()),
         ObservationPartitionTarget::Points {
             sample_ordinals, ..

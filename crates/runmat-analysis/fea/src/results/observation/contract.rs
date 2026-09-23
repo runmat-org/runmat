@@ -89,6 +89,7 @@ impl Default for ObservationLimits {
 pub enum ObservationEntity {
     Node(StableDigest),
     Element(StableDigest),
+    IntegrationPoint(StableDigest),
     Connector(StableDigest),
     Point {
         identity: StableDigest,
@@ -96,6 +97,18 @@ pub enum ObservationEntity {
         position_m: [f64; 3],
         source_element: StableDigest,
     },
+}
+
+pub(super) const fn observation_element_entity(
+    domain: RecoveredFieldEntityDomain,
+    identity: StableDigest,
+) -> ObservationEntity {
+    match domain {
+        RecoveredFieldEntityDomain::SolidIntegrationPoints => {
+            ObservationEntity::IntegrationPoint(identity)
+        }
+        _ => ObservationEntity::Element(identity),
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -361,6 +374,9 @@ impl ObservationResult {
             let (location, identity) = match entity {
                 ObservationEntity::Node(identity) => (FieldLocation::Node, identity),
                 ObservationEntity::Element(identity) => (FieldLocation::Element, identity),
+                ObservationEntity::IntegrationPoint(identity) => {
+                    (FieldLocation::IntegrationPoint, identity)
+                }
                 ObservationEntity::Connector(identity) => (FieldLocation::Connector, identity),
                 ObservationEntity::Point {
                     identity,
@@ -971,7 +987,12 @@ fn validate_resolved_observation(
             indices,
             identities,
         } => {
-            if materialized_field_location(&observation.spec) != FieldLocation::Element
+            if !matches!(
+                materialized_field_location(&observation.spec),
+                FieldLocation::Element | FieldLocation::IntegrationPoint
+            ) || (materialized_field_location(&observation.spec)
+                == FieldLocation::IntegrationPoint)
+                != (*domain == RecoveredFieldEntityDomain::SolidIntegrationPoints)
                 || observation.source_entity_domain != *domain
                 || *domain == RecoveredFieldEntityDomain::StructuralNodes
                 || (has_spatial_reduction && !spatial_extrema)

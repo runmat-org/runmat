@@ -234,6 +234,10 @@ solverMesh = stepResult.mesh();
 mesh(solverMesh);
 ```
 
+For quadratic solid recovery, `fea.StructuralField.integrationPointStress()` selects the four
+physical point tensors per element. `fea.StructuralField.stress()` selects their Jacobian-weighted
+element projection.
+
 `plot` and `mesh` remain the ordinary RunMat rendering functions. FEA-specific APIs select typed data; they do not own a second plotting subsystem or accept an untyped field-name option inside the renderer.
 
 ## What Runs Today

@@ -151,11 +151,12 @@ fn validate_field_catalog(fields: &[RecoveredFieldDefinition]) -> Result<(), Obs
             field.location(),
             FieldLocation::Node
                 | FieldLocation::Element
+                | FieldLocation::IntegrationPoint
                 | FieldLocation::Connector
                 | FieldLocation::Constraint
         ) {
             return Err(ObservationError::Unsupported(
-                "this evaluator accepts only recovered nodal, element, connector, and constraint-group fields",
+                "this evaluator accepts only recovered nodal, element, integration-point, connector, and constraint-group fields",
             ));
         }
         shape_component_count(field.value_shape())?;
@@ -382,11 +383,12 @@ fn validate_supported_spec(
         spec.source_location,
         FieldLocation::Node
             | FieldLocation::Element
+            | FieldLocation::IntegrationPoint
             | FieldLocation::Connector
             | FieldLocation::Constraint
     ) {
         return Err(ObservationError::Unsupported(
-            "this evaluator accepts only nodal, element, connector, and constraint-group fields",
+            "this evaluator accepts only nodal, element, integration-point, connector, and constraint-group fields",
         ));
     }
     match request {
@@ -888,7 +890,7 @@ fn resolve_field_target(
         | ObservationTarget::Spatial(ExcitationTarget::WholeModel) => {
             match materialized_field_location(spec) {
                 FieldLocation::Node => nodes_target((0..topology.nodes.len()).collect(), topology),
-                FieldLocation::Element => {
+                FieldLocation::Element | FieldLocation::IntegrationPoint => {
                     let elements = topology.elements(field_domain)?;
                     elements_target((0..elements.len()).collect(), field_domain, topology)
                 }
@@ -933,6 +935,23 @@ fn resolve_field_target(
                 ) => {
                     let indices = matching_elements(region, field_domain, topology)?;
                     enforce_cardinality(region.cardinality, indices.len(), spec)?;
+                    elements_target(indices, field_domain, topology)
+                }
+                (
+                    EntityDimension::Volume,
+                    ExpectedTopology::MeshElement,
+                    FieldLocation::IntegrationPoint,
+                ) => {
+                    let element_indices = matching_elements(
+                        region,
+                        RecoveredFieldEntityDomain::SolidElements,
+                        topology,
+                    )?;
+                    enforce_cardinality(region.cardinality, element_indices.len(), spec)?;
+                    let indices = element_indices
+                        .into_iter()
+                        .flat_map(|index| index * 4..index * 4 + 4)
+                        .collect();
                     elements_target(indices, field_domain, topology)
                 }
                 (EntityDimension::Volume, ExpectedTopology::MeshElement, FieldLocation::Node) => {

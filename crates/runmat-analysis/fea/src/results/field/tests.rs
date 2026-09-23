@@ -176,6 +176,7 @@ fn recovered_field_artifact_binds_source_topology_and_content() {
         RecoveredFieldEntityCounts {
             structural_nodes: projection.nodes.len(),
             solid_elements: projection.elements.len(),
+            solid_integration_points: projection.elements.len() * 4,
             beam_elements: 0,
             shell_elements: 0,
             connectors: 0,
@@ -216,6 +217,7 @@ fn field_manifest_resolves_semantics_without_values_and_reconstructs_exact_conte
         RecoveredFieldEntityCounts {
             structural_nodes: projection.nodes.len(),
             solid_elements: projection.elements.len(),
+            solid_integration_points: projection.elements.len() * 4,
             beam_elements: 0,
             shell_elements: 0,
             connectors: 0,
@@ -306,6 +308,7 @@ fn field_storage_partitions_are_canonical_complete_and_reconstruct_exactly() {
         RecoveredFieldEntityCounts {
             structural_nodes: entity_count,
             solid_elements: 1,
+            solid_integration_points: 4,
             beam_elements: 0,
             shell_elements: 0,
             connectors: 0,
@@ -319,4 +322,51 @@ fn field_storage_partitions_are_canonical_complete_and_reconstruct_exactly() {
     let mut invalid = manifest;
     invalid.fields[0].partitions[1].first_source_index = 1;
     assert!(invalid.validate().is_err());
+}
+
+#[test]
+fn integration_point_tensor_storage_pages_and_reconstructs_exactly() {
+    let entity_count = RECOVERED_FIELD_PARTITION_ENTITY_COUNT + 1;
+    let definition = RecoveredFieldDefinition::new(
+        crate::contracts::FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRESS,
+        ObservationQuantity::Stress,
+        FieldLocation::IntegrationPoint,
+        RecoveredFieldEntityDomain::SolidIntegrationPoints,
+        ObservationValueShape::SymmetricTensor3,
+        RecoveredFieldNumericRepresentation::Real,
+    )
+    .unwrap();
+    let values = (0..entity_count * 6)
+        .map(|index| index as f64 * 0.25)
+        .collect::<Vec<_>>();
+    let field = RecoveredField::new(
+        definition.clone(),
+        RecoveredFieldSample::Final,
+        AnalysisField::host_f64(
+            crate::contracts::FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRESS,
+            vec![entity_count, 6],
+            values,
+        ),
+    )
+    .unwrap();
+    let partitions = canonical_field_partitions(&field).unwrap();
+
+    assert_eq!(partitions.len(), 2);
+    assert_eq!(
+        partitions[0].source_indices.len(),
+        RECOVERED_FIELD_PARTITION_ENTITY_COUNT
+    );
+    assert_eq!(partitions[1].source_indices, vec![entity_count - 1]);
+    assert_eq!(partitions[1].storage.shape, vec![1, 6]);
+    assert_eq!(
+        reconstruct_recovered_field(
+            field.identity(),
+            definition,
+            RecoveredFieldSample::Final,
+            partitions,
+            entity_count,
+        )
+        .unwrap(),
+        field
+    );
 }

@@ -1748,7 +1748,7 @@ fn tet10_linear_static_admits_its_assembled_recovery_contract() {
     let integration_point_stress = result
         .field(crate::contracts::FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRESS)
         .expect("Tet10 recovery must retain its four physical integration-point stresses");
-    assert_eq!(integration_point_stress.shape, vec![1, 4, 6]);
+    assert_eq!(integration_point_stress.shape, vec![4, 6]);
     let estimate = crate::adaptation::estimate_structural_recovery_error(
         &mesh,
         "elements",

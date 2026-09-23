@@ -261,12 +261,12 @@ pub fn recover_deformation_result_fields(
             ),
             AnalysisField::host_f64(
                 FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRAIN,
-                vec![element_count, 4, TENSOR_COMPONENT_COUNT],
+                vec![element_count * 4, TENSOR_COMPONENT_COUNT],
                 integration_point_strain,
             ),
             AnalysisField::host_f64(
                 FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRESS,
-                vec![element_count, 4, TENSOR_COMPONENT_COUNT],
+                vec![element_count * 4, TENSOR_COMPONENT_COUNT],
                 integration_point_stress,
             ),
             AnalysisField::host_f64(
@@ -357,6 +357,20 @@ pub fn structural_observable_field_definitions(
             ObservationQuantity::Stress,
             FieldLocation::Element,
             RecoveredFieldEntityDomain::SolidElements,
+            ObservationValueShape::SymmetricTensor3,
+        ),
+        (
+            FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRAIN,
+            ObservationQuantity::Strain,
+            FieldLocation::IntegrationPoint,
+            RecoveredFieldEntityDomain::SolidIntegrationPoints,
+            ObservationValueShape::SymmetricTensor3,
+        ),
+        (
+            FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRESS,
+            ObservationQuantity::Stress,
+            FieldLocation::IntegrationPoint,
+            RecoveredFieldEntityDomain::SolidIntegrationPoints,
             ObservationValueShape::SymmetricTensor3,
         ),
         (
@@ -1516,7 +1530,7 @@ mod tests {
         assert_eq!(field_shape(&fields, FEA_FIELD_STRUCTURAL_STRAIN), &[1, 6]);
         assert_eq!(
             field_shape(&fields, FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRAIN),
-            &[1, 4, 6]
+            &[4, 6]
         );
         assert!((strain[0] - 0.5).abs() < 1.0e-13);
         assert!(strain[1..].iter().all(|value| value.abs() < 1.0e-13));

@@ -5,8 +5,8 @@ use crate::execution::{
 };
 
 use super::contract::{
-    publication_result, ObservationEntity, ObservationError, ObservationResult,
-    ResolvedObservationPlan, ResolvedObservationTarget,
+    observation_element_entity, publication_result, ObservationEntity, ObservationError,
+    ObservationResult, ResolvedObservationPlan, ResolvedObservationTarget,
 };
 
 pub fn publish_observation(
@@ -29,10 +29,12 @@ pub fn publish_observation(
             .copied()
             .map(ObservationEntity::Node)
             .collect::<Vec<_>>(),
-        ResolvedObservationTarget::Elements { identities, .. } => identities
+        ResolvedObservationTarget::Elements {
+            domain, identities, ..
+        } => identities
             .iter()
             .copied()
-            .map(ObservationEntity::Element)
+            .map(|identity| observation_element_entity(*domain, identity))
             .collect(),
         ResolvedObservationTarget::Points { samples } => samples
             .iter()

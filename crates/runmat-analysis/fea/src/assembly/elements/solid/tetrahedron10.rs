@@ -2,6 +2,8 @@ use thiserror::Error;
 
 use runmat_meshing_core::TETRAHEDRON_MIDSIDE_EDGE_CORNERS;
 
+use crate::topology::quadrature::TETRAHEDRON_FOUR_POINT_RULE as QUADRATURE;
+
 use super::{
     material::{elasticity_matrix, SolidMaterialError},
     SolidMaterial,
@@ -22,15 +24,7 @@ const BARYCENTRIC_DERIVATIVES: [[f64; 3]; 4] = [
     [0.0, 1.0, 0.0],
     [0.0, 0.0, 1.0],
 ];
-const QUADRATURE_A: f64 = 0.585_410_196_624_968_5;
-const QUADRATURE_B: f64 = 0.138_196_601_125_010_5;
 const QUADRATURE_WEIGHT: f64 = 1.0 / 24.0;
-pub(crate) const QUADRATURE: [[f64; 4]; 4] = [
-    [QUADRATURE_A, QUADRATURE_B, QUADRATURE_B, QUADRATURE_B],
-    [QUADRATURE_B, QUADRATURE_A, QUADRATURE_B, QUADRATURE_B],
-    [QUADRATURE_B, QUADRATURE_B, QUADRATURE_A, QUADRATURE_B],
-    [QUADRATURE_B, QUADRATURE_B, QUADRATURE_B, QUADRATURE_A],
-];
 const MASS_QUADRATURE: [([f64; 4], f64); 11] = [
     ([0.25, 0.25, 0.25, 0.25], -0.013_155_555_555_555_556),
     (

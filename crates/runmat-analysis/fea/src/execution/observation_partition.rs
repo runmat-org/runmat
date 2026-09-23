@@ -613,6 +613,7 @@ mod tests {
             RecoveredFieldEntityCounts {
                 structural_nodes: projection.nodes.len(),
                 solid_elements: projection.elements.len(),
+                solid_integration_points: projection.elements.len() * 4,
                 beam_elements: 0,
                 shell_elements: 0,
                 connectors: 0,

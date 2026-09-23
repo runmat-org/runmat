@@ -71,6 +71,7 @@ pub enum RecoveredFieldNumericRepresentation {
 pub enum RecoveredFieldEntityDomain {
     StructuralNodes,
     SolidElements,
+    SolidIntegrationPoints,
     BeamElements,
     ShellElements,
     Connectors,
@@ -93,6 +94,7 @@ pub enum RecoveredFieldDerivation {
 pub struct RecoveredFieldEntityCounts {
     pub structural_nodes: usize,
     pub solid_elements: usize,
+    pub solid_integration_points: usize,
     pub beam_elements: usize,
     pub shell_elements: usize,
     pub connectors: usize,
@@ -104,6 +106,7 @@ impl RecoveredFieldEntityCounts {
         match domain {
             RecoveredFieldEntityDomain::StructuralNodes => self.structural_nodes,
             RecoveredFieldEntityDomain::SolidElements => self.solid_elements,
+            RecoveredFieldEntityDomain::SolidIntegrationPoints => self.solid_integration_points,
             RecoveredFieldEntityDomain::BeamElements => self.beam_elements,
             RecoveredFieldEntityDomain::ShellElements => self.shell_elements,
             RecoveredFieldEntityDomain::Connectors => self.connectors,
@@ -361,6 +364,9 @@ impl RecoveredFieldDefinition {
             ) | (
                 FieldLocation::Element,
                 RecoveredFieldEntityDomain::SolidElements
+            ) | (
+                FieldLocation::IntegrationPoint,
+                RecoveredFieldEntityDomain::SolidIntegrationPoints
             ) | (
                 FieldLocation::Element,
                 RecoveredFieldEntityDomain::BeamElements

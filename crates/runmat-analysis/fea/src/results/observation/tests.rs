@@ -262,6 +262,7 @@ fn constraint_reaction_resultant_uses_canonical_group_ownership() {
         RecoveredFieldEntityCounts {
             structural_nodes: mesh.topology.nodes.len(),
             solid_elements: mesh.topology.volume_elements.len(),
+            solid_integration_points: mesh.topology.volume_elements.len() * 4,
             beam_elements: 0,
             shell_elements: 0,
             connectors: 0,
@@ -386,6 +387,7 @@ fn connector_observation_binds_exact_identity_and_partition_source() {
         RecoveredFieldEntityCounts {
             structural_nodes: mesh.topology.nodes.len(),
             solid_elements: mesh.topology.volume_elements.len(),
+            solid_integration_points: mesh.topology.volume_elements.len() * 4,
             beam_elements: 0,
             shell_elements: 0,
             connectors: 1,
@@ -632,6 +634,96 @@ fn field_and_exact_probe_use_typed_source_and_canonical_entities() {
     let decoded =
         ObservationResult::from_canonical_bytes(&results[1].canonical_bytes().unwrap()).unwrap();
     assert_eq!(decoded, results[1]);
+}
+
+#[test]
+fn integration_point_field_retains_canonical_point_entities() {
+    let projection = projection(ElementOrder::Tet10);
+    let definition = RecoveredFieldDefinition::new(
+        crate::contracts::FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRESS,
+        ObservationQuantity::Stress,
+        FieldLocation::IntegrationPoint,
+        RecoveredFieldEntityDomain::SolidIntegrationPoints,
+        ObservationValueShape::SymmetricTensor3,
+        RecoveredFieldNumericRepresentation::Real,
+    )
+    .unwrap();
+    let mut request = spec("point_stress", ObservationTarget::WholeModel);
+    request.quantity = ObservationQuantity::Stress;
+    request.value_shape = ObservationValueShape::SymmetricTensor3;
+    request.source_location = FieldLocation::IntegrationPoint;
+    request.output_location = FieldLocation::IntegrationPoint;
+    let mut step = ProcedureStep::structural_static("static");
+    step.observations = vec![ObservationRequest::Field(request)];
+    let plan = resolve_observation_plan(
+        &step,
+        &projection,
+        std::slice::from_ref(&definition),
+        ObservationLimits::default(),
+    )
+    .unwrap();
+    let values = (0..24).map(|value| value as f64).collect::<Vec<_>>();
+    let fields = catalog(&projection, &definition, vec![4, 6], values.clone());
+
+    let result = evaluate_observations(&plan, &projection, &fields).unwrap();
+
+    assert_eq!(result[0].field.as_host_f64().unwrap(), values);
+    assert_eq!(result[0].entities.len(), 4);
+    assert!(result[0]
+        .entities
+        .iter()
+        .all(|entity| matches!(entity, ObservationEntity::IntegrationPoint(_))));
+    assert!(result[0].entities.windows(2).all(|pair| pair[0] != pair[1]));
+}
+
+#[test]
+fn integration_point_region_cardinality_applies_to_parent_elements() {
+    let projection = projection(ElementOrder::Tet10);
+    let definition = RecoveredFieldDefinition::new(
+        crate::contracts::FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRESS,
+        ObservationQuantity::Stress,
+        FieldLocation::IntegrationPoint,
+        RecoveredFieldEntityDomain::SolidIntegrationPoints,
+        ObservationValueShape::SymmetricTensor3,
+        RecoveredFieldNumericRepresentation::Real,
+    )
+    .unwrap();
+    let selector = projection.elements[0]
+        .region_id
+        .analysis_selection_id()
+        .unwrap();
+    let mut region = runmat_analysis_core::RegionTarget::volume(selector);
+    region.cardinality = runmat_analysis_core::TargetCardinality::One;
+    let mut request = spec(
+        "point_stress",
+        ObservationTarget::Spatial(runmat_analysis_core::ExcitationTarget::Region(region)),
+    );
+    request.quantity = ObservationQuantity::Stress;
+    request.value_shape = ObservationValueShape::SymmetricTensor3;
+    request.source_location = FieldLocation::IntegrationPoint;
+    request.output_location = FieldLocation::IntegrationPoint;
+    let mut step = ProcedureStep::structural_static("static");
+    step.observations = vec![ObservationRequest::Field(request)];
+
+    let plan = resolve_observation_plan(
+        &step,
+        &projection,
+        std::slice::from_ref(&definition),
+        ObservationLimits::default(),
+    )
+    .unwrap();
+
+    let ResolvedObservationTarget::Elements {
+        domain,
+        indices,
+        identities,
+    } = &plan.observations[0].target
+    else {
+        panic!("integration-point field did not resolve to discrete entities");
+    };
+    assert_eq!(*domain, RecoveredFieldEntityDomain::SolidIntegrationPoints);
+    assert_eq!(indices, &[0, 1, 2, 3]);
+    assert_eq!(identities.len(), 4);
 }
 
 #[test]
@@ -1771,6 +1863,7 @@ fn observation_assembly_requires_the_exact_subset_scheduled_at_one_frequency() {
         RecoveredFieldEntityCounts {
             structural_nodes: projection.nodes.len(),
             solid_elements: projection.elements.len(),
+            solid_integration_points: projection.elements.len() * 4,
             beam_elements: 0,
             shell_elements: 0,
             connectors: 0,
@@ -2137,6 +2230,7 @@ fn explicit_structural_nodes_resolve_and_evaluate_without_a_solver_mesh() {
         RecoveredFieldEntityCounts {
             structural_nodes: node_count,
             solid_elements: 0,
+            solid_integration_points: 0,
             beam_elements: beam_count,
             shell_elements: shell_count,
             connectors: 0,

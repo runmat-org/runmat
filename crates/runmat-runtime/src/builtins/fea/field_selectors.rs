@@ -159,6 +159,20 @@ selector!(
     Stress
 );
 selector!(
+    integration_point_strain,
+    INTEGRATION_POINT_STRAIN_DESCRIPTOR,
+    INTEGRATION_POINT_STRAIN_SIGNATURES,
+    "fea.StructuralField.integrationPointStrain",
+    IntegrationPointStrain
+);
+selector!(
+    integration_point_stress,
+    INTEGRATION_POINT_STRESS_DESCRIPTOR,
+    INTEGRATION_POINT_STRESS_SIGNATURES,
+    "fea.StructuralField.integrationPointStress",
+    IntegrationPointStress
+);
+selector!(
     reaction_force,
     REACTION_FORCE_DESCRIPTOR,
     REACTION_FORCE_SIGNATURES,

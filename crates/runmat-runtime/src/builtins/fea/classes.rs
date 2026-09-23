@@ -758,6 +758,14 @@ fn structural_field_methods() -> HashMap<String, crate::class_registry::RuntimeM
         ("nodalVonMises", "fea.StructuralField.nodalVonMises"),
         ("strain", "fea.StructuralField.strain"),
         ("stress", "fea.StructuralField.stress"),
+        (
+            "integrationPointStrain",
+            "fea.StructuralField.integrationPointStrain",
+        ),
+        (
+            "integrationPointStress",
+            "fea.StructuralField.integrationPointStress",
+        ),
         ("reactionForce", "fea.StructuralField.reactionForce"),
         ("reactionMoment", "fea.StructuralField.reactionMoment"),
         (

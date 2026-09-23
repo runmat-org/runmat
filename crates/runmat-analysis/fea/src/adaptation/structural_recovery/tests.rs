@@ -234,7 +234,7 @@ fn tetrahedron10_integration_point_estimator_preserves_linear_recovery() {
         .collect::<Vec<_>>();
     let stress = AnalysisField::host_f64(
         FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRESS,
-        vec![1, 4, 6],
+        vec![4, 6],
         values,
     );
 
