@@ -57,6 +57,5 @@
   "crates/runmat-analysis/fea/src/planning/resource/response_spectrum.rs": 667,
   "crates/runmat-analysis/fea/src/solve/dynamics/modal_transient.rs": 666,
   "crates/runmat-analysis/fea/src/solve/dynamics/random_response/interval.rs": 660,
-  "crates/runmat-analysis/fea/src/planning/resource/modal.rs": 659,
-  "crates/runmat-analysis/fea/src/assembly/mixed_structural.rs": 657
+  "crates/runmat-analysis/fea/src/planning/resource/modal.rs": 659
 }
