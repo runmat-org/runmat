@@ -19,6 +19,7 @@ pub struct Root {
     pub omitted_when_none: Option<u32>,
     pub explicit_null: Option<bool>,
     pub state: State,
+    pub source: Source,
 }
 
 #[derive(Serialize)]
@@ -26,6 +27,18 @@ pub struct Root {
 pub enum State {
     Ready,
     Running { worker_count: u32 },
+}
+
+#[derive(Serialize)]
+pub struct Reference {
+    pub module_path: String,
+    pub declaration_id: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "snake_case", tag = "source")]
+pub enum Source {
+    Declaration(Reference),
 }
 `);
 
@@ -36,6 +49,8 @@ assert.match(output, /omittedWhenNone\?: number/);
 assert.match(output, /explicitNull: boolean \| null/);
 assert.match(output, /kind: "running"/);
 assert.match(output, /worker_count: number/);
+assert.match(output, /Reference & \{ source: "declaration" \}/);
+assert.doesNotMatch(output, /source: "declaration"; value:/);
 assert.doesNotMatch(output, /:\s*(?:unknown|any)\b|\b(?:unknown|any)\[\]/);
 
 fs.rmSync(directory, { recursive: true, force: true });

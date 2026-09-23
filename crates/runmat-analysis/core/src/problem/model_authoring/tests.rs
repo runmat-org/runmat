@@ -1,6 +1,39 @@
 use super::*;
 
 #[test]
+fn internally_tagged_authoring_references_serialize_flat() {
+    let material = AuthoredMaterialSource::Declaration(AuthoredMaterialRef {
+        module_path: "project/main.fea".into(),
+        material_id: "steel".into(),
+    });
+    assert_eq!(
+        serde_json::to_value(material).unwrap(),
+        serde_json::json!({
+            "source": "declaration",
+            "module_path": "project/main.fea",
+            "material_id": "steel",
+        })
+    );
+
+    let region = AuthoredRegionSource::Geometry(GeometryRegionRef {
+        module_path: "project/main.fea".into(),
+        geometry_id: "bracket".into(),
+        region_id: "loaded_face".into(),
+        role: GeometryRegionRole::Face,
+    });
+    assert_eq!(
+        serde_json::to_value(region).unwrap(),
+        serde_json::json!({
+            "source": "geometry",
+            "module_path": "project/main.fea",
+            "geometry_id": "bracket",
+            "region_id": "loaded_face",
+            "role": "face",
+        })
+    );
+}
+
+#[test]
 fn material_assignment_requires_declared_strongly_typed_inputs() {
     let material = AuthoredModelInputRef {
         input_id: "material".into(),

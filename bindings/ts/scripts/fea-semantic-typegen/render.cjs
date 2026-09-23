@@ -89,7 +89,7 @@ function renderEnum(declaration, registry) {
       if (!payload) return [`{ ${tagged} }`];
       if (content) return [`{ ${tagged}; ${safeProperty(content)}: ${payload} }`];
       if (parsed.shape === "named") return [`${payload.slice(0, -1)}${tagged} }`];
-      return [`{ ${tagged}; value: ${payload} }`];
+      return [`${payload} & { ${tagged} }`];
     }
     if (!payload) return [JSON.stringify(name)];
     return [`{ ${safeProperty(name)}: ${payload} }`];
