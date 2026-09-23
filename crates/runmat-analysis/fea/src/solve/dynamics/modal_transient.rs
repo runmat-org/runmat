@@ -1,60 +1,20 @@
-use thiserror::Error;
-
 use crate::execution::ModalTransientCoordinateState;
 
 use super::{dense::solve_square, ModalReducedSystem};
 
+mod algebra;
+mod contract;
+
+use algebra::{
+    linear_combination, multiply, relative_residual, subtract_three, DenseSecondOrderOperators,
+};
+pub use contract::{
+    ModalTransientError, ModalTransientHistory, ModalTransientInitialState, ModalTransientSample,
+    ModalTransientStep,
+};
+
 const BETA: f64 = 0.25;
 const GAMMA: f64 = 0.5;
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct ModalTransientInitialState {
-    pub displacement: Vec<f64>,
-    pub velocity: Vec<f64>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct ModalTransientSample {
-    pub time_s: f64,
-    pub coordinates: ModalTransientCoordinateState,
-    pub relative_residual: f64,
-}
-
-/// One accepted average-acceleration update in modal coordinates.
-#[derive(Clone, Debug, PartialEq)]
-pub struct ModalTransientStep {
-    pub coordinates: ModalTransientCoordinateState,
-    pub relative_residual: f64,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct ModalTransientHistory {
-    pub samples: Vec<ModalTransientSample>,
-}
-
-impl ModalTransientHistory {
-    pub fn terminal_coordinates(&self) -> &ModalTransientCoordinateState {
-        &self
-            .samples
-            .last()
-            .expect("a validated modal transient history is nonempty")
-            .coordinates
-    }
-}
-
-#[derive(Clone, Debug, Error, PartialEq)]
-pub enum ModalTransientError {
-    #[error("modal transient inputs have inconsistent dimensions")]
-    DimensionMismatch,
-    #[error("modal transient time points must be finite and strictly increasing")]
-    InvalidTimeDomain,
-    #[error("modal transient inputs contain a nonfinite value")]
-    NonFinite,
-    #[error("modal transient effective system is singular")]
-    Singular,
-    #[error("modal transient solve was cancelled")]
-    Cancelled,
-}
 
 pub fn solve_modal_transient(
     system: &ModalReducedSystem,
@@ -235,14 +195,6 @@ fn validate_operators_and_load(
         return Err(ModalTransientError::NonFinite);
     }
     Ok(())
-}
-
-#[derive(Clone, Copy)]
-struct DenseSecondOrderOperators<'a> {
-    size: usize,
-    stiffness: &'a [f64],
-    mass: &'a [f64],
-    damping: &'a [f64],
 }
 
 fn integrate_initial(
@@ -460,65 +412,6 @@ fn validate_coordinate_state(
         return Err(ModalTransientError::NonFinite);
     }
     Ok(())
-}
-
-fn multiply(matrix: &[f64], size: usize, vector: &[f64]) -> Vec<f64> {
-    (0..size)
-        .map(|row| {
-            (0..size)
-                .map(|column| matrix[row * size + column] * vector[column])
-                .sum()
-        })
-        .collect()
-}
-
-fn subtract_three(left: &[f64], middle: &[f64], right: &[f64]) -> Vec<f64> {
-    left.iter()
-        .zip(middle)
-        .zip(right)
-        .map(|((left, middle), right)| left - middle - right)
-        .collect()
-}
-
-fn linear_combination(
-    mass: &[f64],
-    damping_scale: f64,
-    damping: &[f64],
-    stiffness_scale: f64,
-    stiffness: &[f64],
-) -> Vec<f64> {
-    mass.iter()
-        .zip(damping)
-        .zip(stiffness)
-        .map(|((mass, damping), stiffness)| {
-            mass + damping_scale * damping + stiffness_scale * stiffness
-        })
-        .collect()
-}
-
-fn relative_residual(
-    operators: DenseSecondOrderOperators<'_>,
-    displacement: &[f64],
-    velocity: &[f64],
-    acceleration: &[f64],
-    load: &[f64],
-) -> f64 {
-    let inertia = multiply(operators.mass, operators.size, acceleration);
-    let damping = multiply(operators.damping, operators.size, velocity);
-    let elastic = multiply(operators.stiffness, operators.size, displacement);
-    let residual = load
-        .iter()
-        .zip(&inertia)
-        .zip(&damping)
-        .zip(&elastic)
-        .map(|(((load, inertia), damping), elastic)| load - inertia - damping - elastic)
-        .collect::<Vec<_>>();
-    norm(&residual)
-        / (norm(load) + norm(&inertia) + norm(&damping) + norm(&elastic)).max(f64::MIN_POSITIVE)
-}
-
-fn norm(vector: &[f64]) -> f64 {
-    vector.iter().map(|value| value * value).sum::<f64>().sqrt()
 }
 
 #[cfg(test)]
