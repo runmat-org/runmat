@@ -17,9 +17,9 @@ use super::{
     AcceleratorRequirement, AccuracyResourceDemand, AssemblyResourcePolicy, ByteCount,
     CheckpointArtifactPolicy, Count, FeaResourceDemand, FeaResourcePhase, FeaResourcePlan,
     FeaResourcePlanningInput, ObservationResourceFacts, PartitioningPolicy, PhaseResourcePolicy,
-    PreparedOutputResourceFacts, PreparedStructuralModalResourceFacts, ResourcePlanningError,
-    SolveResourcePolicy, StructuralModalResourceDemand, StructuralOperatorResourceDemand,
-    WorkerResourcePolicy, RESOURCE_ESTIMATION_MODEL_REVISION,
+    PreparedStructuralModalResourceFacts, ResourcePlanningError, SolveResourcePolicy,
+    StructuralModalResourceDemand, StructuralOperatorResourceDemand, WorkerResourcePolicy,
+    RESOURCE_ESTIMATION_MODEL_REVISION,
 };
 
 const ACCELERATOR_CG_RESIDENT_VECTOR_COUNT: u64 = 6;
@@ -27,8 +27,17 @@ const ASSEMBLY_SCRATCH_BYTES_PER_ELEMENT: u64 = 8 * 1024;
 const FIXED_ASSEMBLY_SCRATCH_BYTES: u64 = 64 * 1024;
 const FIXED_WORKER_MEMORY_BYTES: u64 = 16 * 1024 * 1024;
 const FIXED_WORKER_SCRATCH_BYTES: u64 = 8 * 1024 * 1024;
-const ARTIFACT_OVERHEAD_BYTES: u64 = 64 * 1024;
-const MODAL_RECEIPT_PAYLOAD_BYTES_UPPER_BOUND: u64 = 16 * 1024;
+
+mod sizing;
+
+use sizing::{
+    modal_output_value_count, modal_phase_value_count, modal_result_payload_bytes,
+    modal_workspace_bytes, prepared_output_covers_transport,
+};
+pub use sizing::{
+    structural_modal_receipt_payload_bytes_upper_bound,
+    structural_modal_result_payload_bytes_upper_bound,
+};
 
 /// Builds the monolithic resource envelope for one canonical modal-extraction workload.
 pub fn build_structural_modal_resource_plan(
@@ -360,199 +369,6 @@ pub fn build_structural_modal_resource_plan(
         },
         accuracy_ceiling: step.accuracy.resources,
     })
-}
-
-fn modal_workspace_bytes(
-    full_dimension: u64,
-    reduced_dimension: u64,
-    residual_vector_count: u64,
-    reduced_stiffness_nonzeros: u64,
-    reduced_mass_nonzeros: u64,
-    ilu_bytes: u64,
-) -> Result<u64, ResourcePlanningError> {
-    let reduced_row_offsets = checked_bytes(
-        checked_mul(
-            checked_add(reduced_dimension, 1, "reduced row offsets")?,
-            3,
-            "reduced row offsets",
-        )?,
-        8,
-        "reduced row offsets",
-    )?;
-    // Reduced damping can be as dense as K; it is retained by the current canonical carrier.
-    let reduced_entries = checked_add(
-        checked_add(
-            reduced_stiffness_nonzeros,
-            reduced_mass_nonzeros,
-            "reduced K+M nonzeros",
-        )?,
-        reduced_stiffness_nonzeros,
-        "reduced K+M+C nonzeros",
-    )?;
-    let reduced_operator_bytes = checked_add(
-        reduced_row_offsets,
-        checked_bytes(reduced_entries, 16, "reduced operator entries")?,
-        "reduced operators",
-    )?;
-    // Peak subspace residency: old/full candidate modes, reduced candidates, and three dense
-    // Rayleigh-Ritz matrices can coexist during boundary expansion and eigendecomposition.
-    let vector_values = checked_add(
-        checked_mul(full_dimension, reduced_dimension, "expanded modal vectors")?,
-        checked_mul(
-            checked_mul(
-                reduced_dimension,
-                reduced_dimension,
-                "reduced modal vectors",
-            )?,
-            3,
-            "reduced modal vector blocks",
-        )?,
-        "modal vector values",
-    )?;
-    let dense_values = checked_mul(
-        checked_mul(reduced_dimension, reduced_dimension, "dense modal matrices")?,
-        3,
-        "dense modal matrices",
-    )?;
-    let residual_workspace_values = if residual_vector_count == 0 {
-        0
-    } else {
-        checked_add(
-            checked_mul(full_dimension, 6, "residual-vector full workspace")?,
-            checked_mul(reduced_dimension, 8, "residual-vector reduced workspace")?,
-            "residual-vector workspace",
-        )?
-    };
-    let vector_and_dense = checked_bytes(
-        checked_add(
-            checked_add(vector_values, dense_values, "modal numerical workspace")?,
-            residual_workspace_values,
-            "modal and residual-vector workspace",
-        )?,
-        8,
-        "modal numerical workspace",
-    )?;
-    checked_add(
-        checked_add(
-            reduced_operator_bytes,
-            ilu_bytes,
-            "reduced operators and ILU",
-        )?,
-        vector_and_dense,
-        "modal workspace",
-    )
-}
-
-fn modal_output_value_count(
-    full_dimension: u64,
-    retained_modes: u64,
-    residual_vector_count: u64,
-) -> Result<u64, ResourcePlanningError> {
-    let modal_vectors = checked_mul(full_dimension, retained_modes, "modal basis vectors")?;
-    let square_metrics = checked_mul(retained_modes, retained_modes, "modal square metrics")?;
-    [
-        modal_vectors,
-        checked_mul(square_metrics, 2, "modal orthogonality metrics")?,
-        checked_mul(retained_modes, 48, "modal scalar metrics")?,
-        checked_mul(
-            checked_add(full_dimension, 16, "residual-vector values")?,
-            residual_vector_count,
-            "modal residual-vector output values",
-        )?,
-        32,
-    ]
-    .into_iter()
-    .try_fold(0_u64, |total, value| {
-        checked_add(total, value, "modal output values")
-    })
-}
-
-fn modal_phase_value_count(
-    output_values: u64,
-    full_dimension: u64,
-    retained_modes: u64,
-    nodes: u64,
-    elements: u64,
-) -> Result<u64, ResourcePlanningError> {
-    let recovery_per_mode = checked_add(
-        checked_mul(nodes, 6, "modal phase nodal recovery")?,
-        checked_mul(elements, 13, "modal phase element recovery")?,
-        "modal phase recovery",
-    )?;
-    [
-        output_values,
-        checked_mul(
-            recovery_per_mode,
-            retained_modes,
-            "all recovered modal fields",
-        )?,
-        checked_mul(
-            checked_mul(nodes, 6, "projected translation and rotation values")?,
-            retained_modes,
-            "projected modal fields",
-        )?,
-        checked_mul(full_dimension, retained_modes, "solver modal vectors")?,
-    ]
-    .into_iter()
-    .try_fold(0_u64, |total, value| {
-        checked_add(total, value, "modal phase values")
-    })
-}
-
-/// Deterministic canonical payload ceiling for the modal solver-result object.
-pub fn structural_modal_result_payload_bytes_upper_bound(
-    mesh: Option<&SolverMeshArtifact>,
-    constraints: &CanonicalStructuralConstraintPlan,
-    workload: &StructuralModalWorkload,
-) -> Result<u64, ResourcePlanningError> {
-    workload
-        .validate()
-        .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
-    let facts = derive_structural_resource_facts(workload.model(), mesh, constraints)?;
-    let reduction = facts
-        .constraint_matrix
-        .affine_reduction()
-        .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
-    if reduction.offset.iter().any(|value| *value != 0.0) || reduction.reduced_dof_count == 0 {
-        return Err(ResourcePlanningError::Invalid(
-            "modal payload planning requires a nonempty homogeneous reduction".into(),
-        ));
-    }
-    let values = modal_output_value_count(
-        count(reduction.full_dof_count, "modal full dimension")?,
-        count(reduction.reduced_dof_count, "modal retained modes")?,
-        count(
-            workload.residual_vector_directions().len(),
-            "modal residual-vector count",
-        )?,
-    )?;
-    modal_result_payload_bytes(values, 0)
-}
-
-/// Canonical payload ceiling for the compact fixed-shape numerical receipt.
-pub const fn structural_modal_receipt_payload_bytes_upper_bound() -> u64 {
-    MODAL_RECEIPT_PAYLOAD_BYTES_UPPER_BOUND
-}
-
-fn modal_result_payload_bytes(
-    values: u64,
-    embedded_observation_bytes: u64,
-) -> Result<u64, ResourcePlanningError> {
-    checked_add(
-        checked_add(
-            checked_bytes(values, 8, "modal result values")?,
-            embedded_observation_bytes,
-            "modal result observations",
-        )?,
-        ARTIFACT_OVERHEAD_BYTES,
-        "modal result payload",
-    )
-}
-
-fn prepared_output_covers_transport(output: &PreparedOutputResourceFacts) -> bool {
-    output.transport_closure_bytes_upper_bound >= output.encoded_payload_bytes_upper_bound
-        && output.construction_resident_bytes_admission_budget
-            >= output.encoded_payload_bytes_upper_bound
 }
 
 fn modal_accelerator_requirements(
