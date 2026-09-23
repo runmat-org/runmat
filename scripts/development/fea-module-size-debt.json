@@ -60,6 +60,5 @@
   "crates/runmat-analysis/fea/src/planning/resource/modal.rs": 659,
   "crates/runmat-analysis/fea/src/assembly/mixed_structural.rs": 657,
   "crates/runmat-analysis/fea/src/execution/identity.rs": 644,
-  "crates/runmat-analysis/core/src/problem/region_resolution.rs": 635,
-  "crates/runmat-runtime/src/analysis/frequency_result.rs": 634
+  "crates/runmat-analysis/core/src/problem/region_resolution.rs": 635
 }
