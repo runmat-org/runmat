@@ -23,6 +23,8 @@ pub enum ComplexStructuralFieldRecoveryError {
     PhysicalRecovery(#[from] StructuralFieldRecoveryError),
     #[error(transparent)]
     RecoveredField(#[from] RecoveredFieldError),
+    #[error(transparent)]
+    Connector(#[from] crate::connectors::ConnectorRecoveryError),
     #[error("complex structural recovery inventories have different lengths")]
     InventoryLengthMismatch,
     #[error("complex structural field `{field_id}` has no typed definition")]
@@ -61,6 +63,7 @@ pub struct ComplexStructuralFieldCardinality {
     pub solid_elements: usize,
     pub beam_elements: usize,
     pub shell_elements: usize,
+    pub connectors: usize,
     pub constraint_groups: usize,
     pub has_rotational_dofs: bool,
 }
@@ -74,7 +77,7 @@ pub fn complex_structural_field_layout(
         solid_integration_points: cardinality.solid_elements.saturating_mul(4),
         beam_elements: cardinality.beam_elements,
         shell_elements: cardinality.shell_elements,
-        connectors: 0,
+        connectors: cardinality.connectors,
         constraint_groups: cardinality.constraint_groups,
     };
     let mut definitions = structural_observable_field_definitions()?
@@ -115,6 +118,16 @@ pub fn complex_structural_field_layout(
                 },
             )?)?);
         }
+    }
+    if cardinality.connectors > 0 {
+        definitions.push(RecoveredFieldDefinition::new(
+            crate::contracts::FEA_FIELD_STRUCTURAL_CONNECTOR_FORCE,
+            ObservationQuantity::ReactionForce,
+            runmat_analysis_core::FieldLocation::Connector,
+            crate::results::field::RecoveredFieldEntityDomain::Connectors,
+            runmat_analysis_core::ObservationValueShape::Vector3,
+            RecoveredFieldNumericRepresentation::ComplexInterleaved,
+        )?);
     }
     let storage_value_count = definitions.iter().try_fold(0_usize, |total, definition| {
         let values = entity_counts
@@ -161,6 +174,7 @@ pub fn recover_complex_structural_result_fields(
         solid_elements: summary.structural_solid_recovery.len(),
         beam_elements: summary.structural_beam_recovery.len(),
         shell_elements: summary.structural_shell_recovery.len(),
+        connectors: 0,
         constraint_groups: 0,
         has_rotational_dofs: summary.structural_rotational_dof_count > 0,
     })?;

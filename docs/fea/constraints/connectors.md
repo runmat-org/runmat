@@ -308,6 +308,14 @@ dissipated power in the typed connector-response history. Pair those with suppor
 whole-model energy balance. A displacement contour alone cannot prove that a connector used the
 intended coefficient or target.
 
+For a harmonic solve using the peak-amplitude convention, RunMat publishes the connector resultant
+as a complex force phasor. Springs and foundations use the complex displacement directly. For a
+dashpot, the velocity phasor is $\hat{\mathbf v}=i\omega\hat{\mathbf u}$, so its force is
+$\hat F=i\omega c\,\mathbf a^T(\hat{\mathbf u}_2-\hat{\mathbf u}_1)$. Stored energy and
+dissipated power are quadratic quantities rather than phasors; they are deliberately not labeled
+as complex force-like fields. Derive the cycle metric required by the study from the admitted
+force and displacement convention.
+
 ## What should the Desktop preview show?
 
 The study preview should identify every connector, both endpoints for axial devices, the foundation

@@ -3,7 +3,8 @@ use runmat_analysis_core::{
 };
 
 use crate::{
-    connectors::CanonicalStructuralConnectorResult,
+    assembly::dofs::StructuralDofLayout,
+    connectors::{CanonicalStructuralConnectorPlan, CanonicalStructuralConnectorResult},
     contracts::{
         FEA_FIELD_STRUCTURAL_CONNECTOR_FORCE, FEA_FIELD_STRUCTURAL_CONNECTOR_STORED_ENERGY,
     },
@@ -12,6 +13,82 @@ use crate::{
         RecoveredFieldNumericRepresentation, RecoveredFieldSample,
     },
 };
+
+use super::ComplexStructuralFieldRecoveryError;
+
+/// Recovers the peak-amplitude connector-force phasor from one harmonic displacement state.
+///
+/// The canonical real connector law remains authoritative. Evaluating it for the real and
+/// imaginary displacement/velocity parts preserves the exact spring, foundation, and dashpot
+/// semantics used by static and transient recovery without introducing a second complex law.
+pub fn recover_complex_connector_force_field(
+    plan: CanonicalStructuralConnectorPlan,
+    layout: &StructuralDofLayout,
+    frequency_hz: f64,
+    displacement_real: &[f64],
+    displacement_imaginary: &[f64],
+) -> Result<Option<RecoveredField>, ComplexStructuralFieldRecoveryError> {
+    if !frequency_hz.is_finite() || frequency_hz <= 0.0 {
+        return Err(RecoveredFieldError::InvalidArtifact(
+            "connector phasor recovery requires a positive finite frequency".into(),
+        )
+        .into());
+    }
+    let omega = std::f64::consts::TAU * frequency_hz;
+    let velocity_real = displacement_imaginary
+        .iter()
+        .map(|value| -omega * value)
+        .collect::<Vec<_>>();
+    let velocity_imaginary = displacement_real
+        .iter()
+        .map(|value| omega * value)
+        .collect::<Vec<_>>();
+    let real = CanonicalStructuralConnectorResult::recover_dynamic(
+        plan.clone(),
+        layout,
+        displacement_real,
+        &velocity_real,
+    )?;
+    let imaginary = CanonicalStructuralConnectorResult::recover_dynamic(
+        plan,
+        layout,
+        displacement_imaginary,
+        &velocity_imaginary,
+    )?;
+    if real.responses.is_empty() {
+        return Ok(None);
+    }
+    let connector_count = real.responses.len();
+    let real = AnalysisField::host_f64(
+        FEA_FIELD_STRUCTURAL_CONNECTOR_FORCE,
+        vec![connector_count, 3],
+        real.responses
+            .iter()
+            .flat_map(|response| response.resultant_force_newtons())
+            .collect(),
+    );
+    let imaginary = AnalysisField::host_f64(
+        FEA_FIELD_STRUCTURAL_CONNECTOR_FORCE,
+        vec![connector_count, 3],
+        imaginary
+            .responses
+            .iter()
+            .flat_map(|response| response.resultant_force_newtons())
+            .collect(),
+    );
+    Ok(Some(RecoveredField::new(
+        RecoveredFieldDefinition::new(
+            FEA_FIELD_STRUCTURAL_CONNECTOR_FORCE,
+            ObservationQuantity::ReactionForce,
+            FieldLocation::Connector,
+            RecoveredFieldEntityDomain::Connectors,
+            ObservationValueShape::Vector3,
+            RecoveredFieldNumericRepresentation::ComplexInterleaved,
+        )?,
+        RecoveredFieldSample::FrequencyHertz(frequency_hz),
+        super::complex_fields::interleave(&real, &imaginary)?,
+    )?))
+}
 
 /// Publishes one force vector and one stored-energy scalar for each canonical connector.
 ///
@@ -137,6 +214,68 @@ mod tests {
         assert_eq!(fields[1].storage().as_host_f64().unwrap(), &[3.125, 6.5625]);
         assert_eq!(fields[0].storage().shape, vec![2, 3]);
         assert_eq!(fields[1].storage().shape, vec![2]);
+    }
+
+    #[test]
+    fn harmonic_recovery_uses_displacement_for_springs_and_velocity_for_dashpots() {
+        let layout = StructuralDofLayout::from_node_sets(vec![
+            StructuralNodeDofSet::translational(),
+            StructuralNodeDofSet::translational(),
+        ]);
+        let plan = CanonicalStructuralConnectorPlan::new(
+            CanonicalStructuralTopologyIdentity::Explicit {
+                structural_topology_digest: Digest::sha256(b"topology"),
+            },
+            2,
+            Digest::sha256(b"authored"),
+            vec![
+                CanonicalConnectorEntry::AxialSpring {
+                    connector_id: "spring".into(),
+                    source_digest: Digest::sha256(b"spring"),
+                    primary: node(0, 1),
+                    secondary: node(1, 2),
+                    unit_axis: [1.0, 0.0, 0.0],
+                    stiffness_newtons_per_meter: 20.0,
+                },
+                CanonicalConnectorEntry::AxialDashpot {
+                    connector_id: "dashpot".into(),
+                    source_digest: Digest::sha256(b"dashpot"),
+                    primary: node(0, 1),
+                    secondary: node(1, 2),
+                    unit_axis: [1.0, 0.0, 0.0],
+                    damping_newton_seconds_per_meter: 5.0,
+                },
+            ],
+        )
+        .unwrap();
+        let field = recover_complex_connector_force_field(
+            plan,
+            &layout,
+            2.0,
+            &[0.0, 0.0, 0.0, 0.25, 0.0, 0.0],
+            &[0.0, 0.0, 0.0, -0.5, 0.0, 0.0],
+        )
+        .unwrap()
+        .unwrap();
+        let omega = std::f64::consts::TAU * 2.0;
+        assert_eq!(field.storage().shape, vec![2, 3, 2]);
+        assert_eq!(
+            field.storage().as_host_f64().unwrap(),
+            &[
+                -5.0 * omega * -0.5,
+                5.0 * omega * 0.25,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                5.0,
+                -10.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+            ]
+        );
     }
 
     fn node(node_index: usize, byte: u8) -> CanonicalConnectorNode {

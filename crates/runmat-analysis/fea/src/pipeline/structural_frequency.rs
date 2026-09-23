@@ -26,7 +26,8 @@ use crate::{
         StructuralFrequencyWorkload, StructuralPhasorConvention, StudyIdentity,
     },
     post::{
-        complex_structural_field_layout, recover_complex_constraint_group_observable_fields,
+        complex_structural_field_layout, recover_complex_connector_force_field,
+        recover_complex_constraint_group_observable_fields,
         recover_complex_structural_result_fields, ComplexStructuralFieldCardinality,
         ComplexStructuralFieldState,
     },
@@ -626,11 +627,42 @@ fn recover_structural_frequency_entry_fields_with_state(
         )
         .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?,
     );
+    let connector_plan = match assembly.real.structural_connector_plan.clone() {
+        Some(plan) => plan,
+        None if workload.model().connectors.is_empty() => {
+            crate::connectors::CanonicalStructuralConnectorPlan::empty(
+                constraint_plan.topology,
+                assembly.real.structural_node_count,
+            )
+            .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?
+        }
+        None => {
+            return Err(AnalysisExecutionError::Invalid(
+                "structural frequency assembly did not publish a canonical connector plan".into(),
+            ))
+        }
+    };
+    connector_plan
+        .validate_against_authored(&workload.model().connectors)
+        .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+    let connector_count = connector_plan.entries.len();
+    if let Some(field) = recover_complex_connector_force_field(
+        connector_plan,
+        &assembly.real.structural_dof_layout,
+        frequency_hz,
+        sample.displacement().real(),
+        sample.displacement().imaginary(),
+    )
+    .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?
+    {
+        fields.push(field);
+    }
     let layout = complex_structural_field_layout(ComplexStructuralFieldCardinality {
         structural_nodes: assembly.real.structural_dof_layout.node_count(),
         solid_elements: assembly.real.structural_solid_recovery.len(),
         beam_elements: assembly.real.structural_beam_recovery.len(),
         shell_elements: assembly.real.structural_shell_recovery.len(),
+        connectors: connector_count,
         constraint_groups: constraint_plan.groups.len(),
         has_rotational_dofs: assembly.real.structural_rotational_dof_count > 0,
     })

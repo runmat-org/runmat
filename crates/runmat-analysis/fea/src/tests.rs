@@ -2236,7 +2236,31 @@ fn structural_frequency_entries_execute_independently_and_assemble_in_plan_order
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     let mut step = ProcedureStep::structural_harmonic("frequency_response");
     step.independent_domain = IndependentDomain::FrequencyHertz(vec![20.0, 40.0]);
+    let mut connector_observation = history_observation(
+        "dashpot_force",
+        runmat_analysis_core::ObservationQuantity::ReactionForce,
+        runmat_analysis_core::SamplingPolicy::FrequencyHertz(vec![20.0, 40.0]),
+        runmat_analysis_core::FieldLocation::Connector,
+    );
+    let runmat_analysis_core::ObservationRequest::History(spec) = &mut connector_observation else {
+        unreachable!()
+    };
+    spec.target = runmat_analysis_core::ObservationTarget::Connector {
+        connector_id: "root_to_tip_dashpot".into(),
+    };
+    spec.complex_representation = runmat_analysis_core::ComplexRepresentation::Complex;
+    spec.storage.precision = runmat_analysis_core::SignalPrecision::Complex128;
+    step.observations = vec![connector_observation];
     model.sequence.steps = vec![step];
+    const DASHPOT_COEFFICIENT: f64 = 75.0;
+    model.connectors = vec![runmat_analysis_core::AnalysisConnector {
+        connector_id: "root_to_tip_dashpot".into(),
+        kind: runmat_analysis_core::ConnectorKind::AxialDashpot {
+            primary: runmat_analysis_core::RegionTarget::point("node:2"),
+            secondary: runmat_analysis_core::RegionTarget::point("node:4"),
+            damping: runmat_analysis_core::Damping::new(DASHPOT_COEFFICIENT),
+        },
+    }];
     let mesh = single_tetrahedron_solver_mesh_for_model(&model);
     let plan = FrequencyResponsePlan::new(20.0, &[40.0], &[]).unwrap();
     let workload = StructuralFrequencyWorkload::new(StructuralFrequencyWorkloadInput {
@@ -2337,6 +2361,68 @@ fn structural_frequency_entries_execute_independently_and_assemble_in_plan_order
                 && field.definition().quantity()
                     == runmat_analysis_core::ObservationQuantity::Stress
         })));
+    assert_eq!(topology.entity_counts.connectors, 1);
+    let response = results
+        .iter()
+        .find(|result| result.sample().entry().frequency_hz() == 20.0)
+        .unwrap()
+        .sample();
+    let artifact = fields
+        .iter()
+        .find(|artifact| {
+            artifact
+                .fields()
+                .iter()
+                .any(|field| field.sample() == RecoveredFieldSample::FrequencyHertz(20.0))
+        })
+        .unwrap();
+    let connector_force = artifact
+        .fields()
+        .iter()
+        .find(|field| field.definition().field_id() == crate::FEA_FIELD_STRUCTURAL_CONNECTOR_FORCE)
+        .unwrap();
+    assert_eq!(connector_force.storage().shape, vec![1, 3, 2]);
+    let primary = mesh
+        .topology
+        .nodes
+        .iter()
+        .position(|node| node.node_id == 2)
+        .unwrap();
+    let secondary = mesh
+        .topology
+        .nodes
+        .iter()
+        .position(|node| node.node_id == 4)
+        .unwrap();
+    let delta = std::array::from_fn::<_, 3, _>(|component| {
+        mesh.topology.nodes[secondary].coordinates_m[component]
+            - mesh.topology.nodes[primary].coordinates_m[component]
+    });
+    let length = delta.iter().map(|value| value * value).sum::<f64>().sqrt();
+    let axis = delta.map(|value| value / length);
+    let relative_real = (0..3)
+        .map(|component| {
+            axis[component]
+                * (response.displacement().real()[secondary * 3 + component]
+                    - response.displacement().real()[primary * 3 + component])
+        })
+        .sum::<f64>();
+    let relative_imaginary = (0..3)
+        .map(|component| {
+            axis[component]
+                * (response.displacement().imaginary()[secondary * 3 + component]
+                    - response.displacement().imaginary()[primary * 3 + component])
+        })
+        .sum::<f64>();
+    let omega = std::f64::consts::TAU * 20.0;
+    let actual = connector_force.storage().as_host_f64().unwrap();
+    for component in 0..3 {
+        let expected_real = axis[component] * -omega * DASHPOT_COEFFICIENT * relative_imaginary;
+        let expected_imaginary = axis[component] * omega * DASHPOT_COEFFICIENT * relative_real;
+        let scale = expected_real.abs().max(expected_imaginary.abs()).max(1.0);
+        assert!((actual[component * 2] - expected_real).abs() <= 1.0e-10 * scale);
+        assert!((actual[component * 2 + 1] - expected_imaginary).abs() <= 1.0e-10 * scale);
+    }
 }
 
 pub(crate) fn multi_region_tetrahedron_solver_mesh() -> SolverMeshArtifact {

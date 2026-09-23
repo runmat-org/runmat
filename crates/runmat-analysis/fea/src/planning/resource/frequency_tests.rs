@@ -94,6 +94,14 @@ fn direct_case(
     StructuralFrequencyEntryRequest,
 ) {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    model.connectors = vec![runmat_analysis_core::AnalysisConnector {
+        connector_id: "resource_dashpot".into(),
+        kind: runmat_analysis_core::ConnectorKind::AxialDashpot {
+            primary: runmat_analysis_core::RegionTarget::point("node:2"),
+            secondary: runmat_analysis_core::RegionTarget::point("node:4"),
+            damping: runmat_analysis_core::Damping::new(25.0),
+        },
+    }];
     let mut step = ProcedureStep::structural_harmonic("frequency");
     step.independent_domain = IndependentDomain::FrequencyHertz(vec![20.0]);
     model.sequence.steps = vec![step];

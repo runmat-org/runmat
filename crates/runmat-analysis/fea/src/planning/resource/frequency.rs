@@ -58,6 +58,7 @@ fn structural_frequency_recovery_layout(
         solid_elements: facts.recovery_solid_element_count,
         beam_elements: facts.recovery_beam_element_count,
         shell_elements: facts.recovery_shell_element_count,
+        connectors: workload.model().connectors.len(),
         constraint_groups: constraints.groups.len(),
         has_rotational_dofs: facts.recovery_has_rotational_dofs,
     })
