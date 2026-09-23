@@ -24,6 +24,7 @@ use super::contracts::{
     AnalysisRunResult, AnalysisStudyStepRunData,
 };
 
+mod discovery;
 mod frequency;
 mod frequency_page;
 
@@ -421,41 +422,7 @@ impl FilesystemAnalysisArtifactStore {
     }
 
     fn list_persisted_runs(&self) -> Result<Vec<PersistedAnalysisArtifact>, String> {
-        let runs_dir = self.root.join("runs");
-        if !owned_directory_exists(&self.root, "analysis artifact root")?
-            || !owned_directory_exists(&runs_dir, "analysis artifact runs directory")?
-        {
-            return Ok(Vec::new());
-        }
-        let mut runs = Vec::new();
-        for entry in
-            fs_read_dir(&runs_dir).map_err(|error| format!("failed to scan artifacts: {error}"))?
-        {
-            let path = entry.path().to_path_buf();
-            if path.extension().and_then(|extension| extension.to_str()) != Some("json") {
-                continue;
-            }
-            if entry.file_type() != FsFileType::File {
-                return Err(format!(
-                    "analysis run artifact must be a regular file: {}",
-                    path.display()
-                ));
-            }
-            let run_id = path
-                .file_stem()
-                .and_then(|stem| stem.to_str())
-                .ok_or_else(|| {
-                    format!(
-                        "analysis run artifact filename is invalid: {}",
-                        path.display()
-                    )
-                })?;
-            validate_run_id_token(run_id)?;
-            let bytes =
-                fs_read(&path).map_err(|error| format!("failed to read run artifact: {error}"))?;
-            runs.push(decode_persisted_artifact(&bytes, run_id)?);
-        }
-        Ok(runs)
+        discovery::list_supported_artifacts(&self.root, decode_persisted_artifact)
     }
 }
 
