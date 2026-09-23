@@ -1,13 +1,20 @@
 use std::collections::BTreeMap;
 
+mod projection;
+mod topology;
+
 use runmat_analysis_core::{AnalysisField, AnalysisFieldValues};
 use runmat_canonical_codec::CanonicalLimits;
 use runmat_meshing_core::{
-    ElementOrder, FieldTopologyLocation, SolverEntityTransfer, SolverMeshArtifact,
-    SolverMeshTransferMap, SolverTransferMethod, StableDigest, TETRAHEDRON_MIDSIDE_EDGE_CORNERS,
+    FieldTopologyLocation, SolverMeshArtifact, SolverMeshTransferMap, StableDigest,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
+
+use projection::{apply_projection, field_transfer_method};
+use topology::{
+    component_count, stable_identities, target_midpoint_edges, transfer_map_for_location,
+};
 
 const FIELD_CODEC_PREFIX: &[u8] = b"runmat-analysis-fea-field-cbor/v1\0";
 const FIELD_CODEC_DOMAIN: &str = "analysis.fea.field/v1";
@@ -257,139 +264,14 @@ pub fn transfer_solver_field(
     })
 }
 
-fn transfer_map_for_location(
-    transfer_map: &SolverMeshTransferMap,
-    location: FieldTopologyLocation,
-) -> BTreeMap<StableDigest, &SolverEntityTransfer> {
-    let transfers = match location {
-        FieldTopologyLocation::Node => &transfer_map.node_transfers,
-        FieldTopologyLocation::VolumeElement => &transfer_map.volume_element_transfers,
-        FieldTopologyLocation::BoundaryFace => &transfer_map.boundary_face_transfers,
-        FieldTopologyLocation::BoundaryEdge => &transfer_map.boundary_edge_transfers,
-    };
-    transfers
-        .iter()
-        .map(|transfer| (transfer.target_stable_identity, transfer))
-        .collect()
-}
-
-fn apply_projection(
-    projection: &SolverEntityTransfer,
-    source_values: &BTreeMap<StableDigest, &[f64]>,
-    component_count: usize,
-) -> Result<Vec<f64>, SolverFieldTransferError> {
-    let mut result = vec![0.0; component_count];
-    for source in &projection.sources {
-        let values = source_values
-            .get(&source.stable_identity)
-            .ok_or(SolverFieldTransferError::UnsupportedTopologyChange)?;
-        for (result, value) in result.iter_mut().zip(*values) {
-            *result += source.weight * value;
-        }
-    }
-    Ok(result)
-}
-
-fn field_transfer_method(method: SolverTransferMethod) -> SolverFieldTransferMethod {
-    match method {
-        SolverTransferMethod::BarycentricInterpolation => {
-            SolverFieldTransferMethod::BarycentricInterpolation
-        }
-        SolverTransferMethod::CentroidProjection => SolverFieldTransferMethod::CentroidProjection,
-        SolverTransferMethod::ConservativeProjection => {
-            SolverFieldTransferMethod::ConservativeProjection
-        }
-    }
-}
-
-fn stable_identities(
-    artifact: &SolverMeshArtifact,
-    location: FieldTopologyLocation,
-) -> BTreeMap<u64, StableDigest> {
-    match location {
-        FieldTopologyLocation::Node => artifact
-            .topology
-            .nodes
-            .iter()
-            .map(|entity| (entity.node_id, entity.stable_identity))
-            .collect(),
-        FieldTopologyLocation::VolumeElement => artifact
-            .topology
-            .volume_elements
-            .iter()
-            .map(|entity| (entity.element_id, entity.stable_identity))
-            .collect(),
-        FieldTopologyLocation::BoundaryFace => artifact
-            .topology
-            .boundary_faces
-            .iter()
-            .map(|entity| (entity.face_id, entity.stable_identity))
-            .collect(),
-        FieldTopologyLocation::BoundaryEdge => artifact
-            .topology
-            .boundary_edges
-            .iter()
-            .map(|entity| (entity.edge_id, entity.stable_identity))
-            .collect(),
-    }
-}
-
-fn component_count(
-    field: &AnalysisField,
-    entity_count: usize,
-    value_count: usize,
-) -> Result<usize, SolverFieldTransferError> {
-    if field.shape.is_empty() || field.shape[0] != entity_count {
-        return Err(SolverFieldTransferError::InvalidFieldShape);
-    }
-    let components = field.shape[1..]
-        .iter()
-        .try_fold(1_usize, |product, count| product.checked_mul(*count))
-        .ok_or(SolverFieldTransferError::InvalidFieldShape)?;
-    if components == 0
-        || entity_count
-            .checked_mul(components)
-            .is_none_or(|expected| expected != value_count)
-    {
-        return Err(SolverFieldTransferError::InvalidFieldShape);
-    }
-    Ok(components)
-}
-
-fn target_midpoint_edges(
-    target: &SolverMeshArtifact,
-) -> Result<BTreeMap<StableDigest, [StableDigest; 2]>, SolverFieldTransferError> {
-    if target.resolved_request.element_order == ElementOrder::Tet4 {
-        return Ok(BTreeMap::new());
-    }
-    let mut result = BTreeMap::new();
-    let identities = stable_identities(target, FieldTopologyLocation::Node);
-    for element in &target.topology.volume_elements {
-        for (local_edge, corners) in TETRAHEDRON_MIDSIDE_EDGE_CORNERS.iter().enumerate() {
-            let mut edge = [
-                identities[&element.node_ids[corners[0]]],
-                identities[&element.node_ids[corners[1]]],
-            ];
-            edge.sort_unstable();
-            let midpoint = identities[&element.node_ids[4 + local_edge]];
-            if result
-                .insert(midpoint, edge)
-                .is_some_and(|existing| existing != edge)
-            {
-                return Err(SolverFieldTransferError::InconsistentQuadraticConnectivity);
-            }
-        }
-    }
-    Ok(result)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::assembly::solver_solid::tests::artifact;
     use runmat_meshing_core::{
         solver_boundary_edge_identity, solver_boundary_face_identity,
-        solver_volume_element_identity, CanonicalMeshingContract, SolverTransferSource,
+        solver_volume_element_identity, CanonicalMeshingContract, ElementOrder,
+        SolverEntityTransfer, SolverTransferMethod, SolverTransferSource,
         SOLVER_MESH_TRANSFER_SCHEMA_VERSION,
     };
 
