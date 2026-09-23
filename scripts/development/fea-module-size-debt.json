@@ -47,6 +47,5 @@
   "crates/runmat-analysis/fea/src/pipeline/modal_basis.rs": 725,
   "crates/runmat-runtime/src/analysis/storage/frequency_page.rs": 720,
   "crates/runmat-analysis/fea/src/planning/resource/frequency.rs": 705,
-  "crates/runmat-analysis/fea/src/solve/dynamics/response_spectrum/mod.rs": 696,
-  "crates/runmat-analysis/fea/src/pipeline/transient/motion.rs": 695
+  "crates/runmat-analysis/fea/src/solve/dynamics/response_spectrum/mod.rs": 696
 }
