@@ -2339,7 +2339,7 @@ fn structural_frequency_entries_execute_independently_and_assemble_in_plan_order
         })));
 }
 
-fn multi_region_tetrahedron_solver_mesh() -> SolverMeshArtifact {
+pub(crate) fn multi_region_tetrahedron_solver_mesh() -> SolverMeshArtifact {
     let template = single_tetrahedron_solver_mesh();
     let mut mesh = template.clone();
     mesh.topology.nodes.clear();

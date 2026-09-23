@@ -621,4 +621,6 @@ fn checkpoint(
 }
 
 #[cfg(test)]
+mod qualification_tests;
+#[cfg(test)]
 mod tests;
