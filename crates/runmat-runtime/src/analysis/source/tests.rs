@@ -407,12 +407,23 @@ geometry bracket {
 
     let checked = prepared.check(Vec::new(), Vec::new()).unwrap();
     let report = checked.check_result();
+    #[cfg(not(feature = "occt-native"))]
+    {
+        assert_eq!(report.status, super::FeaCheckStatus::Invalid);
+        assert!(report.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "fea.host.geometry_inspection_failed"
+                && diagnostic.message.contains("GEOMETRY_BACKEND_UNAVAILABLE")
+        }));
+        return;
+    }
+    #[cfg(feature = "occt-native")]
     assert_eq!(
         report.status,
         super::FeaCheckStatus::Valid,
         "diagnostics: {:#?}",
         report.diagnostics
     );
+    #[cfg(feature = "occt-native")]
     assert_eq!(checked.program.geometries.len(), 1);
 }
 

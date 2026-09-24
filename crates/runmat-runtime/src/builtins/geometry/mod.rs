@@ -828,7 +828,7 @@ mod tests {
     }
 
     #[test]
-    fn geometry_load_builtin_applies_explicit_source_units() {
+    fn geometry_load_builtin_preserves_explicit_source_units_and_coordinates() {
         let tmp = tempfile::TempDir::new().unwrap();
         let path = tmp.path().join("part.stl");
         std::fs::write(
@@ -847,7 +847,9 @@ mod tests {
             .expect("asset should decode");
 
         assert_eq!(asset.units, UnitSystem::Millimeter);
-        assert_eq!(asset.surface_meshes[0].vertices[1][0], 0.001);
+        // The preview asset retains source coordinates with its unit tag;
+        // canonical faceted/exact topology converts them to meters later.
+        assert_eq!(asset.surface_meshes[0].vertices[1][0], 1.0);
         assert_eq!(asset.source.sha256.len(), 64);
         assert!(asset
             .source
