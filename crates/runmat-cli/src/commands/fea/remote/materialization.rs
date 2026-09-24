@@ -323,6 +323,7 @@ fn result_expectation(
         frozen_project_digest: Some(*revision.graph_digest()),
         geometry_source_digest: study.geometry_source_digest(),
         workloads: study.workloads(),
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         analysis_accelerator_requests: Vec::new(),
         input_materializations: input_materializations.to_vec(),
         expected_meshing_request: authored_meshing_request(study)?,

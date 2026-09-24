@@ -863,6 +863,7 @@ pub struct ExactStructuralStudyResultExpectation {
     pub frozen_project_digest: Option<Digest>,
     pub geometry_source_digest: Digest,
     pub workloads: StructuralStudyWorkloads,
+    pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     pub analysis_accelerator_requests: Vec<runmat_execution::resource::AcceleratorRequest>,
     pub input_materializations: Vec<runmat_analysis_execution::InputMaterializationExpectation>,
     pub expected_meshing_request: MeshingRequest,

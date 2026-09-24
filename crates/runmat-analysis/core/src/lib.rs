@@ -50,6 +50,7 @@ pub use execution_policy::{
     AuthoredExecutionPolicyRef, BackendPreference, CheckpointPreference, CooperativePolicy,
     ExecutionResourceLimits, FanoutPolicy, InclusiveCountRange, OperatorPartitioner,
     ParallelismLimit, PartitionBalance, PlacementPreference, ResiliencePolicy,
+    MAX_CPU_THREADS_PER_WORKER,
 };
 pub use study::{
     attach_authored_outputs, authored_output_types, geometry_parameter_input_type,

@@ -36,6 +36,7 @@ execution scalable {
     backend = accelerator
     resources {
         workers = 2..64
+        cpu_threads_per_worker = 4
         memory_per_worker <= 32 GiB
         accelerators = preferred
     }
@@ -86,6 +87,7 @@ sweep loads over study.response {
     assert_eq!(policy.backend, BackendPreference::Accelerator);
     assert_eq!(policy.resources.workers.unwrap().minimum, 2);
     assert_eq!(policy.resources.workers.unwrap().maximum, 64);
+    assert_eq!(policy.resources.cpu_threads_per_worker, 4);
     assert_eq!(
         policy.resources.maximum_memory_bytes_per_worker,
         Some(32 << 30)
@@ -138,6 +140,9 @@ fn execution_policy_rejects_contradictions_and_invalid_limits() {
         "backend = cpu\nresources { accelerators = preferred }",
         "backend = accelerator",
         "resources { workers = 0..4 }",
+        "resources { cpu_threads_per_worker = 0 }",
+        "resources { cpu_threads_per_worker = 1025 }",
+        "resources { cpu_threads_per_worker = 2..4 }",
         "resources { memory_per_worker = 32 GiB }",
         "fanout { sweep_cases = 0 }",
         "resilience { retries = -1 }",

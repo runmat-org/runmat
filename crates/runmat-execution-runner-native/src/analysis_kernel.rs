@@ -670,12 +670,18 @@ fn execute_structural_linear(
         )
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let accelerator_requests = resource_plan.request.accelerators.clone();
+    let local_execution =
+        runmat_analysis_fea::planning::resource::LocalExecutionPlan::from_cpu_millicores(
+            resource_plan.request.cpu_millicores,
+        )
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let expected_resource_plan = build_structural_resource_plan(
         mesh.as_ref(),
         &constraint_plan,
         &observations,
         &solve,
         &accelerator_requests,
+        local_execution,
     )
     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     if expected_resource_plan != resource_plan {

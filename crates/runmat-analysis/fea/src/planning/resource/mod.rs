@@ -6,6 +6,7 @@ mod contract;
 mod estimate;
 mod facts;
 mod frequency;
+mod local_execution;
 mod modal;
 mod post_process;
 mod preflight;
@@ -50,6 +51,10 @@ pub use frequency::{
     structural_frequency_entry_payload_bytes_upper_bound,
     structural_frequency_recovery_payload_bytes_upper_bound,
     StructuralFrequencyEntryResourceProjection, StructuralFrequencyRecoveryResourceInput,
+};
+pub use local_execution::{
+    LocalExecutionPlan, LocalExecutionPlanError, LocalThreadCount, LocalWorkChunk,
+    CPU_MILLICORES_PER_LOCAL_THREAD, MAX_LOCAL_EXECUTION_THREADS,
 };
 pub use modal::{
     build_structural_modal_resource_plan, structural_modal_receipt_payload_bytes_upper_bound,

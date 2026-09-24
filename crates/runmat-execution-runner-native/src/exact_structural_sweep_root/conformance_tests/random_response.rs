@@ -48,6 +48,7 @@ async fn random_response_reaches_an_admitted_result_over_encrypted_quic() {
             geometry_source_digest: Digest::sha256(BOX),
             workloads: box_random_response_workloads(),
             analysis_accelerator_requests: Vec::new(),
+            local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
             input_materializations: Vec::new(),
             exact_meshing,
         })

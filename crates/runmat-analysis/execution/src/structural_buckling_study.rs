@@ -5,6 +5,7 @@ use runmat_analysis_fea::execution::{
     AnalysisTaskIdentity, StructuralBucklingTemplate, StructuralStepWorkload,
     StructuralStudyWorkloads,
 };
+use runmat_analysis_fea::planning::resource::LocalExecutionPlan;
 use runmat_execution::{resource::AcceleratorRequest, Digest, ProgramRevision};
 use runmat_execution_artifact::{
     cache::CacheImport, object::ObjectInventoryLimits, ArtifactAccess, ProgramExecutionResponse,
@@ -34,6 +35,7 @@ pub struct StructuralBucklingStudyPreparation {
     pub inventory_limits: ObjectInventoryLimits,
     pub required_capabilities: BTreeSet<AnalysisCapabilityRequirement>,
     pub accelerator_requests: Vec<AcceleratorRequest>,
+    pub local_execution: LocalExecutionPlan,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -102,6 +104,7 @@ impl StructuralBucklingStudyCoordinator {
                 inventory_limits: preparation.inventory_limits,
                 required_capabilities: preparation.required_capabilities.clone(),
                 accelerator_requests: preparation.accelerator_requests.clone(),
+                local_execution: preparation.local_execution,
             })?;
         Ok(Self {
             authored_study_digest: preparation.authored_study_digest,

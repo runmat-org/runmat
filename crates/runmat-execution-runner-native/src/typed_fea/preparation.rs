@@ -78,6 +78,18 @@ pub async fn prepare_study(
         .as_ref()
         .and_then(|policy| policy.resources.workers)
         .map_or(1, |range| range.maximum.max(1));
+    let cpu_threads_per_worker = resolved
+        .execution_policy
+        .as_ref()
+        .map_or(1, |policy| policy.resources.cpu_threads_per_worker);
+    let local_thread_count = u16::try_from(cpu_threads_per_worker)
+        .map_err(|_| "CPU threads per worker exceed the FEA contract maximum".to_string())?;
+    let local_execution =
+        runmat_analysis_fea::planning::resource::LocalExecutionPlan::from_thread_count(
+            runmat_analysis_fea::planning::resource::LocalThreadCount::new(local_thread_count)
+                .map_err(|error| error.to_string())?,
+        )
+        .map_err(|error| error.to_string())?;
     let authored_study_digest = runmat_analysis_fea::study::structural_study_source_digest(
         &realized,
         &resolved.material_catalog,
@@ -99,6 +111,7 @@ pub async fn prepare_study(
             formulation_requirement: resolved.study.formulation_requirement,
             numerics: runmat_analysis_fea::study::StructuralNumericalPlanningPolicy::production(),
         },
+        local_execution,
         analysis_accelerator_requests: options.accelerators.clone(),
         input_materializations,
         geometry_meshing,

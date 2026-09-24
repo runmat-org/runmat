@@ -127,6 +127,7 @@ pub(super) fn execute(solved: &SolvedPipeline) {
         inventory_limits: ObjectInventoryLimits::default(),
         required_capabilities: BTreeSet::new(),
         accelerator_requests: Vec::new(),
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
     })
     .unwrap();
     let warm_outputs = NativeAnalysisKernel

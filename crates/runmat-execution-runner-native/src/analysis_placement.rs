@@ -3,6 +3,7 @@ use std::collections::BTreeSet;
 use futures::stream::{FuturesUnordered, StreamExt};
 use runmat_analysis_execution::StructuralSequencePreparation;
 use runmat_analysis_fea::execution::{StructuralStudyWorkloads, DEFAULT_ANALYSIS_CHUNK_BYTES};
+use runmat_analysis_fea::planning::resource::LocalExecutionPlan;
 use runmat_execution::resource::{AcceleratorRequest, Capability, ResourceRequest};
 use runmat_execution::task::RetryPolicy;
 use runmat_execution::{Digest, ProgramEnvironment, ProgramRevision};
@@ -123,6 +124,7 @@ async fn execute_one(
         workloads: prepared.workloads(),
         mesh: prepared.solver_mesh().clone(),
         workers: workers_per_study,
+        local_execution: LocalExecutionPlan::serial(),
         admitted_accelerators: None,
     })
     .await
@@ -136,6 +138,7 @@ pub struct StructuralWorkloadLocalExecution<'a> {
     pub workloads: StructuralStudyWorkloads,
     pub mesh: runmat_meshing_core::SolverMeshArtifact,
     pub workers: u32,
+    pub local_execution: LocalExecutionPlan,
     pub admitted_accelerators: Option<&'a [runmat_execution::resource::AcceleratorRequest]>,
 }
 
@@ -154,6 +157,7 @@ pub async fn execute_structural_workloads_locally(
         workloads,
         mesh,
         workers,
+        local_execution,
         admitted_accelerators,
     } = execution;
     let revision = ProgramRevision::new(study_digest, study_digest, program_environment)
@@ -192,11 +196,14 @@ pub async fn execute_structural_workloads_locally(
     let mut required_capabilities = BTreeSet::new();
     required_capabilities.insert(Capability::ProcessIsolation);
     execution_config.max_workers = workers.max(1);
+    execution_config.worker_cpu_millicores = local_execution
+        .checked_cpu_millicores()
+        .map_err(|error| crate::NativeExecutionError::Configuration(error.to_string()))?;
     execution_config.worker_memory_bytes = maximum_resident_bytes;
     execution_config.worker_scratch_bytes = maximum_resident_bytes;
     let policy = StructuralSequenceExecutionPolicy {
         resources: ResourceRequest {
-            cpu_millicores: 1_000,
+            cpu_millicores: execution_config.worker_cpu_millicores,
             memory_bytes: maximum_resident_bytes,
             scratch_bytes: maximum_resident_bytes,
             max_wall_millis: maximum_wall_millis,
@@ -253,6 +260,7 @@ pub async fn execute_structural_workloads_locally(
                             inventory_limits: ObjectInventoryLimits::default(),
                             required_capabilities: BTreeSet::new(),
                             accelerator_requests,
+                            local_execution,
                         },
                         policy,
                     )
@@ -363,6 +371,7 @@ pub async fn execute_structural_workloads_locally(
                                 inventory_limits: ObjectInventoryLimits::default(),
                                 required_capabilities: BTreeSet::new(),
                                 accelerator_requests,
+                                local_execution,
                             },
                             policy,
                         )
@@ -409,6 +418,7 @@ pub async fn execute_structural_workloads_locally(
                             inventory_limits: ObjectInventoryLimits::default(),
                             required_capabilities: BTreeSet::new(),
                             accelerator_requests,
+                            local_execution,
                         },
                         policy,
                     )
@@ -440,6 +450,7 @@ pub async fn execute_structural_workloads_locally(
                         inventory_limits: ObjectInventoryLimits::default(),
                         required_capabilities: BTreeSet::new(),
                         accelerator_requests,
+                        local_execution,
                     },
                     policy,
                 )
@@ -580,6 +591,7 @@ pub async fn execute_structural_workloads_locally(
                     inventory_limits: ObjectInventoryLimits::default(),
                     required_capabilities: BTreeSet::new(),
                     accelerator_requests,
+                    local_execution,
                 },
                 policy,
             )

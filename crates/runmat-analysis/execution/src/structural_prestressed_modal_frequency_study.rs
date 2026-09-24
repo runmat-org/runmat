@@ -81,6 +81,7 @@ impl StructuralPrestressedModalFrequencyStudyCoordinator {
                 inventory_limits: preparation.inventory_limits,
                 required_capabilities: preparation.required_capabilities,
                 accelerator_requests: preparation.accelerator_requests,
+                local_execution: preparation.local_execution,
             },
         )?;
         Ok(Self {

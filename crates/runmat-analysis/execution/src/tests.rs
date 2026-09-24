@@ -1412,6 +1412,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         inventory_limits: ObjectInventoryLimits::default(),
         required_capabilities: BTreeSet::new(),
         accelerator_requests: Vec::new(),
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
     })
     .unwrap();
     assert_eq!(prepared.inputs.len(), 4);
@@ -1738,6 +1739,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         runmat_analysis_fea::results::field::RecoveredFieldEntityCounts {
             structural_nodes: projection.nodes.len(),
             solid_elements: projection.elements.len(),
+            solid_integration_points: projection.elements.len() * 4,
             beam_elements: 0,
             shell_elements: 0,
             connectors: 0,
@@ -2397,6 +2399,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         inventory_limits: ObjectInventoryLimits::default(),
         required_capabilities: BTreeSet::new(),
         accelerator_requests: Vec::new(),
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
     })
     .unwrap();
     assert_eq!(branch.inputs.len(), 5);
@@ -2446,6 +2449,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
             inventory_limits: ObjectInventoryLimits::default(),
             required_capabilities: BTreeSet::new(),
             accelerator_requests: Vec::new(),
+            local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         })
         .is_err()
     );
@@ -2484,6 +2488,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         inventory_limits: ObjectInventoryLimits::default(),
         required_capabilities: BTreeSet::new(),
         accelerator_requests: Vec::new(),
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
     })
     .unwrap();
     assert_eq!(prepared.host.workload, access_variant.host.workload);
@@ -2517,6 +2522,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         inventory_limits: ObjectInventoryLimits::default(),
         required_capabilities: BTreeSet::new(),
         accelerator_requests: Vec::new(),
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
     })
     .unwrap();
     assert_eq!(
@@ -2573,6 +2579,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
             count: 1,
             memory_bytes_each: 1024 * 1024 * 1024,
         }],
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
     })
     .unwrap();
     assert!(backend_variant
@@ -2798,6 +2805,7 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
             inventory_limits: ObjectInventoryLimits::default(),
             required_capabilities: BTreeSet::new(),
             accelerator_requests: Vec::new(),
+            local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         })
         .is_err()
     );
@@ -2817,6 +2825,7 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
                 count: 1,
                 memory_bytes_each: 1024,
             }],
+            local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         })
         .is_err()
     );
@@ -2838,6 +2847,7 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
             inventory_limits: ObjectInventoryLimits::default(),
             required_capabilities: BTreeSet::new(),
             accelerator_requests: Vec::new(),
+            local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         })
         .is_err()
     );
@@ -2852,6 +2862,7 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
         inventory_limits: ObjectInventoryLimits::default(),
         required_capabilities: BTreeSet::new(),
         accelerator_requests: Vec::new(),
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
     })
     .unwrap();
     assert_eq!(coordinator.sequence().parallel_levels().len(), 2);
@@ -3058,6 +3069,7 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
             inventory_limits: ObjectInventoryLimits::default(),
             required_capabilities: BTreeSet::new(),
             accelerator_requests: Vec::new(),
+            local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         },
         closures.clone(),
     )
@@ -3079,6 +3091,7 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
             inventory_limits: ObjectInventoryLimits::default(),
             required_capabilities: BTreeSet::new(),
             accelerator_requests: Vec::new(),
+            local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         },
         incomplete,
     )

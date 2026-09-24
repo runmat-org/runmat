@@ -6,6 +6,7 @@ use runmat_analysis_fea::execution::{
     StructuralPrestressedFrequencySolverTemplate, StructuralPrestressedFrequencyTemplate,
     StructuralStepWorkload, StructuralStudyWorkloads,
 };
+use runmat_analysis_fea::planning::resource::LocalExecutionPlan;
 use runmat_execution::{resource::AcceleratorRequest, Digest, ProgramRevision};
 use runmat_execution_artifact::{
     cache::CacheImport, object::ObjectInventoryLimits, ArtifactAccess, ProgramExecutionResponse,
@@ -32,6 +33,7 @@ pub struct StructuralPrestressedFrequencyStudyPreparation {
     pub inventory_limits: ObjectInventoryLimits,
     pub required_capabilities: BTreeSet<AnalysisCapabilityRequirement>,
     pub accelerator_requests: Vec<AcceleratorRequest>,
+    pub local_execution: LocalExecutionPlan,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -110,6 +112,7 @@ impl StructuralPrestressedFrequencyStudyCoordinator {
                 inventory_limits: preparation.inventory_limits,
                 required_capabilities: preparation.required_capabilities,
                 accelerator_requests: preparation.accelerator_requests,
+                local_execution: preparation.local_execution,
             })?;
         Ok(Self {
             mesh: preparation.mesh,

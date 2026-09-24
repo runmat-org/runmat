@@ -4,6 +4,7 @@ use runmat_analysis_core::StateKind;
 use runmat_analysis_fea::execution::{
     AnalysisTaskIdentity, SemanticStatePublicationSource, StructuralLinearWorkload,
 };
+use runmat_analysis_fea::planning::resource::LocalExecutionPlan;
 use runmat_execution::{resource::AcceleratorRequest, Digest, ProgramRevision};
 use runmat_execution_artifact::{
     cache::CacheImport, object::ObjectInventoryLimits, ArtifactAccess, ProgramExecutionResponse,
@@ -30,6 +31,7 @@ pub(crate) struct StructuralPrestressProducerPreparation {
     pub inventory_limits: ObjectInventoryLimits,
     pub required_capabilities: BTreeSet<AnalysisCapabilityRequirement>,
     pub accelerator_requests: Vec<AcceleratorRequest>,
+    pub local_execution: LocalExecutionPlan,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -106,6 +108,7 @@ impl StructuralPrestressProducerCoordinator {
             inventory_limits: self.preparation.inventory_limits,
             required_capabilities: self.preparation.required_capabilities.clone(),
             accelerator_requests: self.preparation.accelerator_requests.clone(),
+            local_execution: self.preparation.local_execution,
         })?;
         self.phase = ProducerPhase::AwaitingPreload(prepared.host.workload.identity.digest());
         Ok(prepared)

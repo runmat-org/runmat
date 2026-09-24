@@ -207,11 +207,14 @@ pub(super) async fn execute_with_completed_meshing(
         return Ok(RemoteExactStructuralStudyComposition::Failed(error));
     }
     workloads.replace_model(resolved_model).map_err(protocol)?;
-    let task_resources =
-        match admit_analysis_task_resources(resources, &decoded.analysis_accelerator_requests) {
-            Ok(resources) => resources,
-            Err(error) => return Ok(RemoteExactStructuralStudyComposition::Failed(error)),
-        };
+    let task_resources = match admit_analysis_task_resources(
+        resources,
+        &decoded.analysis_accelerator_requests,
+        decoded.local_execution,
+    ) {
+        Ok(resources) => resources,
+        Err(error) => return Ok(RemoteExactStructuralStudyComposition::Failed(error)),
+    };
     let analysis_accelerator_requests = decoded.analysis_accelerator_requests.clone();
     let policy = crate::StructuralSequenceExecutionPolicy {
         resources: task_resources,
@@ -273,6 +276,7 @@ pub(super) async fn execute_with_completed_meshing(
                             inventory_limits: ObjectInventoryLimits::default(),
                             required_capabilities: Default::default(),
                             accelerator_requests: analysis_accelerator_requests.clone(),
+                            local_execution: decoded.local_execution,
                         },
                         policy,
                     ),
@@ -378,6 +382,7 @@ pub(super) async fn execute_with_completed_meshing(
                                 inventory_limits: ObjectInventoryLimits::default(),
                                 required_capabilities: Default::default(),
                                 accelerator_requests: analysis_accelerator_requests.clone(),
+                                local_execution: decoded.local_execution,
                             },
                             policy,
                         ),
@@ -421,6 +426,7 @@ pub(super) async fn execute_with_completed_meshing(
                                 inventory_limits: ObjectInventoryLimits::default(),
                                 required_capabilities: Default::default(),
                                 accelerator_requests: analysis_accelerator_requests.clone(),
+                                local_execution: decoded.local_execution,
                             },
                             policy,
                         ))
@@ -461,6 +467,7 @@ pub(super) async fn execute_with_completed_meshing(
                         inventory_limits: ObjectInventoryLimits::default(),
                         required_capabilities: Default::default(),
                         accelerator_requests: analysis_accelerator_requests.clone(),
+                        local_execution: decoded.local_execution,
                     },
                     policy,
                 )
@@ -716,6 +723,7 @@ pub(super) async fn execute_with_completed_meshing(
                     inventory_limits: ObjectInventoryLimits::default(),
                     required_capabilities: Default::default(),
                     accelerator_requests: analysis_accelerator_requests.clone(),
+                    local_execution: decoded.local_execution,
                 },
                 policy,
             )
@@ -864,6 +872,7 @@ pub(super) async fn execute_with_completed_meshing(
 fn admit_analysis_task_resources(
     resources: &AllocationResources,
     expected_accelerators: &[runmat_execution::resource::AcceleratorRequest],
+    local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
 ) -> Result<runmat_execution::resource::ResourceRequest, String> {
     let task_resources =
         super::pool_resources::task_resources(resources).map_err(|error| error.to_string())?;
@@ -871,6 +880,12 @@ fn admit_analysis_task_resources(
         return Err(
             "allocated accelerators differ from the immutable structural-study request".into(),
         );
+    }
+    let expected_cpu = local_execution
+        .checked_cpu_millicores()
+        .map_err(|error| error.to_string())?;
+    if task_resources.cpu_millicores != expected_cpu {
+        return Err("allocated CPU differs from the immutable structural-study request".into());
     }
     Ok(task_resources)
 }
@@ -881,7 +896,7 @@ mod allocation_tests {
 
     fn resources(accelerator_count: u32) -> AllocationResources {
         AllocationResources {
-            cpu_millicores: 500,
+            cpu_millicores: 1_000,
             memory_bytes: 1 << 20,
             scratch_bytes: 1 << 20,
             accelerator_count,
@@ -893,8 +908,21 @@ mod allocation_tests {
 
     #[test]
     fn remote_allocation_must_match_the_immutable_study_request() {
-        assert!(admit_analysis_task_resources(&resources(0), &[]).is_ok());
-        assert!(admit_analysis_task_resources(&resources(1), &[])
+        let serial = runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial();
+        assert!(admit_analysis_task_resources(&resources(0), &[], serial).is_ok());
+        let mut fractional = resources(0);
+        fractional.cpu_millicores = 500;
+        assert!(admit_analysis_task_resources(&fractional, &[], serial)
+            .unwrap_err()
+            .contains("allocated CPU differs"));
+        let parallel = runmat_analysis_fea::planning::resource::LocalExecutionPlan::fixed(
+            runmat_analysis_fea::planning::resource::LocalThreadCount::new(2).unwrap(),
+        )
+        .unwrap();
+        assert!(admit_analysis_task_resources(&resources(0), &[], parallel)
+            .unwrap_err()
+            .contains("allocated CPU differs"));
+        assert!(admit_analysis_task_resources(&resources(1), &[], serial)
             .unwrap_err()
             .contains("immutable structural-study request"));
         let requested = runmat_execution::resource::AcceleratorRequest {
@@ -902,13 +930,15 @@ mod allocation_tests {
             count: 1,
             memory_bytes_each: 1 << 18,
         };
-        assert!(
-            admit_analysis_task_resources(&resources(0), std::slice::from_ref(&requested))
-                .unwrap_err()
-                .contains("immutable structural-study request")
-        );
+        assert!(admit_analysis_task_resources(
+            &resources(0),
+            std::slice::from_ref(&requested),
+            serial,
+        )
+        .unwrap_err()
+        .contains("immutable structural-study request"));
         assert_eq!(
-            admit_analysis_task_resources(&resources(1), &[requested])
+            admit_analysis_task_resources(&resources(1), &[requested], serial)
                 .unwrap()
                 .accelerators
                 .len(),

@@ -4,6 +4,7 @@ use runmat_analysis_execution::{
     prepare_analysis_host_program, AnalysisHostProgramArtifact, PreparedInputMaterialization,
     StructuralStudyWorkloads,
 };
+use runmat_analysis_fea::planning::resource::LocalExecutionPlan;
 use runmat_canonical_codec::{decode_contract, encode_contract};
 use runmat_execution::resource::AcceleratorRequest;
 use runmat_execution::value::{ValuePayload, ValueRef, ValueRefKind};
@@ -35,6 +36,7 @@ struct ExactStructuralStudyRootRequest {
     frozen_project_digest: Option<Digest>,
     geometry_source_digest: Digest,
     workloads: StructuralStudyWorkloads,
+    local_execution: LocalExecutionPlan,
     analysis_accelerator_requests: Vec<AcceleratorRequest>,
     input_materializations: Vec<InputMaterializationRequest>,
     exact_meshing: ProgramExecutionDescriptor,
@@ -66,7 +68,7 @@ impl ExactStructuralStudyRootRequest {
             .map(|reference| reference.id)
             .collect::<BTreeSet<_>>()
             .len();
-        if self.schema_version != 1
+        if self.schema_version != 2
             || self.authored_study_digest.bytes() == &[0; 32]
             || self.geometry_source_digest.bytes() == &[0; 32]
             || self
@@ -104,6 +106,7 @@ pub struct ExactStructuralStudyRootPreparation {
     pub frozen_project_digest: Option<Digest>,
     pub geometry_source_digest: Digest,
     pub workloads: StructuralStudyWorkloads,
+    pub local_execution: LocalExecutionPlan,
     pub analysis_accelerator_requests: Vec<AcceleratorRequest>,
     pub input_materializations: Vec<PreparedInputMaterialization>,
     pub exact_meshing: PreparedExactMeshingRoot,
@@ -190,6 +193,7 @@ impl PreparedExactStructuralStudyRoot {
             frozen_project_digest: self.root.frozen_project_digest,
             geometry_source_digest: self.root.geometry_source_digest,
             workloads: self.root.workloads.clone(),
+            local_execution: self.root.local_execution,
             analysis_accelerator_requests: self.root.analysis_accelerator_requests.clone(),
             input_materializations: self.input_expectations.clone(),
             expected_meshing_request: self.expected_meshing_request.clone(),
@@ -207,6 +211,7 @@ pub struct DecodedExactStructuralStudyRoot {
     pub frozen_project_digest: Option<Digest>,
     pub geometry_source_digest: Digest,
     pub workloads: StructuralStudyWorkloads,
+    pub local_execution: LocalExecutionPlan,
     pub analysis_accelerator_requests: Vec<AcceleratorRequest>,
     pub input_materializations: Vec<PreparedInputMaterialization>,
     pub exact_meshing: ProgramExecutionRequest,
@@ -228,6 +233,7 @@ pub fn prepare_exact_structural_study_root(
         frozen_project_digest,
         geometry_source_digest,
         workloads,
+        local_execution,
         analysis_accelerator_requests,
         input_materializations,
         exact_meshing,
@@ -280,11 +286,12 @@ pub fn prepare_exact_structural_study_root(
         }
     }
     let root = ExactStructuralStudyRootRequest {
-        schema_version: 1,
+        schema_version: 2,
         authored_study_digest,
         frozen_project_digest,
         geometry_source_digest,
         workloads,
+        local_execution,
         analysis_accelerator_requests,
         input_materializations: input_materializations
             .iter()
@@ -474,6 +481,7 @@ pub fn decode_exact_structural_study_root(
         frozen_project_digest: root.frozen_project_digest,
         geometry_source_digest: root.geometry_source_digest,
         workloads: root.workloads,
+        local_execution: root.local_execution,
         analysis_accelerator_requests: root.analysis_accelerator_requests,
         input_materializations,
         exact_meshing,

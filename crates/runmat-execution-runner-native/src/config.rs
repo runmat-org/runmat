@@ -19,6 +19,7 @@ pub struct NativeExecutionConfig {
     pub max_stderr_bytes: usize,
     pub worker_memory_bytes: u64,
     pub worker_scratch_bytes: u64,
+    pub worker_cpu_millicores: u32,
     pub store_root: PathBuf,
     pub worker_capabilities: BTreeSet<Capability>,
     pub worker_accelerators: Vec<AcceleratorRequest>,
@@ -42,6 +43,7 @@ impl NativeExecutionConfig {
             max_stderr_bytes: 1024 * 1024,
             worker_memory_bytes: 1024 * 1024 * 1024,
             worker_scratch_bytes: 1024 * 1024 * 1024,
+            worker_cpu_millicores: 1_000,
             store_root,
             worker_capabilities: BTreeSet::from([Capability::ProcessIsolation]),
             worker_accelerators: Vec::new(),
@@ -77,6 +79,7 @@ impl NativeExecutionConfig {
             || self.max_stderr_bytes == 0
             || self.worker_memory_bytes == 0
             || self.worker_scratch_bytes == 0
+            || self.worker_cpu_millicores == 0
             || self.store_root.as_os_str().is_empty()
             || !self
                 .worker_capabilities

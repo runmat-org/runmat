@@ -166,6 +166,7 @@ async fn run_exact_structural_sweep_conformance() {
             workloads: independent_structural_workloads(&workload),
         },
         analysis_accelerator_requests: Vec::new(),
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         input_materializations: vec![
             runmat_analysis_execution::PreparedInputMaterialization::Signal(Box::new(
                 signal_materialization.clone(),
@@ -187,6 +188,7 @@ async fn run_exact_structural_sweep_conformance() {
             )]),
         },
         analysis_accelerator_requests: Vec::new(),
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         input_materializations: vec![
             runmat_analysis_execution::PreparedInputMaterialization::Signal(Box::new(
                 signal_materialization.clone(),
@@ -208,6 +210,7 @@ async fn run_exact_structural_sweep_conformance() {
             block_plan: StructuralTransientBlockPlan::new(1).unwrap(),
         },
         analysis_accelerator_requests: Vec::new(),
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         input_materializations: Vec::new(),
         exact_meshing: exact_meshing.clone(),
     })
@@ -225,6 +228,7 @@ async fn run_exact_structural_sweep_conformance() {
             workload: Box::new(box_structural_frequency_workload()),
         },
         analysis_accelerator_requests: Vec::new(),
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         input_materializations: Vec::new(),
         exact_meshing: exact_meshing.clone(),
     })
@@ -242,6 +246,7 @@ async fn run_exact_structural_sweep_conformance() {
             workload: Box::new(box_structural_modal_workload()),
         },
         analysis_accelerator_requests: Vec::new(),
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         input_materializations: Vec::new(),
         exact_meshing: exact_meshing.clone(),
     })
@@ -258,6 +263,7 @@ async fn run_exact_structural_sweep_conformance() {
             geometry_source_digest: source_digest,
             workloads: box_modal_transient_workloads(),
             analysis_accelerator_requests: Vec::new(),
+            local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
             input_materializations: Vec::new(),
             exact_meshing: exact_meshing.clone(),
         })
@@ -274,6 +280,7 @@ async fn run_exact_structural_sweep_conformance() {
             geometry_source_digest: source_digest,
             workloads: box_buckling_workloads(),
             analysis_accelerator_requests: Vec::new(),
+            local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
             input_materializations: Vec::new(),
             exact_meshing: exact_meshing.clone(),
         })
@@ -297,6 +304,7 @@ async fn run_exact_structural_sweep_conformance() {
             )]),
         },
         analysis_accelerator_requests: Vec::new(),
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         input_materializations: vec![
             runmat_analysis_execution::PreparedInputMaterialization::Signal(Box::new(
                 signal_materialization,

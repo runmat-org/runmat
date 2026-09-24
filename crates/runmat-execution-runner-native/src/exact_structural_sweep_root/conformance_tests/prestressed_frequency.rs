@@ -61,6 +61,7 @@ async fn run_prestressed_frequency_conformance(modal_reduced: bool) {
                 box_prestressed_frequency_workloads()
             },
             analysis_accelerator_requests: Vec::new(),
+            local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
             input_materializations: Vec::new(),
             exact_meshing,
         })

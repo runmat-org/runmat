@@ -9,7 +9,9 @@ use runmat_analysis_fea::execution::{
     StructuralLinearNumericalReceiptArtifact, StructuralLinearWorkload,
     StructuralLinearWorkloadResult, StudyIdentity,
 };
-use runmat_analysis_fea::planning::resource::{build_structural_resource_plan, FeaResourcePlan};
+use runmat_analysis_fea::planning::resource::{
+    build_structural_resource_plan, FeaResourcePlan, LocalExecutionPlan,
+};
 use runmat_analysis_fea::post::fields::structural_observable_field_definitions;
 use runmat_analysis_fea::results::observation::{
     resolve_structural_observation_plan, ObservationLimits,
@@ -46,6 +48,7 @@ pub struct StructuralLinearProgramPreparation {
     pub inventory_limits: ObjectInventoryLimits,
     pub required_capabilities: BTreeSet<AnalysisCapabilityRequirement>,
     pub accelerator_requests: Vec<AcceleratorRequest>,
+    pub local_execution: LocalExecutionPlan,
 }
 
 pub struct PreparedStructuralLinearProgram {
@@ -172,6 +175,7 @@ pub fn prepare_structural_linear_program(
         &observation_plan,
         &preparation.workload,
         &preparation.accelerator_requests,
+        preparation.local_execution,
     )
     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let resource_plan_bytes = resource_plan

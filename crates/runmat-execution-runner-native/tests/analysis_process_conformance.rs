@@ -1322,6 +1322,7 @@ fn fixture_for_study(
         inventory_limits: ObjectInventoryLimits::default(),
         required_capabilities: BTreeSet::new(),
         accelerator_requests: Vec::new(),
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
     })
     .unwrap();
     (
@@ -1373,6 +1374,7 @@ fn explicit_fixture(
         inventory_limits: ObjectInventoryLimits::default(),
         required_capabilities: BTreeSet::new(),
         accelerator_requests: Vec::new(),
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
     })
     .unwrap();
     assert!(prepared
@@ -1565,6 +1567,7 @@ fn mixed_fixture(
         inventory_limits: ObjectInventoryLimits::default(),
         required_capabilities: BTreeSet::new(),
         accelerator_requests: Vec::new(),
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
     })
     .unwrap();
     let constraint_plan =
@@ -1723,6 +1726,7 @@ fn sequence_preparation(
         inventory_limits: ObjectInventoryLimits::default(),
         required_capabilities: BTreeSet::new(),
         accelerator_requests: Vec::new(),
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
     }
 }
 

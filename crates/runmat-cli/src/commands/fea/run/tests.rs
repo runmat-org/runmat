@@ -28,6 +28,7 @@ fn policy(accelerators: AcceleratorPreference) -> AuthoredExecutionPolicy {
         backend: BackendPreference::Accelerator,
         resources: ExecutionResourceLimits {
             workers: None,
+            cpu_threads_per_worker: 1,
             maximum_memory_bytes_per_worker: None,
             accelerators,
         },

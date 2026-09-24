@@ -12,10 +12,10 @@ use super::{
     build_resource_plan, structural_facts::derive_structural_resource_facts,
     AccuracyResourceDemand, AssemblyResourcePolicy, ByteCount, CheckpointArtifactPolicy, Count,
     FeaResourceDemand, FeaResourcePhase, FeaResourcePlan, FeaResourcePlanningInput,
-    FieldRecoveryResourceFacts, NumericalScalar, ObservationResourceFacts, PartitioningPolicy,
-    PhaseResourcePolicy, PreconditionerStorage, ResourcePlanningError, SolveResourcePolicy,
-    SolverAdmissionResourcePolicy, StructuralOperatorResourceDemand, WorkerResourcePolicy,
-    RESOURCE_ESTIMATION_MODEL_REVISION,
+    FieldRecoveryResourceFacts, LocalExecutionPlan, NumericalScalar, ObservationResourceFacts,
+    PartitioningPolicy, PhaseResourcePolicy, PreconditionerStorage, ResourcePlanningError,
+    SolveResourcePolicy, SolverAdmissionResourcePolicy, StructuralOperatorResourceDemand,
+    WorkerResourcePolicy, RESOURCE_ESTIMATION_MODEL_REVISION,
 };
 
 const STRUCTURAL_ASSEMBLY_SCRATCH_BYTES_PER_ELEMENT: u64 = 8 * 1024;
@@ -35,6 +35,7 @@ pub fn build_structural_resource_plan(
     observations: &ResolvedObservationPlan,
     workload: &StructuralLinearWorkload,
     accelerator_requests: &[AcceleratorRequest],
+    local_execution: LocalExecutionPlan,
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
     workload
         .validate()
@@ -137,6 +138,12 @@ pub fn build_structural_resource_plan(
             runmat_execution::resource::Capability::Accelerator(accelerator.class.clone())
         })
         .collect();
+    let cpu_millicores = local_execution
+        .checked_cpu_millicores()
+        .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+    let fixed_assembly_scratch = local_execution
+        .checked_fixed_scratch_bytes(ByteCount(STRUCTURAL_FIXED_ASSEMBLY_SCRATCH_BYTES))
+        .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
     build_resource_plan(FeaResourcePlanningInput {
         estimation_model_revision: RESOURCE_ESTIMATION_MODEL_REVISION,
         phase: FeaResourcePhase::StructuralLinearPipeline,
@@ -150,7 +157,7 @@ pub fn build_structural_resource_plan(
                 contribution_nonzero_upper_bound: Count(contribution_nonzeros),
                 contribution_bytes_upper_bound: ByteCount(contribution_bytes),
                 scratch_bytes_per_element: ByteCount(STRUCTURAL_ASSEMBLY_SCRATCH_BYTES_PER_ELEMENT),
-                fixed_scratch_bytes_per_worker: ByteCount(STRUCTURAL_FIXED_ASSEMBLY_SCRATCH_BYTES),
+                fixed_scratch_bytes_per_worker: fixed_assembly_scratch,
             },
             solve,
             phase_resources: PhaseResourcePolicy {
@@ -180,7 +187,7 @@ pub fn build_structural_resource_plan(
         }),
         output_set: None,
         worker: WorkerResourcePolicy {
-            cpu_millicores: 1_000,
+            cpu_millicores,
             maximum_wall_milliseconds: step.accuracy.resources.maximum_wall_time_milliseconds,
             fixed_memory_bytes: ByteCount(STRUCTURAL_FIXED_WORKER_MEMORY_BYTES),
             fixed_scratch_bytes: ByteCount(STRUCTURAL_FIXED_WORKER_SCRATCH_BYTES),

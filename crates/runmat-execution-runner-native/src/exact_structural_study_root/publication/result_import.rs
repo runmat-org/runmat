@@ -341,6 +341,7 @@ pub fn import_exact_structural_study_result(
                     inventory_limits: limits,
                     required_capabilities: BTreeSet::new(),
                     accelerator_requests: expected.analysis_accelerator_requests.clone(),
+                    local_execution: expected.local_execution,
                 },
                 closures,
             )

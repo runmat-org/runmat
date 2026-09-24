@@ -133,6 +133,7 @@ fn native_kernel_executes_conformal_mixed_structural_workload() {
         inventory_limits: ObjectInventoryLimits::default(),
         required_capabilities: BTreeSet::new(),
         accelerator_requests: Vec::new(),
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
     })
     .unwrap();
     let outputs = NativeAnalysisKernel

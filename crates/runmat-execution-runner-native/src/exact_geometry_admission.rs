@@ -268,6 +268,7 @@ mod tests {
             max_stderr_bytes: 1024,
             worker_memory_bytes: 1024 * 1024 * 1024,
             worker_scratch_bytes: 1024 * 1024 * 1024,
+            worker_cpu_millicores: 1_000,
             store_root: directory.path().to_path_buf(),
             worker_capabilities: BTreeSet::from([Capability::ProcessIsolation]),
             worker_accelerators: Vec::new(),

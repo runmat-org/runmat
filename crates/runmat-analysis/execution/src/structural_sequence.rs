@@ -7,6 +7,7 @@ use runmat_analysis_core::{
 use runmat_analysis_fea::execution::{
     CanonicalSemanticState, SemanticStatePublicationSource, StructuralLinearWorkload,
 };
+use runmat_analysis_fea::planning::resource::LocalExecutionPlan;
 use runmat_execution::resource::AcceleratorRequest;
 use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::cache::CacheImport;
@@ -48,6 +49,7 @@ pub struct StructuralSequencePreparation {
     pub inventory_limits: ObjectInventoryLimits,
     pub required_capabilities: BTreeSet<AnalysisCapabilityRequirement>,
     pub accelerator_requests: Vec<AcceleratorRequest>,
+    pub local_execution: LocalExecutionPlan,
 }
 
 pub struct PreparedStructuralSolveTask {
@@ -327,6 +329,7 @@ impl StructuralSequenceCoordinator {
                 inventory_limits: self.preparation.inventory_limits,
                 required_capabilities: self.preparation.required_capabilities.clone(),
                 accelerator_requests: self.preparation.accelerator_requests.clone(),
+                local_execution: self.preparation.local_execution,
             })?;
             tasks.push(PreparedStructuralSolveTask {
                 node: StructuralSequenceNode::Solve(step_id.clone()),

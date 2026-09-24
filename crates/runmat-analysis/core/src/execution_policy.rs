@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+pub const MAX_CPU_THREADS_PER_WORKER: u32 = 1_024;
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AuthoredExecutionPolicyRef {
@@ -40,6 +42,13 @@ pub enum BackendPreference {
 #[serde(deny_unknown_fields)]
 pub struct ExecutionResourceLimits {
     pub workers: Option<InclusiveCountRange>,
+    /// Exact shared-memory CPU concurrency available inside each admitted task worker.
+    ///
+    /// This is distinct from `workers` (independent task slots) and cooperative operator
+    /// partitions (distributed/domain decomposition). Numerical kernels must consume the
+    /// corresponding admitted CPU resource rather than discovering host parallelism.
+    #[serde(default = "default_cpu_threads_per_worker")]
+    pub cpu_threads_per_worker: u32,
     pub maximum_memory_bytes_per_worker: Option<u64>,
     pub accelerators: AcceleratorPreference,
 }
@@ -122,6 +131,11 @@ impl AuthoredExecutionPolicy {
                 return Err(AuthoredExecutionPolicyError::InvalidWorkerRange);
             }
         }
+        if self.resources.cpu_threads_per_worker == 0
+            || self.resources.cpu_threads_per_worker > MAX_CPU_THREADS_PER_WORKER
+        {
+            return Err(AuthoredExecutionPolicyError::InvalidCpuThreadsPerWorker);
+        }
         if self.resources.maximum_memory_bytes_per_worker == Some(0) {
             return Err(AuthoredExecutionPolicyError::InvalidMemoryLimit);
         }
@@ -154,10 +168,15 @@ impl Default for ExecutionResourceLimits {
     fn default() -> Self {
         Self {
             workers: None,
+            cpu_threads_per_worker: default_cpu_threads_per_worker(),
             maximum_memory_bytes_per_worker: None,
             accelerators: AcceleratorPreference::Disabled,
         }
     }
+}
+
+const fn default_cpu_threads_per_worker() -> u32 {
+    1
 }
 
 impl Default for FanoutPolicy {
@@ -194,6 +213,8 @@ pub enum AuthoredExecutionPolicyError {
     EmptyIdentity,
     #[error("worker range must be positive and ordered")]
     InvalidWorkerRange,
+    #[error("CPU threads per worker must be in 1..=1024")]
+    InvalidCpuThreadsPerWorker,
     #[error("memory-per-worker limit must be positive")]
     InvalidMemoryLimit,
     #[error("parallelism limits must be positive or automatic")]

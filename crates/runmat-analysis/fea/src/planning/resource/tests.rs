@@ -284,9 +284,15 @@ fn structural_preflight_derives_numerical_facts_before_assembly() {
         initial_guess_transition: None,
     };
 
-    let plan =
-        build_structural_resource_plan(Some(&mesh), &constraints, &observations, &workload, &[])
-            .unwrap();
+    let plan = build_structural_resource_plan(
+        Some(&mesh),
+        &constraints,
+        &observations,
+        &workload,
+        &[],
+        LocalExecutionPlan::serial(),
+    )
+    .unwrap();
     let mut serial_workload = workload.clone();
     serial_workload.observation_execution =
         crate::results::observation::ObservationExecutionPolicy::serial();
@@ -296,8 +302,27 @@ fn structural_preflight_derives_numerical_facts_before_assembly() {
         &observations,
         &serial_workload,
         &[],
+        LocalExecutionPlan::serial(),
     )
     .unwrap();
+    let four_threads = LocalExecutionPlan::fixed(LocalThreadCount::new(4).unwrap()).unwrap();
+    let parallel_plan = build_structural_resource_plan(
+        Some(&mesh),
+        &constraints,
+        &observations,
+        &workload,
+        &[],
+        four_threads,
+    )
+    .unwrap();
+
+    assert_eq!(plan.request.cpu_millicores, 1_000);
+    assert_eq!(parallel_plan.request.cpu_millicores, 4_000);
+    assert_eq!(
+        parallel_plan.request.scratch_bytes - plan.request.scratch_bytes,
+        3 * 64 * 1024
+    );
+    assert_ne!(parallel_plan.identity, plan.identity);
 
     assert_eq!(
         plan.input.topology_digest(),
@@ -372,6 +397,7 @@ fn structural_preflight_derives_numerical_facts_before_assembly() {
         &observations,
         &gpu_workload,
         &[],
+        LocalExecutionPlan::serial(),
     )
     .is_err());
     let accelerator = AcceleratorRequest {
@@ -385,6 +411,7 @@ fn structural_preflight_derives_numerical_facts_before_assembly() {
         &observations,
         &gpu_workload,
         std::slice::from_ref(&accelerator),
+        LocalExecutionPlan::serial(),
     )
     .unwrap();
     assert_eq!(accelerated.request.accelerators, vec![accelerator]);
@@ -418,9 +445,15 @@ fn mixed_preflight_binds_complete_topology_and_connector_sparsity() {
         require_solver_mesh_for_solid: true,
         initial_guess_transition: None,
     };
-    let plan =
-        build_structural_resource_plan(Some(&mesh), &constraints, &observations, &workload, &[])
-            .unwrap();
+    let plan = build_structural_resource_plan(
+        Some(&mesh),
+        &constraints,
+        &observations,
+        &workload,
+        &[],
+        LocalExecutionPlan::serial(),
+    )
+    .unwrap();
 
     assert_eq!(
         plan.input.structural_operator().unwrap().topology.nodes,
@@ -440,9 +473,16 @@ fn mixed_preflight_binds_complete_topology_and_connector_sparsity() {
     );
     assert_eq!(
         plan.identity,
-        build_structural_resource_plan(Some(&mesh), &constraints, &observations, &workload, &[])
-            .unwrap()
-            .identity
+        build_structural_resource_plan(
+            Some(&mesh),
+            &constraints,
+            &observations,
+            &workload,
+            &[],
+            LocalExecutionPlan::serial(),
+        )
+        .unwrap()
+        .identity
     );
 
     let with_connector =
@@ -494,8 +534,15 @@ fn explicit_preflight_derives_complete_bounds_without_a_solver_mesh() {
         require_solver_mesh_for_solid: true,
         initial_guess_transition: None,
     };
-    let plan =
-        build_structural_resource_plan(None, &constraints, &observations, &workload, &[]).unwrap();
+    let plan = build_structural_resource_plan(
+        None,
+        &constraints,
+        &observations,
+        &workload,
+        &[],
+        LocalExecutionPlan::serial(),
+    )
+    .unwrap();
     let structural = model.structural.as_ref().unwrap();
 
     assert_eq!(
@@ -524,9 +571,16 @@ fn explicit_preflight_derives_complete_bounds_without_a_solver_mesh() {
     );
     assert_eq!(
         plan.identity,
-        build_structural_resource_plan(None, &constraints, &observations, &workload, &[])
-            .unwrap()
-            .identity
+        build_structural_resource_plan(
+            None,
+            &constraints,
+            &observations,
+            &workload,
+            &[],
+            LocalExecutionPlan::serial(),
+        )
+        .unwrap()
+        .identity
     );
 }
 

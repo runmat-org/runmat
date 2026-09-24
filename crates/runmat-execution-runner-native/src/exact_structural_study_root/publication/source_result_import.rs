@@ -102,6 +102,7 @@ pub fn import_structural_study_result(
         frozen_project_digest: expected.frozen_project_digest,
         geometry_source_digest: Digest::from_bytes(*mesh.artifact.geometry.source_digest.bytes()),
         workloads: recompiled.workloads,
+        local_execution: expected.local_execution,
         analysis_accelerator_requests: expected.analysis_accelerator_requests.clone(),
         input_materializations: expected.input_materializations.clone(),
         expected_meshing_request: expected.expected_meshing_request.clone(),

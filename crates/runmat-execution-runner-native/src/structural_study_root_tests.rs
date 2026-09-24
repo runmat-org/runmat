@@ -91,6 +91,10 @@ fn typed_study_root_round_trips_exact_analysis_definition() {
         &resolved.material_catalog,
     )
     .unwrap();
+    let local_execution = runmat_analysis_fea::planning::resource::LocalExecutionPlan::fixed(
+        runmat_analysis_fea::planning::resource::LocalThreadCount::new(2).unwrap(),
+    )
+    .unwrap();
     let prepared = prepare_structural_study_root(StructuralStudyRootPreparation {
         program_revision: revision,
         artifact_access: access,
@@ -100,6 +104,7 @@ fn typed_study_root_round_trips_exact_analysis_definition() {
         materials: resolved.material_catalog.clone(),
         planning,
         analysis_accelerator_requests: Vec::new(),
+        local_execution,
         input_materializations: Vec::new(),
         geometry_meshing,
     })
@@ -126,6 +131,7 @@ fn typed_study_root_round_trips_exact_analysis_definition() {
     assert_eq!(decoded.study, realized);
     assert_eq!(decoded.materials, resolved.material_catalog);
     assert_eq!(decoded.planning, planning);
+    assert_eq!(decoded.local_execution, local_execution);
     assert!(decoded.analysis_accelerator_requests.is_empty());
     assert_eq!(
         prepared.transport_objects().unwrap().len(),
@@ -553,6 +559,7 @@ fn prepare_source(
             numerics: StructuralNumericalPlanningPolicy::production(),
         },
         analysis_accelerator_requests: Vec::new(),
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         input_materializations: Vec::new(),
         geometry_meshing,
     })

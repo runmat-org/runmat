@@ -6,7 +6,9 @@ use runmat_analysis_core::{AuthoredMaterialRef, MaterialModel, RealizedStudy};
 use runmat_analysis_execution::{
     prepare_analysis_host_program, InputMaterializationExpectation, PreparedInputMaterialization,
 };
-use runmat_analysis_fea::study::StructuralStudyPlanningPolicy;
+use runmat_analysis_fea::{
+    planning::resource::LocalExecutionPlan, study::StructuralStudyPlanningPolicy,
+};
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use runmat_execution::resource::AcceleratorRequest;
 use runmat_execution::value::{ValuePayload, ValueRefKind};
@@ -45,6 +47,7 @@ struct StructuralStudyRootRequest {
     study: RealizedStudy,
     materials: Vec<StructuralStudyMaterial>,
     planning: StructuralStudyPlanningPolicy,
+    local_execution: LocalExecutionPlan,
     analysis_accelerator_requests: Vec<AcceleratorRequest>,
     input_materializations: Vec<InputMaterializationRequest>,
     geometry_meshing: ProgramExecutionDescriptor,
@@ -58,7 +61,7 @@ impl StructuralStudyRootRequest {
         self.geometry_meshing
             .validate_for_portable_host()
             .map_err(protocol)?;
-        if self.schema_version != 1
+        if self.schema_version != 2
             || self.authored_study_digest.bytes() == &[0; 32]
             || self
                 .frozen_project_digest
@@ -144,6 +147,7 @@ pub struct StructuralStudyRootPreparation {
     pub study: RealizedStudy,
     pub materials: BTreeMap<AuthoredMaterialRef, MaterialModel>,
     pub planning: StructuralStudyPlanningPolicy,
+    pub local_execution: LocalExecutionPlan,
     pub analysis_accelerator_requests: Vec<AcceleratorRequest>,
     pub input_materializations: Vec<PreparedInputMaterialization>,
     pub geometry_meshing: PreparedGeometryMeshingRoot,
@@ -165,6 +169,7 @@ pub struct StructuralStudyResultExpectation {
     pub study: RealizedStudy,
     pub materials: Vec<StructuralStudyMaterialExpectation>,
     pub planning: StructuralStudyPlanningPolicy,
+    pub local_execution: LocalExecutionPlan,
     pub analysis_accelerator_requests: Vec<AcceleratorRequest>,
     pub input_materializations: Vec<InputMaterializationExpectation>,
     pub geometry_request: runmat_analysis_execution::GeometryMaterializationRequest,
@@ -401,6 +406,7 @@ pub struct DecodedStructuralStudyRoot {
     pub study: RealizedStudy,
     pub materials: BTreeMap<AuthoredMaterialRef, MaterialModel>,
     pub planning: StructuralStudyPlanningPolicy,
+    pub local_execution: LocalExecutionPlan,
     pub analysis_accelerator_requests: Vec<AcceleratorRequest>,
     pub input_materializations: Vec<PreparedInputMaterialization>,
     pub geometry_meshing: ProgramExecutionRequest,
@@ -418,6 +424,7 @@ pub fn prepare_structural_study_root(
         study,
         materials,
         planning,
+        local_execution,
         analysis_accelerator_requests,
         input_materializations,
         geometry_meshing,
@@ -458,7 +465,7 @@ pub fn prepare_structural_study_root(
         .collect::<Result<Vec<_>, _>>()
         .map_err(protocol)?;
     let root = StructuralStudyRootRequest {
-        schema_version: 1,
+        schema_version: 2,
         authored_study_digest,
         frozen_project_digest,
         study,
@@ -470,6 +477,7 @@ pub fn prepare_structural_study_root(
             })
             .collect(),
         planning,
+        local_execution,
         analysis_accelerator_requests,
         input_materializations: input_materializations
             .iter()
@@ -565,6 +573,7 @@ pub fn prepare_structural_study_root(
             })
             .collect(),
         planning: root.planning,
+        local_execution: root.local_execution,
         analysis_accelerator_requests: root.analysis_accelerator_requests.clone(),
         input_materializations: input_expectations,
         geometry_request,
@@ -683,6 +692,7 @@ pub fn decode_structural_study_root(
             .map(|entry| (entry.reference, entry.material))
             .collect(),
         planning: root.planning,
+        local_execution: root.local_execution,
         analysis_accelerator_requests: root.analysis_accelerator_requests,
         input_materializations,
         geometry_meshing,

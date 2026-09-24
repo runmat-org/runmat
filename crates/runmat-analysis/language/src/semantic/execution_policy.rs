@@ -125,6 +125,25 @@ fn resource_limits(
         count_range(value)
             .or_else(|| invalid(declaration, "workers must be N or N..M", diagnostics))
     });
+    let cpu_threads_per_worker = assignment(statements, "cpu_threads_per_worker")
+        .and_then(|(_, value)| {
+            let range = count_range(value).or_else(|| {
+                invalid(
+                    declaration,
+                    "cpu_threads_per_worker must be one positive whole number",
+                    diagnostics,
+                )
+            })?;
+            if range.minimum != range.maximum {
+                return invalid(
+                    declaration,
+                    "cpu_threads_per_worker must be one positive whole number",
+                    diagnostics,
+                );
+            }
+            Some(range.minimum)
+        })
+        .unwrap_or(1);
     let maximum_memory_bytes_per_worker =
         assignment(statements, "memory_per_worker").and_then(|(relation, value)| {
             if relation != FeaAssignmentRelation::LessEqual
@@ -160,6 +179,7 @@ fn resource_limits(
         .unwrap_or(AcceleratorPreference::Disabled);
     ExecutionResourceLimits {
         workers,
+        cpu_threads_per_worker,
         maximum_memory_bytes_per_worker,
         accelerators,
     }
@@ -420,7 +440,12 @@ fn validate_members(declaration: &CheckedFeaDeclaration, diagnostics: &mut Vec<F
             } => {
                 let block_name = header.trim();
                 let allowed: &[&str] = match block_name {
-                    "resources" => &["workers", "memory_per_worker", "accelerators"],
+                    "resources" => &[
+                        "workers",
+                        "cpu_threads_per_worker",
+                        "memory_per_worker",
+                        "accelerators",
+                    ],
                     "fanout" => &["sweep_cases", "frequency_samples"],
                     "cooperative" => &["operator_partitions", "partitioner", "balance"],
                     "resilience" => &["retries", "checkpoint"],

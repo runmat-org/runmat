@@ -32,6 +32,7 @@ fn native_kernel_executes_explicit_structural_workload_without_mesh_input() {
         inventory_limits: ObjectInventoryLimits::default(),
         required_capabilities: BTreeSet::new(),
         accelerator_requests: Vec::new(),
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
     })
     .unwrap();
     assert_eq!(prepared.inputs.len(), 3);
