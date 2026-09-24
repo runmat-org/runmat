@@ -1803,7 +1803,11 @@ mod tests {
             .and_then(|node| node.render_data.as_ref())
             .expect("vector annotation node");
         assert_eq!(vector.pipeline_type, PipelineType::LinesNoDepth);
-        assert_eq!(vector.vertices.len(), 6);
+        assert_eq!(vector.vertices.len(), 18);
         assert!(vector.vertices[1].position[2] > vector.vertices[0].position[2]);
+        assert!(vector
+            .vertices
+            .iter()
+            .all(|vertex| vertex.position[2] >= 0.0));
     }
 }

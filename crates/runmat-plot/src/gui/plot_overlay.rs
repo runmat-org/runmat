@@ -2977,7 +2977,7 @@ impl PlotOverlay {
         let bar_height = 7.0 * scale;
         let rect = Rect::from_min_size(
             egui::pos2(plot_rect.max.x - width - pad, plot_rect.min.y + pad),
-            egui::vec2(width, 58.0 * scale),
+            egui::vec2(width, 72.0 * scale),
         );
         let theme = self.theme.build_theme();
         let text = theme.get_text_color();
@@ -2997,7 +2997,7 @@ impl PlotOverlay {
             text_color,
         );
         ui.painter().text(
-            rect.left_top() + egui::vec2(0.0, 13.0 * scale),
+            rect.left_top() + egui::vec2(0.0, 20.0 * scale),
             Align2::LEFT_TOP,
             format!(
                 "{} nodes · {} boundary faces",
@@ -3007,7 +3007,7 @@ impl PlotOverlay {
             muted,
         );
         let bar_rect = Rect::from_min_size(
-            egui::pos2(rect.min.x, rect.min.y + 29.0 * scale),
+            egui::pos2(rect.min.x, rect.min.y + 39.0 * scale),
             egui::vec2(rect.width(), bar_height),
         );
         let stops = [

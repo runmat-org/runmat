@@ -31,8 +31,12 @@ impl GeometryScene {
                         let direction = direction.unwrap_or(frame.normal);
                         append_arrow(
                             &mut line_vertices,
-                            frame.anchor + frame.normal * (arrow_length * 0.12)
-                                - direction * (arrow_length * 0.5),
+                            surface_arrow_start(
+                                frame.anchor,
+                                frame.normal,
+                                direction,
+                                arrow_length,
+                            ),
                             direction,
                             arrow_length,
                             color,
@@ -50,7 +54,7 @@ impl GeometryScene {
                         for anchor in chunk.annotation_samples(&annotation.region_id, 5) {
                             append_arrow(
                                 &mut line_vertices,
-                                anchor - direction * arrow_length,
+                                surface_arrow_start(anchor, frame.normal, direction, arrow_length),
                                 direction,
                                 arrow_length,
                                 color,
@@ -70,7 +74,7 @@ impl GeometryScene {
                                 &mut line_vertices,
                                 anchor,
                                 frame,
-                                arrow_length * 0.42,
+                                arrow_length * 0.52,
                                 color,
                             );
                         }
@@ -78,7 +82,7 @@ impl GeometryScene {
                     GeometrySceneAnnotationKind::SymmetrySupport => append_symmetry_support(
                         &mut line_vertices,
                         frame,
-                        arrow_length * 0.7,
+                        arrow_length * 0.8,
                         color,
                     ),
                     GeometrySceneAnnotationKind::PrescribedMotion => {
@@ -310,9 +314,22 @@ struct AnnotationFrame {
 fn annotation_arrow_length(bounds: BoundingBox) -> f32 {
     let diagonal = bounds.size().length();
     if diagonal.is_finite() && diagonal > 1.0e-6 {
-        diagonal * 0.075
+        diagonal * 0.095
     } else {
         1.0
+    }
+}
+
+fn surface_arrow_start(anchor: Vec3, normal: Vec3, direction: Vec3, length: f32) -> Vec3 {
+    // Keep the complete glyph just outside the selected face. An outward vector starts at the
+    // face and points away from it; an inward vector starts outside and terminates at the face.
+    // Previously every arrow terminated at the face, which made outward loads look as though
+    // they were buried in (and pointing into) the solid.
+    let surface = anchor + normal * (length * 0.08);
+    if direction.dot(normal) >= 0.0 {
+        surface
+    } else {
+        surface - direction * length
     }
 }
 
@@ -363,7 +380,7 @@ fn append_arrow(
     append_line(vertices, anchor, end, color);
     let side = perpendicular_unit(direction);
     let wing_base = end - direction * (length * 0.28);
-    let wing_size = length * 0.12;
+    let wing_size = length * 0.16;
     append_line(vertices, end, wing_base + side * wing_size, color);
     append_line(vertices, end, wing_base - side * wing_size, color);
 }
@@ -452,6 +469,20 @@ fn append_moment(
 }
 
 fn append_line(vertices: &mut Vec<Vertex>, start: Vec3, end: Vec3, color: [f32; 4]) {
+    let direction = end - start;
+    let length = direction.length();
+    if length.is_finite() && length > 1.0e-8 {
+        // WebGPU line primitives are fixed at one physical pixel on the platforms we support.
+        // Add two tightly-spaced companion strokes so engineering annotations stay legible on
+        // high-DPI displays without changing the general-purpose line pipeline.
+        let side = perpendicular_unit(direction / length) * (length * 0.018);
+        append_line_segment(vertices, start - side, end - side, color);
+        append_line_segment(vertices, start + side, end + side, color);
+    }
+    append_line_segment(vertices, start, end, color);
+}
+
+fn append_line_segment(vertices: &mut Vec<Vertex>, start: Vec3, end: Vec3, color: [f32; 4]) {
     vertices.push(vertex(start.to_array(), color, [0.0, 0.0, 1.0]));
     vertices.push(vertex(end.to_array(), color, [0.0, 0.0, 1.0]));
 }
