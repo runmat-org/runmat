@@ -2939,6 +2939,34 @@ fn analysis_run_linear_static_cancellation_maps_normalized_error() {
 }
 
 #[test]
+fn analysis_run_linear_static_cancellation_after_preparation_stops_assembly() {
+    let _guard = analysis_test_guard();
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let _interrupt_guard = crate::interrupt::replace_interrupt(Some(Arc::clone(&cancelled)));
+    let cancellation_on_assembly = Arc::clone(&cancelled);
+    let _progress_guard = replace_fea_progress_handler(Some(Arc::new(move |event| {
+        if event.phase == FeaProgressPhase::ModelAssembly
+            && event.status == FeaProgressStatus::Started
+        {
+            cancellation_on_assembly.store(true, Ordering::Relaxed);
+        }
+    })));
+
+    let error = analysis_run_linear_static_with_options(
+        &sample_model(),
+        ComputeBackend::Cpu,
+        FormulationRequirement::Experimental,
+        AnalysisRunOptions::default(),
+        OperationContext::new(Some("trace-cancel-after-preparation".to_string()), None),
+    )
+    .expect_err("cancellation at the assembly boundary must stop the inline solve");
+
+    assert_eq!(error.error_code, "RM.FEA.RUN_LINEAR_STATIC.CANCELLED");
+    assert_eq!(error.error_type, OperationErrorType::Cancelled);
+    assert!(!error.retryable);
+}
+
+#[test]
 fn analysis_run_linear_static_emits_solver_and_artifact_progress_events() {
     let _guard = analysis_test_guard();
     storage::reset_artifact_store_for_tests();
