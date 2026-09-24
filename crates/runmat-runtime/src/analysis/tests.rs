@@ -3311,11 +3311,16 @@ fn gpu_run_with_provider_keeps_authoritative_host_fields() {
         envelope
             .data
             .run
-            .field(FEA_FIELD_STRUCTURAL_VON_MISES)
-            .expect("structural von Mises field should be present")
+            .field(FEA_FIELD_STRUCTURAL_BEAM_BENDING_STRESS)
+            .expect("beam bending stress field should be present")
             .values,
         AnalysisFieldValues::HostF64(_)
     ));
+    assert!(envelope
+        .data
+        .run
+        .field(FEA_FIELD_STRUCTURAL_VON_MISES)
+        .is_none());
 }
 
 #[test]
@@ -3666,12 +3671,16 @@ fn statistical_field_descriptors_preserve_statistic_units_and_locations() {
 #[test]
 fn analysis_results_describes_structural_l2_fields() {
     let _guard = analysis_test_guard();
-    let model = sample_model();
+    let (mesh_root, mesh_path) = write_ready_minimal_analysis_mesh_artifact("structural-l2-fields");
+    let model = sample_solid_model();
     let run = analysis_run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
         FormulationRequirement::Experimental,
-        Default::default(),
+        AnalysisRunOptions {
+            solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
+            ..AnalysisRunOptions::default()
+        },
         OperationContext::new(Some("trace-results-structural-fields-1".to_string()), None),
     )
     .expect("run should pass");
@@ -3747,6 +3756,7 @@ fn analysis_results_describes_structural_l2_fields() {
         descriptor(FEA_FIELD_STRUCTURAL_EQUATION_SCALE).kind,
         AnalysisFieldKind::Scalar
     );
+    let _ = fs::remove_dir_all(mesh_root);
 }
 
 #[test]
@@ -3861,7 +3871,7 @@ fn analysis_results_describes_beam_resultant_fields() {
 }
 
 #[test]
-fn analysis_results_unknown_field_maps_typed_error() {
+fn analysis_results_unavailable_beam_continuum_field_maps_typed_error() {
     let _guard = analysis_test_guard();
     let model = sample_model();
     let run = analysis_run_linear_static_with_options(
@@ -3876,7 +3886,7 @@ fn analysis_results_unknown_field_maps_typed_error() {
     let err = analysis_results_op(
         &run.data,
         AnalysisResultsQuery {
-            include_fields: vec!["strain_energy".to_string()],
+            include_fields: vec![FEA_FIELD_STRUCTURAL_STRAIN.to_string()],
             include_field_values: true,
 
             include_diagnostics: true,
@@ -3891,11 +3901,15 @@ fn analysis_results_unknown_field_maps_typed_error() {
         },
         OperationContext::new(Some("trace-results-4".to_string()), None),
     )
-    .expect_err("results should fail");
+    .expect_err("a beam run must not invent continuum strain");
 
     assert_eq!(err.operation, "fea.results");
     assert_eq!(err.op_version, "fea.results/v1");
     assert_eq!(err.error_code, "RM.FEA.RESULTS.FIELD_NOT_FOUND");
+    assert_eq!(
+        err.context.get("requested_field"),
+        Some(&FEA_FIELD_STRUCTURAL_STRAIN.to_string())
+    );
 }
 
 #[test]
