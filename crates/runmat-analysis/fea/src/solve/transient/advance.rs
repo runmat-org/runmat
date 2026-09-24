@@ -23,8 +23,8 @@ use super::{
     effective_solve::{solve_average_acceleration_step, solve_initial_acceleration},
     require_stable_system,
     state::SecondOrderState,
-    EffectiveDynamicsSolveResult, TransientIntegrationInterval, TransientSolveError,
-    TransientSolveOptions,
+    EffectiveDynamicsSolveResult, TransientIntegrationInterval, TransientIntervalRetention,
+    TransientSolveError, TransientSolveOptions,
 };
 
 const LOCAL_TRANSIENT_BLOCK_INTERVALS: u64 = 256;
@@ -60,7 +60,7 @@ pub(super) struct TransientAcceptedSample {
     pub(super) energy_balance_residual_j: f64,
     pub(super) relative_energy_balance_error: f64,
     pub(super) dynamic_balance: StructuralDynamicBalanceSnapshot,
-    pub(super) integration_interval: TransientIntegrationInterval,
+    pub(super) integration_interval: Option<TransientIntegrationInterval>,
 }
 
 #[derive(Clone, Debug)]
@@ -98,6 +98,7 @@ pub(super) struct TransientAdvanceContext<'a> {
     pub(super) options: &'a TransientSolveOptions,
     pub(super) backend_kind: LinearAlgebraBackendKind,
     pub(super) schedule: &'a StructuralTransientSchedule,
+    pub(super) interval_retention: TransientIntervalRetention,
 }
 
 pub(super) fn initialize<E, M: std::fmt::Display>(
@@ -250,6 +251,7 @@ pub(super) fn solve_complete<E: std::fmt::Display>(
         options,
         backend_kind,
         schedule,
+        interval_retention: _,
     } = context;
     let mut strategy =
         DirectTransientStepStrategy::new(summary, backend_kind, options.residual_target);
@@ -333,6 +335,7 @@ pub(super) fn advance<E, M: std::fmt::Display>(
         options,
         backend_kind: _,
         schedule,
+        interval_retention,
     } = context;
     let start = usize::try_from(state.schedule_ordinal)
         .map_err(|_| TransientSolveError::ScheduleOrdinalLimit)?;
@@ -434,20 +437,23 @@ pub(super) fn advance<E, M: std::fmt::Display>(
             .map_err(|error| TransientSolveError::DynamicBalance {
                 detail: error.to_string(),
             })?;
-        let interval = TransientIntegrationInterval {
-            start_time_s: current_time_s,
-            start_approach: state.continuation_approach,
-            start_summary: previous_physical_summary,
-            start_displacement: previous_physical_state.displacement().to_vec(),
-            start_velocity: previous_physical_state.velocity().to_vec(),
-            start_acceleration: previous_physical_state.acceleration().to_vec(),
-            end_time_s: next_time_s,
-            end_approach: approach,
-            end_summary: physical_step_summary.clone(),
-            end_displacement: physical_step_state.displacement().to_vec(),
-            end_velocity: physical_step_state.velocity().to_vec(),
-            end_acceleration: physical_step_state.acceleration().to_vec(),
-        };
+        let interval =
+            (interval_retention == TransientIntervalRetention::RetainForMotion).then(|| {
+                TransientIntegrationInterval {
+                    start_time_s: current_time_s,
+                    start_approach: state.continuation_approach,
+                    start_summary: previous_physical_summary,
+                    start_displacement: previous_physical_state.displacement().to_vec(),
+                    start_velocity: previous_physical_state.velocity().to_vec(),
+                    start_acceleration: previous_physical_state.acceleration().to_vec(),
+                    end_time_s: next_time_s,
+                    end_approach: approach,
+                    end_summary: physical_step_summary.clone(),
+                    end_displacement: physical_step_state.displacement().to_vec(),
+                    end_velocity: physical_step_state.velocity().to_vec(),
+                    end_acceleration: physical_step_state.acceleration().to_vec(),
+                }
+            });
         let mut public_state = physical_step_state.clone();
         let mut public_summary = physical_step_summary.clone();
         let mut projected_residual_norm = solved.projected_relative_residual;

@@ -22,7 +22,7 @@ use super::{
     empty::{self, EmptyTransientAdvanceState},
     require_stable_system,
     segment::{self, CanonicalTransientBlockParts},
-    validate_options, TransientIntegrationInterval, TransientSolveError, TransientSolveOptions,
+    validate_options, TransientSolveError, TransientSolveOptions,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -214,6 +214,7 @@ pub(super) fn solve_structural_transient_block_with_strategy<E, M: std::fmt::Dis
             options: input.options,
             backend_kind,
             schedule,
+            interval_retention: super::TransientIntervalRetention::DiscardAfterBalance,
         },
         state,
         input.request.terminal_schedule_ordinal,
@@ -391,20 +392,6 @@ pub(crate) fn solve_fully_prescribed_transient_block_with_physical_mapping<E>(
             .map_err(|error| TransientSolveError::DynamicBalance {
                 detail: error.to_string(),
             })?;
-        let physical_interval = TransientIntegrationInterval {
-            start_time_s: interval.start_time_s,
-            start_approach: interval.start_approach,
-            start_summary: continuation_summary,
-            start_displacement: continuation_state.displacement().to_vec(),
-            start_velocity: continuation_state.velocity().to_vec(),
-            start_acceleration: continuation_state.acceleration().to_vec(),
-            end_time_s: interval.end_time_s,
-            end_approach: interval.end_approach,
-            end_summary: integration_end_summary.clone(),
-            end_displacement: integration_end_state.displacement().to_vec(),
-            end_velocity: integration_end_state.velocity().to_vec(),
-            end_acceleration: integration_end_state.acceleration().to_vec(),
-        };
         if interval.end_approach == SignalSampleApproach::LeftLimit {
             let right_summary = assembly_at(interval.end_time_s, SignalSampleApproach::RightLimit)
                 .map_err(TransientSolveError::Assembly)?;
@@ -435,7 +422,7 @@ pub(crate) fn solve_fully_prescribed_transient_block_with_physical_mapping<E>(
             energy_balance_residual_j: history.energy_balance_residual_j()[history_index],
             relative_energy_balance_error: history.relative_energy_balance_error()[history_index],
             dynamic_balance: history.balances()[history_index].clone(),
-            integration_interval: physical_interval,
+            integration_interval: None,
         });
     }
     segment::into_canonical_segment_parts(

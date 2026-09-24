@@ -212,4 +212,15 @@ pub(crate) struct TransientPhysicalMappingInput<'a> {
     pub(crate) time_domain: TransientTimeDomain<'a>,
     pub(crate) initial_displacement: Vec<f64>,
     pub(crate) initial_velocity: Vec<f64>,
+    pub(crate) interval_retention: TransientIntervalRetention,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TransientIntervalRetention {
+    /// Ordinary reporting and portable blocks consume each interval's balance
+    /// during advancement; their final results need no duplicate endpoints.
+    DiscardAfterBalance,
+    /// Prescribed-motion reconstruction needs the physical endpoint histories
+    /// after the reduced solve to rebuild reactions and work.
+    RetainForMotion,
 }

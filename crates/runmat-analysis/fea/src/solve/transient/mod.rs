@@ -19,6 +19,8 @@ mod contract;
 mod diagnostics;
 mod effective_solve;
 mod empty;
+#[cfg(test)]
+mod interval_retention_tests;
 mod modal_block;
 mod newmark;
 mod schedule;
@@ -44,7 +46,9 @@ use contract::TransientIntegrationInterval;
 pub use contract::{
     StructuralTimeStepPolicy, TransientSolveError, TransientSolveOptions, TransientSolveResult,
 };
-pub(crate) use contract::{TransientPhysicalMappingInput, TransientTimeDomain};
+pub(crate) use contract::{
+    TransientIntervalRetention, TransientPhysicalMappingInput, TransientTimeDomain,
+};
 pub(crate) use diagnostics::mechanical_energy_history_diagnostic;
 use diagnostics::transient_diagnostics;
 use effective_solve::EffectiveDynamicsSolveResult;
@@ -193,6 +197,7 @@ pub(crate) fn solve_transient_system_with_assembly<E: std::fmt::Display>(
             time_domain,
             initial_displacement,
             initial_velocity,
+            interval_retention: TransientIntervalRetention::DiscardAfterBalance,
         },
         assembly_at,
         &mut identity_physical_state,
@@ -216,6 +221,7 @@ pub(crate) fn solve_transient_system_with_physical_mapping<E: std::fmt::Display>
         time_domain,
         initial_displacement,
         initial_velocity,
+        interval_retention,
     } = input;
     let TransientTimeDomain {
         start_time_s,
@@ -242,6 +248,7 @@ pub(crate) fn solve_transient_system_with_physical_mapping<E: std::fmt::Display>
             options: &options,
             backend_kind,
             schedule: &schedule,
+            interval_retention,
         },
         advance::TransientInitialVectors {
             displacement: initial_displacement,
@@ -267,7 +274,13 @@ pub(crate) fn solve_transient_system_with_physical_mapping<E: std::fmt::Display>
     let mut accepted_time_steps_s = Vec::with_capacity(total_steps);
     let mut assembly_snapshots = vec![initial.summary];
     let mut reaction_snapshots = vec![initial.reaction];
-    let mut integration_intervals = Vec::with_capacity(total_steps);
+    let mut integration_intervals = Vec::with_capacity(
+        if interval_retention == TransientIntervalRetention::RetainForMotion {
+            total_steps
+        } else {
+            0
+        },
+    );
     let mut strain_energy_snapshots = vec![initial.strain_energy_j];
     let mut kinetic_energy_snapshots = vec![initial.kinetic_energy_j];
     let mut external_work_j = vec![0.0];
@@ -286,7 +299,9 @@ pub(crate) fn solve_transient_system_with_physical_mapping<E: std::fmt::Display>
         accepted_time_steps_s.push(sample.accepted_time_step_s);
         assembly_snapshots.push(sample.summary);
         reaction_snapshots.push(sample.reaction);
-        integration_intervals.push(sample.integration_interval);
+        if let Some(interval) = sample.integration_interval {
+            integration_intervals.push(interval);
+        }
         strain_energy_snapshots.push(sample.strain_energy_j);
         kinetic_energy_snapshots.push(sample.kinetic_energy_j);
         external_work_j.push(sample.applied_load_work_j);

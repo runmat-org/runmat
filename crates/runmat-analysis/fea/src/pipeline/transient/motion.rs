@@ -353,6 +353,8 @@ pub(super) fn solve_prescribed_motion(
                 time_domain,
                 initial_displacement: reduced_displacement,
                 initial_velocity: reduced_velocity,
+                interval_retention:
+                    crate::solve::transient::TransientIntervalRetention::RetainForMotion,
             },
             &mut reduced_assembly_at,
             &mut map_physical_state,

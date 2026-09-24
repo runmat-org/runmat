@@ -133,6 +133,7 @@ fn orchestration_publishes_native_second_order_state_and_physical_energy() {
     assert_eq!(result.displacement_snapshots.len(), 21);
     assert_eq!(result.velocity_snapshots.len(), 21);
     assert_eq!(result.acceleration_snapshots.len(), 21);
+    assert!(result.integration_intervals.is_empty());
     assert_eq!(result.strain_energy_snapshots.len(), 21);
     assert_eq!(result.kinetic_energy_snapshots.len(), 21);
     assert!(result.residual_norms.iter().all(|value| value.is_finite()));
@@ -335,6 +336,7 @@ fn bounded_restart_at_a_jump_matches_uninterrupted_physical_histories() {
             options: &options,
             backend_kind: LinearAlgebraBackendKind::CpuReference,
             schedule: &schedule,
+            interval_retention: TransientIntervalRetention::DiscardAfterBalance,
         },
         state,
         1,
@@ -378,6 +380,7 @@ fn bounded_restart_at_a_jump_matches_uninterrupted_physical_histories() {
             options: &options,
             backend_kind: LinearAlgebraBackendKind::CpuReference,
             schedule: &schedule,
+            interval_retention: TransientIntervalRetention::DiscardAfterBalance,
         },
         resumed,
         last_ordinal,
