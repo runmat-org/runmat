@@ -65,6 +65,7 @@ export const REPEATABLE_OPTION_FIELDS = Object.freeze({
 
 export const FLAG_FIELDS = Object.freeze({
   "--no-products": "noProducts",
+  "--authority-products": "authorityProducts",
 });
 
 const CONTROL_COMMANDS = Object.freeze([
@@ -97,6 +98,7 @@ export function newCommandOptions(command) {
     identity: null,
     productIds: [],
     noProducts: false,
+    authorityProducts: false,
     help: false,
   };
 }
@@ -141,14 +143,16 @@ export function validateCommandOptions(options, suppliedOptions) {
 
 function validateMaterializationSelection(options) {
   const selected = options.productIds.length > 0;
+  const modes = Number(selected) + Number(options.noProducts)
+    + Number(options.authorityProducts);
   if (options.command !== "materialize-composition") {
-    if (selected || options.noProducts) {
-      throw new Error("--product and --no-products are accepted only by materialize-composition");
+    if (modes > 0) {
+      throw new Error("--product, --no-products, and --authority-products are accepted only by materialize-composition");
     }
     return;
   }
-  if (selected === options.noProducts) {
-    throw new Error("materialize-composition requires exactly one of --product or --no-products");
+  if (modes !== 1) {
+    throw new Error("materialize-composition requires exactly one of --product, --no-products, or --authority-products");
   }
   if (new Set(options.productIds).size !== options.productIds.length) {
     throw new Error("materialize-composition does not accept duplicate --product values");
