@@ -1,6 +1,4 @@
-use runmat_analysis_core::{
-    validate_model, AnalysisField, AnalysisModel, AnalysisProcedure, ProcedureStep,
-};
+use runmat_analysis_core::{AnalysisField, AnalysisModel, ProcedureStep};
 
 use crate::assembly::AssemblySummary;
 use crate::{
@@ -14,9 +12,7 @@ use crate::{
         FEA_FIELD_STRUCTURAL_REACTION_FORCE, FEA_FIELD_STRUCTURAL_REACTION_MOMENT,
     },
     diagnostics::builders::{extend_common_run_diagnostics, CommonRunDiagnosticInputs},
-    excitation::{
-        realize_step_excitations, time_breakpoints, ExcitationSamplePoint, StructuralMotionSet,
-    },
+    excitation::{realize_step_excitations, ExcitationSamplePoint, StructuralMotionSet},
     execution::{
         StructuralTransientBlockRequest, StructuralTransientCheckpoint,
         StructuralTransientCheckpointScope, StructuralTransientCheckpointScopeInput,
@@ -29,13 +25,11 @@ use crate::{
     },
     pipeline::electro_thermal::recover_realized_electro_thermal_fields,
     pipeline::observation_history::{
-        evaluate_field_histories, required_time_history_samples, HistoryFieldSeries,
-        HistoryTopology,
+        evaluate_field_histories, HistoryFieldSeries, HistoryTopology,
     },
     progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
     solve::transient::{
-        canonical_transient_step_boundaries, mechanical_energy_history_diagnostic,
-        solve_structural_modal_transient_block_with_assembly,
+        mechanical_energy_history_diagnostic, solve_structural_modal_transient_block_with_assembly,
         solve_structural_transient_block_with_assembly, solve_transient_system_with_assembly,
         StructuralModalTransientBlockSolveInput, StructuralTransientBlockSolveInput,
         StructuralTransientInitialConditions, TransientSolveError, TransientSolveOptions,
@@ -47,10 +41,14 @@ mod constraint_admission;
 mod finalization;
 mod modal_motion;
 mod motion;
+mod preassembly;
+#[cfg(test)]
+mod preassembly_tests;
 mod reconstruction;
 mod recovery;
 
 use finalization::{finish_transient_run, TransientRunFinalization};
+pub(crate) use preassembly::{prepare_transient_preassembly, PreparedTransientPreassembly};
 
 pub use reconstruction::{recover_completed_transient_run, CompletedStructuralTransientRunInput};
 
@@ -88,33 +86,6 @@ struct PreparedTransientBlockBasis {
     motions: StructuralMotionSet,
     initial_assembly: AssemblySummary,
     schedule: crate::execution::StructuralTransientSchedule,
-}
-
-fn admit_transient_minimum_samples(
-    interval_count: usize,
-    maximum_samples: usize,
-) -> Result<(), FeaRunError> {
-    let minimum_samples = interval_count.checked_add(1).ok_or_else(|| {
-        FeaRunError::InvalidModel("structural transient sample count overflows".into())
-    })?;
-    if minimum_samples > maximum_samples {
-        return Err(FeaRunError::InvalidModel(format!(
-            "structural transient schedule requires at least {minimum_samples} samples, exceeding the authored ceiling of {maximum_samples}"
-        )));
-    }
-    Ok(())
-}
-
-fn admit_transient_schedule_samples(
-    actual_samples: usize,
-    maximum_samples: usize,
-) -> Result<(), FeaRunError> {
-    if actual_samples > maximum_samples {
-        return Err(FeaRunError::InvalidModel(format!(
-            "structural transient schedule requires {actual_samples} samples, exceeding the authored ceiling of {maximum_samples}"
-        )));
-    }
-    Ok(())
 }
 
 fn realize_transient_initial_state(
@@ -179,65 +150,14 @@ fn prepare_transient_block_basis(
     model: &AnalysisModel,
     options: &TransientSolveOptions,
 ) -> Result<PreparedTransientBlockBasis, FeaRunError> {
-    let execution_step = super::admission::require_structural(
-        model,
-        AnalysisProcedure::TransientResponse,
-        options.formulation_requirement,
-    )?
-    .clone();
-    validate_model(model).map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
-    admit_transient_minimum_samples(
-        options.time_step_policy.interval_count(),
-        execution_step.accuracy.resources.maximum_samples,
-    )?;
-    let mut required_history_samples = required_time_history_samples(&execution_step)
-        .map_err(|error| FeaRunError::Observation(error.to_string()))?;
-    let time_grid = crate::excitation::ProcedureTimeGrid::from_interval_count(
-        &execution_step,
-        options.time_step_policy.interval_count(),
-    )
-    .map_err(FeaRunError::InvalidModel)?;
-    let start_time_s = time_grid.start_s();
-    let end_time_s = time_grid.end_s();
-    let active_model = super::activation::model_with_active_constraints(model, &execution_step);
-    constraint_admission::validate(&active_model)
-        .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
-    let motions =
-        StructuralMotionSet::materialize(&active_model, &execution_step, start_time_s, end_time_s)
-            .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
-    required_history_samples.extend(
-        motions
-            .breakpoints_s()
-            .iter()
-            .copied()
-            .filter(|time| *time >= start_time_s && *time <= end_time_s),
-    );
-    required_history_samples.sort_by(f64::total_cmp);
-    required_history_samples.dedup_by(|left, right| left.to_bits() == right.to_bits());
-    let discontinuities =
-        time_breakpoints(&active_model, &execution_step, start_time_s, end_time_s)
-            .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
-    let step_boundaries = canonical_transient_step_boundaries(
-        &discontinuities,
-        &required_history_samples,
-        start_time_s,
-        end_time_s,
-    )
-    .map_err(|error| FeaRunError::Observation(error.to_string()))?;
-    let schedule = crate::solve::transient::canonical_transient_schedule(
-        options.time_step_policy.interval_count(),
-        start_time_s,
-        end_time_s,
-        &step_boundaries,
-    )
-    .map_err(FeaRunError::Solve)?;
-    // Breakpoints and requested history coordinates can add accepted states beyond the
-    // authored interval count. Check the actual schedule before the first structural assembly;
-    // the block scope and every worker block use this same preparation boundary.
-    admit_transient_schedule_samples(
-        schedule.points.len(),
-        execution_step.accuracy.resources.maximum_samples,
-    )?;
+    let PreparedTransientPreassembly {
+        execution_step,
+        active_model,
+        motions,
+        schedule,
+        ..
+    } = prepare_transient_preassembly(model, options)?;
+    let start_time_s = schedule.points[0].time_s;
     let excitations = realize_step_excitations(
         &active_model,
         &execution_step,
@@ -432,11 +352,6 @@ pub fn run_transient_with_options(
     backend: ComputeBackend,
     options: TransientSolveOptions,
 ) -> Result<FeaTransientRunResult, FeaRunError> {
-    let execution_step = super::admission::require_structural(
-        model,
-        AnalysisProcedure::TransientResponse,
-        options.formulation_requirement,
-    )?;
     emit_phase(
         "fea.run_transient",
         FeaProgressPhase::RegionResolution,
@@ -446,13 +361,20 @@ pub fn run_transient_with_options(
         Some(5),
     );
     check_cancelled("fea.run_transient")?;
-    validate_model(model).map_err(|err| FeaRunError::InvalidModel(err.to_string()))?;
-    admit_transient_minimum_samples(
-        options.time_step_policy.interval_count(),
-        execution_step.accuracy.resources.maximum_samples,
-    )?;
-    let mut required_history_samples = required_time_history_samples(execution_step)
-        .map_err(|error| FeaRunError::Observation(error.to_string()))?;
+    let PreparedTransientPreassembly {
+        execution_step,
+        active_model,
+        motions: structural_motions,
+        schedule,
+        step_boundaries,
+    } = prepare_transient_preassembly(model, &options)?;
+    let execution_step = &execution_step;
+    let start_time_s = schedule.points[0].time_s;
+    let end_time_s = schedule
+        .points
+        .last()
+        .expect("validated transient schedule has a terminal point")
+        .time_s;
     emit_phase(
         "fea.run_transient",
         FeaProgressPhase::RegionResolution,
@@ -462,48 +384,6 @@ pub fn run_transient_with_options(
         Some(5),
     );
     check_cancelled("fea.run_transient")?;
-    let time_grid = crate::excitation::ProcedureTimeGrid::from_interval_count(
-        execution_step,
-        options.time_step_policy.interval_count(),
-    )
-    .map_err(FeaRunError::InvalidModel)?;
-    let start_time_s = time_grid.start_s();
-    let end_time_s = time_grid.end_s();
-    let active_model = super::activation::model_with_active_constraints(model, execution_step);
-    constraint_admission::validate(&active_model)
-        .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
-    let structural_motions =
-        StructuralMotionSet::materialize(&active_model, execution_step, start_time_s, end_time_s)
-            .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
-    required_history_samples.extend(
-        structural_motions
-            .breakpoints_s()
-            .iter()
-            .copied()
-            .filter(|time| *time >= start_time_s && *time <= end_time_s),
-    );
-    required_history_samples.sort_by(f64::total_cmp);
-    required_history_samples.dedup_by(|left, right| left.to_bits() == right.to_bits());
-    let discontinuities = time_breakpoints(&active_model, execution_step, start_time_s, end_time_s)
-        .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
-    let step_boundaries = canonical_transient_step_boundaries(
-        &discontinuities,
-        &required_history_samples,
-        start_time_s,
-        end_time_s,
-    )
-    .map_err(|error| FeaRunError::Observation(error.to_string()))?;
-    let schedule = crate::solve::transient::canonical_transient_schedule(
-        options.time_step_policy.interval_count(),
-        start_time_s,
-        end_time_s,
-        &step_boundaries,
-    )
-    .map_err(FeaRunError::Solve)?;
-    admit_transient_schedule_samples(
-        schedule.points.len(),
-        execution_step.accuracy.resources.maximum_samples,
-    )?;
     let excitations = realize_step_excitations(
         &active_model,
         execution_step,
@@ -631,73 +511,4 @@ pub fn run_transient_with_options(
         },
         transient,
     )
-}
-
-#[cfg(test)]
-mod resource_schedule_tests {
-    use super::*;
-    use crate::fixtures::{fixture_model, FixtureId};
-
-    #[test]
-    fn scope_preparation_rejects_accepted_schedule_over_sample_ceiling_before_assembly() {
-        let mut model = fixture_model(FixtureId::StructuralTransientTet4Reference);
-        model.sequence.steps[0].accuracy.resources.maximum_samples = 2;
-        let options = TransientSolveOptions {
-            time_step_policy: crate::solve::transient::StructuralTimeStepPolicy::Fixed {
-                interval_count: 2,
-            },
-            formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
-            ..TransientSolveOptions::default()
-        };
-        let error = match prepare_transient_block_basis(&model, &options) {
-            Ok(_) => panic!("over-ceiling transient schedule was admitted"),
-            Err(error) => error,
-        };
-        assert!(
-            matches!(&error, FeaRunError::InvalidModel(message) if message.contains("requires at least 3 samples") && message.contains("ceiling of 2")),
-            "{error}"
-        );
-    }
-
-    #[test]
-    fn motion_breakpoint_samples_count_against_transient_ceiling() {
-        let mut model = fixture_model(FixtureId::StructuralTransientTet4SupportMotionReference);
-        model.sequence.steps[0].accuracy.resources.maximum_samples = 2;
-        let options = TransientSolveOptions {
-            time_step_policy: crate::solve::transient::StructuralTimeStepPolicy::Fixed {
-                interval_count: 1,
-            },
-            formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
-            ..TransientSolveOptions::default()
-        };
-        let error = match prepare_transient_block_basis(&model, &options) {
-            Ok(_) => panic!("over-ceiling motion schedule was admitted"),
-            Err(error) => error,
-        };
-        assert!(
-            matches!(&error, FeaRunError::InvalidModel(message) if message.contains("requires 3 samples") && message.contains("ceiling of 2")),
-            "{error}"
-        );
-    }
-
-    #[test]
-    fn direct_host_transient_checks_schedule_before_initial_assembly() {
-        let mut model = fixture_model(FixtureId::StructuralTransientTet4Reference);
-        model.sequence.steps[0].accuracy.resources.maximum_samples = 2;
-        let options = TransientSolveOptions {
-            time_step_policy: crate::solve::transient::StructuralTimeStepPolicy::Fixed {
-                interval_count: 2,
-            },
-            formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
-            ..TransientSolveOptions::default()
-        };
-        let error = match run_transient_with_options(&model, ComputeBackend::Cpu, options) {
-            Ok(_) => panic!("over-ceiling direct transient schedule was admitted"),
-            Err(error) => error,
-        };
-        assert!(
-            matches!(&error, FeaRunError::InvalidModel(message) if message.contains("requires at least 3 samples") && message.contains("ceiling of 2")),
-            "{error}"
-        );
-    }
 }
