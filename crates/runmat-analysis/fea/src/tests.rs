@@ -5233,8 +5233,24 @@ fn admitted_affine_and_multiplier_static_solves_match_closed_form() {
     assert_eq!(multiplier_parallel, multiplier_serial);
     assert!((multiplier_parallel.solution[0] - 3.0 / 8.0).abs() < 1.0e-12);
     assert!((multiplier_parallel.solution[1] - 3.0 / 8.0).abs() < 1.0e-12);
+    let equilibrium = crate::algebra::spmv(
+        summary.operator.operators().stiffness(),
+        &multiplier_serial.solution,
+    )
+    .unwrap()
+    .into_iter()
+    .zip(summary.physical_load.iter())
+    .map(|(internal, applied)| internal - applied)
+    .collect::<Vec<_>>();
+    assert!(summary.constraint_matrix.is_some());
+    let serial_reaction =
+        crate::solve::recover_structural_reaction(&summary, &equilibrium).unwrap();
     for threads in [2, 3, 7] {
         let plan = LocalExecutionPlan::fixed(LocalThreadCount::new(threads).unwrap()).unwrap();
+        assert_eq!(
+            crate::solve::recover_structural_reaction_scoped(&summary, &equilibrium, plan).unwrap(),
+            serial_reaction,
+        );
         for _ in 0..2 {
             assert_eq!(
                 solve_linear_system_with_execution(

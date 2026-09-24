@@ -11,7 +11,7 @@ pub mod nonlinear;
 pub mod preconditioner;
 mod reaction;
 #[cfg(test)]
-pub(crate) use reaction::recover_structural_reaction;
+pub(crate) use reaction::{recover_structural_reaction, recover_structural_reaction_scoped};
 pub(crate) mod spd_linear;
 mod static_balance;
 pub use static_balance::StructuralStaticBalanceEvidence;
