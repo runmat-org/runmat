@@ -19,7 +19,6 @@
   "crates/runmat-analysis/fea/src/planning/resource/estimate.rs": 1053,
   "crates/runmat-analysis/fea/src/pipeline/linear_static.rs": 1032,
   "crates/runmat-analysis/fea/src/results/field/contract.rs": 1019,
-  "crates/runmat-analysis/core/src/lib.rs": 1000,
   "crates/runmat-analysis/fea/src/results/accuracy/mod.rs": 987,
   "crates/runmat-analysis/fea/src/constraints/mixed.rs": 947,
   "crates/runmat-runtime/src/analysis/value_admission.rs": 869,
