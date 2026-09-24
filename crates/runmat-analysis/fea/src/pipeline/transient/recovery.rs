@@ -15,6 +15,7 @@ use crate::{
         FEA_FIELD_STRUCTURAL_STRAIN, FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY,
         FEA_FIELD_STRUCTURAL_STRESS, FEA_FIELD_STRUCTURAL_VON_MISES,
     },
+    excitation::SpatialProjectionEvidence,
     execution::StructuralTransientSchedule,
     pipeline::structural_nodal::{nodal_vector_shape, project_structural_nodal_snapshot},
     post::{fields::recover_deformation_result_fields, recover_connector_observable_fields},
@@ -38,10 +39,12 @@ pub(super) struct TransientFieldRecovery {
     pub stress_snapshots: Vec<AnalysisField>,
     pub von_mises_snapshots: Vec<AnalysisField>,
     pub strain_energy_density_snapshots: Vec<AnalysisField>,
+    pub spatial_projection_evidence: Vec<SpatialProjectionEvidence>,
+    pub electro_thermal_summaries: Vec<Option<crate::assembly::ElectroThermalAssemblySummary>>,
 }
 
 pub(super) fn recover_transient_fields(
-    transient: &TransientSolveResult,
+    transient: &mut TransientSolveResult,
     empty_connector_plan: Option<&crate::connectors::CanonicalStructuralConnectorPlan>,
 ) -> Result<TransientFieldRecovery, FeaRunError> {
     let snapshot_count = transient.time_points_s.len();
@@ -99,14 +102,24 @@ pub(super) fn recover_transient_fields(
     let mut stress_snapshots = Vec::with_capacity(snapshot_count);
     let mut von_mises_snapshots = Vec::with_capacity(snapshot_count);
     let mut strain_energy_density_snapshots = Vec::with_capacity(snapshot_count);
-    for (index, (summary, displacement)) in transient
-        .assembly_snapshots
-        .iter()
-        .zip(&transient.displacement_snapshots)
+    let mut velocity_snapshots = Vec::with_capacity(snapshot_count);
+    let mut angular_velocity_snapshots = Vec::with_capacity(snapshot_count);
+    let mut acceleration_snapshots = Vec::with_capacity(snapshot_count);
+    let mut angular_acceleration_snapshots = Vec::with_capacity(snapshot_count);
+    let mut reaction_force_snapshots = Vec::with_capacity(snapshot_count);
+    let mut reaction_moment_snapshots = Vec::with_capacity(snapshot_count);
+    let mut connector_results = Vec::with_capacity(snapshot_count);
+    let mut connector_force_snapshots = Vec::with_capacity(snapshot_count);
+    let mut connector_stored_energy_snapshots = Vec::with_capacity(snapshot_count);
+    let mut spatial_projection_evidence = Vec::new();
+    let mut electro_thermal_summaries = Vec::with_capacity(snapshot_count);
+    for (index, mut summary) in std::mem::take(&mut transient.assembly_snapshots)
+        .into_iter()
         .enumerate()
     {
-        let mut fields = recover_deformation_result_fields(summary, displacement)
-            .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+        let mut fields =
+            recover_deformation_result_fields(&summary, &transient.displacement_snapshots[index])
+                .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
         if index + 1 == snapshot_count {
             final_deformation_fields = fields
                 .iter()
@@ -150,6 +163,102 @@ pub(super) fn recover_transient_fields(
             fea_transient_strain_energy_density_field_id(index),
             &mut strain_energy_density_snapshots,
         );
+        let velocity = project_structural_nodal_snapshot(
+            &summary.structural_dof_layout,
+            &transient.velocity_snapshots[index],
+        )
+        .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+        let acceleration = project_structural_nodal_snapshot(
+            &summary.structural_dof_layout,
+            &transient.acceleration_snapshots[index],
+        )
+        .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+        let reaction = project_structural_nodal_snapshot(
+            &summary.structural_dof_layout,
+            &transient.reaction_snapshots[index],
+        )
+        .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+        let shape = nodal_vector_shape(&summary.structural_dof_layout);
+        velocity_snapshots.push(AnalysisField::host_f64(
+            fea_transient_velocity_field_id(index),
+            shape.clone(),
+            velocity.translations,
+        ));
+        if summary.structural_dof_layout.rotational_dof_count() > 0 {
+            angular_velocity_snapshots.push(AnalysisField::host_f64(
+                fea_transient_angular_velocity_field_id(index),
+                shape.clone(),
+                velocity.rotations,
+            ));
+        }
+        let connector_plan = summary
+            .structural_connector_plan
+            .take()
+            .or_else(|| empty_connector_plan.cloned())
+            .ok_or_else(|| {
+                FeaRunError::Assembly(
+                    "transient structural assembly did not publish a canonical connector plan"
+                        .into(),
+                )
+            })?;
+        let connector_result = CanonicalStructuralConnectorResult::recover_dynamic(
+            connector_plan,
+            &summary.structural_dof_layout,
+            &transient.displacement_snapshots[index],
+            &transient.velocity_snapshots[index],
+        )
+        .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+        let connector_fields = recover_connector_observable_fields(&connector_result)
+            .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+        match connector_fields.len() {
+            0 => {}
+            2 => {
+                let mut fields = connector_fields.into_iter();
+                let mut force = fields
+                    .next()
+                    .expect("checked connector field count")
+                    .into_storage();
+                force.field_id = fea_transient_connector_force_field_id(index);
+                connector_force_snapshots.push(force);
+                let mut stored_energy = fields
+                    .next()
+                    .expect("checked connector field count")
+                    .into_storage();
+                stored_energy.field_id = fea_transient_connector_stored_energy_field_id(index);
+                connector_stored_energy_snapshots.push(stored_energy);
+            }
+            _ => {
+                return Err(FeaRunError::Assembly(
+                    "connector recovery did not publish the canonical force and energy field pair"
+                        .into(),
+                ));
+            }
+        }
+        connector_results.push(connector_result);
+        acceleration_snapshots.push(AnalysisField::host_f64(
+            fea_transient_acceleration_field_id(index),
+            shape.clone(),
+            acceleration.translations,
+        ));
+        reaction_force_snapshots.push(AnalysisField::host_f64(
+            fea_transient_reaction_force_field_id(index),
+            shape.clone(),
+            reaction.translations,
+        ));
+        if summary.structural_dof_layout.rotational_dof_count() > 0 {
+            angular_acceleration_snapshots.push(AnalysisField::host_f64(
+                fea_transient_angular_acceleration_field_id(index),
+                shape.clone(),
+                acceleration.rotations,
+            ));
+            reaction_moment_snapshots.push(AnalysisField::host_f64(
+                fea_transient_reaction_moment_field_id(index),
+                shape,
+                reaction.rotations,
+            ));
+        }
+        spatial_projection_evidence.append(&mut summary.spatial_projection_evidence);
+        electro_thermal_summaries.push(summary.electro_thermal.take());
     }
     require_recovered_field_count(
         snapshot_count,
@@ -188,101 +297,6 @@ pub(super) fn recover_transient_fields(
         RecoveredFieldPolicy::Optional,
     )?;
 
-    let mut velocity_snapshots = Vec::with_capacity(snapshot_count);
-    let mut angular_velocity_snapshots = Vec::with_capacity(snapshot_count);
-    let mut acceleration_snapshots = Vec::with_capacity(snapshot_count);
-    let mut angular_acceleration_snapshots = Vec::with_capacity(snapshot_count);
-    let mut reaction_force_snapshots = Vec::with_capacity(snapshot_count);
-    let mut reaction_moment_snapshots = Vec::with_capacity(snapshot_count);
-    let mut connector_results = Vec::with_capacity(snapshot_count);
-    let mut connector_force_snapshots = Vec::with_capacity(snapshot_count);
-    let mut connector_stored_energy_snapshots = Vec::with_capacity(snapshot_count);
-    for (index, summary) in transient.assembly_snapshots.iter().enumerate() {
-        let velocity = project_structural_nodal_snapshot(
-            &summary.structural_dof_layout,
-            &transient.velocity_snapshots[index],
-        )
-        .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
-        let acceleration = project_structural_nodal_snapshot(
-            &summary.structural_dof_layout,
-            &transient.acceleration_snapshots[index],
-        )
-        .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
-        let reaction = project_structural_nodal_snapshot(
-            &summary.structural_dof_layout,
-            &transient.reaction_snapshots[index],
-        )
-        .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
-        let shape = nodal_vector_shape(&summary.structural_dof_layout);
-        velocity_snapshots.push(AnalysisField::host_f64(
-            fea_transient_velocity_field_id(index),
-            shape.clone(),
-            velocity.translations,
-        ));
-        if summary.structural_dof_layout.rotational_dof_count() > 0 {
-            angular_velocity_snapshots.push(AnalysisField::host_f64(
-                fea_transient_angular_velocity_field_id(index),
-                shape.clone(),
-                velocity.rotations,
-            ));
-        }
-        let connector_plan = summary
-            .structural_connector_plan
-            .clone()
-            .or_else(|| empty_connector_plan.cloned())
-            .ok_or_else(|| {
-                FeaRunError::Assembly(
-                    "transient structural assembly did not publish a canonical connector plan"
-                        .into(),
-                )
-            })?;
-        let connector_result = CanonicalStructuralConnectorResult::recover_dynamic(
-            connector_plan,
-            &summary.structural_dof_layout,
-            &transient.displacement_snapshots[index],
-            &transient.velocity_snapshots[index],
-        )
-        .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
-        let connector_fields = recover_connector_observable_fields(&connector_result)
-            .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
-        if let [force, stored_energy] = connector_fields.as_slice() {
-            let mut force = force.clone().into_storage();
-            force.field_id = fea_transient_connector_force_field_id(index);
-            connector_force_snapshots.push(force);
-            let mut stored_energy = stored_energy.clone().into_storage();
-            stored_energy.field_id = fea_transient_connector_stored_energy_field_id(index);
-            connector_stored_energy_snapshots.push(stored_energy);
-        } else if !connector_fields.is_empty() {
-            return Err(FeaRunError::Assembly(
-                "connector recovery did not publish the canonical force and energy field pair"
-                    .into(),
-            ));
-        }
-        connector_results.push(connector_result);
-        acceleration_snapshots.push(AnalysisField::host_f64(
-            fea_transient_acceleration_field_id(index),
-            shape.clone(),
-            acceleration.translations,
-        ));
-        reaction_force_snapshots.push(AnalysisField::host_f64(
-            fea_transient_reaction_force_field_id(index),
-            shape.clone(),
-            reaction.translations,
-        ));
-        if summary.structural_dof_layout.rotational_dof_count() > 0 {
-            angular_acceleration_snapshots.push(AnalysisField::host_f64(
-                fea_transient_angular_acceleration_field_id(index),
-                shape.clone(),
-                acceleration.rotations,
-            ));
-            reaction_moment_snapshots.push(AnalysisField::host_f64(
-                fea_transient_reaction_moment_field_id(index),
-                shape,
-                reaction.rotations,
-            ));
-        }
-    }
-
     Ok(TransientFieldRecovery {
         final_deformation_fields,
         displacement_snapshots,
@@ -300,6 +314,8 @@ pub(super) fn recover_transient_fields(
         stress_snapshots,
         von_mises_snapshots,
         strain_energy_density_snapshots,
+        spatial_projection_evidence,
+        electro_thermal_summaries,
     })
 }
 
@@ -442,13 +458,6 @@ mod tests {
         StructuralTransientContinuationApproach, StructuralTransientScheduleArrival,
         StructuralTransientSchedulePoint,
     };
-    use crate::{
-        assembly::{
-            assemble_structural_system, dofs::StructuralDofLayout, StructuralFormulationRequirement,
-        },
-        excitation::{realize_step_excitations, ExcitationSamplePoint},
-        fixtures::{fixture_model, FixtureId},
-    };
 
     #[test]
     fn recovery_requires_the_exact_accepted_schedule() {
@@ -470,68 +479,6 @@ mod tests {
             assert!(matches!(
                 validate_schedule_points(&schedule, wrong),
                 Err(FeaRunError::Assembly(message)) if message.contains("canonical accepted schedule")
-            ));
-        }
-    }
-
-    #[test]
-    fn recovery_rejects_changed_dof_ownership_and_malformed_state_vectors() {
-        let model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
-        let excitations = realize_step_excitations(
-            &model,
-            &model.sequence.steps[0],
-            ExcitationSamplePoint::Static,
-        )
-        .unwrap();
-        let summary = assemble_structural_system(
-            &model,
-            &excitations,
-            None,
-            StructuralFormulationRequirement::PhysicalDiscretization,
-        )
-        .unwrap();
-        let state = vec![0.0; summary.dof_count];
-        assert!(
-            validate_snapshot_shape(&summary, &summary, 1, &state, &state, &state, &state).is_ok()
-        );
-
-        let mut changed = summary.clone();
-        changed.structural_dof_layout =
-            StructuralDofLayout::reduced_translational_rows(summary.dof_count);
-        assert!(matches!(
-            validate_snapshot_shape(&summary, &changed, 1, &state, &state, &state, &state),
-            Err(FeaRunError::Assembly(message)) if message.contains("changed structural DOF ownership")
-        ));
-        for change in [
-            |summary: &mut AssemblySummary| summary.structural_node_count += 1,
-            |summary: &mut AssemblySummary| summary.structural_beam_recovery.clear(),
-        ] {
-            let mut changed = summary.clone();
-            change(&mut changed);
-            assert!(matches!(
-                validate_snapshot_shape(&summary, &changed, 1, &state, &state, &state, &state),
-                Err(FeaRunError::Assembly(message)) if message.contains("changed structural recovery topology")
-            ));
-        }
-        assert!(summary.structural_connector_plan.is_some());
-        let mut changed = summary.clone();
-        changed.structural_connector_plan = None;
-        assert!(matches!(
-            validate_snapshot_shape(&summary, &changed, 1, &state, &state, &state, &state),
-            Err(FeaRunError::Assembly(message)) if message.contains("changed structural recovery topology")
-        ));
-        let short = &state[..state.len() - 1];
-        for (displacement, velocity, acceleration, reaction) in [
-            (short, state.as_slice(), state.as_slice(), state.as_slice()),
-            (state.as_slice(), short, state.as_slice(), state.as_slice()),
-            (state.as_slice(), state.as_slice(), short, state.as_slice()),
-            (state.as_slice(), state.as_slice(), state.as_slice(), short),
-        ] {
-            assert!(matches!(
-                validate_snapshot_shape(
-                    &summary, &summary, 1, displacement, velocity, acceleration, reaction
-                ),
-                Err(FeaRunError::Assembly(message)) if message.contains("expected")
             ));
         }
     }

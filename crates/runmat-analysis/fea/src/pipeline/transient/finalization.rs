@@ -30,6 +30,7 @@ pub(super) fn finish_transient_run(
     let reporting_summary = transient.assembly_snapshots.last().ok_or_else(|| {
         FeaRunError::Assembly("transient solve produced no reporting assembly snapshot".into())
     })?;
+    let reporting_dof_count = reporting_summary.dof_count;
     emit_phase(
         "fea.run_transient",
         FeaProgressPhase::Solve,
@@ -102,7 +103,8 @@ pub(super) fn finish_transient_run(
         "residual norm",
         transient.residual_norms.len(),
     )?;
-    let recovered = recovery::recover_transient_fields(&transient, empty_connector_plan.as_ref())?;
+    let recovered =
+        recovery::recover_transient_fields(&mut transient, empty_connector_plan.as_ref())?;
     // Recovery has transferred these solver-owned state vectors into typed
     // histories. Do not retain both representations through observation work.
     transient.displacement_snapshots.clear();
@@ -137,6 +139,8 @@ pub(super) fn finish_transient_run(
         stress_snapshots,
         von_mises_snapshots,
         strain_energy_density_snapshots,
+        spatial_projection_evidence,
+        electro_thermal_summaries,
     } = recovered;
     let mut run = FeaRunResult {
         identity,
@@ -155,11 +159,7 @@ pub(super) fn finish_transient_run(
         solver_host_sync_count: transient.solver_host_sync_count,
         accelerator_evidence: transient.accelerator_evidence,
         diagnostics,
-        spatial_projection_evidence: transient
-            .assembly_snapshots
-            .iter()
-            .flat_map(|summary| summary.spatial_projection_evidence.iter().cloned())
-            .collect(),
+        spatial_projection_evidence,
         structural_static_balance: None,
         structural_constraint_result: None,
         structural_connector_result: Some(Box::new(final_connector_result)),
@@ -255,12 +255,6 @@ pub(super) fn finish_transient_run(
         field.field_id = crate::contracts::FEA_FIELD_STRUCTURAL_CONNECTOR_STORED_ENERGY.into();
         run.fields.push(field);
     }
-    let reporting_dof_count = reporting_summary.dof_count;
-    let electro_thermal_summaries = transient
-        .assembly_snapshots
-        .into_iter()
-        .map(|summary| summary.electro_thermal)
-        .collect::<Vec<_>>();
     let electro_thermal_fields = recover_realized_electro_thermal_fields(
         &electro_thermal_summaries,
         &transient.residual_norms,
