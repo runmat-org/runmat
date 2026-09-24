@@ -10,8 +10,10 @@ use crate::{
     contracts::FeaRunError,
     pipeline::{homogeneous_static::HomogeneousStaticSolver, modal_basis::ModalBasisArtifact},
     post::fields::{recover_deformation_result_fields, StructuralLinearFieldQuantity},
+    solve::preconditioner::SpdPreconditionerKind,
 };
 
+use super::has_missing_mass_correction;
 use super::{
     super::{
         combine::{
@@ -31,16 +33,14 @@ pub(super) fn recover_deformation_fields(
     basis: &ModalBasisArtifact,
     result: &ModalResponseSpectrumResult,
     conversion: ResponseSpectrumDisplacementConversion,
-) -> Result<Vec<ResponseSpectrumLinearField>, FeaRunError> {
-    let static_solver = result
-        .contributions()
-        .iter()
-        .any(|contribution| {
-            matches!(
-                contribution.truncation.correction,
-                ModalTruncationCorrection::MissingMass { .. }
-            )
-        })
+) -> Result<
+    (
+        Vec<ResponseSpectrumLinearField>,
+        Option<SpdPreconditionerKind>,
+    ),
+    FeaRunError,
+> {
+    let static_solver = has_missing_mass_correction(result)
         .then(|| HomogeneousStaticSolver::new(summary))
         .transpose()?;
     let directional = result
@@ -101,7 +101,12 @@ pub(super) fn recover_deformation_fields(
             "response-spectrum directions produced different linear field inventories".into(),
         ));
     }
-    Ok(fields)
+    Ok((
+        fields,
+        static_solver
+            .as_ref()
+            .map(HomogeneousStaticSolver::preconditioner_kind),
+    ))
 }
 
 fn recover_direction(

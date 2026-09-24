@@ -428,6 +428,10 @@ fn pseudo_acceleration_missing_mass_recovers_the_independent_static_field() {
             .collect::<Vec<_>>();
         let recovery =
             recover_modal_response_spectrum_fields(&summary, &run.basis, &result).unwrap();
+        assert_eq!(
+            recovery.deformation().missing_mass_static_preconditioner(),
+            Some(crate::solve::preconditioner::SpdPreconditionerKind::Ilu0)
+        );
         let recovered = recovery
             .field(StructuralLinearFieldQuantity::Stress)
             .unwrap();
@@ -450,6 +454,14 @@ fn pseudo_acceleration_missing_mass_recovers_the_independent_static_field() {
             )
             .unwrap(),
             recovery
+        );
+        let mut missing_provenance = serde_json::to_value(&recovery).unwrap();
+        missing_provenance["deformation"]["recovered"]
+            .as_object_mut()
+            .unwrap()
+            .remove("missing_mass_static_preconditioner");
+        assert!(
+            serde_json::from_value::<ResponseSpectrumFieldRecovery>(missing_provenance).is_err()
         );
     }
 }
@@ -631,6 +643,10 @@ fn linear_field_envelope_recovers_signed_mode_before_statistical_combination() {
         .collect::<Vec<_>>();
 
     let fields = recover_modal_response_spectrum_fields(&summary, &run.basis, &result).unwrap();
+    assert_eq!(
+        fields.deformation().missing_mass_static_preconditioner(),
+        None
+    );
     assert_eq!(
         fields
             .field(StructuralLinearFieldQuantity::Stress)

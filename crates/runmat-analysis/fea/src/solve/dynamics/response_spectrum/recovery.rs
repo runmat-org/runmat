@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     assembly::AssemblySummary, contracts::FeaRunError, pipeline::modal_basis::ModalBasisArtifact,
-    post::fields::StructuralLinearFieldQuantity,
+    post::fields::StructuralLinearFieldQuantity, solve::preconditioner::SpdPreconditionerKind,
 };
 
 use super::{
@@ -54,6 +54,9 @@ impl std::fmt::Display for ResponseSpectrumDeformationRecoveryUnavailability {
 pub enum ResponseSpectrumDeformationRecovery {
     Recovered {
         conversion: ResponseSpectrumDisplacementConversion,
+        /// Preconditioner prepared for missing-mass correction; an all-zero
+        /// correction can bypass the solve while retaining this selection.
+        missing_mass_static_preconditioner: Option<SpdPreconditionerKind>,
         fields: Vec<ResponseSpectrumLinearField>,
     },
     Unavailable {
@@ -62,6 +65,16 @@ pub enum ResponseSpectrumDeformationRecovery {
 }
 
 impl ResponseSpectrumDeformationRecovery {
+    pub const fn missing_mass_static_preconditioner(&self) -> Option<SpdPreconditionerKind> {
+        match self {
+            Self::Recovered {
+                missing_mass_static_preconditioner,
+                ..
+            } => *missing_mass_static_preconditioner,
+            Self::Unavailable { .. } => None,
+        }
+    }
+
     pub const fn conversion(&self) -> Option<ResponseSpectrumDisplacementConversion> {
         match self {
             Self::Recovered { conversion, .. } => Some(*conversion),
@@ -279,6 +292,12 @@ impl ResponseSpectrumFieldRecovery {
             || self.semantics != result.semantics()
             || self.deformation.unavailability()
                 != response_spectrum_deformation_recovery_unavailability(result)
+            || self
+                .deformation
+                .missing_mass_static_preconditioner()
+                .is_some()
+                != (self.deformation.unavailability().is_none()
+                    && has_missing_mass_correction(result))
         {
             return Err(FeaRunError::Solve(
                 "response-spectrum field recovery differs from its numerical result".into(),
@@ -306,7 +325,9 @@ impl ResponseSpectrumFieldRecovery {
     fn validate(&self) -> Result<(), FeaRunError> {
         self.nodal.validate_for(self.response)?;
         let deformation_is_valid = match &self.deformation {
-            ResponseSpectrumDeformationRecovery::Recovered { conversion, fields } => {
+            ResponseSpectrumDeformationRecovery::Recovered {
+                conversion, fields, ..
+            } => {
                 Some(*conversion)
                     == ResponseSpectrumDisplacementConversion::for_response(self.response)
                     && !fields.is_empty()
@@ -376,9 +397,12 @@ pub fn recover_modal_response_spectrum_fields(
             let conversion = result
                 .displacement_conversion()
                 .expect("availability checked displacement conversion");
+            let (fields, missing_mass_static_preconditioner) =
+                recover_deformation_fields(summary, basis, result, conversion)?;
             ResponseSpectrumDeformationRecovery::Recovered {
                 conversion,
-                fields: recover_deformation_fields(summary, basis, result, conversion)?,
+                missing_mass_static_preconditioner,
+                fields,
             }
         }
     };
@@ -399,13 +423,9 @@ pub fn recover_modal_response_spectrum_fields(
 pub fn response_spectrum_deformation_recovery_unavailability(
     result: &ModalResponseSpectrumResult,
 ) -> Option<ResponseSpectrumDeformationRecoveryUnavailability> {
-    let has_missing_mass = result.contributions().iter().any(|contribution| {
-        matches!(
-            contribution.truncation.correction,
-            ModalTruncationCorrection::MissingMass { .. }
-        )
-    });
-    if has_missing_mass && result.response() != SpectrumResponse::PseudoAcceleration {
+    if has_missing_mass_correction(result)
+        && result.response() != SpectrumResponse::PseudoAcceleration
+    {
         return Some(
             ResponseSpectrumDeformationRecoveryUnavailability::MissingMassStaticCorrectionRequiresPseudoAcceleration {
                 response: result.response(),
@@ -417,4 +437,13 @@ pub fn response_spectrum_deformation_recovery_unavailability(
             response: result.response(),
         },
     )
+}
+
+fn has_missing_mass_correction(result: &ModalResponseSpectrumResult) -> bool {
+    result.contributions().iter().any(|contribution| {
+        matches!(
+            contribution.truncation.correction,
+            ModalTruncationCorrection::MissingMass { .. }
+        )
+    })
 }
