@@ -12,7 +12,7 @@ pub(super) struct TransientRunFinalization<'a> {
 
 pub(super) fn finish_transient_run(
     input: TransientRunFinalization<'_>,
-    transient: crate::solve::transient::TransientSolveResult,
+    mut transient: crate::solve::transient::TransientSolveResult,
 ) -> Result<FeaTransientRunResult, FeaRunError> {
     let TransientRunFinalization {
         model,
@@ -23,13 +23,13 @@ pub(super) fn finish_transient_run(
         identity,
         initial_state,
     } = input;
-    let reporting_summary = transient
-        .assembly_snapshots
-        .last()
-        .cloned()
-        .ok_or_else(|| {
-            FeaRunError::Assembly("transient solve produced no reporting assembly snapshot".into())
-        })?;
+    // Motion realization has already consumed the solver integration intervals.
+    // Their duplicated endpoint assemblies and states are not part of the public
+    // history, so release them before constructing recovered field histories.
+    transient.integration_intervals.clear();
+    let reporting_summary = transient.assembly_snapshots.last().ok_or_else(|| {
+        FeaRunError::Assembly("transient solve produced no reporting assembly snapshot".into())
+    })?;
     emit_phase(
         "fea.run_transient",
         FeaProgressPhase::Solve,
@@ -48,12 +48,12 @@ pub(super) fn finish_transient_run(
         Some(3),
         Some(5),
     );
-    let mut diagnostics = transient.diagnostics.clone();
+    let mut diagnostics = std::mem::take(&mut transient.diagnostics);
     extend_common_run_diagnostics(
         &mut diagnostics,
         CommonRunDiagnosticInputs {
             model,
-            summary: &reporting_summary,
+            summary: reporting_summary,
         },
     );
 
@@ -97,7 +97,18 @@ pub(super) fn finish_transient_run(
     } else {
         None
     };
+    recovery::require_snapshot_count(
+        transient.time_points_s.len(),
+        "residual norm",
+        transient.residual_norms.len(),
+    )?;
     let recovered = recovery::recover_transient_fields(&transient, empty_connector_plan.as_ref())?;
+    // Recovery has transferred these solver-owned state vectors into typed
+    // histories. Do not retain both representations through observation work.
+    transient.displacement_snapshots.clear();
+    transient.velocity_snapshots.clear();
+    transient.acceleration_snapshots.clear();
+    transient.reaction_snapshots.clear();
     for connector_result in &recovered.connector_results {
         connector_result
             .plan
@@ -109,14 +120,24 @@ pub(super) fn finish_transient_run(
             "transient solve produced no canonical connector reporting state".into(),
         )
     })?;
-    let kinetic_energy_values = transient.kinetic_energy_snapshots.clone();
-    let strain_energy_values = transient.strain_energy_snapshots.clone();
-    recovery::require_snapshot_count(
-        transient.displacement_snapshots.len(),
-        "residual norm",
-        transient.residual_norms.len(),
-    )?;
-    let residual_norm_values = transient.residual_norms.clone();
+    let recovery::TransientFieldRecovery {
+        final_deformation_fields,
+        displacement_snapshots,
+        rotation_snapshots,
+        velocity_snapshots,
+        angular_velocity_snapshots,
+        acceleration_snapshots,
+        angular_acceleration_snapshots,
+        reaction_force_snapshots,
+        reaction_moment_snapshots,
+        connector_results,
+        connector_force_snapshots,
+        connector_stored_energy_snapshots,
+        strain_snapshots,
+        stress_snapshots,
+        von_mises_snapshots,
+        strain_energy_density_snapshots,
+    } = recovered;
     let mut run = FeaRunResult {
         identity,
         requested_backend: backend,
@@ -132,7 +153,7 @@ pub(super) fn finish_transient_run(
         solver_method: transient.solver_method,
         preconditioner: transient.preconditioner,
         solver_host_sync_count: transient.solver_host_sync_count,
-        accelerator_evidence: transient.accelerator_evidence.clone(),
+        accelerator_evidence: transient.accelerator_evidence,
         diagnostics,
         spatial_projection_evidence: transient
             .assembly_snapshots
@@ -145,11 +166,11 @@ pub(super) fn finish_transient_run(
         observations: Vec::new(),
         observation_histories: Vec::new(),
         series_reductions: Vec::new(),
-        fields: recovered.final_deformation_fields.clone(),
+        fields: final_deformation_fields,
     };
     run.diagnostics.push(mechanical_energy_history_diagnostic(
-        &kinetic_energy_values,
-        &strain_energy_values,
+        &transient.kinetic_energy_snapshots,
+        &transient.strain_energy_snapshots,
         &transient.external_work_j,
         &transient.support_work_j,
         &transient.damping_dissipation_j,
@@ -157,22 +178,8 @@ pub(super) fn finish_transient_run(
         &transient.relative_energy_balance_error,
     ));
 
-    let displacement_snapshots = recovered.displacement_snapshots;
-    let rotation_snapshots = recovered.rotation_snapshots;
-    let velocity_snapshots = recovered.velocity_snapshots;
-    let angular_velocity_snapshots = recovered.angular_velocity_snapshots;
-    let acceleration_snapshots = recovered.acceleration_snapshots;
-    let angular_acceleration_snapshots = recovered.angular_acceleration_snapshots;
-    let reaction_force_snapshots = recovered.reaction_force_snapshots;
-    let reaction_moment_snapshots = recovered.reaction_moment_snapshots;
-    let connector_results = recovered.connector_results;
-    let connector_force_snapshots = recovered.connector_force_snapshots;
-    let connector_stored_energy_snapshots = recovered.connector_stored_energy_snapshots;
-    let strain_snapshots = recovered.strain_snapshots;
-    let stress_snapshots = recovered.stress_snapshots;
-    let von_mises_snapshots = recovered.von_mises_snapshots;
-    let strain_energy_density_snapshots = recovered.strain_energy_density_snapshots;
-    let kinetic_energy_snapshots = kinetic_energy_values
+    let kinetic_energy_snapshots = transient
+        .kinetic_energy_snapshots
         .into_iter()
         .enumerate()
         .map(|(index, value)| {
@@ -183,7 +190,8 @@ pub(super) fn finish_transient_run(
             )
         })
         .collect::<Vec<_>>();
-    let strain_energy_snapshots = strain_energy_values
+    let strain_energy_snapshots = transient
+        .strain_energy_snapshots
         .into_iter()
         .enumerate()
         .map(|(index, value)| {
@@ -194,7 +202,8 @@ pub(super) fn finish_transient_run(
             )
         })
         .collect::<Vec<_>>();
-    let residual_norm_snapshots = residual_norm_values
+    let residual_norm_snapshots = transient
+        .residual_norms
         .iter()
         .copied()
         .enumerate()
@@ -246,15 +255,16 @@ pub(super) fn finish_transient_run(
         field.field_id = crate::contracts::FEA_FIELD_STRUCTURAL_CONNECTOR_STORED_ENERGY.into();
         run.fields.push(field);
     }
+    let reporting_dof_count = reporting_summary.dof_count;
     let electro_thermal_summaries = transient
         .assembly_snapshots
-        .iter()
-        .map(|summary| summary.electro_thermal.clone())
+        .into_iter()
+        .map(|summary| summary.electro_thermal)
         .collect::<Vec<_>>();
     let electro_thermal_fields = recover_realized_electro_thermal_fields(
         &electro_thermal_summaries,
-        &residual_norm_values,
-        reporting_summary.dof_count,
+        &transient.residual_norms,
+        reporting_dof_count,
         options.solver_mesh.as_ref(),
     );
     run.diagnostics.extend(electro_thermal_fields.diagnostics);
