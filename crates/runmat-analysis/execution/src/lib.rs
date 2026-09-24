@@ -328,12 +328,12 @@ pub use transient_block_task::{
 };
 pub use transient_object_access::{
     decode_prepared_structural_transient_block_request,
-    decode_prepared_structural_transient_checkpoint, decode_prepared_structural_transient_segment,
-    decode_prepared_structural_transient_workload, import_structural_transient_segment_sample,
-    prepare_structural_transient_block_request_objects,
-    prepare_structural_transient_checkpoint_objects, prepare_structural_transient_segment_objects,
-    prepare_structural_transient_workload_objects, ImportedStructuralTransientSegmentSample,
-    StructuralTransientSegmentSampleImport,
+    decode_prepared_structural_transient_checkpoint, decode_prepared_structural_transient_scope,
+    decode_prepared_structural_transient_segment, decode_prepared_structural_transient_workload,
+    import_structural_transient_segment_sample, prepare_structural_transient_block_request_objects,
+    prepare_structural_transient_checkpoint_objects, prepare_structural_transient_scope_objects,
+    prepare_structural_transient_segment_objects, prepare_structural_transient_workload_objects,
+    ImportedStructuralTransientSegmentSample, StructuralTransientSegmentSampleImport,
 };
 pub use transient_result_access::{
     decode_prepared_structural_transient_numerical_receipt,

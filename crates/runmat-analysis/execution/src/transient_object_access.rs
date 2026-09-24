@@ -1,9 +1,10 @@
 use runmat_analysis_fea::execution::{
     AnalysisNumericalObjectKind, AnalysisPayloadPartition, AnalysisWorkloadIdentity,
     StructuralTransientBlockRequest, StructuralTransientCheckpoint,
-    StructuralTransientPhysicalSample, StructuralTransientSegment,
-    StructuralTransientSegmentManifest, StructuralTransientSegmentSample,
-    StructuralTransientSegmentSampleIdentity, StructuralTransientWorkload,
+    StructuralTransientCheckpointScope, StructuralTransientPhysicalSample,
+    StructuralTransientSegment, StructuralTransientSegmentManifest,
+    StructuralTransientSegmentSample, StructuralTransientSegmentSampleIdentity,
+    StructuralTransientWorkload,
 };
 
 pub fn prepare_structural_transient_workload_objects(
@@ -62,6 +63,40 @@ pub fn prepare_structural_transient_block_request_objects(
         namespace,
         limits,
     )
+}
+
+pub fn prepare_structural_transient_scope_objects(
+    scope: &StructuralTransientCheckpointScope,
+    chunk_bytes: usize,
+    namespace: ObjectNamespace,
+    limits: ObjectInventoryLimits,
+) -> AnalysisBridgeResult<PreparedAnalysisObjects> {
+    let bytes = scope.canonical_bytes()?;
+    prepare_analysis_objects(
+        AnalysisNumericalObjectKind::StructuralTransientCheckpointScope,
+        scope.identity()?.digest(),
+        &bytes,
+        chunk_bytes,
+        namespace,
+        limits,
+    )
+}
+
+pub fn decode_prepared_structural_transient_scope(
+    prepared: &PreparedAnalysisObjects,
+) -> AnalysisBridgeResult<StructuralTransientCheckpointScope> {
+    if prepared.manifest.kind != AnalysisNumericalObjectKind::StructuralTransientCheckpointScope {
+        return Err(AnalysisBridgeError::Invalid(
+            "expected a structural transient checkpoint scope object".into(),
+        ));
+    }
+    let scope = StructuralTransientCheckpointScope::from_canonical_bytes(&prepared.payload())?;
+    if prepared.manifest.logical_identity != scope.identity()?.digest() {
+        return Err(AnalysisBridgeError::Identity(
+            "structural transient checkpoint scope object has the wrong logical identity",
+        ));
+    }
+    Ok(scope)
 }
 
 pub fn decode_prepared_structural_transient_block_request(

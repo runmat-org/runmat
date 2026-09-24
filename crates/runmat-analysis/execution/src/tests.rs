@@ -3318,6 +3318,33 @@ fn structural_transient_objects_round_trip_and_one_segment_sample_imports_indepe
     )
     .unwrap();
     let limits = ObjectInventoryLimits::default();
+    let scope_objects = prepare_structural_transient_scope_objects(
+        &request.scope,
+        64,
+        ObjectNamespace::ResultValue,
+        limits,
+    )
+    .unwrap();
+    assert_eq!(
+        decode_prepared_structural_transient_scope(&scope_objects).unwrap(),
+        request.scope
+    );
+    let mut substituted_scope_objects = scope_objects.clone();
+    substituted_scope_objects.manifest.logical_identity = digest("substituted-scope");
+    assert!(matches!(
+        decode_prepared_structural_transient_scope(&substituted_scope_objects),
+        Err(AnalysisBridgeError::Identity(_))
+    ));
+    assert!(decode_prepared_structural_transient_scope(
+        &prepare_structural_transient_block_request_objects(
+            &request,
+            64,
+            ObjectNamespace::InputValue,
+            limits,
+        )
+        .unwrap()
+    )
+    .is_err());
     let request_objects = prepare_structural_transient_block_request_objects(
         &request,
         64,

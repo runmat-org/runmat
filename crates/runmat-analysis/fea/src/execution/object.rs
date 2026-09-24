@@ -37,6 +37,7 @@ pub enum AnalysisNumericalObjectKind {
     PublicationRequest,
     StatePublicationRequest,
     ObservationHistoryCheckpointRequest,
+    StructuralTransientCheckpointScope,
     StructuralTransientBlockRequest,
     StructuralTransientResultAssemblyRequest,
     StructuralTransientWorkload,
