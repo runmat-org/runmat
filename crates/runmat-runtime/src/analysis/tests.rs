@@ -2711,12 +2711,13 @@ fn analysis_run_linear_static_returns_typed_envelope() {
     assert_eq!(envelope.data.provenance.precision_mode, "fp64");
     assert_eq!(
         envelope.data.provenance.solver_method,
-        SolverMethod::DenseDirect
+        SolverMethod::MatrixFreePcg
     );
     assert_eq!(
         envelope.data.provenance.preconditioner,
-        SolverPreconditioner::None
+        SolverPreconditioner::Jacobi
     );
+    assert!(envelope.data.provenance.fallback_events.is_empty());
     assert_eq!(envelope.data.provenance.quality_policy, "balanced");
     assert_eq!(envelope.data.provenance.solver_device_apply_k_ratio, 0.0);
     assert_eq!(envelope.data.provenance.solver_host_sync_count, 0);
@@ -5217,7 +5218,7 @@ fn solver_mesh_geometry_revision_must_match_the_analysis_model() {
 }
 
 #[test]
-fn ilu_preconditioner_fallback_is_recorded_when_solver_uses_jacobi() {
+fn ilu_preconditioner_provenance_reports_the_executed_ilu_solver() {
     let _guard = analysis_test_guard();
     let (mesh_root, mesh_path) = write_ready_minimal_analysis_mesh_artifact("preconditioner-ilu");
     let model = sample_solid_model();
@@ -5238,14 +5239,19 @@ fn ilu_preconditioner_fallback_is_recorded_when_solver_uses_jacobi() {
 
     assert_eq!(
         envelope.data.provenance.preconditioner,
-        SolverPreconditioner::Jacobi
+        SolverPreconditioner::Ilu0
     );
-    assert!(envelope
-        .data
-        .provenance
-        .fallback_events
-        .iter()
-        .any(|event| event.reason == FallbackReason::RequestedPreconditionerUnavailable));
+    assert_eq!(
+        envelope.data.provenance.solver_method,
+        SolverMethod::MatrixFreePcg
+    );
+    assert!(envelope.data.provenance.fallback_events.is_empty());
+    assert!(envelope.data.run.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "FEA_SOLVER_METHOD"
+            && diagnostic
+                .message
+                .contains("solver=pcg preconditioner=ilu0")
+    }));
     let _ = fs::remove_dir_all(&mesh_root);
 }
 
