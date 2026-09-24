@@ -7,7 +7,9 @@ use crate::{
     algebra::{dot_scoped, spmv_scoped, vector_sub_scoped, ScopedSpmvError, SpmvWorkError},
     assembly::AssemblySummary,
     planning::resource::{LocalExecutionPlan, ScopedLocalExecutionError},
-    solve::reaction::{recover_structural_reaction, StructuralReactionError},
+    solve::reaction::{
+        recover_structural_reaction_scoped, ReactionWorkError, StructuralReactionError,
+    },
 };
 
 const RELATIVE_TOLERANCE: f64 = 1.0e-8;
@@ -52,6 +54,11 @@ impl StructuralStaticBalanceError {
             Self::Scoped(ScopedSpmvError::Execution(
                 ScopedLocalExecutionError::Work {
                     source: SpmvWorkError::Cancelled,
+                    ..
+                }
+            )) | Self::Reaction(StructuralReactionError::Scoped(
+                ScopedLocalExecutionError::Work {
+                    source: ReactionWorkError::Cancelled,
                     ..
                 }
             ))
@@ -121,7 +128,8 @@ pub(crate) fn recover_structural_static_balance(
     )?;
     let equilibrium_residual =
         vector_sub_scoped(&internal_force, &summary.physical_load, local_execution)?;
-    let reaction = recover_structural_reaction(summary, &equilibrium_residual)?;
+    let reaction =
+        recover_structural_reaction_scoped(summary, &equilibrium_residual, local_execution)?;
     let free_residual = vector_sub_scoped(&equilibrium_residual, &reaction, local_execution)?;
     let equilibrium_residual_norm_newtons = norm(&free_residual, local_execution)?;
     let equilibrium_scale_newtons = norm(&internal_force, local_execution)?
@@ -268,6 +276,39 @@ mod tests {
             assert!((scoped.evidence.internal_work_joules - expected_work).abs() <= 1.0e-10);
             assert!((scoped.evidence.constraint_work_joules - expected_work).abs() <= 1.0e-10);
             assert!(scoped.evidence.equilibrium_relative_error <= RELATIVE_TOLERANCE);
+        }
+
+        let residual =
+            crate::algebra::spmv(summary.operator.operators().stiffness(), &solve.solution)
+                .unwrap();
+        let nested_reaction = execute_scoped_chunks(LocalExecutionPlan::serial(), 1, |_| {
+            recover_structural_reaction_scoped(&summary, &residual, LocalExecutionPlan::serial())
+        });
+        assert!(matches!(
+            nested_reaction,
+            Err(ScopedLocalExecutionError::Work {
+                source: StructuralReactionError::Scoped(ScopedLocalExecutionError::NestedExecution),
+                ..
+            })
+        ));
+
+        {
+            let context = crate::progress::FeaProgressContext::default();
+            context.cancellation.cancel();
+            let _guard = crate::progress::replace_fea_progress_context(context);
+            let cancelled = recover_structural_reaction_scoped(
+                &summary,
+                &residual,
+                LocalExecutionPlan::serial(),
+            )
+            .unwrap_err();
+            assert!(matches!(
+                cancelled,
+                StructuralReactionError::Scoped(ScopedLocalExecutionError::Work {
+                    source: ReactionWorkError::Cancelled,
+                    ..
+                })
+            ));
         }
 
         let nested = execute_scoped_chunks(LocalExecutionPlan::serial(), 1, |_| {
