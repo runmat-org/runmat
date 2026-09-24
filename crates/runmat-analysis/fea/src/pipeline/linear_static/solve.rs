@@ -5,6 +5,7 @@ use crate::{
     solve::{
         backend::build_backend,
         linear::{solve_linear_system_with_execution, LinearSolveResult},
+        recover_structural_static_balance, StructuralStaticBalance,
     },
 };
 
@@ -38,4 +39,20 @@ pub(super) fn solve_static_system(
     })?;
     check_cancelled("fea.run_linear_static")?;
     Ok(result)
+}
+
+pub(super) fn recover_static_balance(
+    summary: &AssemblySummary,
+    displacement: &[f64],
+    options: &LinearStaticSolveOptions,
+) -> Result<StructuralStaticBalance, FeaRunError> {
+    recover_structural_static_balance(summary, displacement, options.local_execution).map_err(
+        |error| {
+            if error.is_cancelled() {
+                FeaRunError::Cancelled
+            } else {
+                FeaRunError::Assembly(error.to_string())
+            }
+        },
+    )
 }

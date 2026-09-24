@@ -41,7 +41,7 @@ use crate::{
         field::{RecoveredFieldCatalog, StructuralRecoveredFieldTopology},
         observation::{evaluate_structural_observations, ObservationLimits},
     },
-    solve::{recover_structural_static_balance, StructuralStaticBalanceEvidence},
+    solve::StructuralStaticBalanceEvidence,
 };
 
 const VECTOR_COMPONENT_COUNT: usize = 3;
@@ -214,8 +214,7 @@ fn run_linear_static_with_constraint_plan(
         Some(5),
     );
     let solve_result = solve::solve_static_system(&summary, &options)?;
-    let static_balance = recover_structural_static_balance(&summary, &solve_result.solution)
-        .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+    let static_balance = solve::recover_static_balance(&summary, &solve_result.solution, &options)?;
     let structural_constraint_result =
         CanonicalStructuralConstraintResult::recover_for_model_from_solver_state(
             executed_constraint_plan,

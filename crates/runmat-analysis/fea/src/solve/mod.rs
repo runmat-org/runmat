@@ -14,7 +14,7 @@ mod reaction;
 pub(crate) use reaction::recover_structural_reaction;
 pub(crate) mod spd_linear;
 mod static_balance;
-pub(crate) use static_balance::recover_structural_static_balance;
 pub use static_balance::StructuralStaticBalanceEvidence;
+pub(crate) use static_balance::{recover_structural_static_balance, StructuralStaticBalance};
 mod symmetric_eigen;
 pub mod transient;

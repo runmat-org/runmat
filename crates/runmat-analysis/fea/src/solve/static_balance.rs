@@ -4,8 +4,9 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
-    algebra::apply_k,
+    algebra::{dot_scoped, spmv_scoped, vector_sub_scoped, ScopedSpmvError, SpmvWorkError},
     assembly::AssemblySummary,
+    planning::resource::{LocalExecutionPlan, ScopedLocalExecutionError},
     solve::reaction::{recover_structural_reaction, StructuralReactionError},
 };
 
@@ -32,14 +33,30 @@ pub(crate) struct StructuralStaticBalance {
     pub reaction: Vec<f64>,
 }
 
-#[derive(Clone, Debug, Error, Eq, PartialEq)]
+#[derive(Debug, Error)]
 pub(crate) enum StructuralStaticBalanceError {
     #[error("structural static balance state has the wrong dimension or a nonfinite value")]
     InvalidState,
     #[error("structural static reaction recovery failed: {0}")]
     Reaction(#[from] StructuralReactionError),
+    #[error("structural static balance local execution failed: {0}")]
+    Scoped(#[from] ScopedSpmvError),
     #[error("structural static balance evidence is inconsistent")]
     InvalidEvidence,
+}
+
+impl StructuralStaticBalanceError {
+    pub(crate) fn is_cancelled(&self) -> bool {
+        matches!(
+            self,
+            Self::Scoped(ScopedSpmvError::Execution(
+                ScopedLocalExecutionError::Work {
+                    source: SpmvWorkError::Cancelled,
+                    ..
+                }
+            ))
+        )
+    }
 }
 
 impl StructuralStaticBalanceEvidence {
@@ -86,6 +103,7 @@ impl StructuralStaticBalanceEvidence {
 pub(crate) fn recover_structural_static_balance(
     summary: &AssemblySummary,
     displacement: &[f64],
+    local_execution: LocalExecutionPlan,
 ) -> Result<StructuralStaticBalance, StructuralStaticBalanceError> {
     if displacement.len() != summary.dof_count
         || summary.physical_load.len() != summary.dof_count
@@ -94,27 +112,27 @@ pub(crate) fn recover_structural_static_balance(
     {
         return Err(StructuralStaticBalanceError::InvalidState);
     }
-    let internal_force = apply_k(&summary.operator, displacement);
-    let equilibrium_residual = internal_force
-        .iter()
-        .zip(&summary.physical_load)
-        .map(|(internal, applied)| internal - applied)
-        .collect::<Vec<_>>();
+    // The structural solve plan already charges whole-vector scratch and scoped
+    // CSR output. Reuse it here; there is no second pool or per-worker full vector.
+    let internal_force = spmv_scoped(
+        summary.operator.operators().stiffness(),
+        displacement,
+        local_execution,
+    )?;
+    let equilibrium_residual =
+        vector_sub_scoped(&internal_force, &summary.physical_load, local_execution)?;
     let reaction = recover_structural_reaction(summary, &equilibrium_residual)?;
-    let free_residual = equilibrium_residual
-        .iter()
-        .zip(&reaction)
-        .map(|(residual, reaction)| residual - reaction)
-        .collect::<Vec<_>>();
-    let equilibrium_residual_norm_newtons = norm(&free_residual);
-    let equilibrium_scale_newtons = norm(&internal_force)
-        .max(norm(&summary.physical_load))
-        .max(norm(&reaction))
+    let free_residual = vector_sub_scoped(&equilibrium_residual, &reaction, local_execution)?;
+    let equilibrium_residual_norm_newtons = norm(&free_residual, local_execution)?;
+    let equilibrium_scale_newtons = norm(&internal_force, local_execution)?
+        .max(norm(&summary.physical_load, local_execution)?)
+        .max(norm(&reaction, local_execution)?)
         .max(1.0);
     let equilibrium_relative_error = equilibrium_residual_norm_newtons / equilibrium_scale_newtons;
-    let internal_work_joules = dot(displacement, &internal_force);
-    let applied_load_work_joules = dot(displacement, &summary.physical_load);
-    let constraint_work_joules = dot(displacement, &reaction);
+    let internal_work_joules = dot_scoped(displacement, &internal_force, local_execution)?;
+    let applied_load_work_joules =
+        dot_scoped(displacement, &summary.physical_load, local_execution)?;
+    let constraint_work_joules = dot_scoped(displacement, &reaction, local_execution)?;
     let work_balance_residual_joules =
         internal_work_joules - applied_load_work_joules - constraint_work_joules;
     let work_scale = internal_work_joules
@@ -141,15 +159,8 @@ pub(crate) fn recover_structural_static_balance(
     Ok(StructuralStaticBalance { evidence, reaction })
 }
 
-fn dot(left: &[f64], right: &[f64]) -> f64 {
-    left.iter()
-        .zip(right)
-        .map(|(left, right)| left * right)
-        .sum()
-}
-
-fn norm(values: &[f64]) -> f64 {
-    dot(values, values).sqrt()
+fn norm(values: &[f64], local_execution: LocalExecutionPlan) -> Result<f64, ScopedSpmvError> {
+    Ok(dot_scoped(values, values, local_execution)?.sqrt())
 }
 
 #[cfg(test)]
@@ -168,6 +179,7 @@ mod tests {
         constraints::{CanonicalStructuralConstraintPlan, CanonicalStructuralConstraintResult},
         excitation::{realize_step_excitations, ExcitationSamplePoint},
         fixtures::{fixture_model, replace_fixture_excitations, FixtureId},
+        planning::resource::{execute_scoped_chunks, LocalThreadCount},
         solve::{
             backend::{cpu_reference::CpuReferenceBackend, kind::LinearAlgebraBackendKind},
             linear::solve_linear_system,
@@ -218,7 +230,12 @@ mod tests {
             None,
         );
         assert!(solve.converged, "{:?}", solve.diagnostics);
-        let balance = recover_structural_static_balance(&summary, &solve.solution).unwrap();
+        let balance = recover_structural_static_balance(
+            &summary,
+            &solve.solution,
+            LocalExecutionPlan::serial(),
+        )
+        .unwrap();
         assert!(balance.evidence.accepted, "{:?}", balance.evidence);
 
         let beam = &summary.structural_beam_recovery[0];
@@ -240,6 +257,48 @@ mod tests {
         assert!((balance.evidence.constraint_work_joules - expected_work).abs() <= 1.0e-10);
         assert_eq!(balance.evidence.applied_load_work_joules, 0.0);
         assert!((balance.evidence.internal_work_joules - expected_work).abs() <= 1.0e-10);
+
+        for thread_count in [2, 3, 7] {
+            let plan =
+                LocalExecutionPlan::fixed(LocalThreadCount::new(thread_count).unwrap()).unwrap();
+            let scoped =
+                recover_structural_static_balance(&summary, &solve.solution, plan).unwrap();
+            assert_eq!(scoped.reaction, balance.reaction);
+            assert!(scoped.evidence.accepted);
+            assert!((scoped.evidence.internal_work_joules - expected_work).abs() <= 1.0e-10);
+            assert!((scoped.evidence.constraint_work_joules - expected_work).abs() <= 1.0e-10);
+            assert!(scoped.evidence.equilibrium_relative_error <= RELATIVE_TOLERANCE);
+        }
+
+        let nested = execute_scoped_chunks(LocalExecutionPlan::serial(), 1, |_| {
+            recover_structural_static_balance(
+                &summary,
+                &solve.solution,
+                LocalExecutionPlan::serial(),
+            )
+        });
+        assert!(matches!(
+            nested,
+            Err(ScopedLocalExecutionError::Work {
+                source: StructuralStaticBalanceError::Scoped(ScopedSpmvError::Execution(
+                    ScopedLocalExecutionError::NestedExecution
+                )),
+                ..
+            })
+        ));
+
+        {
+            let context = crate::progress::FeaProgressContext::default();
+            context.cancellation.cancel();
+            let _guard = crate::progress::replace_fea_progress_context(context);
+            let cancelled = recover_structural_static_balance(
+                &summary,
+                &solve.solution,
+                LocalExecutionPlan::serial(),
+            )
+            .unwrap_err();
+            assert!(cancelled.is_cancelled());
+        }
 
         let plan = CanonicalStructuralConstraintPlan::compile_for_model(&model, None).unwrap();
         let result = CanonicalStructuralConstraintResult::recover_for_model_from_solver_state(
@@ -273,6 +332,40 @@ mod tests {
         let published = run.structural_static_balance.as_ref().unwrap();
         assert!(published.accepted);
         assert!((published.constraint_work_joules - expected_work).abs() <= 1.0e-10);
+        let scoped_run = crate::run_linear_static_with_options(
+            &model,
+            crate::ComputeBackend::Cpu,
+            crate::LinearStaticSolveOptions {
+                formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+                local_execution: LocalExecutionPlan::fixed(LocalThreadCount::new(3).unwrap())
+                    .unwrap(),
+                ..crate::LinearStaticSolveOptions::default()
+            },
+        )
+        .unwrap();
+        let scoped_reactions = scoped_run
+            .field(crate::FEA_FIELD_STRUCTURAL_REACTION_FORCE)
+            .unwrap()
+            .as_host_f64()
+            .unwrap();
+        assert_eq!(scoped_reactions, reactions);
+        assert!(
+            scoped_run
+                .structural_static_balance
+                .as_ref()
+                .unwrap()
+                .accepted
+        );
+        assert!(
+            (scoped_run
+                .structural_static_balance
+                .as_ref()
+                .unwrap()
+                .constraint_work_joules
+                - expected_work)
+                .abs()
+                <= 1.0e-10
+        );
         let published_constraints = run.structural_constraint_result.as_ref().unwrap();
         assert!((published_constraints.constraint_work_joules - expected_work).abs() <= 1.0e-10);
         assert!(published_constraints.maximum_displacement_error_meters <= 1.0e-14);
