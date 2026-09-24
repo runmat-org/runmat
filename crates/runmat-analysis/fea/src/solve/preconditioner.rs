@@ -130,7 +130,7 @@ impl Ilu0Preconditioner {
             for lower_entry in lower_entries {
                 let pivot_row = column_indices[lower_entry];
                 let pivot = factors[diagonal_entries[pivot_row]];
-                if !pivot.is_finite() || pivot.abs() <= 1.0e-14 {
+                if !pivot.is_finite() || pivot <= 1.0e-14 {
                     return Err(PreconditionerError::InvalidPivot { row: pivot_row });
                 }
                 let multiplier = factors[lower_entry] / pivot;
@@ -146,7 +146,7 @@ impl Ilu0Preconditioner {
                 }
             }
             let pivot = factors[diagonal_entries[row]];
-            if !pivot.is_finite() || pivot.abs() <= 1.0e-14 {
+            if !pivot.is_finite() || pivot <= 1.0e-14 {
                 return Err(PreconditionerError::InvalidPivot { row });
             }
         }
@@ -172,12 +172,20 @@ impl SpdPreconditioner for Ilu0Preconditioner {
                 .sum::<f64>();
             y[row] = residual[row] - correction;
         }
-        let mut result = vec![0.0; n];
+        // PCG requires an SPD preconditioner. Accepted positive pivots define
+        // M = L D Lᵀ; use that symmetric factor explicitly rather than the
+        // independently rounded upper ILU entries. Back-substitution propagates
+        // through the stored strict-lower rows in place, so no transpose copy
+        // or additional full-size vector is retained.
+        let mut result = y;
+        for (row, value) in result.iter_mut().enumerate() {
+            *value /= self.factors[self.diagonal_entries[row]];
+        }
         for row in (0..n).rev() {
-            let correction = (self.diagonal_entries[row] + 1..self.row_offsets[row + 1])
-                .map(|entry| self.factors[entry] * result[self.column_indices[entry]])
-                .sum::<f64>();
-            result[row] = (y[row] - correction) / self.factors[self.diagonal_entries[row]];
+            let pivot_value = result[row];
+            for entry in self.row_offsets[row]..self.diagonal_entries[row] {
+                result[self.column_indices[entry]] -= self.factors[entry] * pivot_value;
+            }
         }
         result
     }
@@ -222,6 +230,119 @@ mod tests {
             .unwrap()
             .apply(system.rhs());
         assert!(applied.iter().all(|value| value.is_finite()));
+        let residual = crate::algebra::spmv(system.matrix(), &applied).unwrap();
+        for (actual, expected) in residual.iter().zip(system.rhs()) {
+            assert!((actual - expected).abs() <= 1.0e-12);
+        }
+        assert!(
+            system
+                .rhs()
+                .iter()
+                .zip(&applied)
+                .map(|(left, right)| left * right)
+                .sum::<f64>()
+                > 0.0
+        );
+    }
+
+    #[test]
+    fn ilu0_rejects_negative_incomplete_pivot_on_a_coercive_operator() {
+        // A is independently Cholesky-positive, but its zero-fill incomplete
+        // factorization develops a negative final pivot. Absolute-value pivot
+        // admission would incorrectly pass an indefinite CG preconditioner.
+        let values = [
+            [
+                2.853656491730362,
+                0.0,
+                1.7390443217009306,
+                1.6154918987303972,
+                0.6468259897083044,
+            ],
+            [0.0, 4.752237345324829, 0.0, 2.2926174104213715, 0.0],
+            [
+                1.7390443217009306,
+                0.0,
+                5.047566675581038,
+                0.0,
+                -2.5766232535243034,
+            ],
+            [
+                1.6154918987303972,
+                2.2926174104213715,
+                0.0,
+                3.101011391496286,
+                1.4569321684539318,
+            ],
+            [
+                0.6468259897083044,
+                0.0,
+                -2.5766232535243034,
+                1.4569321684539318,
+                3.166770219337195,
+            ],
+        ];
+        let mut assembler = RealSparseAssembler::square(
+            5,
+            OperatorRole::Stiffness,
+            MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+        );
+        for (row, entries) in values.iter().enumerate() {
+            for (column, value) in entries.iter().copied().enumerate() {
+                if value != 0.0 {
+                    assembler.add(row, column, value);
+                }
+            }
+        }
+        let system = PreparedRealLinearSystem::try_new(
+            assembler.finish().unwrap(),
+            vec![1.0; 5],
+            vec![false; 5],
+        )
+        .expect("the full sparse operator is coercive");
+        assert!(matches!(
+            build_spd_preconditioner(&system, SpdPreconditionerKind::Ilu0),
+            Err(PreconditionerError::InvalidPivot { row: 4 })
+        ));
+    }
+
+    #[test]
+    fn ilu0_applies_a_symmetric_positive_preconditioner_with_missing_fill() {
+        let mut assembler = RealSparseAssembler::square(
+            4,
+            OperatorRole::Stiffness,
+            MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+        );
+        for row in 0..4 {
+            assembler.add(row, row, 6.0);
+            let next = (row + 1) % 4;
+            assembler.add(row, next, -1.0);
+            assembler.add(next, row, -1.0);
+        }
+        let system = PreparedRealLinearSystem::try_new(
+            assembler.finish().unwrap(),
+            vec![0.0; 4],
+            vec![false; 4],
+        )
+        .unwrap();
+        let preconditioner =
+            build_spd_preconditioner(&system, SpdPreconditionerKind::Ilu0).unwrap();
+        let inverse_columns = (0..4)
+            .map(|column| {
+                let mut basis = vec![0.0; 4];
+                basis[column] = 1.0;
+                preconditioner.apply(&basis)
+            })
+            .collect::<Vec<_>>();
+        for row in 0..4 {
+            for column in 0..4 {
+                assert!(
+                    (inverse_columns[column][row] - inverse_columns[row][column]).abs() < 1.0e-14
+                );
+            }
+        }
+        let vector = [1.0, -2.0, 0.5, 3.0];
+        let applied = preconditioner.apply(&vector);
+        assert!(vector.iter().zip(applied).map(|(a, b)| a * b).sum::<f64>() > 0.0);
     }
 
     #[test]
