@@ -7,7 +7,7 @@ export function formatRustModule(source) {
   if (cached !== undefined) return cached;
   const result = spawnSync("rustfmt", [
     "--emit", "stdout", "--edition", "2021", "--config",
-    "reorder_imports=false,reorder_modules=false",
+    "reorder_imports=true,reorder_modules=false",
   ], { input: source, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
   if (result.error) throw new Error(`rustfmt could not run: ${result.error.message}`);
   if (result.status !== 0 || result.signal !== null) {

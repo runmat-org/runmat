@@ -217,7 +217,7 @@ test("parent-scoped declarations and reexports remain closed and verifiable", ()
   })];
   const source = renderModuleCompositionProduct(product);
   assert.match(source, /pub\(super\) mod inference;/);
-  assert.match(source, /pub\(super\) use inference::\{infer\};/);
+  assert.match(source, /pub\(super\) use inference::infer;/);
   assert.doesNotThrow(() => verifyModuleCompositionProduct(product, source));
 });
 
@@ -237,7 +237,7 @@ test("case-distinct Rust item identities survive named reexport composition", ()
     products: [product],
   });
   const source = renderModuleCompositionProduct(parsed.products[0]);
-  assert.match(source, /definitions::\{Inf, NaN, inf, nan\}/);
+  assert.match(source, /definitions::\{inf, nan, Inf, NaN\}/);
   assert.doesNotThrow(() => verifyModuleCompositionProduct(parsed.products[0], source));
 });
 
@@ -309,7 +309,7 @@ test("conditions, hidden reexports, aliases, and independent reexport conditions
   ];
   const source = renderModuleCompositionProduct(product);
   assert.match(source, /#\[cfg\(all\(target_arch = "wasm32", feature = "plot-web"\)\)\]\npub mod plotting;/);
-  assert.match(source, /#\[cfg\(all\(target_arch = "wasm32", feature = "plot-web", test\)\)\]\n#\[doc\(hidden\)\]\npub use plotting::\{evaluate as evaluate_plot\};/);
+  assert.match(source, /#\[cfg\(all\(target_arch = "wasm32", feature = "plot-web", test\)\)\]\n#\[doc\(hidden\)\]\npub use plotting::evaluate as evaluate_plot;/);
   assert.deepEqual(parseGeneratedModuleComposition(source), parseGeneratedModuleComposition(renderModuleCompositionProduct(product)));
   assert.doesNotThrow(() => verifyModuleCompositionProduct(product, source));
 });
