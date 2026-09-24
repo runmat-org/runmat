@@ -2984,6 +2984,13 @@ impl PlotOverlay {
             egui::pos2(plot_rect.max.x - width - pad, plot_rect.min.y + pad),
             egui::vec2(width, 56.0 * scale),
         );
+        // Keep the figure-owned scale legible over scene annotations and mesh
+        // imagery; the mesh counts belong in the viewport information control.
+        ui.painter().rect_filled(
+            rect.expand(6.0 * scale),
+            4.0 * scale,
+            self.theme_background_color(),
+        );
         let theme = self.theme.build_theme();
         let text = theme.get_text_color();
         let text_color = Color32::from_rgb(
