@@ -53,6 +53,96 @@ fn cpu_reference_solve_converges_with_small_canonical_residual() {
 }
 
 #[test]
+fn static_pcg_preserves_a_manufactured_solution_under_operator_and_load_scaling() {
+    for scale in [1.0, 1.0e-20] {
+        let stiffness = RealSparseMatrix::diagonal(
+            vec![2.0 * scale, 4.0 * scale],
+            OperatorRole::Stiffness,
+            MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+        )
+        .unwrap();
+        let mass = RealSparseMatrix::diagonal(
+            vec![1.0; 2],
+            OperatorRole::Mass,
+            MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+        )
+        .unwrap();
+        let damping = RealSparseMatrix::diagonal(
+            vec![0.0; 2],
+            OperatorRole::Damping,
+            MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+        )
+        .unwrap();
+        let operator = AssembledRealSystem::try_new(
+            CanonicalRealOperators::try_new(stiffness, mass, damping).unwrap(),
+            vec![false; 2],
+            vec![2.0 * scale, -8.0 * scale],
+        )
+        .unwrap();
+        let serial = solve_operator_system(
+            &operator,
+            SpdPreconditionerKind::Jacobi,
+            LinearAlgebraBackendKind::CpuReference,
+            &CpuReferenceBackend,
+            None,
+        );
+        let plan = LocalExecutionPlan::fixed(LocalThreadCount::new(2).unwrap()).unwrap();
+        let scoped = solve_operator_system_scoped(
+            &operator,
+            SpdPreconditionerKind::Jacobi,
+            LinearAlgebraBackendKind::CpuReference,
+            &CpuReferenceBackend,
+            None,
+            plan,
+        )
+        .unwrap();
+        assert!(serial.converged, "scale={scale}: {:?}", serial.diagnostics);
+        assert_eq!(serial, scoped);
+        assert!((serial.solution[0] - 1.0).abs() <= 1.0e-12);
+        assert!((serial.solution[1] + 2.0).abs() <= 1.0e-12);
+        assert!(serial.residual_norm <= 1.0e-8 * (68.0_f64.sqrt() * scale));
+    }
+}
+
+#[test]
+fn zero_load_warm_start_uses_initial_residual_as_relative_reference() {
+    let stiffness = RealSparseMatrix::diagonal(
+        vec![2.0, 4.0],
+        OperatorRole::Stiffness,
+        MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+    )
+    .unwrap();
+    let mass = RealSparseMatrix::diagonal(
+        vec![1.0; 2],
+        OperatorRole::Mass,
+        MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+    )
+    .unwrap();
+    let damping = RealSparseMatrix::diagonal(
+        vec![0.0; 2],
+        OperatorRole::Damping,
+        MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+    )
+    .unwrap();
+    let operator = AssembledRealSystem::try_new(
+        CanonicalRealOperators::try_new(stiffness, mass, damping).unwrap(),
+        vec![false; 2],
+        vec![0.0; 2],
+    )
+    .unwrap();
+    let solved = solve_operator_system(
+        &operator,
+        SpdPreconditionerKind::Jacobi,
+        LinearAlgebraBackendKind::CpuReference,
+        &CpuReferenceBackend,
+        Some(&[1.0, -1.0]),
+    );
+    assert!(solved.converged, "{:?}", solved.diagnostics);
+    assert!(solved.iterations > 0);
+    assert!(solved.solution.iter().all(|value| value.abs() <= 1.0e-12));
+}
+
+#[test]
 fn scoped_pcg_matches_serial_and_rejects_nested_execution() {
     let operator = system([4.0, 3.0]);
     let serial = solve_operator_system(

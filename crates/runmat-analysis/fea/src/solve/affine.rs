@@ -154,11 +154,17 @@ fn solve_affine_constraint_system_with_apply(
     );
     let mut direction = residual.clone();
     let mut residual_squared = dot(&residual, &residual)?;
-    let right_hand_side_norm = dot(&reduced_rhs, &reduced_rhs)?.sqrt().max(1.0);
+    let right_hand_side_norm = dot(&reduced_rhs, &reduced_rhs)?.sqrt();
+    let initial_residual_norm = residual_squared.sqrt();
+    let reference_norm = if right_hand_side_norm > 0.0 {
+        right_hand_side_norm
+    } else {
+        initial_residual_norm
+    };
     let tolerance = 1.0e-8;
     let maximum_iterations = reduction.reduced_dof_count.saturating_mul(4).max(256);
     let mut iterations = 0_u32;
-    let mut converged = residual_squared.sqrt() / right_hand_side_norm <= tolerance;
+    let mut converged = initial_residual_norm <= tolerance * reference_norm;
 
     while !converged && (iterations as usize) < maximum_iterations {
         if crate::is_fea_cancelled() {
@@ -172,7 +178,7 @@ fn solve_affine_constraint_system_with_apply(
         let operator_direction =
             apply_reduced_operator(reduction, &direction, &apply_full, vector_plan)?;
         let denominator = dot(&direction, &operator_direction)?;
-        if !denominator.is_finite() || denominator <= 1.0e-18 {
+        if !denominator.is_finite() || denominator <= 0.0 {
             diagnostics.push(FeaDiagnostic {
                 code: "FEA_AFFINE_REDUCED_BREAKDOWN".into(),
                 severity: FeaDiagnosticSeverity::Warning,
@@ -193,9 +199,8 @@ fn solve_affine_constraint_system_with_apply(
         }
         let next_residual_squared = dot(&residual, &residual)?;
         iterations += 1;
-        converged = next_residual_squared.sqrt() / right_hand_side_norm <= tolerance;
+        converged = next_residual_squared.sqrt() <= tolerance * reference_norm;
         if converged {
-            residual_squared = next_residual_squared;
             break;
         }
         let beta = next_residual_squared / residual_squared;
@@ -209,6 +214,27 @@ fn solve_affine_constraint_system_with_apply(
         residual_squared = next_residual_squared;
     }
 
+    // Publish convergence from the physical reduced equation, not only the
+    // recursively updated residual, which can drift after many CG steps.
+    let applied_solution =
+        apply_reduced_operator(reduction, &reduced_solution, &apply_full, vector_plan)?;
+    for ((residual_value, right_hand_side), applied) in
+        residual.iter_mut().zip(&reduced_rhs).zip(applied_solution)
+    {
+        *residual_value = right_hand_side - applied;
+    }
+    let residual_norm = dot(&residual, &residual)?.sqrt();
+    converged = residual_norm <= tolerance * reference_norm;
+    if !converged {
+        diagnostics.push(FeaDiagnostic {
+            code: "FEA_AFFINE_CG_NOT_CONVERGED".into(),
+            severity: FeaDiagnosticSeverity::Warning,
+            message: format!(
+                "affine reduced cg stopped after {iterations}/{maximum_iterations} iterations with residual_norm={residual_norm} relative_residual={} tolerance={tolerance}",
+                residual_norm / reference_norm,
+            ),
+        });
+    }
     diagnostics.push(FeaDiagnostic {
         code: "FEA_SOLVER_METHOD".into(),
         severity: FeaDiagnosticSeverity::Info,
@@ -216,7 +242,7 @@ fn solve_affine_constraint_system_with_apply(
     });
     Ok(LinearSolveResult {
         iterations,
-        residual_norm: residual_squared.sqrt(),
+        residual_norm,
         converged,
         host_sync_count: 0,
         solver_backend: LinearAlgebraBackendKind::CpuReference,

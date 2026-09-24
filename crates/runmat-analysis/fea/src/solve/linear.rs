@@ -375,7 +375,7 @@ fn solve_operator_system_with_apply(
     let mut z = preconditioner.apply(&r);
     let mut p = z.clone();
     let mut rz_old = dot(&r, &z)?;
-    let b_norm = dot(b, b)?.sqrt().max(1.0);
+    let b_norm = dot(b, b)?.sqrt();
 
     let mut diagnostics = initial_diagnostics;
     diagnostics.push(FeaDiagnostic {
@@ -388,7 +388,12 @@ fn solve_operator_system_with_apply(
     });
 
     let initial_residual_norm = dot(&r, &r)?.sqrt();
-    if initial_residual_norm / b_norm <= tol {
+    let reference_norm = if b_norm > 0.0 {
+        b_norm
+    } else {
+        initial_residual_norm
+    };
+    if initial_residual_norm <= tol * reference_norm {
         return Ok(LinearSolveResult {
             iterations: 0,
             residual_norm: initial_residual_norm,
@@ -429,7 +434,7 @@ fn solve_operator_system_with_apply(
         }
         let residual_norm = dot(&r, &r)?.sqrt();
         iterations += 1;
-        if residual_norm / b_norm <= tol {
+        if residual_norm <= tol * reference_norm {
             break;
         }
 
@@ -454,14 +459,14 @@ fn solve_operator_system_with_apply(
     // or false negative from recurrence roundoff.
     r = algebra_backend.vec_sub(b, &apply(&prepared, &x)?);
     let residual_norm = dot(&r, &r)?.sqrt();
-    let converged = residual_norm / b_norm <= tol;
+    let converged = residual_norm <= tol * reference_norm;
     if !converged {
         diagnostics.push(FeaDiagnostic {
             code: "FEA_CG_NOT_CONVERGED".to_string(),
             severity: FeaDiagnosticSeverity::Warning,
             message: format!(
                 "matrix-free cg stopped after {iterations}/{max_iters} iterations with residual_norm={residual_norm} relative_residual={} tolerance={tol}",
-                residual_norm / b_norm,
+                residual_norm / reference_norm,
             ),
         });
     }

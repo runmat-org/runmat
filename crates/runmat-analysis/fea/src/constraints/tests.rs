@@ -836,6 +836,85 @@ fn canonical_solid_solve_enforces_affine_equation_and_recovers_reactions() {
 }
 
 #[test]
+fn affine_static_solve_preserves_constraint_displacement_under_stiffness_scaling() {
+    let (mut model, mesh) = model_and_mesh();
+    model.excitations.clear();
+    model.constraints = vec![
+        prescribed_constraint(
+            "anchor",
+            1,
+            &[
+                StructuralTranslationDof::Ux,
+                StructuralTranslationDof::Uy,
+                StructuralTranslationDof::Uz,
+            ],
+        ),
+        prescribed_constraint(
+            "guide_two",
+            2,
+            &[StructuralTranslationDof::Uy, StructuralTranslationDof::Uz],
+        ),
+        prescribed_constraint("guide_three", 3, &[StructuralTranslationDof::Uz]),
+        equation_constraint("relative_x", 2, 3, 0.001),
+    ];
+    let mut summary = assemble_structural_system(
+        &model,
+        &static_excitations(&model),
+        Some(mesh),
+        StructuralFormulationRequirement::PhysicalDiscretization,
+    )
+    .unwrap();
+    let reference = solve_linear_system(
+        &summary,
+        SpdPreconditionerKind::Jacobi,
+        LinearAlgebraBackendKind::CpuReference,
+        &CpuReferenceBackend,
+        None,
+    );
+    assert!(reference.converged, "{:?}", reference.diagnostics);
+
+    let scale = 1.0e-20;
+    let original = &summary.operator;
+    let stiffness = original.operators().stiffness();
+    let scaled_stiffness = crate::algebra::RealSparseMatrix::try_new(
+        stiffness.pattern().clone(),
+        stiffness
+            .values()
+            .iter()
+            .map(|value| value * scale)
+            .collect(),
+        stiffness.role(),
+        stiffness.properties(),
+        stiffness.contributions().to_vec(),
+    )
+    .unwrap();
+    summary.operator = crate::algebra::AssembledRealSystem::try_new(
+        crate::algebra::CanonicalRealOperators::try_new(
+            scaled_stiffness,
+            original.operators().mass().clone(),
+            original.operators().damping().clone(),
+        )
+        .unwrap(),
+        original.constrained_dofs().to_vec(),
+        original.load().iter().map(|value| value * scale).collect(),
+    )
+    .unwrap();
+    let scaled = solve_linear_system(
+        &summary,
+        SpdPreconditionerKind::Jacobi,
+        LinearAlgebraBackendKind::CpuReference,
+        &CpuReferenceBackend,
+        None,
+    );
+    assert!(scaled.converged, "{:?}", scaled.diagnostics);
+    assert!(scaled.iterations > 0);
+    for (actual, expected) in scaled.solution.iter().zip(&reference.solution) {
+        assert!((actual - expected).abs() <= 1.0e-9);
+    }
+    assert!((scaled.solution[3] - scaled.solution[6] - 0.001).abs() <= 1.0e-9);
+}
+
+#[test]
 fn affine_solver_rejects_a_substituted_reduction_before_iteration() {
     let (mut model, mesh) = model_and_mesh();
     model.excitations.clear();
